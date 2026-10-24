@@ -1,11 +1,15 @@
 import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
 import { imageModelProfile, imageModelSettingsError, normalizeImageModelSettings } from "@/lib/image-model-settings";
 import { validateImageReferences } from "@/lib/image-reference-policy";
-import { requestQueuedImageBatch, requestQueuedImages, type QueuedBatchItem } from "@/services/api/generation-tasks";
+import { requestQueuedImageBatch, requestQueuedImages, uploadImageReference, type QueuedBatchItem } from "@/services/api/generation-tasks";
 import { workspaceOwnerHeaders } from "@/services/api/workspace-owner";
 import { modelOptionName, type AiConfig } from "@/stores/use-config-store";
 import type { ReferenceImage } from "@/types/image";
-import { generationDraftInput } from "./generation-history";
+import { dataUrlToFile } from "@/lib/image-utils";
+import { imageToDataUrl } from "@/services/image-storage";
+import { useUserStore } from "@/stores/use-user-store";
+import { createPromptCompilation, type PromptInputData } from "./prompt-compilations";
+import { fingerprintImage, generationDraftInput } from "./generation-history";
 import { imageAdvancedParameters, readImageOptions } from "@/lib/image-advanced-settings";
 import { resolveToolConfig } from "./tool-runtime";
 import { createClientId } from "@/lib/client-id";
@@ -34,7 +38,7 @@ export type ResponseFunctionTool = {
 export type ToolResponseResult = { content: string; toolCalls: ResponseToolCall[]; stopReason?: string; claudeAssistantContent?: ClaudeAssistantContent; responsesOutputItems?: Array<Record<string, unknown>> };
 
 type ToolChoice = "auto" | "required" | { type: "function"; name: string };
-type RequestOptions = { requestId?: string; chatRequestId?: string; signal?: AbortSignal; operationType?: "image_generation" | "inpaint" | "upscale" | "batch_image"; tool?: string; referencePromptLanguage?: "zh" | "en"; webSearch?: boolean; onToolCallStart?: (name: string) => void; onChatSubmissionStarted?: (requestId: string) => void; cancelOnAbort?: () => boolean; onSubmissionStarted?: () => void | Promise<void>; onSubmitted?: (taskIds: string[]) => void | Promise<void> };
+type RequestOptions = { promptInput?: PromptInputData; onOptimizing?: () => void; onCompiled?: (prompt: string, optimized: boolean) => void; chatProfile?: "creative-chat" | "canvas-assistant"; profileContext?: Record<string, unknown>; requestId?: string; chatRequestId?: string; signal?: AbortSignal; operationType?: "image_generation" | "inpaint" | "upscale" | "batch_image"; tool?: string; referencePromptLanguage?: "zh" | "en"; webSearch?: boolean; onToolCallStart?: (name: string) => void; onChatSubmissionStarted?: (requestId: string) => void; cancelOnAbort?: () => boolean; onSubmissionStarted?: () => void | Promise<void>; onSubmitted?: (taskIds: string[]) => void | Promise<void> };
 type ResponseInputContent = { type: "input_text"; text: string } | { type: "input_image"; image_url: string };
 type ResponseInputItem = { role: "system" | "user" | "assistant"; content: string | ResponseInputContent[] } | { type: "claude_assistant"; content: ClaudeAssistantContent } | { type: "responses_assistant"; output: Array<Record<string, unknown>> } | { type: "function_call"; call_id: string; name: string; arguments: string; thoughtSignature?: string } | { type: "function_call_output"; call_id: string; output: string };
 type ResponseApiToolDefinition = { type: "function"; name: string; description?: string; parameters: Record<string, unknown>; strict?: boolean };
@@ -56,17 +60,20 @@ function requestResolvedGeneration(resolved: Awaited<ReturnType<typeof resolveTo
     const count = Number(normalized.count);
     const validation = validateImageReferences(resolved.model.modelId, references || [], profile);
     if (!validation.valid) throw new Error(validation.message);
-    const actualPrompt = profile.requiresPrompt ? withSystemPrompt(config, prompt) : "";
-    validateImagePrompt(actualPrompt, profile);
+    const actualPrompt = profile.requiresPrompt ? options?.promptInput ? prompt : withSystemPrompt(config, prompt) : "";
+    if (!options?.promptInput) validateImagePrompt(actualPrompt, profile);
     return requestQueuedImages({
         resolvedModel: resolved.model,
         modelId: modelOptionName(config.model || config.imageModel),
         prompt: actualPrompt,
+        promptInput: options?.promptInput,
+        onOptimizing: options?.onOptimizing,
+        onCompiled: options?.onCompiled,
         count,
         operationType: options?.operationType || "image_generation",
         tool: options?.tool,
         parameters: imageTaskParameters(config, profile, { referenceCount: references?.length || 0 }),
-        draft: generationDraftInput({ ...config, ...normalized }, profile.requiresPrompt ? prompt : ""),
+        draft: generationDraftInput({ ...config, ...normalized }, profile.requiresPrompt ? options?.promptInput?.userText ?? prompt : ""),
         references,
         requestId: options?.requestId,
         signal: options?.signal,
@@ -97,8 +104,8 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     }
     const validation = validateImageReferences(resolved.model.modelId, references, profile);
     if (!validation.valid) throw new Error(validation.message);
-    const actualPrompt = withSystemPrompt(config, buildImageReferencePromptText(prompt, references, options?.referencePromptLanguage));
-    validateImagePrompt(actualPrompt, profile);
+    const actualPrompt = options?.promptInput ? prompt : withSystemPrompt(config, buildImageReferencePromptText(prompt, references, options?.referencePromptLanguage));
+    if (!options?.promptInput) validateImagePrompt(actualPrompt, profile);
     const count = Number(normalizeImageModelSettings(config, profile).count);
     const imageOptions = readImageOptions(config.imageOptions);
     const transparent = (profile.kind === "standard" || profile.kind === "quality-resolution") && references.length === 1 && !mask
@@ -109,11 +116,14 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
         resolvedModel: resolved.model,
         modelId: modelOptionName(config.model || config.imageModel),
         prompt: actualPrompt,
+        promptInput: options?.promptInput ? { ...options.promptInput, hasMask: Boolean(mask), ...(mask ? { maskReferenceIndex: references.length } : {}) } : undefined,
+        onOptimizing: options?.onOptimizing,
+        onCompiled: options?.onCompiled,
         count,
         operationType: options?.operationType || "inpaint",
         tool: options?.tool,
         parameters: { ...imageTaskParameters(config, profile, { mask: Boolean(mask), referenceCount: references.length }), ...(transparent ? { background: "transparent", output_format: "png" } : {}) },
-        draft: { ...generationDraftInput({ ...config, ...normalizeImageModelSettings(config, profile) }, prompt), ...(mask ? { maskReferenceIndex: references.length } : {}) },
+        draft: { ...generationDraftInput({ ...config, ...normalizeImageModelSettings(config, profile) }, options?.promptInput?.userText ?? prompt), ...(mask ? { maskReferenceIndex: references.length } : {}) },
         references: [...references, ...(mask ? [mask] : [])],
         requestId: options?.requestId,
         signal: options?.signal,
@@ -141,13 +151,13 @@ export function imageTaskParameters(config: AiConfig, profile = imageModelProfil
     return { size, resolution: quality, ...advanced };
 }
 
-export async function requestBatchEdit(config: AiConfig, prompt: string, files: Array<{ file: File; title: string }>, options?: { signal?: AbortSignal; onSubmitted?: (batchId: string) => void; onProgress?: (items: QueuedBatchItem[]) => void }) {
+export async function requestBatchEdit(config: AiConfig, prompt: string, files: Array<{ file: File; title: string }>, options?: { optimizePrompt?: boolean; onOptimizing?: () => void; onCompiled?: (prompt: string, optimized: boolean) => void; onSubmissionStarted?: (requestId: string, items: Array<{ itemIndex: number }>) => void | Promise<void>; signal?: AbortSignal; onSubmitted?: (batchId: string) => void; onProgress?: (items: QueuedBatchItem[]) => void }) {
     if (!files.length || files.length > 100) throw new Error("每批请选择 1–100 张图片，每张独立生成 1 张结果。");
     const resolved = await resolveToolConfig(config, "batch_image", "canvas-batch");
     config = resolved.config;
     const profile = imageModelProfile(resolved.model.modelId, [resolved.model]);
     const actualPrompt = withSystemPrompt(config, prompt);
-    validateImagePrompt(actualPrompt, profile);
+    if (!options?.optimizePrompt) validateImagePrompt(actualPrompt, profile);
     for (const { file, title } of files) {
         const validation = validateImageReferences(resolved.model.modelId, [{ id: title, name: title, dataUrl: "", bytes: file.size, type: file.type }], profile);
         if (!validation.valid) throw new Error(validation.message);
@@ -156,9 +166,13 @@ export async function requestBatchEdit(config: AiConfig, prompt: string, files: 
         resolvedModel: resolved.model,
         modelId: modelOptionName(config.model || config.imageModel),
         prompt: actualPrompt,
+        promptInput: options?.optimizePrompt ? { scene: "batch-optimize", userText: prompt, fields: {}, mode: "edit", referenceRoles: ["每个批次条目的独立原图"] } : undefined,
+        onOptimizing: options?.onOptimizing,
+        onCompiled: options?.onCompiled,
         parameters: imageTaskParameters(config, profile, { referenceCount: 1 }),
         files,
         signal: options?.signal,
+        onSubmissionStarted: options?.onSubmissionStarted,
         onSubmitted: options?.onSubmitted,
         onProgress: options?.onProgress,
     });
@@ -169,7 +183,7 @@ function validateImagePrompt(prompt: string, profile: ReturnType<typeof imageMod
 }
 
 export async function requestImageQuestion(config: AiConfig, messages: AiTextMessage[], onDelta: (text: string) => void, options?: RequestOptions) {
-    const input = toResponseInput(withSystemMessage(config, messages));
+    const input = toResponseInput(options?.chatProfile ? messages : withSystemMessage(config, messages));
     const modelId = modelOptionName(config.model || config.textModel);
     let result = await requestServerResponse(config, input, [], "auto", options, onDelta);
     const configuredClaudeMaxTokens = normalizeClaudeMaxTokens(config.claudeMaxTokens);
@@ -189,7 +203,7 @@ export async function requestImageQuestion(config: AiConfig, messages: AiTextMes
 }
 
 export async function requestToolResponse(config: AiConfig, messages: ResponseInputMessage[], tools: ResponseFunctionTool[], toolChoice: ToolChoice = "auto", onDelta?: (text: string) => void, options?: RequestOptions): Promise<ToolResponseResult> {
-    const result = await requestServerResponse(config, toResponseInput(withSystemMessage(config, messages)), tools.map(toResponseTool), toolChoice, options, onDelta);
+    const result = await requestServerResponse(config, toResponseInput(options?.chatProfile ? messages : withSystemMessage(config, messages)), tools.map(toResponseTool), toolChoice, options, onDelta);
     // Non-streaming/Responses providers can return raw argument strings without using the SSE boundary.
     if (Array.isArray(result.toolCalls)) for (const call of result.toolCalls) {
         if (typeof call.function?.arguments !== "string") continue;
@@ -205,7 +219,7 @@ async function requestServerResponse(config: AiConfig, input: ResponseInputItem[
     config = resolved.config;
     const modelId = modelOptionName(config.model || config.textModel);
     const claude = isClaudeModel(resolved.model.parameterModelId || resolved.model.modelId)
-        ? { stream: config.claudeStream !== "false", thinking: config.claudeThinking === "true", maxTokens: normalizeClaudeMaxTokens(config.claudeMaxTokens) }
+        ? { stream: options?.chatProfile ? false : config.claudeStream !== "false", thinking: options?.chatProfile ? false : config.claudeThinking === "true", maxTokens: normalizeClaudeMaxTokens(config.claudeMaxTokens) }
         : undefined;
     options?.signal?.throwIfAborted();
     const requestId = options?.chatRequestId || createClientId();
@@ -214,7 +228,7 @@ async function requestServerResponse(config: AiConfig, input: ResponseInputItem[
         method: "POST",
         credentials: "include",
         headers: { "content-type": "application/json", ...workspaceOwnerHeaders() },
-        body: JSON.stringify({ requestId, toolKey: resolved.toolKey, modelId, input, tools, toolChoice, webSearch: options?.webSearch === true, ...(claude ? { claude } : {}) }),
+        body: JSON.stringify({ requestId, toolKey: resolved.toolKey, modelId, input, tools, toolChoice, ...(options?.chatProfile ? { profile: options.chatProfile, profileContext: options.profileContext || {} } : {}), webSearch: options?.webSearch === true, ...(claude ? { claude } : {}) }),
         signal: options?.signal,
     });
     if (!response.ok) {
@@ -337,4 +351,25 @@ function toResponseContent(content: AiTextMessage["content"]): string | Response
 
 function toResponseTool(tool: ResponseFunctionTool): ResponseApiToolDefinition {
     return { type: "function", name: tool.function.name, description: tool.function.description, parameters: tool.function.parameters, strict: tool.function.strict };
+}
+
+
+/** Compile only; this never creates an image task. References keep their exact order. */
+export async function optimizeImagePrompt(config: AiConfig, promptInput: PromptInputData, references: ReferenceImage[] = [], options: { requestId?: string; toolKey?: string; signal?: AbortSignal } = {}) {
+    const ownerId = useUserStore.getState().user?.id;
+    if (!ownerId) throw new Error("当前账号不可用");
+    const assertOwner = () => { options.signal?.throwIfAborted(); if (useUserStore.getState().user?.id !== ownerId) throw new Error("员工会话已变化"); };
+    const resolved = await resolveToolConfig(config, references.length ? "inpaint" : "image_generation", options.toolKey);
+    const sourceUrls: string[] = [];
+    for (const reference of references) {
+        assertOwner();
+        const file = dataUrlToFile({ ...reference, dataUrl: await imageToDataUrl(reference) });
+        const hash = await fingerprintImage(file);
+        const id = await uploadImageReference(reference, file, hash, ownerId, options.signal);
+        sourceUrls.push(`/api/assets/${id}/content`);
+    }
+    assertOwner();
+    const result = await createPromptCompilation({ requestId: options.requestId || createClientId(), modelConfigId: resolved.model.id, toolKey: resolved.toolKey, promptInput, sourceUrls }, options.signal);
+    assertOwner();
+    return result;
 }

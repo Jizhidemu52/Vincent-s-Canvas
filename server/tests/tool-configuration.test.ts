@@ -28,7 +28,8 @@ function fixture() {
   }));
   const statements: Array<{ sql: string; values: unknown[] }> = [];
   const reservations: unknown[][] = [];
-  const tasks = new Map<string, { id: string }>();
+  const tasks = new Map<string, Record<string, any>>();
+  const batches = new Map<string, Record<string, any>>();
   let queues = 0;
   let videoPreflights = 0;
   const client = {
@@ -37,6 +38,9 @@ function fixture() {
       if (["BEGIN", "COMMIT", "ROLLBACK"].includes(sql)) return { rows: [] };
       if (sql.includes("pg_advisory_xact_lock")) return { rows: [] };
       if (sql.startsWith("SELECT id,request_id")) return { rows: [] };
+      if (sql.startsWith("SELECT id FROM tasks WHERE request_id=ANY")) return { rows: [] };
+      if (sql.startsWith("SELECT ") && sql.includes("FROM batch_tasks WHERE request_id")) return { rows: [...batches.values()].filter(row => row.requestId === values[0] && (values.length < 2 || row.userId === values[1])) };
+      if (sql.startsWith("SELECT t.id") && sql.includes("WHERE t.batch_id=")) return { rows: [...tasks.values()].filter(row => row.batchId === values[0] && row.userId === values[1]) };
       if (sql.startsWith("SELECT count(*)::int AS count FROM tasks")) return { rows: [{ count: tasks.size }] };
       if (sql.includes("FROM model_presentation_settings")) return { rows: [] };
       if (sql.includes("FROM module_flags")) return { rows: [{ enabled: flags.get(String(values[0])) }] };
@@ -54,9 +58,23 @@ function fixture() {
         return { rows: selected };
       }
       if (sql.startsWith("INSERT INTO audit_logs")) return { rows: [] };
-      if (sql.startsWith("INSERT INTO tasks")) { tasks.set(String(values[1]), { id: String(values[0]) }); return { rows: [{ id: values[0], queuedAt: new Date().toISOString(), availableAt: new Date().toISOString() }] }; }
+      if (sql.startsWith("INSERT INTO tasks")) { tasks.set(String(values[1]), { id: String(values[0]), requestId: values[1], batchId: values[2], userId: values[3], prompt: values[8], credits: 0, rmbCost: 0, optimized: values[14] === true }); return { rows: [{ id: values[0], queuedAt: new Date().toISOString(), availableAt: new Date().toISOString() }] }; }
+      if (sql.startsWith("UPDATE tasks SET model_config_id=")) {
+        const row = [...tasks.values()].find(row => row.id === values[3]); if (row) Object.assign(row, { modelConfigId: values[0], toolKey: values[1], parameters: values[2] }); return { rows: [] };
+      }
+      if (sql.startsWith("UPDATE tasks SET credits=")) {
+        const row = [...tasks.values()].find(row => row.id === values[2]); if (row) Object.assign(row, { credits: values[0], rmbCost: values[1] }); return { rows: [] };
+      }
+      if (sql.startsWith("UPDATE batch_tasks SET admission_lease_expires_at")) return { rows: batches.has(String(values[0])) ? [{ id: values[0] }] : [] };
+      if (sql.startsWith("UPDATE batch_tasks SET admission_status=CASE")) {
+        const row = batches.get(String(values[0])); if (row) { row.admissionStatus = "complete"; row.admissionToken = null; }
+        return { rows: [] };
+      }
       if (sql.startsWith("UPDATE tasks") || sql.startsWith("UPDATE batch_tasks")) return { rows: [] };
-      if (sql.startsWith("INSERT INTO batch_tasks")) return { rows: [{ id: values[0] }] };
+      if (sql.startsWith("INSERT INTO batch_tasks")) {
+        const row = { id: values[0], requestId: values[1], userId: values[2], prompt: values[7], totalItems: values[9], inputHash: values[11], admissionStatus: "admitting", admissionToken: values[12], failures: [] };
+        batches.set(String(row.id), row); return { rows: [row] };
+      }
       if (sql.includes("COUNT(*)::int total")) return { rows: [{ total: tasks.size, waiting: tasks.size, success: 0, failed: 0, cancelled: 0, paused: 0, processing: 0 }] };
       if (sql.includes("FROM credit_reservations")) return { rows: [] };
       if (sql.includes("FROM users")) return { rows: [{ department_id: null }] };

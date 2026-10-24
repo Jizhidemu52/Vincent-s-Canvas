@@ -1,7 +1,9 @@
 import type { Dispatch, SetStateAction } from "react";
 import { nanoid } from "nanoid";
 import { requestBatchEdit } from "@/services/api/image";
-import { controlQueuedBatch, type QueuedBatchAction } from "@/services/api/generation-tasks";
+import { flushSync } from "react-dom";
+import { useCanvasStore, flushCanvasPersistence } from "@/stores/canvas/use-canvas-store";
+import { controlQueuedBatch, QueuedTaskHttpError, QueuedTaskSubmissionUncertainError, type QueuedBatchAction } from "@/services/api/generation-tasks";
 import { uploadImage, type UploadedImage } from "@/services/image-storage";
 import { fitNodeSize } from "@/lib/canvas/canvas-node-size";
 import { mapCanvasAsyncPool } from "@/lib/canvas/canvas-async-pool";
@@ -18,6 +20,7 @@ export type BatchEditFileItem = {
     file: File;
     relativePath: string;
     status: "waiting" | "processing" | "paused" | "success" | "failed" | "cancelled";
+    requestId?: string;
     sourceUrl?: string;
     resultUrl?: string;
     failureReason?: string;
@@ -25,6 +28,8 @@ export type BatchEditFileItem = {
 
 type Runtime = {
     prompt: string;
+    optimizePrompt?: boolean;
+    setOptimizing?: (value: boolean) => void;
     items: BatchEditFileItem[];
     config: AiConfig;
     estimate: ReturnType<typeof useBusinessConfigStore.getState>["estimate"];
@@ -47,13 +52,15 @@ type Runtime = {
 
 /** The batch form stays mounted; upload/queue/result handling loads only on execution. */
 export async function runCanvasBatchImageEdit({
-    prompt: batchEditPrompt, items: batchEditItems, config: batchGenerationConfig, estimate: estimateUsage, isAiConfigReady,
+    prompt: batchEditPrompt, optimizePrompt = false, setOptimizing, items: batchEditItems, config: batchGenerationConfig, estimate: estimateUsage, isAiConfigReady,
     onMissingModel: handleMissingModelConfig, user, projectId, getCenter: getCanvasCenter, imageMetadata, addAssets,
     setRunning: setBatchEditRunning, setServerId: setBatchEditServerId, setAction: setBatchEditAction, setItems: setBatchEditItems,
     setNodes, setConnections, setSelectedNodeIds, message,
 }: Runtime) {
-        const prompt = batchEditPrompt.trim();
+        let prompt = batchEditPrompt.trim();
+        let optimized = false;
         const items = batchEditItems;
+        if (items.some(item => item.requestId)) { message.warning("该批次已有原请求，请在画布结果节点查询原任务；不会重复提交。新批次请重新选择图片。"); return; }
         const model = batchGenerationConfig.model;
         const modelId = modelOptionName(model);
         const usage = estimateUsage({ operationType: "batch_image", toolKey: "canvas-batch", modelId, quantity: items.length });
@@ -162,6 +169,7 @@ export async function runCanvasBatchImageEdit({
 
         if (!prepared.length) {
             setBatchEditRunning(false);
+            setOptimizing?.(false);
             message.error("没有可提交的图片");
             return;
         }
@@ -172,12 +180,24 @@ export async function runCanvasBatchImageEdit({
         const preparedIndexByItemId = new Map(prepared.map((entry, index) => [entry.item.id, index]));
         let failedCount = localFailures;
         let cancelledCount = 0;
+        let unresolvedCount = 0;
         try {
             const result = await requestBatchEdit(
                 { ...batchGenerationConfig, model, count: "1" },
                 prompt,
                 prepared.map((entry) => ({ file: entry.item.file, title: entry.item.relativePath })),
                 {
+                    optimizePrompt,
+                    onSubmissionStarted: async (requestId, uploadedItems) => {
+                        const bindings = new Map(uploadedItems.map((item, index) => [prepared[item.itemIndex]!.resultId, { requestId: `${requestId}:${index}`, ownerId: user!.id, projectId, resultIndex: 0 }]));
+                        setBatchEditItems(prev => prev.map(item => ({ ...item, requestId })));
+                        let durableNodes: CanvasNodeData[] = [];
+                        flushSync(() => setNodes(prev => { durableNodes = prev.map(node => bindings.has(node.id) ? { ...node, metadata: { ...node.metadata, imageTask: bindings.get(node.id) } } : node); return durableNodes; }));
+                        useCanvasStore.getState().updateProject(projectId, { nodes: durableNodes });
+                        await flushCanvasPersistence();
+                    },
+                    onOptimizing: () => setOptimizing?.(true),
+                    onCompiled: (finalPrompt, wasOptimized) => { prompt = finalPrompt; optimized = wasOptimized; setOptimizing?.(false); },
                     onSubmitted: setBatchEditServerId,
                     onProgress: (current) => {
                         const byPreparedIndex = new Map(current.map((task) => [task.itemIndex, task]));
@@ -260,7 +280,8 @@ export async function runCanvasBatchImageEdit({
                                       metadata: {
                                           ...node.metadata,
                                           ...imageMetadata(uploadedResult),
-                                          sourceTaskId,
+                                          sourceTaskId, imageTask: undefined, optimized,
+                                          userInput: optimizePrompt ? { scene: "batch-optimize", userText: batchEditPrompt.trim(), mode: "edit" } : undefined,
                                           originalFileName: entry.item.file.name,
                                           imageName: entry.item.file.name.replace(/\.[^.]+$/, ""), imageVersion: 2,
                                           prompt,
@@ -333,20 +354,26 @@ export async function runCanvasBatchImageEdit({
                 );
             }
         } catch (error) {
+            const uncertain = error instanceof QueuedTaskSubmissionUncertainError;
+            const rejected = error instanceof QueuedTaskHttpError && error.submissionRejected;
             const reason = error instanceof Error ? error.message : "批量任务提交失败";
             const unresolved = prepared.filter((entry) => !settledResultIds.has(entry.resultId));
             const unresolvedItemIds = new Set(unresolved.map((entry) => entry.item.id));
             const unresolvedResultIds = new Set(unresolved.map((entry) => entry.resultId));
-            failedCount += unresolved.length;
-            setBatchEditItems((prev) => prev.map((item) => (unresolvedItemIds.has(item.id) ? { ...item, status: "failed", failureReason: reason } : item)));
-            setNodes((prev) => prev.map((node) => (unresolvedResultIds.has(node.id) ? { ...node, metadata: { ...node.metadata, status: "error", errorDetails: reason } } : node)));
+            if (uncertain) unresolvedCount = unresolved.length;
+            else failedCount += unresolved.length;
+            setBatchEditItems((prev) => prev.map((item) => (unresolvedItemIds.has(item.id) ? { ...item, ...(rejected ? { requestId: undefined } : {}), status: uncertain ? "paused" : "failed", failureReason: reason } : item)));
+            setNodes((prev) => prev.map((node) => (unresolvedResultIds.has(node.id) ? { ...node, metadata: { ...node.metadata, ...(rejected ? { imageTask: undefined } : {}), status: "error", errorDetails: reason } } : node)));
         } finally {
             if (generatedAssets.length) addAssets(generatedAssets);
             setSelectedNodeIds(new Set(selectedResults));
             setBatchEditRunning(false);
+            setOptimizing?.(false);
         }
 
-        if (failedCount || cancelledCount) {
+        if (unresolvedCount) {
+            message.warning(`批次状态待核查：${unresolvedCount} 张待查询原任务，不会重复提交或扣费。`);
+        } else if (failedCount || cancelledCount) {
             message.warning(`批量改图完成，成功 ${selectedResults.length} 张，失败 ${failedCount} 张，取消 ${cancelledCount} 张`);
         } else {
             message.success(`批量改图完成：${selectedResults.length} 张`);

@@ -1,0 +1,4 @@
+{
+  "extends": "../tsconfig.json",
+  "include": ["prompt-quality-cases.ts", "prompt-quality-matrix.ts", "prompt-quality-supplement.ts", "prompt-optimizer-live-qa.ts", "prompt-contract-live-qa.ts", "export-prompt-quality-evidence.ts"]
+}

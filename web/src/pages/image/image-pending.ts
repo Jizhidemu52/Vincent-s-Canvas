@@ -2,7 +2,7 @@ import { defaultConfig, type AiConfig } from "@/stores/use-config-store";
 import type { ReferenceImage } from "@/types/image";
 import { generationDraftInput } from "@/services/api/generation-history";
 
-export type ImageRequestSnapshot = { text: string; config: AiConfig; references: ReferenceImage[] };
+export type ImageRequestSnapshot = { text: string; promptInput?: import("../../../../shared/prompt-contracts").PromptInputData; config: AiConfig; references: ReferenceImage[] };
 export type PendingImage = {
     id: string;
     ownerId: string;
@@ -16,7 +16,7 @@ export type PendingImage = {
 export function snapshotImageRequest(snapshot: ImageRequestSnapshot): ImageRequestSnapshot {
     // Only image parameters are durable; legacy browser provider credentials
     // and unrelated channel settings must never enter task history.
-    return structuredClone({ text: snapshot.text, config: { ...defaultConfig, ...generationDraftInput(snapshot.config, snapshot.text).config }, references: snapshot.references });
+    return structuredClone({ text: snapshot.text, promptInput: snapshot.promptInput, config: { ...defaultConfig, ...generationDraftInput(snapshot.config, snapshot.text).config }, references: snapshot.references });
 }
 
 export function pendingImagesForWorkspace(records: PendingImage[], ownerId: string, tool: string) {

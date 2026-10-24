@@ -55,6 +55,6 @@ export function resolveImageWorkflow(graph: ImageWorkflowGraph, nodeId: string):
 export function imageWorkflowDefinitionKey(plan: ImageWorkflowPlan, nodes: CanvasNodeData[]) {
     return JSON.stringify([plan, plan.steps.map(step => {
         const metadata = nodes.find(node => node.id === step.configNodeId)?.metadata;
-        return [(metadata?.composerContent || metadata?.prompt || "").replace(/@\[node:[^\]]+\]/g, "").trim(), metadata?.model, metadata?.size, metadata?.quality, metadata?.imageOptions, metadata?.systemPrompt];
+        return [(metadata?.composerContent || metadata?.prompt || "").replace(/@\[node:[^\]]+\]/g, "").trim(), metadata?.model, metadata?.size, metadata?.quality, metadata?.imageOptions, metadata?.systemPrompt, metadata?.promptInput];
     })]);
 }

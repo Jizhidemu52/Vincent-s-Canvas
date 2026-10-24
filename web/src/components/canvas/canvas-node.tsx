@@ -519,7 +519,7 @@ function toRenderState(props: CanvasNodeProps): CanvasNodeRenderState {
 function NodeContent(props: NodeContentRendererProps) {
     if (props.node.type === CanvasNodeType.Config && props.renderNodeContent) return props.renderNodeContent(props.node, { inputSummary: props.configInputSummary, isRunning: props.isRunning });
     if (props.isBatchRoot) return <ImageNodeContent {...props} />;
-    if (props.node.metadata?.status === "loading" && !shouldShowCanvasTextStream(props.node)) return <LoadingContent theme={props.theme} />;
+    if (props.node.metadata?.status === "loading" && !shouldShowCanvasTextStream(props.node)) return <LoadingContent theme={props.theme} optimizing={props.node.metadata?.optimizingPrompt} />;
     if (props.node.metadata?.status === "error") return <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} />;
 
     const Renderer = nodeContentRenderers[props.node.type];
@@ -534,11 +534,11 @@ const nodeContentRenderers = {
     [CanvasNodeType.Audio]: AudioNodeContent,
 } satisfies Record<CanvasNodeType, (props: NodeContentRendererProps) => ReactNode>;
 
-function LoadingContent({ theme }: Pick<NodeContentRendererProps, "theme">) {
+function LoadingContent({ theme, optimizing }: Pick<NodeContentRendererProps, "theme"> & { optimizing?: boolean }) {
     return (
         <div className="flex h-full w-full flex-col items-center justify-center gap-3" style={{ color: theme.node.activeStroke }}>
             <div className="size-10 animate-spin rounded-full border-2" style={{ borderColor: theme.node.stroke, borderTopColor: theme.node.activeStroke }} />
-            <span className="text-[10px] tracking-[0.2em]">生成中</span>
+            <span className="text-[10px] tracking-[0.2em]">{optimizing ? "正在优化提示词…" : "生成中"}</span>
         </div>
     );
 }
@@ -642,7 +642,7 @@ function ImageNodeContent(props: NodeContentRendererProps) {
     if (!hasImageSource && props.isBatchRoot) {
         const content =
             props.node.metadata?.status === "loading" ? (
-                <LoadingContent theme={props.theme} />
+                <LoadingContent theme={props.theme} optimizing={props.node.metadata?.optimizingPrompt} />
             ) : props.node.metadata?.status === "error" ? (
                 <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} />
             ) : (

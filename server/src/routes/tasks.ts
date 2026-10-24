@@ -23,10 +23,17 @@ import { loadTaskPriceSnapshot } from "../billing";
 import { preflightStoredVideoTask } from "../stored-video-preflight";
 import { readTaskProgress } from "../task-progress";
 import { scheduleQueuedTask } from "../task-queue";
+import { requiredPromptScene } from "../../../shared/prompt-contracts";
+import type { PromptCompiler } from "../prompt-compiler";
+import { preparePromptTaskInput } from "../prompt-task-input";
+import { PromptOptimizationError } from "../prompt-safety";
+import { promptHash } from "../prompt-recipe-store";
+import { withTransaction } from "../db-transaction";
+import { claimBatchAdmission, fenceBatchAdmission, findBatchForSubmission, finishBatchAdmission, readBatchAdmission, recordBatchAdmissionFailure, type BatchAdmissionToken } from "../batch-admission";
 
 const actionSchema = z.enum(["pause", "resume", "cancel"]);
 
-const taskSelect = `t.id,t.tool_key AS "toolKey",t.model_config_id AS "modelConfigId",t.request_id AS "requestId",t.batch_id AS "batchId",t.user_id AS "userId",u.display_name AS "userName",t.project_id AS "projectId",t.operation_type AS "operationType",t.prompt,t.parameters,t.source_urls AS "sourceUrls",t.result_urls AS "resultUrls",t.priority,t.status,t.credits,t.rmb_cost::float8 AS "rmbCost",t.failure_reason AS "failureReason",t.attempts,t.upstream_task_id AS "upstreamTaskId",t.upstream_submission_started_at AS "submissionStartedAt",t.queued_at AS "queuedAt",t.started_at AS "startedAt",t.completed_at AS "completedAt"`;
+const taskSelect = `t.id,t.tool_key AS "toolKey",t.model_config_id AS "modelConfigId",t.request_id AS "requestId",t.batch_id AS "batchId",t.user_id AS "userId",u.display_name AS "userName",t.project_id AS "projectId",t.operation_type AS "operationType",t.prompt,t.parameters,t.source_urls AS "sourceUrls",t.result_urls AS "resultUrls",t.priority,t.status,t.credits,t.rmb_cost::float8 AS "rmbCost",t.failure_reason AS "failureReason",t.attempts,t.upstream_task_id AS "upstreamTaskId",t.upstream_submission_started_at AS "submissionStartedAt",t.queued_at AS "queuedAt",t.started_at AS "startedAt",t.completed_at AS "completedAt",t.user_input AS "userInput",t.prompt_optimized AS optimized`;
 const taskSummarySelect = `t.id,t.tool_key AS "toolKey",t.model_config_id AS "modelConfigId",t.request_id AS "requestId",t.batch_id AS "batchId",t.user_id AS "userId",u.display_name AS "userName",t.project_id AS "projectId",t.operation_type AS "operationType",left(t.prompt,240) AS prompt,t.result_urls AS "resultUrls",t.priority,t.status,t.credits,t.rmb_cost::float8 AS "rmbCost",t.failure_reason AS "failureReason",t.attempts,t.upstream_task_id AS "upstreamTaskId",t.upstream_submission_started_at AS "submissionStartedAt",t.queued_at AS "queuedAt",t.started_at AS "startedAt",t.completed_at AS "completedAt"`;
 const batchSelect = `b.id,b.tool_key AS "toolKey",b.model_config_id AS "modelConfigId",b.request_id AS "requestId",b.user_id AS "userId",u.display_name AS "userName",b.department_id AS "departmentId",b.project_id AS "projectId",b.operation_type AS "operationType",m.name AS "modelName",b.priority,b.status,b.total_items AS "totalItems",b.completed_items AS "completedItems",b.failed_items AS "failedItems",stats.waiting_items AS "waitingItems",stats.processing_items AS "processingItems",stats.paused_items AS "pausedItems",stats.cancelled_items AS "cancelledItems",stats.planned_credits AS "plannedCredits",stats.consumed_credits AS "consumedCredits",stats.consumed_rmb_cost AS "consumedRmbCost",b.created_at AS "createdAt",b.updated_at AS "updatedAt"`;
 const batchStatsJoin = `LEFT JOIN LATERAL (SELECT
@@ -39,8 +46,32 @@ const batchStatsJoin = `LEFT JOIN LATERAL (SELECT
   COALESCE(SUM(t.rmb_cost) FILTER (WHERE t.status='success'),0)::float8 AS consumed_rmb_cost
   FROM tasks t WHERE t.batch_id=b.id) stats ON true`;
 
-export function createTasksRouter(db: Database, cache: Cache, creditPolicy: boolean | (() => Promise<boolean>) = true, videoPreflight = preflightStoredVideoTask, options: { maxInflightTasks?: number } = {}) {
+export function createTasksRouter(db: Database, cache: Cache, creditPolicy: boolean | (() => Promise<boolean>) = true, videoPreflight = preflightStoredVideoTask, options: { maxInflightTasks?: number; promptCompiler?: PromptCompiler } = {}) {
   const router = Router();
+  const prepare = async <T extends ReturnType<typeof singleSchema.parse>>(actor: AuthenticatedRequest["auth"], input: T) => {
+    if (!input.promptInput && !requiredPromptScene(input.toolKey ?? String(input.parameters.tool ?? ""))) return { ...input, optimized: false };
+    if (!options.promptCompiler) throw new PromptOptimizationError("PROMPT_UNAVAILABLE", "提示词优化尚未配置，未提交生成", 503);
+    const active = await db.query<{ count: number }>("SELECT count(*)::int AS count FROM tasks WHERE user_id=$1 AND status IN ('waiting','processing','paused')", [actor.id]);
+    if (Number(active.rows[0]?.count) >= (options.maxInflightTasks ?? 100)) throw new BillingError("USER_TASK_LIMIT_REACHED", "在途任务已达到上限，请等待任务完成或取消未提交的任务");
+    const prior = actor.role === "super_admin" && input.promptInput?.compilationId ? await options.promptCompiler.store.getCompilation(input.promptInput.compilationId, actor.id) : null;
+    const execution = await resolveToolExecution(db, input, { allowModelOverride: prior?.adminTest === true });
+    return preparePromptTaskInput(options.promptCompiler, actor, { ...input, modelConfigId: execution.modelConfigId, toolKey: execution.toolKey, toolConfiguration: execution });
+  };
+  const existingBatchResult = async (requestId: string, userId: string) => {
+    const batch = await readBatchAdmission(db, requestId, userId);
+    if (!batch) return null;
+    if (batch.admissionStatus !== "admitting") await recalculateBatch(db, batch.id);
+    const tasks = (await db.query<Record<string, unknown> & { requestId: string }>(`SELECT ${taskSelect} FROM tasks t JOIN users u ON u.id=t.user_id WHERE t.batch_id=$1 AND t.user_id=$2 ORDER BY t.queued_at,t.id`, [batch.id, userId])).rows;
+    const items = tasks.map(task => ({ ...task, itemIndex: Number(task.requestId.slice(requestId.length + 1)) }));
+    const failures = batch.failures.map(({ admitted: _admitted, ...failure }) => failure);
+    if (batch.admissionStatus !== "admitting") for (let index = 0; index < batch.totalItems; index++) {
+      if (!items.some(task => task.itemIndex === index) && !failures.some(failure => failure.index === index)) {
+        failures.push({ index, reason: "批次受理已中断，此项没有已保存任务；不会自动重新提交", code: "BATCH_SUBMISSION_INTERRUPTED" });
+      }
+    }
+    return { batchId: batch.id, prompt: batch.prompt, optimized: tasks.some(task => task.optimized === true), failures: failures.sort((a, b) => a.index - b.index), totalItems: batch.totalItems, submissionComplete: batch.admissionStatus !== "admitting",
+      tasks: items.filter(task => !batch.failures.some(failure => failure.index === task.itemIndex && !failure.admitted)) };
+  };
 
   router.post("/preflight", async (request, response, next) => {
     try {
@@ -102,15 +133,19 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
           .json({ error: "FORBIDDEN", message: "设计师只能提交普通任务" });
         return;
       }
-      response.status(201).json({
-        task: await enqueueTask(db, cache, {
-          ...input,
+      if (options.promptCompiler) {
+        const existing = (await db.query(`SELECT ${taskSelect} FROM tasks t JOIN users u ON u.id=t.user_id WHERE t.request_id=$1 AND t.user_id=$2`, [input.requestId, actor.id])).rows[0];
+        if (existing) { response.status(200).json({ task: existing }); return; }
+      }
+      const prepared = await prepare(actor, input);
+      const task = await enqueueTask(db, cache, {
+          ...prepared,
           creditsEnabled,
           maxInflightTasks: options.maxInflightTasks,
           userId: actor.id,
           departmentId: actor.departmentId,
-        }),
-      });
+        });
+      response.status(201).json({ task: { ...task, prompt: prepared.prompt, userInput: "userInput" in prepared ? prepared.userInput : null, optimized: prepared.optimized } });
     } catch (error) {
       if (error instanceof BillingError) {
         response
@@ -123,6 +158,7 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
   });
 
   router.post("/batch", async (request, response, next) => {
+    let admission: { id: string; owner: BatchAdmissionToken } | undefined;
     try {
       const creditsEnabled = typeof creditPolicy === "function" ? await creditPolicy() : creditPolicy;
       const input = batchSchema.parse(request.body);
@@ -131,47 +167,31 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
         response.status(403).json({ error: "FORBIDDEN", message: "设计师只能提交普通任务" });
         return;
       }
+      if (input.priority === "urgent" && actor.role !== "super_admin") { response.status(403).json({ error: "FORBIDDEN", message: "仅超级管理员可提交紧急任务" }); return; }
+      const inputHash = promptHash(input);
+      const existing = await findBatchForSubmission(db, input.requestId, actor.id, inputHash);
+      if (existing) { response.status(options.promptCompiler ? 200 : 201).json(await existingBatchResult(input.requestId, actor.id)); return; }
+      // Fail global per-item request collisions before invoking the optimizer.
+      const collision = await db.query("SELECT id FROM tasks WHERE request_id=ANY($1::text[]) LIMIT 1", [input.items.map((_, index) => `${input.requestId}:${index}`)]);
+      if (collision.rows[0]) throw new BillingError("DUPLICATE_REQUEST", "请求编号已被其他任务占用");
+      if (input.promptInput && input.promptInput.scene !== "batch-optimize") throw new PromptOptimizationError("PROMPT_RECIPE_MISMATCH", "批处理仅支持批量优化配方");
       const execution = await resolveToolExecution(db, input);
       input.toolKey = execution.toolKey;
       input.modelConfigId = execution.modelConfigId;
       input.parameters = { ...input.parameters, tool: execution.toolKey };
       const priceSnapshot = await loadTaskPriceSnapshot(db, { ...input, toolConfiguration: execution, quantity: 1, creditsEnabled });
-      const requestedBatchId = randomUUID();
-      const insertedBatch = await db.query<{ id: string }>(
-        `INSERT INTO batch_tasks(id,request_id,user_id,department_id,project_id,operation_type,model_config_id,prompt,priority,total_items,tool_key)
-         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-         ON CONFLICT(request_id) DO NOTHING
-         RETURNING id`,
-        [
-          requestedBatchId,
-          input.requestId,
-          actor.id,
-          actor.departmentId,
-          input.projectId,
-          input.operationType,
-          input.modelConfigId ?? null,
-          input.prompt,
-          input.priority,
-          input.items.length,
-          execution.toolKey,
-        ],
-      );
-      let batchId: string = requestedBatchId;
-      if (!insertedBatch.rows[0]) {
-        const existingBatch = await db.query<{ id: string }>(
-          "SELECT id FROM batch_tasks WHERE request_id=$1 AND user_id=$2",
-          [input.requestId, actor.id],
-        );
-        if (!existingBatch.rows[0])
-          throw new BillingError("DUPLICATE_REQUEST", "请求编号已被其他账号占用");
-        batchId = existingBatch.rows[0].id;
-      }
-      const tasks = [];
-      const failures = [];
+      // One representative input, one compilation. All items receive the same trusted result.
+      const prepared = await prepare(actor, { ...input, sourceUrls: input.items[0]!.sourceUrls });
+      input.prompt = prepared.prompt;
+      input.parameters = prepared.parameters;
+      const claimed = await claimBatchAdmission(db, { ...input, userId: actor.id, departmentId: actor.departmentId, totalItems: input.items.length, modelConfigId: execution.modelConfigId, toolKey: execution.toolKey, inputHash });
+      if (!claimed.claimed) { response.status(options.promptCompiler ? 200 : 201).json(await existingBatchResult(input.requestId, actor.id)); return; }
+      const batchId = claimed.batch.id;
+      admission = { id: batchId, owner: claimed.token };
       for (const [index, item] of input.items.entries()) {
         try {
-          const task = await enqueueTask(db, cache, {
-            ...input,
+          await enqueueTask(db, cache, {
+            ...prepared,
             toolConfiguration: execution,
             priceSnapshot,
             creditsEnabled,
@@ -181,9 +201,10 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
             userId: actor.id,
             departmentId: actor.departmentId,
             batchId,
+            batchAdmission: admission.owner,
           });
-          tasks.push({ ...task, itemIndex: index });
         } catch (error) {
+          if (error instanceof PromptOptimizationError && error.code === "BATCH_SUBMISSION_INTERRUPTED") throw error;
           const reason =
             error instanceof Error ? error.message : "任务创建失败";
           const code = error instanceof BillingError ? error.code : "TASK_CREATION_FAILED";
@@ -198,65 +219,96 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
               throw new BillingError("DUPLICATE_REQUEST", "请求编号已被其他任务占用");
             }
             // Queue delivery happens after SQL commits. Preserve the admitted
-            // task and its hold so recovery retries the same task without charging
-            // again; never overwrite another task or turn its hold into a leak.
-            const { userId: _owner, batchId: _batch, ...task } = committed;
-            tasks.push({ ...task, itemIndex: index });
-            failures.push({ index, reason, code });
+            // task and its hold. Worker reconciliation or explicit task recovery
+            // may restore queue membership; batch GET/POST never replay admission.
+            await recordBatchAdmissionFailure(db, batchId, admission.owner, { index, reason, code, admitted: true });
             continue;
           }
+          // An unknown database/process failure does not prove the next item was safely rejected.
+          // Close admission and let GET report missing indexes; never continue the whole batch.
+          if (!(error instanceof BillingError)) throw error;
           const failedId = randomUUID();
-          const failed = await db.query<{ id: string }>(
-            `INSERT INTO tasks(id,request_id,batch_id,user_id,department_id,project_id,operation_type,model_config_id,prompt,parameters,source_urls,priority,status,credits,rmb_cost,failure_reason,completed_at,tool_key)
-               VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'failed',0,0,$13,now(),$14)
-               ON CONFLICT(request_id) DO NOTHING RETURNING id`,
-            [
-              failedId,
-              itemRequestId,
+          await withTransaction(db, async (client) => {
+            await fenceBatchAdmission(
+              client,
               batchId,
               actor.id,
-              actor.departmentId,
-              input.projectId,
-              input.operationType,
-              input.modelConfigId ?? null,
-              input.prompt,
-              input.parameters,
-              JSON.stringify(item.sourceUrls),
-              input.priority,
-              reason,
-              execution.toolKey,
-            ],
-          );
-          if (!failed.rows[0]) throw new BillingError("DUPLICATE_REQUEST", "请求编号已被其他任务占用");
-          await db.query(
-            `INSERT INTO generation_history(task_id,user_id,department_id,project_id,operation_type,model_config_id,prompt,parameters,source_urls,result_urls,credits,rmb_cost,status,failure_reason)
+              admission!.owner,
+            );
+            const failed = await client.query<{ id: string }>(
+              `INSERT INTO tasks(id,request_id,batch_id,user_id,department_id,project_id,operation_type,model_config_id,prompt,parameters,source_urls,priority,status,credits,rmb_cost,failure_reason,completed_at,tool_key)
+               VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'failed',0,0,$13,now(),$14)
+               ON CONFLICT(request_id) DO NOTHING RETURNING id`,
+              [
+                failedId,
+                itemRequestId,
+                batchId,
+                actor.id,
+                actor.departmentId,
+                input.projectId,
+                input.operationType,
+                input.modelConfigId ?? null,
+                input.prompt,
+                input.parameters,
+                JSON.stringify(item.sourceUrls),
+                input.priority,
+                reason,
+                execution.toolKey,
+              ],
+            );
+            if (!failed.rows[0])
+              throw new BillingError(
+                "DUPLICATE_REQUEST",
+                "请求编号已被其他任务占用",
+              );
+            await client.query(
+              `INSERT INTO generation_history(task_id,user_id,department_id,project_id,operation_type,model_config_id,prompt,parameters,source_urls,result_urls,credits,rmb_cost,status,failure_reason)
              VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'[]',0,0,'failed',$10)
              ON CONFLICT(task_id) DO UPDATE SET status='failed',failure_reason=EXCLUDED.failure_reason,credits=0,rmb_cost=0`,
-            [
-              failedId,
-              actor.id,
-              actor.departmentId,
-              input.projectId,
-              input.operationType,
-              input.modelConfigId ?? null,
-              input.prompt,
-              input.parameters,
-              JSON.stringify(item.sourceUrls),
-              reason,
-            ],
-          );
-          failures.push({ index, reason, code });
+              [
+                failedId,
+                actor.id,
+                actor.departmentId,
+                input.projectId,
+                input.operationType,
+                input.modelConfigId ?? null,
+                input.prompt,
+                input.parameters,
+                JSON.stringify(item.sourceUrls),
+                reason,
+              ],
+            );
+            await recordBatchAdmissionFailure(
+              client,
+              batchId,
+              admission!.owner,
+              { index, reason, code, admitted: false },
+            );
+          });
         }
       }
-      await recalculateBatch(db, batchId);
-      response.status(201).json({ batchId, tasks, failures });
+      await finishBatchAdmission(db, batchId, admission.owner);
+      response.status(201).json({ ...(await existingBatchResult(input.requestId, actor.id)), prompt: prepared.prompt, optimized: prepared.optimized });
     } catch (error) {
+      if (admission) {
+        const owned = admission;
+        await finishBatchAdmission(db, owned.id, owned.owner, true).then(() => recalculateBatch(db, owned.id)).catch(() => undefined);
+      }
       if (error instanceof BillingError) {
         response.status(400).json({ error: error.code, message: error.message });
         return;
       }
       next(error);
     }
+  });
+
+  router.get("/batches/by-request/:requestId", async (request, response, next) => {
+    response.set("Cache-Control", "private, no-store");
+    try {
+      const result = await existingBatchResult(String(request.params.requestId), (request as unknown as AuthenticatedRequest).auth.id);
+      if (!result) { response.status(404).json({ error: "NOT_FOUND", message: "批次不存在" }); return; }
+      response.json(result);
+    } catch (error) { next(error); }
   });
 
   router.get("/", async (request, response, next) => {

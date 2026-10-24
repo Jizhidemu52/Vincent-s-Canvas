@@ -1,0 +1,2272 @@
+{
+  "version": 1,
+  "runId": "visual-v2-extended",
+  "baselineCommit": "4ed9d8d",
+  "baselineSourceSha256": "a88aab114195e8934da0526a74a3b0ca30f2315315ff102db9919eab24bef30f",
+  "baselineAssumptions": [
+    "旧版提示词取自 Git 4ed9d8d 的真实 buildScenePrompt 加旧参考编号前缀",
+    "无自定义全局 systemPrompt；与新版使用相同素材字节和实际图像模型",
+    "只有调用参数控制对照；随机生图不承诺相同随机种子"
+  ],
+  "visualReview": "pending-manual-review",
+  "privateRulesIncluded": false,
+  "assetFixtures": {
+    "shirt": {
+      "path": "labs/design-workbench/assets/garment.png",
+      "description": "浅蓝色短袖衬衫，五颗可见前中纽扣，无口袋；已人工查看"
+    },
+    "flat": {
+      "path": "output/creative-api-test/source-shirt.png",
+      "description": "米色平面短袖衬衫，五颗纽扣、单胸袋；已人工查看"
+    },
+    "flower": {
+      "path": "output/designer-manual-20261021/revision-v2/assets/flower.png",
+      "description": "透明底珊瑚色六瓣花、黄色花心；已人工查看"
+    },
+    "leaf": {
+      "path": "output/designer-manual-20261021/revision-v2/assets/leaf.png",
+      "description": "透明底绿色枝叶；已人工查看"
+    },
+    "knit": {
+      "path": "output/designer-manual-20261021/revision-v2/assets/pattern-original.png",
+      "description": "奶油、海军蓝、芥末、砖红几何针织裁片；已人工查看"
+    },
+    "button": {
+      "path": "output/designer-manual-20261021/revision-v2/assets/button-original.png",
+      "description": "72×72 棕色纽扣与针织底布；低分辨率限制，已人工查看"
+    },
+    "buttonFour": {
+      "path": "output/designer-manual-20261021/revision-v2/assets/accessory.webp",
+      "description": "1024×1024 四孔圆形纹样纽扣，棕色边沿与浅色布背景；以前 QA 生成素材，不是实物生产证据；已人工查看"
+    },
+    "buttonTwo": {
+      "path": "output/mark-provider-live/accessory-design-knit-A-1.png",
+      "description": "1024×1024 两孔圆形纹样纽扣，棕色边沿与白色背景；以前 QA 生成素材，不是实物生产证据；已人工查看"
+    }
+  },
+  "cases": [
+    {
+      "id": "style-to-sketch-11-old",
+      "pairId": "style-to-sketch-11",
+      "variant": "old",
+      "group": "creative",
+      "label": "style-to-sketch / 11 / old",
+      "sources": [
+        "shirt"
+      ],
+      "form": {
+        "description": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。黑色中等线宽技术线稿，标出可见肩缝和袖窿线。",
+        "category": "按描述判断",
+        "silhouette": "按描述判断",
+        "fabric": "",
+        "presentation": "白底平铺",
+        "sketchStyle": "technical",
+        "sketchDetail": "detailed",
+        "restyleArea": "领口",
+        "change": "",
+        "preserve": "",
+        "colorMode": "smart",
+        "colors": [
+          "#789282",
+          "#E8DCC8",
+          "#424A55"
+        ],
+        "colorRegion": "",
+        "colorMood": "自然柔和",
+        "backStructure": "简洁",
+        "backMotif": "不延续",
+        "extractMode": "单独图案",
+        "extractBackground": "白底",
+        "craft": "刺绣",
+        "craftFabric": "棉布",
+        "accessoryType": "拉链头",
+        "accessoryApply": "形状与纹样"
+      },
+      "prompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：技术感线稿。用清晰、均匀的线条表达服装轮廓和可见结构，主轮廓与结构线层次分明。\n\n细节程度：保留实际可见的分割线、口袋、褶裥、门襟、纽扣和装饰细节，避免虚构细节。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。黑色中等线宽技术线稿，标出可见肩缝和袖窿线。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。",
+      "toolKey": "image-edit",
+      "checks": [
+        "主体与参考图职责正确",
+        "仅改变明确要求的内容",
+        "没有无关文字、水印、额外产品或部件",
+        "真实材质与光影没有凭空改变",
+        "五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数",
+        "无胸袋，不添加胸袋",
+        "黑色中等线宽技术线稿，标出可见肩缝和袖窿线。"
+      ]
+    },
+    {
+      "id": "style-to-sketch-11-new",
+      "pairId": "style-to-sketch-11",
+      "variant": "new",
+      "group": "creative",
+      "label": "style-to-sketch / 11 / new",
+      "sources": [
+        "shirt"
+      ],
+      "form": {
+        "description": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。黑色中等线宽技术线稿，标出可见肩缝和袖窿线。",
+        "category": "按描述判断",
+        "silhouette": "按描述判断",
+        "fabric": "",
+        "presentation": "白底平铺",
+        "sketchStyle": "technical",
+        "sketchDetail": "detailed",
+        "restyleArea": "领口",
+        "change": "",
+        "preserve": "",
+        "colorMode": "smart",
+        "colors": [
+          "#789282",
+          "#E8DCC8",
+          "#424A55"
+        ],
+        "colorRegion": "",
+        "colorMood": "自然柔和",
+        "backStructure": "简洁",
+        "backMotif": "不延续",
+        "extractMode": "单独图案",
+        "extractBackground": "白底",
+        "craft": "刺绣",
+        "craftFabric": "棉布",
+        "accessoryType": "拉链头",
+        "accessoryApply": "形状与纹样"
+      },
+      "prompt": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。黑色中等线宽技术线稿，标出可见肩缝和袖窿线。",
+      "toolKey": "creative-style-to-sketch",
+      "input": {
+        "scene": "style-to-sketch",
+        "fields": {
+          "description": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。黑色中等线宽技术线稿，标出可见肩缝和袖窿线。",
+          "sketchStyle": "technical",
+          "sketchDetail": "detailed"
+        },
+        "userText": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。黑色中等线宽技术线稿，标出可见肩缝和袖窿线。",
+        "referenceRoles": [
+          "服装参考图"
+        ],
+        "mode": "edit"
+      },
+      "checks": [
+        "主体与参考图职责正确",
+        "仅改变明确要求的内容",
+        "没有无关文字、水印、额外产品或部件",
+        "真实材质与光影没有凭空改变",
+        "五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数",
+        "无胸袋，不添加胸袋",
+        "黑色中等线宽技术线稿，标出可见肩缝和袖窿线。"
+      ]
+    },
+    {
+      "id": "garment-colorway-11-old",
+      "pairId": "garment-colorway-11",
+      "variant": "old",
+      "group": "creative",
+      "label": "garment-colorway / 11 / old",
+      "sources": [
+        "shirt"
+      ],
+      "form": {
+        "description": "只改指定区域至 #2E5B4E。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+        "category": "按描述判断",
+        "silhouette": "按描述判断",
+        "fabric": "",
+        "presentation": "白底平铺",
+        "sketchStyle": "technical",
+        "sketchDetail": "standard",
+        "restyleArea": "领口",
+        "change": "",
+        "preserve": "",
+        "colorMode": "specific",
+        "colors": [
+          "#2E5B4E"
+        ],
+        "colorRegion": "仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色",
+        "colorMood": "严格按指定色彩方向",
+        "backStructure": "简洁",
+        "backMotif": "不延续",
+        "extractMode": "单独图案",
+        "extractBackground": "白底",
+        "craft": "刺绣",
+        "craftFabric": "棉布",
+        "accessoryType": "拉链头",
+        "accessoryApply": "形状与纹样"
+      },
+      "prompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#2E5B4E。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #2E5B4E。\n\n改色范围：仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #2E5B4E。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。",
+      "toolKey": "image-edit",
+      "checks": [
+        "主体与参考图职责正确",
+        "仅改变明确要求的内容",
+        "没有无关文字、水印、额外产品或部件",
+        "真实材质与光影没有凭空改变",
+        "五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数",
+        "无胸袋，不添加胸袋",
+        "仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色；目标 #2E5B4E"
+      ]
+    },
+    {
+      "id": "garment-colorway-11-new",
+      "pairId": "garment-colorway-11",
+      "variant": "new",
+      "group": "creative",
+      "label": "garment-colorway / 11 / new",
+      "sources": [
+        "shirt"
+      ],
+      "form": {
+        "description": "只改指定区域至 #2E5B4E。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+        "category": "按描述判断",
+        "silhouette": "按描述判断",
+        "fabric": "",
+        "presentation": "白底平铺",
+        "sketchStyle": "technical",
+        "sketchDetail": "standard",
+        "restyleArea": "领口",
+        "change": "",
+        "preserve": "",
+        "colorMode": "specific",
+        "colors": [
+          "#2E5B4E"
+        ],
+        "colorRegion": "仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色",
+        "colorMood": "严格按指定色彩方向",
+        "backStructure": "简洁",
+        "backMotif": "不延续",
+        "extractMode": "单独图案",
+        "extractBackground": "白底",
+        "craft": "刺绣",
+        "craftFabric": "棉布",
+        "accessoryType": "拉链头",
+        "accessoryApply": "形状与纹样"
+      },
+      "prompt": "只改指定区域至 #2E5B4E。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+      "toolKey": "creative-garment-colorway",
+      "input": {
+        "scene": "garment-colorway",
+        "fields": {
+          "description": "只改指定区域至 #2E5B4E。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+          "colorMode": "specific",
+          "colorRegion": "仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色",
+          "colors": [
+            "#2E5B4E"
+          ]
+        },
+        "userText": "只改指定区域至 #2E5B4E。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+        "referenceRoles": [
+          "服装参考图"
+        ],
+        "mode": "edit"
+      },
+      "checks": [
+        "主体与参考图职责正确",
+        "仅改变明确要求的内容",
+        "没有无关文字、水印、额外产品或部件",
+        "真实材质与光影没有凭空改变",
+        "五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数",
+        "无胸袋，不添加胸袋",
+        "仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色；目标 #2E5B4E"
+      ]
+    },
+    {
+      "id": "style-to-sketch-12-old",
+      "pairId": "style-to-sketch-12",
+      "variant": "old",
+      "group": "creative",
+      "label": "style-to-sketch / 12 / old",
+      "sources": [
+        "shirt"
+      ],
+      "form": {
+        "description": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。细线简约线稿，不表现布面阴影。",
+        "category": "按描述判断",
+        "silhouette": "按描述判断",
+        "fabric": "",
+        "presentation": "白底平铺",
+        "sketchStyle": "minimal",
+        "sketchDetail": "standard",
+        "restyleArea": "领口",
+        "change": "",
+        "preserve": "",
+        "colorMode": "smart",
+        "colors": [
+          "#789282",
+          "#E8DCC8",
+          "#424A55"
+        ],
+        "colorRegion": "",
+        "colorMood": "自然柔和",
+        "backStructure": "简洁",
+        "backMotif": "不延续",
+        "extractMode": "单独图案",
+        "extractBackground": "白底",
+        "craft": "刺绣",
+        "craftFabric": "棉布",
+        "accessoryType": "拉链头",
+        "accessoryApply": "形状与纹样"
+      },
+      "prompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：极简线稿。用干净、克制的轮廓线表达服装，不保留摄影光影与面料色块。\n\n细节程度：保留领口、袖口、下摆、门襟与主要结构线，适度简化细小纹理。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。细线简约线稿，不表现布面阴影。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。",
+      "toolKey": "image-edit",
+      "checks": [
+        "主体与参考图职责正确",
+        "仅改变明确要求的内容",
+        "没有无关文字、水印、额外产品或部件",
+        "真实材质与光影没有凭空改变",
+        "五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数",
+        "无胸袋，不添加胸袋",
+        "细线简约线稿，不表现布面阴影。"
+      ]
+    },
+    {
+      "id": "style-to-sketch-12-new",
+      "pairId": "style-to-sketch-12",
+      "variant": "new",
+      "group": "creative",
+      "label": "style-to-sketch / 12 / new",
+      "sources": [
+        "shirt"
+      ],
+      "form": {
+        "description": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。细线简约线稿，不表现布面阴影。",
+        "category": "按描述判断",
+        "silhouette": "按描述判断",
+        "fabric": "",
+        "presentation": "白底平铺",
+        "sketchStyle": "minimal",
+        "sketchDetail": "standard",
+        "restyleArea": "领口",
+        "change": "",
+        "preserve": "",
+        "colorMode": "smart",
+        "colors": [
+          "#789282",
+          "#E8DCC8",
+          "#424A55"
+        ],
+        "colorRegion": "",
+        "colorMood": "自然柔和",
+        "backStructure": "简洁",
+        "backMotif": "不延续",
+        "extractMode": "单独图案",
+        "extractBackground": "白底",
+        "craft": "刺绣",
+        "craftFabric": "棉布",
+        "accessoryType": "拉链头",
+        "accessoryApply": "形状与纹样"
+      },
+      "prompt": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。细线简约线稿，不表现布面阴影。",
+      "toolKey": "creative-style-to-sketch",
+      "input": {
+        "scene": "style-to-sketch",
+        "fields": {
+          "description": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。细线简约线稿，不表现布面阴影。",
+          "sketchStyle": "minimal",
+          "sketchDetail": "standard"
+        },
+        "userText": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。细线简约线稿，不表现布面阴影。",
+        "referenceRoles": [
+          "服装参考图"
+        ],
+        "mode": "edit"
+      },
+      "checks": [
+        "主体与参考图职责正确",
+        "仅改变明确要求的内容",
+        "没有无关文字、水印、额外产品或部件",
+        "真实材质与光影没有凭空改变",
+        "五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数",
+        "无胸袋，不添加胸袋",
+        "细线简约线稿，不表现布面阴影。"
+      ]
+    },
+    {
+      "id": "garment-colorway-12-old",
+      "pairId": "garment-colorway-12",
+      "variant": "old",
+      "group": "creative",
+      "label": "garment-colorway / 12 / old",
+      "sources": [
+        "shirt"
+      ],
+      "form": {
+        "description": "只改指定区域至 #253746。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+        "category": "按描述判断",
+        "silhouette": "按描述判断",
+        "fabric": "",
+        "presentation": "白底平铺",
+        "sketchStyle": "technical",
+        "sketchDetail": "standard",
+        "restyleArea": "领口",
+        "change": "",
+        "preserve": "",
+        "colorMode": "specific",
+        "colors": [
+          "#253746"
+        ],
+        "colorRegion": "仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色",
+        "colorMood": "严格按指定色彩方向",
+        "backStructure": "简洁",
+        "backMotif": "不延续",
+        "extractMode": "单独图案",
+        "extractBackground": "白底",
+        "craft": "刺绣",
+        "craftFabric": "棉布",
+        "accessoryType": "拉链头",
+        "accessoryApply": "形状与纹样"
+      },
+      "prompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#253746。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #253746。\n\n改色范围：仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #253746。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。",
+      "toolKey": "image-edit",
+      "checks": [
+        "主体与参考图职责正确",
+        "仅改变明确要求的内容",
+        "没有无关文字、水印、额外产品或部件",
+        "真实材质与光影没有凭空改变",
+        "五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数",
+        "无胸袋，不添加胸袋",
+        "仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色；目标 #253746"
+      ]
+    },
+    {
+      "id": "garment-colorway-12-new",
+      "pairId": "garment-colorway-12",
+      "variant": "new",
+      "group": "creative",
+      "label": "garment-colorway / 12 / new",
+      "sources": [
+        "shirt"
+      ],
+      "form": {
+        "description": "只改指定区域至 #253746。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+        "category": "按描述判断",
+        "silhouette": "按描述判断",
+        "fabric": "",
+        "presentation": "白底平铺",
+        "sketchStyle": "technical",
+        "sketchDetail": "standard",
+        "restyleArea": "领口",
+        "change": "",
+        "preserve": "",
+        "colorMode": "specific",
+        "colors": [
+          "#253746"
+        ],
+        "colorRegion": "仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色",
+        "colorMood": "严格按指定色彩方向",
+        "backStructure": "简洁",
+        "backMotif": "不延续",
+        "extractMode": "单独图案",
+        "extractBackground": "白底",
+        "craft": "刺绣",
+        "craftFabric": "棉布",
+        "accessoryType": "拉链头",
+        "accessoryApply": "形状与纹样"
+      },
+      "prompt": "只改指定区域至 #253746。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+      "toolKey": "creative-garment-colorway",
+      "input": {
+        "scene": "garment-colorway",
+        "fields": {
+          "description": "只改指定区域至 #253746。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+          "colorMode": "specific",
+          "colorRegion": "仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色",
+          "colors": [
+            "#253746"
+          ]
+        },
+        "userText": "只改指定区域至 #253746。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+        "referenceRoles": [
+          "服装参考图"
+        ],
+        "mode": "edit"
+      },
+      "checks": [
+        "主体与参考图职责正确",
+        "仅改变明确要求的内容",
+        "没有无关文字、水印、额外产品或部件",
+        "真实材质与光影没有凭空改变",
+        "五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数",
+        "无胸袋，不添加胸袋",
+        "仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色；目标 #253746"
+      ]
+    },
+    {
+      "id": "style-to-sketch-13-old",
+      "pairId": "style-to-sketch-13",
+      "variant": "old",
+      "group": "creative",
+      "label": "style-to-sketch / 13 / old",
+      "sources": [
+        "shirt"
+      ],
+      "form": {
+        "description": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。外轮廓稍粗、内部缝线细，线宽层级清楚。",
+        "category": "按描述判断",
+        "silhouette": "按描述判断",
+        "fabric": "",
+        "presentation": "白底平铺",
+        "sketchStyle": "technical",
+        "sketchDetail": "standard",
+        "restyleArea": "领口",
+        "change": "",
+        "preserve": "",
+        "colorMode": "smart",
+        "colors": [
+          "#789282",
+          "#E8DCC8",
+          "#424A55"
+        ],
+        "colorRegion": "",
+        "colorMood": "自然柔和",
+        "backStructure": "简洁",
+        "backMotif": "不延续",
+        "extractMode": "单独图案",
+        "extractBackground": "白底",
+        "craft": "刺绣",
+        "craftFabric": "棉布",
+        "accessoryType": "拉链头",
+        "accessoryApply": "形状与纹样"
+      },
+      "prompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：技术感线稿。用清晰、均匀的线条表达服装轮廓和可见结构，主轮廓与结构线层次分明。\n\n细节程度：保留领口、袖口、下摆、门襟与主要结构线，适度简化细小纹理。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。外轮廓稍粗、内部缝线细，线宽层级清楚。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。",
+      "toolKey": "image-edit",
+      "checks": [
+        "主体与参考图职责正确",
+        "仅改变明确要求的内容",
+        "没有无关文字、水印、额外产品或部件",
+        "真实材质与光影没有凭空改变",
+        "五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数",
+        "无胸袋，不添加胸袋",
+        "外轮廓稍粗、内部缝线细，线宽层级清楚。"
+      ]
+    },
+    {
+      "id": "style-to-sketch-13-new",
+      "pairId": "style-to-sketch-13",
+      "variant": "new",
+      "group": "creative",
+      "label": "style-to-sketch / 13 / new",
+      "sources": [
+        "shirt"
+      ],
+      "form": {
+        "description": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。外轮廓稍粗、内部缝线细，线宽层级清楚。",
+        "category": "按描述判断",
+        "silhouette": "按描述判断",
+        "fabric": "",
+        "presentation": "白底平铺",
+        "sketchStyle": "technical",
+        "sketchDetail": "standard",
+        "restyleArea": "领口",
+        "change": "",
+        "preserve": "",
+        "colorMode": "smart",
+        "colors": [
+          "#789282",
+          "#E8DCC8",
+          "#424A55"
+        ],
+        "colorRegion": "",
+        "colorMood": "自然柔和",
+        "backStructure": "简洁",
+        "backMotif": "不延续",
+        "extractMode": "单独图案",
+        "extractBackground": "白底",
+        "craft": "刺绣",
+        "craftFabric": "棉布",
+        "accessoryType": "拉链头",
+        "accessoryApply": "形状与纹样"
+      },
+      "prompt": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。外轮廓稍粗、内部缝线细，线宽层级清楚。",
+      "toolKey": "creative-style-to-sketch",
+      "input": {
+        "scene": "style-to-sketch",
+        "fields": {
+          "description": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。外轮廓稍粗、内部缝线细，线宽层级清楚。",
+          "sketchStyle": "technical",
+          "sketchDetail": "standard"
+        },
+        "userText": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。外轮廓稍粗、内部缝线细，线宽层级清楚。",
+        "referenceRoles": [
+          "服装参考图"
+        ],
+        "mode": "edit"
+      },
+      "checks": [
+        "主体与参考图职责正确",
+        "仅改变明确要求的内容",
+        "没有无关文字、水印、额外产品或部件",
+        "真实材质与光影没有凭空改变",
+        "五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数",
+        "无胸袋，不添加胸袋",
+        "外轮廓稍粗、内部缝线细，线宽层级清楚。"
+      ]
+    },
+    {
+      "id": "garment-colorway-13-old",
+      "pairId": "garment-colorway-13",
+      "variant": "old",
+      "group": "creative",
+      "label": "garment-colorway / 13 / old",
+      "sources": [
+        "shirt"
+      ],
+      "form": {
+        "description": "只改指定区域至 #B76E55。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+        "category": "按描述判断",
+        "silhouette": "按描述判断",
+        "fabric": "",
+        "presentation": "白底平铺",
+        "sketchStyle": "technical",
+        "sketchDetail": "standard",
+        "restyleArea": "领口",
+        "change": "",
+        "preserve": "",
+        "colorMode": "specific",
+        "colors": [
+          "#B76E55"
+        ],
+        "colorRegion": "仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色",
+        "colorMood": "严格按指定色彩方向",
+        "backStructure": "简洁",
+        "backMotif": "不延续",
+        "extractMode": "单独图案",
+        "extractBackground": "白底",
+        "craft": "刺绣",
+        "craftFabric": "棉布",
+        "accessoryType": "拉链头",
+        "accessoryApply": "形状与纹样"
+      },
+      "prompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#B76E55。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #B76E55。\n\n改色范围：仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #B76E55。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。",
+      "toolKey": "image-edit",
+      "checks": [
+        "主体与参考图职责正确",
+        "仅改变明确要求的内容",
+        "没有无关文字、水印、额外产品或部件",
+        "真实材质与光影没有凭空改变",
+        "五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数",
+        "无胸袋，不添加胸袋",
+        "仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色；目标 #B76E55"
+      ]
+    },
+    {
+      "id": "garment-colorway-13-new",
+      "pairId": "garment-colorway-13",
+      "variant": "new",
+      "group": "creative",
+      "label": "garment-colorway / 13 / new",
+      "sources": [
+        "shirt"
+      ],
+      "form": {
+        "description": "只改指定区域至 #B76E55。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+        "category": "按描述判断",
+        "silhouette": "按描述判断",
+        "fabric": "",
+        "presentation": "白底平铺",
+        "sketchStyle": "technical",
+        "sketchDetail": "standard",
+        "restyleArea": "领口",
+        "change": "",
+        "preserve": "",
+        "colorMode": "specific",
+        "colors": [
+          "#B76E55"
+        ],
+        "colorRegion": "仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色",
+        "colorMood": "严格按指定色彩方向",
+        "backStructure": "简洁",
+        "backMotif": "不延续",
+        "extractMode": "单独图案",
+        "extractBackground": "白底",
+        "craft": "刺绣",
+        "craftFabric": "棉布",
+        "accessoryType": "拉链头",
+        "accessoryApply": "形状与纹样"
+      },
+      "prompt": "只改指定区域至 #B76E55。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+      "toolKey": "creative-garment-colorway",
+      "input": {
+        "scene": "garment-colorway",
+        "fields": {
+          "description": "只改指定区域至 #B76E55。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+          "colorMode": "specific",
+          "colorRegion": "仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色",
+          "colors": [
+            "#B76E55"
+          ]
+        },
+        "userText": "只改指定区域至 #B76E55。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+        "referenceRoles": [
+          "服装参考图"
+        ],
+        "mode": "edit"
+      },
+      "checks": [
+        "主体与参考图职责正确",
+        "仅改变明确要求的内容",
+        "没有无关文字、水印、额外产品或部件",
+        "真实材质与光影没有凭空改变",
+        "五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数",
+        "无胸袋，不添加胸袋",
+        "仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色；目标 #B76E55"
+      ]
+    },
+    {
+      "id": "style-to-sketch-14-old",
+      "pairId": "style-to-sketch-14",
+      "variant": "old",
+      "group": "creative",
+      "label": "style-to-sketch / 14 / old",
+      "sources": [
+        "shirt"
+      ],
+      "form": {
+        "description": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。保留领片交叠与门襟，不添加被遮住的纽扣或缝线。",
+        "category": "按描述判断",
+        "silhouette": "按描述判断",
+        "fabric": "",
+        "presentation": "白底平铺",
+        "sketchStyle": "minimal",
+        "sketchDetail": "detailed",
+        "restyleArea": "领口",
+        "change": "",
+        "preserve": "",
+        "colorMode": "smart",
+        "colors": [
+          "#789282",
+          "#E8DCC8",
+          "#424A55"
+        ],
+        "colorRegion": "",
+        "colorMood": "自然柔和",
+        "backStructure": "简洁",
+        "backMotif": "不延续",
+        "extractMode": "单独图案",
+        "extractBackground": "白底",
+        "craft": "刺绣",
+        "craftFabric": "棉布",
+        "accessoryType": "拉链头",
+        "accessoryApply": "形状与纹样"
+      },
+      "prompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：极简线稿。用干净、克制的轮廓线表达服装，不保留摄影光影与面料色块。\n\n细节程度：保留实际可见的分割线、口袋、褶裥、门襟、纽扣和装饰细节，避免虚构细节。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。保留领片交叠与门襟，不添加被遮住的纽扣或缝线。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。",
+      "toolKey": "image-edit",
+      "checks": [
+        "主体与参考图职责正确",
+        "仅改变明确要求的内容",
+        "没有无关文字、水印、额外产品或部件",
+        "真实材质与光影没有凭空改变",
+        "五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数",
+        "无胸袋，不添加胸袋",
+        "保留领片交叠与门襟，不添加被遮住的纽扣或缝线。"
+      ]
+    },
+    {
+      "id": "style-to-sketch-14-new",
+      "pairId": "style-to-sketch-14",
+      "variant": "new",
+      "group": "creative",
+      "label": "style-to-sketch / 14 / new",
+      "sources": [
+        "shirt"
+      ],
+      "form": {
+        "description": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。保留领片交叠与门襟，不添加被遮住的纽扣或缝线。",
+        "category": "按描述判断",
+        "silhouette": "按描述判断",
+        "fabric": "",
+        "presentation": "白底平铺",
+        "sketchStyle": "minimal",
+        "sketchDetail": "detailed",
+        "restyleArea": "领口",
+        "change": "",
+        "preserve": "",
+        "colorMode": "smart",
+        "colors": [
+          "#789282",
+          "#E8DCC8",
+          "#424A55"
+        ],
+        "colorRegion": "",
+        "colorMood": "自然柔和",
+        "backStructure": "简洁",
+        "backMotif": "不延续",
+        "extractMode": "单独图案",
+        "extractBackground": "白底",
+        "craft": "刺绣",
+        "craftFabric": "棉布",
+        "accessoryType": "拉链头",
+        "accessoryApply": "形状与纹样"
+      },
+      "prompt": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。保留领片交叠与门襟，不添加被遮住的纽扣或缝线。",
+      "toolKey": "creative-style-to-sketch",
+      "input": {
+        "scene": "style-to-sketch",
+        "fields": {
+          "description": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。保留领片交叠与门襟，不添加被遮住的纽扣或缝线。",
+          "sketchStyle": "minimal",
+          "sketchDetail": "detailed"
+        },
+        "userText": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。保留领片交叠与门襟，不添加被遮住的纽扣或缝线。",
+        "referenceRoles": [
+          "服装参考图"
+        ],
+        "mode": "edit"
+      },
+      "checks": [
+        "主体与参考图职责正确",
+        "仅改变明确要求的内容",
+        "没有无关文字、水印、额外产品或部件",
+        "真实材质与光影没有凭空改变",
+        "五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数",
+        "无胸袋，不添加胸袋",
+        "保留领片交叠与门襟，不添加被遮住的纽扣或缝线。"
+      ]
+    },
+    {
+      "id": "garment-colorway-14-old",
+      "pairId": "garment-colorway-14",
+      "variant": "old",
+      "group": "creative",
+      "label": "garment-colorway / 14 / old",
+      "sources": [
+        "shirt"
+      ],
+      "form": {
+        "description": "只改指定区域至 #9AAFC3。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+        "category": "按描述判断",
+        "silhouette": "按描述判断",
+        "fabric": "",
+        "presentation": "白底平铺",
+        "sketchStyle": "technical",
+        "sketchDetail": "standard",
+        "restyleArea": "领口",
+        "change": "",
+        "preserve": "",
+        "colorMode": "specific",
+        "colors": [
+          "#9AAFC3"
+        ],
+        "colorRegion": "仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色",
+        "colorMood": "严格按指定色彩方向",
+        "backStructure": "简洁",
+        "backMotif": "不延续",
+        "extractMode": "单独图案",
+        "extractBackground": "白底",
+        "craft": "刺绣",
+        "craftFabric": "棉布",
+        "accessoryType": "拉链头",
+        "accessoryApply": "形状与纹样"
+      },
+      "prompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#9AAFC3。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #9AAFC3。\n\n改色范围：仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #9AAFC3。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。",
+      "toolKey": "image-edit",
+      "checks": [
+        "主体与参考图职责正确",
+        "仅改变明确要求的内容",
+        "没有无关文字、水印、额外产品或部件",
+        "真实材质与光影没有凭空改变",
+        "五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数",
+        "无胸袋，不添加胸袋",
+        "仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色；目标 #9AAFC3"
+      ]
+    },
+    {
+      "id": "garment-colorway-14-new",
+      "pairId": "garment-colorway-14",
+      "variant": "new",
+      "group": "creative",
+      "label": "garment-colorway / 14 / new",
+      "sources": [
+        "shirt"
+      ],
+      "form": {
+        "description": "只改指定区域至 #9AAFC3。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+        "category": "按描述判断",
+        "silhouette": "按描述判断",
+        "fabric": "",
+        "presentation": "白底平铺",
+        "sketchStyle": "technical",
+        "sketchDetail": "standard",
+        "restyleArea": "领口",
+        "change": "",
+        "preserve": "",
+        "colorMode": "specific",
+        "colors": [
+          "#9AAFC3"
+        ],
+        "colorRegion": "仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色",
+        "colorMood": "严格按指定色彩方向",
+        "backStructure": "简洁",
+        "backMotif": "不延续",
+        "extractMode": "单独图案",
+        "extractBackground": "白底",
+        "craft": "刺绣",
+        "craftFabric": "棉布",
+        "accessoryType": "拉链头",
+        "accessoryApply": "形状与纹样"
+      },
+      "prompt": "只改指定区域至 #9AAFC3。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+      "toolKey": "creative-garment-colorway",
+      "input": {
+        "scene": "garment-colorway",
+        "fields": {
+          "description": "只改指定区域至 #9AAFC3。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+          "colorMode": "specific",
+          "colorRegion": "仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色",
+          "colors": [
+            "#9AAFC3"
+          ]
+        },
+        "userText": "只改指定区域至 #9AAFC3。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+        "referenceRoles": [
+          "服装参考图"
+        ],
+        "mode": "edit"
+      },
+      "checks": [
+        "主体与参考图职责正确",
+        "仅改变明确要求的内容",
+        "没有无关文字、水印、额外产品或部件",
+        "真实材质与光影没有凭空改变",
+        "五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数",
+        "无胸袋，不添加胸袋",
+        "仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色；目标 #9AAFC3"
+      ]
+    },
+    {
+      "id": "style-to-sketch-15-old",
+      "pairId": "style-to-sketch-15",
+      "variant": "old",
+      "group": "creative",
+      "label": "style-to-sketch / 15 / old",
+      "sources": [
+        "shirt"
+      ],
+      "form": {
+        "description": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。清楚表现现有短袖袖口折边。",
+        "category": "按描述判断",
+        "silhouette": "按描述判断",
+        "fabric": "",
+        "presentation": "白底平铺",
+        "sketchStyle": "technical",
+        "sketchDetail": "standard",
+        "restyleArea": "领口",
+        "change": "",
+        "preserve": "",
+        "colorMode": "smart",
+        "colors": [
+          "#789282",
+          "#E8DCC8",
+          "#424A55"
+        ],
+        "colorRegion": "",
+        "colorMood": "自然柔和",
+        "backStructure": "简洁",
+        "backMotif": "不延续",
+        "extractMode": "单独图案",
+        "extractBackground": "白底",
+        "craft": "刺绣",
+        "craftFabric": "棉布",
+        "accessoryType": "拉链头",
+        "accessoryApply": "形状与纹样"
+      },
+      "prompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：技术感线稿。用清晰、均匀的线条表达服装轮廓和可见结构，主轮廓与结构线层次分明。\n\n细节程度：保留领口、袖口、下摆、门襟与主要结构线，适度简化细小纹理。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。清楚表现现有短袖袖口折边。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。",
+      "toolKey": "image-edit",
+      "checks": [
+        "主体与参考图职责正确",
+        "仅改变明确要求的内容",
+        "没有无关文字、水印、额外产品或部件",
+        "真实材质与光影没有凭空改变",
+        "五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数",
+        "无胸袋，不添加胸袋",
+        "清楚表现现有短袖袖口折边。"
+      ]
+    },
+    {
+      "id": "style-to-sketch-15-new",
+      "pairId": "style-to-sketch-15",
+      "variant": "new",
+      "group": "creative",
+      "label": "style-to-sketch / 15 / new",
+      "sources": [
+        "shirt"
+      ],
+      "form": {
+        "description": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。清楚表现现有短袖袖口折边。",
+        "category": "按描述判断",
+        "silhouette": "按描述判断",
+        "fabric": "",
+        "presentation": "白底平铺",
+        "sketchStyle": "technical",
+        "sketchDetail": "standard",
+        "restyleArea": "领口",
+        "change": "",
+        "preserve": "",
+        "colorMode": "smart",
+        "colors": [
+          "#789282",
+          "#E8DCC8",
+          "#424A55"
+        ],
+        "colorRegion": "",
+        "colorMood": "自然柔和",
+        "backStructure": "简洁",
+        "backMotif": "不延续",
+        "extractMode": "单独图案",
+        "extractBackground": "白底",
+        "craft": "刺绣",
+        "craftFabric": "棉布",
+        "accessoryType": "拉链头",
+        "accessoryApply": "形状与纹样"
+      },
+      "prompt": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。清楚表现现有短袖袖口折边。",
+      "toolKey": "creative-style-to-sketch",
+      "input": {
+        "scene": "style-to-sketch",
+        "fields": {
+          "description": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。清楚表现现有短袖袖口折边。",
+          "sketchStyle": "technical",
+          "sketchDetail": "standard"
+        },
+        "userText": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。清楚表现现有短袖袖口折边。",
+        "referenceRoles": [
+          "服装参考图"
+        ],
+        "mode": "edit"
+      },
+      "checks": [
+        "主体与参考图职责正确",
+        "仅改变明确要求的内容",
+        "没有无关文字、水印、额外产品或部件",
+        "真实材质与光影没有凭空改变",
+        "五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数",
+        "无胸袋，不添加胸袋",
+        "清楚表现现有短袖袖口折边。"
+      ]
+    },
+    {
+      "id": "garment-colorway-15-old",
+      "pairId": "garment-colorway-15",
+      "variant": "old",
+      "group": "creative",
+      "label": "garment-colorway / 15 / old",
+      "sources": [
+        "shirt"
+      ],
+      "form": {
+        "description": "只改指定区域至 #D8A0A8。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+        "category": "按描述判断",
+        "silhouette": "按描述判断",
+        "fabric": "",
+        "presentation": "白底平铺",
+        "sketchStyle": "technical",
+        "sketchDetail": "standard",
+        "restyleArea": "领口",
+        "change": "",
+        "preserve": "",
+        "colorMode": "specific",
+        "colors": [
+          "#D8A0A8"
+        ],
+        "colorRegion": "仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色",
+        "colorMood": "严格按指定色彩方向",
+        "backStructure": "简洁",
+        "backMotif": "不延续",
+        "extractMode": "单独图案",
+        "extractBackground": "白底",
+        "craft": "刺绣",
+        "craftFabric": "棉布",
+        "accessoryType": "拉链头",
+        "accessoryApply": "形状与纹样"
+      },
+      "prompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#D8A0A8。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #D8A0A8。\n\n改色范围：仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #D8A0A8。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。",
+      "toolKey": "image-edit",
+      "checks": [
+        "主体与参考图职责正确",
+        "仅改变明确要求的内容",
+        "没有无关文字、水印、额外产品或部件",
+        "真实材质与光影没有凭空改变",
+        "五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数",
+        "无胸袋，不添加胸袋",
+        "仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色；目标 #D8A0A8"
+      ]
+    },
+    {
+      "id": "garment-colorway-15-new",
+      "pairId": "garment-colorway-15",
+      "variant": "new",
+      "group": "creative",
+      "label": "garment-colorway / 15 / new",
+      "sources": [
+        "shirt"
+      ],
+      "form": {
+        "description": "只改指定区域至 #D8A0A8。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+        "category": "按描述判断",
+        "silhouette": "按描述判断",
+        "fabric": "",
+        "presentation": "白底平铺",
+        "sketchStyle": "technical",
+        "sketchDetail": "standard",
+        "restyleArea": "领口",
+        "change": "",
+        "preserve": "",
+        "colorMode": "specific",
+        "colors": [
+          "#D8A0A8"
+        ],
+        "colorRegion": "仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色",
+        "colorMood": "严格按指定色彩方向",
+        "backStructure": "简洁",
+        "backMotif": "不延续",
+        "extractMode": "单独图案",
+        "extractBackground": "白底",
+        "craft": "刺绣",
+        "craftFabric": "棉布",
+        "accessoryType": "拉链头",
+        "accessoryApply": "形状与纹样"
+      },
+      "prompt": "只改指定区域至 #D8A0A8。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+      "toolKey": "creative-garment-colorway",
+      "input": {
+        "scene": "garment-colorway",
+        "fields": {
+          "description": "只改指定区域至 #D8A0A8。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+          "colorMode": "specific",
+          "colorRegion": "仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色",
+          "colors": [
+            "#D8A0A8"
+          ]
+        },
+        "userText": "只改指定区域至 #D8A0A8。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+        "referenceRoles": [
+          "服装参考图"
+        ],
+        "mode": "edit"
+      },
+      "checks": [
+        "主体与参考图职责正确",
+        "仅改变明确要求的内容",
+        "没有无关文字、水印、额外产品或部件",
+        "真实材质与光影没有凭空改变",
+        "五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数",
+        "无胸袋，不添加胸袋",
+        "仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色；目标 #D8A0A8"
+      ]
+    },
+    {
+      "id": "style-to-sketch-16-old",
+      "pairId": "style-to-sketch-16",
+      "variant": "old",
+      "group": "creative",
+      "label": "style-to-sketch / 16 / old",
+      "sources": [
+        "shirt"
+      ],
+      "form": {
+        "description": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。只保留结构线和可见纽扣，不添加虚构装饰明线。",
+        "category": "按描述判断",
+        "silhouette": "按描述判断",
+        "fabric": "",
+        "presentation": "白底平铺",
+        "sketchStyle": "minimal",
+        "sketchDetail": "standard",
+        "restyleArea": "领口",
+        "change": "",
+        "preserve": "",
+        "colorMode": "smart",
+        "colors": [
+          "#789282",
+          "#E8DCC8",
+          "#424A55"
+        ],
+        "colorRegion": "",
+        "colorMood": "自然柔和",
+        "backStructure": "简洁",
+        "backMotif": "不延续",
+        "extractMode": "单独图案",
+        "extractBackground": "白底",
+        "craft": "刺绣",
+        "craftFabric": "棉布",
+        "accessoryType": "拉链头",
+        "accessoryApply": "形状与纹样"
+      },
+      "prompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：极简线稿。用干净、克制的轮廓线表达服装，不保留摄影光影与面料色块。\n\n细节程度：保留领口、袖口、下摆、门襟与主要结构线，适度简化细小纹理。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。只保留结构线和可见纽扣，不添加虚构装饰明线。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。",
+      "toolKey": "image-edit",
+      "checks": [
+        "主体与参考图职责正确",
+        "仅改变明确要求的内容",
+        "没有无关文字、水印、额外产品或部件",
+        "真实材质与光影没有凭空改变",
+        "五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数",
+        "无胸袋，不添加胸袋",
+        "只保留结构线和可见纽扣，不添加虚构装饰明线。"
+      ]
+    },
+    {
+      "id": "style-to-sketch-16-new",
+      "pairId": "style-to-sketch-16",
+      "variant": "new",
+      "group": "creative",
+      "label": "style-to-sketch / 16 / new",
+      "sources": [
+        "shirt"
+      ],
+      "form": {
+        "description": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。只保留结构线和可见纽扣，不添加虚构装饰明线。",
+        "category": "按描述判断",
+        "silhouette": "按描述判断",
+        "fabric": "",
+        "presentation": "白底平铺",
+        "sketchStyle": "minimal",
+        "sketchDetail": "standard",
+        "restyleArea": "领口",
+        "change": "",
+        "preserve": "",
+        "colorMode": "smart",
+        "colors": [
+          "#789282",
+          "#E8DCC8",
+          "#424A55"
+        ],
+        "colorRegion": "",
+        "colorMood": "自然柔和",
+        "backStructure": "简洁",
+        "backMotif": "不延续",
+        "extractMode": "单独图案",
+        "extractBackground": "白底",
+        "craft": "刺绣",
+        "craftFabric": "棉布",
+        "accessoryType": "拉链头",
+        "accessoryApply": "形状与纹样"
+      },
+      "prompt": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。只保留结构线和可见纽扣，不添加虚构装饰明线。",
+      "toolKey": "creative-style-to-sketch",
+      "input": {
+        "scene": "style-to-sketch",
+        "fields": {
+          "description": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。只保留结构线和可见纽扣，不添加虚构装饰明线。",
+          "sketchStyle": "minimal",
+          "sketchDetail": "standard"
+        },
+        "userText": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。只保留结构线和可见纽扣，不添加虚构装饰明线。",
+        "referenceRoles": [
+          "服装参考图"
+        ],
+        "mode": "edit"
+      },
+      "checks": [
+        "主体与参考图职责正确",
+        "仅改变明确要求的内容",
+        "没有无关文字、水印、额外产品或部件",
+        "真实材质与光影没有凭空改变",
+        "五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数",
+        "无胸袋，不添加胸袋",
+        "只保留结构线和可见纽扣，不添加虚构装饰明线。"
+      ]
+    },
+    {
+      "id": "garment-colorway-16-old",
+      "pairId": "garment-colorway-16",
+      "variant": "old",
+      "group": "creative",
+      "label": "garment-colorway / 16 / old",
+      "sources": [
+        "shirt"
+      ],
+      "form": {
+        "description": "只改指定区域至 #5E6B52。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+        "category": "按描述判断",
+        "silhouette": "按描述判断",
+        "fabric": "",
+        "presentation": "白底平铺",
+        "sketchStyle": "technical",
+        "sketchDetail": "standard",
+        "restyleArea": "领口",
+        "change": "",
+        "preserve": "",
+        "colorMode": "specific",
+        "colors": [
+          "#5E6B52"
+        ],
+        "colorRegion": "全部服装面料，包括袖子、领子和门襟，但所有纽扣保持原浅蓝色",
+        "colorMood": "严格按指定色彩方向",
+        "backStructure": "简洁",
+        "backMotif": "不延续",
+        "extractMode": "单独图案",
+        "extractBackground": "白底",
+        "craft": "刺绣",
+        "craftFabric": "棉布",
+        "accessoryType": "拉链头",
+        "accessoryApply": "形状与纹样"
+      },
+      "prompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#5E6B52。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #5E6B52。\n\n改色范围：全部服装面料，包括袖子、领子和门襟，但所有纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #5E6B52。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。",
+      "toolKey": "image-edit",
+      "checks": [
+        "主体与参考图职责正确",
+        "仅改变明确要求的内容",
+        "没有无关文字、水印、额外产品或部件",
+        "真实材质与光影没有凭空改变",
+        "五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数",
+        "无胸袋，不添加胸袋",
+        "全部服装面料，包括袖子、领子和门襟，但所有纽扣保持原浅蓝色；目标 #5E6B52"
+      ]
+    },
+    {
+      "id": "garment-colorway-16-new",
+      "pairId": "garment-colorway-16",
+      "variant": "new",
+      "group": "creative",
+      "label": "garment-colorway / 16 / new",
+      "sources": [
+        "shirt"
+      ],
+      "form": {
+        "description": "只改指定区域至 #5E6B52。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+        "category": "按描述判断",
+        "silhouette": "按描述判断",
+        "fabric": "",
+        "presentation": "白底平铺",
+        "sketchStyle": "technical",
+        "sketchDetail": "standard",
+        "restyleArea": "领口",
+        "change": "",
+        "preserve": "",
+        "colorMode": "specific",
+        "colors": [
+          "#5E6B52"
+        ],
+        "colorRegion": "全部服装面料，包括袖子、领子和门襟，但所有纽扣保持原浅蓝色",
+        "colorMood": "严格按指定色彩方向",
+        "backStructure": "简洁",
+        "backMotif": "不延续",
+        "extractMode": "单独图案",
+        "extractBackground": "白底",
+        "craft": "刺绣",
+        "craftFabric": "棉布",
+        "accessoryType": "拉链头",
+        "accessoryApply": "形状与纹样"
+      },
+      "prompt": "只改指定区域至 #5E6B52。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+      "toolKey": "creative-garment-colorway",
+      "input": {
+        "scene": "garment-colorway",
+        "fields": {
+          "description": "只改指定区域至 #5E6B52。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+          "colorMode": "specific",
+          "colorRegion": "全部服装面料，包括袖子、领子和门襟，但所有纽扣保持原浅蓝色",
+          "colors": [
+            "#5E6B52"
+          ]
+        },
+        "userText": "只改指定区域至 #5E6B52。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+        "referenceRoles": [
+          "服装参考图"
+        ],
+        "mode": "edit"
+      },
+      "checks": [
+        "主体与参考图职责正确",
+        "仅改变明确要求的内容",
+        "没有无关文字、水印、额外产品或部件",
+        "真实材质与光影没有凭空改变",
+        "五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数",
+        "无胸袋，不添加胸袋",
+        "全部服装面料，包括袖子、领子和门襟，但所有纽扣保持原浅蓝色；目标 #5E6B52"
+      ]
+    },
+    {
+      "id": "style-to-sketch-17-old",
+      "pairId": "style-to-sketch-17",
+      "variant": "old",
+      "group": "creative",
+      "label": "style-to-sketch / 17 / old",
+      "sources": [
+        "shirt"
+      ],
+      "form": {
+        "description": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。可见四孔纽扣以简洁圆形孔位表示，半遮挡领扣保持半遮挡。",
+        "category": "按描述判断",
+        "silhouette": "按描述判断",
+        "fabric": "",
+        "presentation": "白底平铺",
+        "sketchStyle": "technical",
+        "sketchDetail": "detailed",
+        "restyleArea": "领口",
+        "change": "",
+        "preserve": "",
+        "colorMode": "smart",
+        "colors": [
+          "#789282",
+          "#E8DCC8",
+          "#424A55"
+        ],
+        "colorRegion": "",
+        "colorMood": "自然柔和",
+        "backStructure": "简洁",
+        "backMotif": "不延续",
+        "extractMode": "单独图案",
+        "extractBackground": "白底",
+        "craft": "刺绣",
+        "craftFabric": "棉布",
+        "accessoryType": "拉链头",
+        "accessoryApply": "形状与纹样"
+      },
+      "prompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：技术感线稿。用清晰、均匀的线条表达服装轮廓和可见结构，主轮廓与结构线层次分明。\n\n细节程度：保留实际可见的分割线、口袋、褶裥、门襟、纽扣和装饰细节，避免虚构细节。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。可见四孔纽扣以简洁圆形孔位表示，半遮挡领扣保持半遮挡。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。",
+      "toolKey": "image-edit",
+      "checks": [
+        "主体与参考图职责正确",
+        "仅改变明确要求的内容",
+        "没有无关文字、水印、额外产品或部件",
+        "真实材质与光影没有凭空改变",
+        "五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数",
+        "无胸袋，不添加胸袋",
+        "可见四孔纽扣以简洁圆形孔位表示，半遮挡领扣保持半遮挡。"
+      ]
+    },
+    {
+      "id": "style-to-sketch-17-new",
+      "pairId": "style-to-sketch-17",
+      "variant": "new",
+      "group": "creative",
+      "label": "style-to-sketch / 17 / new",
+      "sources": [
+        "shirt"
+      ],
+      "form": {
+        "description": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。可见四孔纽扣以简洁圆形孔位表示，半遮挡领扣保持半遮挡。",
+        "category": "按描述判断",
+        "silhouette": "按描述判断",
+        "fabric": "",
+        "presentation": "白底平铺",
+        "sketchStyle": "technical",
+        "sketchDetail": "detailed",
+        "restyleArea": "领口",
+        "change": "",
+        "preserve": "",
+        "colorMode": "smart",
+        "colors": [
+          "#789282",
+          "#E8DCC8",
+          "#424A55"
+        ],
+        "colorRegion": "",
+        "colorMood": "自然柔和",
+        "backStructure": "简洁",
+        "backMotif": "不延续",
+        "extractMode": "单独图案",
+        "extractBackground": "白底",
+        "craft": "刺绣",
+        "craftFabric": "棉布",
+        "accessoryType": "拉链头",
+        "accessoryApply": "形状与纹样"
+      },
+      "prompt": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。可见四孔纽扣以简洁圆形孔位表示，半遮挡领扣保持半遮挡。",
+      "toolKey": "creative-style-to-sketch",
+      "input": {
+        "scene": "style-to-sketch",
+        "fields": {
+          "description": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。可见四孔纽扣以简洁圆形孔位表示，半遮挡领扣保持半遮挡。",
+          "sketchStyle": "technical",
+          "sketchDetail": "detailed"
+        },
+        "userText": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。可见四孔纽扣以简洁圆形孔位表示，半遮挡领扣保持半遮挡。",
+        "referenceRoles": [
+          "服装参考图"
+        ],
+        "mode": "edit"
+      },
+      "checks": [
+        "主体与参考图职责正确",
+        "仅改变明确要求的内容",
+        "没有无关文字、水印、额外产品或部件",
+        "真实材质与光影没有凭空改变",
+        "五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数",
+        "无胸袋，不添加胸袋",
+        "可见四孔纽扣以简洁圆形孔位表示，半遮挡领扣保持半遮挡。"
+      ]
+    },
+    {
+      "id": "garment-colorway-17-old",
+      "pairId": "garment-colorway-17",
+      "variant": "old",
+      "group": "creative",
+      "label": "garment-colorway / 17 / old",
+      "sources": [
+        "shirt"
+      ],
+      "form": {
+        "description": "只改指定区域至 #D5C6A5。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+        "category": "按描述判断",
+        "silhouette": "按描述判断",
+        "fabric": "",
+        "presentation": "白底平铺",
+        "sketchStyle": "technical",
+        "sketchDetail": "standard",
+        "restyleArea": "领口",
+        "change": "",
+        "preserve": "",
+        "colorMode": "specific",
+        "colors": [
+          "#D5C6A5"
+        ],
+        "colorRegion": "全部服装面料，包括袖子、领子和门襟，但所有纽扣保持原浅蓝色",
+        "colorMood": "严格按指定色彩方向",
+        "backStructure": "简洁",
+        "backMotif": "不延续",
+        "extractMode": "单独图案",
+        "extractBackground": "白底",
+        "craft": "刺绣",
+        "craftFabric": "棉布",
+        "accessoryType": "拉链头",
+        "accessoryApply": "形状与纹样"
+      },
+      "prompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#D5C6A5。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #D5C6A5。\n\n改色范围：全部服装面料，包括袖子、领子和门襟，但所有纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #D5C6A5。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。",
+      "toolKey": "image-edit",
+      "checks": [
+        "主体与参考图职责正确",
+        "仅改变明确要求的内容",
+        "没有无关文字、水印、额外产品或部件",
+        "真实材质与光影没有凭空改变",
+        "五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数",
+        "无胸袋，不添加胸袋",
+        "全部服装面料，包括袖子、领子和门襟，但所有纽扣保持原浅蓝色；目标 #D5C6A5"
+      ]
+    },
+    {
+      "id": "garment-colorway-17-new",
+      "pairId": "garment-colorway-17",
+      "variant": "new",
+      "group": "creative",
+      "label": "garment-colorway / 17 / new",
+      "sources": [
+        "shirt"
+      ],
+      "form": {
+        "description": "只改指定区域至 #D5C6A5。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+        "category": "按描述判断",
+        "silhouette": "按描述判断",
+        "fabric": "",
+        "presentation": "白底平铺",
+        "sketchStyle": "technical",
+        "sketchDetail": "standard",
+        "restyleArea": "领口",
+        "change": "",
+        "preserve": "",
+        "colorMode": "specific",
+        "colors": [
+          "#D5C6A5"
+        ],
+        "colorRegion": "全部服装面料，包括袖子、领子和门襟，但所有纽扣保持原浅蓝色",
+        "colorMood": "严格按指定色彩方向",
+        "backStructure": "简洁",
+        "backMotif": "不延续",
+        "extractMode": "单独图案",
+        "extractBackground": "白底",
+        "craft": "刺绣",
+        "craftFabric": "棉布",
+        "accessoryType": "拉链头",
+        "accessoryApply": "形状与纹样"
+      },
+      "prompt": "只改指定区域至 #D5C6A5。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+      "toolKey": "creative-garment-colorway",
+      "input": {
+        "scene": "garment-colorway",
+        "fields": {
+          "description": "只改指定区域至 #D5C6A5。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+          "colorMode": "specific",
+          "colorRegion": "全部服装面料，包括袖子、领子和门襟，但所有纽扣保持原浅蓝色",
+          "colors": [
+            "#D5C6A5"
+          ]
+        },
+        "userText": "只改指定区域至 #D5C6A5。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+        "referenceRoles": [
+          "服装参考图"
+        ],
+        "mode": "edit"
+      },
+      "checks": [
+        "主体与参考图职责正确",
+        "仅改变明确要求的内容",
+        "没有无关文字、水印、额外产品或部件",
+        "真实材质与光影没有凭空改变",
+        "五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数",
+        "无胸袋，不添加胸袋",
+        "全部服装面料，包括袖子、领子和门襟，但所有纽扣保持原浅蓝色；目标 #D5C6A5"
+      ]
+    },
+    {
+      "id": "style-to-sketch-18-old",
+      "pairId": "style-to-sketch-18",
+      "variant": "old",
+      "group": "creative",
+      "label": "style-to-sketch / 18 / old",
+      "sources": [
+        "shirt"
+      ],
+      "form": {
+        "description": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。清楚保留原有浅弧形下摆，不改成直下摆。",
+        "category": "按描述判断",
+        "silhouette": "按描述判断",
+        "fabric": "",
+        "presentation": "白底平铺",
+        "sketchStyle": "minimal",
+        "sketchDetail": "standard",
+        "restyleArea": "领口",
+        "change": "",
+        "preserve": "",
+        "colorMode": "smart",
+        "colors": [
+          "#789282",
+          "#E8DCC8",
+          "#424A55"
+        ],
+        "colorRegion": "",
+        "colorMood": "自然柔和",
+        "backStructure": "简洁",
+        "backMotif": "不延续",
+        "extractMode": "单独图案",
+        "extractBackground": "白底",
+        "craft": "刺绣",
+        "craftFabric": "棉布",
+        "accessoryType": "拉链头",
+        "accessoryApply": "形状与纹样"
+      },
+      "prompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：极简线稿。用干净、克制的轮廓线表达服装，不保留摄影光影与面料色块。\n\n细节程度：保留领口、袖口、下摆、门襟与主要结构线，适度简化细小纹理。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。清楚保留原有浅弧形下摆，不改成直下摆。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。",
+      "toolKey": "image-edit",
+      "checks": [
+        "主体与参考图职责正确",
+        "仅改变明确要求的内容",
+        "没有无关文字、水印、额外产品或部件",
+        "真实材质与光影没有凭空改变",
+        "五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数",
+        "无胸袋，不添加胸袋",
+        "清楚保留原有浅弧形下摆，不改成直下摆。"
+      ]
+    },
+    {
+      "id": "style-to-sketch-18-new",
+      "pairId": "style-to-sketch-18",
+      "variant": "new",
+      "group": "creative",
+      "label": "style-to-sketch / 18 / new",
+      "sources": [
+        "shirt"
+      ],
+      "form": {
+        "description": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。清楚保留原有浅弧形下摆，不改成直下摆。",
+        "category": "按描述判断",
+        "silhouette": "按描述判断",
+        "fabric": "",
+        "presentation": "白底平铺",
+        "sketchStyle": "minimal",
+        "sketchDetail": "standard",
+        "restyleArea": "领口",
+        "change": "",
+        "preserve": "",
+        "colorMode": "smart",
+        "colors": [
+          "#789282",
+          "#E8DCC8",
+          "#424A55"
+        ],
+        "colorRegion": "",
+        "colorMood": "自然柔和",
+        "backStructure": "简洁",
+        "backMotif": "不延续",
+        "extractMode": "单独图案",
+        "extractBackground": "白底",
+        "craft": "刺绣",
+        "craftFabric": "棉布",
+        "accessoryType": "拉链头",
+        "accessoryApply": "形状与纹样"
+      },
+      "prompt": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。清楚保留原有浅弧形下摆，不改成直下摆。",
+      "toolKey": "creative-style-to-sketch",
+      "input": {
+        "scene": "style-to-sketch",
+        "fields": {
+          "description": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。清楚保留原有浅弧形下摆，不改成直下摆。",
+          "sketchStyle": "minimal",
+          "sketchDetail": "standard"
+        },
+        "userText": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。清楚保留原有浅弧形下摆，不改成直下摆。",
+        "referenceRoles": [
+          "服装参考图"
+        ],
+        "mode": "edit"
+      },
+      "checks": [
+        "主体与参考图职责正确",
+        "仅改变明确要求的内容",
+        "没有无关文字、水印、额外产品或部件",
+        "真实材质与光影没有凭空改变",
+        "五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数",
+        "无胸袋，不添加胸袋",
+        "清楚保留原有浅弧形下摆，不改成直下摆。"
+      ]
+    },
+    {
+      "id": "garment-colorway-18-old",
+      "pairId": "garment-colorway-18",
+      "variant": "old",
+      "group": "creative",
+      "label": "garment-colorway / 18 / old",
+      "sources": [
+        "shirt"
+      ],
+      "form": {
+        "description": "只改指定区域至 #75677C。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+        "category": "按描述判断",
+        "silhouette": "按描述判断",
+        "fabric": "",
+        "presentation": "白底平铺",
+        "sketchStyle": "technical",
+        "sketchDetail": "standard",
+        "restyleArea": "领口",
+        "change": "",
+        "preserve": "",
+        "colorMode": "specific",
+        "colors": [
+          "#75677C"
+        ],
+        "colorRegion": "全部服装面料，包括袖子、领子和门襟，但所有纽扣保持原浅蓝色",
+        "colorMood": "严格按指定色彩方向",
+        "backStructure": "简洁",
+        "backMotif": "不延续",
+        "extractMode": "单独图案",
+        "extractBackground": "白底",
+        "craft": "刺绣",
+        "craftFabric": "棉布",
+        "accessoryType": "拉链头",
+        "accessoryApply": "形状与纹样"
+      },
+      "prompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#75677C。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #75677C。\n\n改色范围：全部服装面料，包括袖子、领子和门襟，但所有纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #75677C。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。",
+      "toolKey": "image-edit",
+      "checks": [
+        "主体与参考图职责正确",
+        "仅改变明确要求的内容",
+        "没有无关文字、水印、额外产品或部件",
+        "真实材质与光影没有凭空改变",
+        "五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数",
+        "无胸袋，不添加胸袋",
+        "全部服装面料，包括袖子、领子和门襟，但所有纽扣保持原浅蓝色；目标 #75677C"
+      ]
+    },
+    {
+      "id": "garment-colorway-18-new",
+      "pairId": "garment-colorway-18",
+      "variant": "new",
+      "group": "creative",
+      "label": "garment-colorway / 18 / new",
+      "sources": [
+        "shirt"
+      ],
+      "form": {
+        "description": "只改指定区域至 #75677C。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+        "category": "按描述判断",
+        "silhouette": "按描述判断",
+        "fabric": "",
+        "presentation": "白底平铺",
+        "sketchStyle": "technical",
+        "sketchDetail": "standard",
+        "restyleArea": "领口",
+        "change": "",
+        "preserve": "",
+        "colorMode": "specific",
+        "colors": [
+          "#75677C"
+        ],
+        "colorRegion": "全部服装面料，包括袖子、领子和门襟，但所有纽扣保持原浅蓝色",
+        "colorMood": "严格按指定色彩方向",
+        "backStructure": "简洁",
+        "backMotif": "不延续",
+        "extractMode": "单独图案",
+        "extractBackground": "白底",
+        "craft": "刺绣",
+        "craftFabric": "棉布",
+        "accessoryType": "拉链头",
+        "accessoryApply": "形状与纹样"
+      },
+      "prompt": "只改指定区域至 #75677C。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+      "toolKey": "creative-garment-colorway",
+      "input": {
+        "scene": "garment-colorway",
+        "fields": {
+          "description": "只改指定区域至 #75677C。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+          "colorMode": "specific",
+          "colorRegion": "全部服装面料，包括袖子、领子和门襟，但所有纽扣保持原浅蓝色",
+          "colors": [
+            "#75677C"
+          ]
+        },
+        "userText": "只改指定区域至 #75677C。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+        "referenceRoles": [
+          "服装参考图"
+        ],
+        "mode": "edit"
+      },
+      "checks": [
+        "主体与参考图职责正确",
+        "仅改变明确要求的内容",
+        "没有无关文字、水印、额外产品或部件",
+        "真实材质与光影没有凭空改变",
+        "五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数",
+        "无胸袋，不添加胸袋",
+        "全部服装面料，包括袖子、领子和门襟，但所有纽扣保持原浅蓝色；目标 #75677C"
+      ]
+    },
+    {
+      "id": "style-to-sketch-19-old",
+      "pairId": "style-to-sketch-19",
+      "variant": "old",
+      "group": "creative",
+      "label": "style-to-sketch / 19 / old",
+      "sources": [
+        "shirt"
+      ],
+      "form": {
+        "description": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。保留原袖宽与肩斜，去掉摄影阴影和面料填色。",
+        "category": "按描述判断",
+        "silhouette": "按描述判断",
+        "fabric": "",
+        "presentation": "白底平铺",
+        "sketchStyle": "technical",
+        "sketchDetail": "standard",
+        "restyleArea": "领口",
+        "change": "",
+        "preserve": "",
+        "colorMode": "smart",
+        "colors": [
+          "#789282",
+          "#E8DCC8",
+          "#424A55"
+        ],
+        "colorRegion": "",
+        "colorMood": "自然柔和",
+        "backStructure": "简洁",
+        "backMotif": "不延续",
+        "extractMode": "单独图案",
+        "extractBackground": "白底",
+        "craft": "刺绣",
+        "craftFabric": "棉布",
+        "accessoryType": "拉链头",
+        "accessoryApply": "形状与纹样"
+      },
+      "prompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：技术感线稿。用清晰、均匀的线条表达服装轮廓和可见结构，主轮廓与结构线层次分明。\n\n细节程度：保留领口、袖口、下摆、门襟与主要结构线，适度简化细小纹理。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。保留原袖宽与肩斜，去掉摄影阴影和面料填色。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。",
+      "toolKey": "image-edit",
+      "checks": [
+        "主体与参考图职责正确",
+        "仅改变明确要求的内容",
+        "没有无关文字、水印、额外产品或部件",
+        "真实材质与光影没有凭空改变",
+        "五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数",
+        "无胸袋，不添加胸袋",
+        "保留原袖宽与肩斜，去掉摄影阴影和面料填色。"
+      ]
+    },
+    {
+      "id": "style-to-sketch-19-new",
+      "pairId": "style-to-sketch-19",
+      "variant": "new",
+      "group": "creative",
+      "label": "style-to-sketch / 19 / new",
+      "sources": [
+        "shirt"
+      ],
+      "form": {
+        "description": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。保留原袖宽与肩斜，去掉摄影阴影和面料填色。",
+        "category": "按描述判断",
+        "silhouette": "按描述判断",
+        "fabric": "",
+        "presentation": "白底平铺",
+        "sketchStyle": "technical",
+        "sketchDetail": "standard",
+        "restyleArea": "领口",
+        "change": "",
+        "preserve": "",
+        "colorMode": "smart",
+        "colors": [
+          "#789282",
+          "#E8DCC8",
+          "#424A55"
+        ],
+        "colorRegion": "",
+        "colorMood": "自然柔和",
+        "backStructure": "简洁",
+        "backMotif": "不延续",
+        "extractMode": "单独图案",
+        "extractBackground": "白底",
+        "craft": "刺绣",
+        "craftFabric": "棉布",
+        "accessoryType": "拉链头",
+        "accessoryApply": "形状与纹样"
+      },
+      "prompt": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。保留原袖宽与肩斜，去掉摄影阴影和面料填色。",
+      "toolKey": "creative-style-to-sketch",
+      "input": {
+        "scene": "style-to-sketch",
+        "fields": {
+          "description": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。保留原袖宽与肩斜，去掉摄影阴影和面料填色。",
+          "sketchStyle": "technical",
+          "sketchDetail": "standard"
+        },
+        "userText": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。保留原袖宽与肩斜，去掉摄影阴影和面料填色。",
+        "referenceRoles": [
+          "服装参考图"
+        ],
+        "mode": "edit"
+      },
+      "checks": [
+        "主体与参考图职责正确",
+        "仅改变明确要求的内容",
+        "没有无关文字、水印、额外产品或部件",
+        "真实材质与光影没有凭空改变",
+        "五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数",
+        "无胸袋，不添加胸袋",
+        "保留原袖宽与肩斜，去掉摄影阴影和面料填色。"
+      ]
+    },
+    {
+      "id": "garment-colorway-19-old",
+      "pairId": "garment-colorway-19",
+      "variant": "old",
+      "group": "creative",
+      "label": "garment-colorway / 19 / old",
+      "sources": [
+        "shirt"
+      ],
+      "form": {
+        "description": "只改指定区域至 #B3BDCF。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+        "category": "按描述判断",
+        "silhouette": "按描述判断",
+        "fabric": "",
+        "presentation": "白底平铺",
+        "sketchStyle": "technical",
+        "sketchDetail": "standard",
+        "restyleArea": "领口",
+        "change": "",
+        "preserve": "",
+        "colorMode": "specific",
+        "colors": [
+          "#B3BDCF"
+        ],
+        "colorRegion": "仅两只袖子面料；大身、领子、门襟及全部纽扣保持原浅蓝色",
+        "colorMood": "严格按指定色彩方向",
+        "backStructure": "简洁",
+        "backMotif": "不延续",
+        "extractMode": "单独图案",
+        "extractBackground": "白底",
+        "craft": "刺绣",
+        "craftFabric": "棉布",
+        "accessoryType": "拉链头",
+        "accessoryApply": "形状与纹样"
+      },
+      "prompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#B3BDCF。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #B3BDCF。\n\n改色范围：仅两只袖子面料；大身、领子、门襟及全部纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #B3BDCF。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。",
+      "toolKey": "image-edit",
+      "checks": [
+        "主体与参考图职责正确",
+        "仅改变明确要求的内容",
+        "没有无关文字、水印、额外产品或部件",
+        "真实材质与光影没有凭空改变",
+        "五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数",
+        "无胸袋，不添加胸袋",
+        "仅两只袖子面料；大身、领子、门襟及全部纽扣保持原浅蓝色；目标 #B3BDCF"
+      ]
+    },
+    {
+      "id": "garment-colorway-19-new",
+      "pairId": "garment-colorway-19",
+      "variant": "new",
+      "group": "creative",
+      "label": "garment-colorway / 19 / new",
+      "sources": [
+        "shirt"
+      ],
+      "form": {
+        "description": "只改指定区域至 #B3BDCF。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+        "category": "按描述判断",
+        "silhouette": "按描述判断",
+        "fabric": "",
+        "presentation": "白底平铺",
+        "sketchStyle": "technical",
+        "sketchDetail": "standard",
+        "restyleArea": "领口",
+        "change": "",
+        "preserve": "",
+        "colorMode": "specific",
+        "colors": [
+          "#B3BDCF"
+        ],
+        "colorRegion": "仅两只袖子面料；大身、领子、门襟及全部纽扣保持原浅蓝色",
+        "colorMood": "严格按指定色彩方向",
+        "backStructure": "简洁",
+        "backMotif": "不延续",
+        "extractMode": "单独图案",
+        "extractBackground": "白底",
+        "craft": "刺绣",
+        "craftFabric": "棉布",
+        "accessoryType": "拉链头",
+        "accessoryApply": "形状与纹样"
+      },
+      "prompt": "只改指定区域至 #B3BDCF。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+      "toolKey": "creative-garment-colorway",
+      "input": {
+        "scene": "garment-colorway",
+        "fields": {
+          "description": "只改指定区域至 #B3BDCF。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+          "colorMode": "specific",
+          "colorRegion": "仅两只袖子面料；大身、领子、门襟及全部纽扣保持原浅蓝色",
+          "colors": [
+            "#B3BDCF"
+          ]
+        },
+        "userText": "只改指定区域至 #B3BDCF。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+        "referenceRoles": [
+          "服装参考图"
+        ],
+        "mode": "edit"
+      },
+      "checks": [
+        "主体与参考图职责正确",
+        "仅改变明确要求的内容",
+        "没有无关文字、水印、额外产品或部件",
+        "真实材质与光影没有凭空改变",
+        "五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数",
+        "无胸袋，不添加胸袋",
+        "仅两只袖子面料；大身、领子、门襟及全部纽扣保持原浅蓝色；目标 #B3BDCF"
+      ]
+    },
+    {
+      "id": "style-to-sketch-20-old",
+      "pairId": "style-to-sketch-20",
+      "variant": "old",
+      "group": "creative",
+      "label": "style-to-sketch / 20 / old",
+      "sources": [
+        "shirt"
+      ],
+      "form": {
+        "description": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。简洁正面产品线描，衣身比例、开领角度和门襟位置不变。",
+        "category": "按描述判断",
+        "silhouette": "按描述判断",
+        "fabric": "",
+        "presentation": "白底平铺",
+        "sketchStyle": "minimal",
+        "sketchDetail": "detailed",
+        "restyleArea": "领口",
+        "change": "",
+        "preserve": "",
+        "colorMode": "smart",
+        "colors": [
+          "#789282",
+          "#E8DCC8",
+          "#424A55"
+        ],
+        "colorRegion": "",
+        "colorMood": "自然柔和",
+        "backStructure": "简洁",
+        "backMotif": "不延续",
+        "extractMode": "单独图案",
+        "extractBackground": "白底",
+        "craft": "刺绣",
+        "craftFabric": "棉布",
+        "accessoryType": "拉链头",
+        "accessoryApply": "形状与纹样"
+      },
+      "prompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：极简线稿。用干净、克制的轮廓线表达服装，不保留摄影光影与面料色块。\n\n细节程度：保留实际可见的分割线、口袋、褶裥、门襟、纽扣和装饰细节，避免虚构细节。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。简洁正面产品线描，衣身比例、开领角度和门襟位置不变。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。",
+      "toolKey": "image-edit",
+      "checks": [
+        "主体与参考图职责正确",
+        "仅改变明确要求的内容",
+        "没有无关文字、水印、额外产品或部件",
+        "真实材质与光影没有凭空改变",
+        "五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数",
+        "无胸袋，不添加胸袋",
+        "简洁正面产品线描，衣身比例、开领角度和门襟位置不变。"
+      ]
+    },
+    {
+      "id": "style-to-sketch-20-new",
+      "pairId": "style-to-sketch-20",
+      "variant": "new",
+      "group": "creative",
+      "label": "style-to-sketch / 20 / new",
+      "sources": [
+        "shirt"
+      ],
+      "form": {
+        "description": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。简洁正面产品线描，衣身比例、开领角度和门襟位置不变。",
+        "category": "按描述判断",
+        "silhouette": "按描述判断",
+        "fabric": "",
+        "presentation": "白底平铺",
+        "sketchStyle": "minimal",
+        "sketchDetail": "detailed",
+        "restyleArea": "领口",
+        "change": "",
+        "preserve": "",
+        "colorMode": "smart",
+        "colors": [
+          "#789282",
+          "#E8DCC8",
+          "#424A55"
+        ],
+        "colorRegion": "",
+        "colorMood": "自然柔和",
+        "backStructure": "简洁",
+        "backMotif": "不延续",
+        "extractMode": "单独图案",
+        "extractBackground": "白底",
+        "craft": "刺绣",
+        "craftFabric": "棉布",
+        "accessoryType": "拉链头",
+        "accessoryApply": "形状与纹样"
+      },
+      "prompt": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。简洁正面产品线描，衣身比例、开领角度和门襟位置不变。",
+      "toolKey": "creative-style-to-sketch",
+      "input": {
+        "scene": "style-to-sketch",
+        "fields": {
+          "description": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。简洁正面产品线描，衣身比例、开领角度和门襟位置不变。",
+          "sketchStyle": "minimal",
+          "sketchDetail": "detailed"
+        },
+        "userText": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。简洁正面产品线描，衣身比例、开领角度和门襟位置不变。",
+        "referenceRoles": [
+          "服装参考图"
+        ],
+        "mode": "edit"
+      },
+      "checks": [
+        "主体与参考图职责正确",
+        "仅改变明确要求的内容",
+        "没有无关文字、水印、额外产品或部件",
+        "真实材质与光影没有凭空改变",
+        "五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数",
+        "无胸袋，不添加胸袋",
+        "简洁正面产品线描，衣身比例、开领角度和门襟位置不变。"
+      ]
+    },
+    {
+      "id": "garment-colorway-20-old",
+      "pairId": "garment-colorway-20",
+      "variant": "old",
+      "group": "creative",
+      "label": "garment-colorway / 20 / old",
+      "sources": [
+        "shirt"
+      ],
+      "form": {
+        "description": "只改指定区域至 #A96054。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+        "category": "按描述判断",
+        "silhouette": "按描述判断",
+        "fabric": "",
+        "presentation": "白底平铺",
+        "sketchStyle": "technical",
+        "sketchDetail": "standard",
+        "restyleArea": "领口",
+        "change": "",
+        "preserve": "",
+        "colorMode": "specific",
+        "colors": [
+          "#A96054"
+        ],
+        "colorRegion": "仅两只袖子面料；大身、领子、门襟及全部纽扣保持原浅蓝色",
+        "colorMood": "严格按指定色彩方向",
+        "backStructure": "简洁",
+        "backMotif": "不延续",
+        "extractMode": "单独图案",
+        "extractBackground": "白底",
+        "craft": "刺绣",
+        "craftFabric": "棉布",
+        "accessoryType": "拉链头",
+        "accessoryApply": "形状与纹样"
+      },
+      "prompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#A96054。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #A96054。\n\n改色范围：仅两只袖子面料；大身、领子、门襟及全部纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #A96054。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。",
+      "toolKey": "image-edit",
+      "checks": [
+        "主体与参考图职责正确",
+        "仅改变明确要求的内容",
+        "没有无关文字、水印、额外产品或部件",
+        "真实材质与光影没有凭空改变",
+        "五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数",
+        "无胸袋，不添加胸袋",
+        "仅两只袖子面料；大身、领子、门襟及全部纽扣保持原浅蓝色；目标 #A96054"
+      ]
+    },
+    {
+      "id": "garment-colorway-20-new",
+      "pairId": "garment-colorway-20",
+      "variant": "new",
+      "group": "creative",
+      "label": "garment-colorway / 20 / new",
+      "sources": [
+        "shirt"
+      ],
+      "form": {
+        "description": "只改指定区域至 #A96054。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+        "category": "按描述判断",
+        "silhouette": "按描述判断",
+        "fabric": "",
+        "presentation": "白底平铺",
+        "sketchStyle": "technical",
+        "sketchDetail": "standard",
+        "restyleArea": "领口",
+        "change": "",
+        "preserve": "",
+        "colorMode": "specific",
+        "colors": [
+          "#A96054"
+        ],
+        "colorRegion": "仅两只袖子面料；大身、领子、门襟及全部纽扣保持原浅蓝色",
+        "colorMood": "严格按指定色彩方向",
+        "backStructure": "简洁",
+        "backMotif": "不延续",
+        "extractMode": "单独图案",
+        "extractBackground": "白底",
+        "craft": "刺绣",
+        "craftFabric": "棉布",
+        "accessoryType": "拉链头",
+        "accessoryApply": "形状与纹样"
+      },
+      "prompt": "只改指定区域至 #A96054。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+      "toolKey": "creative-garment-colorway",
+      "input": {
+        "scene": "garment-colorway",
+        "fields": {
+          "description": "只改指定区域至 #A96054。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+          "colorMode": "specific",
+          "colorRegion": "仅两只袖子面料；大身、领子、门襟及全部纽扣保持原浅蓝色",
+          "colors": [
+            "#A96054"
+          ]
+        },
+        "userText": "只改指定区域至 #A96054。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。",
+        "referenceRoles": [
+          "服装参考图"
+        ],
+        "mode": "edit"
+      },
+      "checks": [
+        "主体与参考图职责正确",
+        "仅改变明确要求的内容",
+        "没有无关文字、水印、额外产品或部件",
+        "真实材质与光影没有凭空改变",
+        "五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数",
+        "无胸袋，不添加胸袋",
+        "仅两只袖子面料；大身、领子、门襟及全部纽扣保持原浅蓝色；目标 #A96054"
+      ]
+    }
+  ],
+  "plannedFullMatrix": {
+    "records": 40,
+    "images": 40,
+    "compilations": 20,
+    "chatResponses": 0,
+    "extraProtocolSmoke": "运行时枚举其他启用图片模型；不能合法选择的模型报告 blocked"
+  },
+  "limits": [
+    "真实 UI 按钮、复制、历史导出、刷新恢复与完整串行工作流需单独浏览器验收",
+    "没有真实 mask 样本，不代表严格蒙版验收",
+    "视觉评分必须人工按 checks 核对，HTTP 成功不记视觉通过",
+    "图像实际上游费用若 API 未提供则未知，应用配置扣费不是账单"
+  ]
+}

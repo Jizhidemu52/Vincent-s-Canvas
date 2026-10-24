@@ -58,30 +58,18 @@ describe("garment scenario recipes", () => {
         expect(garmentScenarios.every((item) => !("secondaryLabel" in item) && !("requiresSecondary" in item))).toBe(true);
     });
 
-    test("colorway applies the requested color while keeping structure, texture and conceptual boundaries", () => {
+    test("colorway preserves authored target and structured preservation without rendering rules", () => {
         const recipe = buildGarmentRecipe(brief("colorway", { target: "衣身改成 #A6C8D8，领口保留奶白", preserve: "保留袖口和针织质感" }), references());
         expect(recipe.title).toBe("服装换色");
-        expect(recipe.references.map((item) => item.id)).toEqual(["garment"]);
-        expect(recipe.prompt).toContain("图片1是服装主图，也是唯一参考图");
-        expect(recipe.prompt).toContain("衣身改成 #A6C8D8，领口保留奶白");
-        expect(recipe.prompt).toContain("保留袖口和针织质感");
-        expect(recipe.prompt).toContain("服装廓形、结构、比例");
-        expect(recipe.prompt).toContain("未指定部位保留原色");
-        expect(recipe.prompt).toContain("纹理");
-        expect(recipe.prompt).toContain("不保证精确色值");
-        expect(recipe.prompt).toContain("概念配色");
+        expect(recipe.prompt).toBe("衣身改成 #A6C8D8，领口保留奶白");
+        expect(recipe.promptInput).toMatchObject({ scene: "garment-colorway", fields: { preserve: "保留袖口和针织质感" }, referenceRoles: ["服装主图"] });
+        expect(recipe.references.map(item => item.id)).toEqual(["garment"]);
+        expect(recipe.prompt).not.toContain("默认保留范围");
     });
-
-    test("restyle changes only the specified design and preserves other regions", () => {
+    test("restyle transports exact scope to the server recipe", () => {
         const recipe = buildGarmentRecipe(brief("restyle", { target: "圆领改翻领", preserve: "保留袖口和衣长" }), references());
         expect(recipe.title).toBe("服装改款");
-        expect(recipe.references.map((item) => item.id)).toEqual(["garment"]);
-        expect(recipe.prompt).toContain("圆领改翻领");
-        expect(recipe.prompt).toContain("保留袖口和衣长");
-        expect(recipe.prompt).toContain("对目标未涉及的区域");
-        expect(recipe.prompt).toContain("不擅自扩大改动范围");
-        expect(recipe.prompt).toContain("不是纸样、工艺单");
-        expect(recipe.prompt).toContain("概念效果");
+        expect(recipe.promptInput).toMatchObject({ scene: "local-restyle", userText: "圆领改翻领", fields: { change: "圆领改翻领", preserve: "保留袖口和衣长" } });
     });
 
     test.each(scenarios)("%s sends only the selected primary image, never unselected references", (scenario) => {
@@ -91,7 +79,7 @@ describe("garment scenario recipes", () => {
         expect(recipe.prompt).not.toContain("图片2");
         expect(recipe.prompt).not.toContain("unused");
         expect(recipe.prompt).not.toContain("other-garment");
-        expect(recipe.prompt).toContain("保留项优先");
+        expect(recipe.promptInput.referenceRoles).toEqual(["服装主图"]);
     });
 });
 
@@ -155,19 +143,19 @@ describe("garment brief validation", () => {
     test("preserves Unicode, multiline instructions and punctuation, trimming only outer whitespace", () => {
         const target = "领口改成 V 领\n保留‘靛蓝’与 #3A5B9C，印花文字为「海风」 🌊";
         const recipe = buildGarmentRecipe(brief("restyle", { target: `  ${target}\n`, preserve: "  袖型\n针织肌理  " }), references());
-        expect(recipe.prompt).toContain(`设计目标：\n${target}\n\n`);
-        expect(recipe.prompt).toContain("用户明确要求保留：\n袖型\n针织肌理\n\n");
+        expect(recipe.prompt).toBe(target);
+        expect(recipe.promptInput.fields?.preserve).toBe("袖型\n针织肌理");
     });
 
     test.each(["", " \n\t "])("accepts blank optional preservation and keeps the scenario defaults: %j", (preserve) => {
         const recipe = buildGarmentRecipe(brief("colorway", { preserve }), references());
-        expect(recipe.prompt).toContain("无额外保留要求；遵守上述场景的默认保留范围");
+        expect(recipe.promptInput.fields?.preserve).toBe("");
     });
 
     test.each(["target", "preserve"] as const)("%s accepts exactly 2000 characters and rejects 2001 without truncation", (field) => {
         expect(GARMENT_BRIEF_TEXT_LIMIT).toBe(2000);
         const accepted = "设".repeat(2000);
-        expect(buildGarmentRecipe(brief("restyle", { [field]: accepted }), references()).prompt).toContain(accepted);
+        expect(JSON.stringify(buildGarmentRecipe(brief("restyle", { [field]: accepted }), references()).promptInput)).toContain(accepted);
         expect(() => buildGarmentRecipe(brief("restyle", { [field]: `${accepted}计` }), references())).toThrow("不能超过 2000 个字符");
     });
 

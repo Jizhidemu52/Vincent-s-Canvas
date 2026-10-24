@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { buildScenePrompt, cloneSceneForm, createSceneForm, setSceneColor } from "@/pages/creative/scene-form-model";
+import { scenePromptInput, cloneSceneForm, createSceneForm, setSceneColor } from "@/pages/creative/scene-form-model";
 import type { StandardColorSelection } from "@/lib/standard-colors";
 import { sceneParameters, serializeSceneDraft, serializeSceneLog, type SceneImage, type SceneLog } from "@/pages/creative/use-scene-workspace";
 
@@ -12,7 +12,7 @@ describe("creative workspace persistence", () => {
         const selection: StandardColorSelection = { id: "color-a", name: "17-1234 TCX", hex: "#123456", library: "PANTONE TCX", source: "公开色库", sourceUrl: "https://example.invalid/color-a", datasetVersion: "snapshot-1" };
         const form = setSceneColor({ ...createSceneForm("garment-colorway"), colorMode: "specific" as const }, 0, selection.hex, selection);
         const draft = serializeSceneDraft({ form, images: { primary }, config });
-        const log: SceneLog = { id: "log-color", ownerId: "designer-1", sceneId: "garment-colorway", createdAt: 123, prompt: buildScenePrompt("garment-colorway", form), form: cloneSceneForm(form), referenceImages: { primary }, config, images: [], results: [], durationMs: 0, successCount: 0, failCount: 0 };
+        const log: SceneLog = { id: "log-color", ownerId: "designer-1", sceneId: "garment-colorway", createdAt: 123, prompt: "Server final compiled prompt", form: cloneSceneForm(form), referenceImages: { primary }, config, images: [], results: [], durationMs: 0, successCount: 0, failCount: 0 };
         const stored = serializeSceneLog(log);
         form.colors[0] = "#ABCDEF";
         form.colorSelections![0]!.name = "CHANGED";
@@ -21,7 +21,8 @@ describe("creative workspace persistence", () => {
         expect(stored.form.colorSelections?.[0]).toEqual(selection);
         expect(stored.form.colorSelections?.[0]).not.toBe(log.form.colorSelections?.[0]);
         const restored = { ...createSceneForm("garment-colorway"), ...JSON.parse(JSON.stringify(draft)).form };
-        expect(buildScenePrompt("garment-colorway", restored)).toBe(stored.prompt);
+        expect(scenePromptInput("garment-colorway", restored)).toEqual(scenePromptInput("garment-colorway", stored.form));
+        expect(stored.prompt).toBe("Server final compiled prompt");
         expect(stored).toMatchObject({ ownerId: "designer-1", sceneId: "garment-colorway" });
         const secondOwner = serializeSceneLog({ ...log, ownerId: "designer-2", sceneId: "pattern-colorway", form: createSceneForm("pattern-colorway") });
         expect(secondOwner.ownerId).toBe("designer-2");

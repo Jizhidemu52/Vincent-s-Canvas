@@ -1,9 +1,6 @@
-import type { PoolClient } from "pg";
-
-import type { Database } from "./db";
 import type { SessionUser } from "./types";
 
-export async function writeAudit(db: Database | PoolClient, input: {
+export async function writeAudit(db: { query(sql: string, values?: unknown[]): Promise<unknown> }, input: {
     actor?: SessionUser;
     action: string;
     targetType: string;

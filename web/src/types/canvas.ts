@@ -43,6 +43,12 @@ export type CanvasStoredImageReference = {
 };
 
 export type CanvasNodeMetadata = {
+    promptInput?: import("../../../shared/prompt-contracts").PromptInputData;
+    userInput?: import("../../../shared/prompt-contracts").PromptInputData;
+    optimizingPrompt?: boolean;
+    compiledPrompt?: string;
+    optimized?: boolean;
+    reversePrompt?: { requestId: string; outputNodeId: string };
     promptTemplateSource?: {
         templateId: string; versionId: string; version: number; title: string;
         targetTool: import("@/services/api/prompts").PromptTargetTool;

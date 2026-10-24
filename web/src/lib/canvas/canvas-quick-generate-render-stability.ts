@@ -28,6 +28,7 @@ export type CanvasQuickGeneratePanelRenderState = {
     onMoveReference: (id: string, targetId: string) => void;
     onMissingConfig: () => void;
     onGenerate: () => void;
+    onOptimizedPrompt?: (prompt: string, input: import("../../../../shared/prompt-contracts").PromptInputData, references: import("@/types/image").ReferenceImage[]) => void;
 };
 
 /**
@@ -65,6 +66,6 @@ export function canvasQuickGeneratePanelPropsEqual(previous: CanvasQuickGenerate
         previous.onClearReferences === next.onClearReferences &&
         previous.onMoveReference === next.onMoveReference &&
         previous.onMissingConfig === next.onMissingConfig &&
-        previous.onGenerate === next.onGenerate
+        previous.onGenerate === next.onGenerate && previous.onOptimizedPrompt === next.onOptimizedPrompt
     );
 }

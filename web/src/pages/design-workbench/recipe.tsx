@@ -22,7 +22,7 @@ import { useThemeStore } from "@/stores/use-theme-store";
 import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
 import {
-    buildRecipePrompt,
+    recipePromptInput,
     createRecipeForm,
     createRecipeRun,
     parseRecipeProject,
@@ -538,8 +538,8 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
                             <ImageSettingsPanel config={config} referenceCount={refs.length} onConfigChange={updateSettings} theme={theme} maxCount={1} showTitle={false} />
                         </details>
                         <details className="sr-details">
-                            <summary>预览候选 1 的设计指令</summary>
-                            <pre>{buildRecipePrompt(project.form, 0, refs.length > 1)}</pre>
+                            <summary>查看候选 1 的设计输入</summary>
+                            <pre>{JSON.stringify(recipePromptInput(project.form, 0, refs.length > 1).fields, null, 2)}</pre>
                         </details>
                     </fieldset>
                 </aside>
@@ -592,7 +592,7 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
                                         ) : (
                                             <span>
                                                 {branch.status === "running" ? <LoaderCircle size={28} className="animate-spin" /> : <Palette size={28} strokeWidth={1} />}
-                                                {recipeStatusLabels[branch.status]}
+                                                {branch.optimizing ? "正在优化提示词…" : recipeStatusLabels[branch.status]}
                                             </span>
                                         )}
                                     </button>
@@ -601,7 +601,7 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
                                             <h3>
                                                 {run.form.kind === "structure" && <i style={{ background: run.form.palette[branch.index]!.hex }} />}候选 {String(branch.index + 1).padStart(2, "0")}
                                             </h3>
-                                            <span>{recipeStatusLabels[branch.status]}</span>
+                                            <span>{branch.optimizing ? "正在优化提示词…" : recipeStatusLabels[branch.status]}</span>
                                         </div>
                                         <p>{run.form.kind === "structure" ? `${run.form.palette[branch.index]!.name} · ${run.form.palette[branch.index]!.hex.toUpperCase()}` : run.form.positions[branch.index]}</p>
                                         {branch.error && <p className="sr-error">{branch.error}</p>}

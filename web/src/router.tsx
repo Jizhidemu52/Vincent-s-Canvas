@@ -9,6 +9,7 @@ import { deploymentFeatures } from "@/lib/deployment-features";
 import type { ModuleKey } from "@/services/api/modules";
 
 const AdminPage = lazy(() => import("@/pages/admin"));
+const AdminPromptRecipesPage = lazy(() => import("@/pages/admin/prompt-recipes"));
 const AdminLoginPage = lazy(() => import("@/pages/admin/login"));
 const LoginPage = lazy(() => import("@/pages/login"));
 const AssetsPage = lazy(() => import("@/pages/assets"));
@@ -91,6 +92,7 @@ export const router = createBrowserRouter([
             { path: "/design-library", element: moduleRoute(DesignLibraryPage, "design-library") },
             ...(!standaloneEdition ? [
                 { path: "/admin", element: protectedRoute(AdminPage, true) },
+                { path: "/admin/prompt-recipes", element: protectedRoute(AdminPromptRecipesPage, true) },
                 { path: "/admin/design-library", element: protectedRoute(DesignLibraryPage, true) },
                 // Hiding role entrances must not lock operators out of maintenance.
                 { path: "/admin/login", element: routeElement(AdminLoginPage) },

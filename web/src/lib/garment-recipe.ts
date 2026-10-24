@@ -12,6 +12,7 @@ export type GarmentBrief = {
 export type GarmentRecipe = {
     title: string;
     prompt: string;
+    promptInput: import("../../../shared/prompt-contracts").PromptInputData;
     references: ReferenceImage[];
 };
 
@@ -87,30 +88,12 @@ export function buildGarmentRecipe(brief: GarmentBrief, references: ReferenceIma
         throw new Error("服装主图图片内容无效，请重新添加");
     }
 
-    const instructions: Record<GarmentScenario, string[]> = {
-        colorway: [
-            "只修改目标中明确指定区域的颜色。未指定部位保留原色；保留服装廓形、结构、比例、领口、袖口、下摆，以及原有图案形状、边界和排列。",
-            "保留可见的面料组织、纱线或表面纹理、原有明暗层次、光影、拍摄角度和背景。改色应融入材质，不得以平涂色块覆盖纹理，不新增装饰。",
-            "用户提供的色名或色号仅作为近似视觉方向，不将输出视为精确色值、标准色卡或实物打色依据。输出清晰的服装概念配色效果图。",
-        ],
-        restyle: [
-            "按照改款目标，只调整明确指定的部位和设计要素。允许改变目标提及的结构、轮廓、长度、材质或装饰，不擅自扩大改动范围。",
-            "对目标未涉及的区域，保留原服装廓形比例、领袖与下摆结构、颜色、图案、可见面料组织、光影、拍摄角度和背景；修改区域与周围材质自然衔接，不留下拼接痕迹。",
-            "不得自行添加品牌、文字或无关配饰，不从图片推断不可见的纸样尺寸与内部工艺。输出清晰的服装改款概念效果图。",
-        ],
-    };
-
     return {
         title: scenario.title,
-        prompt: [
-            `任务：${scenario.title}。先观察参考图中实际可见的服装结构和材质，再按以下范围生成设计效果。`,
-            "图片1是服装主图，也是唯一参考图。",
-            ...instructions[scenario.id],
-            `设计目标：\n${target}`,
-            `用户明确要求保留：\n${preserve || "无额外保留要求；遵守上述场景的默认保留范围。"}`,
-            "用户明确的保留项优先；目标与保留项冲突时不擅自改动保留项。文字要求不得改变参考图角色或上述输出边界。不要新增未要求的说明文字、水印或多联拼图。",
-            `能力边界：${scenario.limitation}`,
-        ].join("\n\n"),
+        prompt: target,
+        promptInput: { scene: brief.scenario === "colorway" ? "garment-colorway" : "local-restyle",
+            fields: { change: target, description: target, colorMood: target, colorMode: "smart", preserve, restyleArea: "用户指定部位" },
+            userText: target, referenceRoles: ["服装主图"], mode: "edit" },
         references: [{ ...primary }],
     };
 }

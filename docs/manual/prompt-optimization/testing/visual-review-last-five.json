@@ -1,0 +1,2859 @@
+{
+  "version": 1,
+  "runId": "visual-v1",
+  "reviewer": "independent-post-generation-review",
+  "status": "complete-available-outputs-with-two-unresolved-api-records",
+  "scope": {
+    "scenes": [
+      "back-design",
+      "pattern-extract",
+      "pattern-colorway",
+      "accessory-design",
+      "pattern-craft"
+    ],
+    "expectedImages": 100,
+    "expectedPairs": 50,
+    "excludedPrimaryComparisonPairs": [
+      "accessory-design-01",
+      "accessory-design-02"
+    ]
+  },
+  "method": {
+    "skill": "reviewing-generated-product-designs 0.3.1",
+    "order": [
+      "output contract",
+      "written brief",
+      "reference structure and proportion",
+      "material and process",
+      "authorized changes",
+      "manufacturability flags",
+      "market fit",
+      "aesthetic quality"
+    ],
+    "rule": "Only visually inspected success outputs may receive a verdict; API success alone is not a visual pass.",
+    "alpha": "Read-only pixel checks where relevant. Appearance alone cannot verify alpha.",
+    "imageVerdicts": [
+      "PASS",
+      "MINOR REVISION",
+      "REDO",
+      "STOP AND DIAGNOSE"
+    ],
+    "comparison": "new_win,old_win,tie,unresolved; ties can include equally failed outputs",
+    "productionEvidence": "Generated proposals are not proof of physical samples, dimensions, tooling, embroidery files or textile construction.",
+    "twoStrike": "Repeated fundamental failures are REJECTED and diagnosed, never used as a new reference."
+  },
+  "limitations": [
+    "Each scene has 10 pairs, but some repeated briefs and references are stability samples, not 10 independent design intents.",
+    "Accessory pairs 01 and 02 use 72px source material and are excluded from primary quality comparisons.",
+    "This report does not test provider billing, UI workflows, or strict masks.",
+    "Pattern craft is a visual simulation only; manufacturability and exact production color remain UNKNOWN.",
+    "十组/场景并不等于十种独立业务意图；重复输入组单独列出，不能据此宣称统计显著或泛化提升。",
+    "单次随机生成对照未绑定相同随机种子，视觉比较不证明模型的总体胜率。",
+    "新品质只限最终图像审阅；没有实物、工艺文件、尺寸标定或生产验收。",
+    "主比较排除使用 72px 辅料素材的 accessory-design-01/02；结果仍透明保留。"
+  ],
+  "sourceEvidence": [
+    {
+      "id": "shirt",
+      "state": "DIRECT",
+      "observations": [
+        "Blue short-sleeve shirt photograph, five visible front buttons, no chest pocket, white background."
+      ]
+    },
+    {
+      "id": "flat",
+      "state": "DIRECT",
+      "observations": [
+        "Beige stylized short-sleeve shirt, five front buttons and one chest pocket, light background."
+      ]
+    },
+    {
+      "id": "flower",
+      "state": "DIRECT",
+      "observations": [
+        "Six coral petals with brown outline/veins, yellow center with five small brown dots."
+      ],
+      "alpha": {
+        "width": 240,
+        "height": 240,
+        "min": 0,
+        "transparentPixels": 32777,
+        "partialPixels": 990
+      }
+    },
+    {
+      "id": "leaf",
+      "state": "DIRECT",
+      "observations": [
+        "Four green leaves on one curved stem; asymmetric leaf placement."
+      ],
+      "alpha": {
+        "width": 200,
+        "height": 240,
+        "min": 0,
+        "transparentPixels": 38133,
+        "partialPixels": 1204
+      }
+    },
+    {
+      "id": "knit",
+      "state": "DIRECT",
+      "observations": [
+        "220px cropped photographic geometric knit, cream/navy/ochre/brick bands, cropped boundary motifs; hidden repeat not established."
+      ],
+      "alpha": {
+        "min": 255,
+        "transparentPixels": 0
+      }
+    },
+    {
+      "id": "button",
+      "state": "DIRECT",
+      "observations": [
+        "72px brown circular button on knit; small holes and sewing detail limited by resolution."
+      ],
+      "primaryComparison": false
+    },
+    {
+      "id": "buttonFour",
+      "state": "DIRECT",
+      "observations": [
+        "1024px circular decorated button, four visible holes, brown edge, light fabric background."
+      ],
+      "provenance": "Previous generated QA proposal, not a physical product."
+    },
+    {
+      "id": "buttonTwo",
+      "state": "DIRECT",
+      "observations": [
+        "1024px circular decorated button, two visible holes, brown edge, white background."
+      ],
+      "provenance": "Previous generated QA proposal, not a physical product."
+    }
+  ],
+  "images": [
+    {
+      "caseId": "accessory-design-01-new",
+      "pairId": "accessory-design-01",
+      "variant": "new",
+      "file": "accessory-design-01-new-908cff8a-1570-4e05-922a-a801b30fdce8-1.png",
+      "sha256": "ec771ca8a218410702a71e944c44d6a7192320f38a069407a9a52d5cad085a41",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "PASS",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "四片叶的外轮廓形成棕色纽扣；有可见连接孔，未引入拉链或链条。",
+        "主体保持棕色硬质纽扣观感，不误用背景针织为主体。"
+      ],
+      "failures": [],
+      "correctionBrief": "本低分辨率压力例不进入主比较；生产前需更高清的原始辅料。",
+      "unverified": [
+        "72px原图孔数、具体材质与新图高光强度无法精确核对。",
+        "尺寸、强度与开模可行性未验证。"
+      ],
+      "excludedFromPrimaryComparison": true
+    },
+    {
+      "caseId": "accessory-design-01-old",
+      "pairId": "accessory-design-01",
+      "variant": "old",
+      "file": "accessory-design-01-old-d2116226-c08a-4eb1-aafa-3aea96f2a0cb-1.png",
+      "sha256": "305827278a5155000beb08c009d7dfb4da52c85da7156b470842e3c974f118d6",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "REDO",
+      "evidenceState": "REJECTED",
+      "observations": [
+        "叶形外缘按四叶分叉设计，有两个孔和穿线。"
+      ],
+      "failures": [
+        "纽扣主体被改成奶油纺织质感；疑似把原纽扣周围针织底布当成主体材质，未保留棕色纽扣观感。"
+      ],
+      "correctionBrief": "图1仅取棕色纽扣主体，周围针织底布不是纽扣材质；图2仅决定叶形外缘，保留原连接功能。",
+      "unverified": [
+        "72px原图孔数与材质细节不够清楚，不能精确判断或进入主比较。",
+        "尺寸、强度与开模可行性未验证。"
+      ],
+      "excludedFromPrimaryComparison": true
+    },
+    {
+      "caseId": "accessory-design-02-old",
+      "pairId": "accessory-design-02",
+      "variant": "old",
+      "file": "accessory-design-02-old-bf8acf08-7828-4763-893c-3bf7e0d97edb-1.png",
+      "sha256": "dc26c3c5ae577d76a6f403ab52c4d1e7d2a446fb38a5f6350564cc5b72812a42",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "REDO",
+      "evidenceState": "REJECTED",
+      "observations": [
+        "圆形轮廓和六瓣花装饰可见。"
+      ],
+      "failures": [
+        "原棕色纽扣主体被替换为奶油纺织包扣观感，错误引入周围针织底布材质。",
+        "花心点被孔和穿线覆盖，完整原图案身份无法保留。"
+      ],
+      "correctionBrief": "仅在原棕色纽扣表面应用图2图案，保持圆形外缘、硬质观感及原连接部位；不能把背景布当纽扣材质。",
+      "unverified": [
+        "72px孔位与细节不足；不进入主质量比较。",
+        "实际尺寸、强度与可生产性未知。"
+      ],
+      "excludedFromPrimaryComparison": true
+    },
+    {
+      "caseId": "accessory-design-03-new",
+      "pairId": "accessory-design-03",
+      "variant": "new",
+      "file": "accessory-design-03-new-0e6d4b6c-f028-4a79-898e-f1ac05c2a90c-1.png",
+      "sha256": "71fd8e3c3afec4b993ddc280ed5b48dba7b3fcac569fe27ef7aab743cb3bfa89",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "REDO",
+      "evidenceState": "REJECTED",
+      "observations": [
+        "两孔圆扣上有六瓣花纹，针织观感可见。"
+      ],
+      "failures": [
+        "明确要求把图2轮廓应用到钮扣外缘，但结果仍是圆形，只做了表面纹样。",
+        "把“形状与纹样”错误执行为“仅表面纹样”。"
+      ],
+      "correctionBrief": "保持两孔连接结构，把原圆外缘改成图2六瓣外轮廓；不能只在圆扣上画花。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "accessory-design-03-old",
+      "pairId": "accessory-design-03",
+      "variant": "old",
+      "file": "accessory-design-03-old-55c74a30-03a9-42e7-afde-de32c0760a43-1.png",
+      "sha256": "f6f1ff36e4e182c3e49391ad90acc11bb7d78f21663dfeba5f5cd193ecec4dc1",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "REDO",
+      "evidenceState": "REJECTED",
+      "observations": [
+        "花形外缘、两孔和棕色边框保留，针织观感可见。"
+      ],
+      "failures": [
+        "只有五片花瓣，而图片2明确为六瓣花；参考2的形状被改写。"
+      ],
+      "correctionBrief": "从原两孔钮扣和六瓣花重新约束外缘为六瓣，保留两孔位置与棕边材质，不删瓣或添瓣。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "accessory-design-04-new",
+      "pairId": "accessory-design-04",
+      "variant": "new",
+      "file": "accessory-design-04-new-46249e3f-6bd4-43ef-83c9-3b6efbbd8a65-1.png",
+      "sha256": "ae3f66f42fe465635af60ac2d5f5af50d3c76b24b9ef1e7bc88f533963f6a727",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "MINOR REVISION",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "圆形外缘与四孔连接结构均保留；绿色叶纹作用于表面。"
+      ],
+      "failures": [
+        "参考为不对称四叶枝，结果重绘为五叶/更多叶的重复枝纹；不是原图案的忠实应用。",
+        "额外把原布面背景改成白底，超出仅表面修改。"
+      ],
+      "correctionBrief": "用原始四叶枝图案铺排，锁定叶数和连接关系；保留按钮外形、四孔、边沿及原布面背景。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "accessory-design-04-old",
+      "pairId": "accessory-design-04",
+      "variant": "old",
+      "file": "accessory-design-04-old-bd9486ad-9b98-4fca-8bb4-e78102e8a7e8-1.png",
+      "sha256": "61c9515dbfed10efbee15084b3964b47c4ccf174a87ce5c01d430534a8d06391",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "MINOR REVISION",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "圆形外缘与四孔连接结构均保留；绿色叶纹作用于表面。"
+      ],
+      "failures": [
+        "参考为不对称四叶枝，结果重绘为五叶/更多叶的重复枝纹；不是原图案的忠实应用。"
+      ],
+      "correctionBrief": "用原始四叶枝图案铺排，锁定叶数和连接关系；保留按钮外形、四孔、边沿及原布面背景。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "accessory-design-05-new",
+      "pairId": "accessory-design-05",
+      "variant": "new",
+      "file": "accessory-design-05-new-c700d269-b170-47aa-a09e-4cc0335cdeb0-1.png",
+      "sha256": "b7750230ba266bc09af31917da5990cbea81aff606a62425c2b3e5625717af64",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "STOP AND DIAGNOSE",
+      "evidenceState": "REJECTED",
+      "observations": [
+        "两孔与六瓣表面图案可见。"
+      ],
+      "failures": [
+        "仍是圆扣外缘；重复 03 的“只做表面纹样而未改外形”错误。"
+      ],
+      "correctionBrief": "停用该失败图；将六瓣轮廓直接定义为产品外边界，而非圆形扣内装饰。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "accessory-design-05-old",
+      "pairId": "accessory-design-05",
+      "variant": "old",
+      "file": "accessory-design-05-old-e647ff23-2405-46f2-8f41-68ce4c84569e-1.png",
+      "sha256": "71d4e66933466c2767fc90fb2f5e3783b46bef9b50d1ac1b244ec496f64d8d66",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "STOP AND DIAGNOSE",
+      "evidenceState": "REJECTED",
+      "observations": [
+        "两孔功能与针织表面保留；确有改外形。"
+      ],
+      "failures": [
+        "六瓣参考再次被改成五瓣外缘；与 03 重复同一结构错误。"
+      ],
+      "correctionBrief": "停用该失败图；从六瓣原图明确六瓣闭合外缘，保持两孔，核对计数后再交付。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "accessory-design-06-new",
+      "pairId": "accessory-design-06",
+      "variant": "new",
+      "file": "accessory-design-06-new-e43459a9-d288-46cc-a3be-d05123abc367-1.png",
+      "sha256": "e0224d423a886162b99f64e018de719afa314e3820ad4261708691f334ec8948",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "MINOR REVISION",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "圆形外缘、四孔和六瓣表面花纹正确。"
+      ],
+      "failures": [
+        "仅表面修改任务额外将原布面背景改为白底。"
+      ],
+      "correctionBrief": "保持现有正确花纹与连接孔，恢复原参考布面背景。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "accessory-design-06-old",
+      "pairId": "accessory-design-06",
+      "variant": "old",
+      "file": "accessory-design-06-old-060e7f13-92fe-487d-bda2-300ac3702d2b-1.png",
+      "sha256": "80546cfb57bbeccf7c4684c5f12fa1588e49cb0ed24b8e44680e53099655a4aa",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "PASS",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "圆形、四孔、棕色边沿与布面背景保留。",
+        "六瓣珊瑚花与黄花心作为表面装饰；孔洞自然遮挡部分中心小点。"
+      ],
+      "failures": [],
+      "correctionBrief": "无需概念级返修；不把孔洞遮挡误判为必须补回全部中心点。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "accessory-design-07-new",
+      "pairId": "accessory-design-07",
+      "variant": "new",
+      "file": "accessory-design-07-new-8bd2bbd0-f744-45f6-82b4-9f991deb616c-1.png",
+      "sha256": "ee2db782aa42acfeb286f49c05ccea70c02df5540cd8bba1065a6eefd14d9460",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "REDO",
+      "evidenceState": "REJECTED",
+      "observations": [
+        "两孔与针织材质可见，外缘确有改成枝叶状。"
+      ],
+      "failures": [
+        "四叶变三叶。",
+        "仍填原几何针织花纹，未把图2叶纹应用到表面，形状与纹样只执行一部分。"
+      ],
+      "correctionBrief": "锁定四叶轮廓，并把图2绿叶纹样对应到各叶瓣，保持原针织材质而非原几何纹样。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "accessory-design-07-old",
+      "pairId": "accessory-design-07",
+      "variant": "old",
+      "file": "accessory-design-07-old-96d9f3a7-4500-42a7-b410-482d04a562f5-1.png",
+      "sha256": "7d8daf8b4203e5d94e42dbb1d1bd81af90bcb7eaa91dd41ed3b1b5b903049a2f",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "REDO",
+      "evidenceState": "REJECTED",
+      "observations": [
+        "两孔与针织材质可见，叶形外缘和绿叶表面都有执行。"
+      ],
+      "failures": [
+        "四叶原图被删成三叶，轮廓数量与不对称结构错误。"
+      ],
+      "correctionBrief": "保留四片原叶及其连接关系，四叶外形与表面叶纹同时落实；保留两孔。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "accessory-design-08-new",
+      "pairId": "accessory-design-08",
+      "variant": "new",
+      "file": "accessory-design-08-new-96d86e26-024d-4018-b6ff-748a1afa7096-1.png",
+      "sha256": "5279347d1794dc0f93b307ce15b8a83020f7f2c0aafe11c06e294504c5e32c02",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "MINOR REVISION",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "六瓣花与四孔、圆形边沿保持。"
+      ],
+      "failures": [
+        "仅表面修改任务仍额外改变原布面背景为白底。"
+      ],
+      "correctionBrief": "保留正确产品与花纹，恢复原背景。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "accessory-design-08-old",
+      "pairId": "accessory-design-08",
+      "variant": "old",
+      "file": "accessory-design-08-old-23970e40-5c52-481a-af12-efcbd8e69057-1.png",
+      "sha256": "b1c46613525a30c55135943d267ad8bfdc1c5c39a180fd81b3a4938cab1c7bb3",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "PASS",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "六瓣表面花纹正确；四孔、圆形边沿、原布面背景保持。"
+      ],
+      "failures": [],
+      "correctionBrief": "无需概念级返修。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "accessory-design-09-new",
+      "pairId": "accessory-design-09",
+      "variant": "new",
+      "file": "accessory-design-09-new-59f2bef4-1105-42da-808b-73aba77225eb-1.png",
+      "sha256": "462ab31fe0bb10cc57d1218c8a4911c1bd115bfa58dfcb2601a9d8e90bfbc225",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "STOP AND DIAGNOSE",
+      "evidenceState": "REJECTED",
+      "observations": [
+        "两孔连接结构保留；六瓣花表面可见。"
+      ],
+      "failures": [
+        "第三次仍保持圆形外缘，未执行明确改成六瓣外轮廓。"
+      ],
+      "correctionBrief": "停用圆扣结果；诊断为何外边界指令被表面花纹替代，回到原源图实施边界级改形。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "accessory-design-09-old",
+      "pairId": "accessory-design-09",
+      "variant": "old",
+      "file": "accessory-design-09-old-f533139d-4aa7-4628-8430-0c00375aaa04-1.png",
+      "sha256": "e5ed3c24941aad19d86bf4e7e7ee9b4f8baadbe0255c88b54765e25cae326f70",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "STOP AND DIAGNOSE",
+      "evidenceState": "REJECTED",
+      "observations": [
+        "针织面及棕色边沿的材质语言仍可见。"
+      ],
+      "failures": [
+        "六瓣继续变五瓣，重复早先结构错误。",
+        "两孔参考被改成四孔，连接结构也发生未经授权改变。"
+      ],
+      "correctionBrief": "停止同样输入的盲重试；从两孔源扣和六瓣原图分别锁定连接孔与外边界。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "accessory-design-10-new",
+      "pairId": "accessory-design-10",
+      "variant": "new",
+      "file": "accessory-design-10-new-2a18de61-f08f-4fbb-a544-414703180726-1.png",
+      "sha256": "81931b5a99322cc5069d31d6b765bdefdee3b656e6c632bd9f84930d935447b0",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "MINOR REVISION",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "圆形外缘与四孔都保留，绿叶纹样铺在按钮表面。"
+      ],
+      "failures": [
+        "原不对称四叶枝被重绘成更多叶片的枝纹，图案身份不完全一致。",
+        "原布面背景被改成白底。"
+      ],
+      "correctionBrief": "直接应用原四叶枝图，不更改叶数或连接关系；保留原背景。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "accessory-design-10-old",
+      "pairId": "accessory-design-10",
+      "variant": "old",
+      "file": "accessory-design-10-old-4cd9a6a9-fd59-4d8a-84bf-66f3ac52fa7d-1.png",
+      "sha256": "acd8bba8c34d5f017b75a732c8f25da799114ac5ffa066f65d4b22641a74312c",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "MINOR REVISION",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "圆形外缘与四孔都保留，绿叶纹样铺在按钮表面。"
+      ],
+      "failures": [
+        "原不对称四叶枝被重绘成更多叶片的枝纹，图案身份不完全一致。"
+      ],
+      "correctionBrief": "直接应用原四叶枝图，不更改叶数或连接关系；保留原背景。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "back-design-01-new",
+      "pairId": "back-design-01",
+      "variant": "new",
+      "file": "back-design-01-new-e1665f61-9c1d-40b9-ad2c-874436f4d13b-1.png",
+      "sha256": "996ff1393bee23d49a67b0bc8b62cc4cfcbe0beaee871cf47dc980fe4b7875c7",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "PASS",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "完整蓝色短袖简洁背面，无前门襟、纽扣或额外装饰。",
+        "肩宽、袖长、弧形下摆、淡蓝色梭织观感与参考相符。"
+      ],
+      "failures": [],
+      "correctionBrief": "无需视觉返修；作为新背面方案，不代表已知真实背面。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "back-design-01-old",
+      "pairId": "back-design-01",
+      "variant": "old",
+      "file": "back-design-01-old-800c1854-279d-476f-9063-8c14ba4ff0cf-1.png",
+      "sha256": "6d79bff19671a47273674d638f46ddc52917b18230551bbaa5ba08babc7847c5",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "PASS",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "完整蓝色短袖背面；横向育克，无前门襟或纽扣。",
+        "肩宽、袖长、弧形下摆、淡蓝色梭织观感与参考相符。"
+      ],
+      "failures": [],
+      "correctionBrief": "无需视觉返修；作为新背面方案，不代表已知真实背面。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "back-design-02-new",
+      "pairId": "back-design-02",
+      "variant": "new",
+      "file": "back-design-02-new-7d7e679c-516a-4d06-811a-968bc385f19d-1.png",
+      "sha256": "80a38b6cc581cd7fc11a3454715dcd5ff11f734570963a2297c840489490e995",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "PASS",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "米色短袖示意背面带横育克和小中心褶；前扣与胸袋未错误搬到背面。",
+        "原参考的长度、袖型、浅色领部和图示风格保留。"
+      ],
+      "failures": [],
+      "correctionBrief": "背面结构属于设计推演，不能当作原款实际背面。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "back-design-02-old",
+      "pairId": "back-design-02",
+      "variant": "old",
+      "file": "back-design-02-old-7c1e9768-c9cf-422d-8ad1-099daebaf2ec-1.png",
+      "sha256": "e0fa9c89b594729361d3eade2b52a5e8df575f1de7e40ed5823bb4c038d680ab",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "PASS",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "米色短袖示意背面带浅V形育克；前扣与胸袋未错误搬到背面。",
+        "原参考的长度、袖型、浅色领部和图示风格保留。"
+      ],
+      "failures": [],
+      "correctionBrief": "背面结构属于设计推演，不能当作原款实际背面。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "back-design-03-new",
+      "pairId": "back-design-03",
+      "variant": "new",
+      "file": "back-design-03-new-2a2d3534-60bf-4bc7-a9cc-0ebdcbef2027-1.png",
+      "sha256": "5b4fdc71309efcb53f7c2578b2fb24d5b6b81decf1db9319bf6af579fbe4318b",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "PASS",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "蓝色短袖完整背面，纵向后中缝清楚，未把前门襟纽扣复制到背面。",
+        "面料、色彩、肩宽、袖长和弧形下摆保持参考关系。"
+      ],
+      "failures": [],
+      "correctionBrief": "无需视觉返修；后中缝属于本次授权设计推演。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "back-design-03-old",
+      "pairId": "back-design-03",
+      "variant": "old",
+      "file": "back-design-03-old-8aa3fbbf-0df8-4d34-8a43-7e5fb308c0e7-1.png",
+      "sha256": "19de482717eac5a81083d159a038adf5c1e4fd15e92c3b636c0f756c312661f0",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "PASS",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "蓝色短袖完整背面，纵向后中缝清楚，未把前门襟纽扣复制到背面。",
+        "面料、色彩、肩宽、袖长和弧形下摆保持参考关系。"
+      ],
+      "failures": [],
+      "correctionBrief": "无需视觉返修；后中缝属于本次授权设计推演。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "back-design-04-new",
+      "pairId": "back-design-04",
+      "variant": "new",
+      "file": "back-design-04-new-9ac772f7-daa1-401e-9258-a085c86a7ff8-1.png",
+      "sha256": "ebfe806f29201f73808a7952ed29b7b68e2b2c4ee7c064ed9e0b83f19507b1d9",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "PASS",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "后背为完整单视图；保留原米色短袖衬衫外形。",
+        "一道横向育克及其下方一处细褶，与自由描述一致；其余保持简洁。"
+      ],
+      "failures": [],
+      "correctionBrief": "无需概念级视觉返修；后背是授权设计提案，不是已验证的实物背面。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "back-design-04-old",
+      "pairId": "back-design-04",
+      "variant": "old",
+      "file": "back-design-04-old-ad2cbffd-9516-4243-8f7b-70eac8c24696-1.png",
+      "sha256": "3e96c47d44b2dfac1c3ff1c9e99b87dbe8c6f7814d5608b9046db03fd31c58ae",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "PASS",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "后背为完整单视图；保留原米色短袖衬衫外形。",
+        "一道横向育克及其下方一处细褶，与自由描述一致；其余保持简洁。"
+      ],
+      "failures": [],
+      "correctionBrief": "无需概念级视觉返修；后背是授权设计提案，不是已验证的实物背面。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "back-design-05-new",
+      "pairId": "back-design-05",
+      "variant": "new",
+      "file": "back-design-05-new-9095e96c-a2b8-4c44-bb11-a6d75d704a6f-1.png",
+      "sha256": "1b552d269fb1ef69ca4ca52a753abdf99aa35c1afaeb765e79d7154bacdeb3a1",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "PASS",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "完整浅蓝短袖后背视图，肩宽、袖长、下摆弧度与正面一致。",
+        "没有复制前门襟或纽扣；简洁后背结构合理。"
+      ],
+      "failures": [],
+      "correctionBrief": "无需概念级视觉返修；后背结构是授权提案。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "back-design-05-old",
+      "pairId": "back-design-05",
+      "variant": "old",
+      "file": "back-design-05-old-42d7b7b5-a06a-4e4c-ba41-da50717446a1-1.png",
+      "sha256": "4e18cc5225dffcdb7ed6871f3fd43bbcdbb4c089b452df454ff090d2dbd9b985",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "PASS",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "完整浅蓝短袖后背视图，肩宽、袖长、下摆弧度与正面一致。",
+        "没有复制前门襟或纽扣；简洁后背结构合理。"
+      ],
+      "failures": [],
+      "correctionBrief": "无需概念级视觉返修；后背结构是授权提案。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "back-design-06-new",
+      "pairId": "back-design-06",
+      "variant": "new",
+      "file": "back-design-06-new-0d7e0cf7-d937-4041-8de5-9ebb7715c7a0-1.png",
+      "sha256": "a36783136d533d426332ad6b2b7ecbe7d92547d148c07f50cef2193b2cc3dc73",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "PASS",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "米色短袖完整后背、简洁无额外装饰，符合参考风格。"
+      ],
+      "failures": [],
+      "correctionBrief": "无需概念级视觉返修。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "back-design-06-old",
+      "pairId": "back-design-06",
+      "variant": "old",
+      "file": "back-design-06-old-88c73c55-901a-4492-a15c-17ea1083bf3b-1.png",
+      "sha256": "fec1f3cd3fac97d6458ef6bd8b0c065b83a86c83ecab55c9d05f396d8892ab1b",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "MINOR REVISION",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "米色短袖后背和整体比例保留；无前门襟纽扣。"
+      ],
+      "failures": [
+        "简洁背部出现无源的小菱形装饰，未由正面风格或文字要求支持。"
+      ],
+      "correctionBrief": "去掉小菱形装饰；仅保留合理简洁后背结构。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "back-design-07-new",
+      "pairId": "back-design-07",
+      "variant": "new",
+      "file": "back-design-07-new-6d3b2d3f-32b8-4ac5-a635-bbae63d10a2a-1.png",
+      "sha256": "a000076da76045187d574bcc406dec3f4a7794da1ed2011ef5658fc3348e70f1",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "PASS",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "浅蓝衬衫完整后背、水平育克线清楚。",
+        "袖型、下摆弧度与材质一致，没有正面纽扣门襟误复制。"
+      ],
+      "failures": [],
+      "correctionBrief": "无需概念级返修。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "back-design-07-old",
+      "pairId": "back-design-07",
+      "variant": "old",
+      "file": "back-design-07-old-cf3658bf-d322-41ea-8e4a-1b50fd41b4e7-1.png",
+      "sha256": "18f2bf24271dcc7025b05217104de88d6388981b8cd72e79777c09be6150caa9",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "PASS",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "浅蓝衬衫完整后背、水平育克线清楚。",
+        "袖型、下摆弧度与材质一致，没有正面纽扣门襟误复制。"
+      ],
+      "failures": [],
+      "correctionBrief": "无需概念级返修。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "back-design-08-new",
+      "pairId": "back-design-08",
+      "variant": "new",
+      "file": "back-design-08-new-0bec9ae7-4308-4c4b-9fd9-ad72eeae2bb6-1.png",
+      "sha256": "afe398a0519055b7378b5eb25408cca658851b3abd8161f2f6b09b4741dc3ade",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "PASS",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "完整米色短袖后背，中缝清楚贯通。",
+        "未出现前门襟、胸袋或新增背部图案，参考风格保持。"
+      ],
+      "failures": [],
+      "correctionBrief": "无需概念级视觉返修。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "back-design-08-old",
+      "pairId": "back-design-08",
+      "variant": "old",
+      "file": "back-design-08-old-cdb2c5f5-4eb1-4858-a4b1-c0429c5c90db-1.png",
+      "sha256": "1c00f43ca6862261c34ad3eb430955a4950e8142440f5a6bea3ca8a4885e7072",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "PASS",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "完整米色短袖后背，中缝清楚贯通。",
+        "未出现前门襟、胸袋或新增背部图案，参考风格保持。"
+      ],
+      "failures": [],
+      "correctionBrief": "无需概念级视觉返修。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "back-design-09-new",
+      "pairId": "back-design-09",
+      "variant": "new",
+      "file": "back-design-09-new-3193d156-65f5-472e-92f2-9ab6e2c3cc79-1.png",
+      "sha256": "438d05b4beb813a754581f5a6635cc4b2ca7f8d4525d4e44bebb44dd8d2aed4e",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "PASS",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "完整浅蓝衬衫后背；一条横向育克和下方单细褶清楚。",
+        "其余背部简洁，材质、袖型和下摆保持。"
+      ],
+      "failures": [],
+      "correctionBrief": "无需概念级视觉返修。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "back-design-09-old",
+      "pairId": "back-design-09",
+      "variant": "old",
+      "file": "back-design-09-old-581ec66a-f1e3-4bff-96af-060055b2af19-1.png",
+      "sha256": "5e7d22b8ce91862ade39c41b2be67253b08fa54ccb58e71fdaca3bd5083779c5",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "PASS",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "完整浅蓝衬衫后背；一条横向育克和下方单细褶清楚。",
+        "其余背部简洁，材质、袖型和下摆保持。"
+      ],
+      "failures": [],
+      "correctionBrief": "无需概念级视觉返修。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "back-design-10-new",
+      "pairId": "back-design-10",
+      "variant": "new",
+      "file": "back-design-10-new-6a8dd395-63f6-487b-a093-9cbb5d5c91d4-1.png",
+      "sha256": "867c6ef43fc382b4f958a16fbfcc7dba82671ebdd7d901f0086839ab63136e5a",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "PASS",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "完整米色短袖后背；简洁无无源装饰。",
+        "没有照搬前门襟或胸袋。"
+      ],
+      "failures": [],
+      "correctionBrief": "无需概念级视觉返修。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "back-design-10-old",
+      "pairId": "back-design-10",
+      "variant": "old",
+      "file": "back-design-10-old-65b863f9-c8b5-4112-8f91-763671bd96af-1.png",
+      "sha256": "494a053914a2eab98fed68a1dfd539d9c56d3edbc3366787a7adfafedf2c2c32",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "REDO",
+      "evidenceState": "REJECTED",
+      "observations": [
+        "米色短袖后背轮廓及长度大体保持。"
+      ],
+      "failures": [
+        "简洁背部出现无依据的大白菱形与单侧横线，不来自前图，也未被文字授权。"
+      ],
+      "correctionBrief": "删除新增菱形装饰及其横线，保持简洁背面和原参考风格。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "pattern-colorway-01-new",
+      "pairId": "pattern-colorway-01",
+      "variant": "new",
+      "file": "pattern-colorway-01-new-ab738087-4d42-455a-bc36-1d23748d4fc0-1.png",
+      "sha256": "ed6e2d9f74fb96fdc5627ed88fe2ab4f7d4857037263def97ed4ed483da8774d",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "STOP AND DIAGNOSE",
+      "evidenceState": "REJECTED",
+      "observations": [
+        "柔和陶土花瓣与淡米黄花心，六瓣五点保留。"
+      ],
+      "failures": [
+        "原透明背景变成全不透明黑底；只读像素确认0透明像素。",
+        "图案外围轮廓有轻微重绘，不能视为精确换色。"
+      ],
+      "correctionBrief": "先修正alpha输出链；从原透明图进行只改色处理，保留轮廓与五点位置。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ],
+      "alpha": {
+        "method": "read-only decoded pixel RGBA",
+        "width": 1024,
+        "height": 1024,
+        "minAlpha": 255,
+        "transparentPixels": 0,
+        "partialPixels": 0
+      }
+    },
+    {
+      "caseId": "pattern-colorway-01-old",
+      "pairId": "pattern-colorway-01",
+      "variant": "old",
+      "file": "pattern-colorway-01-old-981b9d08-6847-4590-853b-d208a1cfbdd9-1.png",
+      "sha256": "b81417e1269f17e1c6e4db03c77df2432870d7a20ce2df80cf0bf933107beadd",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "STOP AND DIAGNOSE",
+      "evidenceState": "REJECTED",
+      "observations": [
+        "改为芥末黄、奶油花心，六瓣五点保留。"
+      ],
+      "failures": [
+        "原透明背景变成全不透明黑底；只读像素确认0透明像素。",
+        "图案外围轮廓有轻微重绘，不能视为精确换色。"
+      ],
+      "correctionBrief": "先修正alpha输出链；从原透明图进行只改色处理，保留轮廓与五点位置。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ],
+      "alpha": {
+        "method": "read-only decoded pixel RGBA",
+        "width": 1024,
+        "height": 1024,
+        "minAlpha": 255,
+        "transparentPixels": 0,
+        "partialPixels": 0
+      }
+    },
+    {
+      "caseId": "pattern-colorway-02-new",
+      "pairId": "pattern-colorway-02",
+      "variant": "new",
+      "file": "pattern-colorway-02-new-cbfb52e3-901f-42a1-883e-59d770974068-1.png",
+      "sha256": "37cf094723ad2b49e8b1963a73e1d0959d3597ec72ac57469b3cef5085fffafe",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "STOP AND DIAGNOSE",
+      "evidenceState": "REJECTED",
+      "observations": [
+        "四片叶与单茎保留；色板采用灰蓝和奶油色方向。"
+      ],
+      "failures": [
+        "灰白棋盘格是烘焙进RGB的实体背景；与明确“透明背景保持透明”相违背。",
+        "外轮廓线和叶片主体合成同色，原线稿层次弱化。"
+      ],
+      "correctionBrief": "先检查并修复RGBA透明输出，禁止绘制棋盘格代替alpha；回到原四叶图保留原轮廓、脉线与位置只改色。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ],
+      "alpha": {
+        "method": "read-only decoded pixel RGBA",
+        "width": 1024,
+        "height": 1024,
+        "minAlpha": 255,
+        "transparentPixels": 0,
+        "partialPixels": 0,
+        "required": true
+      }
+    },
+    {
+      "caseId": "pattern-colorway-02-old",
+      "pairId": "pattern-colorway-02",
+      "variant": "old",
+      "file": "pattern-colorway-02-old-d1a1ba97-237e-4a74-a9ee-ff1824082cb7-1.png",
+      "sha256": "e5642baf5b86f3ff3a7bfa3323ae44fc8e09205fe4e360686f543ad20a9a3f70",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "STOP AND DIAGNOSE",
+      "evidenceState": "REJECTED",
+      "observations": [
+        "四片叶与单茎保留；色板采用灰蓝和奶油色方向。"
+      ],
+      "failures": [
+        "灰白棋盘格是烘焙进RGB的实体背景；与明确“透明背景保持透明”相违背。"
+      ],
+      "correctionBrief": "先检查并修复RGBA透明输出，禁止绘制棋盘格代替alpha；回到原四叶图保留原轮廓、脉线与位置只改色。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ],
+      "alpha": {
+        "method": "read-only decoded pixel RGBA",
+        "width": 1024,
+        "height": 1024,
+        "minAlpha": 255,
+        "transparentPixels": 0,
+        "partialPixels": 0,
+        "required": true
+      }
+    },
+    {
+      "caseId": "pattern-colorway-03-new",
+      "pairId": "pattern-colorway-03",
+      "variant": "new",
+      "file": "pattern-colorway-03-new-9fa6ffcb-a349-412d-b870-d7524a652cf0-1.png",
+      "sha256": "95f6da668a5f86d4a5be587ee038d98c2a25bcdcfb72f5c38027cd3378dc6632",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "PASS",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "原图的针织带状布局、中央几何、左侧布褶均可识别。",
+        "配色改为第二图的米色/棕色/奶油色关系，没有引入衬衫外形、口袋或纽扣。",
+        "深棕菱形与浅棕大几何分区较清楚。"
+      ],
+      "failures": [],
+      "correctionBrief": "无需概念级视觉返修；若用于精确图案换色，需本地逐色替换核验。",
+      "unverified": [
+        "220px源图的细小单元/逐针位置与输出未做像素级等值验证。",
+        "HEX与实物印染色差未验证。"
+      ]
+    },
+    {
+      "caseId": "pattern-colorway-03-old",
+      "pairId": "pattern-colorway-03",
+      "variant": "old",
+      "file": "pattern-colorway-03-old-b0c6578b-b79e-493a-8542-1ed232095ff6-1.png",
+      "sha256": "d825fb2f10f5e6e53e1d487d61be5981e5abdd589fd54ae402e04ca1728d4411",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "PASS",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "原图的针织带状布局、中央几何、左侧布褶均可识别。",
+        "配色改为第二图的米色/棕色/奶油色关系，没有引入衬衫外形、口袋或纽扣。",
+        "同棕色映射使部分相邻几何的色彩分离较弱。"
+      ],
+      "failures": [],
+      "correctionBrief": "无需概念级视觉返修；若用于精确图案换色，需本地逐色替换核验。",
+      "unverified": [
+        "220px源图的细小单元/逐针位置与输出未做像素级等值验证。",
+        "HEX与实物印染色差未验证。"
+      ]
+    },
+    {
+      "caseId": "pattern-colorway-04-new",
+      "pairId": "pattern-colorway-04",
+      "variant": "new",
+      "file": "pattern-colorway-04-new-6086a729-d307-44a7-bd84-b75f0d3680e3-1.png",
+      "sha256": "ff2ea202c30ef19477aa551a6740b565167b9986a466d93c9bef378aeddae772",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "STOP AND DIAGNOSE",
+      "evidenceState": "REJECTED",
+      "observations": [
+        "六瓣及五个花心圆点保留；主体采用暖色改色。"
+      ],
+      "failures": [
+        "输出把棋盘格烘焙成 RGB 背景，没有保留透明通道。",
+        "背景棋盘格还出现不规则波浪/密度变化，造成额外视觉伪影。"
+      ],
+      "correctionBrief": "隔离此输出，不作新参考；核实图像模型与资产管线的真实 alpha 支持，再用原始透明源图修复输出契约。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ],
+      "alpha": {
+        "minAlpha": 255,
+        "transparentPixels": 0,
+        "partialPixels": 0,
+        "width": 1024,
+        "height": 1024
+      }
+    },
+    {
+      "caseId": "pattern-colorway-04-old",
+      "pairId": "pattern-colorway-04",
+      "variant": "old",
+      "file": "pattern-colorway-04-old-66fb5215-2b26-42d8-a6f5-df6ee86e1ea1-1.png",
+      "sha256": "693733bac11a959bfe18de22bdab0859c18106547599e788c696ec6c68d61979",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "STOP AND DIAGNOSE",
+      "evidenceState": "REJECTED",
+      "observations": [
+        "六瓣及五个花心圆点保留；主体采用暖色改色。"
+      ],
+      "failures": [
+        "输出把棋盘格烘焙成 RGB 背景，没有保留透明通道。"
+      ],
+      "correctionBrief": "隔离此输出，不作新参考；核实图像模型与资产管线的真实 alpha 支持，再用原始透明源图修复输出契约。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ],
+      "alpha": {
+        "minAlpha": 255,
+        "transparentPixels": 0,
+        "partialPixels": 0,
+        "width": 1024,
+        "height": 1024
+      }
+    },
+    {
+      "caseId": "pattern-colorway-05-new",
+      "pairId": "pattern-colorway-05",
+      "variant": "new",
+      "file": "pattern-colorway-05-new-4797cd63-6f27-44f0-95d5-12fe460d7e26-1.png",
+      "sha256": "2e7e1d523b6034d2ca9b2fa6bd57745fb5398181b7c5c69fe9a9b2bf5b10d998",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "STOP AND DIAGNOSE",
+      "evidenceState": "REJECTED",
+      "observations": [
+        "四叶数量保留；可见陶土色叶块。"
+      ],
+      "failures": [
+        "透明背景被整幅深蓝填充。",
+        "叶缘轮廓、枝茎与背景融合，茎和深色轮廓可读性丢失。"
+      ],
+      "correctionBrief": "保留透明背景并将深蓝限定于原轮廓与枝茎，禁止填背景或吞没结构。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ],
+      "alpha": {
+        "minAlpha": 255,
+        "transparentPixels": 0,
+        "partialPixels": 0
+      }
+    },
+    {
+      "caseId": "pattern-colorway-05-old",
+      "pairId": "pattern-colorway-05",
+      "variant": "old",
+      "file": "pattern-colorway-05-old-94915d3d-6b7d-4b20-ac50-beaabb3e9dc9-1.png",
+      "sha256": "8fad4b1278e0aa237feee56c5efc3e89fc47ab635062e0f1e212ef6994205c45",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "STOP AND DIAGNOSE",
+      "evidenceState": "REJECTED",
+      "observations": [
+        "四叶及枝茎可识别；使用深蓝与陶土色。"
+      ],
+      "failures": [
+        "透明底变不透明黑底；原外围深色轮廓还被改成同色阴影。"
+      ],
+      "correctionBrief": "保留原 alpha、轮廓和茎叶结构，只替换已有色块；先核实透明管线。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ],
+      "alpha": {
+        "minAlpha": 255,
+        "transparentPixels": 0,
+        "partialPixels": 0
+      }
+    },
+    {
+      "caseId": "pattern-colorway-06-new",
+      "pairId": "pattern-colorway-06",
+      "variant": "new",
+      "file": "pattern-colorway-06-new-875fd785-b410-4164-88ea-25949b32d1af-1.png",
+      "sha256": "cccdd7cbadaf0ca6b5ae0a7f012d8b4090d60fa44aaca0154aaa388c5d71b7d7",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "PASS",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "针织实拍裁片和几何条带保留，改为来自米色衣图的棕/奶油色体系。",
+        "未引入第二张参考的服装结构。"
+      ],
+      "failures": [],
+      "correctionBrief": "无需概念级返修；生产用色号及小针格需另核。",
+      "unverified": [
+        "仅可验证整体几何和配色方向；220px 源图的每个针格及实物色值未验证。"
+      ]
+    },
+    {
+      "caseId": "pattern-colorway-06-old",
+      "pairId": "pattern-colorway-06",
+      "variant": "old",
+      "file": "pattern-colorway-06-old-85dfde54-2606-42f2-9db6-22b67cd66f9a-1.png",
+      "sha256": "1a0562bd35411a3c2732aa6b6dba1deda2570a3b72f96ae361321e2a00d69fbd",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "PASS",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "针织实拍裁片和几何条带保留，改为来自米色衣图的棕/奶油色体系。",
+        "未引入第二张参考的服装结构。"
+      ],
+      "failures": [],
+      "correctionBrief": "无需概念级返修；生产用色号及小针格需另核。",
+      "unverified": [
+        "仅可验证整体几何和配色方向；220px 源图的每个针格及实物色值未验证。"
+      ]
+    },
+    {
+      "caseId": "pattern-colorway-07-new",
+      "pairId": "pattern-colorway-07",
+      "variant": "new",
+      "file": "pattern-colorway-07-new-1294ee6a-66c0-42f4-812c-83d9f820e933-1.png",
+      "sha256": "bfa849416d64725bd5975378564f134a4af851bd4b63b6f7f24a0e368b00065f",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "STOP AND DIAGNOSE",
+      "evidenceState": "REJECTED",
+      "observations": [
+        "六瓣花、五点花心与完整主体保留。"
+      ],
+      "failures": [
+        "原透明底再次变不透明黑底；改色不能代替透明契约。"
+      ],
+      "correctionBrief": "隔离结果；核实 alpha 通道管线后从原透明源图修复，禁止继续以失败图作参考。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ],
+      "alpha": {
+        "minAlpha": 255,
+        "transparentPixels": 0,
+        "partialPixels": 0
+      }
+    },
+    {
+      "caseId": "pattern-colorway-07-old",
+      "pairId": "pattern-colorway-07",
+      "variant": "old",
+      "file": "pattern-colorway-07-old-c190a670-ae9a-4dbb-8b70-2a405d66a91f-1.png",
+      "sha256": "cd6e4f2c61ba6f2218fad3ae748b4dcedd4aa328575e538b46d12f357351f06e",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "STOP AND DIAGNOSE",
+      "evidenceState": "REJECTED",
+      "observations": [
+        "六瓣花、五点花心与完整主体保留。"
+      ],
+      "failures": [
+        "原透明底再次变不透明黑底；改色不能代替透明契约。"
+      ],
+      "correctionBrief": "隔离结果；核实 alpha 通道管线后从原透明源图修复，禁止继续以失败图作参考。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ],
+      "alpha": {
+        "minAlpha": 255,
+        "transparentPixels": 0,
+        "partialPixels": 0
+      }
+    },
+    {
+      "caseId": "pattern-colorway-08-new",
+      "pairId": "pattern-colorway-08",
+      "variant": "new",
+      "file": "pattern-colorway-08-new-b5bcf1af-4fdf-4aea-a2eb-3f0c8ffb568c-1.png",
+      "sha256": "2330bf887f8dcc5eed16f6ed823bb7d74aae05ef8a4d7d92473554d50e93e85b",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "STOP AND DIAGNOSE",
+      "evidenceState": "REJECTED",
+      "observations": [
+        "四叶数量与绿/奶油色方向正确。"
+      ],
+      "failures": [
+        "透明背景被烘焙棋盘格取代，alpha 全 255。",
+        "图案线边被重新绘制为轻微毛边，非原图严格保形。"
+      ],
+      "correctionBrief": "先解决真实透明通道；基于原轮廓仅置换色块，不烘焙预览网格或重画笔触。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ],
+      "alpha": {
+        "minAlpha": 255,
+        "transparentPixels": 0,
+        "partialPixels": 0
+      }
+    },
+    {
+      "caseId": "pattern-colorway-08-old",
+      "pairId": "pattern-colorway-08",
+      "variant": "old",
+      "file": "pattern-colorway-08-old-379b81ca-8101-4084-b829-fa7d709cad93-1.png",
+      "sha256": "a5b710477593ff71a7efbae264e0cb739d7067dd73f3859372a57288056ba2be",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "STOP AND DIAGNOSE",
+      "evidenceState": "REJECTED",
+      "observations": [
+        "四叶数量与绿/奶油色方向正确。"
+      ],
+      "failures": [
+        "透明背景被烘焙棋盘格取代，alpha 全 255。",
+        "图案线边被重新绘制为轻微毛边，非原图严格保形。"
+      ],
+      "correctionBrief": "先解决真实透明通道；基于原轮廓仅置换色块，不烘焙预览网格或重画笔触。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ],
+      "alpha": {
+        "minAlpha": 255,
+        "transparentPixels": 0,
+        "partialPixels": 0
+      }
+    },
+    {
+      "caseId": "pattern-colorway-09-new",
+      "pairId": "pattern-colorway-09",
+      "variant": "new",
+      "file": "pattern-colorway-09-new-20b46215-1d52-4eae-8a21-f1c7459e49e2-1.png",
+      "sha256": "ccf0ded8712818f1dfeb2deeb2e5749957aba2fe54feaa467aa6e94575e1d82b",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "PASS",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "几何条带与针织布面保留；棕/米色暖调方向正确。",
+        "配色参考没有被误用为服装结构。"
+      ],
+      "failures": [],
+      "correctionBrief": "无需概念级返修；生产用色及每针格对位另核。",
+      "unverified": [
+        "220px 来源只能支撑整体图案判断，不证明逐针位或真实色差。"
+      ]
+    },
+    {
+      "caseId": "pattern-colorway-09-old",
+      "pairId": "pattern-colorway-09",
+      "variant": "old",
+      "file": "pattern-colorway-09-old-44d6572f-aa01-41cf-b1eb-5623492adf6c-1.png",
+      "sha256": "f2588b9d359a4b55428a708cfa763c3953544cc7bc7b3904f5dce36fc1f4ef4e",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "PASS",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "几何条带与针织布面保留；棕/米色暖调方向正确。",
+        "配色参考没有被误用为服装结构。"
+      ],
+      "failures": [],
+      "correctionBrief": "无需概念级返修；生产用色及每针格对位另核。",
+      "unverified": [
+        "220px 来源只能支撑整体图案判断，不证明逐针位或真实色差。"
+      ]
+    },
+    {
+      "caseId": "pattern-colorway-10-new",
+      "pairId": "pattern-colorway-10",
+      "variant": "new",
+      "file": "pattern-colorway-10-new-f8b42093-45ea-4519-8ff9-f172ede4fa91-1.png",
+      "sha256": "c639f21506b1a9c8f2086413ac1ca80b819d0d490fb93951239543499fd9bbcd",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "STOP AND DIAGNOSE",
+      "evidenceState": "REJECTED",
+      "observations": [
+        "六瓣、五点花心和完整主体可辨。"
+      ],
+      "failures": [
+        "所谓透明背景实际是烘焙棋盘格，没有 alpha。"
+      ],
+      "correctionBrief": "不重复盲重试；从原透明源图解决模型输出/资产管线的 alpha 契约，失败结果隔离。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ],
+      "alpha": {
+        "minAlpha": 255,
+        "transparentPixels": 0,
+        "partialPixels": 0
+      }
+    },
+    {
+      "caseId": "pattern-colorway-10-old",
+      "pairId": "pattern-colorway-10",
+      "variant": "old",
+      "file": "pattern-colorway-10-old-5a0e5239-8915-45d2-b621-367f7ff238e4-1.png",
+      "sha256": "e2c9a01b9c8c7fd79f9724a0134139a5b31264c7482d31a50f55146eca4b5699",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "STOP AND DIAGNOSE",
+      "evidenceState": "REJECTED",
+      "observations": [
+        "六瓣、五点花心和完整主体可辨。"
+      ],
+      "failures": [
+        "所谓透明背景实际是烘焙棋盘格，没有 alpha。"
+      ],
+      "correctionBrief": "不重复盲重试；从原透明源图解决模型输出/资产管线的 alpha 契约，失败结果隔离。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ],
+      "alpha": {
+        "minAlpha": 255,
+        "transparentPixels": 0,
+        "partialPixels": 0
+      }
+    },
+    {
+      "caseId": "pattern-craft-01-new",
+      "pairId": "pattern-craft-01",
+      "variant": "new",
+      "file": "pattern-craft-01-new-a84a2c47-2410-49eb-838c-1e420b0b2027-1.png",
+      "sha256": "b2bf5484e48cdc7ba771d24facf2f4a699d46321fa3bbc9a207db9ee3d754bae",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "PASS",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "六瓣五点与细棕色脉线均清楚；珊瑚花瓣、黄色花心和棕边保留。",
+        "刺绣线迹位于棉布表面，边缘收口合理。"
+      ],
+      "failures": [],
+      "correctionBrief": "无需视觉返修；不代表真实针迹文件或可直接打样数据。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "pattern-craft-01-old",
+      "pairId": "pattern-craft-01",
+      "variant": "old",
+      "file": "pattern-craft-01-old-a4094978-0eb4-4d8d-996b-44ccc545c3d2-1.png",
+      "sha256": "87d6a924238030d2cee984c5ffbb84e3b8d5a48f38b2b15add4f4524ae98a195",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "MINOR REVISION",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "六瓣、五点、珊瑚/黄/棕配色保留；线迹与棉布组织清楚。"
+      ],
+      "failures": [
+        "部分花瓣原有细棕色脉线被同色针迹流向弱化，图案细线身份不够明确。"
+      ],
+      "correctionBrief": "保留现有刺绣效果，在每瓣原位置恢复清楚、细窄的棕色脉线；不加新纹样。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "pattern-craft-02-new",
+      "pairId": "pattern-craft-02",
+      "variant": "new",
+      "file": "pattern-craft-02-new-55d105da-d793-434e-b7bc-d864f4438c2e-1.png",
+      "sha256": "777d5bcd4c7285fc13fcf645ce4912485ee48804d29584ad0ef6e03d17516b9c",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "REDO",
+      "evidenceState": "REJECTED",
+      "observations": [
+        "四叶单茎和针织提花线圈仍可识别。"
+      ],
+      "failures": [
+        "右侧叶尖与下端茎被画幅裁掉；斜视近拍使完整图案边界不能核对。",
+        "超浅景深弱化部分图案边缘，偏离保持原形状与比例的核对用途。"
+      ],
+      "correctionBrief": "从原图重做完整俯视提花效果，四叶及茎端全部入画，保留边界留白与清晰线圈；不增加新图案。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "pattern-craft-02-old",
+      "pairId": "pattern-craft-02",
+      "variant": "old",
+      "file": "pattern-craft-02-old-3eea253f-5a09-46b9-b4ba-8b55737e768d-1.png",
+      "sha256": "284b9af367b5bd598af9900b95d288ef669f7e7a161fec91c5f34434f439a56b",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "PASS",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "四叶单茎、绿色主体与深色脉线以针织V形线圈表达。",
+        "图案与针织底面一体，符合提花模拟，没有额外图案。"
+      ],
+      "failures": [],
+      "correctionBrief": "无需视觉返修；黑色底布为未限定底色的方案选择，不证明真实组织图。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "pattern-craft-03-old",
+      "pairId": "pattern-craft-03",
+      "variant": "old",
+      "file": "pattern-craft-03-old-94e4b8c5-0f7e-403d-aba8-f25e55339a65-1.png",
+      "sha256": "11d43ce7c53e37b402deedc03db04d86a57f618104df9f78e95f7b58eb413968",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "PASS",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "原几何分区和奶油/深蓝/砖红/芥末色关系保留。",
+        "凸起密集绒圈/簇绒与帆布底面有区分，符合毛巾绣观感。"
+      ],
+      "failures": [],
+      "correctionBrief": "无需概念级视觉返修；真实绒圈、针法与打样参数需工厂另核。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "pattern-craft-04-new",
+      "pairId": "pattern-craft-04",
+      "variant": "new",
+      "file": "pattern-craft-04-new-831d2905-d8dd-44dd-a16a-34b0d55a7ab6-1.png",
+      "sha256": "e0e5235d3fee195415dffc1d44ee9816271cfb5b9f14914a92709fbc0e5dc2fa",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "PASS",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "六瓣花、五个花心圆点与暖色关系完整。",
+        "表面胶印膜层有轻微光泽，棉织物基底可见；未改成刺绣。"
+      ],
+      "failures": [],
+      "correctionBrief": "无需概念级返修；打样时另核胶浆厚度、牢度和真实布料。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "pattern-craft-04-old",
+      "pairId": "pattern-craft-04",
+      "variant": "old",
+      "file": "pattern-craft-04-old-5d1310cb-6f6e-4cf9-94ee-9260a6492489-1.png",
+      "sha256": "1300733d0d0517fa1b94180e0b280eba51426e6e5f902ec81e9abbcb79a97b06",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "PASS",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "六瓣花、五个花心圆点与暖色关系完整。",
+        "表面胶印膜层有轻微光泽，棉织物基底可见；未改成刺绣。"
+      ],
+      "failures": [],
+      "correctionBrief": "无需概念级返修；打样时另核胶浆厚度、牢度和真实布料。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "pattern-craft-05-new",
+      "pairId": "pattern-craft-05",
+      "variant": "new",
+      "file": "pattern-craft-05-new-b71a14fa-68fd-4a4b-bf6f-1ef82627bc65-1.png",
+      "sha256": "dc90dd10183b4f4b046d52ba93490e84da7a13ff24df8efe85cf457f7d34faee",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "PASS",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "四叶枝、深绿外轮廓及浅绿内部保持。",
+        "绣线方向与独立织物底面有区分，奶油色针织底面可见。"
+      ],
+      "failures": [],
+      "correctionBrief": "无需概念级返修；线材、密度和针织防变形需工厂打样。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "pattern-craft-05-old",
+      "pairId": "pattern-craft-05",
+      "variant": "old",
+      "file": "pattern-craft-05-old-de16104a-3544-48ab-9880-6ea0a3bf173c-1.png",
+      "sha256": "c98e973ba98159c7eda9b7570393589ef188e1d1e994d1e4b201f8af182c7806",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "PASS",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "四叶枝、深绿外轮廓及浅绿内部保持。",
+        "绣线方向与独立织物底面有区分，奶油色针织底面可见。"
+      ],
+      "failures": [],
+      "correctionBrief": "无需概念级返修；线材、密度和针织防变形需工厂打样。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "pattern-craft-06-new",
+      "pairId": "pattern-craft-06",
+      "variant": "new",
+      "file": "pattern-craft-06-new-acdf2815-9665-4b16-82bb-4201f1db47fe-1.png",
+      "sha256": "b90c46ba722eb24c2097d11625c2899737375504799857c97d4dca9f5c874378",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "PASS",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "原几何色区可辨，表现为交织经纬/提花式织物。",
+        "粗织帆布观感成立，没有误变成刺绣贴片。"
+      ],
+      "failures": [],
+      "correctionBrief": "无需概念级返修；真实提花组织和帆布克重必须另行工艺确认。",
+      "unverified": [
+        "仅评材质外观；不能由生成图证明真正织造组织、循环或可生产性。"
+      ]
+    },
+    {
+      "caseId": "pattern-craft-06-old",
+      "pairId": "pattern-craft-06",
+      "variant": "old",
+      "file": "pattern-craft-06-old-9d31bbc1-feed-4f70-8737-4499f9408b5d-1.png",
+      "sha256": "dbe01a9235be588851548bb2d575a61c22cf9d64602d801b96b58c42a81bd6f7",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "PASS",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "原几何色区可辨，表现为交织经纬/提花式织物。",
+        "粗织帆布观感成立，没有误变成刺绣贴片。"
+      ],
+      "failures": [],
+      "correctionBrief": "无需概念级返修；真实提花组织和帆布克重必须另行工艺确认。",
+      "unverified": [
+        "仅评材质外观；不能由生成图证明真正织造组织、循环或可生产性。"
+      ]
+    },
+    {
+      "caseId": "pattern-craft-07-new",
+      "pairId": "pattern-craft-07",
+      "variant": "new",
+      "file": "pattern-craft-07-new-09ffc644-e7cc-4bf6-871b-03bf03a5cf93-1.png",
+      "sha256": "f4482abf25d384bf50fdd1c197d27a22222c48bae9a437cd897ca3ba2d0af7d6",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "MINOR REVISION",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "六瓣、黄花心五点完整；绒圈体积符合毛巾绣，棉布底面可见。"
+      ],
+      "failures": [
+        "每片花瓣内原有的棕色细线消失，不能只靠绒圈纹理代替。"
+      ],
+      "correctionBrief": "保留毛巾绣主体，在六片花瓣内补回原棕色细线关系；不添加新装饰。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "pattern-craft-07-old",
+      "pairId": "pattern-craft-07",
+      "variant": "old",
+      "file": "pattern-craft-07-old-af5c6ad7-3223-4aef-9ded-1955ff8b538f-1.png",
+      "sha256": "c40580033c33e1a760409766abc34d645ce40b5b78fbbc5d2a9b749ed6717d41",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "MINOR REVISION",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "六瓣、黄花心五点完整；绒圈体积符合毛巾绣，棉布底面可见。"
+      ],
+      "failures": [
+        "每片花瓣内原有的棕色细线消失，不能只靠绒圈纹理代替。"
+      ],
+      "correctionBrief": "保留毛巾绣主体，在六片花瓣内补回原棕色细线关系；不添加新装饰。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "pattern-craft-08-new",
+      "pairId": "pattern-craft-08",
+      "variant": "new",
+      "file": "pattern-craft-08-new-9b2e7a10-4a16-4189-a884-2e76eee456cc-1.png",
+      "sha256": "fbf33aad258f90e5ef5d9a7ba23ebe66b5d43213005127a09a0788dd64d2e05e",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "PASS",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "四叶、深绿外轮廓与叶脉全部保留。",
+        "有胶印膜层和针织底面区分，未变绣线。"
+      ],
+      "failures": [],
+      "correctionBrief": "无需概念级返修；胶层厚度、弹性和牢度另需实测。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "pattern-craft-08-old",
+      "pairId": "pattern-craft-08",
+      "variant": "old",
+      "file": "pattern-craft-08-old-fe328ed1-6be9-4d2c-aa22-fa6fa44bb6d7-1.png",
+      "sha256": "e2a289b7dbb56030cc3e9be14c010c616da798529cd9aa19228ceec4651b27b2",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "MINOR REVISION",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "四叶与枝茎完整；针织底面与胶印光泽合理。"
+      ],
+      "failures": [
+        "源图深绿色外围轮廓大部分丢失，仅留下内部叶脉。"
+      ],
+      "correctionBrief": "在胶印色层里保留原外轮廓，不能因工艺模拟而删除色区。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "pattern-craft-09-new",
+      "pairId": "pattern-craft-09",
+      "variant": "new",
+      "file": "pattern-craft-09-new-e3376ea9-5c0c-4831-a008-410823bbc95c-1.png",
+      "sha256": "b3a0d988f5e89e9ad5b07f97b819f427c6f80f6fe9e565d33ebd6266a6545396",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "PASS",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "原四色几何条带可辨；绣线方向与凸起层次清晰。",
+        "底布是粗织帆布观感，与表面刺绣可区分。"
+      ],
+      "failures": [],
+      "correctionBrief": "无需概念级返修；实际针法、边界密度和生产绣花文件不由此图证明。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "pattern-craft-09-old",
+      "pairId": "pattern-craft-09",
+      "variant": "old",
+      "file": "pattern-craft-09-old-4fc4bd11-5ae9-4fcc-8d33-8937324c2e3d-1.png",
+      "sha256": "da5a4fc728a61b798c1b6a991e8ebd725319101e67dfc04c1e32df322a2a9508",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "PASS",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "原四色几何条带可辨；绣线方向与凸起层次清晰。",
+        "底布是粗织帆布观感，与表面刺绣可区分。"
+      ],
+      "failures": [],
+      "correctionBrief": "无需概念级返修；实际针法、边界密度和生产绣花文件不由此图证明。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "pattern-craft-10-new",
+      "pairId": "pattern-craft-10",
+      "variant": "new",
+      "file": "pattern-craft-10-new-316c1f34-8a3b-45f6-a1e2-aaa78277ad75-1.png",
+      "sha256": "42f1c5607640ad3d1fe7de1dc67f5b8911070e2b13aaf6c145670b42df6a410d",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "REDO",
+      "evidenceState": "REJECTED",
+      "observations": [
+        "提花/织造纹理和花朵主要配色可辨。"
+      ],
+      "failures": [
+        "斜视近景裁掉右下花瓣边缘，无法交付完整原图案或核对其外形。"
+      ],
+      "correctionBrief": "保留完整六瓣花在画内并留边，取消过近裁切；织物视角不能牺牲原图案完整性。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "pattern-craft-10-old",
+      "pairId": "pattern-craft-10",
+      "variant": "old",
+      "file": "pattern-craft-10-old-c603290c-a9c1-4fb7-950a-cc1de8a5bd78-1.png",
+      "sha256": "4657ee8fe21977c952b5b2bd6706af4f86c7cdea3adaea424ef8d7f241889736",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "PASS",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "六瓣、五点花心和花瓣细线完整。",
+        "织造纹理穿过色区，提花棉布观感成立。"
+      ],
+      "failures": [],
+      "correctionBrief": "无需概念级视觉返修；织造组织和真实材料参数另核。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "pattern-extract-01-new",
+      "pairId": "pattern-extract-01",
+      "variant": "new",
+      "file": "pattern-extract-01-new-0d696194-7404-4ab8-9a7a-891402aa1347-1.png",
+      "sha256": "aa88ba4814404a989d331d8266d2a31973a968356c37bbe6716e3466954683be",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "STOP AND DIAGNOSE",
+      "evidenceState": "REJECTED",
+      "observations": [
+        "六瓣花、五个花心点及大致比例保留。"
+      ],
+      "failures": [
+        "保留底色要求未满足：原透明区域被黑色烘焙。",
+        "实际RGBA全不透明；同组两次均丢失alpha。"
+      ],
+      "correctionBrief": "先查供应商透明输出支持及上传/保存是否摊平alpha，再从原始透明图恢复RGBA交付；不要以失败输出作参考。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ],
+      "alpha": {
+        "method": "read-only decoded pixel RGBA",
+        "width": 1024,
+        "height": 1024,
+        "minAlpha": 255,
+        "transparentPixels": 0,
+        "partialPixels": 0
+      }
+    },
+    {
+      "caseId": "pattern-extract-01-old",
+      "pairId": "pattern-extract-01",
+      "variant": "old",
+      "file": "pattern-extract-01-old-5ead785b-f001-4665-b4e5-bf4971aa444c-1.png",
+      "sha256": "c414d61bbc1207bed0d4247b8460088c2b1f3a4bf60943a673fba5f2d18d2609",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "STOP AND DIAGNOSE",
+      "evidenceState": "REJECTED",
+      "observations": [
+        "六瓣花、五个花心点及大致比例保留。"
+      ],
+      "failures": [
+        "保留底色要求未满足：原透明区域被白色烘焙。",
+        "实际RGBA全不透明；同组两次均丢失alpha。"
+      ],
+      "correctionBrief": "先查供应商透明输出支持及上传/保存是否摊平alpha，再从原始透明图恢复RGBA交付；不要以失败输出作参考。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ],
+      "alpha": {
+        "method": "read-only decoded pixel RGBA",
+        "width": 1024,
+        "height": 1024,
+        "minAlpha": 255,
+        "transparentPixels": 0,
+        "partialPixels": 0
+      }
+    },
+    {
+      "caseId": "pattern-extract-02-new",
+      "pairId": "pattern-extract-02",
+      "variant": "new",
+      "file": "pattern-extract-02-new-1c703f88-4a19-492e-92df-134261ee002c-1.png",
+      "sha256": "5d71870655d6cf13502508ef8ff03d0b9d10c30b212aa004ca2f61ad8ea8908d",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "PASS",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "四片叶、单茎及不对称排列保持，白底符合当前字段。",
+        "没有新增花朵、叶片、服装轮廓或自动循环。"
+      ],
+      "failures": [],
+      "correctionBrief": "无需视觉返修；这是一张白底栅格图，不代表矢量或无缝循环。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ],
+      "alpha": {
+        "method": "read-only decoded pixel RGBA",
+        "width": 1024,
+        "height": 1024,
+        "minAlpha": 255,
+        "transparentPixels": 0,
+        "partialPixels": 0,
+        "required": false
+      }
+    },
+    {
+      "caseId": "pattern-extract-02-old",
+      "pairId": "pattern-extract-02",
+      "variant": "old",
+      "file": "pattern-extract-02-old-dff0361b-5e79-44e0-8d53-183a22acfa35-1.png",
+      "sha256": "abec86aba21a671fe557cb7bdc2aaa3293b8b96baad9be608353071237dffba7",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "PASS",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "四片叶、单茎及不对称排列保持，白底符合当前字段。",
+        "没有新增花朵、叶片、服装轮廓或自动循环。"
+      ],
+      "failures": [],
+      "correctionBrief": "无需视觉返修；这是一张白底栅格图，不代表矢量或无缝循环。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ],
+      "alpha": {
+        "method": "read-only decoded pixel RGBA",
+        "width": 1024,
+        "height": 1024,
+        "minAlpha": 255,
+        "transparentPixels": 0,
+        "partialPixels": 0,
+        "required": false
+      }
+    },
+    {
+      "caseId": "pattern-extract-03-new",
+      "pairId": "pattern-extract-03",
+      "variant": "new",
+      "file": "pattern-extract-03-new-11ada841-e100-47ee-a423-b425f7c8a29d-1.png",
+      "sha256": "c013c406384c04ac3bffea1532ec69b80eeb96f1e08de3d16a60b02ae8bf2202",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "REDO",
+      "evidenceState": "REJECTED",
+      "observations": [
+        "输出为一枚独立深蓝/奶油/芥末几何图案。"
+      ],
+      "failures": [
+        "将参考中的相邻几何关系重组为完整八向雪花状图案，顶部/底部闭合菱形及内部白色形状与源可见图形不一致。",
+        "明显针织立体纹理保留，提取结果仍像新工艺徽章而非忠实图案整理。"
+      ],
+      "correctionBrief": "只分离指定可见单元，不把邻接纹样拼成完整对称新图案；不新增被裁切或不可见的连接。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "pattern-extract-03-old",
+      "pairId": "pattern-extract-03",
+      "variant": "old",
+      "file": "pattern-extract-03-old-577514a0-0b01-4a97-b82c-0d5950b08894-1.png",
+      "sha256": "8576eafc63eda9aa01ade44160b5c326be533e20868dd39c9400caba35119c3b",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "REDO",
+      "evidenceState": "REJECTED",
+      "observations": [
+        "原针织的深蓝/砖红/芥末配色和若干几何元素可识别。"
+      ],
+      "failures": [
+        "要求“单独图案”，结果保留整幅多行重复带状布局而非单一元素。",
+        "部分边界重复和几何小形被重新绘制，不是原图逐元素提取。"
+      ],
+      "correctionBrief": "明确只选原图中央清晰可见的单一几何单元，保持其实际边界；不补整条循环带、不扩展被裁切元素。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "pattern-extract-04-new",
+      "pairId": "pattern-extract-04",
+      "variant": "new",
+      "file": "pattern-extract-04-new-4b8803e7-f5d5-4335-adb9-1d1eec0c1cde-1.png",
+      "sha256": "f3e9de4829dacace2bd03c0e5619c69dd4fb3ee85ad549830c8cb11609cb82ec",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "STOP AND DIAGNOSE",
+      "evidenceState": "REJECTED",
+      "observations": [
+        "六瓣、五个花心圆点及主体轮廓可识别。"
+      ],
+      "failures": [
+        "源图透明底被改成不透明黑底。"
+      ],
+      "correctionBrief": "隔离此输出，不作新参考；核实图像模型与资产管线的真实 alpha 支持，再用原始透明源图修复输出契约。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ],
+      "alpha": {
+        "minAlpha": 255,
+        "transparentPixels": 0,
+        "partialPixels": 0,
+        "width": 1024,
+        "height": 1024
+      }
+    },
+    {
+      "caseId": "pattern-extract-04-old",
+      "pairId": "pattern-extract-04",
+      "variant": "old",
+      "file": "pattern-extract-04-old-e72da686-fedb-4c8a-9f2d-6d14713ada48-1.png",
+      "sha256": "e4ddb9a31464b80a86603797dec07275c17b84968297fb8d860ea8a857efbf97",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "STOP AND DIAGNOSE",
+      "evidenceState": "REJECTED",
+      "observations": [
+        "六瓣、五个花心圆点及主体轮廓可识别。"
+      ],
+      "failures": [
+        "源图透明底被改成不透明黑底。"
+      ],
+      "correctionBrief": "隔离此输出，不作新参考；核实图像模型与资产管线的真实 alpha 支持，再用原始透明源图修复输出契约。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ],
+      "alpha": {
+        "minAlpha": 255,
+        "transparentPixels": 0,
+        "partialPixels": 0,
+        "width": 1024,
+        "height": 1024
+      }
+    },
+    {
+      "caseId": "pattern-extract-05-new",
+      "pairId": "pattern-extract-05",
+      "variant": "new",
+      "file": "pattern-extract-05-new-616b980c-fc69-4c8e-8308-a4786e5bba79-1.png",
+      "sha256": "773096797e557de5f67a1152b169a62c47f8560212d0a4dc20e4b0b3878925f3",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "MINOR REVISION",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "四叶枝数量和大体连接位置正确，白底正确。"
+      ],
+      "failures": [
+        "原清晰平滑线边被重绘为颗粒/毛边，提取质量下降。"
+      ],
+      "correctionBrief": "从原始图案保留轮廓与细线；只清底，不引入笔触和毛边。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "pattern-extract-05-old",
+      "pairId": "pattern-extract-05",
+      "variant": "old",
+      "file": "pattern-extract-05-old-5788c1b5-2ac7-4554-8cbe-d0b85aa326ed-1.png",
+      "sha256": "36794ffd67bd0dc1c11eb2d8c4e5aa4a51ec98ecc01ffa1b35eac271cb67a9c3",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "PASS",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "四叶枝、非对称连接、深绿轮廓和白底均满足要求。",
+        "边缘清晰完整，无额外图案。"
+      ],
+      "failures": [],
+      "correctionBrief": "无需概念级视觉返修。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "pattern-extract-06-new",
+      "pairId": "pattern-extract-06",
+      "variant": "new",
+      "file": "pattern-extract-06-new-46382f63-32ba-4232-9d54-c403942d983b-1.png",
+      "sha256": "e6523a65da7e21048618a1ccb825658a6aeaea217917a4497018efc2c17e2d16",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "REDO",
+      "evidenceState": "REJECTED",
+      "observations": [
+        "使用了源图四种色系和横向几何带。"
+      ],
+      "failures": [
+        "中央黄色交点被深蓝点和重排的红色菱形取代，改变了原可见图案的相对位置与组合。",
+        "把完整可见图案提取变成重建相似重复纹样。"
+      ],
+      "correctionBrief": "按原可见裁片逐区保留位置关系，禁止推断重排循环；不确定边界保留裁切。",
+      "unverified": [
+        "源图仅 220px，细小针格和隐含循环未验证。"
+      ]
+    },
+    {
+      "caseId": "pattern-extract-06-old",
+      "pairId": "pattern-extract-06",
+      "variant": "old",
+      "file": "pattern-extract-06-old-40593b25-b17f-42da-9986-f5beb2a59de6-1.png",
+      "sha256": "c2cc1f0df60b8e95884033669f6306dc3870d6396e828b7c69d8b46222c9535c",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "MINOR REVISION",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "可见几何横条分层、主要图案与四色情况接近来源；白底外围正确。"
+      ],
+      "failures": [
+        "保留大量针织针目肌理，未完全成为清晰平面图案；边界几何存在局部重绘。"
+      ],
+      "correctionBrief": "保留原可见版面，不扩展不可见循环；去除材质肌理并核对几何边界。",
+      "unverified": [
+        "源图仅 220px，细小针格和隐含循环不能作为生产级精确恢复依据。"
+      ]
+    },
+    {
+      "caseId": "pattern-extract-07-new",
+      "pairId": "pattern-extract-07",
+      "variant": "new",
+      "file": "pattern-extract-07-new-ff8de2b4-3d58-4daa-b70e-448c419d7a4a-1.png",
+      "sha256": "4742cd10e298f3c2445b6fc64e5ab2d08dc2a19a575c19dcb31b72a9de28a5aa",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "STOP AND DIAGNOSE",
+      "evidenceState": "REJECTED",
+      "observations": [
+        "六瓣花、五点花心与完整主体保留。"
+      ],
+      "failures": [
+        "原透明底再次变不透明黑底。"
+      ],
+      "correctionBrief": "隔离结果；核实 alpha 通道管线后从原透明源图修复，禁止继续以失败图作参考。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ],
+      "alpha": {
+        "minAlpha": 255,
+        "transparentPixels": 0,
+        "partialPixels": 0
+      }
+    },
+    {
+      "caseId": "pattern-extract-07-old",
+      "pairId": "pattern-extract-07",
+      "variant": "old",
+      "file": "pattern-extract-07-old-8dc418b8-ff1a-400f-84c5-fecd1f2827b6-1.png",
+      "sha256": "a1c79b77f24558ef0cb9092093832bfaa0d3b31748a19cd365f447c4962b8c5d",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "STOP AND DIAGNOSE",
+      "evidenceState": "REJECTED",
+      "observations": [
+        "六瓣花、五点花心与完整主体保留。"
+      ],
+      "failures": [
+        "原透明底再次变不透明白底。"
+      ],
+      "correctionBrief": "隔离结果；核实 alpha 通道管线后从原透明源图修复，禁止继续以失败图作参考。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ],
+      "alpha": {
+        "minAlpha": 255,
+        "transparentPixels": 0,
+        "partialPixels": 0
+      }
+    },
+    {
+      "caseId": "pattern-extract-08-new",
+      "pairId": "pattern-extract-08",
+      "variant": "new",
+      "file": "pattern-extract-08-new-7ecb11f1-6529-472e-8d13-d141aa888b8b-1.png",
+      "sha256": "eca58ceb42bcda3d00db74f02e8cb394d5be5a84168299750cd5985f5aa70a48",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "PASS",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "四叶、弯曲枝茎、深绿细线及白底正确。",
+        "保持非对称叶序，没有新增叶或重复纹样。"
+      ],
+      "failures": [],
+      "correctionBrief": "无需概念级视觉返修；需要生产级精确路径时仍应沿原图描摹核对。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "pattern-extract-08-old",
+      "pairId": "pattern-extract-08",
+      "variant": "old",
+      "file": "pattern-extract-08-old-231b83d8-bf37-4631-becd-fe5278720212-1.png",
+      "sha256": "98273e50ae0a3bc580dbba1d8e8b50af1c69eb76938e3dda8e74f902909d6d5d",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "PASS",
+      "evidenceState": "reviewed-proposal",
+      "observations": [
+        "四叶、弯曲枝茎、深绿细线及白底正确。",
+        "保持非对称叶序，没有新增叶或重复纹样。"
+      ],
+      "failures": [],
+      "correctionBrief": "无需概念级视觉返修；需要生产级精确路径时仍应沿原图描摹核对。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "pattern-extract-09-new",
+      "pairId": "pattern-extract-09",
+      "variant": "new",
+      "file": "pattern-extract-09-new-af75c3de-a4f1-4c62-8c21-6582ac8d7fc2-1.png",
+      "sha256": "24425c775d38ed61198bb4addebbd759cb13de59519362eb605d94f346700671",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "STOP AND DIAGNOSE",
+      "evidenceState": "REJECTED",
+      "observations": [
+        "输出孤立的深蓝/奶油/芥末色几何纹样。"
+      ],
+      "failures": [
+        "重建了来源中没有完整出现的八向雪花状单元，并新增中央白色小菱形与周边补全。",
+        "重复 03 的推断补全，并非忠实单独图案提取。"
+      ],
+      "correctionBrief": "隔离重建图；回到原可见裁片，明确仅提取真实可见单元，不补不可见循环或重组邻近部件。",
+      "unverified": [
+        "220px 裁片的隐含循环未知；不允许把推断补全认作原稿事实。"
+      ]
+    },
+    {
+      "caseId": "pattern-extract-09-old",
+      "pairId": "pattern-extract-09",
+      "variant": "old",
+      "file": "pattern-extract-09-old-9ba86d6d-f202-4591-965d-8b883dad8f0d-1.png",
+      "sha256": "64685a95ee67aef72e8e908495b03af6c0a581d35d8db5d4f4c6998e6e48b979",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "STOP AND DIAGNOSE",
+      "evidenceState": "REJECTED",
+      "observations": [
+        "色系及多层几何条带近似来源。"
+      ],
+      "failures": [
+        "再次忽略单独图案模式，输出整幅多条带重复纹样；与 03 重复。"
+      ],
+      "correctionBrief": "先定义要提取的原可见单元，禁止整幅重复重绘；不确定单元须保持证据边界。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ]
+    },
+    {
+      "caseId": "pattern-extract-10-new",
+      "pairId": "pattern-extract-10",
+      "variant": "new",
+      "file": "pattern-extract-10-new-898aa98e-1022-491f-9a44-d41418d39bb1-1.png",
+      "sha256": "8506d34999b3a648e317bda2298878011db33eb3c1e73d34692e7d70e25c0ae5",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "STOP AND DIAGNOSE",
+      "evidenceState": "REJECTED",
+      "observations": [
+        "六瓣、五点花心和完整主体可辨。"
+      ],
+      "failures": [
+        "透明来源再次变不透明黑底。"
+      ],
+      "correctionBrief": "不重复盲重试；从原透明源图解决模型输出/资产管线的 alpha 契约，失败结果隔离。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ],
+      "alpha": {
+        "minAlpha": 255,
+        "transparentPixels": 0,
+        "partialPixels": 0
+      }
+    },
+    {
+      "caseId": "pattern-extract-10-old",
+      "pairId": "pattern-extract-10",
+      "variant": "old",
+      "file": "pattern-extract-10-old-3298298c-a274-4384-b48b-8ff609e2866e-1.png",
+      "sha256": "476c942514939cc367a2f8a81ebff86209a6332fa7d1fb39471e37308c13eb92",
+      "apiStatus": "success",
+      "viewedWith": "view_image",
+      "verdict": "STOP AND DIAGNOSE",
+      "evidenceState": "REJECTED",
+      "observations": [
+        "六瓣、五点花心和完整主体可辨。"
+      ],
+      "failures": [
+        "透明来源再次变不透明黑底。"
+      ],
+      "correctionBrief": "不重复盲重试；从原透明源图解决模型输出/资产管线的 alpha 契约，失败结果隔离。",
+      "unverified": [
+        "实物色差、尺寸与生产可行性未验证；仅评图像方案"
+      ],
+      "alpha": {
+        "minAlpha": 255,
+        "transparentPixels": 0,
+        "partialPixels": 0
+      }
+    }
+  ],
+  "pairs": [
+    {
+      "pairId": "accessory-design-01",
+      "result": "new_win",
+      "reason": "新版保留棕色纽扣观感，旧版误带入针织背景材质；低清压力例排除主比较。",
+      "inPrimaryComparison": false
+    },
+    {
+      "pairId": "accessory-design-02",
+      "result": "unresolved",
+      "reason": "新版 API failed，无可查看输出；旧版不作为相对胜出依据。且 72px 辅料素材已排除主比较。",
+      "inPrimaryComparison": false
+    },
+    {
+      "pairId": "accessory-design-03",
+      "result": "tie",
+      "reason": "旧版少一瓣，新版未改外缘；两者各有核心要求失败。",
+      "inPrimaryComparison": true
+    },
+    {
+      "pairId": "accessory-design-04",
+      "result": "old_win",
+      "reason": "两版都改动了参考叶枝数量；旧版额外修改更少，保留原布面背景，新版改为白底。",
+      "inPrimaryComparison": true
+    },
+    {
+      "pairId": "accessory-design-05",
+      "result": "tie",
+      "reason": "两版重复各自根本结构错误，均不可接受。",
+      "inPrimaryComparison": true
+    },
+    {
+      "pairId": "accessory-design-06",
+      "result": "old_win",
+      "reason": "旧版保留原背景且正确完成表面花纹；新版无必要改成白底。",
+      "inPrimaryComparison": true
+    },
+    {
+      "pairId": "accessory-design-07",
+      "result": "old_win",
+      "reason": "两版都少一叶；旧版至少同时应用绿叶表面纹样，新版还保留原几何纹样而未完成双重要求。",
+      "inPrimaryComparison": true
+    },
+    {
+      "pairId": "accessory-design-08",
+      "result": "old_win",
+      "reason": "旧版完成表面修改且保留背景；新版额外换白底。",
+      "inPrimaryComparison": true
+    },
+    {
+      "pairId": "accessory-design-09",
+      "result": "new_win",
+      "reason": "两版均不可交付，但新版至少守住两孔；旧版还把两孔改四孔并做错瓣数。",
+      "inPrimaryComparison": true
+    },
+    {
+      "pairId": "accessory-design-10",
+      "result": "old_win",
+      "reason": "两版都重绘叶枝，旧版额外变化较少并保留背景。",
+      "inPrimaryComparison": true
+    },
+    {
+      "pairId": "back-design-01",
+      "result": "tie",
+      "reason": "两者均满足简洁背面；横育克与无育克属于可接受推演差异。",
+      "inPrimaryComparison": true
+    },
+    {
+      "pairId": "back-design-02",
+      "result": "tie",
+      "reason": "两者均符合育克背面推演；不把额外方案差异当作原样真实性证明。",
+      "inPrimaryComparison": true
+    },
+    {
+      "pairId": "back-design-03",
+      "result": "tie",
+      "reason": "两者均正确呈现后中缝与背面方向。",
+      "inPrimaryComparison": true
+    },
+    {
+      "pairId": "back-design-04",
+      "result": "tie",
+      "reason": "两版均满足一道育克及单细褶；褶长差异在开放范围内。",
+      "inPrimaryComparison": true
+    },
+    {
+      "pairId": "back-design-05",
+      "result": "tie",
+      "reason": "两版均满足简洁完整后背设计，育克差异在授权范围内。",
+      "inPrimaryComparison": true
+    },
+    {
+      "pairId": "back-design-06",
+      "result": "new_win",
+      "reason": "新版没有旧版无依据的小菱形装饰，更符合简洁背部要求。",
+      "inPrimaryComparison": true
+    },
+    {
+      "pairId": "back-design-07",
+      "result": "tie",
+      "reason": "两版均满足明确育克及完整后背要求。",
+      "inPrimaryComparison": true
+    },
+    {
+      "pairId": "back-design-08",
+      "result": "tie",
+      "reason": "两版均符合中缝背部结构。",
+      "inPrimaryComparison": true
+    },
+    {
+      "pairId": "back-design-09",
+      "result": "tie",
+      "reason": "两版都满足育克和单细褶。",
+      "inPrimaryComparison": true
+    },
+    {
+      "pairId": "back-design-10",
+      "result": "new_win",
+      "reason": "新版避免旧版明显的无源菱形装饰，符合简洁要求。",
+      "inPrimaryComparison": true
+    },
+    {
+      "pairId": "pattern-colorway-01",
+      "result": "tie",
+      "reason": "配色方向各自可接受，但共同全不透明黑底使输出合同失败。",
+      "inPrimaryComparison": true
+    },
+    {
+      "pairId": "pattern-colorway-02",
+      "result": "tie",
+      "reason": "两者均烘焙棋盘格、无alpha；旧版线条层次较清楚，但均不满足交付合同。",
+      "inPrimaryComparison": true
+    },
+    {
+      "pairId": "pattern-colorway-03",
+      "result": "new_win",
+      "reason": "两者均未泄漏第二图服装结构；新版深浅几何色区分离更明确。",
+      "inPrimaryComparison": true
+    },
+    {
+      "pairId": "pattern-colorway-04",
+      "result": "tie",
+      "reason": "两版均违反透明输出契约；新版额外出现波浪棋盘格，仍不能把任一版本算通过。",
+      "inPrimaryComparison": true
+    },
+    {
+      "pairId": "pattern-colorway-05",
+      "result": "old_win",
+      "reason": "两版均失去透明底；旧版枝茎仍清楚，新版深色背景吞没枝茎。",
+      "inPrimaryComparison": true
+    },
+    {
+      "pairId": "pattern-colorway-06",
+      "result": "old_win",
+      "reason": "两版可用，旧版深浅区分更接近原纹样层次；新版中央大色区合并为近色，识别性稍弱。",
+      "inPrimaryComparison": true
+    },
+    {
+      "pairId": "pattern-colorway-07",
+      "result": "tie",
+      "reason": "两版均不透明黑底；不能只凭暖色色相计通过。",
+      "inPrimaryComparison": true
+    },
+    {
+      "pairId": "pattern-colorway-08",
+      "result": "tie",
+      "reason": "配色可辨但两版均是烘焙棋盘格，核心透明要求失败。",
+      "inPrimaryComparison": true
+    },
+    {
+      "pairId": "pattern-colorway-09",
+      "result": "tie",
+      "reason": "两版均保留整体纹样并完成可接受暖色改色；未做生产级色值判断。",
+      "inPrimaryComparison": true
+    },
+    {
+      "pairId": "pattern-colorway-10",
+      "result": "tie",
+      "reason": "两版均烘焙棋盘格，非透明图案。",
+      "inPrimaryComparison": true
+    },
+    {
+      "pairId": "pattern-craft-01",
+      "result": "new_win",
+      "reason": "新版细棕色脉线保留更清楚，旧版需要局部补线。",
+      "inPrimaryComparison": true
+    },
+    {
+      "pairId": "pattern-craft-02",
+      "result": "old_win",
+      "reason": "旧版完整保留四叶与茎，提花清楚；新版右叶与茎端裁切。",
+      "inPrimaryComparison": true
+    },
+    {
+      "pairId": "pattern-craft-03",
+      "result": "unresolved",
+      "reason": "新版 uncertain 且无输出，只能记录旧版 PASS，不能判断新旧相对优劣。",
+      "inPrimaryComparison": true
+    },
+    {
+      "pairId": "pattern-craft-04",
+      "result": "tie",
+      "reason": "两版均有完整正确图案及胶印观感，视角不同不构成必要优劣。",
+      "inPrimaryComparison": true
+    },
+    {
+      "pairId": "pattern-craft-05",
+      "result": "tie",
+      "reason": "两版均忠实四叶枝并有合适刺绣及针织底面观感。",
+      "inPrimaryComparison": true
+    },
+    {
+      "pairId": "pattern-craft-06",
+      "result": "tie",
+      "reason": "两版均体现要求的织造观感与原配色图案。",
+      "inPrimaryComparison": true
+    },
+    {
+      "pairId": "pattern-craft-07",
+      "result": "tie",
+      "reason": "两版毛巾绣观感均好，但都漏掉原花瓣内细线，均需局部返修。",
+      "inPrimaryComparison": true
+    },
+    {
+      "pairId": "pattern-craft-08",
+      "result": "new_win",
+      "reason": "新版完整保留深绿轮廓，旧版遗漏外围深色线。",
+      "inPrimaryComparison": true
+    },
+    {
+      "pairId": "pattern-craft-09",
+      "result": "tie",
+      "reason": "两版均有正确刺绣/帆布区分与原几何配色。",
+      "inPrimaryComparison": true
+    },
+    {
+      "pairId": "pattern-craft-10",
+      "result": "old_win",
+      "reason": "旧版完整保留花朵；新版裁掉右下花瓣。",
+      "inPrimaryComparison": true
+    },
+    {
+      "pairId": "pattern-extract-01",
+      "result": "tie",
+      "reason": "两者均丢失源alpha，均未通过；新版黑底不能当透明改善。",
+      "inPrimaryComparison": true
+    },
+    {
+      "pairId": "pattern-extract-02",
+      "result": "tie",
+      "reason": "两者均保留四叶结构并按字段输出白底。",
+      "inPrimaryComparison": true
+    },
+    {
+      "pairId": "pattern-extract-03",
+      "result": "tie",
+      "reason": "旧版未按单独图案输出，新版重组并新增单元；两者均不能作为忠实提取。",
+      "inPrimaryComparison": true
+    },
+    {
+      "pairId": "pattern-extract-04",
+      "result": "tie",
+      "reason": "两版同样失败：透明源图变不透明黑底。",
+      "inPrimaryComparison": true
+    },
+    {
+      "pairId": "pattern-extract-05",
+      "result": "old_win",
+      "reason": "旧版线边更清晰；新版引入毛边颗粒，不利于忠实提取。",
+      "inPrimaryComparison": true
+    },
+    {
+      "pairId": "pattern-extract-06",
+      "result": "old_win",
+      "reason": "旧版虽残留针目但可见主布局更接近来源；新版重新排列中央几何。",
+      "inPrimaryComparison": true
+    },
+    {
+      "pairId": "pattern-extract-07",
+      "result": "tie",
+      "reason": "两版主体成立但透明契约均失败。",
+      "inPrimaryComparison": true
+    },
+    {
+      "pairId": "pattern-extract-08",
+      "result": "tie",
+      "reason": "两版均完整保留四叶枝并正确输出白底。",
+      "inPrimaryComparison": true
+    },
+    {
+      "pairId": "pattern-extract-09",
+      "result": "tie",
+      "reason": "旧版忽略单独模式，新版臆造完整单元，两版均根本失败。",
+      "inPrimaryComparison": true
+    },
+    {
+      "pairId": "pattern-extract-10",
+      "result": "tie",
+      "reason": "两版同样不透明黑底，核心输出契约失败。",
+      "inPrimaryComparison": true
+    }
+  ],
+  "pending": [
+    {
+      "caseId": "accessory-design-02-new",
+      "apiStatus": "failed",
+      "requestId": "pq:visual-v1:accessory-design-02-new:0",
+      "visualVerdict": null,
+      "reason": "没有成功输出可查看；不赋视觉 PASS/REDO，也不补发任务。"
+    },
+    {
+      "caseId": "pattern-craft-03-new",
+      "apiStatus": "uncertain",
+      "requestId": "pq:visual-v1:pattern-craft-03-new:0",
+      "visualVerdict": null,
+      "reason": "没有成功输出可查看；不赋视觉 PASS/REDO，也不补发任务。"
+    }
+  ],
+  "completedAt": "2026-10-25",
+  "summary": {
+    "expectedImages": 100,
+    "reviewedImages": 98,
+    "unreviewableApiRecords": 2,
+    "pairs": 50,
+    "primaryPairs": 48,
+    "verdicts": {
+      "PASS": 45,
+      "REDO": 12,
+      "MINOR REVISION": 13,
+      "STOP AND DIAGNOSE": 28
+    },
+    "oldVerdicts": {
+      "REDO": 6,
+      "MINOR REVISION": 7,
+      "STOP AND DIAGNOSE": 14,
+      "PASS": 23
+    },
+    "newVerdicts": {
+      "PASS": 22,
+      "REDO": 6,
+      "MINOR REVISION": 6,
+      "STOP AND DIAGNOSE": 14
+    },
+    "allComparisons": {
+      "new_win": 7,
+      "unresolved": 2,
+      "tie": 30,
+      "old_win": 11
+    },
+    "primaryComparisons": {
+      "tie": 30,
+      "old_win": 11,
+      "new_win": 6,
+      "unresolved": 1
+    },
+    "alphaContractFailures": 22,
+    "perScene": [
+      {
+        "scene": "back-design",
+        "old": {
+          "PASS": 8,
+          "MINOR REVISION": 1,
+          "REDO": 1
+        },
+        "new": {
+          "PASS": 10
+        },
+        "pairs": {
+          "tie": 8,
+          "new_win": 2
+        }
+      },
+      {
+        "scene": "pattern-extract",
+        "old": {
+          "STOP AND DIAGNOSE": 5,
+          "PASS": 3,
+          "REDO": 1,
+          "MINOR REVISION": 1
+        },
+        "new": {
+          "STOP AND DIAGNOSE": 5,
+          "PASS": 2,
+          "REDO": 2,
+          "MINOR REVISION": 1
+        },
+        "pairs": {
+          "tie": 8,
+          "old_win": 2
+        }
+      },
+      {
+        "scene": "pattern-colorway",
+        "old": {
+          "STOP AND DIAGNOSE": 7,
+          "PASS": 3
+        },
+        "new": {
+          "STOP AND DIAGNOSE": 7,
+          "PASS": 3
+        },
+        "pairs": {
+          "tie": 7,
+          "new_win": 1,
+          "old_win": 2
+        }
+      },
+      {
+        "scene": "accessory-design",
+        "old": {
+          "REDO": 4,
+          "MINOR REVISION": 2,
+          "STOP AND DIAGNOSE": 2,
+          "PASS": 2
+        },
+        "new": {
+          "PASS": 1,
+          "REDO": 2,
+          "MINOR REVISION": 4,
+          "STOP AND DIAGNOSE": 2
+        },
+        "pairs": {
+          "tie": 2,
+          "old_win": 5,
+          "new_win": 1
+        }
+      },
+      {
+        "scene": "pattern-craft",
+        "old": {
+          "MINOR REVISION": 3,
+          "PASS": 7
+        },
+        "new": {
+          "PASS": 6,
+          "REDO": 2,
+          "MINOR REVISION": 1
+        },
+        "pairs": {
+          "new_win": 2,
+          "old_win": 2,
+          "unresolved": 1,
+          "tie": 5
+        }
+      }
+    ],
+    "alphaCheckedImages": 24
+  },
+  "conclusion": "在本批次后五场景中，新版并未表现为全面优于旧版。背面生成更少无源装饰；部分工艺细线保留改善。但透明输出契约两版均失败，辅料形状与纹样分工仍存在根本错误，个别工艺近景裁切退化。相对胜出不等于视觉验收通过。",
+  "diagnostics": [
+    {
+      "issue": "transparent-background-contract",
+      "evidence": "22 张要求保留源 alpha 的成功 API 输出，alpha 均为 255，含纯色或烘焙棋盘格。",
+      "cause": "当前证据证明交付产物不透明；未定位是模型能力、供应商参数还是资产管线，不能仅归咎提示词。",
+      "next": "回到原 PNG 检查输入/供应商原始字节与落盘字节的 alpha；先解决格式契约，不继续盲生成。"
+    },
+    {
+      "issue": "accessory-mode-and-count",
+      "evidence": "高清 03/05/09 的新版均保持圆扣外缘而非六瓣；07 两版四叶变三叶；09 旧版两孔变四孔。",
+      "cause": "视觉表现符合表面纹样优先而外形/连接约束失效；需要逐项对照编译提示词和图像行为。",
+      "next": "将外边界、表面纹样、连接孔分别列为硬性验收；失败图禁止作为新参考。"
+    },
+    {
+      "issue": "extraction-reconstruction-leakage",
+      "evidence": "针织单独图案 03/09 新版推断成完整雪花单元，旧版输出整幅多带纹样；06 新版重排中央关系。",
+      "cause": "低分辨率且裁片缺乏明确独立单元，不能把隐含循环推断当提取事实。",
+      "next": "明确可见单元/裁切边界；没有证据的部分不补全，必要时报告不足。"
+    },
+    {
+      "issue": "craft-framing-and-detail",
+      "evidence": "毛巾绣 07 两版漏花瓣内细线；新版 02/10 的近景裁切破坏完整图案。",
+      "cause": "工艺渲染/产品摄影风格压过结构完整性。",
+      "next": "规定全图案留边、六瓣/四叶完整，细线保留后再表达工艺。"
+    }
+  ],
+  "duplicateInputGroups": [
+    [
+      "back-design-01",
+      "back-design-05"
+    ],
+    [
+      "pattern-extract-01",
+      "pattern-extract-07"
+    ],
+    [
+      "pattern-colorway-01",
+      "pattern-colorway-07"
+    ],
+    [
+      "pattern-extract-02",
+      "pattern-extract-08"
+    ],
+    [
+      "pattern-extract-03",
+      "pattern-extract-09"
+    ],
+    [
+      "pattern-colorway-03",
+      "pattern-colorway-09"
+    ],
+    [
+      "accessory-design-03",
+      "accessory-design-05",
+      "accessory-design-09"
+    ],
+    [
+      "pattern-extract-04",
+      "pattern-extract-10"
+    ],
+    [
+      "pattern-colorway-04",
+      "pattern-colorway-10"
+    ],
+    [
+      "accessory-design-04",
+      "accessory-design-10"
+    ],
+    [
+      "back-design-06",
+      "back-design-10"
+    ],
+    [
+      "accessory-design-06",
+      "accessory-design-08"
+    ]
+  ]
+}

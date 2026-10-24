@@ -4,10 +4,14 @@ import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type Canvas
 import type { CanvasGenerationResult } from "@/pages/canvas/canvas-shared-generation-runtime";
 import { resolveImageWorkflow } from "./canvas-image-workflow";
 
-export const defaultImageSequenceSteps: [string, string][] = [
-    ["抠成白底", "提取图片中的服装，去除人物、衣架和原背景，完整呈现服装，改为纯白背景。保留服装原有版型、颜色、面料、图案和所有细节，不添加文字。"],
-    ["改成紫色", "仅将上一步图片中服装的主体颜色改为紫色，保留版型、面料纹理、缝线、图案和辅料细节，保持纯白背景，不改变服装结构。"],
-    ["模特上身", "让一位真实成人模特穿着上一步图片中的这件紫色服装。严格保留紫色、款式结构、面料和细节，穿着自然合体，正面全身，简洁摄影棚背景，真实服装摄影，不添加文字。"],
+export type WorkflowStepType = "white_bg" | "recolor" | "on_model" | "detail_shot" | "scene" | "custom";
+export type ImageSequenceStep = [title: string, instruction: string, stepType?: WorkflowStepType];
+export const imageSequenceStepTypes: { value: WorkflowStepType; label: string }[] = [
+    { value: "white_bg", label: "白底图" }, { value: "recolor", label: "换色" }, { value: "on_model", label: "模特上身" },
+    { value: "detail_shot", label: "细节图" }, { value: "scene", label: "场景展示" }, { value: "custom", label: "自定义" },
+];
+export const defaultImageSequenceSteps: ImageSequenceStep[] = [
+    ["抠成白底", "服装白底产品图", "white_bg"], ["改成紫色", "服装主体改成紫色", "recolor"], ["模特上身", "成人模特，正面全身，摄影棚", "on_model"],
 ];
 type Graph = { nodes: CanvasNodeData[]; connections: CanvasConnection[] };
 type Sequence = NonNullable<CanvasNodeGroup["imageSequence"]>;
@@ -15,13 +19,13 @@ const hasImage = (node?: CanvasNodeData) => node?.type === CanvasNodeType.Image 
 export const imageSequencePrompt = (node: CanvasNodeData) => (node.metadata?.composerContent ?? node.metadata?.prompt ?? "").replace(/@\[node:[^\]]+\]/g, "").trim();
 
 /** A shortcut for building the same ordinary nodes and wires that users can draw manually. */
-export function createImageSequence(source: CanvasNodeData, steps: readonly (readonly [string, string])[], position: Position, model?: string, makeId = nanoid) {
+export function createImageSequence(source: CanvasNodeData, steps: readonly Readonly<ImageSequenceStep>[], position: Position, model?: string, makeId = nanoid) {
     if (!hasImage(source)) throw new Error("请选择一张已加载的图片");
     if (!steps.length || steps.length > 10 || steps.some(([title, prompt]) => !title.trim() || !prompt.trim())) throw new Error("请填写 1–10 个步骤的名称和提示词");
-    const nodes: CanvasNodeData[] = steps.map(([title, prompt], index) => ({
+    const nodes: CanvasNodeData[] = steps.map(([title, prompt, stepType = "custom"], index) => ({
         ...NODE_DEFAULT_SIZE[CanvasNodeType.Config], id: makeId(), type: CanvasNodeType.Config,
         title: `${index + 1}. ${title.trim()}`, position: { x: position.x + index * (NODE_DEFAULT_SIZE[CanvasNodeType.Config].width + 160), y: position.y },
-        metadata: { status: "idle", generationMode: "image", generationType: "edit", configImageInputMode: "combined", model, count: 1, prompt: prompt.trim(), composerContent: prompt.trim() },
+        metadata: { status: "idle", generationMode: "image", generationType: "edit", configImageInputMode: "combined", model, count: 1, promptInput: { scene: "workflow-step", fields: { step_type: stepType, instruction: prompt.trim() }, userText: prompt.trim(), referenceRoles: ["上游步骤输出图"], mode: "edit" }, prompt: prompt.trim(), composerContent: prompt.trim() },
     }));
     const group: CanvasNodeGroup = { id: `group-${makeId()}`, title: "连续改图", nodeIds: nodes.map(node => node.id), collapsed: false,
         imageSequence: { sourceNodeId: source.id, status: "idle", steps: nodes.map((node, index) => ({ configNodeId: node.id, inputConfigId: nodes[index - 1]?.id, status: "idle" })) } };

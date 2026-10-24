@@ -1,0 +1,46 @@
+{
+  "scope": "Root agent real browser image-page and canvas quick-generate checks against isolated synthetic SQLite service",
+  "apiBase": "http://127.0.0.1:3100",
+  "webBase": "http://127.0.0.1:5188",
+  "mocked": false,
+  "imageSubmissionCount": 2,
+  "optimizationSubmissionCount": 2,
+  "actualProviderCost": null,
+  "cases": [
+    {
+      "entry": "image-page",
+      "taskId": "30560977-8b9e-49ce-a03e-9bb3a0ab5455",
+      "requestId": "0Ly_ojZi7XaK_OqzTAXwk:0",
+      "actions": [
+        "One-click optimize returned Chinese",
+        "Manually edited the returned text",
+        "Generated once",
+        "Refreshed and selected history to restore input"
+      ],
+      "status": "success",
+      "optimizedFlagAtGeneration": false,
+      "visiblePromptMatchedSubmittedPrompt": true,
+      "note": "User edit invalidated the compiled snapshot as expected; final Chinese text was sent verbatim without hidden translation."
+    },
+    {
+      "entry": "canvas-quick-generate",
+      "taskId": "230d98ce-238b-4481-a0ef-2087ccdfff01",
+      "requestId": "0GqnOjSMiItN3uw_Q_qtp:0",
+      "canvasId": "gvEGpGWmZinPcdLPfIYnh",
+      "actions": [
+        "Created own empty QA canvas",
+        "One-click optimized cream V-neck vest brief",
+        "Generated unchanged optimized text once",
+        "Reloaded QA canvas"
+      ],
+      "status": "success",
+      "optimizedFlagAtGeneration": true,
+      "visiblePromptMatchedSubmittedPrompt": true,
+      "note": "No existing employee project was used. Image appeared in the QA canvas."
+    }
+  ],
+  "limitations": [
+    "This is an observed UI/HTTP check, not a screenshot-only claim or a general visual-quality approval.",
+    "Formal employee isolation and cross-device behavior are separate acceptance items."
+  ]
+}

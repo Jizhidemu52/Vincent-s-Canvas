@@ -115,6 +115,23 @@ bun run dev
 
 Vite 会把 `/api` 代理到 `http://localhost:3100`，因此还需要启动 API、Worker、PostgreSQL 和 Redis。模型 Base URL 与 API Key 由超级管理员在后台配置，设计师端没有密钥弹窗。
 
+## 提示词配方初始化与维护
+
+正式服务先执行数据库迁移，再显式导入用户提供的配方。以下命令在 `server/` 执行，`DATABASE_URL` 只通过服务端环境提供，`--model` 必须使用该数据库内已启用的文字模型配置 UUID：
+
+```bash
+bun scripts/import-prompt-recipes.ts --file "../docs/manual/prompt-optimization/无线画布-板块系统提示词（机密）.md" --dry-run
+bun scripts/import-prompt-recipes.ts --file "../docs/manual/prompt-optimization/无线画布-板块系统提示词（机密）.md" --model TEXT_MODEL_CONFIG_UUID --activate
+```
+
+本机演示改为增加 `--sqlite ABSOLUTE_DEMO_STATE_PATH`；必须与演示服务的 `DEMO_STATE_PATH` 一致。默认端口使用 `DEMO_PORT`，不是正式 API 的 `PORT`。导入共 18 组配方，展开跨章节引用；相同内容不重复建版本，已有设置和已激活版本不被再次导入覆盖。不要将 API Key、数据库密码或账号凭据写入命令、前端或仓库。
+
+超级管理员页为 `/admin/prompt-recipes`。`POST /api/prompt-compilations` 只返回安全结果，`GET /api/prompt-compilations/by-request/:requestId` 查询本人原请求；任务提交可附 `promptInput`，必需场景由服务端执行，不能依靠浏览器最终提示词绕过。批量优化使用第一项代表图一次扩写，逐项图片仍为独立任务。响应丢失先查扩写和原任务，不能用新请求编号自动再付费。
+
+管理接口位于 `/api/admin/prompt-recipes`，包括版本、激活、测试、诊断和统计，要求当前超级管理员会话并使用 `no-store`。独立对话和画布助手的规则正文不再由前端构造；启用私有 profile 时先缓冲并校验完整输出，再返回安全内容及必要的协议续接信息，不把未校验的流式规则输出展示给设计师。普通无 profile 对话保持既有行为。
+
+原始两份需求文档按项目所有者明确要求收录源码；原文的“不进仓库”备注保留作来源记录，不代表本项目仍承诺仓库级保密。运行时权限隔离、前端包检查和输出泄漏检查依然适用。
+
 ## 质量检查
 
 仓库根目录可运行 `bun run dev` 同时启动演示 API 和 Vite；`Ctrl+C` 关闭本次子进程，不终止已存在的其他服务。根目录 `bun run check` 统一运行 Biome、两端构建和测试；前端构建会重新生成 `web/dist`。首次分别安装根目录、`server` 与 `web` 的锁定依赖，或使用 README 中的启动入口。下列命令可用于单独检查。

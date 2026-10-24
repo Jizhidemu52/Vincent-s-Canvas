@@ -49,15 +49,10 @@ describe("creative design presets", () => {
         expect(getCreativePreset("text-to-style")!.prompt).not.toMatch(/连衣裙|衬衫|夹克|西装|圆领|长袖/);
     });
 
-    test("concept presets preserve important production and unseen-content boundaries", () => {
-        for (const preset of creativePresets.filter((item) => item.prompt)) {
-            expect(preset.prompt).toContain("概念");
-            expect(preset.prompt).toMatch(/不是.*生产|不保证.*生产/);
+    test("client presets contain public input examples, not scene authoring recipes", () => {
+        for (const preset of creativePresets.filter(item => item.prompt)) {
+            expect(preset.prompt!.length).toBeLessThan(30);
+            expect(preset.prompt).not.toMatch(/不宣称|不保证|必须|任务：/);
         }
-        expect(getCreativePreset("back-design")!.prompt).toContain("不宣称还原原款真实背面");
-        expect(getCreativePreset("style-to-sketch")!.prompt).toContain("不增加看不见的结构");
-        expect(getCreativePreset("pattern-extract")!.prompt).toContain("不要把遮挡或缺失区域当作已知原稿");
-        expect(getCreativePreset("pattern-colorway")!.prompt).toContain("不保证精确色值");
-        expect(getCreativePreset("pattern-craft")!.prompt).toContain("不承诺真实工艺可行性");
     });
 });

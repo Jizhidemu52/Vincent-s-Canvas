@@ -29,6 +29,8 @@ export type RecipeBranch = {
     images: ReferenceImage[];
     error: string;
     selected: boolean;
+    optimizing?: boolean;
+    optimized?: boolean;
 };
 export type RecipeRun = { id: string; ownerId: string; createdAt: string; form: RecipeForm; references: ReferenceImage[]; settings: RecipeSettings; branches: RecipeBranch[] };
 export type RecipeProject = { version: 1; kind: "series-recipe"; ownerId: string; form: RecipeForm; references: ReferenceImage[]; settings: RecipeSettings; run?: RecipeRun };
@@ -68,18 +70,9 @@ export function recipeSettings(config: Partial<AiConfig>): RecipeSettings {
     return { model: String(config.model || ""), imageModel: String(config.imageModel || config.model || ""), size: String(config.size || "auto"), quality: String(config.quality || "auto"), count: "1", imageOptions: String(config.imageOptions || "") };
 }
 
-export function buildRecipePrompt(form: RecipeForm, index: number, hasMotif: boolean) {
-    const color = form.palette[index]!;
-    return [
-        `系列设计：${form.series || "未命名系列"}。这是第 ${index + 1} 个独立候选，只输出一张完整产品效果图。`,
-        "参考图 1 是产品底图，负责产品形状、结构、材质、原始构图与背景。",
-        form.kind === "structure"
-            ? `编辑范围：产品的主体面料颜色。目标屏幕近似色：${color.name}，HEX ${color.hex.toUpperCase()}。保持立体光影和面料纹理；不要把背景、皮肤、辅料或其他物体一起改色。这不是实物色卡匹配。`
-            : `${hasMotif ? "参考图 2 仅提供图案内容，不提供产品结构或背景。将该图案应用到参考图 1 的产品上。" : "只使用底图中已有的图案，不新增未经提供的图案、文字或品牌；若底图无图案，遵循用户设计方向，不擅自杜撰标识。"} 本候选定位：${form.positions[index]}。图案随产品的透视、褶皱和材质自然融合。`,
-        `必须保留：${form.constraints || "保持未指定修改的区域不变"}。`,
-        `用户设计方向：${form.prompt || "自然、协调、适合产品展示"}`,
-        "保持同系列视觉一致性。不要添加色卡、说明文字、水印或拼图，不输出对比板。",
-    ].join("\n\n");
+export function recipePromptInput(form: RecipeForm, index: number, hasMotif: boolean): import("../../../../shared/prompt-contracts").PromptInputData {
+    return { scene: "series-recipe", fields: { ...copy(form), variantIndex: index, hasMotif }, userText: form.prompt,
+        referenceRoles: ["产品底图", ...(hasMotif ? ["图案参考图"] : [])], mode: "edit" };
 }
 
 export function createRecipeRun(ownerId: string, form: RecipeForm, references: ReferenceImage[], config: Partial<AiConfig>): RecipeRun {
@@ -96,7 +89,7 @@ export function createRecipeRun(ownerId: string, form: RecipeForm, references: R
         branches: Array.from({ length: 1 }, (_, index) => ({
             id: `variant-${index + 1}`,
             index,
-            prompt: buildRecipePrompt(frozenForm, index, frozenRefs.length > 1),
+            prompt: frozenForm.prompt,
             status: "waiting",
             attempts: 0,
             taskIds: [],
@@ -180,6 +173,9 @@ export class SeriesRecipeRunner {
                     this.controller.signal.throwIfAborted();
                     const outputs = await this.deps.generate({ ...this.config, ...this.run.settings, count: "1" }, branch.prompt, this.run.references, undefined, {
                         tool: "series-recipe",
+                        promptInput: recipePromptInput(this.run.form, branch.index, this.run.references.length > 1),
+                        onOptimizing: () => { branch.optimizing = true; void this.emit(); },
+                        onCompiled: (prompt, optimized) => { branch.prompt = prompt; branch.optimized = optimized; branch.optimizing = false; void this.emit(); },
                         operationType: "inpaint",
                         requestId: branch.requestId,
                         signal: this.controller.signal,
@@ -202,12 +198,14 @@ export class SeriesRecipeRunner {
                     if (!outputs.length) throw new Error("任务未返回图片，请查询原任务");
                     branch.images = outputs.map((output, index) => ({ id: output.id, dataUrl: output.dataUrl, name: `候选 ${branch.index + 1}-${index + 1}`, type: "image/png" }));
                     branch.status = "success";
+                    branch.optimizing = false;
                     branch.selected = true;
                 } catch (error) {
                     if (!this.current()) break;
                     const task = (error as { task?: QueuedTask })?.task;
-                    branch.status = task?.status === "failed" ? "failed" : task?.status === "cancelled" ? "cancelled" : branch.submissionStarted || branch.taskIds.length ? "uncertain" : this.controller.signal.aborted ? "cancelled" : "failed";
+                    branch.status = (error as { submissionRejected?: boolean })?.submissionRejected ? "failed" : task?.status === "failed" ? "failed" : task?.status === "cancelled" ? "cancelled" : branch.submissionStarted || branch.taskIds.length ? "uncertain" : this.controller.signal.aborted ? "cancelled" : "failed";
                     branch.error = message(error);
+                    branch.optimizing = false;
                 }
                 await this.emit();
                 // Old imported projects may contain multiple waiting branches. Each
@@ -236,6 +234,7 @@ export class SeriesRecipeRunner {
                 try {
                     const task = await this.deps.query(branch.taskIds, branch.requestId, this.controller.signal);
                     if (!this.current()) break;
+                    if (task?.prompt) { branch.prompt = task.prompt; branch.optimized = task.optimized; }
                     if (!task) {
                         branch.error = "暂未查到原任务，仍保留请求标识；请稍后核查，不要重复提交。";
                     } else {
@@ -323,7 +322,8 @@ export function parseRecipeProject(value: unknown, ownerId: string, portable = f
             return {
                 id: `variant-${index + 1}`,
                 index,
-                prompt: string(branch.prompt, 10000),
+                prompt: string(branch.prompt, 20000),
+                optimized: branch.optimized === true,
                 status,
                 attempts: Number.isSafeInteger(branch.attempts) ? Math.max(0, Math.min(Number(branch.attempts), 9999)) : 0,
                 requestId: sameOwner ? string(branch.requestId, 200) || undefined : undefined,

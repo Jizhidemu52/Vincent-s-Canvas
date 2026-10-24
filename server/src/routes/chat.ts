@@ -13,17 +13,21 @@ import { beginChatBilling, ChatStreamOutcome, finishChatBilling } from "../chat-
 import { getCreditsEnabled } from "../credit-policy";
 import { deploymentFeatures } from "../deployment-features";
 import { DuplicateJsonKeyError, parseStrictJson } from "../strict-json";
+import { chatPromptProfiles, prepareChatProfileInput, validateChatProfileOutput, type ChatPromptProfile } from "../prompt-chat-profiles";
+import { PromptOptimizationError } from "../prompt-safety";
 
 type ResponseContent = { type: "input_text"; text: string } | { type: "input_image"; image_url: string };
-type ResponseInput =
+export type ResponseInput =
     | { role: "system" | "user" | "assistant"; content: string | ResponseContent[] }
     | { type: "claude_assistant"; content: Array<Record<string, unknown>> }
     | { type: "responses_assistant"; output: Array<Record<string, unknown>> }
     | { type: "function_call"; call_id: string; name: string; arguments: string; thoughtSignature?: string }
     | { type: "function_call_output"; call_id: string; output: string };
-type ResponseTool = { type: "function"; name: string; description?: string; parameters: Record<string, unknown>; strict?: boolean };
+export type ResponseTool = { type: "function"; name: string; description?: string; parameters: Record<string, unknown>; strict?: boolean };
 type ToolCall = { id: string; type: "function"; function: { name: string; arguments: string }; thoughtSignature?: string };
-type ChatCompletionResult = { content: string; toolCalls: ToolCall[]; stopReason?: string; claudeAssistantContent?: Array<Record<string, unknown>>; responsesOutputItems?: Array<Record<string, unknown>> };
+export type ChatCompletionUsage = { inputTokens?: number; outputTokens?: number; actualCost?: number; currency?: string };
+export type ChatCompletionResult = { content: string; toolCalls: ToolCall[]; stopReason?: string; claudeAssistantContent?: Array<Record<string, unknown>>; responsesOutputItems?: Array<Record<string, unknown>>; usage?: ChatCompletionUsage };
+export type ChatCompletionInput = { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown; webSearch?: boolean; gemini?: { maxOutputTokens: number }; claude?: { stream?: boolean; thinking?: boolean; maxTokens?: number }; privateProfile?: boolean };
 type ChatModel = { model_id: string; base_url: string; protocol: string; encrypted_credentials: string | null };
 /** Shared by explicit administrator analysis selection and the execution adapter. */
 export const CHAT_COMPLETION_PROTOCOLS = ["openai", "custom", "apimart", "gemini", "anthropic", "openai-chat"] as const;
@@ -47,6 +51,8 @@ const schema = z.object({
     requestId: z.string().min(8).max(160).regex(/^[a-zA-Z0-9:_-]+$/).optional(),
     modelId: z.string().min(1).max(200).optional(),
     toolKey: z.string().min(1).max(100).optional(),
+    profile: z.enum(chatPromptProfiles).optional(),
+    profileContext: z.record(z.string(), z.unknown()).optional(),
     input: z.array(z.unknown()).max(200),
     tools: chatFunctionToolsSchema,
     toolChoice: z.unknown().optional(),
@@ -81,7 +87,12 @@ function chatErrorMetadata(error: unknown) {
     return metadata;
 }
 
-export function createChatRouter(db: Database, config: AppConfig) {
+export type ChatRouterOptions = {
+    loadProfileRules?: (profile: ChatPromptProfile, actor: AuthenticatedRequest["auth"]) => Promise<string>;
+    validateProfileOutput?: (result: ChatCompletionResult, privateRules: readonly string[]) => void | Promise<void>;
+};
+
+export function createChatRouter(db: Database, config: AppConfig, options: ChatRouterOptions = {}) {
     const router = Router();
     const features = deploymentFeatures(config);
 
@@ -97,10 +108,12 @@ export function createChatRouter(db: Database, config: AppConfig) {
         const disconnected = () => Boolean(response.destroyed || request.aborted || socket?.destroyed
             || (hadRemoteAddress && !socket.remoteAddress));
         try {
-            const input = schema.parse(request.body) as {
+            const parsed = schema.parse(request.body) as {
                 requestId?: string;
                 modelId?: string;
                 toolKey?: string;
+                profile?: ChatPromptProfile;
+                profileContext?: Record<string, unknown>;
                 input: ResponseInput[];
                 tools: ResponseTool[];
                 toolChoice?: unknown;
@@ -108,9 +121,10 @@ export function createChatRouter(db: Database, config: AppConfig) {
                 gemini?: { maxOutputTokens: number };
                 claude?: { stream?: boolean; thinking?: boolean; maxTokens?: number };
             };
-            const execution = await resolveToolExecution(db, { ...input, operationType: "chat" });
-
             const actor = (request as unknown as AuthenticatedRequest).auth;
+            const prepared = await prepareChatProfileInput(parsed, options.loadProfileRules ? profile => options.loadProfileRules!(profile, actor) : undefined);
+            const input = prepared.input;
+            const execution = await resolveToolExecution(db, { ...input, operationType: "chat" });
             const result = await db.query<ChatModel>(
                 `SELECT m.model_id,p.base_url,p.protocol,p.encrypted_credentials
                  FROM model_configs m JOIN providers p ON p.id=m.provider_id
@@ -137,7 +151,8 @@ export function createChatRouter(db: Database, config: AppConfig) {
             });
             if (disconnected()) throw new ChatProtocolError("CHAT_REQUEST_CANCELLED", "对话请求已中断，本次不扣积分");
             if (features.authenticationEnabled && !(request as AuthenticatedRequest).allowsAnonymousCreation) {
-                usageRequestId = await beginUsageChat(db, { userId: actor.id, modelConfigId: execution.modelConfigId, boardKey: execution.toolKey, input: input.input });
+                // Runtime rules never enter chat history/usage previews.
+                usageRequestId = await beginUsageChat(db, { userId: actor.id, modelConfigId: execution.modelConfigId, boardKey: execution.toolKey, input: parsed.input });
             }
             providerInFlight = true;
             if (isClaudeMessagesModel(model) && input.claude?.stream) {
@@ -179,8 +194,12 @@ export function createChatRouter(db: Database, config: AppConfig) {
                 response.end();
                 return;
             }
-            const resultPayload = await requestChatCompletion(model, credentials, input);
+            let resultPayload = await requestChatCompletion(model, credentials, input);
             providerInFlight = false;
+            if (prepared.privateRules.length) {
+                resultPayload = validateChatProfileOutput(resultPayload, prepared.privateRules);
+                await options.validateProfileOutput?.(resultPayload, prepared.privateRules);
+            }
             if (!resultPayload.content.trim() && !resultPayload.toolCalls.length) throw new ChatProtocolError("CHAT_RESPONSE_EMPTY", "模型未返回有效回复，本次不扣积分");
             if (usageRequestId) await finishUsageChat(db, usageRequestId, disconnected() ? "interrupted" : "success");
 
@@ -197,7 +216,8 @@ export function createChatRouter(db: Database, config: AppConfig) {
             // usage write must still follow the held-reservation refund path.
             await finishChatBilling(db, billingReservationId, !disconnected());
             billingReservationId = null;
-            response.json(resultPayload);
+            const { usage: _internalUsage, ...publicPayload } = resultPayload;
+            response.json(publicPayload);
         } catch (error) {
             if (billingReservationId) await finishChatBilling(db, billingReservationId, false).catch((releaseError) => {
                 const { code, name } = chatErrorMetadata(releaseError);
@@ -226,6 +246,10 @@ export function createChatRouter(db: Database, config: AppConfig) {
                 response.status(504).json({ error: "CHAT_REQUEST_TIMEOUT", message: CHAT_REQUEST_TIMEOUT_MESSAGE });
                 return;
             }
+            if (error instanceof PromptOptimizationError) {
+                response.status(error.status).json({ error: error.code, message: error.message });
+                return;
+            }
             if (diagnostics) {
                 const notSubmitted = diagnostics.phase === "initial_tls" || diagnostics.phase === "preflight";
                 next(new ChatProtocolError("UPSTREAM_REQUEST_FAILED", notSubmitted
@@ -249,7 +273,7 @@ export function createChatRouter(db: Database, config: AppConfig) {
 export async function requestChatCompletion(
     model: ChatModel,
     credentials: Record<string, string>,
-    input: { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown; webSearch?: boolean; gemini?: { maxOutputTokens: number }; claude?: { stream?: boolean; thinking?: boolean; maxTokens?: number } },
+    input: ChatCompletionInput,
 ): Promise<ChatCompletionResult> {
     if (!(CHAT_COMPLETION_PROTOCOLS as readonly string[]).includes(model.protocol)) throw new ChatProtocolError("PROTOCOL_NOT_SUPPORTED", "当前对话入口暂不支持该 Provider 协议");
     const usesResponses = model.protocol === "openai" || model.protocol === "custom" || (model.protocol === "apimart" && model.model_id === "gpt-6-astra");
@@ -267,7 +291,7 @@ export async function requestChatCompletion(
 async function requestClaudeCompletion(
     model: ChatModel,
     credentials: Record<string, string>,
-    input: { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown; webSearch?: boolean; claude?: { stream?: boolean; thinking?: boolean; maxTokens?: number } },
+    input: ChatCompletionInput,
 ) {
     const upstream = await fetchProviderSubmission(claudeMessagesUrl(model.base_url), {
         method: "POST",
@@ -275,7 +299,7 @@ async function requestClaudeCompletion(
         body: JSON.stringify({ model: model.model_id, ...buildClaudeMessagesRequest(input, { modelId: model.model_id, maxTokens: input.claude?.maxTokens || 2048, thinking: input.claude?.thinking }) }),
         signal: AbortSignal.timeout(180000),
     });
-    if (!upstream.ok) throw await upstreamError("Claude Provider", upstream, model.protocol === "apimart");
+    if (!upstream.ok) throw await upstreamError("Claude Provider", upstream, model.protocol === "apimart" || input.privateProfile);
     return readClaudeResponse(await readNativeChatPayload(upstream) as ClaudeResponse);
 }
 
@@ -416,6 +440,7 @@ export function readClaudeResponse(body: ClaudeResponse): ChatCompletionResult {
         }] : []),
         ...(hasTools ? { claudeAssistantContent: body.content } : {}),
         ...(body.stop_reason ? { stopReason: body.stop_reason } : {}),
+        ...usageResult(body, "anthropic"),
     };
 }
 
@@ -441,7 +466,7 @@ function toClaudeToolChoice(value: unknown) {
 async function requestOpenAiCompletion(
     model: ChatModel,
     credentials: Record<string, string>,
-    input: { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown; webSearch?: boolean },
+    input: ChatCompletionInput,
 ): Promise<ChatCompletionResult> {
     const responseInput = input.input.flatMap((item): Array<Record<string, unknown>> => {
         if (!("type" in item)) return [item];
@@ -464,7 +489,7 @@ async function requestOpenAiCompletion(
         }),
         signal: AbortSignal.timeout(180000),
     });
-    if (!upstream.ok) throw await upstreamError("对话 Provider", upstream, model.protocol === "apimart");
+    if (!upstream.ok) throw await upstreamError("对话 Provider", upstream, model.protocol === "apimart" || input.privateProfile);
     if (model.protocol === "apimart") return readApiMartResponses(await readApiMartChatPayload(upstream));
 
     const body = await upstream.json() as {
@@ -490,7 +515,7 @@ async function requestOpenAiCompletion(
             function: { name: item.name!, arguments: item.arguments || "{}" },
             ...(item.thoughtSignature ? { thoughtSignature: item.thoughtSignature } : {}),
         }));
-    return { content, toolCalls };
+    return { content, toolCalls, ...usageResult(body) };
 }
 
 function invalidApiMartChatResponse() {
@@ -512,7 +537,11 @@ async function readApiMartChatPayload(upstream: Response): Promise<Record<string
     if (envelope.error || (envelope.code !== undefined && envelope.code !== 200)) throw invalidApiMartChatResponse();
     const body = envelope.data ?? envelope;
     if (!body || typeof body !== "object" || Array.isArray(body) || (body as Record<string, unknown>).error) throw invalidApiMartChatResponse();
-    return body as Record<string, unknown>;
+    return { ...(body as Record<string, unknown>),
+        ...(body !== envelope && !Object.prototype.hasOwnProperty.call(body, "usage") && envelope.usage ? { usage: envelope.usage } : {}),
+        ...(body !== envelope && !Object.prototype.hasOwnProperty.call(body, "actual_cost") && envelope.actual_cost !== undefined ? { actual_cost: envelope.actual_cost } : {}),
+        ...(body !== envelope && !Object.prototype.hasOwnProperty.call(body, "currency") && envelope.currency !== undefined ? { currency: envelope.currency } : {}),
+    };
 }
 
 function readApiMartChatChoices(body: Record<string, unknown>): ChatCompletionResult {
@@ -531,7 +560,7 @@ function readApiMartChatChoices(body: Record<string, unknown>): ChatCompletionRe
     const content = choice.message.content || "";
     const toolCalls = choice.message.tool_calls || [];
     if (!content.trim() && !toolCalls.length) throw invalidApiMartChatResponse();
-    return { content, toolCalls, ...(choice.finish_reason ? { stopReason: choice.finish_reason } : {}) };
+    return { content, toolCalls, ...(choice.finish_reason ? { stopReason: choice.finish_reason } : {}), ...usageResult(body) };
 }
 
 function readApiMartResponses(body: Record<string, unknown>): ChatCompletionResult {
@@ -562,13 +591,14 @@ function readApiMartResponses(body: Record<string, unknown>): ChatCompletionResu
     if (!content.trim() && !toolCalls.length) throw invalidApiMartChatResponse();
     return { content, toolCalls, stopReason: toolCalls.length ? "tool_calls" : "stop",
         ...(toolCalls.length && checked.data.output ? { responsesOutputItems: checked.data.output } : {}),
+        ...usageResult(body),
     };
 }
 
 async function requestOpenAiChatCompletion(
     model: ChatModel,
     credentials: Record<string, string>,
-    input: { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown },
+    input: ChatCompletionInput,
 ): Promise<ChatCompletionResult> {
     type Message = { role: string; content: unknown; tool_calls?: ToolCall[]; tool_call_id?: string };
     const messages: Message[] = [];
@@ -606,17 +636,17 @@ async function requestOpenAiChatCompletion(
         }),
         signal: AbortSignal.timeout(180000),
     });
-    if (!upstream.ok) throw await upstreamError("Chat Completions Provider", upstream, model.protocol === "apimart");
+    if (!upstream.ok) throw await upstreamError("Chat Completions Provider", upstream, model.protocol === "apimart" || input.privateProfile);
     if (model.protocol === "apimart") return readApiMartChatChoices(await readApiMartChatPayload(upstream));
     const body = await upstream.json() as { choices?: Array<{ message?: { content?: string | null; tool_calls?: ToolCall[] }; finish_reason?: string }> };
     const choice = body.choices?.[0];
-    return { content: choice?.message?.content || "", toolCalls: choice?.message?.tool_calls || [], ...(choice?.finish_reason ? { stopReason: choice.finish_reason } : {}) };
+    return { content: choice?.message?.content || "", toolCalls: choice?.message?.tool_calls || [], ...(choice?.finish_reason ? { stopReason: choice.finish_reason } : {}), ...usageResult(body) };
 }
 
 async function requestGeminiCompletion(
     model: ChatModel,
     credentials: Record<string, string>,
-    input: { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown; webSearch?: boolean; gemini?: { maxOutputTokens: number } },
+    input: ChatCompletionInput,
 ) {
     const upstream = await fetchProviderSubmission(buildGeminiGenerateUrl(model.base_url, model.model_id), {
         method: "POST",
@@ -624,9 +654,9 @@ async function requestGeminiCompletion(
         body: JSON.stringify(buildGeminiRequestBody(input)),
         signal: AbortSignal.timeout(180000),
     });
-    if (!upstream.ok) throw await upstreamError("Gemini Provider", upstream);
+    if (!upstream.ok) throw await upstreamError("Gemini Provider", upstream, input.privateProfile);
 
-    return readGeminiResponse(await readNativeChatPayload(upstream) as GeminiResponse);
+    return readGeminiResponse(await readNativeChatPayload(upstream) as GeminiResponse, { privateProfile: input.privateProfile });
 }
 
 export function buildGeminiGenerateUrl(baseUrl: string, modelId: string) {
@@ -685,9 +715,9 @@ export function buildGeminiRequestBody(input: { input: ResponseInput[]; tools: R
     };
 }
 
-export function readGeminiResponse(body: GeminiResponse): { content: string; toolCalls: ToolCall[] } {
+export function readGeminiResponse(body: GeminiResponse, options: { privateProfile?: boolean } = {}): ChatCompletionResult {
     const candidates = body.data?.candidates || body.candidates || [];
-    const parts = candidates.flatMap((candidate) => candidate.content?.parts || []);
+    const parts = candidates.flatMap((candidate) => candidate.content?.parts || []).filter(part => !options.privateProfile || !part.thought);
     return {
         content: withGroundingSources(parts.map((part) => part.text || "").join(""), candidates),
         toolCalls: parts.flatMap((part) => part.functionCall?.name ? [{
@@ -695,6 +725,7 @@ export function readGeminiResponse(body: GeminiResponse): { content: string; too
             function: { name: part.functionCall.name, arguments: JSON.stringify(part.functionCall.args || {}) },
             ...(part.thoughtSignature ? { thoughtSignature: part.thoughtSignature } : {}),
         }] : []),
+        ...usageResult(body.data || body, "gemini"),
     };
 }
 
@@ -734,34 +765,64 @@ function requestHeaders(credentials: Record<string, string>) {
     return headers;
 }
 
+/** Provider-reported accounting only. Missing fields stay unknown, never estimated as zero. */
+export function readChatUsage(body: unknown, protocol?: "anthropic" | "gemini"): ChatCompletionUsage | undefined {
+    const record = (value: unknown): Record<string, unknown> => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+    const root = record(body), usage = record(root.usage), gemini = record(root.usageMetadata);
+    const number = (value: unknown) => typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+    const tokens = (value: unknown) => { const count = number(value); return count !== undefined && Number.isSafeInteger(count) ? count : undefined; };
+    let inputTokens = tokens(usage.input_tokens ?? usage.prompt_tokens);
+    let outputTokens = tokens(usage.output_tokens ?? usage.completion_tokens);
+    if (protocol === "anthropic" && inputTokens !== undefined) inputTokens += (tokens(usage.cache_creation_input_tokens) || 0) + (tokens(usage.cache_read_input_tokens) || 0);
+    if (protocol === "gemini") {
+        inputTokens = tokens(gemini.promptTokenCount);
+        const candidates = tokens(gemini.candidatesTokenCount);
+        outputTokens = candidates === undefined ? undefined : candidates + (tokens(gemini.thoughtsTokenCount) || 0);
+    }
+    const cost = record(usage.cost ?? root.cost);
+    const actualCost = number(usage.actualCost ?? usage.actual_cost ?? usage.total_cost ?? usage.cost ?? root.actualCost ?? root.actual_cost ?? root.cost) ?? number(cost.amount);
+    const rawCurrency = usage.currency ?? root.currency ?? cost.currency;
+    const currency = typeof rawCurrency === "string" && /^[a-z]{3}$/i.test(rawCurrency) ? rawCurrency.toUpperCase() : undefined;
+    const result = { ...(inputTokens === undefined ? {} : { inputTokens }), ...(outputTokens === undefined ? {} : { outputTokens }),
+        ...(actualCost === undefined ? {} : { actualCost }), ...(currency === undefined ? {} : { currency }) };
+    return Object.keys(result).length ? result : undefined;
+}
+
+function usageResult(body: unknown, protocol?: "anthropic" | "gemini") {
+    const usage = readChatUsage(body, protocol);
+    return usage ? { usage } : {};
+}
+
 async function upstreamError(label: string, upstream: Response, suppressProviderBody = false) {
     // Mark can echo request headers in an error body. Retain its HTTP status,
     // never expose that body to clients, and never submit a fallback request.
     if (suppressProviderBody) {
         await upstream.body?.cancel().catch(() => {});
-        return new ChatProtocolError("UPSTREAM_REQUEST_FAILED", `${label} ${upstream.status}: 上游服务拒绝了请求；本次请求不会重新提交。`);
+        return new ChatProtocolError("UPSTREAM_REQUEST_FAILED", `${label} ${upstream.status}: 上游服务拒绝了请求；本次请求不会重新提交。`, upstream.status);
     }
     const detail = (await upstream.text()).slice(0, 500);
-    return new ChatProtocolError("UPSTREAM_REQUEST_FAILED", `${label} ${upstream.status}: ${detail}`);
+    return new ChatProtocolError("UPSTREAM_REQUEST_FAILED", `${label} ${upstream.status}: ${detail}`, upstream.status);
 }
 
 export class ChatProtocolError extends Error {
-    constructor(readonly code: string, message: string) {
+    constructor(readonly code: string, message: string, readonly upstreamStatus?: number) {
         super(message);
     }
 }
 
 type GeminiResponse = {
-    data?: { candidates?: GeminiCandidate[] };
+    data?: { candidates?: GeminiCandidate[]; usageMetadata?: Record<string, unknown>; usage?: Record<string, unknown> };
     candidates?: GeminiCandidate[];
+    usageMetadata?: Record<string, unknown>;
 };
 type GeminiCandidate = {
-    content?: { parts?: Array<{ text?: string; thoughtSignature?: string; functionCall?: { name?: string; args?: Record<string, unknown> } }> };
+    content?: { parts?: Array<{ text?: string; thought?: boolean; thoughtSignature?: string; functionCall?: { name?: string; args?: Record<string, unknown> } }> };
     groundingMetadata?: { groundingChunks?: Array<{ web?: { uri?: string; title?: string } }> };
 };
 
 type ClaudeResponse = {
     stop_reason?: string;
+    usage?: Record<string, unknown>;
     content?: Array<{
         [key: string]: unknown;
         type?: string;

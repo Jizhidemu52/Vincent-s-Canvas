@@ -26,7 +26,7 @@ function readGraph(options: ImageSequenceOptions) {
     return { nodes: options.nodes.current, connections: options.connections.current };
 }
 
-export function addCanvasImageSequence(options: ImageSequenceOptions, sourceId: string, steps: [string, string][], model?: string) {
+export function addCanvasImageSequence(options: ImageSequenceOptions, sourceId: string, steps: import("@/lib/canvas/canvas-image-sequence").ImageSequenceStep[], model?: string) {
     const graph = readGraph(options);
     const source = graph.nodes.find(node => node.id === sourceId);
     if (!source) throw new Error("原图已移除，请重新选择");

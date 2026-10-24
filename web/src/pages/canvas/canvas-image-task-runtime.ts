@@ -90,16 +90,16 @@ export default function createCanvasImageTaskRuntime({ nodes, setNodes, saveQueu
                 signal: controller.signal,
                 cancelOnAbort: () => shouldCancelCanvasGeneration(controller.signal) && current(nodeId, binding, prepared),
                 assertCurrent,
-                async generate(config: Parameters<typeof requestGeneration>[0], prompt: string, references?: Parameters<typeof requestEdit>[2], mask?: Parameters<typeof requestEdit>[3], edit = Boolean(references?.length || mask)) {
+                async generate(config: Parameters<typeof requestGeneration>[0], prompt: string, references?: Parameters<typeof requestEdit>[2], mask?: Parameters<typeof requestEdit>[3], edit = Boolean(references?.length || mask), promptInput?: import("../../../../shared/prompt-contracts").PromptInputData) {
                     assertCurrent();
                     if (!mask && imageModelProfile(config.model || config.imageModel).kind === "midjourney-blend") { edit = false; prompt = ""; }
                     config = { ...config, count: "1", canvasImageCount: "1" };
-                    const requestOptions = { ...options, tool: toolKey || (edit ? "canvas-edit" : "canvas-image") };
+                    const requestOptions = { ...options, promptInput: promptInput?.compilationId ? promptInput : promptInput ? { ...promptInput, userText: prompt, fields: { ...promptInput.fields, ...(promptInput.scene === "workflow-step" || Object.hasOwn(promptInput.fields || {}, "instruction") ? { instruction: prompt } : {}) }, hasMask: Boolean(mask) } : undefined, onOptimizing: () => { setNodes(previous => previous.map(node => node.id === nodeId ? { ...node, metadata: { ...node.metadata, optimizingPrompt: true } } : node)); }, onCompiled: (finalPrompt: string, optimized: boolean) => { setNodes(previous => previous.map(node => node.id === nodeId ? { ...node, metadata: { ...node.metadata, prompt: finalPrompt, optimized, optimizingPrompt: false } } : node)); }, tool: toolKey || (edit ? "canvas-edit" : "canvas-image") };
                     return options.receiveResult(edit
                         ? requestEdit(config, prompt, references || [], mask, requestOptions)
                         : requestGeneration(config, prompt, requestOptions, references));
                 },
-                async receiveResult<T extends { dataUrl: string; sourceTaskId?: string }>(request: Promise<T[]>) {
+                async receiveResult<T extends { dataUrl: string; sourceTaskId?: string; prompt?: string; optimized?: boolean; userInput?: import("../../../../shared/prompt-contracts").PromptInputData }>(request: Promise<T[]>) {
                     try {
                         const image = (await request)[0];
                         assertCurrent();
@@ -108,6 +108,7 @@ export default function createCanvasImageTaskRuntime({ nodes, setNodes, saveQueu
                         assertCurrent();
                         const metadata: CanvasNodeMetadata = {
                             imageTask: undefined, errorDetails: undefined, sourceTaskId: image.sourceTaskId,
+                            ...(image.prompt !== undefined ? { prompt: image.prompt, optimized: image.optimized, userInput: image.userInput } : {}), optimizingPrompt: false,
                             content: uploaded.url, storageKey: uploaded.storageKey, status: "success",
                             naturalWidth: uploaded.width, naturalHeight: uploaded.height, bytes: uploaded.bytes, mimeType: uploaded.mimeType,
                             ...(uploaded.originalFileName ? { originalFileName: uploaded.originalFileName, imageName: uploaded.originalFileName.replace(/\.[^.]+$/, ""), imageVersion: 1 } : {}),
@@ -115,9 +116,9 @@ export default function createCanvasImageTaskRuntime({ nodes, setNodes, saveQueu
                         return { image, uploaded, metadata };
                     } catch (error) {
                         assertCurrent();
-                        if (error instanceof QueuedTaskFailedError) {
+                        if (error instanceof QueuedTaskFailedError || (error as { submissionRejected?: boolean })?.submissionRejected) {
                             setNodes(previous => previous.map(node => node.id === nodeId ? {
-                                ...node, metadata: { ...node.metadata, imageTask: undefined },
+                                ...node, metadata: { ...node.metadata, imageTask: undefined, optimizingPrompt: false },
                             } : node));
                         }
                         throw error;
@@ -220,7 +221,11 @@ export default function createCanvasImageTaskRuntime({ nodes, setNodes, saveQueu
                 await patch(nodeId, binding, {
                     imageTask: undefined, sourceTaskId: task.id, content: image.url, storageKey: image.storageKey,
                     naturalWidth: image.width, naturalHeight: image.height, bytes: image.bytes, mimeType: image.mimeType,
-                    status: "success", errorDetails: undefined,
+                    status: "success", errorDetails: undefined, optimizingPrompt: false,
+                    // Older task records omit these fields; missing metadata must not erase the saved request.
+                    ...(task.prompt !== undefined ? { prompt: task.prompt } : {}),
+                    ...(task.optimized !== undefined ? { optimized: task.optimized } : {}),
+                    ...(task.userInput !== undefined ? { userInput: task.userInput } : {}),
                 });
             } catch (error) {
                 if (valid() && !(error instanceof Error && error.name === "AbortError")) {

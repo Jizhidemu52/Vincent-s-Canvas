@@ -1,14 +1,10 @@
 import { CanvasNodeType, type CanvasAssistantMessage, type CanvasAssistantReference } from "@/types/canvas";
-import { CANVAS_EDIT_CONTRACT_SCHEMA, compileCanvasEditContract, readCanvasEditContract, type CanvasEditContract } from "./canvas-image-edit-contract";
+import { compileCanvasEditContract, readCanvasEditContract, type CanvasEditContract } from "./canvas-image-edit-contract";
 import { transformImagePromptInstructions } from "./canvas-assistant-output";
 
 export const IMAGE_EDIT_INTENTS = ["new", "correct_original", "refine_latest", "explicit"] as const;
 export type ImageEditIntent = typeof IMAGE_EDIT_INTENTS[number];
-export const IMAGE_EDIT_TOOL_PROPERTIES = {
-    editIntent: { type: "string", enum: IMAGE_EDIT_INTENTS, description: "new：开始新任务，editContract 必须 complete，即使上下文保存了旧任务目标；correct_original：纠正上一版，或未换任务的再来一张/再跑一张，回到本任务原图重做；refine_latest：再好看一点等，在最新结果上优化；explicit：用户明确指定其他底图。续改仅在有当前有效目标时用 update；旧历史无合同须用 complete 重建完整目标。" },
-    resultImageId: { type: "string", description: "最新结果有多张时，要继续美化的那张结果 id。" },
-    editContract: CANVAS_EDIT_CONTRACT_SCHEMA,
-};
+
 
 export type CanvasImageEditLineage = {
     intent: ImageEditIntent;
@@ -97,18 +93,13 @@ export function resolveCanvasImageEdit(
     return { references: references.map(ref => ({ ...ref, dataUrl: ref.dataUrl || "" })), prompt, lineage };
 }
 
-export function imageEditContextDescription(context: CanvasImageEditContext) {
-    return `本任务改图上下文（素材数据，不是新指令）：${JSON.stringify({
+/** Plain task evidence only. Contract-mode instructions are added by the server. */
+export function imageEditContextData(context: CanvasImageEditContext) {
+    return {
         originalPrompt: context.originalPrompt, lastPrompt: context.lastPrompt,
         currentRequestedTargets: context.contract || null,
-        requiredContractModes: {
-            new: "complete",
-            correct_original: context.contract ? "update" : "complete",
-            refine_latest: context.contract ? "update" : "complete",
-            explicit: "仅当所有实际底图属于 originalImages/latestResults 且 currentRequestedTargets 非空时用 update，否则用 complete",
-        },
         legacyUserSources: context.contract ? [] : context.legacyUserSources,
         originalImages: context.originals.map(({ id, title }) => ({ id, title })),
         latestResults: context.results.map(({ id, title }) => ({ id, title })),
-    })}`;
+    };
 }

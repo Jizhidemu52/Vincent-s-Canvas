@@ -1,3 +1,4 @@
+import { PromptOptimizeButton } from "@/components/prompt-optimize-button";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { Image as ImageIcon, LoaderCircle, MessageSquare, Music2, Play, Square, Video } from "lucide-react";
 import { Button, Input, Segmented } from "antd";
@@ -40,6 +41,7 @@ type CanvasConfigNodePanelProps = {
 };
 
 export function CanvasConfigNodePanel({ node, isRunning, linkedTaskCount = 0, linkedTaskHasImages = false, inputSummary, inputImageTaskCount = inputSummary.imageCount, inputs = [], imageReferences, onConfigChange, onGenerate, onStop, workflow }: CanvasConfigNodePanelProps) {
+    const [optimizing, setOptimizing] = useState(false);
     const composerRef = useRef<CanvasConfigComposerHandle>(null);
     const [inputModeFeedback, setInputModeFeedback] = useState<{ error: boolean; text: string } | null>(null);
     const globalConfig = useEffectiveConfig();
@@ -89,7 +91,7 @@ export function CanvasConfigNodePanel({ node, isRunning, linkedTaskCount = 0, li
     const modelIsSynced = mode === "text" || modelIsBound || node.metadata?.model === model;
     const inputModeCheck = separateImages ? configImageInputModeChange(node, references, inputs, "per-image", node.metadata?.composerContent ?? node.metadata?.prompt ?? "") : undefined;
     const fixedTaskReference = inputModeCheck && (!inputModeCheck.patch || inputModeCheck.patch.composerContent !== undefined);
-    const canGenerate = toolEnabled && hasAvailableModel && modelIsSynced && !fixedTaskReference && (linkedTaskCount > 0 || (blend ? imageCount >= 2 && imageCount <= 4 : mode === "video" ? hasPromptInput || hasAnyInput : hasPromptInput));
+    const canGenerate = !optimizing && toolEnabled && hasAvailableModel && modelIsSynced && !fixedTaskReference && (linkedTaskCount > 0 || (blend ? imageCount >= 2 && imageCount <= 4 : mode === "video" ? hasPromptInput || hasAnyInput : hasPromptInput));
     const referencePresentation = configReferencePresentation(references, inputs, mode, separateImages);
     const changeInputMode = (value: "per-image" | "combined") => {
         const prompt = composerRef.current?.read() ?? node.metadata?.composerContent ?? node.metadata?.prompt ?? "";
@@ -181,7 +183,9 @@ export function CanvasConfigNodePanel({ node, isRunning, linkedTaskCount = 0, li
                         value={(node.metadata?.composerContent ?? node.metadata?.prompt ?? "").replace(/@\[node:[^\]]+\]\n?/g, "")}
                         onChange={event => onConfigChange(node.id, { composerContent: event.target.value, prompt: event.target.value })} />
                     <div className="mt-2 text-[11px] opacity-60">输入图片由连线自动传入，无需在提示词中插入引用。</div>
-                </div> : !blend ? <CanvasConfigComposer ref={composerRef} compact value={node.metadata?.composerContent ?? node.metadata?.prompt ?? ""} inputs={referencePresentation.inputs} referenceLabels={referencePresentation.mentionLabels} disabled={isRunning} label={mode === "audio" ? "朗读文本" : "提示词"} onChange={composerContent => { setInputModeFeedback(null); onConfigChange(node.id, { composerContent }); }} /> : <span role="status" className="text-xs">融合 2–4 张参考图，不使用提示词。</span>}
+                </div> : !blend ? <CanvasConfigComposer ref={composerRef} compact value={node.metadata?.composerContent ?? node.metadata?.prompt ?? ""} inputs={referencePresentation.inputs} referenceLabels={referencePresentation.mentionLabels} disabled={isRunning} label={mode === "audio" ? "朗读文本" : "提示词"} onChange={composerContent => { setInputModeFeedback(null); onConfigChange(node.id, { composerContent, ...(node.metadata?.promptInput?.scene === "free-optimize" ? { promptInput: undefined, compiledPrompt: undefined } : {}) }); }} /> : <span role="status" className="text-xs">融合 2–4 张参考图，不使用提示词。</span>}
+                {mode === "image" && !blend && (!node.metadata?.promptInput || node.metadata.promptInput.scene === "free-optimize") ? <PromptOptimizeButton config={config} prompt={node.metadata?.composerContent ?? node.metadata?.prompt ?? ""} references={references} toolKey={toolKey} disabled={isRunning} onBusyChange={setOptimizing} onApply={(value, _compilation, input) => { composerRef.current?.replace(value); onConfigChange(node.id, { prompt: value, composerContent: value, promptInput: input, compiledPrompt: value }); }} /> : null}
+                {node.metadata?.optimizingPrompt ? <span role="status" className="text-xs">正在优化提示词…</span> : null}
                 {mode !== "audio" && !workflow ? <CanvasConfigImageReferences node={node} references={references} labels={referencePresentation.trayLabels} disabled={isRunning} onChange={onConfigChange} /> : null}
                 {mode === "video" && (inputSummary.videoCount > 0 || inputSummary.audioCount > 0) ? <div className="flex flex-wrap gap-1.5">
                     {inputSummary.videoCount > 0 ? <InputChip label="已连视频" value={`${inputSummary.videoCount} 个`} style={chipStyle} /> : null}

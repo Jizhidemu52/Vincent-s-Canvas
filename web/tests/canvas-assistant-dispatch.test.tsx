@@ -19,6 +19,7 @@ import type { BusinessConfig } from "@/services/api/business-config";
 import * as toolRuntime from "@/services/api/tool-runtime";
 import { createAgentMediaWorkflow } from "@/lib/canvas/agent-media-workflow";
 import { CanvasEditContractError } from "@/lib/canvas/canvas-image-edit-contract";
+import * as onlineTaskRecovery from "@/lib/canvas/canvas-online-task-recovery";
 
 const requireModule = createRequire(new URL("../src/components/canvas/canvas-assistant-panel.tsx", import.meta.url));
 const requireToolConfigModule = createRequire(new URL("../src/hooks/use-tool-config.ts", import.meta.url));
@@ -30,7 +31,7 @@ const toolConfigCode = ts.transpileModule(readFileSync(new URL("../src/hooks/use
     compilerOptions: { module: ts.ModuleKind.CommonJS, esModuleInterop: true },
 }).outputText;
 
-function panelHarness(options: { replies: ToolResponseResult[]; stream?: string; translate?: () => Promise<string>; config?: Partial<configModule.AiConfig>; flags?: Partial<Record<ModuleKey, boolean>>; tools?: BusinessConfig["tools"]; models?: BusinessConfig["models"]; imageCapabilities?: BusinessConfig["models"]; standalone?: boolean; selected?: CanvasNodeData[]; nodes?: CanvasNodeData[]; history?: CanvasAssistantMessage[]; confirmTools?: boolean; generate?: () => Promise<Array<{ id: string; dataUrl: string }>>; video?: () => Promise<{ url: string; mimeType: string }>; storedImage?: UploadedImage; storedVideo?: UploadedFile; taskLifecycle?: boolean; storeImage?: () => Promise<UploadedImage> }) {
+function panelHarness(options: { replies: ToolResponseResult[]; stream?: string; translate?: () => Promise<string>; config?: Partial<configModule.AiConfig>; flags?: Partial<Record<ModuleKey, boolean>>; tools?: BusinessConfig["tools"]; models?: BusinessConfig["models"]; imageCapabilities?: BusinessConfig["models"]; standalone?: boolean; selected?: CanvasNodeData[]; nodes?: CanvasNodeData[]; history?: CanvasAssistantMessage[]; confirmTools?: boolean; generate?: () => Promise<Array<{ id: string; dataUrl: string }>>; video?: () => Promise<{ url: string; mimeType: string }>; storedImage?: UploadedImage; storedVideo?: UploadedFile; taskLifecycle?: boolean; storeImage?: () => Promise<UploadedImage>; userId?: string; recoveryIO?: NonNullable<Parameters<typeof onlineTaskRecovery.recoverOnlineAgentTask>[3]> }) {
     const states: unknown[] = [];
     const refs: unknown[] = [];
     const memos: Array<{ dependencies?: DependencyList; value: unknown }> = [];
@@ -119,7 +120,11 @@ function panelHarness(options: { replies: ToolResponseResult[]; stream?: string;
         "@/stores/use-config-store": { ...configModule, useEffectiveConfig: () => config, useConfigStore: (selector: (state: unknown) => unknown) => selector({ openConfigDialog: () => undefined, updateConfig: () => undefined }) },
         "@/lib/standalone-edition": { standaloneEdition: options.standalone || false },
         "@/stores/use-theme-store": { useThemeStore: (selector: (state: unknown) => unknown) => selector({ theme: "light" }) },
-        "@/stores/use-user-store": { useUserStore: (selector: (state: unknown) => unknown) => selector({ user: null }) },
+        "@/stores/use-user-store": { useUserStore: (selector: (state: unknown) => unknown) => selector({ user: options.userId ? { id: options.userId } : null }) },
+        "@/lib/canvas/canvas-online-task-recovery": {
+            ...onlineTaskRecovery,
+            recoverOnlineAgentTask: (...args: Parameters<typeof onlineTaskRecovery.recoverOnlineAgentTask>) => onlineTaskRecovery.recoverOnlineAgentTask(args[0], args[1], args[2], options.recoveryIO),
+        },
         "@/stores/use-asset-store": { serverAssetIdFromAsset, useAssetStore: (selector: (state: unknown) => unknown) => selector({ cleanupImages: () => undefined, addAssets: (items: AssetInput[]) => { assets.push(...items); return items.map((_, index) => `asset-${index}`); } }) },
         "@/stores/canvas/use-canvas-agent-store": { useCanvasAgentStore: (selector: (state: unknown) => unknown) => selector({ confirmTools: options.confirmTools || false, setAgentState: () => undefined }) },
         "@/hooks/use-can-manage-config": { useCanManageConfig: () => false },
@@ -207,6 +212,9 @@ function panelHarness(options: { replies: ToolResponseResult[]; stream?: string;
         },
         displayedMessages() {
             return findElements(render()).filter(element => typeof element.type === "object" && element.props.item).map(element => element.props.item as CanvasAssistantMessage);
+        },
+        recoveryButtons() {
+            return findElements(render()).filter(element => element.props.children === "查询原任务" && typeof element.props.onClick === "function");
         },
         referencePreviews() {
             const rows = findElements(render()).filter((element) => typeof element.type === "function" && element.type.name === "MessageReferences");
@@ -372,6 +380,41 @@ describe("online Agent cancellation", () => {
         expect(harness.snapshotRef.current.nodes).toEqual([]);
         expect(harness.assets).toEqual([]);
         expect(harness.messages().flatMap(message => message.attachments || [])).toEqual([]);
+    });
+
+    test.each([true, false])("persisted recovery controls use original metadata without exposing private prompts (task ID saved: %s)", async hasTaskId => {
+        const task: generationTasks.QueuedTask = { id: "original-task", requestId: "original-request", status: "paused", upstreamTaskId: "original-upstream", resultUrls: [], failureReason: "下载失败" };
+        const completed = { ...task, status: "success" as const, resultUrls: ["/api/assets/original-result/content"] };
+        const calls: string[] = [];
+        const pending: onlineTaskRecovery.PendingOnlineAgentTask = {
+            ownerId: "owner", projectId: "project", requestId: task.requestId!, taskIds: hasTaskId ? [task.id] : undefined,
+            mode: "image", prompt: "PRIVATE_PROVIDER_PROMPT", model: "gpt-image-2",
+        };
+        const harness = panelHarness({ userId: "owner", replies: [], history: [{
+            id: "persisted-generation", role: "error", text: "下载失败，可查询原任务。",
+            detail: { kind: "agent_generation", status: "paused", prompt: pending.prompt, pendingTask: pending },
+        }], recoveryIO: {
+            getQueuedTask: async id => { calls.push(`get:${id}`); return task; },
+            getQueuedTaskByRequestId: async id => { calls.push(`request:${id}`); return task; },
+            recoverQueuedTask: async id => { calls.push(`recover:${id}`); return { ...task, status: "waiting" }; },
+            waitForTasks: async ids => { calls.push(`wait:${ids.join(",")}`); return [completed]; },
+            uploadImage: async url => { calls.push(`store:${url}`); return { url, storageKey: "", width: 100, height: 100, bytes: 5, mimeType: "image/png" }; },
+        } as NonNullable<Parameters<typeof onlineTaskRecovery.recoverOnlineAgentTask>[3]> });
+        await harness.ready();
+        expect(harness.messages()[0]!.detail?.pendingTask).toEqual(pending);
+        expect(JSON.stringify(harness.displayedMessages())).not.toContain(pending.prompt);
+        expect(harness.recoveryButtons()).toHaveLength(1);
+        harness.recoveryButtons()[0]!.props.onClick();
+        await waitFor(() => harness.messages().some(message => message.detail?.status === "completed"));
+        expect(calls).toEqual([
+            hasTaskId ? "get:original-task" : "request:original-request",
+            "recover:original-task", "wait:original-task", "store:/api/assets/original-result/content",
+        ]);
+        expect(harness.requests).toEqual([]);
+        expect(harness.snapshotRef.current.nodes.map(node => node.id)).toEqual(["agent-original-task-0"]);
+        expect(harness.recoveryButtons()).toEqual([]);
+        expect(JSON.stringify(harness.displayedMessages())).not.toContain(pending.prompt);
+        expect(harness.messages()[0]!.text).toContain("没有重新生成");
     });
 });
 
@@ -599,8 +642,10 @@ describe("canvas assistant submission", () => {
         await harness.submit("根据上传图和选中的原款改背景，不改变服装");
         const firstContent = harness.requests.find((request) => request.type === "agent")!.args[1].at(-1).content;
         expect(firstContent.filter((part: any) => part.type === "image_url")).toHaveLength(2);
-        expect(firstContent.find((part: any) => part.type === "text" && part.text.includes("创作预设"))?.text).toContain('"quality":"auto"');
-        expect(firstContent.find((part: any) => part.type === "text" && part.text.includes("可用参考图片"))?.text).toContain('"source":"upload"');
+        const firstProfile = harness.requests.find(request => request.type === "agent")!.args[5];
+        expect(firstProfile).toMatchObject({ chatProfile: "canvas-assistant", profileContext: { stage: "plan", settings: { quality: "auto" } } });
+        expect(firstProfile.profileContext.references).toContainEqual(expect.objectContaining({ source: "upload" }));
+        expect(firstContent).toContainEqual({ type: "text", text: "根据上传图和选中的原款改背景，不改变服装" });
         expect(harness.requests.some((request) => request.type === "image" || request.type === "edit")).toBe(false);
         const confirmation = harness.messages().find((message) => message.role === "tool" && message.detail?.status === "pending")!;
         harness.approve(confirmation.id);
@@ -664,7 +709,8 @@ describe("canvas assistant submission", () => {
         expect(visible.some(message => message.text === "已将背景改为浅蓝，衣服保持不变。")).toBe(true);
         expect(visible.some(message => message.role === "tool")).toBe(false);
         expect(JSON.stringify(visible)).not.toContain(internal);
-        expect(harness.requests[0].args[1][0].content).toContain("内部完整生成提示词必须使用英文");
+        expect(harness.requests[0].args[5]).toMatchObject({ chatProfile: "canvas-assistant", profileContext: { stage: "plan", userText: "背景换成浅蓝，衣服不变" } });
+        expect(harness.requests[0].args[1].some((message: any) => message.role === "system")).toBe(false);
     });
 
     test.each([null, { mode: "complete", changes: [{ id: "background", text: "仍然是中文提示词", source: "背景换成浅蓝" }], preserve: [], forbid: [], supersedes: [], referenceRoles: [] }])("invalid or non-English contract never submits or spends a translation retry", async (editContract) => {
@@ -687,16 +733,9 @@ describe("canvas assistant submission", () => {
         expect(JSON.stringify(harness.displayedMessages())).not.toContain("knit_material 的 source");
         expect(JSON.stringify(harness.messages().filter(message => message.role === "tool"))).toContain("knit_material 的 source 不是已提供的用户要求原文");
         const planner = harness.requests[0];
-        expect(planner.args[1][0].content).toContain("逐字复制允许来源中的连续原文片段，禁止翻译、改写、重排");
-        expect(planner.args[1][0].content).toContain("新任务只能引用本轮用户需求");
-        expect(planner.args[1][0].content).toContain("不能把整段需求复制给每一项");
-        const schema = planner.args[2].find((item: any) => item.function.name === "canvas_generate_image").function.parameters.properties.editContract;
-        for (const group of ["changes", "preserve", "forbid"]) {
-            const description = schema.properties[group].items.properties.source.description;
-            expect(description).toContain("verbatim contiguous excerpt from the current user request");
-            expect(description).toContain("Do not translate, paraphrase, reorder");
-            expect(description).toContain("not the whole request as a blanket justification");
-        }
+        expect(planner.args[5]).toMatchObject({ chatProfile: "canvas-assistant", profileContext: { userText: "把材质改成棉质针织。", editContext: { currentRequestedTargets: null } } });
+        expect(planner.args[1].at(-1).content).toContainEqual({ type: "text", text: "把材质改成棉质针织。" });
+        expect(planner.args[2]).toEqual([]);
     });
 
     test.each(["stale-number", "missing-count", "lost-negation"])("contract guard blocks %s before provider dispatch and translation", async kind => {
@@ -719,12 +758,10 @@ describe("canvas assistant submission", () => {
         const harness = panelHarness({ history: JSON.parse(JSON.stringify(history)), replies: [tool("canvas_generate_image", { editIntent: "correct_original", prompt: "Fix the buttons.", referenceNodeIds: ["pink"], editContract }), { content: "已更新。", toolCalls: [] }] });
         await harness.submit("粉色不变，七颗纽扣改酒红，只生成1张");
         expect(harness.requests.map(request => request.type)).toEqual(["agent", "edit", "agent"]);
-        // Verify the real planner request receives delta guidance, not merely a disconnected exported constant.
+        // The server derives delta guidance from the exact saved targets in this request.
         const planner = harness.requests.find(request => request.type === "agent")!;
-        expect(planner.args[1][0].content).toContain("完全未变条件必须省略，由代码继承");
-        const schema = planner.args[2].find((item: any) => item.function.name === "canvas_generate_image").function.parameters.properties.editContract;
-        expect(schema.properties.mode.description).toContain("update is a delta");
-        for (const group of ["changes", "preserve", "forbid"]) expect(schema.properties[group].description).toContain("Omit unchanged ids");
+        expect(planner.args[5]).toMatchObject({ chatProfile: "canvas-assistant", profileContext: { userText: "粉色不变，七颗纽扣改酒红，只生成1张", editContext: { currentRequestedTargets: contract } } });
+        expect(planner.args[2]).toEqual([]);
         const edit = harness.requests.find(request => request.type === "edit")!;
         expect(edit.args[2][0].dataUrl).toBe(original.dataUrl);
         expect(edit.args[1]).toContain("Make the shirt pink.");
@@ -753,7 +790,8 @@ describe("canvas assistant submission", () => {
         await harness.submit("在跑一张");
         expect(harness.requests.map(item => item.type)).toEqual(["agent", "agent", "edit"]);
         const correction = harness.requests[1];
-        expect(correction.args[2].map((item: any) => item.function.name)).toEqual(["canvas_generate_image"]);
+        expect(correction.args[2]).toEqual([]);
+        expect(correction.args[5]).toMatchObject({ chatProfile: "canvas-assistant", profileContext: { stage: "repair-image-contract", editContext: { legacyUserSources: ["衬衫改粉色"] } } });
         expect(correction.args[3]).toEqual({ type: "function", name: "canvas_generate_image" });
         expect(correction.args[1]).toContainEqual({ type: "responses_assistant", output: failed.responsesOutputItems });
         expect(correction.args[1].filter((item: any) => item.role === "tool").map((item: any) => JSON.parse(item.content))).toContainEqual(expect.objectContaining({ ok: false, data: expect.objectContaining({ phase: "image_preflight", submitted: false, expectedMode: "complete" }) }));

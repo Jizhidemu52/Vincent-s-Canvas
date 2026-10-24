@@ -1,3 +1,4 @@
+import { PromptOptimizeButton } from "@/components/prompt-optimize-button";
 import { memo, useEffect, useState } from "react";
 import { ImageIcon, Info, LoaderCircle, Plus, X } from "lucide-react";
 import { Popover } from "radix-ui";
@@ -27,8 +28,9 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
     embedded = false, open, promptRef, promptRevision, model, size, quality, count, imageOptions, references, running,
     estimateCredits, estimateRmb, remainingCredits, config, onClose,
     onModelChange, onSizeChange, onQualityChange, onCountChange, onImageOptionsChange, onPickReferences, onRemoveReference,
-    onClearReferences, onMoveReference, onMissingConfig, onGenerate, positioned, onClearPosition,
+    onClearReferences, onMoveReference, onMissingConfig, onGenerate, onOptimizedPrompt, positioned, onClearPosition,
 }: CanvasQuickGeneratePanelProps) {
+    const [optimizing, setOptimizing] = useState(false);
     const [prompt, setPrompt] = useState(promptRef.current);
     useEffect(() => setPrompt(promptRef.current), [promptRef, promptRevision]);
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
@@ -54,7 +56,7 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
     }, [availableModel, running, size, quality, count, settings.size, activeQuality, settings.count, onSizeChange, onQualityChange, onCountChange]);
     if (!open) return null;
     const referenceValidation = validateImageReferences(modelOptionName(availableModel || model), references, profile);
-    const disabled = !toolEnabled || running || !availableModel || model !== availableModel || (profile.requiresPrompt && !prompt.trim()) || !referenceValidation.valid || Boolean(imageModelSettingsError(settings.size, profile));
+    const disabled = !toolEnabled || optimizing || running || !availableModel || model !== availableModel || (profile.requiresPrompt && !prompt.trim()) || !referenceValidation.valid || Boolean(imageModelSettingsError(settings.size, profile));
     return (
         <div data-testid="canvas-quick-generate-panel" data-canvas-no-zoom
             className={embedded ? "cw-generator" : "cw-generator cw-generator-mobile cw-surface max-h-[calc(100dvh-144px)] overflow-y-auto"}
@@ -78,6 +80,7 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
                         event.preventDefault();
                         if (!disabled && !event.repeat) onGenerate();
                     }} /> : <p className="my-3 text-xs leading-5" role="status">添加 2–4 张参考图，直接融合，不使用提示词。原有描述会保留，切换模型后可继续编辑。</p>}
+                {profile.requiresPrompt ? <PromptOptimizeButton config={boundConfig} prompt={prompt} references={references} toolKey={toolKey} disabled={running} onBusyChange={setOptimizing} onApply={(value, _compilation, input) => { promptRef.current = value; setPrompt(value); onOptimizedPrompt?.(value, input, references); }} /> : null}
                 <div className="cw-reference-row">
                     <button type="button" className="cw-add-reference" aria-label="添加参考图" disabled={running || references.length >= referenceValidation.maximum} onClick={onPickReferences}><Plus size={15} aria-hidden /><span>添加参考图</span></button>
                     <Popover.Root>

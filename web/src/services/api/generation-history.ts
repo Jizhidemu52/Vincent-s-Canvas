@@ -1,3 +1,4 @@
+import type { PromptInputData } from "../../../../shared/prompt-contracts";
 import { sha256 } from "@noble/hashes/sha256";
 import { bytesToHex } from "@noble/hashes/utils";
 import { workspaceOwnerHeaders } from "./workspace-owner";
@@ -10,12 +11,12 @@ export type GenerationDraftInput = { prompt: string; config: GenerationDraftConf
 export type ArchivedReference = { id: string; name: string; originalFileName?: string; type: string; bytes: number; sha256: string; url: string; sourceAssetId?: string };
 export type GenerationInputArchive = {
     version: 1; ownerId: string; modelConfigId: string; modelId: string;
-    prompt: string; effectivePrompt: string; config: GenerationDraftConfig;
+    prompt: string; userInput?: PromptInputData; optimized?: boolean; effectivePrompt: string; config: GenerationDraftConfig;
     parameters: Record<string, unknown>; references: ArchivedReference[];
     maskReferenceIndex?: number;
 };
 export function generationDraftInput(config: AiConfig, prompt: string): GenerationDraftInput {
-    return { prompt, config: { model: config.model, imageModel: config.imageModel, size: config.size, quality: config.quality, count: config.count, systemPrompt: config.systemPrompt, imageOptions: config.imageOptions || "" } };
+    return { prompt, config: { model: config.model, imageModel: config.imageModel, size: config.size, quality: config.quality, count: config.count, systemPrompt: "", imageOptions: config.imageOptions || "" } };
 }
 export async function fingerprintImage(blob: Blob) {
     return bytesToHex(sha256(new Uint8Array(await blob.arrayBuffer())));
@@ -67,6 +68,6 @@ export async function restoreGenerationDraft(taskId: string) {
         references.push({ id: `history:${taskId}:${index}`, name: item.name, originalFileName: item.originalFileName, type: item.type, bytes: item.bytes, sourceAssetId: item.sourceAssetId, dataUrl });
     }
     assertOwner();
-    return { prompt: archive.prompt, config: { ...archive.config, model: archive.modelConfigId, imageModel: archive.modelConfigId }, references,
+    return { prompt: archive.prompt, userInput: archive.userInput || task.userInput, optimized: task.optimized === true, finalPrompt: task.prompt as string, config: { ...archive.config, model: archive.modelConfigId, imageModel: archive.modelConfigId }, references,
         operationType: String(task.operationType), tool: typeof task.parameters.tool === "string" ? task.parameters.tool : undefined, parameters: { ...archive.parameters }, maskReferenceIndex: archive.maskReferenceIndex };
 }

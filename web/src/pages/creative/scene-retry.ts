@@ -5,6 +5,7 @@ import type { SceneLog, SceneResult } from "./use-scene-workspace";
 
 export function sceneFailure(error: unknown, submitted: boolean, taskId?: string, requestId?: string): Pick<SceneResult, "status" | "error" | "failureKind" | "taskId" | "requestId"> {
     const message = error instanceof Error ? error.message : "操作未完成";
+    if ((error as { submissionRejected?: boolean })?.submissionRejected) return { status: "failed", error: message, failureKind: "local", requestId };
     if (error instanceof QueuedTaskFailedError) return { status: "failed", error: message, failureKind: error.task.status === "failed" ? "terminal" : "local", taskId: error.task.id, requestId: error.task.requestId };
     if (error instanceof QueuedTaskPausedError) return { status: "failed", error: message, failureKind: "uncertain", taskId: error.task.id, requestId: error.task.requestId };
     if (error instanceof QueuedTaskSubmissionUncertainError) return { status: "failed", error: message, failureKind: "uncertain", taskId: error.taskId || taskId, requestId: error.requestId };
@@ -28,7 +29,7 @@ export async function prepareSceneRetry(log: SceneLog, result: SceneResult, mode
     const referenceImages = Object.fromEntries(await Promise.all(Object.entries(log.referenceImages).map(async ([slot, image]) => [slot, await deps.restoreLocalInput(image!)])));
     const selection = log.selection ? { ...log.selection, mask: await deps.restoreLocalInput(log.selection.mask) } : null;
     if (selection && (!referenceImages.primary || selection.sourceId !== referenceImages.primary.id || selection.mask.width !== referenceImages.primary.width || selection.mask.height !== referenceImages.primary.height)) throw new Error("原选区与参考图不匹配，未提交重试");
-    return { referenceImages, selection, input: { modelId: model.modelId, resolvedModel: model, prompt: archive.effectivePrompt, count: 1,
+    return { referenceImages, selection, input: { modelId: model.modelId, resolvedModel: model, prompt: archive.effectivePrompt, promptInput: archive.userInput, count: 1,
         operationType: draft.operationType as "image_generation" | "inpaint", tool: draft.tool, parameters: draft.parameters,
         draft: { prompt: draft.prompt, config: draft.config, maskReferenceIndex: draft.maskReferenceIndex }, references: draft.references } };
 }

@@ -41,7 +41,7 @@ export async function readToolConfiguration(db: Pick<Database, "query">, toolKey
 export async function resolveToolExecution(db: Pick<Database, "query">, input: {
   operationType: string; toolKey?: string | null; parameters?: Record<string, unknown>;
   modelConfigId?: string | null; modelId?: string | null;
-}): Promise<ToolConfiguration & { modelConfigId: string }> {
+}, options: { allowModelOverride?: boolean } = {}): Promise<ToolConfiguration & { modelConfigId: string }> {
   const toolKey = normalizeTaskTool(input);
   await assertModuleEnabled(db, toolKey);
   const configuration = await readToolConfiguration(db, toolKey);
@@ -54,7 +54,7 @@ export async function resolveToolExecution(db: Pick<Database, "query">, input: {
   const isChat = input.operationType === "chat";
   const modelConfiguration = isChat && toolKey !== DEFAULT_CHAT_MODEL_TOOL_KEY
     ? await readToolConfiguration(db, DEFAULT_CHAT_MODEL_TOOL_KEY) : configuration;
-  const selected = isChat ? modelConfiguration.modelConfigId : configuration.modelConfigId ?? requested;
+  const selected = isChat ? modelConfiguration.modelConfigId : options.allowModelOverride && requested ? requested : configuration.modelConfigId ?? requested;
   if (isChat && !selected) throw new ToolConfigurationError("CHAT_MODEL_NOT_CONFIGURED", "管理员尚未配置统一对话模型", 503);
   if (!selected) throw new ToolConfigurationError("MODEL_REQUIRED", "请先选择一个已启用的模型");
   const result = await db.query<{
@@ -68,7 +68,7 @@ export async function resolveToolExecution(db: Pick<Database, "query">, input: {
   const model = result.rows[0];
   if (!model || !model.enabled || !model.providerEnabled) throw new ToolConfigurationError("MODEL_DISABLED", "模型或 Provider 不存在或未启用");
   if (model.workflowConfigId && !model.workflowEnabled) throw new ToolConfigurationError("WORKFLOW_DISABLED", "模型工作流未启用");
-  if (!isChat && configuration.modelConfigId && requested && requested !== model.id && requested !== model.modelId) {
+  if (!isChat && !options.allowModelOverride && configuration.modelConfigId && requested && requested !== model.id && requested !== model.modelId) {
     throw new ToolConfigurationError("TOOL_MODEL_CHANGED", "管理员已更改该板块模型，请刷新模型配置和参数后重试", 409);
   }
   if (toolKey === "midjourney-blend" && model.modelId !== "midjourney-blend") {

@@ -251,6 +251,7 @@ export default function AdminPage() {
                     </div>
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                         {signedInUser.role === "super_admin" && <Link to="/"><Button className="!h-10">进入个人工作台</Button></Link>}
+                        {signedInUser.role === "super_admin" && <Link to="/admin/prompt-recipes"><Button className="!h-10">提示词配方</Button></Link>}
                         {deploymentFeatures.oaLoginEnabled && <Link to="/admin/design-library"><Button className="!h-10">设计灵感库管理</Button></Link>}
                         <div className="text-sm text-[var(--muted-foreground)]">
                             当前管理员：<span className="font-medium">{currentOperator?.displayName}</span>

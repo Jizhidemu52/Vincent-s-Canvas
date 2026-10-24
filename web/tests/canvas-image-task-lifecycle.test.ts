@@ -525,6 +525,33 @@ describe("canvas original image task recovery", () => {
         h.unmount();
     });
 
+    test("legacy recovery preserves existing prompt provenance when the task response omits it", async () => {
+        const previous = initialNodes(binding);
+        const userInput = { scene: "free-optimize" as const, userText: "只改花瓣", mode: "edit" as const, compilationId: "1cd57c50-d53e-4694-adb0-dc0b862c2e08" };
+        Object.assign(previous[1]!.metadata!, { optimized: true, userInput });
+        const h = harness({ nodes: previous });
+        await h.action().recoverPending("result-node");
+        expect(h.result()!.metadata).toMatchObject({ prompt: "只改花瓣", optimized: true, userInput, optimizingPrompt: false });
+        expect(h.result()!.metadata?.imageTask).toBeUndefined();
+        expect(h.committed.at(-1)!.nodes[1]!.metadata).toMatchObject({ prompt: "只改花瓣", optimized: true, userInput });
+        expect(h.queries).toHaveLength(1);
+        expect(h.uploads).toEqual(["/api/assets/original-result/content"]);
+        h.unmount();
+    });
+
+    test.each([true, false])("recovery applies authoritative server prompt provenance including optimized=%s", async optimized => {
+        const previous = initialNodes(binding);
+        Object.assign(previous[1]!.metadata!, { optimized: !optimized, userInput: { scene: "free-optimize", userText: "old input", mode: "edit" } });
+        const userInput = { scene: "free-optimize" as const, userText: "把花瓣改为蓝色", mode: "edit" as const };
+        const h = harness({ nodes: previous, query: async () => ({ ...completedTask, prompt: "Make the petals blue.", optimized, userInput }) });
+        await h.action().recoverPending("result-node");
+        expect(h.result()!.metadata).toMatchObject({ prompt: "Make the petals blue.", optimized, userInput, optimizingPrompt: false });
+        expect(h.committed.at(-1)!.nodes[1]).toEqual(h.result());
+        expect(h.queries).toHaveLength(1);
+        expect(h.uploads).toEqual(["/api/assets/original-result/content"]);
+        h.unmount();
+    });
+
     test("repeated recover calls observe one task and import its result once", async () => {
         const entered = Promise.withResolvers<void>();
         const reply = Promise.withResolvers<QueuedTask>();

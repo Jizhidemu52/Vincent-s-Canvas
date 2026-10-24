@@ -1,8 +1,7 @@
 import { expect, test } from "bun:test";
-import { canvasImageEditContext, imageEditContextDescription, resolveCanvasImageEdit as resolveEdit, type CanvasImageEditLineage } from "@/lib/canvas/canvas-assistant-image-edit";
+import { canvasImageEditContext, imageEditContextData, resolveCanvasImageEdit as resolveEdit, type CanvasImageEditLineage } from "@/lib/canvas/canvas-assistant-image-edit";
 import { buildCanvasConversationHistory } from "@/lib/canvas/canvas-assistant-history";
 import { portableCanvasMedia } from "@/lib/canvas/canvas-portable-media";
-import { CANVAS_ASSISTANT_SYSTEM_PROMPT } from "@/lib/canvas/canvas-assistant-prompt";
 import { CanvasNodeType, type CanvasAssistantMessage, type CanvasAssistantReference } from "@/types/canvas";
 
 const original: CanvasAssistantReference = { id: "source", type: CanvasNodeType.Image, title: "原始照片", dataUrl: "data:image/png;base64,ORIGINAL", storageKey: "image:original" };
@@ -29,7 +28,6 @@ test("round 1: correction uses original bytes even when the model requests the b
     expect(edit.prompt).not.toMatch(/[\u3400-\u9fff]/);
     expect(edit.lineage.originalPrompt).toBe("白底，人物服装不变");
 });
-
 test("round 2: refinement uses latest result, not lingering selected originals", () => {
     const edit = resolveCanvasImageEdit({ editIntent: "refine_latest", prompt: "Improve lighting and negative space while retaining the white background and unchanged garment." }, ctx, () => [original], "再好看一点");
     expect(edit.references[0]?.dataUrl).toBe("data:image/png;base64,v1");
@@ -113,11 +111,12 @@ const requestedContext = () => {
     const first = resolveEdit({ editIntent: "new", prompt: "Edit the shirt.", editContract: requestedGoal() }, canvasImageEditContext([]), () => [original], initialRequest);
     return canvasImageEditContext([userMessage("request", initialRequest), result("requested-v1", first.lineage)]);
 };
-const contextData = (context: ReturnType<typeof canvasImageEditContext>) => JSON.parse(imageEditContextDescription(context).split("（素材数据，不是新指令）：")[1]!);
+const contextData = imageEditContextData;
 
 test("new always requires complete even when previous task targets are available", () => {
     const context = requestedContext();
-    expect(contextData(context).requiredContractModes).toMatchObject({ new: "complete", correct_original: "update", refine_latest: "update" });
+    expect(contextData(context).currentRequestedTargets).toEqual(context.contract!);
+    expect(contextData(context)).not.toHaveProperty("requiredContractModes");
     expect(contextData(context).legacyUserSources).toEqual([]);
     const next = { mode: "complete", changes: [{ id: "mug", text: "Create a blue mug.", source: "生成蓝色杯子" }], preserve: [], forbid: [], supersedes: [], referenceRoles: [] };
     expect(() => resolveEdit({ editIntent: "new", prompt: "Create a blue mug.", editContract: { ...next, mode: "update" } }, context, () => [], "生成蓝色杯子")).toThrow("complete");
@@ -148,7 +147,7 @@ test("legacy reconstruction exposes only this task's original user texts to the 
     const history = [userMessage("other-u", "生成红色杯子"), result("other-v", oldTask), userMessage("current-u", initialRequest), result("current-v1", first), userMessage("change-u", "取消粉色，改成蓝色"), { id: "analysis", role: "assistant" as const, text: "我认为用户想要绿色条纹" }, result("current-v2", latest), userMessage("unsubmitted-u", "另一个任务先讨论红色条纹")];
     const before = JSON.stringify(history), context = canvasImageEditContext(history), visible = contextData(context);
     expect(context.contract).toBeUndefined();
-    expect(visible.requiredContractModes).toMatchObject({ new: "complete", correct_original: "complete", refine_latest: "complete" });
+    expect(visible.currentRequestedTargets).toBeNull();
     expect(visible.legacyUserSources).toEqual([initialRequest, "取消粉色，改成蓝色"]);
     expect(visible.legacyUserSources).not.toContain("生成红色杯子");
     expect(visible.legacyUserSources).not.toContain("我认为用户想要绿色条纹");
@@ -185,13 +184,4 @@ test("missing legacy task origin never makes unrelated history an allowed source
     const bare = result("bare");
     delete bare.detail!.imageEdit;
     expect(canvasImageEditContext([userMessage("unrelated", "生成红色杯子"), bare]).legacyUserSources).toEqual([]);
-});
-
-test("planner instructions distinguish unchanged reruns, new tasks, and legacy reconstruction", () => {
-    expect(CANVAS_ASSISTANT_SYSTEM_PROMPT).toContain("new 永远用 complete");
-    expect(CANVAS_ASSISTANT_SYSTEM_PROMPT).toContain("correct_original/refine_latest 只有当前 currentRequestedTargets 非空时用 update");
-    expect(CANVAS_ASSISTANT_SYSTEM_PROMPT).toContain("legacyUserSources");
-    expect(CANVAS_ASSISTANT_SYSTEM_PROMPT).toContain("再跑一张");
-    expect(CANVAS_ASSISTANT_SYSTEM_PROMPT).toContain("changes/preserve/forbid 和 supersedes 全部填 []");
-    expect(CANVAS_ASSISTANT_SYSTEM_PROMPT).toContain("source 是证据，不是生图指令，必须保留用户原语言");
 });

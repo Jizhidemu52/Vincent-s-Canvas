@@ -18,7 +18,7 @@ import { useModuleEnabled } from "@/stores/use-module-store";
 import { resolveToolConfig } from "@/services/api/tool-runtime";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { nanoid } from "nanoid";
-import { requestEdit, requestGeneration, requestImageQuestion, requestToolResponse, toolResponseToInput, type AiTextMessage, type ClaudeAssistantContent, type ResponseFunctionTool, type ResponseInputMessage, type ResponseToolCall, type ToolResponseResult } from "@/services/api/image";
+import { requestEdit, requestGeneration, requestImageQuestion, requestToolResponse, toolResponseToInput, type AiTextMessage, type ClaudeAssistantContent, type ResponseInputMessage, type ResponseToolCall, type ToolResponseResult } from "@/services/api/image";
 import { imageToDataUrl, uploadImage } from "@/services/image-storage";
 import { requestVideoGeneration, storeGeneratedVideo, type VideoGenerationTask } from "@/services/api/video";
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
@@ -54,10 +54,9 @@ import { buildNodeGenerationContext, buildNodeResponseMessages, hydrateNodeGener
 import { buildCanvasAssistantContext } from "@/lib/canvas/canvas-assistant-context";
 import { captureCanvasContextSnapshot, readCanvasContextImage, readCanvasContextVideo, readCanvasConversationImage } from "@/lib/canvas/canvas-assistant-media";
 import { buildCanvasConversationHistory } from "@/lib/canvas/canvas-assistant-history";
-import { CANVAS_ASSISTANT_SYSTEM_PROMPT } from "@/lib/canvas/canvas-assistant-prompt";
-import { CANVAS_ASSISTANT_OUTPUT_POLICY, CANVAS_ENGLISH_IMAGE_PROMPT_SYSTEM, IMAGE_GENERATION_PROMPT_DESCRIPTION, canvasAssistantDisplayMessage, ensureEnglishImagePrompt } from "@/lib/canvas/canvas-assistant-output";
+import { canvasAssistantDisplayMessage, ensureEnglishImagePrompt } from "@/lib/canvas/canvas-assistant-output";
 import { createCanvasSelectionPromptSync } from "@/lib/canvas/canvas-selection-prompt";
-import { canvasImageEditContext, imageEditContextDescription, IMAGE_EDIT_TOOL_PROPERTIES, resolveCanvasImageEdit, type CanvasImageEditContext, type CanvasImageEditLineage } from "@/lib/canvas/canvas-assistant-image-edit";
+import { canvasImageEditContext, imageEditContextData, resolveCanvasImageEdit, type CanvasImageEditContext, type CanvasImageEditLineage } from "@/lib/canvas/canvas-assistant-image-edit";
 import { CanvasEditContractError } from "@/lib/canvas/canvas-image-edit-contract";
 import { pendingOnlineAgentTask, recoverOnlineAgentTask, type PendingOnlineAgentTask } from "@/lib/canvas/canvas-online-task-recovery";
 import { CANVAS_AGENT_ATTACHMENT_LIMIT, readCanvasAgentAttachments } from "@/lib/canvas/canvas-agent-attachments";
@@ -66,164 +65,9 @@ import { canvasCompareSource } from "@/lib/canvas/canvas-image-compare-source";
 const PANEL_MOTION_SECONDS = CANVAS_AGENT_PANEL_MOTION_MS / 1000;
 const ONLINE_AGENT_MAX_STEPS = 4;
 const IMAGE_TARGETS_INCOMPLETE_MESSAGE = "未能完整接续这次生图要求，本次尚未提交图片生成。请明确要沿用的上一版，或补充本次需要保留和修改的内容。";
-const JSON_RECORD_SCHEMA = { type: "object", additionalProperties: true };
-const POSITION_SCHEMA = { type: "object", properties: { x: { type: "number" }, y: { type: "number" } }, required: ["x", "y"], additionalProperties: false };
-const VIEWPORT_SCHEMA = { type: "object", properties: { x: { type: "number" }, y: { type: "number" }, k: { type: "number" } }, required: ["x", "y", "k"], additionalProperties: false };
-const NODE_TYPE_SCHEMA = { type: "string", enum: ["image", "text", "config", "video", "audio"] };
-const GENERATION_MODE_SCHEMA = { type: "string", enum: ["text", "image", "video", "audio"] };
-const GENERATION_OPTION_PROPERTIES = {
-    model: { type: "string" },
-    size: { type: "string" },
-    quality: { type: "string" },
-    imageOptions: { type: "string", description: "图像高级参数 JSON 字符串；resolution 与 quality 独立，仅使用当前模型支持的参数" },
-    count: { type: "number" },
-    seconds: { type: "string" },
-    vquality: { type: "string" },
-    generateAudio: { type: "string" },
-    watermark: { type: "string" },
-    audioVoice: { type: "string" },
-    audioFormat: { type: "string" },
-    audioSpeed: { type: "string" },
-    audioInstructions: { type: "string" },
-};
-const CANVAS_OP_SCHEMA = {
-    type: "object",
-    properties: {
-        type: { type: "string", enum: ["add_node", "update_node", "delete_node", "delete_connections", "connect_nodes", "set_viewport", "select_nodes", "run_generation"] },
-        id: { type: "string" },
-        ids: { type: "array", items: { type: "string" } },
-        nodeType: NODE_TYPE_SCHEMA,
-        title: { type: "string" },
-        x: { type: "number" },
-        y: { type: "number" },
-        width: { type: "number" },
-        height: { type: "number" },
-        position: POSITION_SCHEMA,
-        metadata: JSON_RECORD_SCHEMA,
-        patch: JSON_RECORD_SCHEMA,
-        all: { type: "boolean" },
-        fromNodeId: { type: "string" },
-        toNodeId: { type: "string" },
-        viewport: VIEWPORT_SCHEMA,
-        nodeId: { type: "string" },
-        mode: GENERATION_MODE_SCHEMA,
-        prompt: { type: "string" },
-    },
-    required: ["type"],
-    additionalProperties: false,
-};
+
 const ONLINE_READ_TOOLS = new Set(["canvas_get_state", "canvas_get_selection", "canvas_export_snapshot"]);
 
-function toolDefinition(name: string, description: string, properties: Record<string, unknown>, required: string[] = [], strict = false): ResponseFunctionTool {
-    return { type: "function", function: { name, description, parameters: { type: "object", properties, required, additionalProperties: false }, strict } };
-}
-
-function generationToolDefinition(name: string, description: string, mode?: "text" | "image" | "video" | "audio") {
-    return toolDefinition(
-        name,
-        description,
-        {
-            prompt: { type: "string", ...(name === "canvas_generate_image" ? { description: IMAGE_GENERATION_PROMPT_DESCRIPTION } : {}) },
-            title: { type: "string" },
-            x: { type: "number" },
-            y: { type: "number" },
-            referenceNodeIds: { type: "array", items: { type: "string" } },
-            ...(name === "canvas_generate_image" ? IMAGE_EDIT_TOOL_PROPERTIES : {}),
-            ...(mode ? {} : { mode: GENERATION_MODE_SCHEMA }),
-            autoRun: { type: "boolean" },
-            ...GENERATION_OPTION_PROPERTIES,
-        },
-        name === "canvas_generate_image" ? ["prompt", "editIntent", "editContract"] : ["prompt"],
-    );
-}
-
-const ONLINE_AGENT_TOOLS: ResponseFunctionTool[] = [
-    toolDefinition("canvas_get_state", "读取当前网页画布的节点、连线、选区和视口。", {}),
-    toolDefinition("canvas_get_selection", "读取当前网页画布选中的节点。", {}),
-    toolDefinition("canvas_export_snapshot", "导出当前画布快照，用于理解布局。", {}),
-    toolDefinition(
-        "canvas_apply_ops",
-        "批量操作当前网页画布。ops 支持 add_node、update_node、delete_node、delete_connections、connect_nodes、set_viewport、select_nodes、run_generation。",
-        { ops: { type: "array", items: CANVAS_OP_SCHEMA } },
-        ["ops"],
-        false,
-    ),
-    toolDefinition(
-        "canvas_create_node",
-        "创建任意类型节点：text、image、config、video、audio。适合创建占位图、媒体占位、配置节点或自定义 metadata 节点。",
-        { nodeType: NODE_TYPE_SCHEMA, title: { type: "string" }, x: { type: "number" }, y: { type: "number" }, width: { type: "number" }, height: { type: "number" }, metadata: JSON_RECORD_SCHEMA },
-        ["nodeType"],
-    ),
-    toolDefinition("canvas_create_text_node", "在当前画布创建单个文本节点。", { text: { type: "string" }, x: { type: "number" }, y: { type: "number" }, title: { type: "string" }, width: { type: "number" }, height: { type: "number" } }),
-    toolDefinition(
-        "canvas_create_text_nodes",
-        "批量创建文本节点，适合生成标题、段落、脚本、说明等内容块。",
-        {
-            items: {
-                type: "array",
-                minItems: 1,
-                items: {
-                    type: "object",
-                    properties: { text: { type: "string" }, title: { type: "string" }, x: { type: "number" }, y: { type: "number" }, width: { type: "number" }, height: { type: "number" } },
-                    required: ["text"],
-                    additionalProperties: false,
-                },
-            },
-            x: { type: "number" },
-            y: { type: "number" },
-            gap: { type: "number" },
-            direction: { type: "string", enum: ["row", "column"] },
-        },
-        ["items"],
-    ),
-    toolDefinition("canvas_create_config_node", "创建生成配置节点，可指定 text/image/video/audio 模式和生成参数，可选择立即触发生成。", {
-        prompt: { type: "string" },
-        mode: GENERATION_MODE_SCHEMA,
-        title: { type: "string" },
-        x: { type: "number" },
-        y: { type: "number" },
-        width: { type: "number" },
-        height: { type: "number" },
-        autoRun: { type: "boolean" },
-        ...GENERATION_OPTION_PROPERTIES,
-    }),
-    toolDefinition(
-        "canvas_create_image_prompt_flow",
-        "创建提示词文本节点和图片生成配置节点，并自动连线，可选择立即触发生图。",
-        { prompt: { type: "string" }, x: { type: "number" }, y: { type: "number" }, autoRun: { type: "boolean" }, ...GENERATION_OPTION_PROPERTIES },
-        ["prompt"],
-    ),
-    generationToolDefinition("canvas_create_generation_flow", "创建通用生成流程：提示词文本节点、生成配置节点、参考节点连线，可用于文案、生图、视频或音频。"),
-    generationToolDefinition("canvas_generate_text", "创建通用文本生成流程并立即触发生成。", "text"),
-    generationToolDefinition("canvas_generate_image", "按完整提示词生成或修改静态图片。必须指定 editIntent：纠错由代码选第一轮原图，继续美化选最新结果，不由 referenceNodeIds 覆盖；new/explicit 使用 referenceNodeIds 或本轮参考图。分析看到的图片不自动全部作为改图输入。", "image"),
-    generationToolDefinition("canvas_generate_video", "按完整提示词生成视频，等待完成后返回可播放结果节点；referenceNodeIds 可引用画布图片或本轮上传的首帧/参考图。", "video"),
-    generationToolDefinition("canvas_generate_audio", "创建通用音频生成流程并立即触发生成。", "audio"),
-    toolDefinition("canvas_update_node", "更新节点基础字段或 metadata。", { id: { type: "string" }, patch: JSON_RECORD_SCHEMA, metadata: JSON_RECORD_SCHEMA }, ["id"]),
-    toolDefinition("canvas_update_node_text", "更新文本节点内容和标题。", { id: { type: "string" }, text: { type: "string" }, title: { type: "string" } }, ["id", "text"]),
-    toolDefinition(
-        "canvas_move_nodes",
-        "移动一个或多个节点，支持绝对坐标或 dx/dy 偏移。",
-        {
-            items: {
-                type: "array",
-                minItems: 1,
-                items: { type: "object", properties: { id: { type: "string" }, x: { type: "number" }, y: { type: "number" }, dx: { type: "number" }, dy: { type: "number" } }, required: ["id"], additionalProperties: false },
-            },
-        },
-        ["items"],
-    ),
-    toolDefinition("canvas_resize_node", "调整节点尺寸。", { id: { type: "string" }, width: { type: "number" }, height: { type: "number" }, freeResize: { type: "boolean" } }, ["id", "width", "height"]),
-    toolDefinition("canvas_delete_nodes", "删除指定节点及相关连线。", { ids: { type: "array", items: { type: "string" }, minItems: 1 } }, ["ids"]),
-    toolDefinition(
-        "canvas_connect_nodes",
-        "批量连接节点。",
-        { connections: { type: "array", minItems: 1, items: { type: "object", properties: { fromNodeId: { type: "string" }, toNodeId: { type: "string" } }, required: ["fromNodeId", "toNodeId"], additionalProperties: false } } },
-        ["connections"],
-    ),
-    toolDefinition("canvas_select_nodes", "设置当前选中节点。", { ids: { type: "array", items: { type: "string" } } }, ["ids"]),
-    toolDefinition("canvas_set_viewport", "调整画布视口。", { viewport: VIEWPORT_SCHEMA }, ["viewport"]),
-    toolDefinition("canvas_run_generation", "触发指定节点生成，通常用于配置节点或文本/图片/视频/音频节点。", { nodeId: { type: "string" }, mode: GENERATION_MODE_SCHEMA, prompt: { type: "string" } }, ["nodeId"]),
-];
 type OnlineAgentTab = "setup" | "chat" | "history" | "log";
 type OnlineAgentLog = { id: string; time: string; title: string; data?: unknown };
 type OnlineAgentLogContext = { model: string; running: boolean; confirmTools: boolean; messages: number; nodes: number; connections: number };
@@ -440,7 +284,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
     const renderedMessageWindow = useMemo(() => agentMessageWindow(messages.length, chatMessageLimit), [chatMessageLimit, messages.length]);
     const renderedMessages = useMemo(() => messages.slice(renderedMessageWindow.start).flatMap(message => {
         const display = canvasAssistantDisplayMessage(message);
-        return display ? [display] : [];
+        return display ? [{ source: message, display, pendingTask: pendingOnlineAgentTask(message.detail?.pendingTask) }] : [];
     }), [messages, renderedMessageWindow.start]);
     const hasMessages = messages.length > 0;
     const activeModel = effectiveConfig.textModel || effectiveConfig.model;
@@ -650,12 +494,12 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
             const result = await requestToolResponse(
                 { ...requestConfig, systemPrompt: "" },
                 messages,
-                ONLINE_AGENT_TOOLS,
+                [],
                 "auto",
                 (text) => {
                     streamed = text;
                 },
-                { webSearch: true, tool: "canvas-chat", signal: turn.signal },
+                { webSearch: true, tool: "canvas-chat", signal: turn.signal, ...canvasChatProfile(turn, "plan") },
             );
             turn.signal?.throwIfAborted();
             addOnlineLog("模型工具回复", { content: result.content, toolCalls: result.toolCalls, stopReason: result.stopReason });
@@ -722,8 +566,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                 && toolResults.every(item => item === failed || (item.result.ok && ONLINE_READ_TOOLS.has(item.name)));
             if (canRepair && original) {
                 turn.imageContractRepairUsed = true;
-                const repairMessages: ResponseInputMessage[] = [...nextMessages, { role: "system", content:
-                    "内部提交前校验：上一条图片调用尚未执行，没有提交生图。只允许纠正这一条 canvas_generate_image 的参数一次，不是重试生成。重新核对用户本轮意图与本任务改图上下文：new 始终使用 complete；续作有 currentRequestedTargets 时使用 update；续作无目标时依据已提供的原始及当前任务历史用户要求重建 complete。不得直接换 mode 而保留不完整差量，不得编造 source 或漏掉仍有效的目标。返回且仅返回一个 canvas_generate_image；可纠正 prompt/editContract，editIntent 只允许保持原值或将误判为 new 的同任务重做改为 correct_original。原图和原始要求必须已保存且没有引入其他任务的新参考图。referenceNodeIds/resultImageId、数量、模型、比例、质量等参数必须沿用原调用，不得增加其他工具或任务。无法依据现有资料恢复目标时停止，不要猜测。" }];
+                const repairMessages: ResponseInputMessage[] = nextMessages;
                 upsertMessage(sessionId, { id: assistantId, role: "assistant", text: "正在接续上一轮要求，核对完整生成参数…" });
                 let repaired: ToolResponseResult, call: ResponseToolCall;
                 try {
@@ -732,8 +575,8 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                         ? mediaReferencesForTool(originalArgs, turn).map(ref => ({ ...ref })) : [];
                     repaired = await requestToolResponse(
                         { ...turn.config, model: turn.config.textModel || turn.config.model, systemPrompt: "" },
-                        repairMessages, ONLINE_AGENT_TOOLS.filter(tool => tool.function.name === "canvas_generate_image"),
-                        { type: "function", name: "canvas_generate_image" }, undefined, { tool: "canvas-chat", signal: turn.signal },
+                        repairMessages, [],
+                        { type: "function", name: "canvas_generate_image" }, undefined, { tool: "canvas-chat", signal: turn.signal, ...canvasChatProfile(turn, "repair-image-contract") },
                     );
                     turn.signal?.throwIfAborted();
                     call = checkedImageContractRepairCall(original, repaired.toolCalls, turn);
@@ -773,12 +616,12 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
         const next = await requestToolResponse(
             { ...requestConfig, systemPrompt: "" },
             nextMessages,
-            ONLINE_AGENT_TOOLS,
+            [],
             "auto",
             (text) => {
                 streamed = text;
             },
-            { webSearch: true, tool: "canvas-chat", signal: turn.signal },
+            { webSearch: true, tool: "canvas-chat", signal: turn.signal, ...canvasChatProfile(turn, "continue") },
         );
         turn.signal?.throwIfAborted();
         addOnlineLog(`Agent Tool Loop ${step + 1} 回复`, { content: next.content, toolCalls: next.toolCalls, stopReason: next.stopReason });
@@ -1106,8 +949,8 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
             if (plan.kind === "image") {
                 prompt = await ensureEnglishImagePrompt(prompt, source => requestImageQuestion(
                     { ...baseConfig, model: baseConfig.textModel || baseConfig.model, systemPrompt: "" },
-                    [{ role: "system", content: CANVAS_ENGLISH_IMAGE_PROMPT_SYSTEM }, { role: "user", content: source }],
-                    () => {}, { tool: "canvas-chat", signal },
+                    [{ role: "user", content: source }],
+                    () => {}, { tool: "canvas-chat", signal, chatProfile: "canvas-assistant", profileContext: { stage: "english-image-prompt" } },
                 ), { requiresPrompt: plan.requiresPrompt });
                 signal?.throwIfAborted();
                 const config = { ...baseConfig, model: plan.model, imageModel: plan.model, size: plan.size, quality: plan.quality, imageOptions: plan.imageOptions ?? baseConfig.imageOptions, count: String(plan.count), canvasImageCount: String(plan.count), systemPrompt: "" };
@@ -1387,12 +1230,12 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                                     </Button>
                                 </div>
                             ) : null}
-                            {renderedMessages.map((message) => (
+                            {renderedMessages.map(({ source, display: message, pendingTask }) => (
                                 <div key={message.id} className="space-y-2">
                                     <AgentChatMessage item={message} theme={theme} user={user} onRejectTool={handleRejectOnlineTool} onApproveTool={handleApproveOnlineTool} onUseImageForVideo={handleUseImageForVideo} />
-                                    {pendingOnlineAgentTask(message.detail?.pendingTask) ? <div className="flex flex-wrap items-center gap-2 text-xs" style={{ color: theme.node.muted }}>
-                                        <span className="break-all">原任务：{pendingOnlineAgentTask(message.detail?.pendingTask)?.taskIds?.join("、") || pendingOnlineAgentTask(message.detail?.pendingTask)?.requestId}</span>
-                                        <Button size="small" disabled={isRunning} onClick={() => void queryOriginalAgentTask(activeSession!.id, message)}>查询原任务</Button>
+                                    {pendingTask ? <div className="flex flex-wrap items-center gap-2 text-xs" style={{ color: theme.node.muted }}>
+                                        <span className="break-all">原任务：{pendingTask.taskIds?.join("、") || pendingTask.requestId}</span>
+                                        <Button size="small" disabled={isRunning} onClick={() => void queryOriginalAgentTask(activeSession!.id, source)}>查询原任务</Button>
                                     </div> : null}
                                     {message.references?.length ? <MessageReferences message={message} nodes={snapshotRef.current.nodes} /> : null}
                                     {message.detail?.mediaWorkflow ? (
@@ -2367,10 +2210,6 @@ function fileToDataUrl(file: File) {
 async function refineAgentGenerationPrompt(config: AiConfig, settings: AgentGenerationSettings, prompt: string, references: ReferenceImage[]) {
     const messages: AiTextMessage[] = [
         {
-            role: "system",
-            content: CANVAS_ENGLISH_IMAGE_PROMPT_SYSTEM,
-        },
-        {
             role: "user",
             content: [
                 { type: "text", text: buildAgentGenerationBrief(settings, prompt, references.length > 0) },
@@ -2378,7 +2217,7 @@ async function refineAgentGenerationPrompt(config: AiConfig, settings: AgentGene
             ],
         },
     ];
-    return requestImageQuestion({ ...config, model: config.textModel || config.model, systemPrompt: "" }, messages, () => {}, { tool: "canvas-chat" });
+    return requestImageQuestion({ ...config, model: config.textModel || config.model, systemPrompt: "" }, messages, () => {}, { tool: "canvas-chat", chatProfile: "canvas-assistant", profileContext: { stage: "english-image-prompt" } });
 }
 
 function nodeToReference(node: CanvasNodeData): CanvasAssistantReference | null {
@@ -2397,24 +2236,24 @@ function buildAssistantReferences(nodes: CanvasNodeData[]) {
         .filter((item): item is CanvasAssistantReference => Boolean(item));
 }
 
-function buildToolAgentMessages(snapshot: CanvasAgentSnapshot, userMessage: CanvasAssistantMessage, settings: AgentGenerationSettings, conversation: Awaited<ReturnType<typeof buildCanvasConversationHistory>>, editContext: CanvasImageEditContext): ResponseInputMessage[] {
+function buildToolAgentMessages(_snapshot: CanvasAgentSnapshot, userMessage: CanvasAssistantMessage, _settings: AgentGenerationSettings, conversation: Awaited<ReturnType<typeof buildCanvasConversationHistory>>, _editContext: CanvasImageEditContext): ResponseInputMessage[] {
     const refs = userMessage.references || [];
-    return [
-        {
-            role: "system",
-            content: `${CANVAS_ASSISTANT_SYSTEM_PROMPT}\n${CANVAS_ASSISTANT_OUTPUT_POLICY}`,
-        },
-        ...conversation.messages,
-        {
-            role: "user",
-            content: [
-                ...conversation.currentContent,
-                { type: "text", text: imageEditContextDescription(editContext) },
-                ...refs.flatMap((item) => (item.text ? [{ type: "text" as const, text: `选中节点 ${item.title}：${item.text}` }] : [])),
-                { type: "text", text: `当前画布结构（不代表已读取媒体）：${JSON.stringify(compactSnapshot(snapshot, false))}\n\n可用参考图片（按本轮手动排列顺序编号；id可用于referenceNodeIds）：${JSON.stringify(refs.filter((item) => item.dataUrl).map((item, index) => ({ id: item.id, label: `本轮${imageReferenceLabel(index)}`, title: item.title, source: snapshot.nodes.some((node) => node.id === item.id) ? "canvas" : "upload" })))}\n\n创作预设（仅为用户要求生成时的默认参数，不是生成指令）：${JSON.stringify(settings)}\n\n用户需求：${userMessage.text}` },
-            ],
-        },
-    ];
+    return [...conversation.messages, { role: "user", content: [
+        ...conversation.currentContent,
+        ...refs.flatMap(item => item.text ? [{ type: "text" as const, text: "选中节点 " + item.title + "：" + item.text }] : []),
+        { type: "text", text: userMessage.text },
+    ] }];
+}
+
+function canvasChatProfile(turn: OnlineTurnContext, stage: "plan" | "continue" | "repair-image-contract") {
+    return { chatProfile: "canvas-assistant" as const, profileContext: {
+        stage, userText: turn.userPrompt, snapshot: compactSnapshot(turn.canvasSnapshot, false), settings: turn.settings,
+        references: turn.references.filter(item => item.dataUrl || item.storageKey).map((item, index) => ({
+            id: item.id, label: "本轮" + imageReferenceLabel(index), title: item.title,
+            source: turn.canvasSnapshot.nodes.some(node => node.id === item.id) ? "canvas" : "upload",
+        })),
+        editContext: imageEditContextData(turn.imageEditContext || canvasImageEditContext([])),
+    } };
 }
 
 function compactSnapshot(snapshot: CanvasAgentSnapshot, includeContent = true) {

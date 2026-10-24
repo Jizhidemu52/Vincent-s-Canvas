@@ -39,14 +39,22 @@ afterEach(() => {
 function controlledNetwork(phase: "initial" | "final", options: { task?: QueuedTask; pollError?: Error; abort?: AbortController } = {}) {
     const sessions: ReturnType<typeof Promise.withResolvers<Response>>[] = [];
     const cancellations: string[] = [];
+    const submissions: Array<{ path: string; body: Record<string, unknown> }> = [];
+    const observations: string[] = [];
     const task = options.task || completedTask;
     globalThis.fetch = (async (input, init) => {
         const path = String(input);
         const method = init?.method || "GET";
         if (path === "/api/models") return Response.json({ tools: [], prices: [], models: [model] });
         if (path === "/api/assets/upload-request") return Response.json({ assetId: "reference-1", uploadUrl: null });
-        if (path === "/api/tasks" && method === "POST") return Response.json({ task: { id: task.id } });
-        if (path === "/api/tasks/batch") return Response.json({ batchId: "batch-1", tasks: [{ id: task.id, itemIndex: 0 }], failures: [] });
+        if (path === "/api/tasks" && method === "POST") {
+            submissions.push({ path, body: JSON.parse(String(init?.body)) });
+            return Response.json({ task: { id: task.id } });
+        }
+        if (path === "/api/tasks/batch" && method === "POST") {
+            submissions.push({ path, body: JSON.parse(String(init?.body)) });
+            return Response.json({ batchId: "batch-1", tasks: [{ id: task.id, itemIndex: 0 }], failures: [] });
+        }
         if (path === `/api/tasks/${task.id}/recover`) return Response.json({ task: { ...task, status: "running" }, recovered: true });
         if (path.endsWith("/cancel")) {
             cancellations.push(path);
@@ -59,6 +67,7 @@ function controlledNetwork(phase: "initial" | "final", options: { task?: QueuedT
             return pending.promise;
         }
         if (path === `/api/tasks/${task.id}` || (path.startsWith("/api/tasks?") && method === "GET")) {
+            observations.push(path);
             // Let the first real hydration finish, so finally must start a distinct final refresh.
             if (phase === "final") await useUserStore.getState().hydrateSession();
             if (options.abort) {
@@ -71,7 +80,7 @@ function controlledNetwork(phase: "initial" | "final", options: { task?: QueuedT
         }
         throw new Error(`Unexpected HTTP ${method} ${path}`);
     }) as typeof fetch;
-    return { sessions, cancellations };
+    return { sessions, cancellations, submissions, observations };
 }
 
 function run(path: Path, signal?: AbortSignal) {
@@ -119,7 +128,18 @@ describe("generation results do not wait for session refresh", () => {
                 expect(error).toBeInstanceOf(QueuedTaskSubmissionUncertainError);
                 expect(error).toMatchObject({ requestId: completedTask.requestId, taskId: completedTask.id });
                 expect(error.cause).toBeInstanceOf(TaskObservationStoppedError);
+            } else if (path === "batch") {
+                // An accepted batch keeps its original request identity so callers
+                // leave recovery bindings intact instead of offering a fresh POST.
+                expect(error).toBeInstanceOf(QueuedTaskSubmissionUncertainError);
+                expect(error.requestId).toBe(network.submissions[0]!.body.requestId);
+                expect(error.taskId).toBeUndefined();
+                expect(error.cause).toBeInstanceOf(TaskObservationStoppedError);
             } else expect(error).toBeInstanceOf(TaskObservationStoppedError);
+            const stopped = error instanceof QueuedTaskSubmissionUncertainError ? error.cause : error;
+            expect(stopped).toMatchObject({ reason: "unavailable", taskIds: ["task-1"] });
+            expect(network.observations).toHaveLength(3);
+            expect(network.submissions).toHaveLength(path === "recovery" ? 0 : 1);
             expect(network.cancellations).toEqual([]);
         } finally { globalThis.setTimeout = nativeTimeout; }
     });

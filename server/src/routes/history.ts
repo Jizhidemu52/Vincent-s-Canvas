@@ -7,8 +7,8 @@ import { makeCursorPage, parseCursorPage } from "../cursor-pagination";
 import { requireRole } from "../rbac";
 import type { AuthenticatedRequest, SessionUser } from "../types";
 
-const select = `h.id,h.task_id AS "taskId",h.user_id AS "userId",u.display_name AS "userName",h.department_id AS "departmentId",d.name AS "departmentName",h.project_id AS "projectId",h.operation_type AS "operationType",h.model_config_id AS "modelConfigId",m.name AS "modelName",h.prompt,h.parameters,h.source_urls AS "sourceUrls",h.result_urls AS "resultUrls",h.credits,h.rmb_cost::float8 AS "rmbCost",h.status,h.failure_reason AS "failureReason",h.created_at AS "createdAt"`;
-const joins = `FROM generation_history h JOIN users u ON u.id=h.user_id LEFT JOIN departments d ON d.id=h.department_id LEFT JOIN model_configs m ON m.id=h.model_config_id`;
+const select = `h.id,h.task_id AS "taskId",h.user_id AS "userId",u.display_name AS "userName",h.department_id AS "departmentId",d.name AS "departmentName",h.project_id AS "projectId",h.operation_type AS "operationType",h.model_config_id AS "modelConfigId",m.name AS "modelName",h.prompt,h.parameters,h.source_urls AS "sourceUrls",h.result_urls AS "resultUrls",h.credits,h.rmb_cost::float8 AS "rmbCost",h.status,h.failure_reason AS "failureReason",h.created_at AS "createdAt",t.user_input AS "userInput",t.prompt_optimized AS optimized`;
+const joins = `FROM generation_history h JOIN users u ON u.id=h.user_id LEFT JOIN departments d ON d.id=h.department_id LEFT JOIN model_configs m ON m.id=h.model_config_id LEFT JOIN tasks t ON t.id=h.task_id`;
 const summarySelect = `h.id,h.task_id AS "taskId",h.user_id AS "userId",u.display_name AS "userName",h.department_id AS "departmentId",d.name AS "departmentName",h.project_id AS "projectId",h.operation_type AS "operationType",h.model_config_id AS "modelConfigId",m.name AS "modelName",left(h.prompt,240) AS prompt,h.credits,h.rmb_cost::float8 AS "rmbCost",h.status,h.failure_reason AS "failureReason",h.created_at AS "createdAt",to_char(h.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS "cursorCreatedAt"`;
 const exportLimit = 50_000;
 

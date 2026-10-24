@@ -1,4 +1,4 @@
-import { buildCreativeChatRequestMessages, buildCreativeChatTools, buildCreativeImageCatalog, MAX_CREATIVE_CHAT_PREVIEW_BYTES, MAX_CREATIVE_CHAT_REFERENCES, parseCreativeChatInspection, parseCreativeChatPlan, resolveCreativeChatReferences, type CreativeChatMessage, type CreativeChatPlan } from "@/lib/creative-chat";
+import { buildCreativeChatRequest, buildCreativeImageCatalog, MAX_CREATIVE_CHAT_PREVIEW_BYTES, MAX_CREATIVE_CHAT_REFERENCES, parseCreativeChatInspection, parseCreativeChatPlan, resolveCreativeChatReferences, type CreativeChatMessage, type CreativeChatPlan } from "@/lib/creative-chat";
 import { getDataUrlByteSize } from "@/lib/image-utils";
 import { requestToolResponse, toolResponseToInput } from "@/services/api/image";
 import { imageToDataUrl } from "@/services/image-storage";
@@ -92,13 +92,15 @@ export async function requestCreativeChatPlan(config: AiConfig, history: Creativ
     const context = { catalog, selectedImageId };
     const requestOptions = {
         tool: "gpt-chat",
+        chatProfile: "creative-chat" as const,
         signal: options.signal,
         onToolCallStart: (name: string) => {
             if (name === "create_image") options.onPhase?.("正在整理图片修改要求…");
             else if (name === "inspect_images") options.onPhase?.("正在查看相关图片…");
         },
     };
-    let result = await requestToolResponse(config, buildCreativeChatRequestMessages(history, current, previews, context), buildCreativeChatTools(true, allowImageCreation), "auto", options.onDelta, requestOptions);
+    let prepared = buildCreativeChatRequest(history, current, previews, context);
+    let result = await requestToolResponse(config, prepared.messages, [], "auto", options.onDelta, { ...requestOptions, profileContext: prepared.profileContext });
     options.signal?.throwIfAborted();
     const inspectionIds = parseCreativeChatInspection(result, catalog);
     if (inspectionIds) {
@@ -113,11 +115,12 @@ export async function requestCreativeChatPlan(config: AiConfig, history: Creativ
         references = references.filter((item) => previews.some((preview) => preview.id === item.id));
         options.signal?.throwIfAborted();
         const inspectedResult = result;
+        prepared = buildCreativeChatRequest(history, current, previews, context);
         result = await requestToolResponse(config, [
-            ...buildCreativeChatRequestMessages(history, current, previews, context),
+            ...prepared.messages,
             ...toolResponseToInput(inspectedResult),
-            { role: "tool", tool_call_id: inspectedResult.toolCalls[0]!.id, content: JSON.stringify({ inspected_image_ids: inspectionIds, previewed_image_ids: previews.map((item) => item.id), unavailable_image_ids: nextIds.filter((id) => !previews.some((item) => item.id === id)), instruction: `可读取的预览已按image_id提供，不可用图片不得用其他图替代。查看步骤已结束，${allowImageCreation ? "现在只能回复文字或调用一次create_image" : "本轮没有文字处理要求，只能回复文字"}；不得再次调用inspect_images。` }) },
-        ], buildCreativeChatTools(false, allowImageCreation), "auto", options.onDelta, requestOptions);
+            { role: "tool", tool_call_id: inspectedResult.toolCalls[0]!.id, content: JSON.stringify({ inspected_image_ids: inspectionIds, previewed_image_ids: previews.map((item) => item.id), unavailable_image_ids: nextIds.filter((id) => !previews.some((item) => item.id === id)) }) },
+        ], [], "auto", options.onDelta, { ...requestOptions, profileContext: { ...prepared.profileContext, phase: "after-inspection" } });
         options.signal?.throwIfAborted();
     }
     return parseCreativeChatPlan(result, references, { ...context, previewedImageIds: previews.map((item) => item.id), allowImageCreation });

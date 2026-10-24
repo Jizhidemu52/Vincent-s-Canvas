@@ -1,0 +1,830 @@
+<!doctype html><meta charset="utf-8"><title>Prompt QA visual-v2-extended</title><style>body{font:15px system-ui;margin:24px;background:#eee;color:#222}main{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}section{background:white;padding:16px}h2{font-size:17px}.images{display:flex;gap:8px}figure{margin:0;max-width:100%}img{max-width:100%;max-height:560px}pre{white-space:pre-wrap;overflow-wrap:anywhere}summary{cursor:pointer}</style><h1>visual-v2-extended — HTTP 成功不等于视觉验收通过</h1><p>原始字节图像；全部视觉状态待人工按验收点核对。旧新版相邻。详情不含私有配方或凭据。</p><main><section><h2>style-to-sketch / 11 / old</h2><p>success / 视觉待核 / </p><div class="images"><figure><img loading="lazy" src="style-to-sketch-11-old-733bd2b4-a16f-4cbc-9526-28dbe35833cf-1.png"><figcaption>image/png / 757262 bytes</figcaption></figure></div><details><summary>输入、最终提示词、验收点</summary><pre>{
+  &quot;requestId&quot;: &quot;pq:visual-v2-extended:style-to-sketch-11-old:0&quot;,
+  &quot;userInput&quot;: &quot;参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：技术感线稿。用清晰、均匀的线条表达服装轮廓和可见结构，主轮廓与结构线层次分明。\n\n细节程度：保留实际可见的分割线、口袋、褶裥、门襟、纽扣和装饰细节，避免虚构细节。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。黑色中等线宽技术线稿，标出可见肩缝和袖窿线。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。&quot;,
+  &quot;finalPrompt&quot;: &quot;参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：技术感线稿。用清晰、均匀的线条表达服装轮廓和可见结构，主轮廓与结构线层次分明。\n\n细节程度：保留实际可见的分割线、口袋、褶裥、门襟、纽扣和装饰细节，避免虚构细节。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。黑色中等线宽技术线稿，标出可见肩缝和袖窿线。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。&quot;,
+  &quot;checks&quot;: [
+    &quot;主体与参考图职责正确&quot;,
+    &quot;仅改变明确要求的内容&quot;,
+    &quot;没有无关文字、水印、额外产品或部件&quot;,
+    &quot;真实材质与光影没有凭空改变&quot;,
+    &quot;五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数&quot;,
+    &quot;无胸袋，不添加胸袋&quot;,
+    &quot;黑色中等线宽技术线稿，标出可见肩缝和袖窿线。&quot;
+  ]
+}</pre></details></section>
+<section><h2>style-to-sketch / 11 / new</h2><p>success / 视觉待核 / </p><div class="images"><figure><img loading="lazy" src="style-to-sketch-11-new-686fa657-47a7-4faa-b4ea-46bf6da60891-1.png"><figcaption>image/png / 760529 bytes</figcaption></figure></div><details><summary>输入、最终提示词、验收点</summary><pre>{
+  &quot;requestId&quot;: &quot;pq:visual-v2-extended:style-to-sketch-11-new:0&quot;,
+  &quot;userInput&quot;: {
+    &quot;scene&quot;: &quot;style-to-sketch&quot;,
+    &quot;fields&quot;: {
+      &quot;description&quot;: &quot;只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。黑色中等线宽技术线稿，标出可见肩缝和袖窿线。&quot;,
+      &quot;sketchStyle&quot;: &quot;technical&quot;,
+      &quot;sketchDetail&quot;: &quot;detailed&quot;
+    },
+    &quot;userText&quot;: &quot;只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。黑色中等线宽技术线稿，标出可见肩缝和袖窿线。&quot;,
+    &quot;referenceRoles&quot;: [
+      &quot;服装参考图&quot;
+    ],
+    &quot;mode&quot;: &quot;edit&quot;
+  },
+  &quot;finalPrompt&quot;: &quot;Convert Image 1 into one symmetrical front-view technical fashion flat; omit photographic color, texture and shadows. Preserve its proportions, silhouette, pointed collar, short set-in sleeves, placket, curved hem, exactly five fully visible center-front buttons and the original partially obscured neckline button; add or remove none. Show visible shoulder seams, armhole lines, sleeve hems and dashed topstitching only where visible. Use medium-weight black (#000000) lines, heavier outer contours and thinner construction lines on pure white (#FFFFFF). Keep the chest pocketless; show no back view or invented details.\nAvoid: shading, gradients, color fills, fabric texture, models, minors, extra limbs, anatomical distortion, nudity, sexualized presentation, hangers, background objects, brand logos, watermarks, unrelated text, text labels, collages, multiple panels, back views, color swatches, measurements, added pockets, altered button count, invented details.&quot;,
+  &quot;checks&quot;: [
+    &quot;主体与参考图职责正确&quot;,
+    &quot;仅改变明确要求的内容&quot;,
+    &quot;没有无关文字、水印、额外产品或部件&quot;,
+    &quot;真实材质与光影没有凭空改变&quot;,
+    &quot;五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数&quot;,
+    &quot;无胸袋，不添加胸袋&quot;,
+    &quot;黑色中等线宽技术线稿，标出可见肩缝和袖窿线。&quot;
+  ]
+}</pre></details></section>
+<section><h2>garment-colorway / 11 / old</h2><p>success / 视觉待核 / </p><div class="images"><figure><img loading="lazy" src="garment-colorway-11-old-589719e6-8d61-4c65-ba70-bca1ae26acb8-1.png"><figcaption>image/png / 1293216 bytes</figcaption></figure></div><details><summary>输入、最终提示词、验收点</summary><pre>{
+  &quot;requestId&quot;: &quot;pq:visual-v2-extended:garment-colorway-11-old:0&quot;,
+  &quot;userInput&quot;: &quot;参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#2E5B4E。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #2E5B4E。\n\n改色范围：仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #2E5B4E。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。&quot;,
+  &quot;finalPrompt&quot;: &quot;参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#2E5B4E。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #2E5B4E。\n\n改色范围：仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #2E5B4E。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。&quot;,
+  &quot;checks&quot;: [
+    &quot;主体与参考图职责正确&quot;,
+    &quot;仅改变明确要求的内容&quot;,
+    &quot;没有无关文字、水印、额外产品或部件&quot;,
+    &quot;真实材质与光影没有凭空改变&quot;,
+    &quot;五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数&quot;,
+    &quot;无胸袋，不添加胸袋&quot;,
+    &quot;仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色；目标 #2E5B4E&quot;
+  ]
+}</pre></details></section>
+<section><h2>garment-colorway / 11 / new</h2><p>success / 视觉待核 / </p><div class="images"><figure><img loading="lazy" src="garment-colorway-11-new-59501f89-afdd-4234-b3d1-01948401108b-1.png"><figcaption>image/png / 1394589 bytes</figcaption></figure></div><details><summary>输入、最终提示词、验收点</summary><pre>{
+  &quot;requestId&quot;: &quot;pq:visual-v2-extended:garment-colorway-11-new:0&quot;,
+  &quot;userInput&quot;: {
+    &quot;scene&quot;: &quot;garment-colorway&quot;,
+    &quot;fields&quot;: {
+      &quot;description&quot;: &quot;只改指定区域至 #2E5B4E。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。&quot;,
+      &quot;colorMode&quot;: &quot;specific&quot;,
+      &quot;colorRegion&quot;: &quot;仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色&quot;,
+      &quot;colors&quot;: [
+        &quot;#2E5B4E&quot;
+      ]
+    },
+    &quot;userText&quot;: &quot;只改指定区域至 #2E5B4E。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。&quot;,
+    &quot;referenceRoles&quot;: [
+      &quot;服装参考图&quot;
+    ],
+    &quot;mode&quot;: &quot;edit&quot;
+  },
+  &quot;finalPrompt&quot;: &quot;Recolor only the body fabric and front placket of Image 1 to deep forest green (#2E5B4E); use Image 1 as the exact garment reference, replacing its color only within these regions. Keep sleeves, collar, all five center-front buttons and the partially concealed collar button their original pale blue. Preserve silhouette, construction, visible stitching, collar shape, absence of pockets and patterns, fabric weave, folds, highlights, shadows, white background and image proportions. The new color sits naturally in the fabric weave and folds, with realistic highlights and shadows, not a flat fill.\nAvoid: flat color fill, color swatches, changing garment structure or patterns, recoloring sleeves, collar or buttons, recoloring skin or background, brand logos, watermarks, unrelated text, collage grids, dimension annotations, extra hands, deformed limbs, underage models, nudity, sexualized presentation.&quot;,
+  &quot;checks&quot;: [
+    &quot;主体与参考图职责正确&quot;,
+    &quot;仅改变明确要求的内容&quot;,
+    &quot;没有无关文字、水印、额外产品或部件&quot;,
+    &quot;真实材质与光影没有凭空改变&quot;,
+    &quot;五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数&quot;,
+    &quot;无胸袋，不添加胸袋&quot;,
+    &quot;仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色；目标 #2E5B4E&quot;
+  ]
+}</pre></details></section>
+<section><h2>style-to-sketch / 12 / old</h2><p>success / 视觉待核 / </p><div class="images"><figure><img loading="lazy" src="style-to-sketch-12-old-0f42ac1d-d68b-4958-a96f-c3579e7209fa-1.png"><figcaption>image/png / 720726 bytes</figcaption></figure></div><details><summary>输入、最终提示词、验收点</summary><pre>{
+  &quot;requestId&quot;: &quot;pq:visual-v2-extended:style-to-sketch-12-old:0&quot;,
+  &quot;userInput&quot;: &quot;参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：极简线稿。用干净、克制的轮廓线表达服装，不保留摄影光影与面料色块。\n\n细节程度：保留领口、袖口、下摆、门襟与主要结构线，适度简化细小纹理。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。细线简约线稿，不表现布面阴影。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。&quot;,
+  &quot;finalPrompt&quot;: &quot;参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：极简线稿。用干净、克制的轮廓线表达服装，不保留摄影光影与面料色块。\n\n细节程度：保留领口、袖口、下摆、门襟与主要结构线，适度简化细小纹理。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。细线简约线稿，不表现布面阴影。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。&quot;,
+  &quot;checks&quot;: [
+    &quot;主体与参考图职责正确&quot;,
+    &quot;仅改变明确要求的内容&quot;,
+    &quot;没有无关文字、水印、额外产品或部件&quot;,
+    &quot;真实材质与光影没有凭空改变&quot;,
+    &quot;五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数&quot;,
+    &quot;无胸袋，不添加胸袋&quot;,
+    &quot;细线简约线稿，不表现布面阴影。&quot;
+  ]
+}</pre></details></section>
+<section><h2>style-to-sketch / 12 / new</h2><p>success / 视觉待核 / </p><div class="images"><figure><img loading="lazy" src="style-to-sketch-12-new-92c3d412-bc5c-47b2-969d-aecb35bda39d-1.png"><figcaption>image/png / 747386 bytes</figcaption></figure></div><details><summary>输入、最终提示词、验收点</summary><pre>{
+  &quot;requestId&quot;: &quot;pq:visual-v2-extended:style-to-sketch-12-new:0&quot;,
+  &quot;userInput&quot;: {
+    &quot;scene&quot;: &quot;style-to-sketch&quot;,
+    &quot;fields&quot;: {
+      &quot;description&quot;: &quot;只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。细线简约线稿，不表现布面阴影。&quot;,
+      &quot;sketchStyle&quot;: &quot;minimal&quot;,
+      &quot;sketchDetail&quot;: &quot;standard&quot;
+    },
+    &quot;userText&quot;: &quot;只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。细线简约线稿，不表现布面阴影。&quot;,
+    &quot;referenceRoles&quot;: [
+      &quot;服装参考图&quot;
+    ],
+    &quot;mode&quot;: &quot;edit&quot;
+  },
+  &quot;finalPrompt&quot;: &quot;Convert Image 1 into one symmetrical front-view fashion flat, using thin, clean black (#000000) contours and essential construction lines on pure white (#FFFFFF); omit photographic color, texture, and shadows. Preserve its proportions, silhouette, pointed collar, center-front placket, short set-in sleeves, sleeve hems, curved hem, and visible seams. Keep exactly five fully visible center-front buttons plus the original partially obscured neckline button, with none added or removed. Show only the garment laid flat; add no pockets, back view, or unseen details.\nAvoid: shading, gradients, color fills, fabric texture, pockets, added or missing buttons, back views, collage grids, models, extra limbs, anatomical distortions, minors, nudity, sexualized presentation, hangers, background objects, brand logos, watermarks, unrelated text, measurements, text labels, color swatches.&quot;,
+  &quot;checks&quot;: [
+    &quot;主体与参考图职责正确&quot;,
+    &quot;仅改变明确要求的内容&quot;,
+    &quot;没有无关文字、水印、额外产品或部件&quot;,
+    &quot;真实材质与光影没有凭空改变&quot;,
+    &quot;五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数&quot;,
+    &quot;无胸袋，不添加胸袋&quot;,
+    &quot;细线简约线稿，不表现布面阴影。&quot;
+  ]
+}</pre></details></section>
+<section><h2>garment-colorway / 12 / old</h2><p>success / 视觉待核 / </p><div class="images"><figure><img loading="lazy" src="garment-colorway-12-old-95cb19f3-e717-4349-ae7b-4ad99c3d5435-1.png"><figcaption>image/png / 1353137 bytes</figcaption></figure></div><details><summary>输入、最终提示词、验收点</summary><pre>{
+  &quot;requestId&quot;: &quot;pq:visual-v2-extended:garment-colorway-12-old:0&quot;,
+  &quot;userInput&quot;: &quot;参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#253746。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #253746。\n\n改色范围：仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #253746。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。&quot;,
+  &quot;finalPrompt&quot;: &quot;参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#253746。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #253746。\n\n改色范围：仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #253746。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。&quot;,
+  &quot;checks&quot;: [
+    &quot;主体与参考图职责正确&quot;,
+    &quot;仅改变明确要求的内容&quot;,
+    &quot;没有无关文字、水印、额外产品或部件&quot;,
+    &quot;真实材质与光影没有凭空改变&quot;,
+    &quot;五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数&quot;,
+    &quot;无胸袋，不添加胸袋&quot;,
+    &quot;仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色；目标 #253746&quot;
+  ]
+}</pre></details></section>
+<section><h2>garment-colorway / 12 / new</h2><p>success / 视觉待核 / </p><div class="images"><figure><img loading="lazy" src="garment-colorway-12-new-02eb4b41-0d37-4f2f-be35-5ec950be76d7-1.png"><figcaption>image/png / 1398426 bytes</figcaption></figure></div><details><summary>输入、最终提示词、验收点</summary><pre>{
+  &quot;requestId&quot;: &quot;pq:visual-v2-extended:garment-colorway-12-new:0&quot;,
+  &quot;userInput&quot;: {
+    &quot;scene&quot;: &quot;garment-colorway&quot;,
+    &quot;fields&quot;: {
+      &quot;description&quot;: &quot;只改指定区域至 #253746。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。&quot;,
+      &quot;colorMode&quot;: &quot;specific&quot;,
+      &quot;colorRegion&quot;: &quot;仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色&quot;,
+      &quot;colors&quot;: [
+        &quot;#253746&quot;
+      ]
+    },
+    &quot;userText&quot;: &quot;只改指定区域至 #253746。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。&quot;,
+    &quot;referenceRoles&quot;: [
+      &quot;服装参考图&quot;
+    ],
+    &quot;mode&quot;: &quot;edit&quot;
+  },
+  &quot;finalPrompt&quot;: &quot;Use Image 1 as the editing base, replacing only the body fabric and front placket color with dark slate blue (#253746), not transferring this color elsewhere. Keep both sleeves, the collar, all five center-front buttons and the partially concealed collar button in their original pale blue. Preserve the silhouette, construction lines, visible stitching, collar shape, pocket configuration, any pattern shapes and positions, fabric weave, texture, folds, highlight/shadow gradations, white background and image proportions. The new color sits naturally in the fabric weave and folds, with realistic highlights and shadows, not a flat fill.\nAvoid: flat color fill, color swatches, dimension annotations, collage grids, garment structure or pattern changes, recoloring sleeves, collar or buttons, recoloring skin or background, brand logos, watermarks, unrelated text, extra hands, deformed limbs, underage models, nudity, sexualized presentation.&quot;,
+  &quot;checks&quot;: [
+    &quot;主体与参考图职责正确&quot;,
+    &quot;仅改变明确要求的内容&quot;,
+    &quot;没有无关文字、水印、额外产品或部件&quot;,
+    &quot;真实材质与光影没有凭空改变&quot;,
+    &quot;五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数&quot;,
+    &quot;无胸袋，不添加胸袋&quot;,
+    &quot;仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色；目标 #253746&quot;
+  ]
+}</pre></details></section>
+<section><h2>style-to-sketch / 13 / old</h2><p>success / 视觉待核 / </p><div class="images"><figure><img loading="lazy" src="style-to-sketch-13-old-644396ee-d767-438a-a60b-98ffffdf98ca-1.png"><figcaption>image/png / 762365 bytes</figcaption></figure></div><details><summary>输入、最终提示词、验收点</summary><pre>{
+  &quot;requestId&quot;: &quot;pq:visual-v2-extended:style-to-sketch-13-old:0&quot;,
+  &quot;userInput&quot;: &quot;参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：技术感线稿。用清晰、均匀的线条表达服装轮廓和可见结构，主轮廓与结构线层次分明。\n\n细节程度：保留领口、袖口、下摆、门襟与主要结构线，适度简化细小纹理。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。外轮廓稍粗、内部缝线细，线宽层级清楚。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。&quot;,
+  &quot;finalPrompt&quot;: &quot;参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：技术感线稿。用清晰、均匀的线条表达服装轮廓和可见结构，主轮廓与结构线层次分明。\n\n细节程度：保留领口、袖口、下摆、门襟与主要结构线，适度简化细小纹理。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。外轮廓稍粗、内部缝线细，线宽层级清楚。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。&quot;,
+  &quot;checks&quot;: [
+    &quot;主体与参考图职责正确&quot;,
+    &quot;仅改变明确要求的内容&quot;,
+    &quot;没有无关文字、水印、额外产品或部件&quot;,
+    &quot;真实材质与光影没有凭空改变&quot;,
+    &quot;五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数&quot;,
+    &quot;无胸袋，不添加胸袋&quot;,
+    &quot;外轮廓稍粗、内部缝线细，线宽层级清楚。&quot;
+  ]
+}</pre></details></section>
+<section><h2>style-to-sketch / 13 / new</h2><p>success / 视觉待核 / </p><div class="images"><figure><img loading="lazy" src="style-to-sketch-13-new-8d4e0355-6fe8-4a36-a2cb-233a6fa76989-1.png"><figcaption>image/png / 761848 bytes</figcaption></figure></div><details><summary>输入、最终提示词、验收点</summary><pre>{
+  &quot;requestId&quot;: &quot;pq:visual-v2-extended:style-to-sketch-13-new:0&quot;,
+  &quot;userInput&quot;: {
+    &quot;scene&quot;: &quot;style-to-sketch&quot;,
+    &quot;fields&quot;: {
+      &quot;description&quot;: &quot;只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。外轮廓稍粗、内部缝线细，线宽层级清楚。&quot;,
+      &quot;sketchStyle&quot;: &quot;technical&quot;,
+      &quot;sketchDetail&quot;: &quot;standard&quot;
+    },
+    &quot;userText&quot;: &quot;只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。外轮廓稍粗、内部缝线细，线宽层级清楚。&quot;,
+    &quot;referenceRoles&quot;: [
+      &quot;服装参考图&quot;
+    ],
+    &quot;mode&quot;: &quot;edit&quot;
+  },
+  &quot;finalPrompt&quot;: &quot;Convert Image 1 into one symmetrical front-view technical fashion flat; use its visible construction, not its photographic rendering. Preserve proportions, silhouette, pointed collar, center-front placket, short set-in sleeves, sleeve hems, curved hem, and exactly five fully visible front buttons plus the original partially obscured neckline button; add no pockets or unseen details. Use consistent black (#000000) lines, a slightly bolder outer contour, thin interior seams, and dashed topstitching on pure white (#FFFFFF). Show only the garment, laid flat; omit the back view, shading, fills, and fabric texture.\nAvoid: shading, gradients, color fills, fabric texture, models, minors, extra limbs, anatomical deformation, nudity, sexualized presentation, hangers, background objects, logos, watermarks, unrelated text, text labels, collages, multiple panels, back views, color swatches, measurements, added pockets, added or missing buttons.&quot;,
+  &quot;checks&quot;: [
+    &quot;主体与参考图职责正确&quot;,
+    &quot;仅改变明确要求的内容&quot;,
+    &quot;没有无关文字、水印、额外产品或部件&quot;,
+    &quot;真实材质与光影没有凭空改变&quot;,
+    &quot;五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数&quot;,
+    &quot;无胸袋，不添加胸袋&quot;,
+    &quot;外轮廓稍粗、内部缝线细，线宽层级清楚。&quot;
+  ]
+}</pre></details></section>
+<section><h2>garment-colorway / 13 / old</h2><p>success / 视觉待核 / </p><div class="images"><figure><img loading="lazy" src="garment-colorway-13-old-fe45e118-f630-4bd3-9ed9-f6891b406d07-1.png"><figcaption>image/png / 1368369 bytes</figcaption></figure></div><details><summary>输入、最终提示词、验收点</summary><pre>{
+  &quot;requestId&quot;: &quot;pq:visual-v2-extended:garment-colorway-13-old:0&quot;,
+  &quot;userInput&quot;: &quot;参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#B76E55。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #B76E55。\n\n改色范围：仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #B76E55。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。&quot;,
+  &quot;finalPrompt&quot;: &quot;参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#B76E55。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #B76E55。\n\n改色范围：仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #B76E55。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。&quot;,
+  &quot;checks&quot;: [
+    &quot;主体与参考图职责正确&quot;,
+    &quot;仅改变明确要求的内容&quot;,
+    &quot;没有无关文字、水印、额外产品或部件&quot;,
+    &quot;真实材质与光影没有凭空改变&quot;,
+    &quot;五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数&quot;,
+    &quot;无胸袋，不添加胸袋&quot;,
+    &quot;仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色；目标 #B76E55&quot;
+  ]
+}</pre></details></section>
+<section><h2>garment-colorway / 13 / new</h2><p>success / 视觉待核 / </p><div class="images"><figure><img loading="lazy" src="garment-colorway-13-new-a27b214a-6e33-47b3-9a10-2073e3794ad7-1.png"><figcaption>image/png / 1423613 bytes</figcaption></figure></div><details><summary>输入、最终提示词、验收点</summary><pre>{
+  &quot;requestId&quot;: &quot;pq:visual-v2-extended:garment-colorway-13-new:0&quot;,
+  &quot;userInput&quot;: {
+    &quot;scene&quot;: &quot;garment-colorway&quot;,
+    &quot;fields&quot;: {
+      &quot;description&quot;: &quot;只改指定区域至 #B76E55。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。&quot;,
+      &quot;colorMode&quot;: &quot;specific&quot;,
+      &quot;colorRegion&quot;: &quot;仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色&quot;,
+      &quot;colors&quot;: [
+        &quot;#B76E55&quot;
+      ]
+    },
+    &quot;userText&quot;: &quot;只改指定区域至 #B76E55。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。&quot;,
+    &quot;referenceRoles&quot;: [
+      &quot;服装参考图&quot;
+    ],
+    &quot;mode&quot;: &quot;edit&quot;
+  },
+  &quot;finalPrompt&quot;: &quot;Recolor only Image 1’s body fabric and front placket to muted terracotta (#B76E55); use it as the structural reference, not the target palette. Keep sleeves, collar, five center-front buttons and partially concealed collar button their original light blue. Preserve silhouette, construction lines, visible stitching, collar shape, pocket configuration, pattern shapes/positions, fabric weave, folds, highlight/shadow gradations, white background and image proportions. The new color sits naturally in the fabric weave and folds, with realistic highlights and shadows, not a flat fill.\nAvoid: flat color fill, color swatches or dimension annotations, garment structure or pattern changes, recoloring sleeves, collar, buttons, skin or background, brand logos, watermarks or unrelated text, collages or multi-panel layouts, extra hands or deformed limbs, minor models, nudity or sexualized presentation.&quot;,
+  &quot;checks&quot;: [
+    &quot;主体与参考图职责正确&quot;,
+    &quot;仅改变明确要求的内容&quot;,
+    &quot;没有无关文字、水印、额外产品或部件&quot;,
+    &quot;真实材质与光影没有凭空改变&quot;,
+    &quot;五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数&quot;,
+    &quot;无胸袋，不添加胸袋&quot;,
+    &quot;仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色；目标 #B76E55&quot;
+  ]
+}</pre></details></section>
+<section><h2>style-to-sketch / 14 / old</h2><p>success / 视觉待核 / </p><div class="images"><figure><img loading="lazy" src="style-to-sketch-14-old-1c175a46-c4ac-4624-90e7-85e08984faa9-1.png"><figcaption>image/png / 717632 bytes</figcaption></figure></div><details><summary>输入、最终提示词、验收点</summary><pre>{
+  &quot;requestId&quot;: &quot;pq:visual-v2-extended:style-to-sketch-14-old:0&quot;,
+  &quot;userInput&quot;: &quot;参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：极简线稿。用干净、克制的轮廓线表达服装，不保留摄影光影与面料色块。\n\n细节程度：保留实际可见的分割线、口袋、褶裥、门襟、纽扣和装饰细节，避免虚构细节。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。保留领片交叠与门襟，不添加被遮住的纽扣或缝线。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。&quot;,
+  &quot;finalPrompt&quot;: &quot;参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：极简线稿。用干净、克制的轮廓线表达服装，不保留摄影光影与面料色块。\n\n细节程度：保留实际可见的分割线、口袋、褶裥、门襟、纽扣和装饰细节，避免虚构细节。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。保留领片交叠与门襟，不添加被遮住的纽扣或缝线。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。&quot;,
+  &quot;checks&quot;: [
+    &quot;主体与参考图职责正确&quot;,
+    &quot;仅改变明确要求的内容&quot;,
+    &quot;没有无关文字、水印、额外产品或部件&quot;,
+    &quot;真实材质与光影没有凭空改变&quot;,
+    &quot;五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数&quot;,
+    &quot;无胸袋，不添加胸袋&quot;,
+    &quot;保留领片交叠与门襟，不添加被遮住的纽扣或缝线。&quot;
+  ]
+}</pre></details></section>
+<section><h2>style-to-sketch / 14 / new</h2><p>success / 视觉待核 / </p><div class="images"><figure><img loading="lazy" src="style-to-sketch-14-new-9ac0df5e-bcdb-4e33-be2a-b8dc5dac3a97-1.png"><figcaption>image/png / 746105 bytes</figcaption></figure></div><details><summary>输入、最终提示词、验收点</summary><pre>{
+  &quot;requestId&quot;: &quot;pq:visual-v2-extended:style-to-sketch-14-new:0&quot;,
+  &quot;userInput&quot;: {
+    &quot;scene&quot;: &quot;style-to-sketch&quot;,
+    &quot;fields&quot;: {
+      &quot;description&quot;: &quot;只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。保留领片交叠与门襟，不添加被遮住的纽扣或缝线。&quot;,
+      &quot;sketchStyle&quot;: &quot;minimal&quot;,
+      &quot;sketchDetail&quot;: &quot;detailed&quot;
+    },
+    &quot;userText&quot;: &quot;只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。保留领片交叠与门襟，不添加被遮住的纽扣或缝线。&quot;,
+    &quot;referenceRoles&quot;: [
+      &quot;服装参考图&quot;
+    ],
+    &quot;mode&quot;: &quot;edit&quot;
+  },
+  &quot;finalPrompt&quot;: &quot;Convert Image 1 into one front-view minimal fashion flat, symmetrically laid out, using clean black (#000000) contours and essential construction lines on pure white (#FFFFFF). Preserve its proportions, silhouette, overlapping pointed collar, placket, short set-in sleeves, curved hem, and visible stitching. Retain exactly five fully visible center-front buttons plus the original partially obscured neckline button; preserve its occlusion. Use Image 1 for visible construction only, not color, texture, shadows, or folds. Add no pockets, hidden buttons, concealed seams, or back view.\nAvoid: shading, gradients, color fills, fabric texture, models, extra limbs, anatomical distortion, hangers, background objects, logos, watermarks, unrelated text, labels, collages, multiple views, color swatches, measurements, minors, nudity, sexualized presentation, added pockets, altered button count, invented hidden construction.&quot;,
+  &quot;checks&quot;: [
+    &quot;主体与参考图职责正确&quot;,
+    &quot;仅改变明确要求的内容&quot;,
+    &quot;没有无关文字、水印、额外产品或部件&quot;,
+    &quot;真实材质与光影没有凭空改变&quot;,
+    &quot;五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数&quot;,
+    &quot;无胸袋，不添加胸袋&quot;,
+    &quot;保留领片交叠与门襟，不添加被遮住的纽扣或缝线。&quot;
+  ]
+}</pre></details></section>
+<section><h2>garment-colorway / 14 / old</h2><p>success / 视觉待核 / </p><div class="images"><figure><img loading="lazy" src="garment-colorway-14-old-c2d2bc53-0328-4c69-a268-8d06314b3688-1.png"><figcaption>image/png / 1305797 bytes</figcaption></figure></div><details><summary>输入、最终提示词、验收点</summary><pre>{
+  &quot;requestId&quot;: &quot;pq:visual-v2-extended:garment-colorway-14-old:0&quot;,
+  &quot;userInput&quot;: &quot;参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#9AAFC3。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #9AAFC3。\n\n改色范围：仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #9AAFC3。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。&quot;,
+  &quot;finalPrompt&quot;: &quot;参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#9AAFC3。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #9AAFC3。\n\n改色范围：仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #9AAFC3。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。&quot;,
+  &quot;checks&quot;: [
+    &quot;主体与参考图职责正确&quot;,
+    &quot;仅改变明确要求的内容&quot;,
+    &quot;没有无关文字、水印、额外产品或部件&quot;,
+    &quot;真实材质与光影没有凭空改变&quot;,
+    &quot;五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数&quot;,
+    &quot;无胸袋，不添加胸袋&quot;,
+    &quot;仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色；目标 #9AAFC3&quot;
+  ]
+}</pre></details></section>
+<section><h2>garment-colorway / 14 / new</h2><p>success / 视觉待核 / </p><div class="images"><figure><img loading="lazy" src="garment-colorway-14-new-f0f6f021-e90f-49d8-9861-e4000ef4b0ae-1.png"><figcaption>image/png / 1357296 bytes</figcaption></figure></div><details><summary>输入、最终提示词、验收点</summary><pre>{
+  &quot;requestId&quot;: &quot;pq:visual-v2-extended:garment-colorway-14-new:0&quot;,
+  &quot;userInput&quot;: {
+    &quot;scene&quot;: &quot;garment-colorway&quot;,
+    &quot;fields&quot;: {
+      &quot;description&quot;: &quot;只改指定区域至 #9AAFC3。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。&quot;,
+      &quot;colorMode&quot;: &quot;specific&quot;,
+      &quot;colorRegion&quot;: &quot;仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色&quot;,
+      &quot;colors&quot;: [
+        &quot;#9AAFC3&quot;
+      ]
+    },
+    &quot;userText&quot;: &quot;只改指定区域至 #9AAFC3。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。&quot;,
+    &quot;referenceRoles&quot;: [
+      &quot;服装参考图&quot;
+    ],
+    &quot;mode&quot;: &quot;edit&quot;
+  },
+  &quot;finalPrompt&quot;: &quot;Recolor only Image 1’s body fabric and front placket to dusty blue-gray (#9AAFC3); use its construction, not its original body color. Keep sleeves, collar, five center-front buttons and partially concealed collar button original light blue. Preserve silhouette, structural seams, visible stitching, collar shape, absence of pockets/patterns, fabric weave, folds, highlights, shadows, white background and image proportions; leave everything outside the specified regions unchanged. The new color sits naturally in the fabric weave and folds, with realistic highlights and shadows, not a flat fill.\nAvoid: flat color fill, color swatches or dimension annotations, garment structure or pattern changes, recoloring sleeves, collar or buttons, recoloring skin or background, brand logos, watermarks or unrelated text, collages or multi-panel layouts, extra limbs, anatomical distortion, underage models, nudity or sexualization.&quot;,
+  &quot;checks&quot;: [
+    &quot;主体与参考图职责正确&quot;,
+    &quot;仅改变明确要求的内容&quot;,
+    &quot;没有无关文字、水印、额外产品或部件&quot;,
+    &quot;真实材质与光影没有凭空改变&quot;,
+    &quot;五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数&quot;,
+    &quot;无胸袋，不添加胸袋&quot;,
+    &quot;仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色；目标 #9AAFC3&quot;
+  ]
+}</pre></details></section>
+<section><h2>style-to-sketch / 15 / old</h2><p>success / 视觉待核 / </p><div class="images"><figure><img loading="lazy" src="style-to-sketch-15-old-4acdbaf4-07ee-44cd-9b87-590ccdfed002-1.png"><figcaption>image/png / 754207 bytes</figcaption></figure></div><details><summary>输入、最终提示词、验收点</summary><pre>{
+  &quot;requestId&quot;: &quot;pq:visual-v2-extended:style-to-sketch-15-old:0&quot;,
+  &quot;userInput&quot;: &quot;参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：技术感线稿。用清晰、均匀的线条表达服装轮廓和可见结构，主轮廓与结构线层次分明。\n\n细节程度：保留领口、袖口、下摆、门襟与主要结构线，适度简化细小纹理。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。清楚表现现有短袖袖口折边。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。&quot;,
+  &quot;finalPrompt&quot;: &quot;参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：技术感线稿。用清晰、均匀的线条表达服装轮廓和可见结构，主轮廓与结构线层次分明。\n\n细节程度：保留领口、袖口、下摆、门襟与主要结构线，适度简化细小纹理。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。清楚表现现有短袖袖口折边。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。&quot;,
+  &quot;checks&quot;: [
+    &quot;主体与参考图职责正确&quot;,
+    &quot;仅改变明确要求的内容&quot;,
+    &quot;没有无关文字、水印、额外产品或部件&quot;,
+    &quot;真实材质与光影没有凭空改变&quot;,
+    &quot;五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数&quot;,
+    &quot;无胸袋，不添加胸袋&quot;,
+    &quot;清楚表现现有短袖袖口折边。&quot;
+  ]
+}</pre></details></section>
+<section><h2>style-to-sketch / 15 / new</h2><p>success / 视觉待核 / </p><div class="images"><figure><img loading="lazy" src="style-to-sketch-15-new-d61030d6-613e-461f-97be-930a00eaf22f-1.png"><figcaption>image/png / 756160 bytes</figcaption></figure></div><details><summary>输入、最终提示词、验收点</summary><pre>{
+  &quot;requestId&quot;: &quot;pq:visual-v2-extended:style-to-sketch-15-new:0&quot;,
+  &quot;userInput&quot;: {
+    &quot;scene&quot;: &quot;style-to-sketch&quot;,
+    &quot;fields&quot;: {
+      &quot;description&quot;: &quot;只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。清楚表现现有短袖袖口折边。&quot;,
+      &quot;sketchStyle&quot;: &quot;technical&quot;,
+      &quot;sketchDetail&quot;: &quot;standard&quot;
+    },
+    &quot;userText&quot;: &quot;只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。清楚表现现有短袖袖口折边。&quot;,
+    &quot;referenceRoles&quot;: [
+      &quot;服装参考图&quot;
+    ],
+    &quot;mode&quot;: &quot;edit&quot;
+  },
+  &quot;finalPrompt&quot;: &quot;Convert Image 1 into one symmetrical front-view technical fashion flat; use its visible construction, not its color, texture or shadows. Preserve original proportions, silhouette, pointed collar, placket, short set-in sleeves, curved hem, exactly five fully visible center-front buttons and the original partially concealed collar button; add no pockets or unseen details. Clearly delineate existing sleeve hem folds and visible seams. Use uniform black (#000000) lines, bolder outer contours, thinner construction lines and dashed topstitching on pure white (#FFFFFF); show only the garment, without a back view.\nAvoid: shading, gradients, color fills, fabric texture, models, extra hands, distorted limbs, minors, nudity, sexualization, hangers, background objects, brand logos, watermarks, unrelated text, labels, collages, multiple views, back view, color swatches, measurements, added pockets, added or missing buttons.&quot;,
+  &quot;checks&quot;: [
+    &quot;主体与参考图职责正确&quot;,
+    &quot;仅改变明确要求的内容&quot;,
+    &quot;没有无关文字、水印、额外产品或部件&quot;,
+    &quot;真实材质与光影没有凭空改变&quot;,
+    &quot;五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数&quot;,
+    &quot;无胸袋，不添加胸袋&quot;,
+    &quot;清楚表现现有短袖袖口折边。&quot;
+  ]
+}</pre></details></section>
+<section><h2>garment-colorway / 15 / old</h2><p>success / 视觉待核 / </p><div class="images"><figure><img loading="lazy" src="garment-colorway-15-old-ba42d5ef-9cb2-47a4-bef2-b47a8c9a6d67-1.png"><figcaption>image/png / 1333805 bytes</figcaption></figure></div><details><summary>输入、最终提示词、验收点</summary><pre>{
+  &quot;requestId&quot;: &quot;pq:visual-v2-extended:garment-colorway-15-old:0&quot;,
+  &quot;userInput&quot;: &quot;参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#D8A0A8。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #D8A0A8。\n\n改色范围：仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #D8A0A8。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。&quot;,
+  &quot;finalPrompt&quot;: &quot;参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#D8A0A8。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #D8A0A8。\n\n改色范围：仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #D8A0A8。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。&quot;,
+  &quot;checks&quot;: [
+    &quot;主体与参考图职责正确&quot;,
+    &quot;仅改变明确要求的内容&quot;,
+    &quot;没有无关文字、水印、额外产品或部件&quot;,
+    &quot;真实材质与光影没有凭空改变&quot;,
+    &quot;五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数&quot;,
+    &quot;无胸袋，不添加胸袋&quot;,
+    &quot;仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色；目标 #D8A0A8&quot;
+  ]
+}</pre></details></section>
+<section><h2>garment-colorway / 15 / new</h2><p>success / 视觉待核 / </p><div class="images"><figure><img loading="lazy" src="garment-colorway-15-new-acd0c3f6-ba0f-4d9f-b1a7-68df21eaf7c3-1.png"><figcaption>image/png / 1301481 bytes</figcaption></figure></div><details><summary>输入、最终提示词、验收点</summary><pre>{
+  &quot;requestId&quot;: &quot;pq:visual-v2-extended:garment-colorway-15-new:0&quot;,
+  &quot;userInput&quot;: {
+    &quot;scene&quot;: &quot;garment-colorway&quot;,
+    &quot;fields&quot;: {
+      &quot;description&quot;: &quot;只改指定区域至 #D8A0A8。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。&quot;,
+      &quot;colorMode&quot;: &quot;specific&quot;,
+      &quot;colorRegion&quot;: &quot;仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色&quot;,
+      &quot;colors&quot;: [
+        &quot;#D8A0A8&quot;
+      ]
+    },
+    &quot;userText&quot;: &quot;只改指定区域至 #D8A0A8。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。&quot;,
+    &quot;referenceRoles&quot;: [
+      &quot;服装参考图&quot;
+    ],
+    &quot;mode&quot;: &quot;edit&quot;
+  },
+  &quot;finalPrompt&quot;: &quot;Recolor only Image 1’s body fabric and front placket dusty rose (#D8A0A8); retain its garment and composition, not its original body color. Keep sleeves, collar, five center-front buttons and partially obscured collar button their original light blue. Preserve silhouette, construction lines, visible stitching, collar shape, pocketless design, absence of patterns, fabric weave, folds, highlights, shadows, white background and image proportions. The new color sits naturally in the fabric weave and folds, with realistic highlights and shadows, not a flat fill.\nAvoid: flat color fill, garment structure or pattern changes, recoloring sleeves, collar, buttons, skin or background, brand logos, watermarks or unrelated text, collage grids or color swatches, dimension annotations, extra hands or deformed limbs, underage models, nudity or sexualization.&quot;,
+  &quot;checks&quot;: [
+    &quot;主体与参考图职责正确&quot;,
+    &quot;仅改变明确要求的内容&quot;,
+    &quot;没有无关文字、水印、额外产品或部件&quot;,
+    &quot;真实材质与光影没有凭空改变&quot;,
+    &quot;五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数&quot;,
+    &quot;无胸袋，不添加胸袋&quot;,
+    &quot;仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色；目标 #D8A0A8&quot;
+  ]
+}</pre></details></section>
+<section><h2>style-to-sketch / 16 / old</h2><p>success / 视觉待核 / </p><div class="images"><figure><img loading="lazy" src="style-to-sketch-16-old-9d2eda1c-b7bb-4e63-b5c6-5acf9b46d4dd-1.png"><figcaption>image/png / 720353 bytes</figcaption></figure></div><details><summary>输入、最终提示词、验收点</summary><pre>{
+  &quot;requestId&quot;: &quot;pq:visual-v2-extended:style-to-sketch-16-old:0&quot;,
+  &quot;userInput&quot;: &quot;参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：极简线稿。用干净、克制的轮廓线表达服装，不保留摄影光影与面料色块。\n\n细节程度：保留领口、袖口、下摆、门襟与主要结构线，适度简化细小纹理。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。只保留结构线和可见纽扣，不添加虚构装饰明线。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。&quot;,
+  &quot;finalPrompt&quot;: &quot;参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：极简线稿。用干净、克制的轮廓线表达服装，不保留摄影光影与面料色块。\n\n细节程度：保留领口、袖口、下摆、门襟与主要结构线，适度简化细小纹理。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。只保留结构线和可见纽扣，不添加虚构装饰明线。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。&quot;,
+  &quot;checks&quot;: [
+    &quot;主体与参考图职责正确&quot;,
+    &quot;仅改变明确要求的内容&quot;,
+    &quot;没有无关文字、水印、额外产品或部件&quot;,
+    &quot;真实材质与光影没有凭空改变&quot;,
+    &quot;五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数&quot;,
+    &quot;无胸袋，不添加胸袋&quot;,
+    &quot;只保留结构线和可见纽扣，不添加虚构装饰明线。&quot;
+  ]
+}</pre></details></section>
+<section><h2>style-to-sketch / 16 / new</h2><p>success / 视觉待核 / </p><div class="images"><figure><img loading="lazy" src="style-to-sketch-16-new-69a89ec8-7dd9-4201-b6c5-82ef9a8ad80e-1.png"><figcaption>image/png / 709143 bytes</figcaption></figure></div><details><summary>输入、最终提示词、验收点</summary><pre>{
+  &quot;requestId&quot;: &quot;pq:visual-v2-extended:style-to-sketch-16-new:0&quot;,
+  &quot;userInput&quot;: {
+    &quot;scene&quot;: &quot;style-to-sketch&quot;,
+    &quot;fields&quot;: {
+      &quot;description&quot;: &quot;只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。只保留结构线和可见纽扣，不添加虚构装饰明线。&quot;,
+      &quot;sketchStyle&quot;: &quot;minimal&quot;,
+      &quot;sketchDetail&quot;: &quot;standard&quot;
+    },
+    &quot;userText&quot;: &quot;只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。只保留结构线和可见纽扣，不添加虚构装饰明线。&quot;,
+    &quot;referenceRoles&quot;: [
+      &quot;服装参考图&quot;
+    ],
+    &quot;mode&quot;: &quot;edit&quot;
+  },
+  &quot;finalPrompt&quot;: &quot;Convert Image 1 into one front-view minimal fashion flat, symmetrically laid out, using black (#000000) lines on pure white (#FFFFFF). Take only its visible garment structure, not its color, texture, shadows or wrinkles. Preserve its proportions, silhouette, pointed collar, short set-in sleeves, center-front placket, curved hem, and exactly five fully visible front buttons plus the original partially obscured neckline button; add or remove none. Use clean contours and essential construction lines only; no pockets, invented topstitching, hidden details or back view.\nAvoid: shading, gradients, color fills, fabric texture, models, hangers, background objects, pockets, invented decoration, added topstitching, altered button count, invented hidden structures, back views, collages, multiple panels, brand logos, watermarks, unrelated text, labels, color swatches, measurements, extra limbs, deformed hands, minors, nudity, sexualization.&quot;,
+  &quot;checks&quot;: [
+    &quot;主体与参考图职责正确&quot;,
+    &quot;仅改变明确要求的内容&quot;,
+    &quot;没有无关文字、水印、额外产品或部件&quot;,
+    &quot;真实材质与光影没有凭空改变&quot;,
+    &quot;五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数&quot;,
+    &quot;无胸袋，不添加胸袋&quot;,
+    &quot;只保留结构线和可见纽扣，不添加虚构装饰明线。&quot;
+  ]
+}</pre></details></section>
+<section><h2>garment-colorway / 16 / old</h2><p>success / 视觉待核 / </p><div class="images"><figure><img loading="lazy" src="garment-colorway-16-old-b0aa5f18-24f0-479f-8a34-dab632dd9a4f-1.png"><figcaption>image/png / 1505754 bytes</figcaption></figure></div><details><summary>输入、最终提示词、验收点</summary><pre>{
+  &quot;requestId&quot;: &quot;pq:visual-v2-extended:garment-colorway-16-old:0&quot;,
+  &quot;userInput&quot;: &quot;参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#5E6B52。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #5E6B52。\n\n改色范围：全部服装面料，包括袖子、领子和门襟，但所有纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #5E6B52。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。&quot;,
+  &quot;finalPrompt&quot;: &quot;参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#5E6B52。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #5E6B52。\n\n改色范围：全部服装面料，包括袖子、领子和门襟，但所有纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #5E6B52。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。&quot;,
+  &quot;checks&quot;: [
+    &quot;主体与参考图职责正确&quot;,
+    &quot;仅改变明确要求的内容&quot;,
+    &quot;没有无关文字、水印、额外产品或部件&quot;,
+    &quot;真实材质与光影没有凭空改变&quot;,
+    &quot;五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数&quot;,
+    &quot;无胸袋，不添加胸袋&quot;,
+    &quot;全部服装面料，包括袖子、领子和门襟，但所有纽扣保持原浅蓝色；目标 #5E6B52&quot;
+  ]
+}</pre></details></section>
+<section><h2>garment-colorway / 16 / new</h2><p>success / 视觉待核 / </p><div class="images"><figure><img loading="lazy" src="garment-colorway-16-new-220e9e22-fc4d-465e-97f5-d9ca5e3d4cb1-1.png"><figcaption>image/png / 1392857 bytes</figcaption></figure></div><details><summary>输入、最终提示词、验收点</summary><pre>{
+  &quot;requestId&quot;: &quot;pq:visual-v2-extended:garment-colorway-16-new:0&quot;,
+  &quot;userInput&quot;: {
+    &quot;scene&quot;: &quot;garment-colorway&quot;,
+    &quot;fields&quot;: {
+      &quot;description&quot;: &quot;只改指定区域至 #5E6B52。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。&quot;,
+      &quot;colorMode&quot;: &quot;specific&quot;,
+      &quot;colorRegion&quot;: &quot;全部服装面料，包括袖子、领子和门襟，但所有纽扣保持原浅蓝色&quot;,
+      &quot;colors&quot;: [
+        &quot;#5E6B52&quot;
+      ]
+    },
+    &quot;userText&quot;: &quot;只改指定区域至 #5E6B52。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。&quot;,
+    &quot;referenceRoles&quot;: [
+      &quot;服装参考图&quot;
+    ],
+    &quot;mode&quot;: &quot;edit&quot;
+  },
+  &quot;finalPrompt&quot;: &quot;Recolor all garment fabric in Image 1, including sleeves, collar and placket, to muted olive green (#5E6B52); use its construction and texture, not its original fabric color. Keep all five center-front buttons and the partially concealed collar button their original light blue. Preserve silhouette, structural seams, visible stitching, collar shape, pocket-free design, pattern shapes and positions, fabric weave, folds, highlights, shadows, white background and image proportions. The new color sits naturally in the fabric weave and folds, with realistic highlights and shadows, not a flat fill.\nAvoid: flat color fill, color swatches, dimension annotations, garment structure or pattern changes, button, skin or background recoloring, brand logos, watermarks, unrelated text, collages, multi-panel layouts, extra hands, deformed limbs, underage models, nudity, sexualized presentation.&quot;,
+  &quot;checks&quot;: [
+    &quot;主体与参考图职责正确&quot;,
+    &quot;仅改变明确要求的内容&quot;,
+    &quot;没有无关文字、水印、额外产品或部件&quot;,
+    &quot;真实材质与光影没有凭空改变&quot;,
+    &quot;五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数&quot;,
+    &quot;无胸袋，不添加胸袋&quot;,
+    &quot;全部服装面料，包括袖子、领子和门襟，但所有纽扣保持原浅蓝色；目标 #5E6B52&quot;
+  ]
+}</pre></details></section>
+<section><h2>style-to-sketch / 17 / old</h2><p>success / 视觉待核 / </p><div class="images"><figure><img loading="lazy" src="style-to-sketch-17-old-1502029d-304e-4c65-bbf8-9b09c5f51074-1.png"><figcaption>image/png / 744667 bytes</figcaption></figure></div><details><summary>输入、最终提示词、验收点</summary><pre>{
+  &quot;requestId&quot;: &quot;pq:visual-v2-extended:style-to-sketch-17-old:0&quot;,
+  &quot;userInput&quot;: &quot;参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：技术感线稿。用清晰、均匀的线条表达服装轮廓和可见结构，主轮廓与结构线层次分明。\n\n细节程度：保留实际可见的分割线、口袋、褶裥、门襟、纽扣和装饰细节，避免虚构细节。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。可见四孔纽扣以简洁圆形孔位表示，半遮挡领扣保持半遮挡。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。&quot;,
+  &quot;finalPrompt&quot;: &quot;参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：技术感线稿。用清晰、均匀的线条表达服装轮廓和可见结构，主轮廓与结构线层次分明。\n\n细节程度：保留实际可见的分割线、口袋、褶裥、门襟、纽扣和装饰细节，避免虚构细节。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。可见四孔纽扣以简洁圆形孔位表示，半遮挡领扣保持半遮挡。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。&quot;,
+  &quot;checks&quot;: [
+    &quot;主体与参考图职责正确&quot;,
+    &quot;仅改变明确要求的内容&quot;,
+    &quot;没有无关文字、水印、额外产品或部件&quot;,
+    &quot;真实材质与光影没有凭空改变&quot;,
+    &quot;五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数&quot;,
+    &quot;无胸袋，不添加胸袋&quot;,
+    &quot;可见四孔纽扣以简洁圆形孔位表示，半遮挡领扣保持半遮挡。&quot;
+  ]
+}</pre></details></section>
+<section><h2>style-to-sketch / 17 / new</h2><p>success / 视觉待核 / </p><div class="images"><figure><img loading="lazy" src="style-to-sketch-17-new-8bb909b1-1b07-4f16-af49-33db3cf608fe-1.png"><figcaption>image/png / 755424 bytes</figcaption></figure></div><details><summary>输入、最终提示词、验收点</summary><pre>{
+  &quot;requestId&quot;: &quot;pq:visual-v2-extended:style-to-sketch-17-new:0&quot;,
+  &quot;userInput&quot;: {
+    &quot;scene&quot;: &quot;style-to-sketch&quot;,
+    &quot;fields&quot;: {
+      &quot;description&quot;: &quot;只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。可见四孔纽扣以简洁圆形孔位表示，半遮挡领扣保持半遮挡。&quot;,
+      &quot;sketchStyle&quot;: &quot;technical&quot;,
+      &quot;sketchDetail&quot;: &quot;detailed&quot;
+    },
+    &quot;userText&quot;: &quot;只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。可见四孔纽扣以简洁圆形孔位表示，半遮挡领扣保持半遮挡。&quot;,
+    &quot;referenceRoles&quot;: [
+      &quot;服装参考图&quot;
+    ],
+    &quot;mode&quot;: &quot;edit&quot;
+  },
+  &quot;finalPrompt&quot;: &quot;Convert Image 1 into one symmetrical front-view technical fashion flat, black (#000000) lines on white (#FFFFFF); use its visible construction, not color, texture or shadows. Preserve proportions, silhouette, pointed collar, short set-in sleeves, placket, curved hem and visible seams; add no pockets or unseen details. Keep exactly five fully visible front buttons plus the original partially concealed collar button, maintaining its occlusion; render visible four-hole buttons with simple circular holes. Use consistent linework, heavier outer contours, fine construction lines and dashed topstitching; no back view.\nAvoid: shading, gradients, color fills, fabric texture, models, minors, nudity, sexualization, malformed limbs, hangers, background objects, logos, watermarks, unrelated text, labels, measurements, color swatches, collages, multiple views, back view, pockets, invented construction details, added or missing buttons, exposed concealed collar button.&quot;,
+  &quot;checks&quot;: [
+    &quot;主体与参考图职责正确&quot;,
+    &quot;仅改变明确要求的内容&quot;,
+    &quot;没有无关文字、水印、额外产品或部件&quot;,
+    &quot;真实材质与光影没有凭空改变&quot;,
+    &quot;五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数&quot;,
+    &quot;无胸袋，不添加胸袋&quot;,
+    &quot;可见四孔纽扣以简洁圆形孔位表示，半遮挡领扣保持半遮挡。&quot;
+  ]
+}</pre></details></section>
+<section><h2>garment-colorway / 17 / old</h2><p>success / 视觉待核 / </p><div class="images"><figure><img loading="lazy" src="garment-colorway-17-old-fa82a7e8-73dd-4bde-bdee-fef2f36f43f4-1.png"><figcaption>image/png / 1348817 bytes</figcaption></figure></div><details><summary>输入、最终提示词、验收点</summary><pre>{
+  &quot;requestId&quot;: &quot;pq:visual-v2-extended:garment-colorway-17-old:0&quot;,
+  &quot;userInput&quot;: &quot;参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#D5C6A5。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #D5C6A5。\n\n改色范围：全部服装面料，包括袖子、领子和门襟，但所有纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #D5C6A5。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。&quot;,
+  &quot;finalPrompt&quot;: &quot;参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#D5C6A5。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #D5C6A5。\n\n改色范围：全部服装面料，包括袖子、领子和门襟，但所有纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #D5C6A5。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。&quot;,
+  &quot;checks&quot;: [
+    &quot;主体与参考图职责正确&quot;,
+    &quot;仅改变明确要求的内容&quot;,
+    &quot;没有无关文字、水印、额外产品或部件&quot;,
+    &quot;真实材质与光影没有凭空改变&quot;,
+    &quot;五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数&quot;,
+    &quot;无胸袋，不添加胸袋&quot;,
+    &quot;全部服装面料，包括袖子、领子和门襟，但所有纽扣保持原浅蓝色；目标 #D5C6A5&quot;
+  ]
+}</pre></details></section>
+<section><h2>garment-colorway / 17 / new</h2><p>success / 视觉待核 / </p><div class="images"><figure><img loading="lazy" src="garment-colorway-17-new-40bff212-71d1-4298-baf8-9b2245e8e0a3-1.png"><figcaption>image/png / 1390320 bytes</figcaption></figure></div><details><summary>输入、最终提示词、验收点</summary><pre>{
+  &quot;requestId&quot;: &quot;pq:visual-v2-extended:garment-colorway-17-new:0&quot;,
+  &quot;userInput&quot;: {
+    &quot;scene&quot;: &quot;garment-colorway&quot;,
+    &quot;fields&quot;: {
+      &quot;description&quot;: &quot;只改指定区域至 #D5C6A5。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。&quot;,
+      &quot;colorMode&quot;: &quot;specific&quot;,
+      &quot;colorRegion&quot;: &quot;全部服装面料，包括袖子、领子和门襟，但所有纽扣保持原浅蓝色&quot;,
+      &quot;colors&quot;: [
+        &quot;#D5C6A5&quot;
+      ]
+    },
+    &quot;userText&quot;: &quot;只改指定区域至 #D5C6A5。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。&quot;,
+    &quot;referenceRoles&quot;: [
+      &quot;服装参考图&quot;
+    ],
+    &quot;mode&quot;: &quot;edit&quot;
+  },
+  &quot;finalPrompt&quot;: &quot;Recolor all garment fabric in Image 1, including sleeves, collar and placket, to sand beige (#D5C6A5); use its construction, not its original fabric color. Keep all five center-front buttons and the partially concealed collar button their original light blue. Preserve silhouette, construction lines, visible stitching, collar shape, pocket-free construction, absence of patterns, fabric weave, folds, highlight/shadow gradations, white background, framing and aspect ratio. The new color sits naturally in the fabric weave and folds, with realistic highlights and shadows, not a flat fill.\nAvoid: flat color fill, color swatches or dimension annotations, garment structure or pattern changes, button recoloring, skin or background recoloring, brand logos, watermarks or unrelated text, collages or multi-panel layouts, extra hands or deformed limbs, underage models, nudity or sexualized presentation.&quot;,
+  &quot;checks&quot;: [
+    &quot;主体与参考图职责正确&quot;,
+    &quot;仅改变明确要求的内容&quot;,
+    &quot;没有无关文字、水印、额外产品或部件&quot;,
+    &quot;真实材质与光影没有凭空改变&quot;,
+    &quot;五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数&quot;,
+    &quot;无胸袋，不添加胸袋&quot;,
+    &quot;全部服装面料，包括袖子、领子和门襟，但所有纽扣保持原浅蓝色；目标 #D5C6A5&quot;
+  ]
+}</pre></details></section>
+<section><h2>style-to-sketch / 18 / old</h2><p>success / 视觉待核 / </p><div class="images"><figure><img loading="lazy" src="style-to-sketch-18-old-9f4f82b1-f1f9-4851-9b15-4ce99fdbd6fd-1.png"><figcaption>image/png / 736286 bytes</figcaption></figure></div><details><summary>输入、最终提示词、验收点</summary><pre>{
+  &quot;requestId&quot;: &quot;pq:visual-v2-extended:style-to-sketch-18-old:0&quot;,
+  &quot;userInput&quot;: &quot;参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：极简线稿。用干净、克制的轮廓线表达服装，不保留摄影光影与面料色块。\n\n细节程度：保留领口、袖口、下摆、门襟与主要结构线，适度简化细小纹理。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。清楚保留原有浅弧形下摆，不改成直下摆。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。&quot;,
+  &quot;finalPrompt&quot;: &quot;参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：极简线稿。用干净、克制的轮廓线表达服装，不保留摄影光影与面料色块。\n\n细节程度：保留领口、袖口、下摆、门襟与主要结构线，适度简化细小纹理。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。清楚保留原有浅弧形下摆，不改成直下摆。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。&quot;,
+  &quot;checks&quot;: [
+    &quot;主体与参考图职责正确&quot;,
+    &quot;仅改变明确要求的内容&quot;,
+    &quot;没有无关文字、水印、额外产品或部件&quot;,
+    &quot;真实材质与光影没有凭空改变&quot;,
+    &quot;五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数&quot;,
+    &quot;无胸袋，不添加胸袋&quot;,
+    &quot;清楚保留原有浅弧形下摆，不改成直下摆。&quot;
+  ]
+}</pre></details></section>
+<section><h2>style-to-sketch / 18 / new</h2><p>success / 视觉待核 / </p><div class="images"><figure><img loading="lazy" src="style-to-sketch-18-new-e9f7dc95-92e2-4ba3-80aa-daa12ccf0552-1.png"><figcaption>image/png / 732717 bytes</figcaption></figure></div><details><summary>输入、最终提示词、验收点</summary><pre>{
+  &quot;requestId&quot;: &quot;pq:visual-v2-extended:style-to-sketch-18-new:0&quot;,
+  &quot;userInput&quot;: {
+    &quot;scene&quot;: &quot;style-to-sketch&quot;,
+    &quot;fields&quot;: {
+      &quot;description&quot;: &quot;只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。清楚保留原有浅弧形下摆，不改成直下摆。&quot;,
+      &quot;sketchStyle&quot;: &quot;minimal&quot;,
+      &quot;sketchDetail&quot;: &quot;standard&quot;
+    },
+    &quot;userText&quot;: &quot;只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。清楚保留原有浅弧形下摆，不改成直下摆。&quot;,
+    &quot;referenceRoles&quot;: [
+      &quot;服装参考图&quot;
+    ],
+    &quot;mode&quot;: &quot;edit&quot;
+  },
+  &quot;finalPrompt&quot;: &quot;Convert Image 1 into one front-view minimal fashion flat with clean, confident black (#000000) lines on pure white (#FFFFFF). Use its visible construction, not its color, texture or shadows; lay the garment symmetrically flat, preserving its proportions and silhouette. Retain the pointed collar, short set-in sleeves, sleeve hems, center-front placket, essential seams and distinctly shallow curved hem, never straightened. Preserve exactly five fully visible front buttons plus the original partially concealed neckline button; add or remove none. Keep the chest pocket-free; show no back view.\nAvoid: shading, gradients, color fills, fabric texture, models, extra limbs, anatomical distortions, minors, nudity, sexualized presentation, hangers, background objects, brand logos, watermarks, unrelated text, text labels, collages, multiple panels, color swatches, measurements, added pockets, invented construction.&quot;,
+  &quot;checks&quot;: [
+    &quot;主体与参考图职责正确&quot;,
+    &quot;仅改变明确要求的内容&quot;,
+    &quot;没有无关文字、水印、额外产品或部件&quot;,
+    &quot;真实材质与光影没有凭空改变&quot;,
+    &quot;五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数&quot;,
+    &quot;无胸袋，不添加胸袋&quot;,
+    &quot;清楚保留原有浅弧形下摆，不改成直下摆。&quot;
+  ]
+}</pre></details></section>
+<section><h2>garment-colorway / 18 / old</h2><p>success / 视觉待核 / </p><div class="images"><figure><img loading="lazy" src="garment-colorway-18-old-5b1f0e0e-652e-4c19-9550-9ca1e223b078-1.png"><figcaption>image/png / 1321836 bytes</figcaption></figure></div><details><summary>输入、最终提示词、验收点</summary><pre>{
+  &quot;requestId&quot;: &quot;pq:visual-v2-extended:garment-colorway-18-old:0&quot;,
+  &quot;userInput&quot;: &quot;参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#75677C。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #75677C。\n\n改色范围：全部服装面料，包括袖子、领子和门襟，但所有纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #75677C。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。&quot;,
+  &quot;finalPrompt&quot;: &quot;参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#75677C。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #75677C。\n\n改色范围：全部服装面料，包括袖子、领子和门襟，但所有纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #75677C。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。&quot;,
+  &quot;checks&quot;: [
+    &quot;主体与参考图职责正确&quot;,
+    &quot;仅改变明确要求的内容&quot;,
+    &quot;没有无关文字、水印、额外产品或部件&quot;,
+    &quot;真实材质与光影没有凭空改变&quot;,
+    &quot;五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数&quot;,
+    &quot;无胸袋，不添加胸袋&quot;,
+    &quot;全部服装面料，包括袖子、领子和门襟，但所有纽扣保持原浅蓝色；目标 #75677C&quot;
+  ]
+}</pre></details></section>
+<section><h2>garment-colorway / 18 / new</h2><p>success / 视觉待核 / </p><div class="images"><figure><img loading="lazy" src="garment-colorway-18-new-e0f713bc-7841-4f96-9165-a6a995536764-1.png"><figcaption>image/png / 1393676 bytes</figcaption></figure></div><details><summary>输入、最终提示词、验收点</summary><pre>{
+  &quot;requestId&quot;: &quot;pq:visual-v2-extended:garment-colorway-18-new:0&quot;,
+  &quot;userInput&quot;: {
+    &quot;scene&quot;: &quot;garment-colorway&quot;,
+    &quot;fields&quot;: {
+      &quot;description&quot;: &quot;只改指定区域至 #75677C。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。&quot;,
+      &quot;colorMode&quot;: &quot;specific&quot;,
+      &quot;colorRegion&quot;: &quot;全部服装面料，包括袖子、领子和门襟，但所有纽扣保持原浅蓝色&quot;,
+      &quot;colors&quot;: [
+        &quot;#75677C&quot;
+      ]
+    },
+    &quot;userText&quot;: &quot;只改指定区域至 #75677C。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。&quot;,
+    &quot;referenceRoles&quot;: [
+      &quot;服装参考图&quot;
+    ],
+    &quot;mode&quot;: &quot;edit&quot;
+  },
+  &quot;finalPrompt&quot;: &quot;In Image 1, recolor all garment fabric, including sleeves, collar and placket, to muted grayish purple (#75677C); replace only fabric color. Keep all five center-front buttons and the partially obscured collar button their original light blue. Preserve silhouette, construction lines, visible stitching, collar shape, pocket configuration, pattern shapes and positions, fabric weave, texture, folds, highlight/shadow gradations, white background, framing and aspect ratio. The new color sits naturally in the fabric weave and folds, with realistic highlights and shadows, not a flat fill.\nAvoid: flat color fill, color swatches or dimension annotations, garment structure or pattern changes, button, skin or background recoloring, brand logos, watermarks or unrelated text, collages or multi-panel layouts, extra hands or deformed limbs, underage models, nudity or sexualized presentation.&quot;,
+  &quot;checks&quot;: [
+    &quot;主体与参考图职责正确&quot;,
+    &quot;仅改变明确要求的内容&quot;,
+    &quot;没有无关文字、水印、额外产品或部件&quot;,
+    &quot;真实材质与光影没有凭空改变&quot;,
+    &quot;五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数&quot;,
+    &quot;无胸袋，不添加胸袋&quot;,
+    &quot;全部服装面料，包括袖子、领子和门襟，但所有纽扣保持原浅蓝色；目标 #75677C&quot;
+  ]
+}</pre></details></section>
+<section><h2>style-to-sketch / 19 / old</h2><p>success / 视觉待核 / </p><div class="images"><figure><img loading="lazy" src="style-to-sketch-19-old-1193aa71-ea53-4a51-a1e8-e991f601ac27-1.png"><figcaption>image/png / 756720 bytes</figcaption></figure></div><details><summary>输入、最终提示词、验收点</summary><pre>{
+  &quot;requestId&quot;: &quot;pq:visual-v2-extended:style-to-sketch-19-old:0&quot;,
+  &quot;userInput&quot;: &quot;参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：技术感线稿。用清晰、均匀的线条表达服装轮廓和可见结构，主轮廓与结构线层次分明。\n\n细节程度：保留领口、袖口、下摆、门襟与主要结构线，适度简化细小纹理。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。保留原袖宽与肩斜，去掉摄影阴影和面料填色。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。&quot;,
+  &quot;finalPrompt&quot;: &quot;参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：技术感线稿。用清晰、均匀的线条表达服装轮廓和可见结构，主轮廓与结构线层次分明。\n\n细节程度：保留领口、袖口、下摆、门襟与主要结构线，适度简化细小纹理。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。保留原袖宽与肩斜，去掉摄影阴影和面料填色。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。&quot;,
+  &quot;checks&quot;: [
+    &quot;主体与参考图职责正确&quot;,
+    &quot;仅改变明确要求的内容&quot;,
+    &quot;没有无关文字、水印、额外产品或部件&quot;,
+    &quot;真实材质与光影没有凭空改变&quot;,
+    &quot;五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数&quot;,
+    &quot;无胸袋，不添加胸袋&quot;,
+    &quot;保留原袖宽与肩斜，去掉摄影阴影和面料填色。&quot;
+  ]
+}</pre></details></section>
+<section><h2>style-to-sketch / 19 / new</h2><p>success / 视觉待核 / </p><div class="images"><figure><img loading="lazy" src="style-to-sketch-19-new-1b5a75e3-bb8e-4779-bfe1-4c2b9ede66d1-1.png"><figcaption>image/png / 753698 bytes</figcaption></figure></div><details><summary>输入、最终提示词、验收点</summary><pre>{
+  &quot;requestId&quot;: &quot;pq:visual-v2-extended:style-to-sketch-19-new:0&quot;,
+  &quot;userInput&quot;: {
+    &quot;scene&quot;: &quot;style-to-sketch&quot;,
+    &quot;fields&quot;: {
+      &quot;description&quot;: &quot;只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。保留原袖宽与肩斜，去掉摄影阴影和面料填色。&quot;,
+      &quot;sketchStyle&quot;: &quot;technical&quot;,
+      &quot;sketchDetail&quot;: &quot;standard&quot;
+    },
+    &quot;userText&quot;: &quot;只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。保留原袖宽与肩斜，去掉摄影阴影和面料填色。&quot;,
+    &quot;referenceRoles&quot;: [
+      &quot;服装参考图&quot;
+    ],
+    &quot;mode&quot;: &quot;edit&quot;
+  },
+  &quot;finalPrompt&quot;: &quot;Convert Image 1 into one symmetrical front-view technical fashion flat, using its visible construction only; discard photographic shadows, fabric texture and fill. Use black (#000000) lines on pure white (#FFFFFF), consistent linework, bolder outlines, thinner construction lines and dashed topstitching. Preserve original proportions, silhouette, sleeve width, shoulder slope, pointed collar, short set-in sleeves, sleeve hems, center-front placket and curved hem. Retain exactly five fully visible front buttons plus the original partially obscured collar button; add or remove none. Draw no pockets, back view or unseen details.\nAvoid: shading, gradients, color fills, fabric texture, models, extra limbs, anatomical distortion, minors, nudity, sexualized presentation, hangers, background objects, brand logos, watermarks, unrelated text, text labels, collages, multiple panels, back views, color swatches, measurements, added pockets, added or missing buttons.&quot;,
+  &quot;checks&quot;: [
+    &quot;主体与参考图职责正确&quot;,
+    &quot;仅改变明确要求的内容&quot;,
+    &quot;没有无关文字、水印、额外产品或部件&quot;,
+    &quot;真实材质与光影没有凭空改变&quot;,
+    &quot;五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数&quot;,
+    &quot;无胸袋，不添加胸袋&quot;,
+    &quot;保留原袖宽与肩斜，去掉摄影阴影和面料填色。&quot;
+  ]
+}</pre></details></section>
+<section><h2>garment-colorway / 19 / old</h2><p>success / 视觉待核 / </p><div class="images"><figure><img loading="lazy" src="garment-colorway-19-old-57fc6b1c-ae5d-459e-8411-8b617f304eac-1.png"><figcaption>image/png / 1271255 bytes</figcaption></figure></div><details><summary>输入、最终提示词、验收点</summary><pre>{
+  &quot;requestId&quot;: &quot;pq:visual-v2-extended:garment-colorway-19-old:0&quot;,
+  &quot;userInput&quot;: &quot;参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#B3BDCF。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #B3BDCF。\n\n改色范围：仅两只袖子面料；大身、领子、门襟及全部纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #B3BDCF。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。&quot;,
+  &quot;finalPrompt&quot;: &quot;参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#B3BDCF。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #B3BDCF。\n\n改色范围：仅两只袖子面料；大身、领子、门襟及全部纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #B3BDCF。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。&quot;,
+  &quot;checks&quot;: [
+    &quot;主体与参考图职责正确&quot;,
+    &quot;仅改变明确要求的内容&quot;,
+    &quot;没有无关文字、水印、额外产品或部件&quot;,
+    &quot;真实材质与光影没有凭空改变&quot;,
+    &quot;五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数&quot;,
+    &quot;无胸袋，不添加胸袋&quot;,
+    &quot;仅两只袖子面料；大身、领子、门襟及全部纽扣保持原浅蓝色；目标 #B3BDCF&quot;
+  ]
+}</pre></details></section>
+<section><h2>garment-colorway / 19 / new</h2><p>success / 视觉待核 / </p><div class="images"><figure><img loading="lazy" src="garment-colorway-19-new-3854a909-4865-4b88-b3dc-c720adf7f1cd-1.png"><figcaption>image/png / 1221366 bytes</figcaption></figure></div><details><summary>输入、最终提示词、验收点</summary><pre>{
+  &quot;requestId&quot;: &quot;pq:visual-v2-extended:garment-colorway-19-new:0&quot;,
+  &quot;userInput&quot;: {
+    &quot;scene&quot;: &quot;garment-colorway&quot;,
+    &quot;fields&quot;: {
+      &quot;description&quot;: &quot;只改指定区域至 #B3BDCF。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。&quot;,
+      &quot;colorMode&quot;: &quot;specific&quot;,
+      &quot;colorRegion&quot;: &quot;仅两只袖子面料；大身、领子、门襟及全部纽扣保持原浅蓝色&quot;,
+      &quot;colors&quot;: [
+        &quot;#B3BDCF&quot;
+      ]
+    },
+    &quot;userText&quot;: &quot;只改指定区域至 #B3BDCF。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。&quot;,
+    &quot;referenceRoles&quot;: [
+      &quot;服装参考图&quot;
+    ],
+    &quot;mode&quot;: &quot;edit&quot;
+  },
+  &quot;finalPrompt&quot;: &quot;Recolor only both sleeve fabrics in Image 1 to muted blue-gray (#B3BDCF), from armhole seams through sleeve hems; use Image 1 as the unchanged visual base, replacing only its sleeve color. Keep the body, collar, placket, all five center-front buttons and partially concealed collar button in their original light blue. Preserve silhouette, construction lines, visible stitching, collar shape, pocket configuration, pattern shapes and positions, fabric weave and texture, folds, highlight and shadow gradients, white background, framing and aspect ratio; change nothing outside the sleeves. The new color sits naturally in the fabric weave and folds, with realistic highlights and shadows, not a flat fill.\nAvoid: flat color fill, color swatches, dimension annotations, garment structure or pattern changes, recoloring outside sleeves, skin or background, brand logos, watermarks, unrelated text, collages, multi-panel layouts, extra hands, deformed limbs, underage models, nudity, sexualized presentation.&quot;,
+  &quot;checks&quot;: [
+    &quot;主体与参考图职责正确&quot;,
+    &quot;仅改变明确要求的内容&quot;,
+    &quot;没有无关文字、水印、额外产品或部件&quot;,
+    &quot;真实材质与光影没有凭空改变&quot;,
+    &quot;五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数&quot;,
+    &quot;无胸袋，不添加胸袋&quot;,
+    &quot;仅两只袖子面料；大身、领子、门襟及全部纽扣保持原浅蓝色；目标 #B3BDCF&quot;
+  ]
+}</pre></details></section>
+<section><h2>style-to-sketch / 20 / old</h2><p>success / 视觉待核 / </p><div class="images"><figure><img loading="lazy" src="style-to-sketch-20-old-826de775-1a01-4bc1-923a-08adf608a89b-1.png"><figcaption>image/png / 734935 bytes</figcaption></figure></div><details><summary>输入、最终提示词、验收点</summary><pre>{
+  &quot;requestId&quot;: &quot;pq:visual-v2-extended:style-to-sketch-20-old:0&quot;,
+  &quot;userInput&quot;: &quot;参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：极简线稿。用干净、克制的轮廓线表达服装，不保留摄影光影与面料色块。\n\n细节程度：保留实际可见的分割线、口袋、褶裥、门襟、纽扣和装饰细节，避免虚构细节。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。简洁正面产品线描，衣身比例、开领角度和门襟位置不变。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。&quot;,
+  &quot;finalPrompt&quot;: &quot;参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：极简线稿。用干净、克制的轮廓线表达服装，不保留摄影光影与面料色块。\n\n细节程度：保留实际可见的分割线、口袋、褶裥、门襟、纽扣和装饰细节，避免虚构细节。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。简洁正面产品线描，衣身比例、开领角度和门襟位置不变。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。&quot;,
+  &quot;checks&quot;: [
+    &quot;主体与参考图职责正确&quot;,
+    &quot;仅改变明确要求的内容&quot;,
+    &quot;没有无关文字、水印、额外产品或部件&quot;,
+    &quot;真实材质与光影没有凭空改变&quot;,
+    &quot;五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数&quot;,
+    &quot;无胸袋，不添加胸袋&quot;,
+    &quot;简洁正面产品线描，衣身比例、开领角度和门襟位置不变。&quot;
+  ]
+}</pre></details></section>
+<section><h2>style-to-sketch / 20 / new</h2><p>success / 视觉待核 / </p><div class="images"><figure><img loading="lazy" src="style-to-sketch-20-new-03477a00-d761-4d52-8527-2190d9bb1bc6-1.png"><figcaption>image/png / 737317 bytes</figcaption></figure></div><details><summary>输入、最终提示词、验收点</summary><pre>{
+  &quot;requestId&quot;: &quot;pq:visual-v2-extended:style-to-sketch-20-new:0&quot;,
+  &quot;userInput&quot;: {
+    &quot;scene&quot;: &quot;style-to-sketch&quot;,
+    &quot;fields&quot;: {
+      &quot;description&quot;: &quot;只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。简洁正面产品线描，衣身比例、开领角度和门襟位置不变。&quot;,
+      &quot;sketchStyle&quot;: &quot;minimal&quot;,
+      &quot;sketchDetail&quot;: &quot;detailed&quot;
+    },
+    &quot;userText&quot;: &quot;只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。简洁正面产品线描，衣身比例、开领角度和门襟位置不变。&quot;,
+    &quot;referenceRoles&quot;: [
+      &quot;服装参考图&quot;
+    ],
+    &quot;mode&quot;: &quot;edit&quot;
+  },
+  &quot;finalPrompt&quot;: &quot;Convert Image 1 into one symmetrical front-view fashion flat with minimal, confident black (#000000) lines on pure white (#FFFFFF). Use its visible construction, not its color, texture or shadows; show no back view. Preserve the silhouette, body proportions, collar opening angle, placket position, short set-in sleeves, curved hem and visible stitching. Retain exactly five fully visible center-front buttons plus the original partially obscured neckline button, with none added or removed; add no pockets. Keep the garment flat, using clean contours and restrained construction lines.\nAvoid: shading, gradients, color fills, fabric texture, models, minors, extra limbs, nudity, sexualization, hangers and background objects, brand logos, watermarks, unrelated text, text labels, collages, multiple views, back views, color swatches and measurements, added pockets or invented construction, added, missing or repositioned buttons.&quot;,
+  &quot;checks&quot;: [
+    &quot;主体与参考图职责正确&quot;,
+    &quot;仅改变明确要求的内容&quot;,
+    &quot;没有无关文字、水印、额外产品或部件&quot;,
+    &quot;真实材质与光影没有凭空改变&quot;,
+    &quot;五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数&quot;,
+    &quot;无胸袋，不添加胸袋&quot;,
+    &quot;简洁正面产品线描，衣身比例、开领角度和门襟位置不变。&quot;
+  ]
+}</pre></details></section>
+<section><h2>garment-colorway / 20 / old</h2><p>success / 视觉待核 / </p><div class="images"><figure><img loading="lazy" src="garment-colorway-20-old-77470f90-91fe-488f-8f30-861b14f028be-1.png"><figcaption>image/png / 1266346 bytes</figcaption></figure></div><details><summary>输入、最终提示词、验收点</summary><pre>{
+  &quot;requestId&quot;: &quot;pq:visual-v2-extended:garment-colorway-20-old:0&quot;,
+  &quot;userInput&quot;: &quot;参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#A96054。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #A96054。\n\n改色范围：仅两只袖子面料；大身、领子、门襟及全部纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #A96054。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。&quot;,
+  &quot;finalPrompt&quot;: &quot;参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#A96054。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #A96054。\n\n改色范围：仅两只袖子面料；大身、领子、门襟及全部纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #A96054。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。&quot;,
+  &quot;checks&quot;: [
+    &quot;主体与参考图职责正确&quot;,
+    &quot;仅改变明确要求的内容&quot;,
+    &quot;没有无关文字、水印、额外产品或部件&quot;,
+    &quot;真实材质与光影没有凭空改变&quot;,
+    &quot;五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数&quot;,
+    &quot;无胸袋，不添加胸袋&quot;,
+    &quot;仅两只袖子面料；大身、领子、门襟及全部纽扣保持原浅蓝色；目标 #A96054&quot;
+  ]
+}</pre></details></section>
+<section><h2>garment-colorway / 20 / new</h2><p>success / 视觉待核 / </p><div class="images"><figure><img loading="lazy" src="garment-colorway-20-new-9c26ce5f-b75f-42da-ab3b-7b158d2d4740-1.png"><figcaption>image/png / 1265851 bytes</figcaption></figure></div><details><summary>输入、最终提示词、验收点</summary><pre>{
+  &quot;requestId&quot;: &quot;pq:visual-v2-extended:garment-colorway-20-new:0&quot;,
+  &quot;userInput&quot;: {
+    &quot;scene&quot;: &quot;garment-colorway&quot;,
+    &quot;fields&quot;: {
+      &quot;description&quot;: &quot;只改指定区域至 #A96054。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。&quot;,
+      &quot;colorMode&quot;: &quot;specific&quot;,
+      &quot;colorRegion&quot;: &quot;仅两只袖子面料；大身、领子、门襟及全部纽扣保持原浅蓝色&quot;,
+      &quot;colors&quot;: [
+        &quot;#A96054&quot;
+      ]
+    },
+    &quot;userText&quot;: &quot;只改指定区域至 #A96054。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。&quot;,
+    &quot;referenceRoles&quot;: [
+      &quot;服装参考图&quot;
+    ],
+    &quot;mode&quot;: &quot;edit&quot;
+  },
+  &quot;finalPrompt&quot;: &quot;Recolor only both sleeve fabrics in Image 1 to muted terracotta (#A96054), from armhole seams through hems; use its garment and presentation unchanged, not its sleeve color. Keep the body, collar, placket, five front buttons and partially obscured collar button original light blue. Preserve silhouette, construction, collar shape, visible stitching, pocket/pattern details and placement, weave, texture, folds, highlights, shadows, white background and image proportions. The new color sits naturally in the fabric weave and folds, with realistic highlights and shadows, not a flat fill.\nAvoid: flat color fill, recoloring outside sleeves, skin or background, garment structure or pattern changes, brand logos, watermarks, unrelated text, collages, multi-panel layouts, color swatches, dimension annotations, extra hands, deformed limbs, underage models, nudity, sexualized presentation.&quot;,
+  &quot;checks&quot;: [
+    &quot;主体与参考图职责正确&quot;,
+    &quot;仅改变明确要求的内容&quot;,
+    &quot;没有无关文字、水印、额外产品或部件&quot;,
+    &quot;真实材质与光影没有凭空改变&quot;,
+    &quot;五颗完整前中纽扣与半遮挡领扣分别核对，不混淆计数&quot;,
+    &quot;无胸袋，不添加胸袋&quot;,
+    &quot;仅两只袖子面料；大身、领子、门襟及全部纽扣保持原浅蓝色；目标 #A96054&quot;
+  ]
+}</pre></details></section></main>

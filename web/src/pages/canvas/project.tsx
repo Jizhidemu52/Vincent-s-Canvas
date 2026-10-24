@@ -213,12 +213,6 @@ const NODE_STATUS_LOADING = "loading" as const;
 const NODE_STATUS_SUCCESS = "success" as const;
 const NODE_STATUS_ERROR = "error" as const;
 const INTERRUPTED_IMAGE_TASK_ERROR = "本地查询已中断，可恢复原图片任务，不会重新生成。";
-const IMAGE_PROMPT_REVERSE_PRESET = `请根据参考图片反推一段适合用于 AI 生图的提示词。
-
-要求：
-1. 只输出提示词正文，不要解释。
-2. 覆盖主体、构图、风格、光线、色彩、材质、镜头和氛围。
-3. 尽量写成可直接用于生图模型的完整提示词。`;
 
 function createCanvasNode(type: CanvasNodeType, position: Position, metadata?: CanvasNodeMetadata): CanvasNodeData {
     const spec = getNodeSpec(type);
@@ -451,6 +445,10 @@ function WirelessCanvasPage() {
     const quickSubmissionRef = useRef<symbol | null>(null);
     const [batchEditOpen, setBatchEditOpen] = useState(false);
     const [batchEditPrompt, setBatchEditPrompt] = useState("");
+    const [batchOptimizePrompt, setBatchOptimizePrompt] = useState(false);
+    const [batchOptimizing, setBatchOptimizing] = useState(false);
+    const quickOptimizedDraft = useRef<{ prompt: string; input: import("../../../../shared/prompt-contracts").PromptInputData; references: ReferenceImage[] } | undefined>(undefined);
+    const onQuickOptimizedPrompt = useCallback((prompt: string, input: import("../../../../shared/prompt-contracts").PromptInputData, references: ReferenceImage[]) => { quickOptimizedDraft.current = { prompt, input, references: [...references] }; }, []);
     const [batchImageSettings, setBatchImageSettings] = useState<Partial<AiConfig>>({});
     const [batchEditItems, setBatchEditItems] = useState<BatchEditFileItem[]>([]);
     const [batchEditRunning, setBatchEditRunning] = useState(false);
@@ -2426,42 +2424,35 @@ function WirelessCanvasPage() {
     };
 
     const createImageReversePromptNodes = useCallback(
-        (node: CanvasNodeData) => {
-            if (node.type !== CanvasNodeType.Image || !node.metadata?.content) {
-                message.warning("图片节点为空，无法反推提示词");
-                return;
-            }
-
-            const gap = 96;
-            const textSpec = NODE_DEFAULT_SIZE[CanvasNodeType.Text];
-            const configSpec = NODE_DEFAULT_SIZE[CanvasNodeType.Config];
-            const centerY = node.position.y + node.height / 2;
-            const textNode = {
-                ...createCanvasNode(CanvasNodeType.Text, { x: node.position.x + node.width + gap + textSpec.width / 2, y: centerY }, { content: IMAGE_PROMPT_REVERSE_PRESET, prompt: IMAGE_PROMPT_REVERSE_PRESET, status: NODE_STATUS_SUCCESS, fontSize: 14 }),
+        async (node: CanvasNodeData) => {
+            if (node.type !== CanvasNodeType.Image || !(node.metadata?.content || node.metadata?.storageKey)) { message.warning("图片节点为空，无法反推提示词"); return; }
+            const key = `reverse-prompt:${node.id}`;
+            if (generationDispatchLocksRef.current.has(key)) return;
+            generationDispatchLocksRef.current.add(key);
+            const pending = nodesRef.current.find(item => item.id === node.id)?.metadata?.reversePrompt;
+            const requestId = pending?.requestId || nanoid();
+            const textNode = pending ? nodesRef.current.find(item => item.id === pending.outputNodeId) : {
+                ...createCanvasNode(CanvasNodeType.Text, { x: node.position.x + node.width + 96 + NODE_DEFAULT_SIZE[CanvasNodeType.Text].width / 2, y: node.position.y + node.height / 2 }, { content: "正在分析图片并优化提示词…", status: NODE_STATUS_LOADING, fontSize: 14 }),
                 title: "反推提示词",
             };
-            const configNode = {
-                ...createCanvasNode(
-                    CanvasNodeType.Config,
-                    { x: textNode.position.x + textNode.width + gap + configSpec.width / 2, y: centerY },
-                    {
-                        generationMode: "text",
-                        model: effectiveConfig.textModel || effectiveConfig.model || defaultConfig.textModel,
-                        count: 1,
-                        composerContent: `参考图片：@[node:${node.id}]\n任务说明：@[node:${textNode.id}]`,
-                    },
-                ),
-                title: "反推提示词配置",
-            };
-
-            setNodes((prev) => [...prev, textNode, configNode]);
-            setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: node.id, toNodeId: configNode.id }, { id: nanoid(), fromNodeId: textNode.id, toNodeId: configNode.id }]);
-            setSelectedNodeIds(new Set([configNode.id]));
-            setSelectedConnectionId(null);
-            setDialogNodeId(configNode.id);
-            setContextMenu(null);
+            if (!textNode) { generationDispatchLocksRef.current.delete(key); message.error("原反推结果节点已移除，请先恢复该节点"); return; }
+            const ownerId = useUserStore.getState().user?.id;
+            const current = () => designProjectIdRef.current === projectId && useUserStore.getState().user?.id === ownerId;
+            if (!pending) setNodes(prev => [...prev.map(item => item.id === node.id ? { ...item, metadata: { ...item.metadata, reversePrompt: { requestId, outputNodeId: textNode.id } } } : item), textNode]);
+            setContextMenu(null); setSelectedNodeIds(new Set([textNode.id]));
+            try {
+                const { optimizeImagePrompt } = await import("@/services/api/image");
+                const { completedPromptCompilation, getPromptCompilation } = await import("@/services/api/prompt-compilations");
+                const result = pending ? completedPromptCompilation(await getPromptCompilation(requestId), requestId)
+                    : await optimizeImagePrompt({ ...effectiveConfig, model: effectiveConfig.imageModel || effectiveConfig.model }, { scene: "reverse-prompt", fields: {}, userText: "", referenceRoles: ["待反推图片"], mode: "edit" }, [{ id: node.id, name: node.title, dataUrl: node.metadata?.content || "", storageKey: node.metadata?.storageKey, type: node.metadata?.mimeType || "image/png" }], { requestId, toolKey: "canvas-edit" });
+                if (!current()) return;
+                setNodes(prev => prev.map(item => item.id === textNode.id ? { ...item, metadata: { ...item.metadata, content: [result.prompt, result.summaryZh].filter(Boolean).join("\n\n"), prompt: result.prompt, optimized: result.optimized, status: NODE_STATUS_SUCCESS, errorDetails: undefined } } : item));
+                setDialogNodeId(textNode.id);
+            } catch (error) {
+                if (current()) { const detail = error instanceof Error ? error.message : "反推提示词失败"; message.error(detail); setNodes(prev => prev.map(item => item.id === textNode.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails: detail, content: detail } } : item)); }
+            } finally { generationDispatchLocksRef.current.delete(key); }
         },
-        [effectiveConfig.model, effectiveConfig.textModel, message],
+        [effectiveConfig, message, projectId],
     );
 
     const saveManualImageEdit = async (image: UploadedImage) => {
@@ -3023,7 +3014,9 @@ function WirelessCanvasPage() {
             targetIds.map(async (targetId, index) => {
                 try {
                     const options = await createOptions(targetId, controller, () => finishSubmission(targetId), toolKey);
-                    const { metadata, uploaded } = await options.generate(generationConfig, prompt, references, undefined, operationType === "inpaint");
+                    const optimized = quickOptimizedDraft.current;
+                    const sameReferences = optimized?.references.length === references.length && optimized.references.every((image, index) => image.id === references[index]?.id && image.dataUrl === references[index]?.dataUrl && image.storageKey === references[index]?.storageKey);
+                    const { metadata, uploaded } = await options.generate(generationConfig, prompt, references, undefined, operationType === "inpaint", optimized?.prompt === prompt && sameReferences ? optimized.input : undefined);
                     const resultSize = fitNodeSize(uploaded.width, uploaded.height, nodeSize.width, nodeSize.height);
                     setNodes((current) =>
                         current.map((node) =>
@@ -3182,7 +3175,7 @@ function WirelessCanvasPage() {
         try {
             const { runCanvasBatchImageEdit } = await loadBatchEditRuntime();
             await runCanvasBatchImageEdit({
-                prompt: batchEditPrompt, items: batchEditItems, config: batchGenerationConfig, estimate: estimateUsage, isAiConfigReady,
+                prompt: batchEditPrompt, optimizePrompt: batchOptimizePrompt, setOptimizing: setBatchOptimizing, items: batchEditItems, config: batchGenerationConfig, estimate: estimateUsage, isAiConfigReady,
                 onMissingModel: handleMissingModelConfig, user, projectId, getCenter: getCanvasCenter, imageMetadata, addAssets,
                 setRunning: setBatchEditRunning, setServerId: setBatchEditServerId, setAction: setBatchEditAction, setItems: setBatchEditItems,
                 setNodes, setConnections, setSelectedNodeIds, message,
@@ -3193,7 +3186,7 @@ function WirelessCanvasPage() {
             generationDispatchLocksRef.current.delete("canvas-batch");
             setBatchEditRunning(false);
         }
-    }, [addAssets, batchEditItems, batchEditPrompt, batchGenerationConfig, estimateUsage, getCanvasCenter, handleMissingModelConfig, isAiConfigReady, message, projectId, user]);
+    }, [addAssets, batchEditItems, batchEditPrompt, batchOptimizePrompt, batchGenerationConfig, estimateUsage, getCanvasCenter, handleMissingModelConfig, isAiConfigReady, message, projectId, user]);
 
     const controlActiveBatchEdit = useCallback(async (action: QueuedBatchAction) => {
         if (!batchEditServerId) return;
@@ -3441,7 +3434,11 @@ function WirelessCanvasPage() {
                         targetIds.map(async (targetId) => {
                             try {
                                 const imageTask = await createOptions(targetId, controller, undefined, toolKey);
-                                const { metadata, uploaded } = await imageTask.generate({ ...generationConfig, count: "1" }, effectivePrompt, referenceImages.length ? referenceImages : undefined, undefined, generationType === "edit");
+                                const recipeNode = shared?.plan.configNode || sourceNode;
+                                const recipeInput = recipeNode?.metadata?.promptInput;
+                                const workflowStep = connectionsRef.current.some(edge => edge.kind === "config-sequence" && (edge.fromNodeId === recipeNode?.id || edge.toNodeId === recipeNode?.id));
+                                const promptInput = recipeInput?.scene === "free-optimize" && recipeNode?.metadata?.compiledPrompt !== effectivePrompt ? undefined : recipeInput || (workflowStep ? { scene: "workflow-step" as const, fields: { step_type: "custom", instruction: effectivePrompt }, userText: effectivePrompt, mode: "edit" as const, referenceRoles: ["上游步骤输出图"] } : undefined);
+                                const { metadata, uploaded } = await imageTask.generate({ ...generationConfig, count: "1" }, effectivePrompt, referenceImages.length ? referenceImages : undefined, undefined, generationType === "edit", promptInput);
                                 const imageSize = fitNodeSize(uploaded.width, uploaded.height, imageConfig.width, imageConfig.height);
                                 setNodes((prev) => {
                                     const root = prev.find((node) => node.id === rootId);
@@ -4100,6 +4097,7 @@ const handleRetryNode = useCallback(async (node: CanvasNodeData) => {
     const quickGeneratePanel = (
 <Suspense fallback={isCanvasDesktopLayout ? <div className="cw-panel-loading">正在加载编辑区…</div> : null}>
                     <CanvasQuickGeneratePanel
+                        onOptimizedPrompt={onQuickOptimizedPrompt}
                         embedded={isCanvasDesktopLayout}
                         open={quickGenerateOpen && !assistantOpen}
                         promptRef={quickGeneratePromptRef}
@@ -4376,7 +4374,7 @@ const handleRetryNode = useCallback(async (node: CanvasNodeData) => {
                     applyDesignTemplate, saveGroupName, saveNodeName, saveManualImageEdit, cropImageNode, maskEditImageNode,
                     splitImageNode, upscaleImageNode, generateAngleNode, clearCanvas, handleAssetInsert,
                 }} />
-            {batchEditOpen ? <Suspense fallback={null}><CanvasBatchEditDialog open={batchEditOpen} running={batchEditRunning} prompt={batchEditPrompt} items={batchEditItems} imageSettings={batchImageSettings} serverId={batchEditServerId} action={batchEditAction} onClose={() => setBatchEditOpen(false)} onPromptChange={setBatchEditPrompt} onImageSettingsChange={setBatchImageSettings} onSelectFiles={() => batchFilesInputRef.current?.click()} onClearItems={() => setBatchEditItems([])} onRun={runBatchImageEdit} onControlBatch={controlActiveBatchEdit} /></Suspense> : null}
+            {batchEditOpen ? <Suspense fallback={null}><CanvasBatchEditDialog open={batchEditOpen} running={batchEditRunning} prompt={batchEditPrompt} optimizePrompt={batchOptimizePrompt} optimizing={batchOptimizing} onOptimizePromptChange={setBatchOptimizePrompt} items={batchEditItems} imageSettings={batchImageSettings} serverId={batchEditServerId} action={batchEditAction} onClose={() => setBatchEditOpen(false)} onPromptChange={setBatchEditPrompt} onImageSettingsChange={setBatchImageSettings} onSelectFiles={() => batchFilesInputRef.current?.click()} onClearItems={() => setBatchEditItems([])} onRun={runBatchImageEdit} onControlBatch={controlActiveBatchEdit} /></Suspense> : null}
                 <input ref={batchFilesInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleBatchFolderInputChange} />
                 {localAgentModuleEnabled && codexCompactAgent && !assistantMounted ? (
                     <Suspense fallback={null}>

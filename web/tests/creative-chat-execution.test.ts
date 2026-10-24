@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { compileCreativeChatExecutionPrompt } from "../src/lib/creative-chat-execution";
-import { buildCreativeChatRequestMessages, buildCreativeChatTools, buildCreativeImageCatalog, parseCreativeChatPlan, type CreativeChatMessage } from "../src/lib/creative-chat";
+import { buildCreativeImageCatalog, parseCreativeChatPlan, type CreativeChatMessage } from "../src/lib/creative-chat";
 import { buildImageReferencePromptText } from "../src/lib/image-reference-prompt";
 
 const reference = (id: string) => ({ id, name: `${id}.png`, type: "image/png", dataUrl: "data:image/png;base64,QQ==" });
@@ -132,16 +132,4 @@ describe("creative chat deterministic execution contract", () => {
         expect(numberedOutput.kind === "image" && numberedOutput.prompt).toContain("生成第一张夏季海报");
     });
 
-    test("new schema is additive and historical execution does not imply user approval", () => {
-        const schema = buildCreativeChatTools()[0]!.function.parameters as { required: string[]; properties: Record<string, unknown> };
-        expect(schema.required).toEqual(["action", "prompt", "preserve"]);
-        expect(schema.properties.reference_roles).toBeDefined();
-        expect(schema.properties.superseded_constraints).toBeDefined();
-        expect(schema.properties.preserve).toMatchObject({ type: "array", items: { type: "string" } });
-        const messages = buildCreativeChatRequestMessages([], { role: "user", content: "画一朵花" });
-        expect(String(messages[0]!.content)).toContain("生成成功不等于用户认可");
-        expect(String(messages[0]!.content)).toContain("旧 prompt 内的编号只属于旧执行");
-        expect(String(messages[0]!.content)).toContain('"preserve":["约束一","约束二"]');
-        expect(String(messages[0]!.content)).toContain("每个键只能出现一次");
-    });
 });

@@ -1,4 +1,6 @@
 import { nanoid } from "nanoid";
+import type { PromptInputData } from "../../../../shared/prompt-contracts";
+import { getPromptCompilation } from "./prompt-compilations";
 import type { TaskSubmission } from "../../../../shared/task-contracts";
 
 import { dataUrlToFile } from "@/lib/image-utils";
@@ -30,7 +32,7 @@ export type QueuedTaskProgress = {
     estimateReason: string | null;
     retryAfterSeconds: number | null;
 };
-export type QueuedTask = { id: string; requestId: string; operationType?: string; status: string; stage?: string; errorCode?: string | null; upstreamTaskId?: string | null; submissionStartedAt?: string | null; resultUrls: string[]; failureReason: string | null; createdAt?: string; updatedAt?: string; userId?: string; ownerUserId?: string; parameters?: Record<string, unknown> };
+export type QueuedTask = { prompt?: string; userInput?: PromptInputData; optimized?: boolean; id: string; requestId: string; operationType?: string; status: string; stage?: string; errorCode?: string | null; upstreamTaskId?: string | null; submissionStartedAt?: string | null; resultUrls: string[]; failureReason: string | null; createdAt?: string; updatedAt?: string; userId?: string; ownerUserId?: string; parameters?: Record<string, unknown> };
 export class QueuedTaskPausedError extends Error {
     readonly taskId: string;
     readonly canRecover: boolean;
@@ -55,8 +57,9 @@ export class QueuedTaskSubmissionUncertainError extends Error {
         this.name = "QueuedTaskSubmissionUncertainError";
     }
 }
-class QueuedTaskHttpError extends Error {
-    constructor(readonly status: number, message: string) { super(message); }
+export class QueuedTaskHttpError extends Error {
+    get submissionRejected() { return this.status >= 400 && this.status < 500 && this.status !== 408 && !["PROMPT_OPTIMIZING", "PROMPT_SUBMISSION_UNCERTAIN"].includes(this.code || ""); }
+    constructor(readonly status: number, message: string, readonly code?: string) { super(message); }
 }
 export type GenerationVideoCapability = { seconds: readonly [number, number]; resolutions: readonly string[]; sizes: readonly string[]; minImages: number; maxImages: number; firstFrameRequired: boolean; supportsAudio: boolean };
 export type GenerationCapabilityModel = { id: string; name: string; modelId: string; capability: GenerationVideoCapability };
@@ -72,8 +75,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
         headers: { "content-type": "application/json", ...init?.headers, ...workspaceOwnerHeaders() },
     });
     if (!response.ok) {
-        const body = (await response.json().catch(() => ({}))) as { message?: string };
-        throw new QueuedTaskHttpError(response.status, body.message || "任务提交失败");
+        const body = (await response.json().catch(() => ({}))) as { message?: string; error?: string; code?: string };
+        throw new QueuedTaskHttpError(response.status, body.message || "任务提交失败", body.error || body.code);
     }
     return response.status === 204 ? (undefined as T) : (response.json() as Promise<T>);
 }
@@ -85,6 +88,7 @@ export function createImageTaskRequests(input: {
     operationType: ImageOperationType;
     modelConfigId: string;
     prompt: string;
+    promptInput?: PromptInputData;
     parameters?: Record<string, unknown>;
     sourceUrls: string[];
     count: number;
@@ -96,13 +100,14 @@ export function createImageTaskRequests(input: {
         toolKey: requireToolKey(input.operationType, input.toolKey),
         modelConfigId: input.modelConfigId,
         prompt: input.prompt,
+        ...(input.promptInput ? { promptInput: input.promptInput } : {}),
         parameters: { ...input.parameters, count: 1, n: 1 },
         sourceUrls: input.sourceUrls,
         priority: "normal" as const,
-    } satisfies TaskSubmission));
+    } satisfies Omit<TaskSubmission, "promptInput"> & { promptInput?: PromptInputData }));
 }
 
-export async function requestQueuedImages(input: { modelId: string; resolvedModel?: PublicModel; prompt: string; count: number; operationType: ImageOperationType; tool?: string; parameters?: Record<string, unknown>; draft?: GenerationDraftInput; references?: ReferenceImage[]; requestId?: string; signal?: AbortSignal; cancelOnAbort?: () => boolean; onSubmissionStarted?: () => void | Promise<void>; onSubmitted?: (taskIds: string[]) => void | Promise<void> }) {
+export async function requestQueuedImages(input: { modelId: string; resolvedModel?: PublicModel; prompt: string; promptInput?: PromptInputData; onOptimizing?: () => void; onCompiled?: (prompt: string, optimized: boolean) => void; count: number; operationType: ImageOperationType; tool?: string; parameters?: Record<string, unknown>; draft?: GenerationDraftInput; references?: ReferenceImage[]; requestId?: string; signal?: AbortSignal; cancelOnAbort?: () => boolean; onSubmissionStarted?: () => void | Promise<void>; onSubmitted?: (taskIds: string[]) => void | Promise<void> }) {
     input.signal?.throwIfAborted();
     const ownerId = useUserStore.getState().user?.id;
     if (!ownerId) throw new Error("当前账号不可用");
@@ -135,7 +140,7 @@ export async function requestQueuedImages(input: { modelId: string; resolvedMode
     const projectId = currentProjectId("image-workbench");
     const archive: GenerationInputArchive | undefined = input.draft ? {
         version: 1, ownerId, modelConfigId: model.id, modelId: model.modelId,
-        prompt: input.draft.prompt, effectivePrompt: input.prompt, config: { ...input.draft.config, model: model.id, imageModel: model.id, count: "1" },
+        prompt: input.draft.prompt, userInput: input.promptInput, effectivePrompt: input.prompt, config: { ...input.draft.config, model: model.id, imageModel: model.id, count: "1" },
         parameters: { ...input.parameters }, references: archivedReferences, maskReferenceIndex: input.draft.maskReferenceIndex,
     } : undefined;
     const taskRequests = createImageTaskRequests({
@@ -145,6 +150,7 @@ export async function requestQueuedImages(input: { modelId: string; resolvedMode
         operationType: input.operationType,
         modelConfigId: model.id,
         prompt: input.prompt,
+        promptInput: input.promptInput,
         parameters: { ...input.parameters, ...(input.tool ? { tool: input.tool } : {}), ...(archive ? { inputArchive: archive } : {}) },
         sourceUrls,
         count: input.count,
@@ -158,22 +164,27 @@ export async function requestQueuedImages(input: { modelId: string; resolvedMode
             assertOwner();
             input.signal?.throwIfAborted();
             try {
-                const result = await request<{ task: { id: string } }>("/api/tasks", {
+                if (input.promptInput) input.onOptimizing?.();
+                const result = await request<{ task: QueuedTask }>("/api/tasks", {
                 method: "POST",
                 body: JSON.stringify(task),
                 signal: input.signal,
                 });
                 if (typeof result?.task?.id !== "string" || !result.task.id.trim()) throw new Error("服务器未返回任务编号");
+                if (result.task.prompt !== undefined) input.onCompiled?.(result.task.prompt, result.task.optimized === true);
                 return result;
             } catch (error) {
-                if (error instanceof QueuedTaskHttpError && error.status >= 400 && error.status < 500 && error.status !== 408) throw error;
+                if (error instanceof QueuedTaskHttpError && error.submissionRejected) throw error;
+                // Both the optimizer and image submission are looked up; neither POST is replayed.
+                const [original] = await Promise.all([getQueuedTaskByRequestId(task.requestId).catch(() => null), input.promptInput ? getPromptCompilation(task.requestId).catch(() => null) : Promise.resolve(null)]);
+                if (original?.id) { input.onCompiled?.(original.prompt || input.prompt, original.optimized === true); return { task: original }; }
                 throw new QueuedTaskSubmissionUncertainError(task.requestId, undefined, error);
             }
         }),
     );
     const rejected = submitted.find((result): result is PromiseRejectedResult => result.status === "rejected");
     if (rejected) throw rejected.reason instanceof Error ? rejected.reason : new Error("任务提交失败");
-    const ids = submitted.map((result) => (result as PromiseFulfilledResult<{ task: { id: string } }>).value.task.id);
+    const ids = submitted.map((result) => (result as PromiseFulfilledResult<{ task: QueuedTask }>).value.task.id);
     try {
         try { await input.onSubmitted?.(ids); }
         catch (error) { if (input.signal?.aborted) throw error; throw new QueuedTaskSubmissionUncertainError(taskRequests[0]!.requestId, ids[0], error); }
@@ -181,7 +192,7 @@ export async function requestQueuedImages(input: { modelId: string; resolvedMode
         const tasks = await waitForTasks(ids, input.signal, undefined, true);
         const failed = tasks.find((task) => task.status === "failed" || task.status === "cancelled");
         if (failed) throw new QueuedTaskFailedError(failed);
-        return tasks.flatMap((task) => task.resultUrls.map((dataUrl) => ({ id: nanoid(), dataUrl, sourceTaskId: task.id })));
+        return tasks.flatMap((task) => task.resultUrls.map((dataUrl) => ({ id: nanoid(), dataUrl, sourceTaskId: task.id, prompt: task.prompt || input.prompt, userInput: task.userInput || input.promptInput, optimized: task.optimized === true })));
     } catch (error) {
         if (input.signal?.aborted && (input.cancelOnAbort?.() ?? true)) await cancelTasks(ids);
         throw error;
@@ -190,14 +201,21 @@ export async function requestQueuedImages(input: { modelId: string; resolvedMode
     }
 }
 
-export async function requestQueuedImageBatch(input: { modelId: string; resolvedModel?: PublicModel; prompt: string; parameters?: Record<string, unknown>; files: Array<{ file: File; title: string }>; signal?: AbortSignal; onSubmitted?: (batchId: string) => void; onProgress?: (items: QueuedBatchItem[]) => void }) {
+export async function requestQueuedImageBatch(input: { modelId: string; resolvedModel?: PublicModel; prompt: string; promptInput?: PromptInputData; onOptimizing?: () => void; onCompiled?: (prompt: string, optimized: boolean) => void; parameters?: Record<string, unknown>; files: Array<{ file: File; title: string }>; onSubmissionStarted?: (requestId: string, items: Array<{ itemIndex: number }>) => void | Promise<void>; signal?: AbortSignal; onSubmitted?: (batchId: string) => void; onProgress?: (items: QueuedBatchItem[]) => void }) {
     if (!input.files.length || input.files.length > 100) throw new Error("每批请选择 1–100 张图片，每张独立生成 1 张结果。");
+    const ownerId = useUserStore.getState().user?.id;
+    if (!ownerId) throw new Error("当前账号不可用");
+    const assertOwner = () => { input.signal?.throwIfAborted(); if (useUserStore.getState().user?.id !== ownerId) throw new Error("员工会话已变化，批次未提交"); };
+    assertOwner();
     const model = input.resolvedModel || await resolvePublicModel(input.modelId, "batch_image", "canvas-batch");
+    assertOwner();
     const uploadedItems: Array<{ itemIndex: number; sourceUrl: string }> = [];
     const uploadFailures: QueuedBatchFailure[] = [];
     for (const [itemIndex, item] of input.files.entries()) {
         try {
-            const assetId = await uploadServerAsset(item.file, { title: item.title, source: "canvas-batch-reference" });
+            assertOwner();
+            const assetId = await uploadServerAsset(item.file, { title: item.title, source: "canvas-batch-reference" }, { signal: input.signal, expectedOwnerId: ownerId });
+            assertOwner();
             uploadedItems.push({ itemIndex, sourceUrl: `/api/assets/${assetId}/content` });
         } catch (error) {
             uploadFailures.push({ index: itemIndex, reason: error instanceof Error ? error.message : "源图片上传失败" });
@@ -205,24 +223,38 @@ export async function requestQueuedImageBatch(input: { modelId: string; resolved
     }
     if (!uploadedItems.length) throw new Error(uploadFailures[0]?.reason || "没有可提交的源图片");
 
+    const requestId = createClientId();
+    assertOwner();
+    await input.onSubmissionStarted?.(requestId, uploadedItems);
+    assertOwner();
+    if (input.promptInput) input.onOptimizing?.();
     const result = await request<{
+        prompt?: string; optimized?: boolean;
         batchId: string;
         tasks: Array<{ id: string; itemIndex: number }>;
         failures: QueuedBatchFailure[];
     }>("/api/tasks/batch", {
         method: "POST",
         body: JSON.stringify({
-            requestId: createClientId(),
+            requestId,
             projectId: currentProjectId("canvas-batch-edit"),
             operationType: "batch_image",
             toolKey: "canvas-batch",
             modelConfigId: model.id,
             prompt: input.prompt,
+            ...(input.promptInput ? { promptInput: input.promptInput } : {}),
             parameters: { ...input.parameters, tool: "canvas-batch", count: 1, n: 1 },
             priority: "normal",
             items: uploadedItems.map((item) => ({ sourceUrls: [item.sourceUrl] })),
         }),
+        signal: input.signal,
+    }).catch(async error => {
+        if (error instanceof QueuedTaskHttpError && error.submissionRejected) throw error;
+        const [original] = await Promise.all([getQueuedBatchByRequestId(requestId).catch(() => null), getPromptCompilation(requestId).catch(() => null), getQueuedTaskByRequestId(`${requestId}:0`).catch(() => null)]);
+        if (original && original.submissionComplete !== false) return original;
+        throw new QueuedTaskSubmissionUncertainError(requestId, undefined, error);
     });
+    if (result.prompt !== undefined) input.onCompiled?.(result.prompt, result.optimized === true);
     const remapped = restoreBatchItemIndices(uploadedItems, result.tasks, result.failures);
     const itemIndexByTaskId = new Map(remapped.tasks.map((task) => [task.id, task.itemIndex]));
     const failures = [...uploadFailures, ...remapped.failures];
@@ -240,11 +272,19 @@ export async function requestQueuedImageBatch(input: { modelId: string; resolved
     } catch (error) {
         if (input.signal?.aborted) {
             await request<{ changed: number }>(`/api/tasks/batches/${result.batchId}/cancel`, { method: "POST" }).catch(() => undefined);
+            throw error;
         }
-        throw error;
+        throw new QueuedTaskSubmissionUncertainError(requestId, undefined, error);
     } finally {
         void refreshSessionBalance();
     }
+}
+
+export async function getQueuedBatchByRequestId(requestId: string) {
+    const response = await fetch(`/api/tasks/batches/by-request/${encodeURIComponent(requestId)}`, { credentials: "include", headers: workspaceOwnerHeaders(), cache: "no-store" });
+    if (response.status === 404) return null;
+    if (!response.ok) throw new Error("原批次查询失败");
+    return response.json() as Promise<{ batchId: string; tasks: Array<QueuedTask & { itemIndex: number }>; failures: QueuedBatchFailure[]; prompt?: string; optimized?: boolean; submissionComplete?: boolean; totalItems?: number }>;
 }
 
 export function controlQueuedBatch(batchId: string, action: QueuedBatchAction) {
@@ -332,7 +372,7 @@ export async function submitQueuedMediaTask(input: QueuedMediaInput) {
         task = { ...result.task, requestId: submitPayload.requestId };
     } catch (error) {
         // An explicit client rejection is known not to have created a new task.
-        if (error instanceof QueuedTaskHttpError && error.status >= 400 && error.status < 500 && error.status !== 408) throw error;
+        if (error instanceof QueuedTaskHttpError && error.submissionRejected) throw error;
         throw new QueuedTaskSubmissionUncertainError(submitPayload.requestId, undefined, error);
     }
     // Once acknowledged, keep the ID available to onSubmitted and cancellation;

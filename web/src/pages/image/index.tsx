@@ -1,3 +1,5 @@
+import { PromptOptimizeButton } from "@/components/prompt-optimize-button";
+import type { PromptInputData, PromptScene } from "../../../../shared/prompt-contracts";
 import { ArrowLeft, ArrowRight, BookmarkPlus, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, ImagePlus, LoaderCircle, PenLine, Plus, Share2, SlidersHorizontal, Sparkles, Trash2, Upload } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { handleSubmitShortcut } from "@/lib/submit-shortcut";
@@ -71,6 +73,8 @@ type GeneratedImage = {
     imageVersion?: number;
     imageOriginId?: string;
     prompt?: string;
+    userInput?: PromptInputData;
+    optimized?: boolean;
 };
 
 type GenerationResult = {
@@ -89,6 +93,8 @@ type GenerationLog = {
     createdAt: number;
     title: string;
     prompt: string;
+    userInput?: PromptInputData;
+    optimized?: boolean;
     time: string;
     model: string;
     config: GenerationLogConfig;
@@ -221,6 +227,8 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const user = useUserStore((state) => state.user);
     const estimate = useBusinessConfigStore((state) => state.estimate);
     const addAsset = useAssetStore((state) => state.addAsset);
+    const [optimizingPrompt, setOptimizingPrompt] = useState(false);
+    const [optimizedDraft, setOptimizedDraft] = useState<{ prompt: string; input: PromptInputData; references: ReferenceImage[] }>();
     const [prompt, setPrompt] = useWorkbenchField(creativePreset ? `creative:${creativePreset.id}:prompt` : `image:${resolveImageToolMode(searchParams.get("tool"))}:prompt`, creativePreset?.prompt || "");
     const historyStore = creativePreset ? creativeLogStore : logStore;
     const [results, setResults] = useState<GenerationResult[]>([]);
@@ -259,6 +267,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const applyGarmentRecipe = (recipe: GarmentRecipe) => {
         inputRevision.current += 1;
         setPrompt(recipe.prompt);
+        setOptimizedDraft({ prompt: recipe.prompt, input: recipe.promptInput, references: recipe.references });
         setReferences(recipe.references.map(item => references.find(reference => reference.id === item.id) || createImageReferenceItem(item, "template")));
         setGarmentDraft({ scope: garmentScope, dirty: false, appliedReferences: recipe.references });
         message.success("已套用到提示词；检查后点击开始编辑");
@@ -277,7 +286,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const quotaBlocked = deploymentFeatures.creditsEnabled && Boolean(user && estimatedUsage.configured && user.creditBalance < estimatedUsage.credits);
     const missingReference = !isBlend && toolModeConfig.requiresReference && references.length === 0;
     const invalidBlendReferences = isBlend && (references.length < 2 || references.length > 4);
-    const canGenerate = Boolean(model) && (!requiresPrompt || Boolean(prompt.trim())) && !quotaBlocked && !missingReference && !invalidBlendReferences && referenceValidation.valid && !garmentNeedsApply && !incompleteCreativePrompt;
+    const canGenerate = !optimizingPrompt && Boolean(model) && (!requiresPrompt || Boolean(prompt.trim())) && !quotaBlocked && !missingReference && !invalidBlendReferences && referenceValidation.valid && !garmentNeedsApply && !incompleteCreativePrompt;
 
     const appendReferences = (items: ReferenceImage[], origin: ImageReferenceOrigin) => { inputRevision.current += 1; setReferences((value) => dedupeImageReferences([...value, ...items.map((item) => createImageReferenceItem(item, origin))])); };
     const restoreReferences = (items: ReferenceImage[], origin: ImageReferenceOrigin = "template") => { inputRevision.current += 1; setReferences(dedupeImageReferences(items.map((item) => createImageReferenceItem(item, origin)))); };
@@ -654,6 +663,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
             if (draft.tool && draft.tool !== historyTool) throw new Error(`请先切换到历史原工具“${imageToolModes[draft.tool as GenerationToolMode]?.title || draft.tool}”再恢复，当前草稿未改变`);
             if (revision !== inputRevision.current || preview !== previewRevision.current || settingsBeforeRestore !== useConfigStore.getState().config) throw new Error("草稿或所选记录已改变，已取消恢复");
             replacePrompt(draft.prompt);
+            setOptimizedDraft(draft.userInput ? { prompt: draft.prompt, input: { ...draft.userInput, compilationId: undefined }, references: draft.references } : undefined);
             setReferences(draft.references.map(item => createImageReferenceItem(item, "template")));
             updateConfig("imageModel", draft.config.imageModel);
             updateConfig("size", draft.config.size); updateConfig("quality", draft.config.quality);
@@ -664,7 +674,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         finally { restoreBusy.current = false; setRestoringHistory(false); }
     };
 
-    const buildRequestSnapshot = () => {
+    const buildRequestSnapshot = (): ImageRequestSnapshot | null => {
         previewRevision.current += 1;
         setPreviewLoading(false);
         if (!model) {
@@ -688,7 +698,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
             message.error(referenceValidation.message);
             return null;
         }
-        return { text: text || "Blend reference images", config: { ...effectiveConfig, model, count: "1" }, references: [...references] };
+        return { text: text || "Blend reference images", promptInput: optimizedDraft?.prompt === text && garmentReferencesMatch(optimizedDraft.references, references) ? optimizedDraft.input : creativePreset ? { scene: creativePreset.id as PromptScene, userText: text, fields: {}, mode: references.length ? "edit" : "generate", referenceRoles: references.map(image => image.name) } : undefined, config: { ...effectiveConfig, model, count: "1" }, references: [...references] };
     };
 
     const persistPending = async (record: PendingImage) => {
@@ -705,12 +715,12 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         if (mountedRef.current) setPendingImages(current => current.filter(item => item.id !== record.id));
     };
 
-    const finishImage = async (record: PendingImage, image: { id: string; dataUrl: string; sourceTaskId?: string }, index: number) => {
+    const finishImage = async (record: PendingImage, image: { id: string; dataUrl: string; sourceTaskId?: string; prompt?: string; optimized?: boolean; userInput?: PromptInputData }, index: number) => {
         const stored = await uploadImage(image.dataUrl);
-        const nextImage: GeneratedImage = { ...image, dataUrl: stored.url, storageKey: stored.storageKey, prompt: record.snapshot.text, durationMs: Date.now() - record.createdAt, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType, ...canvasImageReferenceIdentity(record.snapshot.references[0]) };
+        const nextImage: GeneratedImage = { ...image, dataUrl: stored.url, storageKey: stored.storageKey, prompt: image.prompt ?? record.snapshot.text, durationMs: Date.now() - record.createdAt, width: stored.width, height: stored.height, bytes: stored.bytes, mimeType: stored.mimeType, ...canvasImageReferenceIdentity(record.snapshot.references[0]) };
         // Stable ID makes a crash between saving the result and deleting the
         // in-flight marker idempotent on the next recovery.
-        await saveLog({ ...buildLog({ prompt: record.snapshot.text, model: record.snapshot.config.model, config: record.snapshot.config, references: record.snapshot.references, durationMs: nextImage.durationMs, successCount: 1, failCount: 0, status: "成功", images: [nextImage] }), id: record.id, createdAt: record.createdAt });
+        await saveLog({ ...buildLog({ prompt: image.prompt ?? record.snapshot.text, model: record.snapshot.config.model, config: record.snapshot.config, references: record.snapshot.references, durationMs: nextImage.durationMs, successCount: 1, failCount: 0, status: "成功", images: [nextImage] }), id: record.id, createdAt: record.createdAt, userInput: image.userInput || record.snapshot.promptInput, optimized: image.optimized });
         await removePending(record);
         if (mountedRef.current) setResults(value => updateResultAt(value, index, { status: "success", image: nextImage, recovery: undefined, error: undefined, snapshot: record.snapshot }));
         return nextImage;
@@ -725,6 +735,9 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
             const snapshotIsBlend = historyTool === "midjourney-blend" || imageModelProfile(modelOptionName(snapshot.config.model), businessModels).kind === "midjourney-blend";
             const requestOptions = {
                 operationType: snapshotIsBlend ? "image_generation" as const : operationType, tool: historyTool,
+                promptInput: snapshot.promptInput,
+                onOptimizing: () => { if (mountedRef.current) setOptimizingPrompt(true); },
+                onCompiled: () => { if (mountedRef.current) setOptimizingPrompt(false); },
                 requestId: record.requestId, signal: controller.signal, cancelOnAbort: () => false,
                 onSubmissionStarted: async () => { await persistPending(record); submissionStarted = true; },
                 onSubmitted: async (taskIds: string[]) => { record.taskId = taskIds[0]; await persistPending(record); if (mountedRef.current) setActiveTaskId(record.taskId || null); },
@@ -736,6 +749,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
             if (!image) throw new Error("接口没有返回图片");
             return await finishImage(record, image, index);
         } catch (error) {
+            if (mountedRef.current) setOptimizingPrompt(false);
             const uncertain = submissionStarted && !(error instanceof QueuedTaskFailedError) && (Boolean(record.taskId) || error instanceof QueuedTaskSubmissionUncertainError || controller.signal.aborted || error instanceof TaskObservationStoppedError || error instanceof QueuedTaskPausedError);
             if (!uncertain && submissionStarted) await removePending(record);
             if (mountedRef.current) setResults((value) => updateResultAt(value, index, { status: uncertain ? "paused" : "failed", error: controller.signal.aborted ? "已停止本页查询；服务端任务可能继续，可查询原任务。" : error instanceof Error ? error.message : "生成失败", recovery: uncertain ? record : undefined, snapshot }));
@@ -769,7 +783,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                     const [completed] = await waitForTasks([task.id], controller.signal, undefined, true);
                     if (!completed || completed.status !== "success") throw new QueuedTaskFailedError(completed || task);
                     if (!completed.resultUrls[0]) throw new Error("原任务尚无可读取结果，请稍后继续查询");
-                    await finishImage(record, { id: record.id, dataUrl: completed.resultUrls[0], sourceTaskId: completed.id }, index);
+                    await finishImage(record, { id: record.id, dataUrl: completed.resultUrls[0], sourceTaskId: completed.id, prompt: completed.prompt, optimized: completed.optimized, userInput: completed.userInput }, index);
                 } catch (error) {
                     const terminal = error instanceof QueuedTaskFailedError;
                     if (terminal) await removePending(record);
@@ -853,6 +867,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                                 <Input.TextArea aria-label="图像提示词" value={prompt} onChange={(event) => { inputRevision.current += 1; setPrompt(event.target.value); }} onKeyDown={(event) => handleSubmitShortcut(event, canGenerate && !running, () => void generate())} rows={6} disabled={running || !requiresPrompt} placeholder={requiresPrompt ? `${toolModeConfig.placeholder}（Ctrl/⌘ + Enter 提交）` : "这个模型直接合成参考图，不需要填写文字"} />
                             </div> : <p className="rounded-lg bg-stone-50 p-3 text-sm text-stone-600 dark:bg-stone-900 dark:text-stone-300">请选择 2–4 张参考图。此模型不会提交提示词；生成结果取决于图片内容及下方融合参数。</p>}
 
+                            {requiresPrompt ? <PromptOptimizeButton config={effectiveConfig} prompt={prompt} references={references} toolKey={toolKey} disabled={running} onBusyChange={setOptimizingPrompt} onApply={(value, _compilation, input) => { replacePrompt(value); setOptimizedDraft({ prompt: value, input, references: [...references] }); }} /> : null}
                             <ReferenceImageTray
                                 references={references}
                                 validation={referenceValidation}
@@ -889,7 +904,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                                 {incompleteCreativePrompt ? <div className="mt-1" role="status">请把「{CREATIVE_REQUIREMENT_PLACEHOLDER}」替换成你的设计要求。</div> : null}
                             </div>
                             <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} loading={running} disabled={!canGenerate || running} onClick={() => void generate()}>
-                                {running ? "正在生成，请稍候…" : toolModeConfig.button}
+                                {optimizingPrompt ? "正在优化提示词…" : running ? "正在生成，请稍候…" : toolModeConfig.button}
                             </Button>
                             {running ? <Button block onClick={() => { for (const controller of observationControllers.current) controller.abort(); }}>停止本页查询（不取消服务端任务）</Button> : pendingImages.length ? <Button block onClick={() => void resumePendingImages(pendingImages)}>继续查询原任务（{pendingImages.length}）</Button> : null}
                         </div>

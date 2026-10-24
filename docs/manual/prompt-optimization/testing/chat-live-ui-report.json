@@ -1,0 +1,459 @@
+{
+  "version": 2,
+  "checkedAt": "2026-10-24T18:10:18.000Z",
+  "scope": {
+    "uiOrigin": "http://127.0.0.1:5188",
+    "apiOrigin": "http://127.0.0.1:3100",
+    "browser": "Independent headless Chrome, Playwright CLI session prompt-chat-live-qa",
+    "mocked": false,
+    "servicesRestarted": false,
+    "productCodeEdited": false,
+    "existingUserCanvasTouched": false,
+    "additionalImageSubmissions": 0
+  },
+  "summary": {
+    "newImageSubmissions": 4,
+    "successfulImages": 4,
+    "visualPasses": 4,
+    "observedProfileChatPosts": 6,
+    "manualOptimizationPosts": 2,
+    "originalTaskRecoveryPosts": 1,
+    "actualCost": null,
+    "feeNote": "Demo credits=0 不等于提供商免费；未取得可对账实费。",
+    "uiRecoveryRetest": "pass_existing_task_result_rehydration"
+  },
+  "cases": [
+    {
+      "id": "chat-1",
+      "name": "鼠尾草绿改色",
+      "profile": "creative-chat",
+      "userText": "请直接改这张衬衫产品图：只把浅蓝色衬衫面料改为柔和鼠尾草绿色。保持衬衫主体、短袖长度、领型、门襟、纽扣数量与位置、缝线、原有褶皱、光线、白色背景及画幅不变，不添加任何文字或图案。只生成一张。",
+      "taskId": "2c5750f3-f56e-43e8-be34-22c2f42a2d9b",
+      "requestId": "e53cba02-59f7-4d6a-bffa-9cb317960fe4:0",
+      "upstreamTaskId": "task_01M5QG436CAPK94HZ00DJK97F5",
+      "taskStatus": "success",
+      "stage": "succeeded",
+      "projectId": "image-workbench",
+      "actualImageModel": {
+        "configId": "d5000000-0000-4000-8000-000000000007",
+        "publicName": "aplmart-gpt2",
+        "provider": "APIMart",
+        "modelId": "gpt-image-2"
+      },
+      "actualChatModel": {
+        "configId": "d5000000-0000-4000-8000-000000000010",
+        "modelId": "claude-sonnet-5-5",
+        "provider": "APIMart"
+      },
+      "sourceOrder": [
+        {
+          "id": "b3e3c5b7-dd16-410d-a784-be63af3fedd6",
+          "name": "garment.png",
+          "type": "image/png",
+          "bytes": 987824,
+          "sha256": "b6cc50b7f2e1f7a124931e17bc57cecfecad7b05d0190f85b516ca0b7697f519",
+          "url": "/api/assets/aec6feeb-cbb7-48a2-84fe-c7ba8040a5f1/content",
+          "sourceAssetId": "aec6feeb-cbb7-48a2-84fe-c7ba8040a5f1"
+        }
+      ],
+      "sourceUrls": [
+        "/api/assets/aec6feeb-cbb7-48a2-84fe-c7ba8040a5f1/content"
+      ],
+      "finalPrompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n【本轮修改要求（最高优先级）】\n只改颜色：把这件浅蓝色短袖衬衫的面料（包括领子、门襟、袖子、衣身）重新染成柔和鼠尾草绿色 soft sage green (#9CAF88)。纽扣与衬衫同色系，也随之变为同一鼠尾草绿的略深或相近色调。颜色自然融入棉质织纹与褶皱，保留原有高光与阴影、缝线与立体质感。电商平铺产品图，纯白背景，柔和均匀的影棚光线。不添加任何文字或图案。\n本轮明确修改或撤销的要求优先于旧版本条件；下列保留项仅在不与本轮修改冲突时适用，不把旧版本当作已获用户认可。\n【参考图分工（按实际输入顺序）】\n- 图片1（修改主体）：本轮修改主体，以本轮要求决定修改范围。\n【本轮仍有效的保留项】\n- 衬衫主体轮廓与版型不变\n- 短袖长度不变\n- 领型（尖领）不变\n- 门襟形态不变\n- 纽扣数量（5颗）与位置不变\n- 缝线不变\n- 原有褶皱与光影不变\n- 白色背景不变\n- 画幅与构图不变\n- 不添加任何文字或图案",
+      "submittedImageCount": 1,
+      "observedChatPostCount": 1,
+      "actualCost": null,
+      "appCredits": 0,
+      "visual": {
+        "status": "pass",
+        "scope": "人工视觉主目标和可见结构；不表示像素级全局不变",
+        "observations": [
+          "浅蓝衬衫变为鼠尾草绿，白底、短袖、尖领、五颗主体纽扣与门襟保留。",
+          "没有新增文字或口袋；面料和领口存在轻微重绘，不代表像素级保真。"
+        ]
+      },
+      "result": {
+        "assetUrl": "/api/assets/e1645778-6d54-4311-ad09-02cc8289179f/content",
+        "localFile": "chat-live-ui/chat-1.png",
+        "sha256": "6199c0380c2708cf601d1035b53b1f9c1a8e4e6002c5008147d074a5c0f44757",
+        "mime": "image/png",
+        "width": 1254,
+        "height": 1254
+      },
+      "ui": {
+        "status": "pass",
+        "screenshot": "chat-live-ui/chat-1-ui.png"
+      }
+    },
+    {
+      "id": "chat-2",
+      "name": "续改 INCHOICE",
+      "profile": "creative-chat",
+      "userText": "继续修改刚生成的鼠尾草绿色衬衫（图2），不要回到原始蓝色图。仅在穿着者左胸、也就是画面右侧上胸位置，增加一行小号深海军蓝英文大写文字 INCHOICE，字母必须准确。保持鼠尾草绿色、主体轮廓、领型、袖长、门襟、纽扣、缝线、褶皱、光线、白色背景和画幅不变；不要新增口袋或其他图案。只生成一张。",
+      "taskId": "ef2524c4-1717-4142-b617-7f70a388d2c4",
+      "requestId": "ed45a7fa-0dc2-4f5d-88e9-3d2116f7d520:0",
+      "upstreamTaskId": "task_01M5QG93KQPJK8BBFBQHEM1PSS",
+      "taskStatus": "success",
+      "stage": "succeeded",
+      "projectId": "image-workbench",
+      "actualImageModel": {
+        "configId": "d5000000-0000-4000-8000-000000000007",
+        "publicName": "aplmart-gpt2",
+        "provider": "APIMart",
+        "modelId": "gpt-image-2"
+      },
+      "actualChatModel": {
+        "configId": "d5000000-0000-4000-8000-000000000010",
+        "modelId": "claude-sonnet-5-5",
+        "provider": "APIMart"
+      },
+      "sourceOrder": [
+        {
+          "id": "2c5750f3-f56e-43e8-be34-22c2f42a2d9b:0",
+          "name": "生成结果-1.png",
+          "type": "image/png",
+          "bytes": 1972166,
+          "sha256": "6199c0380c2708cf601d1035b53b1f9c1a8e4e6002c5008147d074a5c0f44757",
+          "url": "/api/assets/9e9e865f-625c-4c84-89c8-45c312226793/content",
+          "sourceAssetId": "9e9e865f-625c-4c84-89c8-45c312226793"
+        }
+      ],
+      "sourceUrls": [
+        "/api/assets/9e9e865f-625c-4c84-89c8-45c312226793/content"
+      ],
+      "finalPrompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n【本轮修改要求（最高优先级）】\n只改一处：在衬衫穿着者左胸（画面右侧）上胸位置，门襟纽扣线右侧、距领口下方约一个领高处，增加一行小号深海军蓝 navy blue (#1F2A44) 英文大写文字 \"INCHOICE\"，字母依次为 I-N-C-H-O-I-C-E，共 8 个字母，拼写必须准确。字体为简洁无衬线体，字距适中，小号印刷或刺绣质感，文字沿面料平整排布，并自然融入织纹与褶皱，保留原有高光与阴影。除该文字外，其余部分完全不变。\n本轮明确修改或撤销的要求优先于旧版本条件；下列保留项仅在不与本轮修改冲突时适用，不把旧版本当作已获用户认可。\n【参考图分工（按实际输入顺序）】\n- 图片1（修改主体）：本轮修改主体，以本轮要求决定修改范围。\n【本轮仍有效的保留项】\n- 鼠尾草绿色 (#9CAF88) 不变\n- 衬衫主体轮廓与版型不变\n- 领型（尖领）不变\n- 短袖袖长不变\n- 门襟形态不变\n- 纽扣数量（5颗）与位置不变\n- 缝线不变\n- 原有褶皱与光影不变\n- 白色背景不变\n- 画幅与构图不变\n- 不新增口袋或其他图案，仅有 INCHOICE 一行文字",
+      "submittedImageCount": 1,
+      "observedChatPostCount": 2,
+      "actualCost": null,
+      "appCredits": 0,
+      "visual": {
+        "status": "pass",
+        "scope": "人工视觉主目标和可见结构；不表示像素级全局不变",
+        "observations": [
+          "INCHOICE 八个字母正确，位于画面右侧上胸。",
+          "保留上一张鼠尾草绿、主体和背景，未退回原始蓝色；来源原始字节 hash 与上一结果相同。"
+        ]
+      },
+      "result": {
+        "assetUrl": "/api/assets/7691a723-f009-4f85-8d85-53f71553ac9d/content",
+        "localFile": "chat-live-ui/chat-2.png",
+        "sha256": "f19bbf0e7f35bfae2fce8fbc3d43208fdcf6997d85da6a07fd8baabbfe083b41",
+        "mime": "image/png",
+        "width": 1254,
+        "height": 1254
+      },
+      "ui": {
+        "status": "pass",
+        "screenshot": "chat-live-ui/chat-2-ui.png"
+      }
+    },
+    {
+      "id": "canvas-1",
+      "name": "海军蓝改色",
+      "profile": "canvas-assistant",
+      "userText": "请直接编辑当前选中的 source-shirt.png，只把棕褐色衣身和短袖面料改为深海军蓝。保持两片米白色领子、右侧胸袋的形状和位置、五颗深色纽扣、深色外轮廓线、原有构图和米白背景不变，维持平面服装款式图风格，不添加任何文字或装饰。只生成一张。",
+      "taskId": "419260dc-575a-41f7-b22b-c5ea39f4cbfa",
+      "requestId": "yu9YXwOC6UxUnZQ3MiIyi:0",
+      "upstreamTaskId": "task_01M5QG94XNHK8050GYN2DBY33B",
+      "taskStatus": "success",
+      "stage": "succeeded",
+      "projectId": "wY-DJE8qcJl9QkhuPNCnw",
+      "actualImageModel": {
+        "configId": "d5000000-0000-4000-8000-000000000007",
+        "publicName": "aplmart-gpt2",
+        "provider": "APIMart",
+        "modelId": "gpt-image-2"
+      },
+      "actualChatModel": {
+        "configId": "d5000000-0000-4000-8000-000000000010",
+        "modelId": "claude-sonnet-5-5",
+        "provider": "APIMart"
+      },
+      "sourceOrder": [
+        {
+          "id": "image-1792863824932-4wqwo",
+          "name": "source-shirt.png",
+          "type": "image/png",
+          "bytes": 7302,
+          "sha256": "441e8edc4f0d9dfc16091c6e9ddd114db4adbb823d62a6d98d0e1c9660549080",
+          "url": "/api/assets/023cddd1-9ae5-4133-a39d-638d39866519/content",
+          "sourceAssetId": "023cddd1-9ae5-4133-a39d-638d39866519"
+        }
+      ],
+      "sourceUrls": [
+        "/api/assets/023cddd1-9ae5-4133-a39d-638d39866519/content"
+      ],
+      "finalPrompt": "Reference images in the supplied order: Image 1. Interpret all image references using these numbers.\n\nImage 1: base reference.\n\nRequired changes:\n- Change only the tan-brown body fabric and short sleeve fabric to deep navy blue (#1F2A44), blending naturally into the flat fills while keeping seam and placket lines visible.\n\nKeep unchanged:\n- Keep the two cream-white collar pieces unchanged.\n- Keep the chest pocket on the right side unchanged in shape and position.\n- Keep the five dark buttons unchanged.\n- Keep the dark outline strokes unchanged.\n- Keep the original composition and cream background unchanged.\n- Maintain the flat garment technical illustration style.\n\nProhibitions:\n- Do not add any text or decoration.",
+      "submittedImageCount": 1,
+      "observedChatPostCount": 2,
+      "actualCost": null,
+      "appCredits": 0,
+      "visual": {
+        "status": "pass",
+        "scope": "人工视觉主目标和可见结构；不表示像素级全局不变",
+        "observations": [
+          "棕褐色衣身和袖子变为海军蓝，米白两片领子、右胸袋、五颗纽扣、平面款式图布局保留。",
+          "输出线条有重绘与轻微渐变，未进行像素级局部不变验收。"
+        ]
+      },
+      "result": {
+        "assetUrl": "/api/assets/4264a92c-185b-42ae-ab16-3ffd30b0f975/content",
+        "localFile": "chat-live-ui/canvas-1.png",
+        "sha256": "50365e38a7549617e6b2528ecdd635cc094e720db2da9ac23c0109bf0c1d02a4",
+        "mime": "image/png",
+        "width": 1254,
+        "height": 1254
+      },
+      "ui": {
+        "status": "pass",
+        "screenshot": "chat-live-ui/canvas-1-ui.png"
+      }
+    },
+    {
+      "id": "canvas-2",
+      "name": "续改 STUDIO",
+      "profile": "canvas-assistant",
+      "userText": "继续修改刚生成并选中的海军蓝衬衫图片2，不要回到棕褐色原图。仅在画面右侧胸袋正中加一行小号米白色英文大写文字 STUDIO，字母必须准确，并以此明确取消上一轮不添加文字的限制。保持海军蓝衣身、两片米白领子、胸袋形状位置、五颗深色纽扣、轮廓线、平面款式图风格、米白背景和画幅不变；不要新增其他图案或装饰。只生成一张。",
+      "taskId": "45e23f0b-0bb8-4224-ba87-d2aea68ff75a",
+      "requestId": "a6AtIRbPXQY4nEEozvHtp:0",
+      "upstreamTaskId": "task_01M5QGCTEMF1Q5YJ17627VMDKJ",
+      "taskStatus": "success",
+      "stage": "succeeded",
+      "projectId": "wY-DJE8qcJl9QkhuPNCnw",
+      "actualImageModel": {
+        "configId": "d5000000-0000-4000-8000-000000000007",
+        "publicName": "aplmart-gpt2",
+        "provider": "APIMart",
+        "modelId": "gpt-image-2"
+      },
+      "actualChatModel": {
+        "configId": "d5000000-0000-4000-8000-000000000010",
+        "modelId": "claude-sonnet-5-5",
+        "provider": "APIMart"
+      },
+      "sourceOrder": [
+        {
+          "id": "agent-419260dc-575a-41f7-b22b-c5ea39f4cbfa-0",
+          "name": "生成图片 1",
+          "type": "image/png",
+          "bytes": 1132374,
+          "sha256": "50365e38a7549617e6b2528ecdd635cc094e720db2da9ac23c0109bf0c1d02a4",
+          "url": "/api/assets/a98afa60-901a-426f-ae0f-9a1be7657174/content",
+          "sourceAssetId": "a98afa60-901a-426f-ae0f-9a1be7657174"
+        }
+      ],
+      "sourceUrls": [
+        "/api/assets/a98afa60-901a-426f-ae0f-9a1be7657174/content"
+      ],
+      "finalPrompt": "Reference images in the supplied order: Image 1. Interpret all image references using these numbers.\n\nUse the attached image explicitly selected by the user as the editing base.\n\nImage 1: base reference.\n\nRequired changes:\n- Change only the tan-brown body fabric and short sleeve fabric to deep navy blue (#1F2A44), blending naturally into the flat fills while keeping seam and placket lines visible.\n- Add one line of small cream-white uppercase English text exactly \"STUDIO\" centered on the chest pocket on the right side of the image; letters must be accurate.\n\nKeep unchanged:\n- Keep the two cream-white collar pieces unchanged.\n- Keep the chest pocket on the right side unchanged in shape and position.\n- Keep the five dark buttons unchanged.\n- Keep the dark outline strokes unchanged.\n- Keep the original composition and cream background unchanged.\n- Maintain the flat garment technical illustration style.\n- Keep the deep navy shirt body unchanged; do not revert to the tan-brown original.\n\nProhibitions:\n- Do not add any other pattern or decoration besides the STUDIO text.",
+      "submittedImageCount": 1,
+      "observedChatPostCount": 1,
+      "actualCost": null,
+      "appCredits": 0,
+      "visual": {
+        "status": "pass",
+        "scope": "人工视觉主目标和可见结构；不表示像素级全局不变",
+        "observations": [
+          "STUDIO 六个字母准确，米白小字位于画面右胸袋正中；保留海军蓝、两片领子和五颗纽扣。",
+          "原上游图片已完成，但首次下载失败；原任务 recover 一次后取回，无新图片生成。"
+        ]
+      },
+      "result": {
+        "assetUrl": "/api/assets/c2f3f400-cb3c-4543-b412-be228637eac6/content",
+        "localFile": "chat-live-ui/canvas-2.png",
+        "sha256": "622a8c05b396c12393d835614722f60a159bfcee2c51b4651fb013485af86a28",
+        "mime": "image/png",
+        "width": 1254,
+        "height": 1254
+      },
+      "ui": {
+        "status": "pass_after_recovery_button_fix",
+        "screenshot": "chat-live-ui/canvas-2-recovered-ui.png",
+        "initialFailureScreenshot": "chat-live-ui/canvas-2-download-failed-ui.png"
+      }
+    }
+  ],
+  "recovery": {
+    "taskId": "45e23f0b-0bb8-4224-ba87-d2aea68ff75a",
+    "upstreamTaskId": "task_01M5QGCTEMF1Q5YJ17627VMDKJ",
+    "initialStatus": "paused",
+    "initialStage": "failed",
+    "initialFailureReason": "原图片任务已生成结果，但下载暂时失败；可恢复下载原结果，不会重新生成或重复收费。",
+    "uiMissingQueryButton": true,
+    "apiRecoveryCount": 1,
+    "apiRecoveryResult": "success",
+    "newTaskCreated": false,
+    "sameTaskAndUpstreamId": true,
+    "rootCause": "展示脱敏副本移除了 pendingTask，按钮误读展示副本；原始会话仍保留恢复信息，修复无需迁移旧消息。代码根因由修复方核查，真实 UI 随后复验。",
+    "uiRetest": {
+      "status": "pass",
+      "action": "刷新原画布，重新选择网站 Agent，点击原失败消息的查询原任务按钮一次。",
+      "buttonObserved": true,
+      "browserRequestId": 1249,
+      "requestMethod": "GET",
+      "requestPath": "/api/tasks/45e23f0b-0bb8-4224-ba87-d2aea68ff75a",
+      "newTaskPosts": 0,
+      "newChatPosts": 0,
+      "newRecoveryPosts": 0,
+      "canvasImageNodeCountBefore": 2,
+      "canvasImageNodeCountAfter": 3,
+      "renderedResultSha256": "622a8c05b396c12393d835614722f60a159bfcee2c51b4651fb013485af86a28",
+      "renderedResultBytes": 1354528,
+      "renderedResultWidth": 1254,
+      "renderedResultHeight": 1254,
+      "message": "已取回原任务结果并放入画布，没有重新生成。",
+      "screenshot": "chat-live-ui/canvas-2-recovered-ui.png",
+      "scope": "原任务此前已由获准的一次 API recover 恢复成功；本次真实 UI 覆盖查询入口、同任务结果回收和节点插入，不是再次触发暂停任务下载。",
+      "residualObservation": "独立的旧错误说明消息仍保留在恢复消息之后；实际结果消息已更新且图片节点正常插入。"
+    }
+  },
+  "lineage": {
+    "chat2SourceEqualsChat1Result": true,
+    "canvas2SourceEqualsCanvas1Result": true,
+    "canvas2Supersedes": [
+      "no_text_decor"
+    ]
+  },
+  "supplementary": {
+    "configurationOptimization": [
+      {
+        "id": "config-1",
+        "request": {
+          "requestId": "d1e655fc-0555-4fc3-a62c-d7454fcf44a8",
+          "modelConfigId": "d5000000-0000-4000-8000-000000000007",
+          "toolKey": "canvas-edit",
+          "promptInput": {
+            "scene": "free-optimize",
+            "userText": "只把参考图1中的浅蓝色短袖衬衫面料改为暖米白，保持原有版型、领型、短袖、门襟和纽扣位置、缝线、褶皱、白色背景及方形构图不变，不增加口袋、文字或装饰。",
+            "fields": {},
+            "mode": "edit",
+            "referenceRoles": [
+              "garment.png"
+            ]
+          },
+          "sourceUrls": [
+            "/api/assets/aec6feeb-cbb7-48a2-84fe-c7ba8040a5f1/content"
+          ]
+        },
+        "response": {
+          "compilation": {
+            "id": "bb986812-0365-4466-b4a4-9d3353790b29",
+            "requestId": "d1e655fc-0555-4fc3-a62c-d7454fcf44a8",
+            "status": "success",
+            "optimized": true,
+            "prompt": "仅将 Image 1 中短袖衬衫的面料颜色改为暖米白（#F3EBDD）；以该图作为编辑底图，沿用其结构与展示方式，不保留原有浅蓝面料色。保持原有版型、领型、短袖、门襟和纽扣位置、缝线、褶皱、面料质感及光影不变，保留白色（#FFFFFF）背景和方形构图，不改动面料颜色之外的内容，不增加口袋、文字或装饰。\n避免: 品牌logo、水印, 无关文字, 拼贴多宫格, 色卡条、尺寸标注, 多余的手或肢体变形, 未成年人模特, 裸露或性感化表现, 新增口袋或装饰."
+          }
+        },
+        "editorMatchedResponse": true,
+        "imageSubmitted": false,
+        "actualCost": null,
+        "screenshot": "chat-live-ui/config-optimize-1-ui.png"
+      },
+      {
+        "id": "config-2",
+        "request": {
+          "requestId": "27c72c73-1cdb-4826-b20b-a0754a9923a2",
+          "modelConfigId": "d5000000-0000-4000-8000-000000000007",
+          "toolKey": "canvas-edit",
+          "promptInput": {
+            "scene": "free-optimize",
+            "userText": "以当前参考图1的棕褐色短袖衬衫款式图为底图，仅在画面右侧胸袋正中添加小号米白色大写文字 STUDIO，拼写必须完全一致。保持棕褐色衣身、两片米白领子、五颗纽扣、口袋轮廓、线条、背景和方形构图不变。不要把衣服改成其他颜色，不新增图案。",
+            "fields": {},
+            "mode": "edit",
+            "referenceRoles": [
+              "source-shirt.png"
+            ]
+          },
+          "sourceUrls": [
+            "/api/assets/023cddd1-9ae5-4133-a39d-638d39866519/content"
+          ]
+        },
+        "response": {
+          "compilation": {
+            "id": "ba775e52-a9ca-4d25-be58-341d66a14efe",
+            "requestId": "27c72c73-1cdb-4826-b20b-a0754a9923a2",
+            "status": "success",
+            "optimized": true,
+            "prompt": "以 Image 1 为唯一编辑底图，仅在画面右侧胸袋正中添加小号米白色（#F0EADB）大写文字 \"STUDIO\"，水平居中，完整置于袋面内，拼写必须完全一致。沿用 Image 1 的原有款式与平面线稿，不作其他改动：保持棕褐色（#CBB08F）衣身、两片米白色领子、五颗纽扣、口袋轮廓、全部线条、背景和方形构图不变；色值仅作颜色描述，保留底图实际颜色，不重新着色，不新增其他文字或图案。\n避免: 品牌标志与无关文字, 水印, 拼贴多宫格, 色卡条与尺寸标注, 多余手部或肢体变形, 未成年人模特, 裸露或性感化表现, 文字拼写错误."
+          }
+        },
+        "editorMatchedResponse": true,
+        "imageSubmitted": false,
+        "actualCost": null,
+        "screenshot": "chat-live-ui/config-optimize-2-ui.png"
+      }
+    ],
+    "batchDefault": {
+      "checked": false,
+      "networkGenerationSubmitted": false,
+      "screenshot": "chat-live-ui/batch-default-off-ui.png"
+    },
+    "zipPrivacy": {
+      "file": "chat-live-ui/config-node-export.zip",
+      "sha256": "4934c78268cc2ade5cf75ec071ae82a042823a8cda8d0911f06d450a548135a6",
+      "entries": [
+        {
+          "name": "projects.json",
+          "bytes": 16971,
+          "sha256": "414a09e52a5a8062a96c96456440cfc44770e6f757c63308bb780ee60177e5cc"
+        },
+        {
+          "name": "projects/yT336mLGeCICiCo7u2n1g/files/image_a319TxfkCBkVd7fxxnnMj.png",
+          "bytes": 7302,
+          "sha256": "441e8edc4f0d9dfc16091c6e9ddd114db4adbb823d62a6d98d0e1c9660549080"
+        },
+        {
+          "name": "projects/yT336mLGeCICiCo7u2n1g/files/image_EZ16qPWPRV3sHL_hflU3Z.png",
+          "bytes": 987824,
+          "sha256": "b6cc50b7f2e1f7a124931e17bc57cecfecad7b05d0190f85b516ca0b7697f519"
+        }
+      ],
+      "jsonFilesScanned": 1,
+      "privateFieldFindings": [],
+      "promptInputs": [
+        {
+          "path": "projects.json.projects.0.project.nodes.0.metadata.promptInput",
+          "scene": "free-optimize",
+          "compilationId": "ba775e52-a9ca-4d25-be58-341d66a14efe"
+        },
+        {
+          "path": "projects.json.projects.0.project.history.past.4.arrays.nodes.items.0.metadata.promptInput",
+          "scene": "free-optimize",
+          "compilationId": "bb986812-0365-4466-b4a4-9d3353790b29"
+        },
+        {
+          "path": "projects.json.projects.0.project.history.past.5.arrays.nodes.items.0.metadata.promptInput",
+          "scene": "free-optimize",
+          "compilationId": "bb986812-0365-4466-b4a4-9d3353790b29"
+        },
+        {
+          "path": "projects.json.projects.0.project.history.past.6.arrays.nodes.items.0.metadata.promptInput",
+          "scene": "free-optimize",
+          "compilationId": "bb986812-0365-4466-b4a4-9d3353790b29"
+        }
+      ],
+      "compiledIds": [
+        "ba775e52-a9ca-4d25-be58-341d66a14efe",
+        "bb986812-0365-4466-b4a4-9d3353790b29"
+      ],
+      "status": "pass",
+      "scanScope": "全部 JSON 递归字段，含撤销历史；两个编译记录和用户输入保留，无私有规则字段；原图 hash 一致。"
+    }
+  },
+  "observedNonBlockingIssues": [
+    "原任务 UI 恢复成功后，独立的旧错误说明消息仍在历史中；恢复结果消息已更新，不影响结果节点。",
+    "canvas-2 最终提示词正确撤销 no_text_decor 并引用上一海军蓝结果，但 Required changes 仍保留上一轮棕褐改海军蓝指令；同文明确保持海军蓝、不可退回棕褐色，本次结果未回退。",
+    "Demo /api/tasks/events 返回 404，客户端 GET 轮询成功。",
+    "新画布默认本机 Agent 未运行；通过当前独立画布 UI 切换网站 Agent，未启动本机服务。"
+  ],
+  "modelEvidence": [
+    "server/src/demo-mark-provider.ts assigns stable d500... IDs from MARK_PLATFORM_MODELS",
+    "shared/mark-image-models.ts maps index 7 to gpt-image-2 and index 10 to claude-sonnet-5-5",
+    "Current /api/models and own task modelConfigId matched these entries"
+  ],
+  "limitations": [
+    "未读取提供商计费账单，实际成本 null。",
+    "首次下载失败和缺少 UI 恢复按钮均保留为负面证据；修复后真实 UI 已验证同任务查询与结果插入，但因为 API 先前已恢复，此次没有再次触发暂停任务下载。",
+    "视觉通过不包含严格像素不变、蒙版外不变或完整生产工艺验收。"
+  ]
+}

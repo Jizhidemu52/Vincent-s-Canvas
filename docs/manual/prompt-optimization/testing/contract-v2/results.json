@@ -1,0 +1,533 @@
+{
+  "models": [
+    {
+      "id": "b07b7625-63e4-4ea5-9706-ec9295b9392f",
+      "modelId": "claude-sonnet-5-5"
+    },
+    {
+      "id": "652b3d3c-9bdf-419e-851f-31c5e101daf6",
+      "modelId": "gpt-6-astra"
+    }
+  ],
+  "cases": [
+    {
+      "model": "claude-sonnet-5-5",
+      "case": "style-to-sketch-01-new",
+      "passed": true,
+      "compilation": {
+        "adminTest": false,
+        "modelConfigId": "b07b7625-63e4-4ea5-9706-ec9295b9392f",
+        "targetModelConfigId": "9b560bcc-539d-42a3-a977-696f11146ca9",
+        "inputSnapshot": {
+          "promptInput": {
+            "scene": "style-to-sketch",
+            "fields": {
+              "description": "只画正面，保留实际可见五颗纽扣；不增加口袋或装饰。",
+              "sketchStyle": "technical",
+              "sketchDetail": "detailed"
+            },
+            "userText": "只画正面，保留实际可见五颗纽扣；不增加口袋或装饰。",
+            "referenceRoles": [
+              "服装参考图"
+            ],
+            "mode": "edit",
+            "hasMask": false
+          },
+          "sourceUrls": [
+            "shirt"
+          ]
+        },
+        "optimized": true,
+        "rawResponse": "{\"prompt\":\"Convert Image 1 into a clean technical fashion flat drawing of the shirt, front view only, laid out symmetrically and flat as in a tech flat. Draw the visible structure in detail: pointed spread collar with collar stand, concealed-looking center front placket with exactly five round four-hole buttons evenly spaced down the placket, set-in short sleeves with hemmed cuffs, shoulder seams with a subtle yoke line at the shoulder, armhole seams, and a gently curved shirttail hem. Use clean uniform black line weight with a bolder outer contour, thinner interior construction lines, and dashed lines for topstitching along the collar, placket, sleeve hems and bottom hem. Keep the original proportions and silhouette of Image 1. Take only the garment structure and silhouette from Image 1; do not take its blue color, fabric texture, lighting or shadows. Do not add pockets, decorations, or any detail not visible in Image 1, and do not invent the back or hidden construction. Pure white background, black lines only, no shading, no color fill, no fabric texture, no model, no background objects.\",\"avoid\":[\"shading\",\"color\",\"gradient\",\"texture\",\"model\",\"hanger\",\"measurements\",\"text labels\"],\"keep_text\":[]}",
+        "latencyMs": 6035,
+        "inputTokens": 3464,
+        "outputTokens": 417,
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": "CNY",
+        "completedAt": "2026-10-24T17:52:51.842Z",
+        "prompt": "Convert Image 1 into a clean technical fashion flat drawing of the shirt, front view only, laid out symmetrically and flat as in a tech flat. Draw the visible structure in detail: pointed spread collar with collar stand, concealed-looking center front placket with exactly five round four-hole buttons evenly spaced down the placket, set-in short sleeves with hemmed cuffs, shoulder seams with a subtle yoke line at the shoulder, armhole seams, and a gently curved shirttail hem. Use clean uniform black line weight with a bolder outer contour, thinner interior construction lines, and dashed lines for topstitching along the collar, placket, sleeve hems and bottom hem. Keep the original proportions and silhouette of Image 1. Take only the garment structure and silhouette from Image 1; do not take its blue color, fabric texture, lighting or shadows. Do not add pockets, decorations, or any detail not visible in Image 1, and do not invent the back or hidden construction. Pure white background, black lines only, no shading, no color fill, no fabric texture, no model, no background objects.\nAvoid: shading, color, gradient, texture, model, hanger, measurements, text labels.",
+        "keepText": [],
+        "id": "c4ea4e58-907d-4dbe-af9b-fb5a494440c8",
+        "userId": "prompt-contract-qa",
+        "requestId": "contract-v2:claude-sonnet-5-5:style-to-sketch-01-new",
+        "inputHash": "82dc42ef36e30ed408a900ce1f04b7d83f55b9f87f5256771d05e3bf03347ec9",
+        "recipeKey": "style-to-sketch",
+        "recipeVersionId": "c7277b98-9c09-4cb3-b9e7-c3c9d82ff301",
+        "status": "success",
+        "reusedFromId": null,
+        "cacheHit": false,
+        "createdAt": "2026-10-24T17:52:45.774Z"
+      }
+    },
+    {
+      "model": "claude-sonnet-5-5",
+      "case": "style-to-sketch-02-new",
+      "passed": true,
+      "compilation": {
+        "adminTest": false,
+        "modelConfigId": "b07b7625-63e4-4ea5-9706-ec9295b9392f",
+        "targetModelConfigId": "9b560bcc-539d-42a3-a977-696f11146ca9",
+        "inputSnapshot": {
+          "promptInput": {
+            "scene": "style-to-sketch",
+            "fields": {
+              "description": "只画正面，保留实际可见五颗纽扣；不增加口袋或装饰。",
+              "sketchStyle": "minimal",
+              "sketchDetail": "standard"
+            },
+            "userText": "只画正面，保留实际可见五颗纽扣；不增加口袋或装饰。",
+            "referenceRoles": [
+              "服装参考图"
+            ],
+            "mode": "edit",
+            "hasMask": false
+          },
+          "sourceUrls": [
+            "flat"
+          ]
+        },
+        "optimized": true,
+        "rawResponse": "{\"prompt\":\"Convert Image 1 into a minimal fashion flat sketch: minimal line drawing, clean confident black contour lines, only essential construction lines, front view only, garment laid flat and symmetrical. Draw the short-sleeve shirt with its open notched collar, center front placket with exactly five round buttons, set-in short sleeves with armhole seams, the single chest pocket with flap line on the wearer's left, and the straight hem. Keep the original proportions and silhouette of Image 1. Do not add pockets, decoration, or hidden back details. Remove all color fill, using a pure white background with black lines only.\",\"avoid\":[\"shading\",\"color\",\"gradient\",\"texture\",\"model\",\"hanger\",\"measurements\",\"text labels\"],\"keep_text\":[]}",
+        "latencyMs": 9885,
+        "inputTokens": 2879,
+        "outputTokens": 753,
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": "CNY",
+        "completedAt": "2026-10-24T17:53:01.925Z",
+        "prompt": "Convert Image 1 into a minimal fashion flat sketch: minimal line drawing, clean confident black contour lines, only essential construction lines, front view only, garment laid flat and symmetrical. Draw the short-sleeve shirt with its open notched collar, center front placket with exactly five round buttons, set-in short sleeves with armhole seams, the single chest pocket with flap line on the wearer's left, and the straight hem. Keep the original proportions and silhouette of Image 1. Do not add pockets, decoration, or hidden back details. Remove all color fill, using a pure white background with black lines only.\nAvoid: shading, color, gradient, texture, model, hanger, measurements, text labels.",
+        "keepText": [],
+        "id": "8aa11164-d7f1-4246-9545-c9f4225db5cc",
+        "userId": "prompt-contract-qa",
+        "requestId": "contract-v2:claude-sonnet-5-5:style-to-sketch-02-new",
+        "inputHash": "84c231a04ae5fec19aa44551562a7b6bdc4f95f5f2d93ca4fad329fc76695fe8",
+        "recipeKey": "style-to-sketch",
+        "recipeVersionId": "c7277b98-9c09-4cb3-b9e7-c3c9d82ff301",
+        "status": "success",
+        "reusedFromId": null,
+        "cacheHit": false,
+        "createdAt": "2026-10-24T17:52:52.015Z"
+      }
+    },
+    {
+      "model": "claude-sonnet-5-5",
+      "case": "accessory-design-02-new",
+      "passed": true,
+      "compilation": {
+        "adminTest": false,
+        "modelConfigId": "b07b7625-63e4-4ea5-9706-ec9295b9392f",
+        "targetModelConfigId": "9b560bcc-539d-42a3-a977-696f11146ca9",
+        "inputSnapshot": {
+          "promptInput": {
+            "scene": "accessory-design",
+            "fields": {
+              "description": "只将图片2图案装饰到图片1纽扣表面，保留原外形及实际可见孔位。",
+              "accessoryType": "钮扣",
+              "accessoryApply": "仅表面纹样"
+            },
+            "userText": "只将图片2图案装饰到图片1纽扣表面，保留原外形及实际可见孔位。",
+            "referenceRoles": [
+              "辅料图",
+              "图案图"
+            ],
+            "mode": "edit",
+            "hasMask": false
+          },
+          "sourceUrls": [
+            "button",
+            "flower"
+          ]
+        },
+        "optimized": true,
+        "rawResponse": "{\"prompt\":\"Apply the six-petal flower from Image 2 onto the surface of the round dark brown button in Image 1, as a fine mold-pressed relief with inlaid color: terracotta petals (#C9735A), a pale yellow center (#F2D88F) with tiny brown dots, and thin dark brown outlines (#7A4A3A). Center the flower within the button's inner face. Keep the button's outer shape, raised rim, thickness, glossy dark brown material and the sew-through holes that are actually visible in Image 1 unchanged. Image 2 is only a motif reference; do not include its garment, person or background. Show the single button centered as a product macro shot on a clean light gray background, with soft studio light and crisp material detail.\",\"avoid\":[\"multiple items\",\"garment\",\"hands\",\"background clutter\",\"text\",\"logo\",\"watermark\",\"extra holes\"],\"keep_text\":[]}",
+        "latencyMs": 8976,
+        "inputTokens": 2296,
+        "outputTokens": 753,
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": "CNY",
+        "completedAt": "2026-10-24T17:53:11.255Z",
+        "prompt": "Apply the six-petal flower from Image 2 onto the surface of the round dark brown button in Image 1, as a fine mold-pressed relief with inlaid color: terracotta petals (#C9735A), a pale yellow center (#F2D88F) with tiny brown dots, and thin dark brown outlines (#7A4A3A). Center the flower within the button's inner face. Keep the button's outer shape, raised rim, thickness, glossy dark brown material and the sew-through holes that are actually visible in Image 1 unchanged. Image 2 is only a motif reference; do not include its garment, person or background. Show the single button centered as a product macro shot on a clean light gray background, with soft studio light and crisp material detail.\nAvoid: multiple items, garment, hands, background clutter, text, logo, watermark, extra holes.",
+        "keepText": [],
+        "id": "44e2acb5-8fb2-4fe4-90a9-ec5e710c2432",
+        "userId": "prompt-contract-qa",
+        "requestId": "contract-v2:claude-sonnet-5-5:accessory-design-02-new",
+        "inputHash": "afadabdeb9a6007806741f9a6efd8dc89fcd214fb18a13367b32d411dadfe3e9",
+        "recipeKey": "accessory-design",
+        "recipeVersionId": "ca74d66b-c3e3-482e-b3c5-a7cc43224e7a",
+        "status": "success",
+        "reusedFromId": null,
+        "cacheHit": false,
+        "createdAt": "2026-10-24T17:53:02.201Z"
+      }
+    },
+    {
+      "model": "claude-sonnet-5-5",
+      "case": "template-development-1-1",
+      "passed": true,
+      "compilation": {
+        "adminTest": false,
+        "modelConfigId": "b07b7625-63e4-4ea5-9706-ec9295b9392f",
+        "targetModelConfigId": "9b560bcc-539d-42a3-a977-696f11146ca9",
+        "inputSnapshot": {
+          "promptInput": {
+            "scene": "style-to-sketch",
+            "fields": {
+              "templateId": "development",
+              "branchIndex": 0,
+              "title": "正面与背面技术线稿",
+              "instruction": "正面与背面技术线稿",
+              "views": [
+                "front",
+                "back"
+              ]
+            },
+            "userText": "正面与背面技术线稿",
+            "referenceRoles": [
+              "参考款"
+            ],
+            "mode": "edit",
+            "hasMask": false
+          },
+          "sourceUrls": [
+            "shirt"
+          ]
+        },
+        "optimized": true,
+        "rawResponse": "{\"prompt\":\"Convert the shirt in Image 1 into a clean technical fashion flat drawing, showing the front view and the back view side by side on one pure white background. Use clean uniform black line weight, a bolder outer contour, thinner interior construction lines, and dashed lines for topstitching. Draw each view laid out symmetrically and flat, as in a tech flat. Front view: point collar with collar stand, full center-front button placket with five evenly spaced round buttons plus the top collar-stand button, set-in short sleeves with plain hemmed cuffs, topstitched shoulder seams, and a curved shirttail hem. No chest pocket. Back view: the same collar and stand from behind, shoulder seams, set-in short sleeves with hemmed cuffs, a plain back panel, and the same curved hem. Add only the construction the front view supports, with no invented pockets, pleats, or trims. Keep the original proportions, silhouette, sleeve length, collar shape, and button placement of Image 1. Use black lines only, with no shading, no color fill, no fabric texture, no hanger, and no background objects. Show only the garment.\",\"avoid\":[\"shading\",\"color\",\"gradient\",\"texture\",\"model\",\"hanger\",\"measurements\",\"text labels\"],\"keep_text\":[]}",
+        "latencyMs": 10218,
+        "inputTokens": 3439,
+        "outputTokens": 840,
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": "CNY",
+        "completedAt": "2026-10-24T17:53:21.741Z",
+        "prompt": "Convert the shirt in Image 1 into a clean technical fashion flat drawing, showing the front view and the back view side by side on one pure white background. Use clean uniform black line weight, a bolder outer contour, thinner interior construction lines, and dashed lines for topstitching. Draw each view laid out symmetrically and flat, as in a tech flat. Front view: point collar with collar stand, full center-front button placket with five evenly spaced round buttons plus the top collar-stand button, set-in short sleeves with plain hemmed cuffs, topstitched shoulder seams, and a curved shirttail hem. No chest pocket. Back view: the same collar and stand from behind, shoulder seams, set-in short sleeves with hemmed cuffs, a plain back panel, and the same curved hem. Add only the construction the front view supports, with no invented pockets, pleats, or trims. Keep the original proportions, silhouette, sleeve length, collar shape, and button placement of Image 1. Use black lines only, with no shading, no color fill, no fabric texture, no hanger, and no background objects. Show only the garment.\nAvoid: shading, color, gradient, texture, model, hanger, measurements, text labels.",
+        "keepText": [],
+        "id": "e9dfafb5-61df-416b-b447-1f80eb4f2cc8",
+        "userId": "prompt-contract-qa",
+        "requestId": "contract-v2:claude-sonnet-5-5:template-development-1-1",
+        "inputHash": "4e5f992e12622e16af38e39864aa9b3a53293ef68e1da3058eb6274ef581a5f5",
+        "recipeKey": "style-to-sketch",
+        "recipeVersionId": "c7277b98-9c09-4cb3-b9e7-c3c9d82ff301",
+        "status": "success",
+        "reusedFromId": null,
+        "cacheHit": false,
+        "createdAt": "2026-10-24T17:53:11.504Z"
+      }
+    },
+    {
+      "model": "claude-sonnet-5-5",
+      "case": "template-range-2-1",
+      "passed": true,
+      "compilation": {
+        "adminTest": false,
+        "modelConfigId": "b07b7625-63e4-4ea5-9706-ec9295b9392f",
+        "targetModelConfigId": "9b560bcc-539d-42a3-a977-696f11146ca9",
+        "inputSnapshot": {
+          "promptInput": {
+            "scene": "garment-colorway",
+            "fields": {
+              "templateId": "range",
+              "branchIndex": 1,
+              "title": "海军蓝，正面平铺，白底",
+              "instruction": "海军蓝，正面平铺，白底"
+            },
+            "userText": "海军蓝，正面平铺，白底",
+            "referenceRoles": [
+              "参考款"
+            ],
+            "mode": "edit",
+            "hasMask": false
+          },
+          "sourceUrls": [
+            "shirt"
+          ]
+        },
+        "optimized": true,
+        "rawResponse": "{\"prompt\":\"Recolor only the garment in Image 1: change the light blue short-sleeve poplin shirt (body, collar, sleeves, placket, cuffs) to deep navy blue (#1F2A44), and change the matching-tone buttons to a coordinated navy (#1B2540). Keep the front flat-lay view on a clean white background. Keep unchanged: the shirt silhouette, point collar, concealed-stitch front placket and five-button spacing, set-in short sleeves with hems, shoulder seams and topstitching, curved hem, fabric weave and fine wrinkles, highlight and shadow layers, and the white background. The new color sits naturally in the fabric weave and folds, with realistic highlights and shadows, not a flat fill.\",\"avoid\":[\"flat color fill\",\"color swatches\",\"changing garment structure\",\"recoloring background\",\"pattern changes\",\"brand logo\",\"watermark\",\"extra text\"],\"keep_text\":[]}",
+        "latencyMs": 5781,
+        "inputTokens": 3687,
+        "outputTokens": 312,
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": "CNY",
+        "completedAt": "2026-10-24T17:53:27.795Z",
+        "prompt": "Recolor only the garment in Image 1: change the light blue short-sleeve poplin shirt (body, collar, sleeves, placket, cuffs) to deep navy blue (#1F2A44), and change the matching-tone buttons to a coordinated navy (#1B2540). Keep the front flat-lay view on a clean white background. Keep unchanged: the shirt silhouette, point collar, concealed-stitch front placket and five-button spacing, set-in short sleeves with hems, shoulder seams and topstitching, curved hem, fabric weave and fine wrinkles, highlight and shadow layers, and the white background. The new color sits naturally in the fabric weave and folds, with realistic highlights and shadows, not a flat fill.\nAvoid: flat color fill, color swatches, changing garment structure, recoloring background, pattern changes, brand logo, watermark, extra text.",
+        "keepText": [],
+        "id": "4d567c3a-8a7c-43cf-bc45-67871604bb4d",
+        "userId": "prompt-contract-qa",
+        "requestId": "contract-v2:claude-sonnet-5-5:template-range-2-1",
+        "inputHash": "87731e645616629ec51e5d6662d730910d4943f311fd1d43d9e83c7036c933aa",
+        "recipeKey": "garment-colorway",
+        "recipeVersionId": "fb36a6bd-dd75-4e35-9f6a-4a3e6d8ca98a",
+        "status": "success",
+        "reusedFromId": null,
+        "cacheHit": false,
+        "createdAt": "2026-10-24T17:53:21.991Z"
+      }
+    },
+    {
+      "model": "gpt-6-astra",
+      "case": "style-to-sketch-01-new",
+      "passed": true,
+      "compilation": {
+        "adminTest": false,
+        "modelConfigId": "652b3d3c-9bdf-419e-851f-31c5e101daf6",
+        "targetModelConfigId": "9b560bcc-539d-42a3-a977-696f11146ca9",
+        "inputSnapshot": {
+          "promptInput": {
+            "scene": "style-to-sketch",
+            "fields": {
+              "description": "只画正面，保留实际可见五颗纽扣；不增加口袋或装饰。",
+              "sketchStyle": "technical",
+              "sketchDetail": "detailed"
+            },
+            "userText": "只画正面，保留实际可见五颗纽扣；不增加口袋或装饰。",
+            "referenceRoles": [
+              "服装参考图"
+            ],
+            "mode": "edit",
+            "hasMask": false
+          },
+          "sourceUrls": [
+            "shirt"
+          ]
+        },
+        "optimized": true,
+        "rawResponse": "{\"prompt\":\"Convert Image 1 into a front-only technical fashion flat, laid out symmetrically on pure white (#FFFFFF), using black (#000000) lines only. Preserve its proportions, silhouette, pointed collar, center-front placket, short set-in sleeves, sleeve hems, curved hem, and exactly five visible buttons; add no pockets, decoration, or unseen structures. Use Image 1 for visible construction only, not its color, texture, shadows, or wrinkles. Draw a bolder outer contour, thinner uniform construction lines, and dashed visible topstitching, retaining visible buttonhole and button details.\",\"avoid\":[\"shading, gradients, color fills\",\"fabric texture\",\"models, extra limbs, deformed hands\",\"hangers, background objects\",\"logos, watermarks, unrelated text, text labels\",\"collages, multi-panel layouts, color swatches\",\"measurements, added pockets or decoration\",\"minors, nudity, sexualized presentation\"],\"keep_text\":[]}",
+        "latencyMs": 10977,
+        "inputTokens": 2679,
+        "outputTokens": 263,
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": "CNY",
+        "completedAt": "2026-10-24T17:53:39.036Z",
+        "prompt": "Convert Image 1 into a front-only technical fashion flat, laid out symmetrically on pure white (#FFFFFF), using black (#000000) lines only. Preserve its proportions, silhouette, pointed collar, center-front placket, short set-in sleeves, sleeve hems, curved hem, and exactly five visible buttons; add no pockets, decoration, or unseen structures. Use Image 1 for visible construction only, not its color, texture, shadows, or wrinkles. Draw a bolder outer contour, thinner uniform construction lines, and dashed visible topstitching, retaining visible buttonhole and button details.\nAvoid: shading, gradients, color fills, fabric texture, models, extra limbs, deformed hands, hangers, background objects, logos, watermarks, unrelated text, text labels, collages, multi-panel layouts, color swatches, measurements, added pockets or decoration, minors, nudity, sexualized presentation.",
+        "keepText": [],
+        "id": "b9764921-7d7b-4d6c-a58d-d96eaf824c8e",
+        "userId": "prompt-contract-qa",
+        "requestId": "contract-v2:gpt-6-astra:style-to-sketch-01-new",
+        "inputHash": "31bd2a3f6c213fd76aa63566b1c95d1879ee99bcf399001c9b5c52866722c27f",
+        "recipeKey": "style-to-sketch",
+        "recipeVersionId": "c7277b98-9c09-4cb3-b9e7-c3c9d82ff301",
+        "status": "success",
+        "reusedFromId": null,
+        "cacheHit": false,
+        "createdAt": "2026-10-24T17:53:28.030Z"
+      }
+    },
+    {
+      "model": "gpt-6-astra",
+      "case": "style-to-sketch-02-new",
+      "passed": true,
+      "compilation": {
+        "adminTest": false,
+        "modelConfigId": "652b3d3c-9bdf-419e-851f-31c5e101daf6",
+        "targetModelConfigId": "9b560bcc-539d-42a3-a977-696f11146ca9",
+        "inputSnapshot": {
+          "promptInput": {
+            "scene": "style-to-sketch",
+            "fields": {
+              "description": "只画正面，保留实际可见五颗纽扣；不增加口袋或装饰。",
+              "sketchStyle": "minimal",
+              "sketchDetail": "standard"
+            },
+            "userText": "只画正面，保留实际可见五颗纽扣；不增加口袋或装饰。",
+            "referenceRoles": [
+              "服装参考图"
+            ],
+            "mode": "edit",
+            "hasMask": false
+          },
+          "sourceUrls": [
+            "flat"
+          ]
+        },
+        "optimized": true,
+        "rawResponse": "{\"prompt\":\"Convert Image 1 into a front-view minimal fashion flat sketch, using its visible construction but discarding its colors and background. Keep the original proportions, silhouette, pointed collar, short set-in sleeves, center-front opening, exactly five visible buttons, existing single chest patch pocket, and straight hem unchanged; add no pockets, decoration, or unseen details. Lay the garment symmetrically flat with clean, confident black (#000000) contours and essential construction lines on pure white (#FFFFFF), without shading, fills, texture, models, or background objects.\",\"avoid\":[\"shading, gradients, color fills\",\"fabric texture\",\"models, extra limbs, nudity, sexualization\",\"hangers, background objects\",\"added pockets or decoration\",\"brand logos, watermarks, unrelated text\",\"collage grids, color swatches\",\"measurements, text labels\"],\"keep_text\":[]}",
+        "latencyMs": 8335,
+        "inputTokens": 2141,
+        "outputTokens": 226,
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": "CNY",
+        "completedAt": "2026-10-24T17:53:47.573Z",
+        "prompt": "Convert Image 1 into a front-view minimal fashion flat sketch, using its visible construction but discarding its colors and background. Keep the original proportions, silhouette, pointed collar, short set-in sleeves, center-front opening, exactly five visible buttons, existing single chest patch pocket, and straight hem unchanged; add no pockets, decoration, or unseen details. Lay the garment symmetrically flat with clean, confident black (#000000) contours and essential construction lines on pure white (#FFFFFF), without shading, fills, texture, models, or background objects.\nAvoid: shading, gradients, color fills, fabric texture, models, extra limbs, nudity, sexualization, hangers, background objects, added pockets or decoration, brand logos, watermarks, unrelated text, collage grids, color swatches, measurements, text labels.",
+        "keepText": [],
+        "id": "f4e8b75c-727c-4b3f-80a7-f1bf0ed81b9e",
+        "userId": "prompt-contract-qa",
+        "requestId": "contract-v2:gpt-6-astra:style-to-sketch-02-new",
+        "inputHash": "f4bb5523114222a3c79ea244294152e46386e98b4bfc8ddce2f448d01eeb12cc",
+        "recipeKey": "style-to-sketch",
+        "recipeVersionId": "c7277b98-9c09-4cb3-b9e7-c3c9d82ff301",
+        "status": "success",
+        "reusedFromId": null,
+        "cacheHit": false,
+        "createdAt": "2026-10-24T17:53:39.205Z"
+      }
+    },
+    {
+      "model": "gpt-6-astra",
+      "case": "accessory-design-02-new",
+      "passed": true,
+      "compilation": {
+        "adminTest": false,
+        "modelConfigId": "652b3d3c-9bdf-419e-851f-31c5e101daf6",
+        "targetModelConfigId": "9b560bcc-539d-42a3-a977-696f11146ca9",
+        "inputSnapshot": {
+          "promptInput": {
+            "scene": "accessory-design",
+            "fields": {
+              "description": "只将图片2图案装饰到图片1纽扣表面，保留原外形及实际可见孔位。",
+              "accessoryType": "钮扣",
+              "accessoryApply": "仅表面纹样"
+            },
+            "userText": "只将图片2图案装饰到图片1纽扣表面，保留原外形及实际可见孔位。",
+            "referenceRoles": [
+              "辅料图",
+              "图案图"
+            ],
+            "mode": "edit",
+            "hasMask": false
+          },
+          "sourceUrls": [
+            "button",
+            "flower"
+          ]
+        },
+        "optimized": true,
+        "rawResponse": "{\"prompt\":\"Decorate Image 1’s button surface with Image 2’s six-petal flower: muted terracotta (#C9896D) petals, pale yellow (#EFDC93) center, and brown (#80643E) outlines and dots, applied as fine surface printing. Preserve Image 1’s original silhouette, thickness, material, rim, and actual visible sewing holes; keep holes unobstructed. Use Image 1 only for the button, excluding surrounding knitwear. Image 2 is only a motif reference; do not include its garment, person or background. Show one centered button, macro product view, white background, soft studio lighting, crisp detail.\",\"avoid\":[\"multiple items, collage grids\",\"garments, background clutter\",\"hands, extra limbs, anatomical distortions\",\"minors, nudity, sexualized presentation\",\"text, logos, watermarks\",\"color swatches, dimension annotations\",\"altered silhouette, thickness or material\",\"added, filled or obscured sewing holes\"],\"keep_text\":[]}",
+        "latencyMs": 80502,
+        "inputTokens": 1625,
+        "outputTokens": 324,
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": "CNY",
+        "completedAt": "2026-10-24T17:55:08.496Z",
+        "prompt": "Decorate Image 1’s button surface with Image 2’s six-petal flower: muted terracotta (#C9896D) petals, pale yellow (#EFDC93) center, and brown (#80643E) outlines and dots, applied as fine surface printing. Preserve Image 1’s original silhouette, thickness, material, rim, and actual visible sewing holes; keep holes unobstructed. Use Image 1 only for the button, excluding surrounding knitwear. Image 2 is only a motif reference; do not include its garment, person or background. Show one centered button, macro product view, white background, soft studio lighting, crisp detail.\nAvoid: multiple items, collage grids, garments, background clutter, hands, extra limbs, anatomical distortions, minors, nudity, sexualized presentation, text, logos, watermarks, color swatches, dimension annotations, altered silhouette, thickness or material, added, filled or obscured sewing holes.",
+        "keepText": [],
+        "id": "5784349c-d16d-4586-afc8-348855ea0288",
+        "userId": "prompt-contract-qa",
+        "requestId": "contract-v2:gpt-6-astra:accessory-design-02-new",
+        "inputHash": "e64405103bdbd3ebade560e669b5c9d9729855b74960f8ecc82e1417580a0088",
+        "recipeKey": "accessory-design",
+        "recipeVersionId": "ca74d66b-c3e3-482e-b3c5-a7cc43224e7a",
+        "status": "success",
+        "reusedFromId": null,
+        "cacheHit": false,
+        "createdAt": "2026-10-24T17:53:47.966Z"
+      }
+    },
+    {
+      "model": "gpt-6-astra",
+      "case": "template-development-1-1",
+      "passed": true,
+      "compilation": {
+        "adminTest": false,
+        "modelConfigId": "652b3d3c-9bdf-419e-851f-31c5e101daf6",
+        "targetModelConfigId": "9b560bcc-539d-42a3-a977-696f11146ca9",
+        "inputSnapshot": {
+          "promptInput": {
+            "scene": "style-to-sketch",
+            "fields": {
+              "templateId": "development",
+              "branchIndex": 0,
+              "title": "正面与背面技术线稿",
+              "instruction": "正面与背面技术线稿",
+              "views": [
+                "front",
+                "back"
+              ]
+            },
+            "userText": "正面与背面技术线稿",
+            "referenceRoles": [
+              "参考款"
+            ],
+            "mode": "edit",
+            "hasMask": false
+          },
+          "sourceUrls": [
+            "shirt"
+          ]
+        },
+        "optimized": true,
+        "rawResponse": "{\"prompt\":\"Convert Image 1 into side-by-side front and back technical fashion flats; render the back as an outline only, without inventing unseen construction. Preserve the original proportions, silhouette, pointed collar, short set-in sleeves, button placket, visible buttons, sleeve hems and curved hem; use Image 1 for structure, not color, texture or shadows. Lay both views flat and symmetrically on pure white (#FFFFFF), using black (#000000) lines: heavier outer contours, thinner construction lines and dashed visible topstitching. Keep the front pocket-free; add no labels.\",\"avoid\":[\"shading, gradients, color fills\",\"fabric texture\",\"models, extra limbs, anatomical distortion\",\"hangers, background objects\",\"measurements, color swatches\",\"brand logos, watermarks, unrelated text\",\"collage grids\",\"minors, nudity, sexualization\"],\"keep_text\":[]}",
+        "latencyMs": 9424,
+        "inputTokens": 2661,
+        "outputTokens": 251,
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": "CNY",
+        "completedAt": "2026-10-24T17:55:18.210Z",
+        "prompt": "Convert Image 1 into side-by-side front and back technical fashion flats; render the back as an outline only, without inventing unseen construction. Preserve the original proportions, silhouette, pointed collar, short set-in sleeves, button placket, visible buttons, sleeve hems and curved hem; use Image 1 for structure, not color, texture or shadows. Lay both views flat and symmetrically on pure white (#FFFFFF), using black (#000000) lines: heavier outer contours, thinner construction lines and dashed visible topstitching. Keep the front pocket-free; add no labels.\nAvoid: shading, gradients, color fills, fabric texture, models, extra limbs, anatomical distortion, hangers, background objects, measurements, color swatches, brand logos, watermarks, unrelated text, collage grids, minors, nudity, sexualization.",
+        "keepText": [],
+        "id": "ec29b7ca-9d20-4421-90bf-2091402501a1",
+        "userId": "prompt-contract-qa",
+        "requestId": "contract-v2:gpt-6-astra:template-development-1-1",
+        "inputHash": "88560de5fb49dfeb83b8277c794911740aaa511f37a8926675b08aa9c7102af5",
+        "recipeKey": "style-to-sketch",
+        "recipeVersionId": "c7277b98-9c09-4cb3-b9e7-c3c9d82ff301",
+        "status": "success",
+        "reusedFromId": null,
+        "cacheHit": false,
+        "createdAt": "2026-10-24T17:55:08.751Z"
+      }
+    },
+    {
+      "model": "gpt-6-astra",
+      "case": "template-range-2-1",
+      "passed": true,
+      "compilation": {
+        "adminTest": false,
+        "modelConfigId": "652b3d3c-9bdf-419e-851f-31c5e101daf6",
+        "targetModelConfigId": "9b560bcc-539d-42a3-a977-696f11146ca9",
+        "inputSnapshot": {
+          "promptInput": {
+            "scene": "garment-colorway",
+            "fields": {
+              "templateId": "range",
+              "branchIndex": 1,
+              "title": "海军蓝，正面平铺，白底",
+              "instruction": "海军蓝，正面平铺，白底"
+            },
+            "userText": "海军蓝，正面平铺，白底",
+            "referenceRoles": [
+              "参考款"
+            ],
+            "mode": "edit",
+            "hasMask": false
+          },
+          "sourceUrls": [
+            "shirt"
+          ]
+        },
+        "optimized": true,
+        "rawResponse": "{\"prompt\":\"Recolor Image 1’s body, sleeves, collar and placket navy blue (#192D4A), with matching buttons. Use Image 1 for construction and presentation, not its original light-blue color. Preserve silhouette, seam lines, collar shape, pocket-free construction, absence of patterns, fabric weave, folds, highlight/shadow gradations, front-facing flat lay and white (#FFFFFF) background; do not introduce pockets or patterns. The new color sits naturally in the fabric weave and folds, with realistic highlights and shadows, not a flat fill.\",\"avoid\":[\"flat color fill\",\"color swatches, dimension annotations\",\"garment structure or pattern changes\",\"skin or background recoloring\",\"brand logos, watermarks, unrelated text\",\"collage layouts\",\"extra hands, deformed limbs\",\"underage models, nudity, sexualized presentation\"],\"keep_text\":[]}",
+        "latencyMs": 7040,
+        "inputTokens": 2837,
+        "outputTokens": 224,
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": "CNY",
+        "completedAt": "2026-10-24T17:55:25.572Z",
+        "prompt": "Recolor Image 1’s body, sleeves, collar and placket navy blue (#192D4A), with matching buttons. Use Image 1 for construction and presentation, not its original light-blue color. Preserve silhouette, seam lines, collar shape, pocket-free construction, absence of patterns, fabric weave, folds, highlight/shadow gradations, front-facing flat lay and white (#FFFFFF) background; do not introduce pockets or patterns. The new color sits naturally in the fabric weave and folds, with realistic highlights and shadows, not a flat fill.\nAvoid: flat color fill, color swatches, dimension annotations, garment structure or pattern changes, skin or background recoloring, brand logos, watermarks, unrelated text, collage layouts, extra hands, deformed limbs, underage models, nudity, sexualized presentation.",
+        "keepText": [],
+        "id": "f70fa324-bb46-4e51-a0cd-09206ac94284",
+        "userId": "prompt-contract-qa",
+        "requestId": "contract-v2:gpt-6-astra:template-range-2-1",
+        "inputHash": "aa48f3be36deb9f37bcbbe9869e325c55999f410af57dd7fb7a9f2be89d02c5e",
+        "recipeKey": "garment-colorway",
+        "recipeVersionId": "fb36a6bd-dd75-4e35-9f6a-4a3e6d8ca98a",
+        "status": "success",
+        "reusedFromId": null,
+        "cacheHit": false,
+        "createdAt": "2026-10-24T17:55:18.509Z"
+      }
+    }
+  ],
+  "originalFailuresRetained": true,
+  "imagesSubmitted": 0,
+  "actualCostUnavailableIsNotZero": true
+}

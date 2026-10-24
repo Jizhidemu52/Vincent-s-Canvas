@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "runId": "protocol-v2",
+  "baselineCommit": "4ed9d8d",
+  "baselineSourceSha256": "a88aab114195e8934da0526a74a3b0ca30f2315315ff102db9919eab24bef30f",
+  "baselineAssumptions": [
+    "旧版提示词取自 Git 4ed9d8d 的真实 buildScenePrompt 加旧参考编号前缀",
+    "无自定义全局 systemPrompt；与新版使用相同素材字节和实际图像模型",
+    "只有调用参数控制对照；随机生图不承诺相同随机种子"
+  ],
+  "visualReview": "pending-manual-review",
+  "privateRulesIncluded": false,
+  "assetFixtures": {
+    "shirt": {
+      "path": "labs/design-workbench/assets/garment.png",
+      "description": "浅蓝色短袖衬衫，五颗可见前中纽扣，无口袋；已人工查看"
+    },
+    "flat": {
+      "path": "output/creative-api-test/source-shirt.png",
+      "description": "米色平面短袖衬衫，五颗纽扣、单胸袋；已人工查看"
+    },
+    "flower": {
+      "path": "output/designer-manual-20261021/revision-v2/assets/flower.png",
+      "description": "透明底珊瑚色六瓣花、黄色花心；已人工查看"
+    },
+    "leaf": {
+      "path": "output/designer-manual-20261021/revision-v2/assets/leaf.png",
+      "description": "透明底绿色枝叶；已人工查看"
+    },
+    "knit": {
+      "path": "output/designer-manual-20261021/revision-v2/assets/pattern-original.png",
+      "description": "奶油、海军蓝、芥末、砖红几何针织裁片；已人工查看"
+    },
+    "button": {
+      "path": "output/designer-manual-20261021/revision-v2/assets/button-original.png",
+      "description": "72×72 棕色纽扣与针织底布；低分辨率限制，已人工查看"
+    },
+    "buttonFour": {
+      "path": "output/designer-manual-20261021/revision-v2/assets/accessory.webp",
+      "description": "1024×1024 四孔圆形纹样纽扣，棕色边沿与浅色布背景；以前 QA 生成素材，不是实物生产证据；已人工查看"
+    },
+    "buttonTwo": {
+      "path": "output/mark-provider-live/accessory-design-knit-A-1.png",
+      "description": "1024×1024 两孔圆形纹样纽扣，棕色边沿与白色背景；以前 QA 生成素材，不是实物生产证据；已人工查看"
+    }
+  },
+  "cases": [],
+  "plannedFullMatrix": {
+    "records": 224,
+    "images": 220,
+    "compilations": 127,
+    "chatResponses": 4,
+    "extraProtocolSmoke": "运行时枚举其他启用图片模型；不能合法选择的模型报告 blocked"
+  },
+  "limits": [
+    "真实 UI 按钮、复制、历史导出、刷新恢复与完整串行工作流需单独浏览器验收",
+    "没有真实 mask 样本，不代表严格蒙版验收",
+    "视觉评分必须人工按 checks 核对，HTTP 成功不记视觉通过",
+    "图像实际上游费用若 API 未提供则未知，应用配置扣费不是账单"
+  ]
+}

@@ -6,6 +6,8 @@ import { withTransaction } from "./db-transaction";
 import { preflightStoredVideoTask, validateStoredVideoPreflightSnapshot } from "./stored-video-preflight";
 import { resolveToolExecution, type ToolConfiguration } from "./tool-configuration";
 import { removeQueuedTask, scheduleQueuedTask } from "./task-queue";
+import type { PromptInput } from "../../shared/prompt-contracts";
+import { fenceBatchAdmission, type BatchAdmissionToken } from "./batch-admission";
 
 export type TaskPriority = "normal" | "priority" | "urgent";
 export type QueueTaskAction = "pause" | "resume" | "cancel";
@@ -24,10 +26,15 @@ export type TaskInput = {
   priceSnapshot?: PriceSnapshot;
   modelConfigId?: string | null;
   prompt: string;
+  userInput?: PromptInput;
+  promptCompilationId?: string;
+  optimized?: boolean;
   parameters?: Record<string, unknown>;
   sourceUrls: string[];
   priority: TaskPriority;
   batchId?: string | null;
+  /** Server-only fenced batch owner; never accepted from task request JSON. */
+  batchAdmission?: BatchAdmissionToken;
 };
 export type BatchTaskCounts = {
   total: number;
@@ -95,6 +102,10 @@ export async function enqueueTask(
   const taskId = randomUUID();
   let preparedVideo: { execution: ToolConfiguration & { modelConfigId: string }; checked: Awaited<ReturnType<typeof preflightStoredVideoTask>> } | undefined;
   const admit = () => withTransaction(db, async (client) => {
+    if (input.batchAdmission) {
+      if (!input.batchId) throw new Error("Batch admission token requires a batch ID");
+      await fenceBatchAdmission(client, input.batchId, input.userId, input.batchAdmission);
+    }
     // Count and admission must share one per-user transaction lock. In particular,
     // a parallel batch cannot make every item observe the same remaining slot.
     await client.query("SELECT pg_advisory_xact_lock(hashtext('user-inflight-quota'),hashtext($1))", [input.userId]);
@@ -128,8 +139,8 @@ export async function enqueueTask(
     // The second transaction repeats those checks before atomic insert + hold.
     if (input.operationType === "video_generation" && !preparedVideo) return null;
     const inserted = await client.query<{ id: string; queuedAt: string; availableAt: string }>(
-      `INSERT INTO tasks(id,request_id,batch_id,user_id,department_id,project_id,operation_type,model_config_id,prompt,parameters,source_urls,priority,credits,rmb_cost)
-           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,0,0)
+      `INSERT INTO tasks(id,request_id,batch_id,user_id,department_id,project_id,operation_type,model_config_id,prompt,parameters,source_urls,priority,credits,rmb_cost,user_input,prompt_compilation_id,prompt_optimized)
+           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,0,0,$13,$14,$15)
            ON CONFLICT(request_id) DO NOTHING RETURNING id,queued_at AS "queuedAt",available_at AS "availableAt"`,
       [
         taskId,
@@ -145,6 +156,9 @@ export async function enqueueTask(
         input.parameters ?? {},
         JSON.stringify(input.sourceUrls),
         input.priority,
+        input.userInput ? JSON.stringify(input.userInput) : null,
+        input.promptCompilationId ?? null,
+        input.optimized === true,
       ],
     );
     if (!inserted.rows[0]) {
@@ -209,17 +223,22 @@ export async function enqueueTask(
 
 export async function recalculateBatch(db: Database, batchId: string) {
   const result = await db.query<BatchTaskCounts>(
-    `SELECT COUNT(*)::int total,
+    `SELECT (counts.total+missing.items)::int total,counts.success,(counts.failed+missing.items)::int failed,
+        counts.cancelled,counts.paused,counts.waiting,counts.processing
+      FROM (SELECT COUNT(*)::int total,
         COUNT(*) FILTER (WHERE status='success')::int success,COUNT(*) FILTER (WHERE status='failed')::int failed,
         COUNT(*) FILTER (WHERE status='cancelled')::int cancelled,COUNT(*) FILTER (WHERE status='paused')::int paused,
         COUNT(*) FILTER (WHERE status='waiting')::int waiting,COUNT(*) FILTER (WHERE status='processing')::int processing
-        FROM tasks WHERE batch_id=$1`,
+        FROM tasks WHERE batch_id=$1) counts
+      LEFT JOIN batch_tasks b ON b.id=$1
+      CROSS JOIN LATERAL (SELECT CASE WHEN b.admission_status<>'admitting'
+        THEN GREATEST(b.total_items-counts.total,0) ELSE 0 END AS items) missing`,
     [batchId],
   );
   const counts = result.rows[0]!;
   const status = deriveBatchStatus(counts);
   await db.query(
-    "UPDATE batch_tasks SET status=$1,completed_items=$2,failed_items=$3,updated_at=now() WHERE id=$4",
+    "UPDATE batch_tasks SET status=$1,completed_items=$2,failed_items=$3,updated_at=now() WHERE id=$4 AND (status,completed_items,failed_items) IS DISTINCT FROM ($1,$2,$3)",
     [status, counts.success, counts.failed, batchId],
   );
 }

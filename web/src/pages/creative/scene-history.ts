@@ -1,13 +1,13 @@
 import type { SceneLog } from "./use-scene-workspace";
 
 type Storage = { getItem<T>(key: string): Promise<T | null>; setItem<T>(key: string, value: T): Promise<unknown> };
-export type SceneLogSummary = Pick<SceneLog, "id" | "ownerId" | "sceneId" | "createdAt" | "successCount" | "failCount" | "operation"> & { hasSelection: boolean };
+export type SceneLogSummary = Pick<SceneLog, "id" | "ownerId" | "sceneId" | "createdAt" | "successCount" | "failCount" | "operation"> & { hasSelection: boolean; unresolvedCount?: number };
 type Index = { version: 1; entries: SceneLogSummary[] };
 const writes = new Map<string, Promise<unknown>>();
 export const SCENE_HISTORY_PAGE_SIZE = 20;
 
 export function summarizeSceneLog(log: SceneLog): SceneLogSummary {
-    return { id: log.id, ownerId: log.ownerId, sceneId: log.sceneId, createdAt: log.createdAt, successCount: log.successCount, failCount: log.failCount, operation: log.operation, hasSelection: Boolean(log.selection) };
+    return { id: log.id, ownerId: log.ownerId, sceneId: log.sceneId, createdAt: log.createdAt, successCount: log.successCount, failCount: log.failCount, operation: log.operation, hasSelection: Boolean(log.selection), unresolvedCount: log.results.filter(result => result.status === "pending" || result.failureKind === "uncertain").length };
 }
 
 /** Old arrays are preserved. Only the first indexed read touches them, never each new save. */
@@ -40,6 +40,7 @@ export function createSceneHistory(storage: Storage, ownerId: string, sceneId: s
         return created;
     }
     return {
+        pending() { return ordered(async () => (await readIndex()).entries.filter(entry => entry.unresolvedCount)); },
         page(offset = 0, limit = SCENE_HISTORY_PAGE_SIZE) {
             return ordered(async () => {
                 const index = await readIndex();

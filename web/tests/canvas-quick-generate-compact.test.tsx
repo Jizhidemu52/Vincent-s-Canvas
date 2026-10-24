@@ -6,6 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import ts from "typescript";
 import { CanvasQuickGeneratePanel } from "@/components/canvas/canvas-quick-generate-panel";
 import { CanvasQuickSettingsPopovers } from "@/components/canvas/canvas-quick-settings-popovers";
+import { CanvasQuickReferenceTray } from "@/components/canvas/canvas-quick-reference-tray";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { defaultConfig, useConfigStore } from "@/stores/use-config-store";
 import { useModuleStore } from "@/stores/use-module-store";
@@ -91,7 +92,7 @@ test("reference guidance occupies one accessible icon in the add-reference row a
     const explanation = renderToStaticMarkup(<>{popup.props.children}</>);
     expect(explanation).toContain("点击或框选画布图片添加参考图");
     expect(explanation).toContain("原图保留。取消选中不会清空参考图；请用移除或清空按钮调整。");
-    expect(tree.findIndex(element => element.props.references)).toBeGreaterThan(tree.indexOf(row));
+    expect(tree.findIndex(element => element.type === CanvasQuickReferenceTray)).toBeGreaterThan(tree.indexOf(row));
     const generate = tree.find(element => element.props.className === "cw-generate-button")!;
     expect(elements(generate.props.children).some(element => element.props.className === "cw-generate-count")).toBe(true);
     expect(generate.props.title).toBe("Enter 生成，Shift+Enter 换行");

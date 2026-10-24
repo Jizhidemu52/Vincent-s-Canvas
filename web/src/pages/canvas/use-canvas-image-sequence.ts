@@ -14,7 +14,7 @@ export function useCanvasImageSequence(options: ImageSequenceOptions) {
         return () => { active.current?.controller.abort(); active.current = null; };
     }, [options.projectId]);
 
-    const add = async (sourceId: string, steps: [string, string][], model?: string) => {
+    const add = async (sourceId: string, steps: import("@/lib/canvas/canvas-image-sequence").ImageSequenceStep[], model?: string) => {
         if (adding.current) return;
         adding.current = true;
         const projectId = latest.current.projectId;

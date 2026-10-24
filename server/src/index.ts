@@ -61,12 +61,17 @@ import { BillingError } from "./billing";
 import { createTasksEventsRouter, TaskEventsService } from "./task-events";
 import { createApiShutdown } from "./api-shutdown";
 import { startAssetThumbnailMaintenance } from "./asset-thumbnails";
+import { createPostgresPromptCompiler } from "./prompt-runtime";
+import { createPromptCompilationsRouter, createAdminPromptRecipesRouter } from "./routes/prompt-recipes";
+import { PromptOptimizationError } from "./prompt-safety";
+import { writeAudit } from "./audit";
 
 const config = loadConfig();
 const features = deploymentFeatures(config);
 const db = createDatabase(config.DATABASE_URL);
 const cache = await createCache(config.REDIS_URL);
 const storage = new ObjectStorage(config);
+const promptCompiler = createPostgresPromptCompiler(db, config, storage);
 const taskEvents = new TaskEventsService(db);
 void taskEvents.start();
 const app = express();
@@ -106,6 +111,11 @@ app.get("/api/health", async (_request, response, next) => {
 app.use("/api/auth", createAuthRouter(db, cache, config));
 const requireSession = sessionMiddleware(db, cache, config, { allowPersonalWorkspace: true });
 const requireAdminSession = sessionMiddleware(db, cache, config, { allowGuest: false });
+app.use("/api/prompt-compilations", requireSession, requireAccountReady, createPromptCompilationsRouter(promptCompiler));
+app.use("/api/admin/prompt-recipes", requireAdminSession, requireAccountReady, createAdminPromptRecipesRouter(promptCompiler,
+  async () => (await db.query(`SELECT m.id,m.name,m.model_id AS "modelId",m.capabilities,m.enabled FROM model_configs m JOIN providers p ON p.id=m.provider_id WHERE m.enabled=true AND p.enabled=true ORDER BY m.name`)).rows,
+  async (actor, action, key, client) => { await writeAudit(client, { actor, action, targetType: "prompt_recipe", targetId: key, result: "success" }); },
+));
 const requireUsageSession = sessionMiddleware(db, cache, config, { allowGuest: false, allowAdminSession: true, unauthenticatedStatus: 403 });
 app.use("/api/usage", requireUsageSession, requireAccountReady, createUsageRouter(db, { enabled: features.authenticationEnabled }));
 app.use("/api/admin/usage", requireUsageSession, requireAccountReady, createAdminUsageRouter(db, config, { enabled: features.authenticationEnabled }));
@@ -154,7 +164,7 @@ app.use(
   requireSession,
   requireAccountReady,
   protectModelIdentity,
-  createTasksRouter(db, cache, readCreditsEnabled, undefined, { maxInflightTasks: config.USER_MAX_INFLIGHT_TASKS }),
+  createTasksRouter(db, cache, readCreditsEnabled, undefined, { maxInflightTasks: config.USER_MAX_INFLIGHT_TASKS, promptCompiler }),
 );
 app.use(
   "/api/admin/tasks",
@@ -212,7 +222,7 @@ app.use(
   "/api/chat",
   requireSession,
   requireAccountReady,
-  createChatRouter(db, config),
+  createChatRouter(db, config, { loadProfileRules: async profile => (await promptCompiler.store.active(profile)).version.systemPrompt }),
 );
 app.use(
   "/api/admin/credit-policy",
@@ -327,6 +337,10 @@ const errorHandler: ErrorRequestHandler = (
       message: "提交内容不符合要求",
       issues: error.issues,
     });
+    return;
+  }
+  if (error instanceof PromptOptimizationError) {
+    response.status(error.status).json({ error: error.code, message: error.message });
     return;
   }
   if (error instanceof ToolConfigurationError) {

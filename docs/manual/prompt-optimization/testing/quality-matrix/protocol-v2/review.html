@@ -1,0 +1,46 @@
+<!doctype html><meta charset="utf-8"><title>Prompt QA protocol-v2</title><style>body{font:15px system-ui;margin:24px;background:#eee;color:#222}main{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}section{background:white;padding:16px}h2{font-size:17px}.images{display:flex;gap:8px}figure{margin:0;max-width:100%}img{max-width:100%;max-height:560px}pre{white-space:pre-wrap;overflow-wrap:anywhere}summary{cursor:pointer}</style><h1>protocol-v2 — HTTP 成功不等于视觉验收通过</h1><p>原始字节图像；全部视觉状态待人工按验收点核对。旧新版相邻。详情不含私有配方或凭据。</p><main><section><h2>协议烟测 d5000000-0000-4000-8000-000000000003</h2><p>success / 视觉待核 / </p><div class="images"><figure><img loading="lazy" src="protocol-d5000000-0000-4000-8000-000000000003-4c6f5a78-a0e2-415a-8827-116a963ba32f-1.jpg"><figcaption>image/jpeg / 434672 bytes</figcaption></figure></div><details><summary>输入、最终提示词、验收点</summary><pre>{
+  &quot;requestId&quot;: &quot;pq:protocol-v2:protocol-d5000000-0000-4000-8000-000000000003:0&quot;,
+  &quot;userInput&quot;: {
+    &quot;scene&quot;: &quot;free-optimize&quot;,
+    &quot;fields&quot;: {},
+    &quot;userText&quot;: &quot;仅将衬衫大身改为鼠尾草绿色，保留其余内容。&quot;,
+    &quot;referenceRoles&quot;: [
+      &quot;参考图1&quot;
+    ],
+    &quot;mode&quot;: &quot;edit&quot;
+  },
+  &quot;finalPrompt&quot;: &quot;仅将 Image 1 衬衫大身改为鼠尾草绿色（#9DA882），替换大身原色；保留领、袖、门襟、纽扣及其余内容不变。\n避免: 品牌 logo 或水印, 无关文字, 拼贴多宫格, 色卡条, 尺寸标注, 多余的手或肢体变形, 未成年人模特, 裸露或性感化表现.&quot;,
+  &quot;checks&quot;: [
+    &quot;协议提交、结果取回、原始 MIME&quot;,
+    &quot;绑定模型不一致时阻止调用，不擅自更改管理员配置&quot;,
+    &quot;单例协议烟测不能代表模型视觉质量&quot;
+  ]
+}</pre></details></section>
+<section><h2>协议烟测 aplmart-mj-blend</h2><p>success / 视觉待核 / </p><div class="images"><figure><img loading="lazy" src="protocol-d5000000-0000-4000-8000-000000000006-1ef04f61-c07a-43ae-aa51-0d2e27447721-1.png"><figcaption>image/png / 553275 bytes</figcaption></figure></div><details><summary>输入、最终提示词、验收点</summary><pre>{
+  &quot;requestId&quot;: &quot;pq:protocol-v2:protocol-d5000000-0000-4000-8000-000000000006:0&quot;,
+  &quot;userInput&quot;: &quot;&quot;,
+  &quot;finalPrompt&quot;: &quot;&quot;,
+  &quot;checks&quot;: [
+    &quot;双图 Blend 协议提交、结果取回与真实 MIME&quot;,
+    &quot;Blend 不接受文字提示词，不调用扩写模型&quot;,
+    &quot;单例烟测不能代表视觉质量&quot;
+  ]
+}</pre></details></section>
+<section><h2>协议烟测 d5000000-0000-4000-8000-000000000009</h2><p>success / 视觉待核 / </p><div class="images"><figure><img loading="lazy" src="protocol-d5000000-0000-4000-8000-000000000009-8a5d7079-ade7-4fff-bef2-717065b7415f-1.jpg"><figcaption>image/jpeg / 439595 bytes</figcaption></figure></div><details><summary>输入、最终提示词、验收点</summary><pre>{
+  &quot;requestId&quot;: &quot;pq:protocol-v2:protocol-d5000000-0000-4000-8000-000000000009:0&quot;,
+  &quot;userInput&quot;: {
+    &quot;scene&quot;: &quot;free-optimize&quot;,
+    &quot;fields&quot;: {},
+    &quot;userText&quot;: &quot;仅将衬衫大身改为鼠尾草绿色，保留其余内容。&quot;,
+    &quot;referenceRoles&quot;: [
+      &quot;参考图1&quot;
+    ],
+    &quot;mode&quot;: &quot;edit&quot;
+  },
+  &quot;finalPrompt&quot;: &quot;仅将 Image 1 中衬衫大身的原色替换为鼠尾草绿色（#9DA882）。保留领、袖、门襟及其余内容不变，包括纹理、光影与背景。\n避免: 品牌 logo 与水印, 无关文字, 拼贴多宫格, 色卡条, 尺寸标注, 多余的手或肢体变形, 未成年人模特, 裸露或性感化表现.&quot;,
+  &quot;checks&quot;: [
+    &quot;协议提交、结果取回、原始 MIME&quot;,
+    &quot;绑定模型不一致时阻止调用，不擅自更改管理员配置&quot;,
+    &quot;单例协议烟测不能代表模型视觉质量&quot;
+  ]
+}</pre></details></section></main>

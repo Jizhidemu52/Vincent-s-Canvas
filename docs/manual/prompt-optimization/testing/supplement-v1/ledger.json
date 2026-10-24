@@ -1,0 +1,234 @@
+{
+  "version": 1,
+  "upstreamCost": null,
+  "jobs": {
+    "gpt-6-astra-generate-specified-text": {
+      "id": "gpt-6-astra-generate-specified-text",
+      "requestId": "pq:supplement-v1:gpt-6-astra-generate-specified-text",
+      "optimizer": "gpt-6-astra",
+      "sample": "generate-specified-text",
+      "attempted": true,
+      "taskId": "6bf08bee-2d07-4351-8602-579bcacc9139",
+      "status": "success",
+      "errorCode": null,
+      "finalPrompt": "A cream (#F3E8D5) short-sleeve knitted pullover with a crew neckline and relaxed regular fit. Use set-in sleeves, a straight hem, and neat, narrow rib-knit finishing at the neckline, cuffs, and hem. Fine-gauge cotton knit is lightweight, softly draping, and matte, with delicate, clearly resolved stitch texture. Print \"INCHOICE\" on the wearer's left chest in small, clean uppercase lettering in charcoal (#333333); include no other decoration. Show a single garment laid flat and centered, front facing upward, in a top-down product shot on a pure white (#FFFFFF) seamless background. Soft studio lighting, natural contact shadows, and crisp detail reveal the construction and knit texture. No person, hanger, or props; minimal commercial styling.\nAvoid: unrequested logos, watermarks and unrelated text, multiple garments and collage layouts, color swatch strips and dimension annotations, mannequin seams, extra hands and distorted limbs, underage models, nudity and sexualized styling, additional decorative embellishments.",
+      "optimized": false,
+      "outputs": [
+        {
+          "path": "gpt-6-astra-generate-specified-text-primary.png",
+          "role": "primary",
+          "mime": "image/png",
+          "bytes": 1446376,
+          "sha256": "56f4550eb32f8b751aa2b2a6c0ff4e00b536424818730f10e90fb5ead5e821f4",
+          "operations": []
+        }
+      ]
+    },
+    "gpt-6-astra-sketch-observed-details": {
+      "id": "gpt-6-astra-sketch-observed-details",
+      "requestId": "pq:supplement-v1:gpt-6-astra-sketch-observed-details",
+      "optimizer": "gpt-6-astra",
+      "sample": "sketch-observed-details",
+      "status": "success",
+      "errorCode": null,
+      "attempted": true,
+      "taskId": "51445bbf-28c9-469c-9b04-7b362ba7113f",
+      "finalPrompt": "Convert Image 1 into a detailed technical fashion flat: symmetrical front view, black (#000000) lines on pure white (#FFFFFF). Preserve its proportions, silhouette, pointed collar, front placket, five visible buttons, short set-in sleeves, shoulder seams, sleeve hems and curved bottom hem; add no pockets or unseen construction. Use clean, uniform linework with a bolder outer contour, thinner interior construction lines and dashed visible topstitching. Take only garment structure from Image 1, excluding its color, fabric texture, wrinkles and shadows; show the garment alone, flat.\nAvoid: shading, gradients, color fills, fabric texture, models, minors, extra hands, deformed limbs, nudity, sexualized presentation, hangers, background objects, brand logos, watermarks, unrelated text, text labels, collages, multi-panel layouts, color swatches, measurements, added pockets, extra buttons, invented details.",
+      "optimized": false,
+      "outputs": [
+        {
+          "path": "gpt-6-astra-sketch-observed-details-primary.png",
+          "role": "primary",
+          "mime": "image/png",
+          "bytes": 750380,
+          "sha256": "2898ac0cc09efbd9442a54cdc7256653aedcd835be9482c4ad02dc83d7e36074",
+          "operations": []
+        }
+      ]
+    },
+    "claude-sonnet-5-5-generate-specified-text": {
+      "id": "claude-sonnet-5-5-generate-specified-text",
+      "requestId": "pq:supplement-v1:claude-sonnet-5-5-generate-specified-text",
+      "optimizer": "claude-sonnet-5-5",
+      "sample": "generate-specified-text",
+      "attempted": true,
+      "taskId": "9073e387-ec2a-44dd-9621-9e5ffefda997",
+      "status": "success",
+      "errorCode": null,
+      "finalPrompt": "A flat lay product shot of a cream crew-neck short-sleeve knit top, garment laid flat and centered, front view, top-down view, on a pure white seamless background with a soft natural contact shadow, no person, no hanger, no props. Relaxed regular fit with a clean straight body, set-in short sleeves, a neat ribbed crew neckline, and a plain ribbed hem and sleeve edges. Made from fine-gauge cotton knit with a smooth, even stitch, soft medium-light drape and a subtle matte finish, with the delicate knit texture clearly visible. Soft creamy ivory color (#F3EAD7). A small, simple printed lettering \"INCHOICE\" sits on the left chest, crisp and legible, in a tone-on-tone or soft dark neutral ink, and there is no other decoration, pocket, trim or pattern. Soft diffused studio lighting, high detail, sharp fabric texture, minimal and refined commercial presentation.\nAvoid: multiple garments, collage, extra text, logo, watermark, mannequin seams, distorted hands, additional decoration or patterns.",
+      "optimized": false,
+      "outputs": [
+        {
+          "path": "claude-sonnet-5-5-generate-specified-text-primary.png",
+          "role": "primary",
+          "mime": "image/png",
+          "bytes": 1234236,
+          "sha256": "44a761ee7d070b129cb21139d9d213b61b1513cf4a3208698de37c5e37be9582",
+          "operations": []
+        }
+      ]
+    },
+    "claude-sonnet-5-5-sketch-observed-details": {
+      "id": "claude-sonnet-5-5-sketch-observed-details",
+      "requestId": "pq:supplement-v1:claude-sonnet-5-5-sketch-observed-details",
+      "optimizer": "claude-sonnet-5-5",
+      "sample": "sketch-observed-details",
+      "status": "success",
+      "errorCode": null,
+      "attempted": true,
+      "taskId": "66bdab4b-a397-4b3c-9532-c5a588f30cd1",
+      "finalPrompt": "Convert Image 1 into a clean technical fashion flat drawing of the shirt: front view, garment laid out symmetrically and flat as in a tech flat, with clean uniform black line weight, bolder outer contour, thinner interior construction lines, and dashed lines for topstitching. Draw all visible details: pointed shirt collar with collar stand, center front button placket with exactly five buttons (each with four-hole detail), shoulder seams and armhole seams, short set-in sleeves with hemmed cuffs, topstitching along the collar, placket, sleeve hems and curved shirttail hem. Do not add any pocket. Keep the original proportions and silhouette of Image 1. Use pure white background, black lines only, no shading, no color fill, no fabric texture, no model, no background objects.\nAvoid: shading, color, gradient, texture, model, hanger, measurements, text labels.",
+      "optimized": false,
+      "outputs": [
+        {
+          "path": "claude-sonnet-5-5-sketch-observed-details-primary.png",
+          "role": "primary",
+          "mime": "image/png",
+          "bytes": 759883,
+          "sha256": "2bbf65d4a497c8ddb2285c5e22e4c95a2a0b5b7365e405449f87f5705029d3b7",
+          "operations": []
+        }
+      ]
+    },
+    "gpt-6-astra-color-specific-region": {
+      "id": "gpt-6-astra-color-specific-region",
+      "requestId": "pq:supplement-v1:gpt-6-astra-color-specific-region",
+      "optimizer": "gpt-6-astra",
+      "sample": "color-specific-region",
+      "status": "success",
+      "errorCode": null,
+      "attempted": true,
+      "taskId": "9c440f14-298a-4234-b33f-5e2af1505374",
+      "finalPrompt": "Recolor only Image 1’s body fabric, including the placket, to muted forest green (#2E5B4E); retain its construction, not its original body color. Keep sleeves, collar and buttons unchanged. Preserve silhouette, seam lines, collar shape, pocket configuration, pattern shapes and placement, fabric texture and weave, folds, highlight and shadow gradations, framing and background; leave all colors outside the body fabric untouched. The new color sits naturally in the fabric weave and folds, with realistic highlights and shadows, not a flat fill.\nAvoid: flat color fill, color swatches, dimension annotations, garment structure or pattern changes, recoloring sleeves, collar, buttons, skin or background, brand logos, watermarks, unrelated text, collages, multi-panel layouts, extra hands, deformed limbs, underage models, nudity, sexualized presentation.",
+      "optimized": false,
+      "outputs": [
+        {
+          "path": "gpt-6-astra-color-specific-region-primary.png",
+          "role": "primary",
+          "mime": "image/png",
+          "bytes": 1444522,
+          "sha256": "b2d8781bb72f8a5441faac433a3d83caaf1bde809d3e985051e40ff6c677a2dd",
+          "operations": []
+        }
+      ]
+    },
+    "claude-sonnet-5-5-color-specific-region": {
+      "id": "claude-sonnet-5-5-color-specific-region",
+      "requestId": "pq:supplement-v1:claude-sonnet-5-5-color-specific-region",
+      "optimizer": "claude-sonnet-5-5",
+      "sample": "color-specific-region",
+      "status": "success",
+      "errorCode": null,
+      "attempted": true,
+      "taskId": "cfd99195-f314-4353-82bb-52a13dfcef63",
+      "finalPrompt": "Recolor only the body fabric of the shirt in Image 1 (front panels, back and front placket) to deep pine green (#2E5B4E). Keep the short sleeves and the collar in their original light blue. The new color sits naturally in the fabric weave and folds, with realistic highlights and shadows, not a flat fill. Keep unchanged: the buttons and their original blue color, the shirt's cut and proportions, seams and topstitching, collar shape, sleeve hems, the fine poplin weave texture, wrinkles, existing shadow and highlight gradation, and the plain white background.\nAvoid: flat color fill, color swatches, changing garment structure, recoloring buttons, recoloring sleeves or collar, recoloring background, pattern or texture changes, logos or watermarks.",
+      "optimized": false,
+      "outputs": [
+        {
+          "path": "claude-sonnet-5-5-color-specific-region-primary.png",
+          "role": "primary",
+          "mime": "image/png",
+          "bytes": 1290865,
+          "sha256": "2d898a3ddd15afbc60c290a033ef68a8bf517673b15766d8935df2b46ac91664",
+          "operations": []
+        }
+      ]
+    },
+    "mask-baseline": {
+      "id": "mask-baseline",
+      "requestId": "pq:supplement-v1:mask-baseline",
+      "status": "success",
+      "errorCode": null,
+      "attempted": true,
+      "taskId": "f5dfeeab-99e1-4ba7-bccf-d3997a0637ee",
+      "finalPrompt": "只在透明蒙版限定的衣身中央区域添加一颗小小的红色五角星刺绣；不要改变衣服、纽扣、其余面料或背景。",
+      "optimized": false,
+      "outputs": [
+        {
+          "path": "mask-baseline-provider-original.png",
+          "role": "provider-original",
+          "mime": "image/png",
+          "bytes": 1241205,
+          "sha256": "0edcd11d8ff312cd9c75cbdefb9c7f433a498b208684c26eeb88df6b6a4a70b9",
+          "operations": [
+            "strict_mask_composite"
+          ],
+          "pixelComparison": {
+            "outside": 1013426,
+            "outsideChanged": 995689,
+            "inside": 35150,
+            "insideChanged": 35119,
+            "strictOutsidePreserved": false
+          }
+        },
+        {
+          "path": "mask-baseline-primary.png",
+          "role": "primary",
+          "mime": "image/png",
+          "bytes": 1154296,
+          "sha256": "ed0d059e55d113d545bc369846a259db34230f7b62d195c8a247f51e6569aa7b",
+          "operations": [
+            "strict_mask_composite"
+          ],
+          "pixelComparison": {
+            "outside": 1013426,
+            "outsideChanged": 0,
+            "inside": 35150,
+            "insideChanged": 35119,
+            "strictOutsidePreserved": true
+          }
+        }
+      ]
+    },
+    "mask-optimized": {
+      "id": "mask-optimized",
+      "requestId": "pq:supplement-v1:mask-optimized",
+      "status": "success",
+      "errorCode": null,
+      "attempted": true,
+      "taskId": "338b53ae-5ad4-4a52-8791-d538483e614e",
+      "finalPrompt": "仅在透明蒙版限定的衣身中央区域添加一颗小小的红色（#D62828）五角星刺绣，针脚细密、贴合面料。以 Image 1 为保留底图，沿用原有衣服、纽扣、其余面料、背景及光线，不重绘或替换；除新增刺绣外，所有内容保持不变，蒙版仅限定编辑范围，不作为画面内容。\n避免: 品牌 logo、水印, 无关文字, 拼贴多宫格, 色卡条、尺寸标注, 多余的手或肢体变形, 未成年人模特, 裸露或性感化表现, 蒙版外改动.",
+      "optimized": true,
+      "outputs": [
+        {
+          "path": "mask-optimized-provider-original.png",
+          "role": "provider-original",
+          "mime": "image/png",
+          "bytes": 1216357,
+          "sha256": "545856af9e587c713db07752d8686c4a7f6df2f295b6d558945ba1dee7ea2328",
+          "operations": [
+            "strict_mask_composite"
+          ],
+          "pixelComparison": {
+            "outside": 1013426,
+            "outsideChanged": 993114,
+            "inside": 35150,
+            "insideChanged": 34979,
+            "strictOutsidePreserved": false
+          }
+        },
+        {
+          "path": "mask-optimized-primary.png",
+          "role": "primary",
+          "mime": "image/png",
+          "bytes": 1152524,
+          "sha256": "bc7680c001e3590f4b3a25efeb5ddbcd4ed43022e067183527f3352d61171554",
+          "operations": [
+            "strict_mask_composite"
+          ],
+          "pixelComparison": {
+            "outside": 1013426,
+            "outsideChanged": 0,
+            "inside": 35150,
+            "insideChanged": 34979,
+            "strictOutsidePreserved": true
+          }
+        }
+      ]
+    }
+  },
+  "assets": {
+    "b6cc50b7f2e1f7a124931e17bc57cecfecad7b05d0190f85b516ca0b7697f519": "aec6feeb-cbb7-48a2-84fe-c7ba8040a5f1",
+    "6e5a7323313667c11638e758246daf6997dab22d978edcf0a1c9d720b76b9c48": "1c40e1a3-e953-4d66-b6de-6697e8e9fe38"
+  }
+}

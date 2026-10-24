@@ -185,6 +185,24 @@ SQLite 适配器在同一事务保存快照、分享、收据及接收人的 `de
 
 分析预览有效 15 分钟，成功消费后不可再次调用；这是确认授权期限，不是数据删除时间。本次不自动删除历史事件、聊天提交或分析结果，也不新增定时清理机制。企业运维应按公司留存与访问制度管理数据库、备份和获准导出的文件。
 
+## 服务端提示词配方与扩写
+
+`043_prompt_recipes.sql` 新增三张正式表，迁移本身不导入或激活业务配方：
+
+| 表 | 关键数据与约束 |
+| --- | --- |
+| `prompt_recipes` | `key` 唯一；`settings` 保存启用、独立文字模型绑定和失败策略；`current_version_id` 指向已激活版本 |
+| `prompt_recipe_versions` | 不可变版本正文、字段模板、分模型规则、语言、创建人和内容哈希；每个配方的版本号与内容哈希分别唯一 |
+| `prompt_compilations` | 账号／请求编号唯一；保存配方版本、输入哈希、状态、原始响应和用量；`reused_from_id` 关联同账号缓存的主记录 |
+
+`tasks` 增加 `user_input`、`prompt_compilation_id` 和 `prompt_optimized`。原有 `prompt` 继续作为最终发送指令，不另设可能不一致的 `final_prompt`。公开任务和历史只返回结构化用户输入、最终提示词和是否优化；版本正文、原始扩写响应及模型规则只通过超级管理员接口读取。
+
+`batch_tasks` 增加 `admission_input_hash`、`admission_status`、`admission_token`、`admission_lease_expires_at` 和 `admission_failures`。批次受理使用 30 秒租约，每个任务在原入队事务内核验令牌，过期的旧受理进程不能追加任务。恢复查询只关闭过期受理并展示缺项，不重放扩写或生图；已关闭批次的缺项计为失败，不把仅完成 1/3 的批次误报为全部成功。
+
+扩写以账号、配方版本、模型配置、规范化字段、原文、参考图原始字节哈希／顺序／分工、蒙版和语言判定缓存；同请求改输入返回冲突。事务锁防止同输入并发重复调用，不在模型网络调用期间持有事务。`optimizing`、`success`、`failed`、`uncertain` 分别记录正在扩写、通过校验、明确失败与结果不明；后者不能自动重复付费。缓存命中的请求仍有独立持久记录，统计区分实际调用与复用。
+
+费用字段保留实际值、估算值、币种和未知状态；不同币种分别汇总。Token 或实际费用缺失时不推定为零。Demo SQLite 使用相同配方和扩写生命周期，数据位于同一 `DEMO_STATE_PATH`，并补充本机批次受理恢复记录；这不是正式 PostgreSQL 多连接验证的替代品。
+
 ## 更新和备份
 
 `021_chat_provider_protocols.sql` 扩展 `providers.protocol` 的检查约束，允许 `openai-chat` 和 `anthropic`，保留原有协议值。现有 `openai` 继续用于 Responses／图片接口；新增选项分别用于 Chat Completions 和 Messages。正式环境需先应用该迁移，才能保存这两种新协议的 Provider。

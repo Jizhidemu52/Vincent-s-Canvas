@@ -1,0 +1,5 @@
+FROM canvas-web:canvas-4ed9d8d-20261024
+# Retain old fingerprinted chunks for already-open browser tabs.
+COPY release-web/ /usr/share/nginx/html/
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY WEB-SHA256SUMS /opt/release/WEB-SHA256SUMS

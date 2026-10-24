@@ -1,0 +1,64 @@
+{
+  "runId": "protocol-v2",
+  "reviewed": 3,
+  "method": "view_image of each original output plus ledger task/compilation evidence; no new calls",
+  "scope": "Protocol/basic capability smoke, not overall image-quality certification",
+  "results": [
+    {
+      "modelConfigId": "d5000000-0000-4000-8000-000000000003",
+      "modelId": "gemini-nano-banana-2.1",
+      "taskId": "4c6f5a78-a0e2-415a-8827-116a963ba32f",
+      "protocol": "PASS",
+      "visual": "MINOR REVISION",
+      "file": "protocol-d5000000-0000-4000-8000-000000000003-4c6f5a78-a0e2-415a-8827-116a963ba32f-1.jpg",
+      "mime": "image/jpeg",
+      "observations": [
+        "大身改为鼠尾草绿，领、袖、门襟大致保留浅蓝，五颗纽扣和主体结构保持。"
+      ],
+      "failures": [
+        "要求保留纽扣不变，但纽扣出现可见绿色染色；肩部育克仍为蓝色，需明确其是否属于大身范围。"
+      ],
+      "correctionBrief": "锁定纽扣原色；明示肩育克是否包含在大身改色区。",
+      "unverified": [
+        "未做像素级保形、色值或生产验证。"
+      ]
+    },
+    {
+      "modelConfigId": "d5000000-0000-4000-8000-000000000006",
+      "modelId": "midjourney-blend",
+      "taskId": "1ef04f61-c07a-43ae-aa51-0d2e27447721",
+      "protocol": "PASS",
+      "visual": "PASS",
+      "file": "protocol-d5000000-0000-4000-8000-000000000006-1ef04f61-c07a-43ae-aa51-0d2e27447721-1.png",
+      "mime": "image/png",
+      "observations": [
+        "双图无文本 Blend 成功；融合蓝色衬衫和款式图线条/胸袋，输出完整短袖衬衫。",
+        "此次是创意融合，不是鼠尾草改色，也无固定孔/纽扣数量保留契约。"
+      ],
+      "failures": [],
+      "correctionBrief": "基本融合无需返修；不要把本例宣传为精确改款能力。",
+      "unverified": [
+        "单例不代表融合质量稳定性或精确结构保留。"
+      ]
+    },
+    {
+      "modelConfigId": "d5000000-0000-4000-8000-000000000009",
+      "modelId": "gemini-3.1-flash-image-preview-official",
+      "taskId": "8a5d7079-ade7-4fff-bef2-717065b7415f",
+      "protocol": "PASS",
+      "visual": "REDO",
+      "file": "protocol-d5000000-0000-4000-8000-000000000009-8a5d7079-ade7-4fff-bef2-717065b7415f-1.jpg",
+      "mime": "image/jpeg",
+      "observations": [
+        "成功返回真实图片，大身改为鼠尾草绿，领、门襟及五纽扣大致保留。"
+      ],
+      "failures": [
+        "明确要求袖子不变，但两只袖子的主体面料也被改绿，只留蓝色袖口。"
+      ],
+      "correctionBrief": "将可改区域限制为躯干衣身，整只袖子（非仅袖口）保留原蓝色。",
+      "unverified": [
+        "协议可用不等于遵从局部范围；未进行严格蒙版验收。"
+      ]
+    }
+  ]
+}

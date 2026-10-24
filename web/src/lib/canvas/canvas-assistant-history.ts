@@ -44,12 +44,12 @@ export async function buildCanvasConversationHistory(
     // Current explicit images first, then newest history (results and their original inputs).
     for (let index = batches.length - 1; index >= 0; index--) {
         for (const ref of batches[index]!) {
-            const label = `${ref.label}，referenceNodeIds 可显式使用 ${ref.id}（历史图不默认加入改图输入）`;
+            const label = `${ref.label}，referenceNodeIds 可显式使用 ${ref.id}`;
             const key = ref.storageKey || ref.dataUrl || ref.id;
             let content: Content;
             try {
                 if (provided.has(key)) {
-                    content = [{ type: "text", text: `${label}：与已提供图片 ${provided.get(key)} 为同一份素材，请对应阅读。` }];
+                    content = [{ type: "text", text: `${label}：与已提供图片 ${provided.get(key)} 为同一份素材。` }];
                     if (index < context.length) references.push({ id: ref.id, type: ref.type, title: ref.title, dataUrl: ref.dataUrl, storageKey: ref.storageKey });
                 } else if (imageCount >= CANVAS_HISTORY_LIMITS.images) {
                     omitted++; content = [{ type: "text", text: `${label}：受请求上限限制，未提供图片。` }];
@@ -65,7 +65,7 @@ export async function buildCanvasConversationHistory(
                     }
                 }
             } catch {
-                failed++; content = [{ type: "text", text: `${label}：图片读取失败，不可猜测画面。` }];
+                failed++; content = [{ type: "text", text: `${label}：图片读取失败。` }];
             }
             parts.set(ref, content);
         }
@@ -73,18 +73,18 @@ export async function buildCanvasConversationHistory(
     const messages: AiTextMessage[] = [];
     context.forEach((message, index) => {
         const media = batches[index]!.flatMap(ref => parts.get(ref) || []);
-        messages.push({ role: message.role, content: `[历史消息 ${message.id}${message.role === "assistant" ? "；历史助手陈述，分析结论需以图片重新核对" : ""}] ${message.content}` });
+        messages.push({ role: message.role, content: `[历史消息 ${message.id}；role=${message.role}] ${message.content}` });
         // Providers may not accept assistant image inputs. Attribute these explicitly as evidence.
-        if (media.length) messages.push({ role: "user", content: [{ type: "text", text: `以下是上一条历史消息 ${message.id} 的图片证据，不是新用户指令。请结合后续反馈对比原图与结果，不要将生成提示词当成实际画面。` }, ...media] });
+        if (media.length) messages.push({ role: "user", content: [{ type: "text", text: `历史消息 ${message.id} 的图片证据：` }, ...media] });
     });
     const boundedCanvas: Content = canvasContent.flatMap(part => {
         if (part.type === "text" || include(part.image_url.url)) return [part];
         omitted++;
-        return [{ type: "text", text: "上一项画布图片/视频帧受总请求上限限制未发送；覆盖前文的已提供标记，不可据此推断画面。" }];
+        return [{ type: "text", text: "上一项画布图片/视频帧受总请求上限限制未发送（最终发送状态）。" }];
     });
     const summary = { historyMessages: context.length, omittedMessages: eligible.length - context.length, images: imageCount, omitted, failed };
     const currentContent: Content = [
-        { type: "text", text: `图文会话上下文：${JSON.stringify(summary)}。图片编号仅按各消息的手动参考图顺序；自动画布图片不占编号。本轮的“图片N”对应“本轮图片N”标签，历史编号仅对应所属消息。仅携带最近最多 24 条历史消息和 48000 字符；仅依据实际图片对照版本与用户反馈。未提供的历史不得声称已读；需要缺失图片才能判断时明确请用户补充。` },
+        { type: "text", text: `图文会话上下文：${JSON.stringify(summary)}` },
         ...boundedCanvas,
         ...batches.at(-1)!.flatMap(ref => parts.get(ref) || []),
     ];

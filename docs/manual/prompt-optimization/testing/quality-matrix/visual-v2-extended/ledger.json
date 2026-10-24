@@ -1,0 +1,2265 @@
+{
+  "version": 1,
+  "runId": "visual-v2-extended",
+  "baselineCommit": "4ed9d8d",
+  "createdAt": "2026-10-24T18:06:16.952Z",
+  "updatedAt": "2026-10-24T18:10:36.556Z",
+  "assets": {
+    "shirt": {
+      "id": "aec6feeb-cbb7-48a2-84fe-c7ba8040a5f1",
+      "sha256": "b6cc50b7f2e1f7a124931e17bc57cecfecad7b05d0190f85b516ca0b7697f519",
+      "mime": "image/png",
+      "bytes": 987824
+    }
+  },
+  "cases": {
+    "style-to-sketch-11-old": {
+      "id": "style-to-sketch-11-old",
+      "requestId": "pq:visual-v2-extended:style-to-sketch-11-old:0",
+      "compilationRequestId": "pq:visual-v2-extended:style-to-sketch-11-old:compile",
+      "inputHash": "c2fd5a3a6e04ec3fa5b01686172e3abc45983a437f5240b1ba665c45db62f56f",
+      "status": "success",
+      "visualReview": "pending-manual-review",
+      "providerImageActualCost": null,
+      "providerChatActualCost": null,
+      "modelConfigId": "d5000000-0000-4000-8000-000000000001",
+      "modelId": "d5000000-0000-4000-8000-000000000001",
+      "startedAt": "2026-10-24T18:06:16.997Z",
+      "taskAttempted": true,
+      "tasks": [
+        {
+          "id": "733bd2b4-a16f-4cbc-9526-28dbe35833cf",
+          "requestId": "pq:visual-v2-extended:style-to-sketch-11-old:0",
+          "status": "success",
+          "prompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：技术感线稿。用清晰、均匀的线条表达服装轮廓和可见结构，主轮廓与结构线层次分明。\n\n细节程度：保留实际可见的分割线、口袋、褶裥、门襟、纽扣和装饰细节，避免虚构细节。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。黑色中等线宽技术线稿，标出可见肩缝和袖窿线。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。",
+          "optimized": false,
+          "credits": 0
+        }
+      ],
+      "finalPrompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：技术感线稿。用清晰、均匀的线条表达服装轮廓和可见结构，主轮廓与结构线层次分明。\n\n细节程度：保留实际可见的分割线、口袋、褶裥、门襟、纽扣和装饰细节，避免虚构细节。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。黑色中等线宽技术线稿，标出可见肩缝和袖窿线。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。",
+      "optimized": false,
+      "applicationChargeRmb": null,
+      "outputs": [
+        {
+          "taskId": "733bd2b4-a16f-4cbc-9526-28dbe35833cf",
+          "index": 0,
+          "path": "style-to-sketch-11-old-733bd2b4-a16f-4cbc-9526-28dbe35833cf-1.png",
+          "mime": "image/png",
+          "sha256": "5ffb6776fdd3a238880563c4e6777482823a07de5b13557872580e21a6e04ea7",
+          "bytes": 757262,
+          "contentType": "image/png"
+        }
+      ],
+      "completedAt": "2026-10-24T18:06:38.367Z"
+    },
+    "style-to-sketch-11-new": {
+      "id": "style-to-sketch-11-new",
+      "requestId": "pq:visual-v2-extended:style-to-sketch-11-new:0",
+      "compilationRequestId": "pq:visual-v2-extended:style-to-sketch-11-new:compile",
+      "inputHash": "ddc536fda5116962e6af9533c4cba34dd6fbc3a3f2705e5fedeba50c4b06118e",
+      "status": "success",
+      "visualReview": "pending-manual-review",
+      "providerImageActualCost": null,
+      "providerChatActualCost": null,
+      "modelConfigId": "d5000000-0000-4000-8000-000000000001",
+      "modelId": "d5000000-0000-4000-8000-000000000001",
+      "startedAt": "2026-10-24T18:06:16.997Z",
+      "compileAttempted": true,
+      "compilation": {
+        "id": "1cc058ff-4e12-43a3-afa6-a7266ef66883",
+        "requestId": "pq:visual-v2-extended:style-to-sketch-11-new:compile",
+        "status": "success",
+        "optimized": true,
+        "prompt": "Convert Image 1 into one symmetrical front-view technical fashion flat; omit photographic color, texture and shadows. Preserve its proportions, silhouette, pointed collar, short set-in sleeves, placket, curved hem, exactly five fully visible center-front buttons and the original partially obscured neckline button; add or remove none. Show visible shoulder seams, armhole lines, sleeve hems and dashed topstitching only where visible. Use medium-weight black (#000000) lines, heavier outer contours and thinner construction lines on pure white (#FFFFFF). Keep the chest pocketless; show no back view or invented details.\nAvoid: shading, gradients, color fills, fabric texture, models, minors, extra limbs, anatomical distortion, nudity, sexualized presentation, hangers, background objects, brand logos, watermarks, unrelated text, text labels, collages, multiple panels, back views, color swatches, measurements, added pockets, altered button count, invented details."
+      },
+      "finalPrompt": "Convert Image 1 into one symmetrical front-view technical fashion flat; omit photographic color, texture and shadows. Preserve its proportions, silhouette, pointed collar, short set-in sleeves, placket, curved hem, exactly five fully visible center-front buttons and the original partially obscured neckline button; add or remove none. Show visible shoulder seams, armhole lines, sleeve hems and dashed topstitching only where visible. Use medium-weight black (#000000) lines, heavier outer contours and thinner construction lines on pure white (#FFFFFF). Keep the chest pocketless; show no back view or invented details.\nAvoid: shading, gradients, color fills, fabric texture, models, minors, extra limbs, anatomical distortion, nudity, sexualized presentation, hangers, background objects, brand logos, watermarks, unrelated text, text labels, collages, multiple panels, back views, color swatches, measurements, added pockets, altered button count, invented details.",
+      "optimized": true,
+      "compilationCost": {
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": null,
+        "inputTokens": null,
+        "outputTokens": null,
+        "cacheHit": null,
+        "latencyMs": null
+      },
+      "taskAttempted": true,
+      "tasks": [
+        {
+          "id": "686fa657-47a7-4faa-b4ea-46bf6da60891",
+          "requestId": "pq:visual-v2-extended:style-to-sketch-11-new:0",
+          "status": "success",
+          "prompt": "Convert Image 1 into one symmetrical front-view technical fashion flat; omit photographic color, texture and shadows. Preserve its proportions, silhouette, pointed collar, short set-in sleeves, placket, curved hem, exactly five fully visible center-front buttons and the original partially obscured neckline button; add or remove none. Show visible shoulder seams, armhole lines, sleeve hems and dashed topstitching only where visible. Use medium-weight black (#000000) lines, heavier outer contours and thinner construction lines on pure white (#FFFFFF). Keep the chest pocketless; show no back view or invented details.\nAvoid: shading, gradients, color fills, fabric texture, models, minors, extra limbs, anatomical distortion, nudity, sexualized presentation, hangers, background objects, brand logos, watermarks, unrelated text, text labels, collages, multiple panels, back views, color swatches, measurements, added pockets, altered button count, invented details.",
+          "optimized": true,
+          "credits": 0
+        }
+      ],
+      "applicationChargeRmb": null,
+      "outputs": [
+        {
+          "taskId": "686fa657-47a7-4faa-b4ea-46bf6da60891",
+          "index": 0,
+          "path": "style-to-sketch-11-new-686fa657-47a7-4faa-b4ea-46bf6da60891-1.png",
+          "mime": "image/png",
+          "sha256": "a09649bcc706f2200b2c1f2b056dd61c70f4bc625000202bab49a73ea7cc1560",
+          "bytes": 760529,
+          "contentType": "image/png"
+        }
+      ],
+      "completedAt": "2026-10-24T18:06:48.222Z"
+    },
+    "garment-colorway-11-old": {
+      "id": "garment-colorway-11-old",
+      "requestId": "pq:visual-v2-extended:garment-colorway-11-old:0",
+      "compilationRequestId": "pq:visual-v2-extended:garment-colorway-11-old:compile",
+      "inputHash": "bea1fa7c1811f2ebd58412648944cf5981bc9347306d5e05e77bbb9da1e6b028",
+      "status": "success",
+      "visualReview": "pending-manual-review",
+      "providerImageActualCost": null,
+      "providerChatActualCost": null,
+      "modelConfigId": "d5000000-0000-4000-8000-000000000001",
+      "modelId": "d5000000-0000-4000-8000-000000000001",
+      "startedAt": "2026-10-24T18:06:16.998Z",
+      "taskAttempted": true,
+      "tasks": [
+        {
+          "id": "589719e6-8d61-4c65-ba70-bca1ae26acb8",
+          "requestId": "pq:visual-v2-extended:garment-colorway-11-old:0",
+          "status": "success",
+          "prompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#2E5B4E。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #2E5B4E。\n\n改色范围：仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #2E5B4E。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。",
+          "optimized": false,
+          "credits": 0
+        }
+      ],
+      "finalPrompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#2E5B4E。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #2E5B4E。\n\n改色范围：仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #2E5B4E。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。",
+      "optimized": false,
+      "applicationChargeRmb": null,
+      "outputs": [
+        {
+          "taskId": "589719e6-8d61-4c65-ba70-bca1ae26acb8",
+          "index": 0,
+          "path": "garment-colorway-11-old-589719e6-8d61-4c65-ba70-bca1ae26acb8-1.png",
+          "mime": "image/png",
+          "sha256": "f9b781d32619ea522a2936738efc77a0d1e587bf8c2b7244d06b649e2d2c33c9",
+          "bytes": 1293216,
+          "contentType": "image/png"
+        }
+      ],
+      "completedAt": "2026-10-24T18:06:38.377Z"
+    },
+    "garment-colorway-11-new": {
+      "id": "garment-colorway-11-new",
+      "requestId": "pq:visual-v2-extended:garment-colorway-11-new:0",
+      "compilationRequestId": "pq:visual-v2-extended:garment-colorway-11-new:compile",
+      "inputHash": "e823448ce19bf42d9966b53041a7db5c026883ab6890151b6fdbe8e98a8a71fa",
+      "status": "success",
+      "visualReview": "pending-manual-review",
+      "providerImageActualCost": null,
+      "providerChatActualCost": null,
+      "modelConfigId": "d5000000-0000-4000-8000-000000000001",
+      "modelId": "d5000000-0000-4000-8000-000000000001",
+      "startedAt": "2026-10-24T18:06:16.998Z",
+      "compileAttempted": true,
+      "compilation": {
+        "id": "2c4309b2-8ad6-4b1d-a098-05a70a55fe37",
+        "requestId": "pq:visual-v2-extended:garment-colorway-11-new:compile",
+        "status": "success",
+        "optimized": true,
+        "prompt": "Recolor only the body fabric and front placket of Image 1 to deep forest green (#2E5B4E); use Image 1 as the exact garment reference, replacing its color only within these regions. Keep sleeves, collar, all five center-front buttons and the partially concealed collar button their original pale blue. Preserve silhouette, construction, visible stitching, collar shape, absence of pockets and patterns, fabric weave, folds, highlights, shadows, white background and image proportions. The new color sits naturally in the fabric weave and folds, with realistic highlights and shadows, not a flat fill.\nAvoid: flat color fill, color swatches, changing garment structure or patterns, recoloring sleeves, collar or buttons, recoloring skin or background, brand logos, watermarks, unrelated text, collage grids, dimension annotations, extra hands, deformed limbs, underage models, nudity, sexualized presentation."
+      },
+      "finalPrompt": "Recolor only the body fabric and front placket of Image 1 to deep forest green (#2E5B4E); use Image 1 as the exact garment reference, replacing its color only within these regions. Keep sleeves, collar, all five center-front buttons and the partially concealed collar button their original pale blue. Preserve silhouette, construction, visible stitching, collar shape, absence of pockets and patterns, fabric weave, folds, highlights, shadows, white background and image proportions. The new color sits naturally in the fabric weave and folds, with realistic highlights and shadows, not a flat fill.\nAvoid: flat color fill, color swatches, changing garment structure or patterns, recoloring sleeves, collar or buttons, recoloring skin or background, brand logos, watermarks, unrelated text, collage grids, dimension annotations, extra hands, deformed limbs, underage models, nudity, sexualized presentation.",
+      "optimized": true,
+      "compilationCost": {
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": null,
+        "inputTokens": null,
+        "outputTokens": null,
+        "cacheHit": null,
+        "latencyMs": null
+      },
+      "taskAttempted": true,
+      "tasks": [
+        {
+          "id": "59501f89-afdd-4234-b3d1-01948401108b",
+          "requestId": "pq:visual-v2-extended:garment-colorway-11-new:0",
+          "status": "success",
+          "prompt": "Recolor only the body fabric and front placket of Image 1 to deep forest green (#2E5B4E); use Image 1 as the exact garment reference, replacing its color only within these regions. Keep sleeves, collar, all five center-front buttons and the partially concealed collar button their original pale blue. Preserve silhouette, construction, visible stitching, collar shape, absence of pockets and patterns, fabric weave, folds, highlights, shadows, white background and image proportions. The new color sits naturally in the fabric weave and folds, with realistic highlights and shadows, not a flat fill.\nAvoid: flat color fill, color swatches, changing garment structure or patterns, recoloring sleeves, collar or buttons, recoloring skin or background, brand logos, watermarks, unrelated text, collage grids, dimension annotations, extra hands, deformed limbs, underage models, nudity, sexualized presentation.",
+          "optimized": true,
+          "credits": 0
+        }
+      ],
+      "applicationChargeRmb": null,
+      "outputs": [
+        {
+          "taskId": "59501f89-afdd-4234-b3d1-01948401108b",
+          "index": 0,
+          "path": "garment-colorway-11-new-59501f89-afdd-4234-b3d1-01948401108b-1.png",
+          "mime": "image/png",
+          "sha256": "24c10b2cd7b4792733d431b7677d2a5a03b32000593b9d320f2c25b3d3523607",
+          "bytes": 1394589,
+          "contentType": "image/png"
+        }
+      ],
+      "completedAt": "2026-10-24T18:06:47.367Z"
+    },
+    "style-to-sketch-12-old": {
+      "id": "style-to-sketch-12-old",
+      "requestId": "pq:visual-v2-extended:style-to-sketch-12-old:0",
+      "compilationRequestId": "pq:visual-v2-extended:style-to-sketch-12-old:compile",
+      "inputHash": "79f8741f97114b8aed9e1c529b618f3672a5c3199628539b9a431bc40b1975bd",
+      "status": "success",
+      "visualReview": "pending-manual-review",
+      "providerImageActualCost": null,
+      "providerChatActualCost": null,
+      "modelConfigId": "d5000000-0000-4000-8000-000000000001",
+      "modelId": "d5000000-0000-4000-8000-000000000001",
+      "startedAt": "2026-10-24T18:06:38.376Z",
+      "taskAttempted": true,
+      "tasks": [
+        {
+          "id": "0f42ac1d-d68b-4958-a96f-c3579e7209fa",
+          "requestId": "pq:visual-v2-extended:style-to-sketch-12-old:0",
+          "status": "success",
+          "prompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：极简线稿。用干净、克制的轮廓线表达服装，不保留摄影光影与面料色块。\n\n细节程度：保留领口、袖口、下摆、门襟与主要结构线，适度简化细小纹理。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。细线简约线稿，不表现布面阴影。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。",
+          "optimized": false,
+          "credits": 0
+        }
+      ],
+      "finalPrompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：极简线稿。用干净、克制的轮廓线表达服装，不保留摄影光影与面料色块。\n\n细节程度：保留领口、袖口、下摆、门襟与主要结构线，适度简化细小纹理。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。细线简约线稿，不表现布面阴影。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。",
+      "optimized": false,
+      "applicationChargeRmb": null,
+      "outputs": [
+        {
+          "taskId": "0f42ac1d-d68b-4958-a96f-c3579e7209fa",
+          "index": 0,
+          "path": "style-to-sketch-12-old-0f42ac1d-d68b-4958-a96f-c3579e7209fa-1.png",
+          "mime": "image/png",
+          "sha256": "9a22d92685bcc2908b3572c03ccf27f48177e8e3247573ee35d6fa7f5f519157",
+          "bytes": 720726,
+          "contentType": "image/png"
+        }
+      ],
+      "completedAt": "2026-10-24T18:06:56.682Z"
+    },
+    "style-to-sketch-12-new": {
+      "id": "style-to-sketch-12-new",
+      "requestId": "pq:visual-v2-extended:style-to-sketch-12-new:0",
+      "compilationRequestId": "pq:visual-v2-extended:style-to-sketch-12-new:compile",
+      "inputHash": "3505f83ca4cb760a6965db0c720aa74f7ec0809fb17aa2c36da72cd7071d1474",
+      "status": "success",
+      "visualReview": "pending-manual-review",
+      "providerImageActualCost": null,
+      "providerChatActualCost": null,
+      "modelConfigId": "d5000000-0000-4000-8000-000000000001",
+      "modelId": "d5000000-0000-4000-8000-000000000001",
+      "startedAt": "2026-10-24T18:06:38.382Z",
+      "compileAttempted": true,
+      "compilation": {
+        "id": "aed981e5-5688-46d8-9c10-bcf205e92974",
+        "requestId": "pq:visual-v2-extended:style-to-sketch-12-new:compile",
+        "status": "success",
+        "optimized": true,
+        "prompt": "Convert Image 1 into one symmetrical front-view fashion flat, using thin, clean black (#000000) contours and essential construction lines on pure white (#FFFFFF); omit photographic color, texture, and shadows. Preserve its proportions, silhouette, pointed collar, center-front placket, short set-in sleeves, sleeve hems, curved hem, and visible seams. Keep exactly five fully visible center-front buttons plus the original partially obscured neckline button, with none added or removed. Show only the garment laid flat; add no pockets, back view, or unseen details.\nAvoid: shading, gradients, color fills, fabric texture, pockets, added or missing buttons, back views, collage grids, models, extra limbs, anatomical distortions, minors, nudity, sexualized presentation, hangers, background objects, brand logos, watermarks, unrelated text, measurements, text labels, color swatches."
+      },
+      "finalPrompt": "Convert Image 1 into one symmetrical front-view fashion flat, using thin, clean black (#000000) contours and essential construction lines on pure white (#FFFFFF); omit photographic color, texture, and shadows. Preserve its proportions, silhouette, pointed collar, center-front placket, short set-in sleeves, sleeve hems, curved hem, and visible seams. Keep exactly five fully visible center-front buttons plus the original partially obscured neckline button, with none added or removed. Show only the garment laid flat; add no pockets, back view, or unseen details.\nAvoid: shading, gradients, color fills, fabric texture, pockets, added or missing buttons, back views, collage grids, models, extra limbs, anatomical distortions, minors, nudity, sexualized presentation, hangers, background objects, brand logos, watermarks, unrelated text, measurements, text labels, color swatches.",
+      "optimized": true,
+      "compilationCost": {
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": null,
+        "inputTokens": null,
+        "outputTokens": null,
+        "cacheHit": null,
+        "latencyMs": null
+      },
+      "taskAttempted": true,
+      "tasks": [
+        {
+          "id": "92c3d412-bc5c-47b2-969d-aecb35bda39d",
+          "requestId": "pq:visual-v2-extended:style-to-sketch-12-new:0",
+          "status": "success",
+          "prompt": "Convert Image 1 into one symmetrical front-view fashion flat, using thin, clean black (#000000) contours and essential construction lines on pure white (#FFFFFF); omit photographic color, texture, and shadows. Preserve its proportions, silhouette, pointed collar, center-front placket, short set-in sleeves, sleeve hems, curved hem, and visible seams. Keep exactly five fully visible center-front buttons plus the original partially obscured neckline button, with none added or removed. Show only the garment laid flat; add no pockets, back view, or unseen details.\nAvoid: shading, gradients, color fills, fabric texture, pockets, added or missing buttons, back views, collage grids, models, extra limbs, anatomical distortions, minors, nudity, sexualized presentation, hangers, background objects, brand logos, watermarks, unrelated text, measurements, text labels, color swatches.",
+          "optimized": true,
+          "credits": 0
+        }
+      ],
+      "applicationChargeRmb": null,
+      "outputs": [
+        {
+          "taskId": "92c3d412-bc5c-47b2-969d-aecb35bda39d",
+          "index": 0,
+          "path": "style-to-sketch-12-new-92c3d412-bc5c-47b2-969d-aecb35bda39d-1.png",
+          "mime": "image/png",
+          "sha256": "68aa10d7ba6478f18d87ffe3ba596c47ae11ae90f445fa470697a4847c9824a2",
+          "bytes": 747386,
+          "contentType": "image/png"
+        }
+      ],
+      "completedAt": "2026-10-24T18:07:09.558Z"
+    },
+    "garment-colorway-12-old": {
+      "id": "garment-colorway-12-old",
+      "requestId": "pq:visual-v2-extended:garment-colorway-12-old:0",
+      "compilationRequestId": "pq:visual-v2-extended:garment-colorway-12-old:compile",
+      "inputHash": "ec88e654fb85a925b49423b842b7dd2b8e99e1a0185a4f722b265d7568365605",
+      "status": "success",
+      "visualReview": "pending-manual-review",
+      "providerImageActualCost": null,
+      "providerChatActualCost": null,
+      "modelConfigId": "d5000000-0000-4000-8000-000000000001",
+      "modelId": "d5000000-0000-4000-8000-000000000001",
+      "startedAt": "2026-10-24T18:06:47.371Z",
+      "taskAttempted": true,
+      "tasks": [
+        {
+          "id": "95cb19f3-e717-4349-ae7b-4ad99c3d5435",
+          "requestId": "pq:visual-v2-extended:garment-colorway-12-old:0",
+          "status": "success",
+          "prompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#253746。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #253746。\n\n改色范围：仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #253746。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。",
+          "optimized": false,
+          "credits": 0
+        }
+      ],
+      "finalPrompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#253746。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #253746。\n\n改色范围：仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #253746。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。",
+      "optimized": false,
+      "applicationChargeRmb": null,
+      "outputs": [
+        {
+          "taskId": "95cb19f3-e717-4349-ae7b-4ad99c3d5435",
+          "index": 0,
+          "path": "garment-colorway-12-old-95cb19f3-e717-4349-ae7b-4ad99c3d5435-1.png",
+          "mime": "image/png",
+          "sha256": "bd8ed0a4952d6daabf15a91a85a0ee15fd32b58d83a15592f21d116ba5b3464c",
+          "bytes": 1353137,
+          "contentType": "image/png"
+        }
+      ],
+      "completedAt": "2026-10-24T18:07:05.738Z"
+    },
+    "garment-colorway-12-new": {
+      "id": "garment-colorway-12-new",
+      "requestId": "pq:visual-v2-extended:garment-colorway-12-new:0",
+      "compilationRequestId": "pq:visual-v2-extended:garment-colorway-12-new:compile",
+      "inputHash": "63a84952b2666d7e1443ac5adbf09250d7bf06c3d4e11e55c09545657815eddd",
+      "status": "success",
+      "visualReview": "pending-manual-review",
+      "providerImageActualCost": null,
+      "providerChatActualCost": null,
+      "modelConfigId": "d5000000-0000-4000-8000-000000000001",
+      "modelId": "d5000000-0000-4000-8000-000000000001",
+      "startedAt": "2026-10-24T18:06:48.225Z",
+      "compileAttempted": true,
+      "compilation": {
+        "id": "c76eb166-259f-4c2c-af68-b5c4e86d2934",
+        "requestId": "pq:visual-v2-extended:garment-colorway-12-new:compile",
+        "status": "success",
+        "optimized": true,
+        "prompt": "Use Image 1 as the editing base, replacing only the body fabric and front placket color with dark slate blue (#253746), not transferring this color elsewhere. Keep both sleeves, the collar, all five center-front buttons and the partially concealed collar button in their original pale blue. Preserve the silhouette, construction lines, visible stitching, collar shape, pocket configuration, any pattern shapes and positions, fabric weave, texture, folds, highlight/shadow gradations, white background and image proportions. The new color sits naturally in the fabric weave and folds, with realistic highlights and shadows, not a flat fill.\nAvoid: flat color fill, color swatches, dimension annotations, collage grids, garment structure or pattern changes, recoloring sleeves, collar or buttons, recoloring skin or background, brand logos, watermarks, unrelated text, extra hands, deformed limbs, underage models, nudity, sexualized presentation."
+      },
+      "finalPrompt": "Use Image 1 as the editing base, replacing only the body fabric and front placket color with dark slate blue (#253746), not transferring this color elsewhere. Keep both sleeves, the collar, all five center-front buttons and the partially concealed collar button in their original pale blue. Preserve the silhouette, construction lines, visible stitching, collar shape, pocket configuration, any pattern shapes and positions, fabric weave, texture, folds, highlight/shadow gradations, white background and image proportions. The new color sits naturally in the fabric weave and folds, with realistic highlights and shadows, not a flat fill.\nAvoid: flat color fill, color swatches, dimension annotations, collage grids, garment structure or pattern changes, recoloring sleeves, collar or buttons, recoloring skin or background, brand logos, watermarks, unrelated text, extra hands, deformed limbs, underage models, nudity, sexualized presentation.",
+      "optimized": true,
+      "compilationCost": {
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": null,
+        "inputTokens": null,
+        "outputTokens": null,
+        "cacheHit": null,
+        "latencyMs": null
+      },
+      "taskAttempted": true,
+      "tasks": [
+        {
+          "id": "02eb4b41-0d37-4f2f-be35-5ec950be76d7",
+          "requestId": "pq:visual-v2-extended:garment-colorway-12-new:0",
+          "status": "success",
+          "prompt": "Use Image 1 as the editing base, replacing only the body fabric and front placket color with dark slate blue (#253746), not transferring this color elsewhere. Keep both sleeves, the collar, all five center-front buttons and the partially concealed collar button in their original pale blue. Preserve the silhouette, construction lines, visible stitching, collar shape, pocket configuration, any pattern shapes and positions, fabric weave, texture, folds, highlight/shadow gradations, white background and image proportions. The new color sits naturally in the fabric weave and folds, with realistic highlights and shadows, not a flat fill.\nAvoid: flat color fill, color swatches, dimension annotations, collage grids, garment structure or pattern changes, recoloring sleeves, collar or buttons, recoloring skin or background, brand logos, watermarks, unrelated text, extra hands, deformed limbs, underage models, nudity, sexualized presentation.",
+          "optimized": true,
+          "credits": 0
+        }
+      ],
+      "applicationChargeRmb": null,
+      "outputs": [
+        {
+          "taskId": "02eb4b41-0d37-4f2f-be35-5ec950be76d7",
+          "index": 0,
+          "path": "garment-colorway-12-new-02eb4b41-0d37-4f2f-be35-5ec950be76d7-1.png",
+          "mime": "image/png",
+          "sha256": "f38328352d635b301f4ad44462144b9cdb076ae098c2046b0a9b0e70b7cbeaf9",
+          "bytes": 1398426,
+          "contentType": "image/png"
+        }
+      ],
+      "completedAt": "2026-10-24T18:07:18.446Z"
+    },
+    "style-to-sketch-13-old": {
+      "id": "style-to-sketch-13-old",
+      "requestId": "pq:visual-v2-extended:style-to-sketch-13-old:0",
+      "compilationRequestId": "pq:visual-v2-extended:style-to-sketch-13-old:compile",
+      "inputHash": "5267a1c6c89f47b99221c014022cbf5ac99ccc87891b624fbfb47d4b8a04dbe8",
+      "status": "success",
+      "visualReview": "pending-manual-review",
+      "providerImageActualCost": null,
+      "providerChatActualCost": null,
+      "modelConfigId": "d5000000-0000-4000-8000-000000000001",
+      "modelId": "d5000000-0000-4000-8000-000000000001",
+      "startedAt": "2026-10-24T18:06:56.685Z",
+      "taskAttempted": true,
+      "tasks": [
+        {
+          "id": "644396ee-d767-438a-a60b-98ffffdf98ca",
+          "requestId": "pq:visual-v2-extended:style-to-sketch-13-old:0",
+          "status": "success",
+          "prompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：技术感线稿。用清晰、均匀的线条表达服装轮廓和可见结构，主轮廓与结构线层次分明。\n\n细节程度：保留领口、袖口、下摆、门襟与主要结构线，适度简化细小纹理。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。外轮廓稍粗、内部缝线细，线宽层级清楚。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。",
+          "optimized": false,
+          "credits": 0
+        }
+      ],
+      "finalPrompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：技术感线稿。用清晰、均匀的线条表达服装轮廓和可见结构，主轮廓与结构线层次分明。\n\n细节程度：保留领口、袖口、下摆、门襟与主要结构线，适度简化细小纹理。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。外轮廓稍粗、内部缝线细，线宽层级清楚。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。",
+      "optimized": false,
+      "applicationChargeRmb": null,
+      "outputs": [
+        {
+          "taskId": "644396ee-d767-438a-a60b-98ffffdf98ca",
+          "index": 0,
+          "path": "style-to-sketch-13-old-644396ee-d767-438a-a60b-98ffffdf98ca-1.png",
+          "mime": "image/png",
+          "sha256": "fcdcec951e304cc2e502b97770ba39a0195b2a0be9a03983ff5efc010ac48fa2",
+          "bytes": 762365,
+          "contentType": "image/png"
+        }
+      ],
+      "completedAt": "2026-10-24T18:07:14.840Z"
+    },
+    "style-to-sketch-13-new": {
+      "id": "style-to-sketch-13-new",
+      "requestId": "pq:visual-v2-extended:style-to-sketch-13-new:0",
+      "compilationRequestId": "pq:visual-v2-extended:style-to-sketch-13-new:compile",
+      "inputHash": "f3fb3ae6f37fee9ed9a8a251dd4f0a75497e19ae29f1a19ad8301053a16eddaa",
+      "status": "success",
+      "visualReview": "pending-manual-review",
+      "providerImageActualCost": null,
+      "providerChatActualCost": null,
+      "modelConfigId": "d5000000-0000-4000-8000-000000000001",
+      "modelId": "d5000000-0000-4000-8000-000000000001",
+      "startedAt": "2026-10-24T18:07:05.741Z",
+      "compileAttempted": true,
+      "compilation": {
+        "id": "c32c5c92-daf1-4226-9457-9af5e4eed801",
+        "requestId": "pq:visual-v2-extended:style-to-sketch-13-new:compile",
+        "status": "success",
+        "optimized": true,
+        "prompt": "Convert Image 1 into one symmetrical front-view technical fashion flat; use its visible construction, not its photographic rendering. Preserve proportions, silhouette, pointed collar, center-front placket, short set-in sleeves, sleeve hems, curved hem, and exactly five fully visible front buttons plus the original partially obscured neckline button; add no pockets or unseen details. Use consistent black (#000000) lines, a slightly bolder outer contour, thin interior seams, and dashed topstitching on pure white (#FFFFFF). Show only the garment, laid flat; omit the back view, shading, fills, and fabric texture.\nAvoid: shading, gradients, color fills, fabric texture, models, minors, extra limbs, anatomical deformation, nudity, sexualized presentation, hangers, background objects, logos, watermarks, unrelated text, text labels, collages, multiple panels, back views, color swatches, measurements, added pockets, added or missing buttons."
+      },
+      "finalPrompt": "Convert Image 1 into one symmetrical front-view technical fashion flat; use its visible construction, not its photographic rendering. Preserve proportions, silhouette, pointed collar, center-front placket, short set-in sleeves, sleeve hems, curved hem, and exactly five fully visible front buttons plus the original partially obscured neckline button; add no pockets or unseen details. Use consistent black (#000000) lines, a slightly bolder outer contour, thin interior seams, and dashed topstitching on pure white (#FFFFFF). Show only the garment, laid flat; omit the back view, shading, fills, and fabric texture.\nAvoid: shading, gradients, color fills, fabric texture, models, minors, extra limbs, anatomical deformation, nudity, sexualized presentation, hangers, background objects, logos, watermarks, unrelated text, text labels, collages, multiple panels, back views, color swatches, measurements, added pockets, added or missing buttons.",
+      "optimized": true,
+      "compilationCost": {
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": null,
+        "inputTokens": null,
+        "outputTokens": null,
+        "cacheHit": null,
+        "latencyMs": null
+      },
+      "taskAttempted": true,
+      "tasks": [
+        {
+          "id": "8d4e0355-6fe8-4a36-a2cb-233a6fa76989",
+          "requestId": "pq:visual-v2-extended:style-to-sketch-13-new:0",
+          "status": "success",
+          "prompt": "Convert Image 1 into one symmetrical front-view technical fashion flat; use its visible construction, not its photographic rendering. Preserve proportions, silhouette, pointed collar, center-front placket, short set-in sleeves, sleeve hems, curved hem, and exactly five fully visible front buttons plus the original partially obscured neckline button; add no pockets or unseen details. Use consistent black (#000000) lines, a slightly bolder outer contour, thin interior seams, and dashed topstitching on pure white (#FFFFFF). Show only the garment, laid flat; omit the back view, shading, fills, and fabric texture.\nAvoid: shading, gradients, color fills, fabric texture, models, minors, extra limbs, anatomical deformation, nudity, sexualized presentation, hangers, background objects, logos, watermarks, unrelated text, text labels, collages, multiple panels, back views, color swatches, measurements, added pockets, added or missing buttons.",
+          "optimized": true,
+          "credits": 0
+        }
+      ],
+      "applicationChargeRmb": null,
+      "outputs": [
+        {
+          "taskId": "8d4e0355-6fe8-4a36-a2cb-233a6fa76989",
+          "index": 0,
+          "path": "style-to-sketch-13-new-8d4e0355-6fe8-4a36-a2cb-233a6fa76989-1.png",
+          "mime": "image/png",
+          "sha256": "f20f06a6d3a23de00c309efdc33c8cdc24f03c954905905d9f789225a632571a",
+          "bytes": 761848,
+          "contentType": "image/png"
+        }
+      ],
+      "completedAt": "2026-10-24T18:07:40.750Z"
+    },
+    "garment-colorway-13-old": {
+      "id": "garment-colorway-13-old",
+      "requestId": "pq:visual-v2-extended:garment-colorway-13-old:0",
+      "compilationRequestId": "pq:visual-v2-extended:garment-colorway-13-old:compile",
+      "inputHash": "712a93730d1a69eb5308917c9051b8032a7286656aea2e40ce260b88a4ed136d",
+      "status": "success",
+      "visualReview": "pending-manual-review",
+      "providerImageActualCost": null,
+      "providerChatActualCost": null,
+      "modelConfigId": "d5000000-0000-4000-8000-000000000001",
+      "modelId": "d5000000-0000-4000-8000-000000000001",
+      "startedAt": "2026-10-24T18:07:09.560Z",
+      "taskAttempted": true,
+      "tasks": [
+        {
+          "id": "fe45e118-f630-4bd3-9ed9-f6891b406d07",
+          "requestId": "pq:visual-v2-extended:garment-colorway-13-old:0",
+          "status": "success",
+          "prompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#B76E55。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #B76E55。\n\n改色范围：仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #B76E55。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。",
+          "optimized": false,
+          "credits": 0
+        }
+      ],
+      "finalPrompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#B76E55。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #B76E55。\n\n改色范围：仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #B76E55。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。",
+      "optimized": false,
+      "applicationChargeRmb": null,
+      "outputs": [
+        {
+          "taskId": "fe45e118-f630-4bd3-9ed9-f6891b406d07",
+          "index": 0,
+          "path": "garment-colorway-13-old-fe45e118-f630-4bd3-9ed9-f6891b406d07-1.png",
+          "mime": "image/png",
+          "sha256": "64347948fbda5885bf47ba66eacf07dd715cd655cfba2fd182c8c19c73263b15",
+          "bytes": 1368369,
+          "contentType": "image/png"
+        }
+      ],
+      "completedAt": "2026-10-24T18:07:27.801Z"
+    },
+    "garment-colorway-13-new": {
+      "id": "garment-colorway-13-new",
+      "requestId": "pq:visual-v2-extended:garment-colorway-13-new:0",
+      "compilationRequestId": "pq:visual-v2-extended:garment-colorway-13-new:compile",
+      "inputHash": "51e8d0c7d383fed4657baeffd74ca86703eabe9491fed426b3ba3f100ee3a3b8",
+      "status": "success",
+      "visualReview": "pending-manual-review",
+      "providerImageActualCost": null,
+      "providerChatActualCost": null,
+      "modelConfigId": "d5000000-0000-4000-8000-000000000001",
+      "modelId": "d5000000-0000-4000-8000-000000000001",
+      "startedAt": "2026-10-24T18:07:14.843Z",
+      "compileAttempted": true,
+      "compilation": {
+        "id": "fffdf4b3-ed72-4f26-9637-8b0034fca619",
+        "requestId": "pq:visual-v2-extended:garment-colorway-13-new:compile",
+        "status": "success",
+        "optimized": true,
+        "prompt": "Recolor only Image 1’s body fabric and front placket to muted terracotta (#B76E55); use it as the structural reference, not the target palette. Keep sleeves, collar, five center-front buttons and partially concealed collar button their original light blue. Preserve silhouette, construction lines, visible stitching, collar shape, pocket configuration, pattern shapes/positions, fabric weave, folds, highlight/shadow gradations, white background and image proportions. The new color sits naturally in the fabric weave and folds, with realistic highlights and shadows, not a flat fill.\nAvoid: flat color fill, color swatches or dimension annotations, garment structure or pattern changes, recoloring sleeves, collar, buttons, skin or background, brand logos, watermarks or unrelated text, collages or multi-panel layouts, extra hands or deformed limbs, minor models, nudity or sexualized presentation."
+      },
+      "finalPrompt": "Recolor only Image 1’s body fabric and front placket to muted terracotta (#B76E55); use it as the structural reference, not the target palette. Keep sleeves, collar, five center-front buttons and partially concealed collar button their original light blue. Preserve silhouette, construction lines, visible stitching, collar shape, pocket configuration, pattern shapes/positions, fabric weave, folds, highlight/shadow gradations, white background and image proportions. The new color sits naturally in the fabric weave and folds, with realistic highlights and shadows, not a flat fill.\nAvoid: flat color fill, color swatches or dimension annotations, garment structure or pattern changes, recoloring sleeves, collar, buttons, skin or background, brand logos, watermarks or unrelated text, collages or multi-panel layouts, extra hands or deformed limbs, minor models, nudity or sexualized presentation.",
+      "optimized": true,
+      "compilationCost": {
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": null,
+        "inputTokens": null,
+        "outputTokens": null,
+        "cacheHit": null,
+        "latencyMs": null
+      },
+      "taskAttempted": true,
+      "tasks": [
+        {
+          "id": "a27b214a-6e33-47b3-9a10-2073e3794ad7",
+          "requestId": "pq:visual-v2-extended:garment-colorway-13-new:0",
+          "status": "success",
+          "prompt": "Recolor only Image 1’s body fabric and front placket to muted terracotta (#B76E55); use it as the structural reference, not the target palette. Keep sleeves, collar, five center-front buttons and partially concealed collar button their original light blue. Preserve silhouette, construction lines, visible stitching, collar shape, pocket configuration, pattern shapes/positions, fabric weave, folds, highlight/shadow gradations, white background and image proportions. The new color sits naturally in the fabric weave and folds, with realistic highlights and shadows, not a flat fill.\nAvoid: flat color fill, color swatches or dimension annotations, garment structure or pattern changes, recoloring sleeves, collar, buttons, skin or background, brand logos, watermarks or unrelated text, collages or multi-panel layouts, extra hands or deformed limbs, minor models, nudity or sexualized presentation.",
+          "optimized": true,
+          "credits": 0
+        }
+      ],
+      "applicationChargeRmb": null,
+      "outputs": [
+        {
+          "taskId": "a27b214a-6e33-47b3-9a10-2073e3794ad7",
+          "index": 0,
+          "path": "garment-colorway-13-new-a27b214a-6e33-47b3-9a10-2073e3794ad7-1.png",
+          "mime": "image/png",
+          "sha256": "ca0f11daefac1076ebb96413671487c8406a02a65f03dbedda876a3895d6eafc",
+          "bytes": 1423613,
+          "contentType": "image/png"
+        }
+      ],
+      "completedAt": "2026-10-24T18:07:45.720Z"
+    },
+    "style-to-sketch-14-old": {
+      "id": "style-to-sketch-14-old",
+      "requestId": "pq:visual-v2-extended:style-to-sketch-14-old:0",
+      "compilationRequestId": "pq:visual-v2-extended:style-to-sketch-14-old:compile",
+      "inputHash": "dd2027bfbe779fffcfc6fe8f35ba0114b76b9981a1f0f0339cb66120dd6f34f3",
+      "status": "success",
+      "visualReview": "pending-manual-review",
+      "providerImageActualCost": null,
+      "providerChatActualCost": null,
+      "modelConfigId": "d5000000-0000-4000-8000-000000000001",
+      "modelId": "d5000000-0000-4000-8000-000000000001",
+      "startedAt": "2026-10-24T18:07:18.451Z",
+      "taskAttempted": true,
+      "tasks": [
+        {
+          "id": "1c175a46-c4ac-4624-90e7-85e08984faa9",
+          "requestId": "pq:visual-v2-extended:style-to-sketch-14-old:0",
+          "status": "success",
+          "prompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：极简线稿。用干净、克制的轮廓线表达服装，不保留摄影光影与面料色块。\n\n细节程度：保留实际可见的分割线、口袋、褶裥、门襟、纽扣和装饰细节，避免虚构细节。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。保留领片交叠与门襟，不添加被遮住的纽扣或缝线。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。",
+          "optimized": false,
+          "credits": 0
+        }
+      ],
+      "finalPrompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：极简线稿。用干净、克制的轮廓线表达服装，不保留摄影光影与面料色块。\n\n细节程度：保留实际可见的分割线、口袋、褶裥、门襟、纽扣和装饰细节，避免虚构细节。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。保留领片交叠与门襟，不添加被遮住的纽扣或缝线。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。",
+      "optimized": false,
+      "applicationChargeRmb": null,
+      "outputs": [
+        {
+          "taskId": "1c175a46-c4ac-4624-90e7-85e08984faa9",
+          "index": 0,
+          "path": "style-to-sketch-14-old-1c175a46-c4ac-4624-90e7-85e08984faa9-1.png",
+          "mime": "image/png",
+          "sha256": "dc11993a307d16befb04b41f76e7c89f7900878462758a1fabd10ea68ef72e1b",
+          "bytes": 717632,
+          "contentType": "image/png"
+        }
+      ],
+      "completedAt": "2026-10-24T18:07:36.674Z"
+    },
+    "style-to-sketch-14-new": {
+      "id": "style-to-sketch-14-new",
+      "requestId": "pq:visual-v2-extended:style-to-sketch-14-new:0",
+      "compilationRequestId": "pq:visual-v2-extended:style-to-sketch-14-new:compile",
+      "inputHash": "f5e87b9f011985296fc88ce38c20493db5b9aa1cf85a7abe38068423f400828e",
+      "status": "success",
+      "visualReview": "pending-manual-review",
+      "providerImageActualCost": null,
+      "providerChatActualCost": null,
+      "modelConfigId": "d5000000-0000-4000-8000-000000000001",
+      "modelId": "d5000000-0000-4000-8000-000000000001",
+      "startedAt": "2026-10-24T18:07:27.810Z",
+      "compileAttempted": true,
+      "compilation": {
+        "id": "8e3e58b2-d6b4-4a53-885a-f7e5da225734",
+        "requestId": "pq:visual-v2-extended:style-to-sketch-14-new:compile",
+        "status": "success",
+        "optimized": true,
+        "prompt": "Convert Image 1 into one front-view minimal fashion flat, symmetrically laid out, using clean black (#000000) contours and essential construction lines on pure white (#FFFFFF). Preserve its proportions, silhouette, overlapping pointed collar, placket, short set-in sleeves, curved hem, and visible stitching. Retain exactly five fully visible center-front buttons plus the original partially obscured neckline button; preserve its occlusion. Use Image 1 for visible construction only, not color, texture, shadows, or folds. Add no pockets, hidden buttons, concealed seams, or back view.\nAvoid: shading, gradients, color fills, fabric texture, models, extra limbs, anatomical distortion, hangers, background objects, logos, watermarks, unrelated text, labels, collages, multiple views, color swatches, measurements, minors, nudity, sexualized presentation, added pockets, altered button count, invented hidden construction."
+      },
+      "finalPrompt": "Convert Image 1 into one front-view minimal fashion flat, symmetrically laid out, using clean black (#000000) contours and essential construction lines on pure white (#FFFFFF). Preserve its proportions, silhouette, overlapping pointed collar, placket, short set-in sleeves, curved hem, and visible stitching. Retain exactly five fully visible center-front buttons plus the original partially obscured neckline button; preserve its occlusion. Use Image 1 for visible construction only, not color, texture, shadows, or folds. Add no pockets, hidden buttons, concealed seams, or back view.\nAvoid: shading, gradients, color fills, fabric texture, models, extra limbs, anatomical distortion, hangers, background objects, logos, watermarks, unrelated text, labels, collages, multiple views, color swatches, measurements, minors, nudity, sexualized presentation, added pockets, altered button count, invented hidden construction.",
+      "optimized": true,
+      "compilationCost": {
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": null,
+        "inputTokens": null,
+        "outputTokens": null,
+        "cacheHit": null,
+        "latencyMs": null
+      },
+      "taskAttempted": true,
+      "tasks": [
+        {
+          "id": "9ac0df5e-bcdb-4e33-be2a-b8dc5dac3a97",
+          "requestId": "pq:visual-v2-extended:style-to-sketch-14-new:0",
+          "status": "success",
+          "prompt": "Convert Image 1 into one front-view minimal fashion flat, symmetrically laid out, using clean black (#000000) contours and essential construction lines on pure white (#FFFFFF). Preserve its proportions, silhouette, overlapping pointed collar, placket, short set-in sleeves, curved hem, and visible stitching. Retain exactly five fully visible center-front buttons plus the original partially obscured neckline button; preserve its occlusion. Use Image 1 for visible construction only, not color, texture, shadows, or folds. Add no pockets, hidden buttons, concealed seams, or back view.\nAvoid: shading, gradients, color fills, fabric texture, models, extra limbs, anatomical distortion, hangers, background objects, logos, watermarks, unrelated text, labels, collages, multiple views, color swatches, measurements, minors, nudity, sexualized presentation, added pockets, altered button count, invented hidden construction.",
+          "optimized": true,
+          "credits": 0
+        }
+      ],
+      "applicationChargeRmb": null,
+      "outputs": [
+        {
+          "taskId": "9ac0df5e-bcdb-4e33-be2a-b8dc5dac3a97",
+          "index": 0,
+          "path": "style-to-sketch-14-new-9ac0df5e-bcdb-4e33-be2a-b8dc5dac3a97-1.png",
+          "mime": "image/png",
+          "sha256": "0b5123508fbeb6ce87e302df9c216f74cec2c66e25e060f71a79154815464735",
+          "bytes": 746105,
+          "contentType": "image/png"
+        }
+      ],
+      "completedAt": "2026-10-24T18:07:58.145Z"
+    },
+    "garment-colorway-14-old": {
+      "id": "garment-colorway-14-old",
+      "requestId": "pq:visual-v2-extended:garment-colorway-14-old:0",
+      "compilationRequestId": "pq:visual-v2-extended:garment-colorway-14-old:compile",
+      "inputHash": "8b4f1765d3c428536154af3a13eb507d02a4c134f40ffb631bbe138b68223344",
+      "status": "success",
+      "visualReview": "pending-manual-review",
+      "providerImageActualCost": null,
+      "providerChatActualCost": null,
+      "modelConfigId": "d5000000-0000-4000-8000-000000000001",
+      "modelId": "d5000000-0000-4000-8000-000000000001",
+      "startedAt": "2026-10-24T18:07:36.682Z",
+      "taskAttempted": true,
+      "tasks": [
+        {
+          "id": "c2d2bc53-0328-4c69-a268-8d06314b3688",
+          "requestId": "pq:visual-v2-extended:garment-colorway-14-old:0",
+          "status": "success",
+          "prompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#9AAFC3。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #9AAFC3。\n\n改色范围：仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #9AAFC3。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。",
+          "optimized": false,
+          "credits": 0
+        }
+      ],
+      "finalPrompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#9AAFC3。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #9AAFC3。\n\n改色范围：仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #9AAFC3。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。",
+      "optimized": false,
+      "applicationChargeRmb": null,
+      "outputs": [
+        {
+          "taskId": "c2d2bc53-0328-4c69-a268-8d06314b3688",
+          "index": 0,
+          "path": "garment-colorway-14-old-c2d2bc53-0328-4c69-a268-8d06314b3688-1.png",
+          "mime": "image/png",
+          "sha256": "8923c130b9b51f34c95e8cc7c7bef5e7d7dbd64943544fbf978d075a9301f747",
+          "bytes": 1305797,
+          "contentType": "image/png"
+        }
+      ],
+      "completedAt": "2026-10-24T18:07:57.917Z"
+    },
+    "garment-colorway-14-new": {
+      "id": "garment-colorway-14-new",
+      "requestId": "pq:visual-v2-extended:garment-colorway-14-new:0",
+      "compilationRequestId": "pq:visual-v2-extended:garment-colorway-14-new:compile",
+      "inputHash": "d9469e701d9c202b9daa37a095db7647f29d94cd3d05e7741b62d5a50220b240",
+      "status": "success",
+      "visualReview": "pending-manual-review",
+      "providerImageActualCost": null,
+      "providerChatActualCost": null,
+      "modelConfigId": "d5000000-0000-4000-8000-000000000001",
+      "modelId": "d5000000-0000-4000-8000-000000000001",
+      "startedAt": "2026-10-24T18:07:40.752Z",
+      "compileAttempted": true,
+      "compilation": {
+        "id": "4aad58e9-ac9f-45f2-aee5-fe01ce3e0c63",
+        "requestId": "pq:visual-v2-extended:garment-colorway-14-new:compile",
+        "status": "success",
+        "optimized": true,
+        "prompt": "Recolor only Image 1’s body fabric and front placket to dusty blue-gray (#9AAFC3); use its construction, not its original body color. Keep sleeves, collar, five center-front buttons and partially concealed collar button original light blue. Preserve silhouette, structural seams, visible stitching, collar shape, absence of pockets/patterns, fabric weave, folds, highlights, shadows, white background and image proportions; leave everything outside the specified regions unchanged. The new color sits naturally in the fabric weave and folds, with realistic highlights and shadows, not a flat fill.\nAvoid: flat color fill, color swatches or dimension annotations, garment structure or pattern changes, recoloring sleeves, collar or buttons, recoloring skin or background, brand logos, watermarks or unrelated text, collages or multi-panel layouts, extra limbs, anatomical distortion, underage models, nudity or sexualization."
+      },
+      "finalPrompt": "Recolor only Image 1’s body fabric and front placket to dusty blue-gray (#9AAFC3); use its construction, not its original body color. Keep sleeves, collar, five center-front buttons and partially concealed collar button original light blue. Preserve silhouette, structural seams, visible stitching, collar shape, absence of pockets/patterns, fabric weave, folds, highlights, shadows, white background and image proportions; leave everything outside the specified regions unchanged. The new color sits naturally in the fabric weave and folds, with realistic highlights and shadows, not a flat fill.\nAvoid: flat color fill, color swatches or dimension annotations, garment structure or pattern changes, recoloring sleeves, collar or buttons, recoloring skin or background, brand logos, watermarks or unrelated text, collages or multi-panel layouts, extra limbs, anatomical distortion, underage models, nudity or sexualization.",
+      "optimized": true,
+      "compilationCost": {
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": null,
+        "inputTokens": null,
+        "outputTokens": null,
+        "cacheHit": null,
+        "latencyMs": null
+      },
+      "taskAttempted": true,
+      "tasks": [
+        {
+          "id": "f0f6f021-e90f-49d8-9861-e4000ef4b0ae",
+          "requestId": "pq:visual-v2-extended:garment-colorway-14-new:0",
+          "status": "success",
+          "prompt": "Recolor only Image 1’s body fabric and front placket to dusty blue-gray (#9AAFC3); use its construction, not its original body color. Keep sleeves, collar, five center-front buttons and partially concealed collar button original light blue. Preserve silhouette, structural seams, visible stitching, collar shape, absence of pockets/patterns, fabric weave, folds, highlights, shadows, white background and image proportions; leave everything outside the specified regions unchanged. The new color sits naturally in the fabric weave and folds, with realistic highlights and shadows, not a flat fill.\nAvoid: flat color fill, color swatches or dimension annotations, garment structure or pattern changes, recoloring sleeves, collar or buttons, recoloring skin or background, brand logos, watermarks or unrelated text, collages or multi-panel layouts, extra limbs, anatomical distortion, underage models, nudity or sexualization.",
+          "optimized": true,
+          "credits": 0
+        }
+      ],
+      "applicationChargeRmb": null,
+      "outputs": [
+        {
+          "taskId": "f0f6f021-e90f-49d8-9861-e4000ef4b0ae",
+          "index": 0,
+          "path": "garment-colorway-14-new-f0f6f021-e90f-49d8-9861-e4000ef4b0ae-1.png",
+          "mime": "image/png",
+          "sha256": "c78946c25fdea50c45e8ec5a76a9b3b934532c74ea803a1a096fdf950f8fbcb5",
+          "bytes": 1357296,
+          "contentType": "image/png"
+        }
+      ],
+      "completedAt": "2026-10-24T18:08:12.229Z"
+    },
+    "style-to-sketch-15-old": {
+      "id": "style-to-sketch-15-old",
+      "requestId": "pq:visual-v2-extended:style-to-sketch-15-old:0",
+      "compilationRequestId": "pq:visual-v2-extended:style-to-sketch-15-old:compile",
+      "inputHash": "3e8fe053c2584f4e191b0a73992509151490e96d3c7bba9e60c81930bc31593b",
+      "status": "success",
+      "visualReview": "pending-manual-review",
+      "providerImageActualCost": null,
+      "providerChatActualCost": null,
+      "modelConfigId": "d5000000-0000-4000-8000-000000000001",
+      "modelId": "d5000000-0000-4000-8000-000000000001",
+      "startedAt": "2026-10-24T18:07:45.723Z",
+      "taskAttempted": true,
+      "tasks": [
+        {
+          "id": "4acdbaf4-07ee-44cd-9b87-590ccdfed002",
+          "requestId": "pq:visual-v2-extended:style-to-sketch-15-old:0",
+          "status": "success",
+          "prompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：技术感线稿。用清晰、均匀的线条表达服装轮廓和可见结构，主轮廓与结构线层次分明。\n\n细节程度：保留领口、袖口、下摆、门襟与主要结构线，适度简化细小纹理。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。清楚表现现有短袖袖口折边。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。",
+          "optimized": false,
+          "credits": 0
+        }
+      ],
+      "finalPrompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：技术感线稿。用清晰、均匀的线条表达服装轮廓和可见结构，主轮廓与结构线层次分明。\n\n细节程度：保留领口、袖口、下摆、门襟与主要结构线，适度简化细小纹理。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。清楚表现现有短袖袖口折边。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。",
+      "optimized": false,
+      "applicationChargeRmb": null,
+      "outputs": [
+        {
+          "taskId": "4acdbaf4-07ee-44cd-9b87-590ccdfed002",
+          "index": 0,
+          "path": "style-to-sketch-15-old-4acdbaf4-07ee-44cd-9b87-590ccdfed002-1.png",
+          "mime": "image/png",
+          "sha256": "0a17b042ee331701a4189d1e49a3e928e0d83ffb6e0b925e5b41c8054db5b959",
+          "bytes": 754207,
+          "contentType": "image/png"
+        }
+      ],
+      "completedAt": "2026-10-24T18:08:06.892Z"
+    },
+    "style-to-sketch-15-new": {
+      "id": "style-to-sketch-15-new",
+      "requestId": "pq:visual-v2-extended:style-to-sketch-15-new:0",
+      "compilationRequestId": "pq:visual-v2-extended:style-to-sketch-15-new:compile",
+      "inputHash": "70dae50daf288cf9580b163c7fe5d748c32c46074983fd2dfd7aceafaabd920e",
+      "status": "success",
+      "visualReview": "pending-manual-review",
+      "providerImageActualCost": null,
+      "providerChatActualCost": null,
+      "modelConfigId": "d5000000-0000-4000-8000-000000000001",
+      "modelId": "d5000000-0000-4000-8000-000000000001",
+      "startedAt": "2026-10-24T18:07:57.922Z",
+      "compileAttempted": true,
+      "compilation": {
+        "id": "c5568211-1de8-49fd-9fee-78042425f90a",
+        "requestId": "pq:visual-v2-extended:style-to-sketch-15-new:compile",
+        "status": "success",
+        "optimized": true,
+        "prompt": "Convert Image 1 into one symmetrical front-view technical fashion flat; use its visible construction, not its color, texture or shadows. Preserve original proportions, silhouette, pointed collar, placket, short set-in sleeves, curved hem, exactly five fully visible center-front buttons and the original partially concealed collar button; add no pockets or unseen details. Clearly delineate existing sleeve hem folds and visible seams. Use uniform black (#000000) lines, bolder outer contours, thinner construction lines and dashed topstitching on pure white (#FFFFFF); show only the garment, without a back view.\nAvoid: shading, gradients, color fills, fabric texture, models, extra hands, distorted limbs, minors, nudity, sexualization, hangers, background objects, brand logos, watermarks, unrelated text, labels, collages, multiple views, back view, color swatches, measurements, added pockets, added or missing buttons."
+      },
+      "finalPrompt": "Convert Image 1 into one symmetrical front-view technical fashion flat; use its visible construction, not its color, texture or shadows. Preserve original proportions, silhouette, pointed collar, placket, short set-in sleeves, curved hem, exactly five fully visible center-front buttons and the original partially concealed collar button; add no pockets or unseen details. Clearly delineate existing sleeve hem folds and visible seams. Use uniform black (#000000) lines, bolder outer contours, thinner construction lines and dashed topstitching on pure white (#FFFFFF); show only the garment, without a back view.\nAvoid: shading, gradients, color fills, fabric texture, models, extra hands, distorted limbs, minors, nudity, sexualization, hangers, background objects, brand logos, watermarks, unrelated text, labels, collages, multiple views, back view, color swatches, measurements, added pockets, added or missing buttons.",
+      "optimized": true,
+      "compilationCost": {
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": null,
+        "inputTokens": null,
+        "outputTokens": null,
+        "cacheHit": null,
+        "latencyMs": null
+      },
+      "taskAttempted": true,
+      "tasks": [
+        {
+          "id": "d61030d6-613e-461f-97be-930a00eaf22f",
+          "requestId": "pq:visual-v2-extended:style-to-sketch-15-new:0",
+          "status": "success",
+          "prompt": "Convert Image 1 into one symmetrical front-view technical fashion flat; use its visible construction, not its color, texture or shadows. Preserve original proportions, silhouette, pointed collar, placket, short set-in sleeves, curved hem, exactly five fully visible center-front buttons and the original partially concealed collar button; add no pockets or unseen details. Clearly delineate existing sleeve hem folds and visible seams. Use uniform black (#000000) lines, bolder outer contours, thinner construction lines and dashed topstitching on pure white (#FFFFFF); show only the garment, without a back view.\nAvoid: shading, gradients, color fills, fabric texture, models, extra hands, distorted limbs, minors, nudity, sexualization, hangers, background objects, brand logos, watermarks, unrelated text, labels, collages, multiple views, back view, color swatches, measurements, added pockets, added or missing buttons.",
+          "optimized": true,
+          "credits": 0
+        }
+      ],
+      "applicationChargeRmb": null,
+      "outputs": [
+        {
+          "taskId": "d61030d6-613e-461f-97be-930a00eaf22f",
+          "index": 0,
+          "path": "style-to-sketch-15-new-d61030d6-613e-461f-97be-930a00eaf22f-1.png",
+          "mime": "image/png",
+          "sha256": "307849d1ec4d09d22d25f2733abcf9ebd969c20c8e3731ed22476c8a7a14299a",
+          "bytes": 756160,
+          "contentType": "image/png"
+        }
+      ],
+      "completedAt": "2026-10-24T18:08:32.355Z"
+    },
+    "garment-colorway-15-old": {
+      "id": "garment-colorway-15-old",
+      "requestId": "pq:visual-v2-extended:garment-colorway-15-old:0",
+      "compilationRequestId": "pq:visual-v2-extended:garment-colorway-15-old:compile",
+      "inputHash": "a22fea9c99598fb98a1adb8f90f737656800c135e0a1ffa90a2289e375ee27d3",
+      "status": "success",
+      "visualReview": "pending-manual-review",
+      "providerImageActualCost": null,
+      "providerChatActualCost": null,
+      "modelConfigId": "d5000000-0000-4000-8000-000000000001",
+      "modelId": "d5000000-0000-4000-8000-000000000001",
+      "startedAt": "2026-10-24T18:07:58.148Z",
+      "taskAttempted": true,
+      "tasks": [
+        {
+          "id": "ba42d5ef-9cb2-47a4-bef2-b47a8c9a6d67",
+          "requestId": "pq:visual-v2-extended:garment-colorway-15-old:0",
+          "status": "success",
+          "prompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#D8A0A8。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #D8A0A8。\n\n改色范围：仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #D8A0A8。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。",
+          "optimized": false,
+          "credits": 0
+        }
+      ],
+      "finalPrompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#D8A0A8。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #D8A0A8。\n\n改色范围：仅大身面料和前门襟；袖子、领子及全部纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #D8A0A8。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。",
+      "optimized": false,
+      "applicationChargeRmb": null,
+      "outputs": [
+        {
+          "taskId": "ba42d5ef-9cb2-47a4-bef2-b47a8c9a6d67",
+          "index": 0,
+          "path": "garment-colorway-15-old-ba42d5ef-9cb2-47a4-bef2-b47a8c9a6d67-1.png",
+          "mime": "image/png",
+          "sha256": "d6faea58e8dc571393da1ecfa35159d22f96b0348d1330a40b46c7c463a55258",
+          "bytes": 1333805,
+          "contentType": "image/png"
+        }
+      ],
+      "completedAt": "2026-10-24T18:08:16.904Z"
+    },
+    "garment-colorway-15-new": {
+      "id": "garment-colorway-15-new",
+      "requestId": "pq:visual-v2-extended:garment-colorway-15-new:0",
+      "compilationRequestId": "pq:visual-v2-extended:garment-colorway-15-new:compile",
+      "inputHash": "ed54093a05e30de1808ecf9d6ec1e7c8d5bd30f21b67e27c5a82da6523d180d0",
+      "status": "success",
+      "visualReview": "pending-manual-review",
+      "providerImageActualCost": null,
+      "providerChatActualCost": null,
+      "modelConfigId": "d5000000-0000-4000-8000-000000000001",
+      "modelId": "d5000000-0000-4000-8000-000000000001",
+      "startedAt": "2026-10-24T18:08:06.895Z",
+      "compileAttempted": true,
+      "compilation": {
+        "id": "b646c857-ac67-4f77-a944-77c03a590c99",
+        "requestId": "pq:visual-v2-extended:garment-colorway-15-new:compile",
+        "status": "success",
+        "optimized": true,
+        "prompt": "Recolor only Image 1’s body fabric and front placket dusty rose (#D8A0A8); retain its garment and composition, not its original body color. Keep sleeves, collar, five center-front buttons and partially obscured collar button their original light blue. Preserve silhouette, construction lines, visible stitching, collar shape, pocketless design, absence of patterns, fabric weave, folds, highlights, shadows, white background and image proportions. The new color sits naturally in the fabric weave and folds, with realistic highlights and shadows, not a flat fill.\nAvoid: flat color fill, garment structure or pattern changes, recoloring sleeves, collar, buttons, skin or background, brand logos, watermarks or unrelated text, collage grids or color swatches, dimension annotations, extra hands or deformed limbs, underage models, nudity or sexualization."
+      },
+      "finalPrompt": "Recolor only Image 1’s body fabric and front placket dusty rose (#D8A0A8); retain its garment and composition, not its original body color. Keep sleeves, collar, five center-front buttons and partially obscured collar button their original light blue. Preserve silhouette, construction lines, visible stitching, collar shape, pocketless design, absence of patterns, fabric weave, folds, highlights, shadows, white background and image proportions. The new color sits naturally in the fabric weave and folds, with realistic highlights and shadows, not a flat fill.\nAvoid: flat color fill, garment structure or pattern changes, recoloring sleeves, collar, buttons, skin or background, brand logos, watermarks or unrelated text, collage grids or color swatches, dimension annotations, extra hands or deformed limbs, underage models, nudity or sexualization.",
+      "optimized": true,
+      "compilationCost": {
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": null,
+        "inputTokens": null,
+        "outputTokens": null,
+        "cacheHit": null,
+        "latencyMs": null
+      },
+      "taskAttempted": true,
+      "tasks": [
+        {
+          "id": "acd0c3f6-ba0f-4d9f-b1a7-68df21eaf7c3",
+          "requestId": "pq:visual-v2-extended:garment-colorway-15-new:0",
+          "status": "success",
+          "prompt": "Recolor only Image 1’s body fabric and front placket dusty rose (#D8A0A8); retain its garment and composition, not its original body color. Keep sleeves, collar, five center-front buttons and partially obscured collar button their original light blue. Preserve silhouette, construction lines, visible stitching, collar shape, pocketless design, absence of patterns, fabric weave, folds, highlights, shadows, white background and image proportions. The new color sits naturally in the fabric weave and folds, with realistic highlights and shadows, not a flat fill.\nAvoid: flat color fill, garment structure or pattern changes, recoloring sleeves, collar, buttons, skin or background, brand logos, watermarks or unrelated text, collage grids or color swatches, dimension annotations, extra hands or deformed limbs, underage models, nudity or sexualization.",
+          "optimized": true,
+          "credits": 0
+        }
+      ],
+      "applicationChargeRmb": null,
+      "outputs": [
+        {
+          "taskId": "acd0c3f6-ba0f-4d9f-b1a7-68df21eaf7c3",
+          "index": 0,
+          "path": "garment-colorway-15-new-acd0c3f6-ba0f-4d9f-b1a7-68df21eaf7c3-1.png",
+          "mime": "image/png",
+          "sha256": "72985bcbb37629f4dc40dc96dac16526f1f5a09f7f4fa415c9ee381920995ee8",
+          "bytes": 1301481,
+          "contentType": "image/png"
+        }
+      ],
+      "completedAt": "2026-10-24T18:08:35.813Z"
+    },
+    "style-to-sketch-16-old": {
+      "id": "style-to-sketch-16-old",
+      "requestId": "pq:visual-v2-extended:style-to-sketch-16-old:0",
+      "compilationRequestId": "pq:visual-v2-extended:style-to-sketch-16-old:compile",
+      "inputHash": "445b90e2e7f063b1cfadb9f25aefe30fd05f67f6b061f116364dda7a8e761481",
+      "status": "success",
+      "visualReview": "pending-manual-review",
+      "providerImageActualCost": null,
+      "providerChatActualCost": null,
+      "modelConfigId": "d5000000-0000-4000-8000-000000000001",
+      "modelId": "d5000000-0000-4000-8000-000000000001",
+      "startedAt": "2026-10-24T18:08:12.232Z",
+      "taskAttempted": true,
+      "tasks": [
+        {
+          "id": "9d2eda1c-b7bb-4e63-b5c6-5acf9b46d4dd",
+          "requestId": "pq:visual-v2-extended:style-to-sketch-16-old:0",
+          "status": "success",
+          "prompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：极简线稿。用干净、克制的轮廓线表达服装，不保留摄影光影与面料色块。\n\n细节程度：保留领口、袖口、下摆、门襟与主要结构线，适度简化细小纹理。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。只保留结构线和可见纽扣，不添加虚构装饰明线。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。",
+          "optimized": false,
+          "credits": 0
+        }
+      ],
+      "finalPrompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：极简线稿。用干净、克制的轮廓线表达服装，不保留摄影光影与面料色块。\n\n细节程度：保留领口、袖口、下摆、门襟与主要结构线，适度简化细小纹理。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。只保留结构线和可见纽扣，不添加虚构装饰明线。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。",
+      "optimized": false,
+      "applicationChargeRmb": null,
+      "outputs": [
+        {
+          "taskId": "9d2eda1c-b7bb-4e63-b5c6-5acf9b46d4dd",
+          "index": 0,
+          "path": "style-to-sketch-16-old-9d2eda1c-b7bb-4e63-b5c6-5acf9b46d4dd-1.png",
+          "mime": "image/png",
+          "sha256": "c901c05b74e84cc8d6d31384eb53c7b80bc860fe4f82dee6bdfeb2559339dcbb",
+          "bytes": 720353,
+          "contentType": "image/png"
+        }
+      ],
+      "completedAt": "2026-10-24T18:08:30.803Z"
+    },
+    "style-to-sketch-16-new": {
+      "id": "style-to-sketch-16-new",
+      "requestId": "pq:visual-v2-extended:style-to-sketch-16-new:0",
+      "compilationRequestId": "pq:visual-v2-extended:style-to-sketch-16-new:compile",
+      "inputHash": "c2d1aecd96ac67d4abbe93893b4a33386b7ce5c88a83b924cb8dfaa4c56aec9c",
+      "status": "success",
+      "visualReview": "pending-manual-review",
+      "providerImageActualCost": null,
+      "providerChatActualCost": null,
+      "modelConfigId": "d5000000-0000-4000-8000-000000000001",
+      "modelId": "d5000000-0000-4000-8000-000000000001",
+      "startedAt": "2026-10-24T18:08:16.907Z",
+      "compileAttempted": true,
+      "compilation": {
+        "id": "bff32aa1-2b7f-437d-93fc-44a7ece567a8",
+        "requestId": "pq:visual-v2-extended:style-to-sketch-16-new:compile",
+        "status": "success",
+        "optimized": true,
+        "prompt": "Convert Image 1 into one front-view minimal fashion flat, symmetrically laid out, using black (#000000) lines on pure white (#FFFFFF). Take only its visible garment structure, not its color, texture, shadows or wrinkles. Preserve its proportions, silhouette, pointed collar, short set-in sleeves, center-front placket, curved hem, and exactly five fully visible front buttons plus the original partially obscured neckline button; add or remove none. Use clean contours and essential construction lines only; no pockets, invented topstitching, hidden details or back view.\nAvoid: shading, gradients, color fills, fabric texture, models, hangers, background objects, pockets, invented decoration, added topstitching, altered button count, invented hidden structures, back views, collages, multiple panels, brand logos, watermarks, unrelated text, labels, color swatches, measurements, extra limbs, deformed hands, minors, nudity, sexualization."
+      },
+      "finalPrompt": "Convert Image 1 into one front-view minimal fashion flat, symmetrically laid out, using black (#000000) lines on pure white (#FFFFFF). Take only its visible garment structure, not its color, texture, shadows or wrinkles. Preserve its proportions, silhouette, pointed collar, short set-in sleeves, center-front placket, curved hem, and exactly five fully visible front buttons plus the original partially obscured neckline button; add or remove none. Use clean contours and essential construction lines only; no pockets, invented topstitching, hidden details or back view.\nAvoid: shading, gradients, color fills, fabric texture, models, hangers, background objects, pockets, invented decoration, added topstitching, altered button count, invented hidden structures, back views, collages, multiple panels, brand logos, watermarks, unrelated text, labels, color swatches, measurements, extra limbs, deformed hands, minors, nudity, sexualization.",
+      "optimized": true,
+      "compilationCost": {
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": null,
+        "inputTokens": null,
+        "outputTokens": null,
+        "cacheHit": null,
+        "latencyMs": null
+      },
+      "taskAttempted": true,
+      "tasks": [
+        {
+          "id": "69a89ec8-7dd9-4201-b6c5-82ef9a8ad80e",
+          "requestId": "pq:visual-v2-extended:style-to-sketch-16-new:0",
+          "status": "success",
+          "prompt": "Convert Image 1 into one front-view minimal fashion flat, symmetrically laid out, using black (#000000) lines on pure white (#FFFFFF). Take only its visible garment structure, not its color, texture, shadows or wrinkles. Preserve its proportions, silhouette, pointed collar, short set-in sleeves, center-front placket, curved hem, and exactly five fully visible front buttons plus the original partially obscured neckline button; add or remove none. Use clean contours and essential construction lines only; no pockets, invented topstitching, hidden details or back view.\nAvoid: shading, gradients, color fills, fabric texture, models, hangers, background objects, pockets, invented decoration, added topstitching, altered button count, invented hidden structures, back views, collages, multiple panels, brand logos, watermarks, unrelated text, labels, color swatches, measurements, extra limbs, deformed hands, minors, nudity, sexualization.",
+          "optimized": true,
+          "credits": 0
+        }
+      ],
+      "applicationChargeRmb": null,
+      "outputs": [
+        {
+          "taskId": "69a89ec8-7dd9-4201-b6c5-82ef9a8ad80e",
+          "index": 0,
+          "path": "style-to-sketch-16-new-69a89ec8-7dd9-4201-b6c5-82ef9a8ad80e-1.png",
+          "mime": "image/png",
+          "sha256": "5a10e7d38a09f62ac5b8471809ee4b7d8bee16dcd961d4e97b82595c7b5d6ad2",
+          "bytes": 709143,
+          "contentType": "image/png"
+        }
+      ],
+      "completedAt": "2026-10-24T18:08:51.401Z"
+    },
+    "garment-colorway-16-old": {
+      "id": "garment-colorway-16-old",
+      "requestId": "pq:visual-v2-extended:garment-colorway-16-old:0",
+      "compilationRequestId": "pq:visual-v2-extended:garment-colorway-16-old:compile",
+      "inputHash": "9f5af9dcce4731fd40229090edf0246788a3738cba4eb692d220eef8c786109a",
+      "status": "success",
+      "visualReview": "pending-manual-review",
+      "providerImageActualCost": null,
+      "providerChatActualCost": null,
+      "modelConfigId": "d5000000-0000-4000-8000-000000000001",
+      "modelId": "d5000000-0000-4000-8000-000000000001",
+      "startedAt": "2026-10-24T18:08:30.814Z",
+      "taskAttempted": true,
+      "tasks": [
+        {
+          "id": "b0aa5f18-24f0-479f-8a34-dab632dd9a4f",
+          "requestId": "pq:visual-v2-extended:garment-colorway-16-old:0",
+          "status": "success",
+          "prompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#5E6B52。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #5E6B52。\n\n改色范围：全部服装面料，包括袖子、领子和门襟，但所有纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #5E6B52。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。",
+          "optimized": false,
+          "credits": 0
+        }
+      ],
+      "finalPrompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#5E6B52。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #5E6B52。\n\n改色范围：全部服装面料，包括袖子、领子和门襟，但所有纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #5E6B52。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。",
+      "optimized": false,
+      "applicationChargeRmb": null,
+      "outputs": [
+        {
+          "taskId": "b0aa5f18-24f0-479f-8a34-dab632dd9a4f",
+          "index": 0,
+          "path": "garment-colorway-16-old-b0aa5f18-24f0-479f-8a34-dab632dd9a4f-1.png",
+          "mime": "image/png",
+          "sha256": "c878eda46995e05bb33814e2196a6c7648ad90501d13b457a5497d04bf9186fd",
+          "bytes": 1505754,
+          "contentType": "image/png"
+        }
+      ],
+      "completedAt": "2026-10-24T18:08:52.057Z"
+    },
+    "garment-colorway-16-new": {
+      "id": "garment-colorway-16-new",
+      "requestId": "pq:visual-v2-extended:garment-colorway-16-new:0",
+      "compilationRequestId": "pq:visual-v2-extended:garment-colorway-16-new:compile",
+      "inputHash": "78a36132e5de69e9537a950bd268fee71a0beacf353ae30ba26ef299134d3f6e",
+      "status": "success",
+      "visualReview": "pending-manual-review",
+      "providerImageActualCost": null,
+      "providerChatActualCost": null,
+      "modelConfigId": "d5000000-0000-4000-8000-000000000001",
+      "modelId": "d5000000-0000-4000-8000-000000000001",
+      "startedAt": "2026-10-24T18:08:32.361Z",
+      "compileAttempted": true,
+      "compilation": {
+        "id": "22a344ee-4368-45f1-b77e-3ad918e85ffe",
+        "requestId": "pq:visual-v2-extended:garment-colorway-16-new:compile",
+        "status": "success",
+        "optimized": true,
+        "prompt": "Recolor all garment fabric in Image 1, including sleeves, collar and placket, to muted olive green (#5E6B52); use its construction and texture, not its original fabric color. Keep all five center-front buttons and the partially concealed collar button their original light blue. Preserve silhouette, structural seams, visible stitching, collar shape, pocket-free design, pattern shapes and positions, fabric weave, folds, highlights, shadows, white background and image proportions. The new color sits naturally in the fabric weave and folds, with realistic highlights and shadows, not a flat fill.\nAvoid: flat color fill, color swatches, dimension annotations, garment structure or pattern changes, button, skin or background recoloring, brand logos, watermarks, unrelated text, collages, multi-panel layouts, extra hands, deformed limbs, underage models, nudity, sexualized presentation."
+      },
+      "finalPrompt": "Recolor all garment fabric in Image 1, including sleeves, collar and placket, to muted olive green (#5E6B52); use its construction and texture, not its original fabric color. Keep all five center-front buttons and the partially concealed collar button their original light blue. Preserve silhouette, structural seams, visible stitching, collar shape, pocket-free design, pattern shapes and positions, fabric weave, folds, highlights, shadows, white background and image proportions. The new color sits naturally in the fabric weave and folds, with realistic highlights and shadows, not a flat fill.\nAvoid: flat color fill, color swatches, dimension annotations, garment structure or pattern changes, button, skin or background recoloring, brand logos, watermarks, unrelated text, collages, multi-panel layouts, extra hands, deformed limbs, underage models, nudity, sexualized presentation.",
+      "optimized": true,
+      "compilationCost": {
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": null,
+        "inputTokens": null,
+        "outputTokens": null,
+        "cacheHit": null,
+        "latencyMs": null
+      },
+      "taskAttempted": true,
+      "tasks": [
+        {
+          "id": "220e9e22-fc4d-465e-97f5-d9ca5e3d4cb1",
+          "requestId": "pq:visual-v2-extended:garment-colorway-16-new:0",
+          "status": "success",
+          "prompt": "Recolor all garment fabric in Image 1, including sleeves, collar and placket, to muted olive green (#5E6B52); use its construction and texture, not its original fabric color. Keep all five center-front buttons and the partially concealed collar button their original light blue. Preserve silhouette, structural seams, visible stitching, collar shape, pocket-free design, pattern shapes and positions, fabric weave, folds, highlights, shadows, white background and image proportions. The new color sits naturally in the fabric weave and folds, with realistic highlights and shadows, not a flat fill.\nAvoid: flat color fill, color swatches, dimension annotations, garment structure or pattern changes, button, skin or background recoloring, brand logos, watermarks, unrelated text, collages, multi-panel layouts, extra hands, deformed limbs, underage models, nudity, sexualized presentation.",
+          "optimized": true,
+          "credits": 0
+        }
+      ],
+      "applicationChargeRmb": null,
+      "outputs": [
+        {
+          "taskId": "220e9e22-fc4d-465e-97f5-d9ca5e3d4cb1",
+          "index": 0,
+          "path": "garment-colorway-16-new-220e9e22-fc4d-465e-97f5-d9ca5e3d4cb1-1.png",
+          "mime": "image/png",
+          "sha256": "846eb405c84ef50df4220644f2a8dc427682592f89529e0553569c181f341526",
+          "bytes": 1392857,
+          "contentType": "image/png"
+        }
+      ],
+      "completedAt": "2026-10-24T18:09:04.868Z"
+    },
+    "style-to-sketch-17-old": {
+      "id": "style-to-sketch-17-old",
+      "requestId": "pq:visual-v2-extended:style-to-sketch-17-old:0",
+      "compilationRequestId": "pq:visual-v2-extended:style-to-sketch-17-old:compile",
+      "inputHash": "e9309556973a1b66fb523c3171f7e16b4d13843f6cf8d6eb3502333d886ab878",
+      "status": "success",
+      "visualReview": "pending-manual-review",
+      "providerImageActualCost": null,
+      "providerChatActualCost": null,
+      "modelConfigId": "d5000000-0000-4000-8000-000000000001",
+      "modelId": "d5000000-0000-4000-8000-000000000001",
+      "startedAt": "2026-10-24T18:08:35.816Z",
+      "taskAttempted": true,
+      "tasks": [
+        {
+          "id": "1502029d-304e-4c65-bbf8-9b09c5f51074",
+          "requestId": "pq:visual-v2-extended:style-to-sketch-17-old:0",
+          "status": "success",
+          "prompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：技术感线稿。用清晰、均匀的线条表达服装轮廓和可见结构，主轮廓与结构线层次分明。\n\n细节程度：保留实际可见的分割线、口袋、褶裥、门襟、纽扣和装饰细节，避免虚构细节。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。可见四孔纽扣以简洁圆形孔位表示，半遮挡领扣保持半遮挡。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。",
+          "optimized": false,
+          "credits": 0
+        }
+      ],
+      "finalPrompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：技术感线稿。用清晰、均匀的线条表达服装轮廓和可见结构，主轮廓与结构线层次分明。\n\n细节程度：保留实际可见的分割线、口袋、褶裥、门襟、纽扣和装饰细节，避免虚构细节。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。可见四孔纽扣以简洁圆形孔位表示，半遮挡领扣保持半遮挡。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。",
+      "optimized": false,
+      "applicationChargeRmb": null,
+      "outputs": [
+        {
+          "taskId": "1502029d-304e-4c65-bbf8-9b09c5f51074",
+          "index": 0,
+          "path": "style-to-sketch-17-old-1502029d-304e-4c65-bbf8-9b09c5f51074-1.png",
+          "mime": "image/png",
+          "sha256": "c2b023c6718ea349e6de3eef0a298e3f6bd4ac40adf664009b4f2cae9f204562",
+          "bytes": 744667,
+          "contentType": "image/png"
+        }
+      ],
+      "completedAt": "2026-10-24T18:08:54.053Z"
+    },
+    "style-to-sketch-17-new": {
+      "id": "style-to-sketch-17-new",
+      "requestId": "pq:visual-v2-extended:style-to-sketch-17-new:0",
+      "compilationRequestId": "pq:visual-v2-extended:style-to-sketch-17-new:compile",
+      "inputHash": "436778c4678c826cb6dad5111225438583dc6451df7f2512c462bda40a3afa79",
+      "status": "success",
+      "visualReview": "pending-manual-review",
+      "providerImageActualCost": null,
+      "providerChatActualCost": null,
+      "modelConfigId": "d5000000-0000-4000-8000-000000000001",
+      "modelId": "d5000000-0000-4000-8000-000000000001",
+      "startedAt": "2026-10-24T18:08:51.406Z",
+      "compileAttempted": true,
+      "compilation": {
+        "id": "062bfa57-19a9-430d-846d-8ac187a58068",
+        "requestId": "pq:visual-v2-extended:style-to-sketch-17-new:compile",
+        "status": "success",
+        "optimized": true,
+        "prompt": "Convert Image 1 into one symmetrical front-view technical fashion flat, black (#000000) lines on white (#FFFFFF); use its visible construction, not color, texture or shadows. Preserve proportions, silhouette, pointed collar, short set-in sleeves, placket, curved hem and visible seams; add no pockets or unseen details. Keep exactly five fully visible front buttons plus the original partially concealed collar button, maintaining its occlusion; render visible four-hole buttons with simple circular holes. Use consistent linework, heavier outer contours, fine construction lines and dashed topstitching; no back view.\nAvoid: shading, gradients, color fills, fabric texture, models, minors, nudity, sexualization, malformed limbs, hangers, background objects, logos, watermarks, unrelated text, labels, measurements, color swatches, collages, multiple views, back view, pockets, invented construction details, added or missing buttons, exposed concealed collar button."
+      },
+      "finalPrompt": "Convert Image 1 into one symmetrical front-view technical fashion flat, black (#000000) lines on white (#FFFFFF); use its visible construction, not color, texture or shadows. Preserve proportions, silhouette, pointed collar, short set-in sleeves, placket, curved hem and visible seams; add no pockets or unseen details. Keep exactly five fully visible front buttons plus the original partially concealed collar button, maintaining its occlusion; render visible four-hole buttons with simple circular holes. Use consistent linework, heavier outer contours, fine construction lines and dashed topstitching; no back view.\nAvoid: shading, gradients, color fills, fabric texture, models, minors, nudity, sexualization, malformed limbs, hangers, background objects, logos, watermarks, unrelated text, labels, measurements, color swatches, collages, multiple views, back view, pockets, invented construction details, added or missing buttons, exposed concealed collar button.",
+      "optimized": true,
+      "compilationCost": {
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": null,
+        "inputTokens": null,
+        "outputTokens": null,
+        "cacheHit": null,
+        "latencyMs": null
+      },
+      "taskAttempted": true,
+      "tasks": [
+        {
+          "id": "8bb909b1-1b07-4f16-af49-33db3cf608fe",
+          "requestId": "pq:visual-v2-extended:style-to-sketch-17-new:0",
+          "status": "success",
+          "prompt": "Convert Image 1 into one symmetrical front-view technical fashion flat, black (#000000) lines on white (#FFFFFF); use its visible construction, not color, texture or shadows. Preserve proportions, silhouette, pointed collar, short set-in sleeves, placket, curved hem and visible seams; add no pockets or unseen details. Keep exactly five fully visible front buttons plus the original partially concealed collar button, maintaining its occlusion; render visible four-hole buttons with simple circular holes. Use consistent linework, heavier outer contours, fine construction lines and dashed topstitching; no back view.\nAvoid: shading, gradients, color fills, fabric texture, models, minors, nudity, sexualization, malformed limbs, hangers, background objects, logos, watermarks, unrelated text, labels, measurements, color swatches, collages, multiple views, back view, pockets, invented construction details, added or missing buttons, exposed concealed collar button.",
+          "optimized": true,
+          "credits": 0
+        }
+      ],
+      "applicationChargeRmb": null,
+      "outputs": [
+        {
+          "taskId": "8bb909b1-1b07-4f16-af49-33db3cf608fe",
+          "index": 0,
+          "path": "style-to-sketch-17-new-8bb909b1-1b07-4f16-af49-33db3cf608fe-1.png",
+          "mime": "image/png",
+          "sha256": "a9888d9a0df4ca8b47a8585745d10d47a5618b2bc999bd205b2d0cacd71d4078",
+          "bytes": 755424,
+          "contentType": "image/png"
+        }
+      ],
+      "completedAt": "2026-10-24T18:09:22.588Z"
+    },
+    "garment-colorway-17-old": {
+      "id": "garment-colorway-17-old",
+      "requestId": "pq:visual-v2-extended:garment-colorway-17-old:0",
+      "compilationRequestId": "pq:visual-v2-extended:garment-colorway-17-old:compile",
+      "inputHash": "74589ed495578e4887b0bd281b37fa0b4f4aaf8548b6131eaf0fc676ab06f841",
+      "status": "success",
+      "visualReview": "pending-manual-review",
+      "providerImageActualCost": null,
+      "providerChatActualCost": null,
+      "modelConfigId": "d5000000-0000-4000-8000-000000000001",
+      "modelId": "d5000000-0000-4000-8000-000000000001",
+      "startedAt": "2026-10-24T18:08:52.062Z",
+      "taskAttempted": true,
+      "tasks": [
+        {
+          "id": "fa82a7e8-73dd-4bde-bdee-fef2f36f43f4",
+          "requestId": "pq:visual-v2-extended:garment-colorway-17-old:0",
+          "status": "success",
+          "prompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#D5C6A5。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #D5C6A5。\n\n改色范围：全部服装面料，包括袖子、领子和门襟，但所有纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #D5C6A5。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。",
+          "optimized": false,
+          "credits": 0
+        }
+      ],
+      "finalPrompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#D5C6A5。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #D5C6A5。\n\n改色范围：全部服装面料，包括袖子、领子和门襟，但所有纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #D5C6A5。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。",
+      "optimized": false,
+      "applicationChargeRmb": null,
+      "outputs": [
+        {
+          "taskId": "fa82a7e8-73dd-4bde-bdee-fef2f36f43f4",
+          "index": 0,
+          "path": "garment-colorway-17-old-fa82a7e8-73dd-4bde-bdee-fef2f36f43f4-1.png",
+          "mime": "image/png",
+          "sha256": "f598eddaba47a344e2b0c809af57c015a1d01bafeb89d4ad84b2f63370d6c827",
+          "bytes": 1348817,
+          "contentType": "image/png"
+        }
+      ],
+      "completedAt": "2026-10-24T18:09:10.393Z"
+    },
+    "garment-colorway-17-new": {
+      "id": "garment-colorway-17-new",
+      "requestId": "pq:visual-v2-extended:garment-colorway-17-new:0",
+      "compilationRequestId": "pq:visual-v2-extended:garment-colorway-17-new:compile",
+      "inputHash": "78ad72690d4efaf0842a6876ff1166c96c66ef414c2888a3e4a7210b472e4719",
+      "status": "success",
+      "visualReview": "pending-manual-review",
+      "providerImageActualCost": null,
+      "providerChatActualCost": null,
+      "modelConfigId": "d5000000-0000-4000-8000-000000000001",
+      "modelId": "d5000000-0000-4000-8000-000000000001",
+      "startedAt": "2026-10-24T18:08:54.056Z",
+      "compileAttempted": true,
+      "compilation": {
+        "id": "7cf3830a-9cc7-427c-9338-02202c4deb86",
+        "requestId": "pq:visual-v2-extended:garment-colorway-17-new:compile",
+        "status": "success",
+        "optimized": true,
+        "prompt": "Recolor all garment fabric in Image 1, including sleeves, collar and placket, to sand beige (#D5C6A5); use its construction, not its original fabric color. Keep all five center-front buttons and the partially concealed collar button their original light blue. Preserve silhouette, construction lines, visible stitching, collar shape, pocket-free construction, absence of patterns, fabric weave, folds, highlight/shadow gradations, white background, framing and aspect ratio. The new color sits naturally in the fabric weave and folds, with realistic highlights and shadows, not a flat fill.\nAvoid: flat color fill, color swatches or dimension annotations, garment structure or pattern changes, button recoloring, skin or background recoloring, brand logos, watermarks or unrelated text, collages or multi-panel layouts, extra hands or deformed limbs, underage models, nudity or sexualized presentation."
+      },
+      "finalPrompt": "Recolor all garment fabric in Image 1, including sleeves, collar and placket, to sand beige (#D5C6A5); use its construction, not its original fabric color. Keep all five center-front buttons and the partially concealed collar button their original light blue. Preserve silhouette, construction lines, visible stitching, collar shape, pocket-free construction, absence of patterns, fabric weave, folds, highlight/shadow gradations, white background, framing and aspect ratio. The new color sits naturally in the fabric weave and folds, with realistic highlights and shadows, not a flat fill.\nAvoid: flat color fill, color swatches or dimension annotations, garment structure or pattern changes, button recoloring, skin or background recoloring, brand logos, watermarks or unrelated text, collages or multi-panel layouts, extra hands or deformed limbs, underage models, nudity or sexualized presentation.",
+      "optimized": true,
+      "compilationCost": {
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": null,
+        "inputTokens": null,
+        "outputTokens": null,
+        "cacheHit": null,
+        "latencyMs": null
+      },
+      "taskAttempted": true,
+      "tasks": [
+        {
+          "id": "40bff212-71d1-4298-baf8-9b2245e8e0a3",
+          "requestId": "pq:visual-v2-extended:garment-colorway-17-new:0",
+          "status": "success",
+          "prompt": "Recolor all garment fabric in Image 1, including sleeves, collar and placket, to sand beige (#D5C6A5); use its construction, not its original fabric color. Keep all five center-front buttons and the partially concealed collar button their original light blue. Preserve silhouette, construction lines, visible stitching, collar shape, pocket-free construction, absence of patterns, fabric weave, folds, highlight/shadow gradations, white background, framing and aspect ratio. The new color sits naturally in the fabric weave and folds, with realistic highlights and shadows, not a flat fill.\nAvoid: flat color fill, color swatches or dimension annotations, garment structure or pattern changes, button recoloring, skin or background recoloring, brand logos, watermarks or unrelated text, collages or multi-panel layouts, extra hands or deformed limbs, underage models, nudity or sexualized presentation.",
+          "optimized": true,
+          "credits": 0
+        }
+      ],
+      "applicationChargeRmb": null,
+      "outputs": [
+        {
+          "taskId": "40bff212-71d1-4298-baf8-9b2245e8e0a3",
+          "index": 0,
+          "path": "garment-colorway-17-new-40bff212-71d1-4298-baf8-9b2245e8e0a3-1.png",
+          "mime": "image/png",
+          "sha256": "0884bb1d3cc1a23d696bc84d747846ee8d7bf6e4123ec29a7e3e948d6f746397",
+          "bytes": 1390320,
+          "contentType": "image/png"
+        }
+      ],
+      "completedAt": "2026-10-24T18:09:21.343Z"
+    },
+    "style-to-sketch-18-old": {
+      "id": "style-to-sketch-18-old",
+      "requestId": "pq:visual-v2-extended:style-to-sketch-18-old:0",
+      "compilationRequestId": "pq:visual-v2-extended:style-to-sketch-18-old:compile",
+      "inputHash": "a108b304cea834b2be6f5e6f0a38b14861151f20dcf4a5007fa8ab8c8b09c4c0",
+      "status": "success",
+      "visualReview": "pending-manual-review",
+      "providerImageActualCost": null,
+      "providerChatActualCost": null,
+      "modelConfigId": "d5000000-0000-4000-8000-000000000001",
+      "modelId": "d5000000-0000-4000-8000-000000000001",
+      "startedAt": "2026-10-24T18:09:04.873Z",
+      "taskAttempted": true,
+      "tasks": [
+        {
+          "id": "9f4f82b1-f1f9-4851-9b15-4ce99fdbd6fd",
+          "requestId": "pq:visual-v2-extended:style-to-sketch-18-old:0",
+          "status": "success",
+          "prompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：极简线稿。用干净、克制的轮廓线表达服装，不保留摄影光影与面料色块。\n\n细节程度：保留领口、袖口、下摆、门襟与主要结构线，适度简化细小纹理。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。清楚保留原有浅弧形下摆，不改成直下摆。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。",
+          "optimized": false,
+          "credits": 0
+        }
+      ],
+      "finalPrompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：极简线稿。用干净、克制的轮廓线表达服装，不保留摄影光影与面料色块。\n\n细节程度：保留领口、袖口、下摆、门襟与主要结构线，适度简化细小纹理。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。清楚保留原有浅弧形下摆，不改成直下摆。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。",
+      "optimized": false,
+      "applicationChargeRmb": null,
+      "outputs": [
+        {
+          "taskId": "9f4f82b1-f1f9-4851-9b15-4ce99fdbd6fd",
+          "index": 0,
+          "path": "style-to-sketch-18-old-9f4f82b1-f1f9-4851-9b15-4ce99fdbd6fd-1.png",
+          "mime": "image/png",
+          "sha256": "a4cf62d9e9ed3629a77c1a7a705448749bbfb9398fb1201e008c669ffb101c9b",
+          "bytes": 736286,
+          "contentType": "image/png"
+        }
+      ],
+      "completedAt": "2026-10-24T18:09:26.065Z"
+    },
+    "style-to-sketch-18-new": {
+      "id": "style-to-sketch-18-new",
+      "requestId": "pq:visual-v2-extended:style-to-sketch-18-new:0",
+      "compilationRequestId": "pq:visual-v2-extended:style-to-sketch-18-new:compile",
+      "inputHash": "4462e50bc34d5634fcc634b1a8ebc334b556f11ae76a5682553d38aea2dc8d3d",
+      "status": "success",
+      "visualReview": "pending-manual-review",
+      "providerImageActualCost": null,
+      "providerChatActualCost": null,
+      "modelConfigId": "d5000000-0000-4000-8000-000000000001",
+      "modelId": "d5000000-0000-4000-8000-000000000001",
+      "startedAt": "2026-10-24T18:09:10.396Z",
+      "compileAttempted": true,
+      "compilation": {
+        "id": "81745952-b507-4d95-84d0-50339242e927",
+        "requestId": "pq:visual-v2-extended:style-to-sketch-18-new:compile",
+        "status": "success",
+        "optimized": true,
+        "prompt": "Convert Image 1 into one front-view minimal fashion flat with clean, confident black (#000000) lines on pure white (#FFFFFF). Use its visible construction, not its color, texture or shadows; lay the garment symmetrically flat, preserving its proportions and silhouette. Retain the pointed collar, short set-in sleeves, sleeve hems, center-front placket, essential seams and distinctly shallow curved hem, never straightened. Preserve exactly five fully visible front buttons plus the original partially concealed neckline button; add or remove none. Keep the chest pocket-free; show no back view.\nAvoid: shading, gradients, color fills, fabric texture, models, extra limbs, anatomical distortions, minors, nudity, sexualized presentation, hangers, background objects, brand logos, watermarks, unrelated text, text labels, collages, multiple panels, color swatches, measurements, added pockets, invented construction."
+      },
+      "finalPrompt": "Convert Image 1 into one front-view minimal fashion flat with clean, confident black (#000000) lines on pure white (#FFFFFF). Use its visible construction, not its color, texture or shadows; lay the garment symmetrically flat, preserving its proportions and silhouette. Retain the pointed collar, short set-in sleeves, sleeve hems, center-front placket, essential seams and distinctly shallow curved hem, never straightened. Preserve exactly five fully visible front buttons plus the original partially concealed neckline button; add or remove none. Keep the chest pocket-free; show no back view.\nAvoid: shading, gradients, color fills, fabric texture, models, extra limbs, anatomical distortions, minors, nudity, sexualized presentation, hangers, background objects, brand logos, watermarks, unrelated text, text labels, collages, multiple panels, color swatches, measurements, added pockets, invented construction.",
+      "optimized": true,
+      "compilationCost": {
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": null,
+        "inputTokens": null,
+        "outputTokens": null,
+        "cacheHit": null,
+        "latencyMs": null
+      },
+      "taskAttempted": true,
+      "tasks": [
+        {
+          "id": "e9f7dc95-92e2-4ba3-80aa-daa12ccf0552",
+          "requestId": "pq:visual-v2-extended:style-to-sketch-18-new:0",
+          "status": "success",
+          "prompt": "Convert Image 1 into one front-view minimal fashion flat with clean, confident black (#000000) lines on pure white (#FFFFFF). Use its visible construction, not its color, texture or shadows; lay the garment symmetrically flat, preserving its proportions and silhouette. Retain the pointed collar, short set-in sleeves, sleeve hems, center-front placket, essential seams and distinctly shallow curved hem, never straightened. Preserve exactly five fully visible front buttons plus the original partially concealed neckline button; add or remove none. Keep the chest pocket-free; show no back view.\nAvoid: shading, gradients, color fills, fabric texture, models, extra limbs, anatomical distortions, minors, nudity, sexualized presentation, hangers, background objects, brand logos, watermarks, unrelated text, text labels, collages, multiple panels, color swatches, measurements, added pockets, invented construction.",
+          "optimized": true,
+          "credits": 0
+        }
+      ],
+      "applicationChargeRmb": null,
+      "outputs": [
+        {
+          "taskId": "e9f7dc95-92e2-4ba3-80aa-daa12ccf0552",
+          "index": 0,
+          "path": "style-to-sketch-18-new-e9f7dc95-92e2-4ba3-80aa-daa12ccf0552-1.png",
+          "mime": "image/png",
+          "sha256": "624b406715aeef93c9fd676d592dfc318f652c60e26d5ba8fad4408481068716",
+          "bytes": 732717,
+          "contentType": "image/png"
+        }
+      ],
+      "completedAt": "2026-10-24T18:09:44.078Z"
+    },
+    "garment-colorway-18-old": {
+      "id": "garment-colorway-18-old",
+      "requestId": "pq:visual-v2-extended:garment-colorway-18-old:0",
+      "compilationRequestId": "pq:visual-v2-extended:garment-colorway-18-old:compile",
+      "inputHash": "21cac6e03f30b7b0b6fdc7a251efdb7e5404b1eefdca8f012a689f278edf8c07",
+      "status": "success",
+      "visualReview": "pending-manual-review",
+      "providerImageActualCost": null,
+      "providerChatActualCost": null,
+      "modelConfigId": "d5000000-0000-4000-8000-000000000001",
+      "modelId": "d5000000-0000-4000-8000-000000000001",
+      "startedAt": "2026-10-24T18:09:21.346Z",
+      "taskAttempted": true,
+      "tasks": [
+        {
+          "id": "5b1f0e0e-652e-4c19-9550-9ca1e223b078",
+          "requestId": "pq:visual-v2-extended:garment-colorway-18-old:0",
+          "status": "success",
+          "prompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#75677C。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #75677C。\n\n改色范围：全部服装面料，包括袖子、领子和门襟，但所有纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #75677C。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。",
+          "optimized": false,
+          "credits": 0
+        }
+      ],
+      "finalPrompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#75677C。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #75677C。\n\n改色范围：全部服装面料，包括袖子、领子和门襟，但所有纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #75677C。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。",
+      "optimized": false,
+      "applicationChargeRmb": null,
+      "outputs": [
+        {
+          "taskId": "5b1f0e0e-652e-4c19-9550-9ca1e223b078",
+          "index": 0,
+          "path": "garment-colorway-18-old-5b1f0e0e-652e-4c19-9550-9ca1e223b078-1.png",
+          "mime": "image/png",
+          "sha256": "094932fd7dfcaeb69287327471ad125b2e11578f9e32682a1e2b5e9802b83cd1",
+          "bytes": 1321836,
+          "contentType": "image/png"
+        }
+      ],
+      "completedAt": "2026-10-24T18:09:39.557Z"
+    },
+    "garment-colorway-18-new": {
+      "id": "garment-colorway-18-new",
+      "requestId": "pq:visual-v2-extended:garment-colorway-18-new:0",
+      "compilationRequestId": "pq:visual-v2-extended:garment-colorway-18-new:compile",
+      "inputHash": "b612ae511216e33046b382b38919d968c922b0a4471a478b33cec79e693a114b",
+      "status": "success",
+      "visualReview": "pending-manual-review",
+      "providerImageActualCost": null,
+      "providerChatActualCost": null,
+      "modelConfigId": "d5000000-0000-4000-8000-000000000001",
+      "modelId": "d5000000-0000-4000-8000-000000000001",
+      "startedAt": "2026-10-24T18:09:22.591Z",
+      "compileAttempted": true,
+      "compilation": {
+        "id": "7cd232d7-eef6-4d11-8d3f-6b946a02b35d",
+        "requestId": "pq:visual-v2-extended:garment-colorway-18-new:compile",
+        "status": "success",
+        "optimized": true,
+        "prompt": "In Image 1, recolor all garment fabric, including sleeves, collar and placket, to muted grayish purple (#75677C); replace only fabric color. Keep all five center-front buttons and the partially obscured collar button their original light blue. Preserve silhouette, construction lines, visible stitching, collar shape, pocket configuration, pattern shapes and positions, fabric weave, texture, folds, highlight/shadow gradations, white background, framing and aspect ratio. The new color sits naturally in the fabric weave and folds, with realistic highlights and shadows, not a flat fill.\nAvoid: flat color fill, color swatches or dimension annotations, garment structure or pattern changes, button, skin or background recoloring, brand logos, watermarks or unrelated text, collages or multi-panel layouts, extra hands or deformed limbs, underage models, nudity or sexualized presentation."
+      },
+      "finalPrompt": "In Image 1, recolor all garment fabric, including sleeves, collar and placket, to muted grayish purple (#75677C); replace only fabric color. Keep all five center-front buttons and the partially obscured collar button their original light blue. Preserve silhouette, construction lines, visible stitching, collar shape, pocket configuration, pattern shapes and positions, fabric weave, texture, folds, highlight/shadow gradations, white background, framing and aspect ratio. The new color sits naturally in the fabric weave and folds, with realistic highlights and shadows, not a flat fill.\nAvoid: flat color fill, color swatches or dimension annotations, garment structure or pattern changes, button, skin or background recoloring, brand logos, watermarks or unrelated text, collages or multi-panel layouts, extra hands or deformed limbs, underage models, nudity or sexualized presentation.",
+      "optimized": true,
+      "compilationCost": {
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": null,
+        "inputTokens": null,
+        "outputTokens": null,
+        "cacheHit": null,
+        "latencyMs": null
+      },
+      "taskAttempted": true,
+      "tasks": [
+        {
+          "id": "e0f713bc-7841-4f96-9165-a6a995536764",
+          "requestId": "pq:visual-v2-extended:garment-colorway-18-new:0",
+          "status": "success",
+          "prompt": "In Image 1, recolor all garment fabric, including sleeves, collar and placket, to muted grayish purple (#75677C); replace only fabric color. Keep all five center-front buttons and the partially obscured collar button their original light blue. Preserve silhouette, construction lines, visible stitching, collar shape, pocket configuration, pattern shapes and positions, fabric weave, texture, folds, highlight/shadow gradations, white background, framing and aspect ratio. The new color sits naturally in the fabric weave and folds, with realistic highlights and shadows, not a flat fill.\nAvoid: flat color fill, color swatches or dimension annotations, garment structure or pattern changes, button, skin or background recoloring, brand logos, watermarks or unrelated text, collages or multi-panel layouts, extra hands or deformed limbs, underage models, nudity or sexualized presentation.",
+          "optimized": true,
+          "credits": 0
+        }
+      ],
+      "applicationChargeRmb": null,
+      "outputs": [
+        {
+          "taskId": "e0f713bc-7841-4f96-9165-a6a995536764",
+          "index": 0,
+          "path": "garment-colorway-18-new-e0f713bc-7841-4f96-9165-a6a995536764-1.png",
+          "mime": "image/png",
+          "sha256": "2e102014419c48785cde06f14fa507e5a3243f6569050a7d77cf3e895eb72a29",
+          "bytes": 1393676,
+          "contentType": "image/png"
+        }
+      ],
+      "completedAt": "2026-10-24T18:09:53.507Z"
+    },
+    "style-to-sketch-19-old": {
+      "id": "style-to-sketch-19-old",
+      "requestId": "pq:visual-v2-extended:style-to-sketch-19-old:0",
+      "compilationRequestId": "pq:visual-v2-extended:style-to-sketch-19-old:compile",
+      "inputHash": "28f0768a48663ca8bb0a5111838fe265de96fde8eed000fc3c5c008923495819",
+      "status": "success",
+      "visualReview": "pending-manual-review",
+      "providerImageActualCost": null,
+      "providerChatActualCost": null,
+      "modelConfigId": "d5000000-0000-4000-8000-000000000001",
+      "modelId": "d5000000-0000-4000-8000-000000000001",
+      "startedAt": "2026-10-24T18:09:26.067Z",
+      "taskAttempted": true,
+      "tasks": [
+        {
+          "id": "1193aa71-ea53-4a51-a1e8-e991f601ac27",
+          "requestId": "pq:visual-v2-extended:style-to-sketch-19-old:0",
+          "status": "success",
+          "prompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：技术感线稿。用清晰、均匀的线条表达服装轮廓和可见结构，主轮廓与结构线层次分明。\n\n细节程度：保留领口、袖口、下摆、门襟与主要结构线，适度简化细小纹理。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。保留原袖宽与肩斜，去掉摄影阴影和面料填色。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。",
+          "optimized": false,
+          "credits": 0
+        }
+      ],
+      "finalPrompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：技术感线稿。用清晰、均匀的线条表达服装轮廓和可见结构，主轮廓与结构线层次分明。\n\n细节程度：保留领口、袖口、下摆、门襟与主要结构线，适度简化细小纹理。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。保留原袖宽与肩斜，去掉摄影阴影和面料填色。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。",
+      "optimized": false,
+      "applicationChargeRmb": null,
+      "outputs": [
+        {
+          "taskId": "1193aa71-ea53-4a51-a1e8-e991f601ac27",
+          "index": 0,
+          "path": "style-to-sketch-19-old-1193aa71-ea53-4a51-a1e8-e991f601ac27-1.png",
+          "mime": "image/png",
+          "sha256": "71114668f8b47030768bcf0dda0b1f0ac0409e9084f9752f50b53267f8e0fdcf",
+          "bytes": 756720,
+          "contentType": "image/png"
+        }
+      ],
+      "completedAt": "2026-10-24T18:09:44.262Z"
+    },
+    "style-to-sketch-19-new": {
+      "id": "style-to-sketch-19-new",
+      "requestId": "pq:visual-v2-extended:style-to-sketch-19-new:0",
+      "compilationRequestId": "pq:visual-v2-extended:style-to-sketch-19-new:compile",
+      "inputHash": "9611d2c1e2261307368e4273d62665d39b771f2c3106ad25c058a9f0dd87402b",
+      "status": "success",
+      "visualReview": "pending-manual-review",
+      "providerImageActualCost": null,
+      "providerChatActualCost": null,
+      "modelConfigId": "d5000000-0000-4000-8000-000000000001",
+      "modelId": "d5000000-0000-4000-8000-000000000001",
+      "startedAt": "2026-10-24T18:09:39.566Z",
+      "compileAttempted": true,
+      "compilation": {
+        "id": "dfc16ea5-5571-4345-a6e4-ae98ea14dc0f",
+        "requestId": "pq:visual-v2-extended:style-to-sketch-19-new:compile",
+        "status": "success",
+        "optimized": true,
+        "prompt": "Convert Image 1 into one symmetrical front-view technical fashion flat, using its visible construction only; discard photographic shadows, fabric texture and fill. Use black (#000000) lines on pure white (#FFFFFF), consistent linework, bolder outlines, thinner construction lines and dashed topstitching. Preserve original proportions, silhouette, sleeve width, shoulder slope, pointed collar, short set-in sleeves, sleeve hems, center-front placket and curved hem. Retain exactly five fully visible front buttons plus the original partially obscured collar button; add or remove none. Draw no pockets, back view or unseen details.\nAvoid: shading, gradients, color fills, fabric texture, models, extra limbs, anatomical distortion, minors, nudity, sexualized presentation, hangers, background objects, brand logos, watermarks, unrelated text, text labels, collages, multiple panels, back views, color swatches, measurements, added pockets, added or missing buttons."
+      },
+      "finalPrompt": "Convert Image 1 into one symmetrical front-view technical fashion flat, using its visible construction only; discard photographic shadows, fabric texture and fill. Use black (#000000) lines on pure white (#FFFFFF), consistent linework, bolder outlines, thinner construction lines and dashed topstitching. Preserve original proportions, silhouette, sleeve width, shoulder slope, pointed collar, short set-in sleeves, sleeve hems, center-front placket and curved hem. Retain exactly five fully visible front buttons plus the original partially obscured collar button; add or remove none. Draw no pockets, back view or unseen details.\nAvoid: shading, gradients, color fills, fabric texture, models, extra limbs, anatomical distortion, minors, nudity, sexualized presentation, hangers, background objects, brand logos, watermarks, unrelated text, text labels, collages, multiple panels, back views, color swatches, measurements, added pockets, added or missing buttons.",
+      "optimized": true,
+      "compilationCost": {
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": null,
+        "inputTokens": null,
+        "outputTokens": null,
+        "cacheHit": null,
+        "latencyMs": null
+      },
+      "taskAttempted": true,
+      "tasks": [
+        {
+          "id": "1b5a75e3-bb8e-4779-bfe1-4c2b9ede66d1",
+          "requestId": "pq:visual-v2-extended:style-to-sketch-19-new:0",
+          "status": "success",
+          "prompt": "Convert Image 1 into one symmetrical front-view technical fashion flat, using its visible construction only; discard photographic shadows, fabric texture and fill. Use black (#000000) lines on pure white (#FFFFFF), consistent linework, bolder outlines, thinner construction lines and dashed topstitching. Preserve original proportions, silhouette, sleeve width, shoulder slope, pointed collar, short set-in sleeves, sleeve hems, center-front placket and curved hem. Retain exactly five fully visible front buttons plus the original partially obscured collar button; add or remove none. Draw no pockets, back view or unseen details.\nAvoid: shading, gradients, color fills, fabric texture, models, extra limbs, anatomical distortion, minors, nudity, sexualized presentation, hangers, background objects, brand logos, watermarks, unrelated text, text labels, collages, multiple panels, back views, color swatches, measurements, added pockets, added or missing buttons.",
+          "optimized": true,
+          "credits": 0
+        }
+      ],
+      "applicationChargeRmb": null,
+      "outputs": [
+        {
+          "taskId": "1b5a75e3-bb8e-4779-bfe1-4c2b9ede66d1",
+          "index": 0,
+          "path": "style-to-sketch-19-new-1b5a75e3-bb8e-4779-bfe1-4c2b9ede66d1-1.png",
+          "mime": "image/png",
+          "sha256": "f81bb23041301b40b361c84ba78bbea592377c8b5705e1a3ced1a1d7428c4140",
+          "bytes": 753698,
+          "contentType": "image/png"
+        }
+      ],
+      "completedAt": "2026-10-24T18:10:13.541Z"
+    },
+    "garment-colorway-19-old": {
+      "id": "garment-colorway-19-old",
+      "requestId": "pq:visual-v2-extended:garment-colorway-19-old:0",
+      "compilationRequestId": "pq:visual-v2-extended:garment-colorway-19-old:compile",
+      "inputHash": "d8072d3cff3e0ddc36bf269300a0a91cd006c10dfc24085f8eeee622b8772c42",
+      "status": "success",
+      "visualReview": "pending-manual-review",
+      "providerImageActualCost": null,
+      "providerChatActualCost": null,
+      "modelConfigId": "d5000000-0000-4000-8000-000000000001",
+      "modelId": "d5000000-0000-4000-8000-000000000001",
+      "startedAt": "2026-10-24T18:09:44.081Z",
+      "taskAttempted": true,
+      "tasks": [
+        {
+          "id": "57fc6b1c-ae5d-459e-8411-8b617f304eac",
+          "requestId": "pq:visual-v2-extended:garment-colorway-19-old:0",
+          "status": "success",
+          "prompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#B3BDCF。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #B3BDCF。\n\n改色范围：仅两只袖子面料；大身、领子、门襟及全部纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #B3BDCF。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。",
+          "optimized": false,
+          "credits": 0
+        }
+      ],
+      "finalPrompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#B3BDCF。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #B3BDCF。\n\n改色范围：仅两只袖子面料；大身、领子、门襟及全部纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #B3BDCF。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。",
+      "optimized": false,
+      "applicationChargeRmb": null,
+      "outputs": [
+        {
+          "taskId": "57fc6b1c-ae5d-459e-8411-8b617f304eac",
+          "index": 0,
+          "path": "garment-colorway-19-old-57fc6b1c-ae5d-459e-8411-8b617f304eac-1.png",
+          "mime": "image/png",
+          "sha256": "3f65f0596c0692e8e2f2c4f7032e5acfc0ddd0a3c53b311b44fd66a0ff16d6f6",
+          "bytes": 1271255,
+          "contentType": "image/png"
+        }
+      ],
+      "completedAt": "2026-10-24T18:10:02.217Z"
+    },
+    "garment-colorway-19-new": {
+      "id": "garment-colorway-19-new",
+      "requestId": "pq:visual-v2-extended:garment-colorway-19-new:0",
+      "compilationRequestId": "pq:visual-v2-extended:garment-colorway-19-new:compile",
+      "inputHash": "11d91994858a6a7c27bc029de90c65a955ebca32327adc701d2f1f12199c64fc",
+      "status": "success",
+      "visualReview": "pending-manual-review",
+      "providerImageActualCost": null,
+      "providerChatActualCost": null,
+      "modelConfigId": "d5000000-0000-4000-8000-000000000001",
+      "modelId": "d5000000-0000-4000-8000-000000000001",
+      "startedAt": "2026-10-24T18:09:44.265Z",
+      "compileAttempted": true,
+      "compilation": {
+        "id": "c54352b4-8079-4fad-a846-e362c1391083",
+        "requestId": "pq:visual-v2-extended:garment-colorway-19-new:compile",
+        "status": "success",
+        "optimized": true,
+        "prompt": "Recolor only both sleeve fabrics in Image 1 to muted blue-gray (#B3BDCF), from armhole seams through sleeve hems; use Image 1 as the unchanged visual base, replacing only its sleeve color. Keep the body, collar, placket, all five center-front buttons and partially concealed collar button in their original light blue. Preserve silhouette, construction lines, visible stitching, collar shape, pocket configuration, pattern shapes and positions, fabric weave and texture, folds, highlight and shadow gradients, white background, framing and aspect ratio; change nothing outside the sleeves. The new color sits naturally in the fabric weave and folds, with realistic highlights and shadows, not a flat fill.\nAvoid: flat color fill, color swatches, dimension annotations, garment structure or pattern changes, recoloring outside sleeves, skin or background, brand logos, watermarks, unrelated text, collages, multi-panel layouts, extra hands, deformed limbs, underage models, nudity, sexualized presentation."
+      },
+      "finalPrompt": "Recolor only both sleeve fabrics in Image 1 to muted blue-gray (#B3BDCF), from armhole seams through sleeve hems; use Image 1 as the unchanged visual base, replacing only its sleeve color. Keep the body, collar, placket, all five center-front buttons and partially concealed collar button in their original light blue. Preserve silhouette, construction lines, visible stitching, collar shape, pocket configuration, pattern shapes and positions, fabric weave and texture, folds, highlight and shadow gradients, white background, framing and aspect ratio; change nothing outside the sleeves. The new color sits naturally in the fabric weave and folds, with realistic highlights and shadows, not a flat fill.\nAvoid: flat color fill, color swatches, dimension annotations, garment structure or pattern changes, recoloring outside sleeves, skin or background, brand logos, watermarks, unrelated text, collages, multi-panel layouts, extra hands, deformed limbs, underage models, nudity, sexualized presentation.",
+      "optimized": true,
+      "compilationCost": {
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": null,
+        "inputTokens": null,
+        "outputTokens": null,
+        "cacheHit": null,
+        "latencyMs": null
+      },
+      "taskAttempted": true,
+      "tasks": [
+        {
+          "id": "3854a909-4865-4b88-b3dc-c720adf7f1cd",
+          "requestId": "pq:visual-v2-extended:garment-colorway-19-new:0",
+          "status": "success",
+          "prompt": "Recolor only both sleeve fabrics in Image 1 to muted blue-gray (#B3BDCF), from armhole seams through sleeve hems; use Image 1 as the unchanged visual base, replacing only its sleeve color. Keep the body, collar, placket, all five center-front buttons and partially concealed collar button in their original light blue. Preserve silhouette, construction lines, visible stitching, collar shape, pocket configuration, pattern shapes and positions, fabric weave and texture, folds, highlight and shadow gradients, white background, framing and aspect ratio; change nothing outside the sleeves. The new color sits naturally in the fabric weave and folds, with realistic highlights and shadows, not a flat fill.\nAvoid: flat color fill, color swatches, dimension annotations, garment structure or pattern changes, recoloring outside sleeves, skin or background, brand logos, watermarks, unrelated text, collages, multi-panel layouts, extra hands, deformed limbs, underage models, nudity, sexualized presentation.",
+          "optimized": true,
+          "credits": 0
+        }
+      ],
+      "applicationChargeRmb": null,
+      "outputs": [
+        {
+          "taskId": "3854a909-4865-4b88-b3dc-c720adf7f1cd",
+          "index": 0,
+          "path": "garment-colorway-19-new-3854a909-4865-4b88-b3dc-c720adf7f1cd-1.png",
+          "mime": "image/png",
+          "sha256": "efcb598444c5debc26c1c5dd255435ef6c8c4c1e70329607816713af74be8a47",
+          "bytes": 1221366,
+          "contentType": "image/png"
+        }
+      ],
+      "completedAt": "2026-10-24T18:10:09.210Z"
+    },
+    "style-to-sketch-20-old": {
+      "id": "style-to-sketch-20-old",
+      "requestId": "pq:visual-v2-extended:style-to-sketch-20-old:0",
+      "compilationRequestId": "pq:visual-v2-extended:style-to-sketch-20-old:compile",
+      "inputHash": "f9c0b673e8595e2000dc0fc07a335bfca89ef1c123a3660f958f8ba7af455e5e",
+      "status": "success",
+      "visualReview": "pending-manual-review",
+      "providerImageActualCost": null,
+      "providerChatActualCost": null,
+      "modelConfigId": "d5000000-0000-4000-8000-000000000001",
+      "modelId": "d5000000-0000-4000-8000-000000000001",
+      "startedAt": "2026-10-24T18:09:53.513Z",
+      "taskAttempted": true,
+      "tasks": [
+        {
+          "id": "826de775-1a01-4bc1-923a-08adf608a89b",
+          "requestId": "pq:visual-v2-extended:style-to-sketch-20-old:0",
+          "status": "success",
+          "prompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：极简线稿。用干净、克制的轮廓线表达服装，不保留摄影光影与面料色块。\n\n细节程度：保留实际可见的分割线、口袋、褶裥、门襟、纽扣和装饰细节，避免虚构细节。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。简洁正面产品线描，衣身比例、开领角度和门襟位置不变。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。",
+          "optimized": false,
+          "credits": 0
+        }
+      ],
+      "finalPrompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装参考图，将其中实际可见的服装整理为清晰的线稿图片。\n\n线条风格：极简线稿。用干净、克制的轮廓线表达服装，不保留摄影光影与面料色块。\n\n细节程度：保留实际可见的分割线、口袋、褶裥、门襟、纽扣和装饰细节，避免虚构细节。\n\n保留图片1原有视角、廓形和比例，移除摄影背景与光影；不增加看不见的结构，不标注推测的尺寸。\n\n补充设计要求：只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。简洁正面产品线描，衣身比例、开领角度和门襟位置不变。\n\n输出为白底线稿概念栅格图片，不是可编辑 SVG、矢量文件、纸样或生产技术稿。",
+      "optimized": false,
+      "applicationChargeRmb": null,
+      "outputs": [
+        {
+          "taskId": "826de775-1a01-4bc1-923a-08adf608a89b",
+          "index": 0,
+          "path": "style-to-sketch-20-old-826de775-1a01-4bc1-923a-08adf608a89b-1.png",
+          "mime": "image/png",
+          "sha256": "fe5135b4a250d973b9753b0b8ff66c718076ac8a558d954931b7c5e4e8b5e71f",
+          "bytes": 734935,
+          "contentType": "image/png"
+        }
+      ],
+      "completedAt": "2026-10-24T18:10:11.757Z"
+    },
+    "style-to-sketch-20-new": {
+      "id": "style-to-sketch-20-new",
+      "requestId": "pq:visual-v2-extended:style-to-sketch-20-new:0",
+      "compilationRequestId": "pq:visual-v2-extended:style-to-sketch-20-new:compile",
+      "inputHash": "1aacf964490a319ef71278371e41abe7faf405607aec8f8f1117c0652d9a2535",
+      "status": "success",
+      "visualReview": "pending-manual-review",
+      "providerImageActualCost": null,
+      "providerChatActualCost": null,
+      "modelConfigId": "d5000000-0000-4000-8000-000000000001",
+      "modelId": "d5000000-0000-4000-8000-000000000001",
+      "startedAt": "2026-10-24T18:10:02.220Z",
+      "compileAttempted": true,
+      "compilation": {
+        "id": "ef96473b-8dc3-4dc4-8e01-cc432be5dff4",
+        "requestId": "pq:visual-v2-extended:style-to-sketch-20-new:compile",
+        "status": "success",
+        "optimized": true,
+        "prompt": "Convert Image 1 into one symmetrical front-view fashion flat with minimal, confident black (#000000) lines on pure white (#FFFFFF). Use its visible construction, not its color, texture or shadows; show no back view. Preserve the silhouette, body proportions, collar opening angle, placket position, short set-in sleeves, curved hem and visible stitching. Retain exactly five fully visible center-front buttons plus the original partially obscured neckline button, with none added or removed; add no pockets. Keep the garment flat, using clean contours and restrained construction lines.\nAvoid: shading, gradients, color fills, fabric texture, models, minors, extra limbs, nudity, sexualization, hangers and background objects, brand logos, watermarks, unrelated text, text labels, collages, multiple views, back views, color swatches and measurements, added pockets or invented construction, added, missing or repositioned buttons."
+      },
+      "finalPrompt": "Convert Image 1 into one symmetrical front-view fashion flat with minimal, confident black (#000000) lines on pure white (#FFFFFF). Use its visible construction, not its color, texture or shadows; show no back view. Preserve the silhouette, body proportions, collar opening angle, placket position, short set-in sleeves, curved hem and visible stitching. Retain exactly five fully visible center-front buttons plus the original partially obscured neckline button, with none added or removed; add no pockets. Keep the garment flat, using clean contours and restrained construction lines.\nAvoid: shading, gradients, color fills, fabric texture, models, minors, extra limbs, nudity, sexualization, hangers and background objects, brand logos, watermarks, unrelated text, text labels, collages, multiple views, back views, color swatches and measurements, added pockets or invented construction, added, missing or repositioned buttons.",
+      "optimized": true,
+      "compilationCost": {
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": null,
+        "inputTokens": null,
+        "outputTokens": null,
+        "cacheHit": null,
+        "latencyMs": null
+      },
+      "taskAttempted": true,
+      "tasks": [
+        {
+          "id": "03477a00-d761-4d52-8527-2190d9bb1bc6",
+          "requestId": "pq:visual-v2-extended:style-to-sketch-20-new:0",
+          "status": "success",
+          "prompt": "Convert Image 1 into one symmetrical front-view fashion flat with minimal, confident black (#000000) lines on pure white (#FFFFFF). Use its visible construction, not its color, texture or shadows; show no back view. Preserve the silhouette, body proportions, collar opening angle, placket position, short set-in sleeves, curved hem and visible stitching. Retain exactly five fully visible center-front buttons plus the original partially obscured neckline button, with none added or removed; add no pockets. Keep the garment flat, using clean contours and restrained construction lines.\nAvoid: shading, gradients, color fills, fabric texture, models, minors, extra limbs, nudity, sexualization, hangers and background objects, brand logos, watermarks, unrelated text, text labels, collages, multiple views, back views, color swatches and measurements, added pockets or invented construction, added, missing or repositioned buttons.",
+          "optimized": true,
+          "credits": 0
+        }
+      ],
+      "applicationChargeRmb": null,
+      "outputs": [
+        {
+          "taskId": "03477a00-d761-4d52-8527-2190d9bb1bc6",
+          "index": 0,
+          "path": "style-to-sketch-20-new-03477a00-d761-4d52-8527-2190d9bb1bc6-1.png",
+          "mime": "image/png",
+          "sha256": "9bc22c10acdfb4a51b21091ac4a7f85e0313a897196c0147bc52f89498139e76",
+          "bytes": 737317,
+          "contentType": "image/png"
+        }
+      ],
+      "completedAt": "2026-10-24T18:10:30.871Z"
+    },
+    "garment-colorway-20-old": {
+      "id": "garment-colorway-20-old",
+      "requestId": "pq:visual-v2-extended:garment-colorway-20-old:0",
+      "compilationRequestId": "pq:visual-v2-extended:garment-colorway-20-old:compile",
+      "inputHash": "9d7ff28af0b4cd92e7c3c9cc341cff6599051303cc6c54ddb8dcf232004329e0",
+      "status": "success",
+      "visualReview": "pending-manual-review",
+      "providerImageActualCost": null,
+      "providerChatActualCost": null,
+      "modelConfigId": "d5000000-0000-4000-8000-000000000001",
+      "modelId": "d5000000-0000-4000-8000-000000000001",
+      "startedAt": "2026-10-24T18:10:09.212Z",
+      "taskAttempted": true,
+      "tasks": [
+        {
+          "id": "77470f90-91fe-488f-8f30-861b14f028be",
+          "requestId": "pq:visual-v2-extended:garment-colorway-20-old:0",
+          "status": "success",
+          "prompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#A96054。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #A96054。\n\n改色范围：仅两只袖子面料；大身、领子、门襟及全部纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #A96054。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。",
+          "optimized": false,
+          "credits": 0
+        }
+      ],
+      "finalPrompt": "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n任务：图片1是服装主图，只调整颜色，输出一套配色效果。\n\n目标色板：#A96054。在指定改色区域内使用这 1 种目标颜色，结合明暗与材质自然分配，不把色板绘制到成图中。\n第1目标色：HEX #A96054。\n\n改色范围：仅两只袖子面料；大身、领子、门襟及全部纽扣保持原浅蓝色。范围之外的颜色保持原样。\n\n保留图片1服装的版型、肩宽、衣长、袖长、领口、门襟、口袋、下摆、图案形状及位置、针织或面料纹理、明暗层次、光影与背景。保持原有人像身份、肤色、头发、姿态、配饰、拍摄视角与构图不变。颜色自然融入织纹和褶皱，保留高光、阴影与材质质感，不变成平面色块。\n\n补充设计要求：只改指定区域至 #A96054。五颗前中纽扣及半遮挡领扣保持原浅蓝色；结构、可见缝线、面料肌理、白色背景和画面比例保持。\n\n照片换色由 AI 根据目标颜色与原图光照生成近似视觉效果，同一面料的高光和阴影应有自然色阶；HEX 与标准色号用于描述目标方向，不要求每个像素等于该 HEX，不是物理染色模拟。\n\n色名、HEX 色值与参考图只提供近似视觉方向，不保证精确色值、标准色号还原或实物色差。输出为单张概念配色图片，不绘制多联拼图或色卡，不是生产色稿。",
+      "optimized": false,
+      "applicationChargeRmb": null,
+      "outputs": [
+        {
+          "taskId": "77470f90-91fe-488f-8f30-861b14f028be",
+          "index": 0,
+          "path": "garment-colorway-20-old-77470f90-91fe-488f-8f30-861b14f028be-1.png",
+          "mime": "image/png",
+          "sha256": "828d3b067c17111b270cfc4a140cba3ebc4504f239455ee1703ffcb8fbc02c08",
+          "bytes": 1266346,
+          "contentType": "image/png"
+        }
+      ],
+      "completedAt": "2026-10-24T18:10:27.642Z"
+    },
+    "garment-colorway-20-new": {
+      "id": "garment-colorway-20-new",
+      "requestId": "pq:visual-v2-extended:garment-colorway-20-new:0",
+      "compilationRequestId": "pq:visual-v2-extended:garment-colorway-20-new:compile",
+      "inputHash": "c653df8e4406705e26c59c4c93fb51d7832125bddbb9f3d407a690bbdd2716a8",
+      "status": "success",
+      "visualReview": "pending-manual-review",
+      "providerImageActualCost": null,
+      "providerChatActualCost": null,
+      "modelConfigId": "d5000000-0000-4000-8000-000000000001",
+      "modelId": "d5000000-0000-4000-8000-000000000001",
+      "startedAt": "2026-10-24T18:10:11.761Z",
+      "compileAttempted": true,
+      "compilation": {
+        "id": "fbddfd55-36db-40fd-91bb-219fbf4bd616",
+        "requestId": "pq:visual-v2-extended:garment-colorway-20-new:compile",
+        "status": "success",
+        "optimized": true,
+        "prompt": "Recolor only both sleeve fabrics in Image 1 to muted terracotta (#A96054), from armhole seams through hems; use its garment and presentation unchanged, not its sleeve color. Keep the body, collar, placket, five front buttons and partially obscured collar button original light blue. Preserve silhouette, construction, collar shape, visible stitching, pocket/pattern details and placement, weave, texture, folds, highlights, shadows, white background and image proportions. The new color sits naturally in the fabric weave and folds, with realistic highlights and shadows, not a flat fill.\nAvoid: flat color fill, recoloring outside sleeves, skin or background, garment structure or pattern changes, brand logos, watermarks, unrelated text, collages, multi-panel layouts, color swatches, dimension annotations, extra hands, deformed limbs, underage models, nudity, sexualized presentation."
+      },
+      "finalPrompt": "Recolor only both sleeve fabrics in Image 1 to muted terracotta (#A96054), from armhole seams through hems; use its garment and presentation unchanged, not its sleeve color. Keep the body, collar, placket, five front buttons and partially obscured collar button original light blue. Preserve silhouette, construction, collar shape, visible stitching, pocket/pattern details and placement, weave, texture, folds, highlights, shadows, white background and image proportions. The new color sits naturally in the fabric weave and folds, with realistic highlights and shadows, not a flat fill.\nAvoid: flat color fill, recoloring outside sleeves, skin or background, garment structure or pattern changes, brand logos, watermarks, unrelated text, collages, multi-panel layouts, color swatches, dimension annotations, extra hands, deformed limbs, underage models, nudity, sexualized presentation.",
+      "optimized": true,
+      "compilationCost": {
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": null,
+        "inputTokens": null,
+        "outputTokens": null,
+        "cacheHit": null,
+        "latencyMs": null
+      },
+      "taskAttempted": true,
+      "tasks": [
+        {
+          "id": "9c26ce5f-b75f-42da-ab3b-7b158d2d4740",
+          "requestId": "pq:visual-v2-extended:garment-colorway-20-new:0",
+          "status": "success",
+          "prompt": "Recolor only both sleeve fabrics in Image 1 to muted terracotta (#A96054), from armhole seams through hems; use its garment and presentation unchanged, not its sleeve color. Keep the body, collar, placket, five front buttons and partially obscured collar button original light blue. Preserve silhouette, construction, collar shape, visible stitching, pocket/pattern details and placement, weave, texture, folds, highlights, shadows, white background and image proportions. The new color sits naturally in the fabric weave and folds, with realistic highlights and shadows, not a flat fill.\nAvoid: flat color fill, recoloring outside sleeves, skin or background, garment structure or pattern changes, brand logos, watermarks, unrelated text, collages, multi-panel layouts, color swatches, dimension annotations, extra hands, deformed limbs, underage models, nudity, sexualized presentation.",
+          "optimized": true,
+          "credits": 0
+        }
+      ],
+      "applicationChargeRmb": null,
+      "outputs": [
+        {
+          "taskId": "9c26ce5f-b75f-42da-ab3b-7b158d2d4740",
+          "index": 0,
+          "path": "garment-colorway-20-new-9c26ce5f-b75f-42da-ab3b-7b158d2d4740-1.png",
+          "mime": "image/png",
+          "sha256": "7133b894a54279ec4ab7de68327cb3b840dd280019d8871c244ba94282e80100",
+          "bytes": 1265851,
+          "contentType": "image/png"
+        }
+      ],
+      "completedAt": "2026-10-24T18:10:36.556Z"
+    }
+  },
+  "ownerHash": "993224b4fe85990df64db926ca5c034675eb037399e2fcef041c8d7e31e54d3f",
+  "apiOrigin": "http://127.0.0.1:3100",
+  "models": [
+    {
+      "id": "d5000000-0000-4000-8000-000000000001",
+      "modelId": "d5000000-0000-4000-8000-000000000001",
+      "name": "aplmart-gpt2.5-flare",
+      "capabilities": [
+        "generate",
+        "edit",
+        "batch"
+      ],
+      "rmbCost": 0
+    },
+    {
+      "id": "d5000000-0000-4000-8000-000000000002",
+      "modelId": "d5000000-0000-4000-8000-000000000002",
+      "name": "aplmart-gpt2.5-sunburst",
+      "capabilities": [
+        "generate",
+        "edit",
+        "batch"
+      ],
+      "rmbCost": 0
+    },
+    {
+      "id": "d5000000-0000-4000-8000-000000000003",
+      "modelId": "d5000000-0000-4000-8000-000000000003",
+      "name": "aplmart-nano2.1",
+      "capabilities": [
+        "generate",
+        "edit",
+        "batch"
+      ],
+      "rmbCost": 0
+    },
+    {
+      "id": "40000000-0000-4000-8000-000000000124",
+      "modelId": "gpt-6-astra",
+      "name": "gpt-6-astra",
+      "capabilities": [
+        "chat",
+        "vision",
+        "tools"
+      ],
+      "rmbCost": 0
+    },
+    {
+      "id": "d5000000-0000-4000-8000-000000000006",
+      "modelId": "d5000000-0000-4000-8000-000000000006",
+      "name": "aplmart-mj-blend",
+      "capabilities": [
+        "generate"
+      ],
+      "rmbCost": 0
+    },
+    {
+      "id": "40000000-0000-4000-8000-000000000110",
+      "modelId": "MiniMax-H3",
+      "name": "MiniMax-H3",
+      "capabilities": [
+        "video"
+      ],
+      "rmbCost": 0
+    },
+    {
+      "id": "40000000-0000-4000-8000-000000000111",
+      "modelId": "doubao-seedance-2.5",
+      "name": "doubao-seedance-2.5",
+      "capabilities": [
+        "video"
+      ],
+      "rmbCost": 0
+    },
+    {
+      "id": "40000000-0000-4000-8000-000000000112",
+      "modelId": "wan2.7",
+      "name": "wan2.7",
+      "capabilities": [
+        "video"
+      ],
+      "rmbCost": 0
+    },
+    {
+      "id": "40000000-0000-4000-8000-000000000113",
+      "modelId": "happyhorse-1.1",
+      "name": "happyhorse-1.1",
+      "capabilities": [
+        "video"
+      ],
+      "rmbCost": 0
+    },
+    {
+      "id": "d5000000-0000-4000-8000-000000000007",
+      "modelId": "d5000000-0000-4000-8000-000000000007",
+      "name": "aplmart-gpt2",
+      "capabilities": [
+        "generate",
+        "edit",
+        "batch"
+      ],
+      "rmbCost": 0
+    },
+    {
+      "id": "d5000000-0000-4000-8000-000000000009",
+      "modelId": "d5000000-0000-4000-8000-000000000009",
+      "name": "aplmart-nano2",
+      "capabilities": [
+        "generate",
+        "edit",
+        "batch"
+      ],
+      "rmbCost": 0
+    },
+    {
+      "id": "40000000-0000-4000-8000-000000000105",
+      "modelId": "40000000-0000-4000-8000-000000000105",
+      "name": "gpt-image-2",
+      "capabilities": [
+        "generate",
+        "edit"
+      ],
+      "rmbCost": 0
+    },
+    {
+      "id": "d5000000-0000-4000-8000-000000000004",
+      "modelId": "d5000000-0000-4000-8000-000000000004",
+      "name": "aplmart-gpt6-astra",
+      "capabilities": [
+        "chat"
+      ],
+      "rmbCost": 0
+    },
+    {
+      "id": "d5000000-0000-4000-8000-000000000005",
+      "modelId": "d5000000-0000-4000-8000-000000000005",
+      "name": "aplmart-happyhorse1.1",
+      "capabilities": [
+        "video"
+      ],
+      "rmbCost": 0
+    },
+    {
+      "id": "40000000-0000-4000-8000-000000000107",
+      "modelId": "40000000-0000-4000-8000-000000000107",
+      "name": "gpt-image-2.5-flare",
+      "capabilities": [
+        "generate",
+        "edit"
+      ],
+      "rmbCost": 0
+    },
+    {
+      "id": "40000000-0000-4000-8000-000000000108",
+      "modelId": "40000000-0000-4000-8000-000000000108",
+      "name": "gpt-image-2.5-sunburst",
+      "capabilities": [
+        "generate",
+        "edit"
+      ],
+      "rmbCost": 0
+    },
+    {
+      "id": "40000000-0000-4000-8000-000000000106",
+      "modelId": "40000000-0000-4000-8000-000000000106",
+      "name": "gemini-3.1-flash-image",
+      "capabilities": [
+        "generate",
+        "edit"
+      ],
+      "rmbCost": 0
+    },
+    {
+      "id": "d5000000-0000-4000-8000-000000000010",
+      "modelId": "d5000000-0000-4000-8000-000000000010",
+      "name": "aplmart-claude-sonnet-5-5",
+      "capabilities": [
+        "chat",
+        "vision",
+        "tools"
+      ],
+      "rmbCost": 0
+    }
+  ],
+  "tools": [
+    {
+      "toolKey": "image",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "detail-enhance",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "image-edit",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "angle-control",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "seamless-stitch",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "midjourney-blend",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "video",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "creative-text-to-style",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "creative-style-to-sketch",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "creative-local-restyle",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "creative-garment-colorway",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "creative-back-design",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "creative-pattern-extract",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "creative-pattern-colorway",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "creative-accessory-design",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "creative-pattern-craft",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "series-recipe",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "canvas-image",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "canvas-edit",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "canvas-mask-edit",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "canvas-angle",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "canvas-batch",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "canvas-chat",
+      "modelConfigId": "d5000000-0000-4000-8000-000000000010",
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "canvas-video",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "canvas-audio",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "gpt-chat",
+      "modelConfigId": "d5000000-0000-4000-8000-000000000010",
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "gpt-chat-image",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    }
+  ]
+}

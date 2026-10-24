@@ -15,6 +15,7 @@
 - [画布操作](content/docs/canvas/canvas-node-manual.mdx) · [快捷键](content/docs/canvas/canvas-shortcuts.mdx)。
 - [图片参数](manual/image-model-parameters.md) · [视频参数](manual/video-model-parameters.md) · [聊天参数](manual/chat-model-parameters.md)。模型协议资料供管理员维护；设计师可选择已启用的图片模型，对话理解模型由后台统一管理，不在设计师端选型。
 - [提示词模板](manual/prompt-template-guide.md)。历史公司管理参考：[小组与模块](manual/groups-and-module-switches.md) · [共享额度](manual/group-shared-credit-pool.md) · [设计效能](manual/design-performance-dashboard.md)；不是当前创作的前置步骤。
+- [服务端提示词优化方案](manual/prompt-optimization/无线画布-提示词优化工作流方案.md) · [原始完整配方](manual/prompt-optimization/无线画布-板块系统提示词（机密）.md)：按所有者授权公开的来源材料；当前运行接口与初始化方法以功能和本地开发文档为准。
 
 ## 开发入口
 

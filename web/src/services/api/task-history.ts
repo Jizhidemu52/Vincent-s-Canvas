@@ -7,6 +7,8 @@ export type ServerTask = {
     projectId: string;
     operationType: string;
     prompt: string;
+    userInput?: import("../../../../shared/prompt-contracts").PromptInputData;
+    optimized?: boolean;
     parameters: Record<string, unknown>;
     sourceUrls: string[];
     resultUrls: string[];
@@ -51,6 +53,8 @@ export type ServerHistory = {
     operationType: string;
     modelName: string | null;
     prompt: string;
+    userInput?: import("../../../../shared/prompt-contracts").PromptInputData;
+    optimized?: boolean;
     parameters: Record<string, unknown>;
     sourceUrls: string[];
     resultUrls: string[];

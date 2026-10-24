@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createRecipeForm, createRecipeRun, buildRecipePrompt, parseRecipeProject, SeriesRecipeRunner, type RecipeDependencies } from "../src/pages/design-workbench/recipe-model";
+import { createRecipeForm, createRecipeRun, recipePromptInput, parseRecipeProject, SeriesRecipeRunner, type RecipeDependencies } from "../src/pages/design-workbench/recipe-model";
 import { defaultConfig } from "../src/stores/use-config-store";
 
 const reference = { id: "source", name: "garment.png", type: "image/png", dataUrl: "data:image/png;base64,AAAA" };
@@ -7,7 +7,7 @@ const reference = { id: "source", name: "garment.png", type: "image/png", dataUr
 const makeRun = (count = 3) => {
     const run = createRecipeRun("owner", createRecipeForm(), [reference], defaultConfig);
     run.form.count = count;
-    run.branches = Array.from({ length: count }, (_, index) => ({ ...structuredClone(run.branches[0]!), id: `variant-${index + 1}`, index, prompt: buildRecipePrompt(run.form, index, false) }));
+    run.branches = Array.from({ length: count }, (_, index) => ({ ...structuredClone(run.branches[0]!), id: `variant-${index + 1}`, index, prompt: run.form.prompt }));
     return run;
 };
 const dependencies = (generate: RecipeDependencies["generate"]): RecipeDependencies => ({
@@ -31,12 +31,13 @@ describe("formal series recipe", () => {
         expect(run.settings.count).toBe("1");
         expect(form.count).toBe(6);
     });
-    test("builds distinct reference-aware prompts without inventing a motif", () => {
+    test("sends public form values and ordered reference roles without frontend authoring rules", () => {
         const form = { ...createRecipeForm(), kind: "pattern" as const, constraints: "纽扣不变", prompt: "只在指定部位调整" };
-        expect(buildRecipePrompt(form, 0, false)).toContain("底图中已有的图案");
-        expect(buildRecipePrompt(form, 0, true)).toContain("参考图 2");
-        expect(buildRecipePrompt(form, 0, true)).toContain("纽扣不变");
-        expect(buildRecipePrompt(form, 0, true)).not.toEqual(buildRecipePrompt(form, 1, true));
+        const input = recipePromptInput(form, 0, true);
+        expect(input).toMatchObject({ scene: "series-recipe", userText: form.prompt, fields: { constraints: "纽扣不变", variantIndex: 0, hasMotif: true }, referenceRoles: ["产品底图", "图案参考图"] });
+        expect(recipePromptInput(form, 0, false).referenceRoles).toEqual(["产品底图"]);
+        expect(recipePromptInput(form, 1, true).fields?.variantIndex).toBe(1);
+        expect(JSON.stringify(input)).not.toContain("不输出对比板");
     });
 
     test("submits each real branch once and preserves successful outputs on failed-only retry", async () => {
@@ -49,6 +50,9 @@ describe("formal series recipe", () => {
                 calls.push({ prompt, requestId: options?.requestId, tool: options?.tool, count: config.count });
                 expect(refs[0]?.id).toBe("source");
                 expect(mask).toBeUndefined();
+                expect(options?.promptInput?.scene).toBe("series-recipe");
+                options?.onOptimizing?.();
+                options?.onCompiled?.("server final prompt", true);
                 await options?.onSubmissionStarted?.();
                 await options?.onSubmitted?.([`task-${calls.length}`]);
                 if (calls.length === 2 && shouldFail) {

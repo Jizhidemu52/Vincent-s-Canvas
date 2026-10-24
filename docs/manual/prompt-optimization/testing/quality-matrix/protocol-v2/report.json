@@ -1,0 +1,210 @@
+{
+  "runId": "protocol-v2",
+  "baselineCommit": "4ed9d8d",
+  "apiOrigin": "http://127.0.0.1:3100",
+  "counts": {
+    "ready": 0,
+    "running": 0,
+    "success": 3,
+    "failed": 0,
+    "uncertain": 0,
+    "blocked": 0
+  },
+  "paidPostAttempts": {
+    "compilation": 2,
+    "taskOrBatch": 3,
+    "chat": 0
+  },
+  "costs": {
+    "optimizer": [
+      {
+        "caseId": "protocol-d5000000-0000-4000-8000-000000000003",
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": null,
+        "inputTokens": null,
+        "outputTokens": null,
+        "cacheHit": null,
+        "latencyMs": null
+      },
+      {
+        "caseId": "protocol-d5000000-0000-4000-8000-000000000006",
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": null,
+        "inputTokens": null,
+        "outputTokens": null,
+        "cacheHit": null,
+        "latencyMs": null
+      },
+      {
+        "caseId": "protocol-d5000000-0000-4000-8000-000000000009",
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": null,
+        "inputTokens": null,
+        "outputTokens": null,
+        "cacheHit": null,
+        "latencyMs": null
+      }
+    ],
+    "applicationConfiguredChargeRmb": 0,
+    "imageProviderActualCost": null,
+    "chatProviderActualCost": null,
+    "note": "null means unavailable, not free; configured application charge is not upstream billing"
+  },
+  "visualReview": "pending-manual-review",
+  "cases": [
+    {
+      "id": "protocol-d5000000-0000-4000-8000-000000000003",
+      "requestId": "pq:protocol-v2:protocol-d5000000-0000-4000-8000-000000000003:0",
+      "compilationRequestId": "pq:protocol-v2:protocol-d5000000-0000-4000-8000-000000000003:compile",
+      "inputHash": "622484d0a90207b3bd660018e560ba9c5cfaffdb341ce005046168514a137ab2",
+      "status": "success",
+      "visualReview": "pending-manual-review",
+      "providerImageActualCost": null,
+      "providerChatActualCost": null,
+      "modelConfigId": "d5000000-0000-4000-8000-000000000003",
+      "modelId": "d5000000-0000-4000-8000-000000000003",
+      "startedAt": "2026-10-24T17:46:03.130Z",
+      "compileAttempted": true,
+      "compilation": {
+        "id": "8b78cbe3-1027-4e94-96bd-25af5b880e93",
+        "requestId": "pq:protocol-v2:protocol-d5000000-0000-4000-8000-000000000003:compile",
+        "status": "success",
+        "optimized": true,
+        "prompt": "仅将 Image 1 衬衫大身改为鼠尾草绿色（#9DA882），替换大身原色；保留领、袖、门襟、纽扣及其余内容不变。\n避免: 品牌 logo 或水印, 无关文字, 拼贴多宫格, 色卡条, 尺寸标注, 多余的手或肢体变形, 未成年人模特, 裸露或性感化表现."
+      },
+      "finalPrompt": "仅将 Image 1 衬衫大身改为鼠尾草绿色（#9DA882），替换大身原色；保留领、袖、门襟、纽扣及其余内容不变。\n避免: 品牌 logo 或水印, 无关文字, 拼贴多宫格, 色卡条, 尺寸标注, 多余的手或肢体变形, 未成年人模特, 裸露或性感化表现.",
+      "optimized": true,
+      "compilationCost": {
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": null,
+        "inputTokens": null,
+        "outputTokens": null,
+        "cacheHit": null,
+        "latencyMs": null
+      },
+      "taskAttempted": true,
+      "tasks": [
+        {
+          "id": "4c6f5a78-a0e2-415a-8827-116a963ba32f",
+          "requestId": "pq:protocol-v2:protocol-d5000000-0000-4000-8000-000000000003:0",
+          "status": "success",
+          "prompt": "仅将 Image 1 衬衫大身改为鼠尾草绿色（#9DA882），替换大身原色；保留领、袖、门襟、纽扣及其余内容不变。\n避免: 品牌 logo 或水印, 无关文字, 拼贴多宫格, 色卡条, 尺寸标注, 多余的手或肢体变形, 未成年人模特, 裸露或性感化表现.",
+          "optimized": true,
+          "credits": 0
+        }
+      ],
+      "applicationChargeRmb": null,
+      "outputs": [
+        {
+          "taskId": "4c6f5a78-a0e2-415a-8827-116a963ba32f",
+          "index": 0,
+          "path": "protocol-d5000000-0000-4000-8000-000000000003-4c6f5a78-a0e2-415a-8827-116a963ba32f-1.jpg",
+          "mime": "image/jpeg",
+          "sha256": "eb650a59a121045396bf81e8bd7f3f11562b8b2dc04aa9398f75795960a1f692",
+          "bytes": 434672,
+          "contentType": "image/jpeg"
+        }
+      ],
+      "completedAt": "2026-10-24T17:46:55.082Z"
+    },
+    {
+      "id": "protocol-d5000000-0000-4000-8000-000000000006",
+      "requestId": "pq:protocol-v2:protocol-d5000000-0000-4000-8000-000000000006:0",
+      "compilationRequestId": "pq:protocol-v2:protocol-d5000000-0000-4000-8000-000000000006:compile",
+      "inputHash": "c4d19916778f4d796872b1682113737899d1118d3665a78780f8751f2303163d",
+      "status": "success",
+      "visualReview": "pending-manual-review",
+      "providerImageActualCost": null,
+      "providerChatActualCost": null,
+      "modelConfigId": "d5000000-0000-4000-8000-000000000006",
+      "modelId": "d5000000-0000-4000-8000-000000000006",
+      "startedAt": "2026-10-24T17:46:03.130Z",
+      "taskAttempted": true,
+      "tasks": [
+        {
+          "id": "1ef04f61-c07a-43ae-aa51-0d2e27447721",
+          "requestId": "pq:protocol-v2:protocol-d5000000-0000-4000-8000-000000000006:0",
+          "status": "success",
+          "prompt": "",
+          "optimized": false,
+          "credits": 0
+        }
+      ],
+      "finalPrompt": "",
+      "optimized": false,
+      "applicationChargeRmb": null,
+      "outputs": [
+        {
+          "taskId": "1ef04f61-c07a-43ae-aa51-0d2e27447721",
+          "index": 0,
+          "path": "protocol-d5000000-0000-4000-8000-000000000006-1ef04f61-c07a-43ae-aa51-0d2e27447721-1.png",
+          "mime": "image/png",
+          "sha256": "b780b4550b2b0b6efc6ab58749d415690486ca86844e3f3e93f68b04456124fe",
+          "bytes": 553275,
+          "contentType": "image/png"
+        }
+      ],
+      "completedAt": "2026-10-24T17:46:57.586Z"
+    },
+    {
+      "id": "protocol-d5000000-0000-4000-8000-000000000009",
+      "requestId": "pq:protocol-v2:protocol-d5000000-0000-4000-8000-000000000009:0",
+      "compilationRequestId": "pq:protocol-v2:protocol-d5000000-0000-4000-8000-000000000009:compile",
+      "inputHash": "cb166fe82673b56f454ae7c45d3bb8c2d760678be25653c29cf269b13dcab990",
+      "status": "success",
+      "visualReview": "pending-manual-review",
+      "providerImageActualCost": null,
+      "providerChatActualCost": null,
+      "modelConfigId": "d5000000-0000-4000-8000-000000000009",
+      "modelId": "d5000000-0000-4000-8000-000000000009",
+      "startedAt": "2026-10-24T17:46:03.130Z",
+      "compileAttempted": true,
+      "compilation": {
+        "id": "d144f53d-4700-40ae-9190-4e9a49c28b86",
+        "requestId": "pq:protocol-v2:protocol-d5000000-0000-4000-8000-000000000009:compile",
+        "status": "success",
+        "optimized": true,
+        "prompt": "仅将 Image 1 中衬衫大身的原色替换为鼠尾草绿色（#9DA882）。保留领、袖、门襟及其余内容不变，包括纹理、光影与背景。\n避免: 品牌 logo 与水印, 无关文字, 拼贴多宫格, 色卡条, 尺寸标注, 多余的手或肢体变形, 未成年人模特, 裸露或性感化表现."
+      },
+      "finalPrompt": "仅将 Image 1 中衬衫大身的原色替换为鼠尾草绿色（#9DA882）。保留领、袖、门襟及其余内容不变，包括纹理、光影与背景。\n避免: 品牌 logo 与水印, 无关文字, 拼贴多宫格, 色卡条, 尺寸标注, 多余的手或肢体变形, 未成年人模特, 裸露或性感化表现.",
+      "optimized": true,
+      "compilationCost": {
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": null,
+        "inputTokens": null,
+        "outputTokens": null,
+        "cacheHit": null,
+        "latencyMs": null
+      },
+      "taskAttempted": true,
+      "tasks": [
+        {
+          "id": "8a5d7079-ade7-4fff-bef2-717065b7415f",
+          "requestId": "pq:protocol-v2:protocol-d5000000-0000-4000-8000-000000000009:0",
+          "status": "success",
+          "prompt": "仅将 Image 1 中衬衫大身的原色替换为鼠尾草绿色（#9DA882）。保留领、袖、门襟及其余内容不变，包括纹理、光影与背景。\n避免: 品牌 logo 与水印, 无关文字, 拼贴多宫格, 色卡条, 尺寸标注, 多余的手或肢体变形, 未成年人模特, 裸露或性感化表现.",
+          "optimized": true,
+          "credits": 0
+        }
+      ],
+      "applicationChargeRmb": null,
+      "outputs": [
+        {
+          "taskId": "8a5d7079-ade7-4fff-bef2-717065b7415f",
+          "index": 0,
+          "path": "protocol-d5000000-0000-4000-8000-000000000009-8a5d7079-ade7-4fff-bef2-717065b7415f-1.jpg",
+          "mime": "image/jpeg",
+          "sha256": "4fbe2fb07fa49c4ab3ee173af198042363a0c594f53afb926d5cf51a27fe1feb",
+          "bytes": 439595,
+          "contentType": "image/jpeg"
+        }
+      ],
+      "completedAt": "2026-10-24T17:46:31.095Z"
+    }
+  ]
+}

@@ -1,0 +1,140 @@
+{
+  "capturedAt": "2026-10-24T18:56:15.595Z",
+  "scope": "Root real CUA browser UI on synthetic QA only; no mocks",
+  "canvasId": "gvEGpGWmZinPcdLPfIYnh",
+  "imagePostCount": 2,
+  "explicitCompilationPostCount": 0,
+  "serverInlineCompilations": 2,
+  "actualProviderCost": null,
+  "workflow": "white_bg -> recolor",
+  "secondReferenceShaEqualsFirstResult": true,
+  "images": [
+    {
+      "label": "source",
+      "url": "/api/assets/eb996a3a-2b47-41c1-886c-76c7c7913a9d/content",
+      "file": "workflow-live-ui/source.png",
+      "bytes": 2372866,
+      "sha256": "b89da8fc0395daff134bd39a2bec831cc62004db7ccff90a770a60c0d027aba6",
+      "mime": "image/png"
+    },
+    {
+      "label": "step-1",
+      "url": "/api/assets/6c719bb7-93ae-473f-845f-b0e18ca0a435/content",
+      "file": "workflow-live-ui/step-1.png",
+      "bytes": 2446360,
+      "sha256": "e53311787e3037043fb3e24549774e53db7845625dd74761d9d64b0ef3f5ef2d",
+      "mime": "image/png"
+    },
+    {
+      "label": "step-2",
+      "url": "/api/assets/0e9fba5a-eaca-4e11-aad4-27332eae7785/content",
+      "file": "workflow-live-ui/step-2.png",
+      "bytes": 2731559,
+      "sha256": "d33d202cba39f318510c01b2593999a2bad4393f7961bb7b77e1325f23f33ebf",
+      "mime": "image/png"
+    },
+    {
+      "label": "step-2-input",
+      "url": "/api/assets/f34a0d20-1f0c-44db-9a45-afe405821afe/content",
+      "file": "workflow-live-ui/step-2-input.png",
+      "bytes": 2446360,
+      "sha256": "e53311787e3037043fb3e24549774e53db7845625dd74761d9d64b0ef3f5ef2d",
+      "mime": "image/png"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "03fc4efc-4983-4266-a706-03af885b2027",
+      "requestId": "p6mCh18jAApCtvyVSfHa8:0",
+      "status": "success",
+      "createdAt": "2026-10-24T18:42:49.115Z",
+      "updatedAt": "2026-10-24T18:45:36.718Z",
+      "upstreamTaskId": "task_01M5QKJ3M4HH932XP85P0TSTKP",
+      "modelConfigId": "d5000000-0000-4000-8000-000000000007",
+      "optimized": true,
+      "prompt": "Extract only the garment from Image 1, not its background; present it alone on a pure white (#FFFFFF) seamless background as a centered, complete front-view flat-lay product photograph, with soft lighting and a subtle natural shadow. Remove any person, hanger or mannequin. Keep everything already established in Image 1: cream (#F2E6CE) color, sleeveless silhouette, exact V-neck depth, ribbed neckline, armholes and hem, visible knit stitches, softly textured yarn and plain, unpatterned surface. Keep the garment unchanged, with no buttons or pockets and no cropping.\nAvoid: garment design or color changes, cropped garment, buttons or pockets, text, logos or watermarks, collages or multi-panel layouts, color swatches or dimension annotations, extra hands or distorted limbs, underage models, nudity or sexualization.",
+      "userInput": {
+        "scene": "workflow-step",
+        "fields": {
+          "step_type": "white_bg",
+          "instruction": "图片1\n保持这件奶油色V领无袖针织背心的轮廓、V领深度、罗纹和针织肌理不变，背景整理为纯白色，无文字、无纽扣、无口袋，只输出同一件服装的正面产品图。"
+        },
+        "userText": "图片1\n保持这件奶油色V领无袖针织背心的轮廓、V领深度、罗纹和针织肌理不变，背景整理为纯白色，无文字、无纽扣、无口袋，只输出同一件服装的正面产品图。",
+        "referenceRoles": [
+          "上游步骤输出图"
+        ],
+        "mode": "edit",
+        "hasMask": false,
+        "compilationId": "abce0de3-01d7-4ed6-b4e0-7aa2698cdb8b"
+      },
+      "sourceUrls": [
+        "/api/assets/eb996a3a-2b47-41c1-886c-76c7c7913a9d/content"
+      ],
+      "resultUrls": [
+        "/api/assets/6c719bb7-93ae-473f-845f-b0e18ca0a435/content"
+      ]
+    },
+    {
+      "id": "b0813d46-110a-4bbf-8d43-06302d775d61",
+      "requestId": "yyzI2wf40eSkzKZc-DDpp:0",
+      "status": "success",
+      "createdAt": "2026-10-24T18:45:50.922Z",
+      "updatedAt": "2026-10-24T18:46:22.377Z",
+      "upstreamTaskId": "task_01M5QKQN2DGCZVM9E4CDCF01H1",
+      "modelConfigId": "d5000000-0000-4000-8000-000000000007",
+      "optimized": true,
+      "prompt": "Recolor all fabric in Image 1 to navy blue (#1B2A41), including neckline, armhole and hem ribbing; retain its design, not its cream color. Keep everything already established in Image 1: V-neck depth, sleeveless silhouette, construction lines, stockinette texture, ribbing, solid pattern, folds, highlights, shadows, white (#FFFFFF) background, and complete centered front view. Preserve the absence of buttons and pockets. The new color sits naturally in the fabric weave and folds, with realistic highlights and shadows, not a flat fill.\nAvoid: garment structure or pattern changes, added buttons or pockets, flat color fill, background recoloring, cropped garment or collage grids, logos, watermarks or unrelated text, color swatches or dimension annotations, people, extra limbs, minors or sexualized nudity.",
+      "userInput": {
+        "scene": "workflow-step",
+        "fields": {
+          "step_type": "recolor",
+          "instruction": "图片1\n使用上一步实际图片，仅将同一件V领无袖针织背心的全部面料（含领口、袖口和下摆罗纹）改为海军蓝 #1B2A41；保留V领深度、轮廓、针织肌理、白底，不加纽扣、口袋或文字。"
+        },
+        "userText": "图片1\n使用上一步实际图片，仅将同一件V领无袖针织背心的全部面料（含领口、袖口和下摆罗纹）改为海军蓝 #1B2A41；保留V领深度、轮廓、针织肌理、白底，不加纽扣、口袋或文字。",
+        "referenceRoles": [
+          "上游步骤输出图"
+        ],
+        "mode": "edit",
+        "hasMask": false,
+        "compilationId": "67baea35-0016-46d2-924c-5307d2121e81"
+      },
+      "sourceUrls": [
+        "/api/assets/f34a0d20-1f0c-44db-9a45-afe405821afe/content"
+      ],
+      "resultUrls": [
+        "/api/assets/0e9fba5a-eaca-4e11-aad4-27332eae7785/content"
+      ]
+    }
+  ],
+  "templates": {
+    "canvasId": "DYVDk2EMA0x1MoKsIWAjs",
+    "createdThroughActualUi": [
+      "整套款式开发",
+      "花型与工艺开发",
+      "系列配色提案"
+    ],
+    "persistedUiCounts": {
+      "nodes": 12,
+      "connections": 9,
+      "configurationNodes": 9,
+      "referencePlaceholders": 3
+    },
+    "observedReferenceIds": [
+      "AGpdjgCgqpv-G0We0iCZm",
+      "WeYlx0gKATWT0xAtKdne1",
+      "YLfIEoJQokw4E92iNRaOe"
+    ],
+    "imageSubmissions": 0,
+    "note": "Each template UI describes three independent outputs from one reference. First two groups' all three visible prompt chips referred to the same group reference. Third group and total 12/9 were verified after returning to the canvas list; exact edge mapping is additionally covered by existing template unit tests, not inferred from offscreen DOM."
+  },
+  "preparationOnly": "The other headless blue-shirt canvas recorded in handoff-report.json was never run (0 POST); handoff.private.json is not public evidence.",
+  "secondSourceBytesEqualFirstResult": true,
+  "secondSourceUrlEqualsFirstResult": false,
+  "lineageNote": "The same result bytes were re-uploaded under a new asset ID; both the downloaded bytes and input archive SHA match step 1.",
+  "refreshUi": {
+    "completedSteps": 2,
+    "totalSteps": 2,
+    "sameResultImagesVisible": true,
+    "networkNote": "No additional paid POST was observed after refresh, but the Vite development reload exceeded the browser event buffer; this is not a complete-network negative proof."
+  }
+}

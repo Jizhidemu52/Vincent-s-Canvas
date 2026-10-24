@@ -1,7 +1,8 @@
 import { authenticateDemoAccount, demoAccounts } from "./demo-accounts";
 import { readDemoTaskProgress } from "./task-progress";
 import { logDemoRequest } from "./request-logging";
-import { taskSubmissionSchema, batchSubmissionSchema } from "../../shared/task-contracts";
+import { taskSubmissionSchema, batchSubmissionSchema, type TaskSubmission } from "../../shared/task-contracts";
+import type { PromptInput } from "../../shared/prompt-contracts";
 import { hashAssetContent, requestedContentHash } from "./asset-content-hash";
 import { ZodError } from "zod";
 import { demoTaskSummary, pageDemoRecords, parseDemoTaskFilters } from "./demo-list-pagination";
@@ -55,6 +56,13 @@ import { readReferenceImportBody, referenceImportFailure, runReferenceImportActi
 import { moduleKeys, moduleIsEnabled, toolDefinitions, type ToolKey } from "../../shared/feature-catalog";
 import { DemoToolConfigurationError, resolveDemoToolConfiguration } from "./demo-tool-configuration";
 import { applyDefaultChatModel, INITIAL_CHAT_MODEL_ID } from "./chat-model-policy";
+import { sqlitePromptRecipeStore } from "./demo-prompt-recipes";
+import { createDemoPromptCompiler, handleDemoPromptRecipes } from "./demo-prompt-runtime";
+import { DemoAdmissionGate, DemoPromptBatchStore } from "./demo-prompt-batches";
+import { promptHash } from "./prompt-recipe-store";
+import { preparePromptTaskInput } from "./prompt-task-input";
+import { prepareChatProfileInput, validateChatProfileOutput, type ChatPromptProfile } from "./prompt-chat-profiles";
+import { PromptOptimizationError } from "./prompt-safety";
 
 const sessions = new Map<string, string>();
 const modules = moduleKeys;
@@ -408,6 +416,12 @@ type DemoAsset = {
 };
 type DemoTask = {
   prompt?: string;
+  userInput?: PromptInput | null;
+  optimized?: boolean;
+  promptCompilationId?: string;
+  submissionHash?: string;
+  batchId?: string;
+  itemIndex?: number;
   parameters?: Record<string, unknown>;
   sourceUrls?: string[];
   projectId?: string;
@@ -450,6 +464,16 @@ const demoState = new DemoStateStore<DemoAsset, DemoTask>(demoStatePath);
 const assetProjects = new DemoAssetProjectStore(demoStatePath);
 const canvasDocuments = new DemoCanvasDocumentStore(demoStatePath);
 const promptTemplates = new DemoPromptTemplateStore(demoStatePath);
+const demoPromptDatabase = sqlitePromptRecipeStore(demoStatePath);
+const demoPromptCompiler = createDemoPromptCompiler(demoPromptDatabase.store, {
+  models: demoModels, providers: demoProviders, tools: demoToolConfigurations, flags: demoModuleFlags,
+  credential: demoChatProviderApiKey, asset: id => demoAssets.get(id),
+});
+const demoPromptBatches = new DemoPromptBatchStore(demoPromptDatabase.store.database);
+await demoPromptBatches.initialize();
+const demoAdmissionGate = new DemoAdmissionGate();
+type PreparedDemoTask = TaskSubmission & { userInput?: PromptInput; promptCompilationId?: string; optimized: boolean };
+type TrustedDemoBatchInput = { prepared: PreparedDemoTask; batchId: string; itemIndex: number };
 const oaStore = features.oaLoginEnabled ? new DemoOaStore(demoStatePath) : null;
 const demoDesignLibrary = oaStore ? new DemoDesignLibraryStore(demoStatePath, (asset) => { cacheStoredDemoAsset(asset.id); }) : null;
 const designLibraryService = demoDesignLibrary ? new DesignLibraryService(demoDesignLibrary, demoDesignLibrary) : null;
@@ -726,6 +750,8 @@ Bun.serve({
   hostname: demoHost,
   idleTimeout: DEMO_STREAM_IDLE_TIMEOUT_SECONDS,
   error(error) {
+    if (error instanceof PromptOptimizationError)
+      return json({ error: error.code, message: error.message }, error.status, { "cache-control": "no-store" });
     if (error instanceof ZodError)
       return json({ error: "VALIDATION_ERROR", message: "请求参数格式不正确" }, 400);
     if (error instanceof DemoToolConfigurationError)
@@ -741,7 +767,8 @@ Bun.serve({
     const path = url.pathname;
     const json = (body: unknown, status = 200, extra: Record<string, string> = {}) => new Response(JSON.stringify(
       path.startsWith("/api/") && !path.startsWith("/api/admin/") && path !== "/api/models"
-        ? redactDesignerModelData(body, demoModels, sessionUser(request)?.role) : body, imageTaskApiReplacer,
+        ? redactDesignerModelData(body, demoModels, sessionUser(request)?.role) : body,
+      (key, value) => key === "promptCompilationId" || key === "submissionHash" ? undefined : imageTaskApiReplacer(key, value),
     ), { status, headers: { ...headers, ...extra } });
     if (!["GET", "HEAD", "OPTIONS"].includes(request.method)) {
       const origin = request.headers.get("origin");
@@ -860,6 +887,15 @@ Bun.serve({
     }
     const user = sessionUser(request);
     if (!user) return json({ error: "UNAUTHORIZED", message: "请先登录" }, 401);
+
+    if (path === "/api/prompt-compilations" || path.startsWith("/api/prompt-compilations/")) {
+      const result = await handleDemoPromptRecipes(request, demoPromptCompiler, user, {
+        models: async () => demoModels.filter(model => Array.isArray(model.capabilities) && model.capabilities.includes("chat")),
+        // The runtime's existing /api/admin gate remains authoritative; this path is public compilation only.
+        audit: async () => {},
+      });
+      if (result) return result;
+    }
 
     if (path === "/api/reference-import/scan" || path === "/api/reference-import/image") {
       if (request.method !== "POST") return json({ code: 405, data: null, msg: "请使用 POST 采集网页图片" }, 405, { "cache-control": "no-store" });
@@ -980,6 +1016,8 @@ Bun.serve({
       const input = (await request.json()) as {
         modelId?: string;
         toolKey?: string;
+        profile?: ChatPromptProfile;
+        profileContext?: Record<string, unknown>;
         input?: DemoResponseInput[];
         tools?: DemoResponseTool[];
         toolChoice?: unknown;
@@ -993,6 +1031,24 @@ Bun.serve({
       const parsedTools = chatFunctionToolsSchema.safeParse(input.tools);
       if (!parsedTools.success) return json({ error: "INVALID_TOOLS", message: "对话只允许已声明的 function 工具；图片生成必须通过图像任务入口" }, 400);
       input.tools = parsedTools.data;
+      if (input.profile) {
+        const prepared = await prepareChatProfileInput({ ...input, input: input.input || [], tools: parsedTools.data }, async profile => (await demoPromptCompiler.store.active(profile)).version.systemPrompt);
+        const provider = selectedConfig && demoProviders.find(item => item.id === selectedConfig.providerId && item.enabled === true);
+        const apiKey = provider ? demoChatProviderApiKey(String(provider.id)) : "";
+        if (!provider || !selectedConfig || !apiKey) return json({ error: "PROVIDER_NOT_CONFIGURED", message: "所选对话 API 服务尚未配置服务端密钥" }, 503);
+        try {
+          const result = await requestChatCompletion({ model_id: selectedModel, base_url: String(provider.baseUrl), protocol: String(provider.protocol), encrypted_credentials: null }, { apiKey }, {
+            ...prepared.input,
+            claude: { ...prepared.input.claude, maxTokens: Math.max(1, Math.min(16_384, Math.floor(prepared.input.claude?.maxTokens || 2048))) },
+          });
+          const { usage: _internalUsage, ...payload } = validateChatProfileOutput(result, prepared.privateRules);
+          if (!payload.content.trim() && !payload.toolCalls.length) return json({ error: "CHAT_RESPONSE_EMPTY", message: "模型未返回有效回复；不会自动重新提交。" }, 502, { "cache-control": "no-store" });
+          return json(payload, 200, { "cache-control": "no-store" });
+        } catch (error) {
+          if (error instanceof PromptOptimizationError) throw error;
+          return json({ error: "UPSTREAM_REQUEST_FAILED", message: "对话服务未完成此请求；不会自动重新提交。" }, 502, { "cache-control": "no-store" });
+        }
+      }
       // Select by the resolved configuration UUID: Mark and OpenToken share upstream model IDs.
       const configuredChatModel = selectedConfig && (selectedConfig.providerId === MARK_IMAGE_PROVIDER_ID
         || [openTokenGptChatModel.id, openTokenClaudeModel.id].includes(String(selectedConfig.id))) ? selectedConfig : undefined;
@@ -1031,7 +1087,8 @@ Bun.serve({
               headers: { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache, no-transform" },
             });
           }
-          return json(await requestChatCompletion(model, { apiKey }, chatInput));
+          const { usage: _internalUsage, ...payload } = await requestChatCompletion(model, { apiKey }, chatInput);
+          return json(payload);
         } catch (error) {
           return json({ error: "UPSTREAM_REQUEST_FAILED", message: error instanceof Error ? error.message : "Chat provider request failed" }, 502);
         }
@@ -1182,71 +1239,12 @@ Bun.serve({
           }),
       });
     }
-    if (path === "/api/tasks/batch" && request.method === "POST") {
-      const input = batchSubmissionSchema.parse(await request.json());
-      if (!input?.requestId || !input.projectId || !input.operationType || !input.modelConfigId || !Array.isArray(input.items) || !input.items.length)
-        return json({ error: "INVALID_BATCH", message: "Batch task details are incomplete" }, 400);
-      if (input.items.length > 100) return json({ error: "BATCH_LIMIT_EXCEEDED", message: "每批最多提交 100 个独立任务" }, 400);
-      const batchTool = resolveDemoToolConfiguration({ ...input, operationType: input.operationType }, demoToolConfigurations, demoModels, demoProviders, demoModuleFlags);
-      const batchId = crypto.randomUUID();
-      const cookie = request.headers.get("cookie") || "";
-      const tasks: Array<Record<string, unknown> & { itemIndex: number }> = [];
-      const failures: Array<{ index: number; reason: string }> = [];
-      const taskInputs = createDemoBatchTaskInputs({
-        requestId: input.requestId,
-        projectId: input.projectId,
-        operationType: input.operationType,
-        modelConfigId: input.modelConfigId,
-        prompt: input.prompt || "",
-        parameters: singleImageTaskParameters(input.operationType, { ...input.parameters, tool: batchTool.toolKey }),
-        toolKey: batchTool.toolKey,
-        priority: input.priority,
-        items: input.items.map((item) => ({ sourceUrls: item.sourceUrls || [] })),
-      });
-      for (const [itemIndex, taskInput] of taskInputs.entries()) {
-        const response = await fetch(`http://127.0.0.1:${demoPort}/api/tasks`, {
-          method: "POST",
-          headers: { "content-type": "application/json", cookie },
-          body: JSON.stringify(taskInput),
-        });
-        const body = (await response.json().catch(() => ({}))) as { task?: Record<string, unknown>; message?: string };
-        if (response.ok && body.task) tasks.push({ ...body.task, itemIndex });
-        else failures.push({ index: itemIndex, reason: body.message || `Task submission failed (${response.status})` });
-      }
-      return json({ batchId, tasks, failures }, 201);
-    }
-    if (path === "/api/tasks/preflight" && request.method === "POST") {
-      const input = taskSubmissionSchema.parse(await request.json());
-      if (input.operationType !== "video_generation")
-        return json({ error: "UNSUPPORTED_OPERATION", message: "Only video preflight is supported" }, 400);
-      const preflightTool = resolveDemoToolConfiguration({ ...input, operationType: input.operationType }, demoToolConfigurations, demoModels, demoProviders, demoModuleFlags);
-      input.modelConfigId = preflightTool.modelConfigId;
-      const model = demoModels.find(
-        (item) => item.id === input.modelConfigId && isSupportedVideoModelId(item.modelId) && item.enabled,
-      );
-      if (!model)
-        return json({ error: "MODEL_DISABLED", message: "The selected video model is not enabled" }, 400);
-      if (!resolveDemoVideoProvider(String(model.id), model.modelId as SupportedVideoModelId))
-        return json({ error: "PROVIDER_NOT_CONFIGURED", message: "The selected video provider is not configured" }, 503);
-      const sources = resolveOwnedVideoSources(input.sourceUrls || [], user);
-      if (sources instanceof Response) return sources;
-      const modelId = model.modelId as SupportedVideoModelId;
-      let accessTokens: string[] = [];
-      try {
-        const providerSources = await createProviderVideoSources(modelId, sources);
-        accessTokens = providerSources.accessTokens;
-        const preflight = preflightVideoSources(modelId, input.prompt || "", input.parameters || {}, providerSources.sources);
-        return json({ ok: true, requestId: input.requestId || crypto.randomUUID(), normalized: preflight.normalized });
-      } catch (error) {
-        return json({ error: "INVALID_VIDEO_INPUT", message: error instanceof Error ? error.message : "Invalid video parameters" }, 400);
-      } finally {
-        revokeProviderVideoSources(accessTokens);
-      }
-    }
-    if (path === "/api/tasks" && request.method === "POST") {
-      const input = taskSubmissionSchema.parse(await request.json());
+    async function submitDemoTask(input: TaskSubmission, trustedBatch?: TrustedDemoBatchInput): Promise<Response> {
+      if (!user) return json({ error: "UNAUTHORIZED", message: "请先登录" }, 401);
+      const submissionHash = promptHash(input);
       const existingTask = input.requestId
         ? [...demoTasks.values()].find((task) => task.requestId === input.requestId) : undefined;
+      if (existingTask?.ownerUserId === user.id && existingTask.submissionHash && existingTask.submissionHash !== submissionHash) throw new PromptOptimizationError("PROMPT_REQUEST_CHANGED", "同一任务编号的输入已改变，请新建请求", 409);
       if (existingTask)
         return existingTask.ownerUserId === user.id
           ? json({ task: existingTask })
@@ -1254,6 +1252,16 @@ Bun.serve({
       const taskTool = resolveDemoToolConfiguration({ ...input, operationType: input.operationType || "" }, demoToolConfigurations, demoModels, demoProviders, demoModuleFlags);
       input.modelConfigId = taskTool.modelConfigId;
       input.parameters = singleImageTaskParameters(input.operationType || "", { ...input.parameters, tool: taskTool.toolKey });
+      // This argument is supplied only by the in-process batch coordinator, never parsed from HTTP.
+      const prepared: PreparedDemoTask = trustedBatch
+        ? { ...input, prompt: trustedBatch.prepared.prompt, parameters: structuredClone(trustedBatch.prepared.parameters), promptInput: trustedBatch.prepared.promptInput,
+            userInput: trustedBatch.prepared.userInput, promptCompilationId: trustedBatch.prepared.promptCompilationId, optimized: trustedBatch.prepared.optimized }
+        : await preparePromptTaskInput(demoPromptCompiler, user, { ...input, toolKey: taskTool.toolKey });
+      input = prepared;
+      const promptMetadata = { userInput: prepared.userInput ?? null, optimized: prepared.optimized,
+        ...(prepared.promptCompilationId ? { promptCompilationId: prepared.promptCompilationId } : {}), submissionHash,
+        ...(trustedBatch ? { batchId: trustedBatch.batchId, itemIndex: trustedBatch.itemIndex } : {}) };
+
       if (input.operationType === "video_generation") {
         const duplicate = input.requestId
           ? Array.from(demoTasks.values()).find(
@@ -1345,7 +1353,7 @@ Bun.serve({
           credits,
           createdAt: now(),
         };
-        Object.assign(task, { prompt: input.prompt || "", parameters, sourceUrls: input.sourceUrls || [], projectId: input.projectId, modelConfigId: input.modelConfigId });
+        Object.assign(task, { ...promptMetadata, prompt: input.prompt || "", parameters, sourceUrls: input.sourceUrls || [], projectId: input.projectId, modelConfigId: input.modelConfigId });
         updateDemoTask(task, {});
         if (features.creditsEnabled) user.creditBalance -= credits;
         void runVideoTask(task, user, modelId, input.prompt || "", parameters, sources);
@@ -1483,7 +1491,7 @@ Bun.serve({
           credits,
           createdAt: now(),
         };
-        Object.assign(task, { prompt: input.prompt || "", parameters: input.parameters || {}, sourceUrls: input.sourceUrls || [], projectId: input.projectId, modelConfigId: input.modelConfigId });
+        Object.assign(task, { ...promptMetadata, prompt: input.prompt || "", parameters: input.parameters || {}, sourceUrls: input.sourceUrls || [], projectId: input.projectId, modelConfigId: input.modelConfigId });
         updateDemoTask(task, {});
         if (features.creditsEnabled) user.creditBalance -= credits;
         if (model.providerId === openTokenProviderId)
@@ -1588,11 +1596,76 @@ Bun.serve({
         credits,
         createdAt: now(),
       };
-      Object.assign(task, { prompt: input.prompt || "", parameters, sourceUrls: input.sourceUrls || [], projectId: input.projectId, modelConfigId: input.modelConfigId });
+      Object.assign(task, { ...promptMetadata, prompt: input.prompt || "", parameters, sourceUrls: input.sourceUrls || [], projectId: input.projectId, modelConfigId: input.modelConfigId });
       updateDemoTask(task, {});
       if (features.creditsEnabled) user.creditBalance -= credits;
       void runInternalAiSeamlessTask(task, user, source, parameters);
       return json({ task }, 201);
+        }
+
+    if (path === "/api/tasks/batch" && request.method === "POST") {
+      const input = batchSubmissionSchema.parse(await request.json());
+      const inputHash = promptHash(input);
+      return demoAdmissionGate.run("batch:" + user.id + ":" + input.requestId, inputHash, async () => {
+        const existing = await demoPromptBatches.get(user.id, input.requestId);
+        if (existing) {
+          if (existing.inputHash !== inputHash) throw new PromptOptimizationError("PROMPT_REQUEST_CHANGED", "同一批次编号的输入已改变，请新建批次", 409);
+          return json(demoPromptBatches.result(existing, demoTasks.values()));
+        }
+        if (input.promptInput && input.promptInput.scene !== "batch-optimize") throw new PromptOptimizationError("PROMPT_RECIPE_MISMATCH", "批处理仅支持批量优化配方");
+        const batchTool = resolveDemoToolConfiguration(input, demoToolConfigurations, demoModels, demoProviders, demoModuleFlags);
+        const prepared = await preparePromptTaskInput(demoPromptCompiler, user, {
+          ...input, modelConfigId: batchTool.modelConfigId, toolKey: batchTool.toolKey,
+          parameters: singleImageTaskParameters(input.operationType, { ...input.parameters, tool: batchTool.toolKey }), sourceUrls: input.items[0]!.sourceUrls,
+        });
+        const batch = await demoPromptBatches.create(user.id, input.requestId, inputHash, { prompt: prepared.prompt, optimized: prepared.optimized, projectId: input.projectId, operationType: input.operationType, modelConfigId: batchTool.modelConfigId, totalItems: input.items.length });
+        const taskInputs = createDemoBatchTaskInputs({ ...input, modelConfigId: batchTool.modelConfigId, prompt: prepared.prompt, parameters: prepared.parameters, toolKey: batchTool.toolKey });
+        for (const [itemIndex, taskInput] of taskInputs.entries()) {
+          try {
+            const parsed = taskSubmissionSchema.parse(taskInput);
+            const response = await demoAdmissionGate.run("task:" + user.id + ":" + parsed.requestId, promptHash(parsed), () => submitDemoTask(parsed, { prepared, batchId: batch.id, itemIndex }));
+            const body = await response.json() as { task?: { id: string; batchId?: string }; message?: string; error?: string };
+            if (!response.ok || !body.task || body.task.batchId !== batch.id) await demoPromptBatches.failure(batch, { index: itemIndex, reason: body.message || "任务创建失败或请求编号已被其他任务使用", code: body.error || "TASK_CREATION_FAILED" });
+          } catch (error) {
+            if (error instanceof DemoStorageError) throw error;
+            await demoPromptBatches.failure(batch, { index: itemIndex, reason: error instanceof PromptOptimizationError || error instanceof DemoToolConfigurationError ? error.message : "任务创建失败，未自动重试", code: error instanceof PromptOptimizationError || error instanceof DemoToolConfigurationError ? error.code : "TASK_CREATION_FAILED" });
+          }
+        }
+        await demoPromptBatches.finish(batch);
+        return json(demoPromptBatches.result(batch, demoTasks.values()), 201);
+      });
+    }
+    if (path === "/api/tasks/preflight" && request.method === "POST") {
+      const input = taskSubmissionSchema.parse(await request.json());
+      if (input.operationType !== "video_generation")
+        return json({ error: "UNSUPPORTED_OPERATION", message: "Only video preflight is supported" }, 400);
+      const preflightTool = resolveDemoToolConfiguration({ ...input, operationType: input.operationType }, demoToolConfigurations, demoModels, demoProviders, demoModuleFlags);
+      input.modelConfigId = preflightTool.modelConfigId;
+      const model = demoModels.find(
+        (item) => item.id === input.modelConfigId && isSupportedVideoModelId(item.modelId) && item.enabled,
+      );
+      if (!model)
+        return json({ error: "MODEL_DISABLED", message: "The selected video model is not enabled" }, 400);
+      if (!resolveDemoVideoProvider(String(model.id), model.modelId as SupportedVideoModelId))
+        return json({ error: "PROVIDER_NOT_CONFIGURED", message: "The selected video provider is not configured" }, 503);
+      const sources = resolveOwnedVideoSources(input.sourceUrls || [], user);
+      if (sources instanceof Response) return sources;
+      const modelId = model.modelId as SupportedVideoModelId;
+      let accessTokens: string[] = [];
+      try {
+        const providerSources = await createProviderVideoSources(modelId, sources);
+        accessTokens = providerSources.accessTokens;
+        const preflight = preflightVideoSources(modelId, input.prompt || "", input.parameters || {}, providerSources.sources);
+        return json({ ok: true, requestId: input.requestId || crypto.randomUUID(), normalized: preflight.normalized });
+      } catch (error) {
+        return json({ error: "INVALID_VIDEO_INPUT", message: error instanceof Error ? error.message : "Invalid video parameters" }, 400);
+      } finally {
+        revokeProviderVideoSources(accessTokens);
+      }
+    }
+    if (path === "/api/tasks" && request.method === "POST") {
+      const input = taskSubmissionSchema.parse(await request.json());
+      return demoAdmissionGate.run("task:" + user.id + ":" + input.requestId, promptHash(input), () => submitDemoTask(input));
     }
     if (path === "/api/tasks" && request.method === "GET") {
       const query = Object.fromEntries(url.searchParams);
@@ -1605,6 +1678,15 @@ Bun.serve({
     if (path === "/api/tasks/batches" && request.method === "GET") {
       const page = pageDemoRecords([], Object.fromEntries(url.searchParams));
       return json({ batches: page.items, nextCursor: page.nextCursor, hasMore: page.hasMore });
+    }
+    const encodedBatchRequestId = path.match(/^\/api\/tasks\/batches\/by-request\/([^/]+)$/)?.[1];
+    if (encodedBatchRequestId && request.method === "GET") {
+      const responseHeaders = { "cache-control": "private, no-store" };
+      let requestId: string;
+      try { requestId = batchSubmissionSchema.shape.requestId.parse(decodeURIComponent(encodedBatchRequestId)); }
+      catch { return json({ error: "VALIDATION_ERROR", message: "批次请求编号格式无效" }, 400, responseHeaders); }
+      const batch = await demoPromptBatches.get(user.id, requestId);
+      return batch ? json(demoPromptBatches.result(batch, demoTasks.values()), 200, responseHeaders) : json({ error: "NOT_FOUND", message: "批次不存在或无权访问" }, 404, responseHeaders);
     }
     const encodedTaskRequestId = path.match(/^\/api\/tasks\/by-request\/([^/]+)$/)?.[1];
     if (encodedTaskRequestId && request.method === "GET") {

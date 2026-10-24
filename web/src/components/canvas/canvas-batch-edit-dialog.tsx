@@ -1,5 +1,5 @@
 import type { Dispatch, SetStateAction } from "react";
-import { Button, Input, Modal, Tag, theme as antdTheme } from "antd";
+import { Button, Input, Modal, Tag, Switch, theme as antdTheme } from "antd";
 import { Pause, Play, X } from "lucide-react";
 import { ModelPicker } from "@/components/model-picker";
 import { ImageSettingsPanel } from "@/components/image-settings-panel";
@@ -14,6 +14,9 @@ export type CanvasBatchEditDialogProps = {
     open: boolean;
     running: boolean;
     prompt: string;
+    optimizePrompt: boolean;
+    optimizing: boolean;
+    onOptimizePromptChange: (value: boolean) => void;
     items: BatchEditFileItem[];
     imageSettings: Partial<AiConfig>;
     serverId: string | null;
@@ -29,7 +32,7 @@ export type CanvasBatchEditDialogProps = {
 
 /** The editor owns the batch lifecycle; this chunk contains only its dialog UI. */
 export default function CanvasBatchEditDialog({
-    open, running, prompt, items, imageSettings, serverId, action,
+    open, running, prompt, optimizePrompt, optimizing, onOptimizePromptChange, items, imageSettings, serverId, action,
     onClose, onPromptChange, onImageSettingsChange, onSelectFiles, onClearItems, onRun, onControlBatch,
 }: CanvasBatchEditDialogProps) {
     const theme = canvasThemes[useThemeStore(state => state.theme)];
@@ -45,7 +48,7 @@ export default function CanvasBatchEditDialog({
             footer={
                 <>
                     <Button disabled={running} onClick={onClose}>关闭</Button>
-                    <Button type="primary" loading={running} onClick={() => void onRun()}>一键生图</Button>
+                    <Button type="primary" loading={running} onClick={() => void onRun()}>{optimizing ? "正在优化提示词…" : "一键生图"}</Button>
                 </>
             }
         >
@@ -75,7 +78,8 @@ export default function CanvasBatchEditDialog({
                             onClick={() => void onControlBatch("cancel")}>取消未处理项</Button>
                     </div>
                 ) : null}
-                <Input.TextArea value={prompt} onChange={event => onPromptChange(event.target.value)} rows={4} placeholder="例如：白底图产品摄影，保留产品结构，提升质感和光影，适合电商详情页" />
+                <label className="flex items-center gap-2 text-sm"><Switch checked={optimizePrompt} disabled={running} onChange={onOptimizePromptChange} aria-label="批量统一优化提示词" />统一优化提示词（整批只优化一次，默认关闭）</label>
+                <Input.TextArea disabled={running} value={prompt} onChange={event => onPromptChange(event.target.value)} rows={4} placeholder="例如：白底图产品摄影，保留产品结构，提升质感和光影，适合电商详情页" />
                 <div className="rounded-lg border" style={{ borderColor: theme.node.stroke, color: theme.node.text }}>
                     <div className="flex items-center justify-between border-b px-3 py-2 text-xs font-semibold" style={{ borderColor: theme.node.stroke, color: theme.node.muted }}>
                         <span>待处理图片 {items.length} 张</span><span>按文件名顺序处理</span>

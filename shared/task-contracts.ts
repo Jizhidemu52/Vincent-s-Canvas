@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { promptInputSchema } from "./prompt-contracts";
 
 export const taskBaseSchema = z.object({
   requestId: z.string().min(8).max(200),
@@ -7,6 +8,7 @@ export const taskBaseSchema = z.object({
   toolKey: z.string().min(1).max(100).optional(),
   modelConfigId: z.string().uuid().nullish(),
   prompt: z.string().max(20_000).default(""),
+  promptInput: promptInputSchema.optional(),
   parameters: z.record(z.string(), z.unknown()).default({}),
   priority: z.enum(["normal", "priority", "urgent"]).default("normal"),
 });

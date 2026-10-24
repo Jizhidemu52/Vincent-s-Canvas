@@ -1,0 +1,522 @@
+{
+  "version": 1,
+  "runId": "protocol-v2",
+  "baselineCommit": "4ed9d8d",
+  "createdAt": "2026-10-24T17:46:03.117Z",
+  "updatedAt": "2026-10-24T17:46:57.586Z",
+  "assets": {
+    "shirt": {
+      "id": "aec6feeb-cbb7-48a2-84fe-c7ba8040a5f1",
+      "sha256": "b6cc50b7f2e1f7a124931e17bc57cecfecad7b05d0190f85b516ca0b7697f519",
+      "mime": "image/png",
+      "bytes": 987824
+    },
+    "flat": {
+      "id": "023cddd1-9ae5-4133-a39d-638d39866519",
+      "sha256": "441e8edc4f0d9dfc16091c6e9ddd114db4adbb823d62a6d98d0e1c9660549080",
+      "mime": "image/png",
+      "bytes": 7302
+    }
+  },
+  "cases": {
+    "protocol-d5000000-0000-4000-8000-000000000003": {
+      "id": "protocol-d5000000-0000-4000-8000-000000000003",
+      "requestId": "pq:protocol-v2:protocol-d5000000-0000-4000-8000-000000000003:0",
+      "compilationRequestId": "pq:protocol-v2:protocol-d5000000-0000-4000-8000-000000000003:compile",
+      "inputHash": "622484d0a90207b3bd660018e560ba9c5cfaffdb341ce005046168514a137ab2",
+      "status": "success",
+      "visualReview": "pending-manual-review",
+      "providerImageActualCost": null,
+      "providerChatActualCost": null,
+      "modelConfigId": "d5000000-0000-4000-8000-000000000003",
+      "modelId": "d5000000-0000-4000-8000-000000000003",
+      "startedAt": "2026-10-24T17:46:03.130Z",
+      "compileAttempted": true,
+      "compilation": {
+        "id": "8b78cbe3-1027-4e94-96bd-25af5b880e93",
+        "requestId": "pq:protocol-v2:protocol-d5000000-0000-4000-8000-000000000003:compile",
+        "status": "success",
+        "optimized": true,
+        "prompt": "仅将 Image 1 衬衫大身改为鼠尾草绿色（#9DA882），替换大身原色；保留领、袖、门襟、纽扣及其余内容不变。\n避免: 品牌 logo 或水印, 无关文字, 拼贴多宫格, 色卡条, 尺寸标注, 多余的手或肢体变形, 未成年人模特, 裸露或性感化表现."
+      },
+      "finalPrompt": "仅将 Image 1 衬衫大身改为鼠尾草绿色（#9DA882），替换大身原色；保留领、袖、门襟、纽扣及其余内容不变。\n避免: 品牌 logo 或水印, 无关文字, 拼贴多宫格, 色卡条, 尺寸标注, 多余的手或肢体变形, 未成年人模特, 裸露或性感化表现.",
+      "optimized": true,
+      "compilationCost": {
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": null,
+        "inputTokens": null,
+        "outputTokens": null,
+        "cacheHit": null,
+        "latencyMs": null
+      },
+      "taskAttempted": true,
+      "tasks": [
+        {
+          "id": "4c6f5a78-a0e2-415a-8827-116a963ba32f",
+          "requestId": "pq:protocol-v2:protocol-d5000000-0000-4000-8000-000000000003:0",
+          "status": "success",
+          "prompt": "仅将 Image 1 衬衫大身改为鼠尾草绿色（#9DA882），替换大身原色；保留领、袖、门襟、纽扣及其余内容不变。\n避免: 品牌 logo 或水印, 无关文字, 拼贴多宫格, 色卡条, 尺寸标注, 多余的手或肢体变形, 未成年人模特, 裸露或性感化表现.",
+          "optimized": true,
+          "credits": 0
+        }
+      ],
+      "applicationChargeRmb": null,
+      "outputs": [
+        {
+          "taskId": "4c6f5a78-a0e2-415a-8827-116a963ba32f",
+          "index": 0,
+          "path": "protocol-d5000000-0000-4000-8000-000000000003-4c6f5a78-a0e2-415a-8827-116a963ba32f-1.jpg",
+          "mime": "image/jpeg",
+          "sha256": "eb650a59a121045396bf81e8bd7f3f11562b8b2dc04aa9398f75795960a1f692",
+          "bytes": 434672,
+          "contentType": "image/jpeg"
+        }
+      ],
+      "completedAt": "2026-10-24T17:46:55.082Z"
+    },
+    "protocol-d5000000-0000-4000-8000-000000000006": {
+      "id": "protocol-d5000000-0000-4000-8000-000000000006",
+      "requestId": "pq:protocol-v2:protocol-d5000000-0000-4000-8000-000000000006:0",
+      "compilationRequestId": "pq:protocol-v2:protocol-d5000000-0000-4000-8000-000000000006:compile",
+      "inputHash": "c4d19916778f4d796872b1682113737899d1118d3665a78780f8751f2303163d",
+      "status": "success",
+      "visualReview": "pending-manual-review",
+      "providerImageActualCost": null,
+      "providerChatActualCost": null,
+      "modelConfigId": "d5000000-0000-4000-8000-000000000006",
+      "modelId": "d5000000-0000-4000-8000-000000000006",
+      "startedAt": "2026-10-24T17:46:03.130Z",
+      "taskAttempted": true,
+      "tasks": [
+        {
+          "id": "1ef04f61-c07a-43ae-aa51-0d2e27447721",
+          "requestId": "pq:protocol-v2:protocol-d5000000-0000-4000-8000-000000000006:0",
+          "status": "success",
+          "prompt": "",
+          "optimized": false,
+          "credits": 0
+        }
+      ],
+      "finalPrompt": "",
+      "optimized": false,
+      "applicationChargeRmb": null,
+      "outputs": [
+        {
+          "taskId": "1ef04f61-c07a-43ae-aa51-0d2e27447721",
+          "index": 0,
+          "path": "protocol-d5000000-0000-4000-8000-000000000006-1ef04f61-c07a-43ae-aa51-0d2e27447721-1.png",
+          "mime": "image/png",
+          "sha256": "b780b4550b2b0b6efc6ab58749d415690486ca86844e3f3e93f68b04456124fe",
+          "bytes": 553275,
+          "contentType": "image/png"
+        }
+      ],
+      "completedAt": "2026-10-24T17:46:57.586Z"
+    },
+    "protocol-d5000000-0000-4000-8000-000000000009": {
+      "id": "protocol-d5000000-0000-4000-8000-000000000009",
+      "requestId": "pq:protocol-v2:protocol-d5000000-0000-4000-8000-000000000009:0",
+      "compilationRequestId": "pq:protocol-v2:protocol-d5000000-0000-4000-8000-000000000009:compile",
+      "inputHash": "cb166fe82673b56f454ae7c45d3bb8c2d760678be25653c29cf269b13dcab990",
+      "status": "success",
+      "visualReview": "pending-manual-review",
+      "providerImageActualCost": null,
+      "providerChatActualCost": null,
+      "modelConfigId": "d5000000-0000-4000-8000-000000000009",
+      "modelId": "d5000000-0000-4000-8000-000000000009",
+      "startedAt": "2026-10-24T17:46:03.130Z",
+      "compileAttempted": true,
+      "compilation": {
+        "id": "d144f53d-4700-40ae-9190-4e9a49c28b86",
+        "requestId": "pq:protocol-v2:protocol-d5000000-0000-4000-8000-000000000009:compile",
+        "status": "success",
+        "optimized": true,
+        "prompt": "仅将 Image 1 中衬衫大身的原色替换为鼠尾草绿色（#9DA882）。保留领、袖、门襟及其余内容不变，包括纹理、光影与背景。\n避免: 品牌 logo 与水印, 无关文字, 拼贴多宫格, 色卡条, 尺寸标注, 多余的手或肢体变形, 未成年人模特, 裸露或性感化表现."
+      },
+      "finalPrompt": "仅将 Image 1 中衬衫大身的原色替换为鼠尾草绿色（#9DA882）。保留领、袖、门襟及其余内容不变，包括纹理、光影与背景。\n避免: 品牌 logo 与水印, 无关文字, 拼贴多宫格, 色卡条, 尺寸标注, 多余的手或肢体变形, 未成年人模特, 裸露或性感化表现.",
+      "optimized": true,
+      "compilationCost": {
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": null,
+        "inputTokens": null,
+        "outputTokens": null,
+        "cacheHit": null,
+        "latencyMs": null
+      },
+      "taskAttempted": true,
+      "tasks": [
+        {
+          "id": "8a5d7079-ade7-4fff-bef2-717065b7415f",
+          "requestId": "pq:protocol-v2:protocol-d5000000-0000-4000-8000-000000000009:0",
+          "status": "success",
+          "prompt": "仅将 Image 1 中衬衫大身的原色替换为鼠尾草绿色（#9DA882）。保留领、袖、门襟及其余内容不变，包括纹理、光影与背景。\n避免: 品牌 logo 与水印, 无关文字, 拼贴多宫格, 色卡条, 尺寸标注, 多余的手或肢体变形, 未成年人模特, 裸露或性感化表现.",
+          "optimized": true,
+          "credits": 0
+        }
+      ],
+      "applicationChargeRmb": null,
+      "outputs": [
+        {
+          "taskId": "8a5d7079-ade7-4fff-bef2-717065b7415f",
+          "index": 0,
+          "path": "protocol-d5000000-0000-4000-8000-000000000009-8a5d7079-ade7-4fff-bef2-717065b7415f-1.jpg",
+          "mime": "image/jpeg",
+          "sha256": "4fbe2fb07fa49c4ab3ee173af198042363a0c594f53afb926d5cf51a27fe1feb",
+          "bytes": 439595,
+          "contentType": "image/jpeg"
+        }
+      ],
+      "completedAt": "2026-10-24T17:46:31.095Z"
+    }
+  },
+  "ownerHash": "993224b4fe85990df64db926ca5c034675eb037399e2fcef041c8d7e31e54d3f",
+  "apiOrigin": "http://127.0.0.1:3100",
+  "models": [
+    {
+      "id": "d5000000-0000-4000-8000-000000000001",
+      "modelId": "d5000000-0000-4000-8000-000000000001",
+      "name": "aplmart-gpt2.5-flare",
+      "capabilities": [
+        "generate",
+        "edit",
+        "batch"
+      ],
+      "rmbCost": 0
+    },
+    {
+      "id": "d5000000-0000-4000-8000-000000000002",
+      "modelId": "d5000000-0000-4000-8000-000000000002",
+      "name": "aplmart-gpt2.5-sunburst",
+      "capabilities": [
+        "generate",
+        "edit",
+        "batch"
+      ],
+      "rmbCost": 0
+    },
+    {
+      "id": "d5000000-0000-4000-8000-000000000003",
+      "modelId": "d5000000-0000-4000-8000-000000000003",
+      "name": "aplmart-nano2.1",
+      "capabilities": [
+        "generate",
+        "edit",
+        "batch"
+      ],
+      "rmbCost": 0
+    },
+    {
+      "id": "40000000-0000-4000-8000-000000000124",
+      "modelId": "gpt-6-astra",
+      "name": "gpt-6-astra",
+      "capabilities": [
+        "chat",
+        "vision",
+        "tools"
+      ],
+      "rmbCost": 0
+    },
+    {
+      "id": "d5000000-0000-4000-8000-000000000006",
+      "modelId": "d5000000-0000-4000-8000-000000000006",
+      "name": "aplmart-mj-blend",
+      "capabilities": [
+        "generate"
+      ],
+      "rmbCost": 0
+    },
+    {
+      "id": "40000000-0000-4000-8000-000000000110",
+      "modelId": "MiniMax-H3",
+      "name": "MiniMax-H3",
+      "capabilities": [
+        "video"
+      ],
+      "rmbCost": 0
+    },
+    {
+      "id": "40000000-0000-4000-8000-000000000111",
+      "modelId": "doubao-seedance-2.5",
+      "name": "doubao-seedance-2.5",
+      "capabilities": [
+        "video"
+      ],
+      "rmbCost": 0
+    },
+    {
+      "id": "40000000-0000-4000-8000-000000000112",
+      "modelId": "wan2.7",
+      "name": "wan2.7",
+      "capabilities": [
+        "video"
+      ],
+      "rmbCost": 0
+    },
+    {
+      "id": "40000000-0000-4000-8000-000000000113",
+      "modelId": "happyhorse-1.1",
+      "name": "happyhorse-1.1",
+      "capabilities": [
+        "video"
+      ],
+      "rmbCost": 0
+    },
+    {
+      "id": "d5000000-0000-4000-8000-000000000007",
+      "modelId": "d5000000-0000-4000-8000-000000000007",
+      "name": "aplmart-gpt2",
+      "capabilities": [
+        "generate",
+        "edit",
+        "batch"
+      ],
+      "rmbCost": 0
+    },
+    {
+      "id": "d5000000-0000-4000-8000-000000000009",
+      "modelId": "d5000000-0000-4000-8000-000000000009",
+      "name": "aplmart-nano2",
+      "capabilities": [
+        "generate",
+        "edit",
+        "batch"
+      ],
+      "rmbCost": 0
+    },
+    {
+      "id": "40000000-0000-4000-8000-000000000105",
+      "modelId": "40000000-0000-4000-8000-000000000105",
+      "name": "gpt-image-2",
+      "capabilities": [
+        "generate",
+        "edit"
+      ],
+      "rmbCost": 0
+    },
+    {
+      "id": "d5000000-0000-4000-8000-000000000004",
+      "modelId": "d5000000-0000-4000-8000-000000000004",
+      "name": "aplmart-gpt6-astra",
+      "capabilities": [
+        "chat"
+      ],
+      "rmbCost": 0
+    },
+    {
+      "id": "d5000000-0000-4000-8000-000000000005",
+      "modelId": "d5000000-0000-4000-8000-000000000005",
+      "name": "aplmart-happyhorse1.1",
+      "capabilities": [
+        "video"
+      ],
+      "rmbCost": 0
+    },
+    {
+      "id": "40000000-0000-4000-8000-000000000107",
+      "modelId": "40000000-0000-4000-8000-000000000107",
+      "name": "gpt-image-2.5-flare",
+      "capabilities": [
+        "generate",
+        "edit"
+      ],
+      "rmbCost": 0
+    },
+    {
+      "id": "40000000-0000-4000-8000-000000000108",
+      "modelId": "40000000-0000-4000-8000-000000000108",
+      "name": "gpt-image-2.5-sunburst",
+      "capabilities": [
+        "generate",
+        "edit"
+      ],
+      "rmbCost": 0
+    },
+    {
+      "id": "40000000-0000-4000-8000-000000000106",
+      "modelId": "40000000-0000-4000-8000-000000000106",
+      "name": "gemini-3.1-flash-image",
+      "capabilities": [
+        "generate",
+        "edit"
+      ],
+      "rmbCost": 0
+    },
+    {
+      "id": "d5000000-0000-4000-8000-000000000010",
+      "modelId": "d5000000-0000-4000-8000-000000000010",
+      "name": "aplmart-claude-sonnet-5-5",
+      "capabilities": [
+        "chat",
+        "vision",
+        "tools"
+      ],
+      "rmbCost": 0
+    }
+  ],
+  "tools": [
+    {
+      "toolKey": "image",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "detail-enhance",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "image-edit",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "angle-control",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "seamless-stitch",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "midjourney-blend",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "video",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "creative-text-to-style",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "creative-style-to-sketch",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "creative-local-restyle",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "creative-garment-colorway",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "creative-back-design",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "creative-pattern-extract",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "creative-pattern-colorway",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "creative-accessory-design",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "creative-pattern-craft",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "series-recipe",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "canvas-image",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "canvas-edit",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "canvas-mask-edit",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "canvas-angle",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "canvas-batch",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "canvas-chat",
+      "modelConfigId": "d5000000-0000-4000-8000-000000000010",
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "canvas-video",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "canvas-audio",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "gpt-chat",
+      "modelConfigId": "d5000000-0000-4000-8000-000000000010",
+      "enabled": true,
+      "rmbCostOverride": null
+    },
+    {
+      "toolKey": "gpt-chat-image",
+      "modelConfigId": null,
+      "enabled": true,
+      "rmbCostOverride": null
+    }
+  ]
+}

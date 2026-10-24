@@ -10,11 +10,13 @@ test("only the current employee and tool can restore in-flight records", () => {
 });
 
 test("durable snapshots retain original image parameters but never browser provider credentials", () => {
-    const source = { ...pending.snapshot, config: { ...pending.snapshot.config, apiKey: "must-not-persist", systemPrompt: "keep buttons", imageOptions: '{"seed":42}' } };
+    const source = { ...pending.snapshot, promptInput: { scene: "free-optimize" as const, userText: "keep buttons", fields: {}, mode: "edit" as const }, config: { ...pending.snapshot.config, apiKey: "must-not-persist", systemPrompt: "private-methodology-must-not-persist", imageOptions: '{"seed":42}' } };
     const copy = snapshotImageRequest(source);
     source.config.imageOptions = "changed";
     expect(copy.config.imageOptions).toBe('{"seed":42}');
-    expect(copy.config.systemPrompt).toBe("keep buttons");
+    expect(copy.config.systemPrompt).toBe("");
+    expect(copy.promptInput).toEqual(source.promptInput);
+    expect(JSON.stringify(copy)).not.toContain("private-methodology-must-not-persist");
     expect(copy.config.apiKey).toBe("");
     expect(JSON.stringify(copy)).not.toContain("must-not-persist");
 });

@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { SceneFields, SceneUploads } from "@/pages/creative/scene-form";
-import { addSceneColor, buildScenePrompt, cloneSceneForm, createSceneForm, getSceneColorSelection, getSceneSlots, removeSceneColor, sceneSummaries, setSceneColor, validateSceneForm, type SceneForm } from "@/pages/creative/scene-form-model";
+import { addSceneColor, scenePromptInput, cloneSceneForm, createSceneForm, getSceneColorSelection, getSceneSlots, removeSceneColor, sceneSummaries, setSceneColor, validateSceneForm, type SceneForm } from "@/pages/creative/scene-form-model";
 import type { StandardColorSelection } from "@/lib/standard-colors";
 import type { ReferenceImage } from "@/types/image";
 
@@ -67,25 +67,20 @@ describe("standard color selections for clothing photos", () => {
         expect(setSceneColor(form, 9, "#000000")).toBe(form);
     });
 
-    test("photo prompts include ordered standard identities but never source URLs", () => {
-        const form = setSceneColor(formFor("garment-colorway", { colorMode: "specific", colors: ["#000000", "#abc"], colorRegion: "只改大身，保留袖口原色" }), 0, standardColor.hex, standardColor);
-        const prompt = buildScenePrompt("garment-colorway", form);
-        expect(prompt).toContain(`第1目标色：色库「${standardColor.library}」，色号「${standardColor.name}」，HEX ${standardColor.hex}`);
-        expect(prompt).toContain("第2目标色：HEX #AABBCC");
-        expect(prompt).toContain("只改大身，保留袖口原色");
-        expect(prompt).not.toContain(standardColor.sourceUrl);
-        expect(prompt).not.toContain(standardColor.datasetVersion);
-        for (const text of ["织纹和褶皱", "高光、阴影", "人像身份、肤色", "光影与背景", "近似视觉效果", "不要求每个像素等于该 HEX", "不是物理染色模拟"]) expect(prompt).toContain(text);
-        expect(buildScenePrompt("garment-colorway", { ...form, colorMode: "smart" })).not.toContain(standardColor.name);
-        expect(buildScenePrompt("garment-colorway", { ...form, colorMode: "reference" })).not.toContain(standardColor.name);
-        expect(buildScenePrompt("pattern-colorway", form)).not.toContain("人像身份");
+    test("structured color input includes ordered identities, not rendering instructions", () => {
+        const form = setSceneColor(formFor("garment-colorway", { colorMode: "specific", colors: ["#000000", "#abc"], colorRegion: "只改大身" }), 0, standardColor.hex, standardColor);
+        const input = scenePromptInput("garment-colorway", form);
+        expect(input).toMatchObject({ scene: "garment-colorway", fields: { colors: [standardColor.hex, "#abc"], colorSelections: [standardColor, null], colorRegion: "只改大身" } });
+        expect(scenePromptInput("garment-colorway", { ...form, colorMode: "smart" }).fields).not.toHaveProperty("colors");
+        expect(scenePromptInput("garment-colorway", { ...form, colorMode: "reference" }).fields).not.toHaveProperty("colorSelections");
+        expect(JSON.stringify(input)).not.toContain("不要求每个像素");
     });
 
     test("stale metadata cannot attach the wrong identity to a new HEX and matching short HEX remains valid", () => {
         const form = formFor("garment-colorway", { colorMode: "specific", colors: ["#123456"], colorSelections: [standardColor] });
         expect(getSceneColorSelection(form, 0)).toBeNull();
-        expect(buildScenePrompt("garment-colorway", form)).not.toContain(standardColor.name);
-        expect(buildScenePrompt("garment-colorway", form)).toContain("第1目标色：HEX #123456");
+        expect(JSON.stringify(scenePromptInput("garment-colorway", form))).not.toContain(standardColor.name);
+        expect(scenePromptInput("garment-colorway", form).fields?.colors).toEqual(["#123456"]);
         expect(cloneSceneForm(form).colorSelections).toEqual([null]);
         const short = { ...form, colors: ["#abc"], colorSelections: [{ ...standardColor, hex: "#AABBCC" }] };
         expect(getSceneColorSelection(short, 0)?.id).toBe(standardColor.id);
@@ -129,11 +124,9 @@ describe("creative scene input roles", () => {
         ]);
         expect(validateSceneForm("accessory-design", form, { primary })).toBe("请上传图案图。");
         expect(validateSceneForm("accessory-design", form, images)).toBeNull();
-        const prompt = buildScenePrompt("accessory-design", form);
-        expect(prompt).toContain("图片1是辅料主图");
-        expect(prompt).toContain("图片2是图案参考图");
-        expect(prompt).toContain("不把图片2当作辅料替换图片1");
-        expect(prompt).toContain("孔位或连接方式");
+        const input = scenePromptInput("accessory-design", form);
+        expect(input.referenceRoles).toEqual(["辅料图", "图案图"]);
+        expect(input.fields).toMatchObject({ accessoryType: "拉链头", accessoryApply: "形状与纹样" });
     });
 
     test.each(["garment-colorway", "pattern-colorway"])("%s requests a second image only in reference mode", (sceneId) => {
@@ -141,13 +134,13 @@ describe("creative scene input roles", () => {
         expect(getSceneSlots(sceneId, reference).map((slot) => slot.id)).toEqual(["primary", "secondary"]);
         expect(validateSceneForm(sceneId, reference, { primary })).toBe("请上传配色参考图。");
         expect(validateSceneForm(sceneId, reference, images)).toBeNull();
-        expect(buildScenePrompt(sceneId, reference)).toContain("图片2是配色参考图");
-        expect(buildScenePrompt(sceneId, reference)).toContain("不复制图片2的图案、款式、材质、人物或背景");
+        expect(scenePromptInput(sceneId, reference).referenceRoles).toHaveLength(2);
+        expect(scenePromptInput(sceneId, reference).referenceRoles?.[1]).toBe("配色参考图");
         for (const colorMode of ["smart", "specific"] as const) {
             const form = { ...reference, colorMode };
             expect(getSceneSlots(sceneId, form).map((slot) => slot.id)).toEqual(["primary"]);
             expect(validateSceneForm(sceneId, form, { primary })).toBeNull();
-            expect(buildScenePrompt(sceneId, form)).not.toContain("图片2");
+            expect(scenePromptInput(sceneId, form).referenceRoles).toHaveLength(1);
         }
     });
 
@@ -156,107 +149,45 @@ describe("creative scene input roles", () => {
             const form = createSceneForm(sceneId);
             expect(validateSceneForm(sceneId, form, images)).toContain("暂不支持");
             expect(getSceneSlots(sceneId, form)).toEqual([]);
-            expect(buildScenePrompt(sceneId, form)).toBe("");
+            expect(() => scenePromptInput(sceneId, form)).toThrow("暂不支持");
         }
     });
 });
 
-describe("specialized creative prompt controls", () => {
-    test("text-to-style binds all dedicated garment controls", () => {
-        const form = formFor("text-to-style", { description: "奶油色衬衫", category: "上衣", silhouette: "微宽松", fabric: "轻薄棉麻", presentation: "模特展示" });
-        const prompt = buildScenePrompt("text-to-style", form);
-        for (const value of ["奶油色衬衫", "上衣", "微宽松", "轻薄棉麻", "模特展示"]) expect(prompt).toContain(value);
-        expect(prompt).not.toContain("无人物");
-        expect(prompt).not.toContain("图片1");
+describe("structured creative controls", () => {
+    test.each(sceneIds)("%s is a public input scene without authored prompt paragraphs", scene => {
+        const form = formFor(scene, { description: "我的方向", change: "荷叶袖", preserve: "衣身保持" });
+        const input = scenePromptInput(scene, form);
+        expect(input.scene).toBe(scene);
+        expect(input.mode).toBe(scene === "text-to-style" ? "generate" : "edit");
+        expect(input.userText).toContain("我的方向");
+        expect(input.fields).toHaveProperty("description", "我的方向");
+        expect(input).not.toHaveProperty("systemPrompt");
+        expect(input).not.toHaveProperty("prompt");
     });
-
-    test("sketch controls alter line style and visible detail without promising SVG", () => {
-        const simple = buildScenePrompt("style-to-sketch", formFor("style-to-sketch", { sketchStyle: "minimal", sketchDetail: "outline" }));
-        const technical = buildScenePrompt("style-to-sketch", formFor("style-to-sketch", { sketchStyle: "technical", sketchDetail: "detailed" }));
-        expect(simple).toContain("极简线稿");
-        expect(simple).toContain("仅主要轮廓");
-        expect(technical).toContain("技术感线稿");
-        expect(technical).toContain("分割线、口袋、褶裥");
-        for (const prompt of [simple, technical]) {
-            expect(prompt).toContain("栅格图片，不是可编辑 SVG");
-            expect(prompt).toContain("不增加看不见的结构");
-            expect(prompt).toContain("不标注推测的尺寸");
-        }
+    test("only visible scene controls are sent, preserving exact user choices", () => {
+        expect(scenePromptInput("text-to-style", formFor("text-to-style", { category: "上衣", silhouette: "微宽松", fabric: "棉麻", presentation: "模特展示" })).fields).toEqual({ description: "", category: "上衣", silhouette: "微宽松", fabric: "棉麻", presentation: "模特展示" });
+        expect(scenePromptInput("style-to-sketch", formFor("style-to-sketch", { sketchStyle: "minimal", sketchDetail: "outline" })).fields).toMatchObject({ sketchStyle: "minimal", sketchDetail: "outline" });
+        expect(scenePromptInput("local-restyle", formFor("local-restyle", { restyleArea: "袖子", change: "喇叭袖", preserve: "胸口图案" })).fields).toMatchObject({ restyleArea: "袖子", change: "喇叭袖", preserve: "胸口图案" });
+        expect(scenePromptInput("back-design", formFor("back-design", { backStructure: "育克", backMotif: "延续风格" })).fields).toMatchObject({ backStructure: "育克", backMotif: "延续风格" });
+        expect(scenePromptInput("pattern-extract", formFor("pattern-extract", { extractMode: "完整可见花型", extractBackground: "保留底色" })).fields).toMatchObject({ extractMode: "完整可见花型", extractBackground: "保留底色" });
+        expect(scenePromptInput("pattern-craft", formFor("pattern-craft", { craft: "毛巾绣", craftFabric: "牛仔布" })).fields).toMatchObject({ craft: "毛巾绣", craftFabric: "牛仔布" });
     });
-
-    test("local restyling requires a real change and binds scope and preservation", () => {
-        const form = formFor("local-restyle", { restyleArea: "袖子", change: " 改为轻微喇叭袖 ", preserve: "胸口花朵保持原样" });
-        expect(validateSceneForm("local-restyle", { ...form, change: " " }, images)).toContain("改成什么");
-        expect(validateSceneForm("local-restyle", form, images)).toBeNull();
-        const prompt = buildScenePrompt("local-restyle", form);
-        for (const value of ["修改部位：袖子", "改为轻微喇叭袖", "胸口花朵保持原样", "面料组织", "原有配色", "不是像素蒙版"]) expect(prompt).toContain(value);
+    test.each(["garment-colorway", "pattern-colorway"])("%s validates palette and discards inactive controls", scene => {
+        const form = formFor(scene, { colorMode: "specific", colors: ["#abc", "#11aaBB"], colorRegion: "指定色块", colorMood: "HIDDEN_MOOD" });
+        expect(validateSceneForm(scene, form, images)).toBeNull();
+        expect(scenePromptInput(scene, form).fields).toMatchObject({ colors: ["#abc", "#11aaBB"], colorRegion: "指定色块" });
+        expect(scenePromptInput(scene, form).fields).not.toHaveProperty("colorMood");
+        for (const color of ["red", "123456", "#12", "#12345G", "#12345678", "", "var(--red)"]) expect(validateSceneForm(scene, { ...form, colors: [color] }, images)).toContain("色值无效");
+        expect(validateSceneForm(scene, { ...form, colors: [] }, images)).toContain("至少添加");
+        expect(validateSceneForm(scene, { ...form, colors: Array(7).fill("#FFFFFF") }, images)).toContain("最多使用 6");
+        expect(scenePromptInput(scene, { ...form, colorMode: "smart" }).fields).not.toHaveProperty("colors");
+        expect(scenePromptInput(scene, { ...form, colorMode: "reference" }).referenceRoles).toHaveLength(2);
     });
-
-    test.each(["garment-colorway", "pattern-colorway"])("%s validates the editable HEX palette and ignores hidden obsolete values", (sceneId) => {
-        const form = formFor(sceneId, { colorMode: "specific", colors: ["#abc", "#11aaBB"], colorRegion: "指定色块", colorMood: "HIDDEN_MOOD" });
-        expect(validateSceneForm(sceneId, form, images)).toBeNull();
-        const prompt = buildScenePrompt(sceneId, form);
-        expect(prompt).toContain("#ABC、#11AABB");
-        expect(prompt).toContain("指定色块");
-        expect(prompt).not.toContain("HIDDEN_MOOD");
-        expect(prompt).toContain("不保证精确色值");
-        for (const color of ["red", "123456", "#12", "#12345G", "#12345678", "", "var(--red)"]) {
-            expect(validateSceneForm(sceneId, { ...form, colors: [color] }, images)).toContain("色值无效");
-        }
-        expect(validateSceneForm(sceneId, { ...form, colors: [] }, images)).toContain("至少添加");
-        expect(validateSceneForm(sceneId, { ...form, colors: Array(7).fill("#FFFFFF") }, images)).toContain("最多使用 6");
-        expect(validateSceneForm(sceneId, { ...form, colorMode: "smart", colors: ["not-a-color"] }, images)).toBeNull();
-        const smart = buildScenePrompt(sceneId, { ...form, colorMode: "smart", colorMood: "强烈对比", colors: ["HIDDEN_COLOR"] });
-        expect(smart).toContain("智能配色方向：强烈对比");
-        expect(smart).not.toContain("HIDDEN_COLOR");
-        expect(buildScenePrompt(sceneId, { ...form, colorMode: "reference" })).not.toContain("#ABC");
-    });
-
-    test("clothing colors preserve material while pattern colors preserve geometry", () => {
-        const garment = buildScenePrompt("garment-colorway", formFor("garment-colorway"));
-        const pattern = buildScenePrompt("pattern-colorway", formFor("pattern-colorway"));
-        for (const term of ["面料纹理", "明暗层次", "光影与背景", "肩宽", "袖长"]) expect(garment).toContain(term);
-        for (const term of ["元素形状", "线条粗细", "大小比例", "色块边界", "排列关系", "条纹宽窄", "重复节奏"]) expect(pattern).toContain(term);
-    });
-
-    test("back design binds structural and motif choices without claiming restoration", () => {
-        const form = formFor("back-design", { backStructure: "育克", backMotif: "延续风格" });
-        const prompt = buildScenePrompt("back-design", form);
-        expect(prompt).toContain("后肩加入");
-        expect(prompt).toContain("重新安排适合背面");
-        expect(prompt).toContain("不宣称还原原款真实背面");
-        expect(buildScenePrompt("back-design", { ...form, backStructure: "中缝", backMotif: "不延续" })).toContain("不延续正面图案或装饰");
-        expect(validateSceneForm("back-design", { ...form, backStructure: "自由描述" }, images)).toContain("补充");
-        expect(validateSceneForm("back-design", { ...form, backStructure: "自由描述", description: "后中添加褶裥" }, images)).toBeNull();
-    });
-
-    test("extraction binds range and background and does not invent missing artwork", () => {
-        const form = formFor("pattern-extract", { extractMode: "完整可见花型", extractBackground: "保留底色" });
-        const prompt = buildScenePrompt("pattern-extract", form);
-        expect(prompt).toContain("提取范围：完整可见花型");
-        expect(prompt).toContain("保留图案自身的原有底色");
-        expect(prompt).toContain("不要把遮挡或缺失区域当作已知原稿");
-        expect(prompt).toContain("不自行补成无缝循环");
-        expect(buildScenePrompt("pattern-extract", formFor("pattern-extract"))).toContain("背景处理：白底");
-    });
-
-    test("each craft binds its real visual texture and substrate without promising production data", () => {
-        for (const [craft, texture] of [["刺绣", "针迹方向"], ["毛巾绣", "立体毛圈"], ["提花", "纱线交织"], ["胶印", "柔韧胶质色层"]]) {
-            const prompt = buildScenePrompt("pattern-craft", formFor("pattern-craft", { craft, craftFabric: "牛仔布" }));
-            expect(prompt).toContain(`目标工艺：${craft}`);
-            expect(prompt).toContain(texture);
-            expect(prompt).toContain("承载面料：牛仔布");
-            expect(prompt).toContain("不是绣花针迹文件");
-            expect(prompt).toContain("不承诺真实工艺可行性");
-        }
-    });
-
-    test("accessory surface-only mode locks shape rather than asking to redesign it", () => {
-        const prompt = buildScenePrompt("accessory-design", formFor("accessory-design", { accessoryType: "织标", accessoryApply: "仅表面纹样" }));
-        expect(prompt).toContain("辅料类型：织标");
-        expect(prompt).toContain("应用方式：仅表面纹样");
-        expect(prompt).toContain("保留图片1整体外形");
-        expect(prompt).not.toContain("重新构思");
+    test("required local and back inputs still block empty submissions", () => {
+        expect(validateSceneForm("local-restyle", formFor("local-restyle"), images)).toContain("改成什么");
+        expect(validateSceneForm("back-design", formFor("back-design", { backStructure: "自由描述" }), images)).toContain("补充");
+        expect(validateSceneForm("back-design", formFor("back-design", { backStructure: "自由描述", description: "后中褶裥" }), images)).toBeNull();
     });
 });
 

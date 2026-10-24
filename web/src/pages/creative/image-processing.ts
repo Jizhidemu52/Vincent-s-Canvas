@@ -112,5 +112,3 @@ export function selectionSizeMatches(size: string, original: { width: number; he
 export function preferredSelectionSize(original: { width: number; height: number }, sizes: readonly string[]) {
     return sizes.find(size => size !== "auto" && selectionSizeMatches(size, original)) || "auto";
 }
-
-export const selectionPrompt = "图片1是未经标记的服装原图。图片2是同一原图上的选区示意：蓝色覆盖部分才是允许修改的区域，蓝色不是设计颜色，不得带入最终结果。请依据设计要求修改该区域，保持原图完整画幅、宽高比、视角与主体位置，不裁切、不缩放或移动服装；不要生成选区蒙版、蓝色标记或对比拼图。修改处与原图的面料、光影和边缘自然衔接。程序随后只合入涂选区域，区域外使用原图。";

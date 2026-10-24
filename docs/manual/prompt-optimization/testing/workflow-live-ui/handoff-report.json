@@ -1,0 +1,16 @@
+{
+  "startedAt": "2026-10-24T18:05:38.123Z",
+  "scope": "New isolated headless context; at most two real image submissions; no other canvases touched",
+  "requests": [],
+  "responses": [],
+  "errors": [],
+  "handoffUrl": "http://127.0.0.1:5188/canvas/ZoOxpTZ13i8U_9KlHgTq1",
+  "handoff": {
+    "imagePostCount": 0,
+    "workflowStarted": false,
+    "currentDialog": "图片工作流 · 运行记录",
+    "visibleRunButton": "按连线运行",
+    "nodes": "原图 + 2个配置节点，原图→步骤1→步骤2已创建",
+    "important": "第二步仍是胸口加 STUDIO 的文本；其类型仍为recolor，尚未替换成仅领子米白。请接手后先修改第二步提示词。"
+  }
+}

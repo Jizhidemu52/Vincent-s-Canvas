@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import ts from "typescript";
 import { prepareCanvasBatchFiles } from "@/pages/canvas/canvas-batch-edit-runtime";
 import { assertCanvasImageUploadSize, CANVAS_IMAGE_MAX_BYTES } from "@/lib/canvas/canvas-image-upload-limit";
+import { QueuedTaskHttpError, QueuedTaskSubmissionUncertainError } from "@/services/api/generation-tasks";
 
 test("multi-file selection keeps all supported images in natural filename order", () => {
     const files = ["10.png", "2.png", "1.png"].map(name => new File(["image"], name, { type: "image/png" }));
@@ -55,4 +56,48 @@ test("batch execution rejects stale oversized selections before uploading, queue
     expect(errors[0]).toContain("20 MB");
     expect(effects).toEqual([]);
     expect(items.map(item => item.status)).toEqual(["waiting", "waiting"]);
+});
+
+test("definitive batch rejection clears bindings while uncertain submission retains the original request", async () => {
+    const source = ts.createSourceFile("canvas-batch-edit-runtime.ts", readFileSync(new URL("../src/pages/canvas/canvas-batch-edit-runtime.ts", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true);
+    const declaration = source.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === "runCanvasBatchImageEdit")!;
+    const code = ts.transpileModule(declaration.getText(source).replace(/^export\s+/, ""), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText;
+    for (const uncertain of [false, true]) {
+        let posts = 0;
+        let items: any[] = [{ id: "item", file: new File(["png"], "a.png", { type: "image/png" }), relativePath: "a.png", status: "waiting" }];
+        let nodes: any[] = [];
+        const notices: string[] = [];
+        const dependencies = {
+            assertCanvasImageUploadSize, QueuedTaskHttpError, QueuedTaskSubmissionUncertainError,
+            modelOptionName: (model: string) => model, deploymentFeatures: { creditsEnabled: false }, CanvasNodeType: { Image: "image" },
+            nanoid: () => "test", fitNodeSize: () => ({ width: 100, height: 100 }), flushSync: (action: () => void) => action(),
+            useCanvasStore: { getState: () => ({ updateProject: () => {} }) }, flushCanvasPersistence: async () => {},
+            uploadImage: async () => ({ url: "/source.png", width: 100, height: 100 }),
+            requestBatchEdit: async (_config: unknown, _prompt: string, _files: unknown, options: any) => {
+                posts++;
+                await options.onSubmissionStarted("original-batch", [{ itemIndex: 0 }]);
+                throw uncertain ? new QueuedTaskSubmissionUncertainError("original-batch") : new QueuedTaskHttpError(422, "Recipe disabled");
+            },
+        };
+        const run = new Function(...Object.keys(dependencies), `${code};return runCanvasBatchImageEdit`)(...Object.values(dependencies));
+        const noop = () => {};
+        const input = { prompt: "edit", config: { model: "image-model" }, estimate: () => ({ configured: true, credits: 0 }),
+            isAiConfigReady: () => true, onMissingModel: noop, user: { id: "owner", status: "active", creditBalance: 100 }, projectId: "canvas",
+            getCenter: () => ({ x: 0, y: 0 }), imageMetadata: () => ({}), addAssets: noop, setRunning: noop, setServerId: noop,
+            setAction: noop, setItems: (update: any) => { items = typeof update === "function" ? update(items) : update; },
+            setNodes: (update: any) => { nodes = typeof update === "function" ? update(nodes) : update; }, setConnections: noop, setSelectedNodeIds: noop,
+            message: { error: (text: string) => notices.push(text), warning: (text: string) => notices.push(text), success: (text: string) => notices.push(text) },
+        };
+        await run({ ...input, items });
+        expect(items[0].status).toBe(uncertain ? "paused" : "failed");
+        expect(items[0].requestId).toBe(uncertain ? "original-batch" : undefined);
+        const result = nodes.find(node => node.id.endsWith("-result-1"));
+        expect(result.metadata.imageTask?.requestId).toBe(uncertain ? "original-batch:0" : undefined);
+        if (uncertain) {
+            expect(notices.join(" ")).toContain("状态待核查");
+            expect(notices.join(" ")).not.toContain("批量改图完成");
+            await run({ ...input, items });
+            expect(posts).toBe(1);
+        }
+    }
 });

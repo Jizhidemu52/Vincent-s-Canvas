@@ -1,0 +1,12 @@
+FROM canvas-api:canvas-4ed9d8d-20261024
+WORKDIR /app
+# This is an image layer, not a host directory. Remove previous application sources/dependencies.
+RUN find /app -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + && rm -rf /shared
+COPY server/ /app/
+COPY shared/ /shared/
+RUN bun install --frozen-lockfile --production && cd /shared && bun install --frozen-lockfile --production
+COPY SERVER-SHA256SUMS /app/RELEASE-SHA256SUMS
+COPY SHARED-SHA256SUMS /shared/RELEASE-SHA256SUMS
+COPY docs/manual/prompt-optimization/*.md /opt/release/prompt-sources/
+COPY REVISION /app/REVISION
+CMD ["bun", "src/index.ts"]
