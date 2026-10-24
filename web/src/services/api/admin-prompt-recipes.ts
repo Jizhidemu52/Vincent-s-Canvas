@@ -87,10 +87,16 @@ export async function findAdminPromptCompilation(requestId: string, options: Pro
 }
 
 /** Normal task endpoint, with the tested compilation and its immutable input snapshot. */
-export const submitAdminPromptImage = (input: TaskSubmission, options: PromptAdminOptions) => request<{ task: QueuedTask }>("/api/tasks", options, post(taskSubmissionSchema.parse(input)), 120_000);
+// Production POST returns an acceptance summary; result fields arrive on later GETs.
+type PromptImageResponse = Omit<QueuedTask, "resultUrls" | "failureReason"> & Partial<Pick<QueuedTask, "resultUrls" | "failureReason">>;
+const imageSnapshot = (task: PromptImageResponse): QueuedTask => ({ ...task, resultUrls: task.resultUrls ?? [], failureReason: task.failureReason ?? null });
+export async function submitAdminPromptImage(input: TaskSubmission, options: PromptAdminOptions) {
+    const result = await request<{ task: PromptImageResponse }>("/api/tasks", options, post(taskSubmissionSchema.parse(input)), 120_000);
+    return { task: imageSnapshot(result.task) };
+}
 export async function findAdminPromptImage(requestId: string, options: PromptAdminOptions) {
     try {
-        return (await request<{ task: QueuedTask }>(`/api/tasks/by-request/${encodeURIComponent(requestId)}`, options)).task;
+        return imageSnapshot((await request<{ task: PromptImageResponse }>(`/api/tasks/by-request/${encodeURIComponent(requestId)}`, options)).task);
     } catch (error) {
         if (error instanceof PromptAdminRequestError && error.status === 404) return null;
         throw error;

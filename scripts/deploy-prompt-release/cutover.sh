@@ -2,8 +2,8 @@
 set -Eeuo pipefail
 umask 077
 release="$(cd -- "$(dirname -- "$0")/.." && pwd)"
-previous=/home/vcan/releases/canvas-4ed9d8d-20261024
-optimizer="${PROMPT_OPTIMIZER_MODEL_ID:-652b3d3c-9bdf-419e-851f-31c5e101daf6}"
+previous=/home/vcan/releases/canvas-ef575ee-20261024-prompt
+optimizer="${PROMPT_OPTIMIZER_MODEL_ID:-652b3d3c-93bf-419e-851f-31c5e101daf6}"
 action="${1:-deploy}"
 test "$release" = /home/vcan/releases/__RELEASE__
 cd "$release"
@@ -12,7 +12,7 @@ backup="$(cat BACKUP_DIRECTORY)"
 case "$backup" in /home/vcan/backups/__RELEASE__.*) ;; *) exit 1;; esac
 test -d "$backup"
 dc() { docker compose -p vincent-s-canvas -f "$release/compose.runtime.yml" -f "$release/compose.release.yml" "$@"; }
-old_dc() { docker compose -p vincent-s-canvas -f "$previous/docker-compose.yml" -f "$previous/compose.release.yml" "$@"; }
+old_dc() { docker compose -p vincent-s-canvas -f "$previous/compose.runtime.yml" -f "$previous/compose.release.yml" "$@"; }
 active_tasks() { docker exec vincent-s-canvas-postgres-1 psql -U wireless_canvas -d wireless_canvas -Atqc "SELECT count(*) FROM tasks WHERE status IN ('waiting','processing')"; }
 set_current() {
   local target="$1" link="/home/vcan/current.next-__RELEASE__-$BASHPID"
@@ -74,7 +74,7 @@ fi
 test "$(readlink -f /home/vcan/current)" = "$previous"
 test "$(cat "$backup/current-before.txt")" = "$previous"
 cmp .env "$previous/.env"
-cmp compose.runtime.yml "$previous/docker-compose.yml"
+cmp compose.runtime.yml "$previous/compose.runtime.yml"
 cmp previous-compose.release.yml "$previous/compose.release.yml"
 sha256sum -c SHA256SUMS > /dev/null
 target_api_image="$(cat "$backup/target-api-image-id.txt")"

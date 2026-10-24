@@ -62,4 +62,6 @@
 - 付费 QA 脚本类型检查、编译器/矩阵/绑定针对性检查通过；发布脚本 7 项、58 断言通过，含中文归档原字节往返、Docker 模板环境文件保留、重复导入保持管理员配置、余额/旧字段改变时拒绝切换。
 - 真实 UI 的调用计数、原图 SHA、缓存与 ZIP 检查见 `testing/*report*`；全部公开文件的大小和 SHA-256 见 [evidence-manifest.json](./testing/evidence-manifest.json)。浏览器/系统权限、真实双员工跨设备与高并发仍按 [待验收](../../content/docs/progress/pending-test.mdx) 保留。
 
+上线实操发现正式 `POST /api/tasks` 的受理摘要不含 `resultUrls`，而 SQLite 演示响应带空数组，导致管理员试生图面板报错；原任务仍成功。v0.5.3 在 API 边界补齐待产出字段，新增真实响应形状与原请求 GET 恢复回归。补丁针对性检查 9 项、57 断言通过，Web 类型检查通过；原全套结果为补丁前的有效基线，不将其伪称为补丁后重新执行的全套。发布包另从补丁提交重新构建，线上复验结果保存在对应 GitHub release。
+
 原图、输入、最终提示词、错误与逐图审阅分别位于 `testing/quality-matrix/`、`testing/visual-review-*.{json,md}`、`testing/chat-live-ui/`、`testing/workflow-live-ui/` 和 `testing/supplement-v1/`。运行数据库不在仓库。发布流程见 [部署脚本](../../../scripts/deploy-prompt-release/README.md)，付费重现入口见 [QA 脚本说明](../../../server/scripts/README.prompt-quality.md)；CI 不会自动运行付费脚本。

@@ -88,11 +88,11 @@ test("deployment contract uses frozen archives, explicit migrate/import order, p
   expect(packageCode.indexOf("['archive'")).toBeLessThan(packageCode.indexOf("['run', 'build']"));
   expect(packageCode).toContain("await manifest(buildRoot, sourceNames) !== sourceManifest");
   expect(packageCode).toContain("await files(path.join(root, 'server'))");
-  expect(prepare).toContain('cp -p "$previous/docker-compose.yml" compose.runtime.yml');
+  expect(prepare).toContain('cp -p "$previous/compose.runtime.yml" compose.runtime.yml');
   expect(cutover.indexOf("api bun src/migrate.ts")).toBeLessThan(cutover.indexOf("api bun scripts/import-prompt-recipes.ts"));
   expect(cutover).toContain('--model "$optimizer"');
   expect(cutover).toContain("--activate");
-  expect(cutover).toContain("652b3d3c-9bdf-419e-851f-31c5e101daf6");
+  expect(cutover).toContain("652b3d3c-93bf-419e-851f-31c5e101daf6");
   expect(cutover).not.toMatch(/DROP\s+TABLE|TRUNCATE|down\s+-v|pg_restore\s+--clean|UPDATE\s+tool_api_configurations/i);
   expect(dockerfile).toContain("COPY server/ /app/");
   expect(dockerfile).toContain('CMD ["bun", "src/index.ts"]');

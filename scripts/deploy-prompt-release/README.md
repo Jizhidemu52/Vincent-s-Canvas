@@ -1,12 +1,12 @@
 # 提示词优化发布准备
 
-这里只提供可审阅脚本。编写与离线测试阶段没有连接服务器，没有执行构建发布、上传、切换或模型付费调用。实际执行由发布负责人完成。
+这里提供可审阅脚本。离线合同测试不连接服务器或调用模型；实际发布另执行准备、备份、切换和线上验收，其记录放在对应 GitHub release。
 
 ## 固定目标与边界
 
-- 上一发布：`/home/vcan/releases/canvas-4ed9d8d-20261024`；预期 `/home/vcan/current` 指向它。
+- 上一发布：`/home/vcan/releases/canvas-ef575ee-20261024-prompt`；预期 `/home/vcan/current` 指向它。
 - 仅替换 `vincent-s-canvas-api-1`、`vincent-s-canvas-worker-1`、`wireless-canvas-web`；数据库、Redis、MinIO、备份容器及另一套 `newvcan-*` 不动。
-- 默认独立优化模型为 `652b3d3c-9bdf-419e-851f-31c5e101daf6`。它只用于首次创建的配方设置，不修改任何 `gpt-chat` 或其他板块绑定。执行前仍验证此 UUID 的模型、Provider、工作流启用状态及 chat 能力。
+- 默认独立优化模型为 `652b3d3c-93bf-419e-851f-31c5e101daf6`。它只用于首次创建的配方设置，不修改任何 `gpt-chat` 或其他板块绑定。执行前仍验证此 UUID 的模型、Provider、工作流启用状态及 chat 能力。
 - `PROMPT_OPTIMIZER_MODEL_ID` 可在**首次切换前**选择另一模型。已有配方的模型和管理员设置不被重复导入覆盖；上线后的模型变更通过超管配方页单独保存。
 - 认证和计费模式沿用前一发布的 `.env`、基础 Compose 和发布覆盖文件，不使用仓库 Compose 中的默认登录模式。所有容器环境差异均阻止准备继续。
 
@@ -45,7 +45,7 @@ bash deploy/prepare.sh
 
 ```bash
 # 默认 optimizer，或在首次导入前显式传入替代 UUID：
-PROMPT_OPTIMIZER_MODEL_ID=652b3d3c-9bdf-419e-851f-31c5e101daf6 bash deploy/cutover.sh deploy
+PROMPT_OPTIMIZER_MODEL_ID=652b3d3c-93bf-419e-851f-31c5e101daf6 bash deploy/cutover.sh deploy
 ```
 
 只有当前无 waiting/processing 任务才切换；先排空并停止 Web，再等待任务为零，停止 API/Worker。每次尝试创建独立切换备份，不覆盖前次数据库快照。流程顺序固定为：
@@ -78,7 +78,7 @@ bash deploy/cutover.sh rollback
 & 'C:/Program Files/Git/bin/bash.exe' -n scripts/deploy-prompt-release/prepare.sh
 & 'C:/Program Files/Git/bin/bash.exe' -n scripts/deploy-prompt-release/cutover.sh
 $env:PGLITE_RUNTIME_PATH='D:/重新部署的无限画布/Vincent-s-Canvas/output/mark-admin-qa/runtime'
-bun --no-env-file test scripts/deploy-prompt-release/deploy.test.ts
+bun --no-env-file test ./scripts/deploy-prompt-release/deploy.test.ts
 ```
 
 合同测试只在临时 Git 仓库、文件夹及隔离 PGlite 数据库运行，不调用 Docker、SSH、curl 或模型。完整远端构建、真实容器环境、OA 登录、真实模型输出与视觉验收均留给根任务负责，不由离线测试代替。

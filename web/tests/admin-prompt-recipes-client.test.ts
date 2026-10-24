@@ -119,3 +119,19 @@ test("network uncertainty never replays POST; by-request lookup is GET and a 404
     const forbidden = harness(() => new Response(JSON.stringify({ message: "Forbidden" }), { status: 403 }));
     await expect(forbidden.api.findAdminPromptCompilation("original", options)).rejects.toThrow("Forbidden");
 });
+
+test("production task acceptance without result fields renders safely and observes the original request", async () => {
+    const accepted = { id: "task-1", requestId: "image-request", status: "waiting", prompt: "Visible final prompt", optimized: true };
+    const h = harness((_path, init) => ok({ task: init.method === "POST" ? accepted : { ...accepted, status: "success", resultUrls: ["/api/assets/result/content"] } }));
+    const input = { requestId: "image-request", projectId: "admin-prompt-test", operationType: "image_generation", toolKey: "image", modelConfigId: "0422a5a0-255f-4f4b-94be-957dc676cc54", prompt: "Visible final prompt", parameters: {}, sourceUrls: [], priority: "normal" };
+    const submitted = await h.api.submitAdminPromptImage(input as any, options);
+    expect(submitted.task).toEqual({ ...accepted, resultUrls: [], failureReason: null });
+    expect(submitted.task.resultUrls.filter(url => url.startsWith("/api/"))).toEqual([]);
+    const result = await h.api.findAdminPromptImage("image-request", options);
+    expect(result?.resultUrls).toEqual(["/api/assets/result/content"]);
+    expect(result?.failureReason).toBeNull();
+    expect(result?.id).toBe(accepted.id);
+    expect(h.calls.filter(call => call.init.method === "POST")).toHaveLength(1);
+    expect(h.calls[1].path).toBe("/api/tasks/by-request/image-request");
+    expect(h.calls[1].init.method).toBeUndefined();
+});
