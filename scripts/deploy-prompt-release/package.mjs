@@ -9,6 +9,8 @@ export const originals = [
   'docs/manual/prompt-optimization/无线画布-提示词优化工作流方案.md',
 ];
 export const requiredSource = [...originals, 'server/scripts/import-prompt-recipes.ts', 'server/src/index.ts', 'server/src/migrations/043_prompt_recipes.sql'];
+// Windows bsdtar otherwise decodes Git's UTF-8 headers through the ANSI code page.
+export const tarOptions = process.platform === 'win32' ? ['--options', 'hdrcharset=UTF-8'] : [];
 export function assertReleaseName(name) {
   if (!/^canvas-[a-f0-9]{7,40}-[0-9]{8}-prompt$/.test(name)) throw Error('Invalid release name');
   return name;
@@ -57,13 +59,13 @@ async function main() {
   const root = path.join(output, 'payload');
   await mkdir(root);
   run('git', ['archive', '--format=tar', `--output=${path.join(output, 'source.tar')}`, revision]);
-  run('tar', ['-xf', path.join(output, 'source.tar'), '-C', root]);
+  run('tar', [...tarOptions, '-xf', path.join(output, 'source.tar'), '-C', root]);
   const sourceNames = await files(root);
   assertPublicPackage(sourceNames);
   const sourceManifest = await manifest(root, sourceNames);
   const buildRoot = path.join(output, 'build');
   await mkdir(buildRoot);
-  run('tar', ['-xf', path.join(output, 'source.tar'), '-C', buildRoot]);
+  run('tar', [...tarOptions, '-xf', path.join(output, 'source.tar'), '-C', buildRoot]);
   const buildEnvironment = { ...process.env, NODE_ENV: 'production' };
   for (const key of Object.keys(buildEnvironment)) if (key.startsWith('VITE_') || key.startsWith('CANVAS_')) delete buildEnvironment[key];
   for (const directory of ['shared', 'web']) execFileSync('bun', ['install', '--frozen-lockfile'], { cwd: path.join(buildRoot, directory), stdio: 'inherit', env: { ...buildEnvironment, NODE_ENV: 'development' }, windowsHide: true });
@@ -89,7 +91,7 @@ async function main() {
   assertPublicPackage(names);
   await writeFile(path.join(root, 'SHA256SUMS'), await manifest(root, names));
   const archive = path.join(output, `${releaseName}.tar.gz`);
-  run('tar', ['-czf', archive, '-C', root, '.']);
+  run('tar', [...tarOptions, '-czf', archive, '-C', root, '.']);
   const data = await readFile(archive);
   console.log(JSON.stringify({ revision, releaseName, archive, bytes: data.length, sha256: createHash('sha256').update(data).digest('hex') }, null, 2));
 }

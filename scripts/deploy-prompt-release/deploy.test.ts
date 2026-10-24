@@ -4,7 +4,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { assertClean, assertPublicPackage, assertReleaseName, files, manifest, originals, requiredSource } from "./package.mjs";
+import { assertClean, assertPublicPackage, assertReleaseName, files, manifest, originals, requiredSource, tarOptions } from "./package.mjs";
 import { assertOptimizer, capture, expectedKeys, verify } from "./recipe-state";
 import { createIsolatedPostgres } from "../../server/tests/helpers/isolated-postgres";
 import { postgresPromptRecipeStore } from "../../server/src/prompt-recipe-postgres";
@@ -42,6 +42,23 @@ test("packaging rejects unstaged, staged and untracked source and accepts clean 
   git("-c", "user.name=Isolated release test", "-c", "user.email=isolated@example.invalid", "commit", "-m", "Fixture update");
   await writeFile(join(fixture, "unknown.txt"), "untracked");
   expect(() => assertClean(fixture)).toThrow();
+});
+
+test("UTF-8 Chinese archive paths and exact bytes survive extraction and repackaging", async () => {
+  const fixture = join(scratch, "unicode");
+  const first = join(fixture, "first"), second = join(fixture, "second");
+  await mkdir(first, { recursive: true });
+  await mkdir(second);
+  const source = join(fixture, "source.tar"), packed = join(fixture, "packed.tar.gz");
+  execFileSync("git", ["archive", "--format=tar", `--output=${source}`, "HEAD", originals[0]], { cwd: repo, windowsHide: true });
+  execFileSync("tar", [...tarOptions, "-xf", source, "-C", first], { cwd: repo, windowsHide: true });
+  const expected = execFileSync("git", ["show", `HEAD:${originals[0]}`], { cwd: repo, windowsHide: true });
+  expect(await readFile(join(first, originals[0]))).toEqual(expected);
+  execFileSync("tar", [...tarOptions, "-czf", packed, "-C", first, "."], { cwd: repo, windowsHide: true });
+  expect((await readFile(packed)).subarray(0, 2).toString("hex")).toBe("1f8b");
+  execFileSync("tar", [...tarOptions, "-xf", packed, "-C", second], { cwd: repo, windowsHide: true });
+  expect(await readFile(join(second, originals[0]))).toEqual(expected);
+  expect(await files(first)).toEqual(await files(second));
 });
 
 test("server manifest includes scripts and all nested tracked source rather than src-only", async () => {

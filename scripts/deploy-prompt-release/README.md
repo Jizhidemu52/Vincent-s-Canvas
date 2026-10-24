@@ -20,7 +20,7 @@ bun scripts/deploy-prompt-release/package.mjs --check
 bun scripts/deploy-prompt-release/package.mjs
 ```
 
-`package.mjs` 从最终 HEAD 生成 Git 归档，再在独立 `build/` 归档副本中执行 frozen-lockfile 安装和正式 Web 构建，不使用当前 `web/dist`。环境中的 `VITE_*`、`CANVAS_*` 被移除，并拒绝 standalone 构建。构建前后检查 HEAD、工作区和归档源码字节未改变。
+`package.mjs` 从最终 HEAD 生成 Git 归档，再在独立 `build/` 归档副本中执行 frozen-lockfile 安装和正式 Web 构建，不使用当前 `web/dist`。Windows bsdtar 显式使用 UTF-8 header charset，避免中文文件名按 ANSI 代码页解码。环境中的 `VITE_*`、`CANVAS_*` 被移除，并拒绝 standalone 构建。构建前后检查 HEAD、工作区和归档源码字节未改变。
 
 产物位于 `output/prompt-optimization/packages/canvas-<HEAD前7位>-<UTC日期>-prompt/`。同名目录存在就拒绝覆盖。保留 `build/` 是为方便审阅构建证据，它不进入 tar 包；确认发布后可单独清理该产物目录下的构建副本。
 
@@ -83,4 +83,4 @@ bun --no-env-file test scripts/deploy-prompt-release/deploy.test.ts
 
 合同测试只在临时 Git 仓库、文件夹及隔离 PGlite 数据库运行，不调用 Docker、SSH、curl 或模型。完整远端构建、真实容器环境、OA 登录、真实模型输出与视觉验收均留给根任务负责，不由离线测试代替。
 
-当前离线结果：6 项合同测试通过、0 失败、53 条断言；两份 shell 脚本 `bash -n` 通过。隔离 PostgreSQL 测试实际导入 18 配方，随后修改管理员设置与版本，再重复导入，确认原管理员选择、员工余额和原 chat 绑定均保留。批次指纹只排除本次新增的 5 个 admission 元数据列：同时改动这 5 列不会误报；故意修改原有批次 prompt 或员工余额时保护校验均正确拒绝。最初测试夹具将同一 SQL 参数同时用于 UUID/text 曾失败，已拆分参数后通过，未因此修改产品代码。
+当前离线结果：7 项合同测试通过、0 失败、57 条断言；两份 shell 脚本 `bash -n` 通过。新增真实 Git 归档中文文件名、gzip 编码和字节一致性往返检查；Windows 调用显式指定工作目录与 UTF-8 header charset。隔离 PostgreSQL 测试实际导入 18 配方，随后修改管理员设置与版本，再重复导入，确认原管理员选择、员工余额和原 chat 绑定均保留。批次指纹只排除本次新增的 5 个 admission 元数据列：同时改动这 5 列不会误报；故意修改原有批次 prompt 或员工余额时保护校验均正确拒绝。最初测试夹具将同一 SQL 参数同时用于 UUID/text 曾失败，已拆分参数后通过，未因此修改产品代码。
