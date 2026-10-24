@@ -2,6 +2,7 @@ import { buildVideoProviderRequest, isSupportedVideoModelId, videoTaskStatusPath
 import { prepareVideoProviderSources } from "./video-source-preparation";
 import { queryProviderTaskStatus } from "./provider-status-query";
 import { isDefinitiveSubmissionRejection } from "./provider-submission-policy";
+import { apiMartPollIntervalMs } from "./apimart-poll-interval";
 
 export class VideoProviderFailure extends Error {}
 export class VideoSubmissionClaimLost extends Error {}
@@ -18,14 +19,16 @@ export type ApiMartVideoInput = {
   sources?: ProviderVideoSource[];
   upstreamTaskId?: string | null;
   submissionStarted?: boolean;
+  /** Persisted original submission time, preserved across worker restarts/resume. */
+  submissionStartedAt?: string | Date | null;
   beforeSubmit: () => Promise<boolean>;
   onSubmitted: (id: string) => Promise<void>;
 };
-type VideoRuntime = { fetch?: (url: string, init?: RequestInit) => Promise<Response>; sleep?: (ms: number) => Promise<unknown> };
+type VideoRuntime = { fetch?: (url: string, init?: RequestInit) => Promise<Response>; sleep?: (ms: number) => Promise<unknown>; now?: () => number };
 
 /** Exactly one submission OR status query. Workers persist/schedule between steps. */
 export async function stepApiMartVideoTask(input: ApiMartVideoInput, runtime: VideoRuntime = {}): Promise<
-  { status: "pending"; upstreamTaskId: string } | { status: "completed"; upstreamTaskId: string; url: string }
+  { status: "pending"; upstreamTaskId: string; nextPollMs: number } | { status: "completed"; upstreamTaskId: string; url: string }
 > {
   if (!input.apiKey.trim()) throw new Error("APIMart 视频服务端凭据未配置");
   if (!isSupportedVideoModelId(input.modelId)) throw new Error("当前 APIMart 视频模型尚不支持");
@@ -50,13 +53,13 @@ export async function stepApiMartVideoTask(input: ApiMartVideoInput, runtime: Vi
     upstreamId = created.data?.[0]?.task_id;
     if (!upstreamId) throw new Error("视频服务未返回任务编号；请核查上游状态，不会自动重复提交");
     await input.onSubmitted(upstreamId);
-    return { status: "pending", upstreamTaskId: upstreamId };
+    return { status: "pending", upstreamTaskId: upstreamId, nextPollMs: 2_000 };
   }
   const response = await queryProviderTaskStatus(`${baseUrl}${videoTaskStatusPath(upstreamId)}`, headers, runtime);
   if (!response.ok) throw new Error(`APIMart 视频状态查询失败（${response.status}）`);
   const result = await response.json() as { data?: { status?: string; error?: { message?: string }; result?: { videos?: unknown[] } } };
   if (["failed", "cancelled", "canceled"].includes(result.data?.status || "")) throw new VideoProviderFailure(result.data?.error?.message || "视频生成失败");
-  if (result.data?.status !== "completed") return { status: "pending", upstreamTaskId: upstreamId };
+  if (result.data?.status !== "completed") return { status: "pending", upstreamTaskId: upstreamId, nextPollMs: apiMartPollIntervalMs(input.submissionStartedAt, 2_000, runtime.now?.()) };
   for (const video of result.data.result?.videos || []) {
     const item = video as { url?: string | string[]; video_url?: string; output_url?: string } | null;
     const url = typeof video === "string" ? video : item && typeof item === "object" ? (Array.isArray(item.url) ? item.url[0] : item.url) || item.video_url || item.output_url : null;
@@ -69,13 +72,15 @@ export async function stepApiMartVideoTask(input: ApiMartVideoInput, runtime: Vi
 export async function runApiMartVideoTask(input: ApiMartVideoInput, runtime: VideoRuntime = {}) {
   const sleep = runtime.sleep || Bun.sleep;
   const pending = { ...input };
+  let nextPollMs = 2_000;
   const deadline = Date.now() + 20 * 60_000;
   while (Date.now() < deadline) {
-    if (pending.upstreamTaskId) await sleep(2_000);
+    if (pending.upstreamTaskId) await sleep(nextPollMs);
     const result = await stepApiMartVideoTask(pending, runtime);
     if (result.status === "completed") return result.url;
     pending.upstreamTaskId = result.upstreamTaskId;
     pending.submissionStarted = true;
+    nextPollMs = result.nextPollMs;
   }
   throw new Error("视频状态查询超时；可恢复查询原任务，不会重新生成");
 }

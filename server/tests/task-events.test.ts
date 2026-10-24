@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import express, { type ErrorRequestHandler } from "express";
 import type { PoolClient } from "pg";
@@ -69,11 +69,18 @@ describe("shared PostgreSQL task invalidation listener", () => {
 
   test("connection and LISTEN failures back off, then reconnect invalidates all subscribers without duplicate listeners", async () => {
     const rejected = clientFixture(true), first = clientFixture(), second = clientFixture();
-    const attempts: number[] = [];
+    let attempts = 0;
+    const delays: number[] = [];
+    const realSetTimeout = globalThis.setTimeout;
+    // Assert the service's scheduled backoff, not sub-30ms wall-clock deltas:
+    // Windows/Bun timer ticks can report 9ms for a requested 15ms delay.
+    const timer = spyOn(globalThis, "setTimeout").mockImplementation(((...args: Parameters<typeof setTimeout>) => {
+      delays.push(args[1] ?? 0);
+      return realSetTimeout(...args);
+    }) as typeof setTimeout);
     const clients = [undefined, rejected, first, second];
     const service = new TaskEventsService({ connect: async () => {
-      const attempt = attempts.length; attempts.push(Date.now());
-      const fixture = clients[attempt];
+      const fixture = clients[attempts++];
       if (!fixture) throw new Error("Synthetic checkout failure");
       return fixture.client;
     } } as unknown as Database, { retryBaseMs: 15, retryMaxMs: 30 });
@@ -82,21 +89,21 @@ describe("shared PostgreSQL task invalidation listener", () => {
     try {
       await service.start();
       await until(() => changed.length === 1);
-      expect(attempts).toHaveLength(3);
-      expect(attempts[1]! - attempts[0]!).toBeGreaterThanOrEqual(10);
-      expect(attempts[2]! - attempts[1]!).toBeGreaterThanOrEqual(25);
+      expect(attempts).toBe(3);
+      expect(delays).toEqual([15, 30]);
       expect(rejected.releases).toEqual([true]);
       expect(changed).toEqual([[taskA, taskB]]);
       first.emitter.emit("error", new Error("Synthetic connection loss"));
       first.emitter.emit("end");
       await until(() => changed.length === 2);
+      expect(delays).toEqual([15, 30, 15]);
       expect(first.releases).toEqual([true]); expect(second.queries).toEqual([`LISTEN ${TASK_EVENTS_CHANNEL}`]);
       expect(changed).toEqual([[taskA, taskB], [taskA, taskB]]);
       first.notify(taskA); expect(changed).toHaveLength(2);
       second.notify(taskB); expect(changed.at(-1)).toEqual([taskB]);
-    } finally { await service.close(); }
+    } finally { await service.close(); timer.mockRestore(); }
     expect(second.releases).toEqual([true]);
-    const count = attempts.length; await Bun.sleep(40); expect(attempts).toHaveLength(count);
+    const count = attempts; await Bun.sleep(40); expect(attempts).toBe(count);
   });
 
   test("shutdown clears retry timers and releases a checkout that completes after shutdown", async () => {

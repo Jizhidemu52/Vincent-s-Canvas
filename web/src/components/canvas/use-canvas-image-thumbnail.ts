@@ -12,29 +12,44 @@ export function useCanvasImageThumbnail(node: CanvasNodeData, edge: ImageThumbna
     const width = node.metadata?.naturalWidth || 0;
     const height = node.metadata?.naturalHeight || 0;
     const source = `${storageKey || ""}\n${content}`;
-    const [preview, setPreview] = useState({ source, url: storageKey ? "" : content, thumbnail: false });
+    const [attempt, setAttempt] = useState(0);
+    const [originalOnly, setOriginalOnly] = useState<string | null>(null);
+    const blankPreview = { source, url: "", thumbnail: false, failed: false };
+    const [preview, setPreview] = useState({ ...blankPreview, url: storageKey ? "" : content });
     useEffect(() => {
         const controller = new AbortController();
         let lease: ImageThumbnailLease | null = null;
+        setPreview(blankPreview);
         void (async () => {
             try {
-                const serverThumbnail = canvasServerThumbnailUrl(content, edge);
+                const serverThumbnail = originalOnly === source ? null : canvasServerThumbnailUrl(content, edge);
                 if (serverThumbnail) {
-                    setPreview({ source, url: serverThumbnail, thumbnail: true });
+                    setPreview({ source, url: serverThumbnail, thumbnail: true, failed: false });
                     return;
                 }
-                if (edge && storageKey && width && height) {
+                if (originalOnly !== source && edge && storageKey && width && height) {
                     lease = await acquireImageThumbnail({ storageKey, edge, width, height }, controller.signal);
                     if (controller.signal.aborted) { lease?.release(); return; }
-                    if (lease) { setPreview({ source, url: lease.url, thumbnail: true }); return; }
+                    if (lease) { setPreview({ source, url: lease.url, thumbnail: true, failed: false }); return; }
                 }
                 const url = await resolveImageUrl(storageKey, content);
-                if (!controller.signal.aborted) setPreview({ source, url, thumbnail: false });
+                if (!controller.signal.aborted) setPreview({ source, url, thumbnail: false, failed: !url });
             } catch {
-                if (!controller.signal.aborted) setPreview({ source, url: "", thumbnail: false });
+                if (!controller.signal.aborted) setPreview({ ...blankPreview, failed: true });
             }
         })();
         return () => { controller.abort(); lease?.release(); };
-    }, [source, storageKey, content, edge, width, height]);
-    return preview.source === source ? preview : { source, url: "", thumbnail: false };
+    }, [source, storageKey, content, edge, width, height, originalOnly, attempt]);
+    const current = preview.source === source ? preview : blankPreview;
+    return {
+        ...current,
+        key: `${source}:${attempt}:${current.thumbnail}`,
+        // Successful image loads need no extra React render; only failures change UI.
+        onError: () => {
+            // A failed derivative gets one original fallback, never an automatic retry loop.
+            if (current.thumbnail) setOriginalOnly(source);
+            else setPreview(value => value.source === source && value.url === current.url ? { ...value, failed: true } : value);
+        },
+        retry: () => { setOriginalOnly(null); setAttempt(value => value + 1); },
+    };
 }

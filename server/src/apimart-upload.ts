@@ -53,7 +53,12 @@ export async function uploadApiMartImage(input: {
   }).catch((error: unknown) => {
     throw uploadTransportFailure(error, purposeName);
   });
-  if (!response.ok) throw new Error(`APIMart 参考图上传失败（${response.status}），尚未提交${purposeName}生成`);
+  if (!response.ok) {
+    // The native transport exposes a live stream; close it before the upload
+    // promise settles so a failed concurrent batch leaves no unread response.
+    await response.body?.cancel().catch(() => undefined);
+    throw new Error(`APIMart 参考图上传失败（${response.status}），尚未提交${purposeName}生成`);
+  }
   const result = await response.json().catch((error: unknown) => {
     if (error instanceof SyntaxError) return null;
     throw uploadTransportFailure(error, purposeName);

@@ -11,6 +11,7 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { imageModelSettingsError, normalizeImageModelSettings, useImageModelProfile } from "@/lib/image-model-settings";
 import { imageOptionFields, readImageOptions } from "@/lib/image-advanced-settings";
+import { buildCanvasEditMask, canvasMaskBrushPixels, canvasMaskPoint, canvasMaskPreviewSize, clearMaskCanvas, drawMaskStroke, renderMaskPreview } from "@/lib/canvas/canvas-mask-paint";
 
 export type CanvasImageMaskEditPayload = {
     prompt: string;
@@ -21,9 +22,7 @@ export type CanvasImageMaskEditPayload = {
 
 type DrawMode = "paint" | "erase";
 
-const defaultBrushSize = 100;
-const maskFillColor = "rgba(37, 99, 235, .38)";
-const maskBorderColor = "rgba(255, 255, 255, .72)";
+const defaultBrushSize = 40;
 
 /** A strict mask must use decoded source pixels, never the shared reader's fallback dimensions. */
 export async function readCanvasMaskImageSize(dataUrl: string) {
@@ -36,7 +35,6 @@ export async function readCanvasMaskImageSize(dataUrl: string) {
         throw new Error("原图或蒙版的真实像素尺寸无效；尚未提交生成。");
     return { width, height };
 }
-
 /** Lock the mask coordinate system before either UI confirmation or the actual task submission. */
 export function canvasMaskEditImageSettings(config: Pick<AiConfig, "size" | "quality" | "imageOptions">, image: { width: number; height: number }, profile: ReturnType<typeof useImageModelProfile>) {
     const { width, height } = image;
@@ -81,12 +79,16 @@ export function CanvasNodeMaskEditDialog({
     const toolEnabled = useToolEnabled("canvas-mask-edit");
     const maskCanvasRef = useRef<HTMLCanvasElement>(null);
     const previewCanvasRef = useRef<HTMLCanvasElement>(null);
+    const previewFrameRef = useRef<number | null>(null);
+    const paintedRef = useRef(false);
     const drawingRef = useRef<{ active: boolean; last: { x: number; y: number } | null }>({ active: false, last: null });
     const [image, setImage] = useState<{ width: number; height: number } | null>(null);
     const [prompt, setPrompt] = useState("");
     const [brushSize, setBrushSize] = useState(defaultBrushSize);
     const [mode, setMode] = useState<DrawMode>("paint");
     const [error, setError] = useState("");
+    const [confirmDiscard, setConfirmDiscard] = useState(false);
+    const previewSize = image ? canvasMaskPreviewSize(image) : null;
     let settingsError = "";
     let lockedSettings: ReturnType<typeof canvasMaskEditImageSettings> | undefined;
     try { if (image) lockedSettings = canvasMaskEditImageSettings(effectiveConfig, image, profile); }
@@ -109,33 +111,42 @@ export function CanvasNodeMaskEditDialog({
         setError("");
         setImageSettings({});
         setImage(null);
+        setConfirmDiscard(false);
+        paintedRef.current = false;
         let active = true;
         void readCanvasMaskImageSize(dataUrl).then(size => { if (active) setImage(size); }).catch(reason => { if (active) setError(reason instanceof Error ? reason.message : "原图读取失败"); });
         return () => { active = false; };
     }, [dataUrl, open]);
 
     useEffect(() => {
-        clearCanvas(maskCanvasRef.current);
-        clearCanvas(previewCanvasRef.current);
-    }, [image]);
+        clearMaskCanvas(maskCanvasRef.current);
+        clearMaskCanvas(previewCanvasRef.current);
+        drawingRef.current = { active: false, last: null };
+        return () => {
+            if (previewFrameRef.current !== null) cancelAnimationFrame(previewFrameRef.current);
+            previewFrameRef.current = null;
+        };
+    }, [image, open]);
+
+    const refreshPreview = (withBorder = false) => {
+        if (previewFrameRef.current !== null) cancelAnimationFrame(previewFrameRef.current);
+        previewFrameRef.current = requestAnimationFrame(() => {
+            previewFrameRef.current = null;
+            if (maskCanvasRef.current) renderMaskPreview(maskCanvasRef.current, previewCanvasRef.current, withBorder);
+        });
+    };
 
     const draw = (event: ReactPointerEvent<HTMLCanvasElement>) => {
-        const point = readCanvasPoint(event.currentTarget, event.clientX, event.clientY);
         const maskCanvas = maskCanvasRef.current;
         const context = maskCanvas?.getContext("2d");
         if (!maskCanvas || !context) return;
-        context.lineCap = "round";
-        context.lineJoin = "round";
-        context.lineWidth = brushSize;
+        const rect = event.currentTarget.getBoundingClientRect();
+        const point = canvasMaskPoint(maskCanvas, rect, event.clientX, event.clientY);
+        const sourceBrushSize = canvasMaskBrushPixels(brushSize, maskCanvas, rect);
         context.globalCompositeOperation = mode === "paint" ? "source-over" : "destination-out";
-        context.strokeStyle = "#000";
-        context.fillStyle = "#000";
-        if (!drawingRef.current.last) {
-            drawMaskStroke(context, point, point, brushSize);
-        } else {
-            drawMaskStroke(context, drawingRef.current.last, point, brushSize);
-        }
-        renderMaskPreview(maskCanvas, previewCanvasRef.current);
+        drawMaskStroke(context, drawingRef.current.last || point, point, sourceBrushSize);
+        paintedRef.current = true;
+        refreshPreview();
         drawingRef.current.last = point;
         if (mode === "paint") {
             setError("");
@@ -147,7 +158,6 @@ export function CanvasNodeMaskEditDialog({
         event.stopPropagation();
         event.currentTarget.setPointerCapture(event.pointerId);
         drawingRef.current = { active: true, last: null };
-        if (maskCanvasRef.current) renderMaskPreview(maskCanvasRef.current, previewCanvasRef.current);
         draw(event);
     };
 
@@ -159,14 +169,21 @@ export function CanvasNodeMaskEditDialog({
 
     const stopDraw = () => {
         drawingRef.current = { active: false, last: null };
-        const maskCanvas = maskCanvasRef.current;
-        if (maskCanvas) renderMaskPreview(maskCanvas, previewCanvasRef.current, canvasHasPaint(maskCanvas));
+        refreshPreview(true);
     };
 
     const resetMask = () => {
-        clearCanvas(maskCanvasRef.current);
-        clearCanvas(previewCanvasRef.current);
+        if (previewFrameRef.current !== null) cancelAnimationFrame(previewFrameRef.current);
+        previewFrameRef.current = null;
+        clearMaskCanvas(maskCanvasRef.current);
+        clearMaskCanvas(previewCanvasRef.current);
+        paintedRef.current = false;
         setError("");
+    };
+
+    const requestClose = () => {
+        if (paintedRef.current || prompt.trim()) setConfirmDiscard(true);
+        else onClose();
     };
 
     const submit = () => {
@@ -175,25 +192,29 @@ export function CanvasNodeMaskEditDialog({
         const canvas = maskCanvasRef.current;
         if (!nextPrompt) return setError("请输入修改要求");
         if (!canvas) return;
-        if (!canvasHasPaint(canvas)) return setError("请先涂抹局部区域");
         if (!effectiveConfig.model) return setError("请选择用于局部编辑的模型");
         if (!image || !lockedSettings) return setError(settingsError || "尚未确认原图像素尺寸，请稍后重试");
-        onConfirm({ prompt: nextPrompt, maskDataUrl: buildEditMask(canvas), model: effectiveConfig.model, imageSettings: { quality: lockedSettings.quality, imageOptions: lockedSettings.imageOptions } });
+        let maskDataUrl: string;
+        try { maskDataUrl = buildCanvasEditMask(canvas); }
+        catch (reason) { return setError(reason instanceof Error ? reason.message : "蒙版读取失败"); }
+        onConfirm({ prompt: nextPrompt, maskDataUrl, model: effectiveConfig.model, imageSettings: { quality: lockedSettings.quality, imageOptions: lockedSettings.imageOptions } });
     };
 
     return (
-        <Modal title={null} open={open && Boolean(dataUrl)} onCancel={onClose} footer={null} width={980} centered destroyOnHidden>
-            <div className="grid gap-5 lg:grid-cols-[minmax(360px,1fr)_320px]">
-                <div className="flex min-h-[360px] items-center justify-center rounded-xl border border-black/10 bg-transparent p-0 dark:border-white/10">
+        <>
+        <Modal title="局部遮罩编辑" open={open && Boolean(dataUrl)} onCancel={requestClose} footer={null} width={980} centered destroyOnHidden styles={{ body: { maxHeight: "calc(100dvh - 128px)", overflowY: "auto" } }}>
+            <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
+                <div className="flex min-w-0 items-center justify-center overflow-hidden rounded-xl border bg-transparent p-0" style={{ borderColor: theme.node.stroke }}>
                     <div className="relative inline-block max-w-full overflow-hidden rounded-lg bg-transparent select-none">
                         <img src={dataUrl} alt="" className="block max-h-[68vh] max-w-full bg-transparent" draggable={false} />
-                        {image ? (
+                        {image && previewSize ? (
                             <>
                                 <canvas ref={maskCanvasRef} width={image.width} height={image.height} className="hidden" />
                                 <canvas
                                     ref={previewCanvasRef}
-                                    width={image.width}
-                                    height={image.height}
+                                    width={previewSize.width}
+                                    height={previewSize.height}
+                                    aria-label="蒙版绘制区"
                                     className="absolute inset-0 h-full w-full cursor-crosshair touch-none"
                                     onPointerDown={startDraw}
                                     onPointerMove={moveDraw}
@@ -207,7 +228,6 @@ export function CanvasNodeMaskEditDialog({
 
                 <div className="flex min-h-[360px] flex-col gap-5">
                     <div>
-                        <h2 className="text-xl font-semibold">局部遮罩编辑</h2>
                         <div className="mt-2 text-sm opacity-60">{image ? `输出尺寸锁定为原图 ${image.width} × ${image.height}px` : "读取真实像素尺寸中"}</div>
                     </div>
 
@@ -222,8 +242,8 @@ export function CanvasNodeMaskEditDialog({
 
                     <div className="space-y-2">
                         <div className="flex items-center justify-between text-sm">
-                            <span className="font-medium opacity-75">笔刷大小</span>
-                            <span className="font-semibold">{brushSize}px</span>
+                            <span className="font-medium opacity-75">笔刷直径</span>
+                            <span className="font-semibold">{brushSize} 显示像素</span>
                         </div>
                         <Slider min={8} max={160} step={2} value={brushSize} onChange={setBrushSize} />
                     </div>
@@ -275,7 +295,7 @@ export function CanvasNodeMaskEditDialog({
                             重置
                         </Button>
                         <div className="flex items-center gap-2">
-                            <Button icon={<X className="size-4" />} onClick={onClose}>
+                            <Button icon={<X className="size-4" />} onClick={requestClose}>
                                 取消
                             </Button>
                             <Button type="primary" disabled={!toolEnabled || !effectiveConfig.model || !profile.supportsMask || !lockedSettings} icon={<WandSparkles className="size-4" />} onClick={submit}>
@@ -286,102 +306,9 @@ export function CanvasNodeMaskEditDialog({
                 </div>
             </div>
         </Modal>
+        <Modal title="放弃本次蒙版编辑？" open={open && confirmDiscard} onCancel={() => setConfirmDiscard(false)} onOk={() => { setConfirmDiscard(false); onClose(); }} okText="放弃编辑" cancelText="继续编辑" mask={{ closable: false }} centered>
+            涂抹区域和修改要求尚未提交，关闭后将丢失。
+        </Modal>
+        </>
     );
-}
-
-function readCanvasPoint(canvas: HTMLCanvasElement, clientX: number, clientY: number) {
-    const rect = canvas.getBoundingClientRect();
-    return {
-        x: ((clientX - rect.left) / Math.max(1, rect.width)) * canvas.width,
-        y: ((clientY - rect.top) / Math.max(1, rect.height)) * canvas.height,
-    };
-}
-
-function clearCanvas(canvas: HTMLCanvasElement | null) {
-    const context = canvas?.getContext("2d");
-    if (!canvas || !context) return;
-    context.clearRect(0, 0, canvas.width, canvas.height);
-}
-
-function drawMaskStroke(context: CanvasRenderingContext2D, from: { x: number; y: number }, to: { x: number; y: number }, size: number) {
-    if (from.x === to.x && from.y === to.y) {
-        context.beginPath();
-        context.arc(to.x, to.y, size / 2, 0, Math.PI * 2);
-        context.fill();
-        return;
-    }
-    context.beginPath();
-    context.moveTo(from.x, from.y);
-    context.lineTo(to.x, to.y);
-    context.stroke();
-}
-
-function canvasHasPaint(canvas: HTMLCanvasElement) {
-    const context = canvas.getContext("2d");
-    if (!context) return false;
-    const data = context.getImageData(0, 0, canvas.width, canvas.height).data;
-    for (let index = 3; index < data.length; index += 4) {
-        if (data[index] > 0) return true;
-    }
-    return false;
-}
-
-function renderMaskPreview(maskCanvas: HTMLCanvasElement, previewCanvas: HTMLCanvasElement | null, withBorder = false) {
-    const context = previewCanvas?.getContext("2d");
-    if (!previewCanvas || !context) return;
-    context.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
-    context.fillStyle = maskFillColor;
-    context.fillRect(0, 0, previewCanvas.width, previewCanvas.height);
-    context.globalCompositeOperation = "destination-in";
-    context.drawImage(maskCanvas, 0, 0);
-    context.globalCompositeOperation = "source-over";
-    if (withBorder) drawDashedMaskBorder(context, maskCanvas);
-}
-
-function drawDashedMaskBorder(context: CanvasRenderingContext2D, maskCanvas: HTMLCanvasElement) {
-    const maskContext = maskCanvas.getContext("2d");
-    if (!maskContext) return;
-    const { width, height } = maskCanvas;
-    const data = maskContext.getImageData(0, 0, width, height).data;
-    const step = Math.max(1, Math.round(Math.max(width, height) / 1200));
-    const dash = step * 8;
-    const gap = step * 5;
-    const period = dash + gap;
-
-    context.save();
-    context.fillStyle = maskBorderColor;
-    context.shadowColor = "rgba(0, 0, 0, .24)";
-    context.shadowBlur = step * 1.5;
-    for (let y = step; y < height - step; y += step) {
-        for (let x = step; x < width - step; x += step) {
-            const offset = (y * width + x) * 4 + 3;
-            if (data[offset] === 0 || !isMaskEdge(data, width, x, y, step)) continue;
-            if ((x + y) % period > dash) continue;
-            context.fillRect(x - step / 2, y - step / 2, Math.max(1.5, step), Math.max(1.5, step));
-        }
-    }
-    context.restore();
-}
-
-function isMaskEdge(data: Uint8ClampedArray, width: number, x: number, y: number, step: number) {
-    return data[((y - step) * width + x) * 4 + 3] === 0 || data[((y + step) * width + x) * 4 + 3] === 0 || data[(y * width + x - step) * 4 + 3] === 0 || data[(y * width + x + step) * 4 + 3] === 0;
-}
-
-function buildEditMask(selectionCanvas: HTMLCanvasElement) {
-    const canvas = document.createElement("canvas");
-    canvas.width = selectionCanvas.width;
-    canvas.height = selectionCanvas.height;
-    const context = canvas.getContext("2d");
-    if (!context) return selectionCanvas.toDataURL("image/png");
-    const selectionContext = selectionCanvas.getContext("2d");
-    context.fillStyle = "#fff";
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    if (!selectionContext) return canvas.toDataURL("image/png");
-    const selection = selectionContext.getImageData(0, 0, canvas.width, canvas.height);
-    const mask = context.getImageData(0, 0, canvas.width, canvas.height);
-    for (let index = 3; index < mask.data.length; index += 4) {
-        if (selection.data[index] > 0) mask.data[index] = 0;
-    }
-    context.putImageData(mask, 0, 0);
-    return canvas.toDataURL("image/png");
 }

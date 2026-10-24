@@ -72,6 +72,7 @@ import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { useModuleEnabled } from "@/stores/use-module-store";
 import { applyCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
+import type { CanvasAgentUndoRecord } from "@/lib/canvas/canvas-agent-undo";
 import { buildWorkflowVideoStageDispatch, completeAgentMediaWorkflowStage, restoreAgentMediaWorkflow, selectWorkflowCandidate } from "@/lib/canvas/agent-media-workflow";
 import { buildAgentMediaWorkflowStageOps } from "@/lib/canvas/agent-media-workflow-stage";
 import { createCanvasMentionReferenceIndex, createCanvasResourceReferenceIndex } from "@/lib/canvas/canvas-resource-references";
@@ -472,7 +473,8 @@ function WirelessCanvasPage() {
     const [assistantClosing, setAssistantClosing] = useState(false);
     const assistantOpen = assistantMounted && !assistantCollapsed;
     const [agentMode, setAgentMode] = useState<CanvasAgentMode>("online");
-    const [agentUndoSnapshot, setAgentUndoSnapshot] = useState<CanvasAgentSnapshot | null>(null);
+    const agentUndoRecordRef = useRef<CanvasAgentUndoRecord | null>(null);
+    const [canUndoAgentOps, setCanUndoAgentOps] = useState(false);
     const codexAutoConnect = ["new", "recent", "choose"].includes(searchParams.get("mode") || "");
     const codexCompactAgent = codexAutoConnect && searchParams.has("agentUrl");
     const [titleEditing, setTitleEditing] = useState(false);
@@ -543,17 +545,20 @@ function WirelessCanvasPage() {
         [effectiveConfig.imageModel, effectiveConfig.model, estimateUsage, quickGenerateModel, quickGenerateReferences.length],
     );
 
+    // Persist current chat normally without making streaming/chat selection
+    // changes restart the graph's history debounce or change command identity.
+    const historyChatRef = useRef({ chatSessions, activeChatId });
+    historyChatRef.current = { chatSessions, activeChatId };
     const createHistoryEntry = useCallback(
         (): CanvasHistoryEntry => ({
             nodes: nodesRef.current,
             connections: connectionsRef.current,
             groups: groupsRef.current,
-            chatSessions,
-            activeChatId,
+            ...historyChatRef.current,
             backgroundMode,
             showImageInfo,
         }),
-        [activeChatId, backgroundMode, chatSessions, showImageInfo],
+        [backgroundMode, showImageInfo],
     );
 
     const applyHistory = useCallback((entry: CanvasHistoryEntry) => {
@@ -571,8 +576,7 @@ function WirelessCanvasPage() {
         setNodes(restoredNodes);
         setConnections(entry.connections);
         setGroups(restoredEntry.groups);
-        setChatSessions(entry.chatSessions);
-        setActiveChatId(entry.activeChatId);
+        // Historical chat fields are legacy data, never a canvas undo command.
         setBackgroundMode(entry.backgroundMode);
         setShowImageInfo(entry.showImageInfo);
         setSelectedNodeIds(new Set());
@@ -620,6 +624,8 @@ function WirelessCanvasPage() {
         const restoreToken = lifecycle.begin();
         pendingHistoryEntryRef.current = null;
         applyingHistoryRef.current = false;
+        agentUndoRecordRef.current = null;
+        setCanUndoAgentOps(false);
         setCompareImageIds(null);
         setTemplateSourceId(undefined);
         const invalidateRestore = () => lifecycle.invalidate(restoreToken);
@@ -746,6 +752,7 @@ function WirelessCanvasPage() {
 
     useEffect(
         () => () => {
+            agentUndoRecordRef.current = null;
             if (agentCloseTimerRef.current) clearTimeout(agentCloseTimerRef.current);
             abortPendingCanvasRequests(generationRequestsRef.current);
             textStreamBufferRef.current?.cancel();
@@ -1376,26 +1383,34 @@ function WirelessCanvasPage() {
         if (saved.count !== undefined) setQuickGenerateCount(saved.count);
         if (saved.imageOptions !== undefined) setQuickGenerateImageOptions(saved.imageOptions);
     }, [assistantSelectedNodes, projectId, selectedNodeIds]);
+    const currentAgentSnapshot = useCallback((): CanvasAgentSnapshot => ({ projectId, title: currentProject?.title || "未命名画布", nodes: nodesRef.current, connections: connectionsRef.current, selectedNodeIds: Array.from(selectedNodeIdsRef.current), viewport: viewportRef.current }), [currentProject?.title, projectId]);
+    const commitAgentSnapshot = useCallback((snapshot: CanvasAgentSnapshot) => {
+        // Keep pending manual edits separate from either an agent batch or its inverse.
+        flushPendingHistory();
+        nodesRef.current = snapshot.nodes;
+        connectionsRef.current = snapshot.connections;
+        selectedNodeIdsRef.current = new Set(snapshot.selectedNodeIds);
+        viewportRef.current = snapshot.viewport;
+        setNodes(snapshot.nodes);
+        setConnections(snapshot.connections);
+        setSelectedNodeIds(selectedNodeIdsRef.current);
+        setSelectedConnectionId(null);
+        setViewport(snapshot.viewport);
+        setContextMenu(null);
+        flushPendingHistory();
+    }, [flushPendingHistory]);
     const applyAgentOps = useCallback(
         (ops?: CanvasAgentOp[]) => {
             const safeOps = Array.isArray(ops) ? ops.filter((op) => op?.type) : [];
-            const before = { projectId, title: currentProject?.title || "未命名画布", nodes: nodesRef.current, connections: connectionsRef.current, selectedNodeIds: Array.from(selectedNodeIdsRef.current), viewport: viewportRef.current };
+            const before = currentAgentSnapshot();
             const generationOps = safeOps.filter((op): op is Extract<CanvasAgentOp, { type: "run_generation" }> => op.type === "run_generation" && Boolean(op.nodeId));
-            const next = applyCanvasAgentOps(
-                before,
-                safeOps.filter((op) => op.type !== "run_generation"),
-            );
-            nodesRef.current = next.nodes;
-            connectionsRef.current = next.connections;
-            selectedNodeIdsRef.current = new Set(next.selectedNodeIds);
-            viewportRef.current = next.viewport;
-            setAgentUndoSnapshot(before);
-            setNodes(next.nodes);
-            setConnections(next.connections);
-            setSelectedNodeIds(new Set(next.selectedNodeIds));
-            setSelectedConnectionId(null);
-            setViewport(next.viewport);
-            setContextMenu(null);
+            const edits = safeOps.filter((op) => op.type !== "run_generation");
+            const next = applyCanvasAgentOps(before, edits);
+            // Capture candidate edits without another whole-graph scan. The lazy
+            // diff also recognizes same-value or missing-target edits as no-ops.
+            agentUndoRecordRef.current = edits.length ? { before, after: next } : null;
+            setCanUndoAgentOps(Boolean(agentUndoRecordRef.current));
+            commitAgentSnapshot(next);
             if (generationOps.length) {
                 queueMicrotask(() =>
                     generationOps.forEach((op) => {
@@ -1405,25 +1420,26 @@ function WirelessCanvasPage() {
                     }),
                 );
             }
-            return { ...next, projectId, title: currentProject?.title || "未命名画布" };
+            return next;
         },
-        [currentProject?.title, projectId],
+        [commitAgentSnapshot, currentAgentSnapshot],
     );
-    const undoAgentOps = useCallback(() => {
-        if (!agentUndoSnapshot) return null;
-        nodesRef.current = agentUndoSnapshot.nodes;
-        connectionsRef.current = agentUndoSnapshot.connections;
-        selectedNodeIdsRef.current = new Set(agentUndoSnapshot.selectedNodeIds);
-        viewportRef.current = agentUndoSnapshot.viewport;
-        setNodes(agentUndoSnapshot.nodes);
-        setConnections(agentUndoSnapshot.connections);
-        setSelectedNodeIds(new Set(agentUndoSnapshot.selectedNodeIds));
-        setSelectedConnectionId(null);
-        setViewport(agentUndoSnapshot.viewport);
-        setContextMenu(null);
-        setAgentUndoSnapshot(null);
-        return { ...agentUndoSnapshot, projectId, title: currentProject?.title || "未命名画布" };
-    }, [agentUndoSnapshot, currentProject?.title, projectId]);
+    const undoAgentOps = useCallback(async () => {
+        const record = agentUndoRecordRef.current;
+        if (!record) return null;
+        const action = await import("@/lib/canvas/canvas-agent-undo-action").catch(() => {
+            if (agentUndoRecordRef.current === record) message.error("加载失败，请重试");
+            return null;
+        });
+        // A project switch, newer batch, or another undo invalidates this click.
+        // Read the live graph only after loading so edits made meanwhile win.
+        if (!action || agentUndoRecordRef.current !== record) return null;
+        return action.executeCanvasAgentUndo({
+            current: currentAgentSnapshot(), record, groups: groupsRef.current, requests: generationRequestsRef.current.values(),
+            commit: commitAgentSnapshot, feedback: { modal, message },
+            setRecord: remaining => { agentUndoRecordRef.current = remaining; setCanUndoAgentOps(Boolean(remaining)); },
+        });
+    }, [commitAgentSnapshot, currentAgentSnapshot, message, modal]);
     const createNode = useCallback(
         (type: CanvasNodeType, position?: Position) => {
             const targetPosition = position || getCanvasCenter();
@@ -4570,7 +4586,7 @@ function WirelessCanvasPage() {
                 <input ref={batchFilesInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleBatchFolderInputChange} />
                 {localAgentModuleEnabled && codexCompactAgent && !assistantMounted ? (
                     <Suspense fallback={null}>
-                        <CanvasLocalAgentPanel headless snapshotRef={agentSnapshotRef} canUndoOps={Boolean(agentUndoSnapshot)} onApplyOps={applyAgentOps} onUndoOps={undoAgentOps} autoConnect={codexAutoConnect} />
+                        <CanvasLocalAgentPanel headless snapshotRef={agentSnapshotRef} canUndoOps={canUndoAgentOps} onApplyOps={applyAgentOps} onUndoOps={undoAgentOps} autoConnect={codexAutoConnect} />
                     </Suspense>
                 ) : null}
             </section>
@@ -4589,7 +4605,7 @@ function WirelessCanvasPage() {
                         onSelectNodeIds={setSelectedNodeIds}
                         onSessionsChange={handleAssistantSessionsChange}
                         onApplyOps={applyAgentOps}
-                        canUndoOps={Boolean(agentUndoSnapshot)}
+                        canUndoOps={canUndoAgentOps}
                         onUndoOps={undoAgentOps}
                         onPasteImage={pasteAssistantImage}
                         agentMode={agentMode}

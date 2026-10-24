@@ -14,6 +14,8 @@ export type CanvasAgentOp =
     | { type: "select_nodes"; ids: string[] }
     | { type: "run_generation"; nodeId: string; mode?: "text" | "image" | "video" | "audio"; prompt?: string };
 
+export type CanvasAgentUndoReport = { applied: number; conflicts: Array<{ location: string; reason: string }>; retryable: boolean };
+
 export type CanvasAgentSnapshot = {
     projectId: string;
     title: string;
@@ -25,6 +27,7 @@ export type CanvasAgentSnapshot = {
     viewportOcclusions?: Array<{ x: number; y: number; width: number; height: number }>;
     previewNodeId?: string | null;
     hiddenNodeIds?: string[];
+    undoReport?: CanvasAgentUndoReport;
 };
 
 export function summarizeCanvasAgentOps(ops?: CanvasAgentOp[]) {

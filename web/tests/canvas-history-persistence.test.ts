@@ -74,10 +74,11 @@ describe("canvas persisted undo/redo", () => {
         expect(canvasHistoryForSave(history, current, current, false).past).toHaveLength(1);
     });
 
-    test("edits to notes and connections are undoable without changing image nodes", () => {
+    test("chat-only changes retain redo without creating an edit; connections remain undoable", () => {
         const previous = entry("image");
-        const current = { ...previous, chatSessions: [{ id: "chat", title: "assistant history", messages: [] }] };
-        expect(canvasHistoryForSave({ past: [], future: [] }, previous, current, false).past).toEqual([previous]);
+        const current = { ...previous, chatSessions: [{ id: "chat", title: "assistant history", messages: [{ content: "new answer" }] }], activeChatId: "chat" };
+        const redo = entry("redo");
+        expect(canvasHistoryForSave({ past: [], future: [redo] }, previous, current, false)).toEqual({ past: [], future: [redo] });
         const connectionsOnly = { ...previous, connections: [{ id: "connection" }] as CanvasConnection[] };
         expect(canvasHistoryForSave({ past: [], future: [] }, previous, connectionsOnly, false).past).toEqual([previous]);
     });

@@ -15,6 +15,7 @@ import { summarizeCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot }
 import { AgentChatComposer, AgentChatMessage, AgentPanelTabs, AgentPendingToolCard, AgentWorkingMessage, type CanvasAgentChatAttachment } from "./canvas-agent-chat-ui";
 import { agentMessageWindow, DEFAULT_AGENT_MESSAGE_WINDOW, expandAgentMessageWindow } from "@/lib/canvas/agent-message-window";
 import { selectLocalAgentPanelState } from "@/lib/canvas/canvas-local-agent-selection";
+import { canvasAgentUndoMessage } from "@/lib/canvas/canvas-agent-undo-report";
 
 const PANEL_MOTION_SECONDS = 0.5;
 const MAX_ATTACHMENTS = 6;
@@ -44,13 +45,16 @@ type AgentThreadResponse = { ok?: boolean; workspace?: AgentWorkspace; thread?: 
 type AgentConfigResponse = { ok?: boolean; url?: string; token?: string; hasToken?: boolean };
 const EMPTY_AGENT_SNAPSHOT: CanvasAgentSnapshot = { projectId: "", title: "", nodes: [], connections: [], selectedNodeIds: [], viewport: { x: 0, y: 0, k: 1 } };
 
-export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotRef, canUndoOps, collapsed, embedded, headless, autoConnect, onApplyOps, onUndoOps }: { snapshot?: CanvasAgentSnapshot; snapshotRef?: { current: CanvasAgentSnapshot }; canUndoOps: boolean; collapsed?: boolean; embedded?: boolean; headless?: boolean; autoConnect?: boolean; onApplyOps: (ops: CanvasAgentOp[]) => unknown; onUndoOps: () => CanvasAgentSnapshot | null }) {
+export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotRef, canUndoOps, collapsed, embedded, headless, autoConnect, onApplyOps, onUndoOps }: { snapshot?: CanvasAgentSnapshot; snapshotRef?: { current: CanvasAgentSnapshot }; canUndoOps: boolean; collapsed?: boolean; embedded?: boolean; headless?: boolean; autoConnect?: boolean; onApplyOps: (ops: CanvasAgentOp[]) => unknown; onUndoOps: () => CanvasAgentSnapshot | null | Promise<CanvasAgentSnapshot | null> }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const user = useUserStore((state) => state.user);
     const { message, modal } = App.useApp();
     const [searchParams] = useSearchParams();
     const { width, url, token, connected, enabled, prompt, attachments, sending, waiting, messages, messageCount, eventLogs, eventLogCount, threads, threadCount, activeThreadId, workspacePath, loadingThreads, activeTab, confirmTools, activity, connectError, pendingTool, setAgentState, addMessage: pushMessage, addEventLog: pushEventLog, clearEventLogs } = useCanvasAgentStore(useShallow(state => selectLocalAgentPanelState(state, headless, embedded)));
     const [resizing, setResizing] = useState(false);
+    const [undoing, setUndoing] = useState(false);
+    const undoingRef = useRef(false);
+    const undoLifetimeRef = useRef({ active: true });
     const [messageRenderLimit, setMessageRenderLimit] = useState(DEFAULT_AGENT_MESSAGE_WINDOW);
     const listRef = useRef<HTMLDivElement>(null);
     const fallbackSnapshotRef = useRef<CanvasAgentSnapshot>(snapshot || EMPTY_AGENT_SNAPSHOT);
@@ -89,6 +93,12 @@ export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotR
             setAgentState({ loadingThreads: false });
         }
     }, [endpoint, setAgentState, token]);
+
+    useEffect(() => {
+        const lifetime = { active: true };
+        undoLifetimeRef.current = lifetime;
+        return () => { lifetime.active = false; };
+    }, []);
 
     useEffect(() => {
         if (snapshot) fallbackSnapshotRef.current = snapshot;
@@ -289,12 +299,25 @@ export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotR
         await runToolCall(endpoint, token, tool);
     };
 
-    const undoLastTool = () => {
-        const restored = onUndoOps();
-        if (!restored) return;
-        setAgentState({ activity: "已撤销" });
-        addMessage({ role: "tool", title: "已撤销", text: "上一次工具操作", detail: restored });
-        if (connected) void postState(endpoint, token, clientIdRef.current, restored);
+    const undoLastTool = async () => {
+        const lifetime = undoLifetimeRef.current;
+        if (!lifetime.active || undoingRef.current) return;
+        undoingRef.current = true;
+        setUndoing(true);
+        try {
+            const restored = await onUndoOps();
+            if (!lifetime.active || !restored) return;
+            const report = restored.undoReport;
+            const title = report?.conflicts.length ? report.applied ? "部分撤销" : "暂未撤销" : "已撤销";
+            setAgentState({ activity: title });
+            addMessage({ role: "tool", title, text: report ? canvasAgentUndoMessage(report) : "上一次工具操作", detail: restored });
+            if (connected) void postState(endpoint, token, clientIdRef.current, restored);
+        } catch {
+            if (lifetime.active) message.error("撤销失败，请重试。");
+        } finally {
+            undoingRef.current = false;
+            if (lifetime.active) setUndoing(false);
+        }
     };
 
     const toggleAgentConnection = async () => {
@@ -499,7 +522,7 @@ export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotR
                 }}
                 right={
                     <>
-                        <Button size="small" type="text" disabled={!canUndoOps} icon={<RotateCcw className="size-3.5" />} onClick={undoLastTool}>
+                        <Button size="small" type="text" disabled={!canUndoOps || undoing} loading={undoing} icon={<RotateCcw className="size-3.5" />} onClick={undoLastTool}>
                             撤销
                         </Button>
                     </>

@@ -10,7 +10,9 @@ export function boundedCanvasHistory(history?: { past: CanvasHistoryEntry[]; fut
 /** Include a not-yet-committed edit when closing before the undo debounce fires. */
 export function canvasHistoryForSave(history: { past: CanvasHistoryEntry[]; future: CanvasHistoryEntry[] }, previous: CanvasHistoryEntry | null, current: CanvasHistoryEntry, applyingHistory: boolean) {
     const saved = boundedCanvasHistory(history);
-    const changed = previous && (["nodes", "connections", "groups", "chatSessions", "activeChatId", "backgroundMode", "showImageInfo"] as const).some(key => previous[key] !== current[key]);
+    // Chat remains in the legacy snapshot shape for storage compatibility, but
+    // it is not an edit command and must neither add undo steps nor discard redo.
+    const changed = previous && (["nodes", "connections", "groups", "backgroundMode", "showImageInfo"] as const).some(key => previous[key] !== current[key]);
     if (!applyingHistory && changed) return { past: [...saved.past.slice(-49), previous!], future: [] };
     return saved;
 }
@@ -32,7 +34,7 @@ export function useCanvasHistory(history: ReturnType<typeof useCanvasHistoryStat
 }) {
     const { historyRef, lastHistoryRef, historyCommitTimerRef, applyingHistoryRef, pendingHistoryEntryRef, historyPausedRef, setHistoryState } = history;
     const { projectLoaded, createHistoryEntry, applyHistory } = options;
-    const { nodes, connections, groups, chatSessions, activeChatId, backgroundMode, showImageInfo } = options.current;
+    const { nodes, connections, groups, backgroundMode, showImageInfo } = options.current;
     const flushPendingHistory = useCallback(() => {
         if (!projectLoaded || applyingHistoryRef.current || historyPausedRef.current || !lastHistoryRef.current) return false;
         if (historyCommitTimerRef.current) {
@@ -57,8 +59,6 @@ export function useCanvasHistory(history: ReturnType<typeof useCanvasHistoryStat
             previous?.nodes === next.nodes &&
             previous.connections === next.connections &&
             previous.groups === next.groups &&
-            previous.chatSessions === next.chatSessions &&
-            previous.activeChatId === next.activeChatId &&
             previous.backgroundMode === next.backgroundMode &&
             previous.showImageInfo === next.showImageInfo
         )
@@ -73,18 +73,18 @@ export function useCanvasHistory(history: ReturnType<typeof useCanvasHistoryStat
                 historyCommitTimerRef.current = null;
             }
         };
-    }, [activeChatId, backgroundMode, chatSessions, connections, groups, createHistoryEntry, flushPendingHistory, nodes, projectLoaded, showImageInfo]);
+    }, [backgroundMode, connections, groups, createHistoryEntry, flushPendingHistory, nodes, projectLoaded, showImageInfo]);
 
     useLayoutEffect(() => {
         const restored = pendingHistoryEntryRef.current;
         if (!restored || nodes !== restored.nodes || connections !== restored.connections || groups !== restored.groups ||
-            chatSessions !== restored.chatSessions || activeChatId !== restored.activeChatId || backgroundMode !== restored.backgroundMode || showImageInfo !== restored.showImageInfo) return;
+            backgroundMode !== restored.backgroundMode || showImageInfo !== restored.showImageInfo) return;
         // The visible graph is ready now; a timer would leave rapid redo/undo ignored.
         lastHistoryRef.current = restored;
         pendingHistoryEntryRef.current = null;
         applyingHistoryRef.current = false;
         setHistoryState({ canUndo: historyRef.current.past.length > 0, canRedo: historyRef.current.future.length > 0 });
-    }, [activeChatId, backgroundMode, chatSessions, connections, groups, nodes, showImageInfo]);
+    }, [backgroundMode, connections, groups, nodes, showImageInfo]);
 
     const undoCanvas = useCallback(() => {
         if (!flushPendingHistory()) return;

@@ -27,7 +27,7 @@ export type CanvasAssistantPanelRenderState = {
     onSessionsChange: (sessions: CanvasAssistantSession[], activeSessionId: string | null, options?: { flush: boolean }) => void | Promise<void>;
     onApplyOps: (ops?: CanvasAgentOp[]) => CanvasAgentSnapshot;
     canUndoOps: boolean;
-    onUndoOps: () => CanvasAgentSnapshot | null;
+    onUndoOps: () => CanvasAgentSnapshot | null | Promise<CanvasAgentSnapshot | null>;
     onPasteImage: (file: File) => void;
     agentMode: CanvasAgentMode;
     onAgentModeChange: (mode: CanvasAgentMode) => void;

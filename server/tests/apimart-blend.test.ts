@@ -66,7 +66,7 @@ describe("MJ Blend fixed-provider request contract", () => {
     expect(calls).toBe(0);
   });
 
-  test("uploads inline references in order, persists intent and task ID, then only polls", async () => {
+  test("preserves inline reference order, persists intent and task ID, then only polls", async () => {
     const events: string[] = [];
     const result = await runApiMartImageTask({ ...base, sourceDataUrls: [inline, urls[1]!, "data:image/webp;base64,BAUG"], parameters: { size: "13:7", speed: "fast" },
       beforeSubmit: () => { events.push("intent"); }, onSubmitted: id => { expect(id).toBe("blend_saved"); events.push("persist"); },
@@ -74,9 +74,10 @@ describe("MJ Blend fixed-provider request contract", () => {
       expect(new Headers(init?.headers).get("authorization")).toBe("Bearer fixture-only-key");
       if (url.endsWith("/uploads/images")) {
         const file = (init?.body as FormData).get("file") as File;
-        const first = events.length === 0;
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const first = bytes[0] === 1;
         expect(file.type).toBe(first ? "image/png" : "image/webp");
-        expect(new Uint8Array(await file.arrayBuffer())).toEqual(new Uint8Array(first ? [1, 2, 3] : [4, 5, 6]));
+        expect(bytes).toEqual(new Uint8Array(first ? [1, 2, 3] : [4, 5, 6]));
         events.push("upload");
         return json({ url: first ? urls[0] : urls[2] });
       }
@@ -97,9 +98,9 @@ describe("MJ Blend fixed-provider request contract", () => {
   test.each([json({}, 503), json({ url: "http://127.0.0.1/private.png" }), json({ url: "data:image/png;base64,AQID" })])("upload failure or nonpublic URL cannot start a paid Blend task", async response => {
     const requests: string[] = [];
     await expect(runApiMartImageTask({ ...base, sourceDataUrls: [inline, inline], beforeSubmit: () => { throw new Error("Claim must not run"); } }, {
-      sleep, fetch: async url => { requests.push(url); return response; },
+      sleep, fetch: async url => { requests.push(url); return response.clone(); },
     })).rejects.toThrow();
-    expect(requests).toEqual(["https://provider.example/v1/uploads/images"]);
+    expect(requests).toEqual(["https://provider.example/v1/uploads/images", "https://provider.example/v1/uploads/images"]);
   });
 
   test("known upstream ID ignores expired inputs and performs no upload, claim or POST", async () => {

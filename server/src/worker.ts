@@ -407,6 +407,7 @@ async function executeApiMartImage(
     ...(editInput.mask ? { maskDataUrl: `data:image/png;base64,${Buffer.from(editInput.mask.bytes).toString("base64")}` } : {}),
     upstreamTaskId: task.upstream_task_id,
     submissionStarted: Boolean(task.upstream_submission_started_at),
+    submissionStartedAt: task.upstream_submission_started_at || task.started_at,
     beforeSubmit: async () => {
       const claimed = await db.query("UPDATE tasks SET upstream_submission_started_at=now(),updated_at=now() WHERE id=$1 AND execution_token=$2 AND lease_expires_at>now() AND status='processing' AND upstream_submission_started_at IS NULL RETURNING id", [task.id, task.execution_token]);
       if (!claimed.rows[0]) throw new VideoSubmissionClaimLost();
@@ -466,6 +467,7 @@ async function executeApiMartVideo(task: WorkRow, credentials: Record<string, st
     baseUrl: task.base_url!, apiKey: credentials.apiKey || "", modelId: task.model_id!, prompt: task.prompt,
     parameters: task.parameters, sources: providerSources, upstreamTaskId: task.upstream_task_id,
     submissionStarted: Boolean(task.upstream_submission_started_at),
+    submissionStartedAt: task.upstream_submission_started_at || task.started_at,
     beforeSubmit: async () => {
       const claimed = await db.query(
         "UPDATE tasks SET upstream_submission_started_at=now(),updated_at=now() WHERE id=$1 AND execution_token=$2 AND lease_expires_at>now() AND status='processing' AND upstream_submission_started_at IS NULL RETURNING id",
@@ -482,7 +484,7 @@ async function executeApiMartVideo(task: WorkRow, credentials: Record<string, st
       if (!persisted.rows[0]) throw new VideoSubmissionClaimLost("原上游任务身份已改变");
     },
   });
-  if (result.status === "pending") throw new VideoTaskPending();
+  if (result.status === "pending") throw new VideoTaskPending(result.nextPollMs);
   const response = await fetch(result.url, { signal: AbortSignal.timeout(180_000) });
   if (!response.ok) throw new Error(`视频下载失败（${response.status}）`);
   const contentType = response.headers.get("content-type")?.split(";")[0] || "video/mp4";

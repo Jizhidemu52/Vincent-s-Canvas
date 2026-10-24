@@ -756,13 +756,22 @@ function ImageContent({
     return (
         <BatchFrame theme={theme} batchCount={isBatchRoot ? batchCount : 0} batchExpanded={batchExpanded} batchOpening={batchOpening} batchRecovering={batchRecovering} onToggleBatch={onToggleBatch}>
             <div className="h-full w-full overflow-hidden">
-                {previewUrl ? (
+                {preview.failed ? (
+                    <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-3 text-center text-xs" style={{ color: theme.node.muted }} role="status">
+                        <span>图片读取失败</span>
+                        <button type="button" className="rounded px-3 py-1.5 transition hover:opacity-80" style={{ color: theme.node.text, background: theme.toolbar.activeBg }}
+                            aria-label={`重新加载图片 ${node.title}`} onPointerDown={event => event.stopPropagation()} onMouseDown={event => event.stopPropagation()}
+                            onClick={event => { event.stopPropagation(); preview.retry(); }}>重新加载</button>
+                    </div>
+                ) : previewUrl ? (
                     <img
+                        key={preview.key}
                         src={previewUrl}
                         data-canvas-image-resolution={preview.thumbnail ? imagePreviewEdge : "original"}
                         alt={node.title}
                         draggable={false}
                         {...canvasImageRenderProps()}
+                        onError={preview.onError}
                         onDragStart={(event) => event.preventDefault()}
                         className={`pointer-events-none block h-full w-full select-none ${node.metadata?.freeResize ? "object-fill" : "object-contain"}`}
                     />

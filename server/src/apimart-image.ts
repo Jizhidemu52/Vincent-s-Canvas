@@ -1,6 +1,7 @@
 import { fetchProviderSubmission } from "./provider-submission-transport";
 import { queryProviderTaskStatus } from "./provider-status-query";
 import { isDefinitiveSubmissionRejection } from "./provider-submission-policy";
+import { apiMartPollIntervalMs } from "./apimart-poll-interval";
 import { isPublicHttpUrl, uploadApiMartImage, validateApiMartGenerationImage } from "./apimart-upload";
 
 type MarkImageModel = "gpt-image-2.5-flare" | "gpt-image-2.5-sunburst" | "gemini-nano-banana-2.1";
@@ -328,6 +329,8 @@ export type ApiMartImageTaskInput = ApiMartImageInput & {
   submissionKey?: string;
   upstreamTaskId?: string | null;
   submissionStarted?: boolean;
+  /** Persisted original submission time; never the current execution/resume time. */
+  submissionStartedAt?: string | Date | null;
   beforeSubmit?: () => void | Promise<void>;
   onSubmitted?: (taskId: string) => void | Promise<void>;
 };
@@ -335,6 +338,7 @@ export type ApiMartImageTaskInput = ApiMartImageInput & {
 type ImageRuntime = {
   fetch?: (url: string, init?: RequestInit) => Promise<Response>;
   sleep?: (ms: number) => Promise<unknown>;
+  now?: () => number;
 };
 
 export type ApiMartImageTaskStep =
@@ -369,13 +373,7 @@ export async function stepApiMartImageTask(input: ApiMartImageTaskInput, runtime
     const request = isMarkImageModel(kind) ? buildMarkImageRequest(input, kind, true)
       : kind === "grok-imagine-image-2.0" ? buildGrokImageRequest(input, true) : buildApiMartImageRequest(input);
     if ((isMarkImageModel(kind) || kind === "midjourney-blend" || kind === "grok-imagine-image-2.0") && input.sourceDataUrls?.length) {
-      const references: string[] = [];
-      for (const source of input.sourceDataUrls) {
-        references.push(source.startsWith("data:")
-          ? await uploadApiMartImage({ baseUrl, apiKey: input.apiKey, ...decodeGenerationReference(source), purpose: "image" }, { fetch: runtime.fetch })
-          : source);
-      }
-      request.payload.image_urls = references;
+      request.payload.image_urls = await uploadApiMartImageReferences(input.sourceDataUrls, baseUrl, input.apiKey, runtime);
     }
     pollIntervalMs = request.pollIntervalMs;
     // Persist the intent immediately before the paid POST. Never retry a POST here.
@@ -406,7 +404,29 @@ export async function stepApiMartImageTask(input: ApiMartImageTaskInput, runtime
     return { status: "completed", upstreamTaskId: taskId, urls: outputs };
   }
   if (!IMAGE_STATUSES.has(status)) throw Object.assign(new Error(`APIMart 返回了未知任务状态：${status || "缺失"}`), { code: "PROVIDER_STATUS_INVALID" });
-  return { status: "pending", upstreamTaskId: taskId, nextPollMs: pollIntervalMs };
+  return { status: "pending", upstreamTaskId: taskId, nextPollMs: apiMartPollIntervalMs(input.submissionStartedAt, pollIntervalMs, runtime.now?.()) };
+}
+
+/** Stop claiming new references after failure, but drain every upload already started. */
+async function uploadApiMartImageReferences(sources: string[], baseUrl: string, apiKey: string, runtime: ImageRuntime) {
+  const references = new Array<string>(sources.length);
+  let nextIndex = 0, failed = false;
+  let firstFailure: unknown;
+  const uploadNext = async () => {
+    while (!failed && nextIndex < sources.length) {
+      const index = nextIndex++, source = sources[index]!;
+      try {
+        references[index] = source.startsWith("data:")
+          ? await uploadApiMartImage({ baseUrl, apiKey, ...decodeGenerationReference(source), purpose: "image" }, { fetch: runtime.fetch })
+          : source;
+      } catch (error) {
+        if (!failed) { failed = true; firstFailure = error; }
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(3, sources.length) }, uploadNext));
+  if (failed) throw firstFailure;
+  return references;
 }
 
 /** Demo/single-request callers retain the blocking convenience API. */

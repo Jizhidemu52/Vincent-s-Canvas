@@ -3,6 +3,12 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import type { AppConfig } from "./config";
 import { isPublicHttpsUrl } from "./apimart-upload";
 
+export interface ObjectReadOptions {
+    range?: string;
+    ifMatch?: string;
+    abortSignal?: AbortSignal;
+}
+
 export class ObjectStorage {
     private client: S3Client;
     private publicClient: S3Client;
@@ -12,8 +18,12 @@ export class ObjectStorage {
     }
     get configured() { return Boolean(this.config.S3_ENDPOINT && this.config.S3_ACCESS_KEY_ID && this.config.S3_SECRET_ACCESS_KEY); }
     async put(key: string, body: Uint8Array, contentType: string) { if (!this.configured) throw new Error("公司对象存储尚未配置"); await this.client.send(new PutObjectCommand({ Bucket: this.config.S3_BUCKET, Key: key, Body: body, ContentType: contentType })); }
-    async head(key: string) { return this.client.send(new HeadObjectCommand({ Bucket: this.config.S3_BUCKET, Key: key })); }
-    async get(key: string) { return this.client.send(new GetObjectCommand({ Bucket: this.config.S3_BUCKET, Key: key })); }
+    async head(key: string, options: Pick<ObjectReadOptions, "abortSignal"> = {}) {
+        return this.client.send(new HeadObjectCommand({ Bucket: this.config.S3_BUCKET, Key: key }), { abortSignal: options.abortSignal });
+    }
+    async get(key: string, options: ObjectReadOptions = {}) {
+        return this.client.send(new GetObjectCommand({ Bucket: this.config.S3_BUCKET, Key: key, Range: options.range, IfMatch: options.ifMatch }), { abortSignal: options.abortSignal });
+    }
     /** Used only for newly-created snapshot objects when their database transaction failed. */
     async remove(key: string) { await this.client.send(new DeleteObjectCommand({ Bucket: this.config.S3_BUCKET, Key: key })); }
     async signedDownloadUrl(key: string, expiresIn = 3600) {
