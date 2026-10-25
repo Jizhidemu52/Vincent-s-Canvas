@@ -62,8 +62,11 @@ test("Worker stores raw before mask loading, yields one strict result and real w
   expect(objects.get(assets[0]!.key)!.bytes).toEqual(png);
 }, 15_000);
 
-test("Worker pauses a completed provider result on processing error without refund or queue replay", async () => {
+test("Worker pauses an opaque transparent-background result without refund or paid queue replay", async () => {
   const queries: string[] = [];
+  const failureReasons: string[] = [];
+  const originals: Uint8Array[] = [];
+  const transparentTask = { ...task, source_urls: [], parameters: { background: "transparent" } };
   let paid = 0, refunds = 0, queued = 0;
   class VideoSubmissionClaimLost extends Error {}
   class VideoTaskPending extends Error {}
@@ -71,13 +74,24 @@ test("Worker pauses a completed provider result on processing error without refu
   const api = functions(["runTask"], {
     disposeProviderResults,
     randomUUID, TASK_LEASE_SECONDS: 180, config: { TASK_MOCK_MODE: "false" }, VideoSubmissionClaimLost, VideoTaskPending, ApiMartImageTaskPending, WorkflowTaskPending, TaskExecutionLost,
-    db: { query: async (sql: string) => { queries.push(sql); return { rows: [task] }; } },
+    db: { query: async (sql: string, values: any[]) => {
+      queries.push(sql);
+      if (sql.includes("status='paused'")) failureReasons.push(values[0]);
+      return { rows: [transparentTask] };
+    } },
     cache: { incr: async () => 1, expire: async () => {}, decr: async () => {}, zAdd: async () => { queued++; } },
     createGenerationTiming: () => ({ measure: async (_stage: string, call: () => unknown) => call(), finish: () => {} }),
     acquireModelLease: async () => ({ slotToken: "fixture-slot" }), releaseModelLease: async () => {},
     startTaskLeaseHeartbeat: () => ({ assertOwned() {}, stop: async () => {} }), assertTaskExecution: async () => {}, readProviderSubmissionDiagnostics: () => undefined,
     executeProvider: async () => { paid++; return [{ bytes: png, mimeType: "image/png" }]; },
-    storeResults: async () => { throw new Error("strict mask dimensions mismatch"); },
+    storeResults: async (current: typeof transparentTask, results: Array<{ bytes: Uint8Array; mimeType: string }>) => storeImageResult({
+      result: results[0]!, parameters: current.parameters, resultIndex: 0,
+      save: async (role, image) => {
+        expect(role).toBe("provider-original"); originals.push(image.bytes);
+        return { assetId: randomUUID(), mimeType: image.mimeType, filename: "provider-original.png" };
+      },
+      updateMetadata: async () => { throw new Error("failed transparency validation cannot mark the original as primary"); },
+    }),
     settleReservation: async () => { refunds++; },
   });
   await api.runTask(task.id);
@@ -86,4 +100,8 @@ test("Worker pauses a completed provider result on processing error without refu
   expect(queued).toBe(0);
   expect(queries.some(sql => sql.includes("status='paused'"))).toBe(true);
   expect(queries.some(sql => sql.includes("status='failed'"))).toBe(false);
+  expect(originals).toEqual([png]);
+  expect(failureReasons).toHaveLength(1);
+  expect(failureReasons[0]).toContain("渠道原件已保存");
+  expect(failureReasons[0]).toContain("所有像素均不透明");
 });

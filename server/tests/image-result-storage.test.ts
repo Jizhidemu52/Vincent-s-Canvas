@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { storeImageResult, ImageResultPersistenceError } from "../src/image-result-storage";
+import { storeImageResult, hasImageResultProcessing, ImageResultPersistenceError } from "../src/image-result-storage";
 import { isAuxiliaryImageResult, resolveImageResultVariants, type ImageResultAsset } from "../src/image-result-variants";
 
 const result = { bytes: new Uint8Array([1, 2, 3, 4]), mimeType: "image/png" };
@@ -29,6 +29,26 @@ describe("durable image variants without paid replay", () => {
     expect(h.calls).toEqual(["save:primary"]);
     expect(h.assets[0]!.bytes).toBe(result.bytes);
     expect(primary.assetId).toBe(h.assets[0]!.id);
+  });
+
+  test("transparency-only validation archives opaque provider bytes and exposes a recoverable processing failure", async () => {
+    const h = harness();
+    const opaque = { mimeType: "image/png", bytes: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAACXBIWXMAAAABAAAAAQBPJcTWAAAAFUlEQVR4nGP8////fwYGBgYWEAHCAD4KBAICIHhuAAAAAElFTkSuQmCC", "base64") };
+    const before = Buffer.from(opaque.bytes);
+    expect(hasImageResultProcessing({ background: "transparent" })).toBe(true);
+    expect(hasImageResultProcessing({ background: "opaque" })).toBe(false);
+    const error = await storeImageResult({ ...h, result: opaque, parameters: { background: "transparent" }, resultIndex: 0 }).catch(error => error);
+    expect(error).toBeInstanceOf(ImageResultPersistenceError);
+    expect(error.cause).toMatchObject({ code: "IMAGE_RESULT_TRANSPARENCY_MISSING" });
+    expect(error.message).toContain("渠道原件已保存");
+    expect(error.message).toContain("透明");
+    expect(error.message).toContain("不会自动重新生成");
+    expect(h.calls).toEqual(["save:provider-original"]);
+    expect(h.assets).toHaveLength(1);
+    expect(h.assets[0]!.bytes).toBe(opaque.bytes);
+    expect(h.assets[0]!.bytes).toEqual(before);
+    expect(error.original.assetId).toBe(h.assets[0]!.id);
+    expect(isAuxiliaryImageResult(h.assets[0]!.metadata)).toBe(false);
   });
 
   test("persists original before preparation, stores one primary, and hides auxiliary variants", async () => {

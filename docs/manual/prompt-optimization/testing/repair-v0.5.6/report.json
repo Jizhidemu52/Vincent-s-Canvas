@@ -1,0 +1,1449 @@
+{
+  "release": "v0.5.6",
+  "metrics": {
+    "records": 21,
+    "compilationPostAttempts": 15,
+    "rootCompilationRecords": 13,
+    "cacheAliases": 2,
+    "compilationFailures": 1,
+    "imageSubmissionAttempts": 20,
+    "images": 18,
+    "downloadRecoveriesWithoutRegeneration": 2,
+    "knownInputTokens": 24917,
+    "knownOutputTokens": 3897,
+    "rootRecordsMissingUsage": 1,
+    "actualProviderInvoiceVerified": false,
+    "actualProviderTotalCost": null,
+    "visualGrades": {
+      "PASS": 7,
+      "MINOR_FIX": 2,
+      "REDO": 7,
+      "CONTROL": 2,
+      "NOT_GENERATED": 3
+    }
+  },
+  "recipeRestoration": [
+    {
+      "run": "repair-v1",
+      "key": "pattern-extract",
+      "candidateVersionId": "ee19b96f-4560-4fba-8ca8-7a6959190d66",
+      "candidateContentHash": "fa9f3f5323bc86d220a8aa8ba13576cc17f593187af06c27a35f63488cda8ce8",
+      "previousVersionId": "81f1fc44-3029-45e4-a460-1a3919545790",
+      "restored": true
+    },
+    {
+      "run": "repair-v1",
+      "key": "pattern-craft",
+      "candidateVersionId": "c18456d5-4629-4f51-9494-e89e86d30e54",
+      "candidateContentHash": "9bccff549f257e37c25dfc71aa98b4aacaa1e735b501c7aeafee0f64243f7925",
+      "previousVersionId": "3604761f-bc4c-4b3d-97d7-e0b9ba8d379a",
+      "restored": true
+    },
+    {
+      "run": "repair-v1",
+      "key": "style-to-sketch",
+      "candidateVersionId": "855ca933-9600-4fc3-846a-e3ecfdc87ae1",
+      "candidateContentHash": "d267e31a0f825404e780a81dd782790d5e39c74cd011a68d4443e372ef1e11d2",
+      "previousVersionId": "8988fa02-f632-4d6a-ba26-9d243bfc9e57",
+      "restored": true
+    },
+    {
+      "run": "repair-v1",
+      "key": "pattern-colorway",
+      "candidateVersionId": "9ba42656-b551-413b-868a-5901a04469da",
+      "candidateContentHash": "c7b3901dfd6983260314cf197f3469c15fd99969008c3e19200454eb1060079e",
+      "previousVersionId": "c380d876-a72e-4f74-b4fa-c2b6a5408a08",
+      "restored": true
+    },
+    {
+      "run": "repair-v2",
+      "key": "pattern-extract",
+      "candidateVersionId": "ebead417-65ca-415c-8faf-014522074f67",
+      "candidateContentHash": "03a708e5d23ccc4b43f26b98e4211543ab1688d9c70a7a1f6c81b9b3b7a5d25a",
+      "previousVersionId": "81f1fc44-3029-45e4-a460-1a3919545790",
+      "restored": true
+    },
+    {
+      "run": "repair-v2",
+      "key": "pattern-colorway",
+      "candidateVersionId": "3389d0bc-6c6a-49ae-a655-8cb77ce23d10",
+      "candidateContentHash": "036bd6ece4149d84989f33e5825f987f8b7446393da1a94063a799ea6ac77011",
+      "previousVersionId": "c380d876-a72e-4f74-b4fa-c2b6a5408a08",
+      "restored": true
+    },
+    {
+      "run": "repair-lettering",
+      "key": "local-restyle",
+      "candidateVersionId": "193831fe-8a92-4edf-aad3-0c69d14624ae",
+      "candidateContentHash": "0541728b9856580874b5b47d314755f1046450f02764d65962432821912e49e2",
+      "previousVersionId": "c817c731-002c-4872-a2b9-a324083bacd3",
+      "restored": true
+    }
+  ],
+  "scope": "Synthetic fixtures, isolated local cloned DB; no production deploy or recipe activation. Provider invoice unavailable. Submissions and root compilations are not invoice-confirmed billable counts.",
+  "alphaMetricNote": "transparentPixels counts any alpha below 255, not just background. An alpha channel or any translucent pixel does not prove clean cutout edges or an opaque subject. No automatic cutout or source-alpha overlay was used.",
+  "records": [
+    {
+      "run": "repair-v1",
+      "id": "pattern-extract-03-new",
+      "requestId": "pq:repair-v1:pattern-extract-03-new",
+      "taskId": null,
+      "model": {
+        "id": "d5000000-0000-4000-8000-000000000001",
+        "modelId": "d5000000-0000-4000-8000-000000000001"
+      },
+      "recordedStatus": "uncertain",
+      "verifiedStatus": "compilation_failed",
+      "errorCode": "PROMPT_OPTIMIZATION_FAILED",
+      "failureReason": null,
+      "compileAttempted": true,
+      "imageSubmissionAttempted": false,
+      "originalTaskDownloadRecovery": false,
+      "promptInput": {
+        "scene": "pattern-extract",
+        "fields": {
+          "description": "保留清晰可见的形状、颜色、边缘与相对比例，不增添原图没有的元素。",
+          "extractMode": "单独图案",
+          "extractBackground": "白底"
+        },
+        "userText": "保留清晰可见的形状、颜色、边缘与相对比例，不增添原图没有的元素。",
+        "referenceRoles": [
+          "图案参考图"
+        ],
+        "mode": "edit",
+        "hasMask": false
+      },
+      "finalPrompt": null,
+      "parameters": {},
+      "referenceFixture": "../fixtures/knit.png",
+      "historicalBaseline": "../quality-matrix/visual-v1/pattern-extract-03-new-11ada841-e100-47ee-a423-b425f7c8a29d-1.png",
+      "compilation": {
+        "id": "c0ff1182-aef5-4d9e-9faf-9f58004b05b4",
+        "status": "failed",
+        "recipeVersionId": "ee19b96f-4560-4fba-8ca8-7a6959190d66",
+        "recipeContentHash": "fa9f3f5323bc86d220a8aa8ba13576cc17f593187af06c27a35f63488cda8ce8",
+        "reusedFromId": null,
+        "optimizerModelConfigId": "d5000000-0000-4000-8000-000000000004",
+        "inputTokens": null,
+        "outputTokens": null,
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": "CNY"
+      },
+      "outputs": [],
+      "visualReview": {
+        "grade": "NOT_GENERATED",
+        "reason": "优化失败，未提交生图。后续修改规则后使用新的请求编号验证，未重放此请求。"
+      }
+    },
+    {
+      "run": "repair-v1",
+      "id": "pattern-extract-06-new",
+      "requestId": "pq:repair-v1:pattern-extract-06-new",
+      "taskId": "d618b960-ca0a-404d-956a-10e45f148ae1",
+      "model": {
+        "id": "d5000000-0000-4000-8000-000000000001",
+        "modelId": "d5000000-0000-4000-8000-000000000001"
+      },
+      "recordedStatus": "success",
+      "verifiedStatus": "success",
+      "errorCode": null,
+      "failureReason": "",
+      "compileAttempted": true,
+      "imageSubmissionAttempted": true,
+      "originalTaskDownloadRecovery": false,
+      "promptInput": {
+        "scene": "pattern-extract",
+        "fields": {
+          "description": "保留清晰可见的形状、颜色、边缘与相对比例，不增添原图没有的元素。",
+          "extractMode": "完整可见花型",
+          "extractBackground": "白底"
+        },
+        "userText": "保留清晰可见的形状、颜色、边缘与相对比例，不增添原图没有的元素。",
+        "referenceRoles": [
+          "图案参考图"
+        ],
+        "mode": "edit",
+        "hasMask": false
+      },
+      "finalPrompt": "Extract the entire visible pattern from Image 1 onto an opaque pure white (#FFFFFF) background; use its motifs, not the garment or photographic texture. Flatten the design, removing fabric folds, perspective distortion, garment seams, lighting and shadows. Preserve the navy (#252C40), brick red (#A6402E), mustard (#BA8A35), and ivory (#E8E0CC) details, stepped knitted edges, motif counts, proportions, positions, and cropped boundaries. Retain only visibly evidenced shapes; do not reconstruct obscured areas, extend beyond the image, rearrange elements, or create a seamless repeat.\nAvoid: garment outlines, seams, mockups, folds, shadows, perspective distortion, new motifs, inferred missing shapes, rearranged elements, brand logos, watermarks, unrelated text, collages, multi-panel layouts, color swatches, dimension annotations, extra hands, deformed limbs, underage models, nudity, sexualized presentation.",
+      "parameters": {
+        "n": 1,
+        "size": "1024x1024",
+        "quality": "auto",
+        "tool": "creative-pattern-extract",
+        "count": 1,
+        "background": "opaque"
+      },
+      "referenceFixture": "../fixtures/knit.png",
+      "historicalBaseline": "../quality-matrix/visual-v1/pattern-extract-06-new-46382f63-32ba-4232-9d54-c403942d983b-1.png",
+      "compilation": {
+        "id": "2c928d17-e8b7-4157-ae1f-5fa9f7f3e90a",
+        "status": "success",
+        "recipeVersionId": "ee19b96f-4560-4fba-8ca8-7a6959190d66",
+        "recipeContentHash": "fa9f3f5323bc86d220a8aa8ba13576cc17f593187af06c27a35f63488cda8ce8",
+        "reusedFromId": null,
+        "optimizerModelConfigId": "d5000000-0000-4000-8000-000000000004",
+        "inputTokens": 1685,
+        "outputTokens": 300,
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": "CNY"
+      },
+      "outputs": [
+        {
+          "path": "repair-v1/pattern-extract-06-new-primary.png",
+          "role": "primary",
+          "mime": "image/png",
+          "bytes": 1031136,
+          "sha256": "abd34b2517312731055a935e77842acfaaa6cfddfb2c0f63c249f468356f3241",
+          "pixels": 1048576,
+          "transparentPixels": 0,
+          "partialAlphaPixels": 0,
+          "operations": []
+        }
+      ],
+      "visualReview": {
+        "grade": "PASS",
+        "reason": "横向纹样带完整保留可见边界，没有补出画外元素。"
+      }
+    },
+    {
+      "run": "repair-v1",
+      "id": "pattern-craft-02-new",
+      "requestId": "pq:repair-v1:pattern-craft-02-new",
+      "taskId": "be294993-9408-4a99-818a-ce8b532aee3c",
+      "model": {
+        "id": "d5000000-0000-4000-8000-000000000001",
+        "modelId": "d5000000-0000-4000-8000-000000000001"
+      },
+      "recordedStatus": "success",
+      "verifiedStatus": "success",
+      "errorCode": null,
+      "failureReason": "",
+      "compileAttempted": true,
+      "imageSubmissionAttempted": true,
+      "originalTaskDownloadRecovery": false,
+      "promptInput": {
+        "scene": "pattern-craft",
+        "fields": {
+          "description": "图案保持原有颜色、形状与比例，只模拟指定工艺；不添加其他装饰。",
+          "craft": "提花",
+          "craftFabric": "针织面料"
+        },
+        "userText": "图案保持原有颜色、形状与比例，只模拟指定工艺；不添加其他装饰。",
+        "referenceRoles": [
+          "图案参考图"
+        ],
+        "mode": "edit",
+        "hasMask": false
+      },
+      "finalPrompt": "Convert the botanical motif in Image 1 into yarn-integrated jacquard on ivory (#F2EFE6) cotton jersey knit, with visible yarn texture, continuous fabric structure, and a motif flush with the surface. Preserve its four leaves, stem, contours, proportions, placement, and original muted green (#788B59) and dark olive (#4C6140) coloring; use Image 1 only for the motif, not its background. Add no decorations. Show the complete motif front-on with clear fabric margins, sharp edges and stitch detail, and soft directional lighting revealing the knit texture.\nAvoid: flat printed look, raised embroidery, redesigned motif, added decorations, brand logos, watermarks, unrelated text, collages, multi-panel layouts, color swatch strips, dimension annotations, extra hands, deformed limbs, underage models, nudity, sexualized presentation.",
+      "parameters": {
+        "n": 1,
+        "size": "1024x1024",
+        "quality": "auto",
+        "tool": "creative-pattern-craft",
+        "count": 1
+      },
+      "referenceFixture": "../fixtures/leaf.png",
+      "historicalBaseline": "../quality-matrix/visual-v1/pattern-craft-02-new-55d105da-d793-434e-b7bc-d864f4438c2e-1.png",
+      "compilation": {
+        "id": "58d2d008-4bb6-4b5c-bdd6-f0957c355183",
+        "status": "success",
+        "recipeVersionId": "c18456d5-4629-4f51-9494-e89e86d30e54",
+        "recipeContentHash": "9bccff549f257e37c25dfc71aa98b4aacaa1e735b501c7aeafee0f64243f7925",
+        "reusedFromId": null,
+        "optimizerModelConfigId": "d5000000-0000-4000-8000-000000000004",
+        "inputTokens": 1768,
+        "outputTokens": 352,
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": "CNY"
+      },
+      "outputs": [
+        {
+          "path": "repair-v1/pattern-craft-02-new-primary.png",
+          "role": "primary",
+          "mime": "image/png",
+          "bytes": 2247121,
+          "sha256": "acac2c39b8fd2378c942c83be3fab23e867e60883581b3332a6e34c7a14c1dd5",
+          "pixels": 1048576,
+          "transparentPixels": 0,
+          "partialAlphaPixels": 0,
+          "operations": []
+        }
+      ],
+      "visualReview": {
+        "grade": "PASS",
+        "reason": "四片叶子和枝干完整入镜；工艺纹理可见，四周有留白。"
+      }
+    },
+    {
+      "run": "repair-v1",
+      "id": "pattern-craft-10-new",
+      "requestId": "pq:repair-v1:pattern-craft-10-new",
+      "taskId": "3db4458d-6f8e-4a10-9d3a-dd0f36e18d78",
+      "model": {
+        "id": "d5000000-0000-4000-8000-000000000001",
+        "modelId": "d5000000-0000-4000-8000-000000000001"
+      },
+      "recordedStatus": "success",
+      "verifiedStatus": "success",
+      "errorCode": null,
+      "failureReason": "",
+      "compileAttempted": true,
+      "imageSubmissionAttempted": true,
+      "originalTaskDownloadRecovery": false,
+      "promptInput": {
+        "scene": "pattern-craft",
+        "fields": {
+          "description": "图案保持原有颜色、形状与比例，只模拟指定工艺；不添加其他装饰。",
+          "craft": "提花",
+          "craftFabric": "棉布"
+        },
+        "userText": "图案保持原有颜色、形状与比例，只模拟指定工艺；不添加其他装饰。",
+        "referenceRoles": [
+          "图案参考图"
+        ],
+        "mode": "edit",
+        "hasMask": false
+      },
+      "finalPrompt": "Convert the motif in Image 1 into woven jacquard on ivory (#F4EBDD) cotton with a plain-weave ground. Use Image 1 for the complete flower design, not its background; preserve all petals, dots, outlines, proportions, relative positions, and original terracotta (#C48669), pale yellow (#F4DF93), and brown (#816544) colors. Form the motif through interlaced yarns, flush with the continuous fabric structure, with visible yarn texture. Keep the entire motif sharp and fully framed with clear margins, a frontal view, and soft directional lighting. Add no decorations.\nAvoid: brand logos and watermarks, extra or unrelated text, collages and multi-panel layouts, color swatch strips and dimension annotations, extra hands, deformed limbs, and underage models, nudity and sexualized presentation, flat printed look, motif redesign and added decorations.",
+      "parameters": {
+        "n": 1,
+        "size": "1024x1024",
+        "quality": "auto",
+        "tool": "creative-pattern-craft",
+        "count": 1
+      },
+      "referenceFixture": "../fixtures/flower.png",
+      "historicalBaseline": "../quality-matrix/visual-v1/pattern-craft-10-new-316c1f34-8a3b-45f6-a1e2-aaa78277ad75-1.png",
+      "compilation": {
+        "id": "f167a817-79cb-4710-b3b6-00f5d1f618eb",
+        "status": "success",
+        "recipeVersionId": "c18456d5-4629-4f51-9494-e89e86d30e54",
+        "recipeContentHash": "9bccff549f257e37c25dfc71aa98b4aacaa1e735b501c7aeafee0f64243f7925",
+        "reusedFromId": null,
+        "optimizerModelConfigId": "d5000000-0000-4000-8000-000000000004",
+        "inputTokens": 1776,
+        "outputTokens": 321,
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": "CNY"
+      },
+      "outputs": [
+        {
+          "path": "repair-v1/pattern-craft-10-new-primary.png",
+          "role": "primary",
+          "mime": "image/png",
+          "bytes": 2224017,
+          "sha256": "70e63ef32bbd03c07d8acf5b6de964495e64fc4727c363ae35928ddf2867d182",
+          "pixels": 1048576,
+          "transparentPixels": 0,
+          "partialAlphaPixels": 0,
+          "operations": []
+        }
+      ],
+      "visualReview": {
+        "grade": "PASS",
+        "reason": "花形完整入镜，外轮廓未被微距构图裁掉；工艺细节清晰。"
+      }
+    },
+    {
+      "run": "repair-v1",
+      "id": "style-to-sketch-11-new",
+      "requestId": "pq:repair-v1:style-to-sketch-11-new",
+      "taskId": "a7487dd0-2231-44e1-b852-95e52114c59d",
+      "model": {
+        "id": "d5000000-0000-4000-8000-000000000001",
+        "modelId": "d5000000-0000-4000-8000-000000000001"
+      },
+      "recordedStatus": "success",
+      "verifiedStatus": "success",
+      "errorCode": null,
+      "failureReason": "",
+      "compileAttempted": true,
+      "imageSubmissionAttempted": true,
+      "originalTaskDownloadRecovery": false,
+      "promptInput": {
+        "scene": "style-to-sketch",
+        "fields": {
+          "description": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。黑色中等线宽技术线稿，标出可见肩缝和袖窿线。",
+          "sketchStyle": "technical",
+          "sketchDetail": "detailed"
+        },
+        "userText": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。黑色中等线宽技术线稿，标出可见肩缝和袖窿线。",
+        "referenceRoles": [
+          "服装参考图"
+        ],
+        "mode": "edit",
+        "hasMask": false
+      },
+      "finalPrompt": "Convert Image 1 into one front-only technical fashion flat on white (#FFFFFF), using medium-weight black (#000000) contours, thinner construction lines, and dashed visible topstitching; exclude photographic color, texture, and shadows. Preserve its proportions, silhouette, pointed collar, short set-in sleeves, placket, curved hem, visible shoulder seams and armhole lines, without inventing hidden details or forcing symmetry. Retain exactly five complete center-front buttons plus the original half-occluded neckline button, preserving their positions and occlusion; add or remove none, add no pockets, and show no back view.\nAvoid: shading, gradients, color fills, fabric texture, added pockets, invented seams, altered button count, back views, collage grids, models, extra limbs, anatomical distortion, hangers, background objects, brand logos, watermarks, unrelated text labels, measurement annotations, color swatches, minors, nudity, sexualized presentation.",
+      "parameters": {
+        "n": 1,
+        "size": "1024x1024",
+        "quality": "auto",
+        "tool": "creative-style-to-sketch",
+        "count": 1
+      },
+      "referenceFixture": "../fixtures/shirt.png",
+      "historicalBaseline": "../quality-matrix/visual-v2-extended/style-to-sketch-11-new-686fa657-47a7-4faa-b4ea-46bf6da60891-1.png",
+      "compilation": {
+        "id": "6b6cf48a-99f9-4e73-b74f-cc2caf6a7ac8",
+        "status": "success",
+        "recipeVersionId": "855ca933-9600-4fc3-846a-e3ecfdc87ae1",
+        "recipeContentHash": "d267e31a0f825404e780a81dd782790d5e39c74cd011a68d4443e372ef1e11d2",
+        "reusedFromId": null,
+        "optimizerModelConfigId": "d5000000-0000-4000-8000-000000000004",
+        "inputTokens": 2933,
+        "outputTokens": 275,
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": "CNY"
+      },
+      "outputs": [
+        {
+          "path": "repair-v1/style-to-sketch-11-new-primary.png",
+          "role": "primary",
+          "mime": "image/png",
+          "bytes": 753016,
+          "sha256": "0b1bb75c81742dbe2916dd4ad6058acffc96887033423c7fc638d0f253ceec28",
+          "pixels": 1048576,
+          "transparentPixels": 0,
+          "partialAlphaPixels": 0,
+          "operations": []
+        }
+      ],
+      "visualReview": {
+        "grade": "PASS",
+        "reason": "五颗完整纽扣及领口半遮挡纽扣保留；无新增口袋。"
+      }
+    },
+    {
+      "run": "repair-v1",
+      "id": "style-to-sketch-17-new",
+      "requestId": "pq:repair-v1:style-to-sketch-17-new",
+      "taskId": "2e1c729a-13ca-4b1b-8869-4590ca26e161",
+      "model": {
+        "id": "d5000000-0000-4000-8000-000000000001",
+        "modelId": "d5000000-0000-4000-8000-000000000001"
+      },
+      "recordedStatus": "success",
+      "verifiedStatus": "success",
+      "errorCode": null,
+      "failureReason": "",
+      "compileAttempted": true,
+      "imageSubmissionAttempted": true,
+      "originalTaskDownloadRecovery": false,
+      "promptInput": {
+        "scene": "style-to-sketch",
+        "fields": {
+          "description": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。可见四孔纽扣以简洁圆形孔位表示，半遮挡领扣保持半遮挡。",
+          "sketchStyle": "technical",
+          "sketchDetail": "detailed"
+        },
+        "userText": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。可见四孔纽扣以简洁圆形孔位表示，半遮挡领扣保持半遮挡。",
+        "referenceRoles": [
+          "服装参考图"
+        ],
+        "mode": "edit",
+        "hasMask": false
+      },
+      "finalPrompt": "Convert Image 1 into one front-view technical fashion flat, using its visible construction only, not its color, texture, or shadows. Use black (#000000) lines on pure white (#FFFFFF), a bolder contour, thin uniform construction lines, and dashed topstitching only where visible. Preserve original proportions, silhouette, visible asymmetry, collar, placket, sleeves, and hem. Keep exactly five complete center-front buttons with simple circular four-hole markings, plus the original half-obscured neckline button at its existing position and occlusion; do not complete it. Add no pockets, hidden details, or back view.\nAvoid: shading, gradients, color fills, fabric texture, added or missing buttons, completed neckline button, pockets, invented seams, hidden construction, models, extra hands, deformed limbs, minors, nudity, sexualized presentation, hangers, background objects, brand logos, watermarks, unrelated text, measurement labels, collages, multiple views, color swatches.",
+      "parameters": {
+        "n": 1,
+        "size": "1024x1024",
+        "quality": "auto",
+        "tool": "creative-style-to-sketch",
+        "count": 1
+      },
+      "referenceFixture": "../fixtures/shirt.png",
+      "historicalBaseline": "../quality-matrix/visual-v2-extended/style-to-sketch-17-new-8bb909b1-1b07-4f16-af49-33db3cf608fe-1.png",
+      "compilation": {
+        "id": "0d17a108-b086-4eb7-9366-6520cbf08ecf",
+        "status": "success",
+        "recipeVersionId": "855ca933-9600-4fc3-846a-e3ecfdc87ae1",
+        "recipeContentHash": "d267e31a0f825404e780a81dd782790d5e39c74cd011a68d4443e372ef1e11d2",
+        "reusedFromId": null,
+        "optimizerModelConfigId": "d5000000-0000-4000-8000-000000000004",
+        "inputTokens": 2937,
+        "outputTokens": 290,
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": "CNY"
+      },
+      "outputs": [
+        {
+          "path": "repair-v1/style-to-sketch-17-new-primary.png",
+          "role": "primary",
+          "mime": "image/png",
+          "bytes": 761559,
+          "sha256": "c3180c73302826cb06c2ad856f8b3d6b7954bf9d13d3c424ae951f3218303430",
+          "pixels": 1048576,
+          "transparentPixels": 0,
+          "partialAlphaPixels": 0,
+          "operations": []
+        }
+      ],
+      "visualReview": {
+        "grade": "PASS",
+        "reason": "纽扣数量、领口遮挡和主要结构符合要求。"
+      }
+    },
+    {
+      "run": "repair-v1",
+      "id": "pattern-extract-01-new",
+      "requestId": "pq:repair-v1:pattern-extract-01-new",
+      "taskId": "e2dbc188-d7ce-4cc1-8f1f-de71d036a8e8",
+      "model": {
+        "id": "d5000000-0000-4000-8000-000000000001",
+        "modelId": "d5000000-0000-4000-8000-000000000001"
+      },
+      "recordedStatus": "success",
+      "verifiedStatus": "success",
+      "errorCode": null,
+      "failureReason": "",
+      "compileAttempted": true,
+      "imageSubmissionAttempted": true,
+      "originalTaskDownloadRecovery": false,
+      "promptInput": {
+        "scene": "pattern-extract",
+        "fields": {
+          "description": "保留清晰可见的形状、颜色、边缘与相对比例，不增添原图没有的元素。",
+          "extractMode": "单独图案",
+          "extractBackground": "保留底色"
+        },
+        "userText": "保留清晰可见的形状、颜色、边缘与相对比例，不增添原图没有的元素。",
+        "referenceRoles": [
+          "图案参考图"
+        ],
+        "mode": "edit",
+        "hasMask": false
+      },
+      "finalPrompt": "Extract the single visible flower from Image 1; use its artwork and original background, not display artifacts. Please flatten the design, removing fabric folds, perspective distortion, garment seams, lighting and shadows. Preserve the six irregular petals, dotted center, fine outlines, visible edges, proportions, and arrangement: terracotta (#C9896B), pale yellow (#F4DE95), and muted brown (#8A6845). Keep the original ground color and any genuine transparency; do not draw a checkerboard. Add no elements, infer no hidden content, and do not symmetrize or smooth away the original character.\nAvoid: garment, folds, shadows, perspective, mockup, new motifs, invented contours, symmetry correction, brand logos, watermarks, unrelated text, collages, multi-panel layouts, color swatches, dimension annotations, checkerboard background, extra hands, malformed limbs, underage models, nudity, sexualized presentation.",
+      "parameters": {
+        "n": 1,
+        "size": "1024x1024",
+        "quality": "auto",
+        "tool": "creative-pattern-extract",
+        "count": 1,
+        "background": "transparent",
+        "output_format": "png"
+      },
+      "referenceFixture": "../fixtures/flower.png",
+      "historicalBaseline": "../quality-matrix/visual-v1/pattern-extract-01-new-0d696194-7404-4ab8-9a7a-891402aa1347-1.png",
+      "compilation": {
+        "id": "54729975-7dd2-487d-bdce-c0c15116a915",
+        "status": "success",
+        "recipeVersionId": "ee19b96f-4560-4fba-8ca8-7a6959190d66",
+        "recipeContentHash": "fa9f3f5323bc86d220a8aa8ba13576cc17f593187af06c27a35f63488cda8ce8",
+        "reusedFromId": null,
+        "optimizerModelConfigId": "d5000000-0000-4000-8000-000000000004",
+        "inputTokens": 1704,
+        "outputTokens": 333,
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": "CNY"
+      },
+      "outputs": [
+        {
+          "path": "repair-v1/pattern-extract-01-new-primary.png",
+          "role": "primary",
+          "mime": "image/png",
+          "bytes": 898143,
+          "sha256": "e4483027cce37585dea8fdab69dc07ab40a8a96dd762afd7a24b16035f8324d0",
+          "pixels": 1048576,
+          "transparentPixels": 1048576,
+          "partialAlphaPixels": 463712,
+          "operations": [
+            "transparent_alpha_verified"
+          ]
+        }
+      ],
+      "visualReview": {
+        "grade": "REDO",
+        "reason": "已出现真实 alpha，但边缘有光晕、花瓣线条丢失，不是保真提取。"
+      }
+    },
+    {
+      "run": "repair-v1",
+      "id": "pattern-colorway-01-new",
+      "requestId": "pq:repair-v1:pattern-colorway-01-new",
+      "taskId": "caf5d889-0c3b-4ef5-a71b-55a6d759c8a3",
+      "model": {
+        "id": "d5000000-0000-4000-8000-000000000001",
+        "modelId": "d5000000-0000-4000-8000-000000000001"
+      },
+      "recordedStatus": "success",
+      "verifiedStatus": "success",
+      "errorCode": null,
+      "failureReason": "",
+      "compileAttempted": true,
+      "imageSubmissionAttempted": true,
+      "originalTaskDownloadRecovery": false,
+      "promptInput": {
+        "scene": "pattern-colorway",
+        "fields": {
+          "description": "温暖低饱和秋季配色。保留图案轮廓、所有元素数量、位置、比例和排列。",
+          "colorMode": "smart",
+          "colorRegion": "图案的所有色块",
+          "colorMood": "自然柔和"
+        },
+        "userText": "温暖低饱和秋季配色。保留图案轮廓、所有元素数量、位置、比例和排列。",
+        "referenceRoles": [
+          "图案参考图"
+        ],
+        "mode": "edit",
+        "hasMask": false
+      },
+      "finalPrompt": "Recolor every motif color block in Image 1 with a warm, muted autumn palette: petals → dusty terracotta (#BC826B); flower center → soft oat (#E8D7A5); outlines, petal veins and center dots → warm taupe (#806C50). Use Image 1 only for its existing artwork and brushwork, not its original motif colors. Preserve all contours, element counts, positions, proportions, color boundaries, line weights, arrangement and background transparency exactly. Maintain the original subtle tonal variation and clear separation between adjacent colors; add or remove nothing.\nAvoid: changing shapes or adding motifs, blurred edges, color swatches or dimension annotations, gradient overlays, brand logos, watermarks or unrelated text, collage grids, extra hands or deformed limbs, underage models, nudity or sexualized presentation.",
+      "parameters": {
+        "n": 1,
+        "size": "1024x1024",
+        "quality": "auto",
+        "tool": "creative-pattern-colorway",
+        "count": 1,
+        "background": "transparent",
+        "output_format": "png"
+      },
+      "referenceFixture": "../fixtures/flower.png",
+      "historicalBaseline": "../quality-matrix/visual-v1/pattern-colorway-01-new-ab738087-4d42-455a-bc36-1d23748d4fc0-1.png",
+      "compilation": {
+        "id": "72c7055d-7d5c-4cca-a9f1-d34c9b54aca1",
+        "status": "success",
+        "recipeVersionId": "9ba42656-b551-413b-868a-5901a04469da",
+        "recipeContentHash": "c7b3901dfd6983260314cf197f3469c15fd99969008c3e19200454eb1060079e",
+        "reusedFromId": null,
+        "optimizerModelConfigId": "d5000000-0000-4000-8000-000000000004",
+        "inputTokens": 2123,
+        "outputTokens": 343,
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": "CNY"
+      },
+      "outputs": [
+        {
+          "path": "repair-v1/pattern-colorway-01-new-primary.png",
+          "role": "primary",
+          "mime": "image/png",
+          "bytes": 981110,
+          "sha256": "229914137d1f1fd50bfe484a86d21cbbba1862bd5a133351c6dc7a195353fb14",
+          "pixels": 1048576,
+          "transparentPixels": 1048576,
+          "partialAlphaPixels": 465926,
+          "operations": [
+            "transparent_alpha_verified"
+          ]
+        }
+      ],
+      "visualReview": {
+        "grade": "REDO",
+        "reason": "已出现真实 alpha，但轮廓光晕及内部细节漂移仍存在。"
+      }
+    },
+    {
+      "run": "repair-v1",
+      "id": "style-to-sketch-11-new-repeat",
+      "requestId": "pq:repair-v1:style-to-sketch-11-new-repeat",
+      "taskId": "295846f9-df35-4ab7-b48f-436454f5b3ed",
+      "model": {
+        "id": "d5000000-0000-4000-8000-000000000001",
+        "modelId": "d5000000-0000-4000-8000-000000000001"
+      },
+      "recordedStatus": "success",
+      "verifiedStatus": "success",
+      "errorCode": null,
+      "failureReason": "",
+      "compileAttempted": true,
+      "imageSubmissionAttempted": true,
+      "originalTaskDownloadRecovery": false,
+      "promptInput": {
+        "scene": "style-to-sketch",
+        "fields": {
+          "description": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。黑色中等线宽技术线稿，标出可见肩缝和袖窿线。",
+          "sketchStyle": "technical",
+          "sketchDetail": "detailed"
+        },
+        "userText": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。黑色中等线宽技术线稿，标出可见肩缝和袖窿线。",
+        "referenceRoles": [
+          "服装参考图"
+        ],
+        "mode": "edit",
+        "hasMask": false
+      },
+      "finalPrompt": "Convert Image 1 into one front-only technical fashion flat on white (#FFFFFF), using medium-weight black (#000000) contours, thinner construction lines, and dashed visible topstitching; exclude photographic color, texture, and shadows. Preserve its proportions, silhouette, pointed collar, short set-in sleeves, placket, curved hem, visible shoulder seams and armhole lines, without inventing hidden details or forcing symmetry. Retain exactly five complete center-front buttons plus the original half-occluded neckline button, preserving their positions and occlusion; add or remove none, add no pockets, and show no back view.\nAvoid: shading, gradients, color fills, fabric texture, added pockets, invented seams, altered button count, back views, collage grids, models, extra limbs, anatomical distortion, hangers, background objects, brand logos, watermarks, unrelated text labels, measurement annotations, color swatches, minors, nudity, sexualized presentation.",
+      "parameters": {
+        "n": 1,
+        "size": "1024x1024",
+        "quality": "auto",
+        "tool": "creative-style-to-sketch",
+        "count": 1
+      },
+      "referenceFixture": "../fixtures/shirt.png",
+      "historicalBaseline": "../quality-matrix/visual-v2-extended/style-to-sketch-11-new-686fa657-47a7-4faa-b4ea-46bf6da60891-1.png",
+      "compilation": {
+        "id": "4bc1267f-a165-4dd2-9d42-4aad2b9eca36",
+        "status": "success",
+        "recipeVersionId": "855ca933-9600-4fc3-846a-e3ecfdc87ae1",
+        "recipeContentHash": "d267e31a0f825404e780a81dd782790d5e39c74cd011a68d4443e372ef1e11d2",
+        "reusedFromId": "6b6cf48a-99f9-4e73-b74f-cc2caf6a7ac8",
+        "optimizerModelConfigId": "d5000000-0000-4000-8000-000000000004",
+        "inputTokens": null,
+        "outputTokens": null,
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": "CNY"
+      },
+      "outputs": [
+        {
+          "path": "repair-v1/style-to-sketch-11-new-repeat-primary.png",
+          "role": "primary",
+          "mime": "image/png",
+          "bytes": 761965,
+          "sha256": "cc207ab299217f150f173041bbd6b268c3bf100506d5b87b8ae1ea1f60b9cbba",
+          "pixels": 1048576,
+          "transparentPixels": 0,
+          "partialAlphaPixels": 0,
+          "operations": []
+        }
+      ],
+      "visualReview": {
+        "grade": "MINOR_FIX",
+        "reason": "五颗完整纽扣保留，但领尖变圆，领口遮挡形状轻微漂移。"
+      }
+    },
+    {
+      "run": "repair-v1",
+      "id": "style-to-sketch-17-new-repeat",
+      "requestId": "pq:repair-v1:style-to-sketch-17-new-repeat",
+      "taskId": "3fb91404-d513-445d-a314-1772b1bd4122",
+      "model": {
+        "id": "d5000000-0000-4000-8000-000000000001",
+        "modelId": "d5000000-0000-4000-8000-000000000001"
+      },
+      "recordedStatus": "success",
+      "verifiedStatus": "success",
+      "errorCode": null,
+      "failureReason": "",
+      "compileAttempted": true,
+      "imageSubmissionAttempted": true,
+      "originalTaskDownloadRecovery": false,
+      "promptInput": {
+        "scene": "style-to-sketch",
+        "fields": {
+          "description": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。可见四孔纽扣以简洁圆形孔位表示，半遮挡领扣保持半遮挡。",
+          "sketchStyle": "technical",
+          "sketchDetail": "detailed"
+        },
+        "userText": "只画一件正面，不画背面。保持五颗完整前中纽扣及领口半遮挡原扣，不增加或删减；无胸袋，不能加袋。可见四孔纽扣以简洁圆形孔位表示，半遮挡领扣保持半遮挡。",
+        "referenceRoles": [
+          "服装参考图"
+        ],
+        "mode": "edit",
+        "hasMask": false
+      },
+      "finalPrompt": "Convert Image 1 into one front-view technical fashion flat, using its visible construction only, not its color, texture, or shadows. Use black (#000000) lines on pure white (#FFFFFF), a bolder contour, thin uniform construction lines, and dashed topstitching only where visible. Preserve original proportions, silhouette, visible asymmetry, collar, placket, sleeves, and hem. Keep exactly five complete center-front buttons with simple circular four-hole markings, plus the original half-obscured neckline button at its existing position and occlusion; do not complete it. Add no pockets, hidden details, or back view.\nAvoid: shading, gradients, color fills, fabric texture, added or missing buttons, completed neckline button, pockets, invented seams, hidden construction, models, extra hands, deformed limbs, minors, nudity, sexualized presentation, hangers, background objects, brand logos, watermarks, unrelated text, measurement labels, collages, multiple views, color swatches.",
+      "parameters": {
+        "n": 1,
+        "size": "1024x1024",
+        "quality": "auto",
+        "tool": "creative-style-to-sketch",
+        "count": 1
+      },
+      "referenceFixture": "../fixtures/shirt.png",
+      "historicalBaseline": "../quality-matrix/visual-v2-extended/style-to-sketch-17-new-8bb909b1-1b07-4f16-af49-33db3cf608fe-1.png",
+      "compilation": {
+        "id": "4f2755f8-cd94-4791-af78-14cb4f98c3af",
+        "status": "success",
+        "recipeVersionId": "855ca933-9600-4fc3-846a-e3ecfdc87ae1",
+        "recipeContentHash": "d267e31a0f825404e780a81dd782790d5e39c74cd011a68d4443e372ef1e11d2",
+        "reusedFromId": "0d17a108-b086-4eb7-9366-6520cbf08ecf",
+        "optimizerModelConfigId": "d5000000-0000-4000-8000-000000000004",
+        "inputTokens": null,
+        "outputTokens": null,
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": "CNY"
+      },
+      "outputs": [
+        {
+          "path": "repair-v1/style-to-sketch-17-new-repeat-primary.png",
+          "role": "primary",
+          "mime": "image/png",
+          "bytes": 753640,
+          "sha256": "80ce0f8314ea730de8163a63baf7f32176e9eaff83304c1e09c680b44c5ef46c",
+          "pixels": 1048576,
+          "transparentPixels": 0,
+          "partialAlphaPixels": 0,
+          "operations": []
+        }
+      ],
+      "visualReview": {
+        "grade": "PASS",
+        "reason": "重复出图仍保留五颗完整纽扣及半遮挡领口纽扣。"
+      }
+    },
+    {
+      "run": "repair-v1",
+      "id": "alpha-native-off",
+      "requestId": "pq:repair-v1:alpha-native-off",
+      "taskId": "2fae9426-7a88-4021-8d18-bb45ebb919c8",
+      "model": {
+        "id": "d5000000-0000-4000-8000-000000000001",
+        "modelId": "d5000000-0000-4000-8000-000000000001"
+      },
+      "recordedStatus": "success",
+      "verifiedStatus": "success",
+      "errorCode": null,
+      "failureReason": "",
+      "compileAttempted": false,
+      "imageSubmissionAttempted": true,
+      "originalTaskDownloadRecovery": false,
+      "promptInput": null,
+      "finalPrompt": "Recolor all motif color blocks in Image 1 into a warm, muted autumn palette: petals → dusty terracotta (#BE8871); flower center → warm oat (#E6D5A6); outlines, petal veins, and center dots → earthy brown (#776148). Use Image 1 for its original artwork only, not its existing palette. Preserve every contour, element count, position, proportion, arrangement, line thickness, color boundary, and hand-drawn stroke character exactly. Keep the background and any transparency unchanged. Maintain clear contrast between adjacent colors; do not add or remove elements.\nAvoid: changing shapes or adding motifs, blurred edges or gradient overlays, color swatches or dimension annotations, brand logos or watermarks, unrelated text, collages or multi-panel layouts, extra hands or deformed limbs, underage models, nudity or sexualized presentation.",
+      "parameters": {
+        "n": 1,
+        "size": "1024x1024",
+        "quality": "auto",
+        "tool": "image-edit",
+        "count": 1
+      },
+      "referenceFixture": "../fixtures/flower.png",
+      "historicalBaseline": "../quality-matrix/visual-v1/pattern-colorway-01-new-ab738087-4d42-455a-bc36-1d23748d4fc0-1.png",
+      "compilation": null,
+      "outputs": [
+        {
+          "path": "repair-v1/alpha-native-off-primary.png",
+          "role": "primary",
+          "mime": "image/png",
+          "bytes": 702908,
+          "sha256": "8184ee0206b84f5d5d1a370fde102f54ef0092ad96363b4d9a7bdd2edc7aa032",
+          "pixels": 1048576,
+          "transparentPixels": 0,
+          "partialAlphaPixels": 0,
+          "operations": []
+        }
+      ],
+      "visualReview": {
+        "grade": "CONTROL",
+        "reason": "固定提示词、不发原生透明参数：结果全不透明。"
+      }
+    },
+    {
+      "run": "repair-v1",
+      "id": "alpha-native-on",
+      "requestId": "pq:repair-v1:alpha-native-on",
+      "taskId": "35a9c13d-e6b4-4ff2-91db-5d0273ff1973",
+      "model": {
+        "id": "d5000000-0000-4000-8000-000000000001",
+        "modelId": "d5000000-0000-4000-8000-000000000001"
+      },
+      "recordedStatus": "success",
+      "verifiedStatus": "success",
+      "errorCode": null,
+      "failureReason": "",
+      "compileAttempted": false,
+      "imageSubmissionAttempted": true,
+      "originalTaskDownloadRecovery": false,
+      "promptInput": null,
+      "finalPrompt": "Recolor all motif color blocks in Image 1 into a warm, muted autumn palette: petals → dusty terracotta (#BE8871); flower center → warm oat (#E6D5A6); outlines, petal veins, and center dots → earthy brown (#776148). Use Image 1 for its original artwork only, not its existing palette. Preserve every contour, element count, position, proportion, arrangement, line thickness, color boundary, and hand-drawn stroke character exactly. Keep the background and any transparency unchanged. Maintain clear contrast between adjacent colors; do not add or remove elements.\nAvoid: changing shapes or adding motifs, blurred edges or gradient overlays, color swatches or dimension annotations, brand logos or watermarks, unrelated text, collages or multi-panel layouts, extra hands or deformed limbs, underage models, nudity or sexualized presentation.",
+      "parameters": {
+        "n": 1,
+        "size": "1024x1024",
+        "quality": "auto",
+        "background": "transparent",
+        "output_format": "png",
+        "tool": "image-edit",
+        "count": 1
+      },
+      "referenceFixture": "../fixtures/flower.png",
+      "historicalBaseline": "../quality-matrix/visual-v1/pattern-colorway-01-new-ab738087-4d42-455a-bc36-1d23748d4fc0-1.png",
+      "compilation": null,
+      "outputs": [
+        {
+          "path": "repair-v1/alpha-native-on-primary.png",
+          "role": "primary",
+          "mime": "image/png",
+          "bytes": 921811,
+          "sha256": "4a040ca0e18d7be2ebf30e652a13a0f07fea0a6575dcc530a50d82e9faab476b",
+          "pixels": 1048576,
+          "transparentPixels": 1048576,
+          "partialAlphaPixels": 468145,
+          "operations": [
+            "transparent_alpha_verified"
+          ]
+        }
+      ],
+      "visualReview": {
+        "grade": "REDO",
+        "reason": "同一提示词增加原生透明参数后出现 alpha，但仍有大范围柔边和光晕。"
+      }
+    },
+    {
+      "run": "repair-v2",
+      "id": "pattern-extract-03-new",
+      "requestId": "pq:repair-v2:pattern-extract-03-new",
+      "taskId": "fa28fa3d-a5eb-4770-a236-af5bac363325",
+      "model": {
+        "id": "d5000000-0000-4000-8000-000000000001",
+        "publicModelId": "d5000000-0000-4000-8000-000000000001",
+        "name": "aplmart-gpt2.5-flare",
+        "identityNote": "Public model identity can be redacted for the designer session; config ID pins the actual local runtime selection."
+      },
+      "recordedStatus": "success",
+      "verifiedStatus": "success",
+      "errorCode": null,
+      "failureReason": "",
+      "compileAttempted": true,
+      "imageSubmissionAttempted": true,
+      "originalTaskDownloadRecovery": true,
+      "promptInput": {
+        "scene": "pattern-extract",
+        "fields": {
+          "description": "保留清晰可见的形状、颜色、边缘与相对比例，不增添原图没有的元素。",
+          "extractMode": "单独图案",
+          "extractBackground": "白底"
+        },
+        "userText": "保留清晰可见的形状、颜色、边缘与相对比例，不增添原图没有的元素。",
+        "referenceRoles": [
+          "图案参考图"
+        ],
+        "mode": "edit",
+        "hasMask": false
+      },
+      "finalPrompt": "Extract only the central large navy blue (#293448) angular geometric motif and its mustard gold (#BE8C2F) center from Image 1; use its visible artwork, not neighboring motifs, decorative bands, or garment texture. Center it on a pure white (#FFFFFF), opaque background; flatten the design, removing fabric folds, perspective distortion, garment seams, lighting and shadows. Preserve the visible contours, irregular edges, colors, proportions, and internal spacing; retain any existing crop boundaries without reconstructing hidden portions, enforcing symmetry, or adding elements.\nAvoid: garment outlines, seams, folds, mockups, shadows, perspective distortion, new motifs, reconstructed hidden details, brand logos, watermarks, unrelated text, collages, multi-panel layouts, color swatches, dimension annotations, extra hands, deformed limbs, minor models, nudity, sexualized presentation.",
+      "parameters": {
+        "n": 1,
+        "size": "1024x1024",
+        "quality": "auto",
+        "tool": "creative-pattern-extract",
+        "count": 1,
+        "background": "opaque"
+      },
+      "referenceFixture": "../fixtures/knit.png",
+      "historicalBaseline": "../quality-matrix/visual-v1/pattern-extract-03-new-11ada841-e100-47ee-a423-b425f7c8a29d-1.png",
+      "compilation": {
+        "id": "b205c61b-08fa-4fdb-bc3f-db4298f66e3a",
+        "status": "success",
+        "recipeVersionId": "ebead417-65ca-415c-8faf-014522074f67",
+        "recipeContentHash": "03a708e5d23ccc4b43f26b98e4211543ab1688d9c70a7a1f6c81b9b3b7a5d25a",
+        "reusedFromId": null,
+        "optimizerModelConfigId": "d5000000-0000-4000-8000-000000000004",
+        "inputTokens": 1802,
+        "outputTokens": 317,
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": "CNY"
+      },
+      "outputs": [
+        {
+          "path": "repair-v2/pattern-extract-03-new-primary.png",
+          "role": "primary",
+          "mime": "image/png",
+          "bytes": 821133,
+          "sha256": "cfc29730eb27fed53a0a4462fc7ebf2df7cebe61d645b450bd467eb16f135b8b",
+          "pixels": 1048576,
+          "transparentPixels": 0,
+          "fullyTransparentPixels": 0,
+          "opaquePixels": 1048576,
+          "partialAlphaPixels": 0,
+          "operations": []
+        }
+      ],
+      "visualReview": {
+        "grade": "REDO",
+        "reason": "提示词已禁止补全，出图仍把原来的不规则几何单元重构成近似雪花，不合格。"
+      }
+    },
+    {
+      "run": "repair-v2",
+      "id": "pattern-extract-01-new",
+      "requestId": "pq:repair-v2:pattern-extract-01-new",
+      "taskId": "8f78735d-a7c9-4f5a-a5d9-2145ddbc4d1a",
+      "model": {
+        "id": "d5000000-0000-4000-8000-000000000001",
+        "publicModelId": "d5000000-0000-4000-8000-000000000001",
+        "name": "aplmart-gpt2.5-flare",
+        "identityNote": "Public model identity can be redacted for the designer session; config ID pins the actual local runtime selection."
+      },
+      "recordedStatus": "success",
+      "verifiedStatus": "success",
+      "errorCode": null,
+      "failureReason": "",
+      "compileAttempted": true,
+      "imageSubmissionAttempted": true,
+      "originalTaskDownloadRecovery": false,
+      "promptInput": {
+        "scene": "pattern-extract",
+        "fields": {
+          "description": "保留清晰可见的形状、颜色、边缘与相对比例，不增添原图没有的元素。",
+          "extractMode": "单独图案",
+          "extractBackground": "保留底色"
+        },
+        "userText": "保留清晰可见的形状、颜色、边缘与相对比例，不增添原图没有的元素。",
+        "referenceRoles": [
+          "图案参考图"
+        ],
+        "mode": "edit",
+        "hasMask": false
+      },
+      "finalPrompt": "Extract only the visible flower from Image 1 as a flat 2D motif, not a garment mockup; flatten the design, removing fabric folds, perspective distortion, garment seams, lighting and shadows. Preserve its contours, proportions, brushwork, peach petals (#CC8D6E), pale-yellow center (#F3DC91), and brown outlines (#8B6947); do not reconstruct or add elements. Retain original background transparency: fully transparent outside, opaque solid interiors, semitransparency only at existing antialiased edges. Add no shadows, glow, halos, gradient haze, colored backing, checkerboard, or overall opacity reduction.\nAvoid: garments, mockups, folds, perspective distortion, shadows, glow, halos, gradient haze, new motifs, reconstructed hidden details, colored backing, checkerboard, overall translucency, brand logos, watermarks, unrelated text, collages, multi-panel layouts, color swatches, dimension annotations, extra hands, malformed limbs, underage models, nudity, sexualized presentation.",
+      "parameters": {
+        "n": 1,
+        "size": "1024x1024",
+        "quality": "auto",
+        "tool": "creative-pattern-extract",
+        "count": 1,
+        "background": "transparent",
+        "output_format": "png"
+      },
+      "referenceFixture": "../fixtures/flower.png",
+      "historicalBaseline": "../quality-matrix/visual-v1/pattern-extract-01-new-0d696194-7404-4ab8-9a7a-891402aa1347-1.png",
+      "compilation": {
+        "id": "0614a657-350b-49ee-8fb0-c93dfc9ad90c",
+        "status": "success",
+        "recipeVersionId": "ebead417-65ca-415c-8faf-014522074f67",
+        "recipeContentHash": "03a708e5d23ccc4b43f26b98e4211543ab1688d9c70a7a1f6c81b9b3b7a5d25a",
+        "reusedFromId": null,
+        "optimizerModelConfigId": "d5000000-0000-4000-8000-000000000004",
+        "inputTokens": 1822,
+        "outputTokens": 393,
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": "CNY"
+      },
+      "outputs": [
+        {
+          "path": "repair-v2/pattern-extract-01-new-primary.png",
+          "role": "primary",
+          "mime": "image/png",
+          "bytes": 897452,
+          "sha256": "af63ef68bf8cb3f97c8e01af201095459ae7ec89384a0879d90ad83a1ae0bb31",
+          "pixels": 1048576,
+          "transparentPixels": 1048576,
+          "fullyTransparentPixels": 572083,
+          "opaquePixels": 0,
+          "partialAlphaPixels": 476493,
+          "operations": [
+            "transparent_alpha_verified"
+          ]
+        }
+      ],
+      "visualReview": {
+        "grade": "REDO",
+        "reason": "追加平面、实心和禁止光晕要求后，透明边缘及花瓣细节仍不合格。"
+      }
+    },
+    {
+      "run": "repair-v2",
+      "id": "pattern-extract-02-new",
+      "requestId": "pq:repair-v2:pattern-extract-02-new",
+      "taskId": "d00221b5-f0a5-4d97-a446-42017aa9adbc",
+      "model": {
+        "id": "d5000000-0000-4000-8000-000000000001",
+        "publicModelId": "d5000000-0000-4000-8000-000000000001",
+        "name": "aplmart-gpt2.5-flare",
+        "identityNote": "Public model identity can be redacted for the designer session; config ID pins the actual local runtime selection."
+      },
+      "recordedStatus": "success",
+      "verifiedStatus": "success",
+      "errorCode": null,
+      "failureReason": "",
+      "compileAttempted": true,
+      "imageSubmissionAttempted": true,
+      "originalTaskDownloadRecovery": true,
+      "promptInput": {
+        "scene": "pattern-extract",
+        "fields": {
+          "description": "保留清晰可见的形状、颜色、边缘与相对比例，不增添原图没有的元素。",
+          "extractMode": "完整可见花型",
+          "extractBackground": "白底"
+        },
+        "userText": "保留清晰可见的形状、颜色、边缘与相对比例，不增添原图没有的元素。",
+        "referenceRoles": [
+          "图案参考图"
+        ],
+        "mode": "edit",
+        "hasMask": false
+      },
+      "finalPrompt": "Extract the entire visible botanical motif from Image 1 onto a pure white (#FFFFFF), opaque background; use its leafy stem artwork, not its background or pixel grid. Flatten the design, removing fabric folds, perspective distortion, garment seams, lighting and shadows. Preserve the four leaves, stem, muted olive green (#788C58) fills, dark green (#4F6545) outlines and veins, visible contours, edge character, proportions, element count, relative positions, and existing crop boundaries. Retain only evidenced artwork; do not reconstruct hidden portions, rearrange elements, add motifs, or create a seamless repeat.\nAvoid: garments, mockups, seams, folds, shadows, perspective distortion, new motifs, reconstructed hidden details, brand logos, watermarks, unrelated text, collages, multi-panel layouts, color swatches, dimension annotations, extra hands, deformed limbs, underage models, nudity, sexualized imagery.",
+      "parameters": {
+        "n": 1,
+        "size": "1024x1024",
+        "quality": "auto",
+        "tool": "creative-pattern-extract",
+        "count": 1,
+        "background": "opaque"
+      },
+      "referenceFixture": "../fixtures/leaf.png",
+      "historicalBaseline": "../quality-matrix/visual-v1/pattern-extract-02-new-1c703f88-4a19-492e-92df-134261ee002c-1.png",
+      "compilation": {
+        "id": "c2ceb70a-fa0f-4234-96b6-4a5dd9a94215",
+        "status": "success",
+        "recipeVersionId": "ebead417-65ca-415c-8faf-014522074f67",
+        "recipeContentHash": "03a708e5d23ccc4b43f26b98e4211543ab1688d9c70a7a1f6c81b9b3b7a5d25a",
+        "reusedFromId": null,
+        "optimizerModelConfigId": "d5000000-0000-4000-8000-000000000004",
+        "inputTokens": 1812,
+        "outputTokens": 311,
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": "CNY"
+      },
+      "outputs": [
+        {
+          "path": "repair-v2/pattern-extract-02-new-primary.png",
+          "role": "primary",
+          "mime": "image/png",
+          "bytes": 842863,
+          "sha256": "201303fb4ac4efa15194efa0513cf1a8351c19e136bc8aa544963879531972fc",
+          "pixels": 1048576,
+          "transparentPixels": 0,
+          "fullyTransparentPixels": 0,
+          "opaquePixels": 1048576,
+          "partialAlphaPixels": 0,
+          "operations": []
+        }
+      ],
+      "visualReview": {
+        "grade": "PASS",
+        "reason": "白底四叶枝干完整，叶脉、相对位置与元素数量保留。"
+      }
+    },
+    {
+      "run": "repair-v2",
+      "id": "pattern-colorway-01-new",
+      "requestId": "pq:repair-v2:pattern-colorway-01-new",
+      "taskId": "aaad2ad8-b534-4148-8ef2-82fc60a9c6d5",
+      "model": {
+        "id": "d5000000-0000-4000-8000-000000000001",
+        "publicModelId": "d5000000-0000-4000-8000-000000000001",
+        "name": "aplmart-gpt2.5-flare",
+        "identityNote": "Public model identity can be redacted for the designer session; config ID pins the actual local runtime selection."
+      },
+      "recordedStatus": "success",
+      "verifiedStatus": "success",
+      "errorCode": null,
+      "failureReason": "",
+      "compileAttempted": true,
+      "imageSubmissionAttempted": true,
+      "originalTaskDownloadRecovery": false,
+      "promptInput": {
+        "scene": "pattern-colorway",
+        "fields": {
+          "description": "温暖低饱和秋季配色。保留图案轮廓、所有元素数量、位置、比例和排列。",
+          "colorMode": "smart",
+          "colorRegion": "图案的所有色块",
+          "colorMood": "自然柔和"
+        },
+        "userText": "温暖低饱和秋季配色。保留图案轮廓、所有元素数量、位置、比例和排列。",
+        "referenceRoles": [
+          "图案参考图"
+        ],
+        "mode": "edit",
+        "hasMask": false
+      },
+      "finalPrompt": "Recolor all existing motif color blocks in Image 1 into a warm, muted autumn palette: petals → dusty terracotta (#BC8268); flower center → oat cream (#E8D6A5); outlines, petal veins and center dots → warm taupe brown (#78634E). Use Image 1 for geometry and brushwork only, not its original palette. Preserve every contour, line width, element count, position, proportion, color boundary, arrangement and texture exactly; change RGB colors only. Maintain clear contrast between adjacent regions. Keep the exterior fully transparent and solid interiors opaque, allowing partial transparency only at existing antialiased edges. Render as flat 2D artwork without scene lighting, shadows, glow, halos, gradient fringes, colored backing or checkerboards; never reduce overall opacity.\nAvoid: shape changes or added motifs, blurred edges or gradient overlays, brand logos, watermarks or unrelated text, collages or multi-panel layouts, color swatches or dimension labels, extra hands or malformed limbs, underage models, nudity or sexualized presentation.",
+      "parameters": {
+        "n": 1,
+        "size": "1024x1024",
+        "quality": "auto",
+        "tool": "creative-pattern-colorway",
+        "count": 1,
+        "background": "transparent",
+        "output_format": "png"
+      },
+      "referenceFixture": "../fixtures/flower.png",
+      "historicalBaseline": "../quality-matrix/visual-v1/pattern-colorway-01-new-ab738087-4d42-455a-bc36-1d23748d4fc0-1.png",
+      "compilation": {
+        "id": "a4e3c215-abb9-4df2-92f8-184e41092c15",
+        "status": "success",
+        "recipeVersionId": "3389d0bc-6c6a-49ae-a655-8cb77ce23d10",
+        "recipeContentHash": "036bd6ece4149d84989f33e5825f987f8b7446393da1a94063a799ea6ac77011",
+        "reusedFromId": null,
+        "optimizerModelConfigId": "d5000000-0000-4000-8000-000000000004",
+        "inputTokens": 2301,
+        "outputTokens": 393,
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": "CNY"
+      },
+      "outputs": [
+        {
+          "path": "repair-v2/pattern-colorway-01-new-primary.png",
+          "role": "primary",
+          "mime": "image/png",
+          "bytes": 920881,
+          "sha256": "13f12dd3f6dd081803436d53e6542f88177c5190f841a3c9f1457fe14b60535f",
+          "pixels": 1048576,
+          "transparentPixels": 1048576,
+          "fullyTransparentPixels": 567709,
+          "opaquePixels": 0,
+          "partialAlphaPixels": 480867,
+          "operations": [
+            "transparent_alpha_verified"
+          ]
+        }
+      ],
+      "visualReview": {
+        "grade": "REDO",
+        "reason": "追加禁止整体降透明度和光晕要求后仍有光晕，不能当作像素保真换色。"
+      }
+    },
+    {
+      "run": "repair-sunburst-alpha",
+      "id": "alpha-native-off",
+      "requestId": "pq:repair-sunburst-alpha:alpha-native-off",
+      "taskId": "bf757659-9aab-4c08-83ab-2329996429b1",
+      "model": {
+        "id": "d5000000-0000-4000-8000-000000000002",
+        "publicModelId": "d5000000-0000-4000-8000-000000000002",
+        "name": "aplmart-gpt2.5-sunburst",
+        "identityNote": "Public model identity can be redacted for the designer session; config ID pins the actual local runtime selection."
+      },
+      "recordedStatus": "success",
+      "verifiedStatus": "success",
+      "errorCode": null,
+      "failureReason": "",
+      "compileAttempted": false,
+      "imageSubmissionAttempted": true,
+      "originalTaskDownloadRecovery": false,
+      "promptInput": null,
+      "finalPrompt": "Recolor all motif color blocks in Image 1 into a warm, muted autumn palette: petals → dusty terracotta (#BE8871); flower center → warm oat (#E6D5A6); outlines, petal veins, and center dots → earthy brown (#776148). Use Image 1 for its original artwork only, not its existing palette. Preserve every contour, element count, position, proportion, arrangement, line thickness, color boundary, and hand-drawn stroke character exactly. Keep the background and any transparency unchanged. Maintain clear contrast between adjacent colors; do not add or remove elements.\nAvoid: changing shapes or adding motifs, blurred edges or gradient overlays, color swatches or dimension annotations, brand logos or watermarks, unrelated text, collages or multi-panel layouts, extra hands or deformed limbs, underage models, nudity or sexualized presentation.",
+      "parameters": {
+        "n": 1,
+        "size": "1024x1024",
+        "quality": "auto",
+        "tool": "image-edit",
+        "count": 1
+      },
+      "referenceFixture": "../fixtures/flower.png",
+      "historicalBaseline": "../quality-matrix/visual-v1/pattern-colorway-01-new-ab738087-4d42-455a-bc36-1d23748d4fc0-1.png",
+      "compilation": null,
+      "outputs": [
+        {
+          "path": "repair-sunburst-alpha/alpha-native-off-primary.png",
+          "role": "primary",
+          "mime": "image/png",
+          "bytes": 699642,
+          "sha256": "402d08c486bd3e37c7af43bcc1c295e050c4a8da0dbe2ac874207cc83635a616",
+          "pixels": 1048576,
+          "transparentPixels": 0,
+          "fullyTransparentPixels": 0,
+          "opaquePixels": 1048576,
+          "partialAlphaPixels": 0,
+          "operations": []
+        }
+      ],
+      "visualReview": {
+        "grade": "CONTROL",
+        "reason": "Sunburst 固定提示词、不发原生透明参数：全不透明。"
+      }
+    },
+    {
+      "run": "repair-sunburst-alpha",
+      "id": "alpha-native-on",
+      "requestId": "pq:repair-sunburst-alpha:alpha-native-on",
+      "taskId": "5a374bb9-fb8a-4931-82bd-9915ce85dc71",
+      "model": {
+        "id": "d5000000-0000-4000-8000-000000000002",
+        "publicModelId": "d5000000-0000-4000-8000-000000000002",
+        "name": "aplmart-gpt2.5-sunburst",
+        "identityNote": "Public model identity can be redacted for the designer session; config ID pins the actual local runtime selection."
+      },
+      "recordedStatus": "success",
+      "verifiedStatus": "success",
+      "errorCode": null,
+      "failureReason": "",
+      "compileAttempted": false,
+      "imageSubmissionAttempted": true,
+      "originalTaskDownloadRecovery": false,
+      "promptInput": null,
+      "finalPrompt": "Recolor all motif color blocks in Image 1 into a warm, muted autumn palette: petals → dusty terracotta (#BE8871); flower center → warm oat (#E6D5A6); outlines, petal veins, and center dots → earthy brown (#776148). Use Image 1 for its original artwork only, not its existing palette. Preserve every contour, element count, position, proportion, arrangement, line thickness, color boundary, and hand-drawn stroke character exactly. Keep the background and any transparency unchanged. Maintain clear contrast between adjacent colors; do not add or remove elements.\nAvoid: changing shapes or adding motifs, blurred edges or gradient overlays, color swatches or dimension annotations, brand logos or watermarks, unrelated text, collages or multi-panel layouts, extra hands or deformed limbs, underage models, nudity or sexualized presentation.",
+      "parameters": {
+        "n": 1,
+        "size": "1024x1024",
+        "quality": "auto",
+        "background": "transparent",
+        "output_format": "png",
+        "tool": "image-edit",
+        "count": 1
+      },
+      "referenceFixture": "../fixtures/flower.png",
+      "historicalBaseline": "../quality-matrix/visual-v1/pattern-colorway-01-new-ab738087-4d42-455a-bc36-1d23748d4fc0-1.png",
+      "compilation": null,
+      "outputs": [
+        {
+          "path": "repair-sunburst-alpha/alpha-native-on-primary.png",
+          "role": "primary",
+          "mime": "image/png",
+          "bytes": 923600,
+          "sha256": "90ff241218edfa26b01114da802957c8f912cb360a97f8a8379447d2ea6152ad",
+          "pixels": 1048576,
+          "transparentPixels": 1048576,
+          "fullyTransparentPixels": 559622,
+          "opaquePixels": 0,
+          "partialAlphaPixels": 488954,
+          "operations": [
+            "transparent_alpha_verified"
+          ]
+        }
+      ],
+      "visualReview": {
+        "grade": "REDO",
+        "reason": "Sunburst 原生透明参数有效，但柔边光晕仍不合格。"
+      }
+    },
+    {
+      "run": "repair-opentoken-alpha",
+      "id": "alpha-native-off",
+      "requestId": "pq:repair-opentoken-alpha:alpha-native-off",
+      "taskId": "c653892b-9441-40a4-a6c6-59c796c2e7f5",
+      "model": {
+        "id": "40000000-0000-4000-8000-000000000107",
+        "publicModelId": "40000000-0000-4000-8000-000000000107",
+        "name": "gpt-image-2.5-flare",
+        "identityNote": "Public model identity can be redacted for the designer session; config ID pins the actual local runtime selection."
+      },
+      "recordedStatus": "failed",
+      "verifiedStatus": "failed",
+      "errorCode": null,
+      "failureReason": "图片服务 image request failed: 500: quota reservation failed: insufficient enterprise balance",
+      "compileAttempted": false,
+      "imageSubmissionAttempted": true,
+      "originalTaskDownloadRecovery": false,
+      "promptInput": null,
+      "finalPrompt": "Recolor all motif color blocks in Image 1 into a warm, muted autumn palette: petals → dusty terracotta (#BE8871); flower center → warm oat (#E6D5A6); outlines, petal veins, and center dots → earthy brown (#776148). Use Image 1 for its original artwork only, not its existing palette. Preserve every contour, element count, position, proportion, arrangement, line thickness, color boundary, and hand-drawn stroke character exactly. Keep the background and any transparency unchanged. Maintain clear contrast between adjacent colors; do not add or remove elements.\nAvoid: changing shapes or adding motifs, blurred edges or gradient overlays, color swatches or dimension annotations, brand logos or watermarks, unrelated text, collages or multi-panel layouts, extra hands or deformed limbs, underage models, nudity or sexualized presentation.",
+      "parameters": {
+        "n": 1,
+        "size": "1024x1024",
+        "quality": "auto",
+        "tool": "image-edit",
+        "count": 1
+      },
+      "referenceFixture": "../fixtures/flower.png",
+      "historicalBaseline": "../quality-matrix/visual-v1/pattern-colorway-01-new-ab738087-4d42-455a-bc36-1d23748d4fc0-1.png",
+      "compilation": null,
+      "outputs": [],
+      "visualReview": {
+        "grade": "NOT_GENERATED",
+        "reason": "上游返回 insufficient enterprise balance；没有成图，无法判断视觉质量。"
+      }
+    },
+    {
+      "run": "repair-opentoken-alpha",
+      "id": "alpha-native-on",
+      "requestId": "pq:repair-opentoken-alpha:alpha-native-on",
+      "taskId": "b54b5797-2153-4934-8da6-d65e90bf4609",
+      "model": {
+        "id": "40000000-0000-4000-8000-000000000107",
+        "publicModelId": "40000000-0000-4000-8000-000000000107",
+        "name": "gpt-image-2.5-flare",
+        "identityNote": "Public model identity can be redacted for the designer session; config ID pins the actual local runtime selection."
+      },
+      "recordedStatus": "failed",
+      "verifiedStatus": "failed",
+      "errorCode": null,
+      "failureReason": "图片服务 image request failed: 500: quota reservation failed: insufficient enterprise balance",
+      "compileAttempted": false,
+      "imageSubmissionAttempted": true,
+      "originalTaskDownloadRecovery": false,
+      "promptInput": null,
+      "finalPrompt": "Recolor all motif color blocks in Image 1 into a warm, muted autumn palette: petals → dusty terracotta (#BE8871); flower center → warm oat (#E6D5A6); outlines, petal veins, and center dots → earthy brown (#776148). Use Image 1 for its original artwork only, not its existing palette. Preserve every contour, element count, position, proportion, arrangement, line thickness, color boundary, and hand-drawn stroke character exactly. Keep the background and any transparency unchanged. Maintain clear contrast between adjacent colors; do not add or remove elements.\nAvoid: changing shapes or adding motifs, blurred edges or gradient overlays, color swatches or dimension annotations, brand logos or watermarks, unrelated text, collages or multi-panel layouts, extra hands or deformed limbs, underage models, nudity or sexualized presentation.",
+      "parameters": {
+        "n": 1,
+        "size": "1024x1024",
+        "quality": "auto",
+        "background": "transparent",
+        "output_format": "png",
+        "tool": "image-edit",
+        "count": 1
+      },
+      "referenceFixture": "../fixtures/flower.png",
+      "historicalBaseline": "../quality-matrix/visual-v1/pattern-colorway-01-new-ab738087-4d42-455a-bc36-1d23748d4fc0-1.png",
+      "compilation": null,
+      "outputs": [],
+      "visualReview": {
+        "grade": "NOT_GENERATED",
+        "reason": "上游返回 insufficient enterprise balance；没有成图，无法判断透明能力。"
+      }
+    },
+    {
+      "run": "repair-lettering",
+      "id": "lettering-single-quote",
+      "requestId": "pq:repair-lettering:lettering-single-quote",
+      "taskId": "d121d5a5-be88-4e59-9626-b715c88bff7f",
+      "model": {
+        "id": "d5000000-0000-4000-8000-000000000001",
+        "publicModelId": "d5000000-0000-4000-8000-000000000001",
+        "name": "aplmart-gpt2.5-flare",
+        "identityNote": "Public model identity can be redacted for the designer session; config ID pins the actual local runtime selection."
+      },
+      "recordedStatus": "success",
+      "verifiedStatus": "success",
+      "errorCode": null,
+      "failureReason": "",
+      "compileAttempted": true,
+      "imageSubmissionAttempted": true,
+      "originalTaskDownloadRecovery": false,
+      "promptInput": {
+        "scene": "local-restyle",
+        "fields": {
+          "restyleArea": "左胸",
+          "change": "只加指定印字",
+          "preserve": "纽扣数量、口袋、轮廓、衣身颜色不变"
+        },
+        "userText": "在图片1衬衫左胸印上 'SUMMER 2026'，只加这一行文字，纽扣、胸袋和其他结构不变。",
+        "referenceRoles": [
+          "原衬衫"
+        ],
+        "mode": "edit",
+        "hasMask": false
+      },
+      "finalPrompt": "Modify only the blank left chest in Image 1 (viewer’s right): add \"SUMMER 2026\" as one small, legible line of charcoal (#45413A) sans-serif printing above the pocket, without overlapping it. Keep everything else exactly the same: 纽扣数量、口袋、轮廓、衣身颜色不变; preserve all five buttons, garment structure, flat illustration texture, outlines, background and front view; use Image 1 as the unchanged base, not a redesign reference. Blend the printing seamlessly into the illustrated surface, matching its flat rendering and lighting.\nAvoid: changing other parts or redrawing the whole garment, color shift or new accessories, brand logos or watermarks, extra or unrelated text, collages or multi-panel layouts, color swatches or dimension annotations, extra hands or deformed limbs, minor models, nudity or sexualization.",
+      "parameters": {
+        "n": 1,
+        "size": "1024x1024",
+        "quality": "auto",
+        "tool": "creative-local-restyle",
+        "count": 1
+      },
+      "referenceFixture": "../fixtures/flat.png",
+      "historicalBaseline": null,
+      "compilation": {
+        "id": "b9a257f8-bebf-48bf-8895-4edcc7e04ea9",
+        "status": "success",
+        "recipeVersionId": "193831fe-8a92-4edf-aad3-0c69d14624ae",
+        "recipeContentHash": "0541728b9856580874b5b47d314755f1046450f02764d65962432821912e49e2",
+        "reusedFromId": null,
+        "optimizerModelConfigId": "d5000000-0000-4000-8000-000000000004",
+        "inputTokens": 2254,
+        "outputTokens": 269,
+        "actualCost": null,
+        "estimatedCost": null,
+        "currency": "CNY"
+      },
+      "outputs": [
+        {
+          "path": "repair-lettering/lettering-single-quote-primary.png",
+          "role": "primary",
+          "mime": "image/png",
+          "bytes": 812236,
+          "sha256": "a5f73d742dfcbd91e7a52cf3ee9c27469e3948043871fa24fe6968a5d4d86b1b",
+          "pixels": 1048576,
+          "transparentPixels": 0,
+          "fullyTransparentPixels": 0,
+          "opaquePixels": 1048576,
+          "partialAlphaPixels": 0,
+          "operations": []
+        }
+      ],
+      "visualReview": {
+        "grade": "MINOR_FIX",
+        "reason": "SUMMER 2026 逐字正确，五颗纽扣和胸袋保留；原平面底色新增渐变。"
+      }
+    }
+  ]
+}

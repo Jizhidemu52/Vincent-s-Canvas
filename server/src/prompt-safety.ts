@@ -33,9 +33,35 @@ export function assertNoPromptRuleLeak(output: unknown, privateRules: readonly s
 
 export function specifiedPromptText(userText: string, fields: Record<string, unknown>) {
   const result = new Set<string>();
-  for (const match of userText.matchAll(/(?:文字|文案|字样|印字|标语|text|wording|slogan|lettering)[^\n“"「]{0,18}[“"「]([^”"」\n]{1,200})[”"」]/gi)) result.add(match[1]!);
+  // Quotation alone is not a request to render text: require a lettering cue,
+  // paired quotes, and exclude explicit style descriptions or negated print actions.
+  const literals = /(?:印上|印有|印着|写上|绣上|文字|文案|字样|印字|标语|\b(?:text|wording|slogan|lettering|print(?:ed)?|embroider(?:ed)?)\b)([^\n"'“‘「]{0,18})(?:"([^"\n]{1,1000})"|'([^'\n]{1,1000})'|“([^”\n]{1,1000})”|‘([^’\n]{1,1000})’|「([^」\n]{1,1000})」)/gi;
+  for (const match of userText.matchAll(literals)) {
+    const before = userText.slice(Math.max(0, match.index! - 16), match.index);
+    if (/(?:风格|字体|排版|质感|\b(?:style|font|typography|texture)\b)/i.test(match[1]!)
+      || /(?:不要|禁止|不许|无需|无|do not|don't|without|no)\s*$/i.test(before)) continue;
+    result.add(match.slice(2).find(value => value !== undefined)!);
+  }
+  if (Object.hasOwn(fields, "keep_text")) {
+    const explicit = fields.keep_text;
+    if (!Array.isArray(explicit) || explicit.length > 50 || explicit.some(value => typeof value !== "string" || !value.trim() || value.length > 1_000)) {
+      throw new PromptOptimizationError("PROMPT_TEXT_INVALID", "需保留文字必须为不超过 50 项的非空字符串数组，每项最多 1000 字符", 422);
+    }
+    for (const text of explicit as string[]) result.add(text);
+  }
   for (const [key, value] of Object.entries(fields)) if (/^(?:text|logoText|printText|visibleText|wording|slogan|lettering)$/i.test(key) && typeof value === "string" && value.trim()) result.add(value.trim());
   return [...result];
+}
+
+function allowRequiredText(avoid: string, language: "en" | "zh") {
+  // Only qualify standalone blanket bans. Keep targeted restrictions (such as
+  // unrelated text, text labels, logos, or textured fabric) exactly as supplied.
+  return avoid.split(/(\s*(?:[,;，；、/]|\band\b|\bor\b)\s*)/i).map(part => {
+    const phrase = part.trim().replace(/[.!。！]+$/, "");
+    return /^(?:(?:no|any|all|without)\s+)?(?:text|lettering|words|slogans?)$/i.test(phrase)
+      || /^(?:无|不要|禁止|任何|所有)?(?:文字|文本|字样|标语)$/.test(phrase)
+      ? language === "zh" ? "无关文字" : "unrelated text" : part;
+  }).join("");
 }
 
 export function parseOptimizedPrompt(raw: string, rules: readonly string[], options: { reverse?: boolean; referenceCount: number; userText: string; language: "en" | "zh"; requiredText?: string[] }) {
@@ -61,11 +87,11 @@ export function parseOptimizedPrompt(raw: string, rules: readonly string[], opti
     throw new PromptOptimizationError("PROMPT_OUTPUT_INVALID", "提示词约束格式无效，未提交生成", 422);
   }
   const keepText = value.keep_text as string[];
-  if (keepText.some(text => !options.userText.includes(text) || !(value.prompt as string).includes(text))
+  if (keepText.some(text => (!options.userText.includes(text) && !options.requiredText?.includes(text)) || !(value.prompt as string).includes(text))
     || options.requiredText?.some(text => !keepText.includes(text) || !(value.prompt as string).includes(text))) {
     throw new PromptOptimizationError("PROMPT_TEXT_NOT_PRESERVED", "优化结果未原样保留指定文字，未提交生成", 422);
   }
-  const avoid = (value.avoid as string[]).filter(Boolean);
+  const avoid = (value.avoid as string[]).filter(Boolean).map(item => keepText.length ? allowRequiredText(item, options.language) : item);
   const prompt = [value.prompt.trim(), avoid.length ? `${options.language === "zh" ? "避免" : "Avoid"}: ${avoid.join(", ")}.` : ""].filter(Boolean).join("\n");
   if (prompt.length > 20_000) throw new PromptOptimizationError("PROMPT_OUTPUT_INVALID", "最终提示词过长，未提交生成", 422);
   return { prompt, keepText };

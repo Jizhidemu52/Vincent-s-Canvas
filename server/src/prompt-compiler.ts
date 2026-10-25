@@ -70,6 +70,9 @@ export class PromptCompiler {
     if (request.promptInput.scene !== "text-to-style" && !["free-optimize", "batch-optimize"].includes(request.promptInput.scene) && !references.length) {
       throw new PromptOptimizationError("PROMPT_REFERENCE_REQUIRED", "此场景需要参考图，未提交生成");
     }
+    const fields = normalizePromptFields(request.promptInput);
+    const userText = request.promptInput.userText || (typeof fields.instruction === "string" ? fields.instruction : "");
+    const requiredText = specifiedPromptText(userText, fields);
     const language = request.promptInput.outputLanguage ?? active.version.outputLanguage;
     const inputHash = promptHash({ version: active.version.id, target: target.fingerprint, optimizer: optimizer.fingerprint, adminTest,
       input: { ...normalInput(request.promptInput), outputLanguage: language }, references: references.map((source, index) => ({ hash: sourceHash(source), role: roles[index] ?? "" })),
@@ -86,8 +89,6 @@ export class PromptCompiler {
     const started = performance.now();
     const modelRules = active.version.modelOverrides[target.id] ?? active.version.modelOverrides[target.modelId] ?? "";
     const system = [active.version.systemPrompt, active.version.fieldTemplate, modelRules].filter(Boolean).join("\n\n");
-    const fields = normalizePromptFields(request.promptInput);
-    const userText = request.promptInput.userText || (typeof fields.instruction === "string" ? fields.instruction : "");
     const payload = { recipe: active.recipe.key, target_model: target.modelId,
       model_style: request.promptInput.scene === "reverse-prompt" ? "natural" : /midjourney/i.test(target.modelId) ? "tags" : request.promptInput.mode === "edit" ? "edit" : "natural",
       output_language: language, mode: request.promptInput.mode, fields, user_text: userText,
@@ -101,7 +102,7 @@ export class PromptCompiler {
       const result = await optimizer.invoke(system, content);
       rawResponse = result.content;
       usage = result.usage;
-      const output = parseOptimizedPrompt(result.content, [system], { reverse: request.promptInput.scene === "reverse-prompt", referenceCount: references.length, userText: `${userText}\n${JSON.stringify(fields)}`, language, requiredText: specifiedPromptText(userText, fields) });
+      const output = parseOptimizedPrompt(result.content, [system], { reverse: request.promptInput.scene === "reverse-prompt", referenceCount: references.length, userText: `${userText}\n${JSON.stringify(fields)}`, language, requiredText });
       await this.store.finish(claim.id, "success", { ...output, optimized: true, rawResponse, latencyMs: Math.round(performance.now() - started), ...usageFields(usage, optimizer.estimatedRmbCost) });
     } catch (error) {
       const diagnostics = readProviderSubmissionDiagnostics(error);

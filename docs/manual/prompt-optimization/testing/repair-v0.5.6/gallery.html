@@ -1,0 +1,199 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>v0.5.6 修复验证</title><style>body{max-width:1400px;margin:30px auto;padding:0 20px;font:16px/1.6 system-ui;color:#232323;background:#f4f4f2}article{margin:30px 0;padding:20px;background:white;border:1px solid #ccc}.images{display:flex;flex-wrap:wrap;gap:14px}figure{flex:1;min-width:220px;margin:0}img{width:100%;height:360px;object-fit:contain;background:repeating-conic-gradient(#ddd 0% 25%,#fff 0% 50%) 50%/24px 24px}pre{white-space:pre-wrap;overflow-wrap:anywhere}h2{font-size:18px}</style><h1>v0.5.6 修复与真实出图验证</h1><p>原始 PNG 未改写。棋盘格仅为网页背景，不在图片里。PASS 是本组需求人工目视通过，不是像素一致、生产可用或稳定成功率。历史图没有同种子控制。</p><p><a href="report.json">完整脱敏记录、用量和参数</a> · <a href="README.md">结论与边界</a></p><article><h2>repair-v1 / pattern-extract-03-new — NOT_GENERATED</h2><p>优化失败，未提交生图。后续修改规则后使用新的请求编号验证，未重放此请求。</p><p>接口：compilation_failed · </p><div class="images"><figure><img src="../fixtures/knit.png"><figcaption>原参考图</figcaption></figure><figure><img src="../quality-matrix/visual-v1/pattern-extract-03-new-11ada841-e100-47ee-a423-b425f7c8a29d-1.png"><figcaption>历史失败／对照（非本轮重跑）</figcaption></figure></div><details><summary>实际提示词和参数</summary><pre>
+{}</pre></details></article>
+<article><h2>repair-v1 / pattern-extract-06-new — PASS</h2><p>横向纹样带完整保留可见边界，没有补出画外元素。</p><p>接口：success · </p><div class="images"><figure><img src="../fixtures/knit.png"><figcaption>原参考图</figcaption></figure><figure><img src="../quality-matrix/visual-v1/pattern-extract-06-new-46382f63-32ba-4232-9d54-c403942d983b-1.png"><figcaption>历史失败／对照（非本轮重跑）</figcaption></figure><figure><img src="repair-v1/pattern-extract-06-new-primary.png"><figcaption>本轮原始结果 · alpha&lt;255: 0/1048576</figcaption></figure></div><details><summary>实际提示词和参数</summary><pre>Extract the entire visible pattern from Image 1 onto an opaque pure white (#FFFFFF) background; use its motifs, not the garment or photographic texture. Flatten the design, removing fabric folds, perspective distortion, garment seams, lighting and shadows. Preserve the navy (#252C40), brick red (#A6402E), mustard (#BA8A35), and ivory (#E8E0CC) details, stepped knitted edges, motif counts, proportions, positions, and cropped boundaries. Retain only visibly evidenced shapes; do not reconstruct obscured areas, extend beyond the image, rearrange elements, or create a seamless repeat.
+Avoid: garment outlines, seams, mockups, folds, shadows, perspective distortion, new motifs, inferred missing shapes, rearranged elements, brand logos, watermarks, unrelated text, collages, multi-panel layouts, color swatches, dimension annotations, extra hands, deformed limbs, underage models, nudity, sexualized presentation.
+{
+  &quot;n&quot;: 1,
+  &quot;size&quot;: &quot;1024x1024&quot;,
+  &quot;quality&quot;: &quot;auto&quot;,
+  &quot;tool&quot;: &quot;creative-pattern-extract&quot;,
+  &quot;count&quot;: 1,
+  &quot;background&quot;: &quot;opaque&quot;
+}</pre></details></article>
+<article><h2>repair-v1 / pattern-craft-02-new — PASS</h2><p>四片叶子和枝干完整入镜；工艺纹理可见，四周有留白。</p><p>接口：success · </p><div class="images"><figure><img src="../fixtures/leaf.png"><figcaption>原参考图</figcaption></figure><figure><img src="../quality-matrix/visual-v1/pattern-craft-02-new-55d105da-d793-434e-b7bc-d864f4438c2e-1.png"><figcaption>历史失败／对照（非本轮重跑）</figcaption></figure><figure><img src="repair-v1/pattern-craft-02-new-primary.png"><figcaption>本轮原始结果 · alpha&lt;255: 0/1048576</figcaption></figure></div><details><summary>实际提示词和参数</summary><pre>Convert the botanical motif in Image 1 into yarn-integrated jacquard on ivory (#F2EFE6) cotton jersey knit, with visible yarn texture, continuous fabric structure, and a motif flush with the surface. Preserve its four leaves, stem, contours, proportions, placement, and original muted green (#788B59) and dark olive (#4C6140) coloring; use Image 1 only for the motif, not its background. Add no decorations. Show the complete motif front-on with clear fabric margins, sharp edges and stitch detail, and soft directional lighting revealing the knit texture.
+Avoid: flat printed look, raised embroidery, redesigned motif, added decorations, brand logos, watermarks, unrelated text, collages, multi-panel layouts, color swatch strips, dimension annotations, extra hands, deformed limbs, underage models, nudity, sexualized presentation.
+{
+  &quot;n&quot;: 1,
+  &quot;size&quot;: &quot;1024x1024&quot;,
+  &quot;quality&quot;: &quot;auto&quot;,
+  &quot;tool&quot;: &quot;creative-pattern-craft&quot;,
+  &quot;count&quot;: 1
+}</pre></details></article>
+<article><h2>repair-v1 / pattern-craft-10-new — PASS</h2><p>花形完整入镜，外轮廓未被微距构图裁掉；工艺细节清晰。</p><p>接口：success · </p><div class="images"><figure><img src="../fixtures/flower.png"><figcaption>原参考图</figcaption></figure><figure><img src="../quality-matrix/visual-v1/pattern-craft-10-new-316c1f34-8a3b-45f6-a1e2-aaa78277ad75-1.png"><figcaption>历史失败／对照（非本轮重跑）</figcaption></figure><figure><img src="repair-v1/pattern-craft-10-new-primary.png"><figcaption>本轮原始结果 · alpha&lt;255: 0/1048576</figcaption></figure></div><details><summary>实际提示词和参数</summary><pre>Convert the motif in Image 1 into woven jacquard on ivory (#F4EBDD) cotton with a plain-weave ground. Use Image 1 for the complete flower design, not its background; preserve all petals, dots, outlines, proportions, relative positions, and original terracotta (#C48669), pale yellow (#F4DF93), and brown (#816544) colors. Form the motif through interlaced yarns, flush with the continuous fabric structure, with visible yarn texture. Keep the entire motif sharp and fully framed with clear margins, a frontal view, and soft directional lighting. Add no decorations.
+Avoid: brand logos and watermarks, extra or unrelated text, collages and multi-panel layouts, color swatch strips and dimension annotations, extra hands, deformed limbs, and underage models, nudity and sexualized presentation, flat printed look, motif redesign and added decorations.
+{
+  &quot;n&quot;: 1,
+  &quot;size&quot;: &quot;1024x1024&quot;,
+  &quot;quality&quot;: &quot;auto&quot;,
+  &quot;tool&quot;: &quot;creative-pattern-craft&quot;,
+  &quot;count&quot;: 1
+}</pre></details></article>
+<article><h2>repair-v1 / style-to-sketch-11-new — PASS</h2><p>五颗完整纽扣及领口半遮挡纽扣保留；无新增口袋。</p><p>接口：success · </p><div class="images"><figure><img src="../fixtures/shirt.png"><figcaption>原参考图</figcaption></figure><figure><img src="../quality-matrix/visual-v2-extended/style-to-sketch-11-new-686fa657-47a7-4faa-b4ea-46bf6da60891-1.png"><figcaption>历史失败／对照（非本轮重跑）</figcaption></figure><figure><img src="repair-v1/style-to-sketch-11-new-primary.png"><figcaption>本轮原始结果 · alpha&lt;255: 0/1048576</figcaption></figure></div><details><summary>实际提示词和参数</summary><pre>Convert Image 1 into one front-only technical fashion flat on white (#FFFFFF), using medium-weight black (#000000) contours, thinner construction lines, and dashed visible topstitching; exclude photographic color, texture, and shadows. Preserve its proportions, silhouette, pointed collar, short set-in sleeves, placket, curved hem, visible shoulder seams and armhole lines, without inventing hidden details or forcing symmetry. Retain exactly five complete center-front buttons plus the original half-occluded neckline button, preserving their positions and occlusion; add or remove none, add no pockets, and show no back view.
+Avoid: shading, gradients, color fills, fabric texture, added pockets, invented seams, altered button count, back views, collage grids, models, extra limbs, anatomical distortion, hangers, background objects, brand logos, watermarks, unrelated text labels, measurement annotations, color swatches, minors, nudity, sexualized presentation.
+{
+  &quot;n&quot;: 1,
+  &quot;size&quot;: &quot;1024x1024&quot;,
+  &quot;quality&quot;: &quot;auto&quot;,
+  &quot;tool&quot;: &quot;creative-style-to-sketch&quot;,
+  &quot;count&quot;: 1
+}</pre></details></article>
+<article><h2>repair-v1 / style-to-sketch-17-new — PASS</h2><p>纽扣数量、领口遮挡和主要结构符合要求。</p><p>接口：success · </p><div class="images"><figure><img src="../fixtures/shirt.png"><figcaption>原参考图</figcaption></figure><figure><img src="../quality-matrix/visual-v2-extended/style-to-sketch-17-new-8bb909b1-1b07-4f16-af49-33db3cf608fe-1.png"><figcaption>历史失败／对照（非本轮重跑）</figcaption></figure><figure><img src="repair-v1/style-to-sketch-17-new-primary.png"><figcaption>本轮原始结果 · alpha&lt;255: 0/1048576</figcaption></figure></div><details><summary>实际提示词和参数</summary><pre>Convert Image 1 into one front-view technical fashion flat, using its visible construction only, not its color, texture, or shadows. Use black (#000000) lines on pure white (#FFFFFF), a bolder contour, thin uniform construction lines, and dashed topstitching only where visible. Preserve original proportions, silhouette, visible asymmetry, collar, placket, sleeves, and hem. Keep exactly five complete center-front buttons with simple circular four-hole markings, plus the original half-obscured neckline button at its existing position and occlusion; do not complete it. Add no pockets, hidden details, or back view.
+Avoid: shading, gradients, color fills, fabric texture, added or missing buttons, completed neckline button, pockets, invented seams, hidden construction, models, extra hands, deformed limbs, minors, nudity, sexualized presentation, hangers, background objects, brand logos, watermarks, unrelated text, measurement labels, collages, multiple views, color swatches.
+{
+  &quot;n&quot;: 1,
+  &quot;size&quot;: &quot;1024x1024&quot;,
+  &quot;quality&quot;: &quot;auto&quot;,
+  &quot;tool&quot;: &quot;creative-style-to-sketch&quot;,
+  &quot;count&quot;: 1
+}</pre></details></article>
+<article><h2>repair-v1 / pattern-extract-01-new — REDO</h2><p>已出现真实 alpha，但边缘有光晕、花瓣线条丢失，不是保真提取。</p><p>接口：success · </p><div class="images"><figure><img src="../fixtures/flower.png"><figcaption>原参考图</figcaption></figure><figure><img src="../quality-matrix/visual-v1/pattern-extract-01-new-0d696194-7404-4ab8-9a7a-891402aa1347-1.png"><figcaption>历史失败／对照（非本轮重跑）</figcaption></figure><figure><img src="repair-v1/pattern-extract-01-new-primary.png"><figcaption>本轮原始结果 · alpha&lt;255: 1048576/1048576</figcaption></figure></div><details><summary>实际提示词和参数</summary><pre>Extract the single visible flower from Image 1; use its artwork and original background, not display artifacts. Please flatten the design, removing fabric folds, perspective distortion, garment seams, lighting and shadows. Preserve the six irregular petals, dotted center, fine outlines, visible edges, proportions, and arrangement: terracotta (#C9896B), pale yellow (#F4DE95), and muted brown (#8A6845). Keep the original ground color and any genuine transparency; do not draw a checkerboard. Add no elements, infer no hidden content, and do not symmetrize or smooth away the original character.
+Avoid: garment, folds, shadows, perspective, mockup, new motifs, invented contours, symmetry correction, brand logos, watermarks, unrelated text, collages, multi-panel layouts, color swatches, dimension annotations, checkerboard background, extra hands, malformed limbs, underage models, nudity, sexualized presentation.
+{
+  &quot;n&quot;: 1,
+  &quot;size&quot;: &quot;1024x1024&quot;,
+  &quot;quality&quot;: &quot;auto&quot;,
+  &quot;tool&quot;: &quot;creative-pattern-extract&quot;,
+  &quot;count&quot;: 1,
+  &quot;background&quot;: &quot;transparent&quot;,
+  &quot;output_format&quot;: &quot;png&quot;
+}</pre></details></article>
+<article><h2>repair-v1 / pattern-colorway-01-new — REDO</h2><p>已出现真实 alpha，但轮廓光晕及内部细节漂移仍存在。</p><p>接口：success · </p><div class="images"><figure><img src="../fixtures/flower.png"><figcaption>原参考图</figcaption></figure><figure><img src="../quality-matrix/visual-v1/pattern-colorway-01-new-ab738087-4d42-455a-bc36-1d23748d4fc0-1.png"><figcaption>历史失败／对照（非本轮重跑）</figcaption></figure><figure><img src="repair-v1/pattern-colorway-01-new-primary.png"><figcaption>本轮原始结果 · alpha&lt;255: 1048576/1048576</figcaption></figure></div><details><summary>实际提示词和参数</summary><pre>Recolor every motif color block in Image 1 with a warm, muted autumn palette: petals → dusty terracotta (#BC826B); flower center → soft oat (#E8D7A5); outlines, petal veins and center dots → warm taupe (#806C50). Use Image 1 only for its existing artwork and brushwork, not its original motif colors. Preserve all contours, element counts, positions, proportions, color boundaries, line weights, arrangement and background transparency exactly. Maintain the original subtle tonal variation and clear separation between adjacent colors; add or remove nothing.
+Avoid: changing shapes or adding motifs, blurred edges, color swatches or dimension annotations, gradient overlays, brand logos, watermarks or unrelated text, collage grids, extra hands or deformed limbs, underage models, nudity or sexualized presentation.
+{
+  &quot;n&quot;: 1,
+  &quot;size&quot;: &quot;1024x1024&quot;,
+  &quot;quality&quot;: &quot;auto&quot;,
+  &quot;tool&quot;: &quot;creative-pattern-colorway&quot;,
+  &quot;count&quot;: 1,
+  &quot;background&quot;: &quot;transparent&quot;,
+  &quot;output_format&quot;: &quot;png&quot;
+}</pre></details></article>
+<article><h2>repair-v1 / style-to-sketch-11-new-repeat — MINOR_FIX</h2><p>五颗完整纽扣保留，但领尖变圆，领口遮挡形状轻微漂移。</p><p>接口：success · </p><div class="images"><figure><img src="../fixtures/shirt.png"><figcaption>原参考图</figcaption></figure><figure><img src="../quality-matrix/visual-v2-extended/style-to-sketch-11-new-686fa657-47a7-4faa-b4ea-46bf6da60891-1.png"><figcaption>历史失败／对照（非本轮重跑）</figcaption></figure><figure><img src="repair-v1/style-to-sketch-11-new-repeat-primary.png"><figcaption>本轮原始结果 · alpha&lt;255: 0/1048576</figcaption></figure></div><details><summary>实际提示词和参数</summary><pre>Convert Image 1 into one front-only technical fashion flat on white (#FFFFFF), using medium-weight black (#000000) contours, thinner construction lines, and dashed visible topstitching; exclude photographic color, texture, and shadows. Preserve its proportions, silhouette, pointed collar, short set-in sleeves, placket, curved hem, visible shoulder seams and armhole lines, without inventing hidden details or forcing symmetry. Retain exactly five complete center-front buttons plus the original half-occluded neckline button, preserving their positions and occlusion; add or remove none, add no pockets, and show no back view.
+Avoid: shading, gradients, color fills, fabric texture, added pockets, invented seams, altered button count, back views, collage grids, models, extra limbs, anatomical distortion, hangers, background objects, brand logos, watermarks, unrelated text labels, measurement annotations, color swatches, minors, nudity, sexualized presentation.
+{
+  &quot;n&quot;: 1,
+  &quot;size&quot;: &quot;1024x1024&quot;,
+  &quot;quality&quot;: &quot;auto&quot;,
+  &quot;tool&quot;: &quot;creative-style-to-sketch&quot;,
+  &quot;count&quot;: 1
+}</pre></details></article>
+<article><h2>repair-v1 / style-to-sketch-17-new-repeat — PASS</h2><p>重复出图仍保留五颗完整纽扣及半遮挡领口纽扣。</p><p>接口：success · </p><div class="images"><figure><img src="../fixtures/shirt.png"><figcaption>原参考图</figcaption></figure><figure><img src="../quality-matrix/visual-v2-extended/style-to-sketch-17-new-8bb909b1-1b07-4f16-af49-33db3cf608fe-1.png"><figcaption>历史失败／对照（非本轮重跑）</figcaption></figure><figure><img src="repair-v1/style-to-sketch-17-new-repeat-primary.png"><figcaption>本轮原始结果 · alpha&lt;255: 0/1048576</figcaption></figure></div><details><summary>实际提示词和参数</summary><pre>Convert Image 1 into one front-view technical fashion flat, using its visible construction only, not its color, texture, or shadows. Use black (#000000) lines on pure white (#FFFFFF), a bolder contour, thin uniform construction lines, and dashed topstitching only where visible. Preserve original proportions, silhouette, visible asymmetry, collar, placket, sleeves, and hem. Keep exactly five complete center-front buttons with simple circular four-hole markings, plus the original half-obscured neckline button at its existing position and occlusion; do not complete it. Add no pockets, hidden details, or back view.
+Avoid: shading, gradients, color fills, fabric texture, added or missing buttons, completed neckline button, pockets, invented seams, hidden construction, models, extra hands, deformed limbs, minors, nudity, sexualized presentation, hangers, background objects, brand logos, watermarks, unrelated text, measurement labels, collages, multiple views, color swatches.
+{
+  &quot;n&quot;: 1,
+  &quot;size&quot;: &quot;1024x1024&quot;,
+  &quot;quality&quot;: &quot;auto&quot;,
+  &quot;tool&quot;: &quot;creative-style-to-sketch&quot;,
+  &quot;count&quot;: 1
+}</pre></details></article>
+<article><h2>repair-v1 / alpha-native-off — CONTROL</h2><p>固定提示词、不发原生透明参数：结果全不透明。</p><p>接口：success · </p><div class="images"><figure><img src="../fixtures/flower.png"><figcaption>原参考图</figcaption></figure><figure><img src="../quality-matrix/visual-v1/pattern-colorway-01-new-ab738087-4d42-455a-bc36-1d23748d4fc0-1.png"><figcaption>历史失败／对照（非本轮重跑）</figcaption></figure><figure><img src="repair-v1/alpha-native-off-primary.png"><figcaption>本轮原始结果 · alpha&lt;255: 0/1048576</figcaption></figure></div><details><summary>实际提示词和参数</summary><pre>Recolor all motif color blocks in Image 1 into a warm, muted autumn palette: petals → dusty terracotta (#BE8871); flower center → warm oat (#E6D5A6); outlines, petal veins, and center dots → earthy brown (#776148). Use Image 1 for its original artwork only, not its existing palette. Preserve every contour, element count, position, proportion, arrangement, line thickness, color boundary, and hand-drawn stroke character exactly. Keep the background and any transparency unchanged. Maintain clear contrast between adjacent colors; do not add or remove elements.
+Avoid: changing shapes or adding motifs, blurred edges or gradient overlays, color swatches or dimension annotations, brand logos or watermarks, unrelated text, collages or multi-panel layouts, extra hands or deformed limbs, underage models, nudity or sexualized presentation.
+{
+  &quot;n&quot;: 1,
+  &quot;size&quot;: &quot;1024x1024&quot;,
+  &quot;quality&quot;: &quot;auto&quot;,
+  &quot;tool&quot;: &quot;image-edit&quot;,
+  &quot;count&quot;: 1
+}</pre></details></article>
+<article><h2>repair-v1 / alpha-native-on — REDO</h2><p>同一提示词增加原生透明参数后出现 alpha，但仍有大范围柔边和光晕。</p><p>接口：success · </p><div class="images"><figure><img src="../fixtures/flower.png"><figcaption>原参考图</figcaption></figure><figure><img src="../quality-matrix/visual-v1/pattern-colorway-01-new-ab738087-4d42-455a-bc36-1d23748d4fc0-1.png"><figcaption>历史失败／对照（非本轮重跑）</figcaption></figure><figure><img src="repair-v1/alpha-native-on-primary.png"><figcaption>本轮原始结果 · alpha&lt;255: 1048576/1048576</figcaption></figure></div><details><summary>实际提示词和参数</summary><pre>Recolor all motif color blocks in Image 1 into a warm, muted autumn palette: petals → dusty terracotta (#BE8871); flower center → warm oat (#E6D5A6); outlines, petal veins, and center dots → earthy brown (#776148). Use Image 1 for its original artwork only, not its existing palette. Preserve every contour, element count, position, proportion, arrangement, line thickness, color boundary, and hand-drawn stroke character exactly. Keep the background and any transparency unchanged. Maintain clear contrast between adjacent colors; do not add or remove elements.
+Avoid: changing shapes or adding motifs, blurred edges or gradient overlays, color swatches or dimension annotations, brand logos or watermarks, unrelated text, collages or multi-panel layouts, extra hands or deformed limbs, underage models, nudity or sexualized presentation.
+{
+  &quot;n&quot;: 1,
+  &quot;size&quot;: &quot;1024x1024&quot;,
+  &quot;quality&quot;: &quot;auto&quot;,
+  &quot;background&quot;: &quot;transparent&quot;,
+  &quot;output_format&quot;: &quot;png&quot;,
+  &quot;tool&quot;: &quot;image-edit&quot;,
+  &quot;count&quot;: 1
+}</pre></details></article>
+<article><h2>repair-v2 / pattern-extract-03-new — REDO</h2><p>提示词已禁止补全，出图仍把原来的不规则几何单元重构成近似雪花，不合格。</p><p>接口：success · aplmart-gpt2.5-flare</p><div class="images"><figure><img src="../fixtures/knit.png"><figcaption>原参考图</figcaption></figure><figure><img src="../quality-matrix/visual-v1/pattern-extract-03-new-11ada841-e100-47ee-a423-b425f7c8a29d-1.png"><figcaption>历史失败／对照（非本轮重跑）</figcaption></figure><figure><img src="repair-v2/pattern-extract-03-new-primary.png"><figcaption>本轮原始结果 · alpha&lt;255: 0/1048576</figcaption></figure></div><details><summary>实际提示词和参数</summary><pre>Extract only the central large navy blue (#293448) angular geometric motif and its mustard gold (#BE8C2F) center from Image 1; use its visible artwork, not neighboring motifs, decorative bands, or garment texture. Center it on a pure white (#FFFFFF), opaque background; flatten the design, removing fabric folds, perspective distortion, garment seams, lighting and shadows. Preserve the visible contours, irregular edges, colors, proportions, and internal spacing; retain any existing crop boundaries without reconstructing hidden portions, enforcing symmetry, or adding elements.
+Avoid: garment outlines, seams, folds, mockups, shadows, perspective distortion, new motifs, reconstructed hidden details, brand logos, watermarks, unrelated text, collages, multi-panel layouts, color swatches, dimension annotations, extra hands, deformed limbs, minor models, nudity, sexualized presentation.
+{
+  &quot;n&quot;: 1,
+  &quot;size&quot;: &quot;1024x1024&quot;,
+  &quot;quality&quot;: &quot;auto&quot;,
+  &quot;tool&quot;: &quot;creative-pattern-extract&quot;,
+  &quot;count&quot;: 1,
+  &quot;background&quot;: &quot;opaque&quot;
+}</pre></details></article>
+<article><h2>repair-v2 / pattern-extract-01-new — REDO</h2><p>追加平面、实心和禁止光晕要求后，透明边缘及花瓣细节仍不合格。</p><p>接口：success · aplmart-gpt2.5-flare</p><div class="images"><figure><img src="../fixtures/flower.png"><figcaption>原参考图</figcaption></figure><figure><img src="../quality-matrix/visual-v1/pattern-extract-01-new-0d696194-7404-4ab8-9a7a-891402aa1347-1.png"><figcaption>历史失败／对照（非本轮重跑）</figcaption></figure><figure><img src="repair-v2/pattern-extract-01-new-primary.png"><figcaption>本轮原始结果 · alpha&lt;255: 1048576/1048576</figcaption></figure></div><details><summary>实际提示词和参数</summary><pre>Extract only the visible flower from Image 1 as a flat 2D motif, not a garment mockup; flatten the design, removing fabric folds, perspective distortion, garment seams, lighting and shadows. Preserve its contours, proportions, brushwork, peach petals (#CC8D6E), pale-yellow center (#F3DC91), and brown outlines (#8B6947); do not reconstruct or add elements. Retain original background transparency: fully transparent outside, opaque solid interiors, semitransparency only at existing antialiased edges. Add no shadows, glow, halos, gradient haze, colored backing, checkerboard, or overall opacity reduction.
+Avoid: garments, mockups, folds, perspective distortion, shadows, glow, halos, gradient haze, new motifs, reconstructed hidden details, colored backing, checkerboard, overall translucency, brand logos, watermarks, unrelated text, collages, multi-panel layouts, color swatches, dimension annotations, extra hands, malformed limbs, underage models, nudity, sexualized presentation.
+{
+  &quot;n&quot;: 1,
+  &quot;size&quot;: &quot;1024x1024&quot;,
+  &quot;quality&quot;: &quot;auto&quot;,
+  &quot;tool&quot;: &quot;creative-pattern-extract&quot;,
+  &quot;count&quot;: 1,
+  &quot;background&quot;: &quot;transparent&quot;,
+  &quot;output_format&quot;: &quot;png&quot;
+}</pre></details></article>
+<article><h2>repair-v2 / pattern-extract-02-new — PASS</h2><p>白底四叶枝干完整，叶脉、相对位置与元素数量保留。</p><p>接口：success · aplmart-gpt2.5-flare</p><div class="images"><figure><img src="../fixtures/leaf.png"><figcaption>原参考图</figcaption></figure><figure><img src="../quality-matrix/visual-v1/pattern-extract-02-new-1c703f88-4a19-492e-92df-134261ee002c-1.png"><figcaption>历史失败／对照（非本轮重跑）</figcaption></figure><figure><img src="repair-v2/pattern-extract-02-new-primary.png"><figcaption>本轮原始结果 · alpha&lt;255: 0/1048576</figcaption></figure></div><details><summary>实际提示词和参数</summary><pre>Extract the entire visible botanical motif from Image 1 onto a pure white (#FFFFFF), opaque background; use its leafy stem artwork, not its background or pixel grid. Flatten the design, removing fabric folds, perspective distortion, garment seams, lighting and shadows. Preserve the four leaves, stem, muted olive green (#788C58) fills, dark green (#4F6545) outlines and veins, visible contours, edge character, proportions, element count, relative positions, and existing crop boundaries. Retain only evidenced artwork; do not reconstruct hidden portions, rearrange elements, add motifs, or create a seamless repeat.
+Avoid: garments, mockups, seams, folds, shadows, perspective distortion, new motifs, reconstructed hidden details, brand logos, watermarks, unrelated text, collages, multi-panel layouts, color swatches, dimension annotations, extra hands, deformed limbs, underage models, nudity, sexualized imagery.
+{
+  &quot;n&quot;: 1,
+  &quot;size&quot;: &quot;1024x1024&quot;,
+  &quot;quality&quot;: &quot;auto&quot;,
+  &quot;tool&quot;: &quot;creative-pattern-extract&quot;,
+  &quot;count&quot;: 1,
+  &quot;background&quot;: &quot;opaque&quot;
+}</pre></details></article>
+<article><h2>repair-v2 / pattern-colorway-01-new — REDO</h2><p>追加禁止整体降透明度和光晕要求后仍有光晕，不能当作像素保真换色。</p><p>接口：success · aplmart-gpt2.5-flare</p><div class="images"><figure><img src="../fixtures/flower.png"><figcaption>原参考图</figcaption></figure><figure><img src="../quality-matrix/visual-v1/pattern-colorway-01-new-ab738087-4d42-455a-bc36-1d23748d4fc0-1.png"><figcaption>历史失败／对照（非本轮重跑）</figcaption></figure><figure><img src="repair-v2/pattern-colorway-01-new-primary.png"><figcaption>本轮原始结果 · alpha&lt;255: 1048576/1048576</figcaption></figure></div><details><summary>实际提示词和参数</summary><pre>Recolor all existing motif color blocks in Image 1 into a warm, muted autumn palette: petals → dusty terracotta (#BC8268); flower center → oat cream (#E8D6A5); outlines, petal veins and center dots → warm taupe brown (#78634E). Use Image 1 for geometry and brushwork only, not its original palette. Preserve every contour, line width, element count, position, proportion, color boundary, arrangement and texture exactly; change RGB colors only. Maintain clear contrast between adjacent regions. Keep the exterior fully transparent and solid interiors opaque, allowing partial transparency only at existing antialiased edges. Render as flat 2D artwork without scene lighting, shadows, glow, halos, gradient fringes, colored backing or checkerboards; never reduce overall opacity.
+Avoid: shape changes or added motifs, blurred edges or gradient overlays, brand logos, watermarks or unrelated text, collages or multi-panel layouts, color swatches or dimension labels, extra hands or malformed limbs, underage models, nudity or sexualized presentation.
+{
+  &quot;n&quot;: 1,
+  &quot;size&quot;: &quot;1024x1024&quot;,
+  &quot;quality&quot;: &quot;auto&quot;,
+  &quot;tool&quot;: &quot;creative-pattern-colorway&quot;,
+  &quot;count&quot;: 1,
+  &quot;background&quot;: &quot;transparent&quot;,
+  &quot;output_format&quot;: &quot;png&quot;
+}</pre></details></article>
+<article><h2>repair-sunburst-alpha / alpha-native-off — CONTROL</h2><p>Sunburst 固定提示词、不发原生透明参数：全不透明。</p><p>接口：success · aplmart-gpt2.5-sunburst</p><div class="images"><figure><img src="../fixtures/flower.png"><figcaption>原参考图</figcaption></figure><figure><img src="../quality-matrix/visual-v1/pattern-colorway-01-new-ab738087-4d42-455a-bc36-1d23748d4fc0-1.png"><figcaption>历史失败／对照（非本轮重跑）</figcaption></figure><figure><img src="repair-sunburst-alpha/alpha-native-off-primary.png"><figcaption>本轮原始结果 · alpha&lt;255: 0/1048576</figcaption></figure></div><details><summary>实际提示词和参数</summary><pre>Recolor all motif color blocks in Image 1 into a warm, muted autumn palette: petals → dusty terracotta (#BE8871); flower center → warm oat (#E6D5A6); outlines, petal veins, and center dots → earthy brown (#776148). Use Image 1 for its original artwork only, not its existing palette. Preserve every contour, element count, position, proportion, arrangement, line thickness, color boundary, and hand-drawn stroke character exactly. Keep the background and any transparency unchanged. Maintain clear contrast between adjacent colors; do not add or remove elements.
+Avoid: changing shapes or adding motifs, blurred edges or gradient overlays, color swatches or dimension annotations, brand logos or watermarks, unrelated text, collages or multi-panel layouts, extra hands or deformed limbs, underage models, nudity or sexualized presentation.
+{
+  &quot;n&quot;: 1,
+  &quot;size&quot;: &quot;1024x1024&quot;,
+  &quot;quality&quot;: &quot;auto&quot;,
+  &quot;tool&quot;: &quot;image-edit&quot;,
+  &quot;count&quot;: 1
+}</pre></details></article>
+<article><h2>repair-sunburst-alpha / alpha-native-on — REDO</h2><p>Sunburst 原生透明参数有效，但柔边光晕仍不合格。</p><p>接口：success · aplmart-gpt2.5-sunburst</p><div class="images"><figure><img src="../fixtures/flower.png"><figcaption>原参考图</figcaption></figure><figure><img src="../quality-matrix/visual-v1/pattern-colorway-01-new-ab738087-4d42-455a-bc36-1d23748d4fc0-1.png"><figcaption>历史失败／对照（非本轮重跑）</figcaption></figure><figure><img src="repair-sunburst-alpha/alpha-native-on-primary.png"><figcaption>本轮原始结果 · alpha&lt;255: 1048576/1048576</figcaption></figure></div><details><summary>实际提示词和参数</summary><pre>Recolor all motif color blocks in Image 1 into a warm, muted autumn palette: petals → dusty terracotta (#BE8871); flower center → warm oat (#E6D5A6); outlines, petal veins, and center dots → earthy brown (#776148). Use Image 1 for its original artwork only, not its existing palette. Preserve every contour, element count, position, proportion, arrangement, line thickness, color boundary, and hand-drawn stroke character exactly. Keep the background and any transparency unchanged. Maintain clear contrast between adjacent colors; do not add or remove elements.
+Avoid: changing shapes or adding motifs, blurred edges or gradient overlays, color swatches or dimension annotations, brand logos or watermarks, unrelated text, collages or multi-panel layouts, extra hands or deformed limbs, underage models, nudity or sexualized presentation.
+{
+  &quot;n&quot;: 1,
+  &quot;size&quot;: &quot;1024x1024&quot;,
+  &quot;quality&quot;: &quot;auto&quot;,
+  &quot;background&quot;: &quot;transparent&quot;,
+  &quot;output_format&quot;: &quot;png&quot;,
+  &quot;tool&quot;: &quot;image-edit&quot;,
+  &quot;count&quot;: 1
+}</pre></details></article>
+<article><h2>repair-opentoken-alpha / alpha-native-off — NOT_GENERATED</h2><p>上游返回 insufficient enterprise balance；没有成图，无法判断视觉质量。</p><p>接口：failed · gpt-image-2.5-flare</p><div class="images"><figure><img src="../fixtures/flower.png"><figcaption>原参考图</figcaption></figure><figure><img src="../quality-matrix/visual-v1/pattern-colorway-01-new-ab738087-4d42-455a-bc36-1d23748d4fc0-1.png"><figcaption>历史失败／对照（非本轮重跑）</figcaption></figure></div><details><summary>实际提示词和参数</summary><pre>Recolor all motif color blocks in Image 1 into a warm, muted autumn palette: petals → dusty terracotta (#BE8871); flower center → warm oat (#E6D5A6); outlines, petal veins, and center dots → earthy brown (#776148). Use Image 1 for its original artwork only, not its existing palette. Preserve every contour, element count, position, proportion, arrangement, line thickness, color boundary, and hand-drawn stroke character exactly. Keep the background and any transparency unchanged. Maintain clear contrast between adjacent colors; do not add or remove elements.
+Avoid: changing shapes or adding motifs, blurred edges or gradient overlays, color swatches or dimension annotations, brand logos or watermarks, unrelated text, collages or multi-panel layouts, extra hands or deformed limbs, underage models, nudity or sexualized presentation.
+{
+  &quot;n&quot;: 1,
+  &quot;size&quot;: &quot;1024x1024&quot;,
+  &quot;quality&quot;: &quot;auto&quot;,
+  &quot;tool&quot;: &quot;image-edit&quot;,
+  &quot;count&quot;: 1
+}</pre></details></article>
+<article><h2>repair-opentoken-alpha / alpha-native-on — NOT_GENERATED</h2><p>上游返回 insufficient enterprise balance；没有成图，无法判断透明能力。</p><p>接口：failed · gpt-image-2.5-flare</p><div class="images"><figure><img src="../fixtures/flower.png"><figcaption>原参考图</figcaption></figure><figure><img src="../quality-matrix/visual-v1/pattern-colorway-01-new-ab738087-4d42-455a-bc36-1d23748d4fc0-1.png"><figcaption>历史失败／对照（非本轮重跑）</figcaption></figure></div><details><summary>实际提示词和参数</summary><pre>Recolor all motif color blocks in Image 1 into a warm, muted autumn palette: petals → dusty terracotta (#BE8871); flower center → warm oat (#E6D5A6); outlines, petal veins, and center dots → earthy brown (#776148). Use Image 1 for its original artwork only, not its existing palette. Preserve every contour, element count, position, proportion, arrangement, line thickness, color boundary, and hand-drawn stroke character exactly. Keep the background and any transparency unchanged. Maintain clear contrast between adjacent colors; do not add or remove elements.
+Avoid: changing shapes or adding motifs, blurred edges or gradient overlays, color swatches or dimension annotations, brand logos or watermarks, unrelated text, collages or multi-panel layouts, extra hands or deformed limbs, underage models, nudity or sexualized presentation.
+{
+  &quot;n&quot;: 1,
+  &quot;size&quot;: &quot;1024x1024&quot;,
+  &quot;quality&quot;: &quot;auto&quot;,
+  &quot;background&quot;: &quot;transparent&quot;,
+  &quot;output_format&quot;: &quot;png&quot;,
+  &quot;tool&quot;: &quot;image-edit&quot;,
+  &quot;count&quot;: 1
+}</pre></details></article>
+<article><h2>repair-lettering / lettering-single-quote — MINOR_FIX</h2><p>SUMMER 2026 逐字正确，五颗纽扣和胸袋保留；原平面底色新增渐变。</p><p>接口：success · aplmart-gpt2.5-flare</p><div class="images"><figure><img src="../fixtures/flat.png"><figcaption>原参考图</figcaption></figure><figure><img src="repair-lettering/lettering-single-quote-primary.png"><figcaption>本轮原始结果 · alpha&lt;255: 0/1048576</figcaption></figure></div><details><summary>实际提示词和参数</summary><pre>Modify only the blank left chest in Image 1 (viewer’s right): add &quot;SUMMER 2026&quot; as one small, legible line of charcoal (#45413A) sans-serif printing above the pocket, without overlapping it. Keep everything else exactly the same: 纽扣数量、口袋、轮廓、衣身颜色不变; preserve all five buttons, garment structure, flat illustration texture, outlines, background and front view; use Image 1 as the unchanged base, not a redesign reference. Blend the printing seamlessly into the illustrated surface, matching its flat rendering and lighting.
+Avoid: changing other parts or redrawing the whole garment, color shift or new accessories, brand logos or watermarks, extra or unrelated text, collages or multi-panel layouts, color swatches or dimension annotations, extra hands or deformed limbs, minor models, nudity or sexualization.
+{
+  &quot;n&quot;: 1,
+  &quot;size&quot;: &quot;1024x1024&quot;,
+  &quot;quality&quot;: &quot;auto&quot;,
+  &quot;tool&quot;: &quot;creative-local-restyle&quot;,
+  &quot;count&quot;: 1
+}</pre></details></article></html>

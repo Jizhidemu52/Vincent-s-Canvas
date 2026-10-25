@@ -18,7 +18,7 @@ export type ProcessedImageResult = {
   warning?: string;
 };
 type ProcessingErrorCode = "INVALID_IMAGE_RESULT_PARAMETERS" | "INVALID_IMAGE_RESULT_INPUT" | "IMAGE_RESULT_DIMENSION_MISMATCH"
-  | "IMAGE_RESULT_TOOLS_UNAVAILABLE" | "IMAGE_RESULT_PROCESSING_TIMEOUT" | "IMAGE_RESULT_PROCESSING_FAILED";
+  | "IMAGE_RESULT_TOOLS_UNAVAILABLE" | "IMAGE_RESULT_PROCESSING_TIMEOUT" | "IMAGE_RESULT_PROCESSING_FAILED" | "IMAGE_RESULT_TRANSPARENCY_MISSING";
 export class ImageResultProcessingError extends Error {
   constructor(readonly code: ProcessingErrorCode, message: string) { super(message); this.name = "ImageResultProcessingError"; }
 }
@@ -98,14 +98,68 @@ async function inspect(file: string, mimeType: string, bytes: Uint8Array): Promi
   return { width: image.width!, height: image.height!, pixelFormat: image.pix_fmt || "" };
 }
 
-async function decode(file: string, metadata: ImageMetadata) {
-  const expected = metadata.width * metadata.height * 4;
+async function decode(file: string, metadata: ImageMetadata, pixelFormat: "rgba" | "rgba64le" = "rgba") {
+  const expected = metadata.width * metadata.height * (pixelFormat === "rgba64le" ? 8 : 4);
   // Read at most two frames. The second is only for detecting and rejecting animation/concatenation.
   const pixels = await runTool("ffmpeg", ["-nostdin", ...toolLimits, ...safeImageInput, "-noautorotate", "-i", file,
-    "-map", "0:v:0", "-frames:v", "2", "-threads", "1", "-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1",
+    "-map", "0:v:0", "-frames:v", "2", "-threads", "1", "-f", "rawvideo", "-pix_fmt", pixelFormat, "pipe:1",
   ], expected * 2 + 64 * 1024);
   if (pixels.byteLength !== expected) throw new ImageResultProcessingError("INVALID_IMAGE_RESULT_INPUT", "图片不是完整单帧内容，不能安全合成或导出");
   return pixels;
+}
+
+function pixelsHaveTransparency(pixels: Buffer, highBitDepth = false) {
+  const stride = highBitDepth ? 8 : 4;
+  for (let index = highBitDepth ? 6 : 3; index < pixels.length; index += stride) {
+    if (highBitDepth ? pixels.readUInt16LE(index) !== 65535 : pixels[index] !== 255) return true;
+  }
+  return false;
+}
+
+async function createImageProcessingFiles() {
+  const directory = await mkdtemp(join(tmpdir(), "canvas-image-result-")).catch(() => {
+    throw new ImageResultProcessingError("IMAGE_RESULT_PROCESSING_FAILED", "无法创建图片处理临时目录；原始结果未被替换");
+  });
+  const files = new Set<string>();
+  const localFile = async (name: string, bytes: Uint8Array) => {
+    const file = join(directory, name);
+    files.add(file);
+    await writeFile(file, bytes);
+    return file;
+  };
+  const load = async (name: string, image: ProcessedResultImage) => {
+    const mimeType = providerImageMimeType(image.bytes, image.mimeType);
+    if (!formats[mimeType] || !image.bytes.byteLength || image.bytes.byteLength > MAX_FILE_BYTES) {
+      throw new ImageResultProcessingError("INVALID_IMAGE_RESULT_INPUT", "后处理图片必须是非空且不超过 50 MiB 的 PNG、JPEG 或 WebP");
+    }
+    const file = await localFile(name, image.bytes);
+    return { file, mimeType, metadata: await inspect(file, mimeType, image.bytes) };
+  };
+  const cleanup = async () => {
+    try {
+      for (const file of files) await unlink(file).catch(error => { if (error.code !== "ENOENT") throw error; });
+      await rmdir(directory);
+    } catch {
+      throw new ImageResultProcessingError("IMAGE_RESULT_PROCESSING_FAILED", "图片处理临时文件清理失败；原始生成结果未被替换");
+    }
+  };
+  return { localFile, load, cleanup };
+}
+
+/** Inspect already-authorized bytes only; no network or source re-encoding. */
+export async function hasImageTransparency(image: ProcessedResultImage): Promise<boolean> {
+  const { load, cleanup } = await createImageProcessingFiles();
+  try {
+    const source = await load("alpha-check", image);
+    const highBitDepth = HIGH_BIT_DEPTH.test(source.metadata.pixelFormat);
+    const pixels = await decode(source.file, source.metadata, highBitDepth ? "rgba64le" : "rgba");
+    return pixelsHaveTransparency(pixels, highBitDepth);
+  } catch (error) {
+    if (error instanceof ImageResultProcessingError) throw error;
+    throw new ImageResultProcessingError("IMAGE_RESULT_PROCESSING_FAILED", "无法安全读取图片透明度；原始文件未被修改");
+  } finally {
+    await cleanup();
+  }
 }
 
 function composite(original: Buffer, generated: Buffer, mask: Buffer) {
@@ -134,37 +188,31 @@ function flattenWhite(pixels: Buffer) {
 /** No network, storage or database writes. The caller must archive the provider result BEFORE calling. */
 export async function processImageResult({ result, parameters, editInput }: ImageResultProcessingInput): Promise<ProcessedImageResult> {
   const { format, compression } = exportSettings(parameters);
+  const requireTransparency = parameters.background === "transparent";
+  if (requireTransparency && format === "jpeg") {
+    throw new ImageResultProcessingError("INVALID_IMAGE_RESULT_PARAMETERS", "透明背景仅支持 PNG 或 WebP，不能导出为 JPEG；原始结果未被替换");
+  }
   const mask = editInput?.mask;
   const archive = parameters.inputArchive;
   if (archive && typeof archive === "object" && "maskReferenceIndex" in archive && archive.maskReferenceIndex !== undefined && !mask) {
     throw new ImageResultProcessingError("INVALID_IMAGE_RESULT_INPUT", "任务包含蒙版编辑标记，但后处理缺少独立蒙版；不能将渠道原件当作严格合成结果");
   }
-  if (!mask && !format) return { display: result, operations: [] };
+  if (!mask && !format && !requireTransparency) return { display: result, operations: [] };
   const actualMimeType = providerImageMimeType(result.bytes, "");
-  if (!mask && compression === undefined && actualMimeType === `image/${format}`) {
+  if (!mask && !requireTransparency && compression === undefined && actualMimeType === `image/${format}`) {
     return { display: { bytes: result.bytes, mimeType: actualMimeType }, operations: [] };
   }
   const original = editInput?.references[0];
   if (mask && !original) throw new ImageResultProcessingError("INVALID_IMAGE_RESULT_INPUT", "严格蒙版合成缺少第一张编辑原图；原始生成结果未被替换");
 
-  const directory = await mkdtemp(join(tmpdir(), "canvas-image-result-")).catch(() => {
-    throw new ImageResultProcessingError("IMAGE_RESULT_PROCESSING_FAILED", "无法创建图片处理临时目录；原始结果未被替换");
-  });
-  const files = new Set<string>();
+  const { localFile, load, cleanup } = await createImageProcessingFiles();
   const operations: string[] = [];
-  const localFile = async (name: string, bytes: Uint8Array) => {
-    const file = join(directory, name);
-    files.add(file);
-    await writeFile(file, bytes);
-    return file;
-  };
-  const load = async (name: string, image: ProcessedResultImage) => {
-    const mimeType = providerImageMimeType(image.bytes, image.mimeType);
-    if (!formats[mimeType] || !image.bytes.byteLength || image.bytes.byteLength > MAX_FILE_BYTES) {
-      throw new ImageResultProcessingError("INVALID_IMAGE_RESULT_INPUT", "后处理图片必须是非空且不超过 50 MiB 的 PNG、JPEG 或 WebP");
+  const verifyTransparency = (pixels: Buffer, highBitDepth = false) => {
+    if (!requireTransparency) return;
+    if (!pixelsHaveTransparency(pixels, highBitDepth)) {
+      throw new ImageResultProcessingError("IMAGE_RESULT_TRANSPARENCY_MISSING", "请求透明背景，但结果所有像素均不透明；未自动抠图或重新生成，请检查已保存的渠道原件");
     }
-    const file = await localFile(name, image.bytes);
-    return { file, mimeType, metadata: await inspect(file, mimeType, image.bytes) };
+    if (!operations.includes("transparent_alpha_verified")) operations.push("transparent_alpha_verified");
   };
   const encode = async (pixels: Buffer, metadata: ImageMetadata, target: Format, quality?: number) => {
     const flattened = target === "jpeg" ? flattenWhite(pixels) : { pixels, changed: false };
@@ -205,6 +253,7 @@ export async function processImageResult({ result, parameters, editInput }: Imag
       const generatedPixels = await decode(generated.file, generated.metadata);
       const maskPixels = await decode(alpha.file, alpha.metadata);
       pixels = composite(sourcePixels, generatedPixels, maskPixels);
+      verifyTransparency(pixels);
       const display = await encode(pixels, generated.metadata, "png");
       operations.push("strict_mask_composite");
       if (format === "jpeg" || format === "webp") {
@@ -221,7 +270,17 @@ export async function processImageResult({ result, parameters, editInput }: Imag
       }
       return { display, operations };
     }
-    pixels = await decode(generated.file, generated.metadata);
+    const highBitDepth = requireTransparency && HIGH_BIT_DEPTH.test(generated.metadata.pixelFormat);
+    pixels = await decode(generated.file, generated.metadata, highBitDepth ? "rgba64le" : "rgba");
+    verifyTransparency(pixels, highBitDepth);
+    if (!format || compression === undefined && actualMimeType === `image/${format}`) {
+      return { display: { bytes: result.bytes, mimeType: generated.mimeType }, operations };
+    }
+    if (highBitDepth) {
+      pixels = await decode(generated.file, generated.metadata);
+      // A later 8-bit export must not round the only translucent pixels to opaque.
+      verifyTransparency(pixels);
+    }
     const display = await encode(pixels, generated.metadata, format!, compression);
     operations.push("format_conversion");
     if (compression !== undefined) operations.push("compression_applied");
@@ -230,11 +289,6 @@ export async function processImageResult({ result, parameters, editInput }: Imag
     if (error instanceof ImageResultProcessingError) throw error;
     throw new ImageResultProcessingError("IMAGE_RESULT_PROCESSING_FAILED", "图片后处理失败，原始生成结果未被替换");
   } finally {
-    try {
-      for (const file of files) await unlink(file).catch(error => { if (error.code !== "ENOENT") throw error; });
-      await rmdir(directory);
-    } catch {
-      throw new ImageResultProcessingError("IMAGE_RESULT_PROCESSING_FAILED", "图片处理临时文件清理失败；原始生成结果未被替换");
-    }
+    await cleanup();
   }
 }

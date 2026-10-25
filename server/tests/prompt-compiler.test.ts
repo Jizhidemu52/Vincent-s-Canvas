@@ -32,6 +32,12 @@ async function fixture(invoke: PromptOptimizer["invoke"] = async () => ({ conten
 }
 
 describe("prompt compiler lifecycle", () => {
+  test("invalid explicit lettering stops before paid optimizer or compilation claim", async () => {
+    const f = await fixture();
+    const input = request(); input.promptInput.fields.keep_text = [null];
+    await expect(f.compiler.compile(actor, input)).rejects.toMatchObject({ code: "PROMPT_TEXT_INVALID" });
+    expect(f.calls).toHaveLength(0); expect(await f.store.byRequest(actor.id, input.requestId)).toBeNull();
+  });
   test("authoring and audit roll back together; concurrent SQLite reads cannot see uncommitted settings", async () => {
     const f = await fixture();
     const original = await f.store.get("text-to-style");
@@ -182,6 +188,9 @@ describe("prompt output validation and import", () => {
     expect(await db.store.list()).toHaveLength(18);
     const original = await db.store.active("text-to-style");
     expect(original.version.systemPrompt).toContain("也必须分别输出空数组 []，不得省略字段");
+    expect((await db.store.active("pattern-extract")).version.systemPrompt).toContain("默认仅提取参考图中可见且有证据的图案");
+    expect((await db.store.active("pattern-craft")).version.systemPrompt).toContain("不强制 macro");
+    expect((await db.store.active("style-to-sketch")).version.systemPrompt).toContain("保留真实可见不对称");
     expect((await db.store.active("reverse-prompt")).version.systemPrompt).not.toContain("也必须分别输出空数组 []");
     expect((await db.store.active("creative-chat")).version.systemPrompt).not.toContain("也必须分别输出空数组 []");
     const changed = await db.store.saveVersion("text-to-style", content({ systemPrompt: "Edited authoring rule" }), "admin");

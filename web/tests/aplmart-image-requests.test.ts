@@ -57,6 +57,16 @@ beforeEach(() => {
 afterEach(() => { globalThis.fetch = originalFetch; globals.window = originalWindow; useUserStore.setState(originalUser); useBusinessConfigStore.setState(originalBusiness); });
 const posts = () => requests.filter(item => item.path === "/api/tasks" && item.body);
 
+test.each(["pattern-extract", "pattern-colorway"] as const)("%s leaves alpha inference to the server instead of contradicting scene fields", async scene => {
+    const promptInput = { scene, fields: { extractBackground: "白底" }, userText: "按表单处理图案", mode: "edit" as const };
+    await requestEdit({ ...defaultConfig, model: "gpt-image-2.5-flare", imageOptions: "{}" }, promptInput.userText, references(1), undefined, { tool: `creative-${scene}`, promptInput });
+    expect(posts()).toHaveLength(1);
+    expect(posts()[0]!.body!.promptInput).toMatchObject(promptInput);
+    expect(posts()[0]!.body!.parameters.background).toBeUndefined();
+    // The mock rejects data URL fetches: no browser alpha scan occurred before submission.
+    expect(requests.some(item => item.path.startsWith("data:"))).toBe(false);
+});
+
 test.each([2, 4])("Blend %i references submits one canvas generation with no old or system prompt", async count => {
     await requestGeneration({ ...defaultConfig, model: "blend", size: "7:5", quality: "turbo", count: "9", systemPrompt: "old system instruction", imageOptions: '{"dimensions":"LANDSCAPE","nsfw_check":"false"}' }, "old draft prompt", { tool: "canvas-image" }, references(count));
     expect(posts()).toHaveLength(1);

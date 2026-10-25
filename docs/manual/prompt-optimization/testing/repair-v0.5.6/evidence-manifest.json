@@ -1,0 +1,106 @@
+{
+  "originalImageBytesPreserved": true,
+  "runtimeDatabasesIncluded": false,
+  "files": [
+    {
+      "path": "gallery.html",
+      "bytes": 37981,
+      "sha256": "0543d2e1badf7b0609d33819ab5c035cdcca70f415022d639a28a95c688230da"
+    },
+    {
+      "path": "repair-lettering/lettering-single-quote-primary.png",
+      "bytes": 812236,
+      "sha256": "a5f73d742dfcbd91e7a52cf3ee9c27469e3948043871fa24fe6968a5d4d86b1b"
+    },
+    {
+      "path": "repair-sunburst-alpha/alpha-native-off-primary.png",
+      "bytes": 699642,
+      "sha256": "402d08c486bd3e37c7af43bcc1c295e050c4a8da0dbe2ac874207cc83635a616"
+    },
+    {
+      "path": "repair-sunburst-alpha/alpha-native-on-primary.png",
+      "bytes": 923600,
+      "sha256": "90ff241218edfa26b01114da802957c8f912cb360a97f8a8379447d2ea6152ad"
+    },
+    {
+      "path": "repair-v1/alpha-native-off-primary.png",
+      "bytes": 702908,
+      "sha256": "8184ee0206b84f5d5d1a370fde102f54ef0092ad96363b4d9a7bdd2edc7aa032"
+    },
+    {
+      "path": "repair-v1/alpha-native-on-primary.png",
+      "bytes": 921811,
+      "sha256": "4a040ca0e18d7be2ebf30e652a13a0f07fea0a6575dcc530a50d82e9faab476b"
+    },
+    {
+      "path": "repair-v1/pattern-colorway-01-new-primary.png",
+      "bytes": 981110,
+      "sha256": "229914137d1f1fd50bfe484a86d21cbbba1862bd5a133351c6dc7a195353fb14"
+    },
+    {
+      "path": "repair-v1/pattern-craft-02-new-primary.png",
+      "bytes": 2247121,
+      "sha256": "acac2c39b8fd2378c942c83be3fab23e867e60883581b3332a6e34c7a14c1dd5"
+    },
+    {
+      "path": "repair-v1/pattern-craft-10-new-primary.png",
+      "bytes": 2224017,
+      "sha256": "70e63ef32bbd03c07d8acf5b6de964495e64fc4727c363ae35928ddf2867d182"
+    },
+    {
+      "path": "repair-v1/pattern-extract-01-new-primary.png",
+      "bytes": 898143,
+      "sha256": "e4483027cce37585dea8fdab69dc07ab40a8a96dd762afd7a24b16035f8324d0"
+    },
+    {
+      "path": "repair-v1/pattern-extract-06-new-primary.png",
+      "bytes": 1031136,
+      "sha256": "abd34b2517312731055a935e77842acfaaa6cfddfb2c0f63c249f468356f3241"
+    },
+    {
+      "path": "repair-v1/style-to-sketch-11-new-primary.png",
+      "bytes": 753016,
+      "sha256": "0b1bb75c81742dbe2916dd4ad6058acffc96887033423c7fc638d0f253ceec28"
+    },
+    {
+      "path": "repair-v1/style-to-sketch-11-new-repeat-primary.png",
+      "bytes": 761965,
+      "sha256": "cc207ab299217f150f173041bbd6b268c3bf100506d5b87b8ae1ea1f60b9cbba"
+    },
+    {
+      "path": "repair-v1/style-to-sketch-17-new-primary.png",
+      "bytes": 761559,
+      "sha256": "c3180c73302826cb06c2ad856f8b3d6b7954bf9d13d3c424ae951f3218303430"
+    },
+    {
+      "path": "repair-v1/style-to-sketch-17-new-repeat-primary.png",
+      "bytes": 753640,
+      "sha256": "80ce0f8314ea730de8163a63baf7f32176e9eaff83304c1e09c680b44c5ef46c"
+    },
+    {
+      "path": "repair-v2/pattern-colorway-01-new-primary.png",
+      "bytes": 920881,
+      "sha256": "13f12dd3f6dd081803436d53e6542f88177c5190f841a3c9f1457fe14b60535f"
+    },
+    {
+      "path": "repair-v2/pattern-extract-01-new-primary.png",
+      "bytes": 897452,
+      "sha256": "af63ef68bf8cb3f97c8e01af201095459ae7ec89384a0879d90ad83a1ae0bb31"
+    },
+    {
+      "path": "repair-v2/pattern-extract-02-new-primary.png",
+      "bytes": 842863,
+      "sha256": "201303fb4ac4efa15194efa0513cf1a8351c19e136bc8aa544963879531972fc"
+    },
+    {
+      "path": "repair-v2/pattern-extract-03-new-primary.png",
+      "bytes": 821133,
+      "sha256": "cfc29730eb27fed53a0a4462fc7ebf2df7cebe61d645b450bd467eb16f135b8b"
+    },
+    {
+      "path": "report.json",
+      "bytes": 72439,
+      "sha256": "4e93286dfd1c84c859efb4a1050cfb6384f7a16b7e5f3f5c11a24adb59c26495"
+    }
+  ]
+}

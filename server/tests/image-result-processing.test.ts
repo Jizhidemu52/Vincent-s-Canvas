@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import * as childProcess from "node:child_process";
 import { createRequire } from "node:module";
 import ts from "typescript";
-import { processImageResult, ImageResultProcessingError } from "../src/image-result-processing";
+import { hasImageTransparency, processImageResult, ImageResultProcessingError } from "../src/image-result-processing";
 import { hasNonIdentityImageOrientation, prepareImageEditInput } from "../src/image-edit-input";
 
 const ffmpeg = process.env.FFMPEG_PATH || "ffmpeg";
@@ -82,6 +82,93 @@ describe("local image result processing", () => {
     const output = await processImageResult({ result: highBit, parameters: { output_format: "png" } });
     expect(output.display.bytes).toBe(highBit.bytes);
     expect(output.operations).toEqual([]);
+  });
+
+  for (const pixelFormat of ["rgb24", "rgba"]) {
+    test(`transparent output rejects fully opaque ${pixelFormat} PNG instead of accepting its format`, async () => {
+      const opaque = png(Array(pixelFormat === "rgba" ? 16 : 12).fill(255), 4, 1, pixelFormat);
+      for (const parameters of [{ background: "transparent" }, { background: "transparent", output_format: "png" }]) {
+        await expect(processImageResult({ result: opaque, parameters })).rejects.toMatchObject({ code: "IMAGE_RESULT_TRANSPARENCY_MISSING" });
+      }
+    });
+  }
+
+  test("transparent output rejects JPEG bytes even when declared PNG and requested as PNG", async () => {
+    const jpeg = orientedFixtures.find(item => item.mimeType === "image/jpeg" && item.orientation === 1)!;
+    await expect(processImageResult({ result: { ...jpeg, mimeType: "image/png" }, parameters: { background: "transparent", output_format: "png" } }))
+      .rejects.toMatchObject({ code: "IMAGE_RESULT_TRANSPARENCY_MISSING" });
+  });
+
+  test("a successful transparency check keeps original PNG bytes and does not claim source-alpha equality", async () => {
+    const before = Buffer.from(generated.bytes);
+    for (const parameters of [{ background: "transparent" }, { background: "transparent", output_format: "png" }]) {
+      const output = await processImageResult({ result: generated, parameters });
+      expect(output.display.bytes).toBe(generated.bytes);
+      expect(output.display.mimeType).toBe("image/png");
+      expect(output.operations).toEqual(["transparent_alpha_verified"]);
+      expect(output.export).toBeUndefined();
+    }
+    expect(generated.bytes).toEqual(before);
+  });
+
+  test("authorized-byte transparency inspection distinguishes opaque RGB, RGBA, JPEG and a one-pixel alpha edge", async () => {
+    const opaqueRgb = png(Array(12).fill(255), 4, 1, "rgb24");
+    const opaqueRgba = png(Array(16).fill(255));
+    const jpeg = orientedFixtures.find(item => item.mimeType === "image/jpeg" && item.orientation === 1)!;
+    for (const image of [opaqueRgb, opaqueRgba, jpeg]) expect(await hasImageTransparency(image)).toBe(false);
+    const edge = png([10, 20, 30, 255, 40, 50, 60, 255, 70, 80, 90, 255, 100, 110, 120, 254]);
+    for (const image of [original, edge]) {
+      const before = Buffer.from(image.bytes);
+      expect(await hasImageTransparency(image)).toBe(true);
+      expect(image.bytes).toEqual(before);
+    }
+  });
+
+  test("transparent WebP is checked without re-encoding while opaque WebP is rejected", async () => {
+    const webp = await processImageResult({ result: generated, parameters: { output_format: "webp" } });
+    expect(await hasImageTransparency(webp.display)).toBe(true);
+    const verified = await processImageResult({ result: webp.display, parameters: { background: "transparent", output_format: "webp" } });
+    expect(verified.display.bytes).toBe(webp.display.bytes);
+    expect(verified.operations).toEqual(["transparent_alpha_verified"]);
+    const opaque = { mimeType: "image/webp", bytes: codec([
+      "-f", "rawvideo", "-pixel_format", "rgb24", "-video_size", "4x1", "-i", "pipe:0",
+      "-frames:v", "1", "-threads", "1", "-c:v", "libwebp", "-pix_fmt", "yuv420p", "-f", "image2pipe", "pipe:1",
+    ], new Uint8Array(12).fill(255)) };
+    expect([...rgba(opaque)].filter((_, index) => index % 4 === 3)).toEqual([255, 255, 255, 255]);
+    expect(await hasImageTransparency(opaque)).toBe(false);
+    await expect(processImageResult({ result: opaque, parameters: { background: "transparent" } }))
+      .rejects.toMatchObject({ code: "IMAGE_RESULT_TRANSPARENCY_MISSING" });
+  });
+
+  test("16-bit alpha is inspected without rounding a nearly opaque pixel up to opaque", async () => {
+    const nearlyOpaque = png([0, 0, 0, 0, 0, 0, 255, 254], 1, 1, "rgba64be");
+    const opaque = png([0, 0, 0, 0, 0, 0, 255, 255], 1, 1, "rgba64be");
+    expect(await hasImageTransparency(nearlyOpaque)).toBe(true);
+    expect(await hasImageTransparency(opaque)).toBe(false);
+    const verified = await processImageResult({ result: nearlyOpaque, parameters: { background: "transparent", output_format: "png" } });
+    expect(verified.display.bytes).toBe(nearlyOpaque.bytes);
+    expect(verified.operations).toEqual(["transparent_alpha_verified"]);
+    await expect(processImageResult({ result: nearlyOpaque, parameters: { background: "transparent", output_format: "webp" } }))
+      .rejects.toMatchObject({ code: "IMAGE_RESULT_TRANSPARENCY_MISSING" });
+  });
+
+  test("authorized-byte transparency inspection rejects corrupt files instead of guessing opaque", async () => {
+    await expect(hasImageTransparency({ bytes: Buffer.from("not an image"), mimeType: "image/png" })).rejects.toBeInstanceOf(ImageResultProcessingError);
+  });
+
+  test("transparent output cannot be flattened into a requested JPEG", async () => {
+    await expect(processImageResult({ result: generated, parameters: { background: "transparent", output_format: "jpeg" } }))
+      .rejects.toMatchObject({ code: "INVALID_IMAGE_RESULT_PARAMETERS" });
+  });
+
+  test("transparent output checks the strict composite, not only the provider image", async () => {
+    const opaque = png(Array(16).fill(255));
+    const preserved = await processImageResult({ result: opaque, parameters: { background: "transparent" }, editInput });
+    expect(preserved.operations).toContain("strict_mask_composite");
+    expect(preserved.operations).toContain("transparent_alpha_verified");
+    expect([...rgba(preserved.display)].filter((_, index) => index % 4 === 3)).toContain(0);
+    await expect(processImageResult({ result: generated, parameters: { background: "transparent" }, editInput: { references: [opaque], mask: opaque } }))
+      .rejects.toMatchObject({ code: "IMAGE_RESULT_TRANSPARENCY_MISSING" });
   });
 
   test("keeps every protected RGBA byte, copies editable pixels and weights feathered pixels", async () => {

@@ -1,6 +1,7 @@
 import { promptInputSchema, requiredPromptScene, type PromptInput } from "../../shared/prompt-contracts";
 import type { PromptActor, PromptCompiler } from "./prompt-compiler";
 import { PromptOptimizationError } from "./prompt-safety";
+import { promptImageBackground } from "./prompt-image-background";
 
 export type PromptTaskInput = {
   requestId: string; operationType: string; toolKey?: string; modelConfigId?: string | null;
@@ -12,7 +13,7 @@ export async function preparePromptTaskInput<T extends PromptTaskInput>(compiler
   const expectedScene = requiredPromptScene(input.toolKey);
   if (expectedScene && !input.promptInput) throw new PromptOptimizationError("PROMPT_INPUT_REQUIRED", "此场景必须提交表单设置并经过提示词优化，未提交生成");
   if (expectedScene && input.promptInput?.scene !== expectedScene) throw new PromptOptimizationError("PROMPT_RECIPE_MISMATCH", "优化场景与功能板块不一致，未提交生成");
-  const parameters = { ...input.parameters };
+  let parameters = { ...input.parameters };
   delete parameters.promptOptimization;
   if (!input.promptInput) return { ...input, parameters, optimized: false };
   if (!["image_generation", "inpaint", "batch_image"].includes(input.operationType)) throw new PromptOptimizationError("PROMPT_OPERATION_INVALID", "此任务类型不支持提示词优化");
@@ -31,6 +32,11 @@ export async function preparePromptTaskInput<T extends PromptTaskInput>(compiler
     toolKey: input.toolKey, promptInput, sourceUrls: input.sourceUrls });
   if (compilation.status !== "success" || !compilation.prompt) throw new PromptOptimizationError(compilation.errorCode || "PROMPT_OPTIMIZING",
     compilation.message || "提示词仍在优化，未提交生成，请查询原请求", compilation.status === "failed" ? 422 : 409);
+  if (["pattern-extract", "pattern-colorway"].includes(promptInput.scene)) {
+    const target = await compiler.runtime.resolveTarget(actor, { requestId: input.requestId, modelConfigId: input.modelConfigId,
+      toolKey: input.toolKey, promptInput, sourceUrls: input.sourceUrls }, { adminTest: compilation.adminTest === true });
+    parameters = await promptImageBackground(promptInput, target, () => compiler.runtime.readSource(actor, input.sourceUrls[0]!), parameters);
+  }
   const userInput = { ...promptInput, compilationId: compilation.id };
   parameters.promptOptimization = { optimized: compilation.optimized, compilationId: compilation.id };
   if (archive) {

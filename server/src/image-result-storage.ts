@@ -23,7 +23,7 @@ export class ImageResultPersistenceError extends Error {
 
 export function hasImageResultProcessing(parameters: Record<string, unknown>) {
   const archive = parameters.inputArchive as Record<string, unknown> | undefined;
-  return archive?.maskReferenceIndex !== undefined || ["png", "jpeg", "webp"].includes(String(parameters.output_format));
+  return parameters.background === "transparent" || archive?.maskReferenceIndex !== undefined || ["png", "jpeg", "webp"].includes(String(parameters.output_format));
 }
 
 /** Persist upstream bytes before any fallible local decoding, mask loading or conversion. */

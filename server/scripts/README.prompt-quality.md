@@ -2,6 +2,14 @@
 
 入口：`prompt-quality-matrix.ts`。这是手动运行的 QA 脚本，CI 不执行付费请求。不带 `--execute` 时只读取本地文件与 Git 基线，生成计划，网络请求为零。
 
+## v0.5.6 定向修复复测
+
+`prompt-repair-live-qa.ts` 仅用于本地隔离环境，固定连接 `http://127.0.0.1:3100` 和仓库 `output/prompt-optimization/repair-v1/state.sqlite`。必须先通过 SQLite 一致性备份创建专用 QA 克隆，并让 Demo 的 `DEMO_STATE_PATH` 指向该克隆；不可直接复制正在写入的 SQLite 主文件，不得指向生产库。准备模型凭据及足够余额由运行者负责。默认 dry-run 只生成计划，不调用模型；`--execute` 会创建和临时激活候选配方，仅在正常退出路径恢复，因此异常终止后须依据 ledger 核对克隆中的激活状态。
+
+在 `server/` 运行 `bun scripts/prompt-repair-live-qa.ts` 检查计划。明确授权付费后才加 `--execute`；`PQ_REPAIR_RUN` 设置独立批次名，`PQ_REPAIR_ONLY` 用逗号分隔用例前缀，`PQ_MODEL_CONFIG_ID` 固定同批次模型。规则或输入变化必须使用新 run ID；已有尝试先查原请求，不自动重提。`--recover-download` 仅对已知原任务的结果下载失败调用恢复接口，不重新生图。
+
+本轮的原素材和全部结果已公开在 `docs/manual/prompt-optimization/testing/`，其中 fixtures 为原始测试素材；主矩阵脚本的旧本地素材路径需按清单准备。离线发布脚本 `export-prompt-repair-evidence.ts` 只读本轮克隆与日志，核对候选配方已恢复、PNG SHA-256 一致后，按字段白名单导出到 `testing/repair-v0.5.6/`。不复制运行数据库、凭据、原始供应商响应或员工资料。已知问题和调用统计以该目录报告为准，CI 不运行这些付费脚本。
+
 ## 内容与边界
 
 - 9 个创意场景各 10 组旧版/新版对照，共 180 条；旧版从 Git `4ed9d8d` 的真实 `buildScenePrompt` 读取，加原参考图片编号前缀。新版调用当前前端的真实 `scenePromptInput`，再经 `/api/prompt-compilations` 和 `/api/tasks`。

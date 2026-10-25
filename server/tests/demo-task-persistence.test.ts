@@ -124,6 +124,28 @@ test("local processing failure preserves original bytes first and pauses without
   } finally { h.demoState.close(); }
 });
 
+test("opaque transparent-background output remains durable and pauses the Demo task without a paid replay", async () => {
+  const h = harness();
+  const base64 = "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAACXBIWXMAAAABAAAAAQBPJcTWAAAAFUlEQVR4nGP8////fwYGBgYWEAHCAD4KBAICIHhuAAAAAElFTkSuQmCC";
+  try {
+    h.task.parameters = { background: "transparent" };
+    const error = await h.api.completeDemoImageTask(h.task, h.user.id, `data:image/png;base64,${base64}`).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ImageResultPersistenceError);
+    expect(error.cause).toMatchObject({ code: "IMAGE_RESULT_TRANSPARENCY_MISSING" });
+    h.api.finishDemoTaskFailure(h.task, error, { status: "failed", failureReason: "provider failed" }, h.user);
+    const state = h.demoState.load();
+    expect(state.tasks[0]).toMatchObject({ status: "paused", errorCode: "IMAGE_RESULT_PROCESSING_FAILED", resultUrls: [] });
+    expect(state.tasks[0].failureReason).toContain("所有像素均不透明");
+    expect(state.tasks[0].failureReason).toContain("渠道原件已保存");
+    expect(state.tasks[0].refundedAt).toBeUndefined();
+    expect(state.assets).toHaveLength(1);
+    expect(state.assets[0].bytes).toEqual(new Uint8Array(Buffer.from(base64, "base64")));
+    expect(state.assets[0].filename).toEndWith("-provider-original.png");
+    expect(h.user.creditBalance).toBe(10);
+    expect(h.submissions()).toBe(0);
+  } finally { h.demoState.close(); }
+});
+
 test("completed result keeps original and export relations plus unchanged bytes after a disk reopen", async () => {
   const directory = mkdtempSync(join(tmpdir(), "canvas-image-variants-test-"));
   const path = join(directory, "state.sqlite");
