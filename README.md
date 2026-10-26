@@ -8,7 +8,7 @@
 
 [操作手册](docs/manual/user-guide.md) · [完整功能介绍](docs/content/docs/overview/features.mdx) · [安装部署](docs/manual/installation-guide.md) · [商业使用](COMMERCIAL_USE.md)
 
-[v0.5.6 提示词／透明背景修复与真实出图验证](docs/manual/prompt-optimization/testing/repair-v0.5.6/README.md)：包含原始结果、逐图结论及未解决限制；仅上传 GitHub，未部署线上环境。
+[v0.5.6 提示词／透明背景修复与真实出图验证](docs/manual/prompt-optimization/testing/repair-v0.5.6/README.md)：包含隔离环境原始结果、逐图结论及未解决限制；相关代码随 v0.5.7 部署宝塔，线上已启用配方未自动切换。
 
 ## 一张画布，串起整轮设计
 
