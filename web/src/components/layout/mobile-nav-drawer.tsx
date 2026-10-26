@@ -47,7 +47,7 @@ export function MobileNavDrawer({ open, activeToolSlug, onClose }: MobileNavDraw
             <div className="space-y-6">
                 <FrequentNavigation onNavigate={onClose} />
                 {(["local", "online", "admin"] as const).map((group) => {
-                    const tools = navigationTools.filter((tool) => tool.group === group && (deploymentFeatures.rolePortalsEnabled || tool.group !== "admin") && (tool.slug === "admin" || isModuleAvailable(flags, bindings, navigationModuleKey(tool.slug) as ModuleKey)) && (tool.group !== "admin" || (tool.slug === "team" ? teamVisible : adminVisible)));
+                    const tools = navigationTools.filter((tool) => tool.group === group && (deploymentFeatures.rolePortalsEnabled || tool.group !== "admin" || tool.slug === "admin") && (tool.slug === "admin" || isModuleAvailable(flags, bindings, navigationModuleKey(tool.slug) as ModuleKey)) && (tool.group !== "admin" || (tool.slug === "team" ? teamVisible : adminVisible)));
                     if (!tools.length) return null;
 
                     return (

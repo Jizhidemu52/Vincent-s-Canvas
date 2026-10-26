@@ -30,8 +30,10 @@ describe("canvas workspace tools", () => {
         }
     });
 
-    test("respects deployment role portals and role ownership", () => {
-        expect(canvasWorkspaceTools({ ...access, rolePortalsEnabled: false }).some(item => item.group === "管理中心")).toBe(false);
+    test("keeps authenticated maintenance discoverable while respecting optional portals and role ownership", () => {
+        const portalsDisabled = canvasWorkspaceTools({ ...access, rolePortalsEnabled: false });
+        expect(portalsDisabled.some(item => item.path === "/admin")).toBe(true);
+        expect(portalsDisabled.some(item => item.path === "/team" || item.path === "/admin?tab=performance")).toBe(false);
         expect(canvasWorkspaceTools({ ...access, adminVisible: false, teamVisible: false }).some(item => item.group === "管理中心")).toBe(false);
         const team = canvasWorkspaceTools({ ...access, adminVisible: false });
         expect(team.some(item => item.path === "/team")).toBe(true);

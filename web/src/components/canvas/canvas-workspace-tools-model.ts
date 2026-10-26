@@ -55,10 +55,9 @@ export function canvasWorkspaceTools(access: WorkspaceToolAccess): WorkspaceTool
     add("home", "工作台首页", "/", undefined, "工作台");
     for (const tool of navigationTools) {
         if (tool.group === "admin") {
-            if (!access.rolePortalsEnabled) continue;
             if (tool.slug === "admin") {
                 if (access.adminVisible) add(tool.slug, tool.label, tool.path, undefined, "管理中心");
-            } else if (access.teamVisible) add(tool.slug, tool.label, tool.path, "team", "管理中心");
+            } else if (access.rolePortalsEnabled && access.teamVisible) add(tool.slug, tool.label, tool.path, "team", "管理中心");
         } else add(tool.slug, tool.label, tool.path, navigationModuleKey(tool.slug) as ModuleKey);
     }
     // This is the shared destination registry used by the existing navigation.

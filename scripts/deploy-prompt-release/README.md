@@ -4,7 +4,7 @@
 
 ## 固定目标与边界
 
-- 上一发布：`/home/vcan/releases/canvas-be2d2a2-20261024-prompt`；预期 `/home/vcan/current` 指向它。
+- 上一发布：`/home/vcan/releases/canvas-073c9b2-20261024-prompt`；预期 `/home/vcan/current` 指向它。
 - 仅替换 `vincent-s-canvas-api-1`、`vincent-s-canvas-worker-1`、`wireless-canvas-web`；数据库、Redis、MinIO、备份容器及另一套 `newvcan-*` 不动。
 - 默认独立优化模型为 `652b3d3c-93bf-419e-851f-31c5e101daf6`。它只用于首次创建的配方设置，不修改任何 `gpt-chat` 或其他板块绑定。执行前仍验证此 UUID 的模型、Provider、工作流启用状态及 chat 能力。
 - `PROMPT_OPTIMIZER_MODEL_ID` 可在**首次切换前**选择另一模型。已有配方的模型和管理员设置不被重复导入覆盖；上线后的模型变更通过超管配方页单独保存。

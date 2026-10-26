@@ -60,7 +60,7 @@ function ToolGroup({ group, activeToolSlug, adminVisible, teamVisible, getToolBa
     const bindings = useBusinessConfigStore(state => state.tools);
     const tools = navigationTools.filter((tool) => {
         if (tool.group !== group) return false;
-        if (!deploymentFeatures.rolePortalsEnabled && tool.group === "admin") return false;
+        if (!deploymentFeatures.rolePortalsEnabled && tool.group === "admin" && tool.slug !== "admin") return false;
         return (tool.slug === "admin" || isModuleAvailable(flags, bindings, navigationModuleKey(tool.slug) as ModuleKey))
             && (tool.group !== "admin" || (tool.slug === "team" ? teamVisible : adminVisible));
     });

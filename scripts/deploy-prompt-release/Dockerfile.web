@@ -1,4 +1,4 @@
-FROM canvas-web:canvas-be2d2a2-20261024-prompt
+FROM canvas-web:canvas-073c9b2-20261024-prompt
 # Retain old fingerprinted chunks for already-open browser tabs.
 COPY release-web/ /usr/share/nginx/html/
 COPY nginx.conf /etc/nginx/conf.d/default.conf

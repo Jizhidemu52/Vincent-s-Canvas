@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 umask 077
 release="$(cd -- "$(dirname -- "$0")/.." && pwd)"
-previous=/home/vcan/releases/canvas-be2d2a2-20261024-prompt
+previous=/home/vcan/releases/canvas-073c9b2-20261024-prompt
 test "$release" = /home/vcan/releases/__RELEASE__
 cd "$release"
 sha256sum -c SHA256SUMS > /dev/null
@@ -14,9 +14,9 @@ if test -f DEPLOYED; then
 fi
 test "$(readlink -f /home/vcan/current)" = "$previous"
 for container in vincent-s-canvas-api-1 vincent-s-canvas-worker-1; do
-  test "$(docker inspect --format '{{.Config.Image}}' "$container")" = canvas-api:canvas-be2d2a2-20261024-prompt
+  test "$(docker inspect --format '{{.Config.Image}}' "$container")" = canvas-api:canvas-073c9b2-20261024-prompt
 done
-test "$(docker inspect --format '{{.Config.Image}}' wireless-canvas-web)" = canvas-web:canvas-be2d2a2-20261024-prompt
+test "$(docker inspect --format '{{.Config.Image}}' wireless-canvas-web)" = canvas-web:canvas-073c9b2-20261024-prompt
 if test -f BACKUP_DIRECTORY; then
   backup="$(cat BACKUP_DIRECTORY)"
   case "$backup" in /home/vcan/backups/__RELEASE__.*) ;; *) exit 1;; esac
@@ -50,15 +50,15 @@ if test ! -f "$backup/configuration-saved"; then
   curl --max-time 5 -fsS http://127.0.0.1:3000/api/auth/methods > "$backup/auth-methods-before.json"
   touch "$backup/configuration-saved"
 fi
-docker run --rm --network none -v "$release:/release" canvas-api:canvas-be2d2a2-20261024-prompt bun -e '
+docker run --rm --network none -v "$release:/release" canvas-api:canvas-073c9b2-20261024-prompt bun -e '
 let source=await Bun.file("/release/previous-compose.release.yml").text();
-for(const [oldValue,newValue,count] of [["canvas-web:canvas-be2d2a2-20261024-prompt","canvas-web:__RELEASE__",1],["canvas-api:canvas-be2d2a2-20261024-prompt","canvas-api:__RELEASE__",2]]) {
+for(const [oldValue,newValue,count] of [["canvas-web:canvas-073c9b2-20261024-prompt","canvas-web:__RELEASE__",1],["canvas-api:canvas-073c9b2-20261024-prompt","canvas-api:__RELEASE__",2]]) {
   if(source.split(oldValue).length-1!==count)throw Error("Unexpected image mapping");
   source=source.replaceAll(oldValue,newValue);
 }
 await Bun.write("/release/compose.release.yml",source);'
 docker compose -p vincent-s-canvas -f compose.runtime.yml -f compose.release.yml config --format json > "$backup/candidate-compose.private.json"
-docker run --rm --network none -v "$backup:/backup:ro" canvas-api:canvas-be2d2a2-20261024-prompt bun -e '
+docker run --rm --network none -v "$backup:/backup:ro" canvas-api:canvas-073c9b2-20261024-prompt bun -e '
 const old=await Bun.file("/backup/application-containers.private.json").json(),candidate=await Bun.file("/backup/candidate-compose.private.json").json();
 for(const [service,name] of [["api","/vincent-s-canvas-api-1"],["worker","/vincent-s-canvas-worker-1"],["web","/wireless-canvas-web"]]) {
   const prior=old.find(item=>item.Name===name),environment=Object.fromEntries(prior.Config.Env.map(value=>{const index=value.indexOf("=");return[value.slice(0,index),value.slice(index+1)];}));
