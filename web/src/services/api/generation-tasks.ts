@@ -477,7 +477,7 @@ async function resolvePublicModel(modelId: string, operationType: string, toolKe
 
 export async function waitForTasks(ids: string[], signal?: AbortSignal, onPoll?: (tasks: QueuedTask[]) => void, haltOnPaused = false) {
     if (!ids.length) return [];
-    const events = watchTaskEvents(ids);
+    const events = watchTaskEvents(ids, { background: true });
     let revision = events.version;
     try { return await observeTask({ taskIds: ids, signal, ready: events.ready,
         waitForChange: (remaining, nextSignal) => events.next(revision, remaining, nextSignal),

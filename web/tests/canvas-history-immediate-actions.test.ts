@@ -4,6 +4,7 @@ import ts from "typescript";
 
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import { cloneCanvasNodeGraph, copyCanvasNodeGraph } from "@/lib/canvas/canvas-node-copy";
+import { describeCanvasHistoryChange } from "@/lib/canvas/canvas-history-description";
 
 type Entry = { nodes: CanvasNodeData[]; connections: unknown[]; groups: unknown[]; chatSessions: unknown[]; activeChatId: string | null; backgroundMode: string; showImageInfo: boolean };
 type History = { past: Entry[]; future: Entry[] };
@@ -42,9 +43,11 @@ function harness(history: History, previous: Entry, current: Entry) {
     const pendingTimers = new Map<number, () => void>();
     let timerId = 17;
     let live = current;
+    const notices: { kind: string; description: string }[] = [];
     let availability = { canUndo: history.past.length > 0, canRedo: history.future.length > 0 };
     const commandScope = {
-        copyCanvasNodeGraph, cloneCanvasNodeGraph,
+        copyCanvasNodeGraph, cloneCanvasNodeGraph, describeCanvasHistoryChange,
+        onHistoryAction: (kind: string, before: Parameters<typeof describeCanvasHistoryChange>[0], after: Parameters<typeof describeCanvasHistoryChange>[1]) => notices.push({ kind, description: describeCanvasHistoryChange(before, after) }),
         nodesRef: { get current() { return live.nodes; } }, connectionsRef: { get current() { return live.connections; } },
         groupsRef: { get current() { return live.groups; } },
         setNodes: (update: (nodes: CanvasNodeData[]) => CanvasNodeData[]) => { live = { ...live, nodes: update(live.nodes) }; },
@@ -74,10 +77,23 @@ function harness(history: History, previous: Entry, current: Entry) {
         pendingTimers.delete(timer);
         callback?.();
     };
-    return { ...actions, historyRef, lastHistoryRef, historyCommitTimerRef, applyingHistoryRef, historyPausedRef, clearedTimers, commitPending, live: () => live, availability: () => availability };
+    return { ...actions, historyRef, lastHistoryRef, historyCommitTimerRef, applyingHistoryRef, historyPausedRef, clearedTimers, commitPending, notices, live: () => live, availability: () => availability };
 }
 
 describe("canvas commands before the history debounce commits", () => {
+    test("undo and redo describe the same original three-node move; empty history never emits success", () => {
+        const before = entry("one", "two", "three");
+        const after = { ...before, nodes: before.nodes.map(node => ({ ...node, position: { x: 100, y: 200 } })) };
+        const editor = harness({ past: [], future: [] }, before, after);
+        editor.undoCanvas();
+        editor.undoCanvas();
+        editor.redoCanvas();
+        editor.redoCanvas();
+        expect(editor.notices).toEqual([
+            { kind: "undo", description: "移动 3 个节点" },
+            { kind: "redo", description: "移动 3 个节点" },
+        ]);
+    });
     test("import then duplicate immediately preserves the original when undoing the duplicate", () => {
         const empty = entry();
         const imported = { ...empty, nodes: entry("original").nodes };
@@ -204,6 +220,7 @@ describe("canvas commands before the history debounce commits", () => {
             expect(editor.historyRef.current.past).toHaveLength(1);
             expect(editor.historyRef.current.future).toEqual([after]);
             expect(editor.clearedTimers).toEqual([]);
+            expect(editor.notices).toEqual([]);
         }
     });
 });

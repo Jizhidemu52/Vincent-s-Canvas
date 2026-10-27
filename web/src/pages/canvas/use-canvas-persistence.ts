@@ -3,6 +3,7 @@ import { createCanvasProjectSaveQueue, type CanvasProjectSaveQueue } from "@/lib
 import { flushCanvasPersistence, hasPendingCanvasPersistence, type CanvasProject } from "@/stores/canvas/use-canvas-store";
 import type { CanvasProjectPatch } from "@/lib/canvas/canvas-project-update";
 import type { ViewportTransform } from "@/types/canvas";
+import { normalizeCanvasSelectedNodeIds } from "@/lib/canvas/canvas-view-state";
 import { canvasHistoryForSave, type CanvasHistoryEntry, type useCanvasHistoryState } from "./use-canvas-history";
 
 export type CanvasProjectSaveSnapshot = {
@@ -27,16 +28,17 @@ export function useCanvasPersistence(options: {
     history: ReturnType<typeof useCanvasHistoryState>; current: CanvasHistoryEntry;
     updateProject: UpdateProject; batchEditRunning: boolean; runningNodeId: string | null;
     viewport: ViewportTransform;
+    selectedNodeIds?: ReadonlySet<string>;
 }) {
-    const { projectId, projectLoaded, usePerformanceScenario, projectSaveQueueRef, updateProject, batchEditRunning, runningNodeId, viewport } = options;
+    const { projectId, projectLoaded, usePerformanceScenario, projectSaveQueueRef, updateProject, batchEditRunning, runningNodeId, viewport, selectedNodeIds } = options;
     const { historyRef, lastHistoryRef, historyPausedRef, applyingHistoryRef, historyState } = options.history;
     const { nodes, connections, groups, chatSessions, activeChatId, backgroundMode, showImageInfo } = options.current;
     const savedProjectIdRef = useRef(projectId);
-    const viewportSaveQueueRef = useRef<CanvasProjectSaveQueue<{ projectId: string; viewport: ViewportTransform }> | null>(null);
+    const viewportSaveQueueRef = useRef<CanvasProjectSaveQueue<{ projectId: string; viewport: ViewportTransform; selectedNodeIds?: string[] }> | null>(null);
     const viewportSaveHandlerRef = useRef(updateProject);
     viewportSaveHandlerRef.current = updateProject;
     if (!viewportSaveQueueRef.current) {
-        viewportSaveQueueRef.current = createCanvasProjectSaveQueue(500, ({ projectId: id, viewport: savedViewport }) => viewportSaveHandlerRef.current(id, { viewport: savedViewport }));
+        viewportSaveQueueRef.current = createCanvasProjectSaveQueue(500, ({ projectId: id, ...viewState }) => viewportSaveHandlerRef.current(id, viewState));
     }
     useEffect(() => {
         if (savedProjectIdRef.current === projectId) return;
@@ -93,7 +95,9 @@ export function useCanvasPersistence(options: {
         if (!projectLoaded || usePerformanceScenario) return;
         // Capture the owner and value together: a project switch must never save
         // the next project's live viewport into the previous project.
-        viewportSaveQueueRef.current?.schedule({ projectId, viewport });
-    }, [projectId, projectLoaded, usePerformanceScenario, viewport]);
+        viewportSaveQueueRef.current?.schedule({ projectId, viewport,
+            ...(selectedNodeIds ? { selectedNodeIds: normalizeCanvasSelectedNodeIds(selectedNodeIds, nodes, groups) } : {}),
+        });
+    }, [projectId, projectLoaded, usePerformanceScenario, viewport, selectedNodeIds, nodes, groups]);
     return savedProjectIdRef;
 }

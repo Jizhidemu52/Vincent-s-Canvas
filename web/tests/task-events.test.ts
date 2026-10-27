@@ -71,6 +71,47 @@ test("hidden tabs close the stream, avoid GETs and resnapshot when visible", asy
     watch.close();
 });
 
+test("an active generation keeps the single stream in background without waking passive views", async () => {
+    const f = fixture();
+    const active = f.stream.subscribe(["one"], { background: true });
+    const passive = f.stream.subscribe(["two"]);
+    await Bun.sleep(45);
+    f.connections[0]!.emit(["one"]);
+    f.hidden(true);
+    expect(f.connections[0]!.closed).toBe(false);
+    const revision = active.version;
+    let completed = false;
+    const waiting = active.next(revision, 1000, undefined, 5).then(() => { completed = true; });
+    await Bun.sleep(50);
+    expect(completed).toBe(false);
+    f.connections[0]!.emit(["one"]);
+    await waiting;
+    expect(f.connections).toHaveLength(1);
+    active.close();
+    await Bun.sleep(45);
+    expect(f.connections[0]!.closed).toBe(true);
+    passive.close();
+});
+
+test("a hidden active observer uses its existing bounded fallback when SSE disconnects", async () => {
+    const f = fixture();
+    const watch = f.stream.subscribe(["one"], { background: true });
+    await Bun.sleep(45);
+    f.connections[0]!.emit(["one"]);
+    f.hidden(true);
+    f.connections[0]!.error();
+    let calls = 0, revision = watch.version;
+    const pending = observeTask({ ready: watch.ready, timeoutMs: 1000,
+        read: async () => { revision = watch.version; return ++calls; }, done: value => value === 2,
+        waitForChange: (remaining, signal) => watch.next(revision, remaining, signal, 40),
+    });
+    await Bun.sleep(10);
+    expect(calls).toBe(1);
+    expect(await pending).toBe(2);
+    expect(f.connections).toHaveLength(1);
+    watch.close();
+});
+
 test("employee change rejects stale observation and late old events cannot wake a new owner", async () => {
     const f = fixture();
     const watch = f.stream.subscribe(["one"]);

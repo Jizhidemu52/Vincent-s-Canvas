@@ -47,4 +47,7 @@ describe("canvas top bar render stability", () => {
     test("refreshes when the workspace tools action changes", () => {
         expect(canvasTopBarPropsEqual(state(), state({ onOpenTools: () => undefined }))).toBe(false);
     });
+    test("refreshes when command search changes", () => {
+        expect(canvasTopBarPropsEqual(state(), state({ onOpenCommands: () => undefined }))).toBe(false);
+    });
 });

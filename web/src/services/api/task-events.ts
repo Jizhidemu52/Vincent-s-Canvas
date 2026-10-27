@@ -2,7 +2,8 @@ import { useUserStore } from "@/stores/use-user-store";
 
 type Visibility = Pick<Document, "hidden" | "addEventListener" | "removeEventListener">;
 type EventConnection = Pick<EventSource, "addEventListener" | "close">;
-type Watch = { ids: Set<string>; version: number; ownerId: string | undefined; listeners: Set<() => void>; closed: boolean };
+type Watch = { ids: Set<string>; version: number; ownerId: string | undefined; listeners: Set<() => void>; closed: boolean; background: boolean };
+export type TaskEventWatchOptions = { background?: boolean };
 
 /** One notification connection per workspace, regardless of how many views watch a task. */
 export function createTaskEventStream(options: {
@@ -17,11 +18,16 @@ export function createTaskEventStream(options: {
     const wake = (watch: Watch) => { for (const listener of [...watch.listeners]) listener(); };
     const closeSource = () => { source?.close(); source = undefined; sourceKey = ""; healthy = false; };
     const activeIds = () => [...new Set([...watches].filter(watch => watch.ownerId === options.owner()).flatMap(watch => [...watch.ids]))].sort();
+    const hasBackgroundWork = () => [...watches].some(watch => watch.background && watch.ownerId === options.owner());
+    // Only an actual running generation opts into background observation.
+    // The same observer uses push, or its existing bounded GET fallback when
+    // SSE is unavailable (including the local demo service); no second loop.
+    const canRead = (watch: Watch) => !options.visibility?.hidden || watch.background;
     const rebuild = () => {
         reconnect = undefined;
         const ids = activeIds();
         const ownerId = options.owner();
-        if (!ids.length || !ownerId || !options.connect || options.visibility?.hidden || ids.length > 100) { closeSource(); return; }
+        if (!ids.length || !ownerId || !options.connect || (options.visibility?.hidden && !hasBackgroundWork()) || ids.length > 100) { closeSource(); return; }
         const key = `${ownerId}:${ids.join(",")}`;
         if (source && sourceKey === key) return;
         closeSource();
@@ -51,11 +57,11 @@ export function createTaskEventStream(options: {
     };
     const schedule = () => { clearTimeout(reconnect); reconnect = setTimeout(rebuild, 30); };
     const onVisibility = () => {
-        if (options.visibility?.hidden) closeSource();
+        if (options.visibility?.hidden) { if (!hasBackgroundWork()) closeSource(); }
         else { for (const watch of watches) { watch.version++; wake(watch); } schedule(); }
     };
-    function subscribe(ids: string[]) {
-        const watch: Watch = { ids: new Set(ids.map(id => id.toLowerCase())), version: 0, ownerId: options.owner(), listeners: new Set(), closed: false };
+    function subscribe(ids: string[], settings: TaskEventWatchOptions = {}) {
+        const watch: Watch = { ids: new Set(ids.map(id => id.toLowerCase())), version: 0, ownerId: options.owner(), listeners: new Set(), closed: false, background: settings.background === true };
         if (!watches.size) options.visibility?.addEventListener("visibilitychange", onVisibility);
         watches.add(watch);
         schedule();
@@ -63,8 +69,9 @@ export function createTaskEventStream(options: {
             if (watch.closed) throw new Error("任务观察已关闭");
             if (options.owner() !== watch.ownerId) throw new Error("员工会话已变化，已停止查询原任务");
         };
-        const wait = (ready: () => boolean, ms: number, signal?: AbortSignal) => new Promise<void>((resolve, reject) => {
+        const wait = (ready: () => boolean, ms: number, signal?: AbortSignal, intervalMs = ms) => new Promise<void>((resolve, reject) => {
             let timer: ReturnType<typeof setTimeout> | undefined;
+            const deadline = Date.now() + ms;
             const cleanup = () => { clearTimeout(timer); watch.listeners.delete(check); signal?.removeEventListener("abort", abort); };
             const finish = (error?: unknown) => { cleanup(); if (error) reject(error); else resolve(); };
             const abort = () => finish(signal?.reason || new DOMException("已停止查询", "AbortError"));
@@ -74,15 +81,20 @@ export function createTaskEventStream(options: {
             };
             watch.listeners.add(check);
             signal?.addEventListener("abort", abort, { once: true });
-            timer = setTimeout(() => finish(), Math.max(0, ms));
+            timer = setTimeout(() => {
+                // Passive views stay paused when hidden. Active generation
+                // observers retain their existing fallback, not another poller.
+                if (options.visibility?.hidden && !watch.background && Date.now() < deadline) timer = setTimeout(() => finish(), Math.max(0, deadline - Date.now()));
+                else finish();
+            }, Math.max(0, Math.min(ms, intervalMs)));
             check();
         });
         return {
             get version() { return watch.version; },
-            ready: (ms: number, signal?: AbortSignal) => wait(() => !options.visibility?.hidden, ms, signal),
+            ready: (ms: number, signal?: AbortSignal) => wait(() => canRead(watch), ms, signal),
             next: (version: number, ms: number, signal?: AbortSignal, fallbackMs = 2_500) => wait(
-                () => !options.visibility?.hidden && watch.version !== version,
-                Math.min(ms, healthy ? 30_000 : fallbackMs), signal,
+                () => canRead(watch) && watch.version !== version,
+                ms, signal, healthy ? ms : fallbackMs,
             ),
             close() {
                 if (watch.closed) return;
@@ -105,13 +117,13 @@ export function createTaskEventStream(options: {
 }
 
 let sharedStream: ReturnType<typeof createTaskEventStream> | undefined;
-export function watchTaskEvents(ids: string[]) {
+export function watchTaskEvents(ids: string[], settings?: TaskEventWatchOptions) {
     sharedStream ||= createTaskEventStream({
         owner: () => useUserStore.getState().user?.id,
         visibility: typeof document === "undefined" ? undefined : document,
         connect: typeof EventSource === "undefined" ? undefined : url => new EventSource(url, { withCredentials: true }),
     });
-    return sharedStream.subscribe(ids);
+    return sharedStream.subscribe(ids, settings);
 }
 useUserStore.subscribe((state, previous) => {
     if (state.user?.id !== previous.user?.id) sharedStream?.identityChanged();

@@ -149,12 +149,12 @@ test("new drafts are created only after permission and complete content are avai
 test("latest graph is read after lazy loading and concurrent edits, including a bounded undo stack", async () => {
     const h = harness({ onHydrate: () => {
         const current = h.state.projects[0];
-        h.state.projects[0] = { ...current, title: "并发改名", nodes: [...current.nodes, { ...current.nodes[0], id: "concurrent", position: { x: 2000, y: 2000 } }], history: { past: Array.from({ length: 55 }, () => ({ ...current, history: undefined })), future: [current] } };
+        h.state.projects[0] = { ...current, title: "并发改名", nodes: [...current.nodes, { ...current.nodes[0], id: "concurrent", position: { x: 2000, y: 2000 } }], history: { past: Array.from({ length: 205 }, () => ({ ...current, history: undefined })), future: [current] } };
     } });
     await h.start();
     expect(h.state.projects[0].nodes.map(node => node.id)).toEqual(["old-node", "concurrent", "inserted-1"]);
     expect(h.state.projects[0].title).toBe("并发改名");
-    expect(h.state.projects[0].history?.past).toHaveLength(50);
+    expect(h.state.projects[0].history?.past).toHaveLength(200);
     expect(h.state.projects[0].history?.future).toHaveLength(0);
 });
 

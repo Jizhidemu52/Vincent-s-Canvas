@@ -6,5 +6,5 @@ export function isCanvasDesktopLayout(viewportWidth: number) {
 }
 
 export function shouldOpenCanvasCreationPanel(nodeCount: number, viewportWidth: number) {
-    return nodeCount === 0 && isCanvasDesktopLayout(viewportWidth);
+    return nodeCount === 0 && viewportWidth >= 1440;
 }

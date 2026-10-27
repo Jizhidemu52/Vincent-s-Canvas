@@ -4,7 +4,7 @@ import type { CanvasHistorySnapshot } from "@/stores/canvas/use-canvas-store";
 export type CanvasHistoryEntry = CanvasHistorySnapshot;
 
 export function boundedCanvasHistory(history?: { past: CanvasHistoryEntry[]; future: CanvasHistoryEntry[] }) {
-    return { past: (history?.past || []).slice(-50), future: (history?.future || []).slice(-50) };
+    return { past: (history?.past || []).slice(-200), future: (history?.future || []).slice(-200) };
 }
 
 /** Include a not-yet-committed edit when closing before the undo debounce fires. */
@@ -13,7 +13,7 @@ export function canvasHistoryForSave(history: { past: CanvasHistoryEntry[]; futu
     // Chat remains in the legacy snapshot shape for storage compatibility, but
     // it is not an edit command and must neither add undo steps nor discard redo.
     const changed = previous && (["nodes", "connections", "groups", "backgroundMode", "showImageInfo"] as const).some(key => previous[key] !== current[key]);
-    if (!applyingHistory && changed) return { past: [...saved.past.slice(-49), previous!], future: [] };
+    if (!applyingHistory && changed) return { past: [...saved.past.slice(-199), previous!], future: [] };
     return saved;
 }
 
@@ -31,9 +31,10 @@ export function useCanvasHistoryState() {
 export function useCanvasHistory(history: ReturnType<typeof useCanvasHistoryState>, options: {
     current: CanvasHistoryEntry; projectLoaded: boolean;
     createHistoryEntry: () => CanvasHistoryEntry; applyHistory: (entry: CanvasHistoryEntry) => void;
+    onHistoryAction?: (kind: "undo" | "redo", before: CanvasHistoryEntry, after: CanvasHistoryEntry) => void;
 }) {
     const { historyRef, lastHistoryRef, historyCommitTimerRef, applyingHistoryRef, pendingHistoryEntryRef, historyPausedRef, setHistoryState } = history;
-    const { projectLoaded, createHistoryEntry, applyHistory } = options;
+    const { projectLoaded, createHistoryEntry, applyHistory, onHistoryAction } = options;
     const { nodes, connections, groups, backgroundMode, showImageInfo } = options.current;
     const flushPendingHistory = useCallback(() => {
         if (!projectLoaded || applyingHistoryRef.current || historyPausedRef.current || !lastHistoryRef.current) return false;
@@ -93,7 +94,8 @@ export function useCanvasHistory(history: ReturnType<typeof useCanvasHistoryStat
         if (!previous || !current) return;
         historyRef.current.future.push(current);
         applyHistory(previous);
-    }, [applyHistory, flushPendingHistory]);
+        onHistoryAction?.("undo", previous, current);
+    }, [applyHistory, flushPendingHistory, onHistoryAction]);
 
     const redoCanvas = useCallback(() => {
         if (!flushPendingHistory()) return;
@@ -102,6 +104,7 @@ export function useCanvasHistory(history: ReturnType<typeof useCanvasHistoryStat
         if (!next || !current) return;
         historyRef.current.past.push(current);
         applyHistory(next);
-    }, [applyHistory, flushPendingHistory]);
+        onHistoryAction?.("redo", current, next);
+    }, [applyHistory, flushPendingHistory, onHistoryAction]);
     return { flushPendingHistory, undoCanvas, redoCanvas };
 }

@@ -9,25 +9,32 @@ const code = ts.transpileModule(readFileSync(new URL("../src/components/canvas/u
 function harness(thumbnail: () => Promise<ImageThumbnailLease | null>, original = async () => "blob:original") {
     const values: any[] = [];
     let cursor = 0;
-    let dependenciesBefore: unknown[] | undefined;
-    let cleanup: (() => void) | undefined;
+    const dependenciesBefore = new Map<number, unknown[]>();
+    const cleanups = new Map<number, () => void>();
     let result: any;
     let edge: ImageThumbnailEdge | 0 = 0;
     let originalCalls = 0;
     let thumbnailCalls = 0;
-    const effects: Array<() => void | (() => void)> = [];
+    const effects: Array<{ index: number; run: () => void | (() => void) }> = [];
     const module = { exports: {} as any };
     const dependencies: Record<string, unknown> = {
         react: {
             useState: (initial: unknown) => {
                 const index = cursor++;
-                if (!(index in values)) values[index] = initial;
+                if (!(index in values)) values[index] = typeof initial === "function" ? initial() : initial;
                 return [values[index], (value: any) => { values[index] = typeof value === "function" ? value(values[index]) : value; }];
             },
+            useRef: (initial: unknown) => {
+                const index = cursor++;
+                if (!(index in values)) values[index] = { current: initial };
+                return values[index];
+            },
             useEffect: (run: () => void | (() => void), deps: unknown[]) => {
-                if (!dependenciesBefore || deps.some((value, index) => !Object.is(value, dependenciesBefore![index]))) {
-                    dependenciesBefore = deps;
-                    effects.push(run);
+                const index = cursor++;
+                const before = dependenciesBefore.get(index);
+                if (!before || deps.some((value, i) => !Object.is(value, before[i]))) {
+                    dependenciesBefore.set(index, deps);
+                    effects.push({ index, run });
                 }
             },
         },
@@ -40,18 +47,27 @@ function harness(thumbnail: () => Promise<ImageThumbnailLease | null>, original 
     const render = () => {
         cursor = 0;
         result = module.exports.useCanvasImageThumbnail(node, edge);
-        for (const effect of effects.splice(0)) { cleanup?.(); cleanup = effect() || undefined; }
+        for (const effect of effects.splice(0)) {
+            cleanups.get(effect.index)?.();
+            const cleanup = effect.run();
+            if (cleanup) cleanups.set(effect.index, cleanup);
+            else cleanups.delete(effect.index);
+        }
         return result;
     };
     return {
         node,
-        run: async (nextEdge: ImageThumbnailEdge | 0 = edge) => {
+        run: async (nextEdge: ImageThumbnailEdge | 0 = edge, load = true) => {
             edge = nextEdge;
             render();
-            for (let i = 0; i < 10; i++) await Promise.resolve();
+            for (let i = 0; i < 20; i++) {
+                await Promise.resolve();
+                const preview = render();
+                if (load && preview.url && !preview.loaded && !preview.failed) preview.onLoad?.();
+            }
             render();
         },
-        unmount: () => cleanup?.(),
+        unmount: () => cleanups.forEach(cleanup => cleanup()),
         state: () => ({ preview: render(), originalCalls, thumbnailCalls }),
     };
 }
@@ -60,7 +76,7 @@ test("mounted canvas thumbnails never alter the node source or resolve original 
     let releases = 0;
     const h = harness(async () => ({ url: "blob:thumbnail", release: () => { releases++; } }));
     const originalMetadata = JSON.stringify(h.node.metadata);
-    await h.run(512);
+    await h.run(256);
     expect(h.state().preview).toMatchObject({ url: "blob:thumbnail", thumbnail: true });
     expect(h.state().originalCalls).toBe(0);
     expect(JSON.stringify(h.node.metadata)).toBe(originalMetadata);
@@ -73,7 +89,7 @@ test("mounted canvas thumbnails never alter the node source or resolve original 
 test("failed thumbnails fall back once, original failure is visible and retry is explicit", async () => {
     let releases = 0;
     const h = harness(async () => ({ url: "blob:thumbnail", release: () => { releases++; } }));
-    await h.run(512);
+    await h.run(256);
     h.state().preview.onError();
     await h.run();
     expect(h.state().preview).toMatchObject({ url: "blob:original", thumbnail: false, failed: false });
@@ -88,7 +104,61 @@ test("failed thumbnails fall back once, original failure is visible and retry is
     expect(h.state().preview.key).not.toBe(previousKey);
     expect(h.state().thumbnailCalls).toBe(2);
     expect(h.state().preview.failed).toBe(false);
-    expect(h.state().preview.onLoad).toBeUndefined();
+    expect(typeof h.state().preview.onLoad).toBe("function");
+    h.unmount();
+});
+
+test("a zoom upgrade retains the decoded preview lease until the original image loads", async () => {
+    const original = Promise.withResolvers<string>();
+    let releases = 0;
+    const h = harness(async () => ({ url: "blob:small", release: () => { releases++; } }), () => original.promise);
+    await h.run(256);
+    await h.run(0, false);
+    expect(h.state().preview.url).toBe("blob:small");
+    expect(releases).toBe(0);
+    original.resolve("blob:original");
+    await h.run(0, false);
+    expect(h.state().preview).toMatchObject({ url: "blob:original", placeholderUrl: "blob:small", loaded: false });
+    expect(releases).toBe(0);
+    h.state().preview.onLoad();
+    await h.run(0, false);
+    expect(h.state().preview).toMatchObject({ url: "blob:original", placeholderUrl: "", loaded: true });
+    expect(releases).toBe(1);
+    h.unmount();
+});
+
+test("a cold high-detail view shows a small preview before resolving original bytes", async () => {
+    const h = harness(async () => ({ url: "blob:small", release() {} }));
+    await h.run(0, false);
+    expect(h.state().preview).toMatchObject({ url: "blob:small", thumbnail: true, loaded: false });
+    expect(h.state().originalCalls).toBe(0);
+    h.state().preview.onLoad();
+    await h.run(0, false);
+    expect(h.state().preview).toMatchObject({ url: "blob:original", placeholderUrl: "blob:small" });
+    expect(h.state().originalCalls).toBe(1);
+    h.unmount();
+});
+
+test("a small original is not decoded into an equally large bootstrap thumbnail", async () => {
+    const h = harness(async () => ({ url: "blob:unnecessary", release() {} }));
+    h.node.metadata!.naturalWidth = 200;
+    h.node.metadata!.naturalHeight = 150;
+    await h.run(0);
+    expect(h.state().thumbnailCalls).toBe(0);
+    expect(h.state().preview.url).toBe("blob:original");
+});
+
+test("changing source clears the previous image instead of leaking it as a placeholder", async () => {
+    let releases = 0;
+    const h = harness(async () => ({ url: `blob:${h.node.id}`, release: () => { releases++; } }));
+    await h.run(256);
+    h.node.metadata!.storageKey = "image:new";
+    h.node.metadata!.content = "";
+    h.node.id = "new";
+    await h.run(256, false);
+    expect(h.state().preview.url).toBe("blob:new");
+    expect(h.state().preview.placeholderUrl).toBe("");
+    expect(releases).toBe(1);
     h.unmount();
 });
 

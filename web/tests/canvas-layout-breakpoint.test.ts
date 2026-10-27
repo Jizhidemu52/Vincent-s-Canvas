@@ -13,4 +13,6 @@ test("opens the creation panel on load only for an empty desktop canvas", () => 
     expect(shouldOpenCanvasCreationPanel(20, 1440)).toBe(false);
     expect(shouldOpenCanvasCreationPanel(0, 390)).toBe(false);
     expect(shouldOpenCanvasCreationPanel(1, 390)).toBe(false);
+    expect(shouldOpenCanvasCreationPanel(0, 1280)).toBe(false);
+    expect(shouldOpenCanvasCreationPanel(0, 1366)).toBe(false);
 });

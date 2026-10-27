@@ -29,6 +29,9 @@ import { canvasImageUsageInput } from "@/lib/canvas/canvas-image-usage";
 import { cloneCanvasNodeGraph, copyCanvasNodeGraph, type CanvasNodeGraph } from "@/lib/canvas/canvas-node-copy";
 import { clampCanvasZoom } from "@/lib/canvas/canvas-zoom";
 import { useCanvasShortcuts } from "./use-canvas-shortcuts";
+import { normalizeCanvasSelectedNodeIds } from "@/lib/canvas/canvas-view-state";
+import type { CanvasCommandBindings } from "@/components/canvas/canvas-command-palette";
+import type { CanvasOnboardingHandle } from "@/components/canvas/canvas-onboarding";
 import { useCanvasClipboardDrop, isCanvasAudioFile as isAudioFile } from "./use-canvas-clipboard-drop";
 import { useCanvasHistoryState, useCanvasHistory, boundedCanvasHistory, type CanvasHistoryEntry } from "./use-canvas-history";
 import { zoomViewportAtCanvasCenter } from "@/lib/canvas/canvas-viewport-interaction";
@@ -143,9 +146,15 @@ import {
 } from "@/types/canvas";
 import type { ReferenceImage } from "@/types/image";
 import "./workspace.css";
+import "./canvas-experience.css";
 import "@fontsource-variable/geist/wght.css";
 
 const CanvasAssistantPanel = lazy(loadCanvasAssistantPanel);
+const CanvasCommandPalette = lazy(() => import("@/components/canvas/canvas-command-palette").then(module => ({ default: module.CanvasCommandPalette })));
+const CanvasOnboarding = lazy(() => import("@/components/canvas/canvas-onboarding").then(module => ({ default: module.CanvasOnboarding })));
+const CanvasTaskFeedbackRuntime = lazy(() => import("@/components/canvas/canvas-task-feedback").then(module => ({ default: module.CanvasTaskFeedbackRuntime })));
+const CanvasSaveFailureNotice = lazy(() => import("@/components/canvas/canvas-save-failure-notice").then(module => ({ default: module.CanvasSaveFailureNotice })));
+const loadExperienceMetrics = () => import("@/lib/canvas/canvas-experience-metrics");
 const CanvasNodeContextMenu = lazy(() => import("@/components/canvas/canvas-context-menu").then(module => ({ default: module.CanvasNodeContextMenu })));
 const CanvasWorkspaceTools = lazy(() => import("@/components/canvas/canvas-workspace-tools").then(module => ({ default: module.CanvasWorkspaceTools })));
 const CanvasBatchEditDialog = lazy(() => import("@/components/canvas/canvas-batch-edit-dialog"));
@@ -277,6 +286,10 @@ function WirelessCanvasPage() {
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
     const projectId = params.id || "";
+    const [commandsOpen, setCommandsOpen] = useState(false);
+    const [taskHighlightIds, setTaskHighlightIds] = useState<string[]>([]);
+    const openCommands = useCallback(() => setCommandsOpen(true), []);
+    const onboardingRef = useRef<CanvasOnboardingHandle>(null);
     const performanceModeEnabled = isCanvasPerformanceModeEnabled(
         import.meta.env.DEV,
         import.meta.env.VITE_ENABLE_CANVAS_PERFORMANCE_SCENARIO === "true",
@@ -590,9 +603,15 @@ function WirelessCanvasPage() {
         setContextMenu(null);
     }, []);
 
+    const notifyHistoryAction = useCallback((kind: "undo" | "redo", before: CanvasHistoryEntry, after: CanvasHistoryEntry) => {
+        void import("@/lib/canvas/canvas-history-description").then(({ describeCanvasHistoryChange }) => {
+            void message.info({ key: "canvas-history-action", content: `已${kind === "undo" ? "撤销" : "重做"}：${describeCanvasHistoryChange(before, after)}`, duration: 2 });
+        }).catch(() => { void message.info(`已${kind === "undo" ? "撤销" : "重做"}画布操作`); });
+    }, [message]);
     const { flushPendingHistory, undoCanvas, redoCanvas } = useCanvasHistory(history, {
         current: { nodes, connections, groups, chatSessions, activeChatId, backgroundMode, showImageInfo },
         projectLoaded, createHistoryEntry, applyHistory,
+        onHistoryAction: notifyHistoryAction,
     });
 
     const cleanupCanvasFiles = useCallback(
@@ -628,6 +647,7 @@ function WirelessCanvasPage() {
         if (!hydrated) return;
         const lifecycle = projectAsyncLifecycleRef.current;
         const restoreToken = lifecycle.begin();
+        const openedAt = performance.now();
         pendingHistoryEntryRef.current = null;
         applyingHistoryRef.current = false;
         agentUndoRecordRef.current = null;
@@ -701,6 +721,7 @@ function WirelessCanvasPage() {
             setBackgroundMode(project.backgroundMode);
             setShowImageInfo(project.showImageInfo || false);
             setViewport(project.viewport);
+            setSelectedNodeIds(new Set(normalizeCanvasSelectedNodeIds(project.selectedNodeIds, restoredNodes, restoredGroups)));
             historyRef.current = restoredHistory;
             if (historyCommitTimerRef.current) {
                 clearTimeout(historyCommitTimerRef.current);
@@ -718,7 +739,11 @@ function WirelessCanvasPage() {
             setHistoryState({ canUndo: restoredHistory.past.length > 0, canRedo: restoredHistory.future.length > 0 });
             setProjectLoaded(true);
             requestAnimationFrame(() => {
-                if (lifecycle.isCurrent(restoreToken)) releaseStaleCanvasObjectUrls(restoredNodes, restoredSessions);
+                if (lifecycle.isCurrent(restoreToken)) {
+                    const elapsed = performance.now() - openedAt;
+                    void loadExperienceMetrics().then(metrics => metrics.recordCanvasOpen(elapsed, restoredNodes.length)).catch(() => undefined);
+                    releaseStaleCanvasObjectUrls(restoredNodes, restoredSessions);
+                }
             });
         };
 
@@ -772,7 +797,7 @@ function WirelessCanvasPage() {
     const savedProjectIdRef = useCanvasPersistence({
         projectId, projectLoaded, usePerformanceScenario, projectSaveQueueRef, history, updateProject,
         current: { nodes, connections, groups, chatSessions, activeChatId, backgroundMode, showImageInfo },
-        batchEditRunning, runningNodeId, viewport,
+        batchEditRunning, runningNodeId, viewport, selectedNodeIds,
     });
 
     useEffect(() => {
@@ -858,7 +883,7 @@ function WirelessCanvasPage() {
             }
             setToolbarNodeId(null);
             setRenderQuality(nextCanvasRenderQuality(true));
-            if (performanceModeEnabled && !performanceActiveRef.current) {
+            if (!performanceActiveRef.current) {
                 performanceActiveRef.current = true;
                 performanceLastFrameAtRef.current = performance.now();
                 performanceTrackerRef.current.start("canvas", performanceLastFrameAtRef.current);
@@ -875,11 +900,13 @@ function WirelessCanvasPage() {
         renderQualityTimerRef.current = setTimeout(() => {
             renderQualityTimerRef.current = null;
             if (!nodeDraggingRef.current) setRenderQuality(nextCanvasRenderQuality(false));
-            if (performanceModeEnabled && performanceActiveRef.current) {
+            if (performanceActiveRef.current) {
                 performanceActiveRef.current = false;
                 if (performanceFrameRef.current) cancelAnimationFrame(performanceFrameRef.current);
                 performanceFrameRef.current = null;
-                setPerformanceMetrics(performanceTrackerRef.current.finish(performance.now(), performanceCountsRef.current));
+                const metrics = performanceTrackerRef.current.finish(performance.now(), performanceCountsRef.current);
+                void loadExperienceMetrics().then(experience => experience.recordCanvasInteraction(metrics)).catch(() => undefined);
+                if (performanceModeEnabled) setPerformanceMetrics(metrics);
             }
         }, 150);
     }, [performanceModeEnabled]);
@@ -2136,6 +2163,7 @@ function WirelessCanvasPage() {
     });
 
     useCanvasShortcuts({
+        commands: openCommands,
         duplicate: () => duplicateNodes(new Set(selectedNodeIdsRef.current)),
         group: createSelectedGroup, undo: undoCanvas, redo: redoCanvas,
         selectAll: () => {
@@ -3971,7 +3999,8 @@ const handleRetryNode = useCallback(async (node: CanvasNodeData) => {
     const exportCurrentCanvas = useCallback(async () => {
         if (!currentProject) return;
         projectSaveQueueRef.current?.flush();
-        const latest = useCanvasStore.getState().projects.find(project => project.id === projectId) || currentProject;
+        const stored = useCanvasStore.getState().projects.find(project => project.id === projectId) || currentProject;
+        const latest = { ...stored, nodes: nodesRef.current, connections: connectionsRef.current, groups: groupsRef.current, viewport: viewportRef.current, selectedNodeIds: normalizeCanvasSelectedNodeIds(selectedNodeIdsRef.current, nodesRef.current, groupsRef.current) };
         await exportProjects([latest.id], latest.title || "无线画布", [latest]);
     }, [currentProject, projectId, exportProjects]);
 
@@ -4092,6 +4121,46 @@ const handleRetryNode = useCallback(async (node: CanvasNodeData) => {
     );
     const toggleAgentFromTopBar = useCallback(() => (assistantOpen ? closeAgent() : openAgent()), [assistantOpen, closeAgent, openAgent]);
 
+    const locateNodes = useCallback((ids: string[]) => {
+        const matches = nodesRef.current.filter(node => ids.includes(node.id));
+        if (!matches.length) return;
+        commitSelectedNodeIds(new Set(matches.map(node => node.id)));
+        const left = Math.min(...matches.map(node => node.position.x));
+        const top = Math.min(...matches.map(node => node.position.y));
+        focusCanvasArea({ x: left, y: top }, Math.max(...matches.map(node => node.position.x + node.width)) - left, Math.max(...matches.map(node => node.position.y + node.height)) - top);
+    }, [commitSelectedNodeIds, focusCanvasArea]);
+    const focusNodeByKeyboard = useCallback((id: string) => {
+        if (!selectedNodeIdsRef.current.has(id)) commitSelectedNodeIds(new Set([id]));
+        setSelectedConnectionId(null);
+    }, [commitSelectedNodeIds]);
+    const taskHighlights = useMemo(() => new Set(taskHighlightIds), [taskHighlightIds]);
+    const actOnNodeByKeyboard = useCallback((id: string, action: { x: number; y: number } | "edit", repeat: boolean) => {
+        const node = nodesRef.current.find(item => item.id === id);
+        if (!node) return;
+        if (action === "edit") { if (!repeat) { if (node.type === CanvasNodeType.Text) openTextEditor(node); else editNodeFromToolbar(node); } return; }
+        if (!repeat) flushPendingHistory();
+        const ids = selectedNodeIdsRef.current.has(id) ? selectedNodeIdsRef.current : new Set([id]);
+        setNodes(current => current.map(item => ids.has(item.id) ? { ...item, position: { x: item.position.x + action.x, y: item.position.y + action.y } } : item));
+    }, [editNodeFromToolbar, flushPendingHistory, openTextEditor]);
+    const openExampleCanvas = useCallback(async () => {
+        const { createCanvasExampleProject } = await import("@/lib/canvas/canvas-example-graph");
+        navigate(`/canvas/${createCanvasExampleProject()}`);
+    }, [navigate]);
+    const commandBindings: CanvasCommandBindings = {
+        upload: { run: uploadFromToolbar }, text: { run: addTextNodeFromToolbar }, image: { run: addImageNodeFromToolbar },
+        video: { run: addVideoNodeFromToolbar }, audio: { run: addAudioNodeFromToolbar }, config: { run: addConfigNodeFromToolbar },
+        generate: { run: openQuickGenerateFromToolbar }, batch: { run: openBatchEditFromToolbar },
+        undo: { run: undoCanvas, enabled: historyState.canUndo }, redo: { run: redoCanvas, enabled: historyState.canRedo },
+        duplicate: { run: () => duplicateNodes(new Set(selectedNodeIdsRef.current)), enabled: selectedNodeIds.size > 0 },
+        delete: { run: deleteSelectedNodesFromToolbar, enabled: selectedNodeIds.size > 0 },
+        group: { run: createSelectedGroup, enabled: localToolsEnabled && selectedNodeIds.size >= 2 },
+        selectAll: { run: () => commitSelectedNodeIds(new Set(nodesRef.current.map(node => node.id))), enabled: nodes.length > 0 },
+        assets: { run: openAssetsFromToolbar }, designTemplate: { run: () => setTemplateSourceId(null) },
+        compare: { run: () => openImageCompare(), enabled: nodes.some(node => node.type === CanvasNodeType.Image && Boolean(node.metadata?.content)) },
+        resetView: { run: resetViewport }, minimap: { run: toggleMiniMap }, export: { run: () => void exportCurrentCanvas() },
+        tools: { run: openWorkspaceTools }, guide: { run: () => onboardingRef.current?.start() },
+    };
+
     if (!projectLoaded) return <CanvasRefreshShell />;
 
     const quickGeneratePanel = (
@@ -4164,6 +4233,7 @@ const handleRetryNode = useCallback(async (node: CanvasNodeData) => {
                     onExportImages={openImageExport}
                     onShare={shareFromTopBar}
                     onOpenTools={openWorkspaceTools}
+                    onOpenCommands={openCommands}
                     agentOpen={assistantOpen}
                     compactAgentStatus={compactAgentStatus}
                     onToggleAgent={toggleAgentFromTopBar}
@@ -4227,6 +4297,9 @@ const handleRetryNode = useCallback(async (node: CanvasNodeData) => {
                             getCanvasScale, isConnectionTarget: connectionTargetNodeId === node.id,
                             isConnecting: Boolean(connectingParams), isRunning: runningNodeId === node.id,
                             editRequestNonce: editingNodeId === node.id ? editRequestNonce : 0,
+                            onKeyboardFocus: focusNodeByKeyboard, onKeyboardAction: actOnNodeByKeyboard,
+                            taskHighlighted: taskHighlights.has(node.id),
+                            maxInlinePanelWidth: Math.max(160, (window.innerWidth / 2 - 24) / viewport.k),
                             showPanel: dialogNodeId === node.id && !isSelecting && (!(node.type === CanvasNodeType.Image && (node.metadata?.content || node.metadata?.storageKey)) || connections.some(edge => edge.kind === "config-target" && edge.toNodeId === node.id)),
                             batchCount: batchChildCountById.get(node.id) || 0, batchExpanded: Boolean(node.metadata?.imageBatchExpanded),
                             batchClosing: Boolean(node.metadata?.batchRootId && collapsingBatchIds.has(node.metadata.batchRootId)),
@@ -4245,6 +4318,10 @@ const handleRetryNode = useCallback(async (node: CanvasNodeData) => {
                     <CanvasSelectionOverlay ref={selectionOverlayRef} borderColor={theme.canvas.selectionStroke} background={theme.canvas.selectionFill} />
                     {pendingConnectionCreate ? <Suspense fallback={null}><ConnectionCreateMenu pending={pendingConnectionCreate} onCreate={(type) => createConnectedNode(type, pendingConnectionCreate)} onClose={cancelPendingConnectionCreate} /></Suspense> : null}
                 </WirelessCanvas>
+                <Suspense fallback={null}><CanvasOnboarding ref={onboardingRef} empty={nodes.length === 0} onImportImage={uploadFromToolbar} onUseTemplate={() => setTemplateSourceId(null)} onOpenExample={() => void openExampleCanvas()} onOpenCreation={openQuickGenerateFromToolbar} onCloseCreation={closeQuickGeneratePanel} onDrop={handleDrop} /></Suspense>
+                <div className="cw-feedback-strip"><Suspense fallback={null}><CanvasTaskFeedbackRuntime projectId={projectId} enabled={projectLoaded} nodes={nodes} connections={connections} onLocate={locateNodes} onHighlightChange={setTaskHighlightIds} /></Suspense></div>
+                <Suspense fallback={null}><CanvasSaveFailureNotice onExport={exportCurrentCanvas} /></Suspense>
+                {commandsOpen ? <Suspense fallback={null}><CanvasCommandPalette nodes={nodes} bindings={commandBindings} onLocate={locateNodes} onAsset={handleAssetInsert} onClose={() => setCommandsOpen(false)} /></Suspense> : null}
                 {performanceModeEnabled ? <Suspense fallback={null}><CanvasPerformancePanel metrics={performanceMetrics} /></Suspense> : null}
 
                 {!isNodeDragging && !nodeImageSettingsOpen && !(quickGenerateOpen && !isCanvasDesktopLayout && !assistantOpen) ? (

@@ -85,7 +85,7 @@ test("upload is first and independent from canvas generation permissions", () =>
         harness.menuButtons[0]!.props.onClick();
         expect(harness.events).toEqual(["upload", "close"]);
         expect(harness.root.props.role).toBe("menu");
-        expect(harness.root.props.style.width).toBe(220);
+        expect(harness.root.props.style.width).toBe(300);
         expect(harness.root.props.style.background).toBe("#ffffff");
         expect(harness.root.props.className).toContain("gap-1");
         harness.unmount();

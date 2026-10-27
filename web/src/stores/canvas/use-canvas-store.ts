@@ -6,6 +6,7 @@ import { createDeferredPersistQueue } from "@/lib/deferred-persist-queue";
 import { collectProjectChanges, createProjectChangeBuffer, type CanvasPersistenceConflict, type ProjectChange } from "@/lib/canvas/canvas-persistence-merge";
 import { readCanvasProjects, writeCanvasProjects, removeCanvasProjects } from "@/lib/canvas/canvas-project-storage";
 import { applyCanvasProjectPatch, type CanvasProjectPatch } from "@/lib/canvas/canvas-project-update";
+import { normalizeCanvasSelectedNodeIds } from "@/lib/canvas/canvas-view-state";
 import { deploymentFeatures } from "@/lib/deployment-features";
 import { createCloudCanvasPersistence, type CloudSaveState } from "@/services/canvas-cloud-persistence";
 import { useUserStore } from "@/stores/use-user-store";
@@ -27,6 +28,7 @@ export type CanvasProject = {
     backgroundMode: CanvasBackgroundMode;
     showImageInfo: boolean;
     viewport: ViewportTransform;
+    selectedNodeIds?: string[];
     history?: { past: CanvasHistorySnapshot[]; future: CanvasHistorySnapshot[] };
     persistenceConflict?: CanvasPersistenceConflict;
 };
@@ -36,6 +38,8 @@ type CanvasStore = {
     hydrated: boolean;
     cloudStatus: CloudSaveState;
     cloudError: string;
+    localSaveFailureCount: number;
+    localSaveFailureId: number;
     projects: CanvasProject[];
     unloadedProjects: CanvasProjectSummary[];
     createProject: (title?: string) => string;
@@ -69,7 +73,15 @@ type PersistWrite = { name: string; value: StorageValue<CanvasStore>; changes: M
 let persistWriteChain: Promise<void> = Promise.resolve();
 let lastPersistError: unknown = null;
 let pendingPersistWrites = 0;
+let consecutivePersistFailures = 0;
+let persistFailureSequence = 0;
+let persistRetryTimer: ReturnType<typeof setTimeout> | null = null;
+function clearPersistRetry() {
+    if (persistRetryTimer !== null) clearTimeout(persistRetryTimer);
+    persistRetryTimer = null;
+}
 const persistQueue = createDeferredPersistQueue<PersistWrite>(400, ({ name, changes }) => {
+    clearPersistRetry();
     pendingProjectChanges.clear();
     // Mark the write before the Promise callback starts: a flushed debounce is
     // not durable until its IndexedDB transaction has actually completed.
@@ -92,10 +104,32 @@ const persistQueue = createDeferredPersistQueue<PersistWrite>(400, ({ name, chan
                 useCanvasStore.setState({ projects });
             }
         }))
-        .then(() => { lastPersistError = null; if (canvasOwnerValid) { if (cloudPersistence) cloudPersistence.schedule(); else useCanvasStore.setState({ cloudStatus: "local", cloudError: "" }); } })
+        .then(() => {
+            lastPersistError = null;
+            consecutivePersistFailures = 0;
+            clearPersistRetry();
+            if (canvasOwnerValid) {
+                useCanvasStore.setState({ localSaveFailureCount: 0, localSaveFailureId: 0 });
+                if (cloudPersistence) cloudPersistence.schedule();
+                else useCanvasStore.setState({ cloudStatus: "local", cloudError: "" });
+            }
+        })
         .catch(error => {
             lastPersistError = error;
-            if (canvasOwnerValid) useCanvasStore.setState({ cloudStatus: "local-error", cloudError: "画布写入本机失败，尚未同步本次改动；请重试保存或导出备份。" });
+            if (isCanvasOwnerValid()) {
+                consecutivePersistFailures += 1;
+                useCanvasStore.setState(state => ({
+                    cloudStatus: "local-error", cloudError: "画布写入本机失败，尚未同步本次改动；请重试保存或导出备份。",
+                    localSaveFailureCount: consecutivePersistFailures,
+                    localSaveFailureId: consecutivePersistFailures === 2 ? ++persistFailureSequence : state.localSaveFailureId,
+                }));
+                // Confirm a transient failure once, even if editing stops. The
+                // retained mutation buffer is reused; persistent failures never loop.
+                if (consecutivePersistFailures === 1) persistRetryTimer = setTimeout(() => {
+                    persistRetryTimer = null;
+                    if (isCanvasOwnerValid() && lastPersistError) void flushCanvasCloudPersistence().catch(() => undefined);
+                }, 1000);
+            }
             console.error("画布自动保存失败，改动将随下次编辑重试；请先导出重要作品。", error);
         })
         .finally(() => { pendingPersistWrites -= 1; });
@@ -195,6 +229,8 @@ export const useCanvasStore = create<CanvasStore>()(
             hydrated: false,
             cloudStatus: cloudPersistence ? "loading" : "local",
             cloudError: "",
+            localSaveFailureCount: 0,
+            localSaveFailureId: 0,
             projects: [],
             unloadedProjects: [],
             createProject: (title = "未命名画布") => {
@@ -212,6 +248,7 @@ export const useCanvasStore = create<CanvasStore>()(
                     backgroundMode: "dots",
                     showImageInfo: false,
                     viewport: initialViewport,
+                    selectedNodeIds: [],
                 };
                 set((state) => ({ projects: [project, ...state.projects] }));
                 return id;
@@ -231,6 +268,7 @@ export const useCanvasStore = create<CanvasStore>()(
                     backgroundMode: source.backgroundMode || "dots",
                     showImageInfo: source.showImageInfo || false,
                     viewport: source.viewport || initialViewport,
+                    selectedNodeIds: normalizeCanvasSelectedNodeIds(source.selectedNodeIds, source.nodes || [], source.groups),
                     ...(source.history ? { history: source.history } : {}),
                 };
                 set((state) => ({ projects: [project, ...state.projects] }));
@@ -284,8 +322,10 @@ if (deploymentFeatures.authenticationEnabled && canvasOwnerId) {
         // immutable storage key, hide the workspace, then bootstrap a fresh one.
         restartingForOwner = true;
         canvasOwnerValid = false;
+        clearPersistRetry();
+        consecutivePersistFailures = 0;
         persistQueue.flush();
-        useCanvasStore.setState({ projects: [], unloadedProjects: [], hydrated: false });
+        useCanvasStore.setState({ projects: [], unloadedProjects: [], hydrated: false, localSaveFailureCount: 0, localSaveFailureId: 0 });
         useUserStore.setState({ user: null, status: "loading" });
         void flushCanvasPersistence().catch(() => undefined).finally(() => window.location.reload());
     });

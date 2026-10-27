@@ -9,6 +9,7 @@ import { parseCanvasProject, serializeCanvasProject } from "@/lib/canvas/canvas-
 import type { CanvasHistorySnapshot, CanvasProject } from "@/stores/canvas/use-canvas-store";
 import { CanvasNodeType } from "@/types/canvas";
 import { canvasGenerationRunsForNodes } from "@/lib/canvas/canvas-project-async-lifecycle";
+import { describeCanvasHistoryChange } from "@/lib/canvas/canvas-history-description";
 
 // Run the actual editor callbacks, restore layout effect, and autosave effect.
 // The harness replaces only React setters/timers and unrelated generation/UI services.
@@ -64,6 +65,7 @@ function editor(initial = project(), previous = frame(initial), loadUndoAction: 
     let queuedSave: { patch: CanvasHistorySnapshot & { history: CanvasProject["history"] } } | null = null;
     const scope = {
         React, useCallback: (callback: unknown) => callback, applyCanvasAgentOps, canvasGenerationRunsForNodes,
+        describeCanvasHistoryChange, onHistoryAction: undefined,
         stopGenerationByRunningId: (...args: unknown[]) => stopped.push(args),
         require: (path: string) => {
             if (path !== "@/lib/canvas/canvas-agent-undo-action") throw new Error(`Unexpected dynamic import: ${path}`);

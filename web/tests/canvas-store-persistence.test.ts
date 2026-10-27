@@ -10,6 +10,7 @@ import { createCanvasProjectSaveQueue } from "@/lib/canvas/canvas-project-save-q
 import type { CanvasProject } from "@/stores/canvas/use-canvas-store";
 import { CanvasNodeType } from "@/types/canvas";
 import { isWorkspaceRole } from "../../shared/workspace-access";
+import { normalizeCanvasSelectedNodeIds } from "@/lib/canvas/canvas-view-state";
 
 const source = readFileSync(new URL("../src/stores/canvas/use-canvas-store.ts", import.meta.url), "utf8");
 const ast = ts.createSourceFile("store.ts", source, ts.ScriptTarget.Latest, true);
@@ -36,7 +37,7 @@ function database() {
             const gate = nextWriteGate;
             nextWriteGate = undefined;
             if (gate) await gate;
-            if (writeFailures-- > 0) throw new Error("disk full");
+            if (writeFailures > 0) { writeFailures -= 1; throw new Error("disk full"); }
             writes.push(value);
             values.set(key, value);
         },
@@ -66,8 +67,10 @@ async function openTab(io: ReturnType<typeof database>, oaOwnerId?: string | nul
     let reloads = 0;
     const userStore = create<{ user: { id: string; role?: string } | null; status: string }>(() => ({ user: oaOwnerId ? { id: oaOwnerId, role } : null, status: oaOwnerId ? "authenticated" : "guest" }));
     const errors: unknown[][] = [];
+    const retryTimers = new Map<number, { callback: () => void; delay: number }>();
+    let timerId = 0;
     const bindings = {
-        isWorkspaceRole,
+        isWorkspaceRole, normalizeCanvasSelectedNodeIds,
         create, persist, nanoid: () => `new-${++ids}`, collectProjectChanges, createProjectChangeBuffer, mergeProjectChanges, applyCanvasProjectPatch,
         deploymentFeatures: { authenticationEnabled: oaOwnerId !== undefined, oaLoginEnabled: oaMode && oaOwnerId !== undefined },
         useUserStore: userStore,
@@ -88,13 +91,74 @@ async function openTab(io: ReturnType<typeof database>, oaOwnerId?: string | nul
         createDeferredPersistQueue: <T>(delay: number, flush: (value: T) => void) => createDeferredPersistQueue(delay, flush, { setTimeout: () => 1, clearTimeout() {} }),
         window: browser ? { addEventListener() {}, location: { reload() { reloads += 1; } } } : undefined,
         console: { error: (...args: unknown[]) => errors.push(args) },
+        setTimeout: (callback: () => void, delay: number) => { retryTimers.set(++timerId, { callback, delay }); return timerId; },
+        clearTimeout: (id: number) => { retryTimers.delete(id); },
     };
     const exports = {} as { useCanvasStore: any; flushCanvasPersistence: () => Promise<void>; flushCanvasCloudPersistence: () => Promise<void>; hasPendingCanvasPersistence: () => boolean };
     new Function(...Object.keys(bindings), "exports", code)(...Object.values(bindings), exports);
     const store = exports.useCanvasStore;
     if (!store.persist.hasHydrated() && oaOwnerId !== null) await new Promise<void>(resolve => { const unsubscribe = store.persist.onFinishHydration(() => { unsubscribe(); resolve(); }); });
-    return { store, flush: exports.flushCanvasPersistence, retry: exports.flushCanvasCloudPersistence, hasPending: exports.hasPendingCanvasPersistence, errors, userStore, reloads: () => reloads };
+    return { store, flush: exports.flushCanvasPersistence, retry: exports.flushCanvasCloudPersistence, hasPending: exports.hasPendingCanvasPersistence, errors, userStore, reloads: () => reloads, retryTimers,
+        runRetry: async () => { for (const [id, timer] of [...retryTimers]) { retryTimers.delete(id); timer.callback(); } await exports.flushCanvasPersistence(); },
+    };
 }
+
+test("two consecutive actual write failures produce one incident within five seconds, without retry loops", async () => {
+    const io = database(), tab = await openTab(io);
+    io.failNextWrite(); io.failNextWrite();
+    tab.store.getState().renameProject("shared", "保留失败写入的原稿");
+    await expect(tab.flush()).rejects.toThrow();
+    expect(tab.store.getState().localSaveFailureCount).toBe(1);
+    expect(tab.store.getState().localSaveFailureId).toBe(0);
+    expect(tab.retryTimers.size).toBe(1);
+    expect([...tab.retryTimers.values()][0].delay).toBeLessThan(5000);
+    await expect(tab.runRetry()).rejects.toThrow();
+    const incident = tab.store.getState().localSaveFailureId;
+    expect(tab.store.getState().localSaveFailureCount).toBe(2);
+    expect(incident).toBeGreaterThan(0);
+    expect(tab.retryTimers.size).toBe(0);
+    expect(io.read()[0].title).toBe("原画布");
+    io.failNextWrite();
+    await expect(tab.retry()).rejects.toThrow();
+    expect(tab.store.getState().localSaveFailureCount).toBe(3);
+    expect(tab.store.getState().localSaveFailureId).toBe(incident);
+    await tab.retry();
+    expect(io.read()[0].title).toBe("保留失败写入的原稿");
+    expect(tab.store.getState().localSaveFailureCount).toBe(0);
+    expect(tab.store.getState().localSaveFailureId).toBe(0);
+    io.failNextWrite(); io.failNextWrite();
+    tab.store.getState().renameProject("shared", "新一轮保存失败");
+    await expect(tab.flush()).rejects.toThrow();
+    await expect(tab.runRetry()).rejects.toThrow();
+    expect(tab.store.getState().localSaveFailureId).toBeGreaterThan(incident);
+});
+
+test("one failed write followed by successful retry never escalates, and owner changes cancel retry state", async () => {
+    const io = database(), tab = await openTab(io, "employee-A");
+    tab.store.getState().createProject("原稿");
+    io.failNextWrite();
+    await expect(tab.flush()).rejects.toThrow();
+    await tab.runRetry();
+    expect(tab.store.getState().localSaveFailureCount).toBe(0);
+    expect(tab.store.getState().localSaveFailureId).toBe(0);
+    io.failNextWrite();
+    tab.store.getState().createProject("未保存的新稿");
+    await expect(tab.flush()).rejects.toThrow();
+    expect(tab.retryTimers.size).toBe(1);
+    tab.userStore.setState({ user: { id: "employee-B", role: "designer" }, status: "authenticated" });
+    expect(tab.retryTimers.size).toBe(0);
+    expect(tab.store.getState().localSaveFailureCount).toBe(0);
+    expect(tab.store.getState().localSaveFailureId).toBe(0);
+});
+
+test("imported selection is normalized and survives save/reopen while old documents stay readable", async () => {
+    const io = database(), tab = await openTab(io);
+    const id = tab.store.getState().importProject({ ...project(), selectedNodeIds: ["a", "a", "b", "deleted"], groups: [{ id: "g", title: "隐藏组", nodeIds: ["b"], collapsed: true }] });
+    await tab.flush();
+    const reopened = await openTab(io);
+    expect(reopened.store.getState().openProject(id).selectedNodeIds).toEqual(["a"]);
+    expect(reopened.store.getState().openProject("shared").nodes).toEqual(project().nodes);
+});
 
 test("super-admin canvas mutations persist only in their own partition and reload intact", async () => {
     const io = database(), tab = await openTab(io, "admin-owner", true, true, "super_admin");

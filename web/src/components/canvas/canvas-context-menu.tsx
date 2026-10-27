@@ -1,3 +1,4 @@
+import { canvasActionShortcut } from "@/lib/canvas/canvas-actions";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Copy, FolderPlus, PencilLine, Plus, Trash2, Upload } from "lucide-react";
 
@@ -37,7 +38,7 @@ export function CanvasNodeContextMenu({ menu, targetCount = 1, onClose, onDuplic
     const canRename = menu.type === "node" && !isMultiTarget && Boolean(onRename);
     const itemCount = menu.type === "canvas" ? Number(Boolean(onUpload)) + Number(Boolean(onGroup)) + Number(canGenerate && Boolean(onGenerate))
         : (menu.type === "node" ? 2 + Number(canRename) : 1) + Number(Boolean(onGroup));
-    const [position, setPosition] = useState(() => canvasContextMenuPosition(menu.x, menu.y, 220, 10 + itemCount * 32 + Math.max(0, itemCount - 1) * 4, { width: window.innerWidth, height: window.innerHeight }));
+    const [position, setPosition] = useState(() => canvasContextMenuPosition(menu.x, menu.y, 300, 10 + itemCount * 32 + Math.max(0, itemCount - 1) * 4, { width: window.innerWidth, height: window.innerHeight }));
 
     useLayoutEffect(() => {
         if (!previousFocusRef.current && document.activeElement instanceof HTMLElement && !menuRef.current?.contains(document.activeElement)) previousFocusRef.current = document.activeElement;
@@ -116,7 +117,7 @@ export function MenuButton({ icon, label, action, onClick }: { icon: ReactNode; 
             onFocus={event => { event.currentTarget.style.background = theme.toolbar.itemHover; }} onBlur={event => { event.currentTarget.style.background = "transparent"; }}
             onClick={(event) => { event.preventDefault(); event.stopPropagation(); onClick(); }}>
             {icon}
-            <span>{label}</span>
+            <span>{label}</span><span className="ml-auto text-[10px] opacity-50">{canvasActionShortcut(action)}</span>
         </button>
     );
 }

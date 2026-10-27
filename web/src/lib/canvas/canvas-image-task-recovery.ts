@@ -1,4 +1,6 @@
 import type { QueuedTask } from "@/services/api/generation-tasks";
+import { watchTaskEvents } from "@/services/api/task-events";
+import { TaskObservationStoppedError } from "@/services/api/task-observation";
 
 export type CanvasImageTaskBinding = {
     requestId: string;
@@ -22,8 +24,10 @@ const abortError = () => new DOMException("图片任务恢复已取消", "AbortE
 /** Observe an existing task only. Persist a discovered ID before making another query. */
 export async function observeCanvasImageTask(binding: CanvasImageTaskBinding, options: CanvasImageTaskRecoveryOptions): Promise<QueuedTask | null> {
     const { requestId, ownerId } = binding;
-    const { signal, isCurrent, getTask, getByRequestId, onTask, wait = waitForNextQuery } = options;
+    const { signal, isCurrent, getTask, getByRequestId, onTask, wait } = options;
     let taskId = binding.taskId;
+    let events = !wait && taskId ? watchTaskEvents([taskId], { background: true }) : undefined;
+    const deadline = Date.now() + 15 * 60_000;
     const assertCurrent = () => {
         if (signal.aborted || !isCurrent()) throw abortError();
     };
@@ -49,7 +53,10 @@ export async function observeCanvasImageTask(binding: CanvasImageTaskBinding, op
         }
     };
 
-    for (;;) {
+    try { for (;;) {
+        if (events) await guarded(() => events!.ready(Math.max(0, deadline - Date.now()), signal));
+        if (Date.now() >= deadline) throw new TaskObservationStoppedError("timeout", taskId ? [taskId] : []);
+        const revision = events?.version ?? 0;
         const task = await guarded(() => taskId ? getTask(taskId, signal) : getByRequestId(requestId, signal));
         assertCurrent();
         if (!task) return null;
@@ -64,23 +71,8 @@ export async function observeCanvasImageTask(binding: CanvasImageTaskBinding, op
         assertCurrent();
         taskId = task.id;
         if (task.status !== "waiting" && task.status !== "processing") return task;
-        await guarded(() => wait(signal));
+        if (!wait && !events) events = watchTaskEvents([taskId], { background: true });
+        await guarded(() => wait ? wait(signal) : events!.next(revision, Math.max(0, deadline - Date.now()), signal));
         assertCurrent();
-    }
-}
-
-function waitForNextQuery(signal: AbortSignal) {
-    return new Promise<void>((resolve, reject) => {
-        if (signal.aborted) { reject(abortError()); return; }
-        const abort = () => {
-            clearTimeout(timer);
-            signal.removeEventListener("abort", abort);
-            reject(abortError());
-        };
-        const timer = setTimeout(() => {
-            signal.removeEventListener("abort", abort);
-            resolve();
-        }, 1_000);
-        signal.addEventListener("abort", abort, { once: true });
-    });
+    } } finally { events?.close(); }
 }

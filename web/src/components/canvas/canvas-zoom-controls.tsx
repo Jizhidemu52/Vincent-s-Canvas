@@ -1,12 +1,14 @@
-import type { CSSProperties, ReactNode } from "react";
+import type { CSSProperties } from "react";
 import { Check, ChevronDown, Compass, Focus, HelpCircle } from "lucide-react";
-import { memo, useRef, useState } from "react";
-import { Modal, Popover } from "antd";
+import { lazy, Suspense, memo, useRef, useState } from "react";
+import { Popover } from "antd";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { MAX_CANVAS_ZOOM, MIN_CANVAS_ZOOM } from "@/lib/canvas/canvas-zoom";
 import { useThemeStore } from "@/stores/use-theme-store";
 import "./canvas-toolbar.css";
+
+const CanvasShortcutsDialog = lazy(() => import("./canvas-shortcuts-dialog").then(module => ({ default: module.CanvasShortcutsDialog })));
 
 type CanvasZoomControlsProps = {
     scale: number;
@@ -84,26 +86,7 @@ export const CanvasZoomControls = memo(function CanvasZoomControls({ scale, onSc
                 </div>}>
                     <button type="button" className="cw-zoom-trigger" data-usage-control="canvas-tool.zoom" aria-label="画布缩放与视图" aria-expanded={viewMenuOpen} aria-haspopup="dialog">{Math.round(displayedScale * 100)}%<ChevronDown className="size-3" /></button>
                 </Popover>
-            <Modal title="快捷键" open={shortcutsOpen} onCancel={() => setShortcutsOpen(false)} footer={null} centered>
-                <div className="border-t pt-3" style={{ borderColor: theme.node.stroke }}>
-                    <Shortcut label="拖动画布" value="平移视图" />
-                    <Shortcut label="滚轮" value="缩放画布" />
-                    <Shortcut label="Ctrl / Cmd + 拖动" value="框选多个节点" />
-                    <Shortcut label="Shift / Ctrl / Cmd + 点击" value="追加选择节点" />
-                    <Shortcut label="Ctrl / Cmd + C / V" value="复制 / 粘贴节点" />
-                    <Shortcut label="Ctrl / Cmd + G" value="将选中节点创建为款式组" />
-                    <Shortcut label="Delete / Backspace" value="删除选中" />
-                </div>
-            </Modal>
+            {shortcutsOpen ? <Suspense fallback={null}><CanvasShortcutsDialog open onClose={() => setShortcutsOpen(false)} /></Suspense> : null}
         </div>
     );
 });
-
-function Shortcut({ label, value }: { label: ReactNode; value: string }) {
-    return (
-        <div className="cw-view-shortcut">
-            <span>{label}</span>
-            <span>{value}</span>
-        </div>
-    );
-}

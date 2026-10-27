@@ -3,6 +3,7 @@ import { decodeCanvasProject, encodeCanvasProject, parseCanvasProject, serialize
 import { mergeProjectChanges } from "@/lib/canvas/canvas-persistence-merge";
 import type { CanvasHistorySnapshot, CanvasProject } from "@/stores/canvas/use-canvas-store";
 import { CanvasNodeType } from "@/types/canvas";
+import { boundedCanvasHistory, canvasHistoryForSave } from "@/pages/canvas/use-canvas-history";
 
 function project(): CanvasProject {
     return {
@@ -37,6 +38,52 @@ function historyProject(steps = 50): CanvasProject {
 function plain(value: unknown) { return JSON.parse(JSON.stringify(value)); }
 
 describe("compact canvas history", () => {
+    test("120 edits survive the live history bound, refresh, complete undo and redo without changing media", () => {
+        const original = project();
+        let current = snapshot(original);
+        let history = { past: [] as CanvasHistorySnapshot[], future: [] as CanvasHistorySnapshot[] };
+        for (let step = 1; step <= 120; step += 1) {
+            const next = { ...current, nodes: current.nodes.map((node, index) => index ? node : { ...node, position: { x: step, y: 0 } }) };
+            history = canvasHistoryForSave(history, current, next, false);
+            current = next;
+        }
+        const full = { ...original, ...current, history };
+        const serialized = serializeCanvasProject(full);
+        const restored = parseCanvasProject(serialized);
+        history = boundedCanvasHistory(restored.history);
+        expect(history.past).toHaveLength(120);
+        expect(Buffer.byteLength(serialized)).toBeLessThan(Buffer.byteLength(JSON.stringify(full)) / 5);
+        current = snapshot(restored);
+        for (let step = 119; step >= 0; step -= 1) {
+            history.future.push(current);
+            current = history.past.pop()!;
+            expect(current.nodes[0].position.x).toBe(step);
+            expect(current.nodes.map(node => node.metadata)).toEqual(original.nodes.map(node => node.metadata));
+        }
+        const afterUndo = parseCanvasProject(serializeCanvasProject({ ...restored, ...current, history }));
+        history = boundedCanvasHistory(afterUndo.history);
+        expect(history.future).toHaveLength(120);
+        for (let step = 1; step <= 120; step += 1) {
+            current = history.future.pop()!;
+            expect(current.nodes[0].position.x).toBe(step);
+        }
+        expect(current.nodes).toEqual(full.nodes);
+        expect(original.nodes[0].position.x).toBe(0);
+    });
+
+    test("existing fifty-step expanded and delta-v1 documents retain every undo/redo frame", () => {
+        const source = historyProject(50);
+        source.history!.future = source.history!.past.slice(0, 3);
+        const expanded = plain(source);
+        const compact = plain(encodeCanvasProject(source));
+        expect(compact.history.format).toBe("canvas-history-delta-v1");
+        for (const input of [expanded, compact]) {
+            const restored = decodeCanvasProject(input);
+            expect(boundedCanvasHistory(restored.history)).toEqual(expanded.history);
+            expect(parseCanvasProject(serializeCanvasProject(restored))).toEqual(expanded);
+        }
+    });
+
     test("pending image request identity and result mapping survive project and history serialization", () => {
         const source = project();
         const imageTask = { ownerId: "employee-a", projectId: source.id, requestId: "accepted-request:0", taskId: "original-task", resultIndex: 0 };

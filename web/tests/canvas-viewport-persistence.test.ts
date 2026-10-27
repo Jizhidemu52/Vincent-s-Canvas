@@ -2,7 +2,8 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
 import { createCanvasProjectSaveQueue } from "@/lib/canvas/canvas-project-save-queue";
-import type { ViewportTransform } from "@/types/canvas";
+import { CanvasNodeType, type CanvasNodeData, type CanvasNodeGroup, type ViewportTransform } from "@/types/canvas";
+import { normalizeCanvasSelectedNodeIds } from "@/lib/canvas/canvas-view-state";
 
 const code = ts.transpileModule(readFileSync(new URL("../src/pages/canvas/use-canvas-persistence.ts", import.meta.url), "utf8"), {
     compilerOptions: { target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.CommonJS },
@@ -14,7 +15,7 @@ function editor() {
     const pending: (() => void)[] = [];
     const timers = new Map<number, () => void>();
     const listeners = new Map<string, (event?: unknown) => void>();
-    const writes: { id: string; viewport: ViewportTransform }[] = [];
+    const writes: { id: string; viewport: ViewportTransform; selectedNodeIds?: string[] }[] = [];
     let cursor = 0, effectCursor = 0, timerId = 0;
     const surface = {
         visibilityState: "visible",
@@ -41,6 +42,7 @@ function editor() {
         },
         "@/stores/canvas/use-canvas-store": { flushCanvasPersistence: () => Promise.resolve(), hasPendingCanvasPersistence: () => false },
         "./use-canvas-history": { canvasHistoryForSave: () => ({ past: [], future: [] }) },
+        "@/lib/canvas/canvas-view-state": { normalizeCanvasSelectedNodeIds },
     };
     const module = { exports: {} as { useCanvasPersistence: (options: unknown) => void } };
     new Function("require", "module", "exports", "window", "document", code)((name: string) => dependencies[name], module, module.exports, surface, surface);
@@ -48,10 +50,11 @@ function editor() {
         projectId: "first", projectLoaded: true, usePerformanceScenario: false,
         projectSaveQueueRef: { current: { schedule() {}, flush() {}, hasPending: () => false } },
         history: { historyRef: { current: {} }, lastHistoryRef: { current: {} }, historyPausedRef: { current: false }, applyingHistoryRef: { current: false }, historyState: {} },
-        current: { nodes: [], connections: [], groups: [], chatSessions: [], activeChatId: null, backgroundMode: "dots", showImageInfo: false },
-        updateProject: (id: string, patch: { viewport: ViewportTransform }) => writes.push({ id, viewport: patch.viewport }),
+        current: { nodes: [] as CanvasNodeData[], connections: [], groups: [] as CanvasNodeGroup[], chatSessions: [], activeChatId: null, backgroundMode: "dots", showImageInfo: false },
+        updateProject: (id: string, patch: { viewport: ViewportTransform; selectedNodeIds?: string[] }) => writes.push({ id, ...patch }),
         batchEditRunning: false, runningNodeId: null,
         viewport: { x: 0, y: 0, k: 1 },
+        selectedNodeIds: undefined as ReadonlySet<string> | undefined,
     };
     const render = (patch: Partial<typeof options> = {}) => {
         Object.assign(options, patch);
@@ -59,7 +62,7 @@ function editor() {
         module.exports.useCanvasPersistence(options);
         while (pending.length) pending.shift()!();
     };
-    return { render, writes, listeners, surface, timers, unmount: () => effects.forEach(effect => effect.cleanup?.()) };
+    return { render, writes, listeners, surface, timers, options, unmount: () => effects.forEach(effect => effect.cleanup?.()) };
 }
 
 test("rapid viewport changes remain debounced and unmount saves the last committed viewport", () => {
@@ -103,4 +106,27 @@ test("unloaded and performance scenario canvases do not create viewport saves", 
     app.unmount();
     expect(app.writes).toEqual([]);
     expect(app.timers.size).toBe(0);
+});
+
+test("selection-only changes and clearing survive page hide together with the last viewport", () => {
+    const app = editor();
+    const nodes: CanvasNodeData[] = ["one", "two"].map(id => ({ id, type: CanvasNodeType.Text, title: id, position: { x: 0, y: 0 }, width: 100, height: 100 }));
+    app.render({ current: { ...app.options.current, nodes }, selectedNodeIds: new Set(["one"]), viewport: { x: 80, y: -30, k: 1.25 } });
+    app.render({ selectedNodeIds: new Set(["one", "two", "deleted"]) });
+    app.listeners.get("pagehide")!();
+    expect(app.writes).toEqual([{ id: "first", viewport: { x: 80, y: -30, k: 1.25 }, selectedNodeIds: ["one", "two"] }]);
+    app.render({ selectedNodeIds: new Set() });
+    app.unmount();
+    expect(app.writes[1].selectedNodeIds).toEqual([]);
+});
+
+test("switching project flushes its own selection; collapsing or deleting nodes never persists invisible selections", () => {
+    const app = editor();
+    const nodes: CanvasNodeData[] = ["one", "two"].map(id => ({ id, type: CanvasNodeType.Text, title: id, position: { x: 0, y: 0 }, width: 100, height: 100 }));
+    app.render({ current: { ...app.options.current, nodes }, selectedNodeIds: new Set(["one", "two"]) });
+    app.render({ projectId: "second", selectedNodeIds: new Set(["two"]) });
+    expect(app.writes[0].selectedNodeIds).toEqual(["one", "two"]);
+    app.render({ current: { ...app.options.current, groups: [{ id: "g", title: "折叠组", nodeIds: ["two"], collapsed: true }] } });
+    app.unmount();
+    expect(app.writes[1]).toEqual({ id: "second", viewport: { x: 0, y: 0, k: 1 }, selectedNodeIds: [] });
 });

@@ -190,17 +190,17 @@ test.each(["query", "persist", "wait"])("abort interrupts an uncooperative %s pr
     expect(listeners.size).toBe(0);
 });
 
-test("default wait delays the next query by one second and cleans both timer and observation listeners", async () => {
+test("default shared observer uses bounded foreground fallback and cleans observation listeners", async () => {
     let queries = 0;
     const timestamps: number[] = [];
     const info = setup({ wait: undefined, getTask: async () => { timestamps.push(performance.now()); return task(queries++ ? "success" : "waiting"); } });
     const listeners = trackAbortListeners(info.controller.signal);
     expect((await observeCanvasImageTask(binding, info.options))?.status).toBe("success");
-    expect(timestamps[1]! - timestamps[0]!).toBeGreaterThanOrEqual(950);
+    expect(timestamps[1]! - timestamps[0]!).toBeGreaterThanOrEqual(2400);
     expect(listeners.size).toBe(0);
 });
 
-test("abort cancels the default polling timer without an extra query", async () => {
+test("abort closes the default event watch without an extra query", async () => {
     const persisted = deferred<void>();
     let queries = 0;
     const info = setup({ wait: undefined, getTask: async () => { queries++; return task("processing"); }, onTask: () => { persisted.resolve(); } });

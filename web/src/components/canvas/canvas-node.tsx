@@ -23,7 +23,9 @@ import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textare
 import { CanvasNodeType, type CanvasNodeData, type Position } from "@/types/canvas";
 import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import type { ImageThumbnailEdge } from "@/lib/canvas/canvas-image-thumbnail";
-import { useCanvasImageThumbnail } from "./use-canvas-image-thumbnail";
+import { canvasNodeKeyAction } from "@/lib/canvas/canvas-actions";
+
+const CanvasNodeImagePreview = React.lazy(() => import("./canvas-node-image-preview"));
 
 type ResizeCorner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
 
@@ -47,6 +49,10 @@ type CanvasNodeProps = {
     isConnecting: boolean;
     isRunning: boolean;
     editRequestNonce?: number;
+    taskHighlighted?: boolean;
+    maxInlinePanelWidth?: number;
+    onKeyboardFocus?: (nodeId: string) => void;
+    onKeyboardAction?: (nodeId: string, action: { x: number; y: number } | "edit", repeat: boolean) => void;
     showPanel: boolean;
     showImageInfo: boolean;
     configInputSummary?: CanvasConfigInputSummary;
@@ -117,6 +123,10 @@ export const CanvasNode = React.memo(function CanvasNode({
     isConnecting,
     isRunning,
     editRequestNonce = 0,
+    taskHighlighted = false,
+    maxInlinePanelWidth = 500,
+    onKeyboardFocus,
+    onKeyboardAction,
     showPanel,
     showImageInfo,
     configInputSummary = emptyConfigInputSummary,
@@ -369,6 +379,16 @@ export const CanvasNode = React.memo(function CanvasNode({
     return (
         <div
             data-node-id={data.id}
+            data-task-highlight={taskHighlighted || undefined}
+            tabIndex={0}
+            role="group"
+            aria-label={`${data.title || "未命名节点"}，${isSelected ? "已选择，" : ""}Enter 编辑，方向键微移`}
+            onFocus={event => { if (event.target === event.currentTarget) onKeyboardFocus?.(data.id); }}
+            onKeyDown={event => {
+                if (event.target !== event.currentTarget || event.nativeEvent.isComposing) return;
+                const action = canvasNodeKeyAction(event);
+                if (action && onKeyboardAction) { event.preventDefault(); event.stopPropagation(); onKeyboardAction(data.id, action, event.repeat); }
+            }}
             className={`node-element absolute flex select-none flex-col ${isMoving ? "[&_.backdrop-blur]:!backdrop-blur-none [&_.backdrop-blur-sm]:!backdrop-blur-none [&_.backdrop-blur-md]:!backdrop-blur-none" : "transition-shadow duration-200"} ${isSelected ? "z-50" : "z-10"}`}
             style={{
                 transform: `translate(${position.x}px, ${position.y}px)`,
@@ -474,12 +494,13 @@ export const CanvasNode = React.memo(function CanvasNode({
             {showConnectionControls ? <><ConnectionHandleDot side="left" theme={theme} label={data.type === CanvasNodeType.Config ? "图片 / 上一步输入" : "输入连接"} visible={effectiveHovered || isSelected || isConnecting} onMouseDown={(event) => onConnectStart(event, data.id, "target")} />
             <ConnectionHandleDot side="right" theme={theme} label={data.type === CanvasNodeType.Config ? "结果输出 / 连接下一步" : "输出连接"} visible={effectiveHovered || isSelected || isConnecting} onMouseDown={(event) => onConnectStart(event, data.id, "source")} /></> : null}
 
-            {showPanel && renderPanel ? <div className="absolute left-1/2 top-full z-[70] w-[500px] -translate-x-1/2 pt-4">{renderPanel(data)}</div> : null}
+            {showPanel && renderPanel ? <div className="absolute left-1/2 top-full z-[70] -translate-x-1/2 pt-4" style={{ width: Math.min(500, maxInlinePanelWidth) }}>{renderPanel(data)}</div> : null}
         </div>
     );
 }, canvasNodePropsEqual);
 
 function canvasNodePropsEqual(previous: CanvasNodeProps, next: CanvasNodeProps) {
+    if (previous.taskHighlighted !== next.taskHighlighted || previous.maxInlinePanelWidth !== next.maxInlinePanelWidth || previous.onKeyboardFocus !== next.onKeyboardFocus || previous.onKeyboardAction !== next.onKeyboardAction) return false;
     if (!canvasNodeRenderStateEqual(toRenderState(previous), toRenderState(next))) return false;
     if (previous.previewPosition?.x !== next.previewPosition?.x || previous.previewPosition?.y !== next.previewPosition?.y) return false;
     if (previous.previewBounds?.position.x !== next.previewBounds?.position.x || previous.previewBounds?.position.y !== next.previewBounds?.position.y || previous.previewBounds?.width !== next.previewBounds?.width || previous.previewBounds?.height !== next.previewBounds?.height) return false;
@@ -760,32 +781,12 @@ function ImageContent({
     onSetBatchPrimary?: () => void;
 }) {
     const isBatchChild = Boolean(node.metadata?.batchRootId);
-    const preview = useCanvasImageThumbnail(node, imagePreviewEdge);
-    const previewUrl = preview.url;
 
     return (
         <BatchFrame theme={theme} batchCount={isBatchRoot ? batchCount : 0} batchExpanded={batchExpanded} batchOpening={batchOpening} batchRecovering={batchRecovering} onToggleBatch={onToggleBatch}>
-            <div className="h-full w-full overflow-hidden">
-                {preview.failed ? (
-                    <div className="flex h-full w-full flex-col items-center justify-center gap-3" role="status">
-                        <ErrorContent node={node} theme={theme} onReload={preview.retry} />
-                    </div>
-                ) : previewUrl ? (
-                    <img
-                        key={preview.key}
-                        src={previewUrl}
-                        data-canvas-image-resolution={preview.thumbnail ? imagePreviewEdge : "original"}
-                        alt={node.title}
-                        draggable={false}
-                        {...canvasImageRenderProps()}
-                        onError={preview.onError}
-                        onDragStart={(event) => event.preventDefault()}
-                        className={`pointer-events-none block h-full w-full select-none ${node.metadata?.freeResize ? "object-fill" : "object-contain"}`}
-                    />
-                ) : (
-                    <div className="h-full w-full animate-pulse" style={{ background: theme.toolbar.activeBg }} aria-label="正在恢复图片预览" />
-                )}
-            </div>
+            <React.Suspense fallback={<div className="h-full w-full animate-pulse" style={{ background: theme.toolbar.activeBg }} aria-label="正在加载图片预览" />}>
+                <CanvasNodeImagePreview node={node} edge={imagePreviewEdge} placeholderColor={theme.toolbar.activeBg} renderError={retry => <ErrorContent node={node} theme={theme} onReload={retry} />} />
+            </React.Suspense>
             {isBatchRoot ? (
                 <button
                     type="button"

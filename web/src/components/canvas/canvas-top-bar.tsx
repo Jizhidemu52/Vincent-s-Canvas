@@ -1,7 +1,7 @@
-import { memo, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, memo, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ChevronDown, Download, Globe, Home, Images, Info, LayoutGrid, Plus, Redo2, Trash2, Undo2, Upload } from "lucide-react";
-import { Dropdown, Modal, Popover } from "antd";
+import { Dropdown, Popover } from "antd";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { deploymentFeatures } from "@/lib/deployment-features";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -10,7 +10,10 @@ import { useModuleEnabled } from "@/stores/use-module-store";
 import { UserStatusActions } from "@/components/layout/user-status-actions";
 import { UsageCollectionNotice } from "@/components/layout/frequent-navigation";
 import { CanvasSaveStatus } from "@/components/canvas/canvas-save-status";
+import { canvasActionShortcut } from "@/lib/canvas/canvas-actions";
 import { canvasTopBarPropsEqual, type CanvasTopBarRenderState } from "@/lib/canvas/canvas-top-bar-render-stability";
+
+const CanvasShortcutsDialog = lazy(() => import("./canvas-shortcuts-dialog").then(module => ({ default: module.CanvasShortcutsDialog })));
 
 export const CanvasTopBar = memo(function CanvasTopBar({
     title,
@@ -33,6 +36,7 @@ export const CanvasTopBar = memo(function CanvasTopBar({
     onExportImages,
     onShare,
     onOpenTools,
+    onOpenCommands,
     agentOpen,
     compactAgentStatus,
     onToggleAgent,
@@ -40,8 +44,6 @@ export const CanvasTopBar = memo(function CanvasTopBar({
     const navigate = useNavigate();
     const { id: canvasId } = useParams<{ id: string }>();
     const canImportReferences = useModuleEnabled("reference-import");
-    const colorTheme = useThemeStore((state) => state.theme);
-    const theme = canvasThemes[colorTheme];
     const titleRef = useRef<HTMLDivElement>(null);
     const [shortcutsOpen, setShortcutsOpen] = useState(false);
     const userName = useUserStore((state) => state.user?.displayName || state.user?.username || "本地工作区");
@@ -70,8 +72,9 @@ export const CanvasTopBar = memo(function CanvasTopBar({
                         { key: "export", icon: <Download className="size-4" />, label: "导出画布", onClick: onExport },
                         { key: "export-images", icon: <Images className="size-4" />, label: "导出图片集 / PDF", onClick: onExportImages },
                         { type: "divider" },
-                        { key: "undo", disabled: !canUndo, icon: <Undo2 className="size-4" />, label: <MenuLabel text="撤销" shortcut="Ctrl Z" />, onClick: onUndo },
-                        { key: "redo", disabled: !canRedo, icon: <Redo2 className="size-4" />, label: <MenuLabel text="重做" shortcut="Ctrl Shift Z" />, onClick: onRedo },
+                        { key: "undo", disabled: !canUndo, icon: <Undo2 className="size-4" />, label: <MenuLabel text="撤销" shortcut={canvasActionShortcut("undo")} />, onClick: onUndo },
+                        { key: "redo", disabled: !canRedo, icon: <Redo2 className="size-4" />, label: <MenuLabel text="重做" shortcut={canvasActionShortcut("redo")} />, onClick: onRedo },
+                        { key: "commands", label: "搜索命令、节点和素材（Ctrl / Cmd + K）", onClick: onOpenCommands },
                         { key: "shortcuts", label: "快捷键", onClick: () => setShortcutsOpen(true) },
                         { type: "divider" },
                         { key: "delete", danger: true, icon: <Trash2 className="size-4" />, label: "删除当前画布", onClick: onDeleteProject },
@@ -97,26 +100,7 @@ export const CanvasTopBar = memo(function CanvasTopBar({
                     <UserStatusActions variant="canvas" />
                 </div>
             </div>
-            <Modal title="快捷键" open={shortcutsOpen} onCancel={() => setShortcutsOpen(false)} footer={null} centered>
-                <div className="space-y-2 border-t pt-4 text-sm" style={{ borderColor: theme.node.stroke }}>
-                    <Shortcut keys={["手形工具 / 空格 + 拖动"]} value="平移视图" />
-                    <Shortcut keys={["滚轮"]} value="缩放画布" />
-                    <Shortcut keys={["缩放滑杆"]} value="精确调整缩放" />
-                    <Shortcut keys={["选择工具 + 空白处拖动"]} value="框选多个节点" />
-                    <Shortcut keys={["Shift / Ctrl / Cmd", "点击"]} value="追加选择节点" />
-                    <Shortcut keys={["Ctrl / Cmd", "A"]} value="全选节点" />
-                    <Shortcut keys={["Ctrl / Cmd", "G"]} value="创建款式组" />
-                    <Shortcut keys={["Ctrl / Cmd", "C / V"]} value="复制 / 粘贴节点，或粘贴剪切板文本/图片" />
-                    <Shortcut keys={["Ctrl / Cmd", "X"]} value="剪切选中节点" />
-                    <Shortcut keys={["Ctrl / Cmd", "D"]} value="快速复制选中节点" />
-                    <Shortcut keys={["Ctrl / Cmd", "Z"]} value="撤销" />
-                    <Shortcut keys={["Ctrl / Cmd", "Shift", "Z"]} value="重做" />
-                    <Shortcut keys={["Ctrl / Cmd", "Y"]} value="重做" />
-                    <Shortcut keys={["Delete / Backspace"]} value="删除选中" />
-                    <Shortcut keys={["Esc"]} value="取消选择并关闭浮层" />
-                    <Shortcut keys={["拖入图片/视频/音频"]} value="上传到画布" />
-                </div>
-            </Modal>
+            {shortcutsOpen ? <Suspense fallback={null}><CanvasShortcutsDialog open onClose={() => setShortcutsOpen(false)} /></Suspense> : null}
         </>
     );
 }, canvasTopBarPropsEqual);
@@ -146,26 +130,5 @@ function CompactAgentStatus({ status, onClick }: { status: { connected: boolean;
             <span className="size-2 rounded-full" style={{ background: dotColor }} />
             <span className="max-w-[180px] truncate">{label}</span>
         </button>
-    );
-}
-
-function Shortcut({ keys, value }: { keys: string[]; value: string }) {
-    return (
-        <div className="grid grid-cols-[minmax(0,1fr)_120px] items-center gap-6 rounded-lg px-1 py-1.5">
-            <span className="flex min-w-0 flex-wrap items-center gap-1.5">
-                {keys.map((key, index) => (
-                    <span key={`${key}-${index}`} className="flex items-center gap-1.5">
-                        {index ? <span className="text-xs opacity-35">+</span> : null}
-                        <kbd
-                            className="min-w-9 rounded-md border px-2.5 py-1.5 text-center text-xs font-medium leading-none shadow-[inset_0_-1px_0_rgba(0,0,0,.08),0_1px_2px_rgba(0,0,0,.06)]"
-                            style={{ borderColor: "rgba(120,113,108,.28)", background: "linear-gradient(#fff, rgba(245,245,244,.92))", color: "rgb(68,64,60)" }}
-                        >
-                            {key}
-                        </kbd>
-                    </span>
-                ))}
-            </span>
-            <span className="text-right text-sm opacity-55">{value}</span>
-        </div>
     );
 }

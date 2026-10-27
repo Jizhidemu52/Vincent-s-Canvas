@@ -135,3 +135,12 @@
 @media (max-width: 720px) { .cw-account-card { width: auto; } .cw-account-avatar, .cw-account-name { display: none; } .cw-project-card { gap: 2px; } .cw-share { padding: 0 8px; } }
 @media (max-width: 1023px) { .cw-create-panel { display: none; } }
 @media (min-width: 721px) and (max-width: 1023px) { .cw-project-card { width: 400px; } }
+
+/* Laptop layouts leave a contiguous half-canvas free, including a saved wide-chat preference.
+   These panels are direct absolute children of .cw-workspace (the percentage containing block). */
+@media (min-width: 1024px) and (max-width: 1440px) {
+    .cw-create-panel:not(.is-collapsed) { width: min(var(--cw-create-width, 480px), calc(50% - 24px)); }
+    .cw-agent-panel, .cw-agent-panel.is-wide { left: 12px; top: 80px; bottom: 72px; transform: none; width: min(var(--cw-chat-width, 480px), calc(50% - 24px)); }
+    .cw-agent-panel.is-wide > div > aside > .thin-scrollbar { padding-left: 16px; padding-right: 16px; }
+    .cw-agent-panel.is-wide > div > aside > div:last-of-type { width: 100%; }
+}

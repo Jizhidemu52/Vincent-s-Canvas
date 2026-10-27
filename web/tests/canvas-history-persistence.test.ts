@@ -37,12 +37,12 @@ describe("canvas persisted undo/redo", () => {
         expect(boundedCanvasHistory(JSON.parse(JSON.stringify(undoSaved))).future[0].groups?.[0].collapsed).toBe(true);
         expect(current.nodes).toBe(previous.nodes);
     });
-    test("restores both stacks and keeps only the latest fifty steps", () => {
-        const history = { past: Array.from({ length: 65 }, (_, index) => entry(`past-${index}`)), future: [entry("redo")] };
+    test("restores both stacks and keeps the latest two hundred steps", () => {
+        const history = { past: Array.from({ length: 215 }, (_, index) => entry(`past-${index}`)), future: [entry("redo")] };
         const restored = boundedCanvasHistory(JSON.parse(JSON.stringify(history)));
-        expect(restored.past).toHaveLength(50);
+        expect(restored.past).toHaveLength(200);
         expect(restored.past[0].nodes[0].id).toBe("past-15");
-        expect(restored.past.at(-1)?.nodes[0].metadata.storageKey).toBe("image:past-64");
+        expect(restored.past.at(-1)?.nodes[0].metadata.storageKey).toBe("image:past-214");
         expect(restored.future[0].nodes[0].position).toEqual({ x: 12, y: 34 });
         expect(boundedCanvasHistory()).toEqual({ past: [], future: [] });
     });

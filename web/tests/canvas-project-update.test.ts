@@ -18,3 +18,13 @@ test("real changes preserve untouched graph references and the original snapshot
     const newNodes = [...project.nodes];
     expect(applyCanvasProjectPatch(project, { nodes: newNodes }).nodes).toBe(newNodes);
 });
+
+test("equivalent selected IDs do not rewrite a project, but clearing a saved selection is a real change", () => {
+    const selected = { ...project, selectedNodeIds: ["one", "two"] };
+    expect(applyCanvasProjectPatch(selected, { selectedNodeIds: ["one", "two"] })).toBe(selected);
+    const cleared = applyCanvasProjectPatch(selected, { selectedNodeIds: [] });
+    expect(cleared.selectedNodeIds).toEqual([]);
+    expect(cleared.nodes).toBe(selected.nodes);
+    expect(selected.selectedNodeIds).toEqual(["one", "two"]);
+    expect(applyCanvasProjectPatch(project, { selectedNodeIds: [] })).toBe(project);
+});
