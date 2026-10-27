@@ -1,22 +1,21 @@
-import { canvasActions } from "./canvas-actions";
+import { canvasActions, type CanvasActionId } from "./canvas-actions";
 
-/** Loaded with discovery UI; the initial keyboard handler needs only bound shortcuts. */
-export const canvasCommandCatalog = [
-    { id: "upload", label: "上传素材", keywords: "导入 图片 视频 音频 import" },
-    { id: "text", label: "添加文本", keywords: "文字 text" },
-    { id: "image", label: "添加图片节点", keywords: "image" },
-    { id: "video", label: "添加视频节点", keywords: "video" },
-    { id: "audio", label: "添加音频节点", keywords: "audio" },
-    { id: "config", label: "添加生成配置", keywords: "工作流 config" },
-    { id: "generate", label: "打开画布生图", keywords: "生成 图片 prompt" },
-    { id: "batch", label: "批量改图", keywords: "图片 batch" },
-    ...canvasActions,
-    { id: "assets", label: "我的素材", keywords: "素材库 asset" },
-    { id: "designTemplate", label: "使用设计模板", keywords: "template" },
-    { id: "compare", label: "对比图片", keywords: "compare" },
-    { id: "resetView", label: "重置视图", keywords: "定位 居中 zoom" },
-    { id: "minimap", label: "切换小地图", keywords: "导航 map" },
-    { id: "export", label: "导出画布备份", keywords: "保存 备份 export" },
-    { id: "tools", label: "全部工具与板块", keywords: "workspace" },
-    { id: "guide", label: "重新查看新手引导", keywords: "教程 help" },
-] as const;
+// Search aliases are loaded only when discovery opens. Labels, ids and shortcuts
+// still come from the exact definitions used by menus and keyboard handling.
+const searchAliases: Partial<Record<CanvasActionId, string>> = {
+    group: "分组", commands: "command search", upload: "导入 图片 视频 音频 import",
+    text: "文字", config: "工作流", generate: "生成 图片 prompt", batch: "图片",
+    assets: "素材库 asset", designTemplate: "template", resetView: "定位 居中 zoom",
+    minimap: "导航 map", export: "保存 备份", exportImages: "export images",
+    tools: "workspace", guide: "教程 help", theme: "深色 浅色 dark light",
+    rename: "名称", clear: "清除", select: "选择工具", pan: "手形 平移 hand",
+    imageInfo: "隐藏 图片名称 info", projects: "项目", newProject: "新项目 new project",
+    deleteProject: "delete project", renameProject: "重命名 rename project", share: "分享 share link",
+    shortcuts: "键盘 keyboard", referenceImport: "网站 浏览器 import web",
+};
+export const canvasCommandCatalog = canvasActions.map(action => ({ ...action, keywords: `${action.id} ${searchAliases[action.id] || ""}` }));
+
+export function filterCanvasCommands<T extends { label: string; keywords?: string; enabled?: boolean }>(items: readonly T[], query: string): T[] {
+    const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    return items.filter(item => item.enabled !== false && terms.every(term => `${item.label} ${item.keywords || ""}`.toLowerCase().includes(term)));
+}

@@ -494,7 +494,13 @@ export const CanvasNode = React.memo(function CanvasNode({
             {showConnectionControls ? <><ConnectionHandleDot side="left" theme={theme} label={data.type === CanvasNodeType.Config ? "图片 / 上一步输入" : "输入连接"} visible={effectiveHovered || isSelected || isConnecting} onMouseDown={(event) => onConnectStart(event, data.id, "target")} />
             <ConnectionHandleDot side="right" theme={theme} label={data.type === CanvasNodeType.Config ? "结果输出 / 连接下一步" : "输出连接"} visible={effectiveHovered || isSelected || isConnecting} onMouseDown={(event) => onConnectStart(event, data.id, "source")} /></> : null}
 
-            {showPanel && renderPanel ? <div className="absolute left-1/2 top-full z-[70] -translate-x-1/2 pt-4" style={{ width: Math.min(500, maxInlinePanelWidth) }}>{renderPanel(data)}</div> : null}
+            {showPanel && renderPanel ? <div className="absolute left-1/2 top-full z-[70] pt-4" style={{
+                // Editors are screen UI: compensate only magnification, without
+                // changing the node or its image's world-space dimensions.
+                width: `min(500px, calc(${maxInlinePanelWidth}px / min(1, var(--canvas-node-ui-scale, 1))), calc(50vw - 24px))`,
+                transform: "translateX(-50%) scale(min(1, var(--canvas-node-ui-scale, 1)))",
+                transformOrigin: "top center",
+            }}>{renderPanel(data)}</div> : null}
         </div>
     );
 }, canvasNodePropsEqual);

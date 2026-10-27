@@ -8,6 +8,7 @@ import * as nodeCopy from "@/lib/canvas/canvas-node-copy";
 import { createCanvasImageOperationRunner } from "@/lib/canvas/canvas-image-operation";
 import { assertCanvasImageUploadSize, CANVAS_IMAGE_MAX_BYTES } from "@/lib/canvas/canvas-image-upload-limit";
 import { shouldIgnoreCanvasShortcut } from "@/lib/canvas/canvas-keyboard";
+import { matchCanvasActionShortcut } from "@/lib/canvas/canvas-actions";
 import { fitNodeSize } from "@/lib/canvas/canvas-node-size";
 import { createCanvasSelectionGenerationSync } from "@/lib/canvas/canvas-selection-prompt";
 import { runCanvasGeneration } from "@/pages/canvas/canvas-shared-generation-runtime";
@@ -80,7 +81,7 @@ function harness(initialNodes: CanvasNodeData[] = [], initialConnections: Canvas
     const noop = () => {};
     const update = <T>(ref: { current: T }) => (value: T | ((current: T) => T)) => { ref.current = typeof value === "function" ? (value as (current: T) => T)(ref.current) : value; };
     const env = {
-        ...clipboard, ...nodeCopy, clipboardModule: clipboard, shouldIgnoreCanvasShortcut, isCanvasAudioFile, fitNodeSize, getNodeSpec, CanvasNodeType, NODE_STATUS_SUCCESS: "success", assertCanvasImageUploadSize,
+        ...clipboard, ...nodeCopy, clipboardModule: clipboard, shouldIgnoreCanvasShortcut, matchCanvasActionShortcut, isCanvasAudioFile, fitNodeSize, getNodeSpec, CanvasNodeType, NODE_STATUS_SUCCESS: "success", assertCanvasImageUploadSize,
         window: target, navigator: {}, // HTTP/permissionless path: no navigator.clipboard exists.
         useCallback: (callback: unknown) => callback,
         useRef: (current: unknown) => ({ current }), useLayoutEffect: (run: () => void) => run(),
@@ -99,7 +100,7 @@ function harness(initialNodes: CanvasNodeData[] = [], initialConnections: Canvas
             nodesRef.current = nodesRef.current.filter(node => !ids.has(node.id));
             connectionsRef.current = connectionsRef.current.filter(edge => !ids.has(edge.fromNodeId) && !ids.has(edge.toNodeId));
         },
-        redoCanvas: () => history.push("redo"), undoCanvas: () => history.push("undo"), cancelSelectionPreview: noop, setConnecting: noop,
+        redoCanvas: () => history.push("redo"), undoCanvas: () => history.push("undo"), openCommands: () => history.push("commands"), cancelSelectionPreview: noop, setConnecting: noop,
         setHoveredNodeId: noop, setToolbarNodeId: noop, setEditingNodeId: noop, setInfoNodeId: noop,
         setCropNodeId: noop, setMaskEditNodeId: noop, setPendingConnectionCreate: noop,
         message: { success: noop, warning: (text: string) => warnings.push(text) },

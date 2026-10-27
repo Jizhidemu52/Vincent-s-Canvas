@@ -1,4 +1,4 @@
-import { canvasActionShortcut } from "@/lib/canvas/canvas-actions";
+import { canvasActionLabel, canvasActionShortcut, type CanvasActionId } from "@/lib/canvas/canvas-actions";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Copy, FolderPlus, PencilLine, Plus, Trash2, Upload } from "lucide-react";
 
@@ -99,16 +99,16 @@ export function CanvasNodeContextMenu({ menu, targetCount = 1, onClose, onDuplic
             onContextMenu={event => event.preventDefault()}
             onKeyDown={onKeyDown}
         >
-            {menu.type === "canvas" && onUpload ? <MenuButton icon={<Upload className="size-4" />} label="上传图片" action="upload" onClick={() => choose(onUpload)} /> : null}
-            {menu.type === "node" ? <MenuButton icon={<Copy className="size-4" />} label={isMultiTarget ? `复制所选 ${targetCount} 项` : "复制"} action="duplicate" onClick={() => choose(onDuplicate)} /> : null}
-            {canRename && onRename ? <MenuButton icon={<PencilLine className="size-4" />} label="重命名" action="rename" onClick={() => choose(onRename)} /> : null}
-            {onGroup ? <MenuButton icon={<FolderPlus className="size-4" />} label="创建款式组" action="group" onClick={() => choose(onGroup)} /> : null}
-            {menu.type === "canvas" ? canGenerate && onGenerate && <MenuButton icon={<Plus className="size-4" />} label="生成" action="generate" onClick={() => choose(onGenerate)} /> : <MenuButton icon={<Trash2 className="size-4" />} label={isMultiTarget ? `删除所选 ${targetCount} 项` : "删除"} action="delete" onClick={() => choose(onDelete)} />}
+            {menu.type === "canvas" && onUpload ? <MenuButton icon={<Upload className="size-4" />} action="upload" onClick={() => choose(onUpload)} /> : null}
+            {menu.type === "node" ? <MenuButton icon={<Copy className="size-4" />} action="duplicate" targetCount={targetCount} onClick={() => choose(onDuplicate)} /> : null}
+            {canRename && onRename ? <MenuButton icon={<PencilLine className="size-4" />} action="rename" onClick={() => choose(onRename)} /> : null}
+            {onGroup ? <MenuButton icon={<FolderPlus className="size-4" />} action="group" onClick={() => choose(onGroup)} /> : null}
+            {menu.type === "canvas" ? canGenerate && onGenerate && <MenuButton icon={<Plus className="size-4" />} action="generate" onClick={() => choose(onGenerate)} /> : <MenuButton icon={<Trash2 className="size-4" />} action="delete" targetCount={isMultiTarget ? targetCount : 1} onClick={() => choose(onDelete)} />}
         </div>
     );
 }
 
-export function MenuButton({ icon, label, action, onClick }: { icon: ReactNode; label: string; action: string; onClick: () => void }) {
+export function MenuButton({ icon, action, targetCount = 1, onClick }: { icon: ReactNode; action: CanvasActionId; targetCount?: number; onClick: () => void }) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
 
     return (
@@ -117,7 +117,7 @@ export function MenuButton({ icon, label, action, onClick }: { icon: ReactNode; 
             onFocus={event => { event.currentTarget.style.background = theme.toolbar.itemHover; }} onBlur={event => { event.currentTarget.style.background = "transparent"; }}
             onClick={(event) => { event.preventDefault(); event.stopPropagation(); onClick(); }}>
             {icon}
-            <span>{label}</span><span className="ml-auto text-[10px] opacity-50">{canvasActionShortcut(action)}</span>
+            <span>{canvasActionLabel(action, "context", targetCount)}</span><span className="ml-auto text-[10px] opacity-50">{canvasActionShortcut(action)}</span>
         </button>
     );
 }

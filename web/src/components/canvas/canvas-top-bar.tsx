@@ -10,7 +10,7 @@ import { useModuleEnabled } from "@/stores/use-module-store";
 import { UserStatusActions } from "@/components/layout/user-status-actions";
 import { UsageCollectionNotice } from "@/components/layout/frequent-navigation";
 import { CanvasSaveStatus } from "@/components/canvas/canvas-save-status";
-import { canvasActionShortcut } from "@/lib/canvas/canvas-actions";
+import { canvasActionMenuItem } from "./canvas-action-menu-item";
 import { canvasTopBarPropsEqual, type CanvasTopBarRenderState } from "@/lib/canvas/canvas-top-bar-render-stability";
 
 const CanvasShortcutsDialog = lazy(() => import("./canvas-shortcuts-dialog").then(module => ({ default: module.CanvasShortcutsDialog })));
@@ -62,22 +62,22 @@ export const CanvasTopBar = memo(function CanvasTopBar({
             <div className="cw-topbar">
                 <div className={`cw-project-card cw-surface ${agentOpen ? "is-agent-open" : ""}`}>
                     <Dropdown trigger={["click"]} menu={{ items: [
-                        { key: "home", icon: <Home className="size-4" />, label: "主页", onClick: onHome },
-                        { key: "projects", icon: <Images className="size-4" />, label: "我的画布", onClick: onProjects },
-                        { key: "new", icon: <Plus className="size-4" />, label: "新建画布", onClick: onCreateProject },
-                        { key: "tools", icon: <LayoutGrid className="size-4" />, label: "全部工具与板块", onClick: onOpenTools },
+                        canvasActionMenuItem("home", onHome, <Home className="size-4" />),
+                        canvasActionMenuItem("projects", onProjects, <Images className="size-4" />),
+                        canvasActionMenuItem("newProject", onCreateProject, <Plus className="size-4" />),
+                        canvasActionMenuItem("tools", onOpenTools, <LayoutGrid className="size-4" />),
                         { type: "divider" },
-                        { key: "import", icon: <Upload className="size-4" />, label: "导入素材", onClick: onImportImage },
-                        ...(canImportReferences ? [{ key: "web-import", icon: <Globe className="size-4" />, label: "网页参考图采集", onClick: () => navigate(`/reference-import${canvasId ? `?returnTo=${encodeURIComponent(`/canvas/${canvasId}`)}` : ""}`) }] : []),
-                        { key: "export", icon: <Download className="size-4" />, label: "导出画布", onClick: onExport },
-                        { key: "export-images", icon: <Images className="size-4" />, label: "导出图片集 / PDF", onClick: onExportImages },
+                        canvasActionMenuItem("upload", onImportImage, <Upload className="size-4" />),
+                        ...(canImportReferences ? [canvasActionMenuItem("referenceImport", () => navigate(`/reference-import${canvasId ? `?returnTo=${encodeURIComponent(`/canvas/${canvasId}`)}` : ""}`), <Globe className="size-4" />)] : []),
+                        canvasActionMenuItem("export", onExport, <Download className="size-4" />),
+                        canvasActionMenuItem("exportImages", onExportImages, <Images className="size-4" />),
                         { type: "divider" },
-                        { key: "undo", disabled: !canUndo, icon: <Undo2 className="size-4" />, label: <MenuLabel text="撤销" shortcut={canvasActionShortcut("undo")} />, onClick: onUndo },
-                        { key: "redo", disabled: !canRedo, icon: <Redo2 className="size-4" />, label: <MenuLabel text="重做" shortcut={canvasActionShortcut("redo")} />, onClick: onRedo },
-                        { key: "commands", label: "搜索命令、节点和素材（Ctrl / Cmd + K）", onClick: onOpenCommands },
-                        { key: "shortcuts", label: "快捷键", onClick: () => setShortcutsOpen(true) },
+                        canvasActionMenuItem("undo", onUndo, <Undo2 className="size-4" />, !canUndo),
+                        canvasActionMenuItem("redo", onRedo, <Redo2 className="size-4" />, !canRedo),
+                        canvasActionMenuItem("commands", onOpenCommands),
+                        canvasActionMenuItem("shortcuts", () => setShortcutsOpen(true)),
                         { type: "divider" },
-                        { key: "delete", danger: true, icon: <Trash2 className="size-4" />, label: "删除当前画布", onClick: onDeleteProject },
+                        canvasActionMenuItem("deleteProject", onDeleteProject, <Trash2 className="size-4" />),
                     ] }}>
                         <button type="button" className="cw-icon cw-brand" aria-label="打开画布菜单"><span>V</span><ChevronDown className="size-3" /></button>
                     </Dropdown>
@@ -104,15 +104,6 @@ export const CanvasTopBar = memo(function CanvasTopBar({
         </>
     );
 }, canvasTopBarPropsEqual);
-
-function MenuLabel({ text, shortcut }: { text: string; shortcut: string }) {
-    return (
-        <span className="flex min-w-36 items-center justify-between gap-8">
-            <span>{text}</span>
-            <span className="text-xs opacity-45">{shortcut}</span>
-        </span>
-    );
-}
 
 function CompactAgentStatus({ status, onClick }: { status: { connected: boolean; enabled: boolean; activity: string }; onClick: () => void }) {
     const colorTheme = useThemeStore((state) => state.theme);

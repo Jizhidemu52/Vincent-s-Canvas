@@ -1,6 +1,6 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import React, { type ComponentProps } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderToReadableStream, renderToStaticMarkup } from "react-dom/server";
 import { CanvasNode } from "@/components/canvas/canvas-node";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
@@ -13,6 +13,24 @@ const props: ComponentProps<typeof CanvasNode> = {
     onMouseDown: noop, onHoverStart: noop, onHoverEnd: noop, onConnectStart: noop, onResize: noop, onResizeEnd: noop, onContentChange: noop, onContextMenu: noop,
 };
 const markup = (patch: Partial<typeof props> = {}) => renderToStaticMarkup(<CanvasNode {...props} {...patch} />);
+
+beforeAll(async () => {
+    // Static SSR cannot wait for React.lazy. Resolve the real image chunk through
+    // streaming SSR. Effects and image decoding still require a browser: the
+    // real hook deliberately starts with its restoration host, not an img URL.
+    const stream = await renderToReadableStream(<CanvasNode {...props} />);
+    await stream.allReady;
+    expect(await new Response(stream).text()).toContain('aria-label="正在恢复图片预览"');
+});
+
+function expectImagePreviewHosts(html: string, count = 1) {
+    // Browser decoding, distinct pixels and source preservation are covered by
+    // e2e/canvas-image-overview.pw.ts, not inferred from server markup.
+    expect(html.match(/aria-label="正在恢复图片预览"/g)).toHaveLength(count);
+    expect(html).not.toContain('aria-label="正在加载图片预览"');
+    expect(html).not.toContain('data-testid="canvas-node-overview"');
+    expect(html).not.toContain("空图片节点");
+}
 
 describe("bulk overview node output", () => {
     test("keeps offscreen skipping for image previews while reusing empty bulk overview paint", () => {
@@ -39,29 +57,27 @@ describe("bulk overview node output", () => {
         }
     });
 
-    test("keeps unselected and bulk-selected low-zoom image previews without per-node resize controls", () => {
+    test("keeps unselected and bulk-selected low-zoom preview hosts without per-node resize controls", () => {
         for (const patch of [{ isSelected: false, isMultiSelected: false }, { isSelected: true, isMultiSelected: true }]) {
             const html = markup(patch);
-            expect(html).toContain('<img src="https://example.invalid/image.png"');
-            expect(html).toContain('data-canvas-image-resolution="original"');
+            expectImagePreviewHosts(html);
             expect(html).toContain("content-visibility:auto");
             expect(html).not.toContain('data-testid="canvas-node-overview"');
             expect(html).not.toContain("data-canvas-resize-handle");
         }
     });
 
-    test("adding a second distinct image preserves both previews when the first loses selection", () => {
+    test("adding a second distinct image preserves both preview hosts when the first loses selection", () => {
         const second: CanvasNodeData = { ...image, id: "image-second", title: "Second reference", position: { x: 500, y: 80 }, metadata: { content: "https://example.invalid/second-image.png", status: "success" } };
-        expect(markup({ isMultiSelected: false })).toContain('<img src="https://example.invalid/image.png"');
+        expectImagePreviewHosts(markup({ isMultiSelected: false }));
         for (const secondSelected of [true, false]) {
             const html = renderToStaticMarkup(<>
                 <CanvasNode {...props} data={image} isSelected={false} isMultiSelected={false} />
                 <CanvasNode {...props} data={second} isSelected={secondSelected} isMultiSelected={false} />
             </>);
-            expect(html.match(/<img\b/g)).toHaveLength(2);
-            expect(html).toContain('<img src="https://example.invalid/image.png"');
-            expect(html).toContain('<img src="https://example.invalid/second-image.png"');
-            expect(html.match(/data-canvas-image-resolution="original"/g)).toHaveLength(2);
+            expectImagePreviewHosts(html, 2);
+            expect(html).toContain('data-node-id="image"');
+            expect(html).toContain('data-node-id="image-second"');
             expect(html.match(/content-visibility:auto/g)).toHaveLength(secondSelected ? 1 : 2);
             expect(html).not.toContain('data-testid="canvas-node-overview"');
         }
@@ -70,7 +86,7 @@ describe("bulk overview node output", () => {
     test("a storage-only image mounts the preview restoration path instead of an empty overview", () => {
         const html = markup({ data: { ...image, metadata: { storageKey: "image:persisted", status: "success" } } });
         // Server rendering cannot run the IndexedDB effect, but must retain its preview host.
-        expect(html).toContain('aria-label="正在恢复图片预览"');
+        expectImagePreviewHosts(html);
         expect(html).toContain("content-visibility:auto");
         expect(html).not.toContain('data-testid="canvas-node-overview"');
         expect(html).not.toContain("空图片节点");
@@ -84,10 +100,10 @@ describe("bulk overview node output", () => {
         expect(html).not.toContain("Heavy config editor");
     });
 
-    test("single selection, focus and a connection target retain full image content", () => {
+    test("single selection, focus and a connection target retain preview hosts and full-detail controls", () => {
         for (const patch of [{ isMultiSelected: false }, { isFocusRelated: true }, { isConnectionTarget: true }]) {
             const html = markup(patch);
-            expect(html).toContain("data-canvas-image-resolution");
+            expectImagePreviewHosts(html);
             expect(html).toContain("data-canvas-resize-handle");
             expect(html).not.toContain('data-testid="canvas-node-overview"');
         }
@@ -96,15 +112,15 @@ describe("bulk overview node output", () => {
     test("an explicitly opened panel remains mounted and full-detail", () => {
         const html = markup({ showPanel: true, renderPanel: () => <div>Explicitly opened panel</div> });
         expect(html).toContain("Explicitly opened panel");
-        expect(html).toContain("data-canvas-image-resolution");
+        expectImagePreviewHosts(html);
         expect(html).toContain("data-canvas-resize-handle");
     });
 
-    test("an active connection retains ports and bulk image previews without resize controls", () => {
+    test("an active connection retains ports and bulk preview hosts without resize controls", () => {
         const html = markup({ isConnecting: true });
         expect(html).toContain("data-canvas-connection-handle");
         expect(html).not.toContain("data-canvas-resize-handle");
-        expect(html).toContain("data-canvas-image-resolution");
+        expectImagePreviewHosts(html);
         expect(html).not.toContain('data-testid="canvas-node-overview"');
     });
 

@@ -6,6 +6,7 @@ import { Popover } from "antd";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { MAX_CANVAS_ZOOM, MIN_CANVAS_ZOOM } from "@/lib/canvas/canvas-zoom";
 import { useThemeStore } from "@/stores/use-theme-store";
+import { canvasActionLabel } from "@/lib/canvas/canvas-actions";
 import "./canvas-toolbar.css";
 
 const CanvasShortcutsDialog = lazy(() => import("./canvas-shortcuts-dialog").then(module => ({ default: module.CanvasShortcutsDialog })));
@@ -79,10 +80,10 @@ export const CanvasZoomControls = memo(function CanvasZoomControls({ scale, onSc
                     />
                     <div className="cw-view-presets">{[.25, .5, 1, 2].map(value => <button key={value} type="button" aria-pressed={Math.round(displayedScale * 100) === value * 100} onClick={() => onScaleChange(value)}>{value * 100}%</button>)}</div>
                     <div className="cw-view-separator" />
-                    <button type="button" className="cw-view-action" onClick={() => { onReset(); setViewMenuOpen(false); }}><Focus size={16} strokeWidth={1.5} />重置视图</button>
-                    <button type="button" className="cw-view-action" aria-pressed={isMiniMapOpen} aria-label={isMiniMapOpen ? "关闭小地图" : "打开小地图"} onClick={onToggleMiniMap}><Compass size={16} strokeWidth={1.5} />小地图{isMiniMapOpen ? <Check size={14} /> : null}</button>
+                    <button type="button" className="cw-view-action" onClick={() => { onReset(); setViewMenuOpen(false); }}><Focus size={16} strokeWidth={1.5} />{canvasActionLabel("resetView")}</button>
+                    <button type="button" className="cw-view-action" aria-pressed={isMiniMapOpen} aria-label={isMiniMapOpen ? "关闭小地图" : "打开小地图"} onClick={onToggleMiniMap}><Compass size={16} strokeWidth={1.5} />{canvasActionLabel("minimap", "toolbar")}{isMiniMapOpen ? <Check size={14} /> : null}</button>
                     <div className="cw-view-separator" />
-                    <button type="button" className="cw-view-action" onClick={() => { setViewMenuOpen(false); setShortcutsOpen(true); }}><HelpCircle size={16} strokeWidth={1.5} />快捷键</button>
+                    <button type="button" className="cw-view-action" onClick={() => { setViewMenuOpen(false); setShortcutsOpen(true); }}><HelpCircle size={16} strokeWidth={1.5} />{canvasActionLabel("shortcuts")}</button>
                 </div>}>
                     <button type="button" className="cw-zoom-trigger" data-usage-control="canvas-tool.zoom" aria-label="画布缩放与视图" aria-expanded={viewMenuOpen} aria-haspopup="dialog">{Math.round(displayedScale * 100)}%<ChevronDown className="size-3" /></button>
                 </Popover>

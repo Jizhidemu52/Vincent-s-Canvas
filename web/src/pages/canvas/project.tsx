@@ -118,7 +118,7 @@ import { loadCanvasAssistantPanel, loadCanvasLocalAgentPanel } from "@/lib/canva
 import { loadCanvasNodePromptPanel, loadCanvasQuickGeneratePanel } from "@/lib/canvas/canvas-node-panel-loaders";
 import { loadCanvasNodeHoverToolbar } from "@/lib/canvas/canvas-node-hover-loaders";
 import { CanvasTopBar } from "@/components/canvas/canvas-top-bar";
-import { CanvasDialogsHost } from "@/components/canvas/canvas-dialogs-host";
+const CanvasDialogsHost = lazy(() => import("@/components/canvas/canvas-dialogs-host").then(module => ({ default: module.CanvasDialogsHost })));
 import { useCanvasDialogs } from "./use-canvas-dialogs";
 import { createCanvasConnectionSpatialIndex, refreshCanvasConnectionSpatialIndex, selectCanvasSpatialIndexConnections } from "@/lib/canvas/canvas-connection-spatial-index";
 import { canvasConnectionSvgSurfaceKind } from "@/lib/canvas/canvas-connection-svg-visibility";
@@ -4018,6 +4018,12 @@ const handleRetryNode = useCallback(async (node: CanvasNodeData) => {
         setRenameNode(null);
     };
 
+    const startNodeRename = (nodeId: string | undefined) => {
+        const node = nodesRef.current.find(item => item.id === nodeId);
+        if (node) setRenameNode({ id: node.id, name: node.type === CanvasNodeType.Image ? canvasImageBaseName(node) : node.title });
+        setContextMenu(null);
+    };
+
     const shareCurrentCanvas = useCallback(async () => {
         try {
             await navigator.clipboard.writeText(window.location.href);
@@ -4159,6 +4165,13 @@ const handleRetryNode = useCallback(async (node: CanvasNodeData) => {
         compare: { run: () => openImageCompare(), enabled: nodes.some(node => node.type === CanvasNodeType.Image && Boolean(node.metadata?.content)) },
         resetView: { run: resetViewport }, minimap: { run: toggleMiniMap }, export: { run: () => void exportCurrentCanvas() },
         tools: { run: openWorkspaceTools }, guide: { run: () => onboardingRef.current?.start() },
+        clear: { run: openClearCanvasFromToolbar }, exportImages: { run: openImageExport },
+        select: { run: () => setInteractionMode("select") }, pan: { run: () => { deselectCanvas(); setInteractionMode("hand"); } },
+        backgroundDots: { run: () => setBackgroundMode("dots") }, backgroundLines: { run: () => setBackgroundMode("lines") }, backgroundBlank: { run: () => setBackgroundMode("blank") },
+        imageInfo: { run: () => setShowImageInfo(value => !value) },
+        newProject: { run: createAndOpenProject },
+        deleteProject: { run: deleteCurrentProject }, renameProject: { run: startTitleEditing }, share: { run: shareFromTopBar },
+        rename: { enabled: selectedNodeIds.size === 1, run: () => startNodeRename(selectedNodeIdsRef.current.values().next().value) },
     };
 
     if (!projectLoaded) return <CanvasRefreshShell />;
@@ -4418,9 +4431,7 @@ const handleRetryNode = useCallback(async (node: CanvasNodeData) => {
                         }}
                         onRename={() => {
                             if (contextMenu.type !== "node") return;
-                            const node = nodesRef.current.find(item => item.id === contextMenu.nodeId);
-                            if (node) setRenameNode({ id: node.id, name: node.type === CanvasNodeType.Image ? canvasImageBaseName(node) : node.title });
-                            setContextMenu(null);
+                            startNodeRename(contextMenu.nodeId);
                         }}
                         onDelete={() => {
                             if (contextMenu.type === "node") {
@@ -4447,10 +4458,10 @@ const handleRetryNode = useCallback(async (node: CanvasNodeData) => {
                     onEditConfig={id => { setSelectedNodeIds(new Set([id])); setDialogNodeId(id); }}
                     onPromptChange={(id, prompt) => handleConfigNodeChange(id, { prompt, composerContent: prompt })}
                 /></Suspense> : null}
-                <CanvasDialogsHost projectId={projectId} state={canvasDialogs} actions={{
+                {canvasDialogs.isOpen ? <Suspense fallback={null}><CanvasDialogsHost projectId={projectId} state={canvasDialogs} actions={{
                     applyDesignTemplate, saveGroupName, saveNodeName, saveManualImageEdit, cropImageNode, maskEditImageNode,
                     splitImageNode, upscaleImageNode, generateAngleNode, clearCanvas, handleAssetInsert,
-                }} />
+                }} /></Suspense> : null}
             {batchEditOpen ? <Suspense fallback={null}><CanvasBatchEditDialog open={batchEditOpen} running={batchEditRunning} prompt={batchEditPrompt} optimizePrompt={batchOptimizePrompt} optimizing={batchOptimizing} onOptimizePromptChange={setBatchOptimizePrompt} items={batchEditItems} imageSettings={batchImageSettings} serverId={batchEditServerId} action={batchEditAction} onClose={() => setBatchEditOpen(false)} onPromptChange={setBatchEditPrompt} onImageSettingsChange={setBatchImageSettings} onSelectFiles={() => batchFilesInputRef.current?.click()} onClearItems={() => setBatchEditItems([])} onRun={runBatchImageEdit} onControlBatch={controlActiveBatchEdit} /></Suspense> : null}
                 <input ref={batchFilesInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleBatchFolderInputChange} />
                 {localAgentModuleEnabled && codexCompactAgent && !assistantMounted ? (

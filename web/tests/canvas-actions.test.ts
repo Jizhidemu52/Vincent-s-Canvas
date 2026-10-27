@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
-import { canvasActionShortcut, matchCanvasActionShortcut, filterCanvasCommands, canvasNodeKeyAction } from "@/lib/canvas/canvas-actions";
-import { canvasCommandCatalog as canvasActions } from "@/lib/canvas/canvas-command-catalog";
+import { canvasActionShortcut, matchCanvasActionShortcut, canvasNodeKeyAction } from "@/lib/canvas/canvas-actions";
+import { canvasCommandCatalog as canvasActions, filterCanvasCommands } from "@/lib/canvas/canvas-command-catalog";
 
 test("command definitions expose twenty common actions and real keyboard bindings", () => {
     expect(canvasActions.length).toBeGreaterThanOrEqual(20);
@@ -17,6 +17,12 @@ test("command search supports keyword terms and excludes unavailable actions", (
     expect(filterCanvasCommands(commands, "undo").map(action => action.id)).toEqual(["undo"]);
     expect(filterCanvasCommands(commands, "创建 款式")).toEqual([]);
     expect(filterCanvasCommands(commands, "图片").length).toBeGreaterThan(1);
+});
+
+test("canvas search reaches theme and the existing toolbar and context actions", () => {
+    for (const query of ["切换主题", "清空画布", "重命名", "画布背景", "显示图片信息", "导出图片", "快捷键"]) {
+        expect(filterCanvasCommands(canvasActions, query).length).toBeGreaterThan(0);
+    }
 });
 
 test("node keyboard editing and movement never hijack modified shortcuts", () => {

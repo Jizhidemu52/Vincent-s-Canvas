@@ -68,7 +68,8 @@ function createMenuHarness({ canGenerate = true, type = "canvas", theme = "light
         root.props.ref.current = null;
         cleanups.forEach(cleanup => cleanup?.());
     };
-    return { root, menuButtons, menuElement, trigger, outside, document: fakeDocument, handlers, events, key, unmount, exports: module.exports };
+    const labels = menuButtons.map(item => elements(module.exports.MenuButton!(item.props)).find(element => element.type === "span")?.props.children);
+    return { root, menuButtons, labels, menuElement, trigger, outside, document: fakeDocument, handlers, events, key, unmount, exports: module.exports };
 }
 
 test("context menu fits the real viewport, including short and narrow screens", () => {
@@ -81,7 +82,7 @@ test("context menu fits the real viewport, including short and narrow screens", 
 
 test("upload is first and independent from canvas generation permissions", () => {
     withMenu(harness => {
-        expect(harness.menuButtons.map(item => item.props.label)).toEqual(["上传图片", "创建款式组"]);
+        expect(harness.labels).toEqual(["上传图片", "创建款式组"]);
         harness.menuButtons[0]!.props.onClick();
         expect(harness.events).toEqual(["upload", "close"]);
         expect(harness.root.props.role).toBe("menu");
@@ -94,27 +95,27 @@ test("upload is first and independent from canvas generation permissions", () =>
 
 test("generation and optional upload remain separate existing callbacks", () => {
     withMenu(harness => {
-        expect(harness.menuButtons.map(item => item.props.label)).toEqual(["上传图片", "创建款式组", "生成"]);
+        expect(harness.labels).toEqual(["上传图片", "创建款式组", "生成"]);
         harness.menuButtons.at(-1)!.props.onClick();
         expect(harness.events).toEqual(["generate", "close"]);
         harness.unmount();
     });
     withMenu(harness => {
-        expect(harness.menuButtons.map(item => item.props.label)).toEqual(["创建款式组", "生成"]);
+        expect(harness.labels).toEqual(["创建款式组", "生成"]);
         harness.unmount();
     }, { onUpload: false });
 });
 
 test("node and connection actions preserve behavior with Chinese labels and stable usage actions", () => {
     withMenu(harness => {
-        expect(harness.menuButtons.map(item => item.props.label)).toEqual(["复制", "重命名", "创建款式组", "删除"]);
+        expect(harness.labels).toEqual(["复制", "重命名", "创建款式组", "删除"]);
         expect(harness.menuButtons.map(item => item.props.action)).toEqual(["duplicate", "rename", "group", "delete"]);
         harness.menuButtons[0]!.props.onClick();
         expect(harness.events).toEqual(["duplicate", "close"]);
         harness.unmount();
     }, { type: "node" });
     withMenu(harness => {
-        expect(harness.menuButtons.map(item => item.props.label)).toEqual(["创建款式组", "删除"]);
+        expect(harness.labels).toEqual(["创建款式组", "删除"]);
         expect(harness.root.props.style.background).not.toBe("#ffffff");
         harness.unmount();
     }, { type: "connection", theme: "dark" });
@@ -122,7 +123,7 @@ test("node and connection actions preserve behavior with Chinese labels and stab
 
 test.each([2, 7])("a %i-node selection shows its size and hides rename even when a rename callback exists", targetCount => {
     withMenu(harness => {
-        expect(harness.menuButtons.map(item => item.props.label)).toEqual([`复制所选 ${targetCount} 项`, "创建款式组", `删除所选 ${targetCount} 项`]);
+        expect(harness.labels).toEqual([`复制所选 ${targetCount} 项`, "创建款式组", `删除所选 ${targetCount} 项`]);
         expect(harness.menuButtons.map(item => item.props.action)).toEqual(["duplicate", "group", "delete"]);
         expect(harness.menuButtons.some(item => item.props.action === "rename")).toBe(false);
         expect(harness.events).toEqual([]);
@@ -175,7 +176,7 @@ test.each([
     ["connection", ["创建款式组", "删除"]],
 ] as const)("targetCount does not change %s menu labels or items", (type, labels) => {
     withMenu(harness => {
-        expect(harness.menuButtons.map(item => item.props.label)).toEqual([...labels]);
+        expect(harness.labels).toEqual([...labels]);
         harness.unmount();
     }, { type, targetCount: 6 });
 });

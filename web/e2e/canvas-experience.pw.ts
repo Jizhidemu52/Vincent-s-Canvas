@@ -67,6 +67,33 @@ test("命令搜索、节点键盘编辑与微移、历史提示和刷新视图�
     expect(api.submissions).toHaveLength(0);
 });
 
+test("二十项常用命令可搜索，主题背景与重命名实际执行", async ({ page, api }) => {
+    const id = await newCanvas(page); await skipGuide(page);
+    await page.keyboard.press("Control+k");
+    const search = page.getByRole("combobox", { name: "搜索命令、节点和素材" });
+    for (const query of ["上传素材", "添加文本", "添加图片节点", "添加视频节点", "添加音频节点", "添加生成配置", "打开画布生图", "批量改图", "我的素材", "使用设计模板", "重置视图", "切换小地图", "导出画布备份", "全部工具与板块", "重新查看新手引导", "切换主题", "清空画布", "移动画布", "显示图片信息", "快捷键"]) {
+        await search.fill(query);
+        await expect(page.getByRole("option").filter({ hasText: query })).toHaveCount(1);
+    }
+    await search.fill("画布背景：网格");
+    await search.press("Enter");
+    await expect.poll(() => api.document(id)?.backgroundMode).toBe("lines");
+    await page.keyboard.press("Control+k");
+    await search.fill("添加文本"); await search.press("Enter");
+    await expect.poll(() => api.document(id)?.nodes.length).toBe(1);
+    await page.keyboard.press("Control+k");
+    await search.fill("重命名选中节点"); await search.press("Enter");
+    const rename = page.getByRole("dialog", { name: "重命名图片或节点" });
+    await expect(rename).toBeVisible();
+    await rename.getByRole("textbox").fill("命令命名验证");
+    await rename.getByRole("button", { name: "保存名称" }).click();
+    await expect.poll(() => api.document(id)?.nodes[0].title).toBe("命令命名验证");
+    await page.keyboard.press("Control+k"); await search.fill("快捷键"); await search.press("Enter");
+    await expect(page.getByRole("dialog", { name: "快捷键与画布操作" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    expect(api.submissions).toHaveLength(0);
+});
+
 test("连续本机写入失败五秒内只升级一次且立即导出保留内存内容", async ({ page, api }, testInfo) => {
     const id = await newCanvas(page);
     await skipGuide(page);
@@ -120,5 +147,40 @@ test("两处快捷键入口共用真实说明，命令可从菜单打开", async
     await page.getByRole("button", { name: "打开画布菜单", exact: true }).click();
     await page.getByRole("menuitem", { name: /搜索命令、节点和素材/ }).click();
     await expect(page.getByRole("combobox", { name: "搜索命令、节点和素材" })).toBeFocused();
+    expect(api.submissions).toHaveLength(0);
+});
+
+test("搜索切换主题真实生效并保存，菜单与命令使用相同节点动作", async ({ page, api }) => {
+    const id = await newCanvas(page); await skipGuide(page);
+    const workspace = page.locator("main.cw-workspace");
+    const initialTheme = await workspace.getAttribute("data-theme");
+    const otherTheme = initialTheme === "light" ? "dark" : "light";
+    const search = page.getByRole("combobox", { name: "搜索命令、节点和素材" });
+    const command = async (query: string) => {
+        await page.keyboard.press("Control+k");
+        await search.fill(query);
+        await expect(page.getByRole("option")).toHaveCount(1);
+        await search.press("Enter");
+    };
+    await command("切换主题");
+    await expect(workspace).toHaveAttribute("data-theme", otherTheme);
+    await page.reload();
+    await expect(workspace).toHaveAttribute("data-theme", otherTheme);
+    await command("切换主题");
+    await expect(workspace).toHaveAttribute("data-theme", initialTheme!);
+    await command("添加文本");
+    await expect.poll(() => api.document(id)?.nodes.length).toBe(1);
+    const node = page.locator("[data-node-id]").first();
+    await node.click({ button: "right" });
+    const context = page.getByRole("menu", { name: "节点操作" });
+    await expect(context.getByRole("menuitem", { name: /复制/ })).toContainText("Ctrl / Cmd + D");
+    await context.getByRole("menuitem", { name: /复制/ }).click();
+    await expect.poll(() => api.document(id)?.nodes.length).toBe(2);
+    await command("快速复制选中节点");
+    await expect.poll(() => api.document(id)?.nodes.length).toBe(3);
+    await command("清空画布");
+    await expect(page.getByRole("dialog").filter({ hasText: "清空" })).toBeVisible();
+    await page.getByRole("dialog", { name: "清空画布？" }).getByRole("button", { name: /^取\s*消$/ }).click();
+    await expect.poll(() => api.document(id)?.nodes.length).toBe(3);
     expect(api.submissions).toHaveLength(0);
 });

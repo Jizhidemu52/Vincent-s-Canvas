@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Input, Modal, type InputRef } from "antd";
-import { canvasActionShortcut, filterCanvasCommands, type CanvasActionId } from "@/lib/canvas/canvas-actions";
-import { canvasCommandCatalog } from "@/lib/canvas/canvas-command-catalog";
+import { canvasActionShortcut, type CanvasActionId } from "@/lib/canvas/canvas-actions";
+import { canvasCommandCatalog, filterCanvasCommands } from "@/lib/canvas/canvas-command-catalog";
+import { useNavigate, useParams } from "react-router-dom";
 import { canvasActionModules } from "@/lib/canvas/tool-availability";
 import { isModuleAvailable, useModuleStore } from "@/stores/use-module-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
@@ -9,6 +10,8 @@ import { canUserAccessAsset, useAssetStore } from "@/stores/use-asset-store";
 import { useUserStore } from "@/stores/use-user-store";
 import type { CanvasNodeData } from "@/types/canvas";
 import type { InsertAssetPayload } from "./asset-picker-modal";
+import { useThemeStore } from "@/stores/use-theme-store";
+import { CanvasShortcutsDialog } from "./canvas-shortcuts-dialog";
 
 export type CanvasCommandBindings = Partial<Record<CanvasActionId, { run: () => void; enabled?: boolean }>>;
 export function CanvasCommandPalette({ nodes, bindings, onLocate, onAsset, onClose }: {
@@ -17,15 +20,20 @@ export function CanvasCommandPalette({ nodes, bindings, onLocate, onAsset, onClo
 }) {
     const [query, setQuery] = useState("");
     const [active, setActive] = useState(0);
+    const [shortcutsOpen, setShortcutsOpen] = useState(false);
     const input = useRef<InputRef>(null);
     const assets = useAssetStore(state => state.assets);
     const user = useUserStore(state => state.user);
     const flags = useModuleStore(state => state.flags);
     const tools = useBusinessConfigStore(state => state.tools);
+    const navigate = useNavigate(), { id } = useParams<{ id: string }>();
     const matches = useMemo(() => {
         const actions = canvasCommandCatalog.flatMap(action => {
-            const binding = bindings[action.id];
-            const module = canvasActionModules[action.id] || (action.id === "group" ? "canvas-local-tools" : undefined);
+            const routes = { home: "/", projects: "/canvas", referenceImport: `/reference-import${id ? `?returnTo=${encodeURIComponent(`/canvas/${id}`)}` : ""}` };
+            const binding = action.id in routes ? { run: () => navigate(routes[action.id as keyof typeof routes]) }
+                : action.id === "theme" ? { run: () => { const state = useThemeStore.getState(); state.setTheme(state.theme === "light" ? "dark" : "light"); } }
+                : action.id === "shortcuts" ? { run: () => setShortcutsOpen(true) } : bindings[action.id];
+            const module = canvasActionModules[action.id];
             if (!binding || module && !isModuleAvailable(flags, tools, module)) return [];
             return [{ ...action, enabled: binding.enabled, category: "命令", shortcut: canvasActionShortcut(action.id), run: binding.run }];
         });
@@ -37,10 +45,11 @@ export function CanvasCommandPalette({ nodes, bindings, onLocate, onAsset, onClo
             onAsset(current.kind === "text" ? { kind: "text", title: current.title, content: current.data.content } : current.kind === "image" ? { kind: "image", title: current.title, ...current.data } : { kind: "video", title: current.title, ...current.data });
         } }));
         return filterCanvasCommands([...actions, ...nodeItems, ...assetItems], query).slice(0, 80);
-    }, [query, bindings, flags, tools, nodes, assets, user, onLocate, onAsset]);
+    }, [query, bindings, flags, tools, nodes, assets, user, onLocate, onAsset, id, navigate]);
     useEffect(() => { setActive(0); }, [query]);
     useEffect(() => { document.getElementById(`canvas-command-${active}`)?.scrollIntoView({ block: "nearest" }); }, [active]);
-    const execute = (index: number) => { const item = matches[index]; if (item) { onClose(); item.run(); } };
+    const execute = (index: number) => { const item = matches[index]; if (item) { if (item.id !== "shortcuts") onClose(); item.run(); } };
+    if (shortcutsOpen) return <CanvasShortcutsDialog open onClose={onClose} />;
     return <Modal open title="命令与搜索" footer={null} centered width={620} onCancel={onClose} afterOpenChange={open => { if (open) input.current?.focus(); }}>
         <Input ref={input} value={query} placeholder="搜索命令、画布节点或本地素材…" aria-label="搜索命令、节点和素材" role="combobox" aria-expanded="true" aria-controls="canvas-command-results" aria-activedescendant={matches[active] ? `canvas-command-${active}` : undefined}
             onChange={event => setQuery(event.target.value)} onKeyDown={event => {
