@@ -2,7 +2,7 @@ import { canvasActionHint, canvasActionLabel, type CanvasActionId } from "@/lib/
 import { canvasActionMenuItem } from "./canvas-action-menu-item";
 import { memo } from "react";
 import { Dropdown, Tooltip } from "antd";
-import { Eraser, FolderOpen, FolderPlus, Grid3X3, Hand, Image as ImageIcon, MoreHorizontal, MousePointer2, Music2, Redo2, Settings2, Sparkles, Trash2, Type, Undo2, Upload, Video, WandSparkles, type LucideIcon } from "lucide-react";
+import { Download, Eraser, FolderOpen, FolderPlus, Grid3X3, Hand, Image as ImageIcon, MoreHorizontal, MousePointer2, Music2, Redo2, Settings2, Sparkles, Trash2, Type, Undo2, Upload, Video, WandSparkles, type LucideIcon } from "lucide-react";
 import { canvasToolbarPropsEqual, type CanvasToolbarRenderState } from "@/lib/canvas/canvas-toolbar-render-stability";
 import { isModuleAvailable, useModuleEnabled, useModuleStore } from "@/stores/use-module-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
@@ -17,6 +17,10 @@ export const CanvasToolbar = memo(function CanvasToolbar(props: CanvasToolbarRen
     return (
         <div data-testid="canvas-top-tool-rail" className="cw-dock">
             <div className="cw-tools cw-surface cw-toolbar-primary" role="group" aria-label="画布常用工具">
+                {selectedCount > 1 && Boolean(props.selectedImageCount) && props.onDownloadSelection ? <>
+                    <Tooltip title="仅打包选中的图片，默认保留原文件格式和画质"><button type="button" className="cw-icon cw-download-selection" data-usage-control="canvas-tool.downloadSelectedImages" onClick={props.onDownloadSelection}><Download className="size-4" /><span>{canvasActionLabel("downloadSelectedImages", "toolbar", props.selectedImageCount)}</span></button></Tooltip>
+                    <span className="cw-divider" aria-hidden="true" />
+                </> : null}
                 <ActionButton action="select" icon={MousePointer2} pressed={interactionMode === "select"} onClick={() => onInteractionModeChange?.("select")} />
                 <ActionButton action="pan" icon={Hand} pressed={interactionMode === "hand"} onClick={() => { onDeselect(); onInteractionModeChange?.("hand"); }} />
                 <ActionButton action="upload" icon={Upload} onClick={onUpload} />

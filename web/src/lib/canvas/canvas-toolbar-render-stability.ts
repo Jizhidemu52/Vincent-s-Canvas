@@ -8,6 +8,8 @@ export type CanvasToolbarRenderState = {
     viewControls?: ReactNode;
     onOpenTools?: () => void;
     selectedCount: number;
+    selectedImageCount?: number;
+    onDownloadSelection?: () => void;
     canUndo: boolean;
     canRedo: boolean;
     backgroundMode: CanvasBackgroundMode;
@@ -44,6 +46,8 @@ export function canvasToolbarPropsEqual(previous: CanvasToolbarRenderState, next
         previous.viewControls === next.viewControls &&
         previous.onOpenTools === next.onOpenTools &&
         previous.selectedCount === next.selectedCount &&
+        previous.selectedImageCount === next.selectedImageCount &&
+        previous.onDownloadSelection === next.onDownloadSelection &&
         previous.canUndo === next.canUndo &&
         previous.canRedo === next.canRedo &&
         previous.backgroundMode === next.backgroundMode &&

@@ -1,5 +1,16 @@
 type ImageClipboard = { read?: () => Promise<readonly { types: readonly string[]; getType: (type: string) => Promise<Blob> }[]> };
 
+/** Paste events also work on HTTP sites and do not need clipboard-read permission. */
+export function pastedImageFiles(data: Pick<DataTransfer, "files" | "items">): File[] {
+    const files = Array.from(data.files || []).filter(file => file.type.startsWith("image/"));
+    // files and items describe the same clipboard payload; never concatenate both.
+    if (files.length) return files;
+    return Array.from(data.items || []).flatMap(item => {
+        const file = item.kind === "file" && item.type.startsWith("image/") ? item.getAsFile() : null;
+        return file ? [file] : [];
+    });
+}
+
 export async function readClipboardImages(clipboard: ImageClipboard | undefined): Promise<Blob[]> {
     if (!clipboard?.read) throw new Error("当前浏览器不支持读取剪贴板图片，请使用上传或拖入图片");
     try {

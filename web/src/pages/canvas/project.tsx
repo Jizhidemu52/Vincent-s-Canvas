@@ -25,6 +25,7 @@ import { useThemeStore } from "@/stores/use-theme-store";
 import { loadCanvasImageTools } from "@/lib/canvas/canvas-image-tool-loader";
 import { createCanvasImageOperationRunner } from "@/lib/canvas/canvas-image-operation";
 import { assertCanvasImageUploadSize } from "@/lib/canvas/canvas-image-upload-limit";
+import { canvasImageExportSelection } from "@/lib/canvas/canvas-image-export-selection";
 import { canvasImageUsageInput } from "@/lib/canvas/canvas-image-usage";
 import { cloneCanvasNodeGraph, copyCanvasNodeGraph, type CanvasNodeGraph } from "@/lib/canvas/canvas-node-copy";
 import { clampCanvasZoom } from "@/lib/canvas/canvas-zoom";
@@ -1319,6 +1320,7 @@ function WirelessCanvasPage() {
 
 
     const hasMultipleSelectedNodes = selectedNodeIds.size > 1;
+    const selectedExportImageCount = useMemo(() => canvasImageExportSelection(nodes, Array.from(selectedNodeIds)).length, [nodes, selectedNodeIds]);
 
     useEffect(() => {
         setQuickGenerateReferences((current) => syncCanvasSelectionReferences(current, selectedNodeIds, nodeById));
@@ -3897,6 +3899,7 @@ const handleRetryNode = useCallback(async (node: CanvasNodeData) => {
     const contextMenuNodeIds = useMemo(() => contextMenu?.type === "node"
         ? new Set(selectedNodeIds.has(contextMenu.nodeId) ? selectedNodeIds : [contextMenu.nodeId])
         : new Set<string>(), [contextMenu, selectedNodeIds]);
+    const contextMenuImageCount = useMemo(() => canvasImageExportSelection(nodes, Array.from(contextMenuNodeIds)).length, [nodes, contextMenuNodeIds]);
 
     const insertAssistantImage = useCallback(
         async (image: CanvasAssistantImage) => {
@@ -4006,6 +4009,12 @@ const handleRetryNode = useCallback(async (node: CanvasNodeData) => {
 
     const openImageExport = useCallback(() => {
         setImageExport({ nodes: nodesRef.current, ids: Array.from(selectedNodeIdsRef.current) });
+    }, []);
+    const openSelectedImageDownload = useCallback(() => {
+        const selectedImages = canvasImageExportSelection(nodesRef.current, Array.from(selectedNodeIdsRef.current));
+        if (!selectedImages.length) return;
+        // Snapshot only the selection: an empty or mixed selection must never fall back to all images.
+        setImageExport({ nodes: selectedImages, ids: selectedImages.map(node => node.id), mode: "images" });
     }, []);
 
     const saveNodeName = () => {
@@ -4166,6 +4175,7 @@ const handleRetryNode = useCallback(async (node: CanvasNodeData) => {
         resetView: { run: resetViewport }, minimap: { run: toggleMiniMap }, export: { run: () => void exportCurrentCanvas() },
         tools: { run: openWorkspaceTools }, guide: { run: () => onboardingRef.current?.start() },
         clear: { run: openClearCanvasFromToolbar }, exportImages: { run: openImageExport },
+        downloadSelectedImages: { run: openSelectedImageDownload, enabled: selectedExportImageCount > 0 },
         select: { run: () => setInteractionMode("select") }, pan: { run: () => { deselectCanvas(); setInteractionMode("hand"); } },
         backgroundDots: { run: () => setBackgroundMode("dots") }, backgroundLines: { run: () => setBackgroundMode("lines") }, backgroundBlank: { run: () => setBackgroundMode("blank") },
         imageInfo: { run: () => setShowImageInfo(value => !value) },
@@ -4377,6 +4387,8 @@ const handleRetryNode = useCallback(async (node: CanvasNodeData) => {
                     interactionMode={interactionMode}
                     onInteractionModeChange={setInteractionMode}
                     selectedCount={selectedNodeIds.size}
+                    selectedImageCount={selectedExportImageCount}
+                    onDownloadSelection={openSelectedImageDownload}
                     canUndo={historyState.canUndo}
                     canRedo={historyState.canRedo}
                     backgroundMode={backgroundMode}
@@ -4414,6 +4426,8 @@ const handleRetryNode = useCallback(async (node: CanvasNodeData) => {
                     <CanvasNodeContextMenu
                         menu={contextMenu}
                         targetCount={contextMenuNodeIds.size}
+                        imageCount={contextMenuImageCount}
+                        onDownloadImages={openSelectedImageDownload}
                         onGroup={localToolsEnabled && selectedNodeIds.size >= 2 && (contextMenu.type === "canvas" || (contextMenu.type === "node" && selectedNodeIds.has(contextMenu.nodeId))) ? createSelectedGroup : undefined}
                         onClose={() => setContextMenu(null)}
                         onUpload={contextMenu.type === "canvas" ? () => handleUploadRequest(undefined, contextMenu.canvasPosition) : undefined}

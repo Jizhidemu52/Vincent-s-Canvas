@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, type DragEvent } from 
 import type { CanvasNodeGraph } from "@/lib/canvas/canvas-node-copy";
 import type { canvasCutBlockReason } from "@/lib/canvas/canvas-system-clipboard";
 import type { Position } from "@/types/canvas";
+import { createClientId } from "@/lib/client-id";
 
 export const isCanvasAudioFile = (file: File) => file.type.startsWith("audio/") || /\.(mp3|wav)$/i.test(file.name);
 type Options = {
@@ -49,7 +50,7 @@ export function useCanvasClipboardDrop(options: Options) {
         const io = latest.current;
         if (files.length !== dropped.length) io.warning("仅支持图片、视频和音频，其他文件已跳过");
         const point = io.screenToCanvas(event.clientX, event.clientY);
-        const id = `canvas-import-${crypto.randomUUID()}`;
+        const id = `canvas-import-${createClientId()}`;
         let failed = 0;
         if (files.length) io.onImportProgress?.({ id, completed: 0, total: files.length, failed });
         for (const [index, file] of files.entries()) {

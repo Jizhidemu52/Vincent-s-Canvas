@@ -31,6 +31,7 @@ type CloudDocument = { id: string; revision: number; deleted: boolean; document:
 
 /** Stateful HTTP double. Test actions use the public UI; no app stores are injected. */
 export class MockCanvasApi {
+    constructor(private origin = ORIGIN) {}
     role: "designer" | "super_admin" | "department_admin" = "designer";
     documents = new Map<string, CloudDocument>();
     tasks = new Map<string, Json>();
@@ -97,7 +98,7 @@ export class MockCanvasApi {
     private async route(route: Route) {
         const request = route.request(), url = new URL(request.url()), path = url.pathname, method = request.method();
         if (!["http:", "https:"].includes(url.protocol)) return route.continue();
-        if (url.origin !== ORIGIN) { this.blocked.push(request.url()); return route.abort("blockedbyclient"); }
+        if (url.origin !== this.origin) { this.blocked.push(request.url()); return route.abort("blockedbyclient"); }
         if (!path.startsWith("/api/")) return route.continue();
         const json = (value: unknown, status = 200) => this.json(route, value, status);
         if (path === "/api/deployment") return json({ authenticationEnabled: true, creditsEnabled: false, rolePortalsEnabled: false, oaLoginEnabled: false });
@@ -171,8 +172,8 @@ export class MockCanvasApi {
 }
 
 export const test = base.extend<{ api: MockCanvasApi }>({
-    api: async ({ context }, use) => {
-        const api = new MockCanvasApi();
+    api: async ({ context }, use, testInfo) => {
+        const api = new MockCanvasApi(testInfo.project.use.baseURL || ORIGIN);
         await api.attach(context);
         await use(api);
         expect(api.blocked, "No external requests are allowed").toEqual([]);

@@ -13,6 +13,19 @@ function node(id: string, title = "方案.png", metadata: CanvasNodeData["metada
     return { id, title, type: CanvasNodeType.Image, position: { x: 0, y: 0 }, width: 400, height: 400, metadata: { content: `test:${id}`, ...metadata } };
 }
 
+test("box selection exports exactly its eight images, excludes text and unselected images, and never falls back from empty", () => {
+    const images = Array.from({ length: 9 }, (_, index) => node(`image-${index}`));
+    const text = { ...node("text"), type: CanvasNodeType.Text };
+    const empty = { ...node("empty"), metadata: {} };
+    const stored = node("stored", "存储原图", { content: "", storageKey: "stored-original" });
+    const all = [...images, text, empty, stored];
+    const selectedIds = [...images.slice(0, 8).map(image => image.id), text.id, empty.id];
+    expect(canvasImageExportSelection(all, selectedIds)).toEqual(images.slice(0, 8));
+    expect(canvasImageExportSelection(all, [])).toEqual([]);
+    expect(canvasImageExportSelection(all, [text.id, empty.id])).toEqual([]);
+    expect(canvasImageExportSelection(all, [stored.id])).toEqual([stored]);
+});
+
 async function measureImage(blob: Blob) {
     // Tests use the real PNG/JPEG parser; browser decoding is exercised by the UI check.
     const pdf = await PDFDocument.create();

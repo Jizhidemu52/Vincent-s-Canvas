@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { createProjectSession, sameProject } from "../src/pages/design-workbench/local/project-session.js";
+import { validate, version } from "uuid";
 
 function fixture(values = new Map<string, any>()) {
     let state = { width: 10, src: "data:image/png;base64,AAAA" };
@@ -44,6 +45,27 @@ function fixture(values = new Map<string, any>()) {
         },
     };
 }
+
+test("HTTP origins create and restore workbench projects without the secure-context UUID API", async () => {
+    const native = Object.getOwnPropertyDescriptor(globalThis, "crypto");
+    const secureRandom = crypto.getRandomValues.bind(crypto);
+    Object.defineProperty(globalThis, "crypto", { configurable: true, value: { getRandomValues: secureRandom } });
+    const f = fixture();
+    try {
+        await f.session.initialize();
+        await f.session.create("图片_v2 工程");
+        const id = f.session.view().activeId!;
+        expect(validate(id)).toBe(true);
+        expect(version(id)).toBe(4);
+        const next = fixture(f.values);
+        await next.session.initialize();
+        expect(next.session.view().activeId).toBe(id);
+        next.session.dispose();
+    } finally {
+        f.session.dispose();
+        if (native) Object.defineProperty(globalThis, "crypto", native);
+    }
+});
 
 test("first edit is dirty before autosave, and persisted data survives reopening", async () => {
     const f = fixture();

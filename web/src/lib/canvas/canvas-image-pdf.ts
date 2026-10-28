@@ -2,7 +2,9 @@ import { canvasImageDownloadFileName, canvasImageExportStem } from "@/lib/canvas
 import { prepareCanvasImageFormat, validateImageBlob } from "@/lib/canvas/canvas-image-encoding";
 import { createZip } from "@/lib/zip";
 import { resolveImageUrl } from "@/services/image-storage";
-import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
+import type { CanvasNodeData } from "@/types/canvas";
+import { isCanvasPdfImage } from "./canvas-image-export-selection";
+export { canvasImageExportSelection, isCanvasPdfImage } from "./canvas-image-export-selection";
 
 export type CanvasImagePdfMode = "merged" | "separate" | "images" | "png" | "jpg";
 export type CanvasImagePdfProgress = { completed: number; total: number; label: string };
@@ -24,28 +26,6 @@ type PdfDependencies = {
 // Bound both encoded data and decoded pixel memory. Images are loaded and flushed sequentially.
 export const CANVAS_IMAGE_PDF_LIMITS = { images: 200, sourceBytes: 256 * 1024 * 1024, imagePixels: 20_000_000 };
 const pointsPerPixel = 72 / 96;
-
-export function isCanvasPdfImage(node: CanvasNodeData) {
-    return node.type === CanvasNodeType.Image && Boolean(node.metadata?.storageKey || node.metadata?.content);
-}
-
-/** Batch roots are covers, not additional pages; expand them in their explicit child order. */
-export function canvasImageExportSelection(nodes: readonly CanvasNodeData[], selectedIds?: readonly string[]) {
-    const byId = new Map(nodes.map((node) => [node.id, node]));
-    const result = new Map<string, CanvasNodeData>();
-    const visited = new Set<string>();
-    const add = (id: string) => {
-        if (visited.has(id)) return;
-        visited.add(id);
-        const node = byId.get(id);
-        if (!node) return;
-        const children = node.metadata?.isBatchRoot ? (node.metadata.batchChildIds || []).filter((childId) => childId !== id && byId.has(childId) && isCanvasPdfImage(byId.get(childId)!)) : [];
-        if (children.length) children.forEach(add);
-        else if (isCanvasPdfImage(node)) result.set(id, node);
-    };
-    (selectedIds || nodes.map((node) => node.id)).forEach(add);
-    return [...result.values()];
-}
 
 /** Builds the entire result before the caller downloads anything; failed pages are never omitted. */
 export async function createCanvasImagePdfExport(options: CanvasImagePdfOptions, dependencies: PdfDependencies = {}) {

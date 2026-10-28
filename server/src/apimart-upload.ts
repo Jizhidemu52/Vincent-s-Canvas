@@ -46,7 +46,9 @@ export async function uploadApiMartImage(input: {
   // Blob already snapshots a view. Do not create a second full-size typed-array
   // copy first, and keep byteOffset/byteLength when the input is a subarray.
   const file = new Blob([input.bytes as Uint8Array<ArrayBuffer>], { type: input.mimeType });
-  const filename = input.filename?.split(/[\\/]/).pop()?.replace(/[\u0000-\u001f\u007f]/g, "") || `reference.${extensions[input.mimeType]}`;
+  // The provider builds its CDN path from this multipart name. Keep that wire
+  // name ASCII-only; the original filename remains in our asset metadata.
+  const filename = `reference.${extensions[input.mimeType]}`;
   const form = new FormData();
   form.append("file", file, filename);
   const response = await (runtime.fetch || fetchProviderSubmission)(`${input.baseUrl.replace(/\/+$/, "")}/uploads/images`, {
@@ -66,7 +68,14 @@ export async function uploadApiMartImage(input: {
     throw uploadTransportFailure(error, purposeName);
   }) as { url?: unknown } | null;
   if (typeof result?.url !== "string" || !isPublicHttpsUrl(result.url)) throw new Error(`APIMart 参考图上传未返回公开 HTTPS 地址，尚未提交${purposeName}生成`);
-  return result.url;
+  return normalizeApiMartImageUrl(result.url);
+}
+
+/** Preserve valid escapes/signatures; encode raw Unicode, spaces and bare %. */
+export function normalizeApiMartImageUrl(value: string): string {
+  const normalized = new URL(value.replace(/%(?![\da-f]{2})/gi, "%25")).href;
+  if (!isPublicHttpUrl(normalized)) throw new Error("参考图必须为公开 HTTP(S) URL");
+  return normalized;
 }
 
 /** Generation accepts public HTTP(S); uploads themselves still require HTTPS. */

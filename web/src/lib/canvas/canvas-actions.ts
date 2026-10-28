@@ -22,6 +22,7 @@ export const canvasActions = [
     { id: "minimap", label: "切换小地图", toolbarLabel: "小地图" },
     { id: "export", label: "导出画布备份", toolbarLabel: "导出画布" },
     { id: "exportImages", label: "导出图片集 / PDF" },
+    { id: "downloadSelectedImages", label: "下载所选图片" },
     { id: "tools", label: "全部工具与板块", toolbarLabel: "全部工具" },
     { id: "guide", label: "重新查看新手引导" },
     { id: "theme", label: "切换主题" },
@@ -46,6 +47,7 @@ export type CanvasActionId = typeof canvasActions[number]["id"];
 export type CanvasShortcutActionId = Extract<typeof canvasActions[number], { key: string }>["id"];
 export function canvasActionLabel(id: CanvasActionId, surface: "toolbar" | "context" | "command" = "command", targetCount = 1) {
     const action = canvasActions.find(action => action.id === id)!;
+    if (id === "downloadSelectedImages" && surface !== "command") return `${action.label}（${targetCount} 张）`;
     if (surface === "context" && targetCount > 1 && (id === "duplicate" || id === "delete")) return `${id === "duplicate" ? "复制" : "删除"}所选 ${targetCount} 项`;
     if (surface === "context" && "contextLabel" in action) return action.contextLabel;
     if (surface === "toolbar" && "toolbarLabel" in action) return action.toolbarLabel;

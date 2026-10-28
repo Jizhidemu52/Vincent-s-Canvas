@@ -1,5 +1,6 @@
 .cw-toolbar-primary.cw-tools, .cw-toolbar-secondary.cw-tools { height: 40px; min-height: 40px; padding: 3px; border-radius: 10px; gap: 2px; flex-shrink: 0; }
 .cw-toolbar-primary .cw-icon, .cw-toolbar-secondary .cw-icon { width: 32px; height: 32px; border-radius: 6px; }
+.cw-toolbar-primary .cw-download-selection { width: auto; flex-shrink: 0; gap: 6px; padding: 0 8px; white-space: nowrap; font-size: 12px; }
 .cw-toolbar-primary .cw-divider, .cw-toolbar-secondary .cw-divider { height: 20px; margin: 0 4px; }
 .cw-tool-menu .ant-dropdown-menu { min-width: 220px; padding: 6px; border-radius: 12px; }
 .cw-tool-menu .ant-dropdown-menu .ant-dropdown-menu-item, .cw-tool-menu .ant-dropdown-menu .ant-dropdown-menu-submenu-title { min-height: 36px; padding: 8px 10px; border-radius: 6px; font-size: 13px; line-height: 20px; }

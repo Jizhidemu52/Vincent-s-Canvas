@@ -2,7 +2,7 @@ import { fetchProviderSubmission } from "./provider-submission-transport";
 import { queryProviderTaskStatus } from "./provider-status-query";
 import { isDefinitiveSubmissionRejection } from "./provider-submission-policy";
 import { apiMartPollIntervalMs } from "./apimart-poll-interval";
-import { isPublicHttpUrl, uploadApiMartImage, validateApiMartGenerationImage } from "./apimart-upload";
+import { isPublicHttpUrl, normalizeApiMartImageUrl, uploadApiMartImage, validateApiMartGenerationImage } from "./apimart-upload";
 
 type MarkImageModel = "gpt-image-2.5-flare" | "gpt-image-2.5-sunburst" | "gemini-nano-banana-2.1";
 type GrokImageModel = "grok-imagine-image-2.0";
@@ -262,7 +262,9 @@ function imageDataUrl(source: ApiMartImageBytes) {
 function referencePayload(references: ImageReference[], encode: boolean) {
   // Upload-only request builders retain the original views until every upload
   // succeeds; stepApiMartImageTask replaces this field before serialization.
-  return references.map(reference => typeof reference === 'string' || !encode ? reference : imageDataUrl(reference));
+  return references.map(reference => typeof reference === 'string'
+    ? reference.startsWith('data:') ? reference : normalizeApiMartImageUrl(reference)
+    : encode ? imageDataUrl(reference) : reference);
 }
 
 function decodeGenerationReference(value: ImageReference): ApiMartImageBytes {
@@ -441,7 +443,7 @@ async function uploadApiMartImageReferences(sources: ImageReference[], baseUrl: 
       try {
         references[index] = typeof source !== 'string' || source.startsWith("data:")
           ? await uploadApiMartImage({ baseUrl, apiKey, ...decodeGenerationReference(source), purpose: "image" }, { fetch: runtime.fetch })
-          : source;
+          : normalizeApiMartImageUrl(source);
       } catch (error) {
         if (!failed) { failed = true; firstFailure = error; }
       }

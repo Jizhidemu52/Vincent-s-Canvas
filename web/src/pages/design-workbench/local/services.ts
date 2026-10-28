@@ -1,5 +1,6 @@
 import localforage from "localforage";
 import { createWorkspaceStorage } from "@/lib/workspace-storage";
+import { createClientUuid } from "@/lib/client-uuid";
 import { useUserStore } from "@/stores/use-user-store";
 import { createWorkbenchProjectStorage } from "./project-storage";
 import { imageToDataUrl } from "@/services/image-storage";
@@ -156,7 +157,7 @@ export function createLocalWorkbenchServices(root: HTMLElement, ownerId: string 
         const assetId = await uploadServerAsset(
             new File([blob], name, { type: blob.type }),
             { title: name, source: "design-workbench", module: "设计工作台", tags: ["工作台导出"] },
-            { expectedOwnerId: ownerId || undefined, signal, clientReferenceId: crypto.randomUUID() },
+            { expectedOwnerId: ownerId || undefined, signal, clientReferenceId: createClientUuid() },
         );
         persistence.assertCurrent();
         notify("已保存到素材库，可继续用于画布或生成参考图。");

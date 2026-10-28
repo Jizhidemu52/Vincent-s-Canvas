@@ -1,11 +1,12 @@
 import { App, Button, Checkbox, Select, Tooltip } from "antd";
 import { Bot, Copy, CornerDownLeft, FileText, ImagePlus, LoaderCircle, MessageSquarePlus, Paperclip, PanelLeftClose, PanelLeftOpen, Pencil, RotateCcw, Send, Square, Trash2, WandSparkles, X } from "lucide-react";
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type SetStateAction } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { cn } from "@/lib/utils";
 import { deploymentFeatures } from "@/lib/deployment-features";
 import { createClientId } from "@/lib/client-id";
+import { pastedImageFiles } from "@/lib/clipboard-images";
 import { CHAT_ATTACHMENT_ACCEPT, openChatAttachmentPicker, parseChatAttachment } from "@/lib/chat-attachments";
 import { buildCreativeImageCatalog } from "@/lib/creative-chat";
 import { useCopyText } from "@/hooks/use-copy-text";
@@ -546,15 +547,18 @@ export default function ChatPage() {
         }
     };
 
-    const addFiles = async (files: FileList | null) => {
-        if (!sessionsReady || !files?.length || readingAttachments || sendingRef.current || editing) return;
+    const addFiles = async (files: FileList | File[] | null) => {
+        if (!sessionsReady || !files?.length || attachmentReadRef.current || readingAttachments || sendingRef.current || editing) return;
+        const remaining = Math.max(0, 5 - attachments.length);
+        if (files.length > remaining) message.warning("每次最多添加 5 个附件，超出的图片或文件未添加");
+        if (!remaining) return;
         const read = {};
         const sessionId = activeSessionId;
         attachmentReadRef.current = read;
         const stillCurrent = () => attachmentReadRef.current === read && isCurrentScope() && activeSessionIdRef.current === sessionId;
         const assertCurrent = () => { if (!stillCurrent()) throw new DOMException("会话已切换", "AbortError"); };
         setReadingAttachments(true);
-        const candidates = Array.from(files).slice(0, Math.max(0, 5 - attachments.length));
+        const candidates = Array.from(files).slice(0, remaining);
         const next: ChatAttachment[] = [];
         let totalBytes = attachments.reduce((sum, item) => sum + (Number(item.size) || 0), 0);
         for (const file of candidates) {
@@ -583,6 +587,16 @@ export default function ChatPage() {
             setReadingAttachments(false);
             attachmentReadRef.current = null;
         }
+    };
+
+    const pasteAttachments = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+        const files = pastedImageFiles(event.clipboardData);
+        if (!files.length) return; // Let the browser insert ordinary text at the caret.
+        event.preventDefault();
+        if (editing) { message.warning("编辑历史消息时保留原附件，请取消编辑后再粘贴新图片"); return; }
+        if (sendingRef.current) { message.warning("请等待当前回复结束后再添加图片"); return; }
+        if (attachmentReadRef.current || readingAttachments) { message.warning("正在读取附件，请稍后再粘贴图片"); return; }
+        void addFiles(files);
     };
 
     const composerAttachments = editing && activeSession ? chatSourceTurn(activeSession, editing.messageId)?.attachments || [] : attachments;
@@ -648,7 +662,7 @@ export default function ChatPage() {
                             <div className="rounded-2xl border border-input bg-background p-3 focus-within:border-orange-400">
                                 {composerAttachments.length ? <div className="flex flex-wrap gap-2 pb-3">{composerAttachments.map((item) => <div key={item.id} className="group relative flex h-14 max-w-[180px] items-center gap-2 rounded-xl border border-border bg-card p-1.5">{item.dataUrl ? <img src={item.dataUrl} alt="" className="size-10 rounded-lg object-cover" /> : <span className="grid size-10 place-items-center rounded-lg bg-muted text-muted-foreground"><FileText className="size-5" /></span>}<span className="min-w-0 flex-1 truncate text-xs font-medium">{item.name}</span>{!editing ? <button type="button" aria-label={"移除 " + item.name} onClick={() => setAttachments((current) => current.filter((attachment) => attachment.id !== item.id))} className="absolute -right-1.5 -top-1.5 grid size-6 place-items-center rounded-full border border-border bg-card text-muted-foreground hover:text-red-600"><X className="size-3.5" /></button> : null}</div>)}</div> : null}
                                 {readingAttachments ? <div role="status" className="mb-2 flex items-center gap-2 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />正在读取附件，请稍候…</div> : null}
-                                <textarea ref={composerRef} aria-label={editing ? "编辑消息" : "对话内容"} value={composerText} disabled={!sessionsReady} onChange={(event) => editing ? setEditing({ ...editing, content: event.target.value }) : setDraft(event.target.value)} onKeyDown={(event) => { if ((event.ctrlKey || event.metaKey) && event.key === "Enter") { event.preventDefault(); sendComposer(); } }} placeholder="发消息，或上传图片、文件告诉我怎么改…" className="min-h-[80px] w-full resize-none bg-transparent px-1 py-1 text-sm leading-7 text-foreground outline-none placeholder:text-muted-foreground" />
+                                <textarea ref={composerRef} aria-label={editing ? "编辑消息" : "对话内容"} value={composerText} disabled={!sessionsReady} onChange={(event) => editing ? setEditing({ ...editing, content: event.target.value }) : setDraft(event.target.value)} onPaste={pasteAttachments} onKeyDown={(event) => { if ((event.ctrlKey || event.metaKey) && event.key === "Enter") { event.preventDefault(); sendComposer(); } }} placeholder="发消息，粘贴图片，或上传图片、文件告诉我怎么改…" className="min-h-[80px] w-full resize-none bg-transparent px-1 py-1 text-sm leading-7 text-foreground outline-none placeholder:text-muted-foreground" />
                                 <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-2">
                                     <div className="flex min-w-0 flex-wrap items-center gap-1">
                                         <Tooltip title="上传图片、PDF、Word、表格或文本"><button type="button" disabled={!sessionsReady || isSending || Boolean(editing) || readingAttachments || attachments.length >= 5} onClick={() => openChatAttachmentPicker(fileInputRef.current)} className="grid size-10 place-items-center rounded-xl text-muted-foreground hover:bg-muted disabled:opacity-40" aria-label="上传文件"><Paperclip className="size-5" /></button></Tooltip>
@@ -661,7 +675,7 @@ export default function ChatPage() {
                                 </div>
                                 <input ref={fileInputRef} type="file" multiple disabled={!sessionsReady || isSending || Boolean(editing) || readingAttachments} accept={CHAT_ATTACHMENT_ACCEPT} className="hidden" onChange={(event) => { void addFiles(event.target.files); event.currentTarget.value = ""; }} />
                             </div>
-                            <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground"><CornerDownLeft className="size-3.5" /><span>Ctrl / ⌘ + Enter 发送</span><span className="opacity-45">·</span><span>{deploymentFeatures.creditsEnabled ? "对话按成功模型调用计费（含工具续答），生成图片另计积分" : "直接继续提要求，无需重复上传"}</span></p>
+                            <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground"><CornerDownLeft className="size-3.5" /><span>Ctrl / ⌘ + V 粘贴图片</span><span className="opacity-45">·</span><span>Ctrl / ⌘ + Enter 发送</span><span className="opacity-45">·</span><span>{deploymentFeatures.creditsEnabled ? "对话按成功模型调用计费（含工具续答），生成图片另计积分" : "直接继续提要求，无需重复上传"}</span></p>
                             {isSending ? <p className="mt-1 text-xs text-muted-foreground">停止仅中断本页等待，服务端执行与计费不保证取消。</p> : null}
                         </div>
                     </div>

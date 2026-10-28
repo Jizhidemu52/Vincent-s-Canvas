@@ -1,3 +1,5 @@
+import { createClientUuid } from "../../../lib/client-uuid";
+
 // Project revisions are small integers. Image data is cloned only when actually saving.
 export function createProjectSession({ services, key, snapshot, apply, fresh, onChange = () => {}, delay = 700 }) {
     let catalog = { projects: [], activeId: null };
@@ -16,7 +18,7 @@ export function createProjectSession({ services, key, snapshot, apply, fresh, on
         services.setDirty?.(revision !== savedRevision);
         if (!disposed) onChange(view());
     };
-    const newEntry = (name) => ({ id: crypto.randomUUID(), name, updatedAt: new Date().toISOString() });
+    const newEntry = (name) => ({ id: createClientUuid(), name, updatedAt: new Date().toISOString() });
     async function save() {
         clearTimeout(timer);
         if (disposed || !ready) return;

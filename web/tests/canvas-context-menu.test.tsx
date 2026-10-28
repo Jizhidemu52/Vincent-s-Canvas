@@ -16,7 +16,7 @@ function elements(node: unknown): ReactElement<any>[] {
     return [element, ...elements(element.props.children)];
 }
 
-type MenuHarnessOptions = { canGenerate?: boolean; type?: "canvas" | "node" | "connection"; theme?: "light" | "dark"; onUpload?: boolean; targetCount?: number };
+type MenuHarnessOptions = { canGenerate?: boolean; type?: "canvas" | "node" | "connection"; theme?: "light" | "dark"; onUpload?: boolean; targetCount?: number; imageCount?: number };
 
 function withMenu(run: (harness: ReturnType<typeof createMenuHarness>) => void, options: MenuHarnessOptions = {}) {
     const names = ["window", "document", "Element", "HTMLElement", "Node"] as const;
@@ -25,7 +25,7 @@ function withMenu(run: (harness: ReturnType<typeof createMenuHarness>) => void, 
     finally { for (const [name, descriptor] of saved) if (descriptor) Object.defineProperty(globalThis, name, descriptor); else Reflect.deleteProperty(globalThis, name); }
 }
 
-function createMenuHarness({ canGenerate = true, type = "canvas", theme = "light", onUpload = true, targetCount }: MenuHarnessOptions) {
+function createMenuHarness({ canGenerate = true, type = "canvas", theme = "light", onUpload = true, targetCount, imageCount }: MenuHarnessOptions) {
     const events: string[] = [];
     const layoutEffects: Array<() => (() => void) | undefined> = [], effects: Array<() => (() => void) | undefined> = [];
     const handlers = new Map<string, (event: any) => void>();
@@ -53,7 +53,7 @@ function createMenuHarness({ canGenerate = true, type = "canvas", theme = "light
     };
     const module = { exports: {} as Record<string, (props: any) => ReactElement<any>> };
     new Function("require", "module", "exports", code)((name: string) => dependencies[name] || localRequire(name), module, module.exports);
-    const root = module.exports.CanvasNodeContextMenu!({ menu: { type, x: 795, y: 595, canvasPosition: { x: 50, y: 60 }, nodeId: "node", connectionId: "connection" }, targetCount, onClose: () => events.push("close"), onDuplicate: () => events.push("duplicate"), onDelete: () => events.push("delete"), onGenerate: () => events.push("generate"), onGroup: () => events.push("group"), onRename: () => events.push("rename"), ...(onUpload ? { onUpload: () => events.push("upload") } : {}) });
+    const root = module.exports.CanvasNodeContextMenu!({ menu: { type, x: 795, y: 595, canvasPosition: { x: 50, y: 60 }, nodeId: "node", connectionId: "connection" }, targetCount, imageCount, onDownloadImages: () => events.push("download"), onClose: () => events.push("close"), onDuplicate: () => events.push("duplicate"), onDelete: () => events.push("delete"), onGenerate: () => events.push("generate"), onGroup: () => events.push("group"), onRename: () => events.push("rename"), ...(onUpload ? { onUpload: () => events.push("upload") } : {}) });
     const menuButtons = elements(root).filter(item => typeof item.type === "function" && item.type.name === "MenuButton");
     menuElement.children = menuButtons.map(() => new FakeElement());
     root.props.ref.current = menuElement;
@@ -141,6 +141,20 @@ test.each(["duplicate", "delete"])("multi-node %s activates its bulk callback an
         expect(harness.events).not.toContain("rename");
         harness.unmount();
     }, { type: "node", targetCount: 4 });
+});
+
+test("mixed selection downloads only its image count and closes once", () => {
+    withMenu(harness => {
+        expect(harness.labels).toEqual(["复制所选 3 项", "下载所选图片（2 张）", "创建款式组", "删除所选 3 项"]);
+        harness.menuButtons.find(item => item.props.action === "downloadSelectedImages")!.props.onClick();
+        expect(harness.events).toEqual(["download", "close"]);
+        expect(harness.root.props.style.top).toBe(442);
+        harness.unmount();
+    }, { type: "node", targetCount: 3, imageCount: 2 });
+    for (const type of ["canvas", "connection"] as const) withMenu(harness => {
+        expect(harness.labels.some(label => label.includes("下载"))).toBe(false);
+        harness.unmount();
+    }, { type, imageCount: 2 });
 });
 
 test.each([

@@ -80,7 +80,7 @@ export const CanvasDialogsHost = memo(function CanvasDialogsHost({ projectId, st
                     <Input aria-label="图片或节点名称" autoFocus maxLength={120} value={renameNode?.name || ""} onChange={event => setRenameNode(current => current ? { ...current, name: event.target.value } : current)} onPressEnter={saveNodeName} />
                     <p className="mt-2 text-xs" style={{ color: theme.node.muted }}>修改名称不改变图片内容或版本号。图片下载时会附带当前版本。</p>
                 </Modal>
-                {imageExport ? <Suspense fallback={null}><CanvasImagePdfDialog nodes={imageExport.nodes} defaultSelectedIds={imageExport.ids} defaultName={currentProject?.title || "图片集"} onClose={() => setImageExport(null)} /></Suspense> : null}
+                {imageExport ? <Suspense fallback={null}><CanvasImagePdfDialog nodes={imageExport.nodes} defaultSelectedIds={imageExport.ids} defaultMode={imageExport.mode} defaultName={currentProject?.title || "图片集"} onClose={() => setImageExport(null)} /></Suspense> : null}
                 {imageDownload?.projectId === projectId && nodes.some(node => node.id === imageDownload.node.id && node.metadata?.content === imageDownload.node.metadata?.content && node.metadata?.storageKey === imageDownload.node.metadata?.storageKey) ? <Suspense fallback={null}><CanvasImageDownloadDialog node={imageDownload.node} variants={imageDownload.variants} onClose={() => setImageDownload(null)} /></Suspense> : null}
 
                 {infoNode ? (

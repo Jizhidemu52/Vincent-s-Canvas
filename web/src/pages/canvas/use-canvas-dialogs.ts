@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { CanvasNodeData } from "@/types/canvas";
 import type { ServerAssetVariants } from "@/services/api/server-assets";
+import type { CanvasImagePdfMode } from "@/lib/canvas/canvas-image-pdf";
 
 export function useCanvasDialogs() {
     const [compareImageIds, setCompareImageIds] = useState<string[] | null>(null);
@@ -10,7 +11,7 @@ export function useCanvasDialogs() {
     const [infoNodeId, setInfoNodeId] = useState<string | null>(null);
     const [cropNodeId, setCropNodeId] = useState<string | null>(null);
     const [manualEditNode, setManualEditNode] = useState<CanvasNodeData | null>(null);
-    const [imageExport, setImageExport] = useState<{ nodes: CanvasNodeData[]; ids: string[] } | null>(null);
+    const [imageExport, setImageExport] = useState<{ nodes: CanvasNodeData[]; ids: string[]; mode?: CanvasImagePdfMode } | null>(null);
     const [imageDownload, setImageDownload] = useState<{ projectId: string; node: CanvasNodeData; variants: ServerAssetVariants | null } | null>(null);
     const [renameNode, setRenameNode] = useState<{ id: string; name: string } | null>(null);
     const [renameGroup, setRenameGroup] = useState<{ id: string; name: string } | null>(null);
