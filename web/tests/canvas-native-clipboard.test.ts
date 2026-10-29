@@ -18,7 +18,7 @@ import { CanvasNodeType, type CanvasNodeData, type CanvasConnection, type Canvas
 
 // Execute the page's real keyboard/copy/paste/import callbacks, without mounting its unrelated editor UI.
 // Only the image storage boundary and React state setters are supplied by this harness.
-const source = ["project.tsx", "use-canvas-clipboard-drop.ts", "use-canvas-shortcuts.ts"]
+const source = ["project.tsx", "canvas-project-utils.ts", "use-canvas-clipboard-drop.ts", "use-canvas-shortcuts.ts"]
     .map(file => readFileSync(new URL(`../src/pages/canvas/${file}`, import.meta.url), "utf8")).join("\n");
 const ast = ts.createSourceFile("project.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const callbackNames = new Set(["duplicateNodes", "copySelectedNodes", "pasteCopiedNodes", "createImageFileNode", "createTextNodeFromClipboard", "pasteSystemClipboard", "handleDrop"]);

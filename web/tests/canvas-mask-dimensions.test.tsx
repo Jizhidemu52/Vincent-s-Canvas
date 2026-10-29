@@ -103,7 +103,7 @@ test("mask dialog exposes quality/output only and disables an incompatible origi
 });
 
 async function submitFromProject(sourceSize: { width: number; height: number }, maskSize = sourceSize) {
-    const path = new URL("../src/pages/canvas/project.tsx", import.meta.url);
+    const path = new URL("../src/pages/canvas/use-canvas-image-actions.ts", import.meta.url);
     const source = ts.createSourceFile("project.tsx", readFileSync(path, "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
     let callback: ts.ArrowFunction | undefined;
     const visit = (node: ts.Node) => {
@@ -121,6 +121,7 @@ async function submitFromProject(sourceSize: { width: number; height: number }, 
         loadMaskModule: async () => ({ canvasMaskEditImageSettings, readCanvasMaskImageSize: async (value: string) => value === "source" ? sourceSize : maskSize }),
         isAiConfigReady: (config: AiConfig) => { seen.push(config); return false; }, handleMissingModelConfig: () => {},
         message: { error: (error: string) => errors.push(error) }, createOptions: () => { paidCalls++; },
+        useUserStore: { getState: () => ({ user: null }) },
     };
     const submit = new Function(...Object.keys(deps), `${code}\nreturn submit;`)(...Object.values(deps));
     await submit({ metadata: { content: "source", size: "1:1", naturalWidth: 1024, naturalHeight: 1024 }, width: 300, height: 300 }, {

@@ -4,7 +4,9 @@ import ts from "typescript";
 import { assertCanvasImageUploadSize, CANVAS_IMAGE_MAX_BYTES } from "@/lib/canvas/canvas-image-upload-limit";
 import { isCanvasAudioFile } from "@/pages/canvas/use-canvas-clipboard-drop";
 
-const source = ts.createSourceFile("project.tsx", readFileSync(new URL("../src/pages/canvas/project.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+const pageSource = ["project.tsx", "use-canvas-quick-generation.ts"]
+    .map(file => readFileSync(new URL(`../src/pages/canvas/${file}`, import.meta.url), "utf8")).join("\n");
+const source = ts.createSourceFile("project.tsx", pageSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 function callback(name: string, scope: Record<string, unknown>): (...args: any[]) => any {
     if (name === "handleDrop") {
         const hook = ts.createSourceFile("drop.ts", readFileSync(new URL("../src/pages/canvas/use-canvas-clipboard-drop.ts", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true);
@@ -15,7 +17,7 @@ function callback(name: string, scope: Record<string, unknown>): (...args: any[]
         const code = ts.transpileModule(`const run = ${action.getText(hook)};`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
         const message = scope.message as { error: unknown; warning?: unknown };
         const latest = { current: { screenToCanvas: scope.screenToCanvas, createImage: scope.createImageFileNode, createVideo: scope.createVideoFileNode, createAudio: scope.createAudioFileNode, error: message.error, warning: message.warning } };
-        return new Function("latest", "isCanvasAudioFile", `${code} return run;`)(latest, isCanvasAudioFile);
+        return new Function("latest", "isCanvasAudioFile", "createClientId", `${code} return run;`)(latest, isCanvasAudioFile, () => "upload-limit-test");
     }
     let expression: ts.Expression | undefined;
     const visit = (node: ts.Node) => {

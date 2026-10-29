@@ -28,3 +28,10 @@ test("conversion failure and wrong returned bytes cannot create a falsely labell
     await expect(prepareCanvasImageFormat(new Blob(), "png")).rejects.toThrow("图片内容为空");
     await expect(validateImageBlob(new Blob(['{"error":"denied"}'], { type: "image/png" }))).rejects.toThrow("不是图片");
 });
+
+test("cancelled original and converted exports never return a downloadable result", async () => {
+    const controller = new AbortController(); controller.abort();
+    await expect(prepareCanvasImageFormat(png, "original", undefined, { signal: controller.signal })).rejects.toMatchObject({ name: "AbortError" });
+    const active = new AbortController();
+    await expect(prepareCanvasImageFormat(png, "jpg", async () => { active.abort(); return jpeg; }, { signal: active.signal })).rejects.toMatchObject({ name: "AbortError" });
+});

@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import copyToClipboard from "copy-to-clipboard";
 import { Bot, Copy, Cpu, History, ImageIcon, Maximize2, MoreHorizontal, PanelLeft, PanelRightClose, Plus, Settings2, Trash2, Video, X } from "lucide-react";
 import { Button, Dropdown, Modal, Popover, Segmented, Switch, Tooltip } from "antd";
@@ -206,10 +206,12 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
         approve: (messageId: string) => unknown;
         reject: (messageId: string) => void;
         useImage: (attachment: CanvasAgentChatAttachment) => void;
+        queryOriginal: (sessionId: string, item: CanvasAssistantMessage) => unknown;
     }>({
         approve: (_messageId: string) => undefined,
         reject: (_messageId: string) => undefined,
         useImage: (_attachment: CanvasAgentChatAttachment) => undefined,
+        queryOriginal: (_sessionId: string, _item: CanvasAssistantMessage) => undefined,
     });
 
     const incomingSessionsRef = useRef({ sessions, activeSessionId });
@@ -281,11 +283,16 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
     const activeSession = useMemo(() => safeSessions.find((session) => session.id === localActiveSessionId) || safeSessions[0] || null, [localActiveSessionId, safeSessions]);
     const historySessions = safeSessions.filter((session) => session.messages.length > 0);
     const messages = activeSession?.messages || [];
-    const renderedMessageWindow = useMemo(() => agentMessageWindow(messages.length, chatMessageLimit), [chatMessageLimit, messages.length]);
-    const renderedMessages = useMemo(() => messages.slice(renderedMessageWindow.start).flatMap(message => {
+    const messageView = useMemo(() => ({ sessionId: activeSession?.id, userId: user?.id, messages }), [activeSession?.id, user?.id, messages]);
+    const deferredMessageView = useDeferredValue(messageView);
+    // Never briefly display another session/account while a deferred render is
+    // pending. Only presentation lags; send/retry/approval use live messages.
+    const displayMessages = deferredMessageView.sessionId === messageView.sessionId && deferredMessageView.userId === messageView.userId ? deferredMessageView.messages : messages;
+    const renderedMessageWindow = useMemo(() => agentMessageWindow(displayMessages.length, chatMessageLimit), [chatMessageLimit, displayMessages.length]);
+    const renderedMessages = useMemo(() => displayMessages.slice(renderedMessageWindow.start).flatMap(message => {
         const display = canvasAssistantDisplayMessage(message);
         return display ? [{ source: message, display, pendingTask: pendingOnlineAgentTask(message.detail?.pendingTask) }] : [];
-    }), [messages, renderedMessageWindow.start]);
+    }), [displayMessages, renderedMessageWindow.start]);
     const hasMessages = messages.length > 0;
     const activeModel = effectiveConfig.textModel || effectiveConfig.model;
     const mediaWorkflowModels = useMemo(() => {
@@ -1101,7 +1108,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
         });
     };
 
-    onlineActionHandlersRef.current = { approve: approveOnlineTool, reject: rejectOnlineTool, useImage: useImageForVideo };
+    onlineActionHandlersRef.current = { approve: approveOnlineTool, reject: rejectOnlineTool, useImage: useImageForVideo, queryOriginal: queryOriginalAgentTask };
     const handleApproveOnlineTool = useCallback((messageId: string) => {
         void onlineActionHandlersRef.current.approve(messageId);
     }, []);
@@ -1110,6 +1117,9 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
     }, []);
     const handleUseImageForVideo = useCallback((attachment: CanvasAgentChatAttachment) => {
         onlineActionHandlersRef.current.useImage(attachment);
+    }, []);
+    const handleQueryOriginalTask = useCallback((sessionId: string, item: CanvasAssistantMessage) => {
+        void onlineActionHandlersRef.current.queryOriginal(sessionId, item);
     }, []);
 
     const confirmVideoFromSelectedImage = async () => {
@@ -1145,6 +1155,52 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
         stopOnlineAgent();
         onCollapse();
     };
+
+    // Typing updates the composer, not the entire long conversation subtree.
+    const messageReferenceNodes = snapshotRef.current.nodes;
+    const messageItems = useMemo(() => renderedMessages.map(({ source, display: message, pendingTask }) => (
+        <div key={message.id} className="space-y-2">
+            <AgentChatMessage item={message} theme={theme} user={user} onRejectTool={handleRejectOnlineTool} onApproveTool={handleApproveOnlineTool} onUseImageForVideo={handleUseImageForVideo} />
+            {pendingTask ? <div className="flex flex-wrap items-center gap-2 text-xs" style={{ color: theme.node.muted }}>
+                <span className="break-all">原任务：{pendingTask.taskIds?.join("、") || pendingTask.requestId}</span>
+                <Button size="small" disabled={isRunning} onClick={() => void handleQueryOriginalTask(activeSession!.id, source)}>查询原任务</Button>
+            </div> : null}
+            {message.references?.length ? <MessageReferences message={message} nodes={messageReferenceNodes} /> : null}
+            {message.detail?.mediaWorkflow ? (
+                <CanvasAgentMediaWorkflowCard
+                    workflow={message.detail.mediaWorkflow}
+                    imageModels={mediaWorkflowModels.image}
+                    videoModels={mediaWorkflowModels.video}
+                    theme={theme}
+                    onImageSettingsChange={onMediaWorkflowAction ? (key, value) => onMediaWorkflowAction({ type: "image_settings_change", messageId: message.id, key, value }) : undefined}
+                    onImageModelChange={
+                        onMediaWorkflowAction
+                            ? (model) => {
+                                  updateConfig("imageModel", model);
+                                  onMediaWorkflowAction({ type: "image_model_change", messageId: message.id, model });
+                              }
+                            : undefined
+                    }
+                    onGenerateImages={onMediaWorkflowAction ? () => onMediaWorkflowAction({ type: "generate_images", messageId: message.id }) : undefined}
+                    onImageCountChange={onMediaWorkflowAction ? (count) => onMediaWorkflowAction({ type: "image_count_change", messageId: message.id, count }) : undefined}
+                    onSelectCandidate={onMediaWorkflowAction ? (nodeId) => onMediaWorkflowAction({ type: "select_candidate", messageId: message.id, nodeId }) : undefined}
+                    onVideoModelChange={
+                        onMediaWorkflowAction
+                            ? (model) => {
+                                  updateConfig("videoModel", model);
+                                  onMediaWorkflowAction({ type: "video_model_change", messageId: message.id, model });
+                              }
+                            : undefined
+                    }
+                    onGenerateVideo={onMediaWorkflowAction ? () => onMediaWorkflowAction({ type: "generate_video", messageId: message.id }) : undefined}
+                    onVideoSecondsChange={onMediaWorkflowAction ? (seconds) => onMediaWorkflowAction({ type: "video_seconds_change", messageId: message.id, seconds }) : undefined}
+                    onAspectRatioChange={onMediaWorkflowAction ? (ratio) => onMediaWorkflowAction({ type: "aspect_ratio_change", messageId: message.id, ratio }) : undefined}
+                    onRetry={onMediaWorkflowAction ? (stage) => onMediaWorkflowAction({ type: "retry", messageId: message.id, stage }) : undefined}
+                    onOpenResult={onMediaWorkflowAction && message.detail.mediaWorkflow.videoResult ? () => onMediaWorkflowAction({ type: "open_result", messageId: message.id }) : undefined}
+                />
+            ) : null}
+        </div>
+    )), [renderedMessages, theme, user, isRunning, activeSession?.id, messageReferenceNodes, mediaWorkflowModels, onMediaWorkflowAction, updateConfig, handleRejectOnlineTool, handleApproveOnlineTool, handleUseImageForVideo, handleQueryOriginalTask]);
 
     const onlineContent = (
         <>
@@ -1230,49 +1286,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                                     </Button>
                                 </div>
                             ) : null}
-                            {renderedMessages.map(({ source, display: message, pendingTask }) => (
-                                <div key={message.id} className="space-y-2">
-                                    <AgentChatMessage item={message} theme={theme} user={user} onRejectTool={handleRejectOnlineTool} onApproveTool={handleApproveOnlineTool} onUseImageForVideo={handleUseImageForVideo} />
-                                    {pendingTask ? <div className="flex flex-wrap items-center gap-2 text-xs" style={{ color: theme.node.muted }}>
-                                        <span className="break-all">原任务：{pendingTask.taskIds?.join("、") || pendingTask.requestId}</span>
-                                        <Button size="small" disabled={isRunning} onClick={() => void queryOriginalAgentTask(activeSession!.id, source)}>查询原任务</Button>
-                                    </div> : null}
-                                    {message.references?.length ? <MessageReferences message={message} nodes={snapshotRef.current.nodes} /> : null}
-                                    {message.detail?.mediaWorkflow ? (
-                                        <CanvasAgentMediaWorkflowCard
-                                            workflow={message.detail.mediaWorkflow}
-                                            imageModels={mediaWorkflowModels.image}
-                                            videoModels={mediaWorkflowModels.video}
-                                            theme={theme}
-                                            onImageSettingsChange={onMediaWorkflowAction ? (key, value) => onMediaWorkflowAction({ type: "image_settings_change", messageId: message.id, key, value }) : undefined}
-                                            onImageModelChange={
-                                                onMediaWorkflowAction
-                                                    ? (model) => {
-                                                          updateConfig("imageModel", model);
-                                                          onMediaWorkflowAction({ type: "image_model_change", messageId: message.id, model });
-                                                      }
-                                                    : undefined
-                                            }
-                                            onGenerateImages={onMediaWorkflowAction ? () => onMediaWorkflowAction({ type: "generate_images", messageId: message.id }) : undefined}
-                                            onImageCountChange={onMediaWorkflowAction ? (count) => onMediaWorkflowAction({ type: "image_count_change", messageId: message.id, count }) : undefined}
-                                            onSelectCandidate={onMediaWorkflowAction ? (nodeId) => onMediaWorkflowAction({ type: "select_candidate", messageId: message.id, nodeId }) : undefined}
-                                            onVideoModelChange={
-                                                onMediaWorkflowAction
-                                                    ? (model) => {
-                                                          updateConfig("videoModel", model);
-                                                          onMediaWorkflowAction({ type: "video_model_change", messageId: message.id, model });
-                                                      }
-                                                    : undefined
-                                            }
-                                            onGenerateVideo={onMediaWorkflowAction ? () => onMediaWorkflowAction({ type: "generate_video", messageId: message.id }) : undefined}
-                                            onVideoSecondsChange={onMediaWorkflowAction ? (seconds) => onMediaWorkflowAction({ type: "video_seconds_change", messageId: message.id, seconds }) : undefined}
-                                            onAspectRatioChange={onMediaWorkflowAction ? (ratio) => onMediaWorkflowAction({ type: "aspect_ratio_change", messageId: message.id, ratio }) : undefined}
-                                            onRetry={onMediaWorkflowAction ? (stage) => onMediaWorkflowAction({ type: "retry", messageId: message.id, stage }) : undefined}
-                                            onOpenResult={onMediaWorkflowAction && message.detail.mediaWorkflow.videoResult ? () => onMediaWorkflowAction({ type: "open_result", messageId: message.id }) : undefined}
-                                        />
-                                    ) : null}
-                                </div>
-                            ))}
+                            {messageItems}
                             {isRunning ? <AgentWorkingMessage theme={theme} /> : null}
                         </>
                     ) : <><AgentQuickstart theme={theme} onSelect={(kind) => {

@@ -150,6 +150,24 @@ bun test
 
 推送到 `main` 后，GitHub Actions 还会运行真实 PostgreSQL/Redis 集成、Compose 恢复演练、40 人并发和跨账号隔离测试。
 
+### 画布交互性能预算
+
+`canvas-performance.yml` 在相关前端变更的 PR、`main` 推送及手动触发时运行。基线取 PR 基准提交、推送前提交或手动指定的 ref；在同一 runner 构建并测量两个正式包，不用候选值生成自己的阈值。500 节点、100 张不同 PNG 原图和缩略图的合成场景分别重复平移、缩放、拖拽三次，以中位数比较；报告同时保存现有产品帧指标、原始帧序列、构建与实际渲染图像哈希。
+
+P95 帧耗时最多为基线的 1.35 倍，平均帧耗时最多 1.30 倍，长帧率增幅最多 4 个百分点；隐藏页或 ≥750ms 停顿样本直接判无效。仅测试注入的每帧 65ms 负载必须让独立比较器返回失败，否则门禁本身失败。测试 API 全部隔离，不使用真实账号或调用模型。
+
+同场景通过实际键盘操作记录 0–220 步、强制 GC 后的 JavaScript 堆，检查 200 步历史淘汰和未变节点共享。候选总增量上限 32MiB、200→220 步增量上限 2MiB，峰值不超过基线 1.35 倍；旧基线超限作为修复前证据保留。此边界只适用于该合成场景，不涵盖 GPU、原生图像解码或进程总内存；200 步数量上限不是所有业务画布的统一字节上限。
+
+在 `web/` 下运行（先分别保留旧、新正式构建，不能覆盖基线）：
+
+```bash
+bun scripts/canvas-performance-runner.mjs --baseline-dist ../output/canvas-v2-baseline-web --candidate-dist ../output/canvas-v2-candidate-web
+bun x playwright test --config e2e/canvas-input-v2.config.ts
+bun x playwright test --config e2e/canvas-v2-regression.config.ts
+```
+
+证据写入 `output/canvas-performance/`，CI 上传该目录并显示汇总；只有来源哈希一致、内存采样完整的基线报告才可用 `--reuse-baseline` 复用。输入前后测量以 `CANVAS_INPUT_DIST` 指定正式包、`CANVAS_INPUT_VARIANT` 区分 `baseline` / `candidate`，测量 input 事件到下一帧的延迟，不冒充 INP。计时任务应串行运行，避免多个浏览器或构建互相干扰。
+
 ## 分页、缩略图与调度协议
 
 素材、任务、批次和历史列表接受 `limit`（默认 60，最大 200）与不透明 `cursor`，返回 `nextCursor`／`hasMore`。筛选变化时从第一页重新开始，不能把某一页当作全量总数。完整素材／任务／历史在对应 `/:id` 接口获取；任务轮询使用 `?ids=`（最多 200）或 `by-request` 精确恢复，不能通过扫描最新一页判断旧任务不存在。

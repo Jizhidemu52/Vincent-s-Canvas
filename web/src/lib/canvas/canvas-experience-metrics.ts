@@ -6,10 +6,10 @@ type DurationSummary = { count: number; lastMs: number; meanMs: number; maxMs: n
 export type CanvasExperienceMetrics = {
     open: DurationSummary & { lastNodeCount: number };
     task: DurationSummary;
-    interaction: { count: number; longFrameCount: number; stalledFrameGapCount: number; lastFps: number; lastP95Ms: number; worstFrameMs: number };
+    interaction: { count: number; longFrameCount: number; stalledFrameGapCount: number; lastFps: number; lastP95Ms: number; worstFrameMs: number; lastSample: CanvasInteractionMetrics | null };
 };
 const duration = (): DurationSummary => ({ count: 0, lastMs: 0, meanMs: 0, maxMs: 0 });
-const empty = (): CanvasExperienceMetrics => ({ open: { ...duration(), lastNodeCount: 0 }, task: duration(), interaction: { count: 0, longFrameCount: 0, stalledFrameGapCount: 0, lastFps: 0, lastP95Ms: 0, worstFrameMs: 0 } });
+const empty = (): CanvasExperienceMetrics => ({ open: { ...duration(), lastNodeCount: 0 }, task: duration(), interaction: { count: 0, longFrameCount: 0, stalledFrameGapCount: 0, lastFps: 0, lastP95Ms: 0, worstFrameMs: 0, lastSample: null } });
 const validDuration = (ms: number) => Number.isFinite(ms) && ms >= 0;
 function addDuration(previous: DurationSummary, ms: number): DurationSummary {
     const count = previous.count + 1;
@@ -42,6 +42,14 @@ export function createCanvasExperienceMetrics() {
                 longFrameCount: previous.longFrameCount + metrics.longFrameCount,
                 stalledFrameGapCount: previous.stalledFrameGapCount + metrics.stalledFrameGapCount,
                 lastFps: metrics.averageFps, lastP95Ms: metrics.p95FrameMs, worstFrameMs: Math.max(previous.worstFrameMs, metrics.maxFrameMs),
+                lastSample: {
+                    interaction: ["canvas", "drag", "pan", "zoom", "resize", "marquee", "idle"].includes(metrics.interaction) ? metrics.interaction : "other",
+                    averageFps: metrics.averageFps, p95FrameMs: metrics.p95FrameMs, maxFrameMs: metrics.maxFrameMs,
+                    longFrameCount: metrics.longFrameCount, stalledFrameGapCount: metrics.stalledFrameGapCount,
+                    sampledFrameCount: metrics.sampledFrameCount,
+                    totalNodes: metrics.totalNodes, visibleNodes: metrics.visibleNodes,
+                    totalConnections: metrics.totalConnections, visibleConnections: metrics.visibleConnections,
+                },
             } });
         },
     };

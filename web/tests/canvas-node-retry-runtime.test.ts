@@ -11,7 +11,7 @@ import type { retryCanvasNode } from "@/pages/canvas/canvas-node-retry-runtime";
 
 const transpile = (source: string) => ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.CommonJS } }).outputText;
 const runtimeCode = transpile(readFileSync(new URL("../src/pages/canvas/canvas-node-retry-runtime.ts", import.meta.url), "utf8"));
-const pageSource = readFileSync(new URL("../src/pages/canvas/project.tsx", import.meta.url), "utf8");
+const pageSource = readFileSync(new URL("../src/pages/canvas/use-canvas-generation.ts", import.meta.url), "utf8");
 const ast = ts.createSourceFile("project.tsx", pageSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 let callback = "";
 function visit(node: ts.Node) {

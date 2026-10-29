@@ -3,44 +3,18 @@ import { bytesToHex } from "@noble/hashes/utils";
 import { CanvasNodeType, type CanvasCompareSource, type CanvasNodeData } from "@/types/canvas";
 import { getImageBlob } from "@/services/image-storage";
 import { inlineCompareSources } from "./canvas-inline-compare";
+import { canvasDifferenceLayout, canvasDifferencePixels, compareContainRect } from "./canvas-image-pixels";
+import { checkCanvasImageAbort, imageWorkerSupported, requireCanvasImageFallback, runCanvasImageTask, yieldCanvasImageTask, type CanvasImageTaskOptions } from "./canvas-image-worker";
+export { CANVAS_DIFFERENCE_MAX_PIXELS, CANVAS_DIFFERENCE_MAX_EDGE, canvasDifferenceLayout, canvasDifferencePixels, compareContainRect } from "./canvas-image-pixels";
 
 export type CanvasCompareMode = "slider" | "side" | "overlay" | "difference";
 export type CanvasCompareZoom = "fit" | 1 | 2 | 4;
-export const CANVAS_DIFFERENCE_MAX_PIXELS = 4_000_000;
-export const CANVAS_DIFFERENCE_MAX_EDGE = 4096;
-type CompareImageSize = Pick<HTMLImageElement, "naturalWidth" | "naturalHeight">;
-
-export function canvasDifferenceLayout(before: CompareImageSize, after: CompareImageSize) {
-    if ([before.naturalWidth, before.naturalHeight, after.naturalWidth, after.naturalHeight].some(size => !Number.isSafeInteger(size) || size <= 0)) throw new Error("图片尺寸无效，请重新选择图片");
-    const sourceWidth = Math.max(before.naturalWidth, after.naturalWidth), sourceHeight = Math.max(before.naturalHeight, after.naturalHeight);
-    const scale = Math.min(1, CANVAS_DIFFERENCE_MAX_EDGE / sourceWidth, CANVAS_DIFFERENCE_MAX_EDGE / sourceHeight, Math.sqrt(CANVAS_DIFFERENCE_MAX_PIXELS / (sourceWidth * sourceHeight)));
-    const sameSize = before.naturalWidth === after.naturalWidth && before.naturalHeight === after.naturalHeight;
-    return { width: Math.max(1, Math.floor(sourceWidth * scale)), height: Math.max(1, Math.floor(sourceHeight * scale)), sameSize, downsampled: scale < 1, pixelExact: sameSize && scale === 1 };
-}
 
 export function canvasDifferenceNotice(layout: ReturnType<typeof canvasDifferenceLayout>) {
     if (layout.pixelExact) return "同尺寸原像素差异：按浏览器解码后的像素逐点比较，不是文件字节一致性校验，也不判断设计是否正确。";
     return `${!layout.sameSize ? "原图尺寸不同，各图按比例居中映射到公共框。" : "原图尺寸相同。"}${layout.downsampled ? "超过 400 万像素或单边 4096 限制，已降采样。" : "可能经过缩放。"}仅作展示差异，非原像素一致性检验。`;
 }
 
-/** Visible difference is the maximum absolute premultiplied RGB/alpha distance; hidden RGB at alpha=0 is ignored. */
-export function canvasDifferencePixels(before: Uint8ClampedArray, after: Uint8ClampedArray) {
-    if (before.length !== after.length || before.length % 4 !== 0) throw new Error("差异图像素数据尺寸不一致");
-    if (before.length / 4 > CANVAS_DIFFERENCE_MAX_PIXELS) throw new Error("差异图超过本地处理上限");
-    const result = new Uint8ClampedArray(before.length);
-    for (let index = 0; index < before.length; index += 4) {
-        const beforeAlpha = before[index + 3] / 255, afterAlpha = after[index + 3] / 255;
-        const difference = Math.round(Math.max(
-            Math.abs(before[index] * beforeAlpha - after[index] * afterAlpha),
-            Math.abs(before[index + 1] * beforeAlpha - after[index + 1] * afterAlpha),
-            Math.abs(before[index + 2] * beforeAlpha - after[index + 2] * afterAlpha),
-            Math.abs(before[index + 3] - after[index + 3]),
-        ));
-        result[index] = result[index + 1] = result[index + 2] = difference;
-        result[index + 3] = 255;
-    }
-    return result;
-}
 
 export function canvasComparePreviewScale(width: number, height: number, viewportWidth: number, viewportHeight: number, zoom: CanvasCompareZoom) {
     return zoom === "fit" ? Math.min(1, Math.max(1, viewportWidth) / width, Math.max(1, viewportHeight) / height) : zoom;
@@ -112,17 +86,77 @@ export function chooseCanvasComparePair(nodes: CanvasNodeData[], selected: reado
     const sources = canvasCompareSources(nodes, chosen[0]);
     return [sources.automatic ? sources.images[0].id : "", chosen[0].id] as const;
 }
-export function compareContainRect(width: number, height: number, boxWidth: number, boxHeight: number) {
-    const scale = Math.min(boxWidth / Math.max(1, width), boxHeight / Math.max(1, height));
-    return { x: (boxWidth - width * scale) / 2, y: (boxHeight - height * scale) / 2, width: width * scale, height: height * scale };
-}
-export async function loadCanvasCompareImage(node: CanvasNodeData) {
-    const blob = node.metadata?.storageKey ? await getImageBlob(node.metadata.storageKey) : null;
-    const source = blob ? URL.createObjectURL(blob) : node.metadata?.content;
-    if (!source) throw new Error("原图不可用，请重新上传图片");
+const compareImageBlobs = new WeakMap<HTMLImageElement, Blob>();
+export async function loadCanvasCompareImage(node: CanvasNodeData, signal?: AbortSignal) {
+    checkCanvasImageAbort(signal);
+    let blob = node.metadata?.storageKey ? await getImageBlob(node.metadata.storageKey) : null;
+    checkCanvasImageAbort(signal);
+    if (!blob) {
+        if (!node.metadata?.content) throw new Error("原图不可用，请重新上传图片");
+        const response = await fetch(node.metadata.content, { signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(30_000)]) });
+        if (!response.ok) throw new Error("图片加载失败，请检查原图是否可访问");
+        blob = await response.blob();
+    }
+    checkCanvasImageAbort(signal);
+    const source = URL.createObjectURL(blob);
     try {
-        return await new Promise<HTMLImageElement>((resolve, reject) => { const image = new Image(); image.crossOrigin = "anonymous"; image.onload = () => resolve(image); image.onerror = () => reject(new Error("图片加载失败，请检查原图是否可访问")); image.src = source; });
-    } finally { if (blob) URL.revokeObjectURL(source); }
+        return await new Promise<HTMLImageElement>((resolve, reject) => {
+            const image = new Image();
+            const cleanup = () => { clearTimeout(timer); signal?.removeEventListener("abort", abort); image.onload = null; image.onerror = null; };
+            const fail = (error: unknown) => { cleanup(); image.src = ""; reject(error); };
+            const abort = () => fail(signal?.reason || new DOMException("读取已取消", "AbortError"));
+            const timer = setTimeout(() => fail(new Error("读取原图超时，请重试")), 30_000);
+            if (signal?.aborted) { abort(); return; }
+            signal?.addEventListener("abort", abort, { once: true });
+            image.crossOrigin = "anonymous"; image.onload = () => { cleanup(); compareImageBlobs.set(image, blob!); resolve(image); }; image.onerror = () => fail(new Error("图片加载失败，请检查原图是否可访问")); image.src = source;
+        });
+    } finally { URL.revokeObjectURL(source); }
+}
+
+/** Worker owns readback and the 4MP loop; only the finished bitmap is painted on the UI thread. */
+export async function drawCanvasDifference(canvas: HTMLCanvasElement, before: HTMLImageElement, after: HTMLImageElement, options: CanvasImageTaskOptions = {}) {
+    checkCanvasImageAbort(options.signal);
+    const layout = canvasDifferenceLayout(before, after);
+    if (imageWorkerSupported()) {
+        options.onProgress?.({ percent: 5, label: "正在准备后台差异计算" });
+        const images = await Promise.allSettled([before, after].map(image => compareImageBlobs.get(image) || createImageBitmap(image)));
+        const failed = images.find((item): item is PromiseRejectedResult => item.status === "rejected");
+        if (failed || options.signal?.aborted) {
+            images.forEach(item => { if (item.status === "fulfilled" && !(item.value instanceof Blob)) item.value.close(); });
+            checkCanvasImageAbort(options.signal); throw failed!.reason;
+        }
+        const [a, b] = images.map(item => (item as PromiseFulfilledResult<Blob | ImageBitmap>).value);
+        try {
+            const result = await runCanvasImageTask({ kind: "difference", before: a, after: b }, options) as ImageBitmap;
+            try {
+                checkCanvasImageAbort(options.signal);
+                canvas.width = result.width; canvas.height = result.height;
+                const context = canvas.getContext("2d");
+                if (!context) throw new Error("浏览器不支持图片合成");
+                context.drawImage(result, 0, 0);
+                return;
+            } finally { result.close(); }
+        } catch (error) { if (!(error instanceof Error) || error.name !== "CanvasImageCapabilityError") throw error; }
+    }
+    requireCanvasImageFallback(Math.max(before.naturalWidth, after.naturalWidth), Math.max(before.naturalHeight, after.naturalHeight), options);
+    const scratch = document.createElement("canvas"); scratch.width = layout.width; scratch.height = layout.height;
+    const context = scratch.getContext("2d", { willReadFrequently: true });
+    if (!context) throw new Error("浏览器不支持图片合成");
+    try {
+        const read = (image: HTMLImageElement) => { const rect = compareContainRect(image.naturalWidth, image.naturalHeight, layout.width, layout.height); context.clearRect(0, 0, layout.width, layout.height); context.drawImage(image, rect.x, rect.y, rect.width, rect.height); return context.getImageData(0, 0, layout.width, layout.height); };
+        await yieldCanvasImageTask(options.signal); const first = read(before);
+        await yieldCanvasImageTask(options.signal); const second = read(after);
+        for (let start = 0; start < first.data.length; start += 65536) {
+            await yieldCanvasImageTask(options.signal);
+            const end = Math.min(start + 65536, first.data.length);
+            first.data.set(canvasDifferencePixels(first.data.subarray(start, end), second.data.subarray(start, end)), start);
+            options.onProgress?.({ percent: Math.round(end / first.data.length * 95), label: "正在分段计算差异（兼容模式）", fallback: true });
+        }
+        checkCanvasImageAbort(options.signal);
+        canvas.width = layout.width; canvas.height = layout.height;
+        const target = canvas.getContext("2d"); if (!target) throw new Error("浏览器不支持图片合成");
+        target.putImageData(first, 0, 0);
+    } finally { scratch.width = 0; scratch.height = 0; }
 }
 export function drawCanvasCompare(canvas: HTMLCanvasElement, before: HTMLImageElement, after: HTMLImageElement, mode: CanvasCompareMode, value: number, background: string, foreground: string) {
     if (mode === "difference") {

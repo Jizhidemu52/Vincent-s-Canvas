@@ -63,7 +63,7 @@ test("切换画布清理旧标题与完成反馈，旧任务不能串入新画�
     expect(api.submissions).toHaveLength(1);
 });
 
-test("模拟后台可见性时唯一SSE及时更新标题，不申请系统通知", async ({ page, context, api }) => {
+test("模拟后台可见性时唯一SSE及时更新标题，不申请系统通知", async ({ page, context, api }, testInfo) => {
     const streams = new Set<ServerResponse>();
     let connections = 0;
     const server = createServer((request, response) => {
@@ -72,12 +72,18 @@ test("模拟后台可见性时唯一SSE及时更新标题，不申请系统通�
         connections++;
         streams.add(response);
         response.once("close", () => streams.delete(response));
-        response.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-store" });
+        response.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-store",
+            "Access-Control-Allow-Origin": new URL(testInfo.project.use.baseURL!).origin, "Access-Control-Allow-Credentials": "true" });
         response.write(`event: tasks-changed\ndata: ${JSON.stringify({ ids: url.searchParams.get("ids")!.split(",") })}\n\n`);
     });
     await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(59999, "127.0.0.1", resolve); });
     try {
-        await context.route("**/api/tasks/events?**", route => route.continue());
+        // Route directly to this test's loopback stream. Production asset servers
+        // deliberately have no Vite development proxy or real API fallback.
+        await context.route("**/api/tasks/events?**", route => {
+            const target = new URL(route.request().url()); target.port = "59999";
+            return route.continue({ url: target.href });
+        });
         api.taskStatus = "processing";
         await newCanvas(page);
         const originalTitle = await page.title();

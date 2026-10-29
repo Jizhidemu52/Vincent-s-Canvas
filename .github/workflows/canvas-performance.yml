@@ -1,0 +1,97 @@
+name: Canvas interaction performance budget
+
+on:
+  pull_request:
+    paths: ["web/**", "shared/**", ".github/workflows/canvas-performance.yml"]
+  push:
+    branches: [main]
+    paths: ["web/**", "shared/**", ".github/workflows/canvas-performance.yml"]
+  workflow_dispatch:
+    inputs:
+      baseline_ref:
+        description: "Existing baseline commit/ref; empty uses the previous commit"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: canvas-performance-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      VITE_STANDALONE_EDITION: "false"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.13
+      - name: Resolve immutable baseline
+        id: baseline
+        shell: bash
+        env:
+          REQUESTED_REF: ${{ inputs.baseline_ref }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BASE_SHA: ${{ github.event.before }}
+        run: |
+          selected="${REQUESTED_REF:-${PR_BASE_SHA:-${PUSH_BASE_SHA:-HEAD^}}}"
+          if [[ "$selected" =~ ^0+$ ]]; then selected="HEAD^"; fi
+          baseline_sha=$(git rev-parse --verify "$selected^{commit}")
+          echo "sha=$baseline_sha" >> "$GITHUB_OUTPUT"
+          echo "Baseline: $baseline_sha; candidate: $(git rev-parse HEAD)"
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.baseline.outputs.sha }}
+          path: .performance-baseline
+      - name: Install baseline and build production assets
+        working-directory: .performance-baseline/web
+        run: |
+          bun install --frozen-lockfile
+          bun install --cwd ../shared --frozen-lockfile
+          bun x vite build --outDir ../output/canvas-performance-baseline-build
+      - name: Install candidate and browser
+        working-directory: web
+        run: |
+          bun install --frozen-lockfile
+          bun install --cwd ../shared --frozen-lockfile
+          bun x playwright install --with-deps chromium
+      - name: Build candidate production assets
+        working-directory: web
+        run: |
+          bun x tsc --noEmit
+          bun x vite build --outDir ../output/canvas-performance-candidate-build
+          bun scripts/bundle-budget.mjs ../output/canvas-performance-candidate-build
+      - name: Test budget logic
+        working-directory: web
+        run: bun test tests/canvas-performance-budget.test.ts tests/canvas-performance-heap.test.ts
+      - name: Same-runner baseline, candidate and negative control
+        working-directory: web
+        run: bun scripts/canvas-performance-runner.mjs --baseline-dist ../.performance-baseline/output/canvas-performance-baseline-build --candidate-dist ../output/canvas-performance-candidate-build
+      - name: Production 4MP image worker and original-byte contracts
+        working-directory: web
+        env:
+          CANVAS_IMAGE_WORKER_PREVIEW: "1"
+          CANVAS_IMAGE_WORKER_DIST: ../output/canvas-performance-candidate-build
+        run: bun x playwright test --config e2e/image-worker-v2.config.ts
+      - name: Publish summary
+        if: always()
+        shell: bash
+        run: |
+          if test -f output/canvas-performance/summary.md; then
+            cat output/canvas-performance/summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: canvas-performance-${{ github.run_id }}
+          path: |
+            output/canvas-performance/
+            output/canvas-v2-image-worker-production/
+          retention-days: 14

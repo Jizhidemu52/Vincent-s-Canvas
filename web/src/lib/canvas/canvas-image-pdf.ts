@@ -1,5 +1,6 @@
 import { canvasImageDownloadFileName, canvasImageExportStem } from "@/lib/canvas/canvas-image-filename";
-import { prepareCanvasImageFormat, validateImageBlob } from "@/lib/canvas/canvas-image-encoding";
+import { encodeImageBlob, prepareCanvasImageFormat, validateImageBlob } from "@/lib/canvas/canvas-image-encoding";
+import { checkCanvasImageAbort, type CanvasImageTaskOptions } from "./canvas-image-worker";
 import { createZip } from "@/lib/zip";
 import { resolveImageUrl } from "@/services/image-storage";
 import type { CanvasNodeData } from "@/types/canvas";
@@ -13,14 +14,15 @@ export type CanvasImagePdfOptions = {
     setName: string;
     mode: CanvasImagePdfMode;
     onProgress?: (progress: CanvasImagePdfProgress) => void;
+    signal?: AbortSignal;
 };
 
 type ImageSize = { width: number; height: number };
 type PdfDependencies = {
-    loadImage?: (node: CanvasNodeData) => Promise<Blob>;
+    loadImage?: (node: CanvasNodeData, signal?: AbortSignal) => Promise<Blob>;
     measureImage?: (blob: Blob) => Promise<ImageSize>;
     convertImage?: (blob: Blob) => Promise<Blob>;
-    encodeImage?: (blob: Blob, mimeType: string) => Promise<Blob>;
+    encodeImage?: (blob: Blob, mimeType: string, options?: CanvasImageTaskOptions) => Promise<Blob>;
 };
 
 // Bound both encoded data and decoded pixel memory. Images are loaded and flushed sequentially.
@@ -29,7 +31,8 @@ const pointsPerPixel = 72 / 96;
 
 /** Builds the entire result before the caller downloads anything; failed pages are never omitted. */
 export async function createCanvasImagePdfExport(options: CanvasImagePdfOptions, dependencies: PdfDependencies = {}) {
-    const { nodes, mode, onProgress } = options;
+    const { nodes, mode, onProgress, signal } = options;
+    checkCanvasImageAbort(signal);
     if (!nodes.length) throw new Error("请至少选择一张图片");
     if (nodes.length > CANVAS_IMAGE_PDF_LIMITS.images) throw new Error(`单次最多导出 ${CANVAS_IMAGE_PDF_LIMITS.images} 张图片，请分批导出`);
     if (nodes.some((node) => !isCanvasPdfImage(node))) throw new Error("选择中存在不可导出的图片，请重新选择");
@@ -42,8 +45,7 @@ export async function createCanvasImagePdfExport(options: CanvasImagePdfOptions,
     // This heavyweight dependency must remain outside the initial canvas bundle.
     const PDFDocument = mode === "merged" || mode === "separate" ? (await import("pdf-lib")).PDFDocument : null;
     const loadImage = dependencies.loadImage || loadCanvasPdfImage;
-    const measureImage = dependencies.measureImage || measureImageBlob;
-    const convertImage = dependencies.convertImage || convertImageToPng;
+    const measureImage = dependencies.measureImage || ((blob: Blob) => measureImageBlob(blob, signal));
     const merged = mode === "merged" ? await PDFDocument!.create() : null;
     const files: { name: string; data: Blob }[] = [];
     let sourceBytes = 0;
@@ -51,8 +53,10 @@ export async function createCanvasImagePdfExport(options: CanvasImagePdfOptions,
     for (const [index, node] of nodes.entries()) {
         const imageName = canvasImageExportStem(node);
         try {
+            checkCanvasImageAbort(signal);
             onProgress?.({ completed: index, total: nodes.length, label: `正在读取 ${index + 1}/${nodes.length}：${imageName}` });
-            let blob = await loadImage(node);
+            let blob = await loadImage(node, signal);
+            checkCanvasImageAbort(signal);
             if (!blob.size) throw new Error("原图内容为空");
             const imageMime = await validateImageBlob(blob);
             sourceBytes += blob.size;
@@ -65,12 +69,13 @@ export async function createCanvasImagePdfExport(options: CanvasImagePdfOptions,
                 continue;
             }
             const dimensions = await measureImage(blob);
+            checkCanvasImageAbort(signal);
             const pixels = dimensions.width * dimensions.height;
             if (!Number.isFinite(pixels) || dimensions.width <= 0 || dimensions.height <= 0) throw new Error("无法读取原图尺寸");
             if (pixels > CANVAS_IMAGE_PDF_LIMITS.imagePixels) throw new Error("单张图片超过 2000 万像素，请先缩小图片");
 
             if (mode === "png" || mode === "jpg") {
-                const converted = await prepareCanvasImageFormat(blob, mode, dependencies.encodeImage);
+                const converted = await prepareCanvasImageFormat(blob, mode, dependencies.encodeImage, { signal, onProgress: progress => onProgress?.({ completed: index + progress.percent / 100, total: nodes.length, label: `${index + 1}/${nodes.length}：${progress.label}` }) });
                 if (converted.blob.size > CANVAS_IMAGE_PDF_LIMITS.sourceBytes) throw new Error("转换后的图片过大，请先缩小图片");
                 files.push({ name: `${String(index + 1).padStart(3, "0")}_${imageName}.${mode}`, data: converted.blob });
                 onProgress?.({ completed: index + 1, total: nodes.length, label: `已转换 ${index + 1}/${nodes.length} 张 ${mode.toUpperCase()} 图片` });
@@ -81,7 +86,8 @@ export async function createCanvasImagePdfExport(options: CanvasImagePdfOptions,
             const signature = new Uint8Array(await blob.slice(0, 8).arrayBuffer());
             const isJpeg = signature[0] === 0xff && signature[1] === 0xd8;
             const isPng = signature[0] === 0x89 && signature[1] === 0x50 && signature[2] === 0x4e && signature[3] === 0x47;
-            if (!isJpeg && !isPng) blob = await convertImage(blob);
+            if (!isJpeg && !isPng) blob = await (dependencies.convertImage ? dependencies.convertImage(blob) : encodeImageBlob(blob, "image/png", { signal, onProgress: progress => onProgress?.({ completed: index, total: nodes.length, label: `${index + 1}/${nodes.length}：${progress.label}` }) }));
+            checkCanvasImageAbort(signal);
             if (blob.size > CANVAS_IMAGE_PDF_LIMITS.sourceBytes) throw new Error("转换后的图片过大，请先缩小图片");
 
             const pdf = merged || await PDFDocument!.create();
@@ -93,6 +99,7 @@ export async function createCanvasImagePdfExport(options: CanvasImagePdfOptions,
             const height = image.height * scale;
             pdf.addPage([width, height]).drawImage(image, { x: 0, y: 0, width, height });
             await pdf.flush();
+            checkCanvasImageAbort(signal);
             if (!merged) {
                 pdf.setTitle(`${setName} — ${imageName}`);
                 files.push({ name: `${String(index + 1).padStart(3, "0")}_${imageName}.pdf`, data: new Blob([new Uint8Array(await pdf.save())], { type: "application/pdf" }) });
@@ -100,43 +107,56 @@ export async function createCanvasImagePdfExport(options: CanvasImagePdfOptions,
             onProgress?.({ completed: index + 1, total: nodes.length, label: `已处理 ${index + 1}/${nodes.length} 张图片` });
             await new Promise((resolve) => setTimeout(resolve, 0));
         } catch (error) {
+            checkCanvasImageAbort(signal);
             const reason = error instanceof Error ? error.message : String(error);
             throw new Error(`第 ${index + 1} 张「${imageName}」导出失败：${reason}。未下载任何文件。`);
         }
     }
 
+    checkCanvasImageAbort(signal);
     onProgress?.({ completed: nodes.length, total: nodes.length, label: mode === "merged" ? "正在生成 PDF 文件" : "正在打包文件" });
     if (merged) {
         merged.setTitle(setName);
-        return { blob: new Blob([new Uint8Array(await merged.save())], { type: "application/pdf" }), fileName: `${setName}.pdf`, imageCount: nodes.length };
+        const bytes = new Uint8Array(await merged.save());
+        checkCanvasImageAbort(signal);
+        return { blob: new Blob([bytes], { type: "application/pdf" }), fileName: `${setName}.pdf`, imageCount: nodes.length };
     }
-    return { blob: await createZip(files), fileName: `${setName}.zip`, imageCount: nodes.length };
+    const blob = await createZip(files, { signal, onProgress: progress => onProgress?.({ completed: progress.completed, total: progress.total || 1, label: progress.label }) });
+    checkCanvasImageAbort(signal);
+    return { blob, fileName: `${setName}.zip`, imageCount: nodes.length };
 }
 
-async function loadCanvasPdfImage(node: CanvasNodeData) {
+async function loadCanvasPdfImage(node: CanvasNodeData, signal?: AbortSignal) {
     const url = await resolveImageUrl(node.metadata?.storageKey, node.metadata?.content || "");
     if (!url) throw new Error("找不到原图，请重新打开画布后重试");
-    const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+    checkCanvasImageAbort(signal);
+    const response = await fetch(url, { signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(30_000)]) });
     if (!response.ok) throw new Error(`原图读取失败（${response.status}）`);
     const length = Number(response.headers.get("content-length"));
     if (Number.isFinite(length) && length > CANVAS_IMAGE_PDF_LIMITS.sourceBytes) throw new Error("原图超过 256 MB");
     return response.blob();
 }
 
-async function withBrowserImage<T>(blob: Blob, read: (image: HTMLImageElement) => T | Promise<T>): Promise<T> {
+async function withBrowserImage<T>(blob: Blob, read: (image: HTMLImageElement) => T | Promise<T>, signal?: AbortSignal): Promise<T> {
+    checkCanvasImageAbort(signal);
     const url = URL.createObjectURL(blob);
     const image = new Image();
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let abort: (() => void) | undefined;
     try {
         await new Promise<void>((resolve, reject) => {
+            abort = () => reject(signal?.reason);
+            signal?.addEventListener("abort", abort, { once: true });
             image.onload = () => resolve();
             image.onerror = () => reject(new Error("浏览器无法读取此图片格式"));
             timer = setTimeout(() => reject(new Error("读取原图超时，请重试")), 30_000);
             image.src = url;
         });
+        checkCanvasImageAbort(signal);
         return await read(image);
     } finally {
         clearTimeout(timer);
+        if (abort) signal?.removeEventListener("abort", abort);
         image.onload = null;
         image.onerror = null;
         image.src = "";
@@ -144,23 +164,6 @@ async function withBrowserImage<T>(blob: Blob, read: (image: HTMLImageElement) =
     }
 }
 
-function measureImageBlob(blob: Blob) {
-    return withBrowserImage(blob, (image) => ({ width: image.naturalWidth, height: image.naturalHeight }));
-}
-
-function convertImageToPng(blob: Blob) {
-    return withBrowserImage(blob, async (image) => {
-        const canvas = document.createElement("canvas");
-        canvas.width = image.naturalWidth;
-        canvas.height = image.naturalHeight;
-        try {
-            const context = canvas.getContext("2d");
-            if (!context) throw new Error("无法转换图片格式");
-            context.drawImage(image, 0, 0);
-            return await new Promise<Blob>((resolve, reject) => canvas.toBlob((result) => result ? resolve(result) : reject(new Error("图片格式转换失败")), "image/png"));
-        } finally {
-            canvas.width = 0;
-            canvas.height = 0;
-        }
-    });
+function measureImageBlob(blob: Blob, signal?: AbortSignal) {
+    return withBrowserImage(blob, (image) => ({ width: image.naturalWidth, height: image.naturalHeight }), signal);
 }

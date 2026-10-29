@@ -14,6 +14,7 @@ import { collectCanvasExportMedia } from "@/lib/canvas/canvas-export-media";
 import { exportModelMetadata } from "@/lib/model-display";
 import { encodeCanvasProject } from "./canvas-project-codec";
 import { mapCanvasAsyncPool } from "./canvas-async-pool";
+import { checkCanvasImageAbort, type CanvasImageTaskOptions } from "./canvas-image-worker";
 
 export async function exportCanvasProjects(projects: CanvasProject[], fileName = "无线画布", options: ZipOptions = {}) {
     saveAs(await createCanvasProjectsArchive(projects, {}, options), `${safeFileName(fileName)}.zip`);
@@ -48,17 +49,20 @@ export function downloadCanvasContent(content: string, fileName: string) {
     saveAs(content, fileName);
 }
 
-export async function downloadCanvasImage(node: CanvasNodeData, format: CanvasImageDownloadFormat = "original") {
+export async function downloadCanvasImage(node: CanvasNodeData, format: CanvasImageDownloadFormat = "original", options: CanvasImageTaskOptions = {}) {
+    checkCanvasImageAbort(options.signal);
+    options.onProgress?.({ percent: 0, label: "正在读取原图" });
     let blob = node.metadata?.storageKey ? await getImageBlob(node.metadata.storageKey) : null;
     if (!blob) {
-        const response = await fetch(node.metadata?.content || "", { signal: AbortSignal.timeout(30_000) });
+        const response = await fetch(node.metadata?.content || "", { signal: AbortSignal.any([...(options.signal ? [options.signal] : []), AbortSignal.timeout(30_000)]) });
         if (!response.ok) throw new Error("无法读取图片，请重新打开画布后再试");
         blob = await response.blob();
     }
-    const result = await prepareCanvasImageFormat(blob, format);
+    const result = await prepareCanvasImageFormat(blob, format, undefined, options);
     const fileName = format === "original"
         ? canvasImageDownloadFileName({ ...node, metadata: { ...node.metadata, mimeType: result.mimeType } })
         : `${canvasImageExportStem(node)}.${format}`;
+    checkCanvasImageAbort(options.signal);
     saveAs(result.blob, fileName);
 }
 
@@ -82,8 +86,11 @@ export function hasCanvasImageVariants(variants: ServerAssetVariants) {
 export async function downloadCanvasImageVariant(node: CanvasNodeData, variant: ServerAssetVariant, kind: "primary" | "original" | "export", sources: {
     fetchBlob?: typeof fetchServerAssetContent;
     save?: (blob: Blob, filename: string) => void;
-} = {}) {
-    const blob = await (sources.fetchBlob || fetchServerAssetContent)(variant.assetId);
+} = {}, options: CanvasImageTaskOptions = {}) {
+    checkCanvasImageAbort(options.signal);
+    options.onProgress?.({ percent: 0, label: "正在读取已保存的图片原件" });
+    const blob = await (sources.fetchBlob || fetchServerAssetContent)(variant.assetId, AbortSignal.any([...(options.signal ? [options.signal] : []), AbortSignal.timeout(30_000)]));
+    checkCanvasImageAbort(options.signal);
     if (!blob.size) throw new Error("图片内容为空，无法下载");
     const mimeType = blob.type.split(";")[0]?.trim() || variant.mimeType;
     if (!mimeType.startsWith("image/")) throw new Error("下载的内容不是图片，未保存文件");

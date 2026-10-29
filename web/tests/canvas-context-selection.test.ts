@@ -6,11 +6,13 @@ import ts from "typescript";
 import { cloneCanvasNodeGraph, copyCanvasNodeGraph } from "@/lib/canvas/canvas-node-copy";
 import { removeCanvasGroupMembers } from "@/lib/canvas/canvas-node-groups";
 import { canvasGenerationRunsForNodes } from "@/lib/canvas/canvas-project-async-lifecycle";
+import { canvasImageExportSelection } from "@/lib/canvas/canvas-image-export-selection";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type CanvasNodeGroup, type ContextMenuState } from "@/types/canvas";
 
 // Execute the page's real callback bodies and context-menu JSX; only React state
 // setters and the file-cleanup boundary are supplied, without mounting the editor.
-const source = readFileSync(new URL("../src/pages/canvas/project.tsx", import.meta.url), "utf8");
+const source = ["project.tsx", "use-canvas-connections.ts"]
+    .map(file => readFileSync(new URL(`../src/pages/canvas/${file}`, import.meta.url), "utf8")).join("\n");
 const ast = ts.createSourceFile("project.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const initializers = new Map<string, ts.Expression>();
 let menuJsx: ts.JsxSelfClosingElement | undefined;
@@ -82,6 +84,8 @@ function pageHarness(initialNodes = [node("a"), node("b", 100), node("c", 300)],
         if (!menuJsx) throw new Error("Missing actual page context-menu JSX");
         const element = expression<ReactElement<any>>(menuJsx.getText(ast), {
             ...scope, React, CanvasNodeContextMenu: "context-menu-fixture", contextMenu: state.contextMenu, contextMenuNodeIds,
+            contextMenuImageCount: canvasImageExportSelection(state.nodes, [...contextMenuNodeIds]).length,
+            openSelectedImageDownload: () => undefined,
             selectedNodeIds: state.selectedNodeIds, localToolsEnabled: true, createSelectedGroup: () => undefined,
             duplicateNodes: (ids: ReadonlySet<string>) => { targets.duplicate.push(ids); duplicate(ids); },
             deleteNodes: (ids: ReadonlySet<string>) => { targets.delete.push(ids); remove(ids); },

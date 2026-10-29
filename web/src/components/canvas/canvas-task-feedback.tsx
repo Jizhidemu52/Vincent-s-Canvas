@@ -1,5 +1,7 @@
 import { useEffect } from "react";
-import { LocateFixed, Settings2 } from "lucide-react";
+import { Copy, LocateFixed, Settings2 } from "lucide-react";
+import { useCopyText } from "@/hooks/use-copy-text";
+import { canvasExperienceReport } from "@/lib/canvas/canvas-performance-report";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { useCanvasExperienceMetrics } from "@/lib/canvas/canvas-experience-metrics";
@@ -21,6 +23,7 @@ const seconds = (ms: number) => `${(ms / 1000).toFixed(2)} 秒`;
 export function CanvasTaskFeedback({ feedback }: { feedback: CanvasTaskFeedbackValue }) {
     const theme = canvasThemes[useThemeStore(state => state.theme)];
     const metrics = useCanvasExperienceMetrics();
+    const copy = useCopyText();
     const { progress } = feedback;
     return <div className="flex items-center gap-3 text-xs" style={{ color: theme.toolbar.item }} data-canvas-no-zoom data-testid="canvas-task-feedback">
         <span role="status" aria-live="polite" aria-atomic="true">
@@ -40,6 +43,7 @@ export function CanvasTaskFeedback({ feedback }: { feedback: CanvasTaskFeedbackV
                         <div><dt>交互长帧 (&gt;50ms) / 后台停顿</dt><dd>{metrics.interaction.longFrameCount} / {metrics.interaction.stalledFrameGapCount}</dd></div>
                         <div><dt>提交开始至结果就绪 / 平均</dt><dd>{metrics.task.count ? `${seconds(metrics.task.meanMs)}（${metrics.task.count} 次）` : "暂无本页完整提交样本"}</dd></div>
                     </dl>
+                    <button type="button" className="mt-3 inline-flex items-center gap-1.5 rounded py-1 hover:opacity-75" onClick={() => copy(canvasExperienceReport(metrics), "体验报告已复制（不含画布内容）")}><Copy size={13} />复制体验报告</button>
                     <p className="mt-3 leading-5" style={{ color: theme.node.muted }}>仅本页内存汇总，刷新清空；不含提示词、图片或任务标识，不对外发送。恢复旧任务不计入本页完整提交耗时。</p>
                 </div>
             </div>

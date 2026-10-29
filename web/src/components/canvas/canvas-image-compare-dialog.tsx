@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { App, Button, Modal, Popover, Segmented, Slider, Spin } from "antd";
+import { App, Button, Modal, Popover, Progress, Segmented, Slider, Spin } from "antd";
 import { saveAs } from "file-saver";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
-import { canvasCompareCandidates, canvasCompareImages, canvasCompareSameImage, canvasCompareSources, canvasComparePreviewScale, canvasDifferenceLayout, canvasDifferenceNotice, chooseCanvasComparePair, drawCanvasCompare, loadCanvasCompareImage, type CanvasCompareMode, type CanvasCompareZoom } from "@/lib/canvas/canvas-image-compare";
+import { canvasCompareCandidates, canvasCompareImages, canvasCompareSameImage, canvasCompareSources, canvasComparePreviewScale, canvasDifferenceLayout, canvasDifferenceNotice, chooseCanvasComparePair, drawCanvasCompare, drawCanvasDifference, loadCanvasCompareImage, type CanvasCompareMode, type CanvasCompareZoom } from "@/lib/canvas/canvas-image-compare";
+import { encodeCanvasComparePng } from "@/lib/canvas/canvas-image-encoding";
+import type { CanvasImageProgress } from "@/lib/canvas/canvas-image-worker";
 import type { CanvasNodeData } from "@/types/canvas";
 import { CanvasCompareThumbnail, CanvasImageComparePicker, canvasCompareImageLabel } from "./canvas-image-compare-picker";
 
@@ -26,6 +28,9 @@ export function CanvasImageCompareDialog({ nodes, initialIds, onClose }: { nodes
     const [renderError, setRenderError] = useState("");
     const [reload, setReload] = useState(0);
     const [exporting, setExporting] = useState(false);
+    const [progress, setProgress] = useState<CanvasImageProgress | null>(null);
+    const renderJob = useRef<AbortController | null>(null);
+    const exportJob = useRef<AbortController | null>(null);
     const [rendered, setRendered] = useState<{ source: LoadedPair; mode: CanvasCompareMode; value: number; background: string; foreground: string; width: number; height: number; notice: string } | null>(null);
     const [stageSize, setStageSize] = useState({ width: 900, height: 480 });
     const canvas = useRef<HTMLCanvasElement>(null);
@@ -45,26 +50,32 @@ export function CanvasImageCompareDialog({ nodes, initialIds, onClose }: { nodes
         closePicker();
     };
     useEffect(() => {
-        let cancelled = false;
+        const controller = new AbortController();
         setLoaded(null); setLoadError(""); setRenderError(""); setLoading(false); setZoom("fit");
         if (stage.current) { stage.current.scrollLeft = 0; stage.current.scrollTop = 0; }
         if (!before || !after || before.id === after.id || canvasCompareSameImage(before, after)) return;
         setLoading(true);
-        Promise.all([loadCanvasCompareImage(before), loadCanvasCompareImage(after)]).then(([beforeImage, afterImage]) => { if (!cancelled) setLoaded({ before: beforeImage, after: afterImage }); }).catch(error => { if (!cancelled) setLoadError(error instanceof Error ? error.message : "图片加载失败"); }).finally(() => { if (!cancelled) setLoading(false); });
-        return () => { cancelled = true; };
+        Promise.all([loadCanvasCompareImage(before, controller.signal), loadCanvasCompareImage(after, controller.signal)]).then(([beforeImage, afterImage]) => { if (!controller.signal.aborted) setLoaded({ before: beforeImage, after: afterImage }); }).catch(error => { if (!controller.signal.aborted) setLoadError(error instanceof Error ? error.message : "图片加载失败"); }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
+        return () => { controller.abort(); renderJob.current?.abort(); exportJob.current?.abort(); };
     }, [before, after, reload]);
     useEffect(() => {
-        setRendered(null); setRenderError("");
+        const controller = new AbortController();
+        renderJob.current = controller;
+        exportJob.current?.abort(); exportJob.current = null; setExporting(false);
+        setRendered(null); setRenderError(""); setProgress(null);
         if (!loaded || !canvas.current) return;
-        const frame = requestAnimationFrame(() => {
+        const frame = requestAnimationFrame(async () => {
             const target = canvas.current;
             if (!target) return;
             try {
-                drawCanvasCompare(target, loaded.before, loaded.after, mode, value, theme.node.fill, theme.node.text);
+                if (mode === "difference") await drawCanvasDifference(target, loaded.before, loaded.after, { signal: controller.signal, onProgress: update => { if (!controller.signal.aborted) setProgress(update); } });
+                else drawCanvasCompare(target, loaded.before, loaded.after, mode, value, theme.node.fill, theme.node.text);
+                if (controller.signal.aborted) return;
                 setRendered({ source: loaded, mode, value, background: theme.node.fill, foreground: theme.node.text, width: target.width, height: target.height, notice: mode === "difference" ? canvasDifferenceNotice(canvasDifferenceLayout(loaded.before, loaded.after)) : "展示对比：按原比例居中，不做配准；当前输出经过缩放，非原像素一致性检验。" });
-            } catch (error) { setRenderError(error instanceof Error && error.name === "SecurityError" ? "该图片来源不允许读取像素，请下载原图并重新上传后再试" : error instanceof Error ? error.message : "合成失败，请重试"); }
+            } catch (error) { if (!controller.signal.aborted) setRenderError(error instanceof Error && error.name === "SecurityError" ? "该图片来源不允许读取像素，请下载原图并重新上传后再试" : error instanceof Error ? error.message : "合成失败，请重试"); }
+            finally { if (!controller.signal.aborted) { setProgress(current => current?.fallback ? { ...current, percent: 100, label: "已使用分段兼容模式完成（最多 100 万像素）" } : null); renderJob.current = null; } }
         });
-        return () => cancelAnimationFrame(frame);
+        return () => { cancelAnimationFrame(frame); controller.abort(); exportJob.current?.abort(); };
     }, [loaded, mode, value, theme]);
     useEffect(() => {
         const target = stage.current;
@@ -76,16 +87,23 @@ export function CanvasImageCompareDialog({ nodes, initialIds, onClose }: { nodes
     const error = loadError || renderError;
     const ready = Boolean(loaded && rendered?.source === loaded && rendered.mode === mode && rendered.value === value && rendered.background === theme.node.fill && rendered.foreground === theme.node.text && !loading && !error);
     const scale = canvasComparePreviewScale(rendered?.width || 1, rendered?.height || 1, stageSize.width - 2, stageSize.height - 2, zoom);
-    const exportImage = () => {
-        if (!canvas.current || !ready || exporting) return;
-        setExporting(true);
-        try { canvas.current.toBlob(blob => {
-            try { if (blob) saveAs(blob, `改款前后对比-${mode}.png`); else message.error("导出失败，请重试"); }
-            catch { message.error("导出失败，请重试"); }
-            finally { setExporting(false); }
-        }, "image/png"); } catch { setExporting(false); message.error("该图片来源不允许本地合成，请下载原图并重新上传后再试"); }
+    const close = () => { renderJob.current?.abort(); exportJob.current?.abort(); onClose(); };
+    const cancel = () => {
+        if (exporting) { exportJob.current?.abort(); exportJob.current = null; setExporting(false); }
+        else { renderJob.current?.abort(); renderJob.current = null; setRenderError("差异计算已取消，可重新加载或换图"); }
+        setProgress(null);
     };
-    return <Modal open title="改款前后对比" width={1000} onCancel={onClose} footer={<Button onClick={exportImage} disabled={!ready} loading={exporting}>导出当前对比 PNG</Button>}>
+    const exportImage = async () => {
+        if (!canvas.current || !ready || exporting) return;
+        const controller = new AbortController(); exportJob.current = controller;
+        setExporting(true);
+        try {
+            const blob = await encodeCanvasComparePng(canvas.current, { signal: controller.signal, onProgress: update => { if (!controller.signal.aborted) setProgress(update); } });
+            if (!controller.signal.aborted) saveAs(blob, `改款前后对比-${mode}.png`);
+        } catch (error) { if (!controller.signal.aborted) message.error(error instanceof Error ? error.message : "导出失败，请重试"); }
+        finally { if (exportJob.current === controller) { exportJob.current = null; setExporting(false); setProgress(null); } }
+    };
+    return <Modal open title="改款前后对比" width={1000} onCancel={close} footer={<Button onClick={() => void exportImage()} disabled={!ready} loading={exporting}>导出当前对比 PNG</Button>}>
         <p className="mb-3 text-sm opacity-70">默认与本次修改前的直接上版比较，点击图片卡可换选其他图。不改原图、不调用 AI；不做配准，也不是自动质检。</p>
         <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
             {([0, 1] as const).map(index => {
@@ -112,6 +130,7 @@ export function CanvasImageCompareDialog({ nodes, initialIds, onClose }: { nodes
         </div>
         {mode === "slider" || mode === "overlay" ? <div className="mt-2 flex items-center gap-3"><span className="shrink-0 text-xs">{mode === "slider" ? "分割位置" : "改款后透明度"}</span><Slider className="min-w-0 flex-1" value={value} onChange={setValue} tooltip={{ formatter: value => `${value}%` }} aria-label={mode === "slider" ? "分割位置" : "改款后透明度"} /></div> : null}
         {ready ? <p className="mt-3 text-xs leading-relaxed" role="status" style={{ color: theme.node.muted }}>{rendered?.notice}</p> : null}
+        {progress ? <div aria-live="polite" className="mt-2"><Progress percent={progress.percent} size="small" /><span className="text-xs">{progress.label}</span>{progress.percent < 100 ? <Button type="text" size="small" onClick={cancel}>取消处理</Button> : null}</div> : null}
         <div ref={stage} tabIndex={0} role="region" aria-label="对比预览，可用方向键或触摸滚动" className="mt-3 h-[min(52dvh,560px)] min-h-48 overflow-auto overscroll-contain rounded-lg" style={{ background: theme.node.fill, color: theme.node.text }}>
             <div className="flex min-h-full w-max min-w-full items-center justify-center">
                 {loading || (loaded && !error && !ready) ? <Spin /> : error ? <div className="max-w-72 p-5 text-center"><p role="alert" className="mb-3 break-words text-sm">{error}</p><Button onClick={() => setReload(value => value + 1)}>重新加载</Button></div> : !loaded ? <p className="max-w-72 p-6 text-sm opacity-70">请选择两张不同的图片；没有可靠的修改前记录时，请通过上方缩略图面板手动选图。</p> : null}

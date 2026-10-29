@@ -100,8 +100,8 @@ export async function uploadServerAsset(file: File, metadata: Record<string, unk
     return created.assetId;
 }
 
-export async function fetchServerAssetContent(id: string) {
-    const response = await fetch(`/api/assets/${id}/content`, { credentials: "include" });
+export async function fetchServerAssetContent(id: string, signal?: AbortSignal) {
+    const response = await fetch(`/api/assets/${id}/content`, { credentials: "include", signal });
     if (!response.ok) throw new Error(`素材下载失败（${response.status}）`);
     return response.blob();
 }

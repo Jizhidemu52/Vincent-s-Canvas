@@ -1,3 +1,4 @@
+import { checkCanvasImageAbort, imageWorkerSupported, requireCanvasImageFallback, runCanvasImageTask, yieldCanvasImageTask, type CanvasImageTaskOptions } from "./canvas-image-worker";
 export type CanvasImageDownloadFormat = "original" | "png" | "jpg";
 
 /** Check the bytes as well as the header so a renamed file is never mistaken for a conversion. */
@@ -24,39 +25,54 @@ export async function validateImageBlob(blob: Blob) {
     return detectedType;
 }
 
-export async function prepareCanvasImageFormat(blob: Blob, format: CanvasImageDownloadFormat, encode = encodeImageBlob) {
+export async function prepareCanvasImageFormat(blob: Blob, format: CanvasImageDownloadFormat, encode = encodeImageBlob, options: CanvasImageTaskOptions = {}) {
+    checkCanvasImageAbort(options.signal);
     const sourceType = await validateImageBlob(blob);
+    checkCanvasImageAbort(options.signal);
     if (format === "original") return { blob, mimeType: sourceType };
     if (format !== "png" && format !== "jpg") throw new Error("请选择 PNG、JPG 或原文件格式");
     const mimeType = format === "png" ? "image/png" : "image/jpeg";
-    const result = sourceType === mimeType ? (blob.type === mimeType ? blob : new Blob([blob], { type: mimeType })) : await encode(blob, mimeType);
+    const result = sourceType === mimeType ? (blob.type === mimeType ? blob : new Blob([blob], { type: mimeType })) : await encode(blob, mimeType, options);
+    checkCanvasImageAbort(options.signal);
     if (await validateImageBlob(result) !== mimeType) throw new Error("浏览器未生成所选图片格式，未下载文件");
+    checkCanvasImageAbort(options.signal);
     return { blob: result, mimeType };
 }
 
-export async function encodeImageBlob(blob: Blob, mimeType: string) {
+export async function encodeImageBlob(blob: Blob, mimeType: string, options: CanvasImageTaskOptions = {}): Promise<Blob> {
+    checkCanvasImageAbort(options.signal);
+    if (imageWorkerSupported()) {
+        try { return await runCanvasImageTask({ kind: "encode", source: blob, mimeType }, options) as Blob; }
+        catch (error) { if (!(error instanceof Error) || error.name !== "CanvasImageCapabilityError") throw error; }
+    }
+    const signal = AbortSignal.any([...(options.signal ? [options.signal] : []), AbortSignal.timeout(options.timeoutMs ?? 60_000)]);
+    const fallbackOptions = { ...options, signal };
     const url = URL.createObjectURL(blob);
     const image = new Image();
     const canvas = document.createElement("canvas");
-    let timer: ReturnType<typeof setTimeout> | undefined;
+    const abort = () => { image.src = ""; };
     try {
         await new Promise<void>((resolve, reject) => {
-            image.onload = () => resolve();
-            image.onerror = () => reject(new Error("浏览器无法读取此图片格式"));
-            timer = setTimeout(() => reject(new Error("读取原图超时，请重试")), 30_000);
+            const stop = () => { signal.removeEventListener("abort", cancelled); image.onload = null; image.onerror = null; };
+            const cancelled = () => { stop(); abort(); reject(signal.reason); };
+            signal.addEventListener("abort", cancelled, { once: true });
+            if (signal.aborted) { cancelled(); return; }
+            image.onload = () => { stop(); resolve(); };
+            image.onerror = () => { stop(); reject(new Error("浏览器无法读取此图片格式")); };
             image.src = url;
         });
         if (!image.naturalWidth || !image.naturalHeight) throw new Error("无法读取原图尺寸");
-        if (image.naturalWidth * image.naturalHeight > 20_000_000) throw new Error("单张图片超过 2000 万像素，请先缩小图片");
+        requireCanvasImageFallback(image.naturalWidth, image.naturalHeight, fallbackOptions);
+        await yieldCanvasImageTask(signal);
         canvas.width = image.naturalWidth;
         canvas.height = image.naturalHeight;
         const context = canvas.getContext("2d");
         if (!context) throw new Error("无法转换图片格式");
         if (mimeType === "image/jpeg") { context.fillStyle = "#fff"; context.fillRect(0, 0, canvas.width, canvas.height); }
         context.drawImage(image, 0, 0);
-        return await new Promise<Blob>((resolve, reject) => canvas.toBlob((result) => result ? resolve(result) : reject(new Error("图片格式转换失败")), mimeType, 0.95));
+        await yieldCanvasImageTask(signal);
+        return await encodeCanvasFallback(canvas, mimeType, signal);
     } finally {
-        clearTimeout(timer);
         image.onload = null;
         image.onerror = null;
         image.src = "";
@@ -64,4 +80,26 @@ export async function encodeImageBlob(blob: Blob, mimeType: string) {
         canvas.height = 0;
         URL.revokeObjectURL(url);
     }
+}
+
+function encodeCanvasFallback(canvas: HTMLCanvasElement, mimeType: string, signal?: AbortSignal) {
+    return new Promise<Blob>((resolve, reject) => {
+        const abort = () => reject(signal?.reason);
+        signal?.addEventListener("abort", abort, { once: true });
+        if (signal?.aborted) { signal.removeEventListener("abort", abort); abort(); return; }
+        try { canvas.toBlob(result => { signal?.removeEventListener("abort", abort); if (signal?.aborted) { abort(); return; } if (result) resolve(result); else reject(new Error("图片格式转换失败")); }, mimeType, 0.95); }
+        catch (error) { signal?.removeEventListener("abort", abort); reject(error); }
+    });
+}
+
+export async function encodeCanvasComparePng(canvas: HTMLCanvasElement, options: CanvasImageTaskOptions = {}) {
+    checkCanvasImageAbort(options.signal);
+    if (imageWorkerSupported()) {
+        const bitmap = await createImageBitmap(canvas);
+        return await runCanvasImageTask({ kind: "encode", source: bitmap, mimeType: "image/png" }, options) as Blob;
+    }
+    requireCanvasImageFallback(canvas.width, canvas.height, options);
+    const signal = AbortSignal.any([...(options.signal ? [options.signal] : []), AbortSignal.timeout(options.timeoutMs ?? 60_000)]);
+    await yieldCanvasImageTask(signal);
+    return encodeCanvasFallback(canvas, "image/png", signal);
 }

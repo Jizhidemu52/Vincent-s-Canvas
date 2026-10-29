@@ -92,6 +92,15 @@ test("download failures, empty bytes and non-image responses are never saved", a
     expect(saves).toBe(0);
 });
 
+test("cancelling an original variant forwards cancellation and never saves a stale response", async () => {
+    const controller = new AbortController(); let saves = 0;
+    await expect(downloadCanvasImageVariant(node(), variants.original, "original", {
+        fetchBlob: async (_id, signal) => { expect(signal).toBeDefined(); controller.abort(); expect(signal?.aborted).toBe(true); return new Blob(["source"], { type: "image/png" }); },
+        save: () => { saves++; },
+    }, { signal: controller.signal })).rejects.toMatchObject({ name: "AbortError" });
+    expect(saves).toBe(0);
+});
+
 test("variants API accepts the standard success envelope and the existing demo response", async () => {
     for (const payload of [{ code: 0, data: variants, msg: "ok" }, variants]) {
         globalThis.fetch = (async (path, init) => {

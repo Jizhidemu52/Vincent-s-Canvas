@@ -1,4 +1,4 @@
-import { useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useDeferredValue, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, MouseEvent, PointerEvent, Ref } from "react";
 import { Button, Image } from "antd";
 import { FileText, Image as ImageIcon, Music2, Video, X } from "lucide-react";
@@ -42,6 +42,8 @@ export function CanvasConfigComposer({ ref, value, inputs, onChange, onClose, co
     const [activeIndex, setActiveIndex] = useState(0);
     const [imagePreview, setImagePreview] = useState<string | null>(null);
     const [draftValue, setDraftValue] = useState(value);
+    const deferredDraft = useDeferredValue(draftValue);
+    const deferredQuery = useDeferredValue(mention?.query ?? "");
     const onChangeRef = useRef(onChange);
     onChangeRef.current = onChange;
     const draftRef = useRef<ReturnType<typeof createCanvasTextDraft> | null>(null);
@@ -51,14 +53,14 @@ export function CanvasConfigComposer({ ref, value, inputs, onChange, onClose, co
         read: () => editorRef.current ? serializeEditor(editorRef.current) : draftValue,
         replace: (next) => { draftRef.current?.reset(next); setDraftValue(next); },
     }));
-    const tokens = useMemo(() => parseComposerTokens(draftValue), [draftValue]);
+    const tokens = useMemo(() => parseComposerTokens(deferredDraft), [deferredDraft]);
     const referenceById = useMemo(() => new Map(inputs.map((input) => [input.nodeId, input])), [inputs]);
-    const candidates = useMemo(() => {
-        if (!mention) return [];
-        const query = (mention.query || "").trim().toLowerCase();
+    const filterCandidates = useCallback((search: string) => {
+        const query = search.trim().toLowerCase();
         if (!query) return inputs;
         return inputs.filter((input) => `${resourceLabel(input, inputs, referenceLabels)} ${input.title} ${input.text || ""}`.toLowerCase().includes(query));
-    }, [inputs, mention, referenceLabels]);
+    }, [inputs, referenceLabels]);
+    const candidates = useMemo(() => filterCandidates(deferredQuery), [filterCandidates, deferredQuery]);
 
     useEffect(() => {
         if (document.activeElement === editorRef.current) return;
@@ -108,9 +110,11 @@ export function CanvasConfigComposer({ ref, value, inputs, onChange, onClose, co
         setActiveIndex(0);
     };
 
-    const insertReference = (input: NodeGenerationInput) => {
+    const insertReference = useCallback((input: NodeGenerationInput) => {
         const editor = editorRef.current;
         if (!editor) return;
+        const query = /@([^\s@]*)$/.exec(textBeforeCaret())?.[1];
+        if (query === undefined || !filterCandidates(query).some(item => item.nodeId === input.nodeId)) return;
         removeActiveMention();
         const chip = createReferenceChip(input, inputs, theme, setImagePreview);
         const space = document.createTextNode(" ");
@@ -127,12 +131,13 @@ export function CanvasConfigComposer({ ref, value, inputs, onChange, onClose, co
             editor.append(chip, space);
             placeCaretAtEnd(editor);
         }
-        closeMention();
+        setMention(null);
+        setActiveIndex(0);
         const next = serializeEditor(editor);
         setDraftValue(next);
         draftRef.current?.reset(next);
         onChange(next);
-    };
+    }, [filterCandidates, inputs, onChange, theme]);
 
     const stopCanvasInteraction = (event: PointerEvent | MouseEvent) => event.stopPropagation();
 
@@ -177,20 +182,22 @@ export function CanvasConfigComposer({ ref, value, inputs, onChange, onClose, co
                     onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
                         event.stopPropagation();
                         if (composingRef.current || event.nativeEvent.isComposing || event.keyCode === 229) return;
-                        if (mention && candidates.length) {
+                        const currentQuery = mention && ["ArrowDown", "ArrowUp", "Enter", "Escape"].includes(event.key) ? /@([^\s@]*)$/.exec(textBeforeCaret())?.[1] : undefined;
+                        const currentCandidates = currentQuery === undefined ? [] : filterCandidates(currentQuery);
+                        if (mention && currentCandidates.length) {
                             if (event.key === "ArrowDown") {
                                 event.preventDefault();
-                                setActiveIndex((index) => (index + 1) % candidates.length);
+                                setActiveIndex((index) => (index + 1) % currentCandidates.length);
                                 return;
                             }
                             if (event.key === "ArrowUp") {
                                 event.preventDefault();
-                                setActiveIndex((index) => (index - 1 + candidates.length) % candidates.length);
+                                setActiveIndex((index) => (index - 1 + currentCandidates.length) % currentCandidates.length);
                                 return;
                             }
                             if (event.key === "Enter") {
                                 event.preventDefault();
-                                insertReference(candidates[Math.min(activeIndex, candidates.length - 1)]);
+                                insertReference(currentCandidates[Math.min(activeIndex, currentCandidates.length - 1)]);
                                 return;
                             }
                             if (event.key === "Escape") {
@@ -216,7 +223,7 @@ export function CanvasConfigComposer({ ref, value, inputs, onChange, onClose, co
 
 }
 
-function MentionMenu({ inputs, allInputs, referenceLabels, activeIndex, theme, onSelect }: { inputs: NodeGenerationInput[]; allInputs: NodeGenerationInput[]; referenceLabels?: Record<string, string>; activeIndex: number; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onSelect: (input: NodeGenerationInput) => void }) {
+const MentionMenu = memo(function MentionMenu({ inputs, allInputs, referenceLabels, activeIndex, theme, onSelect }: { inputs: NodeGenerationInput[]; allInputs: NodeGenerationInput[]; referenceLabels?: Record<string, string>; activeIndex: number; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onSelect: (input: NodeGenerationInput) => void }) {
     const selectedRef = useRef(false);
     const activeItemRef = useRef<HTMLButtonElement | null>(null);
 
@@ -254,7 +261,7 @@ function MentionMenu({ inputs, allInputs, referenceLabels, activeIndex, theme, o
             ))}
         </div>
     );
-}
+});
 
 function ResourcePreview({ input }: { input: NodeGenerationInput }) {
     if (input.type === "image" && input.image) return <CanvasPersistedMediaPreview kind="image" url={input.image.dataUrl} storageKey={input.image.storageKey} alt="" className="size-9 rounded-md object-cover" />;

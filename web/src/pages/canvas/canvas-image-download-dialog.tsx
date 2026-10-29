@@ -1,5 +1,5 @@
-import { useRef, useState } from "react";
-import { App, Button, Modal, Radio } from "antd";
+import { useEffect, useRef, useState } from "react";
+import { App, Button, Modal, Progress, Radio } from "antd";
 import { Download } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -7,6 +7,7 @@ import { loadCanvasExport } from "@/lib/canvas/canvas-export-loader";
 import type { ServerAssetVariant, ServerAssetVariants } from "@/services/api/server-assets";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { CanvasNodeData } from "@/types/canvas";
+import type { CanvasImageProgress } from "@/lib/canvas/canvas-image-worker";
 
 export function CanvasImageDownloadDialog({ node, variants, onClose }: {
     node: CanvasNodeData;
@@ -18,6 +19,14 @@ export function CanvasImageDownloadDialog({ node, variants, onClose }: {
     const [downloading, setDownloading] = useState<string | null>(null);
     const [format, setFormat] = useState<"png" | "jpg">("png");
     const busy = useRef(false);
+    const job = useRef<AbortController | null>(null);
+    const [progress, setProgress] = useState<CanvasImageProgress | null>(null);
+    const cancel = () => { job.current?.abort(); job.current = null; busy.current = false; setDownloading(null); setProgress(null); };
+    const close = () => { cancel(); onClose(); };
+    useEffect(() => {
+        cancel();
+        return () => { job.current?.abort(); job.current = null; busy.current = false; };
+    }, [node.id, node.metadata?.storageKey, node.metadata?.content]);
     const options: { key: "primary" | "original" | "export"; title: string; description: string; variant: ServerAssetVariant }[] = variants ? [
         { key: "primary", title: "下载显示结果", description: variants.maskComposited ? "严格蒙版 PNG 主图，保证蒙版区域外像素不变。" : "当前画布显示的图片，保留已保存的原始字节。", variant: variants.primary },
     ] : [];
@@ -27,30 +36,33 @@ export function CanvasImageDownloadDialog({ node, variants, onClose }: {
     const download = async (option: (typeof options)[number]) => {
         if (busy.current) return;
         busy.current = true;
+        const controller = new AbortController(); job.current = controller;
         setDownloading(option.key);
         try {
             const { downloadCanvasImageVariant } = await loadCanvasExport();
-            await downloadCanvasImageVariant(node, option.variant, option.key);
+            await downloadCanvasImageVariant(node, option.variant, option.key, {}, { signal: controller.signal, onProgress: update => { if (!controller.signal.aborted) setProgress(update); } });
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "图片下载失败");
-        } finally { busy.current = false; setDownloading(null); }
+            if (!controller.signal.aborted) message.error(error instanceof Error ? error.message : "图片下载失败");
+        } finally { if (job.current === controller) { job.current = null; busy.current = false; setDownloading(null); setProgress(null); } }
     };
 
     const downloadCurrent = async (selectedFormat: "original" | "png" | "jpg") => {
         if (busy.current) return;
         busy.current = true;
+        const controller = new AbortController(); job.current = controller;
         setDownloading(selectedFormat);
         try {
             const { downloadCanvasImage } = await loadCanvasExport();
-            await downloadCanvasImage(node, selectedFormat);
+            await downloadCanvasImage(node, selectedFormat, { signal: controller.signal, onProgress: update => { if (!controller.signal.aborted) setProgress(update); } });
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "图片下载失败");
-        } finally { busy.current = false; setDownloading(null); }
+            if (!controller.signal.aborted) message.error(error instanceof Error ? error.message : "图片下载失败");
+        } finally { if (job.current === controller) { job.current = null; busy.current = false; setDownloading(null); setProgress(null); } }
     };
 
     return (
-        <Modal title="下载图片" open centered footer={null} onCancel={onClose} closable={!downloading} keyboard={!downloading} mask={{ closable: !downloading }} width={480} destroyOnHidden>
+        <Modal title="下载图片" open centered footer={null} onCancel={close} width={480} destroyOnHidden>
             <div className="space-y-5 py-1">
+                {progress ? <div aria-live="polite"><Progress percent={progress.percent} size="small" /><p className="text-xs">{progress.label}</p><Button size="small" onClick={cancel}>取消处理</Button></div> : null}
                 <div className="space-y-3">
                     <p className="m-0 text-sm font-medium">当前图片导出格式</p>
                     <Radio.Group aria-label="图片下载格式" value={format} disabled={downloading !== null} onChange={event => setFormat(event.target.value)} options={[{ value: "png", label: "PNG（保留透明）" }, { value: "jpg", label: "JPG（白底）" }]} />

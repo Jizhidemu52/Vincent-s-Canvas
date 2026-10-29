@@ -21,17 +21,22 @@ export function CanvasImagePdfDialog({ nodes, defaultSelectedIds = [], defaultNa
     const [busy, setBusy] = useState(false);
     const exporting = useRef(false);
     const active = useRef(true);
+    const job = useRef<AbortController | null>(null);
     const [error, setError] = useState("");
     const [progress, setProgress] = useState<CanvasImagePdfProgress | null>(null);
     const chosenIds = selectedIds.filter((id) => byId.has(id));
     const chosen = new Set(chosenIds);
     const ordered = [...chosenIds.map((id) => byId.get(id)!), ...available.filter((node) => !chosen.has(node.id))];
     const overLimit = chosenIds.length > CANVAS_IMAGE_PDF_LIMITS.images;
+    const mediaIdentity = chosenIds.map(id => { const node = byId.get(id)!; return `${id}:${node.metadata?.storageKey || ""}:${node.metadata?.content || ""}`; }).join("\n");
+    const cancel = () => { job.current?.abort(); job.current = null; exporting.current = false; setBusy(false); setProgress(null); };
+    const close = () => { cancel(); onClose(); };
 
     useEffect(() => {
         active.current = true;
-        return () => { active.current = false; };
+        return () => { active.current = false; job.current?.abort(); job.current = null; };
     }, []);
+    useEffect(() => { cancel(); }, [mediaIdentity]);
 
     const toggle = (id: string) => setSelectedIds((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id]);
     const move = (id: string, delta: number) => setSelectedIds((current) => {
@@ -45,20 +50,21 @@ export function CanvasImagePdfDialog({ nodes, defaultSelectedIds = [], defaultNa
     const exportImages = async () => {
         if (exporting.current) return;
         exporting.current = true;
+        const controller = new AbortController(); job.current = controller;
         setBusy(true);
         setError("");
         try {
             const { saveAs } = await import("file-saver");
-            const result = await createCanvasImagePdfExport({ nodes: chosenIds.map((id) => byId.get(id)!), setName, mode, onProgress: (value) => { if (active.current) setProgress(value); } });
-            if (!active.current) return;
+            const result = await createCanvasImagePdfExport({ nodes: chosenIds.map((id) => byId.get(id)!), setName, mode, signal: controller.signal, onProgress: (value) => { if (active.current && !controller.signal.aborted) setProgress(value); } });
+            if (!active.current || controller.signal.aborted) return;
             saveAs(result.blob, result.fileName);
             void message.success(`已导出 ${result.imageCount} 张图片：${result.fileName}`);
             onClose();
         } catch (cause) {
-            if (active.current) setError(cause instanceof Error ? cause.message : "图片集导出失败，请重试");
+            if (active.current && !controller.signal.aborted) setError(cause instanceof Error ? cause.message : "图片集导出失败，请重试");
         } finally {
-            exporting.current = false;
-            if (active.current) {
+            if (job.current === controller && active.current) {
+                job.current = null; exporting.current = false;
                 setBusy(false);
                 setProgress(null);
             }
@@ -66,10 +72,10 @@ export function CanvasImagePdfDialog({ nodes, defaultSelectedIds = [], defaultNa
     };
 
     return (
-        <Modal title="导出图片集" open onCancel={onClose} closable={!busy} keyboard={!busy} mask={{ closable: !busy }} width={720} centered destroyOnHidden footer={
+        <Modal title="导出图片集" open onCancel={close} width={720} centered destroyOnHidden footer={
             <div className="flex flex-wrap items-center justify-between gap-3">
                 <span style={{ color: token.colorTextSecondary }} className="text-sm">{chosenIds.length} 张图片 · {mode === "merged" ? "1 个多页 PDF" : mode === "separate" ? `${chosenIds.length} 个单页 PDF（ZIP）` : mode === "images" ? "原图 ZIP" : `${mode.toUpperCase()} 图片 ZIP`}</span>
-                <div className="flex gap-2"><Button onClick={onClose} disabled={busy}>取消</Button><Button type="primary" icon={<FileDown size={16} />} loading={busy} disabled={!chosenIds.length || !setName.trim() || overLimit} onClick={() => void exportImages()}>导出并下载</Button></div>
+                <div className="flex gap-2"><Button onClick={busy ? cancel : close}>{busy ? "取消处理" : "取消"}</Button><Button type="primary" icon={<FileDown size={16} />} loading={busy} disabled={!chosenIds.length || !setName.trim() || overLimit} onClick={() => void exportImages()}>导出并下载</Button></div>
             </div>
         }>
             <div className="space-y-4 py-2">

@@ -2,8 +2,8 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
 
-// Exercise the real page callback with a deferred chunk load: React state alone cannot close this window.
-const source = ts.createSourceFile("project.tsx", readFileSync(new URL("../src/pages/canvas/project.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+// Exercise the page-private batch callback with a deferred chunk load: React state alone cannot close this window.
+const source = ts.createSourceFile("use-canvas-batch-edit.ts", readFileSync(new URL("../src/pages/canvas/use-canvas-batch-edit.ts", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 function batchCallback(scope: Record<string, unknown>) {
     let callback: ts.Expression | undefined;
     const visit = (node: ts.Node) => {
@@ -21,7 +21,7 @@ test("batch double clicks before lazy load produce only one execution and releas
     const locks = new Set<string>();
     let loads = 0, executions = 0, blocked = 0;
     const run = batchCallback({ generationDispatchLocksRef: { current: locks }, setBatchEditRunning: () => {},
-        loadBatchEditRuntime: () => { loads++; return chunk.promise; }, message: { info: () => blocked++, error: () => {} }, Error });
+        loadBatchEditRuntime: () => { loads++; return chunk.promise; }, useUserStore: { getState: () => ({ user: null }) }, message: { info: () => blocked++, error: () => {} }, Error });
     const first = run();
     expect([...locks]).toEqual(["canvas-batch"]);
     await run();
@@ -37,7 +37,7 @@ test("a normal shared-generation lock blocks batch entry and a failed load relea
     const locks = new Set(["shared-config"]);
     let loads = 0, errors = 0;
     const run = batchCallback({ generationDispatchLocksRef: { current: locks }, setBatchEditRunning: () => {},
-        loadBatchEditRuntime: async () => { loads++; throw new Error("chunk unavailable"); }, message: { info: () => {}, error: () => errors++ }, Error });
+        loadBatchEditRuntime: async () => { loads++; throw new Error("chunk unavailable"); }, useUserStore: { getState: () => ({ user: null }) }, message: { info: () => {}, error: () => errors++ }, Error });
     await run();
     expect(loads).toBe(0);
     expect([...locks]).toEqual(["shared-config"]);

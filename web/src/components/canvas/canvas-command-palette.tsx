@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { Input, Modal, type InputRef } from "antd";
 import { canvasActionShortcut, type CanvasActionId } from "@/lib/canvas/canvas-actions";
 import { canvasCommandCatalog, filterCanvasCommands } from "@/lib/canvas/canvas-command-catalog";
@@ -19,6 +19,8 @@ export function CanvasCommandPalette({ nodes, bindings, onLocate, onAsset, onClo
     onAsset: (asset: InsertAssetPayload) => void; onClose: () => void;
 }) {
     const [query, setQuery] = useState("");
+    const queryRef = useRef("");
+    const deferredQuery = useDeferredValue(query);
     const [active, setActive] = useState(0);
     const [shortcutsOpen, setShortcutsOpen] = useState(false);
     const input = useRef<InputRef>(null);
@@ -27,7 +29,7 @@ export function CanvasCommandPalette({ nodes, bindings, onLocate, onAsset, onClo
     const flags = useModuleStore(state => state.flags);
     const tools = useBusinessConfigStore(state => state.tools);
     const navigate = useNavigate(), { id } = useParams<{ id: string }>();
-    const matches = useMemo(() => {
+    const items = useMemo(() => {
         const actions = canvasCommandCatalog.flatMap(action => {
             const routes = { home: "/", projects: "/canvas", referenceImport: `/reference-import${id ? `?returnTo=${encodeURIComponent(`/canvas/${id}`)}` : ""}` };
             const binding = action.id in routes ? { run: () => navigate(routes[action.id as keyof typeof routes]) }
@@ -44,20 +46,27 @@ export function CanvasCommandPalette({ nodes, bindings, onLocate, onAsset, onClo
             if (!current || !canUserAccessAsset(current, useUserStore.getState().user)) return;
             onAsset(current.kind === "text" ? { kind: "text", title: current.title, content: current.data.content } : current.kind === "image" ? { kind: "image", title: current.title, ...current.data } : { kind: "video", title: current.title, ...current.data });
         } }));
-        return filterCanvasCommands([...actions, ...nodeItems, ...assetItems], query).slice(0, 80);
-    }, [query, bindings, flags, tools, nodes, assets, user, onLocate, onAsset, id, navigate]);
-    useEffect(() => { setActive(0); }, [query]);
+        return [...actions, ...nodeItems, ...assetItems];
+    }, [bindings, flags, tools, nodes, assets, user, onLocate, onAsset, id, navigate]);
+    const matches = useMemo(() => filterCanvasCommands(items, deferredQuery).slice(0, 80), [items, deferredQuery]);
     useEffect(() => { document.getElementById(`canvas-command-${active}`)?.scrollIntoView({ block: "nearest" }); }, [active]);
-    const execute = (index: number) => { const item = matches[index]; if (item) { if (item.id !== "shortcuts") onClose(); item.run(); } };
+    // Rendering may lag, execution must not. Recheck even pointer selections
+    // against the current query so an old visible row cannot run a wrong action.
+    const currentMatches = () => queryRef.current === deferredQuery ? matches : filterCanvasCommands(items, queryRef.current).slice(0, 80);
+    const execute = (index: number, clickedId?: string) => {
+        const current = currentMatches();
+        const item = clickedId ? current.find(item => item.id === clickedId) : current[Math.min(index, current.length - 1)];
+        if (item) { if (item.id !== "shortcuts") onClose(); item.run(); }
+    };
     if (shortcutsOpen) return <CanvasShortcutsDialog open onClose={onClose} />;
     return <Modal open title="命令与搜索" footer={null} centered width={620} onCancel={onClose} afterOpenChange={open => { if (open) input.current?.focus(); }}>
         <Input ref={input} value={query} placeholder="搜索命令、画布节点或本地素材…" aria-label="搜索命令、节点和素材" role="combobox" aria-expanded="true" aria-controls="canvas-command-results" aria-activedescendant={matches[active] ? `canvas-command-${active}` : undefined}
-            onChange={event => setQuery(event.target.value)} onKeyDown={event => {
+            onChange={event => { queryRef.current = event.target.value; setQuery(event.target.value); setActive(0); }} onKeyDown={event => {
                 if (event.nativeEvent.isComposing) return;
-                if (["ArrowDown", "ArrowUp"].includes(event.key)) { event.preventDefault(); setActive(value => matches.length ? (value + (event.key === "ArrowDown" ? 1 : -1) + matches.length) % matches.length : 0); }
-                if (event.key === "Enter") { event.preventDefault(); execute(Math.min(active, matches.length - 1)); }
+                if (["ArrowDown", "ArrowUp"].includes(event.key)) { event.preventDefault(); const length = currentMatches().length; setActive(value => length ? (value + (event.key === "ArrowDown" ? 1 : -1) + length) % length : 0); }
+                if (event.key === "Enter") { event.preventDefault(); execute(active); }
             }} />
-        <div id="canvas-command-results" role="listbox" aria-label="搜索结果" className="cw-command-results">{matches.map((item, index) => <button id={`canvas-command-${index}`} key={item.id} type="button" role="option" aria-selected={active === index} onMouseEnter={() => setActive(index)} onClick={() => execute(index)}>
+        <div id="canvas-command-results" role="listbox" aria-label="搜索结果" aria-busy={query !== deferredQuery} className="cw-command-results">{matches.map((item, index) => <button id={`canvas-command-${index}`} key={item.id} type="button" role="option" aria-selected={active === index} onMouseEnter={() => setActive(index)} onClick={() => execute(index, item.id)}>
             <span><small>{item.category}</small>{item.label}</span><kbd>{item.shortcut}</kbd>
         </button>)}{!matches.length && <p role="status">没有匹配的可用操作或素材</p>}</div>
         <p className="cw-command-help">↑ ↓ 选择 · Enter 执行 · Esc 关闭 · 云端素材请打开“我的素材”</p>

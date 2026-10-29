@@ -71,7 +71,7 @@ function editor(initial = project(), previous = frame(initial), loadUndoAction: 
             if (path !== "@/lib/canvas/canvas-agent-undo-action") throw new Error(`Unexpected dynamic import: ${path}`);
             return loadUndoAction();
         },
-        projectId: initial.id, currentProject: initial, projectLoaded: true, usePerformanceScenario: false, batchEditRunning: false, runningNodeId: null,
+        projectId: initial.id, projectTitle: initial.title, projectLoaded: true, usePerformanceScenario: false, batchEditRunning: false, runningNodeId: null,
         historyRef, lastHistoryRef, applyingHistoryRef, pendingHistoryEntryRef, historyPausedRef, historyCommitTimerRef, agentUndoRecordRef, selectedNodeIdsRef, generationRequestsRef,
         nodesRef: { get current() { return live.nodes; }, set current(nodes) { live = { ...live, nodes }; } },
         connectionsRef: { get current() { return live.connections; }, set current(connections) { live = { ...live, connections }; } },

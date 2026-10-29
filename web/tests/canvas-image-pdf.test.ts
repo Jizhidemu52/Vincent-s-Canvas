@@ -176,3 +176,11 @@ test("batch cover selection expands child order and all-images list does not rep
     expect(canvasImageExportSelection(nodes, ["single", "root", "a"]).map((item) => item.id)).toEqual(["single", "b", "a"]);
     expect(canvasImageExportSelection([node("old-root", "封面", { isBatchRoot: true, batchChildIds: ["missing"] })]).map((item) => item.id)).toEqual(["old-root"]);
 });
+
+test("cancellation between sequential pages stops loading later sources and returns no archive", async () => {
+    const controller = new AbortController(); const loaded: string[] = [];
+    await expect(createCanvasImagePdfExport({ nodes: [node("one"), node("two")], setName: "cancel", mode: "images", signal: controller.signal }, {
+        loadImage: async item => { loaded.push(item.id); controller.abort(); return redWide; },
+    })).rejects.toMatchObject({ name: "AbortError" });
+    expect(loaded).toEqual(["one"]);
+});

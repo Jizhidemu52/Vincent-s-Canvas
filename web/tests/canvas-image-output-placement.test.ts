@@ -42,7 +42,7 @@ test("shared per-image results anchor beyond the config and avoid earlier tasks 
 });
 
 test("the image execution path includes the shared config as an anchor and preserves empty-node positions", () => {
-    const project = readFileSync(new URL("../src/pages/canvas/project.tsx", import.meta.url), "utf8");
+    const project = readFileSync(new URL("../src/pages/canvas/use-canvas-generation.ts", import.meta.url), "utf8");
     const expression = project.match(/const outputPosition = ([\s\S]*?);\r?\n/)?.[1];
     expect(expression).toBeDefined();
     const config = { ...source, type: CanvasNodeType.Config, position: { x: 440, y: 210 }, width: 400, height: 460 };
