@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { uiText } from "@/lib/i18n";
+import { i18nHarness } from "./helpers/i18n-harness";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
 import { CanvasNodeType, type CanvasNodeData, type CanvasNodeMetadata } from "@/types/canvas";
@@ -39,6 +41,7 @@ function harness(target = node(), options: { recover?: () => Promise<unknown>; r
     const generate = async (...args: unknown[]) => { record("image", ...args); return options.generate ? options.generate(...args) : { metadata, uploaded: image }; };
     const unexpected = () => { throw new Error("Unexpected external generation request"); };
     const dependencies: Record<string, unknown> = {
+        "@/lib/i18n": i18nHarness,
         "@/constant/canvas": { NODE_DEFAULT_SIZE },
         "@/types/canvas": { CanvasNodeType },
         "@/hooks/use-tool-config": { currentToolConfig: (value: unknown) => value, canvasToolKey: () => "canvas-image" },
@@ -183,6 +186,7 @@ function entry() {
     const module = Promise.withResolvers<{ retryCanvasNode: typeof retryCanvasNode }>();
     const invoked: unknown[] = [];
     const scope = {
+        uiText,
         ...h.context, retryScope: { active: true }, designProjectIdRef: { current: "project-a" }, projectSaveQueueRef: { current: null },
         useUserStore: { getState: () => ({ user: owner ? { id: owner } : null }) }, useCallback: (fn: unknown) => fn,
         require: (name: string) => { if (name !== "./canvas-node-retry-runtime") throw new Error(name); loads++; return module.promise; },

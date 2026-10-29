@@ -176,8 +176,8 @@ export function promptDestination(targetTool: PromptTargetTool, reuseToken: stri
     return `/image?${params}`;
 }
 
-export function formatPromptDate(value: string) {
+export function formatPromptDate(value: string, locale = "zh-CN") {
     const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? "" : new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
+    return Number.isNaN(date.getTime()) ? "" : new Intl.DateTimeFormat(locale, { year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
 }
 import { createClientId } from "@/lib/client-id";

@@ -40,7 +40,7 @@ function harness() {
         useEffect(effect: () => (() => void) | undefined, deps: unknown[]) { const index = cursor++; if (!equal(deps, effects[index]?.deps)) queued.push(() => { effects[index]?.cleanup?.(); effects[index] = { deps, cleanup: effect() }; }); },
     };
     const module = { exports: {} as any };
-    new Function('require', 'module', 'exports', code)((name: string) => name === 'react' ? hooks : name === 'antd' ? { Button: 'Button' } : requireModule(name), module, module.exports);
+    new Function('require', 'module', 'exports', code)((name: string) => name === '@/lib/i18n' ? requireModule('../../tests/helpers/i18n-harness').i18nHarness : name === 'react' ? hooks : name === 'antd' ? { Button: 'Button' } : requireModule(name), module, module.exports);
     return {
         render(props: any) {
             cursor = 0; const elements = all(module.exports.InfiniteLoadMore(props));

@@ -1,3 +1,4 @@
+import { uiText, useUiLocale } from "@/lib/i18n";
 import { Button } from "antd";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -16,6 +17,7 @@ type InfiniteLoadMoreProps = {
 
 /** A failed page is retried only by a deliberate button click, never by re-observation. */
 export function InfiniteLoadMore(props: InfiniteLoadMoreProps) {
+    useUiLocale();
     const sentinel = useRef<HTMLDivElement>(null);
     const mounted = useRef(false);
     const inFlight = useRef(false);
@@ -42,7 +44,7 @@ export function InfiniteLoadMore(props: InfiniteLoadMoreProps) {
             if (result && typeof result === "object" && "error" in result && result.error) throw result.error;
         } catch (error) {
             if (mounted.current && latest.current.resetKey === current.resetKey) {
-                setFailure(error instanceof Error ? error.message : "下一页加载失败");
+                setFailure(error instanceof Error ? error.message : uiText("下一页加载失败"));
             }
         } finally {
             inFlight.current = false;
@@ -64,8 +66,8 @@ export function InfiniteLoadMore(props: InfiniteLoadMoreProps) {
     const failed = Boolean(props.error || failure);
     return <div ref={sentinel} data-infinite-load-more={props.label} className="flex flex-col items-center gap-2 py-3">
         <Button loading={props.loading || busy} disabled={props.disabled || props.loading || busy} onClick={() => void load(true)}>
-            {failed ? `重试${props.label}` : props.label}
+            {failed ? uiText("重试{label}", { label: props.label }) : props.label}
         </Button>
-        {failed ? <p role="alert" className="text-sm text-red-600">自动加载已暂停，请点击按钮重试。{failure}</p> : null}
+        {failed ? <p role="alert" className="text-sm text-red-600">{uiText("自动加载已暂停，请点击按钮重试。")}{failure}</p> : null}
     </div>;
 }

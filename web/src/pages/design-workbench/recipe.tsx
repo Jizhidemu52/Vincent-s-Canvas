@@ -1,3 +1,4 @@
+import { uiText, useUiText } from "@/lib/i18n";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowLeft, Download, ImagePlus, LoaderCircle, Palette, Pause, Play, RefreshCw, Save, Square, Upload, X } from "lucide-react";
@@ -42,18 +43,20 @@ const errorText = (error: unknown) => (error instanceof Error ? error.message : 
 const cleanName = (name: string) => (name || "系列配方").replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-").slice(0, 80);
 
 export default function RecipePage() {
+    useUiText();
     const ownerId = useUserStore((state) => state.user?.id);
     return ownerId ? (
         <RecipeWorkspace key={ownerId} ownerId={ownerId} />
     ) : (
         <main className="series-recipe-page">
-            <h1>系列配方</h1>
-            <p>正在确认当前员工身份，请从有效的登录会话进入。</p>
+            <h1>{uiText("系列配方")}</h1>
+            <p>{uiText("正在确认当前员工身份，请从有效的登录会话进入。")}</p>
         </main>
     );
 }
 
 function RecipeWorkspace({ ownerId }: { ownerId: string }) {
+    useUiText();
     const effectiveConfig = useEffectiveConfig();
     const user = useUserStore((state) => state.user);
     const enabled = useToolEnabled("series-recipe");
@@ -154,10 +157,10 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
                 const saved = await storage.getItem<unknown>(scope);
                 if (alive && current() && saved) {
                     commit(parseRecipeProject(saved, ownerId));
-                    setNotice("已恢复当前员工的本地项目。未完成任务不会自动重发。");
+                    setNotice(uiText("已恢复当前员工的本地项目。未完成任务不会自动重发。"));
                 }
             } catch (caught) {
-                if (alive && current()) setError(`本地项目读取失败：${errorText(caught)}`);
+                if (alive && current()) setError(uiText("本地项目读取失败：{value1}", { value1: errorText(caught) }));
             } finally {
                 if (alive && current()) setReady(true);
             }
@@ -191,10 +194,10 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
         const timer = window.setTimeout(() => {
             void persist(project)
                 .then(() => {
-                    if (current()) setNotice("已自动保存到当前员工的浏览器；不等于云端备份。");
+                    if (current()) setNotice(uiText("已自动保存到当前员工的浏览器；不等于云端备份。"));
                 })
                 .catch((caught) => {
-                    if (current()) setError(`自动保存失败：${errorText(caught)}`);
+                    if (current()) setError(uiText("自动保存失败：{value1}", { value1: errorText(caught) }));
                 });
         }, 450);
         return () => window.clearTimeout(timer);
@@ -234,7 +237,7 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
         try {
             await work();
         } catch (caught) {
-            if (current()) setError(errorText(caught));
+            if (current()) setError(uiText(errorText(caught)));
         } finally {
             busy.current = false;
             if (current()) setWorking(false);
@@ -251,7 +254,7 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
             const images = [...old.references];
             images[slot] = { id: createClientUuid(), name: file.name, originalFileName: file.name, type: file.type, dataUrl };
             commit({ ...old, references: images });
-            setNotice(`已读取 ${file.name}，原图不会被修改。`);
+            setNotice(uiText("已读取 {name}，原图不会被修改。", { name: file.name }));
         });
 
     const makeRunner = (snapshot: RecipeRun) => {
@@ -286,11 +289,11 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
     const start = async (mode: "new" | "failed" | "waiting" | "recover") => {
         if (busy.current || runner.current?.active || !ready || !current()) return;
         if (!enabled || user?.status !== "active") {
-            setError("当前账号或系列配方不可用");
+            setError(uiText("当前账号或系列配方不可用"));
             return;
         }
         if (mode === "new" && (validation || uncertain)) {
-            setError(validation || "请先核查原任务，避免重复付费生成");
+            setError(uiText(validation || "请先核查原任务，避免重复付费生成"));
             return;
         }
         busy.current = true;
@@ -305,7 +308,7 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
             if (mode === "recover") await instance.recover();
             else await instance.start(mode === "failed" ? "failed" : "waiting");
         } catch (caught) {
-            if (current()) setError(errorText(caught));
+            if (current()) setError(uiText(errorText(caught)));
         } finally {
             busy.current = false;
             if (current()) {
@@ -335,7 +338,7 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
             const output = await portableProject();
             if (current()) {
                 saveAs(new Blob([JSON.stringify(output, null, 2)], { type: "application/json" }), `${cleanName(output.form.series)}-系列配方.json`);
-                setNotice("已导出完整项目，包含原图、候选、冻结指令与任务标识。文件包含设计资料，请妥善保管。");
+                setNotice(uiText("已导出完整项目，包含原图、候选、冻结指令与任务标识。文件包含设计资料，请妥善保管。"));
             }
         });
     const importProject = (file: File) =>
@@ -348,7 +351,7 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
             runner.current = null;
             commit(imported);
             await persist(imported);
-            setNotice("项目已导入。候选图片已保留，未完成任务不会自动重发。");
+            setNotice(uiText("项目已导入。候选图片已保留，未完成任务不会自动重发。"));
         });
     const exportBoard = () =>
         action(async () => {
@@ -397,12 +400,12 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
             const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((value) => (value ? resolve(value) : reject(new Error("方案板导出失败"))), "image/png"));
             if (current()) {
                 saveAs(blob, `${cleanName(source.form.series)}-方案板.png`);
-                setNotice("已导出所选候选的 PNG 方案板。");
+                setNotice(uiText("已导出所选候选的 PNG 方案板。"));
             }
         });
     const applyColor = () => {
         if (!/^#?[\da-f]{6}$/i.test(colorDraft)) {
-            setError("请输入完整六位 HEX 色值，例如 #91A8A1");
+            setError(uiText("请输入完整六位 HEX 色值，例如 #91A8A1"));
             return;
         }
         const hex = `${colorDraft.startsWith("#") ? "" : "#"}${colorDraft}`.toLowerCase();
@@ -416,114 +419,104 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
                 <div>
                     <Link to="/creative" className="sr-back">
                         <ArrowLeft size={15} />
-                        创意设计
-                    </Link>
-                    <h1>系列配方</h1>
-                    <p>一份参考，多条设计方向。逐分支真实生成，保留每一步的输入与结果。</p>
+                        {uiText("创意设计")}</Link>
+                    <h1>{uiText("系列配方")}</h1>
+                    <p>{uiText("一份参考，多条设计方向。逐分支真实生成，保留每一步的输入与结果。")}</p>
                 </div>
                 <span className="sr-badge">
                     <Palette size={15} />
-                    系列设计工作台
-                </span>
+                    {uiText("系列设计工作台")}</span>
             </header>
             <div className="sr-workspace">
-                <aside className="sr-panel sr-inputs" aria-label="系列配方设置">
+                <aside className="sr-panel sr-inputs" aria-label={uiText("系列配方设置")}>
                     <div className="sr-panel-heading">
-                        <h2>01 / 设置配方</h2>
-                        <span>输入与约束</span>
+                        <h2>{uiText("01 / 设置配方")}</h2>
+                        <span>{uiText("输入与约束")}</span>
                     </div>
                     <fieldset disabled={locked} className="sr-fields">
                         <label className="sr-field">
-                            选择流程
-                            <select aria-label="选择流程" value={project.form.kind} onChange={(event) => updateForm({ kind: event.target.value as RecipeForm["kind"] })}>
-                                <option value="structure">参考款 → 保留结构 → 系列配色</option>
-                                <option value="pattern">产品与图案 → 定位 → 系列候选</option>
+                            {uiText("选择流程")}<select aria-label={uiText("选择流程")} value={project.form.kind} onChange={(event) => updateForm({ kind: event.target.value as RecipeForm["kind"] })}>
+                                <option value="structure">{uiText("参考款 → 保留结构 → 系列配色")}</option>
+                                <option value="pattern">{uiText("产品与图案 → 定位 → 系列候选")}</option>
                             </select>
                         </label>
-                        <RecipeUpload label="参考底图（必需）" image={project.references[0]} disabled={locked} onUpload={(file) => void upload(0, file)} onRemove={() => commit({ ...projectRef.current, references: [] })} />
+                        <RecipeUpload label={uiText("参考底图（必需）")} image={project.references[0]} disabled={locked} onUpload={(file) => void upload(0, file)} onRemove={() => commit({ ...projectRef.current, references: [] })} />
                         {project.form.kind === "pattern" && (
                             <RecipeUpload
-                                label="图案参考（可选）"
+                                label={uiText("图案参考（可选）")}
                                 image={project.references[1]}
                                 disabled={locked || !project.references[0]}
                                 onUpload={(file) => void upload(1, file)}
                                 onRemove={() => commit({ ...projectRef.current, references: projectRef.current.references.slice(0, 1) })}
                             />
                         )}
-                        {project.form.kind === "pattern" && <p className="sr-help">未提供图案参考时，只使用底图已有图案及你写明的方向，不注入内置花型。</p>}
+                        {project.form.kind === "pattern" && <p className="sr-help">{uiText("未提供图案参考时，只使用底图已有图案及你写明的方向，不注入内置花型。")}</p>}
                         <label className="sr-field">
-                            系列名称
-                            <input aria-label="系列名称" value={project.form.series} maxLength={80} onChange={(event) => updateForm({ series: event.target.value })} />
+                            {uiText("系列名称")}<input aria-label={uiText("系列名称")} value={project.form.series} maxLength={80} onChange={(event) => updateForm({ series: event.target.value })} />
                         </label>
                         <label className="sr-field">
-                            必须保留
-                            <textarea aria-label="必须保留" value={project.form.constraints} maxLength={2000} rows={3} onChange={(event) => updateForm({ constraints: event.target.value })} />
+                            {uiText("必须保留")}<textarea aria-label={uiText("必须保留")} value={project.form.constraints} maxLength={2000} rows={3} onChange={(event) => updateForm({ constraints: event.target.value })} />
                         </label>
                         <label className="sr-field">
-                            设计方向
-                            <textarea aria-label="设计方向" value={project.form.prompt} maxLength={3000} rows={3} onChange={(event) => updateForm({ prompt: event.target.value })} />
+                            {uiText("设计方向")}<textarea aria-label={uiText("设计方向")} value={project.form.prompt} maxLength={3000} rows={3} onChange={(event) => updateForm({ prompt: event.target.value })} />
                         </label>
-                        <p className="sr-help">每次仅生成 1 个候选；可修改方向后再次发起独立任务。历史候选保留。</p>
+                        <p className="sr-help">{uiText("每次仅生成 1 个候选；可修改方向后再次发起独立任务。历史候选保留。")}</p>
                         {project.form.kind === "structure" ? (
-                            <section className="sr-palette" aria-label="系列配色">
-                                <h3>系列配色</h3>
+                            <section className="sr-palette" aria-label={uiText("系列配色")}>
+                                <h3>{uiText("系列配色")}</h3>
                                 <div className="sr-swatches">
                                     {project.form.palette.slice(0, project.form.count).map((color, index) => (
-                                        <button key={index} type="button" aria-label={`编辑第 ${index + 1} 色 ${color.hex}`} aria-pressed={index === activeColor} onClick={() => setActiveColor(index)} style={{ background: color.hex }}>
+                                        <button key={index} type="button" aria-label={uiText("编辑第 {value1} 色 {hex}", { value1: index + 1, hex: color.hex })} aria-pressed={index === activeColor} onClick={() => setActiveColor(index)} style={{ background: color.hex }}>
                                             <span>{index + 1}</span>
                                         </button>
                                     ))}
                                 </div>
                                 <div className="sr-segments">
                                     <button type="button" aria-pressed={paletteMode === "manual"} onClick={() => setPaletteMode("manual")}>
-                                        手动选色
-                                    </button>
+                                        {uiText("手动选色")}</button>
                                     <button type="button" aria-pressed={paletteMode === "random"} onClick={() => setPaletteMode("random")}>
-                                        随机配色
-                                    </button>
+                                        {uiText("随机配色")}</button>
                                 </div>
                                 {paletteMode === "random" && (
                                     <div className="sr-inline">
-                                        <select aria-label="配色风格" value={project.form.paletteStyle} onChange={(event) => updateForm({ paletteStyle: event.target.value as RecipeForm["paletteStyle"] })}>
-                                            <option value="soft">柔和</option>
-                                            <option value="vivid">鲜明</option>
-                                            <option value="earth">大地</option>
-                                            <option value="free">自由</option>
+                                        <select aria-label={uiText("配色风格")} value={project.form.paletteStyle} onChange={(event) => updateForm({ paletteStyle: event.target.value as RecipeForm["paletteStyle"] })}>
+                                            <option value="soft">{uiText("柔和")}</option>
+                                            <option value="vivid">{uiText("鲜明")}</option>
+                                            <option value="earth">{uiText("大地")}</option>
+                                            <option value="free">{uiText("自由")}</option>
                                         </select>
                                         <button type="button" className="sr-button" onClick={() => updateForm({ palette: randomRecipePalette(project.form.paletteStyle) })}>
                                             <RefreshCw size={13} />
-                                            换一组
-                                        </button>
+                                            {uiText("换一组")}</button>
                                     </div>
                                 )}
                                 <label className="sr-field">
-                                    第 {activeColor + 1} 色 · {project.form.palette[activeColor]!.name}
+                                    {uiText("第")}{activeColor + 1} {uiText(" 色 · ")}{project.form.palette[activeColor]!.name}
                                     <div className="sr-color-input">
                                         <input
                                             type="color"
-                                            aria-label="选择当前颜色"
+                                            aria-label={uiText("选择当前颜色")}
                                             value={project.form.palette[activeColor]!.hex}
                                             onChange={(event) => {
                                                 const hex = event.target.value;
                                                 updateForm({ palette: project.form.palette.map((color, index) => (index === activeColor ? { name: `自选色 ${index + 1}`, hex } : color)) });
                                             }}
                                         />
-                                        <input aria-label="当前颜色 HEX" value={colorDraft} maxLength={7} onChange={(event) => setColorDraft(event.target.value)} />
+                                        <input aria-label={uiText("当前颜色 HEX")} value={colorDraft} maxLength={7} onChange={(event) => setColorDraft(event.target.value)} />
                                         <button type="button" className="sr-button" onClick={applyColor}>
-                                            应用
-                                        </button>
+                                            {uiText("应用")}</button>
                                     </div>
                                 </label>
-                                <p className="sr-help">数字配色只表达屏幕近似方向，不对应 Pantone 标准，也不保证模型逐像素遵循色值。</p>
+                                <p className="sr-help">{uiText("数字配色只表达屏幕近似方向，不对应 Pantone 标准，也不保证模型逐像素遵循色值。")}</p>
                             </section>
                         ) : (
                             <section className="sr-positions">
-                                <h3>每个候选的定位要求</h3>
+                                <h3>{uiText("每个候选的定位要求")}</h3>
                                 {project.form.positions.slice(0, project.form.count).map((position, index) => (
                                     <label key={index} className="sr-field">
-                                        候选 {index + 1}
+                                        {uiText("候选")}{index + 1}
                                         <input
-                                            aria-label={`候选 ${index + 1} 定位`}
+                                            aria-label={uiText("候选 {value1} 定位", { value1: index + 1 })}
                                             value={position}
                                             maxLength={160}
                                             onChange={(event) => updateForm({ positions: project.form.positions.map((value, positionIndex) => (positionIndex === index ? event.target.value : value)) })}
@@ -533,83 +526,83 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
                             </section>
                         )}
                         <details className="sr-details">
-                            <summary>模型与出图设置</summary>
+                            <summary>{uiText("模型与出图设置")}</summary>
                             <ModelPicker toolKey="series-recipe" config={config} value={config.model} onChange={(value) => updateSettings("imageModel", value)} capability="image" fullWidth disabled={locked} />
                             <ImageSettingsPanel config={config} referenceCount={refs.length} onConfigChange={updateSettings} theme={theme} maxCount={1} showTitle={false} />
                         </details>
                         <details className="sr-details">
-                            <summary>查看候选 1 的设计输入</summary>
+                            <summary>{uiText("查看候选 1 的设计输入")}</summary>
                             <pre>{JSON.stringify(recipePromptInput(project.form, 0, refs.length > 1).fields, null, 2)}</pre>
                         </details>
                     </fieldset>
                 </aside>
-                <section className="sr-stage" aria-label="候选结果">
+                <section className="sr-stage" aria-label={uiText("候选结果")}>
                     <div className="sr-stage-heading">
                         <div>
                             <span className="sr-eyebrow">SERIES / CANDIDATES</span>
-                            <h2>{run?.form.series || project.form.series || "未命名系列"}</h2>
+                            <h2>{run?.form.series || project.form.series || uiText("未命名系列")}</h2>
                         </div>
                         <span className="sr-phase" role="status">
-                            {recovering ? "正在查询原任务" : active ? (paused ? "暂停后续分支 · 当前任务继续" : "真实模型生成中") : uncertain ? "有原任务待核查" : run ? `${succeeded} / ${branches.length} 已完成` : "等待参考图"}
+                            {recovering ? uiText("正在查询原任务") : active ? (paused ? uiText("暂停后续分支 · 当前任务继续") : uiText("真实模型生成中")) : uncertain ? uiText("有原任务待核查") : run ? uiText("{succeeded} / {length} 已完成", { succeeded: succeeded, length: branches.length }) : uiText("等待参考图")}
                         </span>
                     </div>
                     <ol className="sr-flow">
                         <li>
                             <span>01</span>
-                            <b>参考图</b>
-                            <small>{run?.references[0]?.name || project.references[0]?.name || "上传产品底图"}</small>
+                            <b>{uiText("参考图")}</b>
+                            <small>{run?.references[0]?.name || project.references[0]?.name || uiText("上传产品底图")}</small>
                         </li>
                         <li>
                             <span>02</span>
-                            <b>整理约束</b>
-                            <small>用户输入，不冒充 AI 分析</small>
+                            <b>{uiText("整理约束")}</b>
+                            <small>{uiText("用户输入，不冒充 AI 分析")}</small>
                         </li>
                         <li>
                             <span>03</span>
-                            <b>{run?.form.count || project.form.count} 个独立分支</b>
-                            <small>每个候选调用一次模型</small>
+                            <b>{run?.form.count || project.form.count} {uiText(" 个独立分支")}</b>
+                            <small>{uiText("每个候选调用一次模型")}</small>
                         </li>
                         <li>
                             <span>04</span>
-                            <b>选择与方案板</b>
-                            <small>{selected.length} 个已入选</small>
+                            <b>{uiText("选择与方案板")}</b>
+                            <small>{selected.length} {uiText(" 个已入选")}</small>
                         </li>
                     </ol>
-                    {dirty && <p className="sr-callout">当前草稿已修改。下方结果与失败重试仍使用原轮次冻结的参考图、配方和指令；“生成新一轮”使用当前设置。</p>}
+                    {dirty && <p className="sr-callout">{uiText("当前草稿已修改。下方结果与失败重试仍使用原轮次冻结的参考图、配方和指令；“生成新一轮”使用当前设置。")}</p>}
                     {!run ? (
                         <div className="sr-empty">
-                            {project.references[0] ? <img src={project.references[0].dataUrl} alt="当前参考底图预览" /> : <ImagePlus size={52} strokeWidth={1} />}
-                            <h3>{project.references[0] ? "参考图已就位" : "从你的产品参考开始"}</h3>
-                            <p>设置一个配色或定位方向，每次生成 1 个候选。修改方向后可再次生成；不会使用模拟改色图代替模型结果。</p>
+                            {project.references[0] ? <img src={project.references[0].dataUrl} alt={uiText("当前参考底图预览")} /> : <ImagePlus size={52} strokeWidth={1} />}
+                            <h3>{project.references[0] ? uiText("参考图已就位") : uiText("从你的产品参考开始")}</h3>
+                            <p>{uiText("设置一个配色或定位方向，每次生成 1 个候选。修改方向后可再次生成；不会使用模拟改色图代替模型结果。")}</p>
                         </div>
                     ) : (
                         <div className="sr-results">
                             {branches.map((branch) => (
                                 <article key={branch.id} className={`sr-result ${branch.selected ? "is-selected" : ""}`}>
-                                    <button className="sr-result-image" type="button" disabled={!branch.images[0]} aria-label={`查看候选 ${branch.index + 1} 大图`} onClick={() => setPreview(branch.images[0] || null)}>
+                                    <button className="sr-result-image" type="button" disabled={!branch.images[0]} aria-label={uiText("查看候选 {value1} 大图", { value1: branch.index + 1 })} onClick={() => setPreview(branch.images[0] || null)}>
                                         {branch.images[0] ? (
-                                            <img src={branch.images[0].dataUrl} alt={`候选 ${branch.index + 1}`} />
+                                            <img src={branch.images[0].dataUrl} alt={uiText("候选 {value1}", { value1: branch.index + 1 })} />
                                         ) : (
                                             <span>
                                                 {branch.status === "running" ? <LoaderCircle size={28} className="animate-spin" /> : <Palette size={28} strokeWidth={1} />}
-                                                {branch.optimizing ? "正在优化提示词…" : recipeStatusLabels[branch.status]}
+                                                {branch.optimizing ? uiText("正在优化提示词…") : recipeStatusLabels[branch.status]}
                                             </span>
                                         )}
                                     </button>
                                     <div className="sr-result-body">
                                         <div className="sr-result-title">
                                             <h3>
-                                                {run.form.kind === "structure" && <i style={{ background: run.form.palette[branch.index]!.hex }} />}候选 {String(branch.index + 1).padStart(2, "0")}
+                                                {run.form.kind === "structure" && <i style={{ background: run.form.palette[branch.index]!.hex }} />}{uiText("候选 ")}{String(branch.index + 1).padStart(2, "0")}
                                             </h3>
-                                            <span>{branch.optimizing ? "正在优化提示词…" : recipeStatusLabels[branch.status]}</span>
+                                            <span>{branch.optimizing ? uiText("正在优化提示词…") : recipeStatusLabels[branch.status]}</span>
                                         </div>
                                         <p>{run.form.kind === "structure" ? `${run.form.palette[branch.index]!.name} · ${run.form.palette[branch.index]!.hex.toUpperCase()}` : run.form.positions[branch.index]}</p>
                                         {branch.error && <p className="sr-error">{branch.error}</p>}
                                         <small>
-                                            已尝试 {branch.attempts} 次{branch.taskIds[0] ? ` · 任务 ${branch.taskIds[0].slice(0, 10)}…` : ""}
+                                            {uiText("已尝试 {count} 次", { count: branch.attempts })}{branch.taskIds[0] ? uiText(" · 任务 {value1}…", { value1: branch.taskIds[0].slice(0, 10) }) : ""}
                                         </small>
                                         <details>
-                                            <summary>查看本候选原始指令与请求标识</summary>
+                                            <summary>{uiText("查看本候选原始指令与请求标识")}</summary>
                                             <pre>
                                                 {branch.prompt}
                                                 {branch.requestId ? `\n\nrequestId: ${branch.requestId}\ntaskIds: ${branch.taskIds.join(", ") || "尚未确认"}` : ""}
@@ -625,66 +618,62 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
                                                     if (old.run) commit({ ...old, run: { ...old.run, branches: old.run.branches.map((item) => (item.id === branch.id ? { ...item, selected: event.target.checked } : item)) } });
                                                 }}
                                             />
-                                            {branch.selected ? "已选入方案板" : "选入方案板"}
+                                            {branch.selected ? uiText("已选入方案板") : uiText("选入方案板")}
                                         </label>
                                     </div>
                                 </article>
                             ))}
                         </div>
                     )}
-                    <p className="sr-help sr-footer-note">候选来自真实 AI 任务。结构、花型和色彩仍需逐张验收；方案板只是所选结果的排版，不会再次调用模型。</p>
+                    <p className="sr-help sr-footer-note">{uiText("候选来自真实 AI 任务。结构、花型和色彩仍需逐张验收；方案板只是所选结果的排版，不会再次调用模型。")}</p>
                 </section>
-                <aside className="sr-panel sr-controls" aria-label="运行控制和项目保存">
+                <aside className="sr-panel sr-controls" aria-label={uiText("运行控制和项目保存")}>
                     <div className="sr-panel-heading">
-                        <h2>02 / 运行与交付</h2>
+                        <h2>{uiText("02 / 运行与交付")}</h2>
                     </div>
                     <div className="sr-control-body">
-                        {validation && <p className="sr-help">{validation}</p>}
+                        {validation && <p className="sr-help">{uiText(validation || "")}</p>}
                         {business.status === "error" && (
                             <button className="sr-button" onClick={() => void business.refresh().catch(() => undefined)}>
-                                重载模型配置
-                            </button>
+                                {uiText("重载模型配置")}</button>
                         )}
                         <button type="button" className="sr-button sr-primary sr-wide" disabled={locked || !!validation || !!uncertain} onClick={() => void start("new")}>
                             <Play size={15} />
-                            {run ? "生成新一轮" : "运行配方"}
-                            <span>{project.form.count} 张</span>
+                            {run ? uiText("生成新一轮") : uiText("运行配方")}
+                            <span>{project.form.count} {uiText(" 张")}</span>
                         </button>
                         <div className="sr-inline">
                             <button className="sr-button" type="button" disabled={!active || recovering} onClick={() => (paused ? runner.current?.resume() : runner.current?.pause())}>
                                 {paused ? <Play size={14} /> : <Pause size={14} />}
-                                {paused ? "继续分支" : "暂停后续"}
+                                {paused ? uiText("继续分支") : uiText("暂停后续")}
                             </button>
                             <button className="sr-button" type="button" disabled={!active} onClick={() => runner.current?.cancel()}>
                                 <Square size={13} />
-                                停止
-                            </button>
+                                {uiText("停止")}</button>
                         </div>
-                        <p className="sr-help">暂停不取消已提交任务；停止会结束本页查询和未开始分支，服务端任务可能仍继续。可通过原任务查询找回结果。</p>
+                        <p className="sr-help">{uiText("暂停不取消已提交任务；停止会结束本页查询和未开始分支，服务端任务可能仍继续。可通过原任务查询找回结果。")}</p>
                         {!!waiting && !active && (
                             <button type="button" className="sr-button sr-wide" disabled={locked || !enabled || !!uncertain} onClick={() => void start("waiting")}>
-                                继续未提交分支 ({waiting})
+                                {uiText("继续未提交分支 (")}{waiting})
                             </button>
                         )}
                         <button type="button" className="sr-button sr-wide" disabled={locked || !enabled || !failed} onClick={() => void start("failed")}>
                             <RefreshCw size={14} />
-                            仅重试确认失败项 ({failed})
+                            {uiText("仅重试确认失败项 (")}{failed})
                         </button>
                         <button type="button" className="sr-button sr-wide" disabled={locked || !enabled || !uncertain} onClick={() => void start("recover")}>
-                            查询原任务 ({uncertain}) · 不重新生成
-                        </button>
-                        <progress aria-label="分支完成进度" max={branches.length || project.form.count} value={completed} />
+                            {uiText("查询原任务 (")}{uncertain}{uiText(") · 不重新生成")}</button>
+                        <progress aria-label={uiText("分支完成进度")} max={branches.length || project.form.count} value={completed} />
                         <p className="sr-help">
-                            {succeeded} 个成功 · {failed} 个失败 · {uncertain} 个待核查
-                        </p>
+                            {succeeded} {uiText(" 个成功 · ")}{failed} {uiText(" 个失败 · ")}{uncertain} {uiText("个待核查")}</p>
                         <div className="sr-estimate">
-                            <span>本轮预估</span>
-                            <strong>{estimate.configured ? `¥${estimate.rmbCost.toFixed(2)}` : "待配置"}</strong>
-                            {deploymentFeatures.creditsEnabled && estimate.configured && <span>{estimate.credits} 积分</span>}
+                            <span>{uiText("本轮预估")}</span>
+                            <strong>{estimate.configured ? `¥${estimate.rmbCost.toFixed(2)}` : uiText("待配置")}</strong>
+                            {deploymentFeatures.creditsEnabled && estimate.configured && <span>{estimate.credits} {uiText(" 积分")}</span>}
                         </div>
-                        <p className="sr-help">每个分支独立提交；失败重试可能再次计费。预估不等于实付，最终以服务端任务与账单为准。</p>
+                        <p className="sr-help">{uiText("每个分支独立提交；失败重试可能再次计费。预估不等于实付，最终以服务端任务与账单为准。")}</p>
                         <hr />
-                        <h3>保存与导出</h3>
+                        <h3>{uiText("保存与导出")}</h3>
                         <button
                             type="button"
                             className="sr-button sr-wide"
@@ -692,27 +681,24 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
                             onClick={() =>
                                 void action(async () => {
                                     await persist(projectRef.current);
-                                    if (current()) setNotice("已保存到当前员工的本地浏览器。");
+                                    if (current()) setNotice(uiText("已保存到当前员工的本地浏览器。"));
                                 })
                             }
                         >
                             <Save size={14} />
-                            保存项目
-                        </button>
+                            {uiText("保存项目")}</button>
                         <button type="button" className="sr-button sr-wide" disabled={locked || !selected.length} onClick={() => void exportBoard()}>
                             <Download size={14} />
-                            方案板 PNG ({selected.length})
+                            {uiText("方案板 PNG (")}{selected.length})
                         </button>
                         <button type="button" className="sr-button sr-wide" disabled={locked} onClick={() => void exportProject()}>
                             <Download size={14} />
-                            导出完整项目 JSON
-                        </button>
+                            {uiText("导出完整项目 JSON")}</button>
                         <label className={`sr-button sr-wide sr-file-button ${locked ? "is-disabled" : ""}`}>
                             <Upload size={14} />
-                            导入项目 JSON
-                            <input
+                            {uiText("导入项目 JSON")}<input
                                 type="file"
-                                aria-label="导入系列配方项目"
+                                aria-label={uiText("导入系列配方项目")}
                                 accept="application/json,.json"
                                 disabled={locked}
                                 onChange={(event) => {
@@ -722,28 +708,27 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
                                 }}
                             />
                         </label>
-                        <p className="sr-help">本地项目按员工分区，自动恢复。JSON 含原图和候选，可用于备份；不包含模型密钥。</p>
+                        <p className="sr-help">{uiText("本地项目按员工分区，自动恢复。JSON 含原图和候选，可用于备份；不包含模型密钥。")}</p>
                         {working && (
                             <p className="sr-help" role="status">
-                                正在处理图片或项目，请稍候…
-                            </p>
+                                {uiText("正在处理图片或项目，请稍候…")}</p>
                         )}
                         {notice && (
                             <p className="sr-notice" role="status">
-                                {notice}
+                                {uiText(notice || "")}
                             </p>
                         )}
                         {error && (
                             <p className="sr-error" role="alert">
-                                {error}
+                                {uiText(error || "")}
                             </p>
                         )}
                     </div>
                 </aside>
             </div>
             {preview && (
-                <div className="sr-preview" role="dialog" aria-modal="true" aria-label="候选大图" onClick={() => setPreview(null)}>
-                    <button type="button" aria-label="关闭大图" onClick={() => setPreview(null)} autoFocus>
+                <div className="sr-preview" role="dialog" aria-modal="true" aria-label={uiText("候选大图")} onClick={() => setPreview(null)}>
+                    <button type="button" aria-label={uiText("关闭大图")} onClick={() => setPreview(null)} autoFocus>
                         <X size={24} />
                     </button>
                     <img src={preview.dataUrl} alt={preview.name} onClick={(event) => event.stopPropagation()} />
@@ -754,18 +739,19 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
 }
 
 function RecipeUpload({ label, image, disabled, onUpload, onRemove }: { label: string; image?: ReferenceImage; disabled: boolean; onUpload: (file: File) => void; onRemove: () => void }) {
+    useUiText();
     return (
         <div className="sr-upload-field">
             <span>{label}</span>
             <label className={`sr-upload ${disabled ? "is-disabled" : ""}`}>
                 {image ? <img src={image.dataUrl} alt={label} /> : <ImagePlus size={26} strokeWidth={1.4} />}
                 <span>
-                    {image ? "点击替换参考图" : "选择 PNG / JPG / WebP"}
-                    <small>原图保留 · 最大 15 MB</small>
+                    {image ? uiText("点击替换参考图") : uiText("选择 PNG / JPG / WebP")}
+                    <small>{uiText("原图保留 · 最大 15 MB")}</small>
                 </span>
                 <input
                     type="file"
-                    aria-label={`上传${label}`}
+                    aria-label={uiText("上传{label}", { label: label })}
                     accept="image/png,image/jpeg,image/webp"
                     disabled={disabled}
                     onChange={(event) => {
@@ -778,7 +764,7 @@ function RecipeUpload({ label, image, disabled, onUpload, onRemove }: { label: s
             {image && (
                 <div className="sr-upload-name">
                     <span title={image.name}>{image.name}</span>
-                    <button type="button" aria-label={`移除${label}`} disabled={disabled} onClick={onRemove}>
+                    <button type="button" aria-label={uiText("移除{label}", { label: label })} disabled={disabled} onClick={onRemove}>
                         <X size={13} />
                     </button>
                 </div>

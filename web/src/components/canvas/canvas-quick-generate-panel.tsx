@@ -1,3 +1,4 @@
+import { useUiText } from "@/lib/i18n";
 import { PromptOptimizeButton } from "@/components/prompt-optimize-button";
 import { memo, useEffect, useState } from "react";
 import { ImageIcon, Info, LoaderCircle, Plus, X } from "lucide-react";
@@ -30,6 +31,7 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
     onModelChange, onSizeChange, onQualityChange, onCountChange, onImageOptionsChange, onPickReferences, onRemoveReference,
     onClearReferences, onMoveReference, onMissingConfig, onGenerate, onOptimizedPrompt, positioned, onClearPosition,
 }: CanvasQuickGeneratePanelProps) {
+    const t = useUiText();
     const [optimizing, setOptimizing] = useState(false);
     const [prompt, setPrompt] = useState(promptRef.current);
     useEffect(() => setPrompt(promptRef.current), [promptRef, promptRevision]);
@@ -64,32 +66,32 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
             onPointerDown={(event) => event.stopPropagation()}
             onMouseDown={(event) => event.stopPropagation()}
             onWheel={(event) => event.stopPropagation()}>
-            {!embedded ? <div className="cw-tabs"><span>创建</span><button className="cw-icon" style={{ marginLeft: "auto" }} aria-label="关闭画布生图" onClick={onClose}><X size={16} /></button></div> : null}
+            {!embedded ? <div className="cw-tabs"><span>{t("创建")}</span><button className="cw-icon" style={{ marginLeft: "auto" }} aria-label={t("关闭画布生图")} onClick={onClose}><X size={16} /></button></div> : null}
             <div className="cw-generator-body">
-                {positioned ? <div className="mb-3 flex items-center justify-between gap-2 text-xs" style={{ color: theme.node.muted }}><span>下一次生成放在右键位置</span><button type="button" className="shrink-0 hover:underline" onClick={onClearPosition}>取消定位</button></div> : null}
-                <div className="cw-media-kind"><ImageIcon size={15} /><span>{!profile.requiresPrompt ? "多图融合" : references.length ? "编辑图像" : "图像"}</span>{profile.documentationUrl ? <a className="cw-model-info" href={profile.documentationUrl} target="_blank" rel="noreferrer" title={`${profile.tip} 点击查看接口文档`} aria-label="查看当前模型接口文档"><Info size={14} /></a> : <span className="cw-model-info" title={profile.tip}><Info size={14} /></span>}</div>
+                {positioned ? <div className="mb-3 flex items-center justify-between gap-2 text-xs" style={{ color: theme.node.muted }}><span>{t("下一次生成放在右键位置")}</span><button type="button" className="shrink-0 hover:underline" onClick={onClearPosition}>{t("取消定位")}</button></div> : null}
+                <div className="cw-media-kind"><ImageIcon size={15} /><span>{!profile.requiresPrompt ? t("多图融合") : references.length ? t("编辑图像") : t("图像")}</span>{profile.documentationUrl ? <a className="cw-model-info" href={profile.documentationUrl} target="_blank" rel="noreferrer" title={t("{value1} 点击查看接口文档", { value1: profile.tip })} aria-label={t("查看当前模型接口文档")}><Info size={14} /></a> : <span className="cw-model-info" title={profile.tip}><Info size={14} /></span>}</div>
                 <div className="cw-model-row">
                 <ModelPicker toolKey={toolKey} config={boundConfig} value={availableModel} capability="image" modelsSource="server" disabled={running} fullWidth onChange={onModelChange}
                     onMissingConfig={onMissingConfig} className="cw-model-picker" />
                 </div>
-                {profile.requiresPrompt ? <textarea className="cw-prompt" data-canvas-image-paste aria-label="描述图像" placeholder={references.length ? "描述想如何修改，可用「图1」「图2」指定参考图…" : "描述你想创作的图像…"}
-                    value={prompt} maxLength={profile.kind === "grok-image" ? 8000 : 2000} disabled={running} title="Enter 生成，Shift+Enter 换行"
+                {profile.requiresPrompt ? <textarea className="cw-prompt" data-canvas-image-paste aria-label={t("描述图像")} placeholder={references.length ? t("描述想如何修改，可用「图1」「图2」指定参考图…") : t("描述你想创作的图像…")}
+                    value={prompt} maxLength={profile.kind === "grok-image" ? 8000 : 2000} disabled={running} title={t("Enter 生成，Shift+Enter 换行")}
                     onChange={(event) => { promptRef.current = event.target.value; setPrompt(event.target.value); }}
                     onKeyDown={(event) => {
                         if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing || event.keyCode === 229) return;
                         event.preventDefault();
                         if (!disabled && !event.repeat) onGenerate();
-                    }} /> : <p className="my-3 text-xs leading-5" role="status">添加 2–4 张参考图，直接融合，不使用提示词。原有描述会保留，切换模型后可继续编辑。</p>}
+                    }} /> : <p className="my-3 text-xs leading-5" role="status">{t("添加 2–4 张参考图，直接融合，不使用提示词。原有描述会保留，切换模型后可继续编辑。")}</p>}
                 {profile.requiresPrompt ? <PromptOptimizeButton config={boundConfig} prompt={prompt} references={references} toolKey={toolKey} disabled={running} onBusyChange={setOptimizing} onApply={(value, _compilation, input) => { promptRef.current = value; setPrompt(value); onOptimizedPrompt?.(value, input, references); }} /> : null}
                 <div className="cw-reference-row">
-                    <button type="button" className="cw-add-reference" aria-label="添加参考图" disabled={running || references.length >= referenceValidation.maximum} onClick={onPickReferences}><Plus size={15} aria-hidden /><span>添加参考图</span></button>
+                    <button type="button" className="cw-add-reference" aria-label={t("添加参考图")} disabled={running || references.length >= referenceValidation.maximum} onClick={onPickReferences}><Plus size={15} aria-hidden /><span>{t("添加参考图")}</span></button>
                     <Popover.Root>
-                        <Popover.Trigger asChild><button type="button" className="cw-reference-hint-button" aria-label="参考图说明" title="参考图说明"><Info size={13} aria-hidden /></button></Popover.Trigger>
-                        <Popover.Portal><Popover.Content className="cw-reference-hint-popover" aria-label="参考图说明" side="bottom" align="end" sideOffset={6} collisionPadding={12}
+                        <Popover.Trigger asChild><button type="button" className="cw-reference-hint-button" aria-label={t("参考图说明")} title={t("参考图说明")}><Info size={13} aria-hidden /></button></Popover.Trigger>
+                        <Popover.Portal><Popover.Content className="cw-reference-hint-popover" aria-label={t("参考图说明")} side="bottom" align="end" sideOffset={6} collisionPadding={12}
                             style={{ background: theme.node.panel, color: theme.node.text, borderColor: theme.node.stroke }} data-canvas-no-zoom
                             onPointerDown={event => event.stopPropagation()} onMouseDown={event => event.stopPropagation()} onWheel={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
-                            <p>点击或框选画布图片添加参考图。</p>
-                            <p>按上方顺序编辑参考图，原图保留。取消选中不会清空参考图；请用移除或清空按钮调整。</p>
+                            <p>{t("点击或框选画布图片添加参考图。")}</p>
+                            <p>{t("按上方顺序编辑参考图，原图保留。取消选中不会清空参考图；请用移除或清空按钮调整。")}</p>
                         </Popover.Content></Popover.Portal>
                     </Popover.Root>
                 </div>
@@ -104,11 +106,11 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
                             if (key === "imageOptions") onImageOptionsChange(value);
                         }} />
                 <div className={`cw-generate-action ${disabled ? "is-disabled" : ""}`}>
-                    <button type="button" className="cw-generate-button" disabled={disabled} onClick={onGenerate} title={profile.requiresPrompt ? "Enter 生成，Shift+Enter 换行" : undefined}>
-                        {running ? <><LoaderCircle size={16} className="animate-spin" />提交中…</> : !profile.requiresPrompt ? "开始融合" : references.length ? "生成修改图" : "生成"}
-                        <span className="cw-generate-count" aria-label="每次生成 1 张">×1</span>
+                    <button type="button" className="cw-generate-button" disabled={disabled} onClick={onGenerate} title={profile.requiresPrompt ? t("Enter 生成，Shift+Enter 换行") : undefined}>
+                        {running ? <><LoaderCircle size={16} className="animate-spin" />{t("提交中…")}</> : !profile.requiresPrompt ? t("开始融合") : references.length ? t("生成修改图") : t("生成")}
+                        <span className="cw-generate-count" aria-label={t("每次生成 1 张")}>×1</span>
                     </button>
-                    {deploymentFeatures.creditsEnabled ? <span className="cw-estimate" title={`预计 ¥${estimateRmb.toFixed(2)}，剩余 ${remainingCredits ?? "-"} 积分`}>{estimateCredits} 积分</span> : null}
+                    {deploymentFeatures.creditsEnabled ? <span className="cw-estimate" title={t("预计 ¥{value1}，剩余 {value2} 积分", { value1: estimateRmb.toFixed(2), value2: remainingCredits ?? "-" })}>{estimateCredits} {t(" 积分")}</span> : null}
                 </div>
             </div>
         </div>

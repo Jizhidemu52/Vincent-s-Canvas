@@ -1,3 +1,4 @@
+import { useUiText, uiText } from "@/lib/i18n";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { ChevronRight, Image as ImageIcon, Music2, RefreshCw, Star, Video } from "lucide-react";
@@ -154,6 +155,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     onViewImage,
     onContextMenu,
 }: CanvasNodeProps) {
+    const t = useUiText();
     const [hovered, setHovered] = useState(false);
     const [isEditingContent, setIsEditingContent] = useState(false);
     const [textDraft, setTextDraft] = useState(data.metadata?.content || "");
@@ -385,7 +387,7 @@ export const CanvasNode = React.memo(function CanvasNode({
             data-task-highlight={taskHighlighted || undefined}
             tabIndex={0}
             role="group"
-            aria-label={`${data.title || "未命名节点"}，${isSelected ? "已选择，" : ""}Enter 编辑，方向键微移`}
+            aria-label={t("{value1}，{value2}Enter 编辑，方向键微移", { value1: data.title || uiText("未命名节点"), value2: isSelected ? uiText("已选择，") : "" })}
             onFocus={event => { if (event.target === event.currentTarget) onKeyboardFocus?.(data.id); }}
             onKeyDown={event => {
                 if (event.target !== event.currentTarget || event.nativeEvent.isComposing) return;
@@ -494,8 +496,8 @@ export const CanvasNode = React.memo(function CanvasNode({
                 {showResizeControls ? <>{(["top-left", "top-right", "bottom-left", "bottom-right"] as ResizeCorner[]).map((corner) => <ResizeHandle key={corner} corner={corner} theme={theme} onMouseDown={handleResizeMouseDown} />)}</> : null}
             </div>
 
-            {showConnectionControls ? <><ConnectionHandleDot side="left" theme={theme} label={data.type === CanvasNodeType.Config ? "图片 / 上一步输入" : "输入连接"} visible={effectiveHovered || isSelected || isConnecting} onMouseDown={(event) => onConnectStart(event, data.id, "target")} />
-            <ConnectionHandleDot side="right" theme={theme} label={data.type === CanvasNodeType.Config ? "结果输出 / 连接下一步" : "输出连接"} visible={effectiveHovered || isSelected || isConnecting} onMouseDown={(event) => onConnectStart(event, data.id, "source")} /></> : null}
+            {showConnectionControls ? <><ConnectionHandleDot side="left" theme={theme} label={data.type === CanvasNodeType.Config ? t("图片 / 上一步输入") : t("输入连接")} visible={effectiveHovered || isSelected || isConnecting} onMouseDown={(event) => onConnectStart(event, data.id, "target")} />
+            <ConnectionHandleDot side="right" theme={theme} label={data.type === CanvasNodeType.Config ? t("结果输出 / 连接下一步") : t("输出连接")} visible={effectiveHovered || isSelected || isConnecting} onMouseDown={(event) => onConnectStart(event, data.id, "source")} /></> : null}
 
             {showPanel && renderPanel ? <div className="absolute left-1/2 top-full z-[70] pt-4" style={{
                 // Editors are screen UI: compensate only magnification, without
@@ -547,6 +549,7 @@ function toRenderState(props: CanvasNodeProps): CanvasNodeRenderState {
 }
 
 function NodeContent(props: NodeContentRendererProps) {
+    const t = useUiText();
     if (props.node.type === CanvasNodeType.Config && props.renderNodeContent) return props.renderNodeContent(props.node, { inputSummary: props.configInputSummary, isRunning: props.isRunning });
     if (props.isBatchRoot) return <ImageNodeContent {...props} />;
     if (props.node.metadata?.status === "loading" && !shouldShowCanvasTextStream(props.node)) return <LoadingContent theme={props.theme} optimizing={props.node.metadata?.optimizingPrompt} />;
@@ -565,22 +568,24 @@ const nodeContentRenderers = {
 } satisfies Record<CanvasNodeType, (props: NodeContentRendererProps) => ReactNode>;
 
 function LoadingContent({ theme, optimizing }: Pick<NodeContentRendererProps, "theme"> & { optimizing?: boolean }) {
+    const t = useUiText();
     return (
         <div className="flex h-full w-full flex-col items-center justify-center gap-3" style={{ color: theme.node.activeStroke }}>
             <div className="size-10 animate-spin rounded-full border-2" style={{ borderColor: theme.node.stroke, borderTopColor: theme.node.activeStroke }} />
-            <span className="text-[10px] tracking-[0.2em]">{optimizing ? "正在优化提示词…" : "生成中"}</span>
+            <span className="text-[10px] tracking-[0.2em]">{optimizing ? t("正在优化提示词…") : t("生成中")}</span>
         </div>
     );
 }
 
 function ErrorContent({ node, theme, onRetry, onReload }: Pick<NodeContentRendererProps, "node" | "theme" | "onRetry"> & { onReload?: () => void }) {
+    const t = useUiText();
     const videoRecovery = node.type === CanvasNodeType.Video && Boolean(node.metadata?.videoTaskId);
     return (
         <div className="flex max-w-[260px] flex-col items-center gap-3 px-5 text-center">
-            <div className="text-xs leading-5 text-red-300" style={onReload ? { color: theme.node.muted } : undefined}>{onReload ? "图片读取失败" : node.metadata?.errorDetails || "生成失败"}</div>
+            <div className="text-xs leading-5 text-red-300" style={onReload ? { color: theme.node.muted } : undefined}>{onReload ? t("图片读取失败") : node.metadata?.errorDetails || t("生成失败")}</div>
             <button
                 type="button"
-                aria-label={onReload ? "重新加载图片" : undefined}
+                aria-label={onReload ? t("重新加载图片") : undefined}
                 disabled={videoRecovery && node.metadata?.videoTaskCanRecover === false}
                 className="inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition hover:scale-[1.02]"
                 style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
@@ -593,21 +598,22 @@ function ErrorContent({ node, theme, onRetry, onReload }: Pick<NodeContentRender
                 onMouseDown={(event) => event.stopPropagation()}
             >
                 <RefreshCw className="size-3.5" />
-                {onReload ? "重新加载" : videoRecovery ? node.metadata?.videoTaskCanRecover === false ? "提交状态待核查" : "恢复查询" : node.metadata?.imageTask ? "恢复查询" : "重试"}
+                {onReload ? t("重新加载") : videoRecovery ? node.metadata?.videoTaskCanRecover === false ? t("提交状态待核查") : t("恢复查询") : node.metadata?.imageTask ? t("恢复查询") : t("重试")}
             </button>
         </div>
     );
 }
 
 function UnknownNodeContent({ theme }: Pick<NodeContentRendererProps, "theme">) {
+    const t = useUiText();
     return (
         <div className="flex h-full w-full items-center justify-center text-sm" style={{ color: theme.node.placeholder }}>
-            未知节点
-        </div>
+            {t("未知节点")}</div>
     );
 }
 
 function TextContent({ node, theme, isEditingContent, textDraft, textareaRef, mentionReferences, onContentChange, onStopEditing, onGenerateImage }: NodeContentRendererProps) {
+    const t = useUiText();
     const fontSize = node.metadata?.fontSize || 14;
     const textStyle = { fontSize: `${fontSize}px`, lineHeight: `${Math.round(fontSize * 1.65)}px`, color: theme.node.text, boxSizing: "border-box" } as React.CSSProperties;
 
@@ -623,12 +629,11 @@ function TextContent({ node, theme, isEditingContent, textDraft, textareaRef, me
                 }}
                 onMouseDown={(event) => event.stopPropagation()}
                 onPointerDown={(event) => event.stopPropagation()}
-                title="用文本生图"
-                aria-label="用文本生图"
+                title={t("用文本生图")}
+                aria-label={t("用文本生图")}
             >
                 <ImageIcon className="size-3.5" />
-                生图
-            </button>
+                {t("生图")}</button>
             {isEditingContent ? (
                 <CanvasResourceMentionTextarea
                     ref={textareaRef}
@@ -652,7 +657,7 @@ function TextContent({ node, theme, isEditingContent, textDraft, textareaRef, me
                     style={textStyle}
                     onWheel={(event) => event.stopPropagation()}
                 >
-                    {node.metadata?.content || <span style={{ color: theme.node.placeholder }}>双击编辑文字</span>}
+                    {node.metadata?.content || <span style={{ color: theme.node.placeholder }}>{t("双击编辑文字")}</span>}
                 </div>
             )}
         </div>
@@ -660,6 +665,7 @@ function TextContent({ node, theme, isEditingContent, textDraft, textareaRef, me
 }
 
 function ResourceLabelBadge({ reference, theme }: { reference: CanvasResourceReference; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+    const t = useUiText();
     return (
         <span className={`pointer-events-none absolute right-2 top-2 z-30 rounded-md px-1.5 py-0.5 text-[10px] font-medium ${reference.active ? "text-white shadow-sm" : "bg-black/35 text-white/75"}`} style={reference.active ? { background: theme.canvas.selectionStroke } : undefined}>
             {reference.label}
@@ -668,6 +674,7 @@ function ResourceLabelBadge({ reference, theme }: { reference: CanvasResourceRef
 }
 
 function ImageNodeContent(props: NodeContentRendererProps) {
+    const t = useUiText();
     const hasImageSource = Boolean(props.node.metadata?.content || props.node.metadata?.storageKey);
     if (!hasImageSource && props.isBatchRoot) {
         const content =
@@ -703,12 +710,13 @@ function ImageNodeContent(props: NodeContentRendererProps) {
 }
 
 function EmptyImageContent({ theme, isBatchRoot, batchCount, batchExpanded, batchOpening, batchRecovering, onToggleBatch }: NodeContentRendererProps) {
+    const t = useUiText();
     const content = (
         <div className="flex h-full w-full flex-col items-center justify-center gap-3" style={{ color: theme.node.placeholder }}>
             <div className="flex size-14 items-center justify-center rounded-2xl" style={{ background: theme.toolbar.activeBg }}>
                 <ImageIcon className="size-6 opacity-30" />
             </div>
-            <span className="text-[10px] tracking-[0.18em] opacity-50">空图片节点</span>
+            <span className="text-[10px] tracking-[0.18em] opacity-50">{t("空图片节点")}</span>
         </div>
     );
     if (isBatchRoot)
@@ -721,18 +729,20 @@ function EmptyImageContent({ theme, isBatchRoot, batchCount, batchExpanded, batc
 }
 
 function VideoNodeContent({ node, theme, renderQuality }: NodeContentRendererProps) {
+    const t = useUiText();
     const previewUrl = useCanvasNodeMediaPreview(node);
     if (!previewUrl)
         return (
             <div className="flex h-full w-full flex-col items-center justify-center gap-3" style={{ color: theme.node.placeholder }}>
                 <Video className="size-7 opacity-35" />
-                <span className="text-sm">空视频节点</span>
+                <span className="text-sm">{t("空视频节点")}</span>
             </div>
         );
     return <video src={previewUrl} {...canvasMediaPlaybackProps(renderQuality)} className="h-full w-full rounded-[18px] bg-black object-contain" data-canvas-no-zoom />;
 }
 
 function CanvasNodeOverview({ node, theme }: Pick<NodeContentRendererProps, "node" | "theme">) {
+    const t = useUiText();
     const icon = node.type === CanvasNodeType.Image ? <ImageIcon className="size-4" /> : node.type === CanvasNodeType.Video ? <Video className="size-4" /> : node.type === CanvasNodeType.Audio ? <Music2 className="size-4" /> : node.type === CanvasNodeType.Text ? <span className="text-xs font-bold">T</span> : <span className="text-xs font-bold">AI</span>;
     return (
         <div data-testid="canvas-node-overview" className="flex h-full w-full items-center gap-2 overflow-hidden rounded-[inherit] px-3" style={{ background: theme.node.fill, color: theme.node.text }}>
@@ -747,19 +757,20 @@ function configInputSummaryKey(summary?: CanvasConfigInputSummary) {
 }
 
 function AudioNodeContent({ node, theme, renderQuality }: NodeContentRendererProps) {
+    const t = useUiText();
     const previewUrl = useCanvasNodeMediaPreview(node);
     if (!previewUrl)
         return (
             <div className="flex h-full w-full flex-col items-center justify-center gap-2" style={{ color: theme.node.placeholder }}>
                 <Music2 className="size-7 opacity-35" />
-                <span className="text-sm">空音频节点</span>
+                <span className="text-sm">{t("空音频节点")}</span>
             </div>
         );
     return (
         <div className="flex h-full w-full flex-col justify-center gap-3 px-4" style={{ background: theme.node.fill, color: theme.node.text }}>
             <div className="flex min-w-0 items-center gap-2 text-sm opacity-70">
                 <Music2 className="size-4 shrink-0" />
-                <span className="truncate">{node.title || "音频"}</span>
+                <span className="truncate">{node.title || t("音频")}</span>
             </div>
             <audio src={previewUrl} {...canvasMediaPlaybackProps(renderQuality)} className="w-full" data-canvas-no-zoom />
         </div>
@@ -789,11 +800,12 @@ function ImageContent({
     onToggleBatch?: () => void;
     onSetBatchPrimary?: () => void;
 }) {
+    const t = useUiText();
     const isBatchChild = Boolean(node.metadata?.batchRootId);
 
     return (
         <BatchFrame theme={theme} batchCount={isBatchRoot ? batchCount : 0} batchExpanded={batchExpanded} batchOpening={batchOpening} batchRecovering={batchRecovering} onToggleBatch={onToggleBatch}>
-            <React.Suspense fallback={<div className="h-full w-full animate-pulse" style={{ background: theme.toolbar.activeBg }} aria-label="正在加载图片预览" />}>
+            <React.Suspense fallback={<div className="h-full w-full animate-pulse" style={{ background: theme.toolbar.activeBg }} aria-label={t("正在加载图片预览")} />}>
                 <CanvasNodeImagePreview node={node} edge={imagePreviewEdge} placeholderColor={theme.toolbar.activeBg} renderError={retry => <ErrorContent node={node} theme={theme} onReload={retry} />} />
             </React.Suspense>
             {isBatchRoot ? (
@@ -801,7 +813,7 @@ function ImageContent({
                     type="button"
                     className="absolute right-2.5 top-2.5 z-30 flex h-8 items-center justify-center gap-1 rounded-full border px-2.5 text-xs font-semibold shadow-[0_6px_18px_rgba(15,23,42,.10)] backdrop-blur-md transition hover:scale-[1.02]"
                     style={{ background: `${theme.toolbar.panel}d9`, borderColor: `${theme.toolbar.border}cc`, color: theme.node.text }}
-                    aria-label={batchExpanded ? "图片组已展开" : "图片组已收起"}
+                    aria-label={batchExpanded ? t("图片组已展开") : t("图片组已收起")}
                     onClick={(event) => {
                         event.stopPropagation();
                         onToggleBatch?.();
@@ -826,8 +838,7 @@ function ImageContent({
                     onPointerDown={(event) => event.stopPropagation()}
                 >
                     <Star className="size-3.5" style={{ color: theme.canvas.selectionStroke }} />
-                    设为主图
-                </button>
+                    {t("设为主图")}</button>
             ) : null}
         </BatchFrame>
     );
@@ -863,6 +874,7 @@ function useCanvasNodeMediaPreview(node: CanvasNodeData) {
 }
 
 function ImageInfoBar({ node }: { node: CanvasNodeData }) {
+    const t = useUiText();
     const width = Math.round(node.metadata?.naturalWidth || node.width);
     const height = Math.round(node.metadata?.naturalHeight || node.height);
     const size = formatBytes(node.metadata?.bytes || 0);
@@ -877,6 +889,7 @@ function ImageInfoBar({ node }: { node: CanvasNodeData }) {
 }
 
 function BatchFrame({ theme, batchCount, batchExpanded, batchOpening, batchRecovering, onToggleBatch, children }: { theme: (typeof canvasThemes)[keyof typeof canvasThemes]; batchCount: number; batchExpanded: boolean; batchOpening: boolean; batchRecovering: boolean; onToggleBatch?: () => void; children: ReactNode }) {
+    const t = useUiText();
     const isBatchRoot = batchCount > 1;
     return (
         <div
@@ -914,6 +927,7 @@ function BatchFrame({ theme, batchCount, batchExpanded, batchOpening, batchRecov
     );
 }
 function ResizeHandle({ corner, theme, onMouseDown }: { corner: ResizeCorner; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onMouseDown: (event: React.MouseEvent, corner: ResizeCorner) => void }) {
+    const t = useUiText();
     const positionClass = {
         "top-left": "left-0 top-0 cursor-nwse-resize",
         "top-right": "right-0 top-0 cursor-nesw-resize",
@@ -927,6 +941,7 @@ function ResizeHandle({ corner, theme, onMouseDown }: { corner: ResizeCorner; th
 }
 
 function ConnectionHandleDot({ side, theme, label, visible, onMouseDown }: { side: "left" | "right"; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; label: string; visible: boolean; onMouseDown: (event: React.MouseEvent) => void }) {
+    const t = useUiText();
 
     return (
         <div

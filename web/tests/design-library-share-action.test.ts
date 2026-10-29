@@ -1,3 +1,4 @@
+import { i18nHarness } from "./helpers/i18n-harness";
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
@@ -16,6 +17,7 @@ function harness(options: { oa?: boolean; enabled?: boolean; role?: string; fail
     const entered = Promise.withResolvers<void>(), response = Promise.withResolvers<void>();
     let cursor = 0, mounted = false;
     const dependencies: Record<string, unknown> = {
+        "@/lib/i18n": i18nHarness,
         react: {
             useState: (initial: unknown) => { const index = cursor++; if (!(index in values)) values[index] = initial; return [values[index], (next: unknown) => { values[index] = next; }]; },
             useRef: (initial: unknown) => { const index = cursor++; return values[index] ||= { current: initial }; },

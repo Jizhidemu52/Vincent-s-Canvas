@@ -1,3 +1,4 @@
+import { uiText, useUiLocale } from "@/lib/i18n";
 import { useEffect, useRef, useState } from "react";
 import { createImageEditCopySession, type ImageCopySource, type SavedImageCopy } from "@/lib/image-edit-copy";
 import type { UploadedImage } from "@/services/image-storage";
@@ -8,6 +9,7 @@ type EditSession = ReturnType<typeof createImageEditCopySession>;
 
 /** Both history and asset pages share the same account-bound, copy-only save flow. */
 export function useImageCopyEditor(onSaved?: (copy: SavedImageCopy, image: UploadedImage) => void) {
+    useUiLocale();
     const [session, setSession] = useState<EditSession | null>(null);
     const sessionRef = useRef<EditSession | null>(null);
     const onSavedRef = useRef(onSaved);
@@ -29,7 +31,7 @@ export function useImageCopyEditor(onSaved?: (copy: SavedImageCopy, image: Uploa
         },
         close,
         async confirm(image: UploadedImage) {
-            if (!session || session !== sessionRef.current) throw new Error("编辑会话已失效，请重新打开原图");
+            if (!session || session !== sessionRef.current) throw new Error(uiText("编辑会话已失效，请重新打开原图"));
             const store = useAssetStore.getState();
             const copy = session.save(image, useUserStore.getState().user?.id || "unassigned", store.assets, store.addAsset);
             onSavedRef.current?.(copy, image);

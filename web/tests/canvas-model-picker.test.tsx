@@ -1,3 +1,4 @@
+import { i18nHarness } from "./helpers/i18n-harness";
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -5,7 +6,6 @@ import React, { type DependencyList, type EffectCallback, type ReactElement } fr
 import { renderToStaticMarkup } from "react-dom/server";
 import ts from "typescript";
 import { canvasImageModelDetails, canvasModelGroups, canvasModelPresentation, commonCanvasModels, type CanvasModelOption } from "@/lib/canvas/canvas-model-picker-options";
-import { CanvasModelRow } from "@/components/canvas/canvas-model-picker";
 import { imageModelProfile } from "@/lib/image-model-settings";
 import { referencePolicyForModel } from "@/lib/image-reference-policy";
 import { defaultConfig } from "@/stores/use-config-store";
@@ -23,9 +23,11 @@ function loadComponent(path: string, dependencies: Record<string, unknown>) {
     const localRequire = createRequire(url);
     const code = ts.transpileModule(readFileSync(url, "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ESNext, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
     const module = { exports: {} as Record<string, (props: any) => ReactElement<any>> };
-    new Function("require", "module", "exports", code)((name: string) => name.endsWith(".css") ? {} : dependencies[name] || localRequire(name), module, module.exports);
+    new Function("require", "module", "exports", code)((id: string) => id === "@/lib/i18n" ? i18nHarness : ((name: string) => name.endsWith(".css") ? {} : dependencies[name] || localRequire(name))(id), module, module.exports);
     return module.exports;
 }
+
+const CanvasModelRow = loadComponent("../src/components/canvas/canvas-model-picker.tsx", {}).CanvasModelRow as typeof import("@/components/canvas/canvas-model-picker").CanvasModelRow;
 
 const imageModel = (id: string, name: string, profile: PublicModel["imageParameterProfile"] = "quality-resolution"): PublicModel => ({
     id, modelId: id, name, publicName: name, modelIdentityHidden: true, publicDescription: "快速出方案与常规改图",

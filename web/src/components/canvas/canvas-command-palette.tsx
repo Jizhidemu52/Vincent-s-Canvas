@@ -1,3 +1,4 @@
+import { useUiText } from "@/lib/i18n";
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { Input, Modal, type InputRef } from "antd";
 import { canvasActionShortcut, type CanvasActionId } from "@/lib/canvas/canvas-actions";
@@ -18,6 +19,7 @@ export function CanvasCommandPalette({ nodes, bindings, onLocate, onAsset, onClo
     nodes: CanvasNodeData[]; bindings: CanvasCommandBindings; onLocate: (ids: string[]) => void;
     onAsset: (asset: InsertAssetPayload) => void; onClose: () => void;
 }) {
+    const t = useUiText();
     const [query, setQuery] = useState("");
     const queryRef = useRef("");
     const deferredQuery = useDeferredValue(query);
@@ -37,17 +39,17 @@ export function CanvasCommandPalette({ nodes, bindings, onLocate, onAsset, onClo
                 : action.id === "shortcuts" ? { run: () => setShortcutsOpen(true) } : bindings[action.id];
             const module = canvasActionModules[action.id];
             if (!binding || module && !isModuleAvailable(flags, tools, module)) return [];
-            return [{ ...action, enabled: binding.enabled, category: "命令", shortcut: canvasActionShortcut(action.id), run: binding.run }];
+            return [{ ...action, label: t(action.label), keywords: `${action.keywords} ${action.label} ${t(action.label)}`, enabled: binding.enabled, category: t("命令"), shortcut: canvasActionShortcut(action.id), run: binding.run }];
         });
         const typeLabels: Record<string, string> = { text: "文本", image: "图片", video: "视频", audio: "音频", config: "生成配置" };
-        const nodeItems = nodes.map(node => ({ id: `node:${node.id}`, label: node.title || "未命名节点", keywords: `${node.type} ${typeLabels[node.type] || ""} ${node.metadata?.imageName || ""} ${node.type === "text" ? (node.metadata?.content || "").slice(0, 500) : ""}`, category: "画布节点", shortcut: "定位", run: () => onLocate([node.id]) }));
-        const assetItems = assets.filter(asset => canUserAccessAsset(asset, user)).map(asset => ({ id: `asset:${asset.id}`, label: asset.title, keywords: asset.tags.join(" "), category: "本地素材", shortcut: "插入", run: () => {
+        const nodeItems = nodes.map(node => ({ id: `node:${node.id}`, label: node.title || t("未命名节点"), keywords: `${node.type} ${typeLabels[node.type] || ""} ${t(typeLabels[node.type] || "")} ${node.metadata?.imageName || ""} ${node.type === "text" ? (node.metadata?.content || "").slice(0, 500) : ""}`, category: t("画布节点"), shortcut: t("定位"), run: () => onLocate([node.id]) }));
+        const assetItems = assets.filter(asset => canUserAccessAsset(asset, user)).map(asset => ({ id: `asset:${asset.id}`, label: asset.title, keywords: asset.tags.join(" "), category: t("本地素材"), shortcut: t("插入"), run: () => {
             const current = useAssetStore.getState().assets.find(item => item.id === asset.id);
             if (!current || !canUserAccessAsset(current, useUserStore.getState().user)) return;
             onAsset(current.kind === "text" ? { kind: "text", title: current.title, content: current.data.content } : current.kind === "image" ? { kind: "image", title: current.title, ...current.data } : { kind: "video", title: current.title, ...current.data });
         } }));
         return [...actions, ...nodeItems, ...assetItems];
-    }, [bindings, flags, tools, nodes, assets, user, onLocate, onAsset, id, navigate]);
+    }, [bindings, flags, tools, nodes, assets, user, onLocate, onAsset, id, navigate, t]);
     const matches = useMemo(() => filterCanvasCommands(items, deferredQuery).slice(0, 80), [items, deferredQuery]);
     useEffect(() => { document.getElementById(`canvas-command-${active}`)?.scrollIntoView({ block: "nearest" }); }, [active]);
     // Rendering may lag, execution must not. Recheck even pointer selections
@@ -59,16 +61,16 @@ export function CanvasCommandPalette({ nodes, bindings, onLocate, onAsset, onClo
         if (item) { if (item.id !== "shortcuts") onClose(); item.run(); }
     };
     if (shortcutsOpen) return <CanvasShortcutsDialog open onClose={onClose} />;
-    return <Modal open title="命令与搜索" footer={null} centered width={620} onCancel={onClose} afterOpenChange={open => { if (open) input.current?.focus(); }}>
-        <Input ref={input} value={query} placeholder="搜索命令、画布节点或本地素材…" aria-label="搜索命令、节点和素材" role="combobox" aria-expanded="true" aria-controls="canvas-command-results" aria-activedescendant={matches[active] ? `canvas-command-${active}` : undefined}
+    return <Modal open title={t("命令与搜索")} footer={null} centered width={620} onCancel={onClose} afterOpenChange={open => { if (open) input.current?.focus(); }}>
+        <Input ref={input} value={query} placeholder={t("搜索命令、画布节点或本地素材…")} aria-label={t("搜索命令、节点和素材")} role="combobox" aria-expanded="true" aria-controls="canvas-command-results" aria-activedescendant={matches[active] ? `canvas-command-${active}` : undefined}
             onChange={event => { queryRef.current = event.target.value; setQuery(event.target.value); setActive(0); }} onKeyDown={event => {
                 if (event.nativeEvent.isComposing) return;
                 if (["ArrowDown", "ArrowUp"].includes(event.key)) { event.preventDefault(); const length = currentMatches().length; setActive(value => length ? (value + (event.key === "ArrowDown" ? 1 : -1) + length) % length : 0); }
                 if (event.key === "Enter") { event.preventDefault(); execute(active); }
             }} />
-        <div id="canvas-command-results" role="listbox" aria-label="搜索结果" aria-busy={query !== deferredQuery} className="cw-command-results">{matches.map((item, index) => <button id={`canvas-command-${index}`} key={item.id} type="button" role="option" aria-selected={active === index} onMouseEnter={() => setActive(index)} onClick={() => execute(index, item.id)}>
+        <div id="canvas-command-results" role="listbox" aria-label={t("搜索结果")} aria-busy={query !== deferredQuery} className="cw-command-results">{matches.map((item, index) => <button id={`canvas-command-${index}`} key={item.id} type="button" role="option" aria-selected={active === index} onMouseEnter={() => setActive(index)} onClick={() => execute(index, item.id)}>
             <span><small>{item.category}</small>{item.label}</span><kbd>{item.shortcut}</kbd>
-        </button>)}{!matches.length && <p role="status">没有匹配的可用操作或素材</p>}</div>
-        <p className="cw-command-help">↑ ↓ 选择 · Enter 执行 · Esc 关闭 · 云端素材请打开“我的素材”</p>
+        </button>)}{!matches.length && <p role="status">{t("没有匹配的可用操作或素材")}</p>}</div>
+        <p className="cw-command-help">{t("↑ ↓ 选择 · Enter 执行 · Esc 关闭 · 云端素材请打开“我的素材”")}</p>
     </Modal>;
 }

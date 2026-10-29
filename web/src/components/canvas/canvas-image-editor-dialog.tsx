@@ -1,3 +1,4 @@
+import { useUiText, uiText } from "@/lib/i18n";
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { Alert, App, Button, Input, InputNumber, Modal, Select, Slider, Spin, Tooltip } from "antd";
 import { ArrowUpRight, Brush, Check, Crop, Grid2x2, Redo2, RotateCw, Scan, Square, Type, Undo2, ZoomIn, ZoomOut } from "lucide-react";
@@ -23,6 +24,7 @@ const hints: Record<Tool, string> = {
 };
 
 export function CanvasImageEditorDialog({ node, onClose, onConfirm, saveHint = "保存回当前节点 · 原图可通过画布撤销恢复 · 不调用 AI", successMessage = "编辑结果已保存到画布，可继续进行 AI 编辑", cancelDescription = "画布上的图片不会改变，面板内未保存的修改将丢弃。" }: { node: CanvasNodeData; onClose: () => void; onConfirm: (image: UploadedImage) => Promise<void>; saveHint?: string; successMessage?: string; cancelDescription?: string }) {
+    const t = useUiText();
     const theme = canvasThemes[useThemeStore(state => state.theme)];
     const { message, modal } = App.useApp();
     const { pending: saving, run } = useAsyncAction(`canvas-image-edit:${node.id}`);
@@ -146,7 +148,7 @@ export function CanvasImageEditorDialog({ node, onClose, onConfirm, saveHint = "
         }
         setSelectedRectangle(null);
         if (tool === "text") {
-            if (!text.trim()) { message.info("请先输入要添加的文字"); return; }
+            if (!text.trim()) { message.info(t("请先输入要添加的文字")); return; }
             commit({ kind: "text", at: point, text: text.trim(), fontSize, color, width: lineWidth, ...(selection ? { clip: selection } : {}) }); return;
         }
         if (tool === "select") setSelection(null);
@@ -202,64 +204,64 @@ export function CanvasImageEditorDialog({ node, onClose, onConfirm, saveHint = "
     const cancel = () => {
         if (saving) return;
         if (!dirty) { onClose(); return; }
-        modal.confirm({ title: "放弃这次图片编辑？", content: cancelDescription, okText: "放弃修改", cancelText: "继续编辑", onOk: onClose });
+        modal.confirm({ title: uiText("放弃这次图片编辑？"), content: t(cancelDescription), okText: uiText("放弃修改"), cancelText: uiText("继续编辑"), onOk: onClose });
     };
     const save = () => run(async () => {
         if (!canvasRef.current || !dirty || gestureRef.current) return;
         if (!uploadedRef.current) uploadedRef.current = await uploadImage(await editorPngBlob(canvasRef.current));
         await onConfirm(uploadedRef.current);
         onClose();
-        message.success(successMessage);
+        message.success(t(successMessage));
     });
 
-    return <Modal title="编辑图片" open centered width="min(1280px, calc(100vw - 24px))" onCancel={cancel} closable={!saving} keyboard={!saving} maskClosable={false} destroyOnHidden
+    return <Modal title={t("编辑图片")} open centered width="min(1280px, calc(100vw - 24px))" onCancel={cancel} closable={!saving} keyboard={!saving} maskClosable={false} destroyOnHidden
         styles={{ body: { maxHeight: "calc(100dvh - 160px)", overflow: "auto" } }}
-        footer={<div className="flex flex-wrap items-center justify-between gap-3"><span style={{ color: theme.node.muted }} className="text-xs">{saveHint}</span><div className="flex gap-2"><Button disabled={saving} onClick={cancel}>取消</Button><Button type="primary" icon={<Check className="size-4" />} loading={saving} disabled={!image || !dirty || Boolean(loadError)} onClick={() => void save()}>确定并保存</Button></div></div>}>
+        footer={<div className="flex flex-wrap items-center justify-between gap-3"><span style={{ color: theme.node.muted }} className="text-xs">{t(saveHint)}</span><div className="flex gap-2"><Button disabled={saving} onClick={cancel}>{t("取消")}</Button><Button type="primary" icon={<Check className="size-4" />} loading={saving} disabled={!image || !dirty || Boolean(loadError)} onClick={() => void save()}>{t("确定并保存")}</Button></div></div>}>
         <div onKeyDown={event => {
             if ((event.target as Element).closest("input,textarea,[contenteditable=true]")) return;
             if ((event.ctrlKey || event.metaKey) && ["z", "y"].includes(event.key.toLowerCase())) {
                 event.preventDefault(); event.stopPropagation(); travel(event.key.toLowerCase() === "y" || event.shiftKey ? 1 : -1);
             }
         }} style={{ color: theme.node.text }}>
-            {loadError ? <Alert type="error" showIcon message={loadError} action={<Button size="small" onClick={() => setReload(value => value + 1)}>重试</Button>} /> : null}
-            <div role="toolbar" aria-label="手动图片编辑工具" className="mb-3 flex flex-wrap items-center gap-2 border-b pb-3" style={{ borderColor: theme.node.stroke }}>
-                {tools.map(item => <Button key={item.id} disabled={!image || saving} type={tool === item.id ? "primary" : "text"} aria-pressed={tool === item.id} icon={<item.icon className="size-4" />} onClick={() => { clearPreview(); setTool(item.id); }}>{item.label}</Button>)}
+            {loadError ? <Alert type="error" showIcon message={loadError} action={<Button size="small" onClick={() => setReload(value => value + 1)}>{t("重试")}</Button>} /> : null}
+            <div role="toolbar" aria-label={t("手动图片编辑工具")} className="mb-3 flex flex-wrap items-center gap-2 border-b pb-3" style={{ borderColor: theme.node.stroke }}>
+                {tools.map(item => <Button key={item.id} disabled={!image || saving} type={tool === item.id ? "primary" : "text"} aria-pressed={tool === item.id} icon={<item.icon className="size-4" />} onClick={() => { clearPreview(); setTool(item.id); }}>{t(item.label)}</Button>)}
                 <span className="mx-1 h-5 border-l" style={{ borderColor: theme.node.stroke }} />
-                <Tooltip title="顺时针旋转 90°"><Button disabled={!image || saving} type="text" aria-label="顺时针旋转90度" icon={<RotateCw className="size-4" />} onClick={() => { commit({ kind: "rotate" }); setResizeDraft(null); setSelection(null); setZoom(1); }} /></Tooltip>
-                <Tooltip title="撤销 Ctrl+Z"><Button disabled={!dirty || saving} type="text" aria-label="撤销图片编辑" icon={<Undo2 className="size-4" />} onClick={() => travel(-1)} /></Tooltip>
-                <Tooltip title="重做 Ctrl+Shift+Z"><Button disabled={history.cursor >= history.operations.length || saving} type="text" aria-label="重做图片编辑" icon={<Redo2 className="size-4" />} onClick={() => travel(1)} /></Tooltip>
+                <Tooltip title={t("顺时针旋转 90°")}><Button disabled={!image || saving} type="text" aria-label={t("顺时针旋转90度")} icon={<RotateCw className="size-4" />} onClick={() => { commit({ kind: "rotate" }); setResizeDraft(null); setSelection(null); setZoom(1); }} /></Tooltip>
+                <Tooltip title={t("撤销 Ctrl+Z")}><Button disabled={!dirty || saving} type="text" aria-label={t("撤销图片编辑")} icon={<Undo2 className="size-4" />} onClick={() => travel(-1)} /></Tooltip>
+                <Tooltip title={t("重做 Ctrl+Shift+Z")}><Button disabled={history.cursor >= history.operations.length || saving} type="text" aria-label={t("重做图片编辑")} icon={<Redo2 className="size-4" />} onClick={() => travel(1)} /></Tooltip>
             </div>
             <div className="mb-3 flex min-h-8 flex-wrap items-center gap-x-4 gap-y-2 text-xs">
-                {tool !== "select" && tool !== "mosaic" ? <label className="flex items-center gap-2">颜色<input type="color" aria-label="绘制颜色" value={color} disabled={saving} onChange={event => setColor(event.target.value)} className="h-7 w-9 cursor-pointer border-0 bg-transparent" /></label> : null}
-                {tool !== "select" && tool !== "text" ? <label className="flex items-center gap-2">{tool === "mosaic" ? "色块" : "笔宽"}<Slider disabled={saving} className="!m-0 w-28" min={1} max={80} value={lineWidth} onChange={setLineWidth} /><span className="w-10 tabular-nums">{lineWidth}px</span></label> : null}
-                {tool === "text" ? <><Input.TextArea aria-label="标注文字" autoSize={{ minRows: 1, maxRows: 3 }} maxLength={500} value={text} disabled={saving} onChange={event => setText(event.target.value)} placeholder="输入文字，再点击图片放置" className="!w-64 max-w-full" /><label className="flex items-center gap-2">字号<InputNumber aria-label="标注字号" disabled={saving} min={8} max={240} value={fontSize} onChange={value => setFontSize(value || 36)} /></label></> : null}
-                {selection ? <><span>选区 {selection.width} × {selection.height}px</span><Button size="small" disabled={saving} icon={<Crop className="size-3.5" />} onClick={() => { commit({ kind: "crop", rect: selection }); setResizeDraft(null); setSelection(null); setZoom(1); }}>应用裁剪</Button><Button size="small" type="text" disabled={saving} onClick={() => setSelection(null)}>取消选区</Button></> : null}
-                <span className="ml-auto" style={{ color: theme.node.muted }}>{image ? `${size.width} × ${size.height}px` : "读取图片中"}</span>
+                {tool !== "select" && tool !== "mosaic" ? <label className="flex items-center gap-2">{t("颜色")}<input type="color" aria-label={t("绘制颜色")} value={color} disabled={saving} onChange={event => setColor(event.target.value)} className="h-7 w-9 cursor-pointer border-0 bg-transparent" /></label> : null}
+                {tool !== "select" && tool !== "text" ? <label className="flex items-center gap-2">{tool === "mosaic" ? t("色块") : t("笔宽")}<Slider disabled={saving} className="!m-0 w-28" min={1} max={80} value={lineWidth} onChange={setLineWidth} /><span className="w-10 tabular-nums">{lineWidth}px</span></label> : null}
+                {tool === "text" ? <><Input.TextArea aria-label={t("标注文字")} autoSize={{ minRows: 1, maxRows: 3 }} maxLength={500} value={text} disabled={saving} onChange={event => setText(event.target.value)} placeholder={t("输入文字，再点击图片放置")} className="!w-64 max-w-full" /><label className="flex items-center gap-2">{t("字号")}<InputNumber aria-label={t("标注字号")} disabled={saving} min={8} max={240} value={fontSize} onChange={value => setFontSize(value || 36)} /></label></> : null}
+                {selection ? <><span>{t("选区")}{selection.width} × {selection.height}px</span><Button size="small" disabled={saving} icon={<Crop className="size-3.5" />} onClick={() => { commit({ kind: "crop", rect: selection }); setResizeDraft(null); setSelection(null); setZoom(1); }}>{t("应用裁剪")}</Button><Button size="small" type="text" disabled={saving} onClick={() => setSelection(null)}>{t("取消选区")}</Button></> : null}
+                <span className="ml-auto" style={{ color: theme.node.muted }}>{image ? `${size.width} × ${size.height}px` : t("读取图片中")}</span>
             </div>
-            <div role="group" aria-label="自定义图片尺寸" className="mb-3 text-xs">
+            <div role="group" aria-label={t("自定义图片尺寸")} className="mb-3 text-xs">
                 <div className="flex flex-wrap items-center gap-2">
-                    <span>自定义尺寸</span>
-                    <label className="flex items-center gap-2">宽度<InputNumber<number> aria-label="图片宽度（像素）" disabled={!image || saving} min={1} max={EDITOR_MAX_DIMENSION} step={1} changeOnBlur={false} value={resizeWidth} status={resizeError ? "error" : undefined} className="!w-24" onChange={value => setResizeDraft(current => ({ width: value, height: current ? current.height : size.height }))} onPressEnter={applyResize} /></label>
+                    <span>{t("自定义尺寸")}</span>
+                    <label className="flex items-center gap-2">{t("宽度")}<InputNumber<number> aria-label={t("图片宽度（像素）")} disabled={!image || saving} min={1} max={EDITOR_MAX_DIMENSION} step={1} changeOnBlur={false} value={resizeWidth} status={resizeError ? "error" : undefined} className="!w-24" onChange={value => setResizeDraft(current => ({ width: value, height: current ? current.height : size.height }))} onPressEnter={applyResize} /></label>
                     <span aria-hidden>×</span>
-                    <label className="flex items-center gap-2">高度<InputNumber<number> aria-label="图片高度（像素）" disabled={!image || saving} min={1} max={EDITOR_MAX_DIMENSION} step={1} changeOnBlur={false} value={resizeHeight} status={resizeError ? "error" : undefined} className="!w-24" onChange={value => setResizeDraft(current => ({ width: current ? current.width : size.width, height: value }))} onPressEnter={applyResize} /></label>
+                    <label className="flex items-center gap-2">{t("高度")}<InputNumber<number> aria-label={t("图片高度（像素）")} disabled={!image || saving} min={1} max={EDITOR_MAX_DIMENSION} step={1} changeOnBlur={false} value={resizeHeight} status={resizeError ? "error" : undefined} className="!w-24" onChange={value => setResizeDraft(current => ({ width: current ? current.width : size.width, height: value }))} onPressEnter={applyResize} /></label>
                     <span>px</span>
-                    <Select<EditorResizeMode> aria-label="尺寸适配方式" disabled={!image || saving} value={resizeMode} onChange={setResizeMode} className="!w-40" options={[{ value: "contain", label: "完整保留 · 透明留边" }, { value: "cover", label: "填满画面 · 居中裁剪" }, { value: "stretch", label: "拉伸变形" }]} />
-                    <Button disabled={!canResize} onClick={applyResize}>应用尺寸</Button>
+                    <Select<EditorResizeMode> aria-label={t("尺寸适配方式")} disabled={!image || saving} value={resizeMode} onChange={setResizeMode} className="!w-40" options={[{ value: "contain", label: t("完整保留 · 透明留边") }, { value: "cover", label: t("填满画面 · 居中裁剪") }, { value: "stretch", label: t("拉伸变形") }]} />
+                    <Button disabled={!canResize} onClick={applyResize}>{t("应用尺寸")}</Button>
                 </div>
-                <div className="mt-1.5" style={{ color: theme.node.muted }}>{resizeMode === "contain" ? "保持比例，完整保留图片，空白处透明。" : resizeMode === "cover" ? "保持比例填满目标画面，居中裁去超出部分。" : "分别缩放宽高，图片和标记可能变形。"}最长边 8192px，总像素不超过 2500 万；仅本地编辑，不改变 AI 模型的生成尺寸限制。</div>
+                <div className="mt-1.5" style={{ color: theme.node.muted }}>{resizeMode === "contain" ? t("保持比例，完整保留图片，空白处透明。") : resizeMode === "cover" ? t("保持比例填满目标画面，居中裁去超出部分。") : t("分别缩放宽高，图片和标记可能变形。")}{t("最长边 8192px，总像素不超过 2500 万；仅本地编辑，不改变 AI 模型的生成尺寸限制。")}</div>
                 {resizeError ? <Alert className="mt-2" type="error" showIcon message={resizeError} /> : null}
             </div>
             <div ref={stageRef} className="relative h-[min(56dvh,640px)] min-h-52 overflow-auto rounded-lg border" style={{ background: theme.canvas.background, borderColor: theme.node.stroke }}>
-                {!image ? <div className="grid h-full place-items-center">{!loadError ? <Spin tip="读取原图" /> : <span style={{ color: theme.node.muted }}>暂时无法编辑此图片</span>}</div> : <div className="grid place-items-center" style={{ minWidth: "100%", minHeight: "100%", width: size.width * scale + 32, height: size.height * scale + 32 }}>
+                {!image ? <div className="grid h-full place-items-center">{!loadError ? <Spin tip={t("读取原图")} /> : <span style={{ color: theme.node.muted }}>{t("暂时无法编辑此图片")}</span>}</div> : <div className="grid place-items-center" style={{ minWidth: "100%", minHeight: "100%", width: size.width * scale + 32, height: size.height * scale + 32 }}>
                     <div className="relative shrink-0" style={{ width: size.width * scale, height: size.height * scale, background: `repeating-conic-gradient(${theme.node.panel} 0% 25%, ${theme.node.stroke} 0% 50%) 0 / 16px 16px` }}>
-                        <canvas ref={attachCanvas} aria-label="编辑图片预览" className="block size-full" />
-                        <canvas ref={overlayRef} width={size.width} height={size.height} aria-label="图片编辑画布" tabIndex={0} className="absolute inset-0 size-full touch-none outline-none" style={{ cursor: tool === "text" ? "text" : tool === "rectangle" && overRectangle ? "move" : "crosshair", pointerEvents: saving ? "none" : "auto" }} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={clearPreview} onLostPointerCapture={clearPreview} />
-                        {selectedBounds ? <div aria-label="选中的矩形标注" className="pointer-events-none absolute border border-dashed" style={{ left: selectedBounds.x / size.width * 100 + "%", top: selectedBounds.y / size.height * 100 + "%", width: selectedBounds.width / size.width * 100 + "%", height: selectedBounds.height / size.height * 100 + "%", borderColor: theme.canvas.selectionStroke }} /> : null}
+                        <canvas ref={attachCanvas} aria-label={t("编辑图片预览")} className="block size-full" />
+                        <canvas ref={overlayRef} width={size.width} height={size.height} aria-label={t("图片编辑画布")} tabIndex={0} className="absolute inset-0 size-full touch-none outline-none" style={{ cursor: tool === "text" ? "text" : tool === "rectangle" && overRectangle ? "move" : "crosshair", pointerEvents: saving ? "none" : "auto" }} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={clearPreview} onLostPointerCapture={clearPreview} />
+                        {selectedBounds ? <div aria-label={t("选中的矩形标注")} className="pointer-events-none absolute border border-dashed" style={{ left: selectedBounds.x / size.width * 100 + "%", top: selectedBounds.y / size.height * 100 + "%", width: selectedBounds.width / size.width * 100 + "%", height: selectedBounds.height / size.height * 100 + "%", borderColor: theme.canvas.selectionStroke }} /> : null}
                         {selection ? <div className="pointer-events-none absolute border-2 border-dashed" style={{ left: selection.x / size.width * 100 + "%", top: selection.y / size.height * 100 + "%", width: selection.width / size.width * 100 + "%", height: selection.height / size.height * 100 + "%", borderColor: theme.canvas.selectionStroke }} /> : null}
                     </div>
                 </div>}
             </div>
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs" style={{ color: theme.node.muted }}><span className="max-w-3xl">{hints[tool]}</span><div className="flex shrink-0 items-center gap-1"><Button size="small" type="text" aria-label="缩小编辑预览" icon={<ZoomOut className="size-4" />} onClick={() => setZoom(value => Math.max(.25, value / 1.25))} /><span className="w-12 text-center tabular-nums">{Math.round(scale * 100)}%</span><Button size="small" type="text" aria-label="放大编辑预览" icon={<ZoomIn className="size-4" />} onClick={() => setZoom(value => Math.min(8, value * 1.25))} /><Button size="small" type="text" onClick={() => setZoom(1)}>适应画面</Button></div></div>
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs" style={{ color: theme.node.muted }}><span className="max-w-3xl">{t(hints[tool])}</span><div className="flex shrink-0 items-center gap-1"><Button size="small" type="text" aria-label={t("缩小编辑预览")} icon={<ZoomOut className="size-4" />} onClick={() => setZoom(value => Math.max(.25, value / 1.25))} /><span className="w-12 text-center tabular-nums">{Math.round(scale * 100)}%</span><Button size="small" type="text" aria-label={t("放大编辑预览")} icon={<ZoomIn className="size-4" />} onClick={() => setZoom(value => Math.min(8, value * 1.25))} /><Button size="small" type="text" onClick={() => setZoom(1)}>{t("适应画面")}</Button></div></div>
         </div>
     </Modal>;
 }

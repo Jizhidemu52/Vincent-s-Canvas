@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { i18nHarness } from "./helpers/i18n-harness";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import React, { type ReactElement } from "react";
@@ -20,6 +21,7 @@ function controls(patch: Partial<AgentGenerationSettings> = {}) {
     const changes: Partial<AgentGenerationSettings>[] = [];
     const effects: Array<() => void> = [];
     const dependencies: Record<string, unknown> = {
+        "@/lib/i18n": i18nHarness,
         react: { ...React, useEffect: (effect: () => void) => effects.push(effect) },
         "@/lib/image-model-settings": { imageModelProfile, useImageModelProfile: (model: string) => imageModelProfile(model, []) },
         "@/hooks/use-tool-config": { canvasToolKey, useToolConfig: (config: unknown) => config },

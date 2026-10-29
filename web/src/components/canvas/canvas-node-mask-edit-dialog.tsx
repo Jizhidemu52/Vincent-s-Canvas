@@ -1,3 +1,4 @@
+import { useUiText } from "@/lib/i18n";
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Button, Input, Modal, Slider } from "antd";
 import { Brush, Eraser, RotateCcw, WandSparkles, X } from "lucide-react";
@@ -72,6 +73,7 @@ export function CanvasNodeMaskEditDialog({
     onClose: () => void;
     onConfirm: (payload: CanvasImageMaskEditPayload) => void;
 }) {
+    const t = useUiText();
     const [imageSettings, setImageSettings] = useState<Partial<AiConfig>>({});
     const effectiveConfig = useToolConfig({ ...config, ...imageSettings, count: "1", model }, "canvas-mask-edit");
     const profile = useImageModelProfile(effectiveConfig.model);
@@ -202,7 +204,7 @@ export function CanvasNodeMaskEditDialog({
 
     return (
         <>
-        <Modal title="局部遮罩编辑" open={open && Boolean(dataUrl)} onCancel={requestClose} footer={null} width={980} centered destroyOnHidden styles={{ body: { maxHeight: "calc(100dvh - 128px)", overflowY: "auto" } }}>
+        <Modal title={t("局部遮罩编辑")} open={open && Boolean(dataUrl)} onCancel={requestClose} footer={null} width={980} centered destroyOnHidden styles={{ body: { maxHeight: "calc(100dvh - 128px)", overflowY: "auto" } }}>
             <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
                 <div className="flex min-w-0 items-center justify-center overflow-hidden rounded-xl border bg-transparent p-0" style={{ borderColor: theme.node.stroke }}>
                     <div className="relative inline-block max-w-full overflow-hidden rounded-lg bg-transparent select-none">
@@ -214,7 +216,7 @@ export function CanvasNodeMaskEditDialog({
                                     ref={previewCanvasRef}
                                     width={previewSize.width}
                                     height={previewSize.height}
-                                    aria-label="蒙版绘制区"
+                                    aria-label={t("蒙版绘制区")}
                                     className="absolute inset-0 h-full w-full cursor-crosshair touch-none"
                                     onPointerDown={startDraw}
                                     onPointerMove={moveDraw}
@@ -228,60 +230,58 @@ export function CanvasNodeMaskEditDialog({
 
                 <div className="flex min-h-[360px] flex-col gap-5">
                     <div>
-                        <div className="mt-2 text-sm opacity-60">{image ? `输出尺寸锁定为原图 ${image.width} × ${image.height}px` : "读取真实像素尺寸中"}</div>
+                        <div className="mt-2 text-sm opacity-60">{image ? t("输出尺寸锁定为原图 {value1} × {value2}px", { value1: image.width, value2: image.height }) : t("读取真实像素尺寸中")}</div>
                     </div>
 
                     <div className="grid grid-cols-2 gap-2">
                         <Button type={mode === "paint" ? "primary" : "default"} icon={<Brush className="size-4" />} onClick={() => setMode("paint")}>
-                            画笔
-                        </Button>
+                            {t("画笔")}</Button>
                         <Button type={mode === "erase" ? "primary" : "default"} icon={<Eraser className="size-4" />} onClick={() => setMode("erase")}>
-                            擦除
-                        </Button>
+                            {t("擦除")}</Button>
                     </div>
 
                     <div className="space-y-2">
                         <div className="flex items-center justify-between text-sm">
-                            <span className="font-medium opacity-75">笔刷直径</span>
-                            <span className="font-semibold">{brushSize} 显示像素</span>
+                            <span className="font-medium opacity-75">{t("笔刷直径")}</span>
+                            <span className="font-semibold">{brushSize} {t(" 显示像素")}</span>
                         </div>
                         <Slider min={8} max={160} step={2} value={brushSize} onChange={setBrushSize} />
                     </div>
 
                     <div className="space-y-2">
                         <div className="flex items-center justify-between gap-3 text-sm">
-                            <span className="font-medium opacity-75">编辑模型</span>
-                            {deploymentFeatures.creditsEnabled && typeof estimatedCredits === "number" ? <span className="shrink-0 text-xs font-medium text-orange-600">预计 {estimatedCredits} 积分</span> : null}
+                            <span className="font-medium opacity-75">{t("编辑模型")}</span>
+                            {deploymentFeatures.creditsEnabled && typeof estimatedCredits === "number" ? <span className="shrink-0 text-xs font-medium text-orange-600">{t("预计")}{estimatedCredits} {t(" 积分")}</span> : null}
                         </div>
-                        <ModelPicker toolKey="canvas-mask-edit" config={effectiveConfig} value={effectiveConfig.model} onChange={onModelChange} capability="image" fullWidth placeholder="选择局部编辑模型" />
-                        {!profile.supportsMask ? <p role="alert" className="text-xs text-destructive">当前模型不支持蒙版，请切换支持蒙版的出图模型。</p> : null}
+                        <ModelPicker toolKey="canvas-mask-edit" config={effectiveConfig} value={effectiveConfig.model} onChange={onModelChange} capability="image" fullWidth placeholder={t("选择局部编辑模型")} />
+                        {!profile.supportsMask ? <p role="alert" className="text-xs text-destructive">{t("当前模型不支持蒙版，请切换支持蒙版的出图模型。")}</p> : null}
                     </div>
 
                     <div className="space-y-3">
-                        <p className="text-xs leading-5" style={{ color: theme.node.muted }}>蒙版坐标与原图像素一一对应，不调整比例、尺寸或分辨率，也不会自动拉伸原图或蒙版。</p>
+                        <p className="text-xs leading-5" style={{ color: theme.node.muted }}>{t("蒙版坐标与原图像素一一对应，不调整比例、尺寸或分辨率，也不会自动拉伸原图或蒙版。")}</p>
                         {profile.kind === "standard" || profile.kind === "quality-resolution" ? <label className="flex flex-col gap-1 text-xs">
-                            <span>图片质量</span>
-                            <select aria-label="图片质量" className="rounded border px-2 py-1.5" style={{ background: theme.node.fill, color: theme.node.text, borderColor: theme.node.stroke }} value={lockedSettings?.quality || effectiveConfig.quality} onChange={event => setImageSettings(current => ({ ...current, quality: event.target.value }))}>
+                            <span>{t("图片质量")}</span>
+                            <select aria-label={t("图片质量")} className="rounded border px-2 py-1.5" style={{ background: theme.node.fill, color: theme.node.text, borderColor: theme.node.stroke }} value={lockedSettings?.quality || effectiveConfig.quality} onChange={event => setImageSettings(current => ({ ...current, quality: event.target.value }))}>
                                 {profile.qualities.map(value => <option key={value} value={value}>{imageQualityLabel(value)}</option>)}
                             </select>
                         </label> : null}
                         {outputFields.map(field => <label key={field.key} className="flex flex-col gap-1 text-xs">
                             <span>{field.label}</span>
                             {field.options ? <select aria-label={field.label} value={outputOptions[field.key] || ""} className="rounded border px-2 py-1.5" style={{ background: theme.node.fill, color: theme.node.text, borderColor: theme.node.stroke }} onChange={event => setOutputOption(field.key, event.target.value)}>
-                                <option value="">渠道默认</option>
+                                <option value="">{t("渠道默认")}</option>
                                 {field.options.map(value => <option key={value} value={value}>{value}</option>)}
-                            </select> : <input aria-label={field.label} type="number" min={field.min} max={field.max} step={field.step} value={outputOptions[field.key] || ""} placeholder="渠道默认" disabled={field.key === "output_compression" && !["jpeg", "webp"].includes(outputOptions.output_format || "png")} className="rounded border px-2 py-1.5 disabled:opacity-40" style={{ background: theme.node.fill, color: theme.node.text, borderColor: theme.node.stroke }} onChange={event => setOutputOption(field.key, event.target.value)} />}
+                            </select> : <input aria-label={field.label} type="number" min={field.min} max={field.max} step={field.step} value={outputOptions[field.key] || ""} placeholder={t("渠道默认")} disabled={field.key === "output_compression" && !["jpeg", "webp"].includes(outputOptions.output_format || "png")} className="rounded border px-2 py-1.5 disabled:opacity-40" style={{ background: theme.node.fill, color: theme.node.text, borderColor: theme.node.stroke }} onChange={event => setOutputOption(field.key, event.target.value)} />}
                             {field.tip ? <span className="leading-5" style={{ color: theme.node.muted }}>{field.tip}</span> : null}
                         </label>)}
                     </div>
 
                     <div className="space-y-2">
-                        <div className="text-sm font-medium opacity-75">修改要求</div>
+                        <div className="text-sm font-medium opacity-75">{t("修改要求")}</div>
                         <Input.TextArea
                             rows={6}
                             value={prompt}
                             status={error && !prompt.trim() ? "error" : undefined}
-                            placeholder="例如：把选中区域改成金属材质，保持原图光影"
+                            placeholder={t("例如：把选中区域改成金属材质，保持原图光影")}
                             onChange={(event) => {
                                 setPrompt(event.target.value);
                                 setError("");
@@ -292,23 +292,19 @@ export function CanvasNodeMaskEditDialog({
 
                     <div className="mt-auto flex items-center justify-between gap-2">
                         <Button icon={<RotateCcw className="size-4" />} onClick={resetMask}>
-                            重置
-                        </Button>
+                            {t("重置")}</Button>
                         <div className="flex items-center gap-2">
                             <Button icon={<X className="size-4" />} onClick={requestClose}>
-                                取消
-                            </Button>
+                                {t("取消")}</Button>
                             <Button type="primary" disabled={!toolEnabled || !effectiveConfig.model || !profile.supportsMask || !lockedSettings} icon={<WandSparkles className="size-4" />} onClick={submit}>
-                                AI 修改
-                            </Button>
+                                {t("AI 修改")}</Button>
                         </div>
                     </div>
                 </div>
             </div>
         </Modal>
-        <Modal title="放弃本次蒙版编辑？" open={open && confirmDiscard} onCancel={() => setConfirmDiscard(false)} onOk={() => { setConfirmDiscard(false); onClose(); }} okText="放弃编辑" cancelText="继续编辑" mask={{ closable: false }} centered>
-            涂抹区域和修改要求尚未提交，关闭后将丢失。
-        </Modal>
+        <Modal title={t("放弃本次蒙版编辑？")} open={open && confirmDiscard} onCancel={() => setConfirmDiscard(false)} onOk={() => { setConfirmDiscard(false); onClose(); }} okText={t("放弃编辑")} cancelText={t("继续编辑")} mask={{ closable: false }} centered>
+            {t("涂抹区域和修改要求尚未提交，关闭后将丢失。")}</Modal>
         </>
     );
 }

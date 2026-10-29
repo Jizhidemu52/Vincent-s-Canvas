@@ -1,3 +1,4 @@
+import { uiText, useUiText } from "@/lib/i18n";
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { loadProcessingImage } from "./image-processing-browser";
 import { rgbHex } from "./image-processing";
@@ -31,6 +32,7 @@ export function photoPixelHex(rgba: Uint8ClampedArray): string | null {
 export function PhotoColorSampler({ src, onPick, disabled = false }: {
     src: string; onPick: (hex: string) => void; disabled?: boolean;
 }) {
+    useUiText();
     const image = useRef<HTMLImageElement>(null);
     const helpId = useId();
     const [loaded, setLoaded] = useState<{ src: string; canvas: HTMLCanvasElement } | null>(null);
@@ -83,15 +85,15 @@ export function PhotoColorSampler({ src, onPick, disabled = false }: {
     };
 
     return <div data-usage-board="photo-color-picker" className="cs-photo-sampler" aria-busy={!ready && !error}>
-        <div className="cs-photo-sampler-heading">从衣服照片取色</div>
+        <div className="cs-photo-sampler-heading">{uiText("从衣服照片取色")}</div>
         {ready && canvas && <button type="button" className="cs-photo-sampler-image" disabled={disabled}
-            aria-label="衣服照片取色" aria-describedby={helpId} onClick={click} onKeyDown={move}>
-            <img ref={image} src={src} alt="已上传的衣服照片" draggable={false} />
+            aria-label={uiText("衣服照片取色")} aria-describedby={helpId} onClick={click} onKeyDown={move}>
+            <img ref={image} src={src} alt={uiText("已上传的衣服照片")} draggable={false} />
             <span className="cs-photo-sampler-point" aria-hidden="true" style={{ left: `${(point.x + .5) / canvas.width * 100}%`, top: `${(point.y + .5) / canvas.height * 100}%` }} />
         </button>}
-        <p id={helpId} className="cs-photo-sampler-help">点击衣服取色；方向键移动，Shift 精调，Enter 或空格取色。预览取色会受缩放和光照影响。</p>
+        <p id={helpId} className="cs-photo-sampler-help">{uiText("点击衣服取色；方向键移动，Shift 精调，Enter 或空格取色。预览取色会受缩放和光照影响。")}</p>
         <p className="cs-photo-sampler-status" role={error ? "alert" : "status"}>
-            {error || (!ready ? "正在读取照片…" : message || `取色位置：横向 ${point.x + 1}，纵向 ${point.y + 1}`)}
+            {error || (!ready ? uiText("正在读取照片…") : message || uiText("取色位置：横向 {value1}，纵向 {value2}", { value1: point.x + 1, value2: point.y + 1 }))}
         </p>
     </div>;
 }

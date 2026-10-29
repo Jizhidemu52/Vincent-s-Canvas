@@ -12,15 +12,22 @@ import { prepareWorkspaceEntry } from "@/lib/workspace-entry";
 import { subscribeWorkspaceIdentity } from "@/lib/workspace-session-events";
 import { useUserStore } from "@/stores/use-user-store";
 import { isWorkspaceRole } from "../../shared/workspace-access";
+import { initializeUiLocale, setUiPathname, useUiText } from "@/lib/i18n";
 
 // Remove credentials before any network request, dynamic import or navigation.
 let oaToken = consumeOaLoginToken(window.location, window.history);
 const root = createRoot(document.getElementById("root")!);
-root.render(<main role="status" className="flex min-h-screen items-center justify-center bg-background text-sm text-muted-foreground">正在准备工作区…</main>);
+function PreparingWorkspace({ changed = false }: { changed?: boolean }) {
+    const t = useUiText();
+    return <main role="status" className="flex min-h-screen flex-col items-center justify-center gap-4 bg-background text-sm text-muted-foreground"><p>{t(changed ? "登录账号已变化，正在重新准备工作区…" : "正在准备工作区…")}</p>{changed ? <button type="button" onClick={() => window.location.reload()}>{t("重新加载")}</button> : null}</main>;
+}
+root.render(<PreparingWorkspace />);
+const localeReady = initializeUiLocale();
 
 document.body.style.fontFamily = '"SF Pro Display","SF Pro Text","PingFang SC","Microsoft YaHei","Helvetica Neue",sans-serif';
 
 void loadDeploymentFeatures().then(async (loaded) => {
+    await localeReady;
     if (!loaded) {
         oaToken = null;
         root.render(<ServiceUnavailable onRetry={() => window.location.reload()} />);
@@ -48,7 +55,7 @@ void loadDeploymentFeatures().then(async (loaded) => {
     const sessionUser = deploymentFeatures.authenticationEnabled ? useUserStore.getState().user : null;
     const owner = sessionUser && isWorkspaceRole(sessionUser.role) ? sessionUser.id : null;
     const renderIdentityChanged = () => root.render(deploymentFeatures.oaLoginEnabled ? <CompanyOaEntry />
-        : <main role="status" className="flex min-h-screen flex-col items-center justify-center gap-4 bg-background text-sm text-muted-foreground"><p>登录账号已变化，正在重新准备工作区…</p><button type="button" onClick={() => window.location.reload()}>重新加载</button></main>);
+        : <PreparingWorkspace changed />);
     let workspaceLoaded = false;
     if (sessionUser) {
         useUserStore.subscribe(({ user }) => {
@@ -73,6 +80,8 @@ void loadDeploymentFeatures().then(async (loaded) => {
     ]);
     workspaceLoaded = true;
     if (sessionUser && (useUserStore.getState().user?.id !== sessionUser.id || useUserStore.getState().user?.role !== sessionUser.role)) { renderIdentityChanged(); return; }
+    setUiPathname(router.state.location.pathname);
+    router.subscribe(state => setUiPathname(state.location.pathname));
     root.render(
         <React.StrictMode>
             <AppProviders>

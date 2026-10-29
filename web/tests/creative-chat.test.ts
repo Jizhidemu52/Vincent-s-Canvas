@@ -137,7 +137,7 @@ describe("creative chat persistent image identity and branches", () => {
     test("a full catalog survives the ordinary 24-message context cutoff and preserves recorded parents", () => {
         const history = [...branchHistory, ...Array.from({ length: 50 }, (_, index) => ({ id: `discussion-${index}`, ...user(`普通讨论 ${index}`) }))];
         const catalog = buildCreativeImageCatalog(history);
-        expect(catalog.map((item) => [item.id, item.label, item.messageId])).toEqual([["A", "图 1", "message-a"], ["B", "图 2", "message-b"], ["C", "图 3", "message-c"], ["D", "图 4", "message-d"]]);
+        expect(catalog.map((item) => [item.id, item.label, item.messageId])).toEqual([["A", "图1", "message-a"], ["B", "图2", "message-b"], ["C", "图3", "message-c"], ["D", "图4", "message-d"]]);
         expect(catalog.find((item) => item.id === "B")?.lineage?.parentImageId).toBe("A");
         expect(catalog.find((item) => item.id === "D")?.lineage?.parentImageId).toBe("C");
         expect(resolveCreativeChatReferences(history, user("回到图1"), "A")[0]!.id).toBe("A");
@@ -344,6 +344,33 @@ describe("creative chat bounded natural-conversation service", () => {
     const originalFetch = globalThis.fetch;
     afterEach(() => { globalThis.fetch = originalFetch; });
     const config = { model: "gpt-6-astra", textModel: "gpt-6-astra", systemPrompt: "" } as AiConfig;
+
+    test("explicit composer targeting supplements the current text without extending the server profile schema", async () => {
+        const requests: any[] = [];
+        const history = [generated("older"), generated("latest")];
+        globalThis.fetch = withModelConfig(async (url, init) => {
+            expect(String(url)).toBe("/api/chat/responses");
+            requests.push(JSON.parse(String(init?.body)));
+            return Response.json({ content: "我们先讨论选中版本", toolCalls: [] });
+        });
+        await requestCreativeChatPlan(config, history, user("先讨论，不改图"), { selectedImageId: "latest", explicitTargetImageId: "older" });
+        expect(requests).toHaveLength(1);
+        expect(requests[0].profileContext.recentImageId).toBe("older");
+        expect(requests[0].profileContext.currentUserText).toContain("明确选择 图1 作为编辑目标");
+        expect(requests[0].profileContext.explicitTargetImageId).toBeUndefined();
+        expect(JSON.stringify(requests[0].input)).toContain("明确选择 图1 作为编辑目标");
+    });
+
+    test("choosing an explicit target without text cannot enable an image operation", async () => {
+        let body: any;
+        globalThis.fetch = withModelConfig(async (_url, init) => {
+            body = JSON.parse(String(init?.body));
+            return Response.json({ content: "", toolCalls: [tool("generate", "must not execute")] });
+        });
+        const plan = await requestCreativeChatPlan(config, [generated("older")], user(""), { explicitTargetImageId: "older" });
+        expect(body.profileContext.currentUserText).toBe("");
+        expect(plan.kind).toBe("discussion");
+    });
 
     test.each([
         "这个画布提示词是什么发给我",

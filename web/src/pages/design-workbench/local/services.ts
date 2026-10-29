@@ -6,6 +6,7 @@ import { createWorkbenchProjectStorage } from "./project-storage";
 import { imageToDataUrl } from "@/services/image-storage";
 import { uploadServerAsset } from "@/services/api/server-assets";
 import type { InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
+import { setWorkbenchText } from "./ui-text.js";
 
 /** Page-owned resources: never share image data, pending imports, or toasts across owners. */
 export function createLocalWorkbenchServices(root: HTMLElement, ownerId: string | null, signal: AbortSignal, setDirty: (dirty: boolean) => void = () => {}, chooseAsset?: () => Promise<InsertAssetPayload | null>) {
@@ -116,7 +117,7 @@ export function createLocalWorkbenchServices(root: HTMLElement, ownerId: string 
         }
         toast.setAttribute("role", tone === "error" ? "alert" : "status");
         toast.className = `local-workbench-toast ${tone}`;
-        toast.textContent = message;
+        setWorkbenchText(toast, message);
         toast.hidden = false;
         clearTimeout(toastTimer);
         toastTimer = setTimeout(

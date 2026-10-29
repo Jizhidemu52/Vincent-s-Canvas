@@ -7,6 +7,7 @@ import ts from "typescript";
 import { shouldBypassStandaloneAuthGate } from "@/lib/standalone-access";
 import { isAdminRole, type LocalUser } from "@/stores/use-user-store";
 import { isWorkspaceRole } from "../../shared/workspace-access";
+import { i18nHarness } from "./helpers/i18n-harness";
 
 const requireModule = createRequire(import.meta.url);
 const compiled = new Map<string, string>();
@@ -46,6 +47,7 @@ function registeredRoutes(features: Features, standalone = false): Route[] {
 function gateResult(features: Features, user: LocalUser | null, admin: boolean, passwordChange = false) {
     const state = { user, status: user ? "authenticated" : "guest", hydrateSession: async () => undefined };
     const { AuthGate } = evaluateModule("../src/components/auth/auth-gate.tsx", {
+        "@/lib/i18n": i18nHarness,
         "../../../../shared/workspace-access": { isWorkspaceRole },
         react: { ...React, useEffect: () => undefined },
         "react-router-dom": { Navigate, useLocation: () => ({ pathname: admin ? "/admin" : "/canvas/test", search: "" }) },

@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { i18nHarness } from "./helpers/i18n-harness";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import React, { type ReactElement } from "react";
@@ -23,6 +24,7 @@ function picker(models: PublicModel[], current: string, bound = false) {
     const state = { models, status: "ready", refresh: async () => undefined, tools: bound ? [{ toolKey: "canvas-image", modelConfigId: current, enabled: true }] : [] };
     const selected: string[] = [];
     const dependencies: Record<string, unknown> = {
+        "@/lib/i18n": i18nHarness,
         react: { ...React, useEffect() {}, useMemo: (factory: () => unknown) => factory(), useId: () => "picker", useState: () => [false, () => undefined] },
         "@/components/ui/select": { Select: "Select", SelectContent: "SelectContent", SelectItem: "SelectItem", SelectTrigger: "SelectTrigger" },
         "@/hooks/use-can-manage-config": { useCanManageConfig: () => false },

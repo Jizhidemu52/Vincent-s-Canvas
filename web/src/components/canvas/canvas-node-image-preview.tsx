@@ -1,3 +1,4 @@
+import { useUiText } from "@/lib/i18n";
 import type { ReactNode } from "react";
 import type { CanvasNodeData } from "@/types/canvas";
 import type { ImageThumbnailEdge } from "@/lib/canvas/canvas-image-thumbnail";
@@ -8,6 +9,7 @@ import { useCanvasImageThumbnail } from "./use-canvas-image-thumbnail";
 export default function CanvasNodeImagePreview({ node, edge, placeholderColor, renderError }: {
     node: CanvasNodeData; edge: ImageThumbnailEdge | 0; placeholderColor: string; renderError: (retry: () => void) => ReactNode;
 }) {
+    const t = useUiText();
     const preview = useCanvasImageThumbnail(node, edge);
     const fit = node.metadata?.freeResize ? "object-fill" : "object-contain";
     return <div className="relative h-full w-full overflow-hidden">
@@ -17,6 +19,6 @@ export default function CanvasNodeImagePreview({ node, edge, placeholderColor, r
                 {...canvasImageRenderProps()} onError={preview.onError} onLoad={preview.onLoad} onDragStart={event => event.preventDefault()}
                 style={{ opacity: !preview.loaded && preview.placeholderUrl ? 0 : 1, filter: preview.thumbnail && !preview.loaded ? "blur(2px)" : undefined }}
                 className={`cw-image-progressive pointer-events-none relative block h-full w-full select-none ${fit}`} />
-                : <div className="h-full w-full animate-pulse" style={{ background: placeholderColor }} aria-label="正在恢复图片预览" />}
+                : <div className="h-full w-full animate-pulse" style={{ background: placeholderColor }} aria-label={t("正在恢复图片预览")} />}
     </div>;
 }

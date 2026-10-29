@@ -81,8 +81,9 @@
 .cw-topbar { position: absolute; left: 12px; right: 12px; top: 12px; z-index: 50; display: flex; justify-content: space-between; gap: 8px; pointer-events: none; }
 .cw-project-card { display: flex; align-items: center; gap: 8px; width: var(--cw-create-width, 480px); min-width: 0; height: 56px; padding: 9px; pointer-events: auto; }
 .cw-project-card.is-agent-open { width: var(--cw-chat-width, 480px); }
-.cw-brand { gap: 3px; width: 36px; }
-.cw-brand span { font-size: 23px; font-weight: 800; letter-spacing: -3px; font-style: italic; }
+.cw-brand { gap: 3px; width: 190px; height: 38px; }
+.cw-brand .inchoice-brand { width: 175px; }
+.cw-brand:hover { opacity: .8; }
 .cw-project-title { min-width: 0; flex: 1; font-size: 15px; }
 .cw-project-title button, .cw-project-title input { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; border: 0; background: transparent; outline: 0; }
 .cw-share { height: 38px; padding: 0 12px; border: 0; border-radius: 6px; background: var(--cw-soft); font-size: 14px; font-weight: 500; white-space: nowrap; cursor: pointer; }
@@ -133,6 +134,14 @@
 .cw-zoom-popover input { width: 100%; }
 @media (max-width: 720px) { .cw-project-card, .cw-project-card.is-agent-open { width: min(480px, calc(100vw - 110px)); } .cw-agent-panel { width: min(480px, calc(100vw - 24px)); bottom: 66px; } .cw-dock { overflow-x: auto; justify-content: flex-start; } .cw-tools { flex-shrink: 0; } .cw-generator-body { padding-inline: 18px; } .cw-generator-footer { padding-inline: 18px; } }
 @media (max-width: 720px) { .cw-account-card { width: auto; } .cw-account-avatar, .cw-account-name { display: none; } .cw-project-card { gap: 2px; } .cw-share { padding: 0 8px; } }
+@media (max-width: 720px) {
+    .cw-project-card { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; grid-template-rows: 24px 18px; column-gap: 5px; row-gap: 0; height: 56px; padding: 6px 8px; }
+    .cw-brand { grid-column: 1; grid-row: 1; justify-content: flex-start; width: 100%; min-width: 0; height: 24px; }
+    .cw-brand .inchoice-brand { width: min(130px, calc(100% - 15px)); }
+    .cw-project-title { grid-column: 1 / -1; grid-row: 2; font-size: 11px; line-height: 18px; }
+    .cw-project-card > .cw-save-status { grid-column: 2; grid-row: 1; }
+    .cw-share { grid-column: 3; grid-row: 1; height: 24px; padding: 0 4px; font-size: 12px; }
+}
 @media (max-width: 1023px) { .cw-create-panel { display: none; } }
 @media (min-width: 721px) and (max-width: 1023px) { .cw-project-card { width: 400px; } }
 

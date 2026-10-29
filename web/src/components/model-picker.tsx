@@ -1,3 +1,4 @@
+import { uiText, useUiLocale } from "@/lib/i18n";
 import { useEffect, useId, useMemo, useState } from "react";
 import { Cpu } from "lucide-react";
 import { CanvasModelPicker } from "@/components/canvas/canvas-model-picker";
@@ -36,7 +37,8 @@ export function shouldRefreshModelPickerConfig(capability: ModelCapability | und
     return source === "server" && Boolean(capability) && status === "idle";
 }
 
-export function ModelPicker({ config, value, onChange, capability, className, fullWidth = false, placeholder = "选择模型", onMissingConfig, modelsSource, disabled = false, toolKey, variant }: ModelPickerProps) {
+export function ModelPicker({ config, value, onChange, capability, className, fullWidth = false, placeholder = uiText("选择模型"), onMissingConfig, modelsSource, disabled = false, toolKey, variant }: ModelPickerProps) {
+    useUiLocale();
     const pickerId = useId();
     const [open, setOpen] = useState(false);
     const canManageConfig = useCanManageConfig();
@@ -61,7 +63,7 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
     );
     const current = boundModel?.modelId || resolveModelPickerValue(value, options, source);
     const emptyLabel = usesServerModels && businessConfigStatus !== "ready"
-        ? businessConfigStatus === "error" ? "模型配置加载失败" : "正在加载模型…"
+        ? businessConfigStatus === "error" ? uiText("模型配置加载失败") : uiText("正在加载模型…")
         : emptyModelLabel(config, capability, canManageConfig, source);
     const nameFor = (model: string) => {
         const serverModel = serverModels.find(item => item.modelId === model);
@@ -69,7 +71,7 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
             : serverModel?.name || modelOptionLabel(config, model);
     };
     const labelFor = (model: string) => modelLabelWithUsage(nameFor(model), serverModels.find(item => item.modelId === model)?.publicDescription);
-    const currentLabel = binding?.enabled === false ? "此板块已停用" : binding?.modelConfigId && !boundModel ? "绑定模型不可用" : current ? `${labelFor(current)}${boundModel ? " · 后台指定" : ""}` : options.length ? placeholder : emptyLabel;
+    const currentLabel = binding?.enabled === false ? uiText("此板块已停用") : binding?.modelConfigId && !boundModel ? uiText("绑定模型不可用") : current ? `${labelFor(current)}${boundModel ? uiText(" · 后台指定") : ""}` : options.length ? placeholder : emptyLabel;
 
     useEffect(() => {
         const closeOtherPicker = (event: Event) => {
@@ -98,10 +100,10 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
                 details: profile ? canvasImageModelDetails(profile, referencePolicyForModel(model, profile)) : [], usageModelId: serverModel?.id,
                 isFeatured: serverModel?.isFeatured === true, displayOrder: serverModel?.displayOrder };
         });
-        const label = binding?.enabled === false ? "此板块已停用" : binding?.modelConfigId && !boundModel ? "绑定模型不可用"
+        const label = binding?.enabled === false ? uiText("此板块已停用") : binding?.modelConfigId && !boundModel ? uiText("绑定模型不可用")
             : canvasOptions.find(option => option.value === current)?.name || (options.length ? placeholder : emptyLabel);
         return <CanvasModelPicker options={canvasOptions} value={current} label={label} emptyLabel={emptyLabel} open={open} disabled={pickerDisabled} bound={Boolean(boundModel)}
-            categoryLabel={`${capability === "image" ? "图像" : modelCapabilityLabel(capability)}模型`} className={className} onOpenChange={changeOpen} onValueChange={changeValue} />;
+            categoryLabel={uiText("{label}模型", { label: uiText(capability === "image" ? "图像" : modelCapabilityLabel(capability)) })} className={className} onOpenChange={changeOpen} onValueChange={changeValue} />;
     }
 
     return (
@@ -154,25 +156,27 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
 }
 
 function emptyModelLabel(config: AiConfig, capability?: ModelCapability, canManageConfig = false, source: ModelPickerSource = "local") {
-    const label = modelCapabilityLabel(capability);
-    if (source === "server") return `暂无可用${label}模型${canManageConfig ? "，请在后台配置" : "，请联系管理员配置"}`;
-    if (!canManageConfig) return `暂无可用${label}模型，请联系管理员配置模型`;
-    if (capability && config.models.length) return "请先在上方配置可选模型";
-    return config.models.length ? `暂无匹配的${label}模型` : "请先到配置里添加渠道和模型";
+    const label = uiText(modelCapabilityLabel(capability));
+    if (source === "server") return uiText("暂无可用{label}模型{help}", { label, help: uiText(canManageConfig ? "，请在后台配置" : "，请联系管理员配置") });
+    if (!canManageConfig) return uiText("暂无可用{label}模型，请联系管理员配置模型", { label });
+    if (capability && config.models.length) return uiText("请先在上方配置可选模型");
+    return config.models.length ? uiText("暂无匹配的{label}模型", { label }) : uiText("请先到配置里添加渠道和模型");
 }
 
 function ModelLabel({ model, label, serverModel }: { model: string; label: string; serverModel?: { creditCost: number } }) {
+    useUiLocale();
     return (
         <span className="flex min-w-0 items-center gap-2">
             <ModelIcon model={model} />
             <span className="flex min-w-0 flex-col py-1">
-                <span className="whitespace-normal">{serverModel && deploymentFeatures.creditsEnabled ? `${label} · 模型 ${serverModel.creditCost} 积分` : label}</span>
+                <span className="whitespace-normal">{serverModel && deploymentFeatures.creditsEnabled ? uiText("{label} · 模型 {credits} 积分", { label, credits: serverModel.creditCost }) : label}</span>
             </span>
         </span>
     );
 }
 
 function ModelIcon({ model }: { model: string }) {
+    useUiLocale();
     const icon = imageModelIdentityHidden(model) ? "" : resolveModelIcon(modelOptionName(model));
     return icon ? <img src={icon} alt="" className="size-4 shrink-0 dark:invert" /> : <Cpu className="size-4 shrink-0 opacity-70" />;
 }

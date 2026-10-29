@@ -1,3 +1,4 @@
+import { i18nHarness } from "./helpers/i18n-harness";
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -15,7 +16,7 @@ function handle(kind: "create" | "chat") {
         "@/stores/canvas/use-canvas-panel-store": { useCanvasPanelStore: (select: Function) => select(state) },
     };
     const module = { exports: {} as { CanvasPanelResizeHandle: Function } };
-    new Function("require", "module", "exports", code)((name: string) => deps[name] || localRequire(name), module, module.exports);
+    new Function("require", "module", "exports", code)((id: string) => id === "@/lib/i18n" ? i18nHarness : ((name: string) => deps[name] || localRequire(name))(id), module, module.exports);
     const props = module.exports.CanvasPanelResizeHandle({ kind }).props;
     let captured = false;
     const root = { style: { setProperty: (...args: unknown[]) => styles.push(args) } };

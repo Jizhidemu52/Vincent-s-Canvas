@@ -1,3 +1,4 @@
+import { uiText, useUiLocale } from "@/lib/i18n";
 import type { CSSProperties } from "react";
 import { Keyboard, Settings2 } from "lucide-react";
 
@@ -15,6 +16,7 @@ type UserStatusActionsProps = {
 };
 
 export function UserStatusActions({ showConfig = true, variant = "default", onOpenShortcuts }: UserStatusActionsProps) {
+    useUiLocale();
     const theme = useThemeStore((state) => state.theme);
     const setTheme = useThemeStore((state) => state.setTheme);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
@@ -26,13 +28,13 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
     return (
         <div className="inline-flex shrink-0 items-center gap-1">
             {showConfig && canManageConfig && deploymentFeatures.rolePortalsEnabled ? (
-                <button type="button" className={naturalIconClass} style={iconStyle} onClick={() => openConfigDialog(false)} aria-label="配置" title="配置">
+                <button type="button" className={naturalIconClass} style={iconStyle} onClick={() => openConfigDialog(false)} aria-label={uiText("配置")} title={uiText("配置")}>
                     <Settings2 className="size-4" />
                 </button>
             ) : null}
-            <AnimatedThemeToggler theme={theme} onThemeChange={setTheme} className={naturalIconClass} style={iconStyle} aria-label={theme === "dark" ? "切换到浅色主题" : "切换到深色主题"} title={theme === "dark" ? "切换到浅色主题" : "切换到深色主题"} />
+            <AnimatedThemeToggler theme={theme} onThemeChange={setTheme} className={naturalIconClass} style={iconStyle} aria-label={theme === "dark" ? uiText("切换到浅色主题") : uiText("切换到深色主题")} title={theme === "dark" ? uiText("切换到浅色主题") : uiText("切换到深色主题")} />
             {onOpenShortcuts ? (
-                <button type="button" className={naturalIconClass} style={iconStyle} onClick={onOpenShortcuts} aria-label="快捷键" title="快捷键">
+                <button type="button" className={naturalIconClass} style={iconStyle} onClick={onOpenShortcuts} aria-label={uiText("快捷键")} title={uiText("快捷键")}>
                     <Keyboard className="size-4" />
                 </button>
             ) : null}

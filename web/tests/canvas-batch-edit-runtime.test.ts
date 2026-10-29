@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { uiText } from "@/lib/i18n";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
 import { prepareCanvasBatchFiles } from "@/pages/canvas/canvas-batch-edit-runtime";
@@ -36,6 +37,7 @@ test("batch execution rejects stale oversized selections before uploading, queue
     const effects: string[] = [];
     const errors: string[] = [];
     const dependencies = {
+        uiText,
         assertCanvasImageUploadSize, modelOptionName: (model: string) => model, deploymentFeatures: { creditsEnabled: false },
         uploadImage: async () => { effects.push("upload"); throw new Error("No upload expected"); },
         requestBatchEdit: async () => { effects.push("submit"); throw new Error("No generation expected"); },
@@ -68,6 +70,7 @@ test("definitive batch rejection clears bindings while uncertain submission reta
         let nodes: any[] = [];
         const notices: string[] = [];
         const dependencies = {
+            uiText,
             assertCanvasImageUploadSize, QueuedTaskHttpError, QueuedTaskSubmissionUncertainError,
             modelOptionName: (model: string) => model, deploymentFeatures: { creditsEnabled: false }, CanvasNodeType: { Image: "image" },
             nanoid: () => "test", fitNodeSize: () => ({ width: 100, height: 100 }), flushSync: (action: () => void) => action(),

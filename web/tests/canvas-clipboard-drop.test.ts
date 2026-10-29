@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { i18nHarness } from "./helpers/i18n-harness";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
 import { createClientId } from "../src/lib/client-id";
@@ -7,7 +8,7 @@ const source = readFileSync(new URL("../src/pages/canvas/use-canvas-clipboard-dr
 const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ESNext } }).outputText;
 function dropHarness() {
     const exports: Record<string, any> = {};
-    new Function("require", "exports", code)((name: string) => name === "@/lib/client-id" ? { createClientId } : ({ useRef: (current: unknown) => ({ current }), useCallback: (callback: unknown) => callback,
+    new Function("require", "exports", code)((name: string) => name === "@/lib/i18n" ? i18nHarness : name === "@/lib/client-id" ? { createClientId } : ({ useRef: (current: unknown) => ({ current }), useCallback: (callback: unknown) => callback,
         useLayoutEffect: (effect: () => void) => effect(), useEffect() {} }), exports);
     const imported: string[] = [], errors: string[] = [], warnings: string[] = [], progress: Array<{ id: string; completed: number; total: number; failed: number }> = [];
     const create = async (file: File) => { if (file.name === "bad.png") throw new Error("decode failed"); imported.push(file.name); };

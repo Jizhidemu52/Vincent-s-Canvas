@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { uiText } from "@/lib/i18n";
 import { readFileSync } from "node:fs";
 import React from "react";
 import ts from "typescript";
@@ -64,6 +65,7 @@ function editor(initial = project(), previous = frame(initial), loadUndoAction: 
     const stopped: unknown[][] = [];
     let queuedSave: { patch: CanvasHistorySnapshot & { history: CanvasProject["history"] } } | null = null;
     const scope = {
+        uiText,
         React, useCallback: (callback: unknown) => callback, applyCanvasAgentOps, canvasGenerationRunsForNodes,
         describeCanvasHistoryChange, onHistoryAction: undefined,
         stopGenerationByRunningId: (...args: unknown[]) => stopped.push(args),

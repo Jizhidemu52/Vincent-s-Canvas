@@ -1,3 +1,4 @@
+import { useUiText } from "@/lib/i18n";
 import { useEffect, useState } from "react";
 
 import { canvasImageRenderProps } from "@/lib/canvas/canvas-image-render-quality";
@@ -17,6 +18,7 @@ type CanvasPersistedMediaPreviewProps = {
 
 /** Resolves local Blob-backed media only when its chat/card preview mounts. */
 export function CanvasPersistedMediaPreview({ kind, url = "", storageKey, alt = "", className, controls = false, placeholderClassName = "" }: CanvasPersistedMediaPreviewProps) {
+    const t = useUiText();
     const source = { type: kind, content: url, storageKey };
     const needsResolution = needsCanvasNodeMediaPreviewResolution(source);
     const [previewUrl, setPreviewUrl] = useState(() => (needsResolution ? "" : url));
@@ -40,7 +42,7 @@ export function CanvasPersistedMediaPreview({ kind, url = "", storageKey, alt = 
         };
     }, [kind, needsResolution, storageKey, url]);
 
-    if (!previewUrl) return <span aria-label="正在恢复媒体预览" className={`block animate-pulse bg-black/5 dark:bg-white/10 ${placeholderClassName || className}`} />;
+    if (!previewUrl) return <span aria-label={t("正在恢复媒体预览")} className={`block animate-pulse bg-black/5 dark:bg-white/10 ${placeholderClassName || className}`} />;
     if (kind === "video") return <video src={previewUrl} controls={controls} preload="metadata" className={className} />;
     return <img src={previewUrl} alt={alt} {...canvasImageRenderProps()} className={className} />;
 }

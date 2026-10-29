@@ -1,3 +1,4 @@
+import { i18nHarness } from "./helpers/i18n-harness";
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -50,7 +51,7 @@ function loadComponent<T = (props: any) => ReactElement<any>>(path: string, name
         ...overrides,
     };
     const module = { exports: {} as any };
-    new Function("require", "module", "exports", code)((id: string) => dependencies[id] || requireModule(id), module, module.exports);
+    new Function("require", "module", "exports", code)((id: string) => id === "@/lib/i18n" ? i18nHarness : ((id: string) => dependencies[id] || requireModule(id))(id), module, module.exports);
     return module.exports[name] as T;
 }
 

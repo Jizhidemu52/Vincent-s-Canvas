@@ -1,3 +1,5 @@
+import { uiText } from "@/lib/i18n";
+
 /** One definition per canvas action. Context-specific targets stay in the owning callbacks. */
 export const canvasActions = [
     { id: "undo", label: "撤销", key: "z" },
@@ -47,11 +49,11 @@ export type CanvasActionId = typeof canvasActions[number]["id"];
 export type CanvasShortcutActionId = Extract<typeof canvasActions[number], { key: string }>["id"];
 export function canvasActionLabel(id: CanvasActionId, surface: "toolbar" | "context" | "command" = "command", targetCount = 1) {
     const action = canvasActions.find(action => action.id === id)!;
-    if (id === "downloadSelectedImages" && surface !== "command") return `${action.label}（${targetCount} 张）`;
-    if (surface === "context" && targetCount > 1 && (id === "duplicate" || id === "delete")) return `${id === "duplicate" ? "复制" : "删除"}所选 ${targetCount} 项`;
-    if (surface === "context" && "contextLabel" in action) return action.contextLabel;
-    if (surface === "toolbar" && "toolbarLabel" in action) return action.toolbarLabel;
-    return action.label;
+    if (id === "downloadSelectedImages" && surface !== "command") return uiText("下载所选图片（{count} 张）", { count: targetCount });
+    if (surface === "context" && targetCount > 1 && (id === "duplicate" || id === "delete")) return uiText(id === "duplicate" ? "复制所选 {count} 项" : "删除所选 {count} 项", { count: targetCount });
+    if (surface === "context" && "contextLabel" in action) return uiText(action.contextLabel);
+    if (surface === "toolbar" && "toolbarLabel" in action) return uiText(action.toolbarLabel);
+    return uiText(action.label);
 }
 type Shortcut = { id: string; key?: string; shift?: boolean; plain?: boolean };
 type KeyEvent = { key: string; ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean; shiftKey?: boolean };
@@ -61,7 +63,7 @@ export function canvasActionShortcut(id: string) {
 }
 export function canvasActionHint(id: CanvasActionId) {
     const action = canvasActions.find(action => action.id === id)!;
-    const shortcut = canvasActionShortcut(id) || ("gesture" in action ? action.gesture : "");
+    const shortcut = canvasActionShortcut(id) || ("gesture" in action ? uiText(action.gesture) : "");
     return `${canvasActionLabel(id, "toolbar")}${shortcut ? `（${shortcut}）` : ""}`;
 }
 export function matchCanvasActionShortcut(event: KeyEvent): CanvasShortcutActionId | undefined {

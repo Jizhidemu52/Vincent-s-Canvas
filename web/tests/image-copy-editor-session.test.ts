@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { i18nHarness } from "./helpers/i18n-harness";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import ts from "typescript";
@@ -18,6 +19,7 @@ function harness() {
     let cleanup: (() => void) | undefined;
     let mounted = false;
     const dependencies: Record<string, unknown> = {
+        "@/lib/i18n": i18nHarness,
         react: {
             useState(initial: unknown) { const index = stateIndex++; if (!(index in states)) states[index] = initial; return [states[index], (value: unknown) => { states[index] = value; }]; },
             useRef(initial: unknown) { const index = refIndex++; return refs[index] ||= { current: initial }; },

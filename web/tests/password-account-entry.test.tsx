@@ -5,6 +5,7 @@ import React, { type ReactElement } from "react";
 import { create } from "zustand";
 import ts from "typescript";
 import { UsageSession } from "../src/lib/usage-session";
+import { i18nHarness } from "./helpers/i18n-harness";
 
 function elements(node: unknown): ReactElement<any>[] {
     if (Array.isArray(node)) return node.flatMap(elements);
@@ -20,6 +21,9 @@ function pageHarness(path: string, dependencies: Record<string, unknown>) {
     const values: any[] = [], assignments: string[] = [], navigations: string[] = [], errors: string[] = [];
     let cursor = 0;
     const mocks: Record<string, unknown> = {
+        "@/lib/i18n": i18nHarness,
+        "@/components/layout/inchoice-brand": { InchoiceBrand: () => null },
+        "@/components/layout/language-switch": { LanguageSwitch: () => null },
         react: { ...React, useEffect: () => undefined, useState(initial: any) { const index = cursor++; if (!(index in values)) values[index] = initial; return [values[index], (value: any) => { values[index] = value; }]; }, useRef(initial: unknown) { const index = cursor++; return values[index] ||= { current: initial }; } },
         antd: { App: { useApp: () => ({ message: { success() {}, error: (value: string) => errors.push(value), warning: (value: string) => errors.push(value) } }) }, Button: "Button", Input: Object.assign(function Input() {}, { Password: "Password" }), Form: Object.assign(function Form() {}, { Item: "FormItem" }) },
         "lucide-react": new Proxy({}, { get: (_, key) => String(key) }),

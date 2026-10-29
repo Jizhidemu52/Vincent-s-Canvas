@@ -1,3 +1,4 @@
+import { useUiText } from "@/lib/i18n";
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Button, Modal, Select } from "antd";
 import { Check, X } from "lucide-react";
@@ -17,6 +18,7 @@ const ratioOptions = [
 const handleNames: Record<ResizeHandle, string> = { n: "上", e: "右", s: "下", w: "左", ne: "右上", nw: "左上", se: "右下", sw: "左下" };
 
 export function CanvasNodeCropDialog({ dataUrl, open, onClose, onConfirm }: { dataUrl: string; open: boolean; onClose: () => void; onConfirm: (crop: CanvasImageCropRect) => void }) {
+    const t = useUiText();
     const boxRef = useRef<HTMLDivElement>(null);
     const dragCleanupRef = useRef<(() => void) | null>(null);
     const [crop, setCrop] = useState<CanvasImageCropRect>(defaultCrop);
@@ -79,20 +81,20 @@ export function CanvasNodeCropDialog({ dataUrl, open, onClose, onConfirm }: { da
     };
 
     return (
-        <Modal title="裁剪图片" open={open && Boolean(dataUrl)} onCancel={onClose} footer={null} width={780} centered destroyOnHidden>
+        <Modal title={t("裁剪图片")} open={open && Boolean(dataUrl)} onCancel={onClose} footer={null} width={780} centered destroyOnHidden>
             <div className="space-y-4">
                 {imageError ? <div role="alert" className="text-sm">{imageError}</div> : null}
                 <div className="flex justify-center">
                     <div ref={boxRef} className="relative inline-block max-w-full touch-none overflow-hidden rounded-lg bg-black select-none">
                         <img src={dataUrl} alt="" className="block max-h-[62vh] max-w-full opacity-90" draggable={false} />
                         <CropMask crop={crop} />
-                        <div aria-label="裁剪选区" className="absolute cursor-move border-2 border-white shadow-[0_0_0_1px_rgba(0,0,0,.3),0_0_28px_rgba(0,0,0,.28)]" style={cropStyle(crop)} onPointerDown={(event) => startDrag("move", event)}>
+                        <div aria-label={t("裁剪选区")} className="absolute cursor-move border-2 border-white shadow-[0_0_0_1px_rgba(0,0,0,.3),0_0_28px_rgba(0,0,0,.28)]" style={cropStyle(crop)} onPointerDown={(event) => startDrag("move", event)}>
                             <div className="pointer-events-none absolute inset-x-0 top-1/3 border-t border-white/50" />
                             <div className="pointer-events-none absolute inset-x-0 top-2/3 border-t border-white/50" />
                             <div className="pointer-events-none absolute inset-y-0 left-1/3 border-l border-white/50" />
                             <div className="pointer-events-none absolute inset-y-0 left-2/3 border-l border-white/50" />
                             {handles.map((handle) => (
-                                <button key={handle} type="button" disabled={!image} className="absolute size-3 rounded-full border border-black bg-white" style={handleStyle(handle)} onPointerDown={(event) => startDrag("resize", event, handle)} aria-label={`调整裁剪框${handleNames[handle]}`} onKeyDown={event => {
+                                <button key={handle} type="button" disabled={!image} className="absolute size-3 rounded-full border border-black bg-white" style={handleStyle(handle)} onPointerDown={(event) => startDrag("resize", event, handle)} aria-label={t("调整裁剪框{value1}", { value1: t(handleNames[handle]) })} onKeyDown={event => {
                                     const delta = event.shiftKey ? 0.05 : 0.01;
                                     const dx = event.key === "ArrowLeft" ? -delta : event.key === "ArrowRight" ? delta : 0;
                                     const dy = event.key === "ArrowUp" ? -delta : event.key === "ArrowDown" ? delta : 0;
@@ -105,25 +107,23 @@ export function CanvasNodeCropDialog({ dataUrl, open, onClose, onConfirm }: { da
 
                 <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border px-3 py-2">
                     <div className="flex flex-wrap items-center gap-3 text-sm opacity-80">
-                        <span>裁剪尺寸 {cropSize ? `${cropSize.width} x ${cropSize.height}` : "未知"}</span>
-                        <span>比例 {cropSize ? formatRatio(cropSize.width, cropSize.height) : "未知"}</span>
+                        <span>{t("裁剪尺寸")}{cropSize ? `${cropSize.width} x ${cropSize.height}` : t("未知")}</span>
+                        <span>{t("比例")}{cropSize ? formatRatio(cropSize.width, cropSize.height) : t("未知")}</span>
                         {image ? (
                             <span>
-                                原图 {image.width} x {image.height}
+                                {t("原图 ")}{image.width} x {image.height}
                             </span>
                         ) : null}
                     </div>
-                    <Select aria-label="裁剪比例" className="min-w-32" value={ratioKey} options={ratioOptions} disabled={!image} onChange={changeRatio} />
+                    <Select aria-label={t("裁剪比例")} className="min-w-32" value={ratioKey} options={ratioOptions.map(option => ({ ...option, label: t(option.label) }))} disabled={!image} onChange={changeRatio} />
                 </div>
 
                 <div className="flex items-center justify-end gap-2">
-                    <Button onClick={() => { dragCleanupRef.current?.(); setCrop(defaultCrop); setRatioKey("free"); }}>重置</Button>
+                    <Button onClick={() => { dragCleanupRef.current?.(); setCrop(defaultCrop); setRatioKey("free"); }}>{t("重置")}</Button>
                     <Button icon={<X className="size-4" />} onClick={onClose}>
-                        取消
-                    </Button>
+                        {t("取消")}</Button>
                     <Button type="primary" icon={<Check className="size-4" />} disabled={!image} onClick={() => onConfirm(crop)}>
-                        确认裁剪
-                    </Button>
+                        {t("确认裁剪")}</Button>
                 </div>
             </div>
         </Modal>
@@ -131,6 +131,7 @@ export function CanvasNodeCropDialog({ dataUrl, open, onClose, onConfirm }: { da
 }
 
 function CropMask({ crop }: { crop: CanvasImageCropRect }) {
+    const t = useUiText();
     return (
         <>
             <div className="absolute inset-x-0 top-0 bg-black/55" style={{ height: `${crop.y * 100}%` }} />

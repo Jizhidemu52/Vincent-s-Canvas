@@ -1,3 +1,4 @@
+import { useUiText, uiText } from "@/lib/i18n";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, App, Button, Checkbox, Empty, Input, Modal, Progress, Radio, theme } from "antd";
 import { ArrowDown, ArrowUp, FileDown } from "lucide-react";
@@ -10,6 +11,7 @@ import type { CanvasNodeData } from "@/types/canvas";
 export type CanvasImagePdfDialogProps = { nodes: CanvasNodeData[]; defaultSelectedIds?: string[]; defaultName?: string; defaultMode?: CanvasImagePdfMode; onClose: () => void };
 
 export function CanvasImagePdfDialog({ nodes, defaultSelectedIds = [], defaultName = "图片集", defaultMode = "merged", onClose }: CanvasImagePdfDialogProps) {
+    const t = useUiText();
     const { token } = theme.useToken();
     const { message } = App.useApp();
     const available = useMemo(() => canvasImageExportSelection(nodes), [nodes]);
@@ -58,7 +60,7 @@ export function CanvasImagePdfDialog({ nodes, defaultSelectedIds = [], defaultNa
             const result = await createCanvasImagePdfExport({ nodes: chosenIds.map((id) => byId.get(id)!), setName, mode, signal: controller.signal, onProgress: (value) => { if (active.current && !controller.signal.aborted) setProgress(value); } });
             if (!active.current || controller.signal.aborted) return;
             saveAs(result.blob, result.fileName);
-            void message.success(`已导出 ${result.imageCount} 张图片：${result.fileName}`);
+            void message.success(t("已导出 {value1} 张图片：{value2}", { value1: result.imageCount, value2: result.fileName }));
             onClose();
         } catch (cause) {
             if (active.current && !controller.signal.aborted) setError(cause instanceof Error ? cause.message : "图片集导出失败，请重试");
@@ -72,36 +74,36 @@ export function CanvasImagePdfDialog({ nodes, defaultSelectedIds = [], defaultNa
     };
 
     return (
-        <Modal title="导出图片集" open onCancel={close} width={720} centered destroyOnHidden footer={
+        <Modal title={t("导出图片集")} open onCancel={close} width={720} centered destroyOnHidden footer={
             <div className="flex flex-wrap items-center justify-between gap-3">
-                <span style={{ color: token.colorTextSecondary }} className="text-sm">{chosenIds.length} 张图片 · {mode === "merged" ? "1 个多页 PDF" : mode === "separate" ? `${chosenIds.length} 个单页 PDF（ZIP）` : mode === "images" ? "原图 ZIP" : `${mode.toUpperCase()} 图片 ZIP`}</span>
-                <div className="flex gap-2"><Button onClick={busy ? cancel : close}>{busy ? "取消处理" : "取消"}</Button><Button type="primary" icon={<FileDown size={16} />} loading={busy} disabled={!chosenIds.length || !setName.trim() || overLimit} onClick={() => void exportImages()}>导出并下载</Button></div>
+                <span style={{ color: token.colorTextSecondary }} className="text-sm">{chosenIds.length} {t(" 张图片 ·")}{mode === "merged" ? t("1 个多页 PDF") : mode === "separate" ? t("{value1} 个单页 PDF（ZIP）", { value1: chosenIds.length }) : mode === "images" ? t("原图 ZIP") : t("{value1} 图片 ZIP", { value1: mode.toUpperCase() })}</span>
+                <div className="flex gap-2"><Button onClick={busy ? cancel : close}>{busy ? t("取消处理") : t("取消")}</Button><Button type="primary" icon={<FileDown size={16} />} loading={busy} disabled={!chosenIds.length || !setName.trim() || overLimit} onClick={() => void exportImages()}>{t("导出并下载")}</Button></div>
             </div>
         }>
             <div className="space-y-4 py-2">
-                <label className="block space-y-2"><span className="text-sm font-medium">图片集名称</span><Input aria-label="图片集名称" value={setName} maxLength={100} disabled={busy} onChange={(event) => setSetName(event.target.value)} placeholder="例如：秋冬印花方案" /></label>
-                <Radio.Group aria-label="图片集导出方式" value={mode} disabled={busy} onChange={(event) => setMode(event.target.value)} className="flex flex-wrap gap-2" options={[{ value: "png", label: "PNG 图片（ZIP）" }, { value: "jpg", label: "JPG 图片（ZIP）" }, { value: "images", label: "原图（ZIP）" }, { value: "merged", label: "合并多页 PDF" }, { value: "separate", label: "每张一个 PDF（ZIP）" }]} />
-                <p className="text-xs leading-5" style={{ color: token.colorTextSecondary }}>逐张导出所选图片，不会把整个画布合成一张图。按下方编号导出，勾选后可上移或下移。{mode === "images" ? "保留原始图片格式与文件内容，按图片名称和版本命名，不压缩画质。" : mode === "png" || mode === "jpg" ? `保持原图像素尺寸，不裁切。${mode === "png" ? "PNG 保留已有透明区域。" : "JPG 为高质量有损格式，透明区域填充白色，不保证逐像素一致。"}格式转换时，动态图仅导出静态画面。` : "每张图独占一页，保持原图比例、不裁切；按 96 px = 72 pt 设置页面（超长图等比缩放）。PNG/JPEG 直接嵌入，其他格式转为静态 PNG。"}</p>
+                <label className="block space-y-2"><span className="text-sm font-medium">{t("图片集名称")}</span><Input aria-label={t("图片集名称")} value={setName} maxLength={100} disabled={busy} onChange={(event) => setSetName(event.target.value)} placeholder={t("例如：秋冬印花方案")} /></label>
+                <Radio.Group aria-label={t("图片集导出方式")} value={mode} disabled={busy} onChange={(event) => setMode(event.target.value)} className="flex flex-wrap gap-2" options={[{ value: "png", label: t("PNG 图片（ZIP）") }, { value: "jpg", label: t("JPG 图片（ZIP）") }, { value: "images", label: t("原图（ZIP）") }, { value: "merged", label: t("合并多页 PDF") }, { value: "separate", label: t("每张一个 PDF（ZIP）") }]} />
+                <p className="text-xs leading-5" style={{ color: token.colorTextSecondary }}>{t("逐张导出所选图片，不会把整个画布合成一张图。按下方编号导出，勾选后可上移或下移。")}{mode === "images" ? t("保留原始图片格式与文件内容，按图片名称和版本命名，不压缩画质。") : mode === "png" || mode === "jpg" ? t("保持原图像素尺寸，不裁切。{value1}格式转换时，动态图仅导出静态画面。", { value1: mode === "png" ? uiText("PNG 保留已有透明区域。") : uiText("JPG 为高质量有损格式，透明区域填充白色，不保证逐像素一致。") }) : t("每张图独占一页，保持原图比例、不裁切；按 96 px = 72 pt 设置页面（超长图等比缩放）。PNG/JPEG 直接嵌入，其他格式转为静态 PNG。")}</p>
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="text-sm font-medium">图片与导出顺序</span>
-                    <div className="flex flex-wrap gap-1"><Button size="small" type="text" disabled={busy || !available.length} onClick={() => setSelectedIds([...chosenIds, ...available.filter((node) => !chosen.has(node.id)).map((node) => node.id)])}>全选</Button><Button size="small" type="text" disabled={busy || !initialIds.length} onClick={() => setSelectedIds(initialIds)}>仅画布已选</Button><Button size="small" type="text" disabled={busy || !chosenIds.length} onClick={() => setSelectedIds([])}>清空</Button></div>
+                    <span className="text-sm font-medium">{t("图片与导出顺序")}</span>
+                    <div className="flex flex-wrap gap-1"><Button size="small" type="text" disabled={busy || !available.length} onClick={() => setSelectedIds([...chosenIds, ...available.filter((node) => !chosen.has(node.id)).map((node) => node.id)])}>{t("全选")}</Button><Button size="small" type="text" disabled={busy || !initialIds.length} onClick={() => setSelectedIds(initialIds)}>{t("仅画布已选")}</Button><Button size="small" type="text" disabled={busy || !chosenIds.length} onClick={() => setSelectedIds([])}>{t("清空")}</Button></div>
                 </div>
-                {available.length ? <div className="max-h-[38vh] space-y-1 overflow-y-auto pr-1" role="list" aria-label="图片导出顺序">
+                {available.length ? <div className="max-h-[38vh] space-y-1 overflow-y-auto pr-1" role="list" aria-label={t("图片导出顺序")}>
                     {ordered.map((node) => {
                         const index = chosenIds.indexOf(node.id);
                         const name = canvasImageExportStem(node);
                         return <div key={node.id} role="listitem" className="flex items-center gap-3 rounded-lg px-2 py-2" style={{ background: chosen.has(node.id) ? token.controlItemBgActive : token.colorFillQuaternary }}>
-                            <Checkbox aria-label={`选择 ${name}`} checked={chosen.has(node.id)} disabled={busy} onChange={() => toggle(node.id)} />
+                            <Checkbox aria-label={t("选择 {value1}", { value1: name })} checked={chosen.has(node.id)} disabled={busy} onChange={() => toggle(node.id)} />
                             <span className="w-5 shrink-0 text-center text-xs tabular-nums" style={{ color: token.colorTextSecondary }}>{index >= 0 ? index + 1 : "—"}</span>
                             <CanvasPersistedMediaPreview kind="image" url={node.metadata?.content} storageKey={node.metadata?.storageKey} alt={name} className="size-12 shrink-0 rounded object-contain" />
                             <span className="min-w-0 flex-1 truncate text-sm" title={name}>{name}</span>
-                            <div className="flex shrink-0"><Button size="small" type="text" title="上移" aria-label={`上移 ${name}`} icon={<ArrowUp size={15} />} disabled={busy || index <= 0} onClick={() => move(node.id, -1)} /><Button size="small" type="text" title="下移" aria-label={`下移 ${name}`} icon={<ArrowDown size={15} />} disabled={busy || index < 0 || index === chosenIds.length - 1} onClick={() => move(node.id, 1)} /></div>
+                            <div className="flex shrink-0"><Button size="small" type="text" title={t("上移")} aria-label={t("上移 {value1}", { value1: name })} icon={<ArrowUp size={15} />} disabled={busy || index <= 0} onClick={() => move(node.id, -1)} /><Button size="small" type="text" title={t("下移")} aria-label={t("下移 {value1}", { value1: name })} icon={<ArrowDown size={15} />} disabled={busy || index < 0 || index === chosenIds.length - 1} onClick={() => move(node.id, 1)} /></div>
                         </div>;
                     })}
-                </div> : <Empty description="画布中暂无可导出的图片" />}
-                <p className="text-xs" style={{ color: token.colorTextSecondary }}>每批最多 200 张、原图总大小 256 MB{mode !== "images" && "，单张最多 2000 万像素"}。逐张处理，导出不修改画布原图。</p>
-                {overLimit && <Alert type="warning" showIcon title="每批最多导出 200 张图片，请减少选择" />}
-                {error && <Alert type="error" showIcon title="未完成导出" description={error} />}
+                </div> : <Empty description={t("画布中暂无可导出的图片")} />}
+                <p className="text-xs" style={{ color: token.colorTextSecondary }}>{t("每批最多 200 张、原图总大小 256 MB")}{mode !== "images" && t("，单张最多 2000 万像素")}{t("。逐张处理，导出不修改画布原图。")}</p>
+                {overLimit && <Alert type="warning" showIcon title={t("每批最多导出 200 张图片，请减少选择")} />}
+                {error && <Alert type="error" showIcon title={t("未完成导出")} description={error} />}
                 {progress && <div aria-live="polite"><Progress percent={Math.round(progress.completed / progress.total * 100)} status="active" /><p className="truncate text-xs" title={progress.label}>{progress.label}</p></div>}
             </div>
         </Modal>

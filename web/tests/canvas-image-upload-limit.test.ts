@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { uiText } from "@/lib/i18n";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
 import { assertCanvasImageUploadSize, CANVAS_IMAGE_MAX_BYTES } from "@/lib/canvas/canvas-image-upload-limit";
@@ -17,7 +18,7 @@ function callback(name: string, scope: Record<string, unknown>): (...args: any[]
         const code = ts.transpileModule(`const run = ${action.getText(hook)};`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
         const message = scope.message as { error: unknown; warning?: unknown };
         const latest = { current: { screenToCanvas: scope.screenToCanvas, createImage: scope.createImageFileNode, createVideo: scope.createVideoFileNode, createAudio: scope.createAudioFileNode, error: message.error, warning: message.warning } };
-        return new Function("latest", "isCanvasAudioFile", "createClientId", `${code} return run;`)(latest, isCanvasAudioFile, () => "upload-limit-test");
+        return new Function("uiText", "latest", "isCanvasAudioFile", "createClientId", `${code} return run;`)(uiText, latest, isCanvasAudioFile, () => "upload-limit-test");
     }
     let expression: ts.Expression | undefined;
     const visit = (node: ts.Node) => {
@@ -27,7 +28,7 @@ function callback(name: string, scope: Record<string, unknown>): (...args: any[]
     visit(source);
     if (!expression) throw new Error(`Missing callback: ${name}`);
     const code = ts.transpileModule(`const run = ${expression.getText(source)};`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
-    return new Function("scope", `with (scope) { ${code} return run; }`)(new Proxy({ Error, Array, Math, assertCanvasImageUploadSize, ...scope }, { has: () => true }));
+    return new Function("scope", `with (scope) { ${code} return run; }`)(new Proxy({ uiText, Error, Array, Math, assertCanvasImageUploadSize, ...scope }, { has: () => true }));
 }
 const large = { name: "too-large.png", type: "image/png", size: CANVAS_IMAGE_MAX_BYTES + 1 };
 const small = { name: "normal.png", type: "image/png", size: 100 };

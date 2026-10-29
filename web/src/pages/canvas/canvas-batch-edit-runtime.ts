@@ -1,3 +1,4 @@
+import { uiText } from "@/lib/i18n";
 import type { Dispatch, SetStateAction } from "react";
 import { nanoid } from "nanoid";
 import { requestBatchEdit } from "@/services/api/image";
@@ -60,23 +61,23 @@ export async function runCanvasBatchImageEdit({
         let prompt = batchEditPrompt.trim();
         let optimized = false;
         const items = batchEditItems;
-        if (items.some(item => item.requestId)) { message.warning("该批次已有原请求，请在画布结果节点查询原任务；不会重复提交。新批次请重新选择图片。"); return; }
+        if (items.some(item => item.requestId)) { message.warning(uiText("该批次已有原请求，请在画布结果节点查询原任务；不会重复提交。新批次请重新选择图片。")); return; }
         const model = batchGenerationConfig.model;
         const modelId = modelOptionName(model);
         const usage = estimateUsage({ operationType: "batch_image", toolKey: "canvas-batch", modelId, quantity: items.length });
 
         if (!items.length || items.length > 100) {
-            message.error("请选择 1–100 张图片，每张图片独立生成 1 张结果。");
+            message.error(uiText("请选择 1–100 张图片，每张图片独立生成 1 张结果。"));
             return;
         }
         try {
             items.forEach(item => assertCanvasImageUploadSize(item.file));
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "图片过大，未提交批量改图");
+            message.error(error instanceof Error ? error.message : uiText("图片过大，未提交批量改图"));
             return;
         }
         if (!prompt) {
-            message.error("请输入批量改图提示词");
+            message.error(uiText("请输入批量改图提示词"));
             return;
         }
         if (!isAiConfigReady(batchGenerationConfig, model)) {
@@ -84,11 +85,11 @@ export async function runCanvasBatchImageEdit({
             return;
         }
         if (!user || user.status !== "active") {
-            message.error("当前设计师账号不可用");
+            message.error(uiText("当前设计师账号不可用"));
             return;
         }
         if (deploymentFeatures.creditsEnabled && usage.configured && user.creditBalance < usage.credits) {
-            message.error(`额度不足：预计需要 ${usage.credits} 积分，当前剩余 ${user.creditBalance} 积分`);
+            message.error(uiText("额度不足：预计需要 {value1} 积分，当前剩余 {value2} 积分", { value1: usage.credits, value2: user.creditBalance }));
             return;
         }
 
@@ -170,7 +171,7 @@ export async function runCanvasBatchImageEdit({
         if (!prepared.length) {
             setBatchEditRunning(false);
             setOptimizing?.(false);
-            message.error("没有可提交的图片");
+            message.error(uiText("没有可提交的图片"));
             return;
         }
 
@@ -372,11 +373,11 @@ export async function runCanvasBatchImageEdit({
         }
 
         if (unresolvedCount) {
-            message.warning(`批次状态待核查：${unresolvedCount} 张待查询原任务，不会重复提交或扣费。`);
+            message.warning(uiText("批次状态待核查：{value1} 张待查询原任务，不会重复提交或扣费。", { value1: unresolvedCount }));
         } else if (failedCount || cancelledCount) {
-            message.warning(`批量改图完成，成功 ${selectedResults.length} 张，失败 ${failedCount} 张，取消 ${cancelledCount} 张`);
+            message.warning(uiText("批量改图完成，成功 {value1} 张，失败 {value2} 张，取消 {value3} 张", { value1: selectedResults.length, value2: failedCount, value3: cancelledCount }));
         } else {
-            message.success(`批量改图完成：${selectedResults.length} 张`);
+            message.success(uiText("批量改图完成：{value1} 张", { value1: selectedResults.length }));
         }
 
 }
@@ -391,9 +392,9 @@ export function prepareCanvasBatchFiles(files: File[]) {
 export async function controlCanvasBatch(id: string, action: QueuedBatchAction, message: Runtime["message"]) {
     try {
         const result = await controlQueuedBatch(id, action);
-        message.success(`${action === "pause" ? "暂停" : action === "resume" ? "恢复" : "取消"}成功，影响 ${result.changed} 张图片`);
+        message.success(uiText("{value1}成功，影响 {value2} 张图片", { value1: action === "pause" ? uiText("暂停") : action === "resume" ? uiText("恢复") : uiText("取消"), value2: result.changed }));
     } catch (error) {
-        message.error(error instanceof Error ? error.message : "批量任务操作失败");
+        message.error(error instanceof Error ? error.message : uiText("批量任务操作失败"));
     }
 }
 

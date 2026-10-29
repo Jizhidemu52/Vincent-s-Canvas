@@ -1,3 +1,4 @@
+import { i18nHarness } from "./helpers/i18n-harness";
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -47,7 +48,7 @@ function dialogHarness(kind: string, name: string, extraProps: Record<string, un
         "./use-canvas-image-thumbnail": { useCanvasImageThumbnail: (node: { id: string }, edge: number) => ({ url: `/thumb/${node.id}?w=${edge}`, key: node.id, failed: false, onError() {} }) },
     };
     const module = { exports: {} as Record<string, Function> };
-    new Function("require", "module", "exports", code)((key: string) => dependencies[key] || requireModule(key), module, module.exports);
+    new Function("require", "module", "exports", code)((id: string) => id === "@/lib/i18n" ? i18nHarness : ((key: string) => dependencies[key] || requireModule(key))(id), module, module.exports);
     const render = (dataUrl = "blob:first", open = true, props: Record<string, unknown> = {}) => {
         cursor = 0;
         const result = elements(module.exports[name]!({ dataUrl, open, onClose() {}, onConfirm() {}, ...extraProps, ...props }));

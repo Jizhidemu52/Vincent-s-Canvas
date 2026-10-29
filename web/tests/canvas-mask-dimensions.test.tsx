@@ -1,3 +1,4 @@
+import { i18nHarness } from "./helpers/i18n-harness";
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -86,7 +87,7 @@ function dialog(image: { width: number; height: number }) {
         "@/lib/image-model-settings": { ...requireModule("@/lib/image-model-settings"), useImageModelProfile: () => markProfile },
     };
     const module = { exports: {} as any };
-    new Function("require", "module", "exports", code)((name: string) => Object.hasOwn(dependencies, name) ? dependencies[name] : requireModule(name), module, module.exports);
+    new Function("require", "module", "exports", code)((id: string) => id === "@/lib/i18n" ? i18nHarness : ((name: string) => Object.hasOwn(dependencies, name) ? dependencies[name] : requireModule(name))(id), module, module.exports);
     return elements(module.exports.CanvasNodeMaskEditDialog({ dataUrl: "source", open: true, config: globalConfig, model: markModel.id, onModelChange: () => {}, onClose: () => {}, onConfirm: () => {} }));
 }
 

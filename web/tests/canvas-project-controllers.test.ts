@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { uiText } from "@/lib/i18n";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
 import { createCanvasProjectAsyncLifecycle } from "@/lib/canvas/canvas-project-async-lifecycle";
@@ -9,6 +10,7 @@ import { CanvasNodeType } from "@/types/canvas";
 // Execute the actual controller bodies. Only React state, scheduling, and the
 // network/chunk boundaries are supplied; these tests never generate media.
 function evaluateCallback(file: string, name: string, scope: Record<string, unknown>, rewrite?: (code: string) => string) {
+    scope = { uiText, ...scope };
     const source = readFileSync(new URL(`../src/pages/canvas/${file}`, import.meta.url), "utf8");
     const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
     let expression: ts.Expression | undefined;
@@ -177,6 +179,7 @@ describe("page-private project hydration lifecycle", () => {
         const historyRef = { current: { past: [], future: [] } };
         const lastHistoryRef = { current: null };
         const scope: Record<string, unknown> = {
+            uiText,
             ...hydration, loadHydrationRuntime: async () => ({ ...hydration, ...overrides }), boundedCanvasHistory, hydrated: true, projectId: "project", projectAsyncLifecycleRef: { current: createCanvasProjectAsyncLifecycle() },
             historyRef, lastHistoryRef, pendingHistoryEntryRef: { current: null }, applyingHistoryRef: { current: false },
             historyPausedRef: { current: false }, historyCommitTimerRef: { current: null },

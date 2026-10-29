@@ -1,3 +1,4 @@
+import { uiText } from "@/lib/i18n";
 import type { ActiveConnectionPathHandle } from "@/components/canvas/canvas-connections";
 import { createCanvasBatchRenderIndex } from "@/lib/canvas/canvas-batch-motion";
 import { isCanvasBatchChildHidden } from "@/lib/canvas/canvas-batch-visibility";
@@ -90,15 +91,15 @@ export function useCanvasConnections({ nodesRef, connectionsRef, viewportRef, ge
 
             const connection = normalizeConnection(current.nodeId, targetNodeId, nodesRef.current, current.handleType);
             if (!connection) {
-                message.warning("当前支持生图配置之间的工作流连接，请把两个配置都设为生图");
+                message.warning(uiText("当前支持生图配置之间的工作流连接，请把两个配置都设为生图"));
                 return;
             }
-            if ([...generationDispatchLocksRef.current].some(key => key.startsWith("image-sequence:"))) { message.info("请先停止工作流，再修改连线"); return; }
+            if ([...generationDispatchLocksRef.current].some(key => key.startsWith("image-sequence:"))) { message.info(uiText("请先停止工作流，再修改连线")); return; }
             const workflowError = imageWorkflowConnectionError(connection, connectionsRef.current);
             if (workflowError) { message.warning(workflowError); return; }
             const { fromNodeId, toNodeId } = connection;
             if (connection.kind === "config-target" && connectionsRef.current.some((edge) => edge.kind === "config-target" && edge.toNodeId === toNodeId && edge.fromNodeId !== fromNodeId)) {
-                message.warning("一个任务只能使用一套公共配置，请先断开原配置连线");
+                message.warning(uiText("一个任务只能使用一套公共配置，请先断开原配置连线"));
                 return;
             }
             const exists = connectionsRef.current.some((conn) => conn.fromNodeId === fromNodeId && conn.toNodeId === toNodeId);
@@ -114,12 +115,12 @@ export function useCanvasConnections({ nodesRef, connectionsRef, viewportRef, ge
 
     const createConnectedNode = useCallback(
         (type: CanvasNodeType.Image | CanvasNodeType.Text | CanvasNodeType.Config | CanvasNodeType.Video | CanvasNodeType.Audio, pending: PendingConnectionCreate) => {
-            if ([...generationDispatchLocksRef.current].some(key => key.startsWith("image-sequence:"))) { message.info("请先停止工作流，再修改连线"); return; }
+            if ([...generationDispatchLocksRef.current].some(key => key.startsWith("image-sequence:"))) { message.info(uiText("请先停止工作流，再修改连线")); return; }
             const metadata = type === CanvasNodeType.Config ? { model: effectiveConfig.imageModel || effectiveConfig.model, generationMode: "image" as const, size: effectiveConfig.size, count: 1 } : undefined;
             const newNode = createCanvasNode(type, pending.position, metadata);
             const connection = normalizeConnection(pending.connection.nodeId, newNode.id, [...nodesRef.current, newNode], pending.connection.handleType);
             if (!connection) {
-                message.warning("工作流只支持生图配置，请把上一步配置设为生图");
+                message.warning(uiText("工作流只支持生图配置，请把上一步配置设为生图"));
                 return;
             }
             setNodes((prev) => [...prev, newNode]);
@@ -246,7 +247,7 @@ export function useCanvasConnections({ nodesRef, connectionsRef, viewportRef, ge
     );
 
     const deleteConnection = useCallback((connectionId: string) => {
-        if ([...generationDispatchLocksRef.current].some(key => key.startsWith("image-sequence:"))) { message.info("请先停止工作流，再修改连线"); return; }
+        if ([...generationDispatchLocksRef.current].some(key => key.startsWith("image-sequence:"))) { message.info(uiText("请先停止工作流，再修改连线")); return; }
         flushPendingHistory();
         setConnections((prev) => prev.filter((conn) => conn.id !== connectionId));
         setSelectedConnectionId((current) => (current === connectionId ? null : current));

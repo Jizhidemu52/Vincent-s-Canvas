@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { uiText } from "@/lib/i18n";
 import { readFileSync } from "node:fs";
 import React, { type ReactElement } from "react";
 import ts from "typescript";
@@ -64,6 +65,7 @@ function pageHarness(initialNodes = [node("a"), node("b", 100), node("c", 300)],
         state[key] = typeof value === "function" ? (value as (current: typeof state[K]) => typeof state[K])(state[key]) : value;
     };
     const scope: Record<string, unknown> = {
+        uiText,
         CanvasNodeType, copyCanvasNodeGraph, cloneCanvasNodeGraph, removeCanvasGroupMembers, clipboardRef,
         flushPendingHistory: () => true, generationRequestsRef: { current: new Map() }, generationDispatchLocksRef: { current: new Set() }, stopGenerationByRunningId: (...args: unknown[]) => stopped.push(args),
         canvasGenerationRunsForNodes, NODE_STATUS_LOADING: "loading", modal: { confirm: (value: { onOk: () => void }) => confirmations.push(value) },

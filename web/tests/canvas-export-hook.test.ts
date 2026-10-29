@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { i18nHarness } from "./helpers/i18n-harness";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
 import { create } from "zustand";
@@ -18,6 +19,7 @@ const storeCode = compile("../src/stores/canvas/use-canvas-ui-store.ts");
 function evaluate(code: string, dependencies: Record<string, unknown>) {
     const module = { exports: {} as Record<string, any> };
     new Function("require", "module", "exports", code)((name: string) => {
+        if (name === "@/lib/i18n") return i18nHarness;
         if (!Object.hasOwn(dependencies, name)) throw new Error(`Unexpected dependency: ${name}`);
         return dependencies[name];
     }, module, module.exports);

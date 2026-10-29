@@ -31,10 +31,10 @@ test.each(["http://apimart.test", "http://apimart.test/v1/"])("APIMart Sonnet us
     expect(headers.get("x-api-key")).toBeNull();
     expect(headers.get("anthropic-version")).toBe("2023-06-01");
     expect(JSON.parse(String(init?.body))).toEqual({
-      model: "claude-sonnet-5-5", system: "Keep the garment structure intact.", max_tokens: 4096,
+      model: "claude-sonnet-5-5", system: 'Keep the garment structure intact.\n\nFor this request, call only the tool "read_node".', max_tokens: 4096,
       messages: [{ role: "user", content: [{ type: "text", text: "Inspect this" }, { type: "image", source: { type: "base64", media_type: "image/png", data: "AQID" } }] }],
       tools: [{ name: tools[0]!.name, description: tools[0]!.description, input_schema: tools[0]!.parameters }],
-      tool_choice: { type: "tool", name: "read_node" },
+      tool_choice: { type: "auto" },
     });
     return Response.json({ type: "message", role: "assistant", content: blocks, stop_reason: "tool_use", extra_provider_field: "ignored" });
   }) as typeof fetch;

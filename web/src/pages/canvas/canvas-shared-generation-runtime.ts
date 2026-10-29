@@ -1,3 +1,4 @@
+import { uiText } from "@/lib/i18n";
 import type { Dispatch, SetStateAction } from "react";
 import { nanoid } from "nanoid";
 import { canvasToolKey, currentToolConfig } from "@/hooks/use-tool-config";
@@ -51,7 +52,7 @@ export async function runCanvasGeneration(
                         && (source?.type === CanvasNodeType.Config || node.metadata.generationOrigin.sourceNodeId === nodeId)));
                 const pending = previousOutputs.filter(node => node.metadata?.imageTask);
                 if (pending.length) {
-                    message.info("先查询这组尚未完成的原图片任务，本次不会重复提交");
+                    message.info(uiText("先查询这组尚未完成的原图片任务，本次不会重复提交"));
                     const recovered = (await Promise.all(pending.map(node => recoverPending(node.id)))).flatMap(items => items || []);
                     onResult?.({ mode: inherited.metadata?.generationMode || "image", outputs: recovered });
                     return;
@@ -128,7 +129,7 @@ export async function runCanvasGeneration(
             const failures = outputs.filter((output) => output.status === "failed").length;
             const canceled = controller.signal.aborted;
             setNodes((previous) => previous.map((node) => node.id === inherited.id ? { ...node, metadata: { ...node.metadata, status: canceled ? "idle" : failures ? "error" : "success", errorDetails: failures ? `${failures} 个任务失败，已完成结果会保留` : undefined } } : node));
-            if (!canceled) message.info(`公共配置执行完成：${successes}/${plans.length} 个成功${failures ? `，${failures} 个失败` : ""}`);
+            if (!canceled) message.info(uiText("公共配置执行完成：{value1}/{value2} 个成功{value3}", { value1: successes, value2: plans.length, value3: failures ? uiText("，{value1} 个失败", { value1: failures }) : "" }));
             onResult?.({ mode: inherited.metadata?.generationMode || "image", outputs });
         } catch (error) {
             const detail = error instanceof Error ? error.message : "共享配置执行失败";

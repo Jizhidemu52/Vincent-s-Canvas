@@ -1,3 +1,4 @@
+import { i18nHarness } from "./helpers/i18n-harness";
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
@@ -39,6 +40,7 @@ function harness(options: {
     const jsx = (type: unknown, props: Record<string, any>) => { const node = { type, props }; nodes.push(node); return node; };
     const Form = { Item: "Form.Item", useForm: () => [form], useWatch: (key: keyof Fields) => values[key] };
     const dependencies: Record<string, unknown> = {
+        "@/lib/i18n": i18nHarness,
         react, "react/jsx-runtime": { jsx, jsxs: jsx },
         antd: {
             Form, Alert: "Alert", Button: "Button", Checkbox: "Checkbox", Input: { TextArea: "TextArea" }, Modal: "Modal", Select: "Select", Tag: "Tag",

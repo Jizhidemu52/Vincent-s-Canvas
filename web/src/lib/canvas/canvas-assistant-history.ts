@@ -20,6 +20,7 @@ export async function buildCanvasConversationHistory(
     current: CanvasAssistantMessage,
     readImage: (ref: CanvasAssistantReference) => Promise<string>,
     canvasContent: Content = [],
+    referenceLabels?: ReadonlyMap<string, string>,
 ) {
     const eligible = history.filter(message => message.id !== current.id && (message.role === "user" || message.role === "assistant"));
     const context = latestChatContext(eligible.map(message => ({
@@ -31,7 +32,7 @@ export async function buildCanvasConversationHistory(
         ...ref,
         // Only historical IDs use aliases; explicit current references keep their public IDs.
         id: index < context.length ? `history-${message.id}-${imageIndex}` : ref.id,
-        label: `消息 ${message.id} · ${ref.source} · ${ref.title}`,
+        label: `消息 ${message.id} · ${referenceLabels?.get(`${message.id}:${ref.id}`) || ref.source} · ${ref.title}`,
     })));
     const parts = new Map<object, Content>();
     const provided = new Map<string, string>();

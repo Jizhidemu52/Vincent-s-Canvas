@@ -1,3 +1,4 @@
+import { useUiText } from "@/lib/i18n";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { App, Dropdown, Modal, Segmented, Tooltip, type MenuProps } from "antd";
 import { Download, Ellipsis, FolderPlus, Image as ImageIcon, Info, MessageSquare, Minus, Music2, Pencil, Plus, RefreshCw, Settings2, Trash2, Upload, Video } from "lucide-react";
@@ -87,6 +88,7 @@ export function CanvasNodeHoverToolbar({
     onToggleFreeResize,
     onDelete,
 }: CanvasNodeHoverToolbarProps) {
+    const t = useUiText();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const flags = useModuleStore(state => state.flags);
     const bindings = useBusinessConfigStore(state => state.tools);
@@ -159,10 +161,10 @@ export function CanvasNodeHoverToolbar({
     const copyImagePrompt = (target: CanvasNodeData) => {
         const prompt = target.metadata?.prompt?.trim();
         if (!prompt) {
-            message.warning("暂无可复制的提示词");
+            message.warning(t("暂无可复制的提示词"));
             return;
         }
-        copyText(prompt, "提示词已复制");
+        copyText(prompt, t("提示词已复制"));
     };
     const imageTools = buildImageToolbarTools(node, { onCompare, onDesignTemplate, onImageSequence, onRestoreGeneration, onManualEdit, onUpload, onToggleFreeResize, onMaskEdit, onCrop, onSplit, onUpscale, onSuperResolve, onAngle, onViewImage, onCopyPrompt: copyImagePrompt, onReversePrompt });
 
@@ -193,7 +195,7 @@ export function CanvasNodeHoverToolbar({
         ...(isAudio ? [{ id: "uploadAudio", title: hasAudio ? "替换音频" : "上传音频", label: hasAudio ? "替换音频" : "上传音频", icon: <Music2 className="size-4" />, onClick: () => onUpload(node) }] : []),
         ...(hasImage ? imageTools.map((tool) => ({ id: tool.id, title: tool.title, label: tool.label, icon: tool.icon, active: tool.active, onClick: tool.onClick })) : []),
     ];
-    const allToolbarTools = [...baseToolbarTools, ...nodeToolbarTools].filter(tool => {
+    const allToolbarTools = [...baseToolbarTools, ...nodeToolbarTools].map(tool => ({ ...tool, title: t(tool.title), label: t(tool.label) })).filter(tool => {
         const moduleKey = tool.id === "edit" && hasImage ? "canvas-edit" : canvasActionModules[tool.id];
         return !moduleKey || isModuleAvailable(flags, bindings, moduleKey);
     });
@@ -208,7 +210,7 @@ export function CanvasNodeHoverToolbar({
             { type: "divider" },
             ...overflowTools.filter((tool) => ["info", "delete"].includes(tool.id)).map(menuTool),
             { type: "divider" },
-            { key: "customize", label: <span data-usage-control="canvas-tool.customize">自定义工具</span>, icon: <Settings2 className="size-[18px]" /> },
+            { key: "customize", label: <span data-usage-control="canvas-tool.customize">{t("自定义工具")}</span>, icon: <Settings2 className="size-[18px]" /> },
         ],
         onClick: ({ key, domEvent }) => {
             domEvent.stopPropagation();
@@ -227,7 +229,7 @@ export function CanvasNodeHoverToolbar({
         setDraftImageToolIds((current) => {
             const selected = new Set(current);
             if (visible && !selected.has(id) && selected.size >= 4) {
-                message.warning("快捷工具最多显示 4 项，其他工具可在“更多”中使用");
+                message.warning(t("快捷工具最多显示 4 项，其他工具可在“更多”中使用"));
                 return current;
             }
             if (visible) selected.add(id);
@@ -249,7 +251,7 @@ export function CanvasNodeHoverToolbar({
             <div
                 ref={toolbarRef}
                 role="toolbar"
-                aria-label={hasImage ? "图片工具栏" : "节点工具栏"}
+                aria-label={hasImage ? t("图片工具栏") : t("节点工具栏")}
                 data-canvas-node-toolbar="true"
                 className="absolute z-[70] flex h-10 -translate-x-1/2 -translate-y-full items-center overflow-visible rounded-lg border px-1 text-xs shadow-[0_2px_8px_rgba(24,24,27,.06)]"
                 style={{ left, top, maxWidth: "calc(100% - 24px)", background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text, "--node-tool-hover": theme.toolbar.itemHover } as React.CSSProperties}
@@ -279,9 +281,9 @@ export function CanvasNodeHoverToolbar({
                             </div>
                         )}
                     >
-                        <button data-usage-control="canvas-tool.more" type="button" aria-label="更多图片工具" aria-haspopup="menu" aria-expanded={moreToolsOpen} className={`ml-0.5 flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2 transition hover:bg-[var(--node-tool-hover)] focus-visible:outline-2 focus-visible:outline-offset-1 ${moreToolsOpen ? "bg-[var(--node-tool-hover)]" : ""}`}>
+                        <button data-usage-control="canvas-tool.more" type="button" aria-label={t("更多图片工具")} aria-haspopup="menu" aria-expanded={moreToolsOpen} className={`ml-0.5 flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2 transition hover:bg-[var(--node-tool-hover)] focus-visible:outline-2 focus-visible:outline-offset-1 ${moreToolsOpen ? "bg-[var(--node-tool-hover)]" : ""}`}>
                             <Ellipsis className="size-[18px]" />
-                            {showImageToolLabels ? <span>更多</span> : null}
+                            {showImageToolLabels ? <span>{t("更多")}</span> : null}
                         </button>
                     </Dropdown>
                 ) : null}
@@ -312,6 +314,7 @@ export function clampCanvasNodeToolbarPosition({ left, top, width, height, conta
 }
 
 export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNodeData | null; open: boolean; onClose: () => void }) {
+    const t = useUiText();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const [view, setView] = useState<"info" | "json">("info");
     const imageBytes = node?.type === CanvasNodeType.Image && node.metadata?.content ? getDataUrlByteSize(node.metadata.content) : 0;
@@ -337,13 +340,13 @@ export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNodeD
 
     const title = (
         <div className="flex items-center justify-between gap-4 pr-12">
-            <span>节点信息</span>
+            <span>{t("节点信息")}</span>
             <Segmented
                 size="small"
                 value={view}
                 onChange={(value) => setView(value as "info" | "json")}
                 options={[
-                    { label: "信息", value: "info" },
+                    { label: t("信息"), value: "info" },
                     { label: "JSON", value: "json" },
                 ]}
             />
@@ -357,13 +360,13 @@ export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNodeD
                     {view === "info" ? (
                         <div className="thin-scrollbar h-full space-y-3 overflow-auto pr-1">
                             <InfoRow label="ID" value={node.id} />
-                            <InfoRow label="类型" value={node.type === CanvasNodeType.Text ? "文本" : node.type === CanvasNodeType.Image ? "图片" : node.type === CanvasNodeType.Video ? "视频" : node.type === CanvasNodeType.Audio ? "音频" : "生成配置"} />
-                            <InfoRow label="尺寸" value={`${Math.round(node.width)} x ${Math.round(node.height)}`} />
-                            <InfoRow label="位置" value={`${Math.round(node.position.x)}, ${Math.round(node.position.y)}`} />
-                            <InfoRow label="状态" value={node.metadata?.status || "idle"} />
-                            {batchCount > 1 ? <InfoRow label="图片组" value={`${batchCount} 张`} /> : null}
-                            {node.metadata?.prompt ? <InfoRow label="提示词" value={node.metadata.prompt} /> : null}
-                            {imageBytes ? <InfoRow label="图片大小" value={formatBytes(imageBytes)} /> : null}
+                            <InfoRow label={t("类型")} value={node.type === CanvasNodeType.Text ? t("文本") : node.type === CanvasNodeType.Image ? t("图片") : node.type === CanvasNodeType.Video ? t("视频") : node.type === CanvasNodeType.Audio ? t("音频") : t("生成配置")} />
+                            <InfoRow label={t("尺寸")} value={`${Math.round(node.width)} x ${Math.round(node.height)}`} />
+                            <InfoRow label={t("位置")} value={`${Math.round(node.position.x)}, ${Math.round(node.position.y)}`} />
+                            <InfoRow label={t("状态")} value={node.metadata?.status || "idle"} />
+                            {batchCount > 1 ? <InfoRow label={t("图片组")} value={t("{value1} 张", { value1: batchCount })} /> : null}
+                            {node.metadata?.prompt ? <InfoRow label={t("提示词")} value={node.metadata.prompt} /> : null}
+                            {imageBytes ? <InfoRow label={t("图片大小")} value={formatBytes(imageBytes)} /> : null}
                             {node.metadata?.errorDetails ? (
                                 <div className="rounded-lg border p-3 text-red-400" style={{ borderColor: theme.node.stroke }}>
                                     {node.metadata.errorDetails}
@@ -382,6 +385,7 @@ export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNodeD
 }
 
 function ToolbarAction({ id, title, label, icon, onClick, showLabel, active = false, danger = false, highResolution = false }: ToolbarTool & { showLabel: boolean; highResolution?: boolean }) {
+    const t = useUiText();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const hasText = showLabel && Boolean(label);
     return (
@@ -397,6 +401,7 @@ function ToolbarAction({ id, title, label, icon, onClick, showLabel, active = fa
 }
 
 function InfoRow({ label, value }: { label: string; value: ReactNode }) {
+    const t = useUiText();
     return (
         <div className="grid grid-cols-[72px_minmax(0,1fr)] gap-3">
             <span className="opacity-50">{label}</span>

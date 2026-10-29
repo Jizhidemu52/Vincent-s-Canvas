@@ -1,3 +1,4 @@
+import { uiText } from "@/lib/i18n";
 import { useToolConfig } from "@/hooks/use-tool-config";
 import { type QueuedBatchAction } from "@/services/api/generation-tasks";
 import { useCanvasGraphSetter } from "@/stores/canvas/canvas-graph-store";
@@ -58,7 +59,7 @@ export function useCanvasBatchEdit({ projectId, generationDispatchLocksRef, getC
 
     const runBatchImageEdit = useCallback(async () => {
         const user = useUserStore.getState().user;
-        if (generationDispatchLocksRef.current.size) { message.info("当前任务仍在执行，请完成或停止后再运行"); return; }
+        if (generationDispatchLocksRef.current.size) { message.info(uiText("当前任务仍在执行，请完成或停止后再运行")); return; }
         generationDispatchLocksRef.current.add("canvas-batch");
         setBatchEditRunning(true);
         try {
@@ -70,7 +71,7 @@ export function useCanvasBatchEdit({ projectId, generationDispatchLocksRef, getC
                 setNodes, setConnections, setSelectedNodeIds, message,
             });
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "批量改图加载失败");
+            message.error(error instanceof Error ? error.message : uiText("批量改图加载失败"));
         } finally {
             generationDispatchLocksRef.current.delete("canvas-batch");
             setBatchEditRunning(false);

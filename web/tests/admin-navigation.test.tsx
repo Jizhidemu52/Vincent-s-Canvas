@@ -6,6 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import ts from "typescript";
 import { navigationTools, navigationModuleKey, navigationToolBilling } from "@/constant/navigation-tools";
 import { isAdminRole } from "@/stores/use-user-store";
+import { i18nHarness } from "./helpers/i18n-harness";
 
 const requireModule = createRequire(import.meta.url);
 const compiled = new Map<string, string>();
@@ -31,6 +32,9 @@ function navigation(surface: "desktop" | "mobile", role: Role, rolePortalsEnable
     const canvas = { hydrated: true, createProject: () => "unused", projects: [] };
     const useCanvasStore = Object.assign((select: (state: typeof canvas) => unknown) => select(canvas), { getState: () => canvas });
     const dependencies: Record<string, unknown> = {
+        "@/lib/i18n": i18nHarness,
+        "./language-switch": { LanguageSwitch: () => null },
+        "@/components/layout/inchoice-brand": { InchoiceBrand: () => null },
         "react-router-dom": { Link: ({ to, children, ...rest }: any) => <a href={to} {...rest}>{children}</a>, useLocation: () => ({ pathname: "/", search: "" }), useNavigate: () => () => undefined },
         "antd": { Drawer: ({ open, children }: any) => open ? <div>{children}</div> : null },
         "@/components/layout/frequent-navigation": { FrequentNavigation: () => null, UsageCollectionNotice: () => null },

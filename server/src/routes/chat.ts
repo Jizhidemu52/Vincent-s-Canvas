@@ -360,7 +360,7 @@ function claudeHeaders(credentials: Record<string, string>, protocol: string) {
 }
 
 export function buildClaudeMessagesRequest(
-    input: { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown },
+    input: { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown; privateProfile?: boolean },
     options: { modelId?: string; maxTokens: number; stream?: boolean; thinking?: boolean },
 ) {
     const system = input.input
@@ -379,12 +379,18 @@ export function buildClaudeMessagesRequest(
             continue;
         }
         if (item.type === "claude_assistant") {
-            // Tool continuations must echo the complete assistant turn, preserving
-            // thinking/signature blocks and their order without reconstructing them.
-            for (const block of item.content) {
+            // Private profiles rebuild context/tools between stages. Sonnet 5.5
+            // binds reasoning to the original prefix, so it cannot be replayed
+            // here. Keep visible text and exact tool calls/results; leave saved
+            // history and ordinary append-only conversations untouched.
+            // https://platform.claude.com/docs/en/build-with-claude/preserved-thinking
+            const content = input.privateProfile && options.modelId?.toLowerCase() === "claude-sonnet-5-5"
+                ? item.content.filter(block => block.type !== "thinking" && block.type !== "redacted_thinking")
+                : item.content;
+            for (const block of content) {
                 if (block.type === "tool_use" && typeof block.id === "string" && typeof block.name === "string") calls.set(block.id, block.name);
             }
-            messages.push({ role: "assistant", content: item.content });
+            if (content.length) messages.push({ role: "assistant", content });
             continue;
         }
         if (item.type === "function_call") {
@@ -396,16 +402,34 @@ export function buildClaudeMessagesRequest(
         const name = calls.get(item.call_id);
         if (name) messages.push({ role: "user", content: [{ type: "tool_result", tool_use_id: item.call_id, content: item.output }] });
     }
-    const tools = input.tools.map((tool) => ({
+    let allowedTools = input.tools, toolChoice = toClaudeToolChoice(input.toolChoice), toolInstruction = "";
+    // Sonnet 5.5 rejects forced tool/any choices on every platform. Auto is not
+    // an execution guarantee: keep the allowed scope and caller-side validation.
+    // https://platform.claude.com/docs/en/models/sonnet-5-5/whats-new-sonnet-5-5
+    if (options.modelId?.trim().toLowerCase() === "claude-sonnet-5-5") {
+        const noTools = input.toolChoice === "none" || (input.toolChoice && typeof input.toolChoice === "object" && "type" in input.toolChoice && input.toolChoice.type === "none");
+        if (noTools) toolChoice = { type: "none" };
+        else if (toolChoice.type === "tool") {
+            allowedTools = input.tools.filter(tool => tool.name === toolChoice.name);
+            if (allowedTools.length !== 1) throw new ChatProtocolError("CLAUDE_TOOL_CHOICE_INVALID", "指定工具不存在或不唯一，未发送模型请求。");
+            toolInstruction = `For this request, call only the tool ${JSON.stringify(allowedTools[0]!.name)}.`;
+            toolChoice = { type: "auto" };
+        } else if (toolChoice.type === "any") {
+            if (!allowedTools.length) throw new ChatProtocolError("CLAUDE_TOOL_CHOICE_INVALID", "本轮没有可调用工具，未发送模型请求。");
+            toolInstruction = "For this request, call an available tool.";
+            toolChoice = { type: "auto" };
+        }
+    }
+    const tools = allowedTools.map((tool) => ({
         name: tool.name,
         ...(tool.description ? { description: tool.description } : {}),
         input_schema: tool.parameters,
     }));
     return {
-        ...(system ? { system } : {}),
+        ...(system || toolInstruction ? { system: [system, toolInstruction].filter(Boolean).join("\n\n") } : {}),
         messages,
         max_tokens: Math.max(1, Math.floor(options.maxTokens || 2048)),
-        ...(tools.length ? { tools, tool_choice: toClaudeToolChoice(input.toolChoice) } : {}),
+        ...(tools.length ? { tools, tool_choice: toolChoice } : {}),
         ...(options.stream ? { stream: true } : {}),
         ...claudeThinkingParameters(options),
     };

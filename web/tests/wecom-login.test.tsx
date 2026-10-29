@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import React, { type ReactElement } from "react";
 import ts from "typescript";
+import { i18nHarness } from "./helpers/i18n-harness";
 
 const canonicalLogin = "https://canvas.example:8443/login?scan=1";
 const availableMethods = { password: true, wecom: true, wecomLoginUrl: canonicalLogin };
@@ -27,6 +28,9 @@ function loginPage(options: { href?: string; methods?: () => Promise<unknown>; s
     const startCalls: string[] = [];
     const url = new URL(options.href || "http://ordinary.example/login");
     const dependencies: Record<string, unknown> = {
+        "@/lib/i18n": i18nHarness,
+        "@/components/layout/inchoice-brand": { InchoiceBrand: () => null },
+        "@/components/layout/language-switch": { LanguageSwitch: () => null },
         react: {
             ...React,
             useState(initial: unknown) { const index = cursor++; if (!(index in values)) values[index] = initial; return [values[index], (value: unknown) => { values[index] = value; }]; },

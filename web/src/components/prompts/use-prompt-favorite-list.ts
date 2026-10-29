@@ -1,3 +1,4 @@
+import { useUiText } from "@/lib/i18n";
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { setPromptFavorite, type PromptTemplate } from "@/services/api/prompts";
 import { useUserStore } from "@/stores/use-user-store";
@@ -33,6 +34,7 @@ export function createPromptFavoriteQueue() {
 }
 
 export function usePromptFavoriteList(options: Options) {
+    const t = useUiText();
     const [list, setList] = useState<ListState>({ viewKey: "", items: [], total: 0 });
     const listRef = useRef(list);
     listRef.current = list;
@@ -57,7 +59,7 @@ export function usePromptFavoriteList(options: Options) {
             && current.current.options.viewKey === view.viewKey && useUserStore.getState().user?.id === origin.ownerId;
         if (!isCurrent()) return Promise.resolve();
         if (view.loading || listRef.current.viewKey !== view.viewKey || listRef.current.ownerId !== origin.ownerId) {
-            return Promise.reject(new Error("提示词列表正在更新，请稍后再试"));
+            return Promise.reject(new Error(t("提示词列表正在更新，请稍后再试")));
         }
         return origin.queue.run(item.id, async () => {
             if (!isCurrent()) return;
@@ -91,9 +93,9 @@ export function usePromptFavoriteList(options: Options) {
                 commit({ ...listRef.current, items: items.slice(0, remaining), total: result.total });
                 const finalPage = Math.max(1, Math.ceil(result.total / view.pageSize));
                 if (view.page > finalPage) view.setPage(finalPage);
-                else if (items.length < remaining) view.onRefreshError("收藏状态已保存，但列表尚未补齐，请重新加载");
+                else if (items.length < remaining) view.onRefreshError(t("收藏状态已保存，但列表尚未补齐，请重新加载"));
             } catch (error) {
-                if (isCurrent()) view.onRefreshError(`收藏状态已保存，但补齐列表失败：${error instanceof Error ? error.message : "请重新加载"}`);
+                if (isCurrent()) view.onRefreshError(t("收藏状态已保存，但补齐列表失败：{p0}", { p0: String(error instanceof Error ? error.message : t("请重新加载")) }));
             }
         });
     }, [commit]);

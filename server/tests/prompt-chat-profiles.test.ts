@@ -84,6 +84,17 @@ describe("server-owned chat profiles", () => {
         }
     });
 
+    test("canvas profiles retain explicit old-image targets and stable conversation labels", async () => {
+        const selectedTarget = { mode: "edit", baseImageIds: ["older-result"] };
+        for (const stage of ["plan", "repair-image-contract"]) {
+            const prepared = await prepareChatProfileInput(canvas({ selectedTarget }, stage), load);
+            expect(context(prepared.input.input).editContext.selectedTarget).toEqual(selectedTarget);
+            expect(content(prepared.input.input)).toContain("不按每条消息重新编号");
+            expect(content(prepared.input.input)).toContain("不能擅自替换为最新结果或新任务");
+            if (stage === "repair-image-contract") expect(content(prepared.input.input)).toContain("必须沿用这次显式选图已锁定的 editIntent 与底图身份");
+        }
+    });
+
     test("repair only offers the image contract tool; translation has no tools", async () => {
         const repair = await prepareChatProfileInput(canvas({}, "repair-image-contract"), load);
         expect(repair.input.tools.map(tool => tool.name)).toEqual(["canvas_generate_image"]);

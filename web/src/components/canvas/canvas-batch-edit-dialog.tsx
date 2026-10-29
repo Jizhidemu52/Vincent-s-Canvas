@@ -1,3 +1,4 @@
+import { useUiText } from "@/lib/i18n";
 import type { Dispatch, SetStateAction } from "react";
 import { Button, Input, Modal, Tag, Switch, theme as antdTheme } from "antd";
 import { Pause, Play, X } from "lucide-react";
@@ -35,25 +36,26 @@ export default function CanvasBatchEditDialog({
     open, running, prompt, optimizePrompt, optimizing, onOptimizePromptChange, items, imageSettings, serverId, action,
     onClose, onPromptChange, onImageSettingsChange, onSelectFiles, onClearItems, onRun, onControlBatch,
 }: CanvasBatchEditDialogProps) {
+    const t = useUiText();
     const theme = canvasThemes[useThemeStore(state => state.theme)];
     const { token } = antdTheme.useToken();
     const effectiveConfig = useEffectiveConfig();
     const config = useToolConfig({ ...effectiveConfig, ...imageSettings, model: imageSettings.model || effectiveConfig.imageModel || effectiveConfig.model, count: "1" }, "canvas-batch");
     return (
         <Modal
-            title="批量一键改图"
+            title={t("批量一键改图")}
             open={open}
             width={760}
             onCancel={() => { if (!running) onClose(); }}
             footer={
                 <>
-                    <Button disabled={running} onClick={onClose}>关闭</Button>
-                    <Button type="primary" loading={running} onClick={() => void onRun()}>{optimizing ? "正在优化提示词…" : "一键生图"}</Button>
+                    <Button disabled={running} onClick={onClose}>{t("关闭")}</Button>
+                    <Button type="primary" loading={running} onClick={() => void onRun()}>{optimizing ? t("正在优化提示词…") : t("一键生图")}</Button>
                 </>
             }
         >
             <div className="space-y-4">
-                <div className="rounded-lg border px-3 py-2 text-xs leading-5" style={{ borderColor: theme.node.stroke, background: theme.node.fill, color: theme.node.text }}>可多选 1–100 张图片，每张独立生成 1 张结果，原图保留。</div>
+                <div className="rounded-lg border px-3 py-2 text-xs leading-5" style={{ borderColor: theme.node.stroke, background: theme.node.fill, color: theme.node.text }}>{t("可多选 1–100 张图片，每张独立生成 1 张结果，原图保留。")}</div>
                 <fieldset disabled={running} className="space-y-2 border-0 p-0">
                     <ModelPicker toolKey="canvas-batch" config={config} value={config.model} capability="image" fullWidth disabled={running}
                         onChange={model => onImageSettingsChange(current => ({ ...current, model, imageModel: model }))} />
@@ -61,38 +63,38 @@ export default function CanvasBatchEditDialog({
                         onConfigChange={(key, value) => onImageSettingsChange(current => ({ ...current, [key]: value }))} />
                 </fieldset>
                 <div className="flex flex-wrap gap-2">
-                    <Button onClick={onSelectFiles} disabled={running}>选择图片（可多选）</Button>
-                    <Button disabled={running || !items.length} onClick={onClearItems}>清空列表</Button>
+                    <Button onClick={onSelectFiles} disabled={running}>{t("选择图片（可多选）")}</Button>
+                    <Button disabled={running || !items.length} onClick={onClearItems}>{t("清空列表")}</Button>
                 </div>
                 {serverId && running ? (
                     <div className="flex flex-wrap items-center gap-2 rounded-md border px-3 py-2" style={{ borderColor: theme.node.stroke, background: theme.node.fill }}>
-                        <span className="mr-auto text-xs" style={{ color: theme.node.muted }}>服务端批次 {serverId.slice(0, 8)}</span>
+                        <span className="mr-auto text-xs" style={{ color: theme.node.muted }}>{t("服务端批次")}{serverId.slice(0, 8)}</span>
                         <Button size="small" icon={<Pause className="size-4" />} loading={action === "pause"}
                             disabled={Boolean(action) || !items.some(item => item.status === "waiting")}
-                            onClick={() => void onControlBatch("pause")}>暂停等待项</Button>
+                            onClick={() => void onControlBatch("pause")}>{t("暂停等待项")}</Button>
                         <Button size="small" icon={<Play className="size-4" />} loading={action === "resume"}
                             disabled={Boolean(action) || !items.some(item => item.status === "paused")}
-                            onClick={() => void onControlBatch("resume")}>恢复</Button>
+                            onClick={() => void onControlBatch("resume")}>{t("恢复")}</Button>
                         <Button size="small" danger icon={<X className="size-4" />} loading={action === "cancel"}
                             disabled={Boolean(action) || !items.some(item => item.status === "waiting" || item.status === "paused")}
-                            onClick={() => void onControlBatch("cancel")}>取消未处理项</Button>
+                            onClick={() => void onControlBatch("cancel")}>{t("取消未处理项")}</Button>
                     </div>
                 ) : null}
-                <label className="flex items-center gap-2 text-sm"><Switch checked={optimizePrompt} disabled={running} onChange={onOptimizePromptChange} aria-label="批量统一优化提示词" />统一优化提示词（整批只优化一次，默认关闭）</label>
-                <Input.TextArea disabled={running} value={prompt} onChange={event => onPromptChange(event.target.value)} rows={4} placeholder="例如：白底图产品摄影，保留产品结构，提升质感和光影，适合电商详情页" />
+                <label className="flex items-center gap-2 text-sm"><Switch checked={optimizePrompt} disabled={running} onChange={onOptimizePromptChange} aria-label={t("批量统一优化提示词")} />{t("统一优化提示词（整批只优化一次，默认关闭）")}</label>
+                <Input.TextArea disabled={running} value={prompt} onChange={event => onPromptChange(event.target.value)} rows={4} placeholder={t("例如：白底图产品摄影，保留产品结构，提升质感和光影，适合电商详情页")} />
                 <div className="rounded-lg border" style={{ borderColor: theme.node.stroke, color: theme.node.text }}>
                     <div className="flex items-center justify-between border-b px-3 py-2 text-xs font-semibold" style={{ borderColor: theme.node.stroke, color: theme.node.muted }}>
-                        <span>待处理图片 {items.length} 张</span><span>按文件名顺序处理</span>
+                        <span>{t("待处理图片")}{items.length} {t(" 张")}</span><span>{t("按文件名顺序处理")}</span>
                     </div>
                     <div className="max-h-64 overflow-y-auto">
                         {items.length ? items.map((item, index) => (
                             <div key={item.id} className="grid grid-cols-[32px_minmax(0,1fr)_90px] items-center gap-2 border-b px-3 py-2 text-sm last:border-b-0" style={{ borderColor: theme.node.stroke }}>
                                 <span className="text-xs" style={{ color: theme.node.muted }}>{index + 1}</span>
                                 <span className="truncate">{item.relativePath}</span>
-                                <Tag className="justify-self-end" color={item.status === "processing" ? "processing" : item.status === "paused" ? "warning" : item.status === "success" ? "success" : item.status === "failed" ? "error" : "default"}>{batchStatusLabel(item.status)}</Tag>
+                                <Tag className="justify-self-end" color={item.status === "processing" ? "processing" : item.status === "paused" ? "warning" : item.status === "success" ? "success" : item.status === "failed" ? "error" : "default"}>{t(batchStatusLabel(item.status))}</Tag>
                                 {item.failureReason ? <span className="col-span-3 text-xs" style={{ color: token.colorError }}>{item.failureReason}</span> : null}
                             </div>
-                        )) : <div className="px-3 py-10 text-center text-sm" style={{ color: theme.node.muted }}>还没有选择图片</div>}
+                        )) : <div className="px-3 py-10 text-center text-sm" style={{ color: theme.node.muted }}>{t("还没有选择图片")}</div>}
                     </div>
                 </div>
             </div>

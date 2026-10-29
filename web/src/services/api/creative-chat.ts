@@ -1,4 +1,4 @@
-import { buildCreativeChatRequest, buildCreativeImageCatalog, MAX_CREATIVE_CHAT_PREVIEW_BYTES, MAX_CREATIVE_CHAT_REFERENCES, parseCreativeChatInspection, parseCreativeChatPlan, resolveCreativeChatReferences, type CreativeChatMessage, type CreativeChatPlan } from "@/lib/creative-chat";
+import { buildCreativeChatRequest, buildCreativeImageCatalog, MAX_CREATIVE_CHAT_PREVIEW_BYTES, MAX_CREATIVE_CHAT_REFERENCES, parseCreativeChatInspection, parseCreativeChatPlan, resolveCreativeChatReferences, withCreativeChatImageSelection, type CreativeChatImageSelection, type CreativeChatMessage, type CreativeChatPlan } from "@/lib/creative-chat";
 import { getDataUrlByteSize } from "@/lib/image-utils";
 import { requestToolResponse, toolResponseToInput } from "@/services/api/image";
 import { imageToDataUrl } from "@/services/image-storage";
@@ -52,11 +52,12 @@ async function createPlanningPreview(reference: ReferenceImage, signal?: AbortSi
 }
 
 /** At most one read-only inspection then a final decision; never uploads, creates, or retries tasks. */
-export async function requestCreativeChatPlan(config: AiConfig, history: CreativeChatMessage[], current: CreativeChatMessage, options: { signal?: AbortSignal; onDelta?: (text: string) => void; onPhase?: (text: string) => void; selectedImageId?: string } = {}): Promise<CreativeChatPlan> {
+export async function requestCreativeChatPlan(config: AiConfig, history: CreativeChatMessage[], current: CreativeChatMessage, options: CreativeChatImageSelection & { signal?: AbortSignal; onDelta?: (text: string) => void; onPhase?: (text: string) => void; selectedImageId?: string } = {}): Promise<CreativeChatPlan> {
     options.signal?.throwIfAborted();
     const catalog = buildCreativeImageCatalog(history, current);
     const currentImageIds = new Set(buildCreativeImageCatalog([], current).map((item) => item.id));
-    const selectedImageId = options.selectedImageId || current.editTargetImageId;
+    const selectedImageId = options.explicitTargetImageId || options.selectedImageId || current.editTargetImageId;
+    const planningCurrent = withCreativeChatImageSelection(current, catalog, options);
     // This is a structural permission boundary, not keyword-based intent classification.
     // Textless uploads may be read and discussed, but their contents cannot authorize image execution.
     const allowImageCreation = Boolean(current.content.trim());
@@ -99,7 +100,7 @@ export async function requestCreativeChatPlan(config: AiConfig, history: Creativ
             else if (name === "inspect_images") options.onPhase?.("正在查看相关图片…");
         },
     };
-    let prepared = buildCreativeChatRequest(history, current, previews, context);
+    let prepared = buildCreativeChatRequest(history, planningCurrent, previews, context);
     let result = await requestToolResponse(config, prepared.messages, [], "auto", options.onDelta, { ...requestOptions, profileContext: prepared.profileContext });
     options.signal?.throwIfAborted();
     const inspectionIds = parseCreativeChatInspection(result, catalog);
@@ -115,7 +116,7 @@ export async function requestCreativeChatPlan(config: AiConfig, history: Creativ
         references = references.filter((item) => previews.some((preview) => preview.id === item.id));
         options.signal?.throwIfAborted();
         const inspectedResult = result;
-        prepared = buildCreativeChatRequest(history, current, previews, context);
+        prepared = buildCreativeChatRequest(history, planningCurrent, previews, context);
         result = await requestToolResponse(config, [
             ...prepared.messages,
             ...toolResponseToInput(inspectedResult),

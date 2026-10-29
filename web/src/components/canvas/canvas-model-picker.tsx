@@ -1,3 +1,4 @@
+import { useUiText } from "@/lib/i18n";
 import { useEffect, useId, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { ArrowLeft, Check, ChevronDown, ChevronRight, ImageIcon } from "lucide-react";
 import { Popover } from "radix-ui";
@@ -22,6 +23,7 @@ type CanvasModelPickerProps = {
 };
 
 export function CanvasModelPicker({ options, value, label, emptyLabel, open, disabled, bound, categoryLabel, className, onOpenChange, onValueChange }: CanvasModelPickerProps) {
+    const t = useUiText();
     const themeName = useThemeStore(state => state.theme);
     const theme = canvasThemes[themeName];
     const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
@@ -47,7 +49,7 @@ export function CanvasModelPicker({ options, value, label, emptyLabel, open, dis
             openingFocusFrame.current = null;
             if (menuRef.current !== menu || !menu.isConnected) return;
             const selected = menu.querySelector<HTMLButtonElement>('button[data-model-choice][aria-selected="true"]:not(:disabled)');
-            const target = selected || menu.querySelector<HTMLButtonElement>('button[aria-label="关闭模型选择"]:not(:disabled)');
+            const target = selected || menu.querySelector<HTMLButtonElement>('button[data-model-picker-close]:not(:disabled)');
             target?.focus({ preventScroll: true });
             selected?.scrollIntoView({ block: "nearest", inline: "nearest" });
         });
@@ -75,9 +77,9 @@ export function CanvasModelPicker({ options, value, label, emptyLabel, open, dis
 
     return <Popover.Root open={open && !disabled} onOpenChange={next => { if (!disabled) onOpenChange(next); }}>
         <Popover.Trigger asChild>
-            <button type="button" role="combobox" aria-label="选择模型" aria-haspopup="dialog" aria-controls={open ? listId : undefined} aria-expanded={open && !disabled}
+            <button type="button" role="combobox" aria-label={t("选择模型")} aria-haspopup="dialog" aria-controls={open ? listId : undefined} aria-expanded={open && !disabled}
                 disabled={disabled} data-usage-control="model" data-theme={themeName} style={palette}
-                className={cn("canvas-composer-model-picker canvas-model-trigger", className)} title={`${label}${bound ? " · 后台指定" : ""}`}
+                className={cn("canvas-composer-model-picker canvas-model-trigger", className)} title={`${label}${bound ? ` · ${t("后台指定")}` : ""}`}
                 onPointerDown={event => event.stopPropagation()} onMouseDown={event => event.stopPropagation()}>
                 <ModelLogo option={current} compact />
                 <span className="canvas-model-trigger-name">{label}</span>
@@ -86,29 +88,29 @@ export function CanvasModelPicker({ options, value, label, emptyLabel, open, dis
         </Popover.Trigger>
         <Popover.Portal>
             <Popover.Content ref={menuRef} id={listId} data-testid="canvas-model-picker-menu" data-canvas-no-zoom data-theme={themeName}
-                aria-label="选择画布模型" className="canvas-model-menu" style={palette} side="right" align="start" sideOffset={12} collisionPadding={12}
+                aria-label={t("选择画布模型")} className="canvas-model-menu" style={palette} side="right" align="start" sideOffset={12} collisionPadding={12}
                 onOpenAutoFocus={focusOnOpen}
                 onPointerDown={event => event.stopPropagation()} onMouseDown={event => event.stopPropagation()} onWheel={event => event.stopPropagation()}
                 onKeyDown={moveFocus}>
                 <div className="canvas-model-menu-header">
-                    <button type="button" aria-label="关闭模型选择" onClick={() => onOpenChange(false)}><ArrowLeft size={14} aria-hidden="true" /><span>返回</span></button>
-                    <span>选择模型</span>
+                    <button type="button" data-model-picker-close aria-label={t("关闭模型选择")} onClick={() => onOpenChange(false)}><ArrowLeft size={14} aria-hidden="true" /><span>{t("返回")}</span></button>
+                    <span>{t("选择模型")}</span>
                 </div>
                 <div className="canvas-model-menu-scroll">
                     {!options.length ? <p className="canvas-model-empty" role="status">{emptyLabel}</p>
                         : <>
-                            {featured.length ? <><p className="canvas-model-section-label">热门模型</p>
-                                <div role="listbox" aria-label="热门模型">{featured.map(row)}</div></> : null}
-                            <p className={cn("canvas-model-section-label", featured.length > 0 && "canvas-model-section-all")}>所有{categoryLabel}</p>
+                            {featured.length ? <><p className="canvas-model-section-label">{t("热门模型")}</p>
+                                <div role="listbox" aria-label={t("热门模型")}>{featured.map(row)}</div></> : null}
+                            <p className={cn("canvas-model-section-label", featured.length > 0 && "canvas-model-section-all")}>{t("所有")}{categoryLabel}</p>
                             {canvasModelGroups(options).map(group => <section className="canvas-model-family" key={group.name}>
                                 <button type="button" className="canvas-model-family-toggle" aria-expanded={expanded.has(group.name)} onClick={() => setExpanded(previous => {
                                     const next = new Set(previous); if (next.has(group.name)) next.delete(group.name); else next.add(group.name); return next;
                                 })}>
                                     <ModelLogo option={group.models[0]} />
-                                    <span>{group.name}</span><span className="canvas-model-family-count">{group.models.length} 个模型</span>
+                                    <span>{group.name}</span><span className="canvas-model-family-count">{group.models.length} {t(" 个模型")}</span>
                                     <ChevronRight size={14} aria-hidden="true" className={expanded.has(group.name) ? "canvas-model-family-expanded" : undefined} />
                                 </button>
-                                {expanded.has(group.name) ? <div role="listbox" aria-label={`${group.name} 模型`}>{group.models.map(row)}</div> : null}
+                                {expanded.has(group.name) ? <div role="listbox" aria-label={t("{value1} 模型", { value1: group.name })}>{group.models.map(row)}</div> : null}
                             </section>)}
                         </>}
                 </div>
@@ -118,6 +120,7 @@ export function CanvasModelPicker({ options, value, label, emptyLabel, open, dis
 }
 
 export function CanvasModelRow({ option, selected, onSelect }: { option: CanvasModelOption; selected: boolean; onSelect: (value: string) => void }) {
+    const t = useUiText();
     return <button type="button" role="option" aria-selected={selected} aria-label={option.name} data-model-choice data-usage-control="model" data-usage-value={option.usageModelId}
         className="canvas-model-option" onClick={() => onSelect(option.value)}>
         <ModelLogo option={option} />
@@ -126,11 +129,12 @@ export function CanvasModelRow({ option, selected, onSelect }: { option: CanvasM
             {option.description ? <span className="canvas-model-option-description">{option.description}</span> : null}
             {option.details.length ? <span className="canvas-model-option-details">{option.details.join(" · ")}</span> : null}
         </span>
-        {selected ? <Check className="canvas-model-option-check" size={15} aria-label="已选择" /> : null}
+        {selected ? <Check className="canvas-model-option-check" size={15} aria-label={t("已选择")} /> : null}
     </button>;
 }
 
 function ModelLogo({ option, compact = false }: { option?: CanvasModelOption; compact?: boolean }) {
+    const t = useUiText();
     return <span className={cn("canvas-model-logo", compact && "canvas-model-logo-compact")} aria-hidden="true">
         {option?.icon ? <img src={option.icon} alt="" draggable={false} /> : <ImageIcon size={compact ? 19 : 23} />}
     </span>;

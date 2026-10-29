@@ -1,3 +1,4 @@
+import { i18nHarness } from "./helpers/i18n-harness";
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -34,6 +35,7 @@ function page(path: string, exportName: string, dependencies: Record<string, unk
     };
     const mockInput = Object.assign("Input", { Search: "InputSearch", TextArea: "TextArea" });
     const mocks: Record<string, unknown> = {
+        "@/lib/i18n": i18nHarness,
         react: hooks,
         antd: new Proxy({ App: { useApp: () => ({ message: { success() {}, error() {}, warning() {} }, modal: { confirm() {} } }) }, Input: mockInput, DatePicker: { RangePicker: "RangePicker" } }, { get(target, key) { return key in target ? target[key as keyof typeof target] : String(key); } }),
         ...dependencies,

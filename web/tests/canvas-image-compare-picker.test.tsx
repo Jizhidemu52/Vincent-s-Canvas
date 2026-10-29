@@ -1,3 +1,4 @@
+import { i18nHarness } from "./helpers/i18n-harness";
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -24,7 +25,7 @@ function harness(file: string, name: string) {
         "./use-canvas-image-thumbnail": { useCanvasImageThumbnail: (image: CanvasNodeData) => ({ url: image.metadata?.content || "", thumbnail: true }) },
         "./canvas-image-compare-picker": { CanvasCompareThumbnail: "Thumbnail", CanvasImageComparePicker: "ComparePicker", canvasCompareImageLabel: (image: CanvasNodeData) => image.metadata?.imageName || image.metadata?.originalFileName || image.title },
     };
-    new Function("require", "module", "exports", code)((key: string) => dependencies[key] || requireModule(key), module, module.exports);
+    new Function("require", "module", "exports", code)((id: string) => id === "@/lib/i18n" ? i18nHarness : ((key: string) => dependencies[key] || requireModule(key))(id), module, module.exports);
     return { render(props: any) { cursor = 0; return elements(module.exports[name](props)); } };
 }
 const byLabel = (tree: ReactElement<any>[], label: string) => tree.find(element => element.props["aria-label"] === label)!;

@@ -1,3 +1,4 @@
+import { uiText } from "@/lib/i18n";
 import { buildNodeGenerationContext, buildNodeResponseMessages, hydrateNodeGenerationContext } from "@/components/canvas/canvas-node-generation";
 import type { CanvasNodeGenerationMode } from "@/components/canvas/canvas-node-prompt-panel";
 import { NODE_DEFAULT_SIZE, getNodeSpec } from "@/constant/canvas";
@@ -57,12 +58,12 @@ export function useCanvasGeneration({ projectId, nodesRef, connectionsRef, desig
     const restoreNodeGenerationInput = async (node: CanvasNodeData) => {
         if (!node.metadata?.sourceTaskId || restoringGenerationRef.current) return;
         restoringGenerationRef.current = true;
-        const dismiss = message.loading("正在校验历史参数和参考原图…", 0);
+        const dismiss = message.loading(uiText("正在校验历史参数和参考原图…"), 0);
         try {
             const [{ restoreGenerationDraft }, { createCanvasRestoredGenerationNode }] = await Promise.all([import("@/services/api/generation-history"), import("@/lib/canvas/canvas-generation-draft")]);
             const draft = await restoreGenerationDraft(node.metadata.sourceTaskId);
             if (designProjectIdRef.current !== projectId) return;
-            if (nodesRef.current.find(item => item.id === node.id) !== node) { message.warning("图片已变化，未应用历史输入，请重新打开"); return; }
+            if (nodesRef.current.find(item => item.id === node.id) !== node) { message.warning(uiText("图片已变化，未应用历史输入，请重新打开")); return; }
             const position = { x: Math.max(...nodesRef.current.map(item => item.position.x + item.width)) + 120, y: node.position.y };
             const restored = createCanvasRestoredGenerationNode(draft, position);
             setNodes(current => [...current, restored]);
@@ -70,8 +71,8 @@ export function useCanvasGeneration({ projectId, nodesRef, connectionsRef, desig
             setSelectedConnectionId(null);
             setDialogNodeId(restored.id);
             focusCanvasArea(restored.position, restored.width, restored.height);
-            message.success("已新增恢复配置，原图和现有草稿保持不变；尚未生成");
-        } catch (error) { message.error(error instanceof Error ? error.message : "历史输入恢复失败，画布未改变"); }
+            message.success(uiText("已新增恢复配置，原图和现有草稿保持不变；尚未生成"));
+        } catch (error) { message.error(error instanceof Error ? error.message : uiText("历史输入恢复失败，画布未改变")); }
         finally { restoringGenerationRef.current = false; dismiss(); }
     };
 
@@ -336,7 +337,7 @@ export function useCanvasGeneration({ projectId, nodesRef, connectionsRef, desig
                         return;
                     }
                     const failureDetails = imageOutputs.find((output) => output.status === "failed")?.error || "全部图片生成失败";
-                    if (hasFailure) message.error(hasSuccess ? `部分图片生成失败：${failureDetails}` : failureDetails);
+                    if (hasFailure) message.error(hasSuccess ? uiText("部分图片生成失败：{value1}", { value1: failureDetails }) : failureDetails);
                     setNodes((prev) =>
                         prev.map((node) =>
                             node.id === nodeId && isConfigNode
@@ -450,12 +451,12 @@ export function useCanvasGeneration({ projectId, nodesRef, connectionsRef, desig
     );
     const handleGenerateNode = useCallback(async (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string, onResult?: (result: CanvasGenerationResult) => void, sequenceLock?: string, sequenceSignal?: AbortSignal) => {
         if (!sequenceLock && connectionsRef.current.some(edge => edge.kind === "config-sequence" && (edge.fromNodeId === nodeId || edge.toNodeId === nodeId))) {
-            message.info("请从配置节点的“运行工作流”按钮启动相连步骤"); return;
+            message.info(uiText("请从配置节点的“运行工作流”按钮启动相连步骤")); return;
         }
         // Lock before the lazy import: rapid double clicks must not submit twice.
         const ownsSequenceLock = sequenceLock && generationDispatchLocksRef.current.size === 1 && generationDispatchLocksRef.current.has(sequenceLock);
         if (generationDispatchLocksRef.current.size && !ownsSequenceLock) {
-            message.info("请先完成或停止当前任务");
+            message.info(uiText("请先完成或停止当前任务"));
             return;
         }
         if (!ownsSequenceLock) generationDispatchLocksRef.current.add(nodeId);
@@ -491,7 +492,7 @@ const handleRetryNode = useCallback(async (node: CanvasNodeData) => {
                 buildAudioGenerationMetadata, videoMetadata, audioMetadata, videoTaskErrorMetadata, isGenerationCanceled,
             });
         } catch (error) {
-            if (isCurrent()) message.error(error instanceof Error ? error.message : "重试操作加载失败，请重试");
+            if (isCurrent()) message.error(error instanceof Error ? error.message : uiText("重试操作加载失败，请重试"));
         }
     }, [createOptions, effectiveConfig, finishGenerationRequest, handleGenerateNode, handleMissingModelConfig, isAiConfigReady, message, modal, projectId, recoverPending, retryScope, startGenerationRequest]);
 
@@ -499,7 +500,7 @@ const handleRetryNode = useCallback(async (node: CanvasNodeData) => {
         (node: CanvasNodeData) => {
             const prompt = (node.metadata?.content || node.metadata?.prompt || "").trim();
             if (!prompt) {
-                message.warning("文本节点为空，无法生图");
+                message.warning(uiText("文本节点为空，无法生图"));
                 return;
             }
             const sourceNode = nodesRef.current.find((item) => item.id === node.id);

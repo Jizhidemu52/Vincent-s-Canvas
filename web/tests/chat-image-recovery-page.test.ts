@@ -16,7 +16,7 @@ const pageFunctions = new Map<string, ts.Expression>();
 const visit = (node: ts.Node) => {
     if (ts.isCallExpression(node) && node.expression.getText(ast) === "useEffect" && node.arguments[0]?.getText(ast).includes("await recoverChatImageTask(")) effect = node.arguments[0];
     if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) pageFunctions.set(node.name.text, node.initializer);
-    if (ts.isJsxElement(node) && node.children.some((child) => ts.isJsxText(child) && child.text.trim() === "查询原任务")) {
+    if (ts.isJsxElement(node) && node.children.some((child) => (ts.isJsxText(child) && child.text.trim() === "查询原任务") || (ts.isJsxExpression(child) && child.expression && ts.isCallExpression(child.expression) && child.expression.expression.getText(ast) === "uiText" && child.expression.arguments[0] && ts.isStringLiteral(child.expression.arguments[0]) && child.expression.arguments[0].text === "查询原任务"))) {
         const attribute = node.openingElement.attributes.properties.find((item) => ts.isJsxAttribute(item) && item.name.getText(ast) === "onClick");
         if (attribute && ts.isJsxAttribute(attribute) && attribute.initializer && ts.isJsxExpression(attribute.initializer) && attribute.initializer.expression && ts.isIdentifier(attribute.initializer.expression)) queryHandlerName = attribute.initializer.expression.text;
     }

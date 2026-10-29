@@ -1,3 +1,4 @@
+import { uiText, useUiText } from "@/lib/i18n";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { Link, useBlocker } from "react-router-dom";
 import { useUserStore } from "@/stores/use-user-store";
@@ -5,6 +6,7 @@ import { isModuleAvailable, useModuleEnabled, useModuleStore } from "@/stores/us
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { deploymentFeatures } from "@/lib/deployment-features";
 import { createLocalWorkbenchServices, type LocalWorkbenchServices } from "./services";
+import { setWorkbenchText } from "./ui-text.js";
 import "./workbench.css";
 import type { InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
 import { isWorkspaceRole } from "../../../../../shared/workspace-access";
@@ -14,6 +16,7 @@ const AssetPickerModal = lazy(() => import("@/components/canvas/asset-picker-mod
 type Mount = (root: HTMLElement, services: LocalWorkbenchServices) => (() => void) | Promise<() => void>;
 
 export function LocalDesignWorkbench({ moduleKey, title, description, mount }: { moduleKey: "pattern-placement" | "pattern-repeat"; title: string; description: string; mount: Mount }) {
+    useUiText();
     const host = useRef<HTMLDivElement>(null);
     const [dirty, setDirty] = useState(false);
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
@@ -80,7 +83,9 @@ export function LocalDesignWorkbench({ moduleKey, title, description, mount }: {
             })
             .catch((error) => {
                 if (!controller.signal.aborted) {
-                    root.textContent = error instanceof Error ? error.message : "工作台加载失败，请重新进入";
+                    const errorLabel = document.createElement("p");
+                    root.replaceChildren(errorLabel);
+                    setWorkbenchText(errorLabel, error instanceof Error ? error.message : "工作台加载失败，请重新进入");
                 }
             });
         return () => {
@@ -95,26 +100,24 @@ export function LocalDesignWorkbench({ moduleKey, title, description, mount }: {
         <main className="local-design-workbench">
             <header className="local-workbench-heading">
                 <div>
-                    <Link to="/creative">← 创意工作台</Link>
-                    <h1>{title}</h1>
-                    <p>{description}</p>
+                    <Link to="/creative">{uiText("← 创意工作台")}</Link>
+                    <h1>{uiText(title || "")}</h1>
+                    <p>{uiText(description || "")}</p>
                 </div>
-                <span className="badge">本地编辑 · 无模型调用</span>
+                <span className="badge">{uiText("本地编辑 · 无模型调用")}</span>
             </header>
             {blocker.state === "blocked" && (
                 <div className="workbench-leave-warning" role="alert">
-                    <span>有未保存更改。请等待自动保存，或返回工程重试保存/导出。</span>
+                    <span>{uiText("有未保存更改。请等待自动保存，或返回工程重试保存/导出。")}</span>
                     <button className="btn" onClick={() => blocker.reset()}>
-                        继续编辑
-                    </button>
+                        {uiText("继续编辑")}</button>
                     <button className="btn ghost" onClick={() => blocker.proceed()}>
-                        放弃未保存更改并离开
-                    </button>
+                        {uiText("放弃未保存更改并离开")}</button>
                 </div>
             )}
-            {assetPickerError && <p role="alert">{assetPickerError}</p>}
+            {assetPickerError && <p role="alert">{uiText(assetPickerError || "")}</p>}
             {assetPickerOpen && (
-                <Suspense fallback={<p role="status">正在打开素材库…</p>}>
+                <Suspense fallback={<p role="status">{uiText("正在打开素材库…")}</p>}>
                     <AssetPickerModal
                         open
                         onClose={() => {
@@ -124,7 +127,7 @@ export function LocalDesignWorkbench({ moduleKey, title, description, mount }: {
                         }}
                         onInsert={(asset) => {
                             if (asset.kind !== "image") {
-                                setAssetPickerError("工作台只能导入图片，请选择 PNG、JPG 或 WebP 素材。");
+                                setAssetPickerError(uiText("工作台只能导入图片，请选择 PNG、JPG 或 WebP 素材。"));
                                 return;
                             }
                             assetSelection.current?.(asset);
@@ -136,9 +139,9 @@ export function LocalDesignWorkbench({ moduleKey, title, description, mount }: {
                 </Suspense>
             )}
             {!enabled ? (
-                <p role="status">该功能已由管理员关闭。</p>
+                <p role="status">{uiText("该功能已由管理员关闭。")}</p>
             ) : !identityReady ? (
-                <p role="status">{isManagementAccount ? "当前工作台仅面向设计师账号，请使用员工设计师身份进入。" : "请完成员工身份验证后使用工作台。"}</p>
+                <p role="status">{isManagementAccount ? uiText("当前工作台仅面向设计师账号，请使用员工设计师身份进入。") : uiText("请完成员工身份验证后使用工作台。")}</p>
             ) : (
                 <div ref={host} className="local-workbench-host" />
             )}

@@ -1,3 +1,4 @@
+import { i18nHarness } from "./helpers/i18n-harness";
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -25,7 +26,10 @@ function composer(initial: Partial<Props> = {}) {
     let cursor = 0;
     const react = { ...React, useRef(value: unknown) { const index = cursor++; return refs[index] ||= { current: value }; } };
     const module = { exports: {} as { AgentChatComposer: (props: Props) => ReactElement<any> } };
-    new Function("require", "module", "exports", code)((name: string) => name === "react" ? react : localRequire(name), module, module.exports);
+    new Function("require", "module", "exports", code)((id: string) => id === "@/lib/i18n" ? i18nHarness
+        // The real mention popup and keyboard selection run in browser tests; this tree harness has no DOM dispatcher.
+        : id === "@/hooks/use-image-mentions" ? { useImageMentions: (options: { onChange: (value: string) => void }) => ({ menu: null, inputProps: {}, handleChange: (event: { target: { value: string } }) => options.onChange(event.target.value), handleSelect: () => undefined, handleKeyDown: () => false }) }
+        : ((name: string) => name === "react" ? react : localRequire(name))(id), module, module.exports);
     const changes: string[] = [];
     const uploads: Array<FileList | File[] | null> = [];
     const removed: string[] = [];

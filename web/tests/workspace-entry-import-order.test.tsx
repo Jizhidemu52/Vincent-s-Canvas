@@ -4,6 +4,7 @@ import React, { type ReactElement } from "react";
 import * as jsxRuntime from "react/jsx-runtime";
 import ts from "typescript";
 import { isWorkspaceRole } from "../../shared/workspace-access";
+import { i18nHarness } from "./helpers/i18n-harness";
 
 // Keep the entry module intact, replacing import() with a controllable asynchronous
 // module boundary. This observes execution order instead of matching source text.
@@ -59,6 +60,7 @@ function harness(owner: string | null = "employee-a", oaMode = true, role = "des
         invalidateSession: () => { events.push("invalidate"); state.user = null; },
     };
     const dependencies: Record<string, unknown> = {
+        "@/lib/i18n": { ...i18nHarness, initializeUiLocale: async () => undefined },
         "../../shared/workspace-access": { isWorkspaceRole },
         react: React,
         "react/jsx-runtime": jsxRuntime,
@@ -109,7 +111,7 @@ function harness(owner: string | null = "employee-a", oaMode = true, role = "des
         resolveImport: (name: string) => {
             const loading = modules.get(name);
             if (!loading) throw new Error(`Module was not requested: ${name}`);
-            loading.resolve(name === providersPath ? { AppProviders } : name === routerPath ? { router: "test-router" }
+            loading.resolve(name === providersPath ? { AppProviders } : name === routerPath ? { router: { state: { location: { pathname: "/canvas/test" } }, subscribe: () => () => undefined } }
                 : { default: name === loginPath ? PasswordLoginEntry : name === passwordPath ? PasswordChangeEntry : AdminLoginEntry });
         },
         changeUser: (id: string) => { state.user = { id, role: "designer" }; userChanged?.(state); },

@@ -1,3 +1,4 @@
+import { i18nHarness } from "./helpers/i18n-harness";
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
@@ -58,7 +59,7 @@ function harness(options: { failCopy?: boolean; failRead?: boolean; failUpload?:
         },
     };
     const module = { exports: {} as typeof ReuseHelper };
-    new Function("require", "module", "exports", code)((name: string) => dependencies[name], module, module.exports);
+    new Function("require", "module", "exports", code)((id: string) => id === "@/lib/i18n" ? i18nHarness : ((name: string) => dependencies[name])(id), module, module.exports);
     return { ...module.exports, run: (target: string | undefined = "existing") => module.exports.addDesignLibraryImageToCanvas(entry, entry.images[0], target), state, steps, uploaded, mappings, receipts, copyCalls, patches, setOwner: (next: string) => { owner = next; } };
 }
 

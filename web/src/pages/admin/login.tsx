@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 
 import { isAdminRole, useUserStore } from "@/stores/use-user-store";
 import { deploymentFeatures } from "@/lib/deployment-features";
+import { InchoiceBrand } from "@/components/layout/inchoice-brand";
 
 export default function AdminLoginPage() {
     const { message } = App.useApp();
@@ -32,6 +33,7 @@ export default function AdminLoginPage() {
     return (
         <div className="flex h-full items-center justify-center bg-background px-6 py-10 text-foreground">
             <main className="w-full max-w-md rounded-md border border-border bg-card p-6 shadow-sm">
+                <div className="mb-7 flex justify-center"><InchoiceBrand className="!w-[240px]" /></div>
                 <div className="flex items-center gap-3">
                     <div className="flex size-10 items-center justify-center rounded-md bg-foreground text-background">
                         <ShieldCheck className="size-5" />

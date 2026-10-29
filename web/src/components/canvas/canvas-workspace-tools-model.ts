@@ -1,4 +1,5 @@
 import { navigationModuleKey, navigationTools } from "@/constant/navigation-tools";
+import { uiText } from "@/lib/i18n";
 import { usageDestinations } from "@/lib/usage-navigation";
 import { moduleDefinitions, type ModuleKey } from "@/services/api/modules";
 import { isModuleAvailable } from "@/stores/use-module-store";
@@ -74,7 +75,8 @@ export function filterCanvasWorkspaceTools(entries: WorkspaceToolEntry[], query:
     return entries.filter(item => {
         if (group !== "全部" && item.group !== group) return false;
         const moduleLabel = moduleDefinitions.find(module => module.moduleKey === item.moduleKey)?.label;
-        const searchable = [item.label, moduleLabel, item.group, item.moduleKey, ...item.capabilities.map(capability => capability.label)].join(" ").toLocaleLowerCase();
+        const fields = [item.label, moduleLabel, item.group, item.moduleKey, ...item.capabilities.map(capability => capability.label)];
+        const searchable = [...fields, ...fields.map(value => value ? uiText(value) : "")].join(" ").toLocaleLowerCase();
         return words.every(word => searchable.includes(word));
     });
 }

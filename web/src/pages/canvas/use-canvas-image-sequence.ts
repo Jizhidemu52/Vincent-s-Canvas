@@ -1,3 +1,4 @@
+import { uiText } from "@/lib/i18n";
 import { useEffect, useRef, useState } from "react";
 import { App } from "antd";
 import type { ImageSequenceOptions, ImageSequenceSession } from "./canvas-image-sequence-runtime";
@@ -23,14 +24,14 @@ export function useCanvasImageSequence(options: ImageSequenceOptions) {
             if (latest.current.projectId !== projectId) return;
             const created = addCanvasImageSequence(latest.current, sourceId, steps, model);
             setDialog(null);
-            message.success("已创建并连接工作流，可直接编辑节点，点击“运行工作流”开始");
+            message.success(uiText("已创建并连接工作流，可直接编辑节点，点击“运行工作流”开始"));
             return created.nodes[0];
-        } catch (error) { message.error(error instanceof Error ? error.message : "添加失败"); }
+        } catch (error) { message.error(error instanceof Error ? error.message : uiText("添加失败")); }
         finally { adding.current = false; }
     };
     const run = async (groupId?: string, nodeId?: string) => {
         const current = latest.current;
-        if (active.current || current.locks.current.size) { message.info("请先完成或停止当前任务"); return; }
+        if (active.current || current.locks.current.size) { message.info(uiText("请先完成或停止当前任务")); return; }
         const projectId = current.projectId;
         const lockKey = `image-sequence:${nodeId || groupId}`;
         const session: ImageSequenceSession = { groupId: groupId || "", nodeId, controller: new AbortController() };
@@ -41,7 +42,7 @@ export function useCanvasImageSequence(options: ImageSequenceOptions) {
             if (!isCurrent() || session.controller.signal.aborted) return;
             await runCanvasImageSequence(() => latest.current, session, lockKey, isCurrent, setActiveGroupId);
         } catch (error) {
-            if (isCurrent()) message.error(error instanceof Error ? error.message : "连续改图加载失败，请重试");
+            if (isCurrent()) message.error(error instanceof Error ? error.message : uiText("连续改图加载失败，请重试"));
         } finally {
             current.locks.current.delete(lockKey);
             if (active.current === session) { active.current = null; if (latest.current.projectId === projectId) setActiveGroupId(null); }

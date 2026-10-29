@@ -1,12 +1,14 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
+import { i18nHarness } from "./helpers/i18n-harness";
 
 import { buildChatRequestMessages, type ChatHistoryMessage } from "@/lib/chat-context";
 import { createChatSessionStorage } from "@/pages/chat/chat-session-storage";
 import { chatImageRequestOptions, preferredChatImageModel, resolveChatImageQuality } from "@/pages/chat/image-quality";
 import { resolveToolModel, type BusinessConfig } from "@/services/api/business-config";
 import { createChatBranch } from "@/pages/chat/chat-message-actions";
+import { assertCreativeChatImageSelection, buildCreativeImageCatalog } from "@/lib/creative-chat";
 
 function memoryStore() {
     const values = new Map<string, unknown>();
@@ -129,7 +131,9 @@ function pageSendHarness({ ready = true, failWrite = false, failWriteAt = 0, mod
         return taskResult;
     };
     const bindings = {
+        ...i18nHarness,
         sessionsReady: ready, draft: memory.draft, attachments: memory.attachments, isSending: false, readingAttachments: false, hydratingMedia: false,
+        imageTarget: null as { id: string; mode: "edit" | "original"; sessionId: string } | null, referenceImageIds: [] as string[], buildCreativeImageCatalog, assertCreativeChatImageSelection,
         activeSession: session, selectedModel: selected?.modelId || "", selected, imageModels, preferredChatImageModel, resolveChatImageQuality, chatImageRequestOptions, config: {} as Record<string, string>,
         creativeChat, creativeModelId: selected?.modelId || "", sendingRef: { current: false }, placingImageRef: { current: false }, activeSendRef: { current: null as { controller: AbortController; submitted: boolean } | null },
         createClientId: () => `message-${++ids}`, createChatBranch, buildChatRequestMessages, sessionsRef,
@@ -137,13 +141,15 @@ function pageSendHarness({ ready = true, failWrite = false, failWriteAt = 0, mod
         isCurrentScope: () => bindings.loadedStorageKeyRef.current === bindings.storageKey,
         setSessions: (value: any[]) => { sessionsRef.current = value; }, activeSessionIdRef: { current: session.id },
         setActiveSessionId: (_value: string) => {}, setEditing: (_value: unknown) => {},
+        setImageTarget: (value: typeof bindings.imageTarget) => { bindings.imageTarget = value; },
+        setReferenceImageIds: (value: string[] | ((ids: string[]) => string[])) => { bindings.referenceImageIds = typeof value === "function" ? value(bindings.referenceImageIds) : value; },
         persistence: { clear: () => events.push("clear-pending") },
         setIsSending: (value: boolean) => events.push(`sending:${value}`),
         setSendPhase: (_value: string) => {},
         persistSessions: async (value: unknown) => { events.push("save"); if (failWrite || ++writes === failWriteAt) throw new Error("quota exceeded"); snapshots.push(structuredClone(value)); },
         updateSession: (id: string, update: (value: typeof session) => typeof session) => { if (bindings.loadedStorageKeyRef.current !== bindings.storageKey) return; sessionsRef.current = sessionsRef.current.map((item) => item.id === id ? update(item) : item); },
-        setDraft: (update: (value: string) => string) => { memory.draft = update(memory.draft); },
-        setAttachments: (update: (value: typeof memory.attachments) => typeof memory.attachments) => { memory.attachments = update(memory.attachments); },
+        setDraft: (update: string | ((value: string) => string)) => { memory.draft = typeof update === "function" ? update(memory.draft) : update; },
+        setAttachments: (update: typeof memory.attachments | ((value: typeof memory.attachments) => typeof memory.attachments)) => { memory.attachments = typeof update === "function" ? update(memory.attachments) : update; },
         followBottomRef: { current: false }, activeStreamRef: { current: null },
         createChatStreamBuffer: (onFlush: (value: string) => void) => ({ push: onFlush, cancel() {}, flush() {} }),
         chatMedia: { hydrateSession: async (value: any, assertCurrent: () => void) => { assertCurrent(); return value; }, persist: async (value: any, assertCurrent: () => void) => { assertCurrent(); return value; } },
@@ -305,6 +311,64 @@ test("a selected older version and message ancestry are saved before the planner
     expect(page.sessionsRef.current[0]!.editTargetImageId).toBe("old-task:0");
 });
 
+test("the actual send freezes an explicit older image even when the composer is cancelled during planning", async () => {
+    const decision = Promise.withResolvers<any>();
+    const page = pageSendHarness({ plan: decision.promise });
+    page.bindings.activeSession.editTargetImageId = "latest";
+    page.bindings.imageTarget = { id: "older", sessionId: "session", mode: "edit" };
+    const sending = page.send();
+    for (let turn = 0; turn < 20 && !page.plannerCalls.length; turn++) await Promise.resolve();
+    page.bindings.imageTarget = null;
+    expect(page.plannerCalls[0]).toMatchObject({ current: { editTargetImageId: "older" }, options: { selectedImageId: "older", explicitTargetImageId: "older" } });
+    decision.resolve({ kind: "image", action: "edit", prompt: "只改已选版本", content: "", references: [{ id: "older", dataUrl: "data:image/png;base64,AQID" }], lineage: { parentImageId: "older", sourceImageIds: ["older"], preservedConstraints: [] } });
+    await sending;
+    expect(page.taskOptions).toHaveLength(1);
+    expect(page.sessionsRef.current[0]!.messages.at(-1).generatedImages[0].lineage.parentImageId).toBe("older");
+});
+
+test.each(["wrong-target", "wrong-order", "generate", "missing-reference"])("explicit composer choices block %s before any paid image submission", async (failure) => {
+    const references = failure === "generate" ? [] : failure === "wrong-order" ? [{ id: "palette" }, { id: "older" }] : [{ id: failure === "wrong-target" ? "latest" : "older" }];
+    const page = pageSendHarness({ plan: Promise.resolve({ kind: "image", action: failure === "generate" ? "generate" : "edit", content: "", prompt: "do not execute", references, lineage: { parentImageId: failure === "wrong-target" ? "latest" : "older", sourceImageIds: references.map((item) => item.id), preservedConstraints: [] } }) });
+    page.bindings.imageTarget = { id: "older", sessionId: "session", mode: "edit" };
+    if (failure === "missing-reference") page.bindings.referenceImageIds = ["image"];
+    await page.send();
+    expect(page.taskOptions).toEqual([]);
+    expect(page.events.some((event) => event.endsWith("-task"))).toBe(false);
+    expect(page.sessionsRef.current[0]!.messages.at(-1)).toMatchObject({ role: "error" });
+    expect(page.sessionsRef.current[0]!.messages.at(-1).content).toContain("图片任务尚未提交");
+    expect(page.sessionsRef.current[0]!.messages.some((item) => item.pendingImageTask)).toBe(false);
+});
+
+test("cancelling a composer target keeps only the existing soft automatic candidate", async () => {
+    const page = pageSendHarness();
+    page.bindings.activeSession.editTargetImageId = "latest";
+    page.bindings.imageTarget = null;
+    await page.send();
+    expect(page.plannerCalls[0]!.options.explicitTargetImageId).toBeUndefined();
+    expect(page.plannerCalls[0]!.options.selectedImageId).toBe("latest");
+    expect(page.taskOptions).toEqual([]);
+});
+
+test("an explicit target from another conversation is never sent as this conversation's target", async () => {
+    const page = pageSendHarness();
+    page.bindings.activeSession.editTargetImageId = "current-latest";
+    page.bindings.imageTarget = { id: "other-image", sessionId: "other-session", mode: "edit" };
+    await page.send();
+    expect(page.plannerCalls[0]!.options.explicitTargetImageId).toBeUndefined();
+    expect(page.plannerCalls[0]!.current.editTargetImageId).toBe("current-latest");
+});
+
+test("six selected image inputs are rejected without writing a user turn or invoking the planner", async () => {
+    const page = pageSendHarness();
+    page.memory.attachments = Array.from({ length: 5 }, (_, index) => ({ id: `reference-${index}`, name: "参考.png", kind: "image", dataUrl: "data:image/png;base64,AQID" }));
+    page.bindings.imageTarget = { id: "older", sessionId: "session", mode: "edit" };
+    await page.send();
+    expect(page.events).toEqual(["编辑目标与参考图片合计最多 5 张，请先移除一张图片"]);
+    expect(page.snapshots).toEqual([]);
+    expect(page.plannerCalls).toEqual([]);
+    expect(page.memory.attachments).toHaveLength(5);
+});
+
 test.each(["generate", "edit"])("the actual creative send handler submits one %s task and persists the original result", async (action) => {
     const lineage = { parentImageId: "old-task:0", sourceImageIds: ["old-task:0", "attachment-1"], preservedConstraints: ["保留中文", "保留版型"] };
     const page = pageSendHarness({ mode: "create", plan: Promise.resolve({ kind: "image", action, prompt: "完整要求", content: "只改花瓣，保留其余设计", lineage, references: [{ id: "original", dataUrl: "data:image/png;base64,AQID" }] }) });
@@ -451,10 +515,17 @@ test.each([undefined, "edited original"])("explicit replay branches from the ori
         { id: "future", role: "user", content: "future must not enter replay", createdAt: "old" },
     );
     const original = structuredClone(page.sessionsRef.current[0]);
+    page.bindings.imageTarget = { id: "future-image", sessionId: "session", mode: "edit" };
+    page.bindings.referenceImageIds = ["future-image"];
     await Promise.all([page.send({ messageId: "old-answer", content }), page.send({ messageId: "old-answer", content })]);
     expect(page.plannerCalls).toHaveLength(1);
     expect(page.plannerCalls[0]!.history).toEqual([]);
     expect(page.plannerCalls[0]!.current.content).toBe(content || "original prompt");
+    expect(page.plannerCalls[0]!.options.explicitTargetImageId).toBeUndefined();
+    expect(page.bindings.imageTarget).toBeNull();
+    expect(page.bindings.referenceImageIds).toEqual([]);
+    expect(page.memory.attachments).toEqual([]);
+    expect(page.memory.draft).toBe("");
     expect(page.sessionsRef.current).toHaveLength(2);
     expect(page.sessionsRef.current[1]).toEqual(original);
     expect(page.sessionsRef.current[0]).toMatchObject({ branchOf: { sessionId: original!.id, messageId: "old-user" } });

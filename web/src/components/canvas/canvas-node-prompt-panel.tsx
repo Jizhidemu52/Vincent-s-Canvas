@@ -1,3 +1,4 @@
+import { useUiText } from "@/lib/i18n";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { ArrowUp, LoaderCircle, Square } from "lucide-react";
 import { App, Button } from "antd";
@@ -52,6 +53,7 @@ type CanvasNodePromptPanelProps = {
 };
 
 export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, onStop, mentionReferences = [], onImageSettingsOpenChange, canvasNodes = [], canvasConnections = [], sharedConfig, onOpenSharedConfig }: CanvasNodePromptPanelProps) {
+    const t = useUiText();
     const { message } = App.useApp();
     const globalConfig = useEffectiveConfig();
     const estimate = useBusinessConfigStore((state) => state.estimate);
@@ -158,7 +160,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
             }));
             saveReferences(dedupeImageReferences([...imageReferences, ...items]));
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "参考图上传失败");
+            message.error(error instanceof Error ? error.message : t("参考图上传失败"));
         }
     };
 
@@ -167,13 +169,13 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
         const model = models.find(item => item.modelId === config.model || item.id === config.model);
         const modeLabel = { image: "图片", text: "文本", video: "视频", audio: "音频" }[mode];
         return <div className="rounded-xl border p-3 text-sm backdrop-blur" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }} onMouseDown={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()} onWheel={event => event.stopPropagation()}>
-            <div className="font-medium">继承配置：{sharedConfig.title || "公共配置"}</div>
-            <div className="mt-1 text-xs" style={{ color: theme.node.muted }}>{modeLabel} · {mode === "text" ? "统一文本模型" : model?.publicName || model?.name || "使用公共配置模型"}</div>
-            <div className="mt-2 max-h-24 overflow-y-auto whitespace-pre-wrap break-words rounded-lg border px-3 py-2 text-xs leading-5" style={{ background: theme.node.fill, borderColor: theme.node.stroke }} aria-label="公共提示词预览">{sharedPrompt || "未填写公共提示词，将使用任务输入"}</div>
-            <p className="my-2 text-xs leading-5" style={{ color: theme.node.muted }}>每个目标使用自身输入与公共素材独立执行，原节点保留。参数由公共配置统一管理。</p>
+            <div className="font-medium">{t("继承配置：")}{sharedConfig.title || t("公共配置")}</div>
+            <div className="mt-1 text-xs" style={{ color: theme.node.muted }}>{modeLabel} · {mode === "text" ? t("统一文本模型") : model?.publicName || model?.name || t("使用公共配置模型")}</div>
+            <div className="mt-2 max-h-24 overflow-y-auto whitespace-pre-wrap break-words rounded-lg border px-3 py-2 text-xs leading-5" style={{ background: theme.node.fill, borderColor: theme.node.stroke }} aria-label={t("公共提示词预览")}>{sharedPrompt || t("未填写公共提示词，将使用任务输入")}</div>
+            <p className="my-2 text-xs leading-5" style={{ color: theme.node.muted }}>{t("每个目标使用自身输入与公共素材独立执行，原节点保留。参数由公共配置统一管理。")}</p>
             <div className="flex items-center justify-between gap-2">
-                <Button size="small" disabled={!onOpenSharedConfig} onClick={() => onOpenSharedConfig?.(sharedConfig.id)}>编辑公共配置</Button>
-                <Button type="primary" danger={isRunning} aria-label={isRunning ? "停止" : "仅执行此任务"} onClick={() => isRunning ? onStop(node.id) : onGenerate(node.id, mode, sharedPrompt)}>{isRunning ? "停止" : "仅执行此任务"}</Button>
+                <Button size="small" disabled={!onOpenSharedConfig} onClick={() => onOpenSharedConfig?.(sharedConfig.id)}>{t("编辑公共配置")}</Button>
+                <Button type="primary" danger={isRunning} aria-label={isRunning ? t("停止") : t("仅执行此任务")} onClick={() => isRunning ? onStop(node.id) : onGenerate(node.id, mode, sharedPrompt)}>{isRunning ? t("停止") : t("仅执行此任务")}</Button>
             </div>
         </div>;
     }
@@ -193,11 +195,11 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 onSubmit={submit}
                 className="thin-scrollbar h-24 w-full resize-none rounded-lg border px-3 py-2 text-sm leading-5 outline-none"
                 style={{ background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text }}
-                placeholder={promptPlaceholder(mode, hasImageContent, hasTextContent)}
-            /> : <p role="status" className="text-xs leading-5">多图融合需要 2–4 张参考图，不使用提示词。原有描述会保留。</p>}
+                placeholder={t(promptPlaceholder(mode, hasImageContent, hasTextContent))}
+            /> : <p role="status" className="text-xs leading-5">{t("多图融合需要 2–4 张参考图，不使用提示词。原有描述会保留。")}</p>}
 
             {mode === "image" ? <div className="mt-2"><ReferenceImageTray references={imageReferences} fixedReferenceKey={fixedReferenceKey} validation={referenceValidation} onChange={saveReferences} onRequestUpload={() => uploadInputRef.current?.click()} onRequestAssets={() => setAssetPickerOpen(true)} onRequestCanvas={() => setCanvasPickerOpen(true)} /></div> : null}
-            {videoValidation ? <p role="alert" className="mt-2 text-xs text-destructive">{videoValidation}。已连接素材会保留。</p> : null}
+            {videoValidation ? <p role="alert" className="mt-2 text-xs text-destructive">{videoValidation}{t("。已连接素材会保留。")}</p> : null}
 
             <div className="mt-2 flex min-w-0 items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-2">
@@ -234,14 +236,14 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                     style={isRunning ? undefined : { background: theme.toolbar.primary, borderColor: theme.toolbar.primary }}
                     disabled={!isRunning && (!toolEnabled || (mode === "text" && !config.textModel) || (requiresPrompt && !prompt.trim()) || !referenceValidation.valid || Boolean(videoValidation))}
                     onClick={() => (isRunning ? onStop(node.id) : submit())}
-                    aria-label={isRunning ? "停止生成" : "生成"}
+                    aria-label={isRunning ? t("停止生成") : t("生成")}
                 >
                     <span className="flex items-center gap-1.5">
                         {isRunning ? (
                             <>
                                 <LoaderCircle className="size-4 animate-spin" />
                                 <Square className="size-3.5 fill-current" />
-                                <span className="text-xs font-medium">停止</span>
+                                <span className="text-xs font-medium">{t("停止")}</span>
                             </>
                         ) : (
                             <>

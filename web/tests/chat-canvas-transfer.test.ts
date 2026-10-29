@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
+import { i18nHarness } from "./helpers/i18n-harness";
 
 import { applyCanvasProjectPatch, type CanvasProjectPatch } from "@/lib/canvas/canvas-project-update";
 import { collectProjectChanges, createProjectChangeBuffer, mergeProjectChanges, type ProjectChange } from "@/lib/canvas/canvas-persistence-merge";
@@ -102,6 +103,7 @@ function pageCanvasHarness(options: {
         canvasWriteQueued = true;
     }
     const bindings = {
+        ...i18nHarness,
         sessionsReady: true,
         activeSession: sessionsRef.current[0]!,
         sendingRef: { current: false },

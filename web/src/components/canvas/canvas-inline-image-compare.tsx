@@ -1,3 +1,4 @@
+import { useUiText } from "@/lib/i18n";
 import { useEffect, useMemo, useRef, useState, type PointerEvent, type SyntheticEvent } from "react";
 import { Popover } from "antd";
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -24,6 +25,7 @@ async function loadImage(storageKey: string | undefined, content: string) {
 
 /** A preview-only layer in the canvas transform; never writes nodes or image bytes. */
 export function CanvasInlineImageCompare({ node, nodes, scale, showImageInfo, onAdvanced }: { node: CanvasNodeData; nodes: CanvasNodeData[]; scale: number; showImageInfo: boolean; onAdvanced: (sourceId?: string) => void }) {
+    const t = useUiText();
     const theme = canvasThemes[useThemeStore(state => state.theme)];
     const { images: sources, automatic } = useMemo(() => canvasCompareSources(nodes, node), [nodes, node]);
     const available = useMemo(() => [...sources, ...canvasCompareImages(nodes)].filter((item, index, items) => item.id !== node.id && !canvasCompareSameImage(item, node) && !items.slice(0, index).some(previous => canvasCompareSameImage(previous, item))), [sources, nodes, node]);
@@ -64,10 +66,10 @@ export function CanvasInlineImageCompare({ node, nodes, scale, showImageInfo, on
     return <div className="pointer-events-none absolute" data-inline-image-compare={node.id} style={{ left: node.position.x, top: node.position.y, width: node.width, height: node.height, zIndex: 60 }}>
         <div ref={box} className="absolute inset-0">
             {ready && percent < 100 ? <>
-                <div className="absolute inset-0" style={{ background: theme.canvas.background }}><img className="h-full w-full object-contain" src={ready.before.src} alt="对比原图" draggable={false} /></div>
-                <div className="absolute inset-0" style={{ background: theme.canvas.background, clipPath: `inset(0 ${100 - percent}% 0 0)` }}><img className={`h-full w-full ${node.metadata?.freeResize ? "object-fill" : "object-contain"}`} src={ready.after.src} alt="修改后" draggable={false} /></div>
+                <div className="absolute inset-0" style={{ background: theme.canvas.background }}><img className="h-full w-full object-contain" src={ready.before.src} alt={t("对比原图")} draggable={false} /></div>
+                <div className="absolute inset-0" style={{ background: theme.canvas.background, clipPath: `inset(0 ${100 - percent}% 0 0)` }}><img className={`h-full w-full ${node.metadata?.freeResize ? "object-fill" : "object-contain"}`} src={ready.after.src} alt={t("修改后")} draggable={false} /></div>
             </> : null}
-            {ready && percent > 0 && percent < 100 ? <div data-canvas-no-zoom className="pointer-events-auto absolute top-0 bottom-0 cursor-ew-resize touch-none" role="slider" tabIndex={0} aria-label="图片内对比分割线" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(percent)} aria-valuetext={`${Math.round(percent)}% 修改后`} style={{ left: `${percent}%`, width: 20 * unit, transform: "translateX(-50%)" }}
+            {ready && percent > 0 && percent < 100 ? <div data-canvas-no-zoom className="pointer-events-auto absolute top-0 bottom-0 cursor-ew-resize touch-none" role="slider" tabIndex={0} aria-label={t("图片内对比分割线")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(percent)} aria-valuetext={t("{value1}% 修改后", { value1: Math.round(percent) })} style={{ left: `${percent}%`, width: 20 * unit, transform: "translateX(-50%)" }}
                 onPointerDown={event => { stop(event); if (event.button !== 0) return; event.preventDefault(); dragging.current = event.pointerId; event.currentTarget.setPointerCapture(event.pointerId); changeFromPointer(event); }}
                 onPointerMove={event => { stop(event); if (dragging.current === event.pointerId) changeFromPointer(event); }}
                 onPointerUp={event => { stop(event); dragging.current = null; }} onPointerCancel={() => { dragging.current = null; }} onLostPointerCapture={() => { dragging.current = null; }}
@@ -81,20 +83,20 @@ export function CanvasInlineImageCompare({ node, nodes, scale, showImageInfo, on
             <Popover trigger="click" placement="bottom" open={pickerOpen} onOpenChange={setPickerOpen} destroyOnHidden getPopupContainer={() => document.body}
                 styles={{ container: { padding: 16, background: theme.node.panel, maxHeight: "calc(100dvh - 24px)", overflowY: "auto" }, root: { maxWidth: "calc(100vw - 24px)" } }}
                 content={<div style={{ width: "min(600px, calc(100vw - 56px))" }}><CanvasImageComparePicker images={candidates} sourceIds={sources.map(item => item.id)} preferredId={automatic ? sources[0]?.id : undefined} selectedId={source?.id} onChoose={item => { setChosen({ key: sourceSetKey, image: { ...item, metadata: { ...item.metadata } } }); closePicker(); }} onClose={closePicker} /></div>}>
-                <button ref={pickerTrigger} type="button" aria-label="选择对比原图" aria-expanded={pickerOpen} aria-haspopup="dialog" className="flex w-full items-center text-left focus-visible:outline-2 focus-visible:outline-offset-2"
+                <button ref={pickerTrigger} type="button" aria-label={t("选择对比原图")} aria-expanded={pickerOpen} aria-haspopup="dialog" className="flex w-full items-center text-left focus-visible:outline-2 focus-visible:outline-offset-2"
                     style={{ gap: 8 * unit, padding: 6 * unit, borderRadius: 6 * unit, background: theme.node.panel, color: theme.node.text, outlineColor: theme.canvas.selectionStroke }}>
                     {source ? <span className="block shrink-0" style={{ width: 64 * unit, height: 48 * unit }}><CanvasCompareThumbnail node={source} /></span> : null}
-                    <span className="min-w-0 flex-1"><span className="block" style={{ fontSize: 12 * unit }}>{automatic && source?.id === sources[0]?.id ? "修改前 · 直接上版" : source ? "当前对比原图" : "选择对比原图"}</span><span className="mt-0.5 block truncate" title={source ? canvasCompareImageLabel(source) : undefined} style={{ color: theme.node.muted }}>{source ? canvasCompareImageLabel(source) : sources.length ? "多个或未确认来源，请先选择" : "未记录修改前图片，可手动选择"}</span></span>
-                    <span className="shrink-0" style={{ color: theme.node.muted }}>换图 ▾</span>
+                    <span className="min-w-0 flex-1"><span className="block" style={{ fontSize: 12 * unit }}>{automatic && source?.id === sources[0]?.id ? t("修改前 · 直接上版") : source ? t("当前对比原图") : t("选择对比原图")}</span><span className="mt-0.5 block truncate" title={source ? canvasCompareImageLabel(source) : undefined} style={{ color: theme.node.muted }}>{source ? canvasCompareImageLabel(source) : sources.length ? t("多个或未确认来源，请先选择") : t("未记录修改前图片，可手动选择")}</span></span>
+                    <span className="shrink-0" style={{ color: theme.node.muted }}>{t("换图 ▾")}</span>
                 </button>
             </Popover>
             <div className="flex items-center" style={{ gap: 8 * unit }}>
-                <span className="shrink-0">原图</span>
-                <input type="range" aria-label="原图与修改后对比" min={0} max={100} step={1} value={percent} disabled={!ready} onChange={event => setPercent(Number(event.target.value))} className="min-w-0 flex-1 cursor-ew-resize touch-none" style={{ height: 24 * unit, accentColor: theme.canvas.selectionStroke }} />
-                <span className="shrink-0">修改后</span>
-                <button type="button" onClick={() => onAdvanced(source?.id)} className="shrink-0 hover:underline" title="打开差异图、并排和导出工具" style={{ fontSize: "inherit", color: theme.node.muted }}>更多</button>
+                <span className="shrink-0">{t("原图")}</span>
+                <input type="range" aria-label={t("原图与修改后对比")} min={0} max={100} step={1} value={percent} disabled={!ready} onChange={event => setPercent(Number(event.target.value))} className="min-w-0 flex-1 cursor-ew-resize touch-none" style={{ height: 24 * unit, accentColor: theme.canvas.selectionStroke }} />
+                <span className="shrink-0">{t("修改后")}</span>
+                <button type="button" onClick={() => onAdvanced(source?.id)} className="shrink-0 hover:underline" title={t("打开差异图、并排和导出工具")} style={{ fontSize: "inherit", color: theme.node.muted }}>{t("更多")}</button>
             </div>
-            {notice ? <span role="status" className="text-center" style={{ fontSize: 10 * unit }}>{notice}</span> : null}
+            {notice ? <span role="status" className="text-center" style={{ fontSize: 10 * unit }}>{t(notice)}</span> : null}
         </div>
     </div>;
 }

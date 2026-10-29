@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { i18nHarness } from "./helpers/i18n-harness";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import React, { type DependencyList, type EffectCallback, type ReactElement } from "react";
@@ -120,6 +121,7 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
     };
     const component = (name: string) => name;
     const dependencies: Record<string, any> = {
+        "@/lib/i18n": i18nHarness,
         react: {
             ...React, useState, useMemo,
             useCallback: (callback: unknown, deps?: DependencyList) => useMemo(() => callback, deps),

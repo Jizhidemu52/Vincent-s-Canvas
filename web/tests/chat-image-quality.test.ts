@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import React from "react";
 import ts from "typescript";
+import { i18nHarness } from "./helpers/i18n-harness";
 import { imageModelProfile } from "@/lib/image-model-settings";
 import { modelLabelWithUsage } from "@/lib/model-picker-options";
 import { chatImageQualitySettings, chatImageRequestOptions, preferredChatImageModel, resolveChatImageQuality } from "@/pages/chat/image-quality";
@@ -9,6 +10,7 @@ import { createChatSessionStorage } from "@/pages/chat/chat-session-storage";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { defaultConfig } from "@/stores/use-config-store";
 import { imageTaskParameters } from "@/services/api/image";
+import { assertCreativeChatImageSelection, buildCreativeImageCatalog } from "@/lib/creative-chat";
 
 const originalModels = useBusinessConfigStore.getState().models;
 afterEach(() => useBusinessConfigStore.setState({ models: originalModels }));
@@ -45,10 +47,12 @@ function visit(node: ts.Node) {
     if (ts.isVariableDeclaration(node) && node.name.getText(ast) === "send") sendExpression = node.initializer;
     if (ts.isJsxSelfClosingElement(node) && node.tagName.getText(ast) === "Select") {
         for (const attr of node.attributes.properties) {
-            if (!ts.isJsxAttribute(attr) || !attr.initializer || !ts.isStringLiteral(attr.initializer)) continue;
-            if (attr.name.getText(ast) === "data-testid" && attr.initializer.text === "chat-image-quality") selectExpression = node;
-            if (attr.name.getText(ast) === "data-testid" && attr.initializer.text === "chat-image-resolution") resolutionExpression = node;
-            if (attr.name.getText(ast) === "aria-label" && attr.initializer.text === "出图模型") modelExpression = node;
+            if (!ts.isJsxAttribute(attr) || !attr.initializer) continue;
+            const value = ts.isJsxExpression(attr.initializer) && attr.initializer.expression && ts.isCallExpression(attr.initializer.expression) && attr.initializer.expression.expression.getText(ast) === "uiText" ? attr.initializer.expression.arguments[0] : attr.initializer;
+            if (!value || !ts.isStringLiteral(value)) continue;
+            if (attr.name.getText(ast) === "data-testid" && value.text === "chat-image-quality") selectExpression = node;
+            if (attr.name.getText(ast) === "data-testid" && value.text === "chat-image-resolution") resolutionExpression = node;
+            if (attr.name.getText(ast) === "aria-label" && value.text === "出图模型") modelExpression = node;
         }
     }
     ts.forEachChild(node, visit);
@@ -75,8 +79,10 @@ function sendHarness({ action = "generate", quality = "high", resolution = undef
     const calls: any[] = [];
     const config = { model: "chat-model", imageModel: models[0].modelId, quality: "4k", imageOptions: '{"resolution":"2k","output_format":"webp"}' };
     const bindings = {
+        ...i18nHarness,
         sessionsReady: true, draft: "只改花瓣", attachments: [], readingAttachments: false, sendingRef: { current: false }, placingImageRef: { current: false }, activeSession: initial,
         hydratingMedia: false, isCurrentScope: () => true,
+        imageTarget: null, referenceImageIds: [], setImageTarget() {}, setReferenceImageIds() {}, assertCreativeChatImageSelection, buildCreativeImageCatalog,
         chatMedia: { async hydrateSession<T>(session: T) { return session; }, async persist<T>(image: T, assertCurrent: () => void) { assertCurrent(); return image; } },
         selectedModel: "chat-model", selected: { modelId: "chat-model" }, creativeModelId: "chat-model", config, imageModels, preferredChatImageModel, resolveChatImageQuality, chatImageRequestOptions,
         activeSendRef: { current: null }, preparingMessageRef: { current: false }, loadedStorageKeyRef: { current: "user-a" }, storageKey: "user-a", sessionsRef,
@@ -155,6 +161,7 @@ function qualitySelect({ ready = true, sending = false, modelsLoading = false, m
     if (!expression) throw new Error("Actual image select not found");
     const sessions: any[] = [{ id: "a", imageQuality: quality, ...(resolution ? { imageResolution: resolution } : {}) }, { id: "b", imageQuality: "low" }];
     const bindings = {
+        ...i18nHarness,
         React, Select: "select", imageQualitySettings: chatImageQualitySettings(imageModelProfile(model?.modelId || "", models), sessions[0]!.imageQuality, sessions[0]!.imageResolution),
         imageModels: models, imageBinding: bound ? { modelConfigId: model?.id } : undefined, resolveChatImageQuality, modelLabelWithUsage,
         sessionsReady: ready, modelsLoading, isSending: sending, pendingImageMessage: pending, preferredImageModel: model,

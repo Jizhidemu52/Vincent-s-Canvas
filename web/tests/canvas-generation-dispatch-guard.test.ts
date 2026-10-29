@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { uiText } from "@/lib/i18n";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
 
@@ -13,7 +14,7 @@ function batchCallback(scope: Record<string, unknown>) {
     visit(source);
     if (!callback) throw new Error("batch callback missing");
     const code = ts.transpileModule(`const callback = ${callback.getText(source)};`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
-    return new Function("scope", `with (scope) { ${code} return callback; }`)(new Proxy(scope, { has: () => true })) as () => Promise<void>;
+    return new Function("scope", `with (scope) { ${code} return callback; }`)(new Proxy({ uiText, ...scope }, { has: () => true })) as () => Promise<void>;
 }
 
 test("batch double clicks before lazy load produce only one execution and release the shared lock", async () => {

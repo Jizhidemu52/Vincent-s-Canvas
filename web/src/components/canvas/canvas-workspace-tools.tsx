@@ -1,3 +1,4 @@
+import { useUiText } from "@/lib/i18n";
 import { ArrowUpRight, ChevronRight, Grid2X2, Search, Shapes, Sparkles, X } from "lucide-react";
 import { Dialog } from "radix-ui";
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
@@ -18,6 +19,7 @@ export type CanvasWorkspaceToolsProps = {
 };
 
 export function CanvasWorkspaceTools({ open, onOpenChange }: CanvasWorkspaceToolsProps) {
+    const t = useUiText();
     const navigate = useNavigate();
     const location = useLocation();
     const flags = useModuleStore(state => state.flags);
@@ -68,27 +70,27 @@ export function CanvasWorkspaceTools({ open, onOpenChange }: CanvasWorkspaceTool
                 triggerRef.current?.focus();
             }}>
                 <header className="cwt-header">
-                    <div><Dialog.Title>全部工具</Dialog.Title><Dialog.Description>原有工作台与工具，都在这里。</Dialog.Description></div>
-                    <Dialog.Close className="cwt-close" aria-label="关闭全部工具"><X size={19} strokeWidth={1.5} /></Dialog.Close>
+                    <div><Dialog.Title>{t("全部工具")}</Dialog.Title><Dialog.Description>{t("原有工作台与工具，都在这里。")}</Dialog.Description></div>
+                    <Dialog.Close className="cwt-close" aria-label={t("关闭全部工具")}><X size={19} strokeWidth={1.5} /></Dialog.Close>
                 </header>
-                <label className="cwt-search"><Search size={18} strokeWidth={1.6} /><input ref={searchRef} type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索工具或工作台" aria-label="搜索工具或工作台" /><kbd>Esc</kbd></label>
-                <nav className="cwt-categories" aria-label="工具分类">{groups.map(item => <button type="button" key={item} aria-pressed={group === item} onClick={() => setGroup(item)}>{item}</button>)}</nav>
+                <label className="cwt-search"><Search size={18} strokeWidth={1.6} /><input ref={searchRef} type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder={t("搜索工具或工作台")} aria-label={t("搜索工具或工作台")} /><kbd>Esc</kbd></label>
+                <nav className="cwt-categories" aria-label={t("工具分类")}>{groups.map(item => <button type="button" key={item} aria-pressed={group === item} onClick={() => setGroup(item)}>{t(item)}</button>)}</nav>
                 <div className="cwt-body">
-                    {visibleGroups.map(section => <section key={section} className="cwt-section" aria-label={section}>
-                        <h3>{section}</h3>
+                    {visibleGroups.map(section => <section key={section} className="cwt-section" aria-label={t(section)}>
+                        <h3>{t(section)}</h3>
                         <div className="cwt-grid">{visible.filter(item => item.group === section).map(item => {
                             const Icon = navigationTools.find(tool => tool.path === item.path)?.icon ?? (section === "创意工具" ? Shapes : item.id === "home" ? Grid2X2 : Sparkles);
                             const isCanvas = item.moduleKey === "canvas" && currentCanvas;
-                            return <button key={item.id} type="button" className="cwt-tool" data-usage-control={`workspace-tool.${item.id}`} onClick={() => enter(item)} aria-label={`${item.label}${isCanvas ? "（当前画布）" : ""}`} title={item.capabilities.length ? `${item.label}内：${item.capabilities.map(capability => capability.label).join("、")}` : item.label}>
+                            return <button key={item.id} type="button" className="cwt-tool" data-usage-control={`workspace-tool.${item.id}`} onClick={() => enter(item)} aria-label={`${t(item.label)}${isCanvas ? ` (${t("当前画布")})` : ""}`} title={item.capabilities.length ? t("{value1}内：{value2}", { value1: t(item.label), value2: item.capabilities.map(capability => t(capability.label)).join(" / ") }) : t(item.label)}>
                                 <span className="cwt-tool-icon"><Icon size={21} strokeWidth={1.4} /></span>
-                                <span className="cwt-tool-copy"><strong>{item.label}{isCanvas && <small>当前画布</small>}</strong>{item.capabilities.length ? <span>{item.capabilities.map(capability => capability.label).join(" · ")}</span> : null}</span>
+                                <span className="cwt-tool-copy"><strong>{t(item.label)}{isCanvas && <small>{t("当前画布")}</small>}</strong>{item.capabilities.length ? <span>{item.capabilities.map(capability => t(capability.label)).join(" · ")}</span> : null}</span>
                                 {isCanvas ? <ChevronRight className="cwt-arrow" size={16} /> : <ArrowUpRight className="cwt-arrow" size={16} />}
                             </button>;
                         })}</div>
                     </section>)}
-                    {!visible.length && <div className="cwt-empty"><Search size={25} strokeWidth={1.3} /><strong>没有找到对应工具</strong><p>试试其他名称，或切换到全部分类。</p><button type="button" onClick={() => { setQuery(""); setGroup("全部"); }}>查看全部工具</button></div>}
+                    {!visible.length && <div className="cwt-empty"><Search size={25} strokeWidth={1.3} /><strong>{t("没有找到对应工具")}</strong><p>{t("试试其他名称，或切换到全部分类。")}</p><button type="button" onClick={() => { setQuery(""); setGroup("全部"); }}>{t("查看全部工具")}</button></div>}
                 </div>
-                <footer className="cwt-footer"><span>{visible.length} 个可用入口</span><span>工具按当前权限显示</span></footer>
+                <footer className="cwt-footer"><span>{visible.length} {t(" 个可用入口")}</span><span>{t("工具按当前权限显示")}</span></footer>
             </Dialog.Content>
         </Dialog.Portal>
     </Dialog.Root>;

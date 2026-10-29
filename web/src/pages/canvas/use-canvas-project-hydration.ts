@@ -1,3 +1,4 @@
+import { uiText } from "@/lib/i18n";
 import { type CanvasBackgroundMode } from "@/lib/canvas-theme";
 import { shouldOpenCanvasCreationPanel } from "@/lib/canvas/canvas-layout-breakpoint";
 import type { CanvasPerformanceScenarioNodeCount } from "@/lib/canvas/canvas-performance-scenario";
@@ -99,7 +100,7 @@ export function useCanvasProjectHydration({ projectId, projectLoaded, setProject
             setProjectLoaded(true);
             }).catch(() => {
                 if (!lifecycle.isCurrent(restoreToken)) return;
-                message.error("性能测试场景加载失败，请重新打开");
+                message.error(uiText("性能测试场景加载失败，请重新打开"));
                 navigate("/canvas", { replace: true });
             });
             return invalidateRestore;
@@ -116,7 +117,7 @@ export function useCanvasProjectHydration({ projectId, projectLoaded, setProject
         }
         catch (error) {
             if (lifecycle.isCurrent(restoreToken)) {
-                message.error(error instanceof Error ? error.message : "画布读取失败，请重试");
+                message.error(error instanceof Error ? error.message : uiText("画布读取失败，请重试"));
                 navigate("/canvas", { replace: true });
             }
             return;
@@ -176,7 +177,7 @@ export function useCanvasProjectHydration({ projectId, projectLoaded, setProject
             } catch (error) {
                 if (!lifecycle.isCurrent(restoreToken)) return;
                 const reason = error instanceof Error ? error.message : "素材恢复失败";
-                message.warning(`部分素材恢复失败，已保留原始项目内容：${reason}`);
+                message.warning(uiText("部分素材恢复失败，已保留原始项目内容：{value1}", { value1: reason }));
                 commitRestoredProject(resetInterruptedGeneration(project.nodes, hydration), project.chatSessions || []);
             }
         };

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { uiText } from "@/lib/i18n";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
 import * as nodeAsset from "@/lib/canvas/canvas-node-asset";
@@ -79,6 +80,7 @@ function editor() {
     const assets: AssetInput[] = [], successes: string[] = [], errors: string[] = [];
     const project = { current: "project-a" };
     const scope = {
+        uiText,
         projectId: "project-a", designProjectIdRef: project,
         useCallback: (fn: unknown) => fn,
         useUserStore: { getState: () => ({ user: ownerId ? { id: ownerId } : null }) },

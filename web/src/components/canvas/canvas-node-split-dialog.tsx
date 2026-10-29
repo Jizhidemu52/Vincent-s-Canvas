@@ -1,3 +1,4 @@
+import { useUiText } from "@/lib/i18n";
 import { useEffect, useState } from "react";
 import { Button, InputNumber, Modal } from "antd";
 import { Grid2x2 } from "lucide-react";
@@ -11,6 +12,7 @@ const defaultParams: CanvasImageSplitParams = { rows: 2, columns: 2 };
 const maxGridSize = 12;
 
 export function CanvasNodeSplitDialog({ dataUrl, open, onClose, onConfirm }: { dataUrl: string; open: boolean; onClose: () => void; onConfirm: (params: CanvasImageSplitParams) => void }) {
+    const t = useUiText();
     const [params, setParams] = useState(defaultParams);
     const [image, setImage] = useState<{ width: number; height: number } | null>(null);
     const [imageError, setImageError] = useState("");
@@ -43,8 +45,8 @@ export function CanvasNodeSplitDialog({ dataUrl, open, onClose, onConfirm }: { d
             <div className="space-y-5">
                 {imageError ? <div role="alert" className="text-sm">{imageError}</div> : null}
                 <div>
-                    <h2 className="text-xl font-semibold">切分图片</h2>
-                    <p className="mt-1 text-sm opacity-60">生成 {total} 个图片子节点，并按原图网格排列到画布右侧</p>
+                    <h2 className="text-xl font-semibold">{t("切分图片")}</h2>
+                    <p className="mt-1 text-sm opacity-60">{t("生成")}{total} {t(" 个图片子节点，并按原图网格排列到画布右侧")}</p>
                 </div>
                 <div className="grid gap-6 md:grid-cols-[minmax(260px,1fr)_280px]">
                     <div className="rounded-xl border p-4">
@@ -55,26 +57,25 @@ export function CanvasNodeSplitDialog({ dataUrl, open, onClose, onConfirm }: { d
                             </div>
                         </div>
                         <div className="mt-3 flex items-center justify-between text-sm">
-                            <span className="opacity-60">原图</span>
-                            <span className="font-semibold">{image ? `${image.width} x ${image.height} px` : imageError ? "读取失败" : "读取中"}</span>
+                            <span className="opacity-60">{t("原图")}</span>
+                            <span className="font-semibold">{image ? `${image.width} x ${image.height} px` : imageError ? t("读取失败") : t("读取中")}</span>
                         </div>
                     </div>
                     <div className="space-y-5 py-2">
-                        <NumberField label="行数" value={params.rows} onChange={(value) => update("rows", value)} />
-                        <NumberField label="列数" value={params.columns} onChange={(value) => update("columns", value)} />
+                        <NumberField label={t("行数")} value={params.rows} onChange={(value) => update("rows", value)} />
+                        <NumberField label={t("列数")} value={params.columns} onChange={(value) => update("columns", value)} />
                         <div className="rounded-xl border px-4 py-3 text-sm">
                             <div className="flex items-center justify-between">
-                                <span className="opacity-60">子节点</span>
-                                <span className="font-semibold">{total} 个</span>
+                                <span className="opacity-60">{t("子节点")}</span>
+                                <span className="font-semibold">{total} {t(" 个")}</span>
                             </div>
                             <div className="mt-2 flex items-center justify-between">
-                                <span className="opacity-60">单块约</span>
-                                <span className="font-semibold">{pieceSize ? `${pieceSize.width} x ${pieceSize.height}` : "未知"}</span>
+                                <span className="opacity-60">{t("单块约")}</span>
+                                <span className="font-semibold">{pieceSize ? `${pieceSize.width} x ${pieceSize.height}` : t("未知")}</span>
                             </div>
                         </div>
                         <Button type="primary" size="large" className="w-full" icon={<Grid2x2 className="size-4" />} disabled={!image} onClick={() => onConfirm(params)}>
-                            生成子节点
-                        </Button>
+                            {t("生成子节点")}</Button>
                     </div>
                 </div>
             </div>
@@ -83,6 +84,7 @@ export function CanvasNodeSplitDialog({ dataUrl, open, onClose, onConfirm }: { d
 }
 
 function NumberField({ label, value, onChange }: { label: string; value: number; onChange: (value: string | number | null) => void }) {
+    const t = useUiText();
     return (
         <label className="block space-y-2">
             <span className="font-medium opacity-75">{label}</span>
@@ -92,6 +94,7 @@ function NumberField({ label, value, onChange }: { label: string; value: number;
 }
 
 function SplitGrid({ rows, columns }: CanvasImageSplitParams) {
+    const t = useUiText();
     return (
         <div className="pointer-events-none absolute inset-0">
             {Array.from({ length: columns - 1 }).map((_, index) => (

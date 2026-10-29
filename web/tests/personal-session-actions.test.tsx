@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import React, { type ReactElement } from "react";
 import ts from "typescript";
+import { i18nHarness } from "./helpers/i18n-harness";
 
 const requireModule = createRequire(import.meta.url);
 const code = ts.transpileModule(readFileSync(new URL("../src/components/layout/personal-session-actions.tsx", import.meta.url), "utf8"), {
@@ -34,6 +35,7 @@ function sessionActions() {
     let logout = async () => { state.user = null; state.status = "guest"; };
     const module = { exports: {} as any };
     const mocks: Record<string, unknown> = {
+        "@/lib/i18n": i18nHarness,
         react: { ...React, useState(initial: boolean) {
             const currentInstance = instance; const index = cursor++;
             if (!(index in values[currentInstance])) values[currentInstance][index] = initial;

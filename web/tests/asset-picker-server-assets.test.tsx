@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { i18nHarness } from "./helpers/i18n-harness";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import React, { type DependencyList, type EffectCallback, type ReactElement } from "react";
@@ -105,7 +106,7 @@ function harness(localAssets: Asset[] = [], initialMode: "single" | "multiple-im
     };
     const pickerModule = { exports: {} as { AssetPickerModal: (props: object) => ReactElement<any> } };
     new Function("require", "module", "exports", pickerCode)(
-        (name: string) => Object.hasOwn(dependencies, name) ? dependencies[name] : requireModule(name), pickerModule, pickerModule.exports,
+        (name: string) => name === "@/lib/i18n" ? i18nHarness : Object.hasOwn(dependencies, name) ? dependencies[name] : requireModule(name), pickerModule, pickerModule.exports,
     );
     const render = () => {
         const modal = pickerModule.exports.AssetPickerModal({ open, selectionMode, onClose() {}, onInsert: (payload: unknown) => inserted.push(payload), onInsertMany: (payloads: any[]) => batches.push(payloads) });

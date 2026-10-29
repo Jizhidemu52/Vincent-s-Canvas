@@ -1,3 +1,4 @@
+import { i18nHarness } from "./helpers/i18n-harness";
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
@@ -27,6 +28,7 @@ function harness(patch: Partial<Options> = {}, write: (id: string, favorite: boo
         return cells[index].value;
     };
     const dependencies: Record<string, unknown> = {
+        "@/lib/i18n": i18nHarness,
         react: {
             useState: (initial: unknown) => {
                 const index = cursor++;

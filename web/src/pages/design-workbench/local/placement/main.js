@@ -1,3 +1,5 @@
+import { uiText } from "@/lib/i18n";
+import { setWorkbenchText, watchWorkbenchUi } from "../ui-text.js";
 import { PROJECT_VERSION, MAX_LAYERS, clone, clamp, canvasPoint, pointInLayer, checkDimensions, validateProject, resizeBase } from "./model.js";
 import { createProjectSession, mountProjectBar, sameProject } from "../project-session.js";
 
@@ -9,7 +11,9 @@ const format = (value) => Math.round(value * 10) / 10;
 
 export async function mountPlacement(root, services) {
     const { loadImage, readImageFile, downloadBlob, notify, signal } = services;
-    root.innerHTML = '<div class="placement-demo"><div class="empty">正在准备服装定位工作台…</div></div>';
+    const refreshUi = watchWorkbenchUi(root, signal);
+    root.innerHTML = "<div class=\"placement-demo\"><div class=\"empty\"><span data-ui-text=\"正在准备服装定位工作台…\">正在准备服装定位工作台…</span></div></div>";
+    refreshUi();
     const images = new Map();
     let live = true;
     let sequence = 0;
@@ -106,54 +110,54 @@ export async function mountPlacement(root, services) {
     }
     if (!live || signal.aborted) return cleanup;
     selectedId = state.layers[0].id;
-    root.innerHTML = `<section class="placement-demo" aria-label="服装图案定位工作台">
+    root.innerHTML = `<section class="placement-demo" aria-label="服装图案定位工作台" data-ui-aria-label="服装图案定位工作台">
     <div class="workspace">
       <aside class="panel placement-assets">
-        <div class="panel-head"><span>素材与图层</span><span class="placement-subhead">01 / 构图</span></div>
+        <div class="panel-head"><span><span data-ui-text="素材与图层">素材与图层</span></span><span class="placement-subhead"><span data-ui-text="01 / 构图">01 / 构图</span></span></div>
         <div class="panel-body">
-          <p class="placement-intro">先选服装，再放图案。拖动胸前花朵，试试新的位置与比例。</p>
-          <button class="btn placement-upload" data-action="upload-base">替换服装底图</button>
-          ${services.pickImage ? '<button class="btn ghost placement-upload" data-action="asset-base">从素材库选择底图</button>' : ""}
-          <p class="hint">PNG / JPG / WebP，单张 ≤ 15 MB<br>原图保持不变，仅在工作台中合成。</p>
+          <p class="placement-intro"><span data-ui-text="先选服装，再放图案。拖动胸前花朵，试试新的位置与比例。">先选服装，再放图案。拖动胸前花朵，试试新的位置与比例。</span></p>
+          <button class="btn placement-upload" data-action="upload-base"><span data-ui-text="替换服装底图">替换服装底图</span></button>
+          ${services.pickImage ? "<button class=\"btn ghost placement-upload\" data-action=\"asset-base\"><span data-ui-text=\"从素材库选择底图\">从素材库选择底图</span></button>" : ""}
+          <p class="hint"><span data-ui-text="PNG / JPG / WebP，单张 ≤ 15 MB">PNG / JPG / WebP，单张 ≤ 15 MB</span><br><span data-ui-text="原图保持不变，仅在工作台中合成。">原图保持不变，仅在工作台中合成。</span></p>
           <div class="placement-divider"></div>
-          <div class="section-title">添加图案</div>
+          <div class="section-title"><span data-ui-text="添加图案">添加图案</span></div>
           <div class="placement-materials">
-            <button class="placement-material" data-asset="flower" aria-label="添加花朵图案"><img src="/design-workbench/assets/flower.svg" alt="" />花朵</button>
-            <button class="placement-material" data-asset="leaf" aria-label="添加枝叶图案"><img src="/design-workbench/assets/leaf.svg" alt="" />枝叶</button>
-            <button class="placement-material" data-asset="brand" aria-label="添加字标图案"><img src="/design-workbench/assets/brand.svg" alt="" />字标</button>
+            <button class="placement-material" data-asset="flower" aria-label="添加花朵图案" data-ui-aria-label="添加花朵图案"><img src="/design-workbench/assets/flower.svg" alt="" /><span data-ui-text="花朵">花朵</span></button>
+            <button class="placement-material" data-asset="leaf" aria-label="添加枝叶图案" data-ui-aria-label="添加枝叶图案"><img src="/design-workbench/assets/leaf.svg" alt="" /><span data-ui-text="枝叶">枝叶</span></button>
+            <button class="placement-material" data-asset="brand" aria-label="添加字标图案" data-ui-aria-label="添加字标图案"><img src="/design-workbench/assets/brand.svg" alt="" /><span data-ui-text="字标">字标</span></button>
           </div>
-          <button class="btn ghost placement-upload" data-action="upload-art">＋ 上传自己的图案</button>
-          <p class="hint">建议使用透明背景 PNG。最多 30 层。</p>
+          <button class="btn ghost placement-upload" data-action="upload-art"><span data-ui-text="＋ 上传自己的图案">＋ 上传自己的图案</span></button>
+          <p class="hint"><span data-ui-text="建议使用透明背景 PNG。最多 30 层。">建议使用透明背景 PNG。最多 30 层。</span></p>
           <div class="placement-divider"></div>
-          <div class="section-title">图层 <span class="hint" data-layer-count></span></div>
-          <ul class="placement-layers" aria-label="图案图层列表"></ul>
+          <div class="section-title"><span data-ui-text="图层 ">图层 </span><span class="hint" data-layer-count></span></div>
+          <ul class="placement-layers" aria-label="图案图层列表" data-ui-aria-label="图案图层列表"></ul>
           <div class="placement-layer-actions">
-            <button class="btn" data-action="duplicate" title="复制选中图层">复制</button>
-            <button class="btn" data-action="up" title="图层向上移一层">上移</button>
-            <button class="btn" data-action="down" title="图层向下移一层">下移</button>
-            <button class="btn" data-action="delete" title="删除选中图层">删除</button>
+            <button class="btn" data-action="duplicate" title="复制选中图层" data-ui-title="复制选中图层"><span data-ui-text="复制">复制</span></button>
+            <button class="btn" data-action="up" title="图层向上移一层" data-ui-title="图层向上移一层"><span data-ui-text="上移">上移</span></button>
+            <button class="btn" data-action="down" title="图层向下移一层" data-ui-title="图层向下移一层"><span data-ui-text="下移">下移</span></button>
+            <button class="btn" data-action="delete" title="删除选中图层" data-ui-title="删除选中图层"><span data-ui-text="删除">删除</span></button>
           </div>
-          <div class="placement-base-row"><img data-base-thumb alt="" /><span class="placement-base-name"></span><span class="placement-locked">已锁定</span></div>
+          <div class="placement-base-row"><img data-base-thumb alt="" /><span class="placement-base-name"></span><span class="placement-locked"><span data-ui-text="已锁定">已锁定</span></span></div>
         </div>
       </aside>
       <div class="panel placement-center">
-        <div class="stage-toolbar"><span class="placement-stage-label">服装定位画布 <span class="badge">可拖动图案</span></span><div class="toolbar"><button class="btn ghost" data-action="undo" title="Ctrl / ⌘ + Z">撤销</button><button class="btn ghost" data-action="redo" title="Ctrl / ⌘ + Shift + Z">重做</button></div></div>
-        <div class="placement-canvas-wrap"><canvas aria-label="服装图案定位画布，点击图案后拖动或使用方向键微调" tabindex="0"></canvas></div>
-        <div class="placement-stage-footer"><span data-dimensions></span><span>方向键微调 1 像素 · 按住换挡键加速 10 像素</span></div>
-        <div class="placement-stage-footer"><span class="placement-status">二维定位合成 · 不包含人工智能褶皱融合</span><span data-selection-status></span></div>
+        <div class="stage-toolbar"><span class="placement-stage-label"><span data-ui-text="服装定位画布 ">服装定位画布 </span><span class="badge"><span data-ui-text="可拖动图案">可拖动图案</span></span></span><div class="toolbar"><button class="btn ghost" data-action="undo" title="Ctrl / ⌘ + Z"><span data-ui-text="撤销">撤销</span></button><button class="btn ghost" data-action="redo" title="Ctrl / ⌘ + Shift + Z"><span data-ui-text="重做">重做</span></button></div></div>
+        <div class="placement-canvas-wrap"><canvas aria-label="服装图案定位画布，点击图案后拖动或使用方向键微调" data-ui-aria-label="服装图案定位画布，点击图案后拖动或使用方向键微调" tabindex="0"></canvas></div>
+        <div class="placement-stage-footer"><span data-dimensions></span><span><span data-ui-text="方向键微调 1 像素 · 按住换挡键加速 10 像素">方向键微调 1 像素 · 按住换挡键加速 10 像素</span></span></div>
+        <div class="placement-stage-footer"><span class="placement-status"><span data-ui-text="二维定位合成 · 不包含人工智能褶皱融合">二维定位合成 · 不包含人工智能褶皱融合</span></span><span data-selection-status></span></div>
       </div>
       <aside class="panel placement-inspector">
-        <div class="panel-head"><span>定位参数</span><span class="placement-subhead">02 / 精调</span></div>
+        <div class="panel-head"><span><span data-ui-text="定位参数">定位参数</span></span><span class="placement-subhead"><span data-ui-text="02 / 精调">02 / 精调</span></span></div>
         <div class="panel-body">
-          <div><div data-controls></div><div class="placement-note">坐标以服装底图左上角为原点，表示图案中心位置。底图始终锁定，图案等比缩放。正片叠底可保留部分底色明暗，但不产生真实褶皱变形。</div></div>
+          <div><div data-controls></div><div class="placement-note"><span data-ui-text="坐标以服装底图左上角为原点，表示图案中心位置。底图始终锁定，图案等比缩放。正片叠底可保留部分底色明暗，但不产生真实褶皱变形。">坐标以服装底图左上角为原点，表示图案中心位置。底图始终锁定，图案等比缩放。正片叠底可保留部分底色明暗，但不产生真实褶皱变形。</span></div></div>
           <div class="placement-divider"></div>
-          <div class="placement-delivery"><div class="section-title">保存与交付</div>
-            <button class="btn primary placement-export" data-action="export-png">导出合成 PNG</button>
-            ${services.saveAsset ? '<button class="btn placement-export" data-action="save-asset">保存合成图到素材库</button>' : ""}
-            <div class="placement-save-actions"><button class="btn" data-action="save">本地保存</button><button class="btn" data-action="open">打开本地工程</button><button class="btn ghost" data-action="export-json">导出工程 JSON</button><button class="btn ghost" data-action="import-json">导入工程 JSON</button></div>
+          <div class="placement-delivery"><div class="section-title"><span data-ui-text="保存与交付">保存与交付</span></div>
+            <button class="btn primary placement-export" data-action="export-png"><span data-ui-text="导出合成 PNG">导出合成 PNG</span></button>
+            ${services.saveAsset ? "<button class=\"btn placement-export\" data-action=\"save-asset\"><span data-ui-text=\"保存合成图到素材库\">保存合成图到素材库</span></button>" : ""}
+            <div class="placement-save-actions"><button class="btn" data-action="save"><span data-ui-text="本地保存">本地保存</span></button><button class="btn" data-action="open"><span data-ui-text="打开本地工程">打开本地工程</span></button><button class="btn ghost" data-action="export-json"><span data-ui-text="导出工程 JSON">导出工程 JSON</span></button><button class="btn ghost" data-action="import-json"><span data-ui-text="导入工程 JSON">导入工程 JSON</span></button></div>
             <p class="placement-save-state" aria-live="polite"></p>
-            <button class="btn ghost placement-upload" data-action="reset">恢复示例构图</button>
-            <p class="hint">PNG 为平面合成图；JSON 保留可编辑图层和上传图片。恢复示例可撤销并自动保存；要保留当前构图，请先新建工程。</p>
+            <button class="btn ghost placement-upload" data-action="reset"><span data-ui-text="恢复示例构图">恢复示例构图</span></button>
+            <p class="hint"><span data-ui-text="PNG 为平面合成图；JSON 保留可编辑图层和上传图片。恢复示例可撤销并自动保存；要保留当前构图，请先新建工程。">PNG 为平面合成图；JSON 保留可编辑图层和上传图片。恢复示例可撤销并自动保存；要保留当前构图，请先新建工程。</span></p>
           </div>
         </div>
       </aside>
@@ -191,6 +195,7 @@ export async function mountPlacement(root, services) {
         },
     });
     updateProjects = mountProjectBar(root, projects);
+    refreshUi();
 
     async function materializeImages() {
         const entries = [...images.entries()];
@@ -277,22 +282,22 @@ export async function mountPlacement(root, services) {
         query("[data-action=down]").disabled = !layer || index <= 0;
         query("[data-action=export-png]").disabled = exporting;
         if (query("[data-action=save-asset]")) query("[data-action=save-asset]").disabled = exporting;
-        query(".placement-save-state").textContent = "工程自动保存在当前账号的本机浏览器；可导出 JSON 备份。";
-        query("[data-selection-status]").textContent = layer ? `选中：${layer.name}${layer.visible ? "" : "（已隐藏）"}` : "未选中图案";
+        setWorkbenchText(query(".placement-save-state"), () => uiText("工程自动保存在当前账号的本机浏览器；可导出 JSON 备份。"));
+        setWorkbenchText(query("[data-selection-status]"), () => layer ? uiText("选中：{value1}{value2}", { value1: layer.name, value2: layer.visible ? "" : uiText("（已隐藏）") }) : uiText("未选中图案"));
     }
 
     function numberControl(name, label, value, min, max, unit = "像素", step = 1, slider = false) {
-        return `<label class="field"><span>${label}</span><div class="placement-number"><input aria-label="${label}" data-prop="${name}" type="number" min="${min}" max="${max}" step="${step}" value="${format(value)}" /><span style="white-space:nowrap;flex-shrink:0">${unit}</span></div>${slider ? `<input aria-label="${label}滑块" data-prop="${name}" type="range" min="${min}" max="${max}" step="${step}" value="${format(value)}" />` : ""}</label>`;
+        return `<label class="field"><span data-ui-text="${escapeHtml(label)}">${escapeHtml(uiText(label))}</span><div class="placement-number"><input aria-label="${escapeHtml(uiText(label))}" data-ui-aria-label="${escapeHtml(label)}" data-prop="${name}" type="number" min="${min}" max="${max}" step="${step}" value="${format(value)}" /><span data-ui-text="${escapeHtml(unit)}" style="white-space:nowrap;flex-shrink:0">${escapeHtml(uiText(unit))}</span></div>${slider ? `<input aria-label="${escapeHtml(uiText(label + "滑块"))}" data-ui-aria-label="${escapeHtml(label + "滑块")}" data-prop="${name}" type="range" min="${min}" max="${max}" step="${step}" value="${format(value)}" />` : ""}</label>`;
     }
 
     function renderControls() {
         const layer = selected();
         if (!layer) {
-            query("[data-controls]").innerHTML = '<div class="placement-unselected">点击画布中的图案或左侧图层，开始调整位置。</div>';
+            query("[data-controls]").innerHTML = "<div class=\"placement-unselected\"><span data-ui-text=\"点击画布中的图案或左侧图层，开始调整位置。\">点击画布中的图案或左侧图层，开始调整位置。</span></div>";
             return;
         }
         query("[data-controls]").innerHTML =
-            `<p class="section-title">${escapeHtml(layer.name)}</p><div class="placement-coordinate">${numberControl("x", "横向 X", layer.x, -state.base.width, state.base.width * 2)}${numberControl("y", "纵向 Y", layer.y, -state.base.height, state.base.height * 2)}</div>${numberControl("width", "图案宽度", layer.width, 1, state.base.width * 2, "像素", 1, true)}${numberControl("rotation", "旋转角度", layer.rotation, -180, 180, "°", 1, true)}${numberControl("opacity", "不透明度", layer.opacity * 100, 0, 100, "%", 1, true)}<label class="field"><span>混合模式</span><select aria-label="混合模式" data-blend><option value="source-over" ${layer.blend === "source-over" ? "selected" : ""}>正常</option><option value="multiply" ${layer.blend === "multiply" ? "selected" : ""}>正片叠底</option></select></label>`;
+            `<p class="section-title">${escapeHtml(layer.name)}</p><div class="placement-coordinate">${numberControl("x", "横向 X", layer.x, -state.base.width, state.base.width * 2)}${numberControl("y", "纵向 Y", layer.y, -state.base.height, state.base.height * 2)}</div>${numberControl("width", "图案宽度", layer.width, 1, state.base.width * 2, "像素", 1, true)}${numberControl("rotation", "旋转角度", layer.rotation, -180, 180, "°", 1, true)}${numberControl("opacity", "不透明度", layer.opacity * 100, 0, 100, "%", 1, true)}<label class="field"><span data-ui-text="混合模式">混合模式</span><select aria-label="混合模式" data-ui-aria-label="混合模式" data-blend><option value="source-over" data-ui-text="正常" ${layer.blend === "source-over" ? "selected" : ""}>正常</option><option value="multiply" data-ui-text="正片叠底" ${layer.blend === "multiply" ? "selected" : ""}>正片叠底</option></select></label>`;
     }
 
     function syncControls() {
@@ -310,15 +315,16 @@ export async function mountPlacement(root, services) {
             .reverse()
             .map(
                 (layer) =>
-                    `<li class="placement-layer ${layer.id === selectedId ? "selected" : ""} ${layer.visible ? "" : "hidden-layer"}"><img src="${layer.src}" alt="" /><button class="placement-layer-select" data-select="${layer.id}" aria-pressed="${layer.id === selectedId}">${escapeHtml(layer.name)}</button><button class="placement-eye" data-toggle="${layer.id}" aria-label="${layer.visible ? "隐藏" : "显示"}${escapeHtml(layer.name)}" title="${layer.visible ? "隐藏" : "显示"}图层">${layer.visible ? "显" : "隐"}</button></li>`,
+                    `<li class="placement-layer ${layer.id === selectedId ? "selected" : ""} ${layer.visible ? "" : "hidden-layer"}"><img src="${layer.src}" alt="" /><button class="placement-layer-select" data-select="${layer.id}" aria-pressed="${layer.id === selectedId}">${escapeHtml(layer.name)}</button><button class="placement-eye" data-toggle="${layer.id}" data-ui-label-action="${layer.visible ? "隐藏" : "显示"}" data-ui-label-name="${escapeHtml(layer.name)}" aria-label="${uiText(layer.visible ? "隐藏" : "显示")} ${escapeHtml(layer.name)}" data-ui-title="${layer.visible ? "隐藏图层" : "显示图层"}" title="${uiText(layer.visible ? "隐藏图层" : "显示图层")}" data-ui-text="${layer.visible ? "显" : "隐"}">${uiText(layer.visible ? "显" : "隐")}</button></li>`,
             )
             .join("");
         query("[data-layer-count]").textContent = `${state.layers.length} / 30`;
         query("[data-base-thumb]").src = state.base.src;
         query(".placement-base-name").textContent = state.base.name;
-        query("[data-dimensions]").textContent = `${state.base.width} × ${state.base.height} 像素 · 原尺寸导出`;
+        setWorkbenchText(query("[data-dimensions]"), () => uiText("{value1} × {value2} 像素 · 原尺寸导出", { value1: state.base.width, value2: state.base.height }));
         renderControls();
         updateToolbar();
+        refreshUi();
         draw();
     }
 
@@ -427,7 +433,7 @@ export async function mountPlacement(root, services) {
             return;
         }
         if (name === "open") {
-            root.querySelector("[aria-label='本地工程']").focus();
+            root.querySelector(".workbench-project-bar select").focus();
             notify("使用顶部工程列表切换；当前更改会先保存。");
             return;
         }

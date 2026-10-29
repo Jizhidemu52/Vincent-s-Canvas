@@ -1,3 +1,4 @@
+import { i18nHarness } from "./helpers/i18n-harness";
 import { afterEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -80,7 +81,7 @@ function canvasHarness(mode: "select" | "hand" = "select", theme: "light" | "dar
     };
     const module = { exports: {} as { WirelessCanvas: (next: object) => ReactElement<any> } };
     new Function("require", "module", "exports", "window", "document", "Element", "requestAnimationFrame", "cancelAnimationFrame", code)(
-        (name: string) => name.endsWith(".css") ? {} : Object.hasOwn(dependencies, name) ? dependencies[name] : requireModule(name),
+        (id: string) => id === "@/lib/i18n" ? i18nHarness : ((name: string) => name.endsWith(".css") ? {} : Object.hasOwn(dependencies, name) ? dependencies[name] : requireModule(name))(id),
         module, module.exports, canvasWindow, canvasDocument, Surface,
         (callback: FrameRequestCallback) => { const id = ++timerId; frames.set(id, callback); return id; },
         (id: number) => frames.delete(id),

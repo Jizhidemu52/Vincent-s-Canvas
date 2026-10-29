@@ -1,3 +1,4 @@
+import { uiText, useUiLocale } from "@/lib/i18n";
 import type { ReactNode } from "react";
 import { useEffect } from "react";
 import { Navigate, useLocation } from "react-router-dom";
@@ -11,11 +12,13 @@ import { deploymentFeatures } from "@/lib/deployment-features";
 import { isWorkspaceRole } from "../../../../shared/workspace-access";
 
 export function AuthGate({ children, admin = false, passwordChange = false }: { children: ReactNode; admin?: boolean; passwordChange?: boolean }) {
+    useUiLocale();
     if (shouldBypassStandaloneAuthGate(standaloneEdition, admin)) return <>{children}</>;
     return <AuthenticatedGate admin={admin} passwordChange={passwordChange}>{children}</AuthenticatedGate>;
 }
 
 function AuthenticatedGate({ children, admin, passwordChange }: { children: ReactNode; admin: boolean; passwordChange: boolean }) {
+    useUiLocale();
     const location = useLocation();
     const user = useUserStore((state) => state.user);
     const status = useUserStore((state) => state.status);
@@ -24,7 +27,7 @@ function AuthenticatedGate({ children, admin, passwordChange }: { children: Reac
     useEffect(() => { if (status === "idle") void hydrateSession(); }, [hydrateSession, status]);
 
     if (status === "idle" || status === "loading") {
-        return <div className="flex h-full items-center justify-center bg-background text-foreground" role="status" aria-label="正在验证账号"><div className="size-6 animate-spin rounded-full border-2 border-border border-t-primary" /></div>;
+        return <div className="flex h-full items-center justify-center bg-background text-foreground" role="status" aria-label={uiText("正在验证账号")}><div className="size-6 animate-spin rounded-full border-2 border-border border-t-primary" /></div>;
     }
     if (!user || status !== "authenticated") {
         if (admin) return <Navigate to="/admin/login" replace state={{ from: location.pathname + location.search }} />;

@@ -25,6 +25,41 @@ export type CreativeChatPlan =
     | { kind: "discussion"; content: string }
     | { kind: "image"; content: string; action: "generate" | "edit"; prompt: string; references: ReferenceImage[]; lineage: CreativeImageLineage };
 
+/** These are explicit composer choices, not the automatically remembered candidate. */
+export type CreativeChatImageSelection = { explicitTargetImageId?: string; referenceImageIds?: string[] };
+
+export function withCreativeChatImageSelection(current: CreativeChatMessage, catalog: CreativeImageCatalogEntry[], selection: CreativeChatImageSelection): CreativeChatMessage {
+    // Choosing a picture alone never authorizes a paid image operation.
+    if (!current.content.trim()) return current;
+    const selected = (id: string) => {
+        const image = catalog.find((item) => item.id === id);
+        if (!image || image.unavailableReason) throw new Error("选中的图片原件不可用，请重新选择或取消选择");
+        return image.label;
+    };
+    const target = selection.explicitTargetImageId ? selected(selection.explicitTargetImageId) : "";
+    const references = [...new Set(selection.referenceImageIds || [])].filter((id) => id !== selection.explicitTargetImageId).map(selected);
+    if (!target && !references.length) return current;
+    const choices = [
+        target ? `本轮在界面中明确选择 ${target} 作为编辑目标；如果执行图片任务，必须以这张图为底图，不能换成其他版本或独立新生成。` : "",
+        references.length ? `本轮选择的参考图：${references.join("、")}；执行图片任务时必须实际使用这些参考图${target ? "作为辅助，不替换编辑目标" : ""}。` : "",
+        "是否执行仍由本轮文字要求决定；只讨论、分析或写提示词时请正常文字回答。",
+    ].filter(Boolean).join("\n");
+    return { ...current, content: `${current.content}\n\n[本轮界面图片选择]\n${choices}` };
+}
+
+/** Fail before task submission; never silently rewrite a model's image parameters. */
+export function assertCreativeChatImageSelection(plan: CreativeChatPlan, selection: CreativeChatImageSelection) {
+    if (plan.kind === "discussion") return;
+    const target = selection.explicitTargetImageId;
+    if (target && (plan.action !== "edit" || plan.lineage.parentImageId !== target || plan.references[0]?.id !== target)) {
+        throw new Error("模型未使用你选中的编辑目标，图片任务尚未提交。请明确修改要求后重试，或取消选图恢复自动判断。");
+    }
+    const referenceIds = new Set(plan.references.map((image) => image.id));
+    if ((selection.referenceImageIds || []).some((id) => !referenceIds.has(id))) {
+        throw new Error("模型未使用全部已选参考图，图片任务尚未提交。请明确参考用途后重试，或移除不需要的参考图。");
+    }
+}
+
 const MAX_CREATIVE_PROMPT_LENGTH = 20_000;
 const MAX_CATALOG_CONTEXT_ENTRIES = 40;
 const MAX_WORKING_IMAGE_CONTEXT_CHARACTERS = 28_000;
@@ -67,7 +102,7 @@ export function buildCreativeImageCatalog(history: CreativeChatMessage[], curren
             const generated = message.role === "assistant" ? message.generatedImages?.[index] : undefined;
             const entry: CreativeImageCatalogEntry = {
                 id, name: item.name, dataUrl, type: dataUrl.match(/^data:(image\/[^;]+);/)?.[1] || item.mimeType || "image/png",
-                messageId: message.id || `image:${id}`, label: `图 ${catalog.length + 1}`, kind,
+                messageId: message.id || `image:${id}`, label: `图${catalog.length + 1}`, kind,
                 ...(item.storageKey ? { storageKey: item.storageKey } : {}),
                 ...(generated?.prompt ? { prompt: generated.prompt } : {}),
                 ...(generated?.modelId ? { modelId: generated.modelId } : {}),

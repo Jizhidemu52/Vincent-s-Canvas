@@ -1,3 +1,4 @@
+import { useUiText, uiText } from "@/lib/i18n";
 import { useRef, useState } from "react";
 import { App } from "antd";
 import { ChevronLeft, ChevronRight, ImagePlus, LoaderCircle, X } from "lucide-react";
@@ -32,6 +33,7 @@ type Props = {
 
 /** Compact card tray: uploads are stored by the existing image service, never ephemeral file URLs. */
 export function CanvasConfigImageReferences(props: Props) {
+    const t = useUiText();
     const { node, references, disabled, labels, onChange } = props;
     const { message } = App.useApp();
     const theme = canvasThemes[useThemeStore(state => state.theme)];
@@ -70,19 +72,19 @@ export function CanvasConfigImageReferences(props: Props) {
         }
     };
     const controlStyle = { background: theme.toolbar.panel, color: theme.node.text, borderColor: theme.node.stroke };
-    return <section aria-label="参考图" className="min-w-0 cursor-default" onMouseDown={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>
+    return <section aria-label={t("参考图")} className="min-w-0 cursor-default" onMouseDown={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>
         <button type="button" disabled={busy} onClick={() => inputRef.current?.click()} className="inline-flex h-7 items-center gap-1.5 rounded-md px-1 text-xs disabled:opacity-50" style={{ color: theme.node.text }}>
-            {uploading ? <LoaderCircle className="size-3.5 animate-spin" /> : <ImagePlus className="size-3.5" />}{uploading ? "正在添加参考图" : "添加参考图"}
+            {uploading ? <LoaderCircle className="size-3.5 animate-spin" /> : <ImagePlus className="size-3.5" />}{uploading ? t("正在添加参考图") : t("添加参考图")}
         </button>
-        <input ref={inputRef} aria-label="上传参考图" className="hidden" type="file" accept="image/*" multiple disabled={busy} onChange={event => { const files = Array.from(event.target.files || []); event.target.value = ""; void addFiles(files); }} />
+        <input ref={inputRef} aria-label={t("上传参考图")} className="hidden" type="file" accept="image/*" multiple disabled={busy} onChange={event => { const files = Array.from(event.target.files || []); event.target.value = ""; void addFiles(files); }} />
         {references.length ? <div className="thin-scrollbar mt-1 flex gap-2 overflow-x-auto pb-1">
             {references.map((item, index) => <div key={item.referenceKey} className="group relative h-[76px] w-20 shrink-0 overflow-hidden rounded-md border" style={{ borderColor: theme.node.stroke }}>
                 <CanvasPersistedMediaPreview kind="image" url={item.dataUrl} storageKey={item.storageKey} alt={`${labels?.[item.referenceKey] || `参考图${index + 1}`}：${item.name}`} className="h-full w-full object-cover" />
                 <span className="absolute left-0 top-0 rounded-br px-1 text-[10px]" style={controlStyle}>{labels?.[item.referenceKey] || index + 1}</span>
-                <button type="button" disabled={busy} aria-label={`移除${labels?.[item.referenceKey] || `参考图${index + 1}`}`} className="absolute right-0 top-0 rounded-bl p-0.5" style={controlStyle} onClick={() => save(references.filter(reference => reference.referenceKey !== item.referenceKey))}><X className="size-3" /></button>
+                <button type="button" disabled={busy} aria-label={t("移除{value1}", { value1: labels?.[item.referenceKey] || uiText("参考图{value1}", { value1: index + 1 }) })} className="absolute right-0 top-0 rounded-bl p-0.5" style={controlStyle} onClick={() => save(references.filter(reference => reference.referenceKey !== item.referenceKey))}><X className="size-3" /></button>
                 {references.length > 1 ? <div className="absolute bottom-0 right-0 flex rounded-tl" style={controlStyle}>
-                    <button type="button" disabled={busy || index === 0} aria-label={`${labels?.[item.referenceKey] || `参考图${index + 1}`}前移`} className="p-0.5 disabled:opacity-30" onClick={() => save(moveImageReference(references, index, index - 1))}><ChevronLeft className="size-3" /></button>
-                    <button type="button" disabled={busy || index === references.length - 1} aria-label={`${labels?.[item.referenceKey] || `参考图${index + 1}`}后移`} className="p-0.5 disabled:opacity-30" onClick={() => save(moveImageReference(references, index, index + 1))}><ChevronRight className="size-3" /></button>
+                    <button type="button" disabled={busy || index === 0} aria-label={t("{value1}前移", { value1: labels?.[item.referenceKey] || uiText("参考图{value1}", { value1: index + 1 }) })} className="p-0.5 disabled:opacity-30" onClick={() => save(moveImageReference(references, index, index - 1))}><ChevronLeft className="size-3" /></button>
+                    <button type="button" disabled={busy || index === references.length - 1} aria-label={t("{value1}后移", { value1: labels?.[item.referenceKey] || uiText("参考图{value1}", { value1: index + 1 }) })} className="p-0.5 disabled:opacity-30" onClick={() => save(moveImageReference(references, index, index + 1))}><ChevronRight className="size-3" /></button>
                 </div> : null}
             </div>)}
         </div> : null}

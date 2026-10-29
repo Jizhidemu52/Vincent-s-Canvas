@@ -1,3 +1,4 @@
+import { i18nHarness } from "./helpers/i18n-harness";
 import { afterEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -29,6 +30,7 @@ function componentHarness(path: string, exportName: string, dependencies: Record
     const equal = (first: unknown[], second?: unknown[]) => !!second && first.length === second.length && first.every((value, index) => Object.is(value, second[index]));
     const form = { resetFields() {}, setFieldsValue() {} };
     const mocks: Record<string, unknown> = {
+        "@/lib/i18n": i18nHarness,
         react: { ...React, useState(initial: unknown) { const index = cursor++; if (!(index in values)) values[index] = typeof initial === "function" ? initial() : initial; return [values[index], (next: any) => { values[index] = typeof next === "function" ? next(values[index]) : next; }]; }, useRef(initial: unknown) { const index = cursor++; return values[index] ||= { current: initial }; }, useCallback(callback: unknown, deps: unknown[]) { const index = cursor++; const previous = values[index] as any; if (!previous || !equal(deps, previous.deps)) values[index] = { callback, deps }; return (values[index] as any).callback; }, useEffect(effect: () => (() => void) | undefined, deps: unknown[]) { const index = cursor++; if (!equal(deps, effects[index]?.dependencies)) { queue.push(() => { effects[index]?.cleanup?.(); effects[index] = { dependencies: deps, cleanup: effect() }; }); } } },
         antd: new Proxy({ App: { useApp: () => ({ message: { success() {}, error() {} }, modal: { confirm() {} } }) }, Form: Object.assign("Form", { useForm: () => [form], Item: "FormItem" }), Input: { TextArea: "TextArea" }, DatePicker: { RangePicker: "RangePicker" } }, { get(target, key) { return key in target ? target[key as keyof typeof target] : String(key); } }),
         ...dependencies,

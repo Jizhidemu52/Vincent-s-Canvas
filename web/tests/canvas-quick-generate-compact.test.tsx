@@ -1,3 +1,4 @@
+import { i18nHarness } from "./helpers/i18n-harness";
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -135,7 +136,7 @@ function controls(patch: Partial<Props> = {}, toolEnabled = true) {
         },
     };
     const module = { exports: {} as { CanvasQuickGeneratePanel: (props: Props) => ReactElement } };
-    new Function("require", "module", "exports", code)((name: string) => Object.hasOwn(dependencies, name) ? dependencies[name] : requireModule(name), module, module.exports);
+    new Function("require", "module", "exports", code)((id: string) => id === "@/lib/i18n" ? i18nHarness : ((name: string) => Object.hasOwn(dependencies, name) ? dependencies[name] : requireModule(name))(id), module, module.exports);
     return (next: Partial<Props> = {}) => {
         cursor = 0; effects.length = 0;
         const tree = elements(module.exports.CanvasQuickGeneratePanel({ ...initialProps, ...patch, ...next }));

@@ -1,3 +1,4 @@
+import { useUiText } from "@/lib/i18n";
 import { useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type DragEventHandler, type Ref } from "react";
 import { ArrowLeft, ArrowRight, BookOpen, ImagePlus, LayoutTemplate, Play, X } from "lucide-react";
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -24,11 +25,12 @@ const steps = [
     { title: "添加一张参考图", text: "将图片拖到画布，或点击高亮的上传按钮。原图会保留，之后的修改另存为新结果。", selectors: ['[data-usage-control="canvas-tool.upload"]'] },
     { title: "写清要求，再点击生成", text: "先选中参考图，在创建区说明要改什么、哪些细节不能变；确认模型和要求后再点生成。引导本身不会调用模型。", selectors: ['[data-testid="canvas-quick-generate-panel"]', '[data-usage-control="canvas-tool.more"]'] },
     { title: "连线与多图执行", text: "从素材节点右侧连接点拖到生成配置左侧。逐图执行会为每张任务图分别生成；合并参考让多图共同参与一次生成。在配置提示词输入 @ 选择已连接素材，并说明各图用途。", selectors: ['[data-canvas-connection-handle="right"]', '.node-element', '[data-usage-control="canvas-tool.more"]'] },
-    { title: "对比原图和结果", text: "生成后选择原图与结果，在高亮的设计工具中打开“改款前后对比”，查看滑块、并排或叠加效果；满意后再下载。没有结果时可以先打开示例学习结构。", selectors: ['[data-usage-control="canvas-tool.design-tools"]', '[aria-label="工作台与设计工具"]'] },
+    { title: "对比原图和结果", text: "生成后选择原图与结果，在高亮的设计工具中打开“改款前后对比”，查看滑块、并排或叠加效果；满意后再下载。没有结果时可以先打开示例学习结构。", selectors: ['[data-usage-control="canvas-tool.design-tools"]', '.cw-toolbar-secondary'] },
 ] as const;
 
 /** Non-modal guidance: real controls remain clickable and the canvas stays usable. */
 export function CanvasOnboarding({ ref, empty, onImportImage, onUseTemplate, onOpenExample, onOpenCreation, onCloseCreation, onDrop }: Props) {
+    const t = useUiText();
     const theme = canvasThemes[useThemeStore(state => state.theme)];
     const ownerId = useUserStore(state => state.user?.id);
     const status = useUserStore(state => state.status);
@@ -194,18 +196,18 @@ export function CanvasOnboarding({ ref, empty, onImportImage, onUseTemplate, onO
             <div className={`pointer-events-auto w-full max-w-[620px] rounded-xl border ${compactEntries ? "p-4" : "p-6"}`} style={{ background: theme.node.panel, borderColor: theme.node.stroke, color: theme.node.text }}
                 data-testid="canvas-empty-start" onMouseDown={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}
                 onDragOver={event => { if (onDrop) event.preventDefault(); }} onDrop={onDrop}>
-                <h2 className="text-xl font-semibold">从一张参考图开始</h2>
-                <p className="mt-2 text-sm" style={{ color: theme.node.muted }}>上传素材、套用流程，或打开不会调用模型的示例。</p>
+                <h2 className="text-xl font-semibold">{t("从一张参考图开始")}</h2>
+                <p className="mt-2 text-sm" style={{ color: theme.node.muted }}>{t("上传素材、套用流程，或打开不会调用模型的示例。")}</p>
                 <div className={`mt-5 grid gap-3 ${compactEntries ? "grid-cols-1" : "grid-cols-3"}`}>
-                    {[{ title: "拖入图片", detail: "或点击选择本地图片", Icon: ImagePlus, action: onImportImage, disabled: false }, { title: "用模板开始", detail: "复用可编辑的款式流程", Icon: LayoutTemplate, action: onUseTemplate, disabled: !localToolsEnabled }, { title: "打开示例画布", detail: "学习参考图与配置连线", Icon: Play, action: onOpenExample, disabled: false }].map(item => <button key={item.title} type="button" className={`${compactEntries ? "grid min-h-16 grid-cols-[20px_1fr] gap-x-3 gap-y-1 px-3 py-2" : "flex min-h-28 flex-col gap-2 p-4"} items-start rounded-lg border text-left hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-40`} style={actionStyle} disabled={item.disabled} onClick={item.action}>
-                        <item.Icon className="size-5" aria-hidden /><span className="text-sm font-medium">{item.title}</span><span className={`text-xs ${compactEntries ? "col-start-2" : ""}`} style={{ color: theme.node.muted }}>{item.detail}</span>
+                    {[{ title: t("拖入图片"), detail: "或点击选择本地图片", Icon: ImagePlus, action: onImportImage, disabled: false }, { title: t("用模板开始"), detail: "复用可编辑的款式流程", Icon: LayoutTemplate, action: onUseTemplate, disabled: !localToolsEnabled }, { title: t("打开示例画布"), detail: "学习参考图与配置连线", Icon: Play, action: onOpenExample, disabled: false }].map(item => <button key={item.title} type="button" className={`${compactEntries ? "grid min-h-16 grid-cols-[20px_1fr] gap-x-3 gap-y-1 px-3 py-2" : "flex min-h-28 flex-col gap-2 p-4"} items-start rounded-lg border text-left hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-40`} style={actionStyle} disabled={item.disabled} onClick={item.action}>
+                        <item.Icon className="size-5" aria-hidden /><span className="text-sm font-medium">{item.title}</span><span className={`text-xs ${compactEntries ? "col-start-2" : ""}`} style={{ color: theme.node.muted }}>{t(item.detail)}</span>
                     </button>)}
                 </div>
-                {!localToolsEnabled ? <p className="mt-2 text-xs" style={{ color: theme.node.muted }}>当前工作区未启用服装模板工具。</p> : null}
+                {!localToolsEnabled ? <p className="mt-2 text-xs" style={{ color: theme.node.muted }}>{t("当前工作区未启用服装模板工具。")}</p> : null}
             </div>
         </div> : null}
         {!open && availableArea.width > 0 ? <div className="absolute bottom-[72px] z-40 max-w-[280px]" style={{ left: availableArea.left + 12, maxWidth: Math.max(0, availableArea.width - 24), color: theme.node.muted }}>
-            <button type="button" className="inline-flex min-h-9 items-center gap-2 rounded-md px-2 text-xs hover:opacity-70" style={{ background: theme.node.panel }} onClick={start}><BookOpen className="size-4" aria-hidden />新手引导</button>
+            <button type="button" className="inline-flex min-h-9 items-center gap-2 rounded-md px-2 text-xs hover:opacity-70" style={{ background: theme.node.panel }} onClick={start}><BookOpen className="size-4" aria-hidden />{t("新手引导")}</button>
             {storageError ? <p role="status" className="mt-1 text-xs">{storageError}</p> : null}
         </div> : null}
         {open ? <>
@@ -214,16 +216,16 @@ export function CanvasOnboarding({ ref, empty, onImportImage, onUseTemplate, onO
                 className="fixed z-[220] w-[360px] max-w-[calc(100vw-24px)] overflow-y-auto rounded-xl border p-5 shadow-lg outline-none" style={{ ...position, maxHeight: cardMaxHeight ?? "calc(100dvh - 24px)", background: theme.node.panel, color: theme.node.text, borderColor: theme.node.stroke }}
                 onMouseDown={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()} onWheel={event => event.stopPropagation()}
                 onKeyDown={event => { event.stopPropagation(); if (event.key === "Escape") { event.preventDefault(); dismiss("later"); } }}>
-                <header className="flex items-center justify-between gap-3"><span className="text-xs" style={{ color: theme.node.muted }}>快速上手 · {step + 1} / 4</span><button type="button" aria-label="关闭引导，以后再看" className="cw-icon" onClick={() => dismiss("later")}><X className="size-4" /></button></header>
-                <h2 id="canvas-onboarding-title" className="mt-2 text-lg font-semibold">{steps[step].title}</h2>
-                <p className="mt-3 text-sm leading-6">{steps[step].text}</p>
-                {step === 2 && empty ? <p className="mt-2 text-xs leading-5" style={{ color: theme.node.muted }}>当前还没有节点。先从高亮的“更多工具”添加生成配置，或关闭引导后打开示例画布。</p> : null}
-                {!target ? <p className="mt-2 text-xs" style={{ color: theme.node.muted }}>对应工具尚未显示；可以先关闭引导添加素材，再重新查看。</p> : null}
+                <header className="flex items-center justify-between gap-3"><span className="text-xs" style={{ color: theme.node.muted }}>{t("快速上手 ·")}{step + 1} / 4</span><button type="button" aria-label={t("关闭引导，以后再看")} className="cw-icon" onClick={() => dismiss("later")}><X className="size-4" /></button></header>
+                <h2 id="canvas-onboarding-title" className="mt-2 text-lg font-semibold">{t(steps[step].title)}</h2>
+                <p className="mt-3 text-sm leading-6">{t(steps[step].text)}</p>
+                {step === 2 && empty ? <p className="mt-2 text-xs leading-5" style={{ color: theme.node.muted }}>{t("当前还没有节点。先从高亮的“更多工具”添加生成配置，或关闭引导后打开示例画布。")}</p> : null}
+                {!target ? <p className="mt-2 text-xs" style={{ color: theme.node.muted }}>{t("对应工具尚未显示；可以先关闭引导添加素材，再重新查看。")}</p> : null}
                 <div className="mt-4 flex items-center justify-between gap-2">
-                    <button type="button" className="rounded px-2 py-2 text-xs hover:opacity-70" onClick={() => dismiss("skipped")}>跳过引导</button>
-                    <div className="flex gap-2">{step > 0 ? <button type="button" aria-label="上一步" className="cw-icon" onClick={() => setStep(value => value - 1)}><ArrowLeft className="size-4" /></button> : null}<button type="button" className="inline-flex min-h-9 items-center gap-2 rounded-md px-3 text-sm" style={{ background: "var(--cw-active)", color: "var(--cw-inverse)" }} onClick={() => step === 3 ? dismiss("completed") : setStep(value => value + 1)}>{step === 3 ? "完成引导" : "下一步"}<ArrowRight className="size-4" aria-hidden /></button></div>
+                    <button type="button" className="rounded px-2 py-2 text-xs hover:opacity-70" onClick={() => dismiss("skipped")}>{t("跳过引导")}</button>
+                    <div className="flex gap-2">{step > 0 ? <button type="button" aria-label={t("上一步")} className="cw-icon" onClick={() => setStep(value => value - 1)}><ArrowLeft className="size-4" /></button> : null}<button type="button" className="inline-flex min-h-9 items-center gap-2 rounded-md px-3 text-sm" style={{ background: "var(--cw-active)", color: "var(--cw-inverse)" }} onClick={() => step === 3 ? dismiss("completed") : setStep(value => value + 1)}>{step === 3 ? t("完成引导") : t("下一步")}<ArrowRight className="size-4" aria-hidden /></button></div>
                 </div>
-                <button type="button" className="mt-2 w-full py-1 text-center text-xs hover:underline" style={{ color: theme.node.muted }} onClick={() => dismiss("later")}>以后再看 · 随时从“新手引导”打开</button>
+                <button type="button" className="mt-2 w-full py-1 text-center text-xs hover:underline" style={{ color: theme.node.muted }} onClick={() => dismiss("later")}>{t("以后再看 · 随时从“新手引导”打开")}</button>
             </div>
         </> : null}
     </div>;

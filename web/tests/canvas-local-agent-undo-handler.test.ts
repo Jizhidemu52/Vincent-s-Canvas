@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { uiText } from "@/lib/i18n";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
 import type { CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
@@ -19,6 +20,7 @@ function panel(onUndoOps: () => CanvasAgentSnapshot | null | Promise<CanvasAgent
     let undoing = false;
     const messages: unknown[] = [], states: unknown[] = [], posts: unknown[] = [], errors: string[] = [];
     const scope = {
+        t: uiText,
         onUndoOps, undoingRef: { current: false }, undoLifetimeRef: { current: { active: true } }, setUndoing: (value: boolean) => { undoing = value; },
         canvasAgentUndoMessage, setAgentState: (state: unknown) => states.push(state), addMessage: (message: unknown) => messages.push(message),
         connected: true, endpoint: "http://isolated.invalid", token: "fixture", clientIdRef: { current: "client" },

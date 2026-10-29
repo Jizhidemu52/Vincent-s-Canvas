@@ -1,3 +1,4 @@
+import { useUiText } from "@/lib/i18n";
 import { canvasActionLabel, canvasActionShortcut, type CanvasActionId } from "@/lib/canvas/canvas-actions";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Copy, Download, FolderPlus, PencilLine, Plus, Trash2, Upload } from "lucide-react";
@@ -29,6 +30,7 @@ export function canvasContextMenuPosition(x: number, y: number, width: number, h
 }
 
 export function CanvasNodeContextMenu({ menu, targetCount = 1, imageCount = 0, onDownloadImages, onClose, onDuplicate, onDelete, onUpload, onGenerate, onRename, onGroup }: CanvasContextMenuProps) {
+    const t = useUiText();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const canGenerate = useModuleEnabled("canvas-image");
     const menuRef = useRef<HTMLDivElement>(null);
@@ -94,7 +96,7 @@ export function CanvasNodeContextMenu({ menu, targetCount = 1, imageCount = 0, o
 
     return (
         <div
-            ref={menuRef} role="menu" aria-label={menu.type === "canvas" ? "画布操作" : "节点操作"} data-canvas-no-zoom
+            ref={menuRef} role="menu" aria-label={menu.type === "canvas" ? t("画布操作") : t("节点操作")} data-canvas-no-zoom
             className="fixed z-[80] flex flex-col gap-1 overflow-y-auto rounded-[10px] border p-1"
             style={{ ...position, background: theme.node.panel, borderColor: theme.node.stroke, color: theme.node.text, boxShadow: "0 4px 16px rgb(0 0 0 / .10)", fontFamily: "'Geist Variable', 'PingFang SC', 'Microsoft YaHei', sans-serif" }}
             onPointerDown={(event) => event.stopPropagation()}
@@ -113,6 +115,7 @@ export function CanvasNodeContextMenu({ menu, targetCount = 1, imageCount = 0, o
 }
 
 export function MenuButton({ icon, action, targetCount = 1, onClick }: { icon: ReactNode; action: CanvasActionId; targetCount?: number; onClick: () => void }) {
+    const t = useUiText();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
 
     return (

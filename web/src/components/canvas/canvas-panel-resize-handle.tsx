@@ -1,9 +1,11 @@
+import { useUiText, uiText } from "@/lib/i18n";
 import { useEffect, useRef, useState, type PointerEvent } from "react";
 import { canvasPanelWidths, clampCanvasPanelWidth, type CanvasPanelKind } from "@/lib/canvas/canvas-panel-width";
 import { keyboardCanvasPanelWidth } from "@/lib/canvas/canvas-panel-resize-keyboard";
 import { useCanvasPanelStore } from "@/stores/canvas/use-canvas-panel-store";
 
 export function CanvasPanelResizeHandle({ kind }: { kind: CanvasPanelKind }) {
+    const t = useUiText();
     const storedWidth = useCanvasPanelStore((state) => kind === "create" ? state.createWidth : state.chatWidth);
     const width = clampCanvasPanelWidth(kind, storedWidth);
     const setWidth = useCanvasPanelStore((state) => state.setWidth);
@@ -30,10 +32,10 @@ export function CanvasPanelResizeHandle({ kind }: { kind: CanvasPanelKind }) {
     };
 
     return <button type="button" role="separator" aria-orientation="vertical" tabIndex={0}
-        aria-label={`调整${kind === "create" ? "创建" : "对话"}面板宽度`}
+        aria-label={t("调整{value1}面板宽度", { value1: kind === "create" ? uiText("创建") : uiText("对话") })}
         aria-valuemin={limits.min} aria-valuemax={limits.max} aria-valuenow={preview ?? width}
-        aria-valuetext={`${preview ?? width} 像素`}
-        title="拖动调整宽度，双击恢复默认；方向键微调，Home 恢复默认"
+        aria-valuetext={t("{value1} 像素", { value1: preview ?? width })}
+        title={t("拖动调整宽度，双击恢复默认；方向键微调，Home 恢复默认")}
         className={`cw-panel-resize-handle ${preview !== null ? "is-resizing" : ""}`}
         data-canvas-no-zoom
         onPointerDown={(event) => {

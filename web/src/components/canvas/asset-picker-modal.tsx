@@ -1,3 +1,4 @@
+import { useUiText } from "@/lib/i18n";
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Button, Empty, Input, Modal, Pagination, Spin, Tag } from "antd";
 import { Search } from "lucide-react";
@@ -26,9 +27,10 @@ type Props = {
 };
 
 export function AssetPickerModal({ open, onInsert, onInsertMany, onClose, selectionMode = "single" }: Props) {
+    const t = useUiText();
     const ownerId = useUserStore((state) => state.user?.id);
     return (
-        <Modal title="选择素材" open={open} onCancel={onClose} footer={null} width={860} destroyOnHidden styles={{ body: { padding: "0 24px 24px", minHeight: 480 } }}>
+        <Modal title={t("选择素材")} open={open} onCancel={onClose} footer={null} width={860} destroyOnHidden styles={{ body: { padding: "0 24px 24px", minHeight: 480 } }}>
             <MyAssetsTab key={ownerId || "signed-out"} open={open} onInsert={onInsert} onInsertMany={onInsertMany} selectionMode={selectionMode} />
         </Modal>
     );
@@ -44,6 +46,7 @@ const kindOptions = [
 ];
 
 function PickerCard({ asset, selected, onClick }: { asset: Asset; selected?: boolean; onClick: () => void }) {
+    const t = useUiText();
     const fallback = asset.coverUrl || (asset.kind === "image" ? asset.data.dataUrl : asset.kind === "video" ? asset.data.url : "");
     const needsResolution = (asset.kind === "image" || asset.kind === "video") && needsCanvasAssetPreviewResolution(asset);
     const [cover, setCover] = useState(() => (needsResolution ? "" : fallback));
@@ -79,15 +82,16 @@ function PickerCard({ asset, selected, onClick }: { asset: Asset; selected?: boo
             <div className="p-2.5">
                 <div className="flex items-center justify-between gap-2">
                     <span className="line-clamp-1 text-xs font-medium text-stone-800 dark:text-stone-200">{asset.title}</span>
-                    <Tag className="m-0 shrink-0 text-[10px]">{asset.kind === "image" ? "图片" : asset.kind === "video" ? "视频" : "文本"}</Tag>
+                    <Tag className="m-0 shrink-0 text-[10px]">{asset.kind === "image" ? t("图片") : asset.kind === "video" ? t("视频") : t("文本")}</Tag>
                 </div>
             </div>
-            <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-stone-950/0 text-sm font-medium text-white opacity-0 transition group-hover:bg-stone-950/55 group-hover:opacity-100">插入</div>
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-stone-950/0 text-sm font-medium text-white opacity-0 transition group-hover:bg-stone-950/55 group-hover:opacity-100">{t("插入")}</div>
         </button>
     );
 }
 
 function MyAssetsTab({ open, onInsert, onInsertMany, selectionMode }: { open: boolean; onInsert?: (payload: InsertAssetPayload) => void; onInsertMany?: (payloads: InsertAssetPayload[]) => void; selectionMode: "single" | "multiple-images" }) {
+    const t = useUiText();
     const localAssets = useAssetStore((state) => state.assets);
     const user = useUserStore((state) => state.user);
     const ownerId = user?.id;
@@ -211,7 +215,7 @@ function MyAssetsTab({ open, onInsert, onInsertMany, selectionMode }: { open: bo
                     className="w-56"
                     size="small"
                     prefix={<Search className="size-3.5 text-stone-400" />}
-                    placeholder="搜索素材"
+                    placeholder={t("搜索素材")}
                     value={keyword}
                     allowClear
                     onChange={(e) => {
@@ -230,15 +234,15 @@ function MyAssetsTab({ open, onInsert, onInsertMany, selectionMode }: { open: bo
                                 setKindFilter(opt.value);
                             }}
                         >
-                            {opt.label}
+                            {t(opt.label)}
                         </Tag.CheckableTag>
                     ))}
                 </div>
-                <Button size="small" loading={loading} disabled={!ownerId} onClick={() => setRefreshRevision((value) => value + 1)}>刷新</Button>
-                {selectionMode === "multiple-images" ? <Button type="primary" size="small" disabled={!selected.length} onClick={confirmMultiple}>加入 {selected.length} 张参考图</Button> : null}
+                <Button size="small" loading={loading} disabled={!ownerId} onClick={() => setRefreshRevision((value) => value + 1)}>{t("刷新")}</Button>
+                {selectionMode === "multiple-images" ? <Button type="primary" size="small" disabled={!selected.length} onClick={confirmMultiple}>{t("加入")}{selected.length} {t(" 张参考图")}</Button> : null}
             </div>
 
-            {error ? <Alert type="error" showIcon title="素材加载失败" description={error} action={<Button size="small" onClick={() => setRefreshRevision((value) => value + 1)}>重试</Button>} /> : null}
+            {error ? <Alert type="error" showIcon title={t("素材加载失败")} description={error} action={<Button size="small" onClick={() => setRefreshRevision((value) => value + 1)}>{t("重试")}</Button>} /> : null}
             {visible.length ? (
                 <div className="grid grid-cols-4 gap-3">
                     {visible.map((asset) => (
@@ -246,9 +250,9 @@ function MyAssetsTab({ open, onInsert, onInsertMany, selectionMode }: { open: bo
                     ))}
                 </div>
             ) : loading ? (
-                <div role="status" className="flex items-center justify-center gap-2 py-12 text-sm"><Spin size="small" />正在加载素材…</div>
+                <div role="status" className="flex items-center justify-center gap-2 py-12 text-sm"><Spin size="small" />{t("正在加载素材…")}</div>
             ) : !error ? (
-                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有素材" className="py-12" />
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("没有素材")} className="py-12" />
             ) : null}
 
             {filtered.length > PAGE_SIZE && (
@@ -256,8 +260,8 @@ function MyAssetsTab({ open, onInsert, onInsertMany, selectionMode }: { open: bo
                     <Pagination size="small" current={page} pageSize={PAGE_SIZE} total={filtered.length} onChange={setPage} showSizeChanger={false} />
                 </div>
             )}
-            {nextCursor ? <Button block loading={loadingMore} onClick={() => void loadMore()}>加载更多素材</Button> : null}
-            {inserting ? <p role="status" className="text-sm text-muted-foreground">正在读取完整文本…</p> : null}
+            {nextCursor ? <Button block loading={loadingMore} onClick={() => void loadMore()}>{t("加载更多素材")}</Button> : null}
+            {inserting ? <p role="status" className="text-sm text-muted-foreground">{t("正在读取完整文本…")}</p> : null}
         </div>
     );
 }

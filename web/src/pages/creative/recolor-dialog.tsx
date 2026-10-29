@@ -1,3 +1,4 @@
+import { uiText, useUiText } from "@/lib/i18n";
 import { Alert, Button, Modal, Slider } from "antd";
 import { useEffect, useRef, useState } from "react";
 import { editorPngBlob } from "@/lib/canvas/image-editor-document";
@@ -9,6 +10,7 @@ import type { SceneImage } from "./use-scene-workspace";
 export function RecolorDialog({ source, onClose, onSave }: {
     source: SceneImage; onClose: () => void; onSave: (blob: Blob, description: string) => Promise<void>;
 }) {
+    useUiText();
     const original = useRef<PixelImage | null>(null);
     const preview = useRef<HTMLCanvasElement>(null);
     const previewController = useRef<AbortController | null>(null);
@@ -36,7 +38,7 @@ export function RecolorDialog({ source, onClose, onSave }: {
             const reduced = document.createElement("canvas"); reduced.width = Math.max(1, Math.round(canvas.width * ratio)); reduced.height = Math.max(1, Math.round(canvas.height * ratio));
             const context = reduced.getContext("2d")!; context.imageSmoothingEnabled = false; context.drawImage(canvas, 0, 0, reduced.width, reduced.height);
             setSmall(canvasPixels(reduced));
-        }).catch(caught => { if (!cancelled) setError(caught instanceof Error ? caught.message : "图片读取失败"); });
+        }).catch(caught => { if (!cancelled) setError(caught instanceof Error ? uiText(caught.message) : uiText("图片读取失败")); });
         return () => { cancelled = true; original.current = null; saveController.current?.abort(); };
     }, [source.dataUrl]);
     useEffect(() => { setSaveError(""); }, [rules, tolerance]);
@@ -52,7 +54,7 @@ export function RecolorDialog({ source, onClose, onSave }: {
                 preview.current.getContext("2d")!.drawImage(pixelsCanvas(result), 0, 0);
                 setChanged(result.changedPixels); setMatched(result.matchedPixels); setError("");
             }).catch(caught => {
-                if (!controller.signal.aborted) { setChanged(0); setMatched(0); setError(caught instanceof Error ? caught.message : "颜色参数无效"); }
+                if (!controller.signal.aborted) { setChanged(0); setMatched(0); setError(caught instanceof Error ? uiText(caught.message) : uiText("颜色参数无效")); }
             }).finally(() => { if (!controller.signal.aborted) setPreviewBusy(false); });
         }, 100);
         return () => { clearTimeout(timer); controller.abort(); if (previewController.current === controller) previewController.current = null; };
@@ -74,35 +76,35 @@ export function RecolorDialog({ source, onClose, onSave }: {
             const blob = await editorPngBlob(pixelsCanvas(result));
             if (controller.signal.aborted) return;
             await onSave(blob, description); if (!controller.signal.aborted) onClose();
-        } catch (caught) { if (!controller.signal.aborted) setSaveError(caught instanceof Error ? caught.message : "换色保存失败"); }
+        } catch (caught) { if (!controller.signal.aborted) setSaveError(caught instanceof Error ? uiText(caught.message) : uiText("换色保存失败")); }
         finally { if (!controller.signal.aborted) setBusy(false); if (saveController.current === controller) saveController.current = null; }
     };
-    return <Modal open modalRender={modal => <div data-usage-board="pattern-recolor">{modal}</div>} title="精确换色 · 本地处理" width={940} onCancel={onClose} closable={!busy} mask={{ closable: !busy }} keyboard={!busy}
-        footer={<><Button onClick={onClose} disabled={busy}>取消</Button><Button type="primary" loading={busy} disabled={!small} onClick={() => void save()}>保存换色结果</Button></>}>
+    return <Modal open modalRender={modal => <div data-usage-board="pattern-recolor">{modal}</div>} title={uiText("精确换色 · 本地处理")} width={940} onCancel={onClose} closable={!busy} mask={{ closable: !busy }} keyboard={!busy}
+        footer={<><Button onClick={onClose} disabled={busy}>{uiText("取消")}</Button><Button type="primary" loading={busy} disabled={!small} onClick={() => void save()}>{uiText("保存换色结果")}</Button></>}>
         <div className="cs-tool-dialog">
-            <p className="cs-help">不调用 AI、不消耗生成积分。按 RGB 颜色替换，保留图案位置、原始尺寸与透明度。适合平面花型；相近颜色和抗锯齿边缘通过容差纳入，照片光影不会自动保留。</p>
+            <p className="cs-help">{uiText("不调用 AI、不消耗生成积分。按 RGB 颜色替换，保留图案位置、原始尺寸与透明度。适合平面花型；相近颜色和抗锯齿边缘通过容差纳入，照片光影不会自动保留。")}</p>
             <fieldset disabled={busy || !small} className="cs-tool-fieldset">
                 <div className="cs-recolor-rules">{rules.map((rule, index) => <div className="cs-recolor-rule" key={index}>
-                    <button className="cs-choice" aria-pressed={active === index} onClick={() => setActive(index)}>取色 {index + 1}</button>
-                    <label>原色<input aria-label={`原色 ${index + 1}`} type="color" value={/^#[\da-f]{6}$/i.test(rule.from) ? rule.from : "#000000"} onChange={event => changeRule(index, "from", event.target.value)} /><input className="cs-hex-input cs-input" aria-label={`原色 HEX ${index + 1}`} value={rule.from} maxLength={7} onChange={event => changeRule(index, "from", event.target.value)} /></label><span>→</span>
-                    <label>目标色<input aria-label={`目标色 ${index + 1}`} type="color" value={/^#[\da-f]{6}$/i.test(rule.to) ? rule.to : "#000000"} onChange={event => changeRule(index, "to", event.target.value)} /><input className="cs-hex-input cs-input" aria-label={`目标色 HEX ${index + 1}`} value={rule.to} maxLength={7} onChange={event => changeRule(index, "to", event.target.value)} /></label>
-                    <button aria-label={`删除颜色映射 ${index + 1}`} disabled={rules.length === 1} onClick={() => { setRules(current => current.filter((_, at) => at !== index)); setActive(0); }}>删除</button>
+                    <button className="cs-choice" aria-pressed={active === index} onClick={() => setActive(index)}>{uiText("取色 ")}{index + 1}</button>
+                    <label>{uiText("原色")}<input aria-label={uiText("原色 {value1}", { value1: index + 1 })} type="color" value={/^#[\da-f]{6}$/i.test(rule.from) ? rule.from : "#000000"} onChange={event => changeRule(index, "from", event.target.value)} /><input className="cs-hex-input cs-input" aria-label={uiText("原色 HEX {value1}", { value1: index + 1 })} value={rule.from} maxLength={7} onChange={event => changeRule(index, "from", event.target.value)} /></label><span>→</span>
+                    <label>{uiText("目标色")}<input aria-label={uiText("目标色 {value1}", { value1: index + 1 })} type="color" value={/^#[\da-f]{6}$/i.test(rule.to) ? rule.to : "#000000"} onChange={event => changeRule(index, "to", event.target.value)} /><input className="cs-hex-input cs-input" aria-label={uiText("目标色 HEX {value1}", { value1: index + 1 })} value={rule.to} maxLength={7} onChange={event => changeRule(index, "to", event.target.value)} /></label>
+                    <button aria-label={uiText("删除颜色映射 {value1}", { value1: index + 1 })} disabled={rules.length === 1} onClick={() => { setRules(current => current.filter((_, at) => at !== index)); setActive(0); }}>{uiText("删除")}</button>
                 </div>)}</div>
-                <div className="cs-tool-controls"><Button disabled={rules.length >= 6 || busy || !small} onClick={() => { setActive(rules.length); setRules(current => [...current, { from: palette[current.length] || "#FFFFFF", to: "#224E42" }]); }}>添加映射</Button>
-                    <span className="cs-help">参考色板：</span>{palette.map(color => <button key={color} aria-label={`选用原色 ${color}`} title={color} className="cs-swatch" style={{ background: color }} onClick={() => changeRule(active, "from", color)} />)}</div>
-                <label className="cs-label">颜色容差 {tolerance}%<Slider min={0} max={100} value={tolerance} onChange={setTolerance} disabled={busy} /></label>
+                <div className="cs-tool-controls"><Button disabled={rules.length >= 6 || busy || !small} onClick={() => { setActive(rules.length); setRules(current => [...current, { from: palette[current.length] || "#FFFFFF", to: "#224E42" }]); }}>{uiText("添加映射")}</Button>
+                    <span className="cs-help">{uiText("参考色板：")}</span>{palette.map(color => <button key={color} aria-label={uiText("选用原色 {color}", { color: color })} title={color} className="cs-swatch" style={{ background: color }} onClick={() => changeRule(active, "from", color)} />)}</div>
+                <label className="cs-label">{uiText("颜色容差 ")}{tolerance}%<Slider min={0} max={100} value={tolerance} onChange={setTolerance} disabled={busy} /></label>
             </fieldset>
             {(saveError || error) && <Alert type="error" title={saveError || error} showIcon />}
-            <div className="cs-tool-preview-grid"><figure><figcaption>原图 · 点击为第 {active + 1} 组取色</figcaption><img src={source.dataUrl} alt="换色原图（点击取色）" className="cs-sample-image" onClick={event => {
+            <div className="cs-tool-preview-grid"><figure><figcaption>{uiText("原图 · 点击为第 {count} 组取色", { count: active + 1 })}</figcaption><img src={source.dataUrl} alt={uiText("换色原图（点击取色）")} className="cs-sample-image" onClick={event => {
                 if (!original.current || busy) return;
                 const rect = event.currentTarget.getBoundingClientRect(), pixels = original.current;
                 const x = Math.min(pixels.width - 1, Math.max(0, Math.floor((event.clientX - rect.left) * pixels.width / rect.width)));
                 const y = Math.min(pixels.height - 1, Math.max(0, Math.floor((event.clientY - rect.top) * pixels.height / rect.height)));
                 const offset = (y * pixels.width + x) * 4;
-                if (!pixels.data[offset + 3]) { setError("当前点是完全透明像素，请选择有颜色的区域"); return; }
+                if (!pixels.data[offset + 3]) { setError(uiText("当前点是完全透明像素，请选择有颜色的区域")); return; }
                 changeRule(active, "from", rgbHex(Array.from(pixels.data.slice(offset, offset + 3)))); setError("");
-            }} /></figure><figure><figcaption>{previewBusy ? "正在更新换色预览…" : "换色预览"}</figcaption><canvas ref={preview} aria-label="换色预览" /></figure></div>
-            <p className="cs-help">{small ? `缩略预览：匹配 ${matched.toLocaleString()} 个像素，改变 ${changed.toLocaleString()} 个像素。保存时在 ${source.width} × ${source.height} 原图上处理。` : "正在读取原图…"}</p>
+            }} /></figure><figure><figcaption>{previewBusy ? uiText("正在更新换色预览…") : uiText("换色预览")}</figcaption><canvas ref={preview} aria-label={uiText("换色预览")} /></figure></div>
+            <p className="cs-help">{small ? uiText("缩略预览：匹配 {value1} 个像素，改变 {value2} 个像素。保存时在 {width} × {height} 原图上处理。", { value1: matched.toLocaleString(), value2: changed.toLocaleString(), width: source.width, height: source.height }) : uiText("正在读取原图…")}</p>
         </div>
     </Modal>;
 }

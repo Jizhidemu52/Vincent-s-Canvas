@@ -1,6 +1,16 @@
 import { describe, expect, test } from "bun:test";
-import { CanvasDesignActions } from "../src/components/canvas/canvas-design-actions";
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import ts from "typescript";
+import { i18nHarness } from "./helpers/i18n-harness";
 import { canvasArrangeOptions } from "../src/lib/canvas/canvas-node-arrange";
+
+const componentUrl = new URL("../src/components/canvas/canvas-design-actions.tsx", import.meta.url);
+const localRequire = createRequire(componentUrl);
+const code = ts.transpileModule(readFileSync(componentUrl, "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ESNext, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
+const module = { exports: {} as typeof import("../src/components/canvas/canvas-design-actions") };
+new Function("require", "module", "exports", code)((name: string) => name === "@/lib/i18n" ? i18nHarness : name.endsWith(".css") ? {} : localRequire(name), module, module.exports);
+const { CanvasDesignActions } = module.exports;
 
 function menu(selectedCount: number, selectedImages: number, calls: string[]) {
     return CanvasDesignActions({ selectedCount, selectedImages, onCompare: () => calls.push("compare"), onTemplate: () => calls.push("template"), onArrange: mode => calls.push(mode) }).props.menu.items;

@@ -1,3 +1,4 @@
+import { useUiText } from "@/lib/i18n";
 import { memo, useCallback, useDeferredValue, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, MouseEvent, PointerEvent, Ref } from "react";
 import { Button, Image } from "antd";
@@ -35,6 +36,7 @@ type MentionState = {
 export const CONFIG_REFERENCE_PATTERN = /@\[node:([^\]]+)\]/g;
 
 export function CanvasConfigComposer({ ref, value, inputs, onChange, onClose, compact = false, disabled = false, label = "提示词", referenceLabels }: CanvasConfigComposerProps) {
+    const t = useUiText();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const editorRef = useRef<HTMLDivElement>(null);
     const composingRef = useRef(false);
@@ -153,12 +155,12 @@ export function CanvasConfigComposer({ ref, value, inputs, onChange, onClose, co
             <div className="mb-2 flex items-center justify-between gap-2">
                 <div className="flex min-w-0 items-baseline gap-2">
                     <div className="shrink-0 text-xs font-semibold">{label}</div>
-                    {inputs.length ? <div className="truncate text-[11px] opacity-55">@ 引用素材</div> : null}
+                    {inputs.length ? <div className="truncate text-[11px] opacity-55">{t("@ 引用素材")}</div> : null}
                 </div>
                 {onClose ? <Button size="small" type="text" className="!h-7 !w-7 !min-w-7 !p-0" icon={<X className="size-3.5" />} onClick={onClose} /> : null}
             </div>
             <div className="relative rounded-xl border" style={{ background: theme.node.fill, borderColor: theme.node.stroke }}>
-                {!draftValue.trim() ? <div className="pointer-events-none absolute left-3 top-2 text-sm leading-6" style={{ color: theme.node.placeholder }}>{label === "朗读文本" ? "输入需要转为语音的文字" : "描述希望生成或修改的内容"}</div> : null}
+                {!draftValue.trim() ? <div className="pointer-events-none absolute left-3 top-2 text-sm leading-6" style={{ color: theme.node.placeholder }}>{label === t("朗读文本") ? t("输入需要转为语音的文字") : t("描述希望生成或修改的内容")}</div> : null}
                 <div
                     ref={editorRef}
                     contentEditable={!disabled}
@@ -217,13 +219,14 @@ export function CanvasConfigComposer({ ref, value, inputs, onChange, onClose, co
                 />
                 {mention && candidates.length ? <MentionMenu inputs={candidates} allInputs={inputs} referenceLabels={referenceLabels} activeIndex={Math.min(activeIndex, candidates.length - 1)} theme={theme} onSelect={insertReference} /> : null}
             </div>
-            {imagePreview ? <Image src={imagePreview} alt="引用图片预览" style={{ display: "none" }} preview={{ visible: true, src: imagePreview, onVisibleChange: (visible) => !visible && setImagePreview(null) }} /> : null}
+            {imagePreview ? <Image src={imagePreview} alt={t("引用图片预览")} style={{ display: "none" }} preview={{ visible: true, src: imagePreview, onVisibleChange: (visible) => !visible && setImagePreview(null) }} /> : null}
         </div>
     );
 
 }
 
 const MentionMenu = memo(function MentionMenu({ inputs, allInputs, referenceLabels, activeIndex, theme, onSelect }: { inputs: NodeGenerationInput[]; allInputs: NodeGenerationInput[]; referenceLabels?: Record<string, string>; activeIndex: number; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onSelect: (input: NodeGenerationInput) => void }) {
+    const t = useUiText();
     const selectedRef = useRef(false);
     const activeItemRef = useRef<HTMLButtonElement | null>(null);
 
@@ -264,6 +267,7 @@ const MentionMenu = memo(function MentionMenu({ inputs, allInputs, referenceLabe
 });
 
 function ResourcePreview({ input }: { input: NodeGenerationInput }) {
+    const t = useUiText();
     if (input.type === "image" && input.image) return <CanvasPersistedMediaPreview kind="image" url={input.image.dataUrl} storageKey={input.image.storageKey} alt="" className="size-9 rounded-md object-cover" />;
     if (input.type === "video" && input.video) return <video src={input.video.url} className="size-9 rounded-md bg-black object-cover" muted preload="metadata" />;
     const Icon = input.type === "audio" ? Music2 : input.type === "video" ? Video : input.type === "image" ? ImageIcon : FileText;

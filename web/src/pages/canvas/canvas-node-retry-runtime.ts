@@ -1,3 +1,4 @@
+import { uiText } from "@/lib/i18n";
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import type { App } from "antd";
 import { NODE_DEFAULT_SIZE } from "@/constant/canvas";
@@ -66,7 +67,7 @@ export async function retryCanvasNode(node: CanvasNodeData, action: Context) {
         return;
     }
     if (node.type === CanvasNodeType.Video && node.metadata?.videoTaskId && node.metadata.status !== NODE_STATUS_SUCCESS) {
-        if (node.metadata.videoTaskCanRecover === false) { message.warning("原视频任务提交状态待核查，请勿重复生成"); return; }
+        if (node.metadata.videoTaskCanRecover === false) { message.warning(uiText("原视频任务提交状态待核查，请勿重复生成")); return; }
         const controller = startGenerationRequest(node.id, node.id, node.id);
         setRunningNodeId(node.id);
         setNodes((prev) => prev.map((item) => item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_LOADING, errorDetails: undefined } } : item));
@@ -75,7 +76,7 @@ export async function retryCanvasNode(node: CanvasNodeData, action: Context) {
             if (!isCurrent()) return;
             const size = fitNodeSize(video.width || node.width, video.height || node.height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
             setNodes((prev) => prev.map((item) => item.id === node.id ? { ...item, width: size.width, height: size.height, metadata: { ...item.metadata, ...videoMetadata(video), errorDetails: undefined, videoTaskCanRecover: undefined } } : item));
-            message.success("已取回原视频任务结果");
+            message.success(uiText("已取回原视频任务结果"));
         } catch (error) {
             if (!isCurrent() || isGenerationCanceled(error)) return;
             const errorDetails = error instanceof Error ? error.message : "原视频任务查询失败";
@@ -91,10 +92,10 @@ export async function retryCanvasNode(node: CanvasNodeData, action: Context) {
     if (origin?.configNodeId && node.type !== CanvasNodeType.Image) {
         const config = nodesRef.current.find((item) => item.id === origin.configNodeId);
         if (!config || !nodesRef.current.some((item) => item.id === origin.sourceNodeId)) {
-            message.warning("原公共配置或任务输入已删除，不能重建此任务");
+            message.warning(uiText("原公共配置或任务输入已删除，不能重建此任务"));
             return;
         }
-        message.info("将按当前公共配置重新执行此任务，保留已有结果");
+        message.info(uiText("将按当前公共配置重新执行此任务，保留已有结果"));
         await handleGenerateNode(origin.sourceNodeId, origin.mode, config.metadata?.composerContent || config.metadata?.prompt || "");
         return;
     }
@@ -123,7 +124,7 @@ export async function retryCanvasNode(node: CanvasNodeData, action: Context) {
     const blend = node.type === CanvasNodeType.Image && imageModelProfile(generationConfig.model).kind === "midjourney-blend";
     const prompt = blend ? "" : (savedImageMetadata?.prompt || context?.prompt || "").trim();
     if (!prompt && !blend) {
-        message.warning("找不到提示词，无法重试");
+        message.warning(uiText("找不到提示词，无法重试"));
         return;
     }
     const generationType = savedImageMetadata?.generationType;
@@ -132,7 +133,7 @@ export async function retryCanvasNode(node: CanvasNodeData, action: Context) {
         hasSavedImageMetadata && savedImageMetadata ? await resolveMetadataReferences(savedImageMetadata) : useReferenceImages ? (context?.referenceImages.length ? context.referenceImages : sourceNodeReferenceImages(batchRoot || sourceNode)) : [];
     if (!isCurrent()) return;
     if (useReferenceImages && !retryReferenceImages) {
-        message.error("参考图片已丢失，无法继续重试");
+        message.error(uiText("参考图片已丢失，无法继续重试"));
         setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails: "参考图片已丢失，无法继续重试" } } : item)));
         return;
     }

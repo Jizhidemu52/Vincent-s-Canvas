@@ -1,3 +1,5 @@
+import { uiText } from "@/lib/i18n";
+import { setWorkbenchText } from "./ui-text.js";
 import { createClientUuid } from "../../../lib/client-uuid";
 
 // Project revisions are small integers. Image data is cloned only when actually saving.
@@ -133,32 +135,36 @@ export function mountProjectBar(root, session) {
     const bar = document.createElement("div");
     bar.className = "workbench-project-bar";
     bar.innerHTML =
-        '<label>工程 <select aria-label="本地工程"></select></label><button class="btn" type="button" data-project-new>新建工程</button><button class="btn ghost" type="button" data-project-rename>重命名</button><span role="status" data-project-status></span>';
+        "<label><span data-ui-text=\"工程 \">工程 </span><select aria-label=\"本地工程\" data-ui-aria-label=\"本地工程\"></select></label><button class=\"btn\" type=\"button\" data-project-new><span data-ui-text=\"新建工程\">新建工程</span></button><button class=\"btn ghost\" type=\"button\" data-project-rename><span data-ui-text=\"重命名\">重命名</span></button><span role=\"status\" data-project-status></span>";
     root.prepend(bar);
     const select = bar.querySelector("select");
     const report = (error) => {
-        bar.querySelector("[data-project-status]").textContent = error.message;
+        setWorkbenchText(bar.querySelector("[data-project-status]"), () => uiText(error.message));
     };
     select.onchange = () => {
         void session.open(select.value).catch(report);
     };
     bar.querySelector("[data-project-new]").onclick = () => {
-        const name = prompt("新工程名称", "新工程");
+        const name = prompt(uiText("新工程名称"), "新工程");
         if (name?.trim()) void session.create(name.trim().slice(0, 80)).catch(report);
     };
     bar.querySelector("[data-project-rename]").onclick = () => {
-        const name = prompt("工程名称", session.view().projects.find((item) => item.id === session.view().activeId)?.name || "未命名工程");
+        const name = prompt(uiText("工程名称"), session.view().projects.find((item) => item.id === session.view().activeId)?.name || "未命名工程");
         if (name?.trim()) void session.rename(name).catch(report);
     };
     return (view) => {
         select.replaceChildren();
-        if (!view.activeId) select.add(new Option("未保存工程", ""));
+        if (!view.activeId) {
+            const option = new Option(uiText("未保存工程"), "");
+            option.dataset.uiText = "未保存工程";
+            select.add(option);
+        }
         for (const project of view.projects) select.add(new Option(project.name, project.id));
         select.value = view.activeId || "";
         for (const control of bar.querySelectorAll("button, select")) control.disabled = !view.ready || view.saving || view.switching;
         const editor = root.querySelector(".workspace");
         if (editor) editor.inert = !view.ready || view.switching;
-        bar.querySelector("[data-project-status]").textContent = view.error ? `保存失败：${view.error} · 有未保存更改` : view.saving ? "正在保存…" : view.dirty ? "有未保存更改 · 即将自动保存" : view.activeId ? "已自动保存到本机" : "编辑后自动保存到本机";
+        setWorkbenchText(bar.querySelector("[data-project-status]"), () => view.error ? uiText("保存失败：{value1} · 有未保存更改", { value1: view.error }) : view.saving ? uiText("正在保存…") : view.dirty ? uiText("有未保存更改 · 即将自动保存") : view.activeId ? uiText("已自动保存到本机") : uiText("编辑后自动保存到本机"));
     };
 }
 

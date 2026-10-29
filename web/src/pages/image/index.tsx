@@ -1,3 +1,4 @@
+import { uiText, useUiText, getUiLocale } from "@/lib/i18n";
 import { PromptOptimizeButton } from "@/components/prompt-optimize-button";
 import type { PromptInputData, PromptScene } from "../../../../shared/prompt-contracts";
 import { ArrowLeft, ArrowRight, BookmarkPlus, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, ImagePlus, LoaderCircle, PenLine, Plus, Share2, SlidersHorizontal, Sparkles, Trash2, Upload } from "lucide-react";
@@ -175,11 +176,13 @@ function resolveImageToolMode(value: string | null): GenerationToolMode {
 }
 
 export default function ImagePage() {
+    useUiText();
     const [searchParams] = useSearchParams();
-    return searchParams.get("tool") === "seamless-stitch" ? <Suspense fallback={<div className="wb-page wb-empty" role="status">正在打开无缝拼接…</div>}><SeamlessStitchPage /></Suspense> : <ImageGenerationPage />;
+    return searchParams.get("tool") === "seamless-stitch" ? <Suspense fallback={<div className="wb-page wb-empty" role="status">{uiText("正在打开无缝拼接…")}</div>}><SeamlessStitchPage /></Suspense> : <ImageGenerationPage />;
 }
 
 export function ImageGenerationPage({ creativePreset }: { creativePreset?: CreativePreset } = {}) {
+    useUiText();
     const [searchParams] = useSearchParams();
     const ownerId = useUserStore(state => state.user?.id);
     const historyTool = creativePreset ? `creative-${creativePreset.id}` : resolveImageToolMode(searchParams.get("tool"));
@@ -187,6 +190,7 @@ export function ImageGenerationPage({ creativePreset }: { creativePreset?: Creat
 }
 
 function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePreset?: CreativePreset; historyTool: string }) {
+    useUiText();
     const { message, modal } = App.useApp();
     const libraryShare = useDesignLibraryShare();
     const [searchParams] = useSearchParams();
@@ -270,7 +274,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         setOptimizedDraft({ prompt: recipe.prompt, input: recipe.promptInput, references: recipe.references });
         setReferences(recipe.references.map(item => references.find(reference => reference.id === item.id) || createImageReferenceItem(item, "template")));
         setGarmentDraft({ scope: garmentScope, dirty: false, appliedReferences: recipe.references });
-        message.success("已套用到提示词；检查后点击开始编辑");
+        message.success(uiText("已套用到提示词；检查后点击开始编辑"));
     };
     const toolModeConfig = creativePreset ? { ...imageToolModes[toolMode], title: creativePreset.title, description: creativePreset.description, projectId: `creative-${creativePreset.id}` } : imageToolModes[toolMode];
     const operationType = toolModeOperation(toolMode) as "image_generation" | "inpaint" | "upscale";
@@ -293,11 +297,11 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
 
     const handleMissingModelConfig = () => {
         if (canManageConfig) {
-            message.warning("请先完成配置");
+            message.warning(uiText("请先完成配置"));
             openConfigDialog(true);
             return;
         }
-        message.warning("当前没有可用模型，请联系管理员统一配置模型和 API");
+        message.warning(uiText("当前没有可用模型，请联系管理员统一配置模型和 API"));
     };
 
     useEffect(() => {
@@ -331,7 +335,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                 setResults(records.map(record => ({ id: record.id, status: "paused", error: "已找回原任务，可继续查询，不会重新生成", recovery: record, snapshot: record.snapshot })));
                 void resumePendingImages(records);
             }
-        }).catch(error => { if (active && mountedRef.current) message.warning(`在途记录读取失败：${error instanceof Error ? error.message : "浏览器存储不可用"}`); });
+        }).catch(error => { if (active && mountedRef.current) message.warning(uiText("在途记录读取失败：{value1}", { value1: error instanceof Error ? error.message : "浏览器存储不可用" })); });
         return () => { active = false; mountedRef.current = false; for (const controller of observationControllers.current) controller.abort(); imageLogListeners.delete(onSaved); logRefreshRevision.current += 1; };
     }, []);
 
@@ -385,12 +389,12 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                 appendReferences([{ id: nanoid(), name: "复刻来源.png", type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey, sourceAssetId }], "asset");
                 const eventType = searchParams.get("sourceOwnerId") === user?.id ? "asset.edited" : "asset.reused";
                 await recordServerAssetEvent(sourceAssetId, eventType, { channel: "one-click-recreate", destination: toolMode });
-                message.success("已带入原素材、提示词和模型");
+                message.success(uiText("已带入原素材、提示词和模型"));
             })
             .catch((error) => {
                 loadedRecreateAssetsRef.current.delete(sourceAssetId);
                 if (revision !== inputRevision.current) return;
-                message.error(error instanceof Error ? error.message : "复刻来源加载失败");
+                message.error(error instanceof Error ? uiText(error.message) : uiText("复刻来源加载失败"));
             });
         return () => { if (!restored) loadedRecreateAssetsRef.current.delete(sourceAssetId); };
     }, [message, searchParams, toolMode, user?.id]);
@@ -419,13 +423,13 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
             if (selectedModel) updateConfig("imageModel", selectedModel);
             const settings = promptImageSettings(parameters, selectedModel || effectiveConfig.model);
             for (const key of ["size", "quality", "count", "imageOptions"] as const) updateConfig(key, settings[key]);
-            payload.warnings.forEach((warning) => message.warning(warning));
-            if (payload.pricing.modelChanged) message.warning(payload.pricing.selectedModel ? `模型已变更，当前使用 ${payload.pricing.selectedModel.name}` : "模型已变更，请先选择管理员当前启用的模型");
+            payload.warnings.forEach((warning) => message.warning(uiText(warning)));
+            if (payload.pricing.modelChanged) message.warning(payload.pricing.selectedModel ? uiText("模型已变更，当前使用 {name}", { name: payload.pricing.selectedModel.name }) : uiText("模型已变更，请先选择管理员当前启用的模型"));
             const cost = !deploymentFeatures.creditsEnabled ? "不计积分" : (payload.pricing.estimate ? `${payload.pricing.estimate.totalCredits} 积分` : "以当前选择为准");
             if (payload.mode === "fill_and_generate") {
-                modal.confirm({ title: "确认使用当前配置生成？", content: !deploymentFeatures.creditsEnabled ? "确认后将直接提交生成任务。" : `当前实际预计消耗 ${cost}。确认后才会提交任务并扣费。`, okText: "确认生成", cancelText: "仅保留填入", onOk: () => generateRef.current() });
-            } else message.success(`模板已填入，当前预计 ${cost}`);
-        }).catch((error) => { loadedReuseTokenRef.current.delete(token); if (revision === inputRevision.current) message.error(error instanceof Error ? error.message : "模板复用失败"); });
+                modal.confirm({ title: uiText("确认使用当前配置生成？"), content: !deploymentFeatures.creditsEnabled ? uiText("确认后将直接提交生成任务。") : uiText("当前实际预计消耗 {cost}。确认后才会提交任务并扣费。", { cost: cost }), okText: uiText("确认生成"), cancelText: uiText("仅保留填入"), onOk: () => generateRef.current() });
+            } else message.success(uiText("模板已填入，当前预计 {cost}", { cost: cost }));
+        }).catch((error) => { loadedReuseTokenRef.current.delete(token); if (revision === inputRevision.current) message.error(error instanceof Error ? uiText(error.message) : uiText("模板复用失败")); });
         return () => { if (!restored) loadedReuseTokenRef.current.delete(token); };
     }, [message, modal, searchParams, updateConfig, user?.id]);
 
@@ -450,28 +454,28 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                 }),
             );
             appendReferences(nextReferences, "clipboard");
-            message.success(`已读取 ${nextReferences.length} 张参考图`);
+            message.success(uiText("已读取 {length} 张参考图", { length: nextReferences.length }));
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "剪贴板图片读取失败");
+            message.error(error instanceof Error ? uiText(error.message) : uiText("剪贴板图片读取失败"));
         }
     };
 
     const generate = async () => {
         const text = prompt.trim();
         if (!text && requiresPrompt) {
-            message.error("请输入生图提示词");
+            message.error(uiText("请输入生图提示词"));
             return;
         }
         if (missingReference) {
-            message.error(`${toolModeConfig.title}需要先添加参考图`);
+            message.error(uiText("{title}需要先添加参考图", { title: uiText(toolModeConfig.title) }));
             return;
         }
         if (!user || user.status !== "active") {
-            message.error("当前设计师账号不可用");
+            message.error(uiText("当前设计师账号不可用"));
             return;
         }
         if (quotaBlocked) {
-            message.error(`额度不足：预计需要 ${estimatedUsage.credits} 积分，当前剩余 ${user.creditBalance} 积分`);
+            message.error(uiText("额度不足：预计需要 {credits} 积分，当前剩余 {creditBalance} 积分", { credits: estimatedUsage.credits, creditBalance: user.creditBalance }));
             return;
         }
 
@@ -479,7 +483,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         if (!snapshot) return;
 
         const release = workbenchSubmissions.acquire(`image:${user.id}`);
-        if (!release) { message.info("图片任务正在处理，请勿重复提交"); return; }
+        if (!release) { message.info(uiText("图片任务正在处理，请勿重复提交")); return; }
 
         pendingRestoreRevision.current += 1;
         setRunning(true);
@@ -496,7 +500,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         try {
             const result = await Promise.allSettled(tasks);
             const succeeded = result.filter(item => item.status === "fulfilled").length;
-            if (mountedRef.current && succeeded) message.success(`已生成并保存 ${succeeded} 张图片`);
+            if (mountedRef.current && succeeded) message.success(uiText("已生成并保存 {succeeded} 张图片", { succeeded: succeeded }));
         } finally {
             release();
             activeSubmissionRef.current = false;
@@ -519,7 +523,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
 
     const downloadImage = async (image: GeneratedImage, index: number) => {
         try { saveAs(await resolveImageUrl(image.storageKey, image.dataUrl), canvasImageDownloadFileName(resultEditorNode(image, index))); }
-        catch (error) { message.error(error instanceof Error ? error.message : "原图读取失败"); }
+        catch (error) { message.error(error instanceof Error ? uiText(error.message) : uiText("原图读取失败")); }
     };
 
     const shareResultDesign = (image: GeneratedImage, index: number) => {
@@ -532,7 +536,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const addResultToReferences = async (image: GeneratedImage, index: number) => {
         const stored = await uploadImage(image.dataUrl);
         appendReferences([{ id: nanoid(), name: image.imageName || `result-${index + 1}.png`, imageName: image.imageName, imageVersion: image.imageVersion, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }], "generated");
-        message.success("已加入参考图");
+        message.success(uiText("已加入参考图"));
     };
 
     const saveResultToAssets = async (image: GeneratedImage, index: number) => {
@@ -558,19 +562,19 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                 recreatePath: `/image?tool=${toolMode}&prompt=${encodeURIComponent(image.prompt || "")}&model=${encodeURIComponent(model)}`,
             },
         });
-        message.success("已加入我的素材");
+        message.success(uiText("已加入我的素材"));
     };
 
     const saveResultPrompt = async (image: GeneratedImage) => {
         if (!image.sourceTaskId) {
-            message.warning("旧记录没有服务端任务编号，请先保存到素材库后再保存提示词");
+            message.warning(uiText("旧记录没有服务端任务编号，请先保存到素材库后再保存提示词"));
             return;
         }
         try {
             await savePromptFromTask(image.sourceTaskId);
-            message.success("已保存到我的提示词");
+            message.success(uiText("已保存到我的提示词"));
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "保存提示词失败");
+            message.error(error instanceof Error ? uiText(error.message) : uiText("保存提示词失败"));
         }
     };
 
@@ -581,7 +585,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
             const stored = await uploadImage(payload.dataUrl);
             appendReferences([{ id: nanoid(), name: payload.title, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey, imageName: payload.imageName, imageVersion: payload.imageVersion }], "asset");
         } else {
-            message.warning("生图工作台只能使用文本或图片素材");
+            message.warning(uiText("生图工作台只能使用文本或图片素材"));
         }
         setAssetPickerOpen(false);
     };
@@ -609,7 +613,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
             if (deleted?.previewRemoved) setResults([]);
             if (deleted) await refreshLogs();
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "记录删除失败");
+            message.error(error instanceof Error ? uiText(error.message) : uiText("记录删除失败"));
         }
     };
 
@@ -626,7 +630,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
             const next = await readStoredLogs(historyStore, { ownerId: user?.id || "", tool: historyTool });
             if (revision === logRefreshRevision.current) { setLogs(next.logs); setUnclassifiedLogs(next.unclassified); }
         } catch (error) {
-            if (revision === logRefreshRevision.current) message.error(error instanceof Error ? error.message : "历史记录读取失败，请检查浏览器存储");
+            if (revision === logRefreshRevision.current) message.error(error instanceof Error ? uiText(error.message) : uiText("历史记录读取失败，请检查浏览器存储"));
         }
     };
 
@@ -645,14 +649,14 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         setLogsOpen(false);
         setResults(log.images.map((image) => ({ id: image.id, status: "success", image })));
         } catch (error) {
-            if (revision === previewRevision.current) message.error(error instanceof Error ? error.message : "生成记录读取失败，请重试");
+            if (revision === previewRevision.current) message.error(error instanceof Error ? uiText(error.message) : uiText("生成记录读取失败，请重试"));
         } finally { if (revision === previewRevision.current) setPreviewLoading(false); }
     };
 
     const restoreHistoryDraft = async () => {
         if (!previewLog || running || restoreBusy.current) return;
         const taskId = previewLog.images.find(image => image.sourceTaskId)?.sourceTaskId;
-        if (!taskId) { message.warning("这条旧记录没有完整输入归档，无法完整恢复；可复制提示词后新建草稿"); return; }
+        if (!taskId) { message.warning(uiText("这条旧记录没有完整输入归档，无法完整恢复；可复制提示词后新建草稿")); return; }
         const settingsBeforeRestore = useConfigStore.getState().config;
         const revision = inputRevision.current;
         const preview = previewRevision.current;
@@ -669,8 +673,8 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
             updateConfig("size", draft.config.size); updateConfig("quality", draft.config.quality);
             updateConfig("imageOptions", draft.config.imageOptions || "");
             updateConfig("count", previewLog.config.count); updateConfig("systemPrompt", draft.config.systemPrompt);
-            message.success("已完整恢复为草稿，可继续修改；尚未生成或扣费，AI 再次生成不保证结果相同");
-        } catch (error) { message.error(error instanceof Error ? error.message : "历史恢复失败，当前草稿未改变"); }
+            message.success(uiText("已完整恢复为草稿，可继续修改；尚未生成或扣费，AI 再次生成不保证结果相同"));
+        } catch (error) { message.error(error instanceof Error ? uiText(error.message) : uiText("历史恢复失败，当前草稿未改变")); }
         finally { restoreBusy.current = false; setRestoringHistory(false); }
     };
 
@@ -682,20 +686,20 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
             return null;
         }
         if (garmentNeedsApply || incompleteCreativePrompt) {
-            message.warning(garmentNeedsApply ? "服装要求或参考图已改变，请重新套用到提示词" : "请先把提示词中的填写位置替换成你的设计要求");
+            message.warning(garmentNeedsApply ? uiText("服装要求或参考图已改变，请重新套用到提示词") : uiText("请先把提示词中的填写位置替换成你的设计要求"));
             return null;
         }
         const text = prompt.trim();
         if (!text && requiresPrompt) {
-            message.error("请输入生图提示词");
+            message.error(uiText("请输入生图提示词"));
             return null;
         }
         if (invalidBlendReferences) {
-            message.error("当前合成模型需要 2–4 张参考图。");
+            message.error(uiText("当前合成模型需要 2–4 张参考图。"));
             return null;
         }
         if (!referenceValidation.valid) {
-            message.error(referenceValidation.message);
+            message.error(uiText(referenceValidation.message || ""));
             return null;
         }
         return { text: text || "Blend reference images", promptInput: optimizedDraft?.prompt === text && garmentReferencesMatch(optimizedDraft.references, references) ? optimizedDraft.input : creativePreset ? { scene: creativePreset.id as PromptScene, userText: text, fields: {}, mode: references.length ? "edit" : "generate", referenceRoles: references.map(image => image.name) } : undefined, config: { ...effectiveConfig, model, count: "1" }, references: [...references] };
@@ -799,7 +803,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         const snapshot = previous?.snapshot;
         if (!snapshot) return;
         const release = workbenchSubmissions.acquire(`image:${user?.id}`);
-        if (!release) { message.info("图片任务正在处理，请勿重复提交"); return; }
+        if (!release) { message.info(uiText("图片任务正在处理，请勿重复提交")); return; }
         pendingRestoreRevision.current += 1;
         setRunning(true);
         setActiveTaskId(null);
@@ -811,7 +815,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         try {
             await runGenerationSlot(index, snapshot);
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "重试未完成");
+            message.error(error instanceof Error ? uiText(error.message) : uiText("重试未完成"));
         } finally { release(); activeSubmissionRef.current = false; setRunning(false); }
     };
 
@@ -836,16 +840,14 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                         <div>
                             <div className="flex flex-wrap items-start justify-between gap-3">
                                 <div className="min-w-0">
-                                    {creativePreset ? <Link className="wb-eyebrow inline-flex items-center gap-1" to="/creative"><ArrowLeft className="size-3" />创意设计</Link> : <p className="wb-eyebrow">图像工作室</p>}<h1 className="wb-title">{toolModeConfig.title}</h1>
-                                    <p className="wb-description">{toolModeConfig.description}</p>
+                                    {creativePreset ? <Link className="wb-eyebrow inline-flex items-center gap-1" to="/creative"><ArrowLeft className="size-3" />{uiText("创意设计")}</Link> : <p className="wb-eyebrow">{uiText("图像工作室")}</p>}<h1 className="wb-title">{uiText(toolModeConfig.title || "")}</h1>
+                                    <p className="wb-description">{uiText(toolModeConfig.description || "")}</p>
                                 </div>
                                 <div className="flex shrink-0 gap-2 lg:hidden">
                                     <Button icon={<History className="size-4" />} onClick={() => setLogsOpen(true)}>
-                                        记录
-                                    </Button>
+                                        {uiText("记录")}</Button>
                                     <Button icon={<SlidersHorizontal className="size-4" />} onClick={() => setSettingsOpen(true)}>
-                                        参数
-                                    </Button>
+                                        {uiText("参数")}</Button>
                                 </div>
                             </div>
                         </div>
@@ -854,18 +856,16 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                             {initialGarmentScenario ? <GarmentRecipePanel key={garmentScope} references={references} disabled={running || !requiresPrompt} initialScenario={initialGarmentScenario} onApply={applyGarmentRecipe} onDraftChange={handleGarmentDraftChange} /> : null}
                             {requiresPrompt ? <div>
                                 <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
-                                    <span className="text-base font-semibold">提示词</span>
+                                    <span className="text-base font-semibold">{uiText("提示词")}</span>
                                     <div className="flex flex-wrap gap-2">
                                         <Button size="small" icon={<BookOpen className="size-3.5" />} onClick={() => setPromptDialogOpen(true)}>
-                                            查看提示词库
-                                        </Button>
+                                            {uiText("查看提示词库")}</Button>
                                         <Button size="small" icon={<FolderPlus className="size-3.5" />} onClick={() => setAssetPickerOpen(true)}>
-                                            查看我的素材
-                                        </Button>
+                                            {uiText("查看我的素材")}</Button>
                                     </div>
                                 </div>
-                                <Input.TextArea aria-label="图像提示词" value={prompt} onChange={(event) => { inputRevision.current += 1; setPrompt(event.target.value); }} onKeyDown={(event) => handleSubmitShortcut(event, canGenerate && !running, () => void generate())} rows={6} disabled={running || !requiresPrompt} placeholder={requiresPrompt ? `${toolModeConfig.placeholder}（Ctrl/⌘ + Enter 提交）` : "这个模型直接合成参考图，不需要填写文字"} />
-                            </div> : <p className="rounded-lg bg-stone-50 p-3 text-sm text-stone-600 dark:bg-stone-900 dark:text-stone-300">请选择 2–4 张参考图。此模型不会提交提示词；生成结果取决于图片内容及下方融合参数。</p>}
+                                <Input.TextArea aria-label={uiText("图像提示词")} value={prompt} onChange={(event) => { inputRevision.current += 1; setPrompt(event.target.value); }} onKeyDown={(event) => handleSubmitShortcut(event, canGenerate && !running, () => void generate())} rows={6} disabled={running || !requiresPrompt} placeholder={requiresPrompt ? uiText("{placeholder}（Ctrl/⌘ + Enter 提交）", { placeholder: uiText(toolModeConfig.placeholder) }) : uiText("这个模型直接合成参考图，不需要填写文字")} />
+                            </div> : <p className="rounded-lg bg-stone-50 p-3 text-sm text-stone-600 dark:bg-stone-900 dark:text-stone-300">{uiText("请选择 2–4 张参考图。此模型不会提交提示词；生成结果取决于图片内容及下方融合参数。")}</p>}
 
                             {requiresPrompt ? <PromptOptimizeButton config={effectiveConfig} prompt={prompt} references={references} toolKey={toolKey} disabled={running} onBusyChange={setOptimizingPrompt} onApply={(value, _compilation, input) => { replacePrompt(value); setOptimizedDraft({ prompt: value, input, references: [...references] }); }} /> : null}
                             <ReferenceImageTray
@@ -882,8 +882,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                                     {modelOptionLabel(effectiveConfig, model)} · {effectiveConfig.size} · {effectiveConfig.quality}
                                 </span>
                                 <Button size="small" type="text" icon={<SlidersHorizontal className="size-4" />} onClick={() => setSettingsOpen(true)}>
-                                    调整
-                                </Button>
+                                    {uiText("调整")}</Button>
                             </div>
 
                             <div className="hidden gap-4 sm:grid sm:grid-cols-2">
@@ -894,29 +893,29 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                         <div className="mt-auto pt-6">
                             <div className="mb-3 rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-xs leading-5 text-stone-600 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-300">
                                 <div className="flex flex-wrap items-center justify-between gap-3">
-                                    <span>{!deploymentFeatures.creditsEnabled ? "不计积分" : `预计消耗 ${estimatedUsage.credits} 积分`}</span>
-                                    <span>{deploymentFeatures.authenticationEnabled ? "个人工作区" : "本机试用"}</span>
+                                    <span>{!deploymentFeatures.creditsEnabled ? uiText("不计积分") : uiText("预计消耗 {credits} 积分", { credits: estimatedUsage.credits })}</span>
+                                    <span>{deploymentFeatures.authenticationEnabled ? uiText("个人工作区") : uiText("本机试用")}</span>
                                 </div>
-                                {missingReference ? <div className="mt-1 text-amber-600 dark:text-amber-300">{toolModeConfig.title}需要先添加至少一张参考图。</div> : null}
+                                {missingReference ? <div className="mt-1 text-amber-600 dark:text-amber-300">{uiText(toolModeConfig.title || "")}{uiText("需要先添加至少一张参考图。")}</div> : null}
                                 {!referenceValidation.valid ? <div className="mt-1 text-red-500">{referenceValidation.message}</div> : null}
-                                {quotaBlocked ? <div className="mt-1 text-red-500">额度不足，无法提交生成任务。</div> : null}
-                                {garmentNeedsApply ? <div className="mt-1" role="status">服装要求或参考图已改变，请重新套用。<Button size="small" type="link" className="!h-auto !p-0" onClick={resetGarment}>改用当前提示词</Button></div> : null}
-                                {incompleteCreativePrompt ? <div className="mt-1" role="status">请把「{CREATIVE_REQUIREMENT_PLACEHOLDER}」替换成你的设计要求。</div> : null}
+                                {quotaBlocked ? <div className="mt-1 text-red-500">{uiText("额度不足，无法提交生成任务。")}</div> : null}
+                                {garmentNeedsApply ? <div className="mt-1" role="status">{uiText("服装要求或参考图已改变，请重新套用。")}<Button size="small" type="link" className="!h-auto !p-0" onClick={resetGarment}>{uiText("改用当前提示词")}</Button></div> : null}
+                                {incompleteCreativePrompt ? <div className="mt-1" role="status">{uiText("请把「")}{CREATIVE_REQUIREMENT_PLACEHOLDER}{uiText("」替换成你的设计要求。")}</div> : null}
                             </div>
                             <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} loading={running} disabled={!canGenerate || running} onClick={() => void generate()}>
-                                {optimizingPrompt ? "正在优化提示词…" : running ? "正在生成，请稍候…" : toolModeConfig.button}
+                                {optimizingPrompt ? uiText("正在优化提示词…") : running ? uiText("正在生成，请稍候…") : uiText(toolModeConfig.button)}
                             </Button>
-                            {running ? <Button block onClick={() => { for (const controller of observationControllers.current) controller.abort(); }}>停止本页查询（不取消服务端任务）</Button> : pendingImages.length ? <Button block onClick={() => void resumePendingImages(pendingImages)}>继续查询原任务（{pendingImages.length}）</Button> : null}
+                            {running ? <Button block onClick={() => { for (const controller of observationControllers.current) controller.abort(); }}>{uiText("停止本页查询（不取消服务端任务）")}</Button> : pendingImages.length ? <Button block onClick={() => void resumePendingImages(pendingImages)}>{uiText("继续查询原任务（")}{pendingImages.length}）</Button> : null}
                         </div>
                     </div>
 
                     <div className="wb-surface thin-scrollbar min-w-0 p-6 lg:min-h-0 lg:overflow-y-auto">
                         <div className="mb-4 flex items-center justify-between gap-3">
                             <div>
-                                <h2 className="text-xl font-semibold">生成结果</h2>
+                                <h2 className="text-xl font-semibold">{uiText("生成结果")}</h2>
                             </div>
-                            {previewLog ? <div className="flex gap-2"><Button size="small" disabled={running || previewLoading} loading={restoringHistory} onClick={() => void restoreHistoryDraft()}>恢复为草稿继续改</Button><Button size="small" disabled={running} onClick={() => { replacePrompt(previewLog.prompt); message.info("仅复制提示词，未恢复模型与参考图"); }}>仅复制提示词</Button></div> : null}
-                            {previewLoading ? <span role="status" className="text-sm text-muted-foreground">正在读取记录…</span> : running ? <Tag className="m-0 px-2 py-1">等待 <GenerationElapsed startedAt={startedAt} /></Tag> : null}
+                            {previewLog ? <div className="flex gap-2"><Button size="small" disabled={running || previewLoading} loading={restoringHistory} onClick={() => void restoreHistoryDraft()}>{uiText("恢复为草稿继续改")}</Button><Button size="small" disabled={running} onClick={() => { replacePrompt(previewLog.prompt); message.info(uiText("仅复制提示词，未恢复模型与参考图")); }}>{uiText("仅复制提示词")}</Button></div> : null}
+                            {previewLoading ? <span role="status" className="text-sm text-muted-foreground">{uiText("正在读取记录…")}</span> : running ? <Tag className="m-0 px-2 py-1">{uiText("等待 ")}<GenerationElapsed startedAt={startedAt} /></Tag> : null}
                         </div>
                         <GenerationQueueProgress taskId={activeTaskId} active={running} />
                         {results.length ? (
@@ -925,7 +924,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                                     result.status === "success" && result.image ? (
                                         <ResultImageCard key={result.id} image={result.image} index={index} onSelect={selectResultPrompt} onEdit={addResultToReferences} onEditOriginal={openResultEditor} onDownload={downloadImage} onSaveAsset={saveResultToAssets} onSavePrompt={saveResultPrompt} onShareDesign={libraryShare.canShare ? shareResultDesign : undefined} sharingDesign={libraryShare.busy} />
                                     ) : result.status === "failed" || result.status === "paused" ? (
-                                        <FailedImageCard key={result.id} error={result.error || "生成失败"} recovery={Boolean(result.recovery)} disabled={running || (!result.recovery && !result.snapshot)} onRetry={() => retryResult(index)} />
+                                        <FailedImageCard key={result.id} error={result.error || uiText("生成失败")} recovery={Boolean(result.recovery)} disabled={running || (!result.recovery && !result.snapshot)} onRetry={() => retryResult(index)} />
                                     ) : (
                                         <PendingImageCard key={result.id} />
                                     ),
@@ -934,7 +933,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                         ) : (
                             <div className="wb-empty lg:min-h-[480px]">
                                 <ImagePlus size={42} strokeWidth={1.2} />
-                                <strong>{requiresPrompt ? "第一张作品，从一句描述开始" : "上传参考图，开始多图融合"}</strong><p>{requiresPrompt ? "在左侧写下画面内容，选择模型和参数" : "在左侧上传 2–4 张参考图，选择融合参数"}，点击「{toolModeConfig.button}」。结果会出现在这里。</p>
+                                <strong>{requiresPrompt ? uiText("第一张作品，从一句描述开始") : uiText("上传参考图，开始多图融合")}</strong><p>{requiresPrompt ? uiText("在左侧写下画面内容，选择模型和参数") : uiText("在左侧上传 2–4 张参考图，选择融合参数")}{uiText("，点击「")}{uiText(toolModeConfig.button || "")}{uiText("」。结果会出现在这里。")}</p>
                             </div>
                         )}
                     </div>
@@ -951,7 +950,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                     event.target.value = "";
                 }}
             />
-            <Drawer title="生成记录" placement="bottom" size="large" open={logsOpen} onClose={() => setLogsOpen(false)}>
+            <Drawer title={uiText("生成记录")} placement="bottom" size="large" open={logsOpen} onClose={() => setLogsOpen(false)}>
                 <LogPanel
                     logs={logs}
                     unclassifiedLogs={unclassifiedLogs}
@@ -963,7 +962,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                     onPreviewLog={(log) => void previewGenerationLog(log)}
                 />
             </Drawer>
-            <Drawer title="参数" placement="bottom" size="82vh" open={settingsOpen} onClose={() => setSettingsOpen(false)}>
+            <Drawer title={uiText("参数")} placement="bottom" size="82vh" open={settingsOpen} onClose={() => setSettingsOpen(false)}>
                 <div className="grid grid-cols-2 gap-3 pb-4">
                     <GenerationSettings toolKey={toolKey} config={effectiveConfig} model={model} referenceCount={references.length} updateConfig={updateInputConfig} openConfigDialog={openConfigDialog} />
                 </div>
@@ -983,10 +982,9 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                 }}
                 onClose={() => setReferenceAssetPickerOpen(false)}
             />
-            <Modal title="删除生成记录" open={deleteConfirmOpen} onCancel={() => { if (!deletingLogs) setDeleteConfirmOpen(false); }} onOk={deleteSelectedLogs} confirmLoading={deletingLogs} cancelButtonProps={{ disabled: deletingLogs }} okText="删除" okButtonProps={{ danger: true }} cancelText="取消">
-                确定删除选中的 {selectedLogIds.length} 条生成记录吗？
-            </Modal>
-            {imageEditor.node ? <Suspense fallback={<Modal title="编辑原图" open footer={null} onCancel={imageEditor.close}><p role="status">正在读取图片编辑器…</p></Modal>}>
+            <Modal title={uiText("删除生成记录")} open={deleteConfirmOpen} onCancel={() => { if (!deletingLogs) setDeleteConfirmOpen(false); }} onOk={deleteSelectedLogs} confirmLoading={deletingLogs} cancelButtonProps={{ disabled: deletingLogs }} okText={uiText("删除")} okButtonProps={{ danger: true }} cancelText={uiText("取消")}>
+                {uiText("确定删除选中的")}{selectedLogIds.length} {uiText("条生成记录吗？")}</Modal>
+            {imageEditor.node ? <Suspense fallback={<Modal title={uiText("编辑原图")} open footer={null} onCancel={imageEditor.close}><p role="status">{uiText("正在读取图片编辑器…")}</p></Modal>}>
                 <CanvasImageEditorDialog node={imageEditor.node} onClose={imageEditor.close} onConfirm={imageEditor.confirm}
                     saveHint="另存到我的素材 · 原图和生成历史保持不变 · 不调用 AI"
                     successMessage="新版本已保存到我的素材，原图和生成历史保持不变"
@@ -997,15 +995,16 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
 }
 
 function GenerationSettings({ config, model, referenceCount, updateConfig, openConfigDialog, toolKey }: { config: AiConfig; model: string; referenceCount: number; updateConfig: UpdateAiConfig; openConfigDialog: (shouldPromptContinue?: boolean) => void; toolKey: ReturnType<typeof requireToolKey> }) {
+    useUiText();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const profile = useImageModelProfile(model);
 
     return (
         <>
             <label className="col-span-2 block min-w-0">
-                <span className="mb-1.5 block text-sm font-semibold sm:mb-2 sm:text-base">模型</span>
+                <span className="mb-1.5 block text-sm font-semibold sm:mb-2 sm:text-base">{uiText("模型")}</span>
                 <ModelPicker toolKey={toolKey} config={config} value={model} onChange={(value) => updateConfig("imageModel", value)} capability="image" modelsSource="server" fullWidth className="h-10 rounded-lg" onMissingConfig={() => openConfigDialog(false)} />
-                {profile.verified ? <span className="mt-2 block text-xs leading-5" style={{ color: "var(--wb-muted)" }}>{profile.tip}</span> : null}
+                {profile.verified ? <span className="mt-2 block text-xs leading-5" style={{ color: "var(--wb-muted)" }}>{uiText(profile.tip || "")}</span> : null}
             </label>
             <div className="col-span-2">
                 <ImageSettingsPanel config={{ ...config, model, imageModel: model }} referenceCount={referenceCount} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-4" />
@@ -1037,10 +1036,11 @@ function ResultImageCard({
     onShareDesign?: (image: GeneratedImage, index: number) => Promise<void>;
     sharingDesign?: boolean;
 }) {
+    useUiText();
     const previewUrl = useImagePreview(image);
     return (
         <div className="overflow-hidden rounded-lg border border-stone-200 bg-background dark:border-stone-800">
-            <Image src={previewUrl || undefined} preview={{ src: image.dataUrl }} alt={`生成结果 ${index + 1}`} loading="lazy" decoding="async" className="aspect-square object-cover" onClick={() => onSelect(image)} />
+            <Image src={previewUrl || undefined} preview={{ src: image.dataUrl }} alt={uiText("生成结果 {value1}", { value1: index + 1 })} loading="lazy" decoding="async" className="aspect-square object-cover" onClick={() => onSelect(image)} />
             <div className="space-y-2 border-t border-stone-200 px-3 py-2.5 dark:border-stone-800">
                 {image.imageName ? <div className="truncate text-xs font-medium" title={`${image.imageName}_v${image.imageVersion || 1}`}>{image.imageName}_v{image.imageVersion || 1}</div> : null}
                 <div className="flex min-w-0 gap-x-2 gap-y-1 text-xs text-stone-500 dark:text-stone-400">
@@ -1051,33 +1051,28 @@ function ResultImageCard({
                     <span>{formatDuration(image.durationMs)}</span>
                 </div>
                 <div className="grid min-w-0 grid-cols-2 gap-2">
-                    <Tooltip title="直接编辑原始图片，另存为新版本，不调用 AI">
+                    <Tooltip title={uiText("直接编辑原始图片，另存为新版本，不调用 AI")}>
                         <Button className={RESULT_ACTION_BUTTON_CLASS} size="small" icon={<PenLine className="size-3.5" />} onClick={() => onEditOriginal(image, index)}>
-                            编辑原图
-                        </Button>
+                            {uiText("编辑原图")}</Button>
                     </Tooltip>
-                    <Tooltip title="添加到素材">
+                    <Tooltip title={uiText("添加到素材")}>
                         <Button className={RESULT_ACTION_BUTTON_CLASS} size="small" icon={<FolderPlus className="size-3.5" />} onClick={() => void onSaveAsset(image, index)}>
-                            添加到素材
-                        </Button>
+                            {uiText("添加到素材")}</Button>
                     </Tooltip>
-                    <Tooltip title="加入参考图">
+                    <Tooltip title={uiText("加入参考图")}>
                         <Button className={RESULT_ACTION_BUTTON_CLASS} size="small" icon={<PenLine className="size-3.5" />} onClick={() => void onEdit(image, index)}>
-                            加入参考图
-                        </Button>
+                            {uiText("加入参考图")}</Button>
                     </Tooltip>
-                    <Tooltip title="下载">
+                    <Tooltip title={uiText("下载")}>
                         <Button className={RESULT_ACTION_BUTTON_CLASS} size="small" icon={<Download className="size-3.5" />} onClick={() => onDownload(image, index)}>
-                            下载
-                        </Button>
+                            {uiText("下载")}</Button>
                     </Tooltip>
-                    <Tooltip title="保存为个人提示词模板">
+                    <Tooltip title={uiText("保存为个人提示词模板")}>
                         <Button className={RESULT_ACTION_BUTTON_CLASS} size="small" icon={<BookmarkPlus className="size-3.5" />} onClick={() => void onSavePrompt(image)}>
-                            存为提示词
-                        </Button>
+                            {uiText("存为提示词")}</Button>
                     </Tooltip>
-                    {onShareDesign && <Tooltip title="复用或保存本人私有原图，再核对公开内容；不会自动发布">
-                        <Button className={RESULT_ACTION_BUTTON_CLASS} size="small" icon={<Share2 className="size-3.5" />} loading={sharingDesign} onClick={() => void onShareDesign(image, index)}>分享到灵感库</Button>
+                    {onShareDesign && <Tooltip title={uiText("复用或保存本人私有原图，再核对公开内容；不会自动发布")}>
+                        <Button className={RESULT_ACTION_BUTTON_CLASS} size="small" icon={<Share2 className="size-3.5" />} loading={sharingDesign} onClick={() => void onShareDesign(image, index)}>{uiText("分享到灵感库")}</Button>
                     </Tooltip>}
                 </div>
             </div>
@@ -1086,6 +1081,7 @@ function ResultImageCard({
 }
 
 function PendingImageCard() {
+    useUiText();
     return (
         <div className="relative aspect-square overflow-hidden rounded-lg border border-dashed border-stone-300 bg-stone-50 dark:border-stone-700 dark:bg-stone-900">
             <div
@@ -1097,24 +1093,25 @@ function PendingImageCard() {
             />
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-stone-500 dark:text-stone-400">
                 <LoaderCircle className="size-6 animate-spin" />
-                <span>生成中</span>
+                <span>{uiText("生成中")}</span>
             </div>
         </div>
     );
 }
 
 function FailedImageCard({ error, recovery, disabled, onRetry }: { error: string; recovery?: boolean; disabled?: boolean; onRetry: () => void }) {
+    useUiText();
     return (
         <div className="overflow-hidden rounded-lg border border-red-200 bg-red-50 dark:border-red-950 dark:bg-red-950/20">
             <div className="flex aspect-square flex-col items-center justify-center gap-3 p-5 text-center">
-                <div className="text-sm font-medium text-red-600 dark:text-red-300">{recovery ? "原任务查询暂停" : "生成失败"}</div>
+                <div className="text-sm font-medium text-red-600 dark:text-red-300">{recovery ? uiText("原任务查询暂停") : uiText("生成失败")}</div>
                 <Typography.Paragraph ellipsis={{ rows: 4 }} className="!mb-0 !text-xs !text-red-500 dark:!text-red-300">
-                    {error}
+                    {uiText(error || "")}
                 </Typography.Paragraph>
             </div>
             <div className="flex justify-end border-t border-red-200 p-3 dark:border-red-950">
                 <Button size="small" danger={!recovery} disabled={disabled} onClick={onRetry}>
-                    {recovery ? "继续查询原任务" : "按原参数重新生成"}
+                    {recovery ? uiText("继续查询原任务") : uiText("按原参数重新生成")}
                 </Button>
             </div>
         </div>
@@ -1144,6 +1141,7 @@ function LogPanel({
     onDeleteSelected: () => void;
     onPreviewLog: (log: GenerationLog) => void;
 }) {
+    useUiText();
     const allSelected = Boolean(logs.length) && selectedLogIds.length === logs.length;
     const toggleAll = () => onSelectedLogIdsChange(allSelected ? [] : logs.map((log) => log.id));
 
@@ -1151,20 +1149,18 @@ function LogPanel({
         <>
             <div className="mb-3 flex items-center justify-between gap-3">
                 <div>
-                    <h2 className="text-base font-semibold">生成记录</h2>
+                    <h2 className="text-base font-semibold">{uiText("生成记录")}</h2>
                 </div>
                 <Tag className="m-0">{logs.length}</Tag>
             </div>
             <div className="mb-4 flex flex-wrap gap-2">
                 <Button size="small" icon={<Plus className="size-3.5" />} onClick={onCreateSession}>
-                    新建
-                </Button>
+                    {uiText("新建")}</Button>
                 <Button size="small" icon={<CheckSquare className="size-3.5" />} disabled={!logs.length} onClick={toggleAll}>
-                    {allSelected ? "取消" : "全选"}
+                    {allSelected ? uiText("取消") : uiText("全选")}
                 </Button>
                 <Button size="small" danger icon={<Trash2 className="size-3.5" />} disabled={!selectedLogIds.length} onClick={onDeleteSelected}>
-                    删除
-                </Button>
+                    {uiText("删除")}</Button>
             </div>
             <div className="space-y-3">
                 {logs.map((log) => (
@@ -1177,10 +1173,10 @@ function LogPanel({
                         onClick={() => onPreviewLog(log)}
                     />
                 ))}
-                {!logs.length ? <div className="flex min-h-48 items-center justify-center rounded-lg border border-dashed border-stone-300 text-center text-sm text-stone-500 dark:border-stone-700">暂无生成记录</div> : null}
+                {!logs.length ? <div className="flex min-h-48 items-center justify-center rounded-lg border border-dashed border-stone-300 text-center text-sm text-stone-500 dark:border-stone-700">{uiText("暂无生成记录")}</div> : null}
                 {!!unclassifiedLogs.length && <details className="text-xs text-muted-foreground">
-                    <summary className="cursor-pointer py-2">未分类记录（{unclassifiedLogs.length}）</summary>
-                    <p className="mb-2">以下记录的原任务来源无法确认，保留查看，不自动归入当前板块。</p>
+                    <summary className="cursor-pointer py-2">{uiText("未分类记录（")}{unclassifiedLogs.length}）</summary>
+                    <p className="mb-2">{uiText("以下记录的原任务来源无法确认，保留查看，不自动归入当前板块。")}</p>
                     <div className="space-y-3">{unclassifiedLogs.map(log => <LogCard key={log.id} log={log} active={activeLogId === log.id} onClick={() => onPreviewLog(log)} />)}</div>
                 </details>}
             </div>
@@ -1189,6 +1185,7 @@ function LogPanel({
 }
 
 function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: GenerationLog; selected?: boolean; active: boolean; onSelectedChange?: (checked: boolean) => void; onClick: () => void }) {
+    useUiText();
     const thumbnails = log.images.slice(0, 4);
 
     return (
@@ -1214,16 +1211,16 @@ function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: Ge
                 <div className="grid justify-items-end gap-2">
                     <div className="flex gap-1">
                         <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none" color="blue">
-                            成功 {log.successCount ?? log.imageCount}
+                            {uiText("成功")}{log.successCount ?? log.imageCount}
                         </Tag>
                         {log.failCount ? (
                             <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none" color="red">
-                                失败 {log.failCount}
+                                {uiText("失败")}{log.failCount}
                             </Tag>
                         ) : null}
                     </div>
                     <div className="flex flex-wrap justify-end gap-1">
-                        <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none">{log.imageCount} 张</Tag>
+                        <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none">{log.imageCount} {uiText(" 张")}</Tag>
                         <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none" color="green">
                             {formatDuration(log.durationMs)}
                         </Tag>
@@ -1262,7 +1259,7 @@ function normalizeLog(log: Partial<GenerationLog>): GenerationLog {
         createdAt: log.createdAt || Date.now(),
         title: log.title || log.model || "未命名",
         prompt: log.prompt || log.title || "",
-        time: log.time || new Date().toLocaleString("zh-CN", { hour12: false }),
+        time: log.time || new Date().toLocaleString(getUiLocale(), { hour12: false }),
         model: log.model || config.imageModel || "",
         config,
         references,
@@ -1307,6 +1304,7 @@ function moveListItem<T>(items: T[], index: number, offset: number) {
 }
 
 function ReferenceOrderButtons({ index, total, onMove }: { index: number; total: number; onMove: (offset: number) => void }) {
+    useUiText();
     if (total <= 1) return null;
     return (
         <div className="absolute inset-x-1 bottom-1 flex justify-between">
@@ -1350,7 +1348,7 @@ function buildLog({
         createdAt: Date.now(),
         title: prompt.slice(0, 12) || "未命名",
         prompt,
-        time: new Date().toLocaleString("zh-CN", { hour12: false }),
+        time: new Date().toLocaleString(getUiLocale(), { hour12: false }),
         model,
         config: logConfig,
         references,

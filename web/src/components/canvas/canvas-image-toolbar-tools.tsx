@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { uiText } from "@/lib/i18n";
 import { Brush, Camera, Columns2, Copy, FileText, Grid2x2, History, Lock, LockOpen, Maximize2, PanelsTopLeft, PencilRuler, Scissors, Sparkles, Upload, ZoomIn, Workflow } from "lucide-react";
 
 import type { CanvasNodeData } from "@/types/canvas";
@@ -193,5 +194,5 @@ export function readImageQuickToolsConfig(value: unknown): ImageQuickToolsConfig
 }
 
 function resolveToolText(value: string | ((node: CanvasNodeData) => string), node: CanvasNodeData) {
-    return typeof value === "function" ? value(node) : value;
+    return uiText(typeof value === "function" ? value(node) : value);
 }

@@ -1,3 +1,4 @@
+import { uiText } from "@/lib/i18n";
 import { useCallback, useEffect, useLayoutEffect, useRef, type DragEvent } from "react";
 import type { CanvasNodeGraph } from "@/lib/canvas/canvas-node-copy";
 import type { canvasCutBlockReason } from "@/lib/canvas/canvas-system-clipboard";
@@ -40,7 +41,7 @@ export function useCanvasClipboardDrop(options: Options) {
                 pasteImages: files => latest.current.pasteImages(files),
                 pasteText: text => latest.current.pasteText(text),
             });
-        }).catch(() => { if (!disposed) latest.current.warning("剪贴板加载失败，请刷新后重试"); });
+        }).catch(() => { if (!disposed) latest.current.warning(uiText("剪贴板加载失败，请刷新后重试")); });
         return () => { disposed = true; unbind?.(); };
     }, []);
     return useCallback(async (event: DragEvent<HTMLDivElement>) => {
@@ -48,7 +49,7 @@ export function useCanvasClipboardDrop(options: Options) {
         const dropped = Array.from(event.dataTransfer.files);
         const files = dropped.filter(file => file.type.startsWith("image/") || file.type.startsWith("video/") || isCanvasAudioFile(file));
         const io = latest.current;
-        if (files.length !== dropped.length) io.warning("仅支持图片、视频和音频，其他文件已跳过");
+        if (files.length !== dropped.length) io.warning(uiText("仅支持图片、视频和音频，其他文件已跳过"));
         const point = io.screenToCanvas(event.clientX, event.clientY);
         const id = `canvas-import-${createClientId()}`;
         let failed = 0;

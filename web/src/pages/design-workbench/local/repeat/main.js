@@ -1,3 +1,5 @@
+import { uiText } from "@/lib/i18n";
+import { setWorkbenchText, watchWorkbenchUi } from "../ui-text.js";
 import { MODES, cmToPx, periodSize, validateExport, wrapPosition, latticeCopies, mirrorCellTransform, hitElement, previewSize } from "./geometry.mjs";
 import { createProjectSession, mountProjectBar } from "../project-session.js";
 
@@ -65,6 +67,7 @@ export function sanitizeProject(input) {
 
 export async function mountRepeat(root, services) {
     const { loadImage, readImageFile, downloadBlob, notify, signal } = services;
+    const refreshUi = watchWorkbenchUi(root, signal);
     let state = defaultState();
     let selectedId = null;
     let guides = true;
@@ -78,41 +81,41 @@ export async function mountRepeat(root, services) {
     root.innerHTML = `
     <div class="workspace repeat-workspace" data-testid="repeat-workspace">
       <aside class="panel repeat-left"><div class="panel-body">
-        <div class="repeat-intro"><div class="repeat-kicker">花型设计 / 02</div><h2>让灵感<br>自然重复。</h2><p class="hint">拖动花叶，跨边自动衔接。<br>本地几何计算，不使用人工智能。</p></div>
-        <div class="repeat-mode" aria-label="重复方式">${Object.entries(MODES)
-            .map(([key, label]) => `<button type="button" data-mode="${key}" data-testid="repeat-mode-${key}" aria-pressed="${key === state.mode}">${label}</button>`)
+        <div class="repeat-intro"><div class="repeat-kicker"><span data-ui-text="花型设计 / 02">花型设计 / 02</span></div><h2><span data-ui-text="让灵感">让灵感</span><br><span data-ui-text="自然重复。">自然重复。</span></h2><p class="hint"><span data-ui-text="拖动花叶，跨边自动衔接。">拖动花叶，跨边自动衔接。</span><br><span data-ui-text="本地几何计算，不使用人工智能。">本地几何计算，不使用人工智能。</span></p></div>
+        <div class="repeat-mode" aria-label="重复方式" data-ui-aria-label="重复方式">${Object.entries(MODES)
+            .map(([key, label]) => `<button type="button" data-mode="${key}" data-testid="repeat-mode-${key}" aria-pressed="${key === state.mode}" data-ui-text="${label}">${uiText(label)}</button>`)
             .join("")}</div>
-        <section><div class="section-title">设计单元</div>
-          <div class="repeat-grid2"><label class="field"><span>宽度 / 厘米</span><input data-setting="widthCm" data-testid="repeat-width" type="number" min="1" max="60" step=".1" value="10"></label><label class="field"><span>高度 / 厘米</span><input data-setting="heightCm" data-testid="repeat-height" type="number" min="1" max="60" step=".1" value="10"></label></div>
-          <label class="field"><span>输出分辨率 / DPI</span><select data-setting="dpi" data-testid="repeat-dpi"><option>72</option><option selected>150</option><option>300</option><option>600</option></select></label>
+        <section><div class="section-title"><span data-ui-text="设计单元">设计单元</span></div>
+          <div class="repeat-grid2"><label class="field"><span><span data-ui-text="宽度 / 厘米">宽度 / 厘米</span></span><input data-setting="widthCm" data-testid="repeat-width" type="number" min="1" max="60" step=".1" value="10"></label><label class="field"><span><span data-ui-text="高度 / 厘米">高度 / 厘米</span></span><input data-setting="heightCm" data-testid="repeat-height" type="number" min="1" max="60" step=".1" value="10"></label></div>
+          <label class="field"><span><span data-ui-text="输出分辨率 / DPI">输出分辨率 / DPI</span></span><select data-setting="dpi" data-testid="repeat-dpi"><option>72</option><option selected>150</option><option>300</option><option>600</option></select></label>
           <div class="hint mono" data-role="unit-pixels"></div>
-          <div class="repeat-color"><input data-setting="background" type="color" value="#f6f0df" aria-label="背景颜色"><span>底布颜色</span></div>
-          <label class="repeat-check"><input data-setting="transparent" data-testid="repeat-transparent" type="checkbox">透明底色</label>
+          <div class="repeat-color"><input data-setting="background" type="color" value="#f6f0df" aria-label="背景颜色" data-ui-aria-label="背景颜色"><span><span data-ui-text="底布颜色">底布颜色</span></span></div>
+          <label class="repeat-check"><input data-setting="transparent" data-testid="repeat-transparent" type="checkbox"><span data-ui-text="透明底色">透明底色</span></label>
         </section>
-        <section><div class="section-title">添加图案元素</div><div class="repeat-assets"><button class="repeat-asset" data-add="flower" data-testid="repeat-add-flower"><img src="/design-workbench/assets/flower.svg" alt="">花朵 +</button><button class="repeat-asset" data-add="leaf"><img src="/design-workbench/assets/leaf.svg" alt="">叶枝 +</button></div>
-          <button class="btn ghost repeat-upload" data-action="upload" data-testid="repeat-upload">＋ 上传自己的元素</button><input class="repeat-file" data-role="image-file" type="file" accept="image/png,image/jpeg,image/webp">
-          ${services.pickImage ? '<button class="btn ghost repeat-upload" data-action="asset-element">从素材库添加元素</button>' : ""}
-          <p class="hint">PNG / JPG / WebP，≤ 15MB。<br>建议使用透明 PNG；不会自动抠图。</p>
-          <div class="repeat-item-count" data-role="item-count"></div><div class="repeat-layer-list" data-role="layers" aria-label="图案元素"></div>
+        <section><div class="section-title"><span data-ui-text="添加图案元素">添加图案元素</span></div><div class="repeat-assets"><button class="repeat-asset" data-add="flower" data-testid="repeat-add-flower"><img src="/design-workbench/assets/flower.svg" alt=""><span data-ui-text="花朵 +">花朵 +</span></button><button class="repeat-asset" data-add="leaf"><img src="/design-workbench/assets/leaf.svg" alt=""><span data-ui-text="叶枝 +">叶枝 +</span></button></div>
+          <button class="btn ghost repeat-upload" data-action="upload" data-testid="repeat-upload"><span data-ui-text="＋ 上传自己的元素">＋ 上传自己的元素</span></button><input class="repeat-file" data-role="image-file" type="file" accept="image/png,image/jpeg,image/webp">
+          ${services.pickImage ? "<button class=\"btn ghost repeat-upload\" data-action=\"asset-element\"><span data-ui-text=\"从素材库添加元素\">从素材库添加元素</span></button>" : ""}
+          <p class="hint">PNG / JPG / WebP，≤ 15MB。<br><span data-ui-text="建议使用透明 PNG；不会自动抠图。">建议使用透明 PNG；不会自动抠图。</span></p>
+          <div class="repeat-item-count" data-role="item-count"></div><div class="repeat-layer-list" data-role="layers" aria-label="图案元素" data-ui-aria-label="图案元素"></div>
         </section>
       </div></aside>
-      <section class="repeat-stage" aria-label="花型编辑器">
-        <div class="stage-toolbar"><div><div class="repeat-stage-title">设计单元 · <span data-role="mode-label">半落</span></div><div class="repeat-stage-sub">拖动任意副本，编辑同一个元素</div></div><label class="repeat-check repeat-guide-legend"><input data-role="guides" type="checkbox" checked>参考线</label></div>
-        <div class="repeat-editor-wrap"><canvas class="repeat-editor-canvas" data-testid="repeat-canvas" tabindex="0" aria-label="可拖动的花型设计单元。方向键微移，Delete 删除所选图案。"></canvas></div>
-        <div class="repeat-stage-footer"><span data-role="unit-label">10 × 10 厘米</span><span>虚线为参考线，不进入导出</span></div>
-        <div class="repeat-selection"><div class="repeat-selection-head"><span data-role="selection-name">点击花叶开始编辑</span><div class="repeat-inline-actions"><button class="btn ghost" data-action="duplicate" data-testid="repeat-duplicate" disabled>复制</button><button class="btn ghost" data-action="delete" data-testid="repeat-delete" disabled>删除</button></div></div>
-          <div class="repeat-grid2"><label class="field"><span>元素宽度 <b data-role="size-label">—</b></span><input data-role="size" data-testid="repeat-size" type="range" min=".05" max="1.2" step=".01" value=".3" disabled></label><label class="field"><span>旋转 <b data-role="angle-label">—</b></span><input data-role="angle" data-testid="repeat-angle" type="range" min="-180" max="180" step="1" value="0" disabled></label></div>
-          <div class="hint">方向键微移 · 换挡键加速 · 删除键删除 · 退出键取消选择</div>
+      <section class="repeat-stage" aria-label="花型编辑器" data-ui-aria-label="花型编辑器">
+        <div class="stage-toolbar"><div><div class="repeat-stage-title"><span data-ui-text="设计单元 · ">设计单元 · </span><span data-role="mode-label"><span data-ui-text="半落">半落</span></span></div><div class="repeat-stage-sub"><span data-ui-text="拖动任意副本，编辑同一个元素">拖动任意副本，编辑同一个元素</span></div></div><label class="repeat-check repeat-guide-legend"><input data-role="guides" type="checkbox" checked><span data-ui-text="参考线">参考线</span></label></div>
+        <div class="repeat-editor-wrap"><canvas class="repeat-editor-canvas" data-testid="repeat-canvas" tabindex="0" aria-label="可拖动的花型设计单元。方向键微移，Delete 删除所选图案。" data-ui-aria-label="可拖动的花型设计单元。方向键微移，Delete 删除所选图案。"></canvas></div>
+        <div class="repeat-stage-footer"><span data-role="unit-label"><span data-ui-text="10 × 10 厘米">10 × 10 厘米</span></span><span><span data-ui-text="虚线为参考线，不进入导出">虚线为参考线，不进入导出</span></span></div>
+        <div class="repeat-selection"><div class="repeat-selection-head"><span data-role="selection-name"><span data-ui-text="点击花叶开始编辑">点击花叶开始编辑</span></span><div class="repeat-inline-actions"><button class="btn ghost" data-action="duplicate" data-testid="repeat-duplicate" disabled><span data-ui-text="复制">复制</span></button><button class="btn ghost" data-action="delete" data-testid="repeat-delete" disabled><span data-ui-text="删除">删除</span></button></div></div>
+          <div class="repeat-grid2"><label class="field"><span><span data-ui-text="元素宽度 ">元素宽度 </span><b data-role="size-label">—</b></span><input data-role="size" data-testid="repeat-size" type="range" min=".05" max="1.2" step=".01" value=".3" disabled></label><label class="field"><span><span data-ui-text="旋转 ">旋转 </span><b data-role="angle-label">—</b></span><input data-role="angle" data-testid="repeat-angle" type="range" min="-180" max="180" step="1" value="0" disabled></label></div>
+          <div class="hint"><span data-ui-text="方向键微移 · 换挡键加速 · 删除键删除 · 退出键取消选择">方向键微移 · 换挡键加速 · 删除键删除 · 退出键取消选择</span></div>
         </div>
       </section>
       <aside class="panel repeat-right"><div class="panel-body">
-        <section class="repeat-preview-group"><div class="repeat-kicker">实时铺排</div><h2>连续效果</h2><div class="hint">3 × 3 设计单元 · 实时预览</div><div class="repeat-preview-box"><canvas class="repeat-preview-canvas" data-testid="repeat-preview" aria-label="3乘3花型重复预览"></canvas></div><p class="repeat-period-note" data-role="period-note"></p></section>
-        <section class="repeat-export-group"><div class="section-title">导出可用文件</div><div class="repeat-export-summary"><span>真实无缝周期 / PNG</span><strong class="mono" data-role="export-pixels"></strong><span data-role="export-cm"></span></div>
-          <button class="btn primary" data-action="export-unit" data-testid="repeat-export-unit">↓ 导出无缝周期 PNG</button><button class="btn ghost" data-action="export-preview" data-testid="repeat-export-preview">↓ 导出 3 × 3 预览 PNG</button>
-          ${services.saveAsset ? '<button class="btn" data-action="save-asset">保存无缝周期到素材库</button>' : ""}
-          <div class="repeat-warning" data-role="limit-warning"></div><div class="hint" data-role="preview-size"></div><p class="hint">PNG 不嵌入 DPI 元数据。物理尺寸、DPI 与重复方式记录在项目 JSON 中。</p>
+        <section class="repeat-preview-group"><div class="repeat-kicker"><span data-ui-text="实时铺排">实时铺排</span></div><h2><span data-ui-text="连续效果">连续效果</span></h2><div class="hint"><span data-ui-text="3 × 3 设计单元 · 实时预览">3 × 3 设计单元 · 实时预览</span></div><div class="repeat-preview-box"><canvas class="repeat-preview-canvas" data-testid="repeat-preview" aria-label="3乘3花型重复预览" data-ui-aria-label="3乘3花型重复预览"></canvas></div><p class="repeat-period-note" data-role="period-note"></p></section>
+        <section class="repeat-export-group"><div class="section-title"><span data-ui-text="导出可用文件">导出可用文件</span></div><div class="repeat-export-summary"><span><span data-ui-text="真实无缝周期 / PNG">真实无缝周期 / PNG</span></span><strong class="mono" data-role="export-pixels"></strong><span data-role="export-cm"></span></div>
+          <button class="btn primary" data-action="export-unit" data-testid="repeat-export-unit"><span data-ui-text="↓ 导出无缝周期 PNG">↓ 导出无缝周期 PNG</span></button><button class="btn ghost" data-action="export-preview" data-testid="repeat-export-preview"><span data-ui-text="↓ 导出 3 × 3 预览 PNG">↓ 导出 3 × 3 预览 PNG</span></button>
+          ${services.saveAsset ? "<button class=\"btn\" data-action=\"save-asset\"><span data-ui-text=\"保存无缝周期到素材库\">保存无缝周期到素材库</span></button>" : ""}
+          <div class="repeat-warning" data-role="limit-warning"></div><div class="hint" data-role="preview-size"></div><p class="hint"><span data-ui-text="PNG 不嵌入 DPI 元数据。物理尺寸、DPI 与重复方式记录在项目 JSON 中。">PNG 不嵌入 DPI 元数据。物理尺寸、DPI 与重复方式记录在项目 JSON 中。</span></p>
         </section>
-        <section class="repeat-save-group"><hr class="repeat-separator"><div class="section-title">保留这次灵感</div><button class="btn ghost" data-action="save" data-testid="repeat-save">保存到当前账号</button><button class="btn ghost" data-action="restore" data-testid="repeat-restore">打开本地存档</button><div class="repeat-grid2"><button class="btn ghost" data-action="export-json" data-testid="repeat-export-json">导出 JSON</button><button class="btn ghost" data-action="import-json">打开 JSON</button></div><input class="repeat-file" data-role="json-file" type="file" accept="application/json,.json"><div class="repeat-status" data-role="status" role="status" aria-live="polite">当前账号的浏览器分区保存，不上传服务器。</div></section>
+        <section class="repeat-save-group"><hr class="repeat-separator"><div class="section-title"><span data-ui-text="保留这次灵感">保留这次灵感</span></div><button class="btn ghost" data-action="save" data-testid="repeat-save"><span data-ui-text="保存到当前账号">保存到当前账号</span></button><button class="btn ghost" data-action="restore" data-testid="repeat-restore"><span data-ui-text="打开本地存档">打开本地存档</span></button><div class="repeat-grid2"><button class="btn ghost" data-action="export-json" data-testid="repeat-export-json"><span data-ui-text="导出 JSON">导出 JSON</span></button><button class="btn ghost" data-action="import-json"><span data-ui-text="打开 JSON">打开 JSON</span></button></div><input class="repeat-file" data-role="json-file" type="file" accept="application/json,.json"><div class="repeat-status" data-role="status" role="status" aria-live="polite"><span data-ui-text="当前账号的浏览器分区保存，不上传服务器。">当前账号的浏览器分区保存，不上传服务器。</span></div></section>
       </div></aside>
     </div>`;
 
@@ -140,9 +143,10 @@ export async function mountRepeat(root, services) {
         onChange: (view) => updateProjects(view),
     });
     updateProjects = mountProjectBar(root, projects);
+    refreshUi();
     function status(message, error = false) {
         if (disposed) return;
-        $('[data-role="status"]').textContent = message;
+        setWorkbenchText($('[data-role="status"]'), message);
         $('[data-role="status"]').dataset.error = String(error);
     }
     function fail(error) {
@@ -277,23 +281,22 @@ export async function mountRepeat(root, services) {
     }
     function syncDetails() {
         const { width, height, period, preview } = dimensions();
-        $('[data-role="unit-pixels"]').textContent = `${width} × ${height} 像素 / 设计单元`;
-        $('[data-role="unit-label"]').textContent = `${state.widthCm} × ${state.heightCm} 厘米 · ${width} × ${height} 像素`;
-        $('[data-role="mode-label"]').textContent = MODES[state.mode];
-        $('[data-role="export-pixels"]').textContent = `${period.width} × ${period.height} 像素`;
+        setWorkbenchText($('[data-role="unit-pixels"]'), () => uiText("{value1} × {value2} 像素 / 设计单元", { value1: width, value2: height }));
+        setWorkbenchText($('[data-role="unit-label"]'), () => uiText("{value1} × {value2} 厘米 · {value3} × {value4} 像素", { value1: state.widthCm, value2: state.heightCm, value3: width, value4: height }));
+        setWorkbenchText($('[data-role="mode-label"]'), () => uiText(MODES[state.mode]));
+        setWorkbenchText($('[data-role="export-pixels"]'), () => uiText("{value1} × {value2} 像素", { value1: period.width, value2: period.height }));
         const cm = periodSize(state.widthCm, state.heightCm, state.mode);
-        $('[data-role="export-cm"]').textContent = `目标 ${cm.width} × ${cm.height} 厘米 / ${state.dpi} DPI`;
-        $('[data-role="period-note"]').textContent =
-            state.mode === "half" ? "半落：相邻列下移 ½ 高度。矩形无缝周期 = 2 宽 × 1 高。" : state.mode === "mirror" ? "镜像：相邻行列交替翻转。无缝周期 = 2 宽 × 2 高。" : "直排：左右、上下同位衔接。无缝周期 = 1 个设计单元。";
-        $('[data-role="limit-warning"]').textContent = period.valid ? "" : "周期尺寸超过限制：每边 ≤ 4096 像素，面积 ≤ 1600 万像素。请减小厘米尺寸或 DPI 后导出。";
+        setWorkbenchText($('[data-role="export-cm"]'), () => uiText("目标 {value1} × {value2} 厘米 / {value3} DPI", { value1: cm.width, value2: cm.height, value3: state.dpi }));
+        setWorkbenchText($('[data-role="period-note"]'), () => state.mode === "half" ? uiText("半落：相邻列下移 ½ 高度。矩形无缝周期 = 2 宽 × 1 高。") : state.mode === "mirror" ? uiText("镜像：相邻行列交替翻转。无缝周期 = 2 宽 × 2 高。") : uiText("直排：左右、上下同位衔接。无缝周期 = 1 个设计单元。"));
+        setWorkbenchText($('[data-role="limit-warning"]'), () => period.valid ? "" : uiText("周期尺寸超过限制：每边 ≤ 4096 像素，面积 ≤ 1600 万像素。请减小厘米尺寸或 DPI 后导出。"));
         $('[data-action="export-unit"]').disabled = !period.valid || exporting;
         $('[data-action="export-preview"]').disabled = exporting;
         if ($('[data-action="save-asset"]')) $('[data-action="save-asset"]').disabled = !period.valid || exporting;
-        $('[data-role="preview-size"]').textContent = `3 × 3 预览导出 ${preview.width} × ${preview.height} 像素${preview.scale < 1 ? "（已缩小，最长边 1600 像素）" : "（原像素）"}；不是新增的无缝周期。`;
+        setWorkbenchText($('[data-role="preview-size"]'), () => uiText("3 × 3 预览导出 {value1} × {value2} 像素{value3}；不是新增的无缝周期。", { value1: preview.width, value2: preview.height, value3: preview.scale < 1 ? uiText("（已缩小，最长边 1600 像素）") : uiText("（原像素）") }));
         $$("[data-mode]").forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.mode === state.mode)));
         $('[data-setting="background"]').disabled = state.transparent;
         const selected = currentItem();
-        $('[data-role="selection-name"]').textContent = selected ? `正在编辑 · ${selected.name}` : "点击花叶开始编辑";
+        setWorkbenchText($('[data-role="selection-name"]'), () => selected ? uiText("正在编辑 · {value1}", { value1: selected.name }) : uiText("点击花叶开始编辑"));
         $('[data-role="size"]').disabled = !selected;
         $('[data-role="angle"]').disabled = !selected;
         $('[data-action="duplicate"]').disabled = !selected || state.elements.length >= 32;
@@ -307,7 +310,7 @@ export async function mountRepeat(root, services) {
             $('[data-role="size-label"]').textContent = "—";
             $('[data-role="angle-label"]').textContent = "—";
         }
-        $('[data-role="item-count"]').textContent = `${state.elements.length} / 32 个元素 · 点击编号选择`;
+        setWorkbenchText($('[data-role="item-count"]'), () => uiText("{value1} / 32 个元素 · 点击编号选择", { value1: state.elements.length }));
         const layers = $('[data-role="layers"]');
         layers.replaceChildren();
         state.elements.forEach((item, index) => {
@@ -383,7 +386,7 @@ export async function mountRepeat(root, services) {
                 status("无缝周期已保存到素材库。");
             } else {
                 downloadBlob(blob, filename);
-                status(`已导出 ${sizeLabel.replace("x", " × ")} 像素 ${kind === "unit" ? "无缝周期" : "3 × 3 预览"} PNG；不含 DPI 元数据。`);
+                status(() => uiText("已导出 {value1} 像素 {value2} PNG；不含 DPI 元数据。", { value1: sizeLabel.replace("x", " × "), value2: kind === "unit" ? uiText("无缝周期") : uiText("3 × 3 预览") }));
             }
         } finally {
             exporting = false;
@@ -452,7 +455,7 @@ export async function mountRepeat(root, services) {
                     notify("花型已保存到当前账号");
                     break;
                 case "restore": {
-                    root.querySelector("[aria-label='本地工程']").focus();
+                    root.querySelector(".workbench-project-bar select").focus();
                     status("使用顶部工程列表切换；当前更改会先保存。");
                     break;
                 }

@@ -1,3 +1,4 @@
+import { uiText } from "@/lib/i18n";
 import type { CanvasImageAngleParams } from "@/components/canvas/canvas-node-angle-dialog";
 import type { CanvasImageCropRect } from "@/components/canvas/canvas-node-crop-dialog";
 import type { CanvasImageMaskEditPayload } from "@/components/canvas/canvas-node-mask-edit-dialog";
@@ -62,15 +63,15 @@ export function useCanvasImageActions({ projectId, nodesRef, designProjectIdRef,
     const runLocalImageOperation = useCallback((key: string, label: string, task: (signal: AbortSignal) => Promise<void>) => {
         const messageKey = `canvas-image:${projectId}:${key}`;
         return imageOperationRunner.run(key, task, {
-            start: () => { void message.loading({ key: messageKey, content: `${label}中…`, duration: 0 }); },
-            error: (error) => { void message.error(`${label}失败：${error instanceof Error ? error.message : "请重试"}`); },
+            start: () => { void message.loading({ key: messageKey, content: uiText("{value1}中…", { value1: uiText(label) }), duration: 0 }); },
+            error: (error) => { void message.error(uiText("{value1}失败：{value2}", { value1: uiText(label), value2: error instanceof Error ? error.message : uiText("请重试") })); },
             finish: () => message.destroy(messageKey),
         });
     }, [imageOperationRunner, message, projectId]);
 
     const createImageReversePromptNodes = useCallback(
         async (node: CanvasNodeData) => {
-            if (node.type !== CanvasNodeType.Image || !(node.metadata?.content || node.metadata?.storageKey)) { message.warning("图片节点为空，无法反推提示词"); return; }
+            if (node.type !== CanvasNodeType.Image || !(node.metadata?.content || node.metadata?.storageKey)) { message.warning(uiText("图片节点为空，无法反推提示词")); return; }
             const key = `reverse-prompt:${node.id}`;
             if (generationDispatchLocksRef.current.has(key)) return;
             generationDispatchLocksRef.current.add(key);
@@ -80,7 +81,7 @@ export function useCanvasImageActions({ projectId, nodesRef, designProjectIdRef,
                 ...createCanvasNode(CanvasNodeType.Text, { x: node.position.x + node.width + 96 + NODE_DEFAULT_SIZE[CanvasNodeType.Text].width / 2, y: node.position.y + node.height / 2 }, { content: "正在分析图片并优化提示词…", status: NODE_STATUS_LOADING, fontSize: 14 }),
                 title: "反推提示词",
             };
-            if (!textNode) { generationDispatchLocksRef.current.delete(key); message.error("原反推结果节点已移除，请先恢复该节点"); return; }
+            if (!textNode) { generationDispatchLocksRef.current.delete(key); message.error(uiText("原反推结果节点已移除，请先恢复该节点")); return; }
             const ownerId = useUserStore.getState().user?.id;
             const current = () => designProjectIdRef.current === projectId && useUserStore.getState().user?.id === ownerId;
             if (!pending) setNodes(prev => [...prev.map(item => item.id === node.id ? { ...item, metadata: { ...item.metadata, reversePrompt: { requestId, outputNodeId: textNode.id } } } : item), textNode]);
@@ -200,7 +201,7 @@ export function useCanvasImageActions({ projectId, nodesRef, designProjectIdRef,
                 setSelectedNodeIds(new Set(childNodes.map((child) => child.id)));
                 setSelectedConnectionId(null);
                 setDialogNodeId(null);
-                message.success(`已切分为 ${childNodes.length} 个子节点`);
+                message.success(uiText("已切分为 {value1} 个子节点", { value1: childNodes.length }));
             });
         },
         [message, runLocalImageOperation],
@@ -220,7 +221,7 @@ export function useCanvasImageActions({ projectId, nodesRef, designProjectIdRef,
                 const baseConfig = { ...buildGenerationConfig(effectiveConfig, node, "image"), ...payload.imageSettings };
                 generationConfig = { ...baseConfig, ...canvasMaskEditImageSettings(baseConfig, sourceSize, imageModelProfile(selectedModel)), model: selectedModel, imageModel: selectedModel, count: "1" };
             } catch (error) {
-                message.error(error instanceof Error ? error.message : "无法确认原图与蒙版尺寸，尚未提交生成");
+                message.error(error instanceof Error ? error.message : uiText("无法确认原图与蒙版尺寸，尚未提交生成"));
                 return;
             }
             if (!isAiConfigReady(generationConfig, generationConfig.model)) {
@@ -228,15 +229,15 @@ export function useCanvasImageActions({ projectId, nodesRef, designProjectIdRef,
                 return;
             }
             if (!usage.configured) {
-                message.error("管理员尚未为该局部编辑模型启用价格或接口");
+                message.error(uiText("管理员尚未为该局部编辑模型启用价格或接口"));
                 return;
             }
             if (!user || user.status !== "active") {
-                message.error("当前设计师账号不可用");
+                message.error(uiText("当前设计师账号不可用"));
                 return;
             }
             if (deploymentFeatures.creditsEnabled && user.creditBalance < usage.credits) {
-                message.error(`额度不足：本次局部编辑需要 ${usage.credits} 积分，当前剩余 ${user.creditBalance} 积分`);
+                message.error(uiText("额度不足：本次局部编辑需要 {value1} 积分，当前剩余 {value2} 积分", { value1: usage.credits, value2: user.creditBalance }));
                 return;
             }
             const userPrompt = payload.prompt.trim();

@@ -1,3 +1,4 @@
+import { i18nHarness } from "./helpers/i18n-harness";
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -43,7 +44,7 @@ function toolbarHarness(theme: "light" | "dark" = "light", options: { flags?: Pa
         "@/stores/use-business-config-store": { useBusinessConfigStore: (selector: (state: unknown) => unknown) => selector({ tools, models: [], prices: [], status: "ready" }) },
     };
     const module = { exports: {} as any };
-    new Function("require", "module", "exports", code)((name: string) => Object.hasOwn(dependencies, name) ? dependencies[name] : requireModule(name), module, module.exports);
+    new Function("require", "module", "exports", code)((id: string) => id === "@/lib/i18n" ? i18nHarness : ((name: string) => Object.hasOwn(dependencies, name) ? dependencies[name] : requireModule(name))(id), module, module.exports);
     const handlers = Object.fromEntries(["onCompare", "onDesignTemplate", "onRestoreGeneration", "onKeep", "onLeave", "onInfo", "onEditText", "onDecreaseFont", "onIncreaseFont", "onToggleDialog", "onGenerateImage", "onUpload", "onDownload", "onSaveAsset", "onManualEdit", "onMaskEdit", "onCrop", "onSplit", "onUpscale", "onSuperResolve", "onAngle", "onViewImage", "onReversePrompt", "onRetry", "onToggleFreeResize", "onDelete"].map((name) => [name, (target?: CanvasNodeData) => calls.push({ name, node: target })]));
     const render = () => { index = 0; return module.exports.CanvasNodeHoverToolbar({ node, viewport: { x: 0, y: 0, k: 1 }, ...handlers }); };
     return { node, calls, render, exports: module.exports };

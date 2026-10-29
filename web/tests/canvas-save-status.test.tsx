@@ -1,3 +1,4 @@
+import { i18nHarness } from "./helpers/i18n-harness";
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -17,7 +18,7 @@ function statusView(cloudStatus: string, cloudError = "", compact = false) {
         useCanvasStore: (selector: (value: typeof state) => unknown) => selector(state),
         flushCanvasCloudPersistence: async () => { retries += 1; },
     } : requireModule(name);
-    new Function("require", "module", "exports", code)(load, module, module.exports);
+    new Function("require", "module", "exports", code)((id: string) => id === "@/lib/i18n" ? i18nHarness : (load)(id), module, module.exports);
     const element = module.exports.CanvasSaveStatus({ compact });
     return { element, html: renderToStaticMarkup(element), retries: () => retries };
 }

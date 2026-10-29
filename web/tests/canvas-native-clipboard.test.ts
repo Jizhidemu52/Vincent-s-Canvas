@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { uiText } from "@/lib/i18n";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
 
@@ -81,6 +82,7 @@ function harness(initialNodes: CanvasNodeData[] = [], initialConnections: Canvas
     const noop = () => {};
     const update = <T>(ref: { current: T }) => (value: T | ((current: T) => T)) => { ref.current = typeof value === "function" ? (value as (current: T) => T)(ref.current) : value; };
     const env = {
+        uiText,
         ...clipboard, ...nodeCopy, clipboardModule: clipboard, shouldIgnoreCanvasShortcut, matchCanvasActionShortcut, isCanvasAudioFile, fitNodeSize, getNodeSpec, CanvasNodeType, NODE_STATUS_SUCCESS: "success", assertCanvasImageUploadSize,
         window: target, navigator: {}, // HTTP/permissionless path: no navigator.clipboard exists.
         useCallback: (callback: unknown) => callback,

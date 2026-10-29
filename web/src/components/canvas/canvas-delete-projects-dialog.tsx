@@ -1,3 +1,4 @@
+import { useUiText } from "@/lib/i18n";
 import { useRef, useState } from "react";
 import { App, Button, Modal } from "antd";
 
@@ -7,6 +8,7 @@ import { useCanvasUiStore } from "@/stores/canvas/use-canvas-ui-store";
 import { mapCanvasAsyncPool } from "@/lib/canvas/canvas-async-pool";
 
 export function CanvasDeleteProjectsDialog() {
+    const t = useUiText();
     const { message } = App.useApp();
     const [deleting, setDeleting] = useState(false);
     const deleteLock = useRef(false);
@@ -28,13 +30,13 @@ export function CanvasDeleteProjectsDialog() {
             cleanupImages();
             removeSelectedIds(targets);
             setDeleteIds([]);
-        } catch (error) { void message.error(error instanceof Error ? error.message : "删除失败，请重试。"); }
+        } catch (error) { void message.error(error instanceof Error ? error.message : t("删除失败，请重试。")); }
         finally { deleteLock.current = false; setDeleting(false); }
     };
 
     return (
         <Modal
-            title="删除画布？"
+            title={t("删除画布？")}
             open={ids.length > 0}
             centered
             onCancel={() => { if (!deleting) setDeleteIds([]); }}
@@ -42,14 +44,13 @@ export function CanvasDeleteProjectsDialog() {
             maskClosable={!deleting}
             footer={
                 <>
-                    <Button disabled={deleting} onClick={() => setDeleteIds([])}>取消</Button>
+                    <Button disabled={deleting} onClick={() => setDeleteIds([])}>{t("取消")}</Button>
                     <Button loading={deleting} danger type="primary" onClick={() => void confirm()}>
-                        删除
-                    </Button>
+                        {t("删除")}</Button>
                 </>
             }
         >
-            <p className="text-sm text-stone-500">将删除 {ids.length} 个画布，里面的节点和连线也会一起移除。</p>
+            <p className="text-sm text-stone-500">{t("将删除")}{ids.length} {t(" 个画布，里面的节点和连线也会一起移除。")}</p>
         </Modal>
     );
 }

@@ -1,0 +1,35 @@
+.inchoice-brand {
+    display: inline-block;
+    flex-shrink: 0;
+    width: 180px;
+    max-width: 100%;
+    aspect-ratio: 5.2 / 1;
+    vertical-align: middle;
+    /* The split falls in the transparent gap after IN. Only CHOICE follows the theme. */
+    background: linear-gradient(to right, #ed8d02 21.5%, currentColor 21.5%);
+    -webkit-mask: url("/branding/inchoice-wordmark-v1.png") center / cover no-repeat;
+    mask: url("/branding/inchoice-wordmark-v1.png") center / cover no-repeat;
+    pointer-events: none;
+    user-select: none;
+}
+
+.inchoice-new-project {
+    flex: none;
+    min-height: 36px;
+    color: var(--background);
+}
+
+.inchoice-brand-english {
+    display: inline-block;
+    flex-shrink: 1;
+    max-width: 100%;
+    white-space: nowrap;
+    font-size: 16px;
+    font-weight: 650;
+    letter-spacing: -0.035em;
+    line-height: 1.5;
+    text-align: center;
+    pointer-events: none;
+    user-select: none;
+}
+.inchoice-brand-english > span { color: #d77e00; }

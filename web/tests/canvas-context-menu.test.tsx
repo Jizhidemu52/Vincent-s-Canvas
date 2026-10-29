@@ -1,3 +1,4 @@
+import { i18nHarness } from "./helpers/i18n-harness";
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -52,7 +53,7 @@ function createMenuHarness({ canGenerate = true, type = "canvas", theme = "light
         "@/stores/use-module-store": { useModuleEnabled: () => canGenerate },
     };
     const module = { exports: {} as Record<string, (props: any) => ReactElement<any>> };
-    new Function("require", "module", "exports", code)((name: string) => dependencies[name] || localRequire(name), module, module.exports);
+    new Function("require", "module", "exports", code)((id: string) => id === "@/lib/i18n" ? i18nHarness : ((name: string) => dependencies[name] || localRequire(name))(id), module, module.exports);
     const root = module.exports.CanvasNodeContextMenu!({ menu: { type, x: 795, y: 595, canvasPosition: { x: 50, y: 60 }, nodeId: "node", connectionId: "connection" }, targetCount, imageCount, onDownloadImages: () => events.push("download"), onClose: () => events.push("close"), onDuplicate: () => events.push("duplicate"), onDelete: () => events.push("delete"), onGenerate: () => events.push("generate"), onGroup: () => events.push("group"), onRename: () => events.push("rename"), ...(onUpload ? { onUpload: () => events.push("upload") } : {}) });
     const menuButtons = elements(root).filter(item => typeof item.type === "function" && item.type.name === "MenuButton");
     menuElement.children = menuButtons.map(() => new FakeElement());

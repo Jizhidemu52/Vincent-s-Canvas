@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { i18nHarness } from "./helpers/i18n-harness";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import React, { type ReactElement } from "react";
@@ -53,6 +54,7 @@ function harness(kind: "video" | "creative", resolveImage?: (key?: string, fallb
         return [states[index], (value: any) => { states[index] = typeof value === "function" ? value(states[index]) : value; }];
     };
     const dependencies: Record<string, unknown> = {
+        "@/lib/i18n": i18nHarness,
         react: { ...React, useState, useRef: (initial: unknown) => refs[refIndex++] ||= { current: initial }, useMemo: (factory: () => unknown) => factory(),
             useEffect(effect: () => (() => void) | void, deps?: readonly unknown[]) {
                 const index = effectIndex++, prior = effects[index];

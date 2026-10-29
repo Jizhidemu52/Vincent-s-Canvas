@@ -1,3 +1,4 @@
+import { uiText, useUiLocale } from "@/lib/i18n";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Moon, Sun } from "lucide-react";
 import { flushSync } from "react-dom";
@@ -82,6 +83,7 @@ function getThemeTransitionClipPaths(variant: TransitionVariant, cx: number, cy:
 }
 
 export const AnimatedThemeToggler = ({ children, className, duration = 400, variant, fromCenter = false, theme, targetTheme, onThemeChange, ...props }: AnimatedThemeTogglerProps) => {
+    useUiLocale();
     const shape = variant ?? "circle";
     const [isDark, setIsDark] = useState(false);
     const buttonRef = useRef<HTMLButtonElement>(null);
@@ -186,7 +188,7 @@ export const AnimatedThemeToggler = ({ children, className, duration = 400, vari
     return (
         <button type="button" ref={buttonRef} onClick={toggleTheme} className={cn(className)} {...props}>
             {children ?? (isDark ? <Sun /> : <Moon />)}
-            <span className="sr-only">{props["aria-label"] || "切换主题"}</span>
+            <span className="sr-only">{props["aria-label"] || uiText("切换主题")}</span>
         </button>
     );
 };

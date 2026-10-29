@@ -1,3 +1,4 @@
+import { uiText } from "@/lib/i18n";
 import { createClientId } from "@/lib/client-id";
 import type { Asset } from "@/stores/use-asset-store";
 import { CanvasNodeType, type CanvasNodeData, type ViewportTransform } from "@/types/canvas";
@@ -8,7 +9,7 @@ export function selectAssetRange(current: ReadonlySet<string>, orderedIds: strin
     if (shift && index >= 0 && anchorIndex >= 0) {
         for (const value of orderedIds.slice(Math.min(index, anchorIndex), Math.max(index, anchorIndex) + 1)) next.add(value);
     } else if (next.has(id)) next.delete(id); else next.add(id);
-    if (next.size > 50) throw new Error("每次最多选择 50 个素材");
+    if (next.size > 50) throw new Error(uiText("每次最多选择 50 个素材"));
     return next;
 }
 

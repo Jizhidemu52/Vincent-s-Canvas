@@ -1,3 +1,4 @@
+import { uiText, useUiText, getUiLocale } from "@/lib/i18n";
 import { ArrowRight, BookOpen, ImagePlus, Images, LayoutGrid, MessageSquareText, Plus, Video } from "lucide-react";
 import { useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -16,6 +17,7 @@ const entries = [
 ];
 
 export default function IndexPage() {
+    useUiText();
     const navigate = useNavigate();
     const hydrated = useCanvasStore(state => state.hydrated);
     const projects = useCanvasStore(state => state.projects);
@@ -33,29 +35,29 @@ export default function IndexPage() {
         <main className="wb-page home-page h-full overflow-y-auto">
             <div className="home-content">
                 <header className="wb-header">
-                    <div><p className="wb-eyebrow">VINCENT'S CANVAS / 创作工作台</p><h1 className="wb-title">让想法，开始成形。</h1><p className="wb-description">选一个工具开始，或回到上次的画布继续创作。</p></div>
-                    {canvasAvailable ? <button type="button" className="wb-primary-link" disabled={!hydrated} onClick={createAndEnter}><Plus size={18} />新建画布</button> : null}
+                    <div><p className="wb-eyebrow">{uiText("VINCENT'S CANVAS / 创作工作台")}</p><h1 className="wb-title">{uiText("让想法，开始成形。")}</h1><p className="wb-description">{uiText("选一个工具开始，或回到上次的画布继续创作。")}</p></div>
+                    {canvasAvailable ? <button type="button" className="wb-primary-link" disabled={!hydrated} onClick={createAndEnter}><Plus size={18} />{uiText("新建画布")}</button> : null}
                 </header>
-                <section className="home-tools" aria-label="选择创作工具">
+                <section className="home-tools" aria-label={uiText("选择创作工具")}>
                     {entries.filter(entry => isModuleAvailable(flags, tools, entry.flag)).map(({ path, icon: Icon, title, description, action }, index) => <Link to={path} className="wb-surface home-tool" key={path}>
                         <div className="home-tool-top"><Icon size={24} strokeWidth={1.4} /><span>0{index + 1}</span></div>
-                        <h2>{title}</h2><p>{description}</p><span className="home-tool-action">{action}<ArrowRight size={16} /></span>
+                        <h2>{uiText(title || "")}</h2><p>{uiText(description || "")}</p><span className="home-tool-action">{uiText(action || "")}<ArrowRight size={16} /></span>
                     </Link>)}
                 </section>
                 {canvasAvailable ? <section className="home-projects">
-                    <div className="wb-header"><div><p className="wb-eyebrow">继续创作</p><h2 className="wb-title">最近的画布</h2></div><Link to="/canvas" className="home-all-link">查看全部 {projects.length ? "(" + projects.length + ")" : ""}<ArrowRight size={16} /></Link></div>
-                    {!hydrated ? <div className="wb-grid" role="status" aria-label="正在读取画布">{Array.from({ length: 4 }, (_, index) => <div className="home-skeleton animate-pulse" key={index} />)}</div> : recent.length ? <div className="home-project-grid">
+                    <div className="wb-header"><div><p className="wb-eyebrow">{uiText("继续创作")}</p><h2 className="wb-title">{uiText("最近的画布")}</h2></div><Link to="/canvas" className="home-all-link">{uiText("查看全部 ")}{projects.length ? "(" + projects.length + ")" : ""}<ArrowRight size={16} /></Link></div>
+                    {!hydrated ? <div className="wb-grid" role="status" aria-label={uiText("正在读取画布")}>{Array.from({ length: 4 }, (_, index) => <div className="home-skeleton animate-pulse" key={index} />)}</div> : recent.length ? <div className="home-project-grid">
                         {recent.map(project => {
                             const preview = project.nodes.find(node => node.type === "image" && (node.metadata?.storageKey || node.metadata?.content));
                             return <Link to={"/canvas/" + project.id} className="wb-surface home-project" key={project.id}>
                                 <div className="home-project-preview">{preview ? <CanvasPersistedMediaPreview kind="image" url={preview.metadata?.content} storageKey={preview.metadata?.storageKey} alt={project.title} className="h-full w-full object-cover" /> : <LayoutGrid size={32} strokeWidth={1} />}</div>
-                                <div className="home-project-info"><h3>{project.title || "未命名画布"}</h3><p>{project.nodes.length} 个内容 · {new Date(project.updatedAt).toLocaleDateString("zh-CN", { month: "long", day: "numeric" })} 更新</p></div>
+                                <div className="home-project-info"><h3>{project.title || uiText("未命名画布")}</h3><p>{project.nodes.length} {uiText(" 个内容 · ")}{new Date(project.updatedAt).toLocaleDateString(getUiLocale(), { month: "long", day: "numeric" })} {uiText(" 更新")}</p></div>
                             </Link>;
                         })}
-                    </div> : <div className="wb-surface wb-empty"><LayoutGrid size={36} strokeWidth={1.2} /><strong>这里将保存你的创作</strong><p>新建画布后，把图片拖进来，输入你想修改的地方，就可以开始。</p><button className="wb-primary-link" onClick={createAndEnter}><Plus size={16} />创建第一个画布</button></div>}
-                    <p className="home-local-note">保存位置和同步状态以画布顶部提示为准。重要项目请及时导出备份，再换电脑或清理浏览器。</p>
+                    </div> : <div className="wb-surface wb-empty"><LayoutGrid size={36} strokeWidth={1.2} /><strong>{uiText("这里将保存你的创作")}</strong><p>{uiText("新建画布后，把图片拖进来，输入你想修改的地方，就可以开始。")}</p><button className="wb-primary-link" onClick={createAndEnter}><Plus size={16} />{uiText("创建第一个画布")}</button></div>}
+                    <p className="home-local-note">{uiText("保存位置和同步状态以画布顶部提示为准。重要项目请及时导出备份，再换电脑或清理浏览器。")}</p>
                 </section> : null}
-                {flags.prompts ? <Link to="/prompts" className="home-help"><BookOpen size={20} /><div><strong>还不知道怎么描述想法？</strong><span>打开提示词库，挑一个模板开始。</span></div><ArrowRight size={18} /></Link> : null}
+                {flags.prompts ? <Link to="/prompts" className="home-help"><BookOpen size={20} /><div><strong>{uiText("还不知道怎么描述想法？")}</strong><span>{uiText("打开提示词库，挑一个模板开始。")}</span></div><ArrowRight size={18} /></Link> : null}
             </div>
         </main>
     );

@@ -1,3 +1,4 @@
+import { useUiText } from "@/lib/i18n";
 import { lazy, memo, Suspense, useMemo } from "react";
 import { Button, Input, Modal } from "antd";
 import { useCanvasGraphStore } from "@/stores/canvas/canvas-graph-store";
@@ -49,6 +50,7 @@ type DialogActions = {
 export const CanvasDialogsHost = memo(function CanvasDialogsHost({ projectId, state, actions }: {
     projectId: string; state: ReturnType<typeof useCanvasDialogs>; actions: DialogActions;
 }) {
+    const t = useUiText();
     const { compareImageIds, setCompareImageIds, templateSourceId, setTemplateSourceId, clearConfirmOpen, setClearConfirmOpen, assetPickerOpen, setAssetPickerOpen, infoNodeId, setInfoNodeId, cropNodeId, setCropNodeId, manualEditNode, setManualEditNode, imageExport, setImageExport, imageDownload, setImageDownload, renameNode, setRenameNode, renameGroup, setRenameGroup, maskEditNodeId, setMaskEditNodeId, maskEditModel, setMaskEditModel, splitNodeId, setSplitNodeId, upscaleNodeId, setUpscaleNodeId, superResolveNodeId, setSuperResolveNodeId, angleNodeId, setAngleNodeId, previewNodeId, setPreviewNodeId } = state;
     const { applyDesignTemplate, saveGroupName, saveNodeName, saveManualImageEdit, cropImageNode, maskEditImageNode,
         splitImageNode, upscaleImageNode, generateAngleNode, clearCanvas, handleAssetInsert } = actions;
@@ -76,11 +78,11 @@ export const CanvasDialogsHost = memo(function CanvasDialogsHost({ projectId, st
                 {localToolsEnabled && templateSourceId !== undefined ? <Suspense fallback={null}><CanvasDesignTemplateDialog hasReference={Boolean(templateSourceId)} onApply={applyDesignTemplate} onClose={() => setTemplateSourceId(undefined)} /></Suspense> : null}
                 {renameGroup ? <Suspense fallback={null}><CanvasGroupNameDialog key={renameGroup.id} initialName={renameGroup.name} onClose={() => setRenameGroup(null)} onSave={saveGroupName} /></Suspense> : null}
 
-                <Modal title="重命名图片或节点" open={Boolean(renameNode)} onCancel={() => setRenameNode(null)} onOk={saveNodeName} okText="保存名称" cancelText="取消" okButtonProps={{ disabled: !renameNode?.name.trim() }} destroyOnHidden>
-                    <Input aria-label="图片或节点名称" autoFocus maxLength={120} value={renameNode?.name || ""} onChange={event => setRenameNode(current => current ? { ...current, name: event.target.value } : current)} onPressEnter={saveNodeName} />
-                    <p className="mt-2 text-xs" style={{ color: theme.node.muted }}>修改名称不改变图片内容或版本号。图片下载时会附带当前版本。</p>
+                <Modal title={t("重命名图片或节点")} open={Boolean(renameNode)} onCancel={() => setRenameNode(null)} onOk={saveNodeName} okText={t("保存名称")} cancelText={t("取消")} okButtonProps={{ disabled: !renameNode?.name.trim() }} destroyOnHidden>
+                    <Input aria-label={t("图片或节点名称")} autoFocus maxLength={120} value={renameNode?.name || ""} onChange={event => setRenameNode(current => current ? { ...current, name: event.target.value } : current)} onPressEnter={saveNodeName} />
+                    <p className="mt-2 text-xs" style={{ color: theme.node.muted }}>{t("修改名称不改变图片内容或版本号。图片下载时会附带当前版本。")}</p>
                 </Modal>
-                {imageExport ? <Suspense fallback={null}><CanvasImagePdfDialog nodes={imageExport.nodes} defaultSelectedIds={imageExport.ids} defaultMode={imageExport.mode} defaultName={currentProject?.title || "图片集"} onClose={() => setImageExport(null)} /></Suspense> : null}
+                {imageExport ? <Suspense fallback={null}><CanvasImagePdfDialog nodes={imageExport.nodes} defaultSelectedIds={imageExport.ids} defaultMode={imageExport.mode} defaultName={currentProject?.title || t("图片集")} onClose={() => setImageExport(null)} /></Suspense> : null}
                 {imageDownload?.projectId === projectId && nodes.some(node => node.id === imageDownload.node.id && node.metadata?.content === imageDownload.node.metadata?.content && node.metadata?.storageKey === imageDownload.node.metadata?.storageKey) ? <Suspense fallback={null}><CanvasImageDownloadDialog node={imageDownload.node} variants={imageDownload.variants} onClose={() => setImageDownload(null)} /></Suspense> : null}
 
                 {infoNode ? (
@@ -128,8 +130,8 @@ export const CanvasDialogsHost = memo(function CanvasDialogsHost({ projectId, st
                     </Suspense>
                 ) : null}
 
-                <Modal title="AI 超分" open={Boolean(superResolveNode?.metadata?.content)} centered footer={null} onCancel={() => setSuperResolveNodeId(null)}>
-                    <div className="py-8 text-center text-base font-medium">暂未实现</div>
+                <Modal title={t("AI 超分")} open={Boolean(superResolveNode?.metadata?.content)} centered footer={null} onCancel={() => setSuperResolveNodeId(null)}>
+                    <div className="py-8 text-center text-base font-medium">{t("暂未实现")}</div>
                 </Modal>
 
                 {angleEditEnabled && angleNode?.metadata?.content ? (
@@ -139,7 +141,7 @@ export const CanvasDialogsHost = memo(function CanvasDialogsHost({ projectId, st
                 ) : null}
 
                 <Modal
-                    title="图片详情"
+                    title={t("图片详情")}
                     open={Boolean(previewNode?.metadata?.content)}
                     centered
                     onCancel={() => setPreviewNodeId(null)}
@@ -147,24 +149,23 @@ export const CanvasDialogsHost = memo(function CanvasDialogsHost({ projectId, st
                     width="auto"
                     styles={{ body: { padding: 0, display: "flex", justifyContent: "center", alignItems: "center", maxHeight: "80vh" } }}
                 >
-                    {previewNode?.metadata?.content ? <img src={previewNode.metadata.content} alt={previewNode.title || "图片"} style={{ maxWidth: "100%", maxHeight: "80vh", objectFit: "contain" }} /> : null}
+                    {previewNode?.metadata?.content ? <img src={previewNode.metadata.content} alt={previewNode.title || t("图片")} style={{ maxWidth: "100%", maxHeight: "80vh", objectFit: "contain" }} /> : null}
                 </Modal>
 
                 <Modal
-                    title="清空画布？"
+                    title={t("清空画布？")}
                     open={clearConfirmOpen}
                     centered
                     onCancel={() => setClearConfirmOpen(false)}
                     footer={
                         <>
-                            <Button onClick={() => setClearConfirmOpen(false)}>取消</Button>
+                            <Button onClick={() => setClearConfirmOpen(false)}>{t("取消")}</Button>
                             <Button danger type="primary" onClick={clearCanvas}>
-                                清空
-                            </Button>
+                                {t("清空")}</Button>
                         </>
                     }
                 >
-                    <p className="text-sm opacity-60">这会删除当前画布上的所有节点和连线。</p>
+                    <p className="text-sm opacity-60">{t("这会删除当前画布上的所有节点和连线。")}</p>
                 </Modal>
 
                 {assetPickerOpen ? (

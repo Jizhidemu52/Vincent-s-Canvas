@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { i18nHarness } from "./helpers/i18n-harness";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import React, { type ReactElement } from "react";
@@ -17,6 +18,7 @@ function harness(compile: () => Promise<unknown>, query: (id: string) => Promise
     const applied: unknown[] = [], notices: string[] = [];
     let cursor = 0, ownerId = "employee-a";
     const dependencies: Record<string, unknown> = {
+        "@/lib/i18n": i18nHarness,
         react: { ...React,
             useRef: (initial: unknown) => { const index = cursor++; return state[index] ||= { current: initial }; },
             useState: (initial: unknown) => { const index = cursor++; if (!(index in state)) state[index] = initial; return [state[index], (value: unknown) => { state[index] = value; }]; },

@@ -1,3 +1,4 @@
+import { uiText } from "@/lib/i18n";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createWorkspaceStorage } from "@/lib/workspace-storage";
 import { nanoid } from "nanoid";
@@ -248,18 +249,18 @@ export function useSceneWorkspace(sceneId: string) {
                         if (revision === epoch.current) setImages(restoredImages);
                         const restoredSelection = await hydrateSelection(draft.selection, restoredImages);
                         if (revision === epoch.current) setSelection(restoredSelection);
-                    } catch (caught) { if (revision === epoch.current) setError(errorText(caught)); }
+                    } catch (caught) { if (revision === epoch.current) setError(uiText(errorText(caught))); }
                 }
                 if (pendingLogs[0]) {
                     const pendingLog = await hydrateLog(await history!.read(pendingLogs[0].id));
                     if (revision === epoch.current) {
                         setActiveLog(pendingLog); setResults(pendingLog.results); setSelectedPrompt(pendingLog.prompt); setRecoveredRequestId(pendingLog.id);
-                        setNotice("已恢复未结束的原请求。请查询原请求，不会自动重新生成或扣费；修改设计输入可开始新任务。");
+                        setNotice(uiText("已恢复未结束的原请求。请查询原请求，不会自动重新生成或扣费；修改设计输入可开始新任务。"));
                     }
                 }
                 if (revision === epoch.current) setDraftReady(true);
             } catch (caught) {
-                if (revision === epoch.current) setError(`本地草稿或记录读取失败：${errorText(caught)}`);
+                if (revision === epoch.current) setError(uiText("本地草稿或记录读取失败：{value1}", { value1: errorText(caught) }));
             } finally { if (revision === epoch.current) setLoadedScope(scope); }
         })();
         return () => { epoch.current += 1; };
@@ -269,7 +270,7 @@ export function useSceneWorkspace(sceneId: string) {
         if (!scope || loadedScope !== scope || !draftReady) return;
         const draft = serializeSceneDraft({ form, images, config, selection, systemPromptOverride });
         const write = (draftWrites.get(scope) || Promise.resolve()).then(() => storage.setItem(`draft:${scope}`, draft)).then(() => undefined).catch(caught => {
-            if (scopeRef.current === scope) setError(`草稿保存失败：${errorText(caught)}`);
+            if (scopeRef.current === scope) setError(uiText("草稿保存失败：{value1}", { value1: errorText(caught) }));
         });
         draftWrites.set(scope, write);
         void write.then(() => { if (draftWrites.get(scope) === write) draftWrites.delete(scope); });
@@ -285,7 +286,7 @@ export function useSceneWorkspace(sceneId: string) {
         const revision = epoch.current;
         const uploadRevision = ++inputEpoch.current[slot];
         if (!file) { if (slot === "primary") setSelection(null); setImages(current => { const next = { ...current }; delete next[slot]; return next; }); return; }
-        if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) { setError("请上传 PNG、JPG 或 WebP 图片"); return; }
+        if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) { setError(uiText("请上传 PNG、JPG 或 WebP 图片")); return; }
         setError(null); setUploadCount(value => value + 1);
         try {
             const stored = await uploadImage(file);
@@ -293,7 +294,7 @@ export function useSceneWorkspace(sceneId: string) {
             if (slot === "primary") setSelection(null);
             setImages(current => ({ ...current, [slot]: { id: nanoid(), name: file.name, originalFileName: file.name, type: stored.mimeType,
                 mimeType: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey, width: stored.width, height: stored.height, bytes: stored.bytes } }));
-        } catch (caught) { if (revision === epoch.current) setError(`图片保存失败：${errorText(caught)}`); }
+        } catch (caught) { if (revision === epoch.current) setError(uiText("图片保存失败：{value1}", { value1: errorText(caught) })); }
         finally { if (revision === epoch.current) setUploadCount(value => Math.max(0, value - 1)); }
     };
 
@@ -311,7 +312,7 @@ export function useSceneWorkspace(sceneId: string) {
         try {
             const page = await history.page(logs.length);
             if (revision === epoch.current) { setLogs(current => [...current, ...page.entries.filter(entry => !current.some(item => item.id === entry.id))]); setHistoryTotal(page.total); setHistoryHasMore(page.hasMore); }
-        } catch (caught) { if (revision === epoch.current) setError(`历史加载失败：${errorText(caught)}`); }
+        } catch (caught) { if (revision === epoch.current) setError(uiText("历史加载失败：{value1}", { value1: errorText(caught) })); }
         finally { if (revision === epoch.current) { historyLoadingRef.current = false; setHistoryLoading(false); } }
     };
 
@@ -331,7 +332,7 @@ export function useSceneWorkspace(sceneId: string) {
             const restored = await hydrateLog(await history!.read(log.id));
             if (revision !== epoch.current || viewRevision !== viewEpoch.current) return;
             setActiveLog(restored); setSelectedPrompt(restored.prompt); setResults(restored.results); setStartedAt(0);
-        } catch (caught) { if (revision === epoch.current && viewRevision === viewEpoch.current) setError(`结果读取失败：${errorText(caught)}；当前草稿未改变`); }
+        } catch (caught) { if (revision === epoch.current && viewRevision === viewEpoch.current) setError(uiText("结果读取失败：{value1}；当前草稿未改变", { value1: errorText(caught) })); }
         finally { if (revision === epoch.current && viewRevision === viewEpoch.current) setPreviewing(false); }
     };
 
@@ -363,7 +364,7 @@ export function useSceneWorkspace(sceneId: string) {
             setSystemPromptOverride(draft?.config.systemPrompt);
             setSelection(restoredSelection);
             setActiveLog(restored); setSelectedPrompt(log.prompt); setResults(restored.results); setStartedAt(0);
-        } catch (caught) { if (revision === epoch.current && viewRevision === viewEpoch.current) setError(`记录恢复失败：${errorText(caught)}`); }
+        } catch (caught) { if (revision === epoch.current && viewRevision === viewEpoch.current) setError(uiText("记录恢复失败：{value1}", { value1: errorText(caught) })); }
         finally { if (revision === epoch.current && viewRevision === viewEpoch.current) setRestoring(false); }
     };
 
@@ -394,21 +395,21 @@ export function useSceneWorkspace(sceneId: string) {
             if (revision === epoch.current) { setResults([result]); rememberLog(log); setActiveLog(log); }
             try {
                 await history!.save(serializeSceneLog(log));
-            } catch (caught) { if (revision === epoch.current) setError(`换色结果仍保留在页面，但本地记录保存失败：${errorText(caught)}`); }
+            } catch (caught) { if (revision === epoch.current) setError(uiText("换色结果仍保留在页面，但本地记录保存失败：{value1}", { value1: errorText(caught) })); }
         } finally { if (revision === epoch.current) setRunning(false); }
     };
 
     const [optimizing, setOptimizing] = useState(false);
     const generate = async () => {
-        if (validation || !user || !scope) { setError(validation || "当前账号不可用"); return; }
+        if (validation || !user || !scope) { setError(uiText(validation || "当前账号不可用")); return; }
         if (activeLog?.results.some(canQuerySceneResult) && sceneInputMatchesLog(activeLog, form, images, config, selection)) {
-            setError("相同输入已有未结束的原请求，请先查询原请求。修改设计输入后才会创建新任务。"); setRecoveredRequestId(activeLog.id); return;
+            setError(uiText("相同输入已有未结束的原请求，请先查询原请求。修改设计输入后才会创建新任务。")); setRecoveredRequestId(activeLog.id); return;
         }
         let prompt = form.description.trim() || form.change.trim();
         const promptInput = scenePromptInput(sceneId, form);
         let optimized = false;
         const release = workbenchSubmissions.acquire(`creative:${user.id}:${sceneId}`);
-        if (!release) { setError("图片任务正在处理，请勿重复提交"); return; }
+        if (!release) { setError(uiText("图片任务正在处理，请勿重复提交")); return; }
         const revision = epoch.current;
         try {
             for (const summary of await history!.pending()) {
@@ -416,11 +417,11 @@ export function useSceneWorkspace(sceneId: string) {
                 if (revision !== epoch.current) { release(); return; }
                 if (sceneInputMatchesLog(prior, form, images, config, selection)) {
                     const restored = await hydrateLog(prior);
-                    if (revision === epoch.current) { setActiveLog(restored); setResults(restored.results); setRecoveredRequestId(restored.id); setError("相同输入已有未结束的原请求，请先查询原请求。修改设计输入后才会创建新任务。"); }
+                    if (revision === epoch.current) { setActiveLog(restored); setResults(restored.results); setRecoveredRequestId(restored.id); setError(uiText("相同输入已有未结束的原请求，请先查询原请求。修改设计输入后才会创建新任务。")); }
                     release(); return;
                 }
             }
-        } catch (caught) { release(); if (revision === epoch.current) setError(`无法核对原请求，未提交新任务：${errorText(caught)}`); return; }
+        } catch (caught) { release(); if (revision === epoch.current) setError(uiText("无法核对原请求，未提交新任务：{value1}", { value1: errorText(caught) })); return; }
         const requestConfig = { ...config, count: "1" };
         const snapshot: SceneDraft = { form: cloneSceneForm(form), images: { ...images }, config: sceneParameters(config), selection };
         const pending: SceneResult[] = Array.from({ length: count }, () => ({ id: nanoid(), requestId: `${nanoid()}:0`, status: "pending" }));
@@ -478,20 +479,20 @@ export function useSceneWorkspace(sceneId: string) {
                 config: snapshot.config, selection: snapshot.selection, operation: "ai", inputArchiveVersion: 1, results: completed, images: successes, durationMs: performance.now() - start, successCount: successes.length, failCount: count - successes.length };
             if (revision === epoch.current) {
                 setResults(completed); rememberLog(log); setActiveLog(log);
-                if (!successes.length) setError(completed[0]?.error || "生成失败");
-                else if (storageWarnings.length) setError(storageWarnings.join("；"));
+                if (!successes.length) setError(uiText(completed[0]?.error || "生成失败"));
+                else if (storageWarnings.length) setError(uiText(storageWarnings.join("；")));
             }
             try {
                 await history!.save(serializeSceneLog(log));
-            } catch (caught) { if (revision === epoch.current) setError(`生成结果仍保留在页面，但本地记录保存失败：${errorText(caught)}`); }
-        } catch (caught) { if (revision === epoch.current) { setError(errorText(caught)); setResults(pending.map(item => ({ ...item, status: "failed", error: errorText(caught) }))); } }
+            } catch (caught) { if (revision === epoch.current) setError(uiText("生成结果仍保留在页面，但本地记录保存失败：{value1}", { value1: errorText(caught) })); }
+        } catch (caught) { if (revision === epoch.current) { setError(uiText(errorText(caught))); setResults(pending.map(item => ({ ...item, status: "failed", error: errorText(caught) }))); } }
         finally { release(); if (revision === epoch.current) { setRunning(false); setOptimizing(false); } }
     };
 
     const retryResult = async (result: SceneResult) => {
         if (!user || !history || !activeLog || running || loading || !toolEnabled || !canRetrySceneResult(result)) return;
         const release = workbenchSubmissions.acquire(`creative:${user.id}:${sceneId}`);
-        if (!release) { setError("当前场景正在处理任务，请勿重复提交"); return; }
+        if (!release) { setError(uiText("当前场景正在处理任务，请勿重复提交")); return; }
         const revision = epoch.current, originalId = activeLog.id, start = performance.now(), retryId = nanoid();
         const pending: SceneResult = { id: nanoid(), status: "pending", requestId: `${nanoid()}:0` };
         let submitted = false;
@@ -529,10 +530,10 @@ export function useSceneWorkspace(sceneId: string) {
             const log: SceneLog = { ...retryLog, results: [completed],
                 images: completed.image ? [completed.image] : [], successCount: completed.image ? 1 : 0, failCount: completed.image ? 0 : 1, durationMs: performance.now() - start,
                 retryOf: { logId: original.id, resultId: result.id, taskId: result.taskId! } };
-            if (revision === epoch.current) { setResults(log.results); setActiveLog(log); rememberLog(log); if (completed.error || warnings.length) setError(completed.error || warnings.join("；")); }
+            if (revision === epoch.current) { setResults(log.results); setActiveLog(log); rememberLog(log); if (completed.error || warnings.length) setError(uiText(completed.error || warnings.join("；"))); }
             try { await history.save(serializeSceneLog(log)); }
-            catch (caught) { if (revision === epoch.current) setError(`重试结果仍保留在页面，但本地记录保存失败：${errorText(caught)}`); }
-        } catch (caught) { if (revision === epoch.current) setError(`未提交重试：${errorText(caught)}`); }
+            catch (caught) { if (revision === epoch.current) setError(uiText("重试结果仍保留在页面，但本地记录保存失败：{value1}", { value1: errorText(caught) })); }
+        } catch (caught) { if (revision === epoch.current) setError(uiText("未提交重试：{value1}", { value1: errorText(caught) })); }
         finally { release(); if (revision === epoch.current) { setRunning(false); setOptimizing(false); } }
     };
 
@@ -569,13 +570,13 @@ export function useSceneWorkspace(sceneId: string) {
                 if (task.status === "success") {
                     if (!task.resultUrls[0]) throw new Error("原任务成功但未返回结果图片，请勿重新生成");
                     const snapshot = await restoreSnapshot(); assertCurrent();
-                    const completed = await storeSceneResult({ ...currentResult, taskId: task.id, failureKind: undefined, error: undefined, compilationId: undefined }, { id: `${task.id}:0`, dataUrl: task.resultUrls[0], sourceTaskId: task.id, prompt: patch.prompt, userInput: patch.userInput, optimized: patch.optimized }, 0, sceneId, snapshot, text => setNotice(text));
-                    await commit(completed, patch); setNotice("已找回原任务结果，没有重新生成或扣费。");
+                    const completed = await storeSceneResult({ ...currentResult, taskId: task.id, failureKind: undefined, error: undefined, compilationId: undefined }, { id: `${task.id}:0`, dataUrl: task.resultUrls[0], sourceTaskId: task.id, prompt: patch.prompt, userInput: patch.userInput, optimized: patch.optimized }, 0, sceneId, snapshot, text => setNotice(uiText(text)));
+                    await commit(completed, patch); setNotice(uiText("已找回原任务结果，没有重新生成或扣费。"));
                 } else if (task.status === "failed" || task.status === "cancelled") {
                     await commit({ id: currentResult.id, ...sceneFailure(new QueuedTaskFailedError(task), true, task.id, task.requestId) }, patch);
                 } else {
                     await commit({ ...currentResult, taskId: task.id, requestId: task.requestId, status: "pending", failureKind: "uncertain", compilationId: undefined, error: task.failureReason || "原图片任务仍在执行，可稍后查询；不会重新提交。" }, patch);
-                    setNotice("原图片任务尚未结束，本次仅查询了原任务。");
+                    setNotice(uiText("原图片任务尚未结束，本次仅查询了原任务。"));
                 }
                 return;
             }
@@ -602,13 +603,13 @@ export function useSceneWorkspace(sceneId: string) {
                     onSubmitted: async (ids: string[]) => { await commit({ ...currentResult!, taskId: ids[0], status: "pending" }); } };
                 const generated = restoredReferences.length ? await requestEdit(requestConfig, compilation.prompt, restoredReferences, undefined, options) : await requestGeneration(requestConfig, compilation.prompt, options);
                 assertCurrent();
-                const completed = await storeSceneResult({ ...currentResult!, failureKind: undefined, error: undefined, compilationId: undefined }, generated[0], 0, sceneId, snapshot, text => setNotice(text));
+                const completed = await storeSceneResult({ ...currentResult!, failureKind: undefined, error: undefined, compilationId: undefined }, generated[0], 0, sceneId, snapshot, text => setNotice(uiText(text)));
                 await commit(completed, { prompt: generated[0]?.prompt || compilation.prompt, userInput: generated[0]?.userInput || promptInput, optimized: generated[0]?.optimized ?? compilation.optimized });
             } catch (caught) {
                 assertCurrent();
                 await commit({ id: currentResult!.id, ...sceneFailure(caught, submitted, currentResult!.taskId, currentResult!.requestId) });
             }
-        } catch (caught) { if (revision === epoch.current) setError(errorText(caught)); }
+        } catch (caught) { if (revision === epoch.current) setError(uiText(errorText(caught))); }
         finally { release(); if (revision === epoch.current) { setRunning(false); setOptimizing(false); } }
     };
 
@@ -619,9 +620,9 @@ export function useSceneWorkspace(sceneId: string) {
         try {
             const value = await resultActions[action](image, activeLog);
             if (revision !== epoch.current) return;
-            if (action === "saveAsset") { setNotice("原图已保存到素材库。"); return; }
+            if (action === "saveAsset") { setNotice(uiText("原图已保存到素材库。")); return; }
             return value;
-        } catch (caught) { if (revision === epoch.current) setError(errorText(caught)); }
+        } catch (caught) { if (revision === epoch.current) setError(uiText(errorText(caught))); }
         finally { resultActionGate.current = false; if (revision === epoch.current) setResultActionBusy(false); }
     };
 
@@ -634,7 +635,7 @@ export function useSceneWorkspace(sceneId: string) {
             const blob = await response.blob();
             const node = imageCopyEditorNode({ ...image, title: image.name || `设计结果-${index + 1}`, mimeType: blob.type || image.mimeType });
             saveAs(blob, canvasImageDownloadFileName(node));
-        } catch (caught) { setError(errorText(caught)); }
+        } catch (caught) { setError(uiText(errorText(caught))); }
     };
 
     const updateForm: typeof setForm = (value) => { viewEpoch.current += 1; setRestoring(false); setPreviewing(false); setSelectedPrompt(null); setForm(value); };

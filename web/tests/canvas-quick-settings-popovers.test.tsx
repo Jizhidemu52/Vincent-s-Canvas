@@ -1,3 +1,4 @@
+import { i18nHarness } from "./helpers/i18n-harness";
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -5,13 +6,22 @@ import React, { type ComponentProps, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Dialog, Popover } from "radix-ui";
 import ts from "typescript";
-import { CanvasQuickQualityOptions, CanvasQuickRatioOptions, CanvasQuickSettingsPopovers } from "@/components/canvas/canvas-quick-settings-popovers";
+import { CanvasQuickSettingsPopovers } from "@/components/canvas/canvas-quick-settings-popovers";
 import { ImageSettingsPanel, imageSizeLabel } from "@/components/image-settings-panel";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { imageModelProfile, normalizeImageModelSettings } from "@/lib/image-model-settings";
 import { imageOptionFields } from "@/lib/image-advanced-settings";
 import { imageTaskParameters } from "@/services/api/image";
 import { defaultConfig, type AiConfig } from "@/stores/use-config-store";
+
+const { CanvasQuickQualityOptions, CanvasQuickRatioOptions } = (() => {
+    const url = new URL("../src/components/canvas/canvas-quick-settings-popovers.tsx", import.meta.url);
+    const localRequire = createRequire(url);
+    const code = ts.transpileModule(readFileSync(url, "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ESNext, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
+    const module = { exports: {} as typeof import("@/components/canvas/canvas-quick-settings-popovers") };
+    new Function("require", "module", "exports", code)((id: string) => id === "@/lib/i18n" ? i18nHarness : id.endsWith(".css") ? {} : localRequire(id), module, module.exports);
+    return module.exports;
+})();
 
 type Props = ComponentProps<typeof CanvasQuickSettingsPopovers>;
 type Profile = Props["profile"];
@@ -133,11 +143,11 @@ function componentModule(path: string) {
         useEffect(effect: () => void, dependencies: any[]) { const index = cursor++; const previous = slots[index]; if (!previous || dependencies.some((value, i) => value !== previous[i])) effects.push(effect); slots[index] = dependencies; },
     };
     const module = { exports: {} as any };
-    new Function("require", "module", "exports", code)((name: string) => name === "react" ? react
+    new Function("require", "module", "exports", code)((id: string) => id === "@/lib/i18n" ? i18nHarness : ((name: string) => name === "react" ? react
         : name === "radix-ui" ? { Dialog, Popover }
             : name === "@/components/image-settings-panel" ? { ImageSettingsPanel, imageSizeLabel }
                 : name === "@/lib/image-model-settings" ? { ...requireModule(name), useImageModelProfile: profile }
-                    : requireModule(name), module, module.exports);
+                    : requireModule(name))(id), module, module.exports);
     return { exports: module.exports, render<T>(render: (exports: any) => T) { cursor = 0; effects = []; const result = render(module.exports); effects.forEach(effect => effect()); return result; } };
 }
 

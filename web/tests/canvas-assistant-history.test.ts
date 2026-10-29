@@ -37,6 +37,16 @@ test("new uploads do not erase earlier original and result images", async () => 
     expect(result.references.every(item => item.id.startsWith("history-"))).toBe(true);
 });
 
+test("conversation catalog labels stay attached to frozen assets when current references are reordered", async () => {
+    const message = { ...current, references: [ref("second"), ref("first")] };
+    const labels = new Map([["feedback:first", "图2"], ["feedback:second", "图7"]]);
+    const result = await buildCanvasConversationHistory([], message, preview, [], labels);
+    const text = JSON.stringify(result.currentContent);
+    expect(text).toContain("消息 feedback · 图7 · second，referenceNodeIds 可显式使用 second");
+    expect(text).toContain("消息 feedback · 图2 · first，referenceNodeIds 可显式使用 first");
+    expect(images([{ role: "user", content: result.currentContent }])).toEqual([await preview(ref("second")), await preview(ref("first"))]);
+});
+
 test("current manual image labels follow their reordered inputs without counting text or canvas context", async () => {
     const manual = [ref("pattern"), { id: "notes", type: CanvasNodeType.Text, title: "要求", text: "保留版型" }, ref("base")];
     const message: CanvasAssistantMessage = { ...current, references: manual, contextReferences: [ref("snapshot")] };

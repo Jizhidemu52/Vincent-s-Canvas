@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { i18nHarness } from "./helpers/i18n-harness";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import React, { type ReactElement } from "react";
@@ -26,6 +27,7 @@ function settings(model: string, initialOptions: Record<string, string> = {}) {
     let cursor = 0;
     let config = { ...defaultConfig, model, size: profile.sizes[0] || "1024x1024", imageOptions: JSON.stringify(initialOptions) };
     const dependencies: Record<string, unknown> = {
+        "@/lib/i18n": i18nHarness,
         react: { ...React, useEffect() {}, useId: () => "spacious-settings", useState: (initial: unknown) => {
             const index = cursor++;
             if (!(index in states)) states[index] = initial;

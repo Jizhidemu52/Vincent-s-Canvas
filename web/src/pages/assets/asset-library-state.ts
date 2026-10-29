@@ -1,3 +1,4 @@
+import { uiText } from "@/lib/i18n";
 import type { Asset } from "@/stores/use-asset-store";
 import type { AssetListQuery, AssetProjection, ServerAssetPage } from "@/services/api/server-assets";
 
@@ -28,7 +29,7 @@ export async function uploadAssetBatch(jobs: AssetUploadJob[], upload: (job: Ass
         while (next < jobs.length) {
             const job = jobs[next++]!;
             try { await upload(job); succeeded++; }
-            catch (error) { failed.push({ ...job, error: error instanceof Error ? error.message : "上传失败" }); }
+            catch (error) { failed.push({ ...job, error: error instanceof Error ? error.message : uiText("上传失败") }); }
             onProgress(++completed, jobs.length);
         }
     }));

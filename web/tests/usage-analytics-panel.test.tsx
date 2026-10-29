@@ -1,3 +1,4 @@
+import { i18nHarness } from "./helpers/i18n-harness";
 import { expect, test } from "bun:test";
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
@@ -27,6 +28,7 @@ function harness(options: { role?: string; analyze?: (body: unknown, signal: Abo
     const userState = { user: { id: "admin-1", role: options.role || "super_admin" } };
     const equal = (a?: React.DependencyList, b?: React.DependencyList) => Boolean(a && b && a.length === b.length && a.every((item, index) => Object.is(item, b[index])));
     const dependencies: Record<string, any> = {
+        "@/lib/i18n": i18nHarness,
         react: { ...React,
             useState: (initial: any) => { const index = cursor++; if (!(index in state)) state[index] = typeof initial === "function" ? initial() : initial; return [state[index], (next: any) => { state[index] = typeof next === "function" ? next(state[index]) : next; }]; },
             useRef: (initial: any) => { const index = cursor++; return state[index] ||= { current: initial }; },

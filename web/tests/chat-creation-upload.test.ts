@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
+import { i18nHarness } from "./helpers/i18n-harness";
 
 import { parseChatAttachment, type ParsedChatAttachment } from "../src/lib/chat-attachments";
 
@@ -45,6 +46,7 @@ function uploadHarness(legacyMode: Mode) {
     const compressionReads: File[] = [];
     function renderHandlers() {
         const bindings = {
+            ...i18nHarness,
             mode: legacyMode,
             sessionsReady: true,
             readingAttachments: reading,

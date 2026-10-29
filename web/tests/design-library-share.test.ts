@@ -1,3 +1,4 @@
+import { i18nHarness } from "./helpers/i18n-harness";
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
@@ -16,6 +17,7 @@ function harness(options: { asset?: Partial<ServerAsset>; read?: () => Promise<v
     let uploadedSource = options.uploadedSource;
     const uploads: Array<{ file: File; metadata: Record<string, unknown>; options: Record<string, unknown> }> = [];
     const dependencies: Record<string, unknown> = {
+        "@/lib/i18n": i18nHarness,
         "@/lib/client-id": { createClientId: () => "stable-upload" },
         "@/services/api/design-library": { requireDesignLibraryOwner: (_admin: boolean, expected: string) => { if (owner !== expected) throw new Error("identity changed"); return owner; } },
         "@/services/api/server-assets": {

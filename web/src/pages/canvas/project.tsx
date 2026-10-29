@@ -1,3 +1,4 @@
+import { useUiText, uiText } from "@/lib/i18n";
 import { ChevronDown } from "lucide-react";
 import type { CSSProperties, ChangeEvent as ReactChangeEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -162,6 +163,7 @@ const NODE_STATUS_ERROR = "error" as const;
 const isAiConfigReady = (..._args: unknown[]) => true;
 
 export default function CanvasPage() {
+    const t = useUiText();
     const [mounted, setMounted] = useState(false);
     const { id: graphScopeId } = useParams<{ id: string }>();
     const canvasThemeKey = useThemeStore((state) => state.theme);
@@ -177,10 +179,11 @@ export default function CanvasPage() {
 }
 
 function CanvasRefreshShell() {
+    const t = useUiText();
     const themeKey = useThemeStore(state => state.theme);
     const theme = canvasThemes[themeKey];
     return (
-        <main className="cw-workspace relative h-full min-h-0 overflow-hidden" data-theme={themeKey} style={{ background: theme.canvas.background, color: theme.node.text }} aria-label="正在加载画布">
+        <main className="cw-workspace relative h-full min-h-0 overflow-hidden" data-theme={themeKey} style={{ background: theme.canvas.background, color: theme.node.text }} aria-label={t("正在加载画布")}>
             <div
                 className="absolute inset-0"
                 style={{
@@ -188,8 +191,8 @@ function CanvasRefreshShell() {
                     backgroundSize: "16px 16px",
                 }}
             />
-            <div className="cw-topbar" aria-hidden="true"><div className="cw-project-card cw-surface"><span className="cw-icon cw-brand"><span>V</span></span><span className="cw-project-title">正在加载…</span></div><div className="cw-account-card cw-surface" /></div>
-            <aside className="cw-create-panel cw-surface" aria-hidden="true"><div className="cw-tabs">创建 <span className="opacity-50">对话</span></div><div className="h-[370px]" /></aside>
+            <div className="cw-topbar" aria-hidden="true"><div className="cw-project-card cw-surface"><span className="cw-icon cw-brand"><span>V</span></span><span className="cw-project-title">{t("正在加载…")}</span></div><div className="cw-account-card cw-surface" /></div>
+            <aside className="cw-create-panel cw-surface" aria-hidden="true"><div className="cw-tabs">{t("创建")}<span className="opacity-50">{t("对话")}</span></div><div className="h-[370px]" /></aside>
             <div className="cw-dock" aria-hidden="true"><div className="cw-tools cw-surface">
                 {Array.from({ length: 7 }).map((_, index) => (
                     <div key={index} className="size-8 rounded-md bg-current opacity-10" />
@@ -200,6 +203,7 @@ function CanvasRefreshShell() {
 }
 
 function WirelessCanvasPage() {
+    const t = useUiText();
     const { message, modal } = App.useApp();
     const params = useParams<{ id: string }>();
     const navigate = useNavigate();
@@ -409,7 +413,7 @@ function WirelessCanvasPage() {
             openConfigDialog(true);
             return;
         }
-        message.warning("当前没有可用模型，请联系管理员统一配置模型和 API");
+        message.warning(uiText("当前没有可用模型，请联系管理员统一配置模型和 API"));
     }, [canManageConfig, message, openConfigDialog]);
 
     const batchEdit = useCanvasBatchEdit({ projectId, generationDispatchLocksRef, getCanvasCenter, handleMissingModelConfig, isAiConfigReady });
@@ -474,8 +478,8 @@ function WirelessCanvasPage() {
 
     const notifyHistoryAction = useCallback((kind: "undo" | "redo", before: CanvasHistoryEntry, after: CanvasHistoryEntry) => {
         void import("@/lib/canvas/canvas-history-description").then(({ describeCanvasHistoryChange }) => {
-            void message.info({ key: "canvas-history-action", content: `已${kind === "undo" ? "撤销" : "重做"}：${describeCanvasHistoryChange(before, after)}`, duration: 2 });
-        }).catch(() => { void message.info(`已${kind === "undo" ? "撤销" : "重做"}画布操作`); });
+            void message.info({ key: "canvas-history-action", content: uiText("已{value1}：{value2}", { value1: kind === "undo" ? "撤销" : "重做", value2: describeCanvasHistoryChange(before, after) }), duration: 2 });
+        }).catch(() => { void message.info(uiText("已{value1}画布操作", { value1: kind === "undo" ? uiText("撤销") : uiText("重做") })); });
     }, [message]);
     const { flushPendingHistory, undoCanvas, redoCanvas } = useCanvasHistory(history, {
         current: { nodes, connections, groups, chatSessions, activeChatId, backgroundMode, showImageInfo },
@@ -493,10 +497,10 @@ function WirelessCanvasPage() {
     const confirmStopGeneration = useCallback(
         (nodeId: string) => {
             modal.confirm({
-                title: "停止生成？",
-                content: "当前生成请求会被中断，已经生成完成的内容会保留。",
-                okText: "停止",
-                cancelText: "继续生成",
+                title: uiText("停止生成？"),
+                content: uiText("当前生成请求会被中断，已经生成完成的内容会保留。"),
+                okText: uiText("停止"),
+                cancelText: uiText("继续生成"),
                 okButtonProps: { danger: true },
                 onOk: () => stopGenerationByRunningId(nodeId),
             });
@@ -1035,7 +1039,7 @@ function WirelessCanvasPage() {
         const record = agentUndoRecordRef.current;
         if (!record) return null;
         const action = await import("@/lib/canvas/canvas-agent-undo-action").catch(() => {
-            if (agentUndoRecordRef.current === record) message.error("加载失败，请重试");
+            if (agentUndoRecordRef.current === record) message.error(uiText("加载失败，请重试"));
             return null;
         });
         // A project switch, newer batch, or another undo invalidates this click.
@@ -1078,7 +1082,7 @@ function WirelessCanvasPage() {
             });
             const stoppedRuns = canvasGenerationRunsForNodes(allIds, generationRequestsRef.current.values(), connectionsRef.current);
             if (!confirmed && (stoppedRuns.size || nodesRef.current.some(node => allIds.has(node.id) && (node.metadata?.status === NODE_STATUS_LOADING || node.metadata?.imageTask || node.metadata?.mediaTask)))) {
-                modal.confirm({ title: "删除生成中的节点？", content: "这会删除节点并停止相关本地查询；已提交的服务端任务可能继续，不代表取消或退款。可撤销删除后查询原任务。", okText: "删除节点", cancelText: "保留节点", okButtonProps: { danger: true }, onOk: () => deleteNodes(allIds, true) });
+                modal.confirm({ title: uiText("删除生成中的节点？"), content: uiText("这会删除节点并停止相关本地查询；已提交的服务端任务可能继续，不代表取消或退款。可撤销删除后查询原任务。"), okText: uiText("删除节点"), cancelText: uiText("保留节点"), okButtonProps: { danger: true }, onOk: () => deleteNodes(allIds, true) });
                 return;
             }
             flushPendingHistory();
@@ -1128,7 +1132,7 @@ function WirelessCanvasPage() {
     const createSelectedGroup = useCallback(() => {
         if (!localToolsEnabled) return;
         const memberIds = canvasGroupMemberIds(selectedNodeIdsRef.current, nodeById);
-        if (memberIds.size < 2) { message.info("请先框选至少两个节点，再创建款式组"); return; }
+        if (memberIds.size < 2) { message.info(uiText("请先框选至少两个节点，再创建款式组")); return; }
         let number = groupsRef.current.length + 1;
         while (groupsRef.current.some(group => group.title === `款式 ${number}`)) number++;
         const group = { id: `group-${nanoid()}`, title: `款式 ${number}`, nodeIds: [...memberIds], collapsed: false };
@@ -1310,10 +1314,10 @@ function WirelessCanvasPage() {
 
     const deleteCurrentProject = useCallback(() => {
         modal.confirm({
-            title: "删除整个画布？",
-            content: "这会删除当前画布中的所有图片、节点和连线，并返回画布列表。删除单张图片请使用图片工具条中的“删除”。",
-            okText: "删除整个画布",
-            cancelText: "取消",
+            title: uiText("删除整个画布？"),
+            content: uiText("这会删除当前画布中的所有图片、节点和连线，并返回画布列表。删除单张图片请使用图片工具条中的“删除”。"),
+            okText: uiText("删除整个画布"),
+            cancelText: uiText("取消"),
             okButtonProps: { danger: true },
             onOk: () => {
                 deleteProjects([projectId]);
@@ -1677,7 +1681,7 @@ function WirelessCanvasPage() {
             for (const [index, file] of files.entries()) {
                 await createImageFileNode(file, { x: center.x + index * 36, y: center.y + index * 36 }, signal, true);
             }
-            message.success(files.length === 1 ? "已从剪切板添加图片" : `已从剪切板添加 ${files.length} 张图片`);
+            message.success(files.length === 1 ? uiText("已从剪切板添加图片") : uiText("已从剪切板添加 {value1} 张图片", { value1: files.length }));
         });
     }, [createImageFileNode, getCanvasCenter, message, runLocalImageOperation]);
 
@@ -1694,7 +1698,7 @@ function WirelessCanvasPage() {
         onImportProgress: ({ id, completed, total, failed }) => {
             const done = completed === total;
             message.open({ key: id, type: done ? failed ? "warning" : "success" : "loading", duration: done ? 4 : 0,
-                content: done ? `导入完成：成功 ${total - failed} 个${failed ? `，失败 ${failed} 个` : ""}` : `正在导入 ${completed}/${total} 个文件…` });
+                content: done ? uiText("导入完成：成功 {value1} 个{value2}", { value1: total - failed, value2: failed ? `，失败 ${failed} 个` : "" }) : uiText("正在导入 {value1}/{value2} 个文件…", { value1: completed, value2: total }) });
         },
     });
 
@@ -1894,7 +1898,7 @@ function WirelessCanvasPage() {
                 setImageDownload({ projectId, node: current, variants });
             }
             else downloadCanvasContent(node.metadata.content, `canvas-${node.type}-${node.id}.${node.type === CanvasNodeType.Video ? "mp4" : audioExtension(node.metadata.mimeType)}`);
-        } catch (error) { message.error(error instanceof Error ? error.message : "图片下载失败"); }
+        } catch (error) { message.error(error instanceof Error ? error.message : uiText("图片下载失败")); }
     }, [message, projectId]);
 
     const saveNodeAsset = useCallback(
@@ -1905,9 +1909,9 @@ function WirelessCanvasPage() {
                 const { createCanvasNodeAsset } = await import("@/lib/canvas/canvas-node-asset");
                 if (!isCurrent()) return;
                 addAsset(createCanvasNodeAsset(node, projectId));
-                message.success("已加入我的素材");
+                message.success(uiText("已加入我的素材"));
             } catch (error) {
-                if (isCurrent()) message.error(error instanceof Error ? error.message : "素材保存失败，请重试");
+                if (isCurrent()) message.error(error instanceof Error ? error.message : uiText("素材保存失败，请重试"));
             }
         },
         [addAsset, message, projectId],
@@ -1926,7 +1930,7 @@ function WirelessCanvasPage() {
         const { createCanvasDesignTemplate } = await import("@/lib/canvas/canvas-design-templates");
         if (designProjectIdRef.current !== projectId) return;
         const source = sourceId ? nodesRef.current.find(node => node.id === sourceId) : undefined;
-        if (sourceId && !source) { message.warning("参考图已移除，请重新选择"); return; }
+        if (sourceId && !source) { message.warning(t("参考图已移除，请重新选择")); return; }
         const position = { x: nodesRef.current.length ? Math.max(...nodesRef.current.map(node => node.position.x + node.width)) + 120 : 0, y: source?.position.y || 0 };
         const result = createCanvasDesignTemplate(id, source, position, effectiveConfig.imageModel || effectiveConfig.model, undefined, steps, title);
         setNodes(current => [...current, ...result.nodes]);
@@ -1938,7 +1942,7 @@ function WirelessCanvasPage() {
         setDialogNodeId(config.id);
         setTemplateSourceId(undefined);
         focusCanvasArea(config.position, config.width, config.height);
-        message.success("已添加 3 个生成配置；编辑提示词后逐个点击生成，当前未调用模型");
+        message.success(t("已添加 3 个生成配置；编辑提示词后逐个点击生成，当前未调用模型"));
     };
 
     const arrangeNodes = async (mode: import("@/lib/canvas/canvas-node-arrange").CanvasArrangeMode) => {
@@ -1946,9 +1950,9 @@ function WirelessCanvasPage() {
         const { arrangeCanvasNodes } = await import("@/lib/canvas/canvas-node-arrange");
         if (designProjectIdRef.current !== projectId) return;
         const next = arrangeCanvasNodes(nodesRef.current, groupsRef.current, selectedNodeIdsRef.current, mode);
-        if (next === nodesRef.current) { message.info("至少需要两个可移动单元；同一款式组视为一个整体"); return; }
+        if (next === nodesRef.current) { message.info(t("至少需要两个可移动单元；同一款式组视为一个整体")); return; }
         setNodes(next);
-        message.success("排版已更新，款式组内相对位置保留，可撤销");
+        message.success(t("排版已更新，款式组内相对位置保留，可撤销"));
     };
 
     const handleFontSizeChange = useCallback((nodeId: string, fontSize: number) => {
@@ -2060,7 +2064,7 @@ function WirelessCanvasPage() {
                     await (isAudioFile(file) ? createAudioFileNode(file, position) : file.type.startsWith("video/") ? createVideoFileNode(file, position) : createImageFileNode(file, position));
                 }
             } catch (error) {
-                message.error(error instanceof Error ? error.message : "素材导入失败，请重试");
+                message.error(error instanceof Error ? error.message : uiText("素材导入失败，请重试"));
             }
         },
         [createAudioFileNode, createImageFileNode, createVideoFileNode, flushPendingHistory, message, screenToCanvas, size.height, size.width],
@@ -2071,7 +2075,7 @@ function WirelessCanvasPage() {
             const position = screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
             void runLocalImageOperation("assistant-clipboard-paste", "粘贴", async (signal) => {
                 await createImageFileNode(file, position, signal);
-                message.success("已从剪切板添加图片");
+                message.success(uiText("已从剪切板添加图片"));
             });
         },
         [createImageFileNode, message, runLocalImageOperation, screenToCanvas, size.height, size.width],
@@ -2238,7 +2242,7 @@ function WirelessCanvasPage() {
             }
             setAssetPickerOpen(false);
             } catch (error) {
-                message.error(error instanceof Error ? error.message : "素材读取失败，请重试");
+                message.error(error instanceof Error ? error.message : uiText("素材读取失败，请重试"));
             }
         },
         [insertAssistantImage, insertAssistantText, message, screenToCanvas, size.height, size.width],
@@ -2303,9 +2307,9 @@ function WirelessCanvasPage() {
     const shareCurrentCanvas = useCallback(async () => {
         try {
             await navigator.clipboard.writeText(window.location.href);
-            message.success(canvasLinkCopiedMessage[deploymentFeatures.authenticationEnabled ? "cloud" : "local"]);
+            message.success(uiText(canvasLinkCopiedMessage[deploymentFeatures.authenticationEnabled ? "cloud" : "local"]));
         } catch {
-            message.warning("无法复制链接，请从地址栏复制");
+            message.warning(uiText("无法复制链接，请从地址栏复制"));
         }
     }, [message]);
 
@@ -2453,7 +2457,7 @@ function WirelessCanvasPage() {
     if (!projectLoaded) return <CanvasRefreshShell />;
 
     const quickGeneratePanel = (
-<Suspense fallback={isCanvasDesktopLayout ? <div className="cw-panel-loading">正在加载编辑区…</div> : null}>
+<Suspense fallback={isCanvasDesktopLayout ? <div className="cw-panel-loading">{t("正在加载编辑区…")}</div> : null}>
                     <CanvasQuickGeneratePanel
                         onOptimizedPrompt={onQuickOptimizedPrompt}
                         embedded={isCanvasDesktopLayout}
@@ -2492,17 +2496,17 @@ function WirelessCanvasPage() {
     return (
         <main className="cw-workspace relative flex h-full min-h-0 overflow-hidden" data-theme={canvasThemeKey} style={{ background: theme.canvas.background, color: theme.node.text, "--cw-create-width": `${clampCanvasPanelWidth("create", createPanelWidth)}px`, "--cw-chat-width": `${clampCanvasPanelWidth("chat", chatPanelWidth)}px`, "--cw-prompt-height": `${clampCanvasPromptHeight(createPromptHeight)}px` } as CSSProperties}>
             <aside data-testid="canvas-left-generator-rail" className={`cw-create-panel ${quickGenerateOpen ? "cw-surface" : "is-collapsed"} ${assistantOpen ? "is-hidden" : ""}`}>
-                <div className="cw-tabs" role="tablist" aria-label="创作模式">
-                    <button role="tab" aria-selected={!assistantOpen} type="button" onClick={openQuickGenerateFromToolbar}>创建</button>
-                    <button role="tab" aria-selected={assistantOpen} type="button" onClick={toggleAgentFromTopBar}>对话</button>
-                    <div className="cw-tabs-actions">{quickGenerateOpen ? <Suspense fallback={null}><CanvasPanelSizeControl kind="create" /></Suspense> : null}<button type="button" className="cw-icon" aria-label={quickGenerateOpen ? "收起创建面板" : "展开创建面板"} aria-expanded={quickGenerateOpen} onClick={quickGenerateOpen ? closeQuickGeneratePanel : openQuickGenerateFromToolbar}><ChevronDown size={18} className={quickGenerateOpen ? "rotate-180" : undefined} /></button></div>
+                <div className="cw-tabs" role="tablist" aria-label={t("创作模式")}>
+                    <button role="tab" aria-selected={!assistantOpen} type="button" onClick={openQuickGenerateFromToolbar}>{t("创建")}</button>
+                    <button role="tab" aria-selected={assistantOpen} type="button" onClick={toggleAgentFromTopBar}>{t("对话")}</button>
+                    <div className="cw-tabs-actions">{quickGenerateOpen ? <Suspense fallback={null}><CanvasPanelSizeControl kind="create" /></Suspense> : null}<button type="button" className="cw-icon" aria-label={quickGenerateOpen ? t("收起创建面板") : t("展开创建面板")} aria-expanded={quickGenerateOpen} onClick={quickGenerateOpen ? closeQuickGeneratePanel : openQuickGenerateFromToolbar}><ChevronDown size={18} className={quickGenerateOpen ? "rotate-180" : undefined} /></button></div>
                 </div>
                 {isCanvasDesktopLayout ? quickGeneratePanel : null}
                 {isCanvasDesktopLayout && quickGenerateOpen && !assistantOpen ? <Suspense fallback={null}><CanvasPanelResizeHandle kind="create" /></Suspense> : null}
             </aside>
             <section className="relative min-w-0 flex-1 overflow-hidden">
                 <CanvasTopBar
-                    title={projectTitle || "未命名画布"}
+                    title={projectTitle || t("未命名画布")}
                     titleDraft={titleDraft}
                     isTitleEditing={titleEditing}
                     onTitleDraftChange={setTitleDraft}
@@ -2630,7 +2634,7 @@ function WirelessCanvasPage() {
                             onDownload={downloadNodeImage}
                             onSaveAsset={(node) => void saveNodeAsset(node)}
                             onMaskEdit={(node) => setMaskEditNodeId(node.id)}
-                            onManualEdit={(node) => { if (node.metadata?.status === "loading") { message.info("请等待这张图片生成完成后再编辑"); return; } setDialogNodeId(null); setManualEditNode(node); }}
+                            onManualEdit={(node) => { if (node.metadata?.status === "loading") { message.info(t("请等待这张图片生成完成后再编辑")); return; } setDialogNodeId(null); setManualEditNode(node); }}
                             onCrop={(node) => setCropNodeId(node.id)}
                             onSplit={(node) => setSplitNodeId(node.id)}
                             onUpscale={(node) => setUpscaleNodeId(node.id)}
@@ -2781,15 +2785,16 @@ function WirelessCanvasPage() {
 }
 
 function CanvasAgentPanelLoading() {
+    const t = useUiText();
     const theme = canvasThemes[useThemeStore(state => state.theme)];
     return (
         <aside aria-live="polite" className="flex w-[380px] shrink-0 items-center justify-center border-l text-sm" style={{ borderColor: theme.node.stroke, background: theme.node.fill, color: theme.node.muted }}>
-            正在加载 Agent…
-        </aside>
+            {t("正在加载 Agent…")}</aside>
     );
 }
 
 function CanvasNodePanelLoading() {
+    const t = useUiText();
     const theme = canvasThemes[useThemeStore(state => state.theme)];
-    return <div aria-live="polite" className="min-h-36 rounded-xl border p-4 text-sm shadow-lg" style={{ borderColor: theme.node.stroke, background: theme.node.fill, color: theme.node.muted }}>正在加载编辑面板…</div>;
+    return <div aria-live="polite" className="min-h-36 rounded-xl border p-4 text-sm shadow-lg" style={{ borderColor: theme.node.stroke, background: theme.node.fill, color: theme.node.muted }}>{t("正在加载编辑面板…")}</div>;
 }

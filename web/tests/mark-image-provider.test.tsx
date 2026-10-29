@@ -1,3 +1,4 @@
+import { i18nHarness } from "./helpers/i18n-harness";
 import { afterEach, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -83,6 +84,7 @@ function harness(options: { role?: string; load?: () => Promise<MarkImageConfigu
     const userState = { user: { id: "operator", role: options.role || "super_admin" } };
     const business = { refresh: async () => { refreshes++; await options.refresh?.(); } };
     const dependencies: Record<string, any> = {
+        "@/lib/i18n": i18nHarness,
         react: { ...React, useState,
             useRef: (value: unknown) => { const index = cursor++; return state[index] ||= { current: value }; },
             useCallback: (callback: unknown, deps?: DependencyList) => { const index = cursor++; if (!state[index] || !equal(state[index].deps, deps)) state[index] = { deps, callback }; return state[index].callback; },

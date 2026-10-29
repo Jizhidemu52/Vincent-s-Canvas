@@ -1,3 +1,4 @@
+import { uiText } from "@/lib/i18n";
 import { NODE_DEFAULT_SIZE } from "@/constant/canvas";
 import { canvasToolKey, currentToolConfig } from "@/hooks/use-tool-config";
 import { canvasImageReferenceIdentity } from "@/lib/canvas/canvas-image-filename";
@@ -93,7 +94,7 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, r
                 .slice(0, remaining);
             event.target.value = "";
             if (!files.length) {
-                message.warning(remaining ? "请选择图片文件" : maximum ? `当前模型最多添加 ${maximum} 张参考图` : "当前模型不支持参考图");
+                message.warning(remaining ? uiText("请选择图片文件") : maximum ? uiText("当前模型最多添加 {value1} 张参考图", { value1: maximum }) : uiText("当前模型不支持参考图"));
                 return;
             }
 
@@ -115,7 +116,7 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, r
                 );
                 setQuickGenerateReferences((current) => [...current, ...uploaded]);
             } catch (error) {
-                message.error(error instanceof Error ? error.message : "参考图上传失败");
+                message.error(error instanceof Error ? error.message : uiText("参考图上传失败"));
             }
         },
         [message, quickGenerateModel, quickGenerateReferences],
@@ -147,7 +148,7 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, r
         const usage = estimateUsage({ operationType, toolKey, modelId, quantity: count });
 
         if (!prompt && profile.requiresPrompt) {
-            message.error("请输入生图提示词");
+            message.error(uiText("请输入生图提示词"));
             return;
         }
         const referenceValidation = validateImageReferences(modelId, references, profile);
@@ -160,11 +161,11 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, r
             return;
         }
         if (!user || user.status !== "active") {
-            message.error("当前设计师账号不可用");
+            message.error(uiText("当前设计师账号不可用"));
             return;
         }
         if (deploymentFeatures.creditsEnabled && usage.configured && user.creditBalance < usage.credits) {
-            message.error(`额度不足：预计需要 ${usage.credits} 积分，当前剩余 ${user.creditBalance} 积分`);
+            message.error(uiText("额度不足：预计需要 {value1} 积分，当前剩余 {value2} 积分", { value1: usage.credits, value2: user.creditBalance }));
             return;
         }
 
@@ -288,9 +289,9 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, r
 
         setRunningNodeId((current) => current === targetIds[0] ? null : current);
         if (failureCount) {
-            message.warning(`画布生图完成，成功 ${successCount} 张，失败 ${failureCount} 张`);
+            message.warning(uiText("画布生图完成，成功 {value1} 张，失败 {value2} 张", { value1: successCount, value2: failureCount }));
         } else {
-            message.success(`画布生图完成：${successCount} 张`);
+            message.success(uiText("画布生图完成：{value1} 张", { value1: successCount }));
         }
     }, [
         addAsset,
@@ -346,17 +347,17 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, r
                     setQuickGenerateOpen(true);
                 }
                 payload.warnings.forEach((warning) => message.warning(warning));
-                if (payload.pricing.modelChanged) message.warning(payload.pricing.selectedModel ? `模型已变更，当前使用 ${payload.pricing.selectedModel.name}` : "模型已变更，请选择管理员当前启用的模型");
+                if (payload.pricing.modelChanged) message.warning(payload.pricing.selectedModel ? uiText("模型已变更，当前使用 {value1}", { value1: payload.pricing.selectedModel.name }) : uiText("模型已变更，请选择管理员当前启用的模型"));
                 const cost = !deploymentFeatures.creditsEnabled ? "不计积分" : (payload.pricing.estimate ? `${payload.pricing.estimate.totalCredits} 积分` : "以当前选择为准");
                 if (payload.mode === "fill_and_generate" && !isBatch) {
-                    modal.confirm({ title: "确认在画布生成？", content: `当前实际预计消耗 ${cost}。确认后才会提交任务并扣费。`, okText: "确认生成", cancelText: "仅保留填入", onOk: () => quickGenerateRef.current() });
+                    modal.confirm({ title: uiText("确认在画布生成？"), content: uiText("当前实际预计消耗 {value1}。确认后才会提交任务并扣费。", { value1: cost }), okText: uiText("确认生成"), cancelText: uiText("仅保留填入"), onOk: () => quickGenerateRef.current() });
                 } else if (payload.mode === "fill_and_generate" && isBatch) {
-                    message.info(`模板已填入，当前预计 ${cost}。请先选择文件夹，再确认批量生成。`);
-                } else message.success(`模板已填入，当前预计 ${cost}`);
+                    message.info(uiText("模板已填入，当前预计 {value1}。请先选择文件夹，再确认批量生成。", { value1: cost }));
+                } else message.success(uiText("模板已填入，当前预计 {value1}", { value1: cost }));
             })
             .catch((error) => {
                 loadedReuseTokenRef.current.delete(token);
-                message.error(error instanceof Error ? error.message : "模板复用失败");
+                message.error(error instanceof Error ? error.message : uiText("模板复用失败"));
             });
     }, [message, modal, projectLoaded, searchParams]);
 

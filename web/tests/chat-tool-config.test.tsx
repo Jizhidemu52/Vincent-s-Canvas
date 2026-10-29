@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { i18nHarness } from "./helpers/i18n-harness";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import React, { type DependencyList, type EffectCallback, type ReactElement } from "react";
@@ -43,6 +44,7 @@ function chatPageHarness(initial: BusinessConfig, savedImageModelId?: string) {
     const app = { message: { error() {}, warning() {}, success() {} }, modal: { confirm() {} } };
     const config = { ...defaultConfig, imageModel: "old-image" };
     const deps: Record<string, any> = {
+        "@/lib/i18n": i18nHarness,
         react: { ...React, useState, useMemo, useCallback: (callback: unknown, dependencies?: DependencyList) => useMemo(() => callback, dependencies),
             useRef: (value: unknown) => { const index = cursor++; return values[index] ||= { current: value }; },
             useEffect: (effect: EffectCallback, dependencies?: DependencyList) => {

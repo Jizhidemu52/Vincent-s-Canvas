@@ -1,3 +1,4 @@
+import { uiText } from "@/lib/i18n";
 import { buildWorkflowVideoStageDispatch, completeAgentMediaWorkflowStage, selectWorkflowCandidate } from "@/lib/canvas/agent-media-workflow";
 import { type CanvasAgentOp } from "@/lib/canvas/canvas-agent-ops";
 import type { CanvasMediaWorkflowAction } from "@/lib/canvas/canvas-assistant-panel-render-stability";
@@ -72,7 +73,7 @@ export function useCanvasMediaWorkflow({ projectId, nodesRef, chatSessions, setC
         async (messageId: string, workflow: CanvasAgentMediaWorkflow) => {
             const dispatch = buildWorkflowVideoStageDispatch(workflow);
             if (!dispatch) {
-                message.warning("请先选择一张成功候选图");
+                message.warning(uiText("请先选择一张成功候选图"));
                 return;
             }
             updateMediaWorkflow(messageId, (current) => completeAgentMediaWorkflowStage(current, "video", { status: "running" }));

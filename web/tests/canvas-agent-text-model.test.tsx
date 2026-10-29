@@ -1,3 +1,4 @@
+import { i18nHarness } from "./helpers/i18n-harness";
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -22,7 +23,7 @@ const requireModule = createRequire(sourceUrl);
 const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
 const module = { exports: {} as any };
 new Function("require", "module", "exports", code + "\nexports.setup = OnlineAgentSetupView;")(
-    (name: string) => name === "react" ? { ...React, useMemo: (factory: () => unknown) => factory() } : requireModule(name),
+    (id: string) => id === "@/lib/i18n" ? i18nHarness : ((name: string) => name === "react" ? { ...React, useMemo: (factory: () => unknown) => factory() } : requireModule(name))(id),
     module,
     module.exports,
 );
