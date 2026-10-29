@@ -292,7 +292,10 @@ jobs:
         run: |
           set -euo pipefail
           docker compose exec -T redis redis-cli FLUSHDB
-          docker compose exec -T api bun tests/load/prepare-40-sessions.ts
+          # Production images intentionally exclude tests. Copy only this
+          # self-contained fixture into the disposable CI container.
+          docker compose cp server/tests/load/prepare-40-sessions.ts api:/tmp/canvas-prepare-40-sessions.ts
+          docker compose exec -T api bun /tmp/canvas-prepare-40-sessions.ts
           docker compose cp api:/tmp/load-config.json /tmp/load-config.json
           test "$(jq '.sessionCookies | length' /tmp/load-config.json)" = "40"
       - name: Run 40-designer submission load test
@@ -347,7 +350,10 @@ jobs:
           test "$duplicate_requests" = "0"
       - name: Verify cross-account task history and asset isolation
         shell: bash
-        run: docker compose exec -T api bun tests/integration/verify-data-isolation.ts
+        run: |
+          set -euo pipefail
+          docker compose cp server/tests/integration/verify-data-isolation.ts api:/tmp/canvas-verify-data-isolation.ts
+          docker compose exec -T api bun /tmp/canvas-verify-data-isolation.ts
       - name: Print logs and remove test stack
         if: always()
         shell: bash

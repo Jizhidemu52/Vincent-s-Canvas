@@ -7,8 +7,10 @@
  * Reuse the same run ID to resume: any previously attempted paid POST is query-only.
  */
 import { createHash } from "node:crypto";
-import { mkdir, open, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, open, readFile, rename, rm, rmdir, unlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { basename, relative, resolve, sep } from "node:path";
+import { pathToFileURL } from "node:url";
 import { fileTypeFromBuffer } from "file-type";
 import { creativeQualityCases, extendedCreativeQualityCases, auxiliaryQualityCases, qualityAssets, type QualityCase, type QualityAssetKey, type SceneAdapter } from "./prompt-quality-cases";
 import { getToolDefinition } from "../../shared/feature-catalog";
@@ -63,13 +65,26 @@ function publicTask(value: any): Task {
     ...(typeof value.optimized === "boolean" ? { optimized: value.optimized } : {}), resultUrls: Array.isArray(value.resultUrls) ? value.resultUrls.filter((url: unknown) => typeof url === "string") : [],
     ...(number(value.rmbCost) !== null ? { rmbCost: value.rmbCost } : {}), ...(number(value.credits) !== null ? { credits: value.credits } : {}), ...(value.errorCode ? { errorCode: safeCode(value.errorCode) } : {}) };
 }
+async function importSceneModule(javascript: string): Promise<SceneAdapter & { buildScenePrompt?: unknown }> {
+  // Bun 1.3.13 on Linux treats long data: module specifiers as file names.
+  // Load this trusted, import-free repository module via a real temporary file.
+  const directory = await mkdtemp(resolve(tmpdir(), "canvas-scene-module-"));
+  const modulePath = resolve(directory, "scene.mjs");
+  try {
+    await writeFile(modulePath, javascript, { mode: 0o600 });
+    return await import(pathToFileURL(modulePath).href);
+  } finally {
+    await rm(modulePath, { force: true });
+    await rmdir(directory);
+  }
+}
 export async function loadBaselineBuilder(repoRoot = root) {
   const process = Bun.spawn(["git", "show", `${baselineCommit}:web/src/pages/creative/scene-form-model.ts`], { cwd: repoRoot, stdout: "pipe", stderr: "pipe" });
   const source = await new Response(process.stdout).text();
   if (await process.exited !== 0) throw new Error("BASELINE_GIT_OBJECT_MISSING");
   const javascript = new Bun.Transpiler({ loader: "ts" }).transformSync(source);
   if (/^import\s/m.test(javascript)) throw new Error("BASELINE_HAS_RUNTIME_IMPORTS");
-  const module = await import(`data:text/javascript;base64,${Buffer.from(javascript).toString("base64")}`);
+  const module = await importSceneModule(javascript);
   if (typeof module.buildScenePrompt !== "function") throw new Error("BASELINE_BUILDER_MISSING");
   return { build: module.buildScenePrompt as (scene: string, form: any) => string, sourceSha256: sha(source) };
 }
@@ -77,7 +92,7 @@ export async function loadCurrentSceneAdapter(repoRoot = root): Promise<SceneAda
   const source = await readFile(resolve(repoRoot, "web/src/pages/creative/scene-form-model.ts"), "utf8");
   const javascript = new Bun.Transpiler({ loader: "ts" }).transformSync(source);
   if (/^import\s/m.test(javascript)) throw new Error("CURRENT_SCENE_HAS_RUNTIME_IMPORTS");
-  return import(`data:text/javascript;base64,${Buffer.from(javascript).toString("base64")}`);
+  return importSceneModule(javascript);
 }
 function selectCases(cases: QualityCase[], args: string[]) {
   const at = args.indexOf("--only"), selected = at >= 0 ? args[at + 1]?.split(",").filter(Boolean) : undefined;

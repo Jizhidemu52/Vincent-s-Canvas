@@ -109,6 +109,9 @@ function panelHarness(options: { replies: ToolResponseResult[]; stream?: string;
                 }
             },
             useMemo,
+            // This manual renderer commits synchronously; scheduling itself is
+            // covered by the production-browser input and session-switch tests.
+            useDeferredValue: (value: unknown) => value,
             useCallback: (callback: unknown, dependencies?: DependencyList) => useMemo(() => callback, dependencies),
             useRef: (initial: unknown) => { const index = refIndex++; return refs[index] ||= { current: initial }; },
             useState: (initial: unknown) => {
