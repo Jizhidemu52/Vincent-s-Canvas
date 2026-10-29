@@ -92,6 +92,9 @@ jobs:
       TASK_MOCK_MODE: "true"
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Prompt quality matrix reads its immutable historical source via git show.
+          fetch-depth: 0
       - uses: actions/setup-node@v7
         with:
           node-version: "24"

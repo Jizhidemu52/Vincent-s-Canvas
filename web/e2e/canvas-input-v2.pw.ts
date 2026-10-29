@@ -142,3 +142,44 @@ test("报告一键复制只含汇总，窄屏与深浅主题均可操作", async
     await page.screenshot({ path: info.outputPath("report-dark-900.png") });
     expect(api.submissions).toHaveLength(0);
 });
+
+test("引用弹层按需加载，加载中输入和键盘选择不中断", async ({ page, context, api }, info) => {
+    test.skip(!process.env.CANVAS_INPUT_DIST || variant === "baseline", "仅验证本轮正式构建的按需加载资源");
+    await preparePerformanceScene(context, api, new URL(info.project.use.baseURL!).origin);
+    const doc = api.document(PROJECT_ID)!;
+    doc.connections = doc.nodes.filter((node: any) => node.type === "image").map((node: any, index: number) => ({
+        id: `mention-link-${index}`, fromNodeId: node.id, toNodeId: "performance-node-0",
+    }));
+    let requested = false;
+    let release!: () => void;
+    const loading = new Promise<void>(resolve => { release = resolve; });
+    await context.route("**/assets/canvas-resource-mention-menu-*.js", async route => {
+        requested = true;
+        await loading;
+        await route.continue();
+    });
+    try {
+        await openPerformanceScene(page);
+        expect(requested).toBe(false);
+        const node = page.locator('[data-node-id="performance-node-0"]');
+        await node.focus(); await node.press("Enter");
+        const editor = node.locator("textarea:not([placeholder])");
+        await editor.fill("@");
+        await expect.poll(() => requested).toBe(true);
+        await expect(editor).toBeVisible();
+        await editor.pressSequentially("100"); await editor.press("Enter");
+        await expect(editor).toHaveValue("图片100 ");
+        release();
+        await editor.fill("@1");
+        const menu = page.locator('[data-canvas-resource-mention-menu="true"]');
+        await expect(menu).toBeVisible();
+        await menu.getByRole("button").filter({ has: page.getByText("图片1", { exact: true }) }).click({ timeout: 15_000 });
+        await expect(editor).toHaveValue("图片1 ");
+        await expect(editor).toBeFocused();
+        await editor.press("Escape");
+        await expect.poll(() => api.document(PROJECT_ID)?.nodes[0].metadata.content).toBe("图片1 ");
+        expect(api.submissions).toHaveLength(0);
+    } finally {
+        release();
+    }
+});

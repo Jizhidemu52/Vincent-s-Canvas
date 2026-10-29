@@ -255,6 +255,9 @@ export const CanvasNode = React.memo(function CanvasNode({
             const target = event.target;
             if (!(target instanceof Node)) return;
             if (isEditingContent && textareaRef.current?.contains(target)) return;
+            // The reference picker is portalled outside the node. Its pointer
+            // handler must insert the selected label before editing can close.
+            if (target instanceof Element && target.closest('[data-canvas-resource-mention-menu="true"]')) return;
 
             finishTextEditing();
         };
