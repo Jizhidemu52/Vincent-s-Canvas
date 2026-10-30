@@ -837,7 +837,7 @@ integration("production identity and RBAC", () => {
     const firstSubmission = await submitSeamless(chineseLogin.cookie);
     const duplicateSubmission = await submitSeamless(chineseLogin.cookie);
     expect(firstSubmission.response.status).toBe(201);
-    expect(duplicateSubmission.response.status).toBe(201);
+    expect(duplicateSubmission.response.status).toBe(200);
     expect(duplicateSubmission.body.task.id).toBe(firstSubmission.body.task.id);
     expect(firstSubmission.body.task.credits).toBe(2);
 
