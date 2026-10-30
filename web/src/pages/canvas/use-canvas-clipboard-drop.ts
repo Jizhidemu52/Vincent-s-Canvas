@@ -3,10 +3,12 @@ import { useCallback, useEffect, useLayoutEffect, useRef, type DragEvent } from 
 import type { CanvasNodeGraph } from "@/lib/canvas/canvas-node-copy";
 import type { canvasCutBlockReason } from "@/lib/canvas/canvas-system-clipboard";
 import type { Position } from "@/types/canvas";
-import { createClientId } from "@/lib/client-id";
+import { isExternalImageDrag, snapshotImageDrop } from "@/lib/dropped-images";
+import { useUserStore } from "@/stores/use-user-store";
 
 export const isCanvasAudioFile = (file: File) => file.type.startsWith("audio/") || /\.(mp3|wav)$/i.test(file.name);
 type Options = {
+    scopeKey: string;
     copyNodes: () => CanvasNodeGraph | undefined;
     getCutSnapshot: () => Parameters<typeof canvasCutBlockReason>[0];
     cutNodes: () => void;
@@ -14,16 +16,20 @@ type Options = {
     pasteImages: (files: File[]) => void;
     pasteText: (text: string) => boolean;
     screenToCanvas: (x: number, y: number) => Position;
-    createImage: (file: File, position: Position) => Promise<unknown>;
-    createVideo: (file: File, position: Position) => Promise<unknown>;
-    createAudio: (file: File, position: Position) => Promise<unknown>;
+    importFiles: (files: File[], position: Position) => Promise<void>;
     warning: (message: string) => unknown;
     error: (message: string) => unknown;
-    onImportProgress?: (progress: { id: string; completed: number; total: number; failed: number }) => void;
+    onReadingChange: (reading: boolean) => void;
 };
 export function useCanvasClipboardDrop(options: Options) {
-    const latest = useRef(options);
-    useLayoutEffect(() => { latest.current = options; });
+    const owner = useUserStore(state => `${state.status}:${state.user?.id || ""}`);
+    const latest = useRef({ ...options, owner });
+    const request = useRef<AbortController | null>(null);
+    useLayoutEffect(() => { latest.current = { ...options, owner }; });
+    useEffect(() => {
+        options.onReadingChange(false);
+        return () => { request.current?.abort(); request.current = null; };
+    }, [options.scopeKey, owner]);
     useEffect(() => {
         let disposed = false;
         let unbind: (() => void) | undefined;
@@ -44,26 +50,27 @@ export function useCanvasClipboardDrop(options: Options) {
         }).catch(() => { if (!disposed) latest.current.warning(uiText("剪贴板加载失败，请刷新后重试")); });
         return () => { disposed = true; unbind?.(); };
     }, []);
-    return useCallback(async (event: DragEvent<HTMLDivElement>) => {
-        event.preventDefault();
-        const dropped = Array.from(event.dataTransfer.files);
-        const files = dropped.filter(file => file.type.startsWith("image/") || file.type.startsWith("video/") || isCanvasAudioFile(file));
+    return useCallback(async (event: DragEvent<HTMLElement>) => {
+        if (!isExternalImageDrag(event.dataTransfer)) return;
+        event.preventDefault(); event.stopPropagation();
         const io = latest.current;
-        if (files.length !== dropped.length) io.warning(uiText("仅支持图片、视频和音频，其他文件已跳过"));
+        if (request.current) { io.warning(uiText("正在读取拖入图片，请稍候。")); return; }
+        const controller = new AbortController(); request.current = controller;
+        const current = () => request.current === controller && !controller.signal.aborted && latest.current.scopeKey === io.scopeKey && latest.current.owner === io.owner;
         const point = io.screenToCanvas(event.clientX, event.clientY);
-        const id = `canvas-import-${createClientId()}`;
-        let failed = 0;
-        if (files.length) io.onImportProgress?.({ id, completed: 0, total: files.length, failed });
-        for (const [index, file] of files.entries()) {
-            const position = { x: point.x + index * 36, y: point.y + index * 36 };
-            try {
-                await (isCanvasAudioFile(file) ? io.createAudio(file, position) : file.type.startsWith("video/") ? io.createVideo(file, position) : io.createImage(file, position));
-            } catch (error) {
-                failed++;
-                io.error(`${file.name}：${error instanceof Error ? error.message : "素材导入失败"}`);
-            } finally {
-                io.onImportProgress?.({ id, completed: index + 1, total: files.length, failed });
-            }
+        io.onReadingChange(true);
+        try {
+            const snapshot = snapshotImageDrop(event.dataTransfer);
+            const { readImageDrop } = await import("@/lib/dropped-images");
+            const result = await readImageDrop(snapshot, { signal: controller.signal, allowNonImages: true });
+            if (!current()) return;
+            const files = result.files.filter(file => file.type.startsWith("image/") || file.type.startsWith("video/") || isCanvasAudioFile(file));
+            if (files.length !== result.files.length) io.warning(uiText("仅支持图片、视频和音频，其他文件已跳过"));
+            if (files.length) await io.importFiles(files, point);
+        } catch (error) {
+            if (current()) io.error(error instanceof Error && error.name !== "TypeError" && error.name !== "TimeoutError" ? uiText(error.message) : uiText("无法读取拖入图片，请打开企业微信原图后重试，或保存到桌面再拖入。"));
+        } finally {
+            if (request.current === controller) { request.current = null; io.onReadingChange(false); }
         }
     }, []);
 }

@@ -107,7 +107,7 @@ test("Grok reference mode retains the text-only quality preference but omits it 
     expect(imageTaskParameters(value, selected)).toMatchObject({ quality: "low" });
 });
 
-test("compact advanced view retains every supported field and keeps the default panel unchanged", () => {
+test("compact advanced view retains every supported field without redundant task-count controls", () => {
     for (const id of ["mark-flare", "mark-nano", "grok", "gpt-image-2", "vcen-gpt2", "nano-banana-2", "midjourney-v7", "midjourney-blend"]) {
         const selected = profile(id);
         const value = config({ model: id, ...normalizeImageModelSettings(defaultConfig, selected) });
@@ -117,7 +117,7 @@ test("compact advanced view retains every supported field and keeps the default 
         expect(compact).not.toContain('aria-label="宽高比"');
         expect(compact).not.toContain('class="ip-fixed-count"');
         expect(standard).toContain('aria-label="宽高比"');
-        expect(standard).toContain('class="ip-fixed-count"');
+        expect(standard).not.toContain('class="ip-fixed-count"');
         if (selected.customSize) {
             expect(compact).toContain('aria-label="自定义宽度"');
             expect(compact).toContain('aria-label="自定义高度"');

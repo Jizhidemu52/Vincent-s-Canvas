@@ -2,6 +2,7 @@ import { uiText } from "@/lib/i18n";
 import { setWorkbenchText, watchWorkbenchUi } from "../ui-text.js";
 import { MODES, cmToPx, periodSize, validateExport, wrapPosition, latticeCopies, mirrorCellTransform, hitElement, previewSize } from "./geometry.mjs";
 import { createProjectSession, mountProjectBar } from "../project-session.js";
+import { bindLocalImageDrop } from "../image-drop";
 
 const STORE_KEY = "design-workbench.repeat.v1";
 const BUILTINS = { flower: "/design-workbench/assets/flower.svg", leaf: "/design-workbench/assets/leaf.svg" };
@@ -335,13 +336,31 @@ export async function mountRepeat(root, services) {
         if (state.elements.length >= 32) throw new Error("最多添加 32 个元素；请先删除一个");
         const item = { id: makeId(), src, name, x: 0.5, y: 0.5, size: 0.28, angle: 0, ratio: 1 };
         await prepareImages({ elements: [item] });
-        if (disposed || operation !== operationSequence) return;
+        if (disposed || operation !== operationSequence || projects.view().switching) return;
         if (state.elements.length >= 32) throw new Error("最多添加 32 个元素");
         state.elements.push(item);
         projects.changed();
         selectedId = item.id;
         syncDetails();
     }
+    async function importImage(file, operation = operationSequence) {
+        const src = await readImageFile(file);
+        if (disposed || operation !== operationSequence || projects.view().switching) return;
+        await addElement(src, file.name.replace(/\.[^.]+$/, "").slice(0, 16) || "上传图案");
+        if (!disposed && operation === operationSequence) status("元素已加入。文件原有透明度保留，不自动去背景。");
+    }
+    bindLocalImageDrop(root, services, {
+        scopeKey: () => operationSequence,
+        disabled: () => disposed || exporting || !projects.view().ready || projects.view().switching,
+        onFiles: async files => {
+            if (state.elements.length + files.length > 32) throw new Error("最多添加 32 个元素；请先删除一个");
+            const operation = operationSequence;
+            for (const file of files) {
+                if (disposed || operation !== operationSequence) return;
+                await importImage(file, operation);
+            }
+        },
+    });
     function deleteSelected() {
         if (!selectedId) return;
         state.elements = state.elements.filter((item) => item.id !== selectedId);
@@ -515,9 +534,7 @@ export async function mountRepeat(root, services) {
             }
             if (input.dataset.role === "image-file" && input.files[0]) {
                 const file = input.files[0];
-                const src = await readImageFile(file);
-                await addElement(src, file.name.replace(/\.[^.]+$/, "").slice(0, 16) || "上传图案");
-                status("元素已加入。文件原有透明度保留，不自动去背景。");
+                await importImage(file);
                 input.value = "";
             }
             if (input.dataset.role === "json-file" && input.files[0]) {

@@ -66,6 +66,7 @@ function pageHarness(initialNodes = [node("a"), node("b", 100), node("c", 300)],
     };
     const scope: Record<string, unknown> = {
         uiText,
+        React, lastHistoryRef: { current: { nodes: initialNodes } }, historyRef: { current: { past: [] } }, undoCanvas: () => {}, message: { info: () => {}, destroy: () => {} },
         CanvasNodeType, copyCanvasNodeGraph, cloneCanvasNodeGraph, removeCanvasGroupMembers, clipboardRef,
         flushPendingHistory: () => true, generationRequestsRef: { current: new Map() }, generationDispatchLocksRef: { current: new Set() }, stopGenerationByRunningId: (...args: unknown[]) => stopped.push(args),
         canvasGenerationRunsForNodes, NODE_STATUS_LOADING: "loading", modal: { confirm: (value: { onOk: () => void }) => confirmations.push(value) },
@@ -86,6 +87,7 @@ function pageHarness(initialNodes = [node("a"), node("b", 100), node("c", 300)],
         if (!menuJsx) throw new Error("Missing actual page context-menu JSX");
         const element = expression<ReactElement<any>>(menuJsx.getText(ast), {
             ...scope, React, CanvasNodeContextMenu: "context-menu-fixture", contextMenu: state.contextMenu, contextMenuNodeIds,
+            nodes: state.nodes, resetViewport: () => {},
             contextMenuImageCount: canvasImageExportSelection(state.nodes, [...contextMenuNodeIds]).length,
             openSelectedImageDownload: () => undefined,
             selectedNodeIds: state.selectedNodeIds, localToolsEnabled: true, createSelectedGroup: () => undefined,

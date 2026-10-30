@@ -50,7 +50,7 @@ function gateResult(features: Features, user: LocalUser | null, admin: boolean, 
         "@/lib/i18n": i18nHarness,
         "../../../../shared/workspace-access": { isWorkspaceRole },
         react: { ...React, useEffect: () => undefined },
-        "react-router-dom": { Navigate, useLocation: () => ({ pathname: admin ? "/admin" : "/canvas/test", search: "" }) },
+        "react-router-dom": { Link: "a", Navigate, useLocation: () => ({ pathname: admin ? "/admin" : "/canvas/test", search: "" }) },
         "@/stores/use-user-store": { isAdminRole, useUserStore: (selector: (value: typeof state) => unknown) => selector(state) },
         "@/lib/standalone-edition": { standaloneEdition: false },
         "@/lib/standalone-access": { shouldBypassStandaloneAuthGate },
@@ -116,7 +116,8 @@ describe("optional authentication route wiring", () => {
     test("keeps anonymous workspaces usable without allowing guests into administration", () => {
         const features = { authenticationEnabled: false, creditsEnabled: false, rolePortalsEnabled: false };
         expect(gateResult(features, visitor, false).props.children).toBe("protected content");
-        expect(gateResult(features, visitor, true).props.to).toBe("/admin/login");
+        expect(gateResult(features, visitor, true).props.role).toBe("alert");
+        expect(gateResult(features, visitor, true).props.children[0].props.children).toBe("当前账号没有管理权限");
         const loginRedirect = gateResult(features, null, true);
         expect(loginRedirect.type).toBe(Navigate);
         expect(loginRedirect.props.to).toBe("/admin/login");
@@ -151,7 +152,8 @@ describe("optional authentication route wiring", () => {
         expect(gateResult(features, administrator, false).props.children).toBe("protected content");
         expect(gateResult(features, { ...visitor, role: "department_admin" }, false).props.to).toBe("/admin");
         expect(gateResult(features, administrator, false, true).props.children).toBe("protected content");
-        expect(gateResult(features, visitor, true).props.to).toBe("/admin/login");
+        expect(gateResult(features, visitor, true).props.role).toBe("alert");
+        expect(gateResult(features, visitor, true).props.children[0].props.children).toBe("当前账号没有管理权限");
     });
 
     test("OA deployment permits local super-admin workspaces but requires the existing password change", () => {

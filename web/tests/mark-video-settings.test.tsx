@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { VideoSettingsPanel } from "@/components/video-settings-panel";
+import { VideoSettingsPanel, videoDurationOptions } from "@/components/video-settings-panel";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { isHappyHorseVideoConfig } from "@/lib/happyhorse-video";
 import { getVideoModelParameterSpec, normalizeVideoModelConfig, videoAspectRatioFollowsImage, videoReferenceError } from "@/lib/video-model-parameters";
@@ -43,8 +43,10 @@ describe("Mark UUID video model parameter identity", () => {
         expect(normalizeVideoModelConfig({ ...config, videoSeconds: "30", vquality: "2K" })).toMatchObject({ videoSeconds: "5", vquality: "1080P" });
         expect(videoReferenceError(config, Array.from({ length: 10 }, (_, i) => ({ id: `${i}` })) as any)).toContain("最多支持 9 张");
         const html = renderToStaticMarkup(<VideoSettingsPanel config={config} onConfigChange={() => undefined} theme={canvasThemes.light} />);
-        expect(html).toContain('value="3"'); expect(html).toContain('value="15"');
-        expect(html).not.toContain('value="30"'); expect(html).not.toContain(">生成声音<");
+        expect(videoDurationOptions(getVideoModelParameterSpec(markId)!).map(item => item.value)).toEqual(Array.from({ length: 13 }, (_, index) => String(index + 3)));
+        expect(html).toContain('aria-label="视频时长"');
+        expect(html).toContain('title="15 秒"');
+        expect(html).not.toContain(">生成声音<");
         expect(html).toMatch(/<button[^>]*aria-label="添加水印"[^>]*role="switch"|<button[^>]*role="switch"[^>]*aria-label="添加水印"/);
         expect(config.model).toBe(markId);
     });

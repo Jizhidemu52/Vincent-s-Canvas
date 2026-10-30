@@ -2,6 +2,7 @@ import { Alert, App, Button, Form, Input, Modal, Select, Table } from "antd";
 import { useQuery } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { useUserStore } from "@/stores/use-user-store";
+import { formatBeijingDateTime } from "@/lib/beijing-time";
 import { listTaskReconciliation, resolveUncertainChat, resolveUncertainTask, type TaskResolution, type UncertainChat, type UncertainTask } from "@/services/api/task-reconciliation";
 
 type Selection = { kind: "task"; row: UncertainTask } | { kind: "chat"; row: UncertainChat };
@@ -50,7 +51,7 @@ export function TaskReconciliationPanel({ active, onResolved }: { active: boolea
       { title: "操作", width: 90, render: (_, row) => <Button onClick={() => open({ kind: "task", row })}>核查任务</Button> },
     ]} />
     <Table<UncertainChat> className="min-w-0 overflow-hidden" size="small" rowKey="id" dataSource={query.data?.chats ?? []} pagination={false} scroll={{ x: 850 }} columns={[
-      ...commonColumns, { title: "开始时间", dataIndex: "createdAt", width: 180 },
+      ...commonColumns, { title: "开始时间（北京时间）", dataIndex: "createdAt", width: 200, render: (value: string) => formatBeijingDateTime(value) },
       { title: "操作", width: 90, render: (_, row) => <Button onClick={() => open({ kind: "chat", row })}>核查对话</Button> },
     ]} />
     <Modal open={Boolean(selected)} title="核查原任务并结案" onCancel={() => { if (!saving) setSelected(null); }} onOk={() => form.submit()} confirmLoading={saving} okText="保存核查结论" cancelText="返回" mask={{ closable: false }}>

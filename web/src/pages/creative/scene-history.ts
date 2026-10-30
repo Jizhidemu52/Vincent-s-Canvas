@@ -63,5 +63,15 @@ export function createSceneHistory(storage: Storage, ownerId: string, sceneId: s
                 await storage.setItem(indexKey, { version: 1, entries } satisfies Index);
             });
         },
+        remove(id: string) {
+            return ordered(async () => {
+                const index = await readIndex();
+                const log = await storage.getItem<SceneLog>(recordKey(id));
+                if (!log || !owns(log)) throw new Error("这条记录不存在或不属于当前场景");
+                if (!log.results.length || log.results.some(result => result.status === "pending" || result.failureKind === "uncertain" || (result.status === "failed" && !["terminal", "local"].includes(result.failureKind || "")))) throw new Error("这条任务尚未明确结束，请先查询原任务，不能删除跟踪记录。");
+                // Keep original bytes and details that another retry record may reference.
+                await storage.setItem(indexKey, { version: 1, entries: index.entries.filter(item => item.id !== id) } satisfies Index);
+            });
+        },
     };
 }

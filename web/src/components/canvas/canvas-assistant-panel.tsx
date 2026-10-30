@@ -120,7 +120,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
 }: CanvasAssistantPanelRenderState) {
     const t = useUiText();
     const locale = useUiLocale();
-    const brandName = locale === "en-US" ? "Inchoice TruCreate" : "无线画布";
+    const brandName = locale === "en-US" ? "Inchoice TruCreate" : "无限画布";
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const user = useUserStore((state) => state.user);
     const baseConfig = useEffectiveConfig();
@@ -1808,7 +1808,7 @@ function stringifyLog(value: unknown) {
 
 function formatOnlineLogText(logs: OnlineAgentLog[], context: OnlineAgentLogContext) {
     const head = [
-        "无线画布 网站 Agent 诊断日志",
+        "无限画布 网站 Agent 诊断日志",
         `model: ${context.model || "none"}`,
         `running: ${context.running}`,
         `confirmTools: ${context.confirmTools}`,

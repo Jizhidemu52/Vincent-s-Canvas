@@ -116,10 +116,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
         if (!toolEnabled || (requiresPrompt && !text) || isRunning || !referenceValidation.valid || videoValidation) return;
         promptDraftRef.current?.flush();
         onGenerate(node.id, mode, requiresPrompt ? text : "");
-        if (!requiresPrompt) return;
-        setPrompt("");
-        promptDraftRef.current?.reset("");
-        onPromptChange(node.id, "");
+        // Retain the draft for refinement and failed-task recovery.
     };
 
     const saveReferences = (next: typeof imageReferences) => {

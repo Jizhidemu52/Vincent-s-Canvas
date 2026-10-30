@@ -1,6 +1,6 @@
 import type { CanvasProject } from "@/stores/canvas/use-canvas-store";
 
-export type CanvasProjectSummary = Pick<CanvasProject, "id" | "title" | "createdAt" | "updatedAt"> & {
+export type CanvasProjectSummary = Pick<CanvasProject, "id" | "title" | "createdAt" | "updatedAt" | "persistenceConflict"> & {
     nodeCount: number;
     connectionCount: number;
     cover?: { storageKey?: string; content?: string } | null;
@@ -14,6 +14,7 @@ export function canvasProjectSummary(project: CanvasProject): CanvasProjectSumma
     const image = project.nodes.find(node => node.type === "image" && (node.metadata?.storageKey || node.metadata?.content));
     const summary: CanvasProjectSummary = {
         id: project.id, title: project.title, createdAt: project.createdAt, updatedAt: project.updatedAt,
+        persistenceConflict: project.persistenceConflict,
         nodeCount: project.nodes.length, connectionCount: project.connections.length,
         cover: image ? { storageKey: image.metadata?.storageKey, content: image.metadata?.content } : null,
     };

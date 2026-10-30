@@ -34,6 +34,9 @@ function navigation(surface: "desktop" | "mobile", role: Role, rolePortalsEnable
     const dependencies: Record<string, unknown> = {
         "@/lib/i18n": i18nHarness,
         "./language-switch": { LanguageSwitch: () => null },
+        "@/components/layout/language-switch": { LanguageSwitch: () => null },
+        "@/hooks/use-navigation-preferences": { useNavigationPreferences: () => ({ pinned: [], collapsed: [], togglePin() {}, toggleGroup() {} }) },
+        "@/lib/usage-navigation": { usageBoardForLocation: () => "home" },
         "@/components/layout/inchoice-brand": { InchoiceBrand: () => null },
         "react-router-dom": { Link: ({ to, children, ...rest }: any) => <a href={to} {...rest}>{children}</a>, useLocation: () => ({ pathname: "/", search: "" }), useNavigate: () => () => undefined },
         "antd": { Drawer: ({ open, children }: any) => open ? <div>{children}</div> : null },
@@ -51,6 +54,9 @@ function navigation(surface: "desktop" | "mobile", role: Role, rolePortalsEnable
         "@/stores/use-user-store": { isAdminRole, useUserStore: (select: any) => select({ user }) },
         "@/stores/use-module-store": { useModuleStore: (select: any) => select({ flags: {} }), useModuleEnabled: () => true, isModuleAvailable: () => true },
     };
+    dependencies["./frequent-navigation"] = dependencies["@/components/layout/frequent-navigation"];
+    dependencies["@/components/layout/navigation-menu"] = component("../src/components/layout/navigation-menu.tsx", dependencies);
+    dependencies["@/components/layout/navigation-footer"] = component("../src/components/layout/navigation-footer.tsx", dependencies);
     const { MobileNavDrawer } = component("../src/components/layout/mobile-nav-drawer.tsx", dependencies);
     dependencies["@/components/layout/mobile-nav-drawer"] = { MobileNavDrawer };
     const Element = surface === "mobile" ? MobileNavDrawer! : component("../src/components/layout/app-top-nav.tsx", dependencies).AppTopNav!;

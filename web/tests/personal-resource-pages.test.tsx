@@ -31,12 +31,14 @@ function page(path: string, exportName: string, dependencies: Record<string, unk
         useRef(initial: unknown) { const index = cursor++; return values[index] ||= { current: initial }; },
         useMemo(calculate: () => unknown, deps: unknown[]) { const index = cursor++; if (!values[index] || !equal(deps, values[index].deps)) values[index] = { deps, result: calculate() }; return values[index].result; },
         useCallback(callback: unknown, deps: unknown[]) { return hooks.useMemo(() => callback, deps); },
+        useDeferredValue(value: unknown) { return value; },
         useEffect(effect: () => (() => void) | undefined, deps: unknown[]) { const index = cursor++; if (!equal(deps, effects[index]?.deps)) queued.push(() => { effects[index]?.cleanup?.(); effects[index] = { deps, cleanup: effect() }; }); },
     };
     const mockInput = Object.assign("Input", { Search: "InputSearch", TextArea: "TextArea" });
     const mocks: Record<string, unknown> = {
         "@/lib/i18n": i18nHarness,
         react: hooks,
+        "@/hooks/use-workbench-field": { useWorkbenchField(_key: string, initial: unknown) { return hooks.useState(initial); } },
         antd: new Proxy({ App: { useApp: () => ({ message: { success() {}, error() {}, warning() {} }, modal: { confirm() {} } }) }, Input: mockInput, DatePicker: { RangePicker: "RangePicker" } }, { get(target, key) { return key in target ? target[key as keyof typeof target] : String(key); } }),
         ...dependencies,
     };

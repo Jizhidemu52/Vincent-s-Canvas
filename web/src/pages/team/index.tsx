@@ -1,9 +1,11 @@
-import { getUiLocale, useUiText } from "@/lib/i18n";
+import { useUiText } from "@/lib/i18n";
+import { adminLabel } from "@/pages/admin/admin-labels";
+import { formatBeijingDateTime } from "@/lib/beijing-time";
 import { Alert, App, Button, Empty, Form, Input, InputNumber, Modal, Skeleton, Table, Tag } from "antd";
 import { CheckCircle2, CircleDollarSign, Clock3, Download, HandCoins, Images, RefreshCw, RotateCcw, Send, UsersRound, XCircle } from "lucide-react";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { Navigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 
 import { createClientId } from "@/lib/client-id";
 import { deploymentFeatures } from "@/lib/deployment-features";
@@ -85,7 +87,7 @@ export default function TeamPage() {
     finally { pendingActionRef.current = ""; setPendingAction(""); }
   };
 
-  if (!deploymentFeatures.creditsEnabled || !user || !user.groupId) return <Navigate to="/" replace />;
+  if (!deploymentFeatures.creditsEnabled || !user || !user.groupId) return <main role="alert" className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center"><h1 className="text-xl font-semibold">{t("小组功能暂不可用")}</h1><p className="text-sm text-muted-foreground">{!deploymentFeatures.creditsEnabled ? t("当前未启用小组积分功能。") : t("当前账号尚未分配小组，请联系管理员。")}</p><Link to="/" className="underline">{t("返回工作台")}</Link></main>;
 
   const applyCredits = (values: { amount: number; reason: string }) => runAction("request", async () => {
     try {
@@ -138,7 +140,7 @@ export default function TeamPage() {
         <section className="wb-surface overflow-hidden">
           <div className="border-b border-[var(--border)] px-4 py-3"><div className="font-semibold">{t("我的额度申请")}</div><div className="text-xs text-[var(--muted-foreground)]">{t("领取额度仅本月有效，月底自动清零，不能转给其他成员")}</div></div>
           <Table loading={loading} rowKey="id" size="small" scroll={{ x: 760 }} pagination={{ pageSize: 8 }} dataSource={myCredits?.requests ?? []} columns={[
-            { title: t("申请时间"), dataIndex: "createdAt", render: (value: string) => new Date(value).toLocaleString(getUiLocale()) },
+            { title: `${t("申请时间")}（北京时间）`, dataIndex: "createdAt", render: formatBeijingDateTime },
             { title: t("积分"), dataIndex: "amount" }, { title: t("用途"), dataIndex: "reason" },
             { title: t("状态"), dataIndex: "status", render: (value: string) => <Tag color={requestStatus[value]?.color}>{t(requestStatus[value]?.label || value)}</Tag> },
             { title: t("审批备注"), dataIndex: "decisionNote", render: (value: string | null) => value || "-" },
@@ -177,11 +179,11 @@ export default function TeamPage() {
           </section>
 
           <section className="wb-surface overflow-hidden"><div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3"><div className="text-base font-semibold">{t("本组任务与完整提示词")}</div><Button className="!h-10" loading={pendingAction === "export"} disabled={Boolean(pendingAction) || loading || !history.length} icon={<Download className="size-4" />} onClick={() => void downloadReport()}>{t("导出本组报表")}</Button></div><Table loading={loading} rowKey="id" size="small" scroll={{ x: 900 }} pagination={{ pageSize: 20 }} dataSource={history} columns={[
-            { title: t("时间"), dataIndex: "createdAt", width: 170, render: (value: string) => new Date(value).toLocaleString(getUiLocale()) }, { title: t("设计师"), dataIndex: "userName", width: 120 }, { title: t("板块"), dataIndex: "operationType", width: 130 }, { title: t("模型"), dataIndex: "modelName", width: 130, render: (value: string | null) => value || "-" }, { title: t("完整提示词"), dataIndex: "prompt", width: 360 }, { title: t("积分"), dataIndex: "credits", width: 80 }, { title: t("状态"), dataIndex: "status", width: 90, render: (value: string) => <Tag color={value === "success" ? "green" : "red"}>{value}</Tag> },
+            { title: `${t("时间")} (${t("北京时间")})`, dataIndex: "createdAt", width: 200, render: (value: string) => formatBeijingDateTime(value) }, { title: t("设计师"), dataIndex: "userName", width: 120 }, { title: t("板块"), dataIndex: "operationType", width: 130, render: adminLabel }, { title: t("模型"), dataIndex: "modelName", width: 130, render: (value: string | null) => value || "-" }, { title: t("完整提示词"), dataIndex: "prompt", width: 360 }, { title: t("积分"), dataIndex: "credits", width: 80 }, { title: t("状态"), dataIndex: "status", width: 90, render: (value: string) => <Tag color={value === "success" ? "green" : "red"}>{adminLabel(value)}</Tag> },
           ]} /></section>
 
           <section className="wb-surface overflow-hidden"><div className="border-b border-[var(--border)] px-4 py-3 text-base font-semibold">{t("本组审计记录")}</div><Table loading={loading} scroll={{ x: 850 }} rowKey="id" size="small" pagination={{ pageSize: 20 }} dataSource={auditLogs} columns={[
-            { title: t("时间"), dataIndex: "createdAt", width: 180, render: (value: string) => new Date(value).toLocaleString(getUiLocale()) }, { title: t("操作人"), dataIndex: "actorName", width: 120, render: (value: string | null) => value || t("系统") }, { title: t("行为"), dataIndex: "action", width: 180 }, { title: t("目标"), dataIndex: "targetId", width: 220 }, { title: t("结果"), dataIndex: "result", width: 90, render: (value: string) => <Tag color={value === "success" ? "green" : "red"}>{value}</Tag> },
+            { title: `${t("时间")}（北京时间）`, dataIndex: "createdAt", width: 180, render: formatBeijingDateTime }, { title: t("操作人"), dataIndex: "actorName", width: 120, render: (value: string | null) => value || t("系统") }, { title: t("行为"), dataIndex: "action", width: 180, render: adminLabel }, { title: t("目标"), dataIndex: "targetId", width: 220 }, { title: t("结果"), dataIndex: "result", width: 90, render: (value: string) => <Tag color={value === "success" ? "green" : "red"}>{adminLabel(value)}</Tag> },
           ]} /></section>
         </> : null}
       </main>

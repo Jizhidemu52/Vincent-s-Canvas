@@ -1,4 +1,7 @@
 import { useUiText, uiText } from "@/lib/i18n";
+import { GenerationDiagnostic } from "@/components/generation-diagnostic";
+import { GenerationElapsed } from "@/components/generation-elapsed";
+import { GenerationQueueProgress } from "@/components/generation-queue-progress";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { ChevronRight, Image as ImageIcon, Music2, RefreshCw, Star, Video } from "lucide-react";
@@ -77,6 +80,7 @@ type CanvasNodeProps = {
     onToggleBatch?: (nodeId: string) => void;
     onSetBatchPrimary?: (node: CanvasNodeData) => void;
     onRetry?: (node: CanvasNodeData) => void;
+    onStopObservation?: (nodeId: string) => void;
     onGenerateImage?: (node: CanvasNodeData) => void;
     onViewImage?: (node: CanvasNodeData) => void;
     onContextMenu: (event: React.MouseEvent, nodeId: string) => void;
@@ -102,6 +106,7 @@ type NodeContentRendererProps = {
     onStopEditing: () => void;
     mentionReferences: CanvasResourceReference[];
     onRetry?: (node: CanvasNodeData) => void;
+    onStopObservation?: (nodeId: string) => void;
     onGenerateImage?: (node: CanvasNodeData) => void;
     onToggleBatch?: () => void;
     onSetBatchPrimary?: () => void;
@@ -151,6 +156,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     onToggleBatch,
     onSetBatchPrimary,
     onRetry,
+    onStopObservation,
     onGenerateImage,
     onViewImage,
     onContextMenu,
@@ -481,6 +487,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                             onContentChange={updateTextDraft}
                             onStopEditing={finishTextEditing}
                             onRetry={onRetry}
+                            onStopObservation={onStopObservation}
                             onGenerateImage={onGenerateImage}
                             onToggleBatch={() => onToggleBatch?.(data.id)}
                             onSetBatchPrimary={() => onSetBatchPrimary?.(data)}
@@ -513,6 +520,7 @@ export const CanvasNode = React.memo(function CanvasNode({
 function canvasNodePropsEqual(previous: CanvasNodeProps, next: CanvasNodeProps) {
     if (previous.taskHighlighted !== next.taskHighlighted || previous.maxInlinePanelWidth !== next.maxInlinePanelWidth || previous.onKeyboardFocus !== next.onKeyboardFocus || previous.onKeyboardAction !== next.onKeyboardAction) return false;
     if (!canvasNodeRenderStateEqual(toRenderState(previous), toRenderState(next))) return false;
+    if (previous.onStopObservation !== next.onStopObservation) return false;
     if (previous.previewPosition?.x !== next.previewPosition?.x || previous.previewPosition?.y !== next.previewPosition?.y) return false;
     if (previous.previewBounds?.position.x !== next.previewBounds?.position.x || previous.previewBounds?.position.y !== next.previewBounds?.position.y || previous.previewBounds?.width !== next.previewBounds?.width || previous.previewBounds?.height !== next.previewBounds?.height) return false;
     if (previous.imagePreviewEdge !== next.imagePreviewEdge || previous.getCanvasScale !== next.getCanvasScale || previous.onMouseDown !== next.onMouseDown || previous.onHoverStart !== next.onHoverStart || previous.onHoverEnd !== next.onHoverEnd || previous.onConnectStart !== next.onConnectStart || previous.onResize !== next.onResize || previous.onResizeEnd !== next.onResizeEnd || previous.onContentChange !== next.onContentChange || previous.onToggleBatch !== next.onToggleBatch || previous.onSetBatchPrimary !== next.onSetBatchPrimary || previous.onRetry !== next.onRetry || previous.onGenerateImage !== next.onGenerateImage || previous.onViewImage !== next.onViewImage || previous.onContextMenu !== next.onContextMenu) return false;
@@ -552,7 +560,7 @@ function NodeContent(props: NodeContentRendererProps) {
     const t = useUiText();
     if (props.node.type === CanvasNodeType.Config && props.renderNodeContent) return props.renderNodeContent(props.node, { inputSummary: props.configInputSummary, isRunning: props.isRunning });
     if (props.isBatchRoot) return <ImageNodeContent {...props} />;
-    if (props.node.metadata?.status === "loading" && !shouldShowCanvasTextStream(props.node)) return <LoadingContent theme={props.theme} optimizing={props.node.metadata?.optimizingPrompt} />;
+    if (props.node.metadata?.status === "loading" && !shouldShowCanvasTextStream(props.node)) return <LoadingContent node={props.node} theme={props.theme} onStopObservation={props.onStopObservation} />;
     if (props.node.metadata?.status === "error") return <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} />;
 
     const Renderer = nodeContentRenderers[props.node.type];
@@ -567,12 +575,17 @@ const nodeContentRenderers = {
     [CanvasNodeType.Audio]: AudioNodeContent,
 } satisfies Record<CanvasNodeType, (props: NodeContentRendererProps) => ReactNode>;
 
-function LoadingContent({ theme, optimizing }: Pick<NodeContentRendererProps, "theme"> & { optimizing?: boolean }) {
+function LoadingContent({ node, theme, onStopObservation }: Pick<NodeContentRendererProps, "node" | "theme" | "onStopObservation">) {
     const t = useUiText();
+    const startedAt = useRef(performance.now());
+    const taskId = node.metadata?.imageTask?.taskId || node.metadata?.mediaTask?.taskId || node.metadata?.videoTaskId;
     return (
-        <div className="flex h-full w-full flex-col items-center justify-center gap-3" style={{ color: theme.node.activeStroke }}>
+        <div className="flex h-full w-full flex-col items-center justify-center gap-3 px-4 text-center" style={{ color: theme.node.activeStroke }}>
             <div className="size-10 animate-spin rounded-full border-2" style={{ borderColor: theme.node.stroke, borderTopColor: theme.node.activeStroke }} />
-            <span className="text-[10px] tracking-[0.2em]">{optimizing ? t("正在优化提示词…") : t("生成中")}</span>
+            <span className="text-xs">{node.metadata?.optimizingPrompt ? t("正在优化提示词…") : taskId ? t("正在等待结果") : t("正在准备生成")}</span>
+            <span className="text-xs" style={{ color: theme.node.muted }}>{t("本次等待")} <GenerationElapsed startedAt={startedAt.current} /></span>
+            <GenerationQueueProgress taskId={taskId} active />
+            {onStopObservation ? <button type="button" className="rounded border px-3 py-1 text-xs" style={{ borderColor: theme.node.stroke, color: theme.node.text }} onMouseDown={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); onStopObservation(node.id); }}>{t("停止查询")}</button> : null}
         </div>
     );
 }
@@ -582,7 +595,7 @@ function ErrorContent({ node, theme, onRetry, onReload }: Pick<NodeContentRender
     const videoRecovery = node.type === CanvasNodeType.Video && Boolean(node.metadata?.videoTaskId);
     return (
         <div className="flex max-w-[260px] flex-col items-center gap-3 px-5 text-center">
-            <div className="text-xs leading-5 text-red-300" style={onReload ? { color: theme.node.muted } : undefined}>{onReload ? t("图片读取失败") : node.metadata?.errorDetails || t("生成失败")}</div>
+            <div className="max-w-full text-xs leading-5" style={{ color: theme.node.muted }}>{onReload ? t("图片读取失败") : <GenerationDiagnostic error={node.metadata?.errorDetails || t("生成失败")} />}</div>
             <button
                 type="button"
                 aria-label={onReload ? t("重新加载图片") : undefined}
@@ -679,7 +692,7 @@ function ImageNodeContent(props: NodeContentRendererProps) {
     if (!hasImageSource && props.isBatchRoot) {
         const content =
             props.node.metadata?.status === "loading" ? (
-                <LoadingContent theme={props.theme} optimizing={props.node.metadata?.optimizingPrompt} />
+                <LoadingContent node={props.node} theme={props.theme} onStopObservation={props.onStopObservation} />
             ) : props.node.metadata?.status === "error" ? (
                 <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} />
             ) : (
@@ -828,7 +841,7 @@ function ImageContent({
             {isBatchChild ? (
                 <button
                     type="button"
-                    className="absolute right-3 top-3 z-30 flex h-9 items-center gap-1.5 rounded-xl border px-2.5 text-xs font-medium opacity-0 shadow-[0_8px_20px_rgba(68,64,60,.13)] backdrop-blur-md transition group-hover/batch:opacity-100 hover:scale-[1.02]"
+                    className="absolute right-3 top-3 z-30 flex h-9 items-center gap-1.5 rounded-xl border px-2.5 text-xs font-medium opacity-0 shadow-[0_8px_20px_rgba(68,64,60,.13)] backdrop-blur-md transition group-hover/batch:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100 hover:scale-[1.02]"
                     style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
                     onClick={(event) => {
                         event.stopPropagation();

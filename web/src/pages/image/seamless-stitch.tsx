@@ -1,4 +1,5 @@
-import { getUiLocale, uiText, useUiText } from "@/lib/i18n";
+import { uiText, useUiText } from "@/lib/i18n";
+import { formatBeijingTime } from "@/lib/beijing-time";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { App, Button, Empty, Image, InputNumber, Segmented, Tag } from "antd";
 import { ClipboardPaste, Download, FolderPlus, Grid2x2, ImagePlus, LoaderCircle, RotateCcw, Upload } from "lucide-react";
@@ -10,6 +11,7 @@ import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/a
 import { ImageSettingsPanel } from "@/components/image-settings-panel";
 import { ModelPicker } from "@/components/model-picker";
 import { useToolConfig } from "@/hooks/use-tool-config";
+import { useImageDrop } from "@/hooks/use-image-drop";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { deploymentFeatures } from "@/lib/deployment-features";
 import { readClipboardImages } from "@/lib/clipboard-images";
@@ -51,6 +53,7 @@ export function SeamlessStitchPage() {
     const historyBusyRef = useRef(false);
     const previewSequenceRef = useRef(0);
     const submitLockRef = useRef(false);
+    const sourceReadRef = useRef(false);
     const mountedRef = useRef(true);
     const user = useUserStore((state) => state.user);
     const hydrateSession = useUserStore((state) => state.hydrateSession);
@@ -69,6 +72,7 @@ export function SeamlessStitchPage() {
     const [parameters, setParameters] = useState<SeamlessStitchParameters>(() => readSeamlessParameters(searchParams));
     const [result, setResult] = useState<StitchResult>({ status: "idle" });
     const [running, setRunning] = useState(false);
+    const [readingSource, setReadingSource] = useState(false);
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
     const [history, setHistory] = useState<QueuedTask[]>([]);
     const [historyLoading, setHistoryLoading] = useState(true);
@@ -138,11 +142,29 @@ export function SeamlessStitchPage() {
     }, [history, result.status, running, previewLoading]);
 
     const setSourceFromBlob = async (blob: Blob, name: string) => {
-        const uploaded = await uploadImage(blob);
-        const nextSource = { id: nanoid(), name, type: uploaded.mimeType, dataUrl: uploaded.url, url: uploaded.url, storageKey: uploaded.storageKey };
-        sourceRef.current = nextSource;
-        setSource(nextSource);
+        if (sourceReadRef.current || submitLockRef.current) return;
+        const owner = useUserStore.getState().user?.id;
+        sourceReadRef.current = true; setReadingSource(true);
+        try {
+            const uploaded = await uploadImage(blob);
+            if (!mountedRef.current || useUserStore.getState().user?.id !== owner) return;
+            const nextSource = { id: nanoid(), name, type: uploaded.mimeType, dataUrl: uploaded.url, url: uploaded.url, storageKey: uploaded.storageKey };
+            sourceRef.current = nextSource;
+            setSource(nextSource);
+        } finally {
+            sourceReadRef.current = false;
+            if (mountedRef.current) setReadingSource(false);
+        }
     };
+
+    const imageDrop = useImageDrop({
+        scopeKey: "seamless-stitch:source",
+        disabled: running || readingSource || user?.status !== "active",
+        onFiles: async files => {
+            if (files.length !== 1) throw new Error("每个参考图位置一次只能拖入一张图片，请分别放入对应位置。");
+            await setSourceFromBlob(files[0]!, files[0]!.name);
+        },
+    });
 
     const uploadSource = async (files?: FileList | null) => {
         const file = Array.from(files || []).find((item) => item.type.startsWith("image/"));
@@ -183,7 +205,7 @@ export function SeamlessStitchPage() {
     };
 
     const runStitch = async () => {
-        if (submitLockRef.current) return;
+        if (submitLockRef.current || sourceReadRef.current || imageDrop.reading) return;
         const activeSource = sourceRef.current || source;
         if (!activeSource) {
             message.error(uiText("请先上传一张需要无缝拼接的图片"));
@@ -300,7 +322,8 @@ export function SeamlessStitchPage() {
     return (
         <div className="wb-page flex h-full min-h-0 flex-col overflow-hidden">
             <main className="grid min-h-0 flex-1 gap-4 overflow-y-auto p-4 xl:grid-cols-[340px_minmax(0,1fr)_210px] xl:overflow-hidden">
-                <section className="wb-surface thin-scrollbar flex min-h-0 flex-col overflow-y-auto p-4">
+                <section {...imageDrop.dropProps} aria-busy={imageDrop.reading || readingSource} className={`wb-surface thin-scrollbar flex min-h-0 flex-col overflow-y-auto p-4${imageDrop.dragging ? " outline outline-2 outline-offset-2 outline-primary" : ""}`}>
+                    {imageDrop.dragging || imageDrop.reading || readingSource ? <p role="status" className="mb-3 rounded-lg bg-primary/10 p-3 text-sm">{uiText(imageDrop.dragging ? "松开以添加参考图片，不会自动生成。" : "正在读取拖入图片，请稍候。")}</p> : null}
                     <div className="flex items-start justify-between gap-3">
                         <div>
                             <div className="mb-3 grid size-10 place-items-center rounded-lg bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-300">
@@ -318,16 +341,17 @@ export function SeamlessStitchPage() {
                         <div className="mb-2 flex items-center justify-between gap-3">
                             <span className="text-base font-semibold">{uiText("输入图片")}</span>
                             <div className="flex gap-2">
-                                <Button size="small" icon={<ClipboardPaste className="size-3.5" />} onClick={() => void pasteSource()}>
+                                <Button size="small" disabled={running || readingSource || imageDrop.reading} icon={<ClipboardPaste className="size-3.5" />} onClick={() => void pasteSource()}>
                                     {uiText("粘贴")}</Button>
-                                <Button size="small" icon={<FolderPlus className="size-3.5" />} onClick={() => setAssetPickerOpen(true)}>
+                                <Button size="small" disabled={running || readingSource || imageDrop.reading} icon={<FolderPlus className="size-3.5" />} onClick={() => setAssetPickerOpen(true)}>
                                     {uiText("素材库")}</Button>
-                                <Button size="small" icon={<Upload className="size-3.5" />} onClick={() => fileInputRef.current?.click()}>
+                                <Button size="small" disabled={running || readingSource || imageDrop.reading} icon={<Upload className="size-3.5" />} onClick={() => fileInputRef.current?.click()}>
                                     {uiText("上传")}</Button>
                             </div>
                         </div>
                         <button
                             type="button"
+                            disabled={running || readingSource || imageDrop.reading}
                             className="group relative flex aspect-[4/3] w-full items-center justify-center overflow-hidden rounded-lg border border-dashed border-stone-300 bg-stone-50 transition hover:border-stone-500 dark:border-stone-700 dark:bg-stone-950/30"
                             onClick={() => fileInputRef.current?.click()}
                         >
@@ -383,7 +407,7 @@ export function SeamlessStitchPage() {
                             {quotaBlocked ? <div className="mt-1 text-red-500">{uiText("额度不足，无法提交任务。")}</div> : null}
                         </div>
                         {!seamlessModel ? <p className="mb-3 text-xs leading-5 text-stone-500">{uiText("此工具尚未配置，管理员启用无缝拼接模型后即可使用。")}</p> : null}
-                        <Button type="primary" size="large" block icon={<Grid2x2 className="size-4" />} loading={running} disabled={!source || (deploymentFeatures.creditsEnabled && !estimatedUsage.configured) || !seamlessModel || running || quotaBlocked} onClick={() => void runStitch()}>
+                        <Button type="primary" size="large" block icon={<Grid2x2 className="size-4" />} loading={running} disabled={!source || (deploymentFeatures.creditsEnabled && !estimatedUsage.configured) || !seamlessModel || running || readingSource || imageDrop.reading || quotaBlocked} onClick={() => void runStitch()}>
                             {uiText("开始无缝拼接")}</Button>
                     </div>
                 </section>
@@ -455,7 +479,7 @@ export function SeamlessStitchPage() {
                         <div className="space-y-3">
                             {history.map((task) => {
                                 const imageUrl = task.resultUrls[0];
-                                const time = task.createdAt ? new Date(task.createdAt).toLocaleTimeString(getUiLocale(), { hour: "2-digit", minute: "2-digit" }) : uiText("刚刚");
+                                const time = `${formatBeijingTime(task.createdAt)} ${uiText("北京时间")}`;
                                 return (
                                     <article key={task.id} className="overflow-hidden rounded-lg border border-stone-200 bg-stone-50 dark:border-stone-800 dark:bg-stone-950">
                                         {task.status === "success" && imageUrl ? <button type="button" disabled={running} className="block w-full" onClick={() => void openHistoryTask(task)} title={uiText("查看处理结果")}><img loading="lazy" decoding="async" src={imageUrl} alt={uiText("无缝拼接历史结果")} className="aspect-square w-full object-cover transition hover:opacity-80" /></button> : (

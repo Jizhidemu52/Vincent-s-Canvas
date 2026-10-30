@@ -1,6 +1,6 @@
 import { useUiText } from "@/lib/i18n";
 import { useCallback, useEffect, useState } from "react";
-import { App, Button, Input, Pagination, Select, Spin, Switch } from "antd";
+import { App, Button, Input, Pagination, Select, Skeleton, Switch } from "antd";
 import { useWorkbenchField } from "@/hooks/use-workbench-field";
 import { BookOpen, Plus, Search } from "lucide-react";
 import { deploymentFeatures } from "@/lib/deployment-features";
@@ -71,7 +71,7 @@ export default function MyPromptsPage() {
                     <span aria-live="polite" className="ml-auto text-xs text-stone-500">{loading && items.length ? t("正在更新 · ") : ""}{t("共")} {total} {t("个模板")}</span>
                 </section>
                 {loadError ? <div role="alert" className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200"><span>{loadError}</span><Button onClick={() => void load()}>{t("重新加载")}</Button></div> : null}
-                {loading && !items.length ? <div className="flex min-h-80 items-center justify-center"><Spin /></div> : items.length ? (
+                {loading && !items.length ? <div role="status" aria-label={t("正在加载提示词库")} className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">{Array.from({ length: 6 }, (_, index) => <div key={index} className="wb-surface p-5"><Skeleton active paragraph={{ rows: 4 }} /></div>)}</div> : items.length ? (
                     <section aria-busy={loading} className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">{items.map((item) => (
                         <PromptTemplateCard key={item.id} item={item} editable canSubmit={Boolean(groupId)} onReuse={(mode) => reuse(item, mode)} onInsertToCanvas={() => insertToCanvas(item)}
                             onEdit={() => { setEditing(item); setEditorOpen(true); }}

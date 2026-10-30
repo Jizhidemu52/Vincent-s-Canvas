@@ -1,4 +1,4 @@
-import { Alert, Button, Skeleton, Switch } from "antd";
+import { Alert, App, Button, Skeleton, Switch } from "antd";
 import { useEffect, useRef, useState } from "react";
 
 import { loadDeploymentFeatures } from "@/lib/deployment-features";
@@ -6,6 +6,7 @@ import { getCreditPolicy, saveCreditPolicy, type CreditPolicy } from "@/services
 import { isAdminRole, useUserStore } from "@/stores/use-user-store";
 
 export function CreditPolicyPanel() {
+    const { modal } = App.useApp();
     const user = useUserStore((store) => store.user);
     const [policy, setPolicy] = useState<CreditPolicy | null>(null);
     const [loading, setLoading] = useState(true);
@@ -14,6 +15,7 @@ export function CreditPolicyPanel() {
     const [notice, setNotice] = useState("");
     const request = useRef<AbortController | null>(null);
     const writing = useRef(false);
+    const confirming = useRef(false);
     const canRead = isAdminRole(user?.role);
     const canWrite = user?.role === "super_admin";
 
@@ -41,7 +43,12 @@ export function CreditPolicyPanel() {
     }, [user?.id, user?.role, canRead]);
 
     const changePolicy = async (enabled: boolean) => {
-        if (!canWrite || !policy || loading || writing.current) return;
+        if (!canWrite || !policy || loading || writing.current || confirming.current) return;
+        confirming.current = true;
+        const confirmed = await modal.confirm({ title: `确认${enabled ? "开启" : "关闭"}积分计费？`, content: enabled ? "影响全部成员的新任务：将按已发布价格扣除积分，余额不足会阻止提交。现有余额与历史记录保留。" : "影响全部成员的新任务：将停止扣除站内积分，但模型服务仍可能产生人民币成本。现有余额与价格配置保留。", okText: `确认${enabled ? "开启" : "关闭"}`, cancelText: "保持不变", okButtonProps: { danger: true } });
+        confirming.current = false;
+        if (!confirmed) return;
+        if (writing.current) return;
         writing.current = true; setSaving(true); setError(""); setNotice("");
         request.current?.abort();
         const controller = new AbortController();

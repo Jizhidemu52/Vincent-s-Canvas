@@ -22,7 +22,7 @@ export function CanvasPanelSizeControl({ kind }: { kind: CanvasPanelKind }) {
     const limits = canvasPanelWidths[kind];
     const style = { "--cw-panel": theme.node.panel, "--cw-text": theme.node.text, "--cw-muted": theme.node.muted, "--cw-border": theme.node.stroke, "--cw-soft": theme.toolbar.itemHover } as CSSProperties;
     return <Popover.Root>
-        <Popover.Trigger asChild><button type="button" className="cw-panel-size-button" aria-label={t("调整面板大小")} title={t("调整面板大小")}><Scaling size={18} /><span>{t("大小")}</span></button></Popover.Trigger>
+        <Popover.Trigger asChild><button type="button" className="cw-panel-size-button" aria-label={t("调整面板大小")} title={t("调整面板大小")}><Scaling size={18} /><span>{t("面板尺寸")}</span></button></Popover.Trigger>
         <Popover.Portal><Popover.Content side="bottom" align="end" sideOffset={10} collisionPadding={12} className="cw-panel-size-popover" style={style} data-canvas-no-zoom
             onPointerDown={event => event.stopPropagation()} onMouseDown={event => event.stopPropagation()} onWheel={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
             <header><strong>{t("面板大小")}</strong><Popover.Close asChild><button type="button" aria-label={t("关闭面板大小设置")}>{t("完成")}</button></Popover.Close></header>

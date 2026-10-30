@@ -20,7 +20,15 @@ export const canvasActions = [
     { id: "assets", label: "我的素材" },
     { id: "designTemplate", label: "使用设计模板" },
     { id: "compare", label: "对比图片" },
-    { id: "resetView", label: "重置视图" },
+    { id: "resetView", label: "适应全部内容", key: "1", shift: true, plain: true },
+    { id: "fitSelection", label: "缩放到选中", key: "2", shift: true, plain: true },
+    { id: "zoomIn", label: "放大画布", key: "+" },
+    { id: "zoomOut", label: "缩小画布", key: "-" },
+    { id: "zoomActual", label: "画布原始大小", key: "0" },
+    { id: "pasteHere", label: "粘贴到此处" },
+    { id: "bringFront", label: "置于顶层" },
+    { id: "sendBack", label: "置于底层" },
+    { id: "copyPrompt", label: "复制提示词" },
     { id: "minimap", label: "切换小地图", toolbarLabel: "小地图" },
     { id: "export", label: "导出画布备份", toolbarLabel: "导出画布" },
     { id: "exportImages", label: "导出图片集 / PDF" },
@@ -59,7 +67,7 @@ type Shortcut = { id: string; key?: string; shift?: boolean; plain?: boolean };
 type KeyEvent = { key: string; ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean; shiftKey?: boolean };
 export function canvasActionShortcut(id: string) {
     const action: Shortcut | undefined = canvasActions.find(action => action.id === id);
-    return !action?.key ? "" : action.plain ? "Delete / Backspace" : `Ctrl / Cmd + ${action.shift ? "Shift + " : ""}${action.key.toUpperCase()}`;
+    return !action?.key ? "" : action.plain ? action.key === "Delete" ? "Delete / Backspace" : `${action.shift ? "Shift + " : ""}${action.key}` : `Ctrl / Cmd + ${action.shift ? "Shift + " : ""}${action.key.toUpperCase()}`;
 }
 export function canvasActionHint(id: CanvasActionId) {
     const action = canvasActions.find(action => action.id === id)!;
@@ -69,6 +77,9 @@ export function canvasActionHint(id: CanvasActionId) {
 export function matchCanvasActionShortcut(event: KeyEvent): CanvasShortcutActionId | undefined {
     if (event.altKey) return;
     const modifier = Boolean(event.ctrlKey || event.metaKey);
+    if (modifier && ["+", "="].includes(event.key)) return "zoomIn";
+    if (!modifier && event.shiftKey && ["1", "!"].includes(event.key)) return "resetView";
+    if (!modifier && event.shiftKey && ["2", "@"].includes(event.key)) return "fitSelection";
     if (modifier && event.key.toLowerCase() === "y" && !event.shiftKey) return "redo";
     if (!modifier && !event.shiftKey && event.key === "Backspace") return "delete";
     return canvasActions.find(item => {

@@ -22,6 +22,7 @@ function pageHarness(path: string, dependencies: Record<string, unknown>) {
     let cursor = 0;
     const mocks: Record<string, unknown> = {
         "@/lib/i18n": i18nHarness,
+        "@/lib/login-return": { currentLoginReturn: (fallback = "/") => fallback, safeLoginReturn: (_value: unknown, fallback = "/") => fallback },
         "@/components/layout/inchoice-brand": { InchoiceBrand: () => null },
         "@/components/layout/language-switch": { LanguageSwitch: () => null },
         react: { ...React, useEffect: () => undefined, useState(initial: any) { const index = cursor++; if (!(index in values)) values[index] = initial; return [values[index], (value: any) => { values[index] = value; }]; }, useRef(initial: unknown) { const index = cursor++; return values[index] ||= { current: initial }; } },
@@ -52,7 +53,7 @@ test("personal login sends the designer portal once and reloads only after confi
     expect(calls).toEqual([["person-a", "temporary-test-password", "designer"]]);
     expect(page.assignments).toEqual([]);
     resolve({ mustChangePassword: true }); await settle();
-    expect(page.assignments).toEqual(["/change-password"]);
+    expect(page.assignments).toEqual(["/change-password?returnTo=%2F"]);
     expect(page.navigations).toEqual([]);
 });
 
@@ -76,7 +77,8 @@ test("administrator password login starts a new page rather than reusing designe
     const tree = page.render();
     tree.find(element => element.props.autoComplete === "username")!.props.onChange({ target: { value: "admin" } });
     tree.find(element => element.props.autoComplete === "current-password")!.props.onChange({ target: { value: "admin-test-password" } });
-    await page.render().find(element => element.type === "Button" && element.props.children === "登录后台")!.props.onClick();
+    page.render().find(element => element.type === "form")!.props.onSubmit({ preventDefault() {} });
+    await settle();
     expect(page.assignments).toEqual(["/admin"]); expect(page.navigations).toEqual([]);
 });
 

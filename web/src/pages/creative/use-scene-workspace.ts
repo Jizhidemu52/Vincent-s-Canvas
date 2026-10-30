@@ -157,6 +157,7 @@ export function useSceneWorkspace(sceneId: string) {
     const epoch = useRef(0);
     const inputEpoch = useRef<Record<SceneSlotId, number>>({ primary: 0, secondary: 0 });
     const viewEpoch = useRef(0);
+    const observationControllers = useRef(new Set<AbortController>());
     const [loadedScope, setLoadedScope] = useState<string | null>();
     const [draftReady, setDraftReady] = useState(false);
     const [form, setForm] = useState(() => createSceneForm(sceneId));
@@ -263,7 +264,7 @@ export function useSceneWorkspace(sceneId: string) {
                 if (revision === epoch.current) setError(uiText("本地草稿或记录读取失败：{value1}", { value1: errorText(caught) }));
             } finally { if (revision === epoch.current) setLoadedScope(scope); }
         })();
-        return () => { epoch.current += 1; };
+        return () => { epoch.current += 1; for (const controller of observationControllers.current) controller.abort(); };
     }, [scope, sceneId]);
 
     useEffect(() => {
@@ -320,6 +321,27 @@ export function useSceneWorkspace(sceneId: string) {
         const summary = summarizeSceneLog(log);
         setLogs(current => [summary, ...current.filter(item => item.id !== log.id)]);
         if (!knownLogIds.current.has(log.id)) { knownLogIds.current.add(log.id); setHistoryTotal(current => current + 1); }
+    };
+
+    const deleteLog = async (log: SceneLogSummary) => {
+        if (!history || running || loading || historyLoadingRef.current || log.ownerId !== user?.id || log.sceneId !== sceneId) return;
+        const revision = epoch.current;
+        historyLoadingRef.current = true; setHistoryLoading(true); setError(null);
+        try {
+            await history.remove(log.id);
+            const page = await history.page(0, Math.max(logs.length, 20));
+            if (revision !== epoch.current) return;
+            viewEpoch.current += 1; setPreviewing(false);
+            setLogs(page.entries); setHistoryTotal(page.total); setHistoryHasMore(page.hasMore); knownLogIds.current.delete(log.id);
+            if (activeLog?.id === log.id) { setActiveLog(null); setSelectedPrompt(null); setResults([]); }
+            setNotice(uiText("已从本机历史列表移除，原图和服务端记录仍保留。"));
+        } catch (caught) { if (revision === epoch.current) setError(uiText(errorText(caught))); }
+        finally { if (revision === epoch.current) { historyLoadingRef.current = false; setHistoryLoading(false); } }
+    };
+
+    const stopObserving = () => {
+        for (const controller of observationControllers.current) controller.abort();
+        setNotice(uiText("已停止本页查询；服务端任务可能继续，可查询原任务。"));
     };
 
     const previewLog = async (log: SceneLogSummary) => {
@@ -428,6 +450,7 @@ export function useSceneWorkspace(sceneId: string) {
         const logId = nanoid(), createdAt = Date.now();
         const start = performance.now();
         const storageWarnings: string[] = [];
+        const controller = new AbortController(); observationControllers.current.add(controller);
         viewEpoch.current += 1;
         setRunning(true); setError(null); setNotice(null); setActiveLog(null); setSelectedPrompt(null); setPreviewing(false); setResults(pending); setStartedAt(start);
         const updateResult = (index: number, result: SceneResult) => {
@@ -463,7 +486,7 @@ export function useSceneWorkspace(sceneId: string) {
                 const tracked = item;
                 let submitted = false;
                 try {
-                    const options = { operationType, tool: `creative-${sceneId}`, promptInput, onOptimizing: () => { if (revision === epoch.current) setOptimizing(true); }, onCompiled: (finalPrompt: string, wasOptimized: boolean) => { prompt = finalPrompt; optimized = wasOptimized; runLog.prompt = finalPrompt; runLog.optimized = wasOptimized; if (revision === epoch.current) setOptimizing(false); }, requestId: sceneRootRequestId(tracked), onSubmissionStarted: async () => { await persistRun(); submitted = true; }, onSubmitted: async (ids: string[]) => { tracked.taskId = ids[0]; await persistRun(); } };
+                    const options = { operationType, tool: `creative-${sceneId}`, promptInput, signal: controller.signal, cancelOnAbort: () => false, onOptimizing: () => { if (revision === epoch.current) setOptimizing(true); }, onCompiled: (finalPrompt: string, wasOptimized: boolean) => { prompt = finalPrompt; optimized = wasOptimized; runLog.prompt = finalPrompt; runLog.optimized = wasOptimized; if (revision === epoch.current) setOptimizing(false); }, requestId: sceneRootRequestId(tracked), onSubmissionStarted: async () => { await persistRun(); submitted = true; }, onSubmitted: async (ids: string[]) => { tracked.taskId = ids[0]; await persistRun(); } };
                     const generated = requestReferences.length ? await requestEdit(requestConfig, prompt, requestReferences, undefined, options) : await requestGeneration(requestConfig, prompt, options);
                     const result = await storeSceneResult(tracked, generated[0], index, sceneId, snapshot, message => storageWarnings.push(message));
                     if (result.image) result.image.durationMs = performance.now() - itemStart;
@@ -486,7 +509,7 @@ export function useSceneWorkspace(sceneId: string) {
                 await history!.save(serializeSceneLog(log));
             } catch (caught) { if (revision === epoch.current) setError(uiText("生成结果仍保留在页面，但本地记录保存失败：{value1}", { value1: errorText(caught) })); }
         } catch (caught) { if (revision === epoch.current) { setError(uiText(errorText(caught))); setResults(pending.map(item => ({ ...item, status: "failed", error: errorText(caught) }))); } }
-        finally { release(); if (revision === epoch.current) { setRunning(false); setOptimizing(false); } }
+        finally { observationControllers.current.delete(controller); release(); if (revision === epoch.current) { setRunning(false); setOptimizing(false); } }
     };
 
     const retryResult = async (result: SceneResult) => {
@@ -494,6 +517,7 @@ export function useSceneWorkspace(sceneId: string) {
         const release = workbenchSubmissions.acquire(`creative:${user.id}:${sceneId}`);
         if (!release) { setError(uiText("当前场景正在处理任务，请勿重复提交")); return; }
         const revision = epoch.current, originalId = activeLog.id, start = performance.now(), retryId = nanoid();
+        const controller = new AbortController(); observationControllers.current.add(controller);
         const pending: SceneResult = { id: nanoid(), status: "pending", requestId: `${nanoid()}:0` };
         let submitted = false;
         setRunning(true); setError(null); setNotice(null); setStartedAt(start); viewEpoch.current += 1;
@@ -523,7 +547,7 @@ export function useSceneWorkspace(sceneId: string) {
             };
             let completed: SceneResult;
             try {
-                const generated = await requestQueuedImages({ ...prepared.input, requestId: sceneRootRequestId(pending), onOptimizing: () => { if (revision === epoch.current) setOptimizing(true); }, onCompiled: (prompt, optimized) => { retryLog.prompt = prompt; retryLog.optimized = optimized; if (revision === epoch.current) setOptimizing(false); },
+                const generated = await requestQueuedImages({ ...prepared.input, requestId: sceneRootRequestId(pending), signal: controller.signal, cancelOnAbort: () => false, onOptimizing: () => { if (revision === epoch.current) setOptimizing(true); }, onCompiled: (prompt, optimized) => { retryLog.prompt = prompt; retryLog.optimized = optimized; if (revision === epoch.current) setOptimizing(false); },
                     onSubmissionStarted: async () => { await persistRetry(); submitted = true; }, onSubmitted: async ids => { pending.taskId = ids[0]; await persistRetry(); } });
                 completed = await storeSceneResult(pending, generated[0], 0, sceneId, { images: prepared.referenceImages, selection: prepared.selection }, message => warnings.push(message));
             } catch (caught) { completed = { id: pending.id, ...sceneFailure(caught, submitted, pending.taskId, pending.requestId) }; }
@@ -534,7 +558,7 @@ export function useSceneWorkspace(sceneId: string) {
             try { await history.save(serializeSceneLog(log)); }
             catch (caught) { if (revision === epoch.current) setError(uiText("重试结果仍保留在页面，但本地记录保存失败：{value1}", { value1: errorText(caught) })); }
         } catch (caught) { if (revision === epoch.current) setError(uiText("未提交重试：{value1}", { value1: errorText(caught) })); }
-        finally { release(); if (revision === epoch.current) { setRunning(false); setOptimizing(false); } }
+        finally { observationControllers.current.delete(controller); release(); if (revision === epoch.current) { setRunning(false); setOptimizing(false); } }
     };
 
     const queryResult = async (result: SceneResult, continueSubmission = false) => {
@@ -542,6 +566,7 @@ export function useSceneWorkspace(sceneId: string) {
         const release = workbenchSubmissions.acquire(`creative:${user.id}:${sceneId}`);
         if (!release) return;
         const revision = epoch.current, originalId = activeLog.id;
+        const controller = new AbortController(); observationControllers.current.add(controller);
         const assertCurrent = () => { if (revision !== epoch.current || useUserStore.getState().user?.id !== user.id) throw new Error("员工或场景已变化，未继续原请求"); };
         setRunning(true); setOptimizing(false); setError(null); setNotice(null);
         try {
@@ -598,7 +623,7 @@ export function useSceneWorkspace(sceneId: string) {
             const requestConfig = { ...effectiveConfig, ...log.config, count: "1" };
             let submitted = false;
             try {
-                const options = { operationType, tool: `creative-${sceneId}`, requestId: sceneRootRequestId(currentResult), promptInput,
+                const options = { operationType, tool: `creative-${sceneId}`, requestId: sceneRootRequestId(currentResult), promptInput, signal: controller.signal, cancelOnAbort: () => false,
                     onSubmissionStarted: async () => { await commit({ ...currentResult!, status: "pending", error: "正在继续原图片任务…" }); submitted = true; },
                     onSubmitted: async (ids: string[]) => { await commit({ ...currentResult!, taskId: ids[0], status: "pending" }); } };
                 const generated = restoredReferences.length ? await requestEdit(requestConfig, compilation.prompt, restoredReferences, undefined, options) : await requestGeneration(requestConfig, compilation.prompt, options);
@@ -610,7 +635,7 @@ export function useSceneWorkspace(sceneId: string) {
                 await commit({ id: currentResult!.id, ...sceneFailure(caught, submitted, currentResult!.taskId, currentResult!.requestId) });
             }
         } catch (caught) { if (revision === epoch.current) setError(uiText(errorText(caught))); }
-        finally { release(); if (revision === epoch.current) { setRunning(false); setOptimizing(false); } }
+        finally { observationControllers.current.delete(controller); release(); if (revision === epoch.current) { setRunning(false); setOptimizing(false); } }
     };
 
     const resultAction = async (action: "saveAsset" | "canvas" | "reference", image: SceneImage) => {
@@ -640,6 +665,6 @@ export function useSceneWorkspace(sceneId: string) {
 
     const updateForm: typeof setForm = (value) => { viewEpoch.current += 1; setRestoring(false); setPreviewing(false); setSelectedPrompt(null); setForm(value); };
     return { form, setForm: updateForm, images, setImage, selection, saveSelection, clearSelection: () => { if (!running) { viewEpoch.current += 1; setRestoring(false); setPreviewing(false); setSelectedPrompt(null); setSelection(null); setError(null); } }, saveLocalResult, config, updateConfig, model, profile, count, running, optimizing, loading,
-        uploading: uploadCount > 0, logs, historyTotal, historyHasMore, historyLoading, loadMoreHistory, activeLog, selectedPrompt, previewing, previewLog, selectResultPrompt, results, generate, restoreLog, reset, error, validation,
+        uploading: uploadCount > 0, logs, historyTotal, historyHasMore, historyLoading, loadMoreHistory, deleteLog, stopObserving, activeLog, selectedPrompt, previewing, previewLog, selectResultPrompt, results, generate, restoreLog, reset, error, validation,
         quotaBlocked, estimatedCredits: estimateValue.credits, download, startedAt, notice, resultActionBusy, resultAction, retryResult, queryResult, recoveredRequestId };
 }

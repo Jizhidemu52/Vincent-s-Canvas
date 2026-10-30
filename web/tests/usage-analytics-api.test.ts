@@ -30,6 +30,28 @@ test("usage API sends credentialed scoped reads and only frozen preview identifi
     expect(calls.every(call => call.init?.credentials === "include" && call.init.cache === "no-store")).toBe(true);
 });
 
+test("person reads, export and free preview preserve the same search and Beijing UTC boundaries", async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const filters = { search: "张三 & _%", from: "2026-09-30T16:00:00.000Z", to: "2026-10-30T16:00:00.000Z" };
+    globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
+        calls.push({ url: String(url), init });
+        return String(url).endsWith("/export")
+            ? streamResponse(lines([{ ...manifest, filters }, { type: "complete", recordCount: 0 }]))
+            : Response.json({ code: 0, data: {}, msg: "ok" });
+    }) as typeof fetch;
+    await listUsagePeople(filters);
+    await getUsagePerson("person-1", filters);
+    await exportUsageRecords(filters);
+    await previewUsageAnalysis({ ...filters, includePromptSamples: false });
+    for (const call of calls.slice(0, 2)) {
+        const query = new URL(call.url, "http://localhost").searchParams;
+        expect(Object.fromEntries(query)).toEqual(filters);
+    }
+    expect(JSON.parse(String(calls[2]!.init?.body))).toEqual(filters);
+    expect(JSON.parse(String(calls[3]!.init?.body))).toEqual({ ...filters, includePromptSamples: false });
+    expect(calls.some(call => call.url.endsWith("/analyze"))).toBe(false);
+});
+
 test("OA admin text model choices use the dedicated authenticated usage endpoint, never creative model APIs", async () => {
     const calls: Array<{ url: string; init?: RequestInit }> = [];
     const expected = { models: [{ id: "configured-model-uuid", name: "文字模型", description: "流程汇总" }] };

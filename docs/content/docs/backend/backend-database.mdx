@@ -62,7 +62,7 @@ description: 正式数据存储边界、员工画布文档、公司设计灵感�
 | `tool_api_configurations.model_config_id` | 可空 UUID；绑定时服务端权威选择该模型，空值允许用户选择已启用且能力匹配的模型 |
 | `enabled` | 当前板块模型调用开关；`false` 拒绝调用，不能回退其他模型 |
 | `credit_cost_override` | 可空非负整数；本板块每次输出的总积分价覆盖，0 是有效覆盖，NULL 沿用操作价加模型价 |
-| `rmb_cost_override` | 可空 `numeric(12,4)`；本板块每次输出的总成本覆盖，0 是有效覆盖，NULL 沿用操作价加模型价 |
+| `rmb_cost_override` | 可空 `numeric(16,6)`；本板块每次输出的总成本覆盖，0 是有效覆盖，NULL 沿用操作价加模型价；APIMart 固定图片单价模型不应用此人民币覆盖 |
 | `configuration_version` | 正整数，每次保存独立配置递增，不修改共享模型或全局操作价格 |
 | `tasks.tool_key` / `batch_tasks.tool_key` | 可空文本外键，保存正式来源板块；历史任务保留原数据 |
 
@@ -71,6 +71,8 @@ description: 正式数据存储边界、员工画布文档、公司设计灵感�
 `credit_reservations.price_snapshot` 记录 `toolKey`、`configurationVersion`、两项可空覆盖价与最终总价，批量任务在本次提交中共用同一份单项快照。源板块已知时提示词价格估算应用相同覆盖规则。此变更不重新启用部署已关闭的积分；独立对话与画布聊天分别配置且仍不新增聊天计费。`module_flags` 的总入口关闭也阻止子模块；本地工具没有服务端 AI 计费接口。
 
 ## 素材内容校验与复用
+
+`044_image_cost_precision.sql` 将 `model_configs`、`pricing_rule_versions`、`credit_reservations`、`tasks`、`generation_history`、`asset_events` 的 `rmb_cost` 与板块的 `rmb_cost_override` 扩为 `numeric(16,6)`，仅初始化指定 APIMart 图片模型的当前人民币成本，不修改旧金额、价格快照、员工积分或 Provider 凭据。新图片价格快照增加可选 `imageCost.rmbPerImage`；成功结算保留原计划值，另记 `settledQuantity`、`settledTotalRmb`，并在同一事务更新预占记录和任务人民币金额。没有此字段的旧快照继续沿用原价。
 
 `039_asset_content_hash.sql` 为素材新增可空 `content_sha256` 及按 owner/哈希查询就绪未删除素材的索引，不重写旧素材。上传请求可传 `metadata.contentSha256`；服务端只复用同一用户、相同真实哈希/字节数且就绪的图片，复用响应 `uploadUrl=null`。新上传由服务端计算实际字节 SHA-256，声明不一致时拒绝；不信任客户端直接把素材标记为已校验。带 `projectId` 的请求不跨项目自动复用。
 

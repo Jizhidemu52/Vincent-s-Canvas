@@ -1,6 +1,7 @@
 import { uiText, useUiText } from "@/lib/i18n";
 import { ImagePlus, Palette, Plus, Trash2, Upload } from "lucide-react";
 import { lazy, Suspense, useState } from "react";
+import { useImageDrop } from "@/hooks/use-image-drop";
 import type { ReferenceImage } from "@/types/image";
 import { useModuleEnabled } from "@/stores/use-module-store";
 import { addSceneColor, getSceneColorSelection, isSceneHexColor, removeSceneColor, setSceneColor, type SceneForm, type SceneSlot, type SceneSlotId } from "./scene-form-model";
@@ -190,23 +191,39 @@ export function SceneFields({ sceneId, form, onChange, disabled = false, sourceI
     </div>;
 }
 
-export function SceneUploads({ slots, images, onImage, disabled = false }: {
+export function SceneUploads({ slots, images, onImage, disabled = false, scopeKey = "creative" }: {
     slots: SceneSlot[];
     images: Partial<Record<SceneSlotId, ReferenceImage>>;
-    onImage: (slotId: SceneSlotId, file: File | null) => void;
+    onImage: (slotId: SceneSlotId, file: File | null) => void | Promise<void>;
     disabled?: boolean;
+    scopeKey?: string;
 }) {
     useUiText();
     if (!slots.length) return null;
     return <div className={`cs-upload-grid${slots.length === 2 ? " cs-upload-grid-pair" : ""}`}>
-        {slots.map((slot) => {
-            const reference = images[slot.id];
-            return <section className="cs-upload" key={slot.id} aria-labelledby={`cs-upload-${slot.id}-label`}>
+        {slots.map(slot => <SceneUploadSlot key={slot.id} slot={slot} reference={images[slot.id]} onImage={onImage} disabled={disabled} scopeKey={scopeKey} />)}
+    </div>;
+}
+
+function SceneUploadSlot({ slot, reference, onImage, disabled, scopeKey }: {
+    slot: SceneSlot;
+    reference?: ReferenceImage;
+    onImage: (slotId: SceneSlotId, file: File | null) => void | Promise<void>;
+    disabled: boolean;
+    scopeKey: string;
+}) {
+    useUiText();
+    const imageDrop = useImageDrop({
+        scopeKey: `${scopeKey}:${slot.id}:${slot.label}`,
+        disabled,
+        onFiles: async files => {
+            if (files.length !== 1) throw new Error("每个参考图位置一次只能拖入一张图片，请分别放入对应位置。");
+            await onImage(slot.id, files[0]!);
+        },
+    });
+    return <section className="cs-upload" aria-labelledby={`cs-upload-${slot.id}-label`}>
                 <div className="cs-label" id={`cs-upload-${slot.id}-label`}>{uiText(slot.label || "")}{slot.required && <span className="cs-required" aria-hidden="true"> *</span>}</div>
-                <label className={`cs-upload-control${reference ? " has-image" : ""}${disabled ? " is-disabled" : ""}`} htmlFor={`cs-upload-${slot.id}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => {
-                    event.preventDefault();
-                    if (!disabled && event.dataTransfer.files[0]) onImage(slot.id, event.dataTransfer.files[0]);
-                }}>
+                <label {...imageDrop.dropProps} aria-busy={imageDrop.reading} className={`cs-upload-control${reference ? " has-image" : ""}${disabled ? " is-disabled" : ""}${imageDrop.dragging ? " outline outline-2 outline-offset-2 outline-primary" : ""}`} htmlFor={`cs-upload-${slot.id}`}>
                     <input id={`cs-upload-${slot.id}`} className="cs-upload-input" type="file" accept="image/jpeg,image/png,image/webp" aria-label={uiText("上传{label}", { label: uiText(slot.label) })} disabled={disabled} onChange={(event) => {
                         const file = event.currentTarget.files?.[0];
                         if (file) onImage(slot.id, file);
@@ -217,9 +234,8 @@ export function SceneUploads({ slots, images, onImage, disabled = false }: {
                         <span className="cs-upload-replace"><Upload size={14} aria-hidden="true" />{uiText("重新上传")}</span>
                     </> : <span className="cs-upload-empty"><ImagePlus size={28} strokeWidth={1.5} aria-hidden="true" /><strong>{uiText("上传")}{uiText(slot.label || "")}</strong><span>{uiText("点击或拖入 PNG / JPG / WebP")}</span></span>}
                 </label>
+                {imageDrop.dragging || imageDrop.reading ? <p role="status" className="cs-help">{imageDrop.dragging ? uiText("松开以添加到{label}，不会自动生成。", { label: uiText(slot.label) }) : uiText("正在读取拖入图片，请稍候。")}</p> : null}
                 <p className="cs-upload-meta">{uiText(slot.hint || "")}</p>
                 {reference && <div className="cs-upload-file"><span title={reference.name}>{reference.name}</span><button type="button" className="cs-upload-remove" aria-label={uiText("移除{label}", { label: uiText(slot.label) })} disabled={disabled} onClick={() => onImage(slot.id, null)}><Trash2 size={13} aria-hidden="true" />{uiText("移除")}</button></div>}
             </section>;
-        })}
-    </div>;
 }

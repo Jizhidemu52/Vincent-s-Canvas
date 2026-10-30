@@ -1,3 +1,5 @@
+import type { ApimartImageCost } from "../../../../shared/apimart-image-costs";
+
 export type MarkPlatformProvider = {
     id: string;
     name: string;
@@ -14,6 +16,7 @@ export type MarkPlatformModel = {
     enabled: boolean;
     creditCost: number;
     rmbCost: number;
+    imageCost?: ApimartImageCost;
     concurrencyLimit: number;
 };
 

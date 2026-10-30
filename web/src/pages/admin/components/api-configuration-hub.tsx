@@ -15,9 +15,13 @@ import {
 import { moduleIsEnabled, nonAiDefinitions, toolDefinitions } from "@/services/api/modules";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { useModuleStore } from "@/stores/use-module-store";
+import { useUnsavedGuard, useConfirmUnsavedChanges } from "@/hooks/use-unsaved-guard";
 
 export function ApiConfigurationHub({ isAdmin }: { isAdmin: boolean }) {
-    const { message } = App.useApp();
+    const { message, modal } = App.useApp();
+    const [dirty, setDirty] = useState(false);
+    const { confirmDiscard } = useUnsavedGuard(dirty, "板块 API 配置尚未保存，离开后将丢失本次修改。");
+    const confirmAllUnsaved = useConfirmUnsavedChanges();
     const [form] = Form.useForm<ToolApiConfigurationInput>();
     const [tools, setTools] = useState<ToolApiConfiguration[]>([]);
     const [providers, setProviders] = useState<ServerProvider[]>([]);
@@ -51,22 +55,28 @@ export function ApiConfigurationHub({ isAdmin }: { isAdmin: boolean }) {
     };
     useEffect(() => { void refresh(); }, []);
 
-    const openTool = (tool: ToolApiConfiguration) => {
+    const openTool = async (tool: ToolApiConfiguration) => {
+        if (!await confirmDiscard()) return;
+        setDirty(false);
         form.resetFields();
         form.setFieldsValue(buildToolConfigurationInput(tool, tool));
         setSelectedTool(tool);
     };
-    const openAdvanced = (tab: "providers" | "models") => {
+    const openAdvanced = async (tab: "providers" | "models") => {
+        if (!await confirmDiscard()) return;
+        setDirty(false);
         setSelectedTool(null);
         setActiveTab(tab);
     };
     const save = async (values: ToolApiConfigurationInput) => {
         if (!selectedTool) return;
+        if (values.enabled !== selectedTool.enabled && !await modal.confirm({ title: `确认${values.enabled ? "开启" : "关闭"}${selectedTool.label}的 API？`, content: "影响所有使用本板块的成员。关闭后禁止本板块的新调用，不会回退到其他模型；现有历史结果保留。", okText: "确认保存", cancelText: "返回核对", okButtonProps: { danger: !values.enabled } })) return;
         setSaving(true);
         try {
             // The chat binding is shared by conversation surfaces; prices and switches remain per board.
             await updateToolApiConfiguration(selectedTool.toolKey, buildToolConfigurationInput(selectedTool, values));
             setSelectedTool(null);
+            setDirty(false);
             form.resetFields();
             await refresh();
             try {
@@ -88,7 +98,7 @@ export function ApiConfigurationHub({ isAdmin }: { isAdmin: boolean }) {
     return (
         <div className="space-y-4">
             <Alert type="info" showIcon title={`${toolDefinitions.length} 个 AI 板块配置`} description={`对话改图与画布对话共用“对话改图”中指定的模型，设计师端不显示 LLM 模型设置；其他板块模型、各板块开关与费用仍独立配置。API 服务、密钥与新增模型请使用高级页；${nonAiDefinitions.length} 个非 AI 模块在“模块开关”中管理。`} />
-            <Tabs activeKey={activeTab} onChange={(key) => { setActiveTab(key); if (key === "tools") void refresh(); }} items={[
+            <Tabs activeKey={activeTab} destroyOnHidden onChange={async (key) => { if (!await confirmAllUnsaved()) return; setActiveTab(key); if (key === "tools") void refresh(); }} items={[
                 {
                     key: "tools",
                     label: <span className="inline-flex items-center gap-2"><Settings2 className="size-4" />板块配置（{toolDefinitions.length}）</span>,
@@ -116,7 +126,7 @@ export function ApiConfigurationHub({ isAdmin }: { isAdmin: boolean }) {
                                         <div className="mt-3 flex-1 space-y-2 text-sm text-[var(--muted-foreground)]">
                                             <p>{state.reason}</p>
                                             {!moduleEnabled ? <Tag color="orange">模块入口或所属总入口已关闭</Tag> : null}
-                                            <p className="text-xs">{tool.creditCostOverride == null ? "积分：继承操作与模型价格" : `积分：${tool.creditCostOverride} / 次（总额）`}<br />{tool.rmbCostOverride == null ? "成本：继承操作与模型价格" : `成本：￥${tool.rmbCostOverride.toFixed(4)} / 次（总额）`}</p>
+                                            <p className="text-xs">{tool.creditCostOverride == null ? "积分：继承操作与模型价格" : `积分：${tool.creditCostOverride} / 次（总额）`}<br />{tool.rmbCostOverride == null ? "成本：继承操作与模型价格" : `成本：￥${tool.rmbCostOverride.toFixed(6)} / 次（总额）`}<br />固定单价的 APIMart 图片模型始终按每张人民币成本统计。</p>
                                             {tool.workflowName ? <p className="text-xs">工作流：{tool.workflowName}</p> : null}
                                             <p className="text-xs">配置版本：{tool.configurationVersion}</p>
                                         </div>
@@ -132,8 +142,8 @@ export function ApiConfigurationHub({ isAdmin }: { isAdmin: boolean }) {
                 { key: "workflows", label: <span className="inline-flex items-center gap-2"><Workflow className="size-4" />工作流（高级）</span>, children: <WorkflowManagementPanel isAdmin={isAdmin} /> },
                 { key: "models", label: <span className="inline-flex items-center gap-2"><Boxes className="size-4" />模型（高级）</span>, children: <div className="space-y-4"><Alert type="warning" showIcon title="共用模型配置" description="在此新增模型后，返回板块配置选择绑定。编辑已有模型会影响所有使用该模型的板块；需要隔离时请新增模型。" /><ModelPricingPanel mode="models" /></div> },
             ]} />
-            <Modal title={selectedTool ? `配置${selectedTool.label}` : "配置板块"} open={Boolean(selectedTool)} onCancel={() => { if (!saving) setSelectedTool(null); }} footer={null} width={640} destroyOnHidden>
-                <Form form={form} layout="vertical" disabled={!isAdmin || saving} onFinish={save}>
+            <Modal title={selectedTool ? `配置${selectedTool.label}` : "配置板块"} open={Boolean(selectedTool)} onCancel={async () => { if (!saving && await confirmDiscard()) { setDirty(false); setSelectedTool(null); } }} footer={null} width={640} destroyOnHidden>
+                <Form form={form} layout="vertical" disabled={!isAdmin || saving} onValuesChange={() => setDirty(true)} onFinish={save}>
                     {selectedTool?.toolKey === "canvas-chat" ? <Alert className="mb-4" type="info" showIcon title="跟随统一对话模型" description={`当前模型：${selectedTool.modelName || "尚未配置"}。请在“对话改图”中统一修改，画布不再单独选型。下方开关与费用仅影响画布对话。`} action={<Button onClick={() => { const unified = tools.find((tool) => tool.toolKey === "gpt-chat"); if (unified) openTool(unified); }}>修改统一模型</Button>} /> : <Form.Item name="modelConfigId" label={selectedTool?.toolKey === "gpt-chat" ? "统一对话模型" : "本板块模型绑定"} extra={selectedTool?.toolKey === "gpt-chat" ? "同时用于对话改图与画布对话，设计师端不显示模型名称或选型控件。只显示已启用且 API 可用的文字模型。" : "留空即继承默认 / 由用户选择；固定绑定优先于用户选择。只显示已启用且能力兼容、API 可用的模型。"} dependencies={selectedTool?.toolKey === "gpt-chat" ? ["enabled"] : undefined} rules={selectedTool?.toolKey === "gpt-chat" ? [({ getFieldValue }) => ({ validator: (_, value) => getFieldValue("enabled") === false || value ? Promise.resolve() : Promise.reject(new Error("请选择统一对话模型")) })] : undefined}>
                         <Select allowClear={selectedTool?.toolKey !== "gpt-chat"} showSearch={{ optionFilterProp: "label" }} placeholder={selectedTool?.toolKey === "gpt-chat" ? "选择前台与画布共用的对话模型" : "继承默认 / 用户选择模型"} options={selectedModels.map((model) => ({ value: model.id, label: `${model.name} · ${model.providerName} · ${model.modelId}` }))} />
                     </Form.Item>}
@@ -141,11 +151,11 @@ export function ApiConfigurationHub({ isAdmin }: { isAdmin: boolean }) {
                     {!selectedModels.length ? <Alert className="mb-4" type="warning" showIcon title="还没有兼容的可用模型" description="先配置 API 服务与密钥，再在模型高级页新增兼容模型。" /> : null}
                     <div className="mb-5 flex flex-wrap gap-2"><Button onClick={() => openAdvanced("providers")}>配置 / 新增 API 服务</Button><Button onClick={() => openAdvanced("models")}>新增 / 管理模型</Button></div>
                     <>
-                        <Alert className="mb-4" type="info" showIcon title="费用覆盖为每次调用总额" description="留空继承“操作价格 + 模型价格”；填写后替代该合计，仅当前板块生效。0 表示免费，不表示继承。积分总开关关闭时不扣分，费用配置仍会保留。" />
+                        <Alert className="mb-4" type="info" showIcon title="费用覆盖为每次调用总额" description="一般模型留空继承“操作价格 + 模型价格”；填写后替代该合计，仅当前板块生效。0 表示免费，不表示继承。已配置固定单价的 APIMart 图片模型始终按成功出图张数统计人民币成本，不叠加操作费，也不受此人民币覆盖影响。站内积分仍按原规则处理。" />
                         {selectedTool?.operationType === "chat" ? <Alert className="mb-4" type="info" showIcon title="对话按模型调用次数计费" description="每次成功的模型请求计费一次，Agent 工具调用后的模型续答也算一次；生成图片等工具另按对应板块计费。失败或中断不扣分。" /> : null}
                         <div className="grid gap-3 sm:grid-cols-2">
                             <Form.Item name="creditCostOverride" label="积分总额 / 次（可选）"><InputNumber className="w-full" min={0} precision={0} placeholder="留空继承" /></Form.Item>
-                            <Form.Item name="rmbCostOverride" label="人民币成本总额 / 次（可选）"><InputNumber className="w-full" min={0} precision={4} placeholder="留空继承" /></Form.Item>
+                            <Form.Item name="rmbCostOverride" label="人民币成本总额 / 次（可选）"><InputNumber className="w-full" min={0} precision={6} placeholder="留空继承" /></Form.Item>
                         </div>
                     </>
                     <Form.Item name="enabled" label="本板块 API 启用" valuePropName="checked" extra="与模块入口开关独立；关闭后禁止本板块调用，不回退到其他模型。"><Switch /></Form.Item>

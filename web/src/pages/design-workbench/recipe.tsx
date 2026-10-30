@@ -1,4 +1,7 @@
 import { uiText, useUiText } from "@/lib/i18n";
+import { handleSubmitShortcut } from "@/lib/submit-shortcut";
+import { GenerationInputList } from "@/components/generation-input-list";
+import { GenerationDiagnostic } from "@/components/generation-diagnostic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowLeft, Download, ImagePlus, LoaderCircle, Palette, Pause, Play, RefreshCw, Save, Square, Upload, X } from "lucide-react";
@@ -6,6 +9,7 @@ import { saveAs } from "file-saver";
 import { ImageSettingsPanel } from "@/components/image-settings-panel";
 import { ModelPicker } from "@/components/model-picker";
 import { useToolConfig, useToolEnabled } from "@/hooks/use-tool-config";
+import { useImageDrop } from "@/hooks/use-image-drop";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { deploymentFeatures } from "@/lib/deployment-features";
 import { validateImageReferences } from "@/lib/image-reference-policy";
@@ -414,7 +418,7 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
     };
 
     return (
-        <main className="series-recipe-page">
+        <main className="series-recipe-page" onKeyDown={event => handleSubmitShortcut(event, !locked && !validation && !uncertain, () => void start("new"))}>
             <header className="sr-header">
                 <div>
                     <Link to="/creative" className="sr-back">
@@ -440,13 +444,14 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
                                 <option value="pattern">{uiText("产品与图案 → 定位 → 系列候选")}</option>
                             </select>
                         </label>
-                        <RecipeUpload label={uiText("参考底图（必需）")} image={project.references[0]} disabled={locked} onUpload={(file) => void upload(0, file)} onRemove={() => commit({ ...projectRef.current, references: [] })} />
+                        <RecipeUpload label={uiText("参考底图（必需）")} scopeKey={`recipe:${project.form.kind}:primary`} image={project.references[0]} disabled={locked} onUpload={(file) => upload(0, file)} onRemove={() => commit({ ...projectRef.current, references: [] })} />
                         {project.form.kind === "pattern" && (
                             <RecipeUpload
                                 label={uiText("图案参考（可选）")}
+                                scopeKey={`recipe:${project.form.kind}:secondary`}
                                 image={project.references[1]}
                                 disabled={locked || !project.references[0]}
-                                onUpload={(file) => void upload(1, file)}
+                                onUpload={(file) => upload(1, file)}
                                 onRemove={() => commit({ ...projectRef.current, references: projectRef.current.references.slice(0, 1) })}
                             />
                         )}
@@ -532,14 +537,14 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
                         </details>
                         <details className="sr-details">
                             <summary>{uiText("查看候选 1 的设计输入")}</summary>
-                            <pre>{JSON.stringify(recipePromptInput(project.form, 0, refs.length > 1).fields, null, 2)}</pre>
+                            <GenerationInputList fields={recipePromptInput(project.form, 0, refs.length > 1).fields} />
                         </details>
                     </fieldset>
                 </aside>
                 <section className="sr-stage" aria-label={uiText("候选结果")}>
                     <div className="sr-stage-heading">
                         <div>
-                            <span className="sr-eyebrow">SERIES / CANDIDATES</span>
+                            <span className="sr-eyebrow">{uiText("系列候选方案")}</span>
                             <h2>{run?.form.series || project.form.series || uiText("未命名系列")}</h2>
                         </div>
                         <span className="sr-phase" role="status">
@@ -597,15 +602,14 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
                                             <span>{branch.optimizing ? uiText("正在优化提示词…") : recipeStatusLabels[branch.status]}</span>
                                         </div>
                                         <p>{run.form.kind === "structure" ? `${run.form.palette[branch.index]!.name} · ${run.form.palette[branch.index]!.hex.toUpperCase()}` : run.form.positions[branch.index]}</p>
-                                        {branch.error && <p className="sr-error">{branch.error}</p>}
+                                        {branch.error && <GenerationDiagnostic error={branch.error} details={`requestId: ${branch.requestId || ""}\ntaskIds: ${branch.taskIds.join(", ")}`} />}
                                         <small>
-                                            {uiText("已尝试 {count} 次", { count: branch.attempts })}{branch.taskIds[0] ? uiText(" · 任务 {value1}…", { value1: branch.taskIds[0].slice(0, 10) }) : ""}
+                                            {uiText("已尝试 {count} 次", { count: branch.attempts })}
                                         </small>
                                         <details>
-                                            <summary>{uiText("查看本候选原始指令与请求标识")}</summary>
+                                            <summary>{uiText("查看本候选原始提示词")}</summary>
                                             <pre>
                                                 {branch.prompt}
-                                                {branch.requestId ? `\n\nrequestId: ${branch.requestId}\ntaskIds: ${branch.taskIds.join(", ") || "尚未确认"}` : ""}
                                             </pre>
                                         </details>
                                         <label className="sr-selection">
@@ -659,7 +663,7 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
                         )}
                         <button type="button" className="sr-button sr-wide" disabled={locked || !enabled || !failed} onClick={() => void start("failed")}>
                             <RefreshCw size={14} />
-                            {uiText("仅重试确认失败项 (")}{failed})
+                            {uiText("按原参数重试（确认失败项 ")}{failed}）
                         </button>
                         <button type="button" className="sr-button sr-wide" disabled={locked || !enabled || !uncertain} onClick={() => void start("recover")}>
                             {uiText("查询原任务 (")}{uncertain}{uiText(") · 不重新生成")}</button>
@@ -738,12 +742,20 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
     );
 }
 
-function RecipeUpload({ label, image, disabled, onUpload, onRemove }: { label: string; image?: ReferenceImage; disabled: boolean; onUpload: (file: File) => void; onRemove: () => void }) {
+function RecipeUpload({ label, scopeKey, image, disabled, onUpload, onRemove }: { label: string; scopeKey: string; image?: ReferenceImage; disabled: boolean; onUpload: (file: File) => void | Promise<void>; onRemove: () => void }) {
     useUiText();
+    const imageDrop = useImageDrop({
+        scopeKey,
+        disabled,
+        onFiles: async files => {
+            if (files.length !== 1) throw new Error("每个参考图位置一次只能拖入一张图片，请分别放入对应位置。");
+            await onUpload(files[0]!);
+        },
+    });
     return (
         <div className="sr-upload-field">
             <span>{label}</span>
-            <label className={`sr-upload ${disabled ? "is-disabled" : ""}`}>
+            <label {...imageDrop.dropProps} aria-busy={imageDrop.reading} className={`sr-upload ${disabled ? "is-disabled" : ""}${imageDrop.dragging ? " outline outline-2 outline-offset-2 outline-primary" : ""}`}>
                 {image ? <img src={image.dataUrl} alt={label} /> : <ImagePlus size={26} strokeWidth={1.4} />}
                 <span>
                     {image ? uiText("点击替换参考图") : uiText("选择 PNG / JPG / WebP")}
@@ -761,6 +773,7 @@ function RecipeUpload({ label, image, disabled, onUpload, onRemove }: { label: s
                     }}
                 />
             </label>
+            {imageDrop.dragging || imageDrop.reading ? <p role="status" className="sr-help">{imageDrop.dragging ? uiText("松开以添加到{label}，不会自动生成。", { label }) : uiText("正在读取拖入图片，请稍候。")}</p> : null}
             {image && (
                 <div className="sr-upload-name">
                     <span title={image.name}>{image.name}</span>

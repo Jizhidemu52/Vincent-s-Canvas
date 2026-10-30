@@ -59,12 +59,13 @@ test("MJ single-image settings omit repeat while retaining every other advanced 
     const html = renderToStaticMarkup(<ImageSettingsPanel profile={profile} config={{ ...defaultConfig, model: "midjourney", count: "9", imageOptions }} theme={canvasThemes.light} onConfigChange={() => {}} />);
     expect(html).not.toContain("repeat");
     expect(html).not.toContain("重复生成");
-    expect(html).toContain("1 个任务");
+    expect(html).not.toContain("1 个任务");
     for (const label of ["随机种子", "提前停止 --stop", "其他原生参数", "任务附加信息 JSON"]) expect(html).toContain(label);
 });
 
 test("shared settings renders real quality names and all documented advanced fields", () => {
     useBusinessConfigStore.setState({ models: [] });
     const html = renderToStaticMarkup(<ImageSettingsPanel config={{ ...defaultConfig, model: "gpt-image-2.5-sunburst" }} theme={canvasThemes.light} onConfigChange={() => {}} />);
-    for (const label of ["max", "xhigh", "high", "3840x2160", "background", "output_format", "output_compression", "全部高级参数"]) expect(html).toContain(label);
+    for (const label of ["最高", "超高", "高", "3840x2160", "背景", "输出格式", "压缩", "全部高级参数"]) expect(html).toContain(label);
+    for (const rawField of ["<code>background</code>", "<code>output_format</code>", "高 high"]) expect(html).not.toContain(rawField);
 });

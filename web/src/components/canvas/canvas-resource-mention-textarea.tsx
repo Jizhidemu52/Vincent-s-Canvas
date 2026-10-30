@@ -3,6 +3,7 @@ import type { CSSProperties, TextareaHTMLAttributes } from "react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
+import { ignoreCanvasPromptKey } from "@/lib/canvas/canvas-interaction-ux";
 import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 
 // Only the optional popup suspends; the textbox and keyboard selection stay live.
@@ -132,6 +133,7 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
                     props.onPointerUp?.(event);
                 }}
                 onKeyDown={(event) => {
+                    if (ignoreCanvasPromptKey({ isComposing: event.nativeEvent.isComposing, keyCode: event.nativeEvent.keyCode, repeat: event.repeat })) return;
                     if (mention && candidates.length) {
                         if (event.key === "ArrowDown") {
                             event.preventDefault();

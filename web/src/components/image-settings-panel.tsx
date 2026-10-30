@@ -115,10 +115,6 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                 </div>}
             </div>}
             </> : !profile.verified ? <p className="py-2 text-xs leading-5 opacity-60">{uiText(profile.tip)}</p> : null}
-            {!compact ? <div className="ip-row">
-                <span className="ip-label" title={uiText("每次提交生成 1 张图片；可连续提交多个独立任务。")}><Layers2 size={15} />{uiText("任务数")}</span>
-                <span className="ip-fixed-count">{uiText("1 个任务")}</span>
-            </div> : null}
             {profile.customSize && spacious ? <section className="ip-section ip-size-section" aria-labelledby={`${resolutionNoticeId}-size-title`}>
                 <div className="ip-section-heading">
                     <span className="ip-section-icon"><Ratio size={19} aria-hidden /></span>
@@ -159,7 +155,6 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                         const range = field.type === "number" ? uiText("范围 {min}–{max}{step}", { min: field.min ?? "", max: field.max ?? "", step: field.step !== undefined && field.step !== 1 ? uiText("，步长 {step}", { step: field.step }) : "" }) : "";
                         return <fieldset key={field.key} data-image-field={field.key} className={`ip-option-card${isLongText ? " ip-option-card-wide" : ""}${disabled ? " is-inactive" : ""}`}>
                             <legend>{uiText(field.label)}</legend>
-                            <code className="ip-option-key">{field.key}</code>
                             {choices && choices.length <= 4 ? <div className="ip-option-choices" role="radiogroup" aria-label={uiText(field.label)} aria-describedby={field.tip ? helpId : undefined}>
                                 {["", ...choices].map(choice => <label className="ip-option-choice" key={choice || "default"}>
                                     <input type="radio" name={`${resolutionNoticeId}-${field.key}`} data-image-option={field.key} value={choice} checked={value === choice} onChange={event => { if (event.target.checked) updateOption(field.key, choice); }} />
@@ -177,7 +172,7 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
                 <p className="text-xs leading-5" style={{ color: theme.node.muted }}>{uiText("留空使用渠道默认；只提交当前模型支持的字段。")}</p>
                 <div className="flex flex-col gap-3 py-2">
                     {fields.map(field => <label key={field.key} className="flex flex-col gap-1 text-xs">
-                        <span>{uiText(field.label)} <span style={{ color: theme.node.muted }}>({field.key})</span></span>
+                        <span>{uiText(field.label)}</span>
                         {field.options || field.type === "boolean" ? <select aria-label={uiText(field.label)} value={options[field.key] || ""} className="w-full rounded border px-2 py-1.5" style={{ background: theme.node.fill, color: theme.node.text, borderColor: theme.node.stroke }} onChange={event => updateOption(field.key, event.target.value)}>
                             <option value="">{uiText("渠道默认")}</option>
                             {(field.options || ["true", "false"]).map(value => <option key={value} value={value}>{({ true: uiText("开启"), false: uiText("关闭"), auto: uiText("自动 (auto)"), opaque: uiText("不透明 (opaque)"), transparent: uiText("透明 (transparent)") } as Record<string, string>)[value] || value}</option>)}
@@ -200,7 +195,7 @@ export function ImageSettingsTheme({ theme, children }: { theme: CanvasTheme; ch
 }
 
 export function imageQualityLabel(value: string) {
-    return ({ auto: uiText("自动 auto"), high: uiText("高 high"), xhigh: uiText("超高 xhigh"), max: uiText("最高 max"), medium: uiText("中 medium"), low: uiText("低 low"), relax: uiText("休闲"), fast: uiText("快速"), turbo: uiText("极速") } as Record<string, string>)[value] || value.toUpperCase();
+    return ({ auto: uiText("自动"), high: uiText("高"), xhigh: uiText("超高"), max: uiText("最高"), medium: uiText("中"), low: uiText("低"), relax: uiText("休闲"), fast: uiText("快速"), turbo: uiText("极速") } as Record<string, string>)[value] || value.toUpperCase();
 }
 
 export function imageSizeLabel(size: string) {

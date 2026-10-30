@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import React, { type DependencyList, type EffectCallback, type ReactElement } from "react";
 import ts from "typescript";
 
-import { MARK_IMAGE_BASE_URL, MARK_IMAGE_MODELS, MARK_PLATFORM_MODELS } from "../../shared/mark-image-models";
+import { MARK_IMAGE_BASE_URL, MARK_IMAGE_MODELS, MARK_IMAGE_PROVIDER_ID, MARK_PLATFORM_MODELS } from "../../shared/mark-image-models";
 import { getMarkImageConfiguration, MarkImageConfigurationError, saveMarkImageConfiguration, type MarkImageConfiguration, type MarkImageConfigurationInput } from "@/services/api/mark-image-provider";
 
 const originalFetch = globalThis.fetch;
@@ -15,6 +15,13 @@ const savedConfiguration = (): MarkImageConfiguration => ({
     provider: { id: "mark-provider", name: "APIMart 平台", protocol: "apimart", baseUrl: MARK_IMAGE_BASE_URL, enabled: true, hasCredentials: true },
     models: MARK_PLATFORM_MODELS.map((model, index) => ({ ...model, id: `model-${index}`, enabled: true, creditCost: 0, rmbCost: 0, concurrencyLimit: 2 })),
 });
+
+const imageRmb: Record<string, number> = {
+    "gpt-image-2": 0.05368,
+    "gpt-image-2.5-flare": 0.1342,
+    "gpt-image-2.5-sunburst": 0.1342,
+    "gemini-3.1-flash-image-preview-official": 0.3355,
+};
 
 test("Mark API uses only the dedicated authenticated endpoint and omits blank replacement credentials", async () => {
     const calls: Array<{ path: string; init?: RequestInit }> = [];
@@ -85,6 +92,7 @@ function harness(options: { role?: string; load?: () => Promise<MarkImageConfigu
     const business = { refresh: async () => { refreshes++; await options.refresh?.(); } };
     const dependencies: Record<string, any> = {
         "@/lib/i18n": i18nHarness,
+        "@/hooks/use-unsaved-guard": { useUnsavedGuard: () => ({ confirmDiscard: async () => true }) },
         react: { ...React, useState,
             useRef: (value: unknown) => { const index = cursor++; return state[index] ||= { current: value }; },
             useCallback: (callback: unknown, deps?: DependencyList) => { const index = cursor++; if (!state[index] || !equal(state[index].deps, deps)) state[index] = { deps, callback }; return state[index].callback; },
@@ -97,7 +105,7 @@ function harness(options: { role?: string; load?: () => Promise<MarkImageConfigu
         "lucide-react": new Proxy({}, { get: (_, key) => String(key) }),
         "@/stores/use-user-store": { useUserStore: (select: Function) => select(userState) },
         "@/stores/use-business-config-store": { useBusinessConfigStore: (select: Function) => select(business) },
-        "../../../../../shared/mark-image-models": { MARK_IMAGE_BASE_URL, MARK_IMAGE_MODELS, MARK_PLATFORM_MODELS },
+        "../../../../../shared/mark-image-models": { MARK_IMAGE_BASE_URL, MARK_IMAGE_MODELS, MARK_IMAGE_PROVIDER_ID, MARK_PLATFORM_MODELS },
         "@/services/api/mark-image-provider": {
             MarkImageConfigurationError,
             getMarkImageConfiguration: async () => { reads++; return options.load ? options.load() : { provider: null, models: [] }; },
@@ -126,6 +134,44 @@ test("only super admins read the dedicated configuration", async () => {
     } finally { panel.dispose(); }
 });
 
+test("fixed image RMB costs replace stale values, are read-only and survive form submission exactly", async () => {
+    const existing = savedConfiguration();
+    existing.models = existing.models.map(model => ({ ...model, creditCost: 7, rmbCost: 1.23 }));
+    const panel = harness({ load: async () => existing });
+    try {
+        const tree = await panel.settle();
+        for (const [modelId, rmbPerImage] of Object.entries(imageRmb)) {
+            const index = existing.models.findIndex(model => model.modelId === modelId);
+            const model = existing.models[index]!;
+            expect(panel.form.values.models[index].rmbCost).toBe(rmbPerImage);
+            const input = tree.find(element => element.type === "InputNumber" && element.props["aria-label"] === `${model.name} 内部成本`)!;
+            expect(input.props.readOnly).toBe(true);
+            expect(input.props.precision).toBe(6);
+        }
+        const other = existing.models.findIndex(model => model.modelId === "gemini-nano-banana-2.1");
+        expect(panel.form.values.models[other].rmbCost).toBe(1.23);
+        const form = tree.find(element => element.type === panel.Form)!;
+        await form.props.onFinish(panel.form.values);
+        expect(panel.writes[0].models.find(model => model.modelId === "gpt-image-2")).toMatchObject({ creditCost: 7, rmbCost: 0.05368 });
+    } finally { panel.dispose(); }
+});
+
+test("the configuration API preserves five-decimal RMB costs in the JSON request and response", async () => {
+    let submitted: MarkImageConfigurationInput | undefined;
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+        submitted = JSON.parse(String(init?.body));
+        return Response.json({ ...savedConfiguration(), models: submitted!.models.map((model, index) => ({ ...model, id: `model-${index}`, name: model.modelId })) });
+    }) as typeof fetch;
+    const panel = harness({ load: async () => savedConfiguration(), save: saveMarkImageConfiguration });
+    try {
+        const tree = await panel.settle();
+        await tree.find(element => element.type === panel.Form)!.props.onFinish(panel.form.values);
+        expect(submitted?.models.find(model => model.modelId === "gpt-image-2")?.rmbCost).toBe(0.05368);
+        const index = MARK_PLATFORM_MODELS.findIndex(model => model.modelId === "gpt-image-2");
+        expect(panel.form.values.models[index].rmbCost).toBe(0.05368);
+    } finally { panel.dispose(); }
+});
+
 test("first configuration groups every registered image, text, video and blend model with safe defaults and mandatory key", async () => {
     const panel = harness();
     try {
@@ -133,7 +179,7 @@ test("first configuration groups every registered image, text, video and blend m
         expect(panel.form.values.baseUrl).toBe(MARK_IMAGE_BASE_URL);
         expect(MARK_PLATFORM_MODELS).toHaveLength(10);
         expect(tree.some(element => element.type === "Tag" && Array.isArray(element.props.children) && element.props.children.join("") === "6 图片 · 2 文字 · 1 视频 · 1 多图融合")).toBe(true);
-        expect(panel.form.values.models).toEqual(MARK_PLATFORM_MODELS.map(model => ({ enabled: model.defaultEnabled, creditCost: 0, rmbCost: 0, concurrencyLimit: 2 })));
+        expect(panel.form.values.models).toEqual(MARK_PLATFORM_MODELS.map(model => ({ enabled: model.defaultEnabled, creditCost: 0, rmbCost: imageRmb[model.modelId] ?? 0, concurrencyLimit: 2 })));
         expect(MARK_PLATFORM_MODELS.filter(model => !model.defaultEnabled).map(model => model.modelId)).toEqual(["grok-imagine-image-2.0"]);
         expect(MARK_PLATFORM_MODELS.at(-1)?.modelId).toBe("claude-sonnet-5-5");
         expect(tree.filter(element => element.type === "Text" && element.props.strong).map(element => element.props.children).sort()).toEqual(MARK_PLATFORM_MODELS.map(model => model.name).sort());
@@ -170,7 +216,7 @@ test("saving writes exact model identities once, clears the key and refreshes bu
         await submit(panel.form.values);
         expect(panel.writes).toHaveLength(1);
         expect(panel.writes[0].models.map(model => model.modelId)).toEqual(MARK_PLATFORM_MODELS.map(model => model.modelId));
-        expect(panel.writes[0].models[1]).toEqual({ modelId: MARK_IMAGE_MODELS[1].modelId, enabled: false, creditCost: 7, rmbCost: 0.05, concurrencyLimit: 4 });
+        expect(panel.writes[0].models[1]).toEqual({ modelId: MARK_IMAGE_MODELS[1].modelId, enabled: false, creditCost: 7, rmbCost: 0.1342, concurrencyLimit: 4 });
         expect(panel.writes[0].models[3]).toEqual({ modelId: "gpt-6-astra", enabled: false, creditCost: 2, rmbCost: 0.0123, concurrencyLimit: 3 });
         expect(panel.writes[0].models[4]).toEqual({ modelId: "happyhorse-1.1", enabled: true, creditCost: 25, rmbCost: 0.6, concurrencyLimit: 1 });
         expect(panel.writes[0].models[5]).toEqual({ modelId: "midjourney-blend", enabled: false, creditCost: 13, rmbCost: 0.4, concurrencyLimit: 3 });
@@ -196,8 +242,8 @@ test("existing three-model configurations retain saved values and add independen
     try {
         const tree = await panel.settle();
         expect(panel.form.values.models).toHaveLength(MARK_PLATFORM_MODELS.length);
-        expect(panel.form.values.models[0]).toEqual({ enabled: false, creditCost: 11, rmbCost: 0.45, concurrencyLimit: 7 });
-        expect(panel.form.values.models.slice(3)).toEqual(MARK_PLATFORM_MODELS.slice(3).map(model => ({ enabled: model.defaultEnabled, creditCost: 0, rmbCost: 0, concurrencyLimit: 2 })));
+        expect(panel.form.values.models[0]).toEqual({ enabled: false, creditCost: 11, rmbCost: 0.1342, concurrencyLimit: 7 });
+        expect(panel.form.values.models.slice(3)).toEqual(MARK_PLATFORM_MODELS.slice(3).map(model => ({ enabled: model.defaultEnabled, creditCost: 0, rmbCost: imageRmb[model.modelId] ?? 0, concurrencyLimit: 2 })));
         expect(panel.form.values.apiKey).toBe("");
         await tree.find(element => element.type === panel.Form)!.props.onFinish(panel.form.values);
         expect(panel.writes[0].apiKey).toBeUndefined();
@@ -205,7 +251,7 @@ test("existing three-model configurations retain saved values and add independen
     } finally { panel.dispose(); }
 });
 
-test("adding Blend and image models preserves every setting on the existing five-model configuration", async () => {
+test("adding Blend and image models preserves non-cost settings and costs outside the fixed image prices", async () => {
     const existing = savedConfiguration();
     existing.models = existing.models.slice(0, 5).map((model, index) => ({ ...model, enabled: index % 2 === 0, creditCost: index + 3, rmbCost: (index + 1) / 10, concurrencyLimit: index + 2 }));
     const previous = existing.models.map(({ modelId, enabled, creditCost, rmbCost, concurrencyLimit }) => ({ modelId, enabled, creditCost, rmbCost, concurrencyLimit }));
@@ -213,8 +259,8 @@ test("adding Blend and image models preserves every setting on the existing five
     try {
         const tree = await panel.settle();
         await tree.find(element => element.type === panel.Form)!.props.onFinish(panel.form.values);
-        expect(panel.writes[0].models.slice(0, 5)).toEqual(previous);
-        expect(panel.writes[0].models.slice(5)).toEqual(MARK_PLATFORM_MODELS.slice(5).map(({ modelId, defaultEnabled }) => ({ modelId, enabled: defaultEnabled, creditCost: 0, rmbCost: 0, concurrencyLimit: 2 })));
+        expect(panel.writes[0].models.slice(0, 5)).toEqual(previous.map(model => ({ ...model, rmbCost: imageRmb[model.modelId] ?? model.rmbCost })));
+        expect(panel.writes[0].models.slice(5)).toEqual(MARK_PLATFORM_MODELS.slice(5).map(({ modelId, defaultEnabled }) => ({ modelId, enabled: defaultEnabled, creditCost: 0, rmbCost: imageRmb[modelId] ?? 0, concurrencyLimit: 2 })));
         expect(panel.writes[0].apiKey).toBeUndefined();
     } finally { panel.dispose(); }
 });
@@ -227,8 +273,8 @@ for (const grokEnabled of [false, true]) test(`adding Nano2 preserves an existin
     try {
         const tree = await panel.settle();
         await tree.find(element => element.type === panel.Form)!.props.onFinish(panel.form.values);
-        expect(panel.writes[0].models.slice(0, 8)).toEqual(previous);
-        expect(panel.writes[0].models[8]).toEqual({ modelId: "gemini-3.1-flash-image-preview-official", enabled: true, creditCost: 0, rmbCost: 0, concurrencyLimit: 2 });
+        expect(panel.writes[0].models.slice(0, 8)).toEqual(previous.map(model => ({ ...model, rmbCost: imageRmb[model.modelId] ?? model.rmbCost })));
+        expect(panel.writes[0].models[8]).toEqual({ modelId: "gemini-3.1-flash-image-preview-official", enabled: true, creditCost: 0, rmbCost: 0.3355, concurrencyLimit: 2 });
         expect(panel.writes[0].apiKey).toBeUndefined();
     } finally { panel.dispose(); }
 });

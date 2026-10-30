@@ -5,6 +5,7 @@ import { useCopyText } from "@/hooks/use-copy-text";
 import { canvasExperienceReport } from "@/lib/canvas/canvas-performance-report";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
+import { useCanvasDiagnosticsEnabled } from "@/lib/canvas/use-canvas-diagnostics-enabled";
 import { useCanvasExperienceMetrics } from "@/lib/canvas/canvas-experience-metrics";
 import { useCanvasTaskFeedback, type CanvasTaskFeedbackValue } from "@/pages/canvas/use-canvas-task-feedback";
 import type { CanvasConnection, CanvasNodeData } from "@/types/canvas";
@@ -26,6 +27,7 @@ export function CanvasTaskFeedback({ feedback }: { feedback: CanvasTaskFeedbackV
     const t = useUiText();
     const theme = canvasThemes[useThemeStore(state => state.theme)];
     const metrics = useCanvasExperienceMetrics();
+    const diagnosticsEnabled = useCanvasDiagnosticsEnabled();
     const copy = useCopyText();
     const { progress } = feedback;
     return <div className="flex items-center gap-3 text-xs" style={{ color: theme.toolbar.item }} data-canvas-no-zoom data-testid="canvas-task-feedback">
@@ -34,7 +36,7 @@ export function CanvasTaskFeedback({ feedback }: { feedback: CanvasTaskFeedbackV
         </span>
         {feedback.latestResultIds.length ? <button type="button" className="inline-flex items-center gap-1.5 rounded px-1 py-1 hover:opacity-75" onClick={feedback.locateLatest}>
             <LocateFixed size={14} />{t("定位到结果")}</button> : null}
-        <details className="relative">
+        {diagnosticsEnabled ? <details className="relative">
             <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded px-1 py-1 hover:opacity-75" aria-label={t("本页体验数据")}><Settings2 size={14} /><span>{t("体验数据")}</span></summary>
             <div className="absolute bottom-full right-0 z-[220] mb-3 w-72 max-w-[calc(100vw-2rem)] rounded-xl border p-4 text-xs" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}>
                 <div>
@@ -49,6 +51,6 @@ export function CanvasTaskFeedback({ feedback }: { feedback: CanvasTaskFeedbackV
                     <p className="mt-3 leading-5" style={{ color: theme.node.muted }}>{t("仅本页内存汇总，刷新清空；不含提示词、图片或任务标识，不对外发送。恢复旧任务不计入本页完整提交耗时。")}</p>
                 </div>
             </div>
-        </details>
+        </details> : null}
     </div>;
 }

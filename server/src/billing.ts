@@ -1,5 +1,6 @@
 import type { Database } from "./db";
 import type { PoolClient } from "pg";
+import { getApimartImageCost, type ApimartImageCost } from "../../shared/apimart-image-costs";
 import { withTransaction } from "./db-transaction";
 import type { ToolConfiguration } from "./tool-configuration";
 import { ensureGroupCreditPeriod } from "./group-credits";
@@ -11,6 +12,9 @@ import {
 export { ensureMonthlyCreditPeriod, refreshMonthlyCreditPeriod };
 
 export type PriceSnapshot = {
+  imageCost?: ApimartImageCost;
+  settledQuantity?: number;
+  settledTotalRmb?: number;
   toolKey?: string;
   configurationVersion?: number;
   creditCostOverride?: number | null;
@@ -36,8 +40,8 @@ export function calculatePrice(
       (input.creditCostOverride ?? (input.operationCredits + input.modelCredits)) * input.quantity,
     totalRmb:
       Math.round(
-        (input.rmbCostOverride ?? (input.operationRmb + input.modelRmb)) * input.quantity * 10_000,
-      ) / 10_000,
+        (input.imageCost?.rmbPerImage ?? input.rmbCostOverride ?? (input.operationRmb + input.modelRmb)) * input.quantity * 1_000_000,
+      ) / 1_000_000,
   };
 }
 
@@ -87,8 +91,8 @@ export async function loadTaskPriceSnapshot(client: Pick<Database, "query">, inp
   const price = priceResult.rows[0] ?? (!creditsEnabled || input.operationType === "chat" || (overrides?.creditCostOverride != null && overrides?.rmbCostOverride != null) ? { credits: 0, rmb_cost: "0", version: 0 } : undefined);
   if (!price) throw new BillingError("PRICE_NOT_CONFIGURED", "管理员尚未发布该操作的价格");
   const modelResult = input.modelConfigId ? await client.query<{
-    id: string; credit_cost: number; rmb_cost: string; capabilities: string[];
-  }>(`SELECT m.id,m.credit_cost,m.rmb_cost,m.capabilities
+    id: string; provider_id: string; model_id: string; credit_cost: number; rmb_cost: string; capabilities: string[];
+  }>(`SELECT m.id,m.provider_id,m.model_id,m.credit_cost,m.rmb_cost,m.capabilities
        FROM model_configs m JOIN providers p ON p.id=m.provider_id
        LEFT JOIN workflow_configs w ON w.id=m.workflow_config_id
        WHERE m.id=$1 AND m.enabled=true AND p.enabled=true AND (m.workflow_config_id IS NULL OR w.enabled=true)`, [input.modelConfigId]) : null;
@@ -96,6 +100,7 @@ export async function loadTaskPriceSnapshot(client: Pick<Database, "query">, inp
   if (input.modelConfigId && !model) throw new BillingError("MODEL_DISABLED", "模型不存在或未启用");
   if (model && !modelSupportsOperation(input.operationType, model.capabilities)) throw new BillingError("MODEL_CAPABILITY_MISMATCH", "所选模型不支持当前操作");
   const snapshot = calculatePrice({
+    ...(model && input.operationType !== "chat" ? { imageCost: getApimartImageCost(model.provider_id, model.model_id) ?? undefined } : {}),
     toolKey: overrides?.toolKey,
     configurationVersion: overrides?.configurationVersion,
     creditCostOverride: overrides?.creditCostOverride,
@@ -407,6 +412,7 @@ export async function settleReservation(
   outcome: "capture" | "release",
   actorId?: string,
   existingClient?: PoolClient,
+  outputQuantity?: number,
 ) {
   const settle = async (client: PoolClient) => {
     const result = await client.query<{
@@ -422,10 +428,11 @@ export async function settleReservation(
       status: string;
       credit_period_start: string;
       billing_disabled: boolean;
+      price_snapshot: PriceSnapshot;
     }>(
       `SELECT id,user_id,department_id,credits,department_credits,personal_credits,group_credits,
               group_id,group_period_start::text,status,credit_period_start::text,
-              COALESCE((price_snapshot->>'billingDisabled')::boolean,false) AS billing_disabled
+              COALESCE((price_snapshot->>'billingDisabled')::boolean,false) AS billing_disabled,price_snapshot
          FROM credit_reservations WHERE request_id=$1 FOR UPDATE`,
       [requestId],
     );
@@ -434,6 +441,17 @@ export async function settleReservation(
       throw new BillingError("RESERVATION_NOT_FOUND", "额度冻结记录不存在");
     if (reservation.status !== "held")
       return { status: reservation.status, duplicate: true };
+    // Only new per-image snapshots settle against actual outputs. Keep the planned
+    // snapshot, employee credit hold and historical/non-image billing unchanged.
+    if (outcome === "capture" && reservation.price_snapshot?.imageCost && outputQuantity !== undefined) {
+      if (!Number.isSafeInteger(outputQuantity) || outputQuantity < 1) {
+        throw new BillingError("INVALID_OUTPUT_QUANTITY", "成功图片任务必须至少有一张有效结果");
+      }
+      const settledTotalRmb = Math.round(reservation.price_snapshot.imageCost.rmbPerImage * outputQuantity * 1_000_000) / 1_000_000;
+      const snapshot = { ...reservation.price_snapshot, settledQuantity: outputQuantity, settledTotalRmb };
+      await client.query("UPDATE credit_reservations SET rmb_cost=$1,price_snapshot=$2 WHERE id=$3", [settledTotalRmb, snapshot, reservation.id]);
+      await client.query("UPDATE tasks SET rmb_cost=$1,updated_at=now() WHERE request_id=$2", [settledTotalRmb, requestId]);
+    }
     if (reservation.billing_disabled) {
       const status = outcome === "capture" ? "captured" : "released";
       await client.query("UPDATE credit_reservations SET status=$1,settled_at=now() WHERE id=$2", [status, reservation.id]);

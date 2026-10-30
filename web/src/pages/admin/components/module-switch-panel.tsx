@@ -1,5 +1,5 @@
 import { App, Input, Select, Switch, Tag } from "antd";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { moduleDefinitions, nonAiDefinitions, toolDefinitions, updateModuleFlag, type ModuleKey } from "@/services/api/modules";
 import { useModuleStore } from "@/stores/use-module-store";
@@ -8,25 +8,30 @@ const groups = Array.from(new Set(moduleDefinitions.map((module) => module.group
 const kindLabels = { ai: "AI · 需配置 API", local: "本地工具 · 无需 API", external: "模型本机配置", service: "无需模型 API", group: "总入口" };
 
 export function ModuleSwitchPanel() {
-    const { message } = App.useApp();
+    const { message, modal } = App.useApp();
     const flags = useModuleStore((state) => state.flags);
     const refresh = useModuleStore((state) => state.refresh);
     const setFlag = useModuleStore((state) => state.setFlag);
     const [saving, setSaving] = useState<ModuleKey | null>(null);
+    const busy = useRef(false);
     const [search, setSearch] = useState("");
     const [kind, setKind] = useState("all");
 
     useEffect(() => { void refresh().catch((error) => message.error(error instanceof Error ? error.message : "模块状态读取失败")); }, [message, refresh]);
 
     const toggle = async (moduleKey: ModuleKey, enabled: boolean) => {
+        if (busy.current) return;
+        busy.current = true;
+        const label = moduleDefinitions.find((item) => item.moduleKey === moduleKey)?.label || moduleKey;
         setSaving(moduleKey);
         try {
+            if (!await modal.confirm({ title: `确认${enabled ? "开启" : "关闭"}${label}？`, content: `此设置影响所有有权使用本模块的成员。${enabled ? "开启后仍需满足 API 配置与权限要求。" : "关闭后将拦截本模块入口与新操作，不删除已有历史和素材。"}`, okText: `确认${enabled ? "开启" : "关闭"}`, cancelText: "保持不变", okButtonProps: { danger: !enabled } })) return;
             const { module } = await updateModuleFlag(moduleKey, enabled);
             setFlag(module);
             message.success(`${moduleDefinitions.find((item) => item.moduleKey === moduleKey)?.label}已${enabled ? "开启" : "关闭"}`);
         } catch (error) {
             message.error(error instanceof Error ? error.message : "模块状态更新失败");
-        } finally { setSaving(null); }
+        } finally { busy.current = false; setSaving(null); }
     };
     const filtered = moduleDefinitions.filter((module) => (kind === "all" || (kind === "ai" ? module.kind === "ai" : module.kind !== "ai"))
         && `${module.label} ${module.moduleKey} ${module.group} ${module.description}`.toLowerCase().includes(search.trim().toLowerCase()));

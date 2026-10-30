@@ -1,4 +1,5 @@
 import { uiText, useUiText, getUiLocale } from "@/lib/i18n";
+import { formatBeijingDateTime } from "@/lib/beijing-time";
 import { PromptOptimizeButton } from "@/components/prompt-optimize-button";
 import type { PromptInputData, PromptScene } from "../../../../shared/prompt-contracts";
 import { ArrowLeft, ArrowRight, BookmarkPlus, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, ImagePlus, LoaderCircle, PenLine, Plus, Share2, SlidersHorizontal, Sparkles, Trash2, Upload } from "lucide-react";
@@ -9,11 +10,17 @@ import { Link, useSearchParams } from "react-router-dom";
 import { createWorkspaceStorage } from "@/lib/workspace-storage";
 import { saveAs } from "file-saver";
 
-import { ImageSettingsPanel } from "@/components/image-settings-panel";
+import { ImageSettingsPanel, imageQualityLabel, imageSizeLabel } from "@/components/image-settings-panel";
 import { GenerationElapsed } from "@/components/generation-elapsed";
 import { GenerationQueueProgress } from "@/components/generation-queue-progress";
 import { upsertGenerationLog } from "@/lib/generation-log-update";
-import { useWorkbenchField } from "@/hooks/use-workbench-field";
+import { useGenerationDraft } from "@/hooks/use-generation-draft";
+import { useImageDrop } from "@/hooks/use-image-drop";
+import { useUnsavedGuard } from "@/hooks/use-unsaved-guard";
+import { generationErrorMessage, generationErrorDiagnostic, shouldConfirmPromptReuse } from "@/lib/generation-feedback";
+import { GenerationDiagnostic } from "@/components/generation-diagnostic";
+import { useResultCanvas } from "@/hooks/use-result-canvas";
+import { GenerationTaskCancel } from "@/components/generation-task-cancel";
 import { useGenerationWorkspace } from "@/hooks/use-generation-workspace";
 import { useImageCopyEditor } from "@/hooks/use-image-copy-editor";
 import { useImagePreview } from "@/hooks/use-image-preview";
@@ -28,7 +35,7 @@ import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { deploymentFeatures } from "@/lib/deployment-features";
-import { readClipboardImages } from "@/lib/clipboard-images";
+import { pastedImageFiles, readClipboardImages } from "@/lib/clipboard-images";
 import { useCanManageConfig } from "@/hooks/use-can-manage-config";
 import { toolModeOperation, type AdminToolMode } from "@/lib/admin-domain";
 import { createImageReferenceItem, dedupeImageReferences, validateImageReferences } from "@/lib/image-reference-policy";
@@ -83,8 +90,11 @@ type GenerationResult = {
     status: "pending" | "success" | "failed" | "paused";
     image?: GeneratedImage;
     error?: string;
+    diagnostic?: string;
     recovery?: PendingImage;
     snapshot?: ImageRequestSnapshot;
+    createdAt?: number;
+    taskId?: string;
 };
 
 type GenerationLog = {
@@ -137,7 +147,7 @@ const imageToolModes: Record<GenerationToolMode, { title: string; description: s
         requiresReference: true,
     },
     "image-generation": {
-        title: "文生图",
+        title: "图像生成",
         description: "用提示词生成新图片，生成记录会进入后台历史与额度账本。",
         placeholder: "描述画面主体、风格、构图、光线和用途",
         button: "开始生成",
@@ -193,6 +203,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     useUiText();
     const { message, modal } = App.useApp();
     const libraryShare = useDesignLibraryShare();
+    const resultCanvas = useResultCanvas();
     const [searchParams] = useSearchParams();
     const fileInputRef = useRef<HTMLInputElement>(null);
     const loadedRecreateAssetsRef = useRef(new Set<string>());
@@ -206,7 +217,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const previewRevision = useRef(0);
     const logRefreshRevision = useRef(0);
     const {
-        references, setReferences, logs, setLogs, running, setRunning, startedAt, setStartedAt, activeTaskId, setActiveTaskId,
+        logs, setLogs, running, setRunning, startedAt, setStartedAt, activeTaskId, setActiveTaskId,
         previewLoading, setPreviewLoading, logsOpen, setLogsOpen, settingsOpen, setSettingsOpen,
         promptDialogOpen, setPromptDialogOpen, assetPickerOpen, setAssetPickerOpen,
         selectedLogIds, setSelectedLogIds, previewLog, setPreviewLog, deleteConfirmOpen, setDeleteConfirmOpen,
@@ -214,8 +225,11 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     } = useGenerationWorkspace<ImageReferenceItem, GenerationLog>();
     const restoreBusy = useRef(false);
     const [restoringHistory, setRestoringHistory] = useState(false);
-    const config = useConfigStore((state) => state.config);
-    const baseConfig = useEffectiveConfig();
+    const defaults = useEffectiveConfig();
+    const [draftConfig, setDraftConfig, configReady] = useGenerationDraft<Partial<AiConfig>>(`${historyTool}:settings`, {});
+    const baseConfig = { ...defaults, ...draftConfig };
+    const config = baseConfig;
+    const [references, setReferences, referencesReady] = useGenerationDraft<ImageReferenceItem[]>(`${historyTool}:references`, [], async items => Promise.all(items.map(async item => ({ ...item, dataUrl: await resolveImageUrl(item.storageKey, item.dataUrl) }))));
     const toolKey = requireToolKey(historyTool === "detail-enhance" ? "upscale" : historyTool === "image-generation" || historyTool === "midjourney-blend" || historyTool === "creative-text-to-style" ? "image_generation" : "inpaint", historyTool);
     const businessModels = useBusinessConfigStore(state => state.models);
     const blendModels = businessModels.filter(item => item.imageParameterProfile === "blend" || item.imageParameterProfile === "midjourney-blend" || item.modelId === "midjourney-blend");
@@ -224,7 +238,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         ? (blendModels.find(item => item.modelId === baseImageModel || item.id === baseImageModel) || blendModels[0])?.modelId || ""
         : baseImageModel;
     const effectiveConfig = useToolConfig({ ...baseConfig, model: selectedImageModel, imageModel: selectedImageModel }, toolKey);
-    const updateConfig = useConfigStore((state) => state.updateConfig);
+    const updateConfig: UpdateAiConfig = useCallback((key, value) => setDraftConfig(current => current[key] === value ? current : { ...current, [key]: value }), [setDraftConfig]);
     const updateInputConfig: UpdateAiConfig = (key, value) => { inputRevision.current += 1; updateConfig(key, value); };
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const canManageConfig = useCanManageConfig();
@@ -233,7 +247,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const addAsset = useAssetStore((state) => state.addAsset);
     const [optimizingPrompt, setOptimizingPrompt] = useState(false);
     const [optimizedDraft, setOptimizedDraft] = useState<{ prompt: string; input: PromptInputData; references: ReferenceImage[] }>();
-    const [prompt, setPrompt] = useWorkbenchField(creativePreset ? `creative:${creativePreset.id}:prompt` : `image:${resolveImageToolMode(searchParams.get("tool"))}:prompt`, creativePreset?.prompt || "");
+    const [prompt, setPrompt, promptReady] = useGenerationDraft(`${historyTool}:prompt`, creativePreset?.prompt || "");
     const historyStore = creativePreset ? creativeLogStore : logStore;
     const [results, setResults] = useState<GenerationResult[]>([]);
     const imageEditor = useImageCopyEditor((copy, image) => {
@@ -250,6 +264,11 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const observationControllers = useRef(new Set<AbortController>());
     const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
     const [referenceAssetPickerOpen, setReferenceAssetPickerOpen] = useState(false);
+    const [readingReferences, setReadingReferences] = useState(false);
+    const [referenceScope, setReferenceScope] = useState(0);
+    const referenceScopeRef = useRef(referenceScope);
+    referenceScopeRef.current = referenceScope;
+    useUnsavedGuard(readingReferences, uiText("参考图正在读取，离开可能中断上传。"));
     const [garmentEpoch, setGarmentEpoch] = useState(0);
     const [garmentDraft, setGarmentDraft] = useState<{ scope: string; dirty: boolean; appliedReferences: ReferenceImage[] | null } | null>(null);
 
@@ -264,6 +283,10 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         setGarmentDraft(null);
     }, []);
     const replacePrompt = (text: string) => { inputRevision.current += 1; resetGarment(); setPrompt(text); };
+    const reusePrompt = (next: string) => {
+        if (!shouldConfirmPromptReuse(prompt, next)) { replacePrompt(next); return; }
+        modal.confirm({ title: uiText("替换当前草稿？"), content: uiText("当前提示词已有内容，复用将替换现有输入；浏览结果不会更改草稿。"), okText: uiText("确认替换"), cancelText: uiText("保留草稿"), onOk: () => replacePrompt(next) });
+    };
     const handleGarmentDraftChange = useCallback((dirty: boolean) => {
         if (dirty) inputRevision.current += 1;
         setGarmentDraft(current => ({ scope: garmentScope, dirty, appliedReferences: current?.scope === garmentScope ? current.appliedReferences : null }));
@@ -290,7 +313,8 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const quotaBlocked = deploymentFeatures.creditsEnabled && Boolean(user && estimatedUsage.configured && user.creditBalance < estimatedUsage.credits);
     const missingReference = !isBlend && toolModeConfig.requiresReference && references.length === 0;
     const invalidBlendReferences = isBlend && (references.length < 2 || references.length > 4);
-    const canGenerate = !optimizingPrompt && Boolean(model) && (!requiresPrompt || Boolean(prompt.trim())) && !quotaBlocked && !missingReference && !invalidBlendReferences && referenceValidation.valid && !garmentNeedsApply && !incompleteCreativePrompt;
+    const draftReady = configReady && referencesReady && promptReady;
+    const canGenerate = draftReady && !readingReferences && !optimizingPrompt && Boolean(model) && Boolean(user && user.status === "active") && (!requiresPrompt || Boolean(prompt.trim())) && !quotaBlocked && !missingReference && !invalidBlendReferences && referenceValidation.valid && !garmentNeedsApply && !incompleteCreativePrompt;
 
     const appendReferences = (items: ReferenceImage[], origin: ImageReferenceOrigin) => { inputRevision.current += 1; setReferences((value) => dedupeImageReferences([...value, ...items.map((item) => createImageReferenceItem(item, origin))])); };
     const restoreReferences = (items: ReferenceImage[], origin: ImageReferenceOrigin = "template") => { inputRevision.current += 1; setReferences(dedupeImageReferences(items.map((item) => createImageReferenceItem(item, origin)))); };
@@ -360,7 +384,6 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     }, [searchParams, user?.id]);
 
     useEffect(() => {
-        setReferences([]);
         loadedRecreateAssetsRef.current.clear();
         loadedReuseTokenRef.current.clear();
     }, [user?.id]);
@@ -433,18 +456,30 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         return () => { if (!restored) loadedReuseTokenRef.current.delete(token); };
     }, [message, modal, searchParams, updateConfig, user?.id]);
 
-    const addReferences = async (files?: FileList | null) => {
-        const imageFiles = Array.from(files || []).filter((file) => file.type.startsWith("image/"));
+    const addReferences = async (files?: FileList | File[] | null) => {
+        if (readingReferences || !files?.length) return;
+        const scope = referenceScopeRef.current;
+        const stillCurrent = () => mountedRef.current && referenceScopeRef.current === scope;
+        setReadingReferences(true);
+        try {
+        const imageFiles = Array.from(files || []);
+        if (imageFiles.some(file => !file.type.startsWith("image/"))) throw new Error("请选择图片文件，其他格式无法作为参考图。");
         const nextReferences = await Promise.all(
             imageFiles.map(async (file) => {
                 const image = await uploadImage(file);
                 return { id: nanoid(), name: file.name, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey };
             }),
         );
+        if (!stillCurrent()) return;
         appendReferences(nextReferences, "upload");
+        message.success(uiText("参考图已添加"));
+        } catch (error) { if (stillCurrent()) message.error(uiText(generationErrorMessage(error))); }
+        finally { if (mountedRef.current) setReadingReferences(false); }
     };
 
     const addReferencesFromClipboard = async () => {
+        if (readingReferences) return;
+        setReadingReferences(true);
         try {
             const blobs = await readClipboardImages(navigator.clipboard);
             const nextReferences = await Promise.all(
@@ -457,7 +492,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
             message.success(uiText("已读取 {length} 张参考图", { length: nextReferences.length }));
         } catch (error) {
             message.error(error instanceof Error ? uiText(error.message) : uiText("剪贴板图片读取失败"));
-        }
+        } finally { setReadingReferences(false); }
     };
 
     const generate = async () => {
@@ -491,7 +526,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         activeSubmissionRef.current = true;
         resultViewPinnedRef.current = false;
         setPreviewLog(null);
-        setResults(Array.from({ length: generationCount }, () => ({ id: nanoid(), status: "pending" })));
+        setResults(Array.from({ length: generationCount }, () => ({ id: nanoid(), status: "pending", createdAt: Date.now() })));
         const batchStartedAt = performance.now();
         setStartedAt(batchStartedAt);
 
@@ -518,7 +553,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
 
     const selectResultPrompt = (image: GeneratedImage) => {
         const sourceLog = [...logs, ...unclassifiedLogs].find(log => log.images.some(item => item.id === image.id));
-        replacePrompt(image.prompt ?? sourceLog?.prompt ?? "");
+        reusePrompt(image.prompt ?? sourceLog?.prompt ?? "");
     };
 
     const downloadImage = async (image: GeneratedImage, index: number) => {
@@ -534,12 +569,17 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     };
 
     const addResultToReferences = async (image: GeneratedImage, index: number) => {
+        setReadingReferences(true);
+        try {
         const stored = await uploadImage(image.dataUrl);
         appendReferences([{ id: nanoid(), name: image.imageName || `result-${index + 1}.png`, imageName: image.imageName, imageVersion: image.imageVersion, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }], "generated");
         message.success(uiText("已加入参考图"));
+        } catch (error) { message.error(uiText(generationErrorMessage(error))); }
+        finally { setReadingReferences(false); }
     };
 
     const saveResultToAssets = async (image: GeneratedImage, index: number) => {
+        try {
         const stored = await uploadImage(image.dataUrl);
         addAsset({
             kind: "image",
@@ -563,6 +603,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
             },
         });
         message.success(uiText("已加入我的素材"));
+        } catch (error) { message.error(uiText(generationErrorMessage(error))); }
     };
 
     const saveResultPrompt = async (image: GeneratedImage) => {
@@ -579,8 +620,10 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     };
 
     const insertPickedAsset = async (payload: InsertAssetPayload) => {
+        setReadingReferences(true);
+        try {
         if (payload.kind === "text") {
-            replacePrompt(payload.content);
+            reusePrompt(payload.content);
         } else if (payload.kind === "image") {
             const stored = await uploadImage(payload.dataUrl);
             appendReferences([{ id: nanoid(), name: payload.title, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey, imageName: payload.imageName, imageVersion: payload.imageVersion }], "asset");
@@ -588,9 +631,13 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
             message.warning(uiText("生图工作台只能使用文本或图片素材"));
         }
         setAssetPickerOpen(false);
+        } catch (error) { message.error(uiText(generationErrorMessage(error))); }
+        finally { setReadingReferences(false); }
     };
 
     const createSession = () => {
+        referenceScopeRef.current += 1;
+        setReferenceScope(referenceScopeRef.current);
         resultViewPinnedRef.current = true;
         restoredInitialResultRef.current = true;
         previewRevision.current += 1;
@@ -638,7 +685,6 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         if (running) return;
         pendingRestoreRevision.current += 1;
         resultViewPinnedRef.current = true;
-        replacePrompt(log.prompt);
         const revision = ++previewRevision.current;
         setPreviewLoading(true);
         try {
@@ -657,7 +703,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         if (!previewLog || running || restoreBusy.current) return;
         const taskId = previewLog.images.find(image => image.sourceTaskId)?.sourceTaskId;
         if (!taskId) { message.warning(uiText("这条旧记录没有完整输入归档，无法完整恢复；可复制提示词后新建草稿")); return; }
-        const settingsBeforeRestore = useConfigStore.getState().config;
+        const settingsBeforeRestore = draftConfig;
         const revision = inputRevision.current;
         const preview = previewRevision.current;
         restoreBusy.current = true; setRestoringHistory(true);
@@ -665,7 +711,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
             const draft = await restoreGenerationDraft(taskId);
             if (draft.maskReferenceIndex !== undefined) throw new Error("历史包含蒙版，请在支持蒙版的原编辑入口恢复；未套用任何输入");
             if (draft.tool && requireToolKey(draft.operationType, draft.tool) !== toolKey) throw new Error(`请先切换到历史原工具“${imageToolModes[draft.tool as GenerationToolMode]?.title || draft.tool}”再恢复，当前草稿未改变`);
-            if (revision !== inputRevision.current || preview !== previewRevision.current || settingsBeforeRestore !== useConfigStore.getState().config) throw new Error("草稿或所选记录已改变，已取消恢复");
+            if (revision !== inputRevision.current || preview !== previewRevision.current || settingsBeforeRestore !== draftConfig) throw new Error("草稿或所选记录已改变，已取消恢复");
             replacePrompt(draft.prompt);
             setOptimizedDraft(draft.userInput ? { prompt: draft.prompt, input: { ...draft.userInput, compilationId: undefined }, references: draft.references } : undefined);
             setReferences(draft.references.map(item => createImageReferenceItem(item, "template")));
@@ -744,7 +790,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                 onCompiled: () => { if (mountedRef.current) setOptimizingPrompt(false); },
                 requestId: record.requestId, signal: controller.signal, cancelOnAbort: () => false,
                 onSubmissionStarted: async () => { await persistPending(record); submissionStarted = true; },
-                onSubmitted: async (taskIds: string[]) => { record.taskId = taskIds[0]; await persistPending(record); if (mountedRef.current) setActiveTaskId(record.taskId || null); },
+                onSubmitted: async (taskIds: string[]) => { record.taskId = taskIds[0]; await persistPending(record); if (mountedRef.current) { setActiveTaskId(record.taskId || null); setResults(current => updateResultAt(current, index, { taskId: record.taskId, createdAt: record.createdAt })); } },
             };
             const result = snapshotIsBlend
                 ? await requestGeneration(snapshot.config, snapshot.text, requestOptions, snapshot.references)
@@ -756,7 +802,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
             if (mountedRef.current) setOptimizingPrompt(false);
             const uncertain = submissionStarted && !(error instanceof QueuedTaskFailedError) && (Boolean(record.taskId) || error instanceof QueuedTaskSubmissionUncertainError || controller.signal.aborted || error instanceof TaskObservationStoppedError || error instanceof QueuedTaskPausedError);
             if (!uncertain && submissionStarted) await removePending(record);
-            if (mountedRef.current) setResults((value) => updateResultAt(value, index, { status: uncertain ? "paused" : "failed", error: controller.signal.aborted ? "已停止本页查询；服务端任务可能继续，可查询原任务。" : error instanceof Error ? error.message : "生成失败", recovery: uncertain ? record : undefined, snapshot }));
+            if (mountedRef.current) setResults((value) => updateResultAt(value, index, { status: uncertain ? "paused" : "failed", error: controller.signal.aborted ? "已停止本页查询；服务端任务可能继续，可查询原任务。" : error instanceof Error ? error.message : "生成失败", diagnostic: generationErrorDiagnostic(error), recovery: uncertain ? record : undefined, snapshot }));
             throw error;
         } finally { observationControllers.current.delete(controller); }
     };
@@ -819,8 +865,14 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         } finally { release(); activeSubmissionRef.current = false; setRunning(false); }
     };
 
+    const imageDrop = useImageDrop({
+        onFiles: addReferences,
+        scopeKey: `${historyTool}:${referenceScope}`,
+        disabled: !draftReady || readingReferences || running || restoringHistory || user?.status !== "active",
+    });
+
     return (
-        <div className="wb-page image-workbench flex h-full flex-col overflow-hidden">
+        <div className="wb-page image-workbench generation-workbench flex h-full flex-col overflow-hidden">
             <main className="image-workbench-layout grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-y-auto p-5 lg:grid-cols-[228px_minmax(0,1fr)] lg:overflow-hidden">
                 <aside className="wb-surface thin-scrollbar hidden min-h-0 overflow-y-auto p-4 lg:block">
                     <LogPanel
@@ -836,7 +888,9 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                 </aside>
 
                 <section className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4 lg:min-h-0 lg:overflow-hidden xl:grid-cols-[minmax(340px,400px)_minmax(0,1fr)]">
-                    <div className="wb-surface thin-scrollbar flex min-w-0 flex-col p-6 lg:min-h-0 lg:overflow-y-auto">
+                    <div {...imageDrop.dropProps} aria-busy={imageDrop.reading || readingReferences} className={`wb-surface generation-form flex min-w-0 flex-col p-6 lg:min-h-0 lg:overflow-hidden${imageDrop.dragging ? " outline outline-2 outline-offset-2 outline-primary" : ""}`}>
+                        {imageDrop.dragging || imageDrop.reading ? <p role="status" className="mb-3 rounded-lg bg-primary/10 p-3 text-sm text-foreground">{uiText(imageDrop.dragging ? "松开以添加参考图片，不会自动生成。" : "正在读取拖入图片，请稍候。")}</p> : null}
+                        <div className="thin-scrollbar min-h-0 flex-1 overflow-y-auto">
                         <div>
                             <div className="flex flex-wrap items-start justify-between gap-3">
                                 <div className="min-w-0">
@@ -864,12 +918,13 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                                             {uiText("查看我的素材")}</Button>
                                     </div>
                                 </div>
-                                <Input.TextArea aria-label={uiText("图像提示词")} value={prompt} onChange={(event) => { inputRevision.current += 1; setPrompt(event.target.value); }} onKeyDown={(event) => handleSubmitShortcut(event, canGenerate && !running, () => void generate())} rows={6} disabled={running || !requiresPrompt} placeholder={requiresPrompt ? uiText("{placeholder}（Ctrl/⌘ + Enter 提交）", { placeholder: uiText(toolModeConfig.placeholder) }) : uiText("这个模型直接合成参考图，不需要填写文字")} />
+                                <Input.TextArea aria-label={uiText("图像提示词")} showCount value={prompt} onPaste={event => { const files = pastedImageFiles(event.clipboardData); if (files.length) { event.preventDefault(); void addReferences(files); } }} onChange={(event) => { inputRevision.current += 1; setPrompt(event.target.value); }} onKeyDown={(event) => handleSubmitShortcut(event, canGenerate && !running, () => void generate())} rows={5} disabled={!requiresPrompt} placeholder={requiresPrompt ? uiText("{placeholder}（Ctrl/⌘ + Enter 提交）", { placeholder: uiText(toolModeConfig.placeholder) }) : uiText("这个模型直接合成参考图，不需要填写文字")} />
                             </div> : <p className="rounded-lg bg-stone-50 p-3 text-sm text-stone-600 dark:bg-stone-900 dark:text-stone-300">{uiText("请选择 2–4 张参考图。此模型不会提交提示词；生成结果取决于图片内容及下方融合参数。")}</p>}
 
                             {requiresPrompt ? <PromptOptimizeButton config={effectiveConfig} prompt={prompt} references={references} toolKey={toolKey} disabled={running} onBusyChange={setOptimizingPrompt} onApply={(value, _compilation, input) => { replacePrompt(value); setOptimizedDraft({ prompt: value, input, references: [...references] }); }} /> : null}
                             <ReferenceImageTray
                                 references={references}
+                                loading={readingReferences}
                                 validation={referenceValidation}
                                 onChange={(next) => { inputRevision.current += 1; setReferences(dedupeImageReferences(next)); }}
                                 onRequestUpload={() => fileInputRef.current?.click()}
@@ -877,20 +932,17 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                                 onRequestClipboard={() => void addReferencesFromClipboard()}
                             />
 
-                            <div className="flex items-center justify-between rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-sm dark:border-stone-800 dark:bg-stone-900 sm:hidden">
+                        </div>
+                        </div>
+                        <div className="generation-submit shrink-0 pt-4">
+                            <div className="mb-2 flex items-center justify-between rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-sm dark:border-stone-800 dark:bg-stone-900">
                                 <span className="truncate text-stone-500 dark:text-stone-400">
-                                    {modelOptionLabel(effectiveConfig, model)} · {effectiveConfig.size} · {effectiveConfig.quality}
+                                    {modelOptionLabel(effectiveConfig, model)} · {imageSizeLabel(effectiveConfig.size)} · {imageQualityLabel(effectiveConfig.quality)}
                                 </span>
                                 <Button size="small" type="text" icon={<SlidersHorizontal className="size-4" />} onClick={() => setSettingsOpen(true)}>
                                     {uiText("调整")}</Button>
                             </div>
 
-                            <div className="hidden gap-4 sm:grid sm:grid-cols-2">
-                                <GenerationSettings toolKey={toolKey} config={effectiveConfig} model={model} referenceCount={references.length} updateConfig={updateInputConfig} openConfigDialog={openConfigDialog} />
-                            </div>
-                        </div>
-
-                        <div className="mt-auto pt-6">
                             <div className="mb-3 rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-xs leading-5 text-stone-600 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-300">
                                 <div className="flex flex-wrap items-center justify-between gap-3">
                                     <span>{!deploymentFeatures.creditsEnabled ? uiText("不计积分") : uiText("预计消耗 {credits} 积分", { credits: estimatedUsage.credits })}</span>
@@ -901,6 +953,8 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                                 {quotaBlocked ? <div className="mt-1 text-red-500">{uiText("额度不足，无法提交生成任务。")}</div> : null}
                                 {garmentNeedsApply ? <div className="mt-1" role="status">{uiText("服装要求或参考图已改变，请重新套用。")}<Button size="small" type="link" className="!h-auto !p-0" onClick={resetGarment}>{uiText("改用当前提示词")}</Button></div> : null}
                                 {incompleteCreativePrompt ? <div className="mt-1" role="status">{uiText("请把「")}{CREATIVE_REQUIREMENT_PLACEHOLDER}{uiText("」替换成你的设计要求。")}</div> : null}
+                                {!draftReady || readingReferences || optimizingPrompt || !model || (requiresPrompt && !prompt.trim()) || invalidBlendReferences || !user || user.status !== "active" ? <div role="status">{!draftReady ? uiText("正在恢复草稿…") : readingReferences ? uiText("正在读取参考图，请稍候") : optimizingPrompt ? uiText("正在优化提示词，请稍候") : !model ? uiText("还差：选择模型") : requiresPrompt && !prompt.trim() ? uiText("还差：填写提示词") : invalidBlendReferences ? uiText("还差：添加 2–4 张参考图") : uiText("当前设计师账号不可用")}</div> : null}
+                                {running ? <div role="status">{uiText("当前任务正在处理，可先编辑下一条提示词。")}</div> : null}
                             </div>
                             <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} loading={running} disabled={!canGenerate || running} onClick={() => void generate()}>
                                 {optimizingPrompt ? uiText("正在优化提示词…") : running ? uiText("正在生成，请稍候…") : uiText(toolModeConfig.button)}
@@ -914,7 +968,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                             <div>
                                 <h2 className="text-xl font-semibold">{uiText("生成结果")}</h2>
                             </div>
-                            {previewLog ? <div className="flex gap-2"><Button size="small" disabled={running || previewLoading} loading={restoringHistory} onClick={() => void restoreHistoryDraft()}>{uiText("恢复为草稿继续改")}</Button><Button size="small" disabled={running} onClick={() => { replacePrompt(previewLog.prompt); message.info(uiText("仅复制提示词，未恢复模型与参考图")); }}>{uiText("仅复制提示词")}</Button></div> : null}
+                            {previewLog ? <div className="flex flex-wrap gap-2"><Button size="small" disabled={running || previewLoading} loading={restoringHistory} onClick={() => modal.confirm({ title: uiText("恢复为草稿？"), content: uiText("将替换当前提示词、参数与参考图，不会提交生成任务。"), okText: uiText("确认恢复"), cancelText: uiText("保留草稿"), onOk: restoreHistoryDraft })}>{uiText("恢复为草稿继续改")}</Button><Button size="small" onClick={() => reusePrompt(previewLog.prompt)}>{uiText("复用提示词")}</Button></div> : null}
                             {previewLoading ? <span role="status" className="text-sm text-muted-foreground">{uiText("正在读取记录…")}</span> : running ? <Tag className="m-0 px-2 py-1">{uiText("等待 ")}<GenerationElapsed startedAt={startedAt} /></Tag> : null}
                         </div>
                         <GenerationQueueProgress taskId={activeTaskId} active={running} />
@@ -922,11 +976,11 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                             <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-3">
                                 {results.map((result, index) =>
                                     result.status === "success" && result.image ? (
-                                        <ResultImageCard key={result.id} image={result.image} index={index} onSelect={selectResultPrompt} onEdit={addResultToReferences} onEditOriginal={openResultEditor} onDownload={downloadImage} onSaveAsset={saveResultToAssets} onSavePrompt={saveResultPrompt} onShareDesign={libraryShare.canShare ? shareResultDesign : undefined} sharingDesign={libraryShare.busy} />
+                                        <ResultImageCard key={result.id} image={result.image} index={index} onSelect={selectResultPrompt} onEdit={addResultToReferences} onEditOriginal={openResultEditor} onDownload={downloadImage} onSaveAsset={saveResultToAssets} onSavePrompt={saveResultPrompt} onPlaceCanvas={resultCanvas.enabled ? image => { const source = logs.find(log => log.images.some(item => item.id === image.id)); void resultCanvas.place({ id: image.id, kind: "image", url: image.dataUrl, storageKey: image.storageKey, title: image.imageName || "图像生成结果", width: image.width, height: image.height, prompt: image.prompt || source?.prompt, model: source?.model, sourceTaskId: image.sourceTaskId }); } : undefined} placingCanvas={resultCanvas.busy} onShareDesign={libraryShare.canShare ? shareResultDesign : undefined} sharingDesign={libraryShare.busy} />
                                     ) : result.status === "failed" || result.status === "paused" ? (
-                                        <FailedImageCard key={result.id} error={result.error || uiText("生成失败")} recovery={Boolean(result.recovery)} disabled={running || (!result.recovery && !result.snapshot)} onRetry={() => retryResult(index)} />
+                                        <FailedImageCard key={result.id} error={result.error || uiText("生成失败")} diagnostic={result.diagnostic} recovery={Boolean(result.recovery)} taskId={result.recovery?.taskId} disabled={running || (!result.recovery && !result.snapshot)} onRetry={() => retryResult(index)} />
                                     ) : (
-                                        <PendingImageCard key={result.id} />
+                                        <PendingImageCard key={result.id} createdAt={result.createdAt || result.recovery?.createdAt} taskId={result.taskId || result.recovery?.taskId} />
                                     ),
                                 )}
                             </div>
@@ -967,17 +1021,18 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                     <GenerationSettings toolKey={toolKey} config={effectiveConfig} model={model} referenceCount={references.length} updateConfig={updateInputConfig} openConfigDialog={openConfigDialog} />
                 </div>
             </Drawer>
-            <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={replacePrompt} />
+            <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={reusePrompt} />
             <AssetPickerModal open={assetPickerOpen} defaultTab="my-assets" onInsert={(payload) => void insertPickedAsset(payload)} onClose={() => setAssetPickerOpen(false)} />
             <AssetPickerModal
                 open={referenceAssetPickerOpen}
                 defaultTab="my-assets"
                 selectionMode="multiple-images"
                 onInsertMany={(payloads) => {
+                    setReadingReferences(true);
                     void Promise.all(payloads.filter((payload): payload is Extract<InsertAssetPayload, { kind: "image" }> => payload.kind === "image").map(async (payload) => {
                         const stored = await uploadImage(payload.dataUrl);
                         return { id: nanoid(), name: payload.title, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey, imageName: payload.imageName, imageVersion: payload.imageVersion };
-                    })).then((items) => appendReferences(items, "asset"));
+                    })).then((items) => appendReferences(items, "asset")).catch(error => message.error(uiText(generationErrorMessage(error)))).finally(() => setReadingReferences(false));
                     setReferenceAssetPickerOpen(false);
                 }}
                 onClose={() => setReferenceAssetPickerOpen(false)}
@@ -1024,6 +1079,8 @@ function ResultImageCard({
     onSavePrompt,
     onShareDesign,
     sharingDesign,
+    onPlaceCanvas,
+    placingCanvas,
 }: {
     image: GeneratedImage;
     index: number;
@@ -1035,12 +1092,14 @@ function ResultImageCard({
     onSavePrompt: (image: GeneratedImage) => void;
     onShareDesign?: (image: GeneratedImage, index: number) => Promise<void>;
     sharingDesign?: boolean;
+    onPlaceCanvas?: (image: GeneratedImage) => void;
+    placingCanvas?: boolean;
 }) {
     useUiText();
     const previewUrl = useImagePreview(image);
     return (
         <div className="overflow-hidden rounded-lg border border-stone-200 bg-background dark:border-stone-800">
-            <Image src={previewUrl || undefined} preview={{ src: image.dataUrl }} alt={uiText("生成结果 {value1}", { value1: index + 1 })} loading="lazy" decoding="async" className="aspect-square object-cover" onClick={() => onSelect(image)} />
+            <Image src={previewUrl || undefined} preview={{ src: image.dataUrl }} alt={uiText("生成结果 {value1}", { value1: index + 1 })} loading="lazy" decoding="async" className="aspect-square object-cover" />
             <div className="space-y-2 border-t border-stone-200 px-3 py-2.5 dark:border-stone-800">
                 {image.imageName ? <div className="truncate text-xs font-medium" title={`${image.imageName}_v${image.imageVersion || 1}`}>{image.imageName}_v{image.imageVersion || 1}</div> : null}
                 <div className="flex min-w-0 gap-x-2 gap-y-1 text-xs text-stone-500 dark:text-stone-400">
@@ -1051,13 +1110,15 @@ function ResultImageCard({
                     <span>{formatDuration(image.durationMs)}</span>
                 </div>
                 <div className="grid min-w-0 grid-cols-2 gap-2">
+                    <Button className={RESULT_ACTION_BUTTON_CLASS} size="small" onClick={() => onSelect(image)}>{uiText("复用提示词")}</Button>
+                    {onPlaceCanvas ? <Button className={RESULT_ACTION_BUTTON_CLASS} size="small" loading={placingCanvas} onClick={() => onPlaceCanvas(image)}>{uiText("放入画布")}</Button> : null}
                     <Tooltip title={uiText("直接编辑原始图片，另存为新版本，不调用 AI")}>
                         <Button className={RESULT_ACTION_BUTTON_CLASS} size="small" icon={<PenLine className="size-3.5" />} onClick={() => onEditOriginal(image, index)}>
                             {uiText("编辑原图")}</Button>
                     </Tooltip>
                     <Tooltip title={uiText("添加到素材")}>
                         <Button className={RESULT_ACTION_BUTTON_CLASS} size="small" icon={<FolderPlus className="size-3.5" />} onClick={() => void onSaveAsset(image, index)}>
-                            {uiText("添加到素材")}</Button>
+                            {uiText("保存到素材库")}</Button>
                     </Tooltip>
                     <Tooltip title={uiText("加入参考图")}>
                         <Button className={RESULT_ACTION_BUTTON_CLASS} size="small" icon={<PenLine className="size-3.5" />} onClick={() => void onEdit(image, index)}>
@@ -1080,10 +1141,10 @@ function ResultImageCard({
     );
 }
 
-function PendingImageCard() {
+function PendingImageCard({ createdAt, taskId }: { createdAt?: number; taskId?: string }) {
     useUiText();
     return (
-        <div className="relative aspect-square overflow-hidden rounded-lg border border-dashed border-stone-300 bg-stone-50 dark:border-stone-700 dark:bg-stone-900">
+        <div role="status" className="relative aspect-square overflow-hidden rounded-lg border border-dashed border-stone-300 bg-stone-50 dark:border-stone-700 dark:bg-stone-900">
             <div
                 className="absolute inset-0 opacity-60"
                 style={{
@@ -1093,25 +1154,26 @@ function PendingImageCard() {
             />
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-stone-500 dark:text-stone-400">
                 <LoaderCircle className="size-6 animate-spin" />
-                <span>{uiText("生成中")}</span>
+                <span>{uiText("已等待 ")}<GenerationElapsed startedAt={createdAt ? performance.now() - (Date.now() - createdAt) : 0} /></span>
+                <GenerationQueueProgress taskId={taskId} active />
+                <GenerationTaskCancel taskId={taskId} />
             </div>
         </div>
     );
 }
 
-function FailedImageCard({ error, recovery, disabled, onRetry }: { error: string; recovery?: boolean; disabled?: boolean; onRetry: () => void }) {
+function FailedImageCard({ error, diagnostic, recovery, taskId, disabled, onRetry }: { error: string; diagnostic?: string; recovery?: boolean; taskId?: string; disabled?: boolean; onRetry: () => void }) {
     useUiText();
     return (
         <div className="overflow-hidden rounded-lg border border-red-200 bg-red-50 dark:border-red-950 dark:bg-red-950/20">
             <div className="flex aspect-square flex-col items-center justify-center gap-3 p-5 text-center">
                 <div className="text-sm font-medium text-red-600 dark:text-red-300">{recovery ? uiText("原任务查询暂停") : uiText("生成失败")}</div>
-                <Typography.Paragraph ellipsis={{ rows: 4 }} className="!mb-0 !text-xs !text-red-500 dark:!text-red-300">
-                    {uiText(error || "")}
-                </Typography.Paragraph>
+                <GenerationDiagnostic error={error} details={diagnostic} />
+                {recovery && <GenerationTaskCancel taskId={taskId} />}
             </div>
             <div className="flex justify-end border-t border-red-200 p-3 dark:border-red-950">
                 <Button size="small" danger={!recovery} disabled={disabled} onClick={onRetry}>
-                    {recovery ? uiText("继续查询原任务") : uiText("按原参数重新生成")}
+                    {recovery ? uiText("继续查询原任务") : uiText("按原参数重试")}
                 </Button>
             </div>
         </div>
@@ -1226,7 +1288,7 @@ function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: Ge
                         </Tag>
                     </div>
                     <div className="flex justify-end">
-                        <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none">{log.time}</Tag>
+                        <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none">{formatBeijingDateTime(log.createdAt)} {uiText("北京时间")}</Tag>
                     </div>
                 </div>
             </div>
@@ -1256,10 +1318,10 @@ function normalizeLog(log: Partial<GenerationLog>): GenerationLog {
         id: log.id || nanoid(),
         ownerId: log.ownerId,
         tool: log.tool,
-        createdAt: log.createdAt || Date.now(),
+        createdAt: log.createdAt ?? Number.NaN,
         title: log.title || log.model || "未命名",
         prompt: log.prompt || log.title || "",
-        time: log.time || new Date().toLocaleString(getUiLocale(), { hour12: false }),
+        time: log.time || "—",
         model: log.model || config.imageModel || "",
         config,
         references,

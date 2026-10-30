@@ -3,7 +3,7 @@ import { memo, useRef, useState } from "react";
 import { Check, Download, Pencil, Trash2, X, LayoutGrid } from "lucide-react";
 import { CanvasPersistedMediaPreview } from "./canvas-persisted-media-preview";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { App, Button, Input } from "antd";
+import { App, Button, Input, Tag } from "antd";
 
 import { loadCanvasProject, useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useCanvasUiStore } from "@/stores/canvas/use-canvas-ui-store";
@@ -69,11 +69,21 @@ export const CanvasProjectCard = memo(function CanvasProjectCard({ project }: { 
                         }}
                     >
                         <h2 className="truncate text-base font-semibold">{project.title}</h2>
+                        {project.persistenceConflict ? <Tag color="warning">{t("冲突副本 · 原版本已保留")}</Tag> : null}
                         <p className="mt-1 text-xs leading-6 text-stone-500 dark:text-stone-400">
                             {project.nodeCount} {t(" 个节点 ·")}{project.connectionCount} {t(" 条连线")}</p>
                     </button>
                 )}
             </div>
+            {project.persistenceConflict ? <Button size="small" className="mt-3" onClick={async event => {
+                event.stopPropagation();
+                try {
+                    if (!await loadCanvasProject(project.id)) throw new Error(t("画布已不存在，请刷新后重试。"));
+                    useCanvasStore.getState().updateProject(project.id, { persistenceConflict: undefined });
+                    renameProject(project.id, project.title.replace(/（(?:云端)?冲突副本）/g, "（保留版本）"));
+                    message.success(t("已保留为独立画布，另一版本不受影响"));
+                } catch (error) { message.error(error instanceof Error ? error.message : t("保存失败，请重试")); }
+            }}>{t("保留此版本")}</Button> : null}
             <div className="mt-4 flex items-center justify-between gap-2">
                 <p className="text-xs text-stone-500">{t("更新于")}{new Date(project.updatedAt).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</p>
                 <div className="flex items-center gap-1" onClick={(event) => event.stopPropagation()}>
@@ -84,7 +94,7 @@ export const CanvasProjectCard = memo(function CanvasProjectCard({ project }: { 
                         </>
                     ) : (
                         <>
-                            <Button type="text" size="small" shape="circle" loading={exporting} icon={<Download className="size-4" />} onClick={() => void exportProjects([project.id], project.title || "无线画布")} aria-label={t("导出")} />
+                            <Button type="text" size="small" shape="circle" loading={exporting} icon={<Download className="size-4" />} onClick={() => void exportProjects([project.id], project.title || t("无限画布"))} aria-label={t("导出")} />
                             <Button type="text" size="small" shape="circle" icon={<Pencil className="size-4" />} onClick={() => startEditing(project.id, project.title)} aria-label={t("重命名")} />
                             <Button type="text" size="small" shape="circle" icon={<Trash2 className="size-4" />} onClick={() => setDeleteIds([project.id])} aria-label={t("删除")} />
                         </>

@@ -1,6 +1,6 @@
 import { useUiText } from "@/lib/i18n";
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { Button, Modal, Select } from "antd";
+import { App, Button, Modal, Select } from "antd";
 import { Check, X } from "lucide-react";
 
 import { readImageMeta } from "@/lib/image-utils";
@@ -19,12 +19,17 @@ const handleNames: Record<ResizeHandle, string> = { n: "上", e: "右", s: "下"
 
 export function CanvasNodeCropDialog({ dataUrl, open, onClose, onConfirm }: { dataUrl: string; open: boolean; onClose: () => void; onConfirm: (crop: CanvasImageCropRect) => void }) {
     const t = useUiText();
+    const { modal } = App.useApp();
     const boxRef = useRef<HTMLDivElement>(null);
     const dragCleanupRef = useRef<(() => void) | null>(null);
     const [crop, setCrop] = useState<CanvasImageCropRect>(defaultCrop);
     const [ratioKey, setRatioKey] = useState("free");
     const [image, setImage] = useState<{ width: number; height: number } | null>(null);
     const [imageError, setImageError] = useState("");
+    const requestClose = () => {
+        if (ratioKey === "free" && Object.keys(defaultCrop).every(key => crop[key as keyof CanvasImageCropRect] === defaultCrop[key as keyof CanvasImageCropRect])) { onClose(); return; }
+        modal.confirm({ title: t("放弃未保存的裁剪？"), content: t("当前裁剪调整尚未应用，关闭后将丢失。原图不会改变。"), okText: t("放弃调整"), cancelText: t("继续裁剪"), onOk: onClose });
+    };
     const cropSize = image ? { width: Math.max(1, Math.round(crop.width * image.width)), height: Math.max(1, Math.round(crop.height * image.height)) } : null;
     const normalizedRatio = (key: string) => {
         if (key === "free" || !image) return null;
@@ -81,7 +86,7 @@ export function CanvasNodeCropDialog({ dataUrl, open, onClose, onConfirm }: { da
     };
 
     return (
-        <Modal title={t("裁剪图片")} open={open && Boolean(dataUrl)} onCancel={onClose} footer={null} width={780} centered destroyOnHidden>
+        <Modal title={t("裁剪图片")} open={open && Boolean(dataUrl)} onCancel={requestClose} mask={{ closable: false }} footer={null} width={780} centered destroyOnHidden>
             <div className="space-y-4">
                 {imageError ? <div role="alert" className="text-sm">{imageError}</div> : null}
                 <div className="flex justify-center">
@@ -120,7 +125,7 @@ export function CanvasNodeCropDialog({ dataUrl, open, onClose, onConfirm }: { da
 
                 <div className="flex items-center justify-end gap-2">
                     <Button onClick={() => { dragCleanupRef.current?.(); setCrop(defaultCrop); setRatioKey("free"); }}>{t("重置")}</Button>
-                    <Button icon={<X className="size-4" />} onClick={onClose}>
+                    <Button icon={<X className="size-4" />} onClick={requestClose}>
                         {t("取消")}</Button>
                     <Button type="primary" icon={<Check className="size-4" />} disabled={!image} onClick={() => onConfirm(crop)}>
                         {t("确认裁剪")}</Button>

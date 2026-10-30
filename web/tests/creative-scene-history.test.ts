@@ -49,3 +49,22 @@ test("history access remains scoped by both owner and scene", async () => {
     f.values.set("history-record:owner:text-to-style:other", { ...log("other", 1), sceneId: "local-restyle" });
     await expect(f.history.read("other")).rejects.toThrow("当前场景");
 });
+
+test("removing finished history preserves original records and media needed by later retries", async () => {
+    const f = fixture();
+    const done = { ...log("finished", 1), results: [{ id: "result", status: "success" as const }] };
+    await f.history.save(done);
+    await f.history.remove(done.id);
+    expect((await f.history.page()).total).toBe(0);
+    expect(await f.history.read(done.id)).toEqual(done);
+    expect((await f.history.pending())).toEqual([]);
+});
+
+test.each(["pending", "uncertain", "legacy"])("%s scene records cannot lose task tracking through history removal", async state => {
+    const f = fixture();
+    const tracked: SceneLog = { ...log("tracked", 1), results: [{ id: "result", status: state === "pending" ? "pending" : "failed", ...(state === "uncertain" ? { failureKind: "uncertain" as const } : {}) }] };
+    await f.history.save(tracked);
+    await expect(f.history.remove(tracked.id)).rejects.toThrow("尚未明确结束");
+    expect((await f.history.page()).total).toBe(1);
+    expect(await f.history.read(tracked.id)).toEqual(tracked);
+});

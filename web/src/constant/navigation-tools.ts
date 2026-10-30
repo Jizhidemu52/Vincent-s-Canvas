@@ -41,7 +41,7 @@ export const navigationTools = [
     {
         slug: "image",
         path: "/image",
-        label: "文生图",
+        label: "图像生成",
         icon: ImageIcon,
         group: "local",
     },
@@ -55,7 +55,7 @@ export const navigationTools = [
     {
         slug: "video",
         path: "/video",
-        label: "视频创作",
+        label: "视频生成",
         icon: Video,
         group: "local",
     },
@@ -90,7 +90,7 @@ export const navigationTools = [
     {
         slug: "canvas",
         path: "/canvas",
-        label: "无线画布",
+        label: "无限画布",
         icon: Box,
         group: "online",
     },

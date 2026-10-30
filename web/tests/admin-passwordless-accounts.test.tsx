@@ -57,7 +57,8 @@ function page(wecom: boolean | Error = true) {
             useRef(initial: any) { const index = cursor++; return state[index] ||= { current: initial }; },
             useEffect(effect: any, deps: any[]) { const index = cursor++; if (!effects[index] || deps.some((value, item) => !Object.is(value, effects[index].deps[item]))) queue.push(() => { effects[index]?.cleanup?.(); effects[index] = { deps, cleanup: effect() }; }); },
         },
-        antd: new Proxy({ Form, App: { useApp: () => ({ message: { success: (text: string) => notices.push(text), warning: (text: string) => notices.push(text), error: (text: string) => notices.push(text) } }) }, Input: { Password: "Password" }, Typography: { Paragraph: "Paragraph" } }, { get: (target, key) => key in target ? target[key as keyof typeof target] : String(key) }),
+        antd: new Proxy({ Form, App: { useApp: () => ({ modal: { confirm: async () => true }, message: { success: (text: string) => notices.push(text), warning: (text: string) => notices.push(text), error: (text: string) => notices.push(text) } }) }, Input: { Password: "Password" }, Typography: { Paragraph: "Paragraph" } }, { get: (target, key) => key in target ? target[key as keyof typeof target] : String(key) }),
+        "@/hooks/use-unsaved-guard": { useUnsavedGuard: () => ({ confirmDiscard: async () => true }), useConfirmUnsavedChanges: () => async () => true },
         "lucide-react": new Proxy({}, { get: (_, key) => String(key) }),
         "file-saver": { saveAs: (blob: Blob) => downloads.push(blob) }, papaparse: Papa,
         "react-router-dom": { Link: "Link", Navigate: "Navigate", useNavigate: () => () => {}, useSearchParams: () => [new URLSearchParams(), () => {}] },
@@ -130,7 +131,7 @@ test("editing an existing account retains optional password reset behavior", asy
     try {
         const tree = await panel.settle();
         const table = tree.find(item => item.type === "Table" && item.props.dataSource[0]?.id === person.id)!;
-        table.props.columns.find((column: any) => column.title === "操作").render(null, person).props.onClick();
+        await table.props.columns.find((column: any) => column.title === "操作").render(null, person).props.onClick();
         expect(panel.render().find(item => item.props.name === "password")!.props.rules).toEqual([]);
         await panel.submit({ ...panel.forms[2].fields, password: "ChangedPassword123" });
         expect(panel.requests.map(item => item.path)).toEqual(["/api/admin/accounts/person", "/api/admin/accounts/person/reset-password"]);

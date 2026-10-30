@@ -82,7 +82,7 @@
     font-weight: 600;
 }
 .series-recipe-page .sr-panel-heading span {
-    font-size: 11px;
+    font-size: 12px;
     color: var(--muted-foreground);
 }
 .series-recipe-page .sr-fields,
@@ -140,7 +140,7 @@
 }
 .series-recipe-page .sr-upload small {
     display: block;
-    font-size: 10px;
+    font-size: 12px;
     margin-top: 4px;
     color: var(--muted-foreground);
 }
@@ -159,7 +159,7 @@
     min-width: 0;
     gap: 6px;
     color: var(--muted-foreground);
-    font-size: 10px;
+    font-size: 12px;
 }
 .series-recipe-page .sr-upload-name span {
     overflow: hidden;
@@ -206,7 +206,7 @@
     height: 18px;
     line-height: 18px;
     border-radius: 50%;
-    font-size: 10px;
+    font-size: 12px;
 }
 .series-recipe-page .sr-segments {
     display: flex;
@@ -220,7 +220,7 @@
     border: 0;
     background: none;
     color: var(--muted-foreground);
-    font-size: 11px;
+    font-size: 12px;
     border-radius: 3px;
 }
 .series-recipe-page .sr-segments button[aria-pressed="true"] {
@@ -242,7 +242,7 @@
 }
 .series-recipe-page summary {
     cursor: pointer;
-    font-size: 11px;
+    font-size: 12px;
     color: var(--muted-foreground);
 }
 .series-recipe-page .sr-details[open] > summary {
@@ -252,7 +252,7 @@
     white-space: pre-wrap;
     overflow-wrap: anywhere;
     font: inherit;
-    font-size: 11px;
+    font-size: 12px;
     line-height: 1.8;
     padding: 10px;
     background: var(--secondary);
@@ -276,13 +276,13 @@
     letter-spacing: -0.02em;
 }
 .series-recipe-page .sr-eyebrow {
-    font-size: 9px;
+    font-size: 12px;
     letter-spacing: 0.17em;
     color: var(--muted-foreground);
 }
 .series-recipe-page .sr-phase {
     color: var(--muted-foreground);
-    font-size: 11px;
+    font-size: 12px;
 }
 .series-recipe-page .sr-flow {
     display: grid;
@@ -301,16 +301,16 @@
 }
 .series-recipe-page .sr-flow li span {
     color: var(--muted-foreground);
-    font-size: 10px;
+    font-size: 12px;
 }
 .series-recipe-page .sr-flow b {
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 500;
     margin: 3px 0;
 }
 .series-recipe-page .sr-flow small {
     color: var(--muted-foreground);
-    font-size: 10px;
+    font-size: 12px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -382,7 +382,7 @@
     align-items: center;
     justify-content: center;
     gap: 12px;
-    font-size: 11px;
+    font-size: 12px;
 }
 .series-recipe-page .sr-result-body {
     padding: 12px;
@@ -409,11 +409,11 @@
 }
 .series-recipe-page .sr-result-title span,
 .series-recipe-page .sr-result-body small {
-    font-size: 10px;
+    font-size: 12px;
     color: var(--muted-foreground);
 }
 .series-recipe-page .sr-result-body > p {
-    font-size: 11px;
+    font-size: 12px;
 }
 .series-recipe-page .sr-selection {
     display: flex;
@@ -421,7 +421,7 @@
     gap: 7px;
     padding-top: 8px;
     border-top: 1px solid var(--border);
-    font-size: 11px;
+    font-size: 12px;
     cursor: pointer;
 }
 .series-recipe-page input[type="checkbox"] {
@@ -438,7 +438,7 @@
     justify-content: center;
     gap: 6px;
     line-height: 1.5;
-    font-size: 11px;
+    font-size: 12px;
     text-align: center;
 }
 .series-recipe-page .sr-button:hover:not(:disabled) {
@@ -458,7 +458,7 @@
 .series-recipe-page .sr-primary span {
     margin-left: auto;
     opacity: 0.75;
-    font-size: 10px;
+    font-size: 12px;
 }
 .series-recipe-page .sr-wide {
     width: 100%;
@@ -472,7 +472,7 @@
     flex: 1;
 }
 .series-recipe-page .sr-help {
-    font-size: 11px;
+    font-size: 12px;
     color: var(--muted-foreground);
     line-height: 1.8;
 }
@@ -496,7 +496,7 @@
 }
 .series-recipe-page .sr-estimate span {
     color: var(--muted-foreground);
-    font-size: 11px;
+    font-size: 12px;
 }
 .series-recipe-page .sr-estimate strong {
     margin-left: auto;
@@ -515,12 +515,12 @@
 }
 .series-recipe-page .sr-error {
     color: var(--destructive);
-    font-size: 11px;
+    font-size: 12px;
     overflow-wrap: anywhere;
 }
 .series-recipe-page .sr-notice {
     color: var(--muted-foreground);
-    font-size: 10px;
+    font-size: 12px;
 }
 .series-recipe-page .sr-callout {
     padding: 12px;
@@ -528,7 +528,7 @@
     border-radius: 4px;
     background: var(--secondary);
     margin-bottom: 16px;
-    font-size: 11px;
+    font-size: 12px;
 }
 .series-recipe-page .sr-footer-note {
     margin-top: 20px;

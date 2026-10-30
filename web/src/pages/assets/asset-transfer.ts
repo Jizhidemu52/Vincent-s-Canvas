@@ -22,25 +22,40 @@ type AssetExportItem = {
     bytes: number;
 };
 
-export async function exportAssets(assets: Asset[]) {
+export async function exportAssets(assets: Asset[], options?: { readRemote: (asset: Asset) => Promise<Blob>; checkOwner: () => void }) {
     const files: AssetExportItem[] = [];
     const zipFiles: { name: string; data: BlobPart }[] = [];
 
-    await Promise.all(
-        assets.map(async (asset) => {
-            if (asset.kind !== "image" && asset.kind !== "video") return;
-            const storageKey = asset.data.storageKey;
-            if (!storageKey) return;
-            const blob = asset.kind === "image" ? await getImageBlob(storageKey) : await getMediaBlob(storageKey);
-            if (!blob) return;
+    const exportedAssets: Asset[] = [];
+    for (const asset of assets) {
+            options?.checkOwner();
+            if (asset.kind === "text") {
+                const blob = options ? await options.readRemote(asset) : new Blob([asset.data.content], { type: "text/plain" });
+                options?.checkOwner();
+                if (!blob) throw new Error(uiText("素材原文件不可用，导出已停止"));
+                const content = await blob.text();
+                options?.checkOwner();
+                const storageKey = `text:export-${asset.id}`, path = `files/${safeFileName(storageKey)}.txt`;
+                files.push({ storageKey, path, mimeType: blob.type || "text/plain", bytes: blob.size });
+                zipFiles.push({ name: path, data: blob });
+                exportedAssets.push({ ...asset, data: { ...asset.data, content } });
+                continue;
+            }
+            const storageKey = asset.data.storageKey || `${asset.kind}:export-${asset.id}`;
+            const blob = asset.data.storageKey
+                ? await (asset.kind === "image" ? getImageBlob(storageKey) : getMediaBlob(storageKey))
+                : await options?.readRemote(asset);
+            options?.checkOwner();
+            if (!blob) throw new Error(uiText("素材原文件不可用，导出已停止"));
             const path = `files/${safeFileName(storageKey)}.${fileExtension(blob.type, asset.kind)}`;
             files.push({ storageKey, path, mimeType: blob.type || asset.data.mimeType, bytes: blob.size });
             zipFiles.push({ name: path, data: blob });
-        }),
-    );
+            exportedAssets.push({ ...asset, data: { ...asset.data, storageKey } } as Asset);
+    }
 
-    const data: AssetExportFile = { app: "wireless-canvas", version: 1, exportedAt: new Date().toISOString(), assets, files };
+    const data: AssetExportFile = { app: "wireless-canvas", version: 1, exportedAt: new Date().toISOString(), assets: exportedAssets, files };
     const zip = await createZip([{ name: "assets.json", data: JSON.stringify(exportModelMetadata(data), null, 2) }, ...zipFiles]);
+    options?.checkOwner();
     saveAs(zip, uiText("我的素材.zip"));
 }
 

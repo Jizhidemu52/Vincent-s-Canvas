@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Alert, App, Button, Form, Input, Space, Tag, Typography } from "antd";
 
 import { getInternalAiConfig, saveInternalAiConfig, testInternalAiConfig, type InternalAiConfigStatus } from "@/services/api/internal-ai-config";
+import { useUnsavedGuard } from "@/hooks/use-unsaved-guard";
 
 type InternalAiFormValues = {
     seamlessUrl: string;
@@ -12,7 +13,9 @@ type InternalAiFormValues = {
 const DEFAULT_SEAMLESS_URL = "http://122.247.78.91:8101/std/comfy_generate";
 
 export function InternalAiProviderConfig({ isAdmin }: { isAdmin: boolean }) {
-    const { message } = App.useApp();
+    const { message, modal } = App.useApp();
+    const [dirty, setDirty] = useState(false);
+    useUnsavedGuard(dirty, "内部 AI 服务配置尚未保存，离开后将丢失修改。");
     const [form] = Form.useForm<InternalAiFormValues>();
     const [status, setStatus] = useState<InternalAiConfigStatus | null>(null);
     const [loading, setLoading] = useState(true);
@@ -49,6 +52,7 @@ export function InternalAiProviderConfig({ isAdmin }: { isAdmin: boolean }) {
             setStatus(nextStatus);
             form.setFieldValue("appKey", "");
             setTestResult(null);
+            setDirty(false);
             message.success("内部 AI 配置已保存到服务端");
         } catch (error) {
             message.error(error instanceof Error ? error.message : "内部 AI 配置保存失败");
@@ -58,6 +62,7 @@ export function InternalAiProviderConfig({ isAdmin }: { isAdmin: boolean }) {
     };
 
     const testConnection = async () => {
+        if (!await modal.confirm({ title: "确认提交真实测试出图？", content: "测试使用已保存的服务配置，可能产生上游费用。当前未保存的修改不参与测试。", okText: "确认测试", cancelText: "取消" })) return;
         setTesting(true);
         setTestResult(null);
         try {
@@ -74,12 +79,14 @@ export function InternalAiProviderConfig({ isAdmin }: { isAdmin: boolean }) {
     };
 
     const clearAppKey = async () => {
+        if (!await modal.confirm({ title: "确认清除服务端密钥？", content: "清除后所有使用内部 AI 无缝拼接服务的成员将无法继续调用，需重新配置密钥后恢复。", okText: "确认清除", cancelText: "保留密钥", okButtonProps: { danger: true } })) return;
         const seamlessUrl = form.getFieldValue("seamlessUrl") || status?.seamlessUrl || DEFAULT_SEAMLESS_URL;
         setSaving(true);
         try {
             const nextStatus = await saveInternalAiConfig({ seamlessUrl, clearAppKey: true });
             setStatus(nextStatus);
             form.setFieldValue("appKey", "");
+            setDirty(false);
             message.success("内部 AI App Key 已从服务端清除");
         } catch (error) {
             message.error(error instanceof Error ? error.message : "App Key 清除失败");
@@ -111,7 +118,7 @@ export function InternalAiProviderConfig({ isAdmin }: { isAdmin: boolean }) {
                 </Space>
             </div>
 
-            <Form form={form} layout="vertical" disabled={!isAdmin || loading} onFinish={submit} initialValues={{ seamlessUrl: DEFAULT_SEAMLESS_URL }}>
+            <Form form={form} layout="vertical" disabled={!isAdmin || loading || saving || testing} onValuesChange={() => setDirty(true)} onFinish={submit} initialValues={{ seamlessUrl: DEFAULT_SEAMLESS_URL }}>
                 <div className="grid gap-3 lg:grid-cols-[minmax(0,1.5fr)_minmax(280px,1fr)]">
                     <Form.Item
                         name="seamlessUrl"

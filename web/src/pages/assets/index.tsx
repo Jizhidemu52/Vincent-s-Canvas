@@ -1,7 +1,7 @@
 import { useUiText, uiText } from "@/lib/i18n";
-import { BookmarkPlus, Check, Copy, Download, LoaderCircle, PencilLine, Plus, RotateCcw, Search, Share2, Trash2, Upload } from "lucide-react";
+import { BookmarkPlus, Check, Copy, Download, Ellipsis, LoaderCircle, PencilLine, Plus, RotateCcw, Search, Share2, Trash2, Upload } from "lucide-react";
 import { lazy, Suspense, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { App, Button, Card, DatePicker, Drawer, Empty, Form, Image, Input, Modal, Segmented, Select, Space, Tag, Typography } from "antd";
+import { App, Button, Card, DatePicker, Drawer, Dropdown, Empty, Form, Image, Input, Modal, Segmented, Select, Skeleton, Space, Tag, Typography } from "antd";
 import dayjs from "dayjs";
 import { saveAs } from "file-saver";
 import { useInfiniteQuery, useQueryClient, type InfiniteData } from "@tanstack/react-query";
@@ -10,6 +10,7 @@ import { useModuleEnabled } from "@/stores/use-module-store";
 import { InfiniteLoadMore } from "@/components/infinite-load-more";
 
 import { useCopyText } from "@/hooks/use-copy-text";
+import { useImageDrop } from "@/hooks/use-image-drop";
 import { imageModelDisplayName } from "@/lib/model-display";
 import { useAsyncAction } from "@/hooks/use-async-action";
 import { useWorkbenchField } from "@/hooks/use-workbench-field";
@@ -28,6 +29,8 @@ import { canUserAccessAsset, serverAssetIdFromAsset, useAssetStore, type Asset, 
 import { useDesignLibraryShare } from "@/pages/design-library/use-design-library-share";
 import { useUserStore } from "@/stores/use-user-store";
 import { exportAssets, readAssetPackage } from "./asset-transfer";
+import { collectAssetPages } from "./asset-export-pages";
+import { formatBeijingDateTime } from "@/lib/beijing-time";
 import { buildAssetSearchIndex, searchAssetIndex } from "./asset-search";
 import { assetCanvasNodes, assetCanvasViewport, selectAssetRange } from "./asset-batch";
 import { compareAssetCreatedAt, filterLocalAssets, patchAssetProjection, uploadAssetBatch, type AssetUploadJob } from "./asset-library-state";
@@ -107,6 +110,7 @@ export default function AssetsPage() {
     const deferredKeyword = useDeferredValue(keyword);
     const [kindFilter, setKindFilter] = useWorkbenchField<AssetKind | "all">("assets:kind", "all");
     const [libraryView, setLibraryView] = useState<"active" | "trash">("active");
+    const [moreFilters, setMoreFilters] = useState(false);
     const [tagFilter, setTagFilter] = useState("");
     const deferredTag = useDeferredValue(tagFilter.trim());
     const [projectFilter, setProjectFilter] = useState<string>();
@@ -211,6 +215,7 @@ export default function AssetsPage() {
     [validAssets, serverAssetIds, searchIndex, deferredKeyword, kindFilter, deferredTag, projectFilter, dateRange, sort, t]);
 
     const visibleAssets = filteredAssets;
+    const tagOptions = [...new Set([...validAssets.flatMap(asset => asset.tags || []), ...(tagFilter ? [tagFilter] : [])])].sort().map(value => ({ value, label: value }));
 
     const runAssetAction = async (label: string, run: () => Promise<void>) => {
         if (assetActionRef.current) return;
@@ -397,21 +402,37 @@ export default function AssetsPage() {
     };
 
     const exportAllAssets = async () => {
-        if (!validAssets.length) {
-            message.warning(t("暂无素材可导出"));
-            return;
-        }
         const ownerId = user?.id;
+        const checkOwner = () => { if (useUserStore.getState().user?.id !== ownerId) throw new Error(t("账号已切换，导出已停止")); };
+        const complete = ownerId ? await collectAssetPages(cursor => listServerAssets({ ...assetQuery, limit: 100, cursor }), checkOwner,
+            count => setAssetAction(t("正在收集筛选结果：{p0} 个…", { p0: count }))) : [];
+        const exportServerAssets = complete.filter(asset => isSupportedServerAsset(asset) && canUserAccessAsset(serverAssetToLocal(asset), user, true));
+        const exportIds = new Set(exportServerAssets.map(asset => asset.id));
+        const allAssets = [...exportServerAssets.map(serverAssetToLocal), ...filteredAssets.filter(asset => !serverAssetIds.has(asset.id) && !exportIds.has(asset.id) && !exportIds.has(metadataString(asset, "serverAssetId")))];
+        if (!allAssets.length) { message.warning(t("暂无素材可导出")); return; }
         const detailed = new Map<string, Asset>();
-        const serverIds = validAssets.filter(asset => serverAssetIds.has(asset.id)).map(asset => asset.id);
+        const serverIds = [...exportIds];
         for (let start = 0; start < serverIds.length; start += 50) {
+            checkOwner();
             const result = await batchServerAssets("add-to-canvas", serverIds.slice(start, start + 50));
-            if (useUserStore.getState().user?.id !== ownerId) throw new Error(t("账号已切换，导出已停止"));
+            checkOwner();
             result.assets.forEach(asset => detailed.set(asset.id, serverAssetToLocal(asset)));
         }
-        await exportAssets(validAssets.map(asset => detailed.get(asset.id) || asset));
+        setAssetAction(t("正在打包全部 {p0} 个筛选素材…", { p0: allAssets.length }));
+        await exportAssets(allAssets.map(asset => detailed.get(asset.id) || asset), { checkOwner, readRemote: async asset => {
+            checkOwner();
+            if (exportIds.has(asset.id)) return fetchServerAssetContent(asset.id);
+            if (asset.kind === "text") return new Blob([asset.data.content], { type: "text/plain" });
+            const url = await resolveCanvasAssetPreview(asset, { resolveImage: resolveImageUrl, resolveMedia: resolveMediaUrl });
+            if (!url) throw new Error(t("本地素材文件不可用"));
+            const response = await fetch(url);
+            if (!response.ok) throw new Error(t("素材原文件不可用，导出已停止"));
+            return response.blob();
+        } });
+        message.success(t("已导出当前筛选的全部 {p0} 个素材", { p0: allAssets.length }));
+        checkOwner();
         const recorded = await Promise.allSettled(
-            validAssets.filter((asset) => serverAssetIds.has(asset.id)).map((asset) => recordServerAssetEvent(asset.id, "asset.exported", { channel: "asset-package" })),
+            serverIds.map(id => recordServerAssetEvent(id, "asset.exported", { channel: "asset-package" })),
         );
         if (recorded.some((result) => result.status === "rejected")) message.warning(t("素材已导出，部分导出记录同步失败"));
         await refreshServerAssets();
@@ -521,6 +542,12 @@ export default function AssetsPage() {
         setDeletingAsset(null);
     };
 
+    const imageDrop = useImageDrop({
+        scopeKey: `assets:${libraryView}`,
+        disabled: libraryView !== "active" || Boolean(assetAction) || isAssetOpen || Boolean(previewAsset || batchTarget || deletingAsset || projectAsset) || user?.status !== "active",
+        onFiles: files => runAssetAction(t("正在准备上传…"), () => importImageFiles(files)),
+    });
+
     return (
         <div className="wb-page flex h-full flex-col overflow-hidden" tabIndex={0} aria-label={t("素材库")} onKeyDown={event => {
             const target = event.target as HTMLElement;
@@ -529,16 +556,16 @@ export default function AssetsPage() {
                 if (visibleAssets.length > 50) message.info(t("当前页超过 50 个素材，已选择前 50 个"));
             }
         }}>
-            <main className="min-h-0 flex-1 overflow-y-auto px-4 py-6 md:px-8 md:py-8">
+            <main {...imageDrop.dropProps} aria-busy={imageDrop.reading} className={`min-h-0 flex-1 overflow-y-auto px-4 py-6 md:px-8 md:py-8${imageDrop.dragging ? " outline outline-2 outline-offset-[-4px] outline-primary" : ""}`}>
                 <div className="mx-auto max-w-7xl pb-6">
+                    {imageDrop.dragging || imageDrop.reading ? <p role="status" className="mb-3 rounded-lg bg-primary/10 p-3 text-sm">{t(imageDrop.dragging ? "松开以导入我的素材，不会自动生成或分享。" : "正在读取拖入图片，请稍候。")}</p> : null}
                     <header className="wb-header">
                         <div>
                             <p className="wb-eyebrow">{t("素材工作台")}</p>
-                            <h1 className="wb-title">{libraryView === "trash" ? t("最近删除") : t("我的素材")}</h1>
+                            <h1 className="wb-title">{libraryView === "trash" ? t("最近删除") : t("素材库")}</h1>
                             <p className="wb-description">{libraryView === "trash" ? t("仅展示你有权管理、删除未满 30 天的公司素材。原始文件仍保留时可恢复，归属、项目与共享设置保持不变。") : t("把文本、图片和视频整理在一起。收藏、下载，或带着原提示词继续创作。")}</p>
                         </div>
                         <div className="wb-toolbar">
-                            <Segmented aria-label={t("素材库视图")} value={libraryView} onChange={value => setLibraryView(value as "active" | "trash")} options={[{ label: t("我的素材"), value: "active" }, { label: t("最近删除"), value: "trash" }]} />
                             {libraryView === "active" ? <>
                             <Button size="large" icon={<Plus className="size-4" />} onClick={openCreate}>{t("新增素材")}</Button>
                             <Button size="large" type="primary" icon={<Upload className="size-4" />} disabled={Boolean(assetAction)} onClick={() => batchImageInputRef.current?.click()}>{t("上传图片")}</Button>
@@ -546,8 +573,9 @@ export default function AssetsPage() {
                         </div>
                     </header>
 
+                    <Segmented className="mb-4" aria-label={t("素材库视图")} value={libraryView} onChange={value => setLibraryView(value as "active" | "trash")} options={[{ label: t("我的素材"), value: "active" }, { label: t("最近删除"), value: "trash" }]} />
                     <div className="w-full max-w-2xl">
-                        <Input.Search
+                        <Input
                             className="w-full"
                             size="large"
                             allowClear
@@ -557,20 +585,17 @@ export default function AssetsPage() {
                             onChange={(event) => {
                                 setKeyword(event.target.value);
                             }}
-                            onSearch={(value) => {
-                                setKeyword(value);
-                            }}
                         />
                     </div>
 
                     <div className="mt-5 grid gap-3 text-left">
-                        <div className="flex flex-wrap items-center gap-2" aria-label={t("素材筛选")}>
-                            <Input aria-label={t("按标签筛选")} placeholder={t("标签（精确匹配）")} allowClear value={tagFilter} onChange={event => setTagFilter(event.target.value)} style={{ width: 180 }} />
+                        <div><Button aria-expanded={moreFilters} onClick={() => setMoreFilters(value => !value)}>{moreFilters ? t("收起筛选") : t("更多筛选")}{tagFilter || projectFilter || dateRange ? " ·" : ""}</Button>{hasFilters ? <Button type="text" onClick={clearFilters}>{t("清除筛选")}</Button> : null}</div>
+                        {moreFilters && <div className="flex flex-wrap items-center gap-2" aria-label={t("素材筛选")}>
+                            <Select aria-label={t("按标签筛选")} placeholder={t("选择标签")} allowClear showSearch optionFilterProp="label" value={tagFilter || undefined} onChange={value => setTagFilter(value || "")} options={tagOptions} style={{ width: 180 }} />
                             <Select aria-label={t("按项目筛选")} placeholder={t("全部项目")} allowClear showSearch optionFilterProp="label" value={projectFilter} onChange={setProjectFilter} options={serverProjects.map(project => ({ value: project.id, label: project.name }))} style={{ minWidth: 180 }} />
                             <DatePicker.RangePicker aria-label={t("按创建日期筛选")} placeholder={[t("创建开始日期"), t("创建结束日期")]} value={dateRange ? [dayjs(dateRange[0]), dayjs(dateRange[1]).subtract(1, 'day')] : null} onChange={range => setDateRange(range?.[0] && range?.[1] ? [range[0].startOf('day').toISOString(), range[1].add(1, 'day').startOf('day').toISOString()] : null)} />
                             <Select aria-label={t("素材排序")} value={sort} onChange={setSort} options={[{ value: "newest", label: libraryView === "trash" ? t("最近删除优先") : t("最新创建优先") }, { value: "oldest", label: libraryView === "trash" ? t("最早删除优先") : t("最早创建优先") }]} style={{ width: 154 }} />
-                            {hasFilters ? <Button onClick={clearFilters}>{t("清除筛选")}</Button> : null}
-                        </div>
+                        </div>}
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                             <div className="grid gap-2 sm:grid-cols-[56px_minmax(0,1fr)] sm:items-center">
                                 <div className="text-xs font-medium text-stone-500 dark:text-stone-400">{t("类型")}</div>
@@ -593,7 +618,7 @@ export default function AssetsPage() {
                                 <span className="text-sm text-muted-foreground">{t("已加载")} {libraryView === "trash" ? serverAssets.length : filteredAssets.length} {t("个素材")}{serverAssetResponse?.hasMore ? t(" · 还有更多") : ""}</span>
                                 {libraryView === "active" ? <>
                                 {referenceImportEnabled ? <Button onClick={() => navigate("/reference-import")}>{t("网页采集")}</Button> : null}
-                                <Button icon={<Download className="size-4" />} disabled={Boolean(assetAction) || !validAssets.length} onClick={() => void runAssetAction(t("正在整理导出文件…"), exportAllAssets)}>{t("导出已加载素材")}</Button>
+                                <Button icon={<Download className="size-4" />} disabled={Boolean(assetAction) || !filteredAssets.length} onClick={() => void runAssetAction(t("正在整理导出文件…"), exportAllAssets)}>{t("导出全部筛选素材")}</Button>
                                 <Button icon={<Upload className="size-4" />} disabled={Boolean(assetAction)} onClick={() => assetInputRef.current?.click()}>{t("导入素材包")}</Button>
                                 </> : null}
                             </div>
@@ -608,10 +633,11 @@ export default function AssetsPage() {
                 </div>
 
                 <div className="mx-auto flex max-w-7xl flex-col gap-5">
+                    {serverLoading && !serverAssets.length && !visibleAssets.length ? <div role="status" aria-label={t("正在加载素材")} className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{Array.from({ length: 8 }, (_, index) => <div key={index} className="wb-surface p-4"><Skeleton active paragraph={{ rows: 4 }} /></div>)}</div> : null}
                     <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                         {libraryView === "trash" ? serverAssets.map(asset => <Card key={asset.id} className="h-full" title={typeof asset.metadata.title === "string" ? asset.metadata.title : asset.filename}>
-                            <div className="flex flex-col gap-3"><div className="flex items-center gap-2 text-muted-foreground"><Trash2 className="size-5" /><span>{asset.kind} · {formatBytes(asset.byteSize)}</span></div>
-                                <p className="text-sm">{t("删除于")} {asset.deletedAt ? new Date(asset.deletedAt).toLocaleString() : "—"}<br />{t("可恢复至")} {asset.purgeAfter ? new Date(asset.purgeAfter).toLocaleDateString() : "—"}</p>
+                            <div className="flex flex-col gap-3"><div className="flex items-center gap-2 text-muted-foreground"><Trash2 className="size-5" /><span>{t(({ image: "图片", video: "视频", text: "文本", other: "其他" })[asset.kind])} · {formatBytes(asset.byteSize)}</span></div>
+                                <p className="text-sm">{t("删除于")} {formatBeijingDateTime(asset.deletedAt)}<br />{t("可恢复至")} {formatBeijingDateTime(asset.purgeAfter)}</p>
                                 <p className="truncate text-xs text-muted-foreground">{asset.ownerName}{asset.projectName ? ` · ${asset.projectName}` : ""}</p>
                                 <Button icon={<RotateCcw className="size-4" />} disabled={Boolean(assetAction)} onClick={() => void runAssetAction(t("正在恢复素材…"), async () => {
                                     const ownerId = user?.id; await restoreServerAsset(asset.id);
@@ -910,26 +936,25 @@ function AssetCard({
                 <div className="p-4">
                     <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                            <h2 className="line-clamp-1 text-base font-semibold text-foreground">{asset.title}</h2>
+                            <h2 className="line-clamp-1 text-base font-semibold text-foreground">{assetDisplayTitle(asset)}</h2>
                             <Typography.Text type="secondary" className="mt-1 block text-xs">
-                                {asset.source || t("未标注来源")}
+                                {assetSourceLabel(asset.source)}
                             </Typography.Text>
                         </div>
-                        <Tag className="m-0 shrink-0 text-[11px]">{asset.kind === "image" ? t("图片") : asset.kind === "video" ? t("视频") : t("文本")}</Tag>
+                        <Tag className="m-0 shrink-0 text-xs">{asset.kind === "image" ? t("图片") : asset.kind === "video" ? t("视频") : t("文本")}</Tag>
                     </div>
                     <Typography.Paragraph type="secondary" ellipsis={{ rows: 3 }} className="!mb-0 !mt-3 !text-sm !leading-6">
                         {summary}
                     </Typography.Paragraph>
                     <div className="mt-3 flex flex-wrap gap-1.5">
-                        <Tag color="orange" className="m-0 text-[11px]">{resultStatusLabel(metadataString(asset, "resultStatus"))}</Tag>
-                        <Tag className="m-0 text-[11px]">{t("可用性")} {metadataNumber(asset, "usabilityScore")}/100</Tag>
-                        <Tag className="m-0 text-[11px]">{t("下载")} {metadataNumber(asset, "downloadCount")}</Tag>
+                        {metadataString(asset, "resultStatus") && metadataString(asset, "resultStatus") !== "unused" ? <Tag color="orange" className="m-0 text-xs">{resultStatusLabel(metadataString(asset, "resultStatus"))}</Tag> : null}
+                        {metadataNumber(asset, "usabilityScore") > 0 ? <Tag className="m-0 text-xs">{t("可用性")} {metadataNumber(asset, "usabilityScore")}/100</Tag> : null}
+                        {metadataNumber(asset, "downloadCount") > 0 ? <Tag className="m-0 text-xs">{t("下载")} {metadataNumber(asset, "downloadCount")}</Tag> : null}
                         {(asset.tags || []).slice(0, 3).map((tag) => (
-                            <Tag key={tag} className="m-0 text-[11px]">
+                            <Tag key={tag} className="m-0 text-xs">
                                 {tag}
                             </Tag>
                         ))}
-                        {!asset.tags?.length ? <Tag className="m-0 text-[11px]">{t("无标签")}</Tag> : null}
                     </div>
                 </div>
             </button>
@@ -937,29 +962,17 @@ function AssetCard({
                 <Button className="shrink-0" size="small" onClick={onOpen}>
                     {t("查看")}
                 </Button>
-                {asset.kind !== "video" ? (
-                    <Button className="shrink-0" size="small" icon={<PencilLine className="size-3.5" />} onClick={onEdit}>
-                        {t("编辑")}
-                    </Button>
-                ) : null}
-                {asset.kind === "text" ? (
-                    <Button className="shrink-0" size="small" icon={<Copy className="size-3.5" />} onClick={() => void onCopy(asset)}>
-                        {t("复制")}
-                    </Button>
-                ) : null}
                 {asset.kind === "image" || asset.kind === "video" ? (
                     <Button className="shrink-0" size="small" icon={<Download className="size-3.5" />} onClick={() => onDownload(asset)}>
                         {t("下载")}
                     </Button>
                 ) : null}
-                {canReplicate(asset) ? (
-                    <Button className="shrink-0" size="small" icon={<RotateCcw className="size-3.5" />} onClick={onReplicate}>
-                        {t("复刻")}
-                    </Button>
-                ) : null}
-                <Button className="shrink-0" size="small" danger icon={<Trash2 className="size-3.5" />} onClick={onDelete}>
-                    {t("删除")}
-                </Button>
+                <Dropdown trigger={["click"]} menu={{ items: [
+                    ...(asset.kind !== "video" ? [{ key: "edit", label: t("编辑"), icon: <PencilLine className="size-4" />, onClick: onEdit }] : []),
+                    ...(asset.kind === "text" ? [{ key: "copy", label: t("复制"), icon: <Copy className="size-4" />, onClick: () => onCopy(asset) }] : []),
+                    ...(canReplicate(asset) ? [{ key: "replicate", label: t("复刻"), icon: <RotateCcw className="size-4" />, onClick: onReplicate }] : []),
+                    { key: "delete", label: t("删除"), danger: true, icon: <Trash2 className="size-4" />, onClick: onDelete },
+                ] }}><Button size="small" className="ml-auto" aria-label={t("更多操作")} icon={<Ellipsis className="size-4" />} /></Dropdown>
             </div>
         </Card>
     );
@@ -1106,8 +1119,8 @@ function AssetDrawer({
 
 function assetSummary(asset: Asset) {
     if (asset.kind === "text") return asset.data.content.length > 280 ? `${asset.data.content.slice(0, 280)}…` : asset.data.content;
-    const dimensions = asset.data.width > 0 && asset.data.height > 0 ? `${asset.data.width} × ${asset.data.height}` : uiText("尺寸未记录");
-    return `${dimensions} · ${formatBytes(asset.data.bytes)} · ${asset.data.mimeType}`;
+    const dimensions = asset.data.width > 0 && asset.data.height > 0 ? `${asset.data.width} × ${asset.data.height}` : "";
+    return [dimensions, asset.data.bytes > 0 ? formatBytes(asset.data.bytes) : "", asset.data.mimeType].filter(Boolean).join(" · ");
 }
 
 function AssetTrace({ asset }: { asset: Asset }) {
@@ -1143,6 +1156,16 @@ function TraceLine({ label, value, multiline }: { label: string; value: string; 
 function metadataString(asset: Asset, key: string) {
     const value = asset.metadata?.[key];
     return typeof value === "string" ? value : "";
+}
+
+function assetSourceLabel(source?: string) {
+    const labels: Record<string, string> = { generation: "生成结果", "task-reference": "参考图", "manual-upload": "手动上传", manual: "手动添加", "image-page": "图像生成", "video-page": "视频生成", "chat-page": "对话改图", canvas: "画布", "canvas-node": "画布", "seamless-stitch": "无缝拼接" };
+    return source ? uiText(labels[source] || source) : "";
+}
+
+function assetDisplayTitle(asset: Asset) {
+    if (!/^generation[-_][a-z0-9-]+(?:\.[a-z]+)?$/i.test(asset.title)) return asset.title;
+    return metadataString(asset, "prompt").trim().slice(0, 60) || uiText("生成作品");
 }
 
 function metadataNumber(asset: Asset, key: string) {

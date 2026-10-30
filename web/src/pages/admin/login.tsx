@@ -6,6 +6,7 @@ import { useNavigate } from "react-router-dom";
 import { isAdminRole, useUserStore } from "@/stores/use-user-store";
 import { deploymentFeatures } from "@/lib/deployment-features";
 import { InchoiceBrand } from "@/components/layout/inchoice-brand";
+import { currentLoginReturn } from "@/lib/login-return";
 
 export default function AdminLoginPage() {
     const { message } = App.useApp();
@@ -23,7 +24,8 @@ export default function AdminLoginPage() {
         try {
             const user = await login(loginName, password, "admin");
             message.success("登录成功");
-            const destination = user.mustChangePassword ? "/change-password" : isAdminRole(user.role) ? "/admin" : "/";
+            const returnTo = currentLoginReturn("/admin");
+            const destination = user.mustChangePassword ? `/change-password?returnTo=${encodeURIComponent(returnTo)}` : isAdminRole(user.role) ? returnTo : "/";
             if (deploymentFeatures.authenticationEnabled) window.location.assign(destination);
             else navigate(destination, { replace: true });
         } catch (error) { message.error(error instanceof Error ? error.message : "登录失败"); }
@@ -45,18 +47,18 @@ export default function AdminLoginPage() {
                     </div>
                 </div>
 
-                <div className="mt-6 space-y-3">
-                    <label className="block text-sm font-medium">管理员账号</label>
-                    <Input size="large" value={loginName} onChange={(event) => setLoginName(event.target.value)} placeholder="请输入管理员账号" autoComplete="username" />
-                    <label className="block text-sm font-medium">登录密码</label>
-                    <Input.Password size="large" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="请输入密码" autoComplete="current-password" onPressEnter={submit} />
-                    <Button type="primary" size="large" block loading={submitting} icon={<LockKeyhole className="size-4" />} onClick={submit}>
+                <form className="mt-6 space-y-3" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
+                    <label htmlFor="admin-login-name" className="block text-sm font-medium">管理员账号</label>
+                    <Input id="admin-login-name" name="username" required size="large" value={loginName} onChange={(event) => setLoginName(event.target.value)} placeholder="请输入管理员账号" autoComplete="username" />
+                    <label htmlFor="admin-login-password" className="block text-sm font-medium">登录密码</label>
+                    <Input.Password id="admin-login-password" name="password" required size="large" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="请输入密码" autoComplete="current-password" />
+                    <Button type="primary" htmlType="submit" size="large" block loading={submitting} icon={<LockKeyhole className="size-4" />}>
                         登录后台
                     </Button>
                     <Button size="large" block icon={<UserRound className="size-4" />} onClick={() => deploymentFeatures.authenticationEnabled ? window.location.assign(deploymentFeatures.oaLoginEnabled ? "/" : "/login") : navigate("/")}>
                         返回工作台
                     </Button>
-                </div>
+                </form>
             </main>
         </div>
     );

@@ -26,6 +26,7 @@ function harness(options: {
     const calls: { actor: string; input: DesignLibraryPublishInput; options: DesignLibraryRequestOptions }[] = [];
     const uploads: { file: File; metadata: unknown; options: { expectedOwnerId?: string; clientReferenceId?: string; signal?: AbortSignal } }[] = [];
     const published: DesignLibraryEntry[] = [], notices: { level: string; text: string }[] = [], confirmations: unknown[] = [], revoked: string[] = [];
+    let dropOptions: { onFiles: (files: File[]) => void };
     const result = { id: "published-entry" } as DesignLibraryEntry;
     const form = { validateFields: () => { validationCalls++; return options.validate ? options.validate(values) : Promise.resolve(values); } };
     const react = {
@@ -48,6 +49,7 @@ function harness(options: {
         },
         "lucide-react": { ImagePlus: "ImagePlus", X: "X" },
         "@/lib/client-id": { createClientId: () => `request-${++nextId}` },
+        "@/hooks/use-image-drop": { useImageDrop: (input: typeof dropOptions) => { dropOptions = input; return { dropProps: {}, dragging: false, reading: false }; } },
         "@/lib/image-utils": { formatBytes: String },
         "./library-image": { LibraryImage: "LibraryImage" },
         "@/stores/use-user-store": { useUserStore: Object.assign((selector: (value: typeof store) => unknown) => selector(store), { getState: () => store }) },
@@ -93,6 +95,7 @@ function harness(options: {
         busy: () => { render(); return find("Button", node => node.props.children === "确认公开并发布").props.loading; },
         changeFields: (patch: Partial<Fields>) => { values = { ...values, ...patch }; find(Form).props.onValuesChange(); render(); },
         addFile: (file: File) => { find("input").props.onChange({ target: { files: [file], value: "file" } }); render(); },
+        dropFiles: (files: File[]) => { dropOptions.onFiles(files); render(); },
         close: () => find("Modal").props.onCancel(),
         fieldValues: () => values,
     };
@@ -178,4 +181,26 @@ test("owner changes during a pending image upload stop before publication", asyn
     expect(h.uploads).toHaveLength(1);
     h.setOwner("employee-B"); upload.resolve("owned-upload"); await settle();
     expect(h.calls).toHaveLength(0); expect(h.published).toHaveLength(0);
+});
+
+test("dropping images only fills a private draft and invalidates prior disclosure acknowledgement", async () => {
+    const h = harness();
+    h.acknowledge();
+    h.dropFiles([new File(["original"], "draft.png", { type: "image/png" })]);
+    h.clickPublish(); await settle();
+    expect(h.calls).toHaveLength(0); expect(h.uploads).toHaveLength(0); expect(h.published).toHaveLength(0);
+    h.close(); expect(h.confirmations).toHaveLength(1);
+    h.unmount(); expect(h.revoked).toHaveLength(1);
+});
+
+test("dropped publication images retain type and count limits and cannot enter a replacement owner's draft", () => {
+    const h = harness();
+    h.dropFiles([new File(["svg"], "vector.svg", { type: "image/svg+xml" })]);
+    expect(h.notices.at(-1)?.text).toContain("PNG、JPG、WebP 或 GIF");
+    h.dropFiles(Array.from({ length: 13 }, (_, index) => new File(["original"], `${index}.png`, { type: "image/png" })));
+    expect(h.notices.at(-1)?.text).toBe("每次最多分享 12 张图片");
+    h.setOwner("employee-B");
+    h.dropFiles([new File(["original"], "old-owner.png", { type: "image/png" })]);
+    h.unmount(); expect(h.revoked).toHaveLength(0);
+    expect(h.calls).toHaveLength(0); expect(h.uploads).toHaveLength(0);
 });

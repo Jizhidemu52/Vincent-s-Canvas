@@ -1,7 +1,7 @@
 import { useUiText, uiText } from "@/lib/i18n";
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { App, Button, Input, Pagination, Segmented, Spin, Tag } from "antd";
+import { App, Button, Input, Pagination, Segmented, Skeleton, Tag } from "antd";
 import { useWorkbenchField } from "@/hooks/use-workbench-field";
 import { BookOpen, Check, Plus, Search, X } from "lucide-react";
 
@@ -50,6 +50,19 @@ export default function PromptsPage() {
     }, [load, loader]);
 
     const savePublic = async (input: PromptSnapshotInput) => { if (editing) await updatePublicPrompt(editing.id, input); else await createPublicPrompt(input); message.success(editing ? t("公共模板已生成新版本") : t("公共模板已发布")); setEditorOpen(false); setEditing(null); await load(); };
+    // Await hook modals so a failed onOk stays open without an unhandled rejection.
+    const approve = async (item: PromptSubmission) => await modal.confirm({ title: t("通过并发布到本组？"), content: t("将形成独立团队版本，个人后续修改不会覆盖它。"), okText: t("确认通过"), cancelText: t("取消"), onOk: async () => {
+        try { await reviewPromptSubmission(item.id, "approve", t("审核通过")); message.success(t("团队模板已发布")); await load(); }
+        catch (error) { message.error(error instanceof Error ? error.message : t("审核失败，请重试")); throw error; }
+    } });
+    const archive = async (item: PromptTemplate) => await modal.confirm({ title: t("下架这个共享模板？"), okText: t("确认下架"), cancelText: t("取消"), okButtonProps: { danger: true }, onOk: async () => {
+        try { await archiveSharedPrompt(item.id); message.success(t("模板已下架")); await load(); }
+        catch (error) { message.error(error instanceof Error ? error.message : t("下架失败，请重试")); throw error; }
+    } });
+    const copy = async (item: PromptTemplate) => {
+        await copyPromptTemplate(item.id);
+        message.success({ content: <span>{t("已复制到我的提示词")} <a className="ml-2 underline underline-offset-4" href="/my-prompts" onClick={(event) => { if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && event.button === 0) { event.preventDefault(); navigate("/my-prompts"); } }}>{t("去查看")}</a></span>, duration: 6 });
+    };
 
     return (
         <main className="wb-page h-full overflow-y-auto px-4 py-6 md:px-8 md:py-8">
@@ -67,10 +80,10 @@ export default function PromptsPage() {
                 {canReview && scope === "team" && submissions.length ? (
                     <section className="mb-7 border-y border-orange-200 bg-orange-50/70 py-4 dark:border-orange-900 dark:bg-orange-950/20">
                         <div className="mb-3 flex items-center gap-2 px-4"><h2 className="text-sm font-semibold">{t("待审核模板")}</h2><Tag color="orange">{submissions.length}</Tag></div>
-                        <div className="grid gap-3 px-4 md:grid-cols-2">{submissions.map((item) => <div key={item.id} className="rounded-lg border border-orange-200 bg-white p-4 dark:border-orange-900 dark:bg-stone-950"><div className="flex items-start justify-between gap-3"><div><h3 className="text-sm font-semibold">{item.title}</h3><p className="mt-1 text-xs text-stone-500">{t("提交人：")}{item.submitterName}</p></div><div className="flex gap-1"><Button size="small" type="primary" icon={<Check className="size-3.5" />} onClick={() => modal.confirm({ title: t("通过并发布到本组？"), content: t("将形成独立团队版本，个人后续修改不会覆盖它。"), onOk: async () => { await reviewPromptSubmission(item.id, "approve", t("审核通过")); message.success(t("团队模板已发布")); await load(); } })}>{t("通过")}</Button><Button size="small" danger icon={<X className="size-3.5" />} onClick={() => openReject(item, modal, message, load)}>{t("驳回")}</Button></div></div><p className="mt-3 line-clamp-2 text-xs leading-5 text-stone-600 dark:text-stone-300">{item.prompt}</p></div>)}</div>
+                        <div className="grid gap-3 px-4 md:grid-cols-2">{submissions.map((item) => <div key={item.id} className="rounded-lg border border-orange-200 bg-white p-4 dark:border-orange-900 dark:bg-stone-950"><div className="flex items-start justify-between gap-3"><div><h3 className="text-sm font-semibold">{item.title}</h3><p className="mt-1 text-xs text-stone-500">{t("提交人：")}{item.submitterName}</p></div><div className="flex gap-1"><Button size="small" type="primary" icon={<Check className="size-3.5" />} onClick={() => approve(item)}>{t("通过")}</Button><Button size="small" danger icon={<X className="size-3.5" />} onClick={() => openReject(item, modal, message, load)}>{t("驳回")}</Button></div></div><p className="mt-3 line-clamp-2 text-xs leading-5 text-stone-600 dark:text-stone-300">{item.prompt}</p></div>)}</div>
                     </section>
                 ) : null}
-                {loading && !items.length ? <div className="flex min-h-80 items-center justify-center"><Spin /></div> : items.length ? <section aria-busy={loading} className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">{items.map((item) => <PromptTemplateCard key={item.id} item={item} editable={isSuper && item.scope === "public"} onReuse={(mode) => reuse(item, mode)} onInsertToCanvas={() => insertToCanvas(item)} onCopy={async () => { await copyPromptTemplate(item.id); message.success(t("已复制到我的提示词")); }} onFavorite={() => onFavorite(item)} onEdit={isSuper && item.scope === "public" ? () => { setEditing(item); setEditorOpen(true); } : undefined} onPromote={isSuper && item.scope === "team" ? async () => { await promotePromptPublic(item.id); message.success(t("已发布到公共提示词库")); } : undefined} onArchive={isAdminRole(user?.role) ? () => modal.confirm({ title: t("下架这个共享模板？"), onOk: async () => { await archiveSharedPrompt(item.id); message.success(t("模板已下架")); await load(); } }) : undefined} />)}</section> : !loadError ? <div className="wb-surface wb-empty"><BookOpen className="size-9" /><strong>{query ? t("没有找到匹配模板") : scope === "team" ? t("团队经验，等你来分享") : t("公共模板正在整理中")}</strong><p>{query ? t("试试更短的关键词，或清除搜索查看全部内容。") : t("先把好用的方法保存到我的提示词，需要时再复用或提交给团队。")}</p>{query ? <Button onClick={() => setQuery("")}>{t("清除搜索")}</Button> : <Button onClick={() => navigate("/my-prompts")}>{t("查看我的提示词")}</Button>}</div> : null}
+                {loading && !items.length ? <div role="status" aria-label={t("正在加载提示词库")} className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">{Array.from({ length: 6 }, (_, index) => <div className="wb-surface p-5" key={index}><Skeleton active paragraph={{ rows: 4 }} /></div>)}</div> : items.length ? <section aria-busy={loading} className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">{items.map((item) => <PromptTemplateCard key={item.id} item={item} editable={isSuper && item.scope === "public"} onReuse={(mode) => reuse(item, mode)} onInsertToCanvas={() => insertToCanvas(item)} onCopy={() => copy(item)} onFavorite={() => onFavorite(item)} onEdit={isSuper && item.scope === "public" ? () => { setEditing(item); setEditorOpen(true); } : undefined} onPromote={isSuper && item.scope === "team" ? async () => { await promotePromptPublic(item.id); message.success(t("已发布到公共提示词库")); await load(); } : undefined} onArchive={isAdminRole(user?.role) ? () => archive(item) : undefined} />)}</section> : !loadError ? <div className="wb-surface wb-empty"><BookOpen className="size-9" /><strong>{query ? t("没有找到匹配模板") : scope === "team" ? t("团队经验，等你来分享") : t("公共模板正在整理中")}</strong><p>{query ? t("试试更短的关键词，或清除搜索查看全部内容。") : t("先把好用的方法保存到我的提示词，需要时再复用或提交给团队。")}</p>{query ? <Button onClick={() => setQuery("")}>{t("清除搜索")}</Button> : <Button onClick={() => navigate("/my-prompts")}>{t("查看我的提示词")}</Button>}</div> : null}
                 {total > 0 ? <Pagination className="mt-6 flex justify-center" current={page} pageSize={pageSize} total={total} showSizeChanger pageSizeOptions={[24, 48, 96]} onChange={(next, size) => { setPage(size !== pageSize ? 1 : next); setPageSize(size); }} /> : null}
             </div>
             <PromptTemplateEditor open={editorOpen} initial={editing} title={editing ? t("编辑公共模板") : t("新建公共模板")} onCancel={() => { setEditorOpen(false); setEditing(null); }} onSubmit={savePublic} />
@@ -79,7 +92,10 @@ export default function PromptsPage() {
     );
 }
 
-function openReject(item: PromptSubmission, modal: ReturnType<typeof App.useApp>["modal"], message: ReturnType<typeof App.useApp>["message"], reload: () => Promise<void>) {
+async function openReject(item: PromptSubmission, modal: ReturnType<typeof App.useApp>["modal"], message: ReturnType<typeof App.useApp>["message"], reload: () => Promise<void>) {
     let note = "";
-    modal.confirm({ title: uiText("驳回“{p0}”", { p0: String(item.title) }), content: <Input.TextArea rows={4} maxLength={1_000} placeholder={uiText("填写修改建议")} onChange={(event) => { note = event.target.value; }} />, okText: uiText("确认驳回"), okButtonProps: { danger: true }, onOk: async () => { await reviewPromptSubmission(item.id, "reject", note); message.success(uiText("已驳回并保留审核意见")); await reload(); } });
+    await modal.confirm({ title: uiText("驳回“{p0}”", { p0: String(item.title) }), content: <Input.TextArea rows={4} maxLength={1_000} placeholder={uiText("填写修改建议")} onChange={(event) => { note = event.target.value; }} />, okText: uiText("确认驳回"), cancelText: uiText("取消"), okButtonProps: { danger: true }, onOk: async () => {
+        try { await reviewPromptSubmission(item.id, "reject", note); message.success(uiText("已驳回并保留审核意见")); await reload(); }
+        catch (error) { message.error(error instanceof Error ? error.message : uiText("驳回失败，请重试")); throw error; }
+    } });
 }

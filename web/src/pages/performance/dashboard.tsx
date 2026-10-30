@@ -2,6 +2,7 @@ import { Alert, App, Button, DatePicker, Empty, Progress, Segmented, Select, Spi
 import { Activity, CheckCircle2, Clock3, Coins, Download, Gauge, Image, RefreshCw, Sparkles, Target, TrendingUp } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import { formatBeijingDateTime } from "@/lib/beijing-time";
 
 import { designDirectionLabels, getPerformanceDashboard, updateAssetDirection, type DesignDirection, type PerformanceDashboard as DashboardData, type PerformanceFilters, type PerformancePreset } from "@/services/api/performance";
 
@@ -115,7 +116,7 @@ export function PerformanceDashboard({ teamOnly = false }: { teamOnly?: boolean 
 
         <div id="performance-details" className="scroll-mt-4"><Panel title="任务明细" icon={<Activity className="size-4" />}>
           <Table rowKey="id" size="small" scroll={{ x: 1050 }} pagination={{ pageSize: 20 }} dataSource={data.tasks} columns={[
-            { title: "提交时间", dataIndex: "queuedAt", width: 170, render: (value: string) => new Date(value).toLocaleString("zh-CN") },
+            { title: "提交时间（北京时间）", dataIndex: "queuedAt", width: 200, render: (value: string) => formatBeijingDateTime(value) },
             { title: "设计师", dataIndex: "userName", width: 110 }, { title: "板块", dataIndex: "operationType", width: 130 },
             { title: "模型", dataIndex: "modelName", width: 130, render: (value) => value || "-" },
             { title: "完整提示词", dataIndex: "prompt", width: 320, ellipsis: true }, { title: "状态", dataIndex: "status", width: 90 },
@@ -126,7 +127,7 @@ export function PerformanceDashboard({ teamOnly = false }: { teamOnly?: boolean 
 
         <Panel title="成果明细与完整提示词" icon={<Image className="size-4" />}>
           <Table rowKey="id" size="small" scroll={{ x: 1280 }} pagination={{ pageSize: 20 }} dataSource={data.assets} columns={[
-            { title: "生成时间", dataIndex: "createdAt", width: 170, render: (value: string) => new Date(value).toLocaleString("zh-CN") },
+            { title: "生成时间（北京时间）", dataIndex: "createdAt", width: 200, render: (value: string) => formatBeijingDateTime(value) },
             { title: "设计师", dataIndex: "userName", width: 110 }, { title: "项目", dataIndex: "projectName", width: 130, render: (value) => value || "-" },
             { title: "板块", dataIndex: "operationType", width: 120, render: (value) => value || "-" }, { title: "模型", dataIndex: "modelName", width: 130, render: (value) => value || "-" },
             { title: "完整提示词", dataIndex: "prompt", width: 360, ellipsis: true },

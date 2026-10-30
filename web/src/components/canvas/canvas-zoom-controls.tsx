@@ -1,11 +1,11 @@
 import { useUiText } from "@/lib/i18n";
 import type { CSSProperties } from "react";
-import { Check, ChevronDown, Compass, Focus, HelpCircle } from "lucide-react";
+import { Check, ChevronDown, Compass, Focus, HelpCircle, Minus, Plus } from "lucide-react";
 import { lazy, Suspense, memo, useRef, useState } from "react";
 import { Popover } from "antd";
 
 import { canvasThemes } from "@/lib/canvas-theme";
-import { MAX_CANVAS_ZOOM, MIN_CANVAS_ZOOM } from "@/lib/canvas/canvas-zoom";
+import { canvasZoomSliderValue, canvasZoomFromSlider, clampCanvasZoom } from "@/lib/canvas/canvas-zoom";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { canvasActionLabel } from "@/lib/canvas/canvas-actions";
 import "./canvas-toolbar.css";
@@ -65,19 +65,21 @@ export const CanvasZoomControls = memo(function CanvasZoomControls({ scale, onSc
 
     return (
         <div className="cw-zoom-controls" onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
+                <button type="button" className="cw-icon" aria-label={t("缩小画布")} onClick={() => onScaleChange(clampCanvasZoom(scale / 1.25))}><Minus size={16} /></button>
                 <Popover trigger="click" placement="topRight" arrow={false} open={viewMenuOpen} onOpenChange={open => { if (!open) finishScaleAdjustment(); setViewMenuOpen(open); }} styles={{ container: { background: theme.node.panel, border: `1px solid ${theme.toolbar.border}`, borderRadius: 12, padding: 6 } }} content={<div className="cw-view-menu" style={menuStyle}>
                     <div className="cw-view-heading"><span>{t("画布缩放")}</span><span>{Math.round(displayedScale * 100)}%</span></div>
                     <input
                         type="range"
-                        min={MIN_CANVAS_ZOOM * 100}
-                        max={MAX_CANVAS_ZOOM * 100}
+                        min={0}
+                        max={1000}
                         step="1"
-                        value={Math.round(displayedScale * 100)}
+                        value={canvasZoomSliderValue(displayedScale)}
                         onPointerDown={beginScaleAdjustment}
                         onPointerUp={finishScaleAdjustment}
                         onPointerCancel={finishScaleAdjustment}
                         onBlur={finishScaleAdjustment}
-                        onChange={(event) => previewOrCommitScale(Number(event.target.value) / 100)}
+                        onChange={(event) => previewOrCommitScale(canvasZoomFromSlider(Number(event.target.value)))}
+                        aria-valuetext={`${Math.round(displayedScale * 100)}%`}
                         aria-label={t("放大/缩小画布")}
                     />
                     <div className="cw-view-presets">{[.25, .5, 1, 2].map(value => <button key={value} type="button" aria-pressed={Math.round(displayedScale * 100) === value * 100} onClick={() => onScaleChange(value)}>{value * 100}%</button>)}</div>
@@ -89,6 +91,7 @@ export const CanvasZoomControls = memo(function CanvasZoomControls({ scale, onSc
                 </div>}>
                     <button type="button" className="cw-zoom-trigger" data-usage-control="canvas-tool.zoom" aria-label={t("画布缩放与视图")} aria-expanded={viewMenuOpen} aria-haspopup="dialog">{Math.round(displayedScale * 100)}%<ChevronDown className="size-3" /></button>
                 </Popover>
+                <button type="button" className="cw-icon" aria-label={t("放大画布")} onClick={() => onScaleChange(clampCanvasZoom(scale * 1.25))}><Plus size={16} /></button>
             {shortcutsOpen ? <Suspense fallback={null}><CanvasShortcutsDialog open onClose={() => setShortcutsOpen(false)} /></Suspense> : null}
         </div>
     );

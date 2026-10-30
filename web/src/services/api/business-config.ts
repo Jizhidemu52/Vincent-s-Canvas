@@ -1,5 +1,6 @@
 import { deploymentFeatures } from "@/lib/deployment-features";
 import { getToolDefinition } from "../../../../shared/feature-catalog";
+import type { ApimartImageCost } from "../../../../shared/apimart-image-costs";
 
 export type PublicModel = {
     id: string;
@@ -19,6 +20,7 @@ export type PublicModel = {
     capabilities: string[];
     creditCost: number;
     rmbCost: number;
+    imageCost?: ApimartImageCost;
 };
 
 export type PublicPrice = {
@@ -72,10 +74,10 @@ export function estimateServerUsage(config: BusinessConfig, input: { operationTy
     const available = input.toolKey ? tool?.enabled !== false && Boolean(model) : !input.modelId || Boolean(model);
     if (!available) return { credits: 0, rmbCost: 0, configured: false };
     const credits = tool?.creditCostOverride ?? ((price?.credits ?? 0) + (model?.creditCost ?? 0));
-    const rmbCost = tool?.rmbCostOverride ?? ((price?.rmbCost ?? 0) + (model?.rmbCost ?? 0));
+    const rmbCost = model?.imageCost?.rmbPerImage ?? tool?.rmbCostOverride ?? ((price?.rmbCost ?? 0) + (model?.rmbCost ?? 0));
     return {
         credits: deploymentFeatures.creditsEnabled ? credits * quantity : 0,
-        rmbCost: Math.round(rmbCost * quantity * 10_000) / 10_000,
+        rmbCost: Math.round(rmbCost * quantity * 1_000_000) / 1_000_000,
         configured: !deploymentFeatures.creditsEnabled || input.operationType === "chat" || Boolean(price)
             || (tool?.creditCostOverride != null && tool?.rmbCostOverride != null),
     };

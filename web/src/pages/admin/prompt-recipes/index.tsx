@@ -9,6 +9,7 @@ import { RecipeEditor } from "./components/recipe-editor";
 import { RecipeTestPanel } from "./components/recipe-test-panel";
 import { CompilationHistory } from "./components/compilation-history";
 import { messageOf } from "./model";
+import { useUnsavedGuard } from "@/hooks/use-unsaved-guard";
 
 export default function AdminPromptRecipesPage() {
     const user = useUserStore((state) => state.user);
@@ -27,7 +28,6 @@ export default function AdminPromptRecipesPage() {
 }
 
 function RecipeWorkspace({ ownerId }: { ownerId: string }) {
-    const { modal } = App.useApp();
     const [recipes, setRecipes] = useState<AdminPromptRecipe[]>([]);
     const [models, setModels] = useState<PromptAdminModel[]>([]);
     const [selectedKey, setSelectedKey] = useState("");
@@ -38,6 +38,7 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
     const [detailLoading, setDetailLoading] = useState(false);
     const [retry, setRetry] = useState(0);
     const [dirty, setDirty] = useState(false);
+    const { confirmDiscard } = useUnsavedGuard(dirty, "提示词配方尚未保存，离开后将丢失编辑内容；已提交的测试不会被取消。");
     const controller = useRef<AbortController | null>(null);
     const mounted = useRef(true);
     useEffect(() => {
@@ -94,18 +95,9 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
         });
         return () => controller.current?.abort();
     }, [selectedKey, refresh]);
-    useEffect(() => {
-        if (!dirty) return;
-        const warn = (event: BeforeUnloadEvent) => {
-            event.preventDefault();
-        };
-        window.addEventListener("beforeunload", warn);
-        return () => window.removeEventListener("beforeunload", warn);
-    }, [dirty]);
-    const chooseRecipe = (key: string) => {
+    const chooseRecipe = async (key: string) => {
         if (key === selectedKey) return;
-        if (dirty) modal.confirm({ title: "放弃未保存的配方修改？", content: "切换配方会丢弃编辑内容；已提交的测试不会被取消。", okText: "放弃并切换", cancelText: "继续编辑", onOk: () => setSelectedKey(key) });
-        else setSelectedKey(key);
+        if (await confirmDiscard()) setSelectedKey(key);
     };
     const selected = detail?.recipe;
     return (

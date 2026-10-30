@@ -38,7 +38,7 @@ async function request<T>(url: string, signal?: AbortSignal, body?: unknown): Pr
     } catch (error) { rethrowSafe(error); }
 }
 
-export type UsageListQuery = Omit<UsageFilters, "userIds"> & { search?: string; page?: number; pageSize?: number };
+export type UsageListQuery = Omit<UsageFilters, "userIds"> & { page?: number; pageSize?: number };
 function queryString(query: UsageListQuery) {
     const params = new URLSearchParams();
     for (const key of ["search", "from", "to", "modelConfigId", "boardKey", "page", "pageSize"] as const) {

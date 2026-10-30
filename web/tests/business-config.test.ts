@@ -15,6 +15,29 @@ const config: BusinessConfig = {
 };
 
 describe("server-synchronized usage estimates", () => {
+    test.each([
+        ["gpt-image-2", 0.05368, 53.68],
+        ["gpt-image-2.5-flare", 0.1342, 134.2],
+        ["gpt-image-2.5-sunburst", 0.1342, 134.2],
+        ["gemini-3.1-flash-image-preview-official", 0.3355, 335.5],
+    ])("%s uses its per-image RMB cost without operation fees or board overrides", (modelId, rmbPerImage, thousandCost) => {
+        deploymentFeatures.creditsEnabled = true;
+        const priced: BusinessConfig = {
+            ...config,
+            models: [{ ...config.models[0], modelId, imageCost: { rmbPerImage } }],
+            tools: [{ ...config.tools[0], creditCostOverride: 7, rmbCostOverride: 9 }],
+        };
+        expect(estimateServerUsage(priced, { operationType: "image_generation", toolKey: "image" })).toEqual({ credits: 7, rmbCost: rmbPerImage, configured: true });
+        expect(estimateServerUsage(priced, { operationType: "image_generation", toolKey: "image", quantity: 1000 })).toEqual({ credits: 7000, rmbCost: thousandCost, configured: true });
+        deploymentFeatures.creditsEnabled = false;
+        expect(estimateServerUsage(priced, { operationType: "image_generation", toolKey: "image" })).toEqual({ credits: 0, rmbCost: rmbPerImage, configured: true });
+    });
+
+    test("other models keep board overrides and preserve six-decimal RMB precision", () => {
+        const precise = { ...config, tools: [{ ...config.tools[0], rmbCostOverride: 0.123456 }] };
+        expect(estimateServerUsage(precise, { operationType: "image_generation", toolKey: "image", quantity: 3 }).rmbCost).toBe(0.370368);
+    });
+
     test("keeps provider cost estimates without charging internal credits", () => {
         expect(estimateServerUsage(config, { operationType: "image_generation", modelId: "image-v1", quantity: 4 })).toEqual({ credits: 0, rmbCost: 1.4, configured: true });
     });

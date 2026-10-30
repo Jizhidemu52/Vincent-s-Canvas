@@ -86,6 +86,10 @@ import { zoomViewportAtCanvasCenter } from "@/lib/canvas/canvas-viewport-interac
 import { canvasViewportOverscan } from "@/lib/canvas/canvas-viewport-overscan";
 import { createCanvasVisibleNodeCache } from "@/lib/canvas/canvas-visible-node-cache";
 import { clampCanvasZoom } from "@/lib/canvas/canvas-zoom";
+import { useCopyText } from "@/hooks/use-copy-text";
+import { canvasImportGridPosition, canvasUsableArea, fitCanvasNodes } from "@/lib/canvas/canvas-interaction-ux";
+import { canvasLibrarySummaries } from "@/lib/canvas/canvas-project-summary";
+import { nextProjectTitle } from "@/lib/project-title";
 import { deploymentFeatures } from "@/lib/deployment-features";
 import { moveImageReference } from "@/lib/image-reference-policy";
 import { readImageMeta } from "@/lib/image-utils";
@@ -114,6 +118,7 @@ import {
 import { App, ConfigProvider } from "antd";
 import { nanoid } from "nanoid";
 import { isCanvasAudioFile as isAudioFile, useCanvasClipboardDrop } from "./use-canvas-clipboard-drop";
+import { isExternalImageDrag } from "@/lib/dropped-images";
 import { useCanvasDialogs } from "./use-canvas-dialogs";
 import { useCanvasGenerationRuntime } from "./use-canvas-generation-runtime";
 import { useCanvasHistory, useCanvasHistoryState, type CanvasHistoryEntry } from "./use-canvas-history";
@@ -142,6 +147,7 @@ const CanvasInlineImageCompare = lazy(() => import("@/components/canvas/canvas-i
 const CanvasGroupLayer = lazy(() => import("@/components/canvas/canvas-group-layer").then(module => ({ default: module.CanvasGroupLayer })));
 
 const CanvasPerformancePanel = lazy(() => import("@/components/canvas/canvas-performance-panel").then(module => ({ default: module.CanvasPerformancePanel })));
+const CanvasConflictNotice = lazy(() => import("@/components/canvas/canvas-conflict-notice").then(module => ({ default: module.CanvasConflictNotice })));
 const Minimap = lazy(() => import("@/components/canvas/canvas-mini-map").then(module => ({ default: module.Minimap })));
 const CanvasLocalAgentPanel = lazy(loadCanvasLocalAgentPanel);
 
@@ -205,6 +211,7 @@ function CanvasRefreshShell() {
 function WirelessCanvasPage() {
     const t = useUiText();
     const { message, modal } = App.useApp();
+    const copyText = useCopyText();
     const params = useParams<{ id: string }>();
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
@@ -317,6 +324,11 @@ function WirelessCanvasPage() {
     const setHoveredNodeId = useCanvasGraphSetter("hoveredNodeId");
     const [isSelecting, setIsSelecting] = useState(false);
     const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+    const [dropActive, setDropActive] = useState(false);
+    const [dropReading, setDropReading] = useState(false);
+    const [importPlaceholder, setImportPlaceholder] = useState<{ position: Position; name: string; completed: number; total: number } | null>(null);
+    const importLockRef = useRef(false);
+    const pastePositionRef = useRef<Position | null>(null);
     const [workspaceToolsOpen, setWorkspaceToolsOpen] = useState(false);
     const openWorkspaceTools = useCallback(() => setWorkspaceToolsOpen(true), []);
 
@@ -399,7 +411,8 @@ function WirelessCanvasPage() {
 
     const getCanvasCenter = useCallback(() => {
         const rect = containerRef.current?.getBoundingClientRect();
-        return screenToCanvas((rect?.left || 0) + (rect?.width || size.width) / 2, (rect?.top || 0) + (rect?.height || size.height) / 2);
+        const area = canvasUsableArea(containerRef.current, size);
+        return screenToCanvas((rect?.left || 0) + area.left + area.width / 2, (rect?.top || 0) + area.top + area.height / 2);
     }, [screenToCanvas, size.height, size.width]);
 
     useEffect(() => { setImageDownload(null); }, [projectId]);
@@ -497,16 +510,20 @@ function WirelessCanvasPage() {
     const confirmStopGeneration = useCallback(
         (nodeId: string) => {
             modal.confirm({
-                title: uiText("停止生成？"),
-                content: uiText("当前生成请求会被中断，已经生成完成的内容会保留。"),
-                okText: uiText("停止"),
-                cancelText: uiText("继续生成"),
+                title: uiText("停止本页查询？"),
+                content: uiText("已提交的服务端任务可能继续运行，停止查询不代表取消或退款。原任务信息会保留，可以稍后继续查询。"),
+                okText: uiText("停止查询"),
+                cancelText: uiText("继续等待"),
                 okButtonProps: { danger: true },
-                onOk: () => stopGenerationByRunningId(nodeId),
+                onOk: () => stopGenerationByRunningId(nodeId, true),
             });
         },
         [modal, stopGenerationByRunningId],
     );
+
+    const stopNodeObservation = useCallback((nodeId: string) => {
+        confirmStopGeneration(generationRequestsRef.current.get(nodeId)?.runningNodeId || nodeId);
+    }, [confirmStopGeneration]);
 
     const resetHydratedEditor = useCallback(() => {
         agentUndoRecordRef.current = null;
@@ -1086,6 +1103,7 @@ function WirelessCanvasPage() {
                 return;
             }
             flushPendingHistory();
+            const deletionBase = lastHistoryRef.current;
             stoppedRuns.forEach(id => stopGenerationByRunningId(id, true));
             setNodes((prev) => {
                 const next = prev.filter((node) => !allIds.has(node.id));
@@ -1125,8 +1143,14 @@ function WirelessCanvasPage() {
             setRunningNodeId((current) => (current && allIds.has(current) ? null : current));
             setContextMenu((current) => (current?.type === "node" && allIds.has(current.nodeId) ? null : current));
             cleanupCanvasFiles({ projectId, nodes: nodesRef.current.filter((node) => !allIds.has(node.id)), chatSessions });
+            message.info({ key: "canvas-delete-undo", duration: 5, content: <span>{uiText("已删除 {value1} 个节点", { value1: allIds.size })} · <button type="button" className="underline" onClick={() => {
+                flushPendingHistory();
+                if (historyRef.current.past.at(-1)?.nodes === deletionBase?.nodes) undoCanvas();
+                else message.info(uiText("删除后已有其他操作，请使用撤销逐步恢复"));
+                message.destroy("canvas-delete-undo");
+            }}>{uiText("撤销")}</button></span> });
         },
-        [chatSessions, cleanupCanvasFiles, flushPendingHistory, modal, projectId, stopGenerationByRunningId],
+        [chatSessions, cleanupCanvasFiles, flushPendingHistory, message, modal, projectId, stopGenerationByRunningId, undoCanvas],
     );
 
     const createSelectedGroup = useCallback(() => {
@@ -1240,7 +1264,8 @@ function WirelessCanvasPage() {
     const pasteCopiedNodes = useCallback((clipboard: CanvasNodeGraph) => {
         if (!clipboard?.nodes.length) return false;
 
-        const center = getCanvasCenter();
+        const center = pastePositionRef.current || getCanvasCenter();
+        pastePositionRef.current = null;
         const bounds = clipboard.nodes.reduce(
             (acc, node) => ({
                 left: Math.min(acc.left, node.position.x),
@@ -1266,8 +1291,9 @@ function WirelessCanvasPage() {
     }, [flushPendingHistory, getCanvasCenter]);
 
     const resetViewport = useCallback(() => {
-        const next = { x: size.width / 2, y: size.height / 2, k: 1 };
+        const next = fitCanvasNodes(nodesRef.current, canvasUsableArea(containerRef.current, size));
         wirelessCanvasRef.current?.previewViewport(next);
+        viewportRef.current = next;
         setViewport(next);
         setContextMenu(null);
     }, [size.height, size.width]);
@@ -1277,9 +1303,10 @@ function WirelessCanvasPage() {
     const focusCanvasArea = useCallback(
         (position: Position, width: number, height: number) => {
             const current = viewportRef.current;
+            const area = canvasUsableArea(containerRef.current, size);
             setViewport({
-                x: size.width / 2 - (position.x + width / 2) * current.k,
-                y: size.height / 2 - (position.y + height / 2) * current.k,
+                x: area.left + area.width / 2 - (position.x + width / 2) * current.k,
+                y: area.top + area.height / 2 - (position.y + height / 2) * current.k,
                 k: current.k,
             });
         },
@@ -1308,7 +1335,8 @@ function WirelessCanvasPage() {
     );
 
     const createAndOpenProject = useCallback(() => {
-        const id = createProject(`无线画布 ${useCanvasStore.getState().projects.length + 1}`);
+        const state = useCanvasStore.getState();
+        const id = createProject(nextProjectTitle(canvasLibrarySummaries(state.projects, state.unloadedProjects)));
         navigate(`/canvas/${id}`);
     }, [createProject, navigate]);
 
@@ -1583,11 +1611,13 @@ function WirelessCanvasPage() {
         dialogs: canvasDialogs, setDialogNodeId, setContextMenu, handleMissingModelConfig, isAiConfigReady,
     });
 
-    const createImageFileNode = useCallback(async (file: File, position: Position, signal?: AbortSignal, preserveQuickGeneratePrompt = false) => {
+    const createImageFileNode = useCallback(async (file: File, position: Position, signal?: AbortSignal, preserveQuickGeneratePrompt = false, openPanel = true) => {
         signal?.throwIfAborted();
         assertCanvasImageUploadSize(file);
+        const ownerId = useUserStore.getState().user?.id;
         const image = await uploadImage(file);
         signal?.throwIfAborted();
+        if (designProjectIdRef.current !== projectId || useUserStore.getState().user?.id !== ownerId) throw new Error(uiText("画布或账号已切换，已停止导入"));
         const size = fitNodeSize(image.width, image.height);
         const id = `image-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
         const newNode: CanvasNodeData = {
@@ -1607,11 +1637,13 @@ function WirelessCanvasPage() {
         setNodes((prev) => [...prev, newNode]);
         setSelectedNodeIds(new Set([id]));
         setSelectedConnectionId(null);
-        setDialogNodeId(id);
+        if (openPanel) setDialogNodeId(id);
     }, [flushPendingHistory, projectId]);
 
-    const createVideoFileNode = useCallback(async (file: File, position: Position) => {
+    const createVideoFileNode = useCallback(async (file: File, position: Position, openPanel = true) => {
+        const ownerId = useUserStore.getState().user?.id;
         const video = await uploadMediaFile(file, "video");
+        if (designProjectIdRef.current !== projectId || useUserStore.getState().user?.id !== ownerId) throw new Error(uiText("画布或账号已切换，已停止导入"));
         const size = fitNodeSize(video.width || 1280, video.height || 720, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
         const id = `video-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
         flushPendingHistory();
@@ -1629,11 +1661,13 @@ function WirelessCanvasPage() {
         ]);
         setSelectedNodeIds(new Set([id]));
         setSelectedConnectionId(null);
-        setDialogNodeId(id);
-    }, [flushPendingHistory]);
+        if (openPanel) setDialogNodeId(id);
+    }, [flushPendingHistory, projectId]);
 
     const createAudioFileNode = useCallback(async (file: File, position: Position) => {
+        const ownerId = useUserStore.getState().user?.id;
         const audio = await uploadMediaFile(file, "audio");
+        if (designProjectIdRef.current !== projectId || useUserStore.getState().user?.id !== ownerId) throw new Error(uiText("画布或账号已切换，已停止导入"));
         const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Audio];
         const id = `audio-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
         flushPendingHistory();
@@ -1651,7 +1685,28 @@ function WirelessCanvasPage() {
         ]);
         setSelectedNodeIds(new Set([id]));
         setSelectedConnectionId(null);
-    }, [flushPendingHistory]);
+    }, [flushPendingHistory, projectId]);
+
+    const importFiles = useCallback(async (files: File[], origin: Position) => {
+        if (importLockRef.current) { message.info(uiText("正在导入素材，请稍候")); return; }
+        importLockRef.current = true;
+        const key = `canvas-import-${nanoid()}`;
+        let failed = 0;
+        const ownerId = useUserStore.getState().user?.id;
+        try {
+            for (const [index, file] of files.entries()) {
+                if (designProjectIdRef.current !== projectId || useUserStore.getState().user?.id !== ownerId) break;
+                const position = canvasImportGridPosition(origin, index, files.length);
+                setImportPlaceholder({ position, name: file.name, completed: index, total: files.length });
+                message.open({ key, type: "loading", duration: 0, content: uiText("正在导入 {value1}/{value2} 个文件…", { value1: index, value2: files.length }) });
+                try {
+                    await (isAudioFile(file) ? createAudioFileNode(file, position) : file.type.startsWith("video/") ? createVideoFileNode(file, position, files.length === 1) : createImageFileNode(file, position, undefined, true, files.length === 1));
+                } catch (error) { failed++; message.error(`${file.name}：${error instanceof Error ? error.message : uiText("素材导入失败")}`); }
+            }
+            if (designProjectIdRef.current === projectId && useUserStore.getState().user?.id === ownerId) message.open({ key, type: failed ? "warning" : "success", duration: 4, content: uiText("导入完成：成功 {value1} 个{value2}", { value1: files.length - failed, value2: failed ? uiText("，失败 {count} 个", { count: failed }) : "" }) });
+            else message.destroy(key);
+        } finally { importLockRef.current = false; setImportPlaceholder(null); }
+    }, [createAudioFileNode, createImageFileNode, createVideoFileNode, message, projectId]);
 
     const createTextNodeFromClipboard = useCallback(
         (text: string) => {
@@ -1659,10 +1714,11 @@ function WirelessCanvasPage() {
             if (!trimmed) return false;
 
             const node = {
-                ...createCanvasNode(CanvasNodeType.Text, getCanvasCenter(), { content: trimmed, status: NODE_STATUS_SUCCESS }),
+                ...createCanvasNode(CanvasNodeType.Text, pastePositionRef.current || getCanvasCenter(), { content: trimmed, status: NODE_STATUS_SUCCESS }),
                 title: trimmed.slice(0, 32) || "剪切板文本",
             };
 
+            pastePositionRef.current = null;
             flushPendingHistory();
             setNodes((prev) => [...prev, node]);
             setSelectedNodeIds(new Set([node.id]));
@@ -1675,17 +1731,20 @@ function WirelessCanvasPage() {
     );
 
     const pasteSystemClipboard = useCallback(async (files: File[]) => {
-        const center = getCanvasCenter();
+        const center = pastePositionRef.current || getCanvasCenter();
+        pastePositionRef.current = null;
         await runLocalImageOperation(`clipboard-paste:${nanoid()}`, "粘贴", async (signal) => {
             files.forEach(assertCanvasImageUploadSize);
             for (const [index, file] of files.entries()) {
-                await createImageFileNode(file, { x: center.x + index * 36, y: center.y + index * 36 }, signal, true);
+                await createImageFileNode(file, canvasImportGridPosition(center, index, files.length), signal, true, files.length === 1);
             }
             message.success(files.length === 1 ? uiText("已从剪切板添加图片") : uiText("已从剪切板添加 {value1} 张图片", { value1: files.length }));
         });
     }, [createImageFileNode, getCanvasCenter, message, runLocalImageOperation]);
 
     const handleDrop = useCanvasClipboardDrop({
+        scopeKey: projectId,
+        onReadingChange: setDropReading,
         copyNodes: copySelectedNodes,
         getCutSnapshot: () => ({
             nodes: nodesRef.current, connections: connectionsRef.current, selectedIds: selectedNodeIdsRef.current,
@@ -1693,16 +1752,21 @@ function WirelessCanvasPage() {
         }),
         cutNodes: () => deleteNodes(new Set(selectedNodeIdsRef.current)),
         pasteNodes: pasteCopiedNodes, pasteImages: pasteSystemClipboard, pasteText: createTextNodeFromClipboard,
-        screenToCanvas, createImage: createImageFileNode, createVideo: createVideoFileNode, createAudio: createAudioFileNode,
+        screenToCanvas, importFiles,
         warning: text => message.warning(text), error: text => message.error(text),
-        onImportProgress: ({ id, completed, total, failed }) => {
-            const done = completed === total;
-            message.open({ key: id, type: done ? failed ? "warning" : "success" : "loading", duration: done ? 4 : 0,
-                content: done ? uiText("导入完成：成功 {value1} 个{value2}", { value1: total - failed, value2: failed ? `，失败 ${failed} 个` : "" }) : uiText("正在导入 {value1}/{value2} 个文件…", { value1: completed, value2: total }) });
-        },
     });
 
     useCanvasShortcuts({
+        resetView: resetViewport,
+        fitSelection: () => {
+            const selected = nodesRef.current.filter(node => selectedNodeIdsRef.current.has(node.id));
+            if (!selected.length) { message.info(uiText("请先选择节点")); return; }
+            const next = fitCanvasNodes(selected, canvasUsableArea(containerRef.current, size));
+            wirelessCanvasRef.current?.previewViewport(next); viewportRef.current = next; setViewport(next);
+        },
+        zoomIn: () => setZoomScale(viewportRef.current.k * 1.25),
+        zoomOut: () => setZoomScale(viewportRef.current.k / 1.25),
+        zoomActual: () => setZoomScale(1),
         commands: openCommands,
         duplicate: () => duplicateNodes(new Set(selectedNodeIdsRef.current)),
         group: createSelectedGroup, undo: undoCanvas, redo: redoCanvas,
@@ -1961,16 +2025,21 @@ function WirelessCanvasPage() {
 
     const handleUploadRequest = useCallback((nodeId?: string, position?: Position) => {
         uploadTargetRef.current = { nodeId, position };
+        if (imageInputRef.current) imageInputRef.current.multiple = !nodeId;
         imageInputRef.current?.click();
     }, []);
 
     const handleImageInputChange = useCallback(
         async (event: ReactChangeEvent<HTMLInputElement>) => {
-            const file = event.target.files?.[0];
+            const selectedFiles = Array.from(event.target.files || []);
             const target = uploadTargetRef.current;
             uploadTargetRef.current = null;
             event.target.value = "";
-            if (!file || (!file.type.startsWith("image/") && !file.type.startsWith("video/") && !isAudioFile(file))) return;
+            const files = selectedFiles.filter(file => file.type.startsWith("image/") || file.type.startsWith("video/") || isAudioFile(file));
+            if (files.length !== selectedFiles.length) message.warning(uiText("仅支持图片、视频和音频，其他文件已跳过"));
+            const file = files[0];
+            if (!file) return;
+            if (!target?.nodeId) { await importFiles(files, target?.position || getCanvasCenter()); return; }
             try {
                 if (file.type.startsWith("image/")) assertCanvasImageUploadSize(file);
                 if (target?.nodeId) {
@@ -2067,7 +2136,7 @@ function WirelessCanvasPage() {
                 message.error(error instanceof Error ? error.message : uiText("素材导入失败，请重试"));
             }
         },
-        [createAudioFileNode, createImageFileNode, createVideoFileNode, flushPendingHistory, message, screenToCanvas, size.height, size.width],
+        [createAudioFileNode, createImageFileNode, createVideoFileNode, flushPendingHistory, message, screenToCanvas, size.height, size.width, importFiles, getCanvasCenter],
     );
 
     const pasteAssistantImage = useCallback(
@@ -2275,8 +2344,8 @@ function WirelessCanvasPage() {
         const stored = useCanvasStore.getState().projects.find(project => project.id === projectId);
         if (!stored) return;
         const latest = { ...stored, nodes: nodesRef.current, connections: connectionsRef.current, groups: groupsRef.current, viewport: viewportRef.current, selectedNodeIds: normalizeCanvasSelectedNodeIds(selectedNodeIdsRef.current, nodesRef.current, groupsRef.current) };
-        await exportProjects([latest.id], latest.title || "无线画布", [latest]);
-    }, [projectId, exportProjects]);
+        await exportProjects([latest.id], latest.title || t("无限画布"), [latest]);
+    }, [projectId, exportProjects, t]);
 
     const openImageExport = useCallback(() => {
         setImageExport({ nodes: nodesRef.current, ids: Array.from(selectedNodeIdsRef.current) });
@@ -2504,7 +2573,8 @@ function WirelessCanvasPage() {
                 {isCanvasDesktopLayout ? quickGeneratePanel : null}
                 {isCanvasDesktopLayout && quickGenerateOpen && !assistantOpen ? <Suspense fallback={null}><CanvasPanelResizeHandle kind="create" /></Suspense> : null}
             </aside>
-            <section className="relative min-w-0 flex-1 overflow-hidden">
+            <section className="relative min-w-0 flex-1 overflow-hidden" onDragOverCapture={event => { if (isExternalImageDrag(event.dataTransfer)) { event.preventDefault(); setDropActive(true); } }} onDragLeaveCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropActive(false); }} onDropCapture={() => setDropActive(false)} onDrop={handleDrop}>
+                {dropActive || dropReading ? <div data-testid="canvas-drop-overlay" className="pointer-events-none absolute inset-4 z-[120] flex items-center justify-center rounded-xl border-2 border-dashed text-lg font-medium" style={{ background: theme.toolbar.panel, borderColor: theme.canvas.selectionStroke, color: theme.node.text }}>{t(dropReading ? "正在读取拖入图片，请稍候。" : "松开以导入图片、视频或音频")}</div> : null}
                 <CanvasTopBar
                     title={projectTitle || t("未命名画布")}
                     titleDraft={titleDraft}
@@ -2604,16 +2674,19 @@ function WirelessCanvasPage() {
                             onConnectStart: handleConnectStart, onResize: handleNodeResize, onResizeEnd: finishNodeResize,
                             onContentChange: handleNodeContentChange, onToggleBatch: toggleBatchExpanded, onSetBatchPrimary: setBatchPrimary,
                             onRetry: handleRetryNode, onGenerateImage: generateImageFromTextNode, onViewImage: handleNodeViewImage,
+                            onStopObservation: generationRequestsRef.current.has(node.id) || runningNodeId === node.id ? stopNodeObservation : undefined,
                             onContextMenu: handleNodeContextMenu,
                         })} />
 
                     {localToolsEnabled && !isNodeDragging && !isNodeResizing && !isSelecting && !connectingParams && singleSelectedNode?.type === CanvasNodeType.Image && renderedNodes.some(node => node.id === singleSelectedNode.id) ? <Suspense fallback={null}><CanvasInlineImageCompare key={singleSelectedNode.id} node={singleSelectedNode} nodes={nodes} scale={viewport.k} showImageInfo={showImageInfo} onAdvanced={sourceId => sourceId ? setCompareImageIds([sourceId, singleSelectedNode.id]) : openImageCompare(singleSelectedNode)} /></Suspense> : null}
                     <CanvasSelectionOverlay ref={selectionOverlayRef} borderColor={theme.canvas.selectionStroke} background={theme.canvas.selectionFill} />
+                    {importPlaceholder ? <div role="status" className="pointer-events-none absolute flex h-40 w-80 flex-col items-center justify-center gap-3 rounded-xl border p-4 text-center text-sm" style={{ left: importPlaceholder.position.x - 160, top: importPlaceholder.position.y - 80, background: theme.node.panel, borderColor: theme.canvas.selectionStroke, color: theme.node.text }}><span className="max-w-full truncate">{importPlaceholder.name}</span><span>{t("正在导入 {value1}/{value2} 个文件…", { value1: importPlaceholder.completed, value2: importPlaceholder.total })}</span><progress max={importPlaceholder.total} value={importPlaceholder.completed} /></div> : null}
                     {pendingConnectionCreate ? <Suspense fallback={null}><ConnectionCreateMenu pending={pendingConnectionCreate} onCreate={(type) => createConnectedNode(type, pendingConnectionCreate)} onClose={cancelPendingConnectionCreate} /></Suspense> : null}
                 </WirelessCanvas>
                 <Suspense fallback={null}><CanvasOnboarding ref={onboardingRef} empty={nodes.length === 0} onImportImage={uploadFromToolbar} onUseTemplate={() => setTemplateSourceId(null)} onOpenExample={() => void openExampleCanvas()} onOpenCreation={openQuickGenerateFromToolbar} onCloseCreation={closeQuickGeneratePanel} onDrop={handleDrop} /></Suspense>
                 <div className="cw-feedback-strip"><Suspense fallback={null}><CanvasTaskFeedbackRuntime projectId={projectId} enabled={projectLoaded} nodes={nodes} connections={connections} onLocate={locateNodes} onHighlightChange={setTaskHighlightIds} /></Suspense></div>
                 <Suspense fallback={null}><CanvasSaveFailureNotice onExport={exportCurrentCanvas} /></Suspense>
+                <Suspense fallback={null}><CanvasConflictNotice projectId={projectId} /></Suspense>
                 {commandsOpen ? <Suspense fallback={null}><CanvasCommandPalette nodes={nodes} bindings={commandBindings} onLocate={locateNodes} onAsset={handleAssetInsert} onClose={() => setCommandsOpen(false)} /></Suspense> : null}
                 {performanceModeEnabled ? <Suspense fallback={null}><CanvasPerformancePanel metrics={performanceMetrics} /></Suspense> : null}
 
@@ -2698,6 +2771,18 @@ function WirelessCanvasPage() {
                         onGroup={localToolsEnabled && selectedNodeIds.size >= 2 && (contextMenu.type === "canvas" || (contextMenu.type === "node" && selectedNodeIds.has(contextMenu.nodeId))) ? createSelectedGroup : undefined}
                         onClose={() => setContextMenu(null)}
                         onUpload={contextMenu.type === "canvas" ? () => handleUploadRequest(undefined, contextMenu.canvasPosition) : undefined}
+                        onPaste={contextMenu.type === "canvas" ? () => {
+                            pastePositionRef.current = contextMenu.canvasPosition;
+                            message.info(uiText("请按 Ctrl / Cmd + V，剪贴板内容会粘贴到此处"));
+                        } : undefined}
+                        onAddText={contextMenu.type === "canvas" ? () => createNode(CanvasNodeType.Text, contextMenu.canvasPosition) : undefined}
+                        onSelectAll={() => { commitSelectedNodeIds(new Set(nodesRef.current.map(node => node.id))); setSelectedConnectionId(null); }}
+                        onFitAll={resetViewport}
+                        onBringFront={() => { flushPendingHistory(); setNodes(current => [...current.filter(node => !contextMenuNodeIds.has(node.id)), ...current.filter(node => contextMenuNodeIds.has(node.id))]); }}
+                        onSendBack={() => { flushPendingHistory(); setNodes(current => [...current.filter(node => contextMenuNodeIds.has(node.id)), ...current.filter(node => !contextMenuNodeIds.has(node.id))]); }}
+                        onCopyPrompt={contextMenu.type === "node" && nodes.some(node => contextMenuNodeIds.has(node.id) && (node.metadata?.prompt || node.metadata?.draftPrompt)) ? () => {
+                            void copyText(nodes.filter(node => contextMenuNodeIds.has(node.id)).map(node => node.metadata?.draftPrompt || node.metadata?.prompt || "").filter(Boolean).join("\n\n"), uiText("提示词已复制"));
+                        } : undefined}
                         onGenerate={() => {
                             if (contextMenu.type !== "canvas") return;
                             openQuickGenerateFromToolbar();
@@ -2726,7 +2811,7 @@ function WirelessCanvasPage() {
                     </Suspense>
                 ) : null}
 
-                <input ref={imageInputRef} type="file" accept="image/*,video/*,audio/mpeg,audio/wav,audio/x-wav,.mp3,.wav" className="hidden" onChange={handleImageInputChange} />
+                <input ref={imageInputRef} type="file" multiple accept="image/*,video/*,audio/mpeg,audio/wav,audio/x-wav,.mp3,.wav" className="hidden" onChange={handleImageInputChange} />
                 <input ref={quickReferenceInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleQuickReferenceInputChange} />
 
                 {imageSequence.dialog ? <Suspense fallback={null}><CanvasImageSequenceDialog

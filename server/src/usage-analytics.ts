@@ -43,11 +43,11 @@ export const usageEventsSchema = z.object({ events: z.array(z.object({
   .refine(event => Date.now() - Date.parse(event.occurredAt) <= USAGE_MAX_EVENT_AGE_MS && Date.parse(event.occurredAt) - Date.now() <= USAGE_MAX_EVENT_FUTURE_MS, "离线事件必须在过去 7 天内且未来偏差不能超过 5 分钟")
   .refine(event => event.action === "gap" ? event.controlKey === "collection-gap" && !!event.parameters?.droppedEventCount : !event.parameters?.droppedEventCount && event.controlKey !== "collection-gap", "采集缺口必须使用专用事件"))
   .min(1).max(50) }).strict();
-const filterShape = { userIds: z.array(z.string().uuid()).min(1).max(5000).optional(), from: z.string().datetime({ offset: true }).optional(), to: z.string().datetime({ offset: true }).optional(), modelConfigId: z.string().uuid().optional(), boardKey: boardSchema.optional() };
+const filterShape = { userIds: z.array(z.string().uuid()).min(1).max(5000).optional(), search: z.string().trim().max(100).optional(), from: z.string().datetime({ offset: true }).optional(), to: z.string().datetime({ offset: true }).optional(), modelConfigId: z.string().uuid().optional(), boardKey: boardSchema.optional() };
 const orderedDates = (value: UsageFilters) => !value.from || !value.to || Date.parse(value.from) <= Date.parse(value.to);
 export const usageFiltersSchema = z.object(filterShape).strict().refine(orderedDates, "开始时间不能晚于结束时间");
 export const usagePreviewSchema = z.object({ ...filterShape, includePromptSamples: z.boolean().default(false) }).strict().refine(orderedDates, "开始时间不能晚于结束时间");
-export const usageQuerySchema = z.object({ from: filterShape.from, to: filterShape.to, modelConfigId: filterShape.modelConfigId, boardKey: boardSchema.optional(), search: z.string().trim().max(100).optional(), page: z.coerce.number().int().min(1).max(1_000_000).default(1), pageSize: z.coerce.number().int().min(1).max(200).default(50) }).strict().refine(orderedDates, "开始时间不能晚于结束时间");
+export const usageQuerySchema = z.object({ from: filterShape.from, to: filterShape.to, modelConfigId: filterShape.modelConfigId, boardKey: boardSchema.optional(), search: filterShape.search, page: z.coerce.number().int().min(1).max(1_000_000).default(1), pageSize: z.coerce.number().int().min(1).max(200).default(50) }).strict().refine(orderedDates, "开始时间不能晚于结束时间");
 
 /** Preserve design prose, never credential-like values, links or inline image payloads. */
 export function sanitizeUsagePrompt(value: unknown, names: string[] = []) {
@@ -114,17 +114,28 @@ export async function finishUsageChat(db: Database, id: string, status: "success
   await db.query("UPDATE usage_chat_requests SET status=$2,updated_at=now() WHERE id=$1 AND status='processing'", [id, status]);
 }
 
-/** One source row per task: retries/recovery and generation_history cannot multiply requests. */
+/** generation_history.task_id is UNIQUE: keep one row per task, never one row per output.
+ * Costs are saved successful history amounts, not current prices or reservation estimates.
+ * Output counts use saved image results, never requested n/count or video/audio results. */
 export const usageRecordsCte = `WITH usage_records AS (
- SELECT 'event:'||e.id::text AS id,e.user_id,u.display_name,u.department_id,CASE WHEN e.action='visit' THEN 'visit' WHEN e.action='gap' THEN 'gap' ELSE 'interaction' END AS kind,e.board_key,e.action,e.control_key,(e.parameters->>'modelConfigId')::uuid AS model_config_id,'recorded'::text AS status,NULL::text AS prompt,false AS prompt_redacted,e.parameters,e.occurred_at,e.received_at AS updated_at
+ SELECT 'event:'||e.id::text AS id,e.user_id,u.display_name,u.department_id,CASE WHEN e.action='visit' THEN 'visit' WHEN e.action='gap' THEN 'gap' ELSE 'interaction' END AS kind,e.board_key,e.action,e.control_key,(e.parameters->>'modelConfigId')::uuid AS model_config_id,'recorded'::text AS status,NULL::text AS prompt,false AS prompt_redacted,e.parameters,e.occurred_at,e.received_at AS updated_at,0::numeric AS total_rmb_cost,0::int AS generated_images,false AS missing_generation_history
  FROM usage_events e JOIN users u ON u.id=e.user_id WHERE COALESCE(u.is_guest,false)=false
  UNION ALL
- SELECT 'task:'||t.id::text,t.user_id,u.display_name,u.department_id,'generation',COALESCE(t.tool_key,t.parameters->>'tool'),t.operation_type,NULL,t.model_config_id,t.status,t.prompt,false,t.parameters,t.queued_at,t.updated_at
- FROM tasks t JOIN users u ON u.id=t.user_id WHERE COALESCE(u.is_guest,false)=false
+ SELECT 'task:'||t.id::text,t.user_id,u.display_name,u.department_id,'generation',COALESCE(t.tool_key,t.parameters->>'tool'),t.operation_type,NULL,t.model_config_id,t.status,t.prompt,false,t.parameters,t.queued_at,t.updated_at,
+ CASE WHEN t.status='success' AND h.status='success' THEN h.rmb_cost ELSE 0 END,
+ CASE WHEN t.status='success' AND t.operation_type IN('image_generation','inpaint','upscale','batch_image','seamless_stitch') THEN
+   (SELECT count(DISTINCT output.value #>> '{}')::int FROM jsonb_array_elements(
+     CASE WHEN jsonb_typeof(COALESCE(h.result_urls,t.result_urls))='array' THEN COALESCE(h.result_urls,t.result_urls) ELSE '[]'::jsonb END
+   ) AS output(value) WHERE jsonb_typeof(output.value)='string' AND btrim(output.value #>> '{}')<>''
+     AND NOT EXISTS(SELECT 1 FROM assets a WHERE a.id=substring(output.value #>> '{}' FROM '^/api/assets/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/content$')::uuid
+       AND (a.kind<>'image' OR a.mime_type NOT LIKE 'image/%'))) ELSE 0 END,
+ t.status='success' AND h.task_id IS NULL
+ FROM tasks t JOIN users u ON u.id=t.user_id LEFT JOIN generation_history h ON h.task_id=t.id AND h.status='success' WHERE COALESCE(u.is_guest,false)=false
  UNION ALL
- SELECT 'chat:'||c.id::text,c.user_id,u.display_name,u.department_id,'chat',c.board_key,'chat',NULL,c.model_config_id,c.status,c.prompt,c.prompt_redacted,'{}'::jsonb,c.created_at,c.updated_at
+ SELECT 'chat:'||c.id::text,c.user_id,u.display_name,u.department_id,'chat',c.board_key,'chat',NULL,c.model_config_id,c.status,c.prompt,c.prompt_redacted,'{}'::jsonb,c.created_at,c.updated_at,0::numeric,0::int,false
  FROM usage_chat_requests c JOIN users u ON u.id=c.user_id WHERE COALESCE(u.is_guest,false)=false
 )`;
+const usageSearchPattern = (search: string) => `%${search.trim().replace(/[\\%_]/g, "\\$&")}%`;
 export function usageSqlFilter(filters: UsageFilters, alias = "r") {
   const values: unknown[] = []; const clauses: string[] = [];
   const add = (sql: string, value: unknown) => { values.push(value); clauses.push(`${alias}.${sql.replace("?", `$${values.length}`)}`); };
@@ -133,15 +144,20 @@ export function usageSqlFilter(filters: UsageFilters, alias = "r") {
   if (filters.to) add("occurred_at<?::timestamptz", filters.to);
   if (filters.modelConfigId) add("model_config_id=?::uuid", filters.modelConfigId);
   if (filters.boardKey) add("board_key=?", filters.boardKey);
+  if (filters.search?.trim()) {
+    values.push(usageSearchPattern(filters.search));
+    clauses.push(`${alias}.user_id IN(SELECT id FROM users WHERE display_name ILIKE $${values.length} OR username ILIKE $${values.length})`);
+  }
   return { values, where: clauses.length ? `WHERE ${clauses.join(" AND ")}` : "" };
 }
-const summarySelect = `count(*) FILTER(WHERE kind='visit')::int AS visits,count(*) FILTER(WHERE kind='interaction')::int AS interactions,count(*) FILTER(WHERE kind='generation')::int AS "generationRequests",count(*) FILTER(WHERE kind='chat')::int AS "chatRequests",count(*) FILTER(WHERE kind IN('generation','chat') AND status='success')::int AS succeeded,count(*) FILTER(WHERE kind IN('generation','chat') AND status IN('failed','cancelled','interrupted'))::int AS failed,count(*) FILTER(WHERE kind IN('generation','chat') AND status NOT IN('success','failed','cancelled','interrupted'))::int AS pending`;
-export const emptyUsageSummary = (): UsageSummary => ({ visits: 0, interactions: 0, generationRequests: 0, chatRequests: 0, succeeded: 0, failed: 0, pending: 0 });
+const summarySelect = `count(*) FILTER(WHERE kind='visit')::int AS visits,count(*) FILTER(WHERE kind='interaction')::int AS interactions,count(*) FILTER(WHERE kind='generation')::int AS "generationRequests",count(*) FILTER(WHERE kind='chat')::int AS "chatRequests",count(*) FILTER(WHERE kind IN('generation','chat') AND status='success')::int AS succeeded,count(*) FILTER(WHERE kind IN('generation','chat') AND status IN('failed','cancelled','interrupted'))::int AS failed,count(*) FILTER(WHERE kind IN('generation','chat') AND status NOT IN('success','failed','cancelled','interrupted'))::int AS pending,COALESCE(sum(total_rmb_cost),0)::float8 AS "totalRmbCost",COALESCE(sum(generated_images),0)::int AS "generatedImages"`;
+export const emptyUsageSummary = (): UsageSummary => ({ visits: 0, interactions: 0, generationRequests: 0, chatRequests: 0, succeeded: 0, failed: 0, pending: 0, totalRmbCost: 0, generatedImages: 0 });
 export async function usageCoverage(db: Pick<Database, "query">, filters: UsageFilters = {}): Promise<UsageCoverage> {
   const result = await db.query("SELECT started_at AS \"startedAt\" FROM usage_collection_metadata WHERE singleton=true");
   const scope = usageSqlFilter(filters);
-  const dropped = await db.query(`${usageRecordsCte} SELECT COALESCE(sum((parameters->>'droppedEventCount')::int),0)::int AS count FROM usage_records r ${scope.where}${scope.where ? " AND" : " WHERE"} kind='gap'`, scope.values);
-  return { collectionStartedAt: result.rows[0]?.startedAt ? new Date(result.rows[0].startedAt).toISOString() : null, historicalTasksAvailable: true, historicalClicksAvailable: false, historicalChatAvailable: false, droppedEventCount: dropped.rows[0]?.count ?? 0, notes: ["历史生成记录来自现有任务表，每个任务只计一次；恢复和重试不增加生成请求。", "启用采集前的点击、访问及聊天正文未被记录，不能补推；记录缺失不等于未使用。", "客户端明确报告的队列溢出另计采集缺口；离线、关闭页面或未上报的缺口可能未知。", "成功/失败按任务当前状态统计，日期按首次提交时间归组；取消和中断计入失败。", "仅分析软件工作习惯，不评价人格、能力或绩效；不采集逐键输入、密码、令牌或图片字节。"] };
+  const dropped = await db.query(`${usageRecordsCte} SELECT COALESCE(sum((parameters->>'droppedEventCount')::int) FILTER(WHERE kind='gap'),0)::int AS count,count(*) FILTER(WHERE missing_generation_history)::int AS missing_history FROM usage_records r ${scope.where}`, scope.values);
+  const missingHistory = dropped.rows[0]?.missing_history ?? 0;
+  return { collectionStartedAt: result.rows[0]?.startedAt ? new Date(result.rows[0].startedAt).toISOString() : null, historicalTasksAvailable: true, historicalClicksAvailable: false, historicalChatAvailable: false, droppedEventCount: dropped.rows[0]?.count ?? 0, notes: ["历史生成记录来自现有任务表，每个任务只计一次；恢复和重试不增加生成请求。", "生成成本汇总已保存的成功生成历史人民币金额（含图片、视频和音频），不按新单价重算；不含未独立结算的聊天费用及失败、待处理任务的预估金额。", "成功出图张数按图片任务实际保存的非空、去重结果计算，不按请求次数或申请数量推算；视频和音频任务、已确认非图片的内部素材不计为图片。历史外部链接或缺少素材记录时沿用原图片任务类型。", ...(missingHistory ? [`当前筛选中有 ${missingHistory} 个成功任务缺少成功结算历史，费用未计入且不补估；已保存的图片结果仍计入张数。`] : []), "启用采集前的点击、访问及聊天正文未被记录，不能补推；记录缺失不等于未使用。", "客户端明确报告的队列溢出另计采集缺口；离线、关闭页面或未上报的缺口可能未知。", "成功/失败按任务当前状态统计，日期按首次提交时间以北京时间（Asia/Shanghai）归组；取消和中断计入失败。", "仅分析软件工作习惯，不评价人格、能力或绩效；不采集逐键输入、密码、令牌或图片字节。"] };
 }
 export async function usageSummary(db: Pick<Database, "query">, filters: UsageFilters): Promise<UsageSummary> {
   const scope = usageSqlFilter(filters);
@@ -153,14 +169,15 @@ export async function usageBreakdowns(db: Pick<Database, "query">, filters: Usag
   const boards = await group("board_key");
   const controls = await group("control_key", "kind='interaction'");
   const models = await db.query(`${usageRecordsCte} SELECT r.model_config_id::text AS key,COALESCE(m.name,'未知模型') AS label,count(*)::int AS count FROM usage_records r LEFT JOIN model_configs m ON m.id=r.model_config_id ${scope.where}${scope.where ? " AND" : " WHERE"} r.kind IN('generation','chat') GROUP BY r.model_config_id,m.name ORDER BY count DESC,key`, scope.values);
-  const daily = await db.query(`${usageRecordsCte} SELECT to_char(occurred_at AT TIME ZONE 'UTC','YYYY-MM-DD') AS day,${summarySelect} FROM usage_records r ${scope.where} GROUP BY day ORDER BY day`, scope.values);
+  const daily = await db.query(`${usageRecordsCte} SELECT to_char(occurred_at AT TIME ZONE 'Asia/Shanghai','YYYY-MM-DD') AS day,${summarySelect} FROM usage_records r ${scope.where} GROUP BY day ORDER BY day`, scope.values);
   return { boards: boards.map(row => ({ key: row.key ?? "unknown", label: usageBoardLabels[row.key] ?? "未记录板块", count: row.count })), controls: controls.map(row => ({ key: row.key ?? "unknown", label: usageControlLabel(row.key) ?? "未记录控件", count: row.count })), models: models.rows.map(row => ({ ...row, key: row.key ?? "unknown" })), daily: daily.rows };
 }
 export async function usagePeople(db: Database, filters: UsageFilters, query: { search?: string; page: number; pageSize: number }) {
-  const scope = usageSqlFilter(filters); const values = [...scope.values];
+  const search = filters.search ?? query.search;
+  const scope = usageSqlFilter({ ...filters, search }); const values = [...scope.values];
   let userWhere = "WHERE COALESCE(u.is_guest,false)=false";
   if (filters.userIds) { values.push(filters.userIds); userWhere += ` AND u.id=ANY($${values.length}::uuid[])`; }
-  if (query.search) { values.push(`%${query.search.replace(/[\\%_]/g, "\\$&")}%`); userWhere += ` AND (u.display_name ILIKE $${values.length} OR u.username ILIKE $${values.length})`; }
+  if (search?.trim()) { values.push(usageSearchPattern(search)); userWhere += ` AND (u.display_name ILIKE $${values.length} OR u.username ILIKE $${values.length})`; }
   const base = `${usageRecordsCte}, stats AS (SELECT user_id,${summarySelect},max(occurred_at) AS "lastActivityAt" FROM usage_records r ${scope.where} GROUP BY user_id)`;
   const count = await db.query(`${base} SELECT count(*)::int AS total FROM users u ${userWhere}`, values);
   const result = await db.query(`${base} SELECT u.id AS "userId",u.display_name AS "displayName",d.name AS "departmentName",s.* FROM users u LEFT JOIN departments d ON d.id=u.department_id LEFT JOIN stats s ON s.user_id=u.id ${userWhere} ORDER BY s."lastActivityAt" DESC NULLS LAST,u.id LIMIT $${values.length + 1} OFFSET $${values.length + 2}`, [...values, query.pageSize, (query.page - 1) * query.pageSize]);
@@ -169,7 +186,7 @@ export async function usagePeople(db: Database, filters: UsageFilters, query: { 
 export function mapUsageRecord(row: Record<string, any>): UsageRecord {
   const prompt = row.prompt === null ? null : sanitizeUsagePrompt(row.prompt);
   const boardKey = row.board_key || null;
-  return { id: row.id, kind: row.kind, userId: row.user_id, displayName: row.display_name, boardKey, boardLabel: usageBoardLabels[boardKey] ?? "未记录板块", action: row.action, controlKey: row.control_key, controlLabel: usageControlLabel(row.control_key), modelConfigId: row.model_config_id, modelName: row.model_name ?? null, status: row.status, occurredAt: new Date(row.occurred_at).toISOString(), updatedAt: new Date(row.updated_at).toISOString(), prompt: prompt?.text ?? null, promptRedacted: !!row.prompt_redacted || !!prompt?.redacted, parameters: safeUsageParameters(row.parameters) };
+  return { id: row.id, kind: row.kind, userId: row.user_id, displayName: row.display_name, boardKey, boardLabel: usageBoardLabels[boardKey] ?? "未记录板块", action: row.action, controlKey: row.control_key, controlLabel: usageControlLabel(row.control_key), modelConfigId: row.model_config_id, modelName: row.model_name ?? null, status: row.status, occurredAt: new Date(row.occurred_at).toISOString(), updatedAt: new Date(row.updated_at).toISOString(), totalRmbCost: Number(row.total_rmb_cost ?? 0), generatedImages: Number(row.generated_images ?? 0), prompt: prompt?.text ?? null, promptRedacted: !!row.prompt_redacted || !!prompt?.redacted, parameters: safeUsageParameters(row.parameters) };
 }
 export async function usageRecords(db: Pick<Database, "query">, filters: UsageFilters, pagination: { page: number; pageSize: number }) {
   const scope = usageSqlFilter(filters);

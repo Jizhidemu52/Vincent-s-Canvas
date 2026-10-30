@@ -4,10 +4,12 @@ import { useEffect, useRef, useState } from "react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { saveAs } from "file-saver";
 import dayjs from "dayjs";
+import { formatBeijingDateTime, formatBeijingTime } from "@/lib/beijing-time";
 import { useWorkbenchField } from "@/hooks/use-workbench-field";
 import { useUserStore } from "@/stores/use-user-store";
 import { InfiniteLoadMore } from "@/components/infinite-load-more";
 import { TaskReconciliationPanel } from "./task-reconciliation-panel";
+import { AdminDetails, adminLabel } from "../admin-labels";
 
 import {
     availableBatchActions,
@@ -48,7 +50,7 @@ const statusText: Record<string, string> = {
 };
 
 export function TaskManagementPanel({ active = true }: { active?: boolean }) {
-    const { message } = App.useApp();
+    const { message, modal } = App.useApp();
     const userId = useUserStore(state => state.user?.id);
     const isSuperAdmin = useUserStore(state => state.user?.role === "super_admin");
     const [detailId, setDetailId] = useState<string | null>(null);
@@ -73,10 +75,11 @@ export function TaskManagementPanel({ active = true }: { active?: boolean }) {
     const loading = tasksQuery.isPending || batchesQuery.isPending;
     const error = tasksQuery.error?.message || batchesQuery.error?.message || "";
     const lastUpdate = Math.max(tasksQuery.dataUpdatedAt, batchesQuery.dataUpdatedAt);
-    const updatedAt = lastUpdate ? new Date(lastUpdate).toLocaleTimeString("zh-CN", { hour12: false }) : "";
+    const updatedAt = lastUpdate ? formatBeijingTime(lastUpdate) : "";
     const refresh = () => Promise.all([tasksQuery.refetch(), batchesQuery.refetch()]);
 
     const runBatchAction = async (batch: ServerBatch, action: TaskControlAction) => {
+        if (action === "cancel" && !await modal.confirm({ title: "确认取消该批次？", content: `${batch.userName}的批次 ${batch.id}，共 ${batch.totalItems} 项。将取消服务端允许取消的任务；已完成结果保留，已交由上游处理的请求不保证停止或退款。`, okText: "确认取消批次", cancelText: "保留任务", okButtonProps: { danger: true } })) return;
         const key = `batch:${batch.id}:${action}`;
         if (actingRef.current) return;
         actingRef.current = key;
@@ -94,6 +97,7 @@ export function TaskManagementPanel({ active = true }: { active?: boolean }) {
     };
 
     const runTaskAction = async (task: ServerTaskSummary, action: TaskControlAction) => {
+        if (action === "cancel" && !await modal.confirm({ title: "确认取消该任务？", content: `${task.userName}的任务 ${task.id}。取消后不能恢复本任务；已交由上游处理的请求不保证停止或退款，请以更新后的任务状态为准。`, okText: "确认取消任务", cancelText: "保留任务", okButtonProps: { danger: true } })) return;
         const key = `task:${task.id}:${action}`;
         if (actingRef.current) return;
         actingRef.current = key;
@@ -114,7 +118,7 @@ export function TaskManagementPanel({ active = true }: { active?: boolean }) {
         <div className="grid min-w-0 gap-5">
             {isSuperAdmin ? <TaskReconciliationPanel active={active} onResolved={refresh} /> : null}
             <div className="wb-toolbar justify-between">
-                <p className="text-sm text-[var(--muted-foreground)]" role="status">{updatedAt ? `更新于 ${updatedAt} · 当前页每 10 秒自动同步` : "正在读取任务状态…"}</p>
+                <p className="text-sm text-[var(--muted-foreground)]" role="status">{updatedAt ? `更新于 ${updatedAt}（北京时间）· 当前页每 10 秒自动同步` : "正在读取任务状态…"}</p>
                 <Button className="!h-10" loading={loading} icon={<RefreshCw className="size-4" />} onClick={() => void refresh()}>
                     刷新
                 </Button>
@@ -135,7 +139,7 @@ export function TaskManagementPanel({ active = true }: { active?: boolean }) {
                 columns={[
                     { title: "设计师", dataIndex: "userName", fixed: "left", width: 120 },
                     { title: "项目", dataIndex: "projectId", width: 150, ellipsis: true },
-                    { title: "操作", dataIndex: "operationType", width: 130 },
+                    { title: "操作", dataIndex: "operationType", width: 130, render: adminLabel },
                     { title: "模型", dataIndex: "modelName", width: 140 },
                     {
                         title: "进度",
@@ -156,7 +160,7 @@ export function TaskManagementPanel({ active = true }: { active?: boolean }) {
                     {
                         title: "成本",
                         width: 100,
-                        render: (_, row: ServerBatch) => `￥${row.consumedRmbCost.toFixed(4)}`,
+                        render: (_, row: ServerBatch) => `￥${row.consumedRmbCost.toFixed(6)}`,
                     },
                     {
                         title: "状态",
@@ -186,7 +190,7 @@ export function TaskManagementPanel({ active = true }: { active?: boolean }) {
                 columns={[
                     { title: "设计师", dataIndex: "userName", fixed: "left", width: 120 },
                     { title: "项目", dataIndex: "projectId", width: 150, ellipsis: true },
-                    { title: "操作", dataIndex: "operationType", width: 130 },
+                    { title: "操作", dataIndex: "operationType", width: 130, render: adminLabel },
                     { title: "优先级", dataIndex: "priority", width: 80 },
                     {
                         title: "状态",
@@ -196,7 +200,7 @@ export function TaskManagementPanel({ active = true }: { active?: boolean }) {
                     { title: "积分", dataIndex: "credits", width: 70 },
                     { title: "重试", dataIndex: "attempts", width: 65 },
                     { title: "失败原因", dataIndex: "failureReason", ellipsis: true, width: 180 },
-                    { title: "排队时间", dataIndex: "queuedAt", width: 180 },
+                    { title: "排队时间（北京时间）", dataIndex: "queuedAt", width: 200, render: (value: string) => formatBeijingDateTime(value) },
                     {
                         title: "控制",
                         fixed: "right",
@@ -332,14 +336,14 @@ export function HistoryManagementPanel() {
                         resetKey={JSON.stringify([userId, filters])} pageKey={historyQuery.data?.pages.at(-1)?.nextCursor}
                         label="加载更多历史" endLabel="没有更多历史" onLoadMore={() => historyQuery.fetchNextPage({ cancelRefetch: false })} /></>}
                     columns={[
-                        { title: "时间", dataIndex: "createdAt", width: 180 },
+                        { title: "时间（北京时间）", dataIndex: "createdAt", width: 200, render: (value: string) => formatBeijingDateTime(value) },
                         { title: "设计师", dataIndex: "userName", width: 120, fixed: "left" },
                         { title: "部门", dataIndex: "departmentName", width: 120 },
                         { title: "项目", dataIndex: "projectId", width: 160, ellipsis: true },
-                        { title: "操作", dataIndex: "operationType", width: 130 },
+                        { title: "操作", dataIndex: "operationType", width: 130, render: adminLabel },
                         { title: "模型", dataIndex: "modelName", width: 140 },
                         { title: "积分", dataIndex: "credits", width: 70 },
-                        { title: "成本", width: 100, render: (_, row: ServerHistorySummary) => `￥${row.rmbCost.toFixed(4)}` },
+                        { title: "成本", width: 120, render: (_, row: ServerHistorySummary) => `￥${row.rmbCost.toFixed(6)}` },
                         { title: "状态", width: 90, render: (_, row: ServerHistorySummary) => <Tag color={row.status === "success" ? "green" : "red"}>{statusText[row.status] || row.status}</Tag> },
                         { title: "提示词", dataIndex: "prompt", width: 220, ellipsis: true },
                         { title: "失败原因", dataIndex: "failureReason", width: 180, ellipsis: true },
@@ -359,7 +363,7 @@ function RecordDetails({ kind, id, onClose }: { kind: "task" | "history"; id: st
         {query.isPending ? <p role="status">正在读取完整详情…</p> : query.error ? <Alert type="error" title="详情加载失败" description={query.error.message} /> : <>
             <p className="mb-3 break-all text-xs text-[var(--muted-foreground)]">{id}</p>
             <h3>提示词</h3><p className="mb-4 whitespace-pre-wrap break-words">{query.data?.prompt || "（无）"}</p>
-            <h3>参数</h3><pre className="mb-4 overflow-auto whitespace-pre-wrap break-all">{JSON.stringify(query.data?.parameters ?? {}, null, 2)}</pre>
+            <h3 className="mb-2">参数</h3><div className="mb-4"><AdminDetails value={query.data?.parameters ?? {}} /></div>
             <h3>原图</h3>{(query.data?.sourceUrls ?? []).map((url, index) => <p className="break-all" key={`${url}-${index}`}>{/^https?:\/\/|^\/api\//i.test(url) ? <a href={url} target="_blank" rel="noopener noreferrer">{url}</a> : url}</p>)}
             <h3 className="mt-4">结果</h3>{(query.data?.resultUrls ?? []).map((url, index) => <p className="break-all" key={`${url}-${index}`}>{/^https?:\/\/|^\/api\//i.test(url) ? <a href={url} target="_blank" rel="noopener noreferrer">{url}</a> : url}</p>)}
         </>}

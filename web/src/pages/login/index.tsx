@@ -7,6 +7,7 @@ import { getAuthMethods, getWeComLoginUrl, type AuthMethods } from "@/services/a
 import { useUserStore } from "@/stores/use-user-store";
 import { InchoiceBrand } from "@/components/layout/inchoice-brand";
 import { LanguageSwitch } from "@/components/layout/language-switch";
+import { currentLoginReturn } from "@/lib/login-return";
 
 export default function LoginPage() {
     useUiLocale();
@@ -61,7 +62,8 @@ export default function LoginPage() {
             const user = await login(identifier.trim(), password, "designer");
             // Bootstrap a fresh page only after the server has confirmed identity.
             // No previous account's singleton or persistence queue is reused.
-            window.location.assign(user.mustChangePassword ? "/change-password" : "/");
+            const returnTo = currentLoginReturn();
+            window.location.assign(user.mustChangePassword ? `/change-password?returnTo=${encodeURIComponent(returnTo)}` : returnTo);
         } catch (error) {
             message.error(error instanceof Error ? error.message : uiText("登录失败，请重试"));
         } finally {

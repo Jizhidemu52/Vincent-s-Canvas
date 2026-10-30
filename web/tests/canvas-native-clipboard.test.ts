@@ -11,6 +11,7 @@ import { assertCanvasImageUploadSize, CANVAS_IMAGE_MAX_BYTES } from "@/lib/canva
 import { shouldIgnoreCanvasShortcut } from "@/lib/canvas/canvas-keyboard";
 import { matchCanvasActionShortcut } from "@/lib/canvas/canvas-actions";
 import { fitNodeSize } from "@/lib/canvas/canvas-node-size";
+import { canvasImportGridPosition } from "@/lib/canvas/canvas-interaction-ux";
 import { createCanvasSelectionGenerationSync } from "@/lib/canvas/canvas-selection-prompt";
 import { runCanvasGeneration } from "@/pages/canvas/canvas-shared-generation-runtime";
 import { defaultConfig } from "@/stores/use-config-store";
@@ -83,6 +84,9 @@ function harness(initialNodes: CanvasNodeData[] = [], initialConnections: Canvas
     const update = <T>(ref: { current: T }) => (value: T | ((current: T) => T)) => { ref.current = typeof value === "function" ? (value as (current: T) => T)(ref.current) : value; };
     const env = {
         uiText,
+        canvasImportGridPosition, pastePositionRef: { current: null }, importFiles: noop,
+        designProjectIdRef: { current: "clipboard-test" }, useUserStore: Object.assign((select: Function) => select({ status: "authenticated", user: { id: "clipboard-owner" } }), { getState: () => ({ user: { id: "clipboard-owner" } }) }), setDropReading: noop,
+        resetViewport: noop,
         ...clipboard, ...nodeCopy, clipboardModule: clipboard, shouldIgnoreCanvasShortcut, matchCanvasActionShortcut, isCanvasAudioFile, fitNodeSize, getNodeSpec, CanvasNodeType, NODE_STATUS_SUCCESS: "success", assertCanvasImageUploadSize,
         window: target, navigator: {}, // HTTP/permissionless path: no navigator.clipboard exists.
         useCallback: (callback: unknown) => callback,

@@ -1,6 +1,7 @@
 import { uiText, useUiText } from "@/lib/i18n";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
-import { Link, useBlocker } from "react-router-dom";
+import { Link } from "react-router-dom";
+import { useUnsavedGuard } from "@/hooks/use-unsaved-guard";
 import { useUserStore } from "@/stores/use-user-store";
 import { isModuleAvailable, useModuleEnabled, useModuleStore } from "@/stores/use-module-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
@@ -22,23 +23,11 @@ export function LocalDesignWorkbench({ moduleKey, title, description, mount }: {
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
     const [assetPickerError, setAssetPickerError] = useState("");
     const assetSelection = useRef<((asset: InsertAssetPayload | null) => void) | null>(null);
-    const blocker = useBlocker(dirty);
+    useUnsavedGuard(dirty, uiText("有未保存更改。请等待自动保存，或返回工程重试保存/导出。"));
     const isManagementAccount = useUserStore((state) => state.status === "authenticated" && Boolean(state.user) && !isWorkspaceRole(state.user?.role));
-    const ownerId = useUserStore((state) => (state.status === "authenticated" && state.user && isWorkspaceRole(state.user.role) ? state.user.id : null));
+    const ownerId = useUserStore((state) => ((state.status === "authenticated" || state.status === "expired") && state.user && isWorkspaceRole(state.user.role) ? state.user.id : null));
     const enabled = useModuleEnabled(moduleKey);
     const identityReady = !deploymentFeatures.authenticationEnabled || Boolean(ownerId);
-    useEffect(() => {
-        if (blocker.state === "blocked" && !dirty) blocker.proceed();
-    }, [blocker, dirty]);
-    useEffect(() => {
-        if (!dirty) return;
-        const warn = (event: BeforeUnloadEvent) => {
-            event.preventDefault();
-            event.returnValue = "";
-        };
-        window.addEventListener("beforeunload", warn);
-        return () => window.removeEventListener("beforeunload", warn);
-    }, [dirty]);
 
     useEffect(() => {
         const root = host.current;
@@ -56,7 +45,7 @@ export function LocalDesignWorkbench({ moduleKey, title, description, mount }: {
             root.replaceChildren();
         };
         const unsubscribeUser = useUserStore.subscribe((state) => {
-            if (deploymentFeatures.authenticationEnabled && (state.status !== "authenticated" || !isWorkspaceRole(state.user?.role) || state.user?.id !== ownerId)) dispose();
+            if (deploymentFeatures.authenticationEnabled && (!(["authenticated", "expired"] as string[]).includes(state.status) || !isWorkspaceRole(state.user?.role) || state.user?.id !== ownerId)) dispose();
         });
         const checkModule = () => {
             if (!isModuleAvailable(useModuleStore.getState().flags, useBusinessConfigStore.getState().tools, moduleKey)) dispose();
@@ -106,15 +95,6 @@ export function LocalDesignWorkbench({ moduleKey, title, description, mount }: {
                 </div>
                 <span className="badge">{uiText("本地编辑 · 无模型调用")}</span>
             </header>
-            {blocker.state === "blocked" && (
-                <div className="workbench-leave-warning" role="alert">
-                    <span>{uiText("有未保存更改。请等待自动保存，或返回工程重试保存/导出。")}</span>
-                    <button className="btn" onClick={() => blocker.reset()}>
-                        {uiText("继续编辑")}</button>
-                    <button className="btn ghost" onClick={() => blocker.proceed()}>
-                        {uiText("放弃未保存更改并离开")}</button>
-                </div>
-            )}
             {assetPickerError && <p role="alert">{uiText(assetPickerError || "")}</p>}
             {assetPickerOpen && (
                 <Suspense fallback={<p role="status">{uiText("正在打开素材库…")}</p>}>

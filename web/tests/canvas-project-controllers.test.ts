@@ -15,7 +15,7 @@ function evaluateCallback(file: string, name: string, scope: Record<string, unkn
     const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
     let expression: ts.Expression | undefined;
     const visit = (node: ts.Node) => {
-        if (ts.isVariableDeclaration(node) && node.name.getText(ast) === name && node.initializer && ts.isCallExpression(node.initializer)) expression = node.initializer.arguments[0];
+        if (ts.isVariableDeclaration(node) && node.name.getText(ast) === name && node.initializer) expression = ts.isCallExpression(node.initializer) ? node.initializer.arguments[0] : node.initializer;
         ts.forEachChild(node, visit);
     };
     visit(ast);
@@ -132,7 +132,7 @@ describe("on-demand media stage", () => {
     for (const stage of ["Image", "Video"]) {
         test(`${stage} chunk failure preserves the graph and exposes failure`, async () => {
             const events: unknown[] = [];
-            const run = evaluateCallback("use-canvas-media-workflow.ts", `runWorkflow${stage}Stage`, {
+            const run = evaluateCallback("canvas-media-workflow-actions-runtime.ts", `runWorkflow${stage}Stage`, {
                 stageScope: { active: true }, nodesRef: { current: [] },
                 buildWorkflowVideoStageDispatch: () => ({ referenceNodeIds: ["image"] }),
                 updateMediaWorkflow: (_id: string, fn: Function) => events.push(fn({})),
@@ -148,7 +148,7 @@ describe("on-demand media stage", () => {
         test(`${stage} chunk completing after a project switch cannot dispatch`, async () => {
             const stageScope = { active: true };
             const chunk = Promise.withResolvers<unknown>();
-            const run = evaluateCallback("use-canvas-media-workflow.ts", `runWorkflow${stage}Stage`, {
+            const run = evaluateCallback("canvas-media-workflow-actions-runtime.ts", `runWorkflow${stage}Stage`, {
                 stageScope, nodesRef: { current: [] },
                 buildWorkflowVideoStageDispatch: () => ({ referenceNodeIds: ["image"] }),
                 updateMediaWorkflow: () => {},

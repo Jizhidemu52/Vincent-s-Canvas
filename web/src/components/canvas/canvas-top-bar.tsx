@@ -94,7 +94,7 @@ export const CanvasTopBar = memo(function CanvasTopBar({
                         )}
                     </div>
                     <CanvasSaveStatus compact />
-                    <button type="button" className="cw-share" title={uiText("复制链接；不会公开画布。本机试用跨设备请导出")} onClick={onShare}>{uiText("链接")}</button>
+                    <button type="button" className="cw-share" title={uiText("复制链接；不会公开画布。本机试用跨设备请导出")} onClick={onShare}>{uiText("复制画布链接")}</button>
                 </div>
                 <div className="cw-account-card cw-surface">
                     <LanguageSwitch compact />

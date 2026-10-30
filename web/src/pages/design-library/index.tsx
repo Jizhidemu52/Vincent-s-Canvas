@@ -1,5 +1,5 @@
 import { getUiLocale, useUiText } from "@/lib/i18n";
-import { useEffect, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useRef, useState } from "react";
 import { Alert, App, Button, Empty, Input, Modal, Pagination, Segmented, Skeleton, Tag } from "antd";
 import { ArrowLeft, BookOpen, Plus, RefreshCw, Search } from "lucide-react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
@@ -11,6 +11,7 @@ import { EntryDetail, statusLabels } from "./entry-detail";
 import { PublishDialog } from "./publish-dialog";
 import { LibraryImage } from "./library-image";
 import { readDesignLibraryShareDraft } from "./share-draft";
+import { useWorkbenchField } from "@/hooks/use-workbench-field";
 
 export default function DesignLibraryPage() {
     const t = useUiText();
@@ -21,11 +22,12 @@ export default function DesignLibraryPage() {
     const user = useUserStore(state => state.user);
     const owner = user?.id || "";
     const [shareDraft, setShareDraft] = useState(() => readDesignLibraryShareDraft(location.state, owner));
-    const [scope, setScope] = useState<"company" | "mine">("company");
-    const [query, setQuery] = useState("");
-    const [keyword, setKeyword] = useState("");
-    const [tag, setTag] = useState("");
-    const [page, setPage] = useState(1);
+    const filterKey = admin ? "design-library-admin" : "design-library";
+    const [scope, setScope] = useWorkbenchField<"company" | "mine">(`${filterKey}:scope`, "company");
+    const [query, setQuery] = useWorkbenchField(`${filterKey}:query`, "");
+    const keyword = useDeferredValue(query.trim());
+    const [tag, setTag] = useWorkbenchField(`${filterKey}:tag`, "");
+    const [page, setPage] = useWorkbenchField(`${filterKey}:page`, 1);
     const [revision, setRevision] = useState(0);
     const [result, setResult] = useState<{ owner: string; value: DesignLibraryList } | null>(null);
     const [loading, setLoading] = useState(true);
@@ -79,10 +81,10 @@ export default function DesignLibraryPage() {
         setOpened(current => current && current.owner === owner ? { ...current, entry } : null);
         setRevision(value => value + 1);
     };
-    const withdraw = () => {
+    const withdraw = async () => {
         if (!detail) return;
         const entry = detail.entry;
-        modal.confirm({ title: t("撤回这份分享？"), content: t("同事将无法继续访问、下载或复用。已经下载或加入其他画布的副本无法收回。你仍可查看作品和使用统计。"), okText: t("确认撤回"), cancelText: t("保持分享"), okButtonProps: { danger: true }, onOk: async () => {
+        await modal.confirm({ title: t("撤回这份分享？"), content: t("同事将无法继续访问、下载或复用。已经下载或加入其他画布的副本无法收回。你仍可查看作品和使用统计。"), okText: t("确认撤回"), cancelText: t("保持分享"), okButtonProps: { danger: true }, onOk: async () => {
             try { updateEntry(await withdrawDesignLibrary(entry.id, { expectedOwnerId: owner })); message.success(t("已撤回，后续共享访问已停止")); }
             catch (reason) { message.error(reason instanceof Error ? reason.message : t("撤回失败，请重试")); throw reason; }
         } });
@@ -106,11 +108,11 @@ export default function DesignLibraryPage() {
             {!enabled ? <section className="wb-surface py-16 text-center"><BookOpen className="mx-auto mb-4 size-10 text-muted-foreground" /><h2 className="mb-2 text-xl font-semibold">{t("公司共享需要 OA 员工身份")}</h2><p className="mx-auto max-w-xl px-6 text-sm leading-7 text-muted-foreground">{deploymentFeatures.authenticationEnabled ? t("当前为个人账号模式，尚未启用公司 OA 接入，公司设计灵感库暂未开放。个人素材仍按账号隔离，不会自动公开。") : t("当前为本机试用模式，设计灵感库未开放。启用公司 OA 接入后，每位设计师可自主发布，系统会按员工身份保存作者和使用记录。本机素材不会自动公开。")}</p><Link to="/canvas"><Button className="mt-6">{t("返回我的画布")}</Button></Link></section> : <>
                 <section className="flex flex-wrap items-center justify-between gap-3" aria-label={t("共享库筛选")}>
                     {admin ? <Tag>{t("仅显示当前管理员有权管理的内容")}</Tag> : <Segmented value={scope} options={[{ label: t("全公司共享"), value: "company" }, { label: t("我的发布"), value: "mine" }]} onChange={value => { setScope(value as "company" | "mine"); setPage(1); }} />}
-                    <div className="flex min-w-0 flex-wrap items-center gap-2"><Input.Search className="!w-64 max-w-full" prefix={<Search size={15} />} placeholder={t("搜索标题、思路、提示词")} value={query} onChange={event => setQuery(event.target.value)} onSearch={value => { setKeyword(value.trim()); setPage(1); }} allowClear /><Button aria-label={t("刷新共享库")} icon={<RefreshCw size={16} />} loading={loading} onClick={() => setRevision(value => value + 1)} /></div>
+                    <div className="flex min-w-0 flex-wrap items-center gap-2"><Input className="!w-64 max-w-full" prefix={<Search size={15} />} placeholder={t("搜索标题、思路、提示词")} value={query} onChange={event => { setQuery(event.target.value); setPage(1); }} allowClear /><Button aria-label={t("刷新共享库")} icon={<RefreshCw size={16} />} loading={loading} onClick={() => setRevision(value => value + 1)} /></div>
                 </section>
                 {tag && <div className="text-sm">{t("标签筛选：")}<Tag closable onClose={() => { setTag(""); setPage(1); }}>{tag}</Tag></div>}
                 {error && <Alert type="error" showIcon title={t("设计灵感库暂未更新")} description={error} action={<Button onClick={() => setRevision(value => value + 1)}>{t("重试")}</Button>} />}
-                {loading && !data ? <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{Array.from({ length: 8 }, (_, index) => <div key={index} className="wb-surface p-4"><Skeleton.Image active className="!h-40 !w-full" /><Skeleton active title={{ width: "70%" }} paragraph={{ rows: 2 }} /></div>)}</div> : data?.items.length ? <>
+                {loading && !data ? <div role="status" aria-label={t("正在加载灵感")} className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{Array.from({ length: 8 }, (_, index) => <div key={index} className="wb-surface p-4"><Skeleton.Image active className="!h-40 !w-full" /><Skeleton active title={{ width: "70%" }} paragraph={{ rows: 2 }} /></div>)}</div> : data?.items.length ? <>
                     <div className="flex items-center justify-between text-xs text-muted-foreground"><span>{data.total} {t("份")}{scope === "mine" && !admin ? t("自主发布的") : t("设计")}{t("分享")}</span><span>{t("最新发布优先 · 原画布始终私有")}</span></div>
                     <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" aria-busy={loading}>
                         {data.items.map(entry => <article key={entry.id} className="wb-surface group flex min-w-0 flex-col overflow-hidden">
@@ -126,7 +128,7 @@ export default function DesignLibraryPage() {
                 </> : !error && <section className="wb-surface py-16"><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={keyword || tag ? t("没有找到匹配作品，试试其他关键词") : scope === "mine" ? t("你还没有公开的设计分享") : t("灵感库等待第一份分享")}>{!admin && !keyword && !tag && <Button type="primary" onClick={() => setPublishOwner(owner)}>{t("分享我的设计")}</Button>}</Empty></section>}
             </>}
         </main>
-        {enabled && !admin && publishOwner === owner && Boolean(owner) && <PublishDialog key={owner} initialDraft={shareDraft?.ownerId === owner ? shareDraft : undefined} onClose={closePublish} onPublished={entry => { closePublish(); setScope("mine"); setPage(1); setKeyword(""); setQuery(""); setTag(""); setRevision(value => value + 1); setOpened({ owner, entry, key: `${entry.id}:${Date.now()}` }); }} />}
+        {enabled && !admin && publishOwner === owner && Boolean(owner) && <PublishDialog key={owner} initialDraft={shareDraft?.ownerId === owner ? shareDraft : undefined} onClose={closePublish} onPublished={entry => { closePublish(); setScope("mine"); setPage(1); setQuery(""); setTag(""); setRevision(value => value + 1); setOpened({ owner, entry, key: `${entry.id}:${Date.now()}` }); }} />}
         {detail && <EntryDetail key={detail.key} entry={detail.entry} admin={admin} onClose={() => setOpened(null)} onWithdraw={withdraw} onModerate={() => { setModerationReason(""); setModerationOpen(true); }} />}
         <Modal open={moderationOpen && Boolean(detail)} title={t("下架共享作品")} okText={t("确认下架")} cancelText={t("取消")} okButtonProps={{ danger: true }} confirmLoading={moderating} onOk={() => void moderate()} onCancel={() => { if (!moderationBusy.current) setModerationOpen(false); }}>
             <p className="mb-4 text-sm text-muted-foreground">{t("停止后续访问、下载和复用；已有副本无法收回。下架原因会记录在管理员审计中。")}</p><Input.TextArea aria-label={t("下架原因")} value={moderationReason} maxLength={1000} rows={4} showCount onChange={event => setModerationReason(event.target.value)} placeholder={t("请填写具体下架原因")} />

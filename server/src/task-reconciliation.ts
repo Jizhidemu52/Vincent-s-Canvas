@@ -157,7 +157,7 @@ export async function reconcileTask(db: Database, cache: Cache, taskId: string, 
             }
             if (decision.decision === "confirmed_success") resultUrls = await checkedResultUrls(client, task, decision.resultAssetIds);
             else resultUrls = [];
-            await settleReservation(db, task.request_id, outcome, input.actor.id, client);
+            await settleReservation(db, task.request_id, outcome, input.actor.id, client, outcome === "capture" ? resultUrls.length : undefined);
             await client.query(
                 `UPDATE tasks SET status=$2,result_urls=$3,failure_reason=$4,execution_token=NULL,lease_expires_at=NULL,
                     model_slot_token=NULL,model_slot_expires_at=NULL,completed_at=now(),updated_at=now() WHERE id=$1`,

@@ -23,6 +23,7 @@ function dialogHarness(kind: string, name: string, extraProps: Record<string, un
     const effects: Array<{ deps?: DependencyList; cleanup?: () => void }> = [];
     const pending: Array<() => void> = [];
     const reads: Array<ReturnType<typeof Promise.withResolvers<{ width: number; height: number }>>> = [];
+    const confirmations: Array<{ onOk: () => void }> = [];
     let cursor = 0;
     const dependencies: Record<string, unknown> = {
         react: {
@@ -42,7 +43,7 @@ function dialogHarness(kind: string, name: string, extraProps: Record<string, un
                 }
             },
         },
-        antd: { Button: "Button", Modal: "Modal", InputNumber: "InputNumber", Segmented: "Segmented", Select: "Select", Checkbox: "Checkbox", Empty: "Empty", theme: { useToken: () => ({ token: {} }) } },
+        antd: { App: { useApp: () => ({ modal: { confirm: (options: { onOk: () => void }) => confirmations.push(options) } }) }, Button: "Button", Modal: "Modal", InputNumber: "InputNumber", Segmented: "Segmented", Select: "Select", Checkbox: "Checkbox", Empty: "Empty", theme: { useToken: () => ({ token: {} }) } },
         "lucide-react": new Proxy({}, { get: (_target, key) => String(key) }),
         "@/lib/image-utils": { readImageMeta() { const reading = Promise.withResolvers<{ width: number; height: number }>(); reads.push(reading); return reading.promise; } },
         "./use-canvas-image-thumbnail": { useCanvasImageThumbnail: (node: { id: string }, edge: number) => ({ url: `/thumb/${node.id}?w=${edge}`, key: node.id, failed: false, onError() {} }) },
@@ -55,7 +56,7 @@ function dialogHarness(kind: string, name: string, extraProps: Record<string, un
         for (const effect of pending.splice(0)) effect();
         return result;
     };
-    return { render, reads };
+    return { render, reads, confirmations };
 }
 
 const referenceNodes = ["first", "second"].map(id => ({ id, title: id, type: "image", metadata: { content: `data:image/png;base64,${id}` } }));
@@ -105,6 +106,19 @@ test("reference grid uses bounded display-only thumbnails while retaining origin
 });
 
 const confirmation = (tree: ReactElement<any>[]) => tree.find(element => element.type === "Button" && element.props.type === "primary")!;
+test("crop protects dirty adjustments and disables accidental mask closure", () => {
+    let closed = 0;
+    const h = dialogHarness("crop", "CanvasNodeCropDialog", { onClose: () => closed++ });
+    h.render();
+    const before = h.render();
+    expect(before.find(element => element.type === "Modal")!.props.mask).toEqual({ closable: false });
+    before.find(element => element.type === "Select")!.props.onChange("1:1");
+    h.render().find(element => element.type === "Modal")!.props.onCancel();
+    expect(closed).toBe(0);
+    expect(h.confirmations).toHaveLength(1);
+    h.confirmations[0]!.onOk();
+    expect(closed).toBe(1);
+});
 const alerts = (tree: ReactElement<any>[]) => tree.filter(element => element.props.role === "alert");
 
 for (const [kind, name] of [["crop", "CanvasNodeCropDialog"], ["split", "CanvasNodeSplitDialog"], ["upscale", "CanvasNodeUpscaleDialog"]]) {

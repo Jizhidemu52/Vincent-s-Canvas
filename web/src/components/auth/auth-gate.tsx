@@ -1,7 +1,7 @@
 import { uiText, useUiLocale } from "@/lib/i18n";
 import type { ReactNode } from "react";
 import { useEffect } from "react";
-import { Navigate, useLocation } from "react-router-dom";
+import { Link, Navigate, useLocation } from "react-router-dom";
 
 import { isAdminRole, useUserStore } from "@/stores/use-user-store";
 import { standaloneEdition } from "@/lib/standalone-edition";
@@ -29,7 +29,9 @@ function AuthenticatedGate({ children, admin, passwordChange }: { children: Reac
     if (status === "idle" || status === "loading") {
         return <div className="flex h-full items-center justify-center bg-background text-foreground" role="status" aria-label={uiText("正在验证账号")}><div className="size-6 animate-spin rounded-full border-2 border-border border-t-primary" /></div>;
     }
-    if (!user || status !== "authenticated") {
+    // The layout locks expired sessions without unmounting unsent local drafts.
+    // All authenticated API helpers still require status === "authenticated".
+    if (!user || (status !== "authenticated" && status !== "expired")) {
         if (admin) return <Navigate to="/admin/login" replace state={{ from: location.pathname + location.search }} />;
         if (deploymentFeatures.oaLoginEnabled) return <CompanyOaEntry />;
         if (deploymentFeatures.authenticationEnabled) return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />;
@@ -40,7 +42,7 @@ function AuthenticatedGate({ children, admin, passwordChange }: { children: Reac
             ? <>{children}</> : <Navigate to="/" replace />;
     }
     if (user.mustChangePassword && ((isAdminRole(user.role) && (admin || deploymentFeatures.authenticationEnabled)) || (deploymentFeatures.authenticationEnabled && !deploymentFeatures.oaLoginEnabled))) return <Navigate to="/change-password" replace />;
-    if (admin && !isAdminRole(user.role)) return <Navigate to="/admin/login" replace />;
+    if (admin && !isAdminRole(user.role)) return <main role="alert" className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center"><h1 className="text-xl font-semibold">{uiText("当前账号没有管理权限")}</h1><p className="text-sm text-muted-foreground">{uiText("此页面仅供管理员使用。你的作品和当前登录不受影响，请联系管理员处理。")}</p><Link to="/" className="underline">{uiText("返回工作台")}</Link></main>;
     if (!admin && deploymentFeatures.authenticationEnabled && !isWorkspaceRole(user.role)) return deploymentFeatures.oaLoginEnabled ? <CompanyOaEntry /> : <Navigate to="/admin" replace />;
     return <>{children}</>;
 }

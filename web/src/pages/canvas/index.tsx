@@ -80,14 +80,14 @@ export default function CanvasPage() {
                 <header className="wb-page-header">
                     <div>
                         <p className="wb-eyebrow">{chatMode ? t("在线功能") : t("画布库")}</p>
-                        <h1 className="wb-title">{chatMode ? t("对话改图") : t("无线画布")}</h1>
+                        <h1 className="wb-title">{chatMode ? t("对话改图") : t("无限画布")}</h1>
                         {!chatMode ? <p className="wb-description">{projects.length} {t(" 个画布 ·")}<CanvasSaveStatus /></p> : null}
                         {chatMode ? <p className="mt-3 max-w-2xl text-sm leading-6 text-stone-500 dark:text-stone-400">{t("选择或新建一个画布后，助手会围绕当前项目内容进行对话、拆解提示词和生成建议，后台会把相关任务归入画布项目历史。")}</p> : null}
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                         {selectedIds.length ? (
                             <>
-                                <Button disabled={!hydrated} loading={exporting} icon={<Download className="size-4" />} onClick={() => void exportProjects(selectedIds, `无线画布-${selectedIds.length}个项目`)}>
+                                <Button disabled={!hydrated} loading={exporting} icon={<Download className="size-4" />} onClick={() => void exportProjects(selectedIds, t("无限画布-{count}个项目", { count: selectedIds.length }))}>
                                     {t("导出选中")}</Button>
                                 <Button danger disabled={!hydrated} onClick={() => setDeleteIds(selectedIds)}>
                                     {t("删除选中")}</Button>

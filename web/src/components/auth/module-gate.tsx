@@ -1,7 +1,7 @@
 import { uiText, useUiLocale } from "@/lib/i18n";
 import type { ReactNode } from "react";
 import { useEffect } from "react";
-import { Navigate, useLocation } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 
 import type { ModuleKey } from "@/services/api/modules";
 import { useModuleEnabled, useModuleStore } from "@/stores/use-module-store";
@@ -28,6 +28,6 @@ function EnabledModuleGate({ children, moduleKey }: { children: ReactNode; modul
         return <div className="flex h-full items-center justify-center bg-background" role="status">{uiText("正在加载模块配置…")}</div>;
     }
     if (status === "error") return <div className="flex h-full flex-col items-center justify-center gap-3 bg-background" role="alert"><p>{uiText("模块配置暂时无法加载，尚未确认模块是否可用。")}</p><button type="button" className="underline" onClick={() => void refresh().catch(() => undefined)}>{uiText("重新加载")}</button></div>;
-    if (!enabled) return <Navigate to="/" replace state={{ moduleDisabled: resolvedKey }} />;
+    if (!enabled) return <main role="alert" className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center"><h1 className="text-xl font-semibold">{uiText("此功能暂未开放")}</h1><p className="text-sm text-muted-foreground">{uiText("管理员已关闭此功能，或尚未配置可用模型。已有作品不会因此删除，请联系管理员。")}</p><Link to="/" className="underline">{uiText("返回工作台")}</Link><button type="button" className="underline" onClick={() => void refresh().catch(() => undefined)}>{uiText("重新检查")}</button></main>;
     return <>{children}</>;
 }

@@ -1,6 +1,8 @@
 import { App, Button, Form, Input, InputNumber, Select, Switch, Table, Tag } from "antd";
 import { useEffect, useState } from "react";
 import { createServerWorkflow, listServerProviders, listServerWorkflows, updateServerWorkflow, type ServerProvider, type ServerWorkflow } from "@/services/api/model-configuration";
+import { useUnsavedGuard } from "@/hooks/use-unsaved-guard";
+import { adminLabel } from "../admin-labels";
 
 type Values = {
     providerId: string;
@@ -27,7 +29,12 @@ export function WorkflowManagementPanel({ isAdmin }: { isAdmin: boolean }) {
     const [workflows, setWorkflows] = useState<ServerWorkflow[]>([]);
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
-    const applyGptImage2Preset = () => {
+    const [dirty, setDirty] = useState(false);
+    const [saving, setSaving] = useState(false);
+    const { confirmDiscard } = useUnsavedGuard(dirty, "工作流配置尚未保存，离开后将丢失本次修改。");
+    const applyGptImage2Preset = async () => {
+        if (!await confirmDiscard()) return;
+        setDirty(true);
         setSelectedId(null);
         form.setFieldsValue({
             name: "GPT-Image-2",
@@ -73,7 +80,9 @@ export function WorkflowManagementPanel({ isAdmin }: { isAdmin: boolean }) {
     useEffect(() => {
         void refresh();
     }, []);
-    const edit = (workflow: ServerWorkflow) => {
+    const edit = async (workflow: ServerWorkflow) => {
+        if (!await confirmDiscard()) return;
+        setDirty(false);
         setSelectedId(workflow.id);
         form.setFieldsValue({
             ...workflow,
@@ -85,6 +94,8 @@ export function WorkflowManagementPanel({ isAdmin }: { isAdmin: boolean }) {
         });
     };
     const submit = async (values: Values) => {
+        if (saving) return;
+        setSaving(true);
         try {
             const input = {
                 ...values,
@@ -100,23 +111,26 @@ export function WorkflowManagementPanel({ isAdmin }: { isAdmin: boolean }) {
             message.success("工作流已保存到服务端");
             setSelectedId(null);
             form.resetFields();
+            setDirty(false);
             await refresh();
         } catch (error) {
             message.error(error instanceof Error ? error.message : "工作流保存失败");
-        }
+        } finally { setSaving(false); }
     };
     return (
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_440px]">
+        <div className="grid min-w-0 gap-4 2xl:grid-cols-[minmax(0,1fr)_440px]">
             <Table
+                className="min-w-0"
+                scroll={{ x: 780 }}
                 rowKey="id"
                 size="small"
                 loading={loading}
                 dataSource={workflows}
                 columns={[
                     { title: "工作流", dataIndex: "name" },
-                    { title: "Provider", dataIndex: "providerName" },
+                    { title: "API 服务", dataIndex: "providerName" },
                     { title: "协议", dataIndex: "protocol" },
-                    { title: "能力", dataIndex: "capability" },
+                    { title: "能力", dataIndex: "capability", render: adminLabel },
                     { title: "工作流 ID", dataIndex: "workflowId" },
                     { title: "状态", render: (_, row: ServerWorkflow) => <Tag color={row.enabled ? "green" : "red"}>{row.enabled ? "启用" : "停用"}</Tag> },
                     {
@@ -135,7 +149,9 @@ export function WorkflowManagementPanel({ isAdmin }: { isAdmin: boolean }) {
                     {selectedId ? (
                         <Button
                             size="small"
-                            onClick={() => {
+                            onClick={async () => {
+                                if (!await confirmDiscard()) return;
+                                setDirty(false);
                                 setSelectedId(null);
                                 form.resetFields();
                             }}
@@ -145,12 +161,13 @@ export function WorkflowManagementPanel({ isAdmin }: { isAdmin: boolean }) {
                     ) : null}
                 </div>
                 <Button className="mb-3" size="small" onClick={applyGptImage2Preset} disabled={!isAdmin}>
-                    GPT-Image-2 preset
+                    填入 GPT-Image-2 预设
                 </Button>
                 <Form
                     form={form}
                     layout="vertical"
-                    disabled={!isAdmin}
+                    disabled={!isAdmin || saving}
+                    onValuesChange={() => setDirty(true)}
                     initialValues={{
                         protocol: "runninghub",
                         capability: "edit",
@@ -163,7 +180,7 @@ export function WorkflowManagementPanel({ isAdmin }: { isAdmin: boolean }) {
                     }}
                     onFinish={submit}
                 >
-                    <Form.Item name="providerId" label="Provider" rules={[{ required: true }]}>
+                    <Form.Item name="providerId" label="API 服务" rules={[{ required: true }]}>
                         <Select options={providers.map((item) => ({ label: item.name, value: item.id }))} />
                     </Form.Item>
                     <div className="grid grid-cols-2 gap-2">
@@ -179,7 +196,7 @@ export function WorkflowManagementPanel({ isAdmin }: { isAdmin: boolean }) {
                             <Select options={["runninghub", "comfyui", "custom"].map((value) => ({ label: value, value }))} />
                         </Form.Item>
                         <Form.Item name="capability" label="能力" rules={[{ required: true }]}>
-                            <Select options={["generate", "edit", "upscale", "batch"].map((value) => ({ label: value, value }))} />
+                            <Select options={["generate", "edit", "upscale", "batch"].map((value) => ({ label: adminLabel(value), value }))} />
                         </Form.Item>
                     </div>
                     <Form.Item name="submitPath" label="提交路径" rules={[{ required: true }]}>
@@ -221,7 +238,7 @@ export function WorkflowManagementPanel({ isAdmin }: { isAdmin: boolean }) {
                     <Form.Item name="enabled" label="启用" valuePropName="checked">
                         <Switch />
                     </Form.Item>
-                    <Button className="!h-10" type="primary" htmlType="submit" block>
+                    <Button className="!h-10" type="primary" htmlType="submit" loading={saving} block>
                         保存工作流
                     </Button>
                 </Form>

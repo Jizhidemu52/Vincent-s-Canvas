@@ -1,6 +1,6 @@
 import { uiText, useUiLocale } from "@/lib/i18n";
 import { App } from "antd";
-import { LoaderCircle, LogOut } from "lucide-react";
+import { KeyRound, LoaderCircle, LogOut } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -52,8 +52,9 @@ export function PersonalSessionActions({ onSignedOut }: { onSignedOut?: () => vo
         <div className="mt-2 flex items-center gap-2 border-t border-stone-200 px-2 pt-3" aria-label={uiText("个人账号")}>
             <div className="min-w-0 flex-1">
                 <div className="truncate text-xs font-medium text-foreground" title={user.displayName || user.username}>{user.displayName || user.username}</div>
-                <div className="mt-0.5 text-[10px] text-muted-foreground">{uiText("个人账号")}</div>
+                <div className="mt-0.5 text-xs text-muted-foreground">{uiText("个人账号")}</div>
             </div>
+            <button type="button" className="wb-nav-link inline-flex size-9 items-center justify-center rounded-md" disabled={busy} aria-label={uiText("修改密码")} title={uiText("修改密码")} onClick={() => navigate(`/change-password?returnTo=${encodeURIComponent(window.location.pathname + window.location.search)}`)}><KeyRound className="size-3.5" /></button>
             <button
                 type="button"
                 className="wb-nav-link inline-flex h-9 shrink-0 items-center justify-center gap-1 rounded-md px-2 text-xs disabled:cursor-wait disabled:opacity-60"

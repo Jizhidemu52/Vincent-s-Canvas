@@ -176,8 +176,8 @@ describe("generation results do not wait for session refresh", () => {
             : Response.json({ user: { ...employee, displayName: "Updated designer", creditBalance: 42 } }));
         await refresh;
         if (outcome === "unauthorized") {
-            expect(useUserStore.getState().user).toBeNull();
-            expect(useUserStore.getState().status).toBe("guest");
+            expect(useUserStore.getState().user).toMatchObject({ id: "employee-a" });
+            expect(useUserStore.getState().status).toBe("expired");
         } else {
             expect(useUserStore.getState().user).toMatchObject({ id: "employee-a", displayName: outcome === "updated" ? "Updated designer" : "Designer", creditBalance: outcome === "updated" ? 42 : 0 });
             expect(useUserStore.getState().status).toBe("authenticated");

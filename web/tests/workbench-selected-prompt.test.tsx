@@ -39,6 +39,8 @@ function harness(kind: "video" | "creative", resolveImage?: (key?: string, fallb
     let stateIndex = 0, refIndex = 0, effectIndex = 0, prompt = "当前草稿";
     let toolEnabled = true;
     const currentConfig = { ...config };
+    const draftFields = new Map<string, unknown>();
+    const confirmations: Array<{ onOk?: () => unknown }> = [];
     const reads: string[] = [], writes: unknown[] = [], submissions: unknown[] = [];
     const draft = { form: { ...createSceneForm("style-to-sketch"), description: "当前草稿" }, images: { primary: image }, config: currentConfig };
     // Exercise the real summary/detail history adapter, including its migration
@@ -55,7 +57,7 @@ function harness(kind: "video" | "creative", resolveImage?: (key?: string, fallb
     };
     const dependencies: Record<string, unknown> = {
         "@/lib/i18n": i18nHarness,
-        react: { ...React, useState, useRef: (initial: unknown) => refs[refIndex++] ||= { current: initial }, useMemo: (factory: () => unknown) => factory(),
+        react: { ...React, useState, useCallback: (callback: Function) => callback, useRef: (initial: unknown) => refs[refIndex++] ||= { current: initial }, useMemo: (factory: () => unknown) => factory(),
             useEffect(effect: () => (() => void) | void, deps?: readonly unknown[]) {
                 const index = effectIndex++, prior = effects[index];
                 if (prior && deps && prior.deps?.length === deps.length && deps.every((value, i) => Object.is(value, prior.deps![i]))) return;
@@ -67,6 +69,19 @@ function harness(kind: "video" | "creative", resolveImage?: (key?: string, fallb
             async iterate(callback: (log: unknown) => void) { callback(videoLog); },
         }) },
         "@/hooks/use-workbench-field": { useWorkbenchField: () => [prompt, (next: string) => { prompt = next; }] },
+        "@/hooks/use-generation-draft": { useGenerationDraft: (key: string, initial: unknown) => {
+            if (key.endsWith(":prompt")) return [prompt, (next: string) => { prompt = next; }, true];
+            if (!draftFields.has(key)) draftFields.set(key, key.endsWith(":settings") ? currentConfig : initial);
+            return [draftFields.get(key), (next: unknown) => {
+                const value = typeof next === "function" ? next(draftFields.get(key)) : next;
+                draftFields.set(key, value);
+                if (key.endsWith(":settings")) Object.assign(currentConfig, value);
+            }, true];
+        } },
+        "@/hooks/use-unsaved-guard": { useUnsavedGuard: () => ({ confirmDiscard: async () => true }) },
+        // Keep the prompt/history boundary independent from browser-only drag events.
+        "@/hooks/use-image-drop": { useImageDrop: () => ({ dropProps: {}, dragging: false, reading: false }) },
+        "@/hooks/use-result-canvas": { useResultCanvas: () => ({ enabled: false, busy: false }) },
         "@/hooks/use-can-manage-config": { useCanManageConfig: () => false },
         "@/hooks/use-tool-config": {
             useToolConfig: (value: typeof currentConfig) => value,
@@ -85,7 +100,7 @@ function harness(kind: "video" | "creative", resolveImage?: (key?: string, fallb
         "@/services/api/image": { requestGeneration: (...args: unknown[]) => { submissions.push(args); throw new Error("unexpected generation"); }, requestEdit: (...args: unknown[]) => { submissions.push(args); throw new Error("unexpected edit"); } },
         "@/services/api/video": { createVideoGenerationTask: (...args: unknown[]) => { submissions.push(args); throw new Error("unexpected video generation"); } },
         "react-router-dom": { useSearchParams: () => [new URLSearchParams()] },
-        antd: { ...antd, App: { useApp: () => ({ message: { error() {}, warning() {}, success() {}, info() {} }, modal: {} }) } },
+        antd: { ...antd, App: { useApp: () => ({ message: { error() {}, warning() {}, success() {}, info() {} }, modal: { confirm: (options: { onOk?: () => unknown }) => { confirmations.push(options); } } }) } },
     };
     const workspaceModule = { exports: {} };
     const workspaceCode = ts.transpileModule(readFileSync(new URL("../src/hooks/use-generation-workspace.ts", import.meta.url), "utf8"), {
@@ -94,7 +109,7 @@ function harness(kind: "video" | "creative", resolveImage?: (key?: string, fallb
     new Function("require", "module", "exports", workspaceCode)((name: string) => dependencies[name], workspaceModule, workspaceModule.exports);
     dependencies["@/hooks/use-generation-workspace"] = workspaceModule.exports;
     const module = { exports: {} as any };
-    new Function("require", "module", "exports", "window", code)((name: string) => dependencies[name] || requireModule(name), module, module.exports, {});
+    new Function("require", "module", "exports", "window", code)((name: string) => name.endsWith(".css") ? {} : dependencies[name] || requireModule(name), module, module.exports, {});
     const render = () => {
         stateIndex = refIndex = effectIndex = 0;
         let output = kind === "creative" ? module.exports.useSceneWorkspace("style-to-sketch") : module.exports.default();
@@ -104,7 +119,7 @@ function harness(kind: "video" | "creative", resolveImage?: (key?: string, fallb
         pendingEffects.splice(0).forEach(effect => effect());
         return output;
     };
-    return { render, reads, storageReads, stored, writes, submissions, currentConfig, get prompt() { return prompt; }, setPrompt: (value: string) => { prompt = value; }, setToolEnabled: (value: boolean) => { toolEnabled = value; }, unmount: () => effects.forEach(effect => effect.cleanup?.()) };
+    return { render, reads, storageReads, stored, writes, submissions, currentConfig, confirmations, get prompt() { return prompt; }, setPrompt: (value: string) => { prompt = value; }, setToolEnabled: (value: boolean) => { toolEnabled = value; }, unmount: () => effects.forEach(effect => effect.cleanup?.()) };
 }
 
 function elements(node: unknown): ReactElement<any>[] {
@@ -113,28 +128,34 @@ function elements(node: unknown): ReactElement<any>[] {
     return [node, ...elements(node.props.children)];
 }
 
-test("video record selection fills only its prompt and never replaces current model or reference inputs", async () => {
+test("video record selection never replaces the current prompt, model or reference inputs", async () => {
     const app = harness("video");
     app.render(); await settle();
     const before = { ...app.currentConfig };
     const history = elements(app.render()).find(element => (element.type as Function).name === "LogPanel")!;
     app.reads.length = 0;
     history.props.onPreviewLog(history.props.logs[0]); await settle();
-    expect(app.prompt).toBe("原视频提示词：镜头缓慢推进。");
+    expect(app.prompt).toBe("当前草稿");
     expect(app.currentConfig).toEqual(before);
     expect(app.reads).toEqual(["video:result"]);
     expect(app.submissions).toHaveLength(0);
     app.unmount();
 });
 
-test("clicking an already displayed video returns its own prompt without submitting a task", async () => {
+test("playing a displayed video does not alter a draft; explicit reuse waits for confirmation", async () => {
     const app = harness("video");
     app.render(); await settle(); app.render(); await settle();
     app.setPrompt("改过的草稿");
     const card = elements(app.render()).find(element => (element.type as Function).name === "ResultVideoCard")!;
     const video = elements((card.type as Function)(card.props)).find(element => element.type === "video")!;
-    expect(typeof video.props.onClick).toBe("function");
-    video.props.onClick();
+    expect(video.props.onClick).toBeUndefined();
+    expect(video.props.onPlay).toBeUndefined();
+    expect(app.prompt).toBe("改过的草稿");
+    const reuse = elements((card.type as Function)(card.props)).find(element => element.props.children === "复用提示词")!;
+    reuse.props.onClick();
+    expect(app.prompt).toBe("改过的草稿");
+    expect(app.confirmations).toHaveLength(1);
+    await app.confirmations[0]!.onOk?.();
     expect(app.prompt).toBe("原视频提示词：镜头缓慢推进。");
     expect(app.submissions).toHaveLength(0);
     app.unmount();
@@ -147,8 +168,11 @@ test("video full input restoration remains available only through its explicit r
     history.props.onPreviewLog(history.props.logs[0]); await settle();
     const restore = elements(app.render()).find(element => element.props.children === "恢复为草稿继续改")!;
     expect(restore).toBeDefined();
+    const beforeModel = app.currentConfig.videoModel;
     app.reads.length = 0;
     restore.props.onClick(); await settle();
+    expect(app.currentConfig.videoModel).toBe(beforeModel);
+    await app.confirmations.at(-1)?.onOk?.(); await settle();
     expect(app.currentConfig.videoModel).toBe("old-video-model");
     expect(app.reads.sort()).toEqual(["image:old-reference", "video:result"]);
     expect(app.submissions).toHaveLength(0);

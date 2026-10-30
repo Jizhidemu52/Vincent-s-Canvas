@@ -38,11 +38,11 @@ export type UsageClientEvent = {
 export type UsageEventsRequest = { events: UsageClientEvent[] };
 export type UsageEventsResult = { accepted: number; duplicates: number };
 export type UsageEnvelope<T> = { code: 0; data: T; msg: string };
-export type UsageFilters = { userIds?: string[]; from?: string; to?: string; modelConfigId?: string; boardKey?: string };
+export type UsageFilters = { userIds?: string[]; search?: string; from?: string; to?: string; modelConfigId?: string; boardKey?: string };
 export type UsagePagination = { page: number; pageSize: number; total: number };
-export type UsageSummary = { visits: number; interactions: number; generationRequests: number; chatRequests: number; succeeded: number; failed: number; pending: number };
+export type UsageSummary = { visits: number; interactions: number; generationRequests: number; chatRequests: number; succeeded: number; failed: number; pending: number; totalRmbCost: number; generatedImages: number };
 export type UsageBucket = { key: string; label: string; count: number };
-export type UsageBreakdowns = { boards: UsageBucket[]; models: UsageBucket[]; controls: UsageBucket[]; daily: Array<{ day: string; visits: number; interactions: number; generationRequests: number; chatRequests: number; succeeded: number; failed: number }> };
+export type UsageBreakdowns = { boards: UsageBucket[]; models: UsageBucket[]; controls: UsageBucket[]; daily: Array<{ day: string } & UsageSummary> };
 export type UsageCoverage = { collectionStartedAt: string | null; historicalTasksAvailable: true; historicalClicksAvailable: false; historicalChatAvailable: false; droppedEventCount?: number; notes: string[] };
 export type UsagePerson = { userId: string; displayName: string; departmentName: string | null; summary: UsageSummary; lastActivityAt: string | null };
 export type UsagePeopleResult = { people: UsagePerson[]; pagination: UsagePagination; summary: UsageSummary; breakdowns: UsageBreakdowns; coverage: UsageCoverage };
@@ -52,6 +52,7 @@ export type UsageRecord = {
   action: string; controlKey: string | null; controlLabel: string | null;
   modelConfigId: string | null; modelName: string | null;
   status: string; occurredAt: string; updatedAt: string;
+  totalRmbCost: number; generatedImages: number;
   prompt: string | null; promptRedacted: boolean; parameters: UsageParameters;
 };
 export type UsagePersonResult = { person: UsagePerson; summary: UsageSummary; breakdowns: UsageBreakdowns; records: UsageRecord[]; pagination: UsagePagination; coverage: UsageCoverage };
@@ -67,7 +68,8 @@ export const USAGE_API = {
   people: "/api/admin/usage/people", person: (id: string) => `/api/admin/usage/people/${encodeURIComponent(id)}`,
   export: "/api/admin/usage/export", analysisPreview: "/api/admin/usage/analysis-preview", analyze: "/api/admin/usage/analyze", analysisModels: "/api/admin/usage/analysis-models",
 } as const;
-/** People/detail GET: from inclusive,to exclusive,modelConfigId,boardKey,page=1,pageSize=50; people also search. */
+/** People/detail GET: from inclusive,to exclusive,modelConfigId,boardKey,search,page=1,pageSize=50.
+ * Search matches employee display name/account across the full population; daily groups use Asia/Shanghai. */
 /** POST export: UsageFilters; omitted userIds = all, [] invalid. Streaming application/x-ndjson:
  * {type:"manifest",filters,coverage,exportedAt}, {type:"record",record:UsageRecord}..., {type:"complete",recordCount}.
  * No silent cap. A missing complete line means interrupted/failed export.

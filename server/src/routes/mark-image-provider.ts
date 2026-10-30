@@ -9,6 +9,7 @@ import type { Database } from "../db";
 import { encryptSecret } from "../security";
 import type { AuthenticatedRequest } from "../types";
 import { initializeDefaultChatModel } from "../chat-model-policy";
+import { getApimartImageCost } from "../../../shared/apimart-image-costs";
 
 const modelInput = z.object({
   modelId: z.string(), enabled: z.boolean(), creditCost: z.number().int().nonnegative(),
@@ -33,7 +34,10 @@ async function readConfiguration(db: Database | PoolClient) {
   const models = (await db.query(`SELECT id,name,model_id AS "modelId",enabled,credit_cost AS "creditCost",rmb_cost::float8 AS "rmbCost",concurrency_limit AS "concurrencyLimit"
     FROM model_configs WHERE provider_id=$1 AND model_id=ANY($2::text[]) ORDER BY model_id`,
   [MARK_IMAGE_PROVIDER_ID, MARK_PLATFORM_MODELS.map(model => model.modelId)])).rows;
-  return { provider, models };
+  return { provider, models: models.map(model => {
+    const imageCost = getApimartImageCost(MARK_IMAGE_PROVIDER_ID, model.modelId);
+    return imageCost ? { ...model, imageCost, rmbCost: imageCost.rmbPerImage } : model;
+  }) };
 }
 
 /** Mounted inside the existing super_admin-only model configuration router. */
@@ -71,7 +75,8 @@ export function createMarkImageProviderRouter(db: Database, config: AppConfig) {
           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(provider_id,model_id) DO UPDATE SET name=EXCLUDED.name,capabilities=EXCLUDED.capabilities,
           workflow_config_id=NULL,replacement_model_config_id=NULL,credit_cost=EXCLUDED.credit_cost,rmb_cost=EXCLUDED.rmb_cost,
           concurrency_limit=EXCLUDED.concurrency_limit,enabled=EXCLUDED.enabled,updated_at=now()`,
-        [MARK_IMAGE_PROVIDER_ID, preset.name, preset.modelId, [...preset.capabilities], model.creditCost, model.rmbCost, model.concurrencyLimit, model.enabled, actor.id]);
+        [MARK_IMAGE_PROVIDER_ID, preset.name, preset.modelId, [...preset.capabilities], model.creditCost,
+          getApimartImageCost(MARK_IMAGE_PROVIDER_ID, preset.modelId)?.rmbPerImage ?? model.rmbCost, model.concurrencyLimit, model.enabled, actor.id]);
       }
       await initializeDefaultChatModel(client);
       await writeAudit(client, { actor, action: "mark_platform.configured", targetType: "provider", targetId: MARK_IMAGE_PROVIDER_ID,

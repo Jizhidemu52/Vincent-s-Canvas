@@ -4,21 +4,32 @@ import { readFileSync } from "node:fs";
 import ts from "typescript";
 import { assertCanvasImageUploadSize, CANVAS_IMAGE_MAX_BYTES } from "@/lib/canvas/canvas-image-upload-limit";
 import { isCanvasAudioFile } from "@/pages/canvas/use-canvas-clipboard-drop";
+import { canvasImportGridPosition } from "@/lib/canvas/canvas-interaction-ux";
+import * as droppedImages from "@/lib/dropped-images";
 
 const pageSource = ["project.tsx", "use-canvas-quick-generation.ts"]
     .map(file => readFileSync(new URL(`../src/pages/canvas/${file}`, import.meta.url), "utf8")).join("\n");
 const source = ts.createSourceFile("project.tsx", pageSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 function callback(name: string, scope: Record<string, unknown>): (...args: any[]) => any {
+    scope = { importLockRef: { current: false }, pastePositionRef: { current: null }, projectId: "upload-test", designProjectIdRef: { current: "upload-test" },
+        useUserStore: { getState: () => ({ user: { id: "owner" } }) }, nanoid: () => "test-import", setImportPlaceholder() {},
+        getCanvasCenter: () => ({ x: 0, y: 0 }), isAudioFile: isCanvasAudioFile, canvasImportGridPosition,
+        ...scope, message: { open() {}, info() {}, destroy() {}, ...(scope.message as object || {}) } };
+    if (name === "handleDrop" || name === "handleImageInputChange") {
+        scope.createImageFileNode ||= callback("createImageFileNode", scope);
+        scope.importFiles = callback("importFiles", scope);
+    }
     if (name === "handleDrop") {
         const hook = ts.createSourceFile("drop.ts", readFileSync(new URL("../src/pages/canvas/use-canvas-clipboard-drop.ts", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true);
         let action: ts.Node | undefined;
         const find = (node: ts.Node) => { if (ts.isReturnStatement(node) && node.expression && ts.isCallExpression(node.expression) && node.expression.expression.getText(hook) === "useCallback") action = node.expression.arguments[0]; ts.forEachChild(node, find); };
         find(hook);
         if (!action) throw new Error("Missing extracted drop callback");
-        const code = ts.transpileModule(`const run = ${action.getText(hook)};`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+        const code = ts.transpileModule(`const run = ${action.getText(hook)};`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText.replace('import("@/lib/dropped-images")', "Promise.resolve(droppedImages)");
         const message = scope.message as { error: unknown; warning?: unknown };
-        const latest = { current: { screenToCanvas: scope.screenToCanvas, createImage: scope.createImageFileNode, createVideo: scope.createVideoFileNode, createAudio: scope.createAudioFileNode, error: message.error, warning: message.warning } };
-        return new Function("uiText", "latest", "isCanvasAudioFile", "createClientId", `${code} return run;`)(uiText, latest, isCanvasAudioFile, () => "upload-limit-test");
+        const latest = { current: { scopeKey: "upload-test", owner: "owner", onReadingChange() {}, screenToCanvas: scope.screenToCanvas, importFiles: scope.importFiles, error: message.error, warning: message.warning } };
+        const env = { uiText, latest, isCanvasAudioFile, droppedImages, request: { current: null }, ...droppedImages };
+        return new Function("env", `const { ${Object.keys(env).join(",")} } = env; ${code} return run;`)(env);
     }
     let expression: ts.Expression | undefined;
     const visit = (node: ts.Node) => {
@@ -58,7 +69,7 @@ test("drop catches the size error and shows feedback instead of leaving an unhan
         message: { error: (text: string) => errors.push(text) },
     });
     let prevented = false;
-    await drop({ dataTransfer: { files: [large] }, preventDefault: () => { prevented = true; }, clientX: 0, clientY: 0 });
+    await drop({ dataTransfer: { files: [large], types: ["Files"] }, preventDefault: () => { prevented = true; }, stopPropagation() {}, clientX: 0, clientY: 0 });
     expect(prevented).toBe(true);
     expect(errors).toHaveLength(1);
     expect(errors[0]).toContain("超过 20 MB");
@@ -90,7 +101,8 @@ test("file-picker reports decode failures without mutating a replacement and can
         });
         const input = { files: [small], value: "normal.png" };
         await change({ target: input });
-        expect(errors).toEqual(["图片无法读取，请选择有效的图片"]);
+        expect(errors).toHaveLength(1);
+        expect(errors[0]).toContain("图片无法读取，请选择有效的图片");
         expect(input.value).toBe("");
         expect(uploadTargetRef.current).toBeNull();
         expect(mutations).toBe(0);
@@ -109,10 +121,10 @@ test("multi-file drop imports every supported file in order and continues after 
         createImageFileNode: create, createVideoFileNode: create, createAudioFileNode: create,
         message: { error: (text: string) => errors.push(text), warning: (text: string) => warnings.push(text) },
     });
-    await drop({ dataTransfer: { files: [small, { ...small, name: "broken.png" }, { name: "notes.txt", type: "text/plain" }, { name: "clip.mp4", type: "video/mp4" }, { name: "audio.mp3", type: "audio/mpeg" }] }, preventDefault() {}, clientX: 0, clientY: 0 });
+    await drop({ dataTransfer: { files: [small, { ...small, name: "broken.png" }, { name: "notes.txt", type: "text/plain" }, { name: "clip.mp4", type: "video/mp4" }, { name: "audio.mp3", type: "audio/mpeg" }], types: ["Files"] }, preventDefault() {}, stopPropagation() {}, clientX: 0, clientY: 0 });
     expect(calls).toEqual([
-        { name: "normal.png", x: 10, y: 20 }, { name: "broken.png", x: 46, y: 56 },
-        { name: "clip.mp4", x: 82, y: 92 }, { name: "audio.mp3", x: 118, y: 128 },
+        { name: "normal.png", x: 10, y: 20 }, { name: "broken.png", x: 698, y: 20 },
+        { name: "clip.mp4", x: 10, y: 708 }, { name: "audio.mp3", x: 698, y: 708 },
     ]);
     expect(errors).toEqual(["broken.png：图片损坏"]);
     expect(warnings).toEqual(["仅支持图片、视频和音频，其他文件已跳过"]);

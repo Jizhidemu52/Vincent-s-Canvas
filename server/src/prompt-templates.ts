@@ -5,6 +5,7 @@ import type { Database } from "./db";
 import { readToolConfiguration, type ToolConfiguration } from "./tool-configuration";
 import { getToolDefinition, resolveToolKey } from "../../shared/feature-catalog";
 import { isModuleEnabled } from "./module-flags";
+import { getApimartImageCost } from "../../shared/apimart-image-costs";
 
 export const promptTargetTools = [
   "image-generation", "detail-enhance", "image-edit", "angle-control",
@@ -51,6 +52,7 @@ export type PromptSnapshot = z.output<typeof promptSnapshotSchema>;
 
 export type PromptModelCandidate = {
   id: string;
+  providerId?: string;
   name: string;
   modelId: string;
   capabilities: string[];
@@ -111,6 +113,7 @@ export function resolvePromptModel(
 
 export function pricePromptModel(model: PromptModelCandidate, rule: PromptPriceRule, quantity: number, configuration?: ToolConfiguration): PriceSnapshot {
   return calculatePrice({
+    imageCost: getApimartImageCost(model.providerId, model.modelId) ?? undefined,
     ...(configuration ? { toolKey: configuration.toolKey, configurationVersion: configuration.configurationVersion, creditCostOverride: configuration.creditCostOverride, rmbCostOverride: configuration.rmbCostOverride } : {}),
     operationType: rule.operationType,
     operationCredits: rule.credits,
@@ -136,7 +139,7 @@ export async function resolveCurrentPromptPricing(
   }
   const [modelsResult, priceResult] = await Promise.all([
     db.query<PromptModelCandidate>(
-      `SELECT m.id,m.name,m.model_id AS "modelId",m.capabilities,m.credit_cost AS "creditCost",
+      `SELECT m.id,m.provider_id AS "providerId",m.name,m.model_id AS "modelId",m.capabilities,m.credit_cost AS "creditCost",
               m.rmb_cost::float8 AS "rmbCost",m.enabled,p.enabled AS "providerEnabled",
               m.replacement_model_config_id AS "replacementModelConfigId",m.workflow_config_id AS "workflowConfigId",w.enabled AS "workflowEnabled"
          FROM model_configs m JOIN providers p ON p.id=m.provider_id LEFT JOIN workflow_configs w ON w.id=m.workflow_config_id`,

@@ -15,6 +15,7 @@ import { hydratePromptReuse } from "@/services/api/prompts";
 import { fetchServerAssetContent } from "@/services/api/server-assets";
 import { uploadImage } from "@/services/image-storage";
 import { useCanvasGraphSetter } from "@/stores/canvas/canvas-graph-store";
+import { useCanvasPanelStore } from "@/stores/canvas/use-canvas-panel-store";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { defaultConfig, modelOptionName, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
@@ -54,7 +55,8 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, r
     const { setBatchEditPrompt, setBatchImageSettings, setBatchEditOpen } = batchEdit;
     const NODE_STATUS_LOADING = "loading" as const;
     const NODE_STATUS_ERROR = "error" as const;
-    const [quickGenerateOpen, setQuickGenerateOpen] = useState(false);
+    const quickGenerateOpen = useCanvasPanelStore(state => state.creationOpen);
+    const setQuickGenerateOpen = useCanvasPanelStore(state => state.setCreationOpen);
     const quickGeneratePromptRef = useRef("");
     const [quickGeneratePromptRevision, setQuickGeneratePromptRevision] = useState(0);
     const setQuickGeneratePrompt = useCallback((value: string) => {

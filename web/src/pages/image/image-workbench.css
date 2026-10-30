@@ -3,4 +3,11 @@
 .image-workbench .ant-btn-lg { min-height: 44px; font-size: 14px; }
 .image-workbench .thin-scrollbar { scrollbar-gutter: stable; }
 .image-workbench .ant-tag { border: 0; }
+.generation-submit { z-index: 20; background: var(--card); }
+.generation-form > .thin-scrollbar { padding-right: 4px; }
+@media (max-width: 1023px) {
+  .generation-workbench main { padding-bottom: 190px; }
+  .generation-workbench .generation-submit { position: fixed; bottom: 0; left: 0; right: 0; padding: 12px 16px max(12px, env(safe-area-inset-bottom)); border-top: 1px solid var(--border); background: var(--card); }
+  .generation-workbench .generation-submit > div { margin-bottom: 6px; }
+}
 @media (max-width: 767px) { .image-workbench .image-workbench-layout { padding: 12px; gap: 12px; } .image-workbench .wb-surface { padding: 18px; } }

@@ -8,6 +8,7 @@ import {
 } from "@/services/api/model-configuration";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { useUserStore } from "@/stores/use-user-store";
+import { useUnsavedGuard } from "@/hooks/use-unsaved-guard";
 
 const modelName = (model: FeaturedModelCandidate) => model.publicName || model.name;
 const isAvailable = (model: FeaturedModelCandidate) => model.enabled && model.providerEnabled;
@@ -61,6 +62,7 @@ export function HotModelOrderPanel({ isAdmin }: { isAdmin: boolean }) {
     const maximum = configuration?.maxFeatured || 5;
     const dirty = Boolean(configuration && (selectedIds.length !== configuration.featuredModelIds.length
         || selectedIds.some((id, index) => id !== configuration.featuredModelIds[index])));
+    useUnsavedGuard(dirty, "热门模型排序尚未保存，离开后将丢失本次修改。");
     const unavailableSelection = selectedIds.some(id => !models.some(model => model.id === id && isAvailable(model)));
     const locked = !allowed || loading || saving || !configuration || Boolean(loadError);
 

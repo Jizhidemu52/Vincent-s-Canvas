@@ -1,4 +1,6 @@
 import { nanoid } from "nanoid";
+import { generationErrorMessage } from "@/lib/generation-feedback";
+import { cancelOriginalTask } from "@/lib/generation-task-cancel";
 import type { PromptInputData } from "../../../../shared/prompt-contracts";
 import { getPromptCompilation } from "./prompt-compilations";
 import type { TaskSubmission } from "../../../../shared/task-contracts";
@@ -32,7 +34,7 @@ export type QueuedTaskProgress = {
     estimateReason: string | null;
     retryAfterSeconds: number | null;
 };
-export type QueuedTask = { prompt?: string; userInput?: PromptInputData; optimized?: boolean; id: string; requestId: string; operationType?: string; status: string; stage?: string; errorCode?: string | null; upstreamTaskId?: string | null; submissionStartedAt?: string | null; resultUrls: string[]; failureReason: string | null; createdAt?: string; updatedAt?: string; userId?: string; ownerUserId?: string; parameters?: Record<string, unknown> };
+export type QueuedTask = { prompt?: string; userInput?: PromptInputData; optimized?: boolean; id: string; requestId: string; operationType?: string; attempts?: number; status: string; stage?: string; errorCode?: string | null; upstreamTaskId?: string | null; submissionStartedAt?: string | null; resultUrls: string[]; failureReason: string | null; createdAt?: string; updatedAt?: string; userId?: string; ownerUserId?: string; parameters?: Record<string, unknown> };
 export class QueuedTaskPausedError extends Error {
     readonly taskId: string;
     readonly canRecover: boolean;
@@ -59,7 +61,7 @@ export class QueuedTaskSubmissionUncertainError extends Error {
 }
 export class QueuedTaskHttpError extends Error {
     get submissionRejected() { return this.status >= 400 && this.status < 500 && this.status !== 408 && !["PROMPT_OPTIMIZING", "PROMPT_SUBMISSION_UNCERTAIN"].includes(this.code || ""); }
-    constructor(readonly status: number, message: string, readonly code?: string) { super(message); }
+    constructor(readonly status: number, readonly diagnostic: string, readonly code?: string) { super(generationErrorMessage(diagnostic, status)); }
 }
 export type GenerationVideoCapability = { seconds: readonly [number, number]; resolutions: readonly string[]; sizes: readonly string[]; minImages: number; maxImages: number; firstFrameRequired: boolean; supportsAudio: boolean };
 export type GenerationCapabilityModel = { id: string; name: string; modelId: string; capability: GenerationVideoCapability };
@@ -73,12 +75,27 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
         ...init,
         credentials: "include",
         headers: { "content-type": "application/json", ...init?.headers, ...workspaceOwnerHeaders() },
+    }).catch(error => {
+        if (init?.signal?.aborted) throw error;
+        throw new Error(generationErrorMessage(error), { cause: error });
     });
     if (!response.ok) {
+        if (response.status === 401) useUserStore.getState().expireSession();
         const body = (await response.json().catch(() => ({}))) as { message?: string; error?: string; code?: string };
         throw new QueuedTaskHttpError(response.status, body.message || "任务提交失败", body.error || body.code);
     }
     return response.status === 204 ? (undefined as T) : (response.json() as Promise<T>);
+}
+
+export function cancelQueuedTask(id: string) {
+    const ownerId = useUserStore.getState().user?.id;
+    return cancelOriginalTask(id, {
+        read: getQueuedTask,
+        cancel: taskId => request<void>(`/api/tasks/${encodeURIComponent(taskId)}/cancel`, { method: "POST" }),
+        assertCurrent: () => {
+            if (!ownerId || useUserStore.getState().user?.id !== ownerId || useUserStore.getState().user?.status !== "active") throw new Error("员工会话已变化，未继续取消任务。");
+        },
+    });
 }
 
 export function createImageTaskRequests(input: {
@@ -355,7 +372,7 @@ export async function submitQueuedMediaTask(input: QueuedMediaInput) {
             signal: input.signal,
         });
         input.signal?.throwIfAborted();
-        if (!preflight.ok) throw new Error("Video preflight failed");
+        if (!preflight.ok) throw new Error("视频参数检查未通过，请检查模型、生成方式和参考素材后再提交。");
         submitPayload.parameters = { ...submitPayload.parameters, ...preflight.normalized };
     }
     input.signal?.throwIfAborted();

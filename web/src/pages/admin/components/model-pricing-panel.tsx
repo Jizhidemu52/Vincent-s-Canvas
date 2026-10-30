@@ -1,5 +1,8 @@
 import { App, Button, Form, Input, InputNumber, Select, Space, Switch, Table, Tag } from "antd";
 import { useEffect, useState } from "react";
+import { getApimartImageCost } from "../../../../../shared/apimart-image-costs";
+import { useUnsavedGuard } from "@/hooks/use-unsaved-guard";
+import { adminLabel } from "../admin-labels";
 
 import {
     createPriceDraft,
@@ -27,13 +30,16 @@ const operationOptions = [
     ["batch_image", "批量处理每张图"],
     ["seamless_stitch", "无缝拼接"],
 ].map(([value, label]) => ({ value, label }));
-const capabilityOptions = ["generate", "edit", "upscale", "remove_background", "batch", "chat", "video", "audio"].map((value) => ({ value, label: value }));
+const capabilityOptions = ["generate", "edit", "upscale", "remove_background", "batch", "chat", "video", "audio"].map((value) => ({ value, label: adminLabel(value) }));
 
 type PriceValues = { operationType: string; label: string; credits: number; rmbCost: number };
-type ModelValues = Omit<ServerModel, "id" | "providerName" | "workflowName">;
+type ModelValues = Omit<ServerModel, "id" | "providerName" | "workflowName" | "imageCost">;
 
 export function ModelPricingPanel({ mode }: { mode: "prices" | "models" }) {
-    const { message } = App.useApp();
+    const { message, modal } = App.useApp();
+    const [dirty, setDirty] = useState(false);
+    const [saving, setSaving] = useState(false);
+    const { confirmDiscard } = useUnsavedGuard(dirty, "价格或模型配置尚未保存，离开后将丢失本次修改。");
     const [priceForm] = Form.useForm<PriceValues>();
     const [modelForm] = Form.useForm<ModelValues>();
     const [providers, setProviders] = useState<ServerProvider[]>([]);
@@ -42,6 +48,15 @@ export function ModelPricingPanel({ mode }: { mode: "prices" | "models" }) {
     const [workflows, setWorkflows] = useState<ServerWorkflow[]>([]);
     const [editingModelId, setEditingModelId] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
+    const formProviderId = Form.useWatch("providerId", modelForm);
+    const formModelId = Form.useWatch("modelId", modelForm);
+    const editingModel = models.find(model => model.id === editingModelId);
+    const imageCost = getApimartImageCost(formProviderId, formModelId)
+        ?? (editingModel?.providerId === formProviderId && editingModel?.modelId === formModelId ? editingModel?.imageCost : null);
+
+    useEffect(() => {
+        if (imageCost) modelForm.setFieldValue("rmbCost", imageCost.rmbPerImage);
+    }, [imageCost?.rmbPerImage, modelForm]);
 
     const refresh = async () => {
         setLoading(true);
@@ -62,16 +77,22 @@ export function ModelPricingPanel({ mode }: { mode: "prices" | "models" }) {
     }, []);
 
     const savePrice = async (values: PriceValues) => {
+        if (saving) return;
+        setSaving(true);
         try {
             await createPriceDraft(values);
             message.success("价格草稿已创建，测试或发布前不会影响设计师");
             priceForm.resetFields();
+            setDirty(false);
             await refresh();
         } catch (error) {
             message.error(error instanceof Error ? error.message : "价格草稿保存失败");
-        }
+        } finally { setSaving(false); }
     };
     const changePriceStatus = async (price: PriceVersion, action: "test" | "publish") => {
+        if (action === "publish" && !await modal.confirm({ title: `确认发布“${price.label}”价格？`, content: `版本 ${price.version}：${price.credits} 积分，人民币成本 ￥${price.rmbCost.toFixed(6)}。发布后将影响所有使用该操作价格的新任务；不会改写历史任务费用。`, okText: "确认发布价格", cancelText: "暂不发布", okButtonProps: { danger: true } })) return;
+        if (saving) return;
+        setSaving(true);
         try {
             if (action === "test") await markPriceTesting(price.id);
             else await publishPrice(price.id);
@@ -79,21 +100,29 @@ export function ModelPricingPanel({ mode }: { mode: "prices" | "models" }) {
             await refresh();
         } catch (error) {
             message.error(error instanceof Error ? error.message : "价格状态更新失败");
-        }
+        } finally { setSaving(false); }
     };
     const saveModel = async (values: ModelValues) => {
+        if (saving) return;
+        setSaving(true);
         try {
-            if (editingModelId) await updateServerModel(editingModelId, values);
-            else await createServerModel(values);
+            const fixedCost = getApimartImageCost(values.providerId, values.modelId)
+                ?? (editingModel?.providerId === values.providerId && editingModel?.modelId === values.modelId ? editingModel?.imageCost : null);
+            const input = { ...values, rmbCost: fixedCost?.rmbPerImage ?? values.rmbCost };
+            if (editingModelId) await updateServerModel(editingModelId, input);
+            else await createServerModel(input);
             message.success("模型配置已保存到服务端");
             setEditingModelId(null);
             modelForm.resetFields();
+            setDirty(false);
             await refresh();
         } catch (error) {
             message.error(error instanceof Error ? error.message : "模型保存失败");
-        }
+        } finally { setSaving(false); }
     };
-    const editModel = (model: ServerModel) => {
+    const editModel = async (model: ServerModel) => {
+        if (!await confirmDiscard()) return;
+        setDirty(false);
         setEditingModelId(model.id);
         modelForm.setFieldsValue({
             providerId: model.providerId,
@@ -103,7 +132,7 @@ export function ModelPricingPanel({ mode }: { mode: "prices" | "models" }) {
             modelId: model.modelId,
             capabilities: model.capabilities,
             creditCost: model.creditCost,
-            rmbCost: model.rmbCost,
+            rmbCost: model.imageCost?.rmbPerImage ?? getApimartImageCost(model.providerId, model.modelId)?.rmbPerImage ?? model.rmbCost,
             concurrencyLimit: model.concurrencyLimit,
             enabled: model.enabled,
         });
@@ -111,8 +140,10 @@ export function ModelPricingPanel({ mode }: { mode: "prices" | "models" }) {
 
     if (mode === "prices")
         return (
-            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+            <div className="grid min-w-0 gap-4 2xl:grid-cols-[minmax(0,1fr)_360px]">
                 <Table
+                    className="min-w-0"
+                    scroll={{ x: 680 }}
                     rowKey="id"
                     size="small"
                     loading={loading}
@@ -121,19 +152,19 @@ export function ModelPricingPanel({ mode }: { mode: "prices" | "models" }) {
                         { title: "操作", dataIndex: "label" },
                         { title: "版本", dataIndex: "version" },
                         { title: "积分", dataIndex: "credits" },
-                        { title: "人民币成本", render: (_, record: PriceVersion) => `￥${record.rmbCost.toFixed(4)}` },
-                        { title: "状态", render: (_, record: PriceVersion) => <Tag color={record.status === "published" ? "green" : record.status === "testing" ? "orange" : "default"}>{record.status}</Tag> },
+                        { title: "人民币成本", render: (_, record: PriceVersion) => `￥${record.rmbCost.toFixed(6)}` },
+                        { title: "状态", render: (_, record: PriceVersion) => <Tag color={record.status === "published" ? "green" : record.status === "testing" ? "orange" : "default"}>{adminLabel(record.status)}</Tag> },
                         {
                             title: "操作",
                             render: (_, record: PriceVersion) => (
                                 <Space>
                                     {record.status === "draft" ? (
-                                        <Button size="small" onClick={() => changePriceStatus(record, "test")}>
+                                        <Button size="small" disabled={saving} onClick={() => changePriceStatus(record, "test")}>
                                             测试
                                         </Button>
                                     ) : null}
                                     {record.status === "draft" || record.status === "testing" ? (
-                                        <Button size="small" type="primary" onClick={() => changePriceStatus(record, "publish")}>
+                                        <Button size="small" type="primary" disabled={saving} onClick={() => changePriceStatus(record, "publish")}>
                                             发布
                                         </Button>
                                     ) : null}
@@ -144,7 +175,7 @@ export function ModelPricingPanel({ mode }: { mode: "prices" | "models" }) {
                 />
                 <section className="wb-surface p-5">
                     <h3 className="mb-4 text-base font-semibold">创建价格草稿</h3>
-                    <Form form={priceForm} layout="vertical" initialValues={{ operationType: "image_generation", label: "生成一张图", credits: 8, rmbCost: 0.8 }} onFinish={savePrice}>
+                    <Form form={priceForm} layout="vertical" disabled={saving} onValuesChange={() => setDirty(true)} initialValues={{ operationType: "image_generation", label: "生成一张图", credits: 8, rmbCost: 0.8 }} onFinish={savePrice}>
                         <Form.Item name="operationType" label="操作类型" rules={[{ required: true }]}>
                             <Select options={operationOptions} />
                         </Form.Item>
@@ -155,7 +186,7 @@ export function ModelPricingPanel({ mode }: { mode: "prices" | "models" }) {
                             <InputNumber className="w-full" min={0} />
                         </Form.Item>
                         <Form.Item name="rmbCost" label="人民币成本" rules={[{ required: true }]}>
-                            <InputNumber className="w-full" min={0} precision={4} />
+                            <InputNumber className="w-full" min={0} precision={6} />
                         </Form.Item>
                         <Button className="!h-10" type="primary" htmlType="submit" block>
                             保存草稿
@@ -166,10 +197,12 @@ export function ModelPricingPanel({ mode }: { mode: "prices" | "models" }) {
         );
 
     return (
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
+        <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
             <Table
+                className="min-w-0"
                 rowKey="id"
                 size="small"
+                scroll={{ x: 1280 }}
                 loading={loading}
                 dataSource={models}
                 columns={[
@@ -183,12 +216,13 @@ export function ModelPricingPanel({ mode }: { mode: "prices" | "models" }) {
                         render: (_, record: ServerModel) => (
                             <Space wrap>
                                 {record.capabilities.map((item) => (
-                                    <Tag key={item}>{item}</Tag>
+                                    <Tag key={item}>{adminLabel(item)}</Tag>
                                 ))}
                             </Space>
                         ),
                     },
                     { title: "积分", dataIndex: "creditCost" },
+                    { title: "人民币成本", render: (_, model: ServerModel) => `￥${(model.imageCost?.rmbPerImage ?? getApimartImageCost(model.providerId, model.modelId)?.rmbPerImage ?? model.rmbCost).toFixed(6)}${model.imageCost || getApimartImageCost(model.providerId, model.modelId) ? " / 张" : ""}` },
                     { title: "并发", dataIndex: "concurrencyLimit" },
                     { title: "状态", render: (_, record: ServerModel) => <Tag color={record.enabled ? "green" : "red"}>{record.enabled ? "启用" : "停用"}</Tag> },
                     {
@@ -201,9 +235,9 @@ export function ModelPricingPanel({ mode }: { mode: "prices" | "models" }) {
                     },
                 ]}
             />
-            <section className="wb-surface p-5">
+            <section className="wb-surface min-w-0 p-5">
                 <h3 className="mb-4 text-base font-semibold">{editingModelId ? "编辑模型" : "新增模型"}</h3>
-                <Form form={modelForm} layout="vertical" initialValues={{ capabilities: ["generate"], creditCost: 4, rmbCost: 0.4, concurrencyLimit: 5, enabled: true }} onFinish={saveModel}>
+                <Form form={modelForm} layout="vertical" disabled={saving} onValuesChange={() => setDirty(true)} initialValues={{ capabilities: ["generate"], creditCost: 4, rmbCost: 0.4, concurrencyLimit: 5, enabled: true }} onFinish={saveModel}>
                     <Form.Item name="providerId" label="Provider" rules={[{ required: true }]}>
                         <Select options={providers.map((item) => ({ label: item.name, value: item.id }))} />
                     </Form.Item>
@@ -222,12 +256,13 @@ export function ModelPricingPanel({ mode }: { mode: "prices" | "models" }) {
                     <Form.Item name="capabilities" label="支持能力" rules={[{ required: true }]}>
                         <Select mode="multiple" options={capabilityOptions} />
                     </Form.Item>
+                    {imageCost ? <p className="mb-3 text-xs text-[var(--muted-foreground)]">固定人民币单价 ￥{imageCost.rmbPerImage.toFixed(6)} / 张，按成功出图张数统计；不叠加操作费，也不受板块人民币成本覆盖影响。站内积分单独配置。</p> : null}
                     <div className="grid grid-cols-3 gap-2">
                         <Form.Item name="creditCost" label="积分">
                             <InputNumber className="w-full" min={0} />
                         </Form.Item>
-                        <Form.Item name="rmbCost" label="成本">
-                            <InputNumber className="w-full" min={0} precision={4} />
+                        <Form.Item name="rmbCost" label={imageCost ? "人民币 / 张" : "成本 / 元"}>
+                            <InputNumber className="w-full" min={0} precision={6} readOnly={Boolean(imageCost)} controls={!imageCost} />
                         </Form.Item>
                         <Form.Item name="concurrencyLimit" label="并发">
                             <InputNumber className="w-full" min={1} max={100} />

@@ -27,6 +27,8 @@ function harness(path: string, exportName: string, dependencies: Record<string, 
     const queue: Array<() => void> = [];
     const forms: any[] = [];
     const notices: string[] = [];
+    const confirmations: any[] = [];
+    let confirmed = true;
     let cursor = 0;
     const equal = (first: unknown[], second?: unknown[]) => Boolean(second && first.length === second.length && first.every((value, index) => Object.is(value, second[index])));
     const Form = Object.assign(function MockForm() {}, {
@@ -49,7 +51,8 @@ function harness(path: string, exportName: string, dependencies: Record<string, 
             useRef(initial: unknown) { const index = cursor++; return state[index] ||= { current: initial }; },
             useEffect(effect: () => (() => void) | undefined, deps: unknown[]) { const index = cursor++; if (!equal(deps, effects[index]?.deps)) queue.push(() => { effects[index]?.cleanup?.(); effects[index] = { deps, cleanup: effect() }; }); },
         },
-        antd: new Proxy({ Form, App: { useApp: () => ({ message: { success: (text: string) => notices.push(text), error: (text: string) => notices.push(text) } }) }, Input: { Password: "Password" }, Typography: { Paragraph: "Paragraph" } }, { get: (target, key) => key in target ? target[key as keyof typeof target] : String(key) }),
+        antd: new Proxy({ Form, App: { useApp: () => ({ modal: { confirm: async (options: any) => { confirmations.push(options); return confirmed; } }, message: { success: (text: string) => notices.push(text), warning: (text: string) => notices.push(text), error: (text: string) => notices.push(text) } }) }, Input: { Password: "Password" }, Typography: { Paragraph: "Paragraph" } }, { get: (target, key) => key in target ? target[key as keyof typeof target] : String(key) }),
+        "@/hooks/use-unsaved-guard": { useUnsavedGuard: () => ({ confirmDiscard: async () => true }), useConfirmUnsavedChanges: () => async () => true },
         "lucide-react": new Proxy({}, { get: (_, key) => String(key) }),
         "file-saver": { saveAs() {} }, papaparse: {},
         "react-router-dom": { Link: "Link", Navigate: "Navigate", useNavigate: () => () => {}, useSearchParams: () => [new URLSearchParams(), () => {}] },
@@ -60,7 +63,7 @@ function harness(path: string, exportName: string, dependencies: Record<string, 
     new Function("require", "module", "exports", code)((name: string) => Object.hasOwn(mocks, name) ? mocks[name] : requireModule(name), module, module.exports);
     const render = () => { cursor = 0; const tree = elements(module.exports[exportName]()); for (const effect of queue.splice(0)) effect(); return tree; };
     return {
-        forms, notices, render,
+        forms, notices, render, confirmations, confirm(value: boolean) { confirmed = value; },
         async settle() { let tree = render(); for (let index = 0; index < 12; index++) { await Promise.resolve(); tree = render(); } return tree; },
         dispose() { effects.forEach(effect => effect.cleanup?.()); },
     };
@@ -73,6 +76,33 @@ function deferred<T>() {
 }
 
 describe("account credit contracts", () => {
+    test("credit adjustments start blank and cancelled confirmation never writes", async () => {
+        const person = { id: "person", username: "zhangsan", displayName: "张三", role: "designer", status: "active", creditBalance: 500, monthlyCreditLimit: 500 };
+        const writes: any[] = [];
+        const panel = harness("../src/pages/admin/index.tsx", "default", {
+            "@/stores/use-user-store": { isAdminRole: () => true, useUserStore: (select: Function) => select({ user: { id: "admin", role: "super_admin" } }) },
+            "@/stores/use-module-store": { useModuleStore: (select: Function) => select({ flags: { performance: false } }) },
+            "@/lib/deployment-features": { deploymentFeatures: { oaLoginEnabled: false } },
+            "./admin-overview": { loadAdminOverview: async () => ({ accounts: [person], departments: [], auditLogs: [], errors: [] }), resolveAdminTab: () => "accounts" },
+            "@/services/api/admin-accounts": { adjustAccountCredits: async (...input: any[]) => { writes.push(input); return { user: person }; } },
+        });
+        try {
+            const form = (await panel.settle()).find(element => element.props.name === "admin-credit-adjustment")!;
+            expect(form.props.initialValues).toBeUndefined();
+            expect(panel.forms[0].fields).toEqual({});
+            await form.props.onFinish({ designerId: "person", amount: 0, reason: "原因" });
+            expect(panel.confirmations).toHaveLength(0); expect(writes).toEqual([]);
+            panel.confirm(false);
+            await form.props.onFinish({ designerId: "person", amount: -20, reason: "调整原因" });
+            expect(writes).toEqual([]);
+            expect(panel.confirmations[0].title).toContain("给 张三 扣除 20 积分");
+            expect(panel.confirmations[0].content).toContain("调整后 480");
+            panel.confirm(true);
+            await form.props.onFinish({ designerId: "person", amount: -20, reason: "调整原因" });
+            expect(writes).toEqual([["person", -20, "调整原因"]]);
+            expect(panel.forms[0].fields).toEqual({});
+        } finally { panel.dispose(); }
+    });
     test("new disabled accounts keep the selected state and usage comes from settled ledger totals", async () => {
         const created: any[] = [];
         const panel = harness("../src/pages/admin/index.tsx", "default", {
@@ -133,13 +163,14 @@ describe("account credit contracts", () => {
             expect(department.props.rules[0]({ getFieldValue: () => "designer" }).required).toBe(false);
             expect(department.props.rules[0]({ getFieldValue: () => "department_admin" }).required).toBe(true);
             const monthlyForm = tree.find(element => element.props.form === panel.forms[1] && element.props.onFinish)!;
-            expect(monthlyForm.props.initialValues.monthlyCreditLimit).toBe(0);
+            expect(monthlyForm.props.initialValues).toBeUndefined();
+            expect(panel.forms[0].fields.designerId).toBeUndefined();
             const monthlySelect = elements(monthlyForm).find(element => element.type === "Select")!;
             monthlySelect.props.onChange("second"); expect(panel.forms[1].fields.monthlyCreditLimit).toBe(300);
             monthlySelect.props.onChange("person"); expect(panel.forms[1].fields.monthlyCreditLimit).toBe(0);
             const table = tree.find(element => element.type === "Table" && element.props.dataSource[0]?.id === "person")!;
             const edit = table.props.columns.find((column: any) => column.title === "操作").render(null, person);
-            edit.props.onClick(); tree = panel.render();
+            await edit.props.onClick(); tree = panel.render();
             const accountForm = tree.find(element => element.props.form === panel.forms[2] && element.props.onFinish)!;
             await accountForm.props.onFinish({ ...panel.forms[2].fields, name: person.displayName, quotaRemaining: 1000 });
             expect(sets).toEqual([1000]);
@@ -188,6 +219,17 @@ describe("credit policy panel", () => {
         } finally { panel.dispose(); }
     });
 
+    test("cancelling the global billing confirmation keeps state and performs no write", async () => {
+        const panel = policyHarness(); panel.confirm(false);
+        try {
+            (await panel.settle()).find(element => element.type === "Switch")!.props.onChange(true);
+            const tree = await panel.settle();
+            expect(panel.writes).toEqual([]);
+            expect(panel.confirmations[0].content).toContain("影响全部成员");
+            expect(tree.find(element => element.type === "Switch")!.props.checked).toBe(false);
+        } finally { panel.dispose(); }
+    });
+
     test("only a confirmed save changes the switch and synchronizes deployment flags once", async () => {
         const pending = deferred<any>();
         const panel = policyHarness({ save: () => pending.promise });
@@ -195,6 +237,7 @@ describe("credit policy panel", () => {
             const tree = await panel.settle();
             const toggle = tree.find(element => element.type === "Switch")!;
             toggle.props.onChange(true); toggle.props.onChange(true);
+            await panel.settle();
             expect(panel.writes).toEqual([true]);
             const waiting = panel.render().find(element => element.type === "Switch")!;
             expect(waiting.props.checked).toBe(false); expect(waiting.props.disabled).toBe(true);

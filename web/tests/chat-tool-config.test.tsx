@@ -45,6 +45,11 @@ function chatPageHarness(initial: BusinessConfig, savedImageModelId?: string) {
     const config = { ...defaultConfig, imageModel: "old-image" };
     const deps: Record<string, any> = {
         "@/lib/i18n": i18nHarness,
+        "@/hooks/use-conversation-image-tools": { useConversationImageTools: () => ({ download: async () => undefined, compare() {}, compareDialog: null }) },
+        "@/hooks/use-image-mentions": { useImageMentions: ({ onChange }: { onChange: (value: string) => void }) => ({ menu: null, inputProps: {}, handleChange: (event: { target: { value: string } }) => onChange(event.target.value), handleSelect() {}, handleKeyDown: () => false }) },
+        "@/hooks/use-copy-text": { useCopyText: () => async () => true },
+        // External drops have isolated browser coverage; this harness owns no React context.
+        "@/hooks/use-image-drop": { useImageDrop: () => ({ dropProps: {}, dragging: false, reading: false }) },
         react: { ...React, useState, useMemo, useCallback: (callback: unknown, dependencies?: DependencyList) => useMemo(() => callback, dependencies),
             useRef: (value: unknown) => { const index = cursor++; return values[index] ||= { current: value }; },
             useEffect: (effect: EffectCallback, dependencies?: DependencyList) => {

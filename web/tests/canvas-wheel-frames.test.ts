@@ -68,7 +68,8 @@ function harness(initial: ViewportTransform = { x: 120, y: -30, k: 0.5 }) {
         pending.forEach(callback => callback());
     };
     return {
-        wheel: (deltaY: number, clientX = 820, clientY = 440, deltaMode = 0) => callbacks.handleWheel({ target: null, deltaY, clientX, clientY, deltaMode }),
+        wheel: (deltaY: number, clientX = 820, clientY = 440, deltaMode = 0) => callbacks.handleWheel({ target: null, deltaY, deltaX: 0, ctrlKey: true, clientX, clientY, deltaMode }),
+        pan: (deltaX: number, deltaY: number, deltaMode = 0) => callbacks.handleWheel({ target: null, deltaX, deltaY, clientX: 820, clientY: 440, deltaMode }),
         flushFrame: () => flush(frames),
         finish: () => flush(timers),
         preview: (next: ViewportTransform) => callbacks.previewViewport(next),
@@ -83,6 +84,13 @@ function harness(initial: ViewportTransform = { x: 120, y: -30, k: 0.5 }) {
 }
 
 describe("canvas wheel frame scheduling", () => {
+    test("plain two-axis scrolling pans without changing scale, including horizontal-only input", () => {
+        const canvas = harness();
+        canvas.pan(40, 10);
+        canvas.pan(20, 0);
+        canvas.flushFrame(); canvas.finish();
+        expect(canvas.commits.at(-1)).toEqual({ x: 60, y: -40, k: 0.5 });
+    });
     test("reads layout and paints once per input frame while preserving changing anchors and reversals", () => {
         const canvas = harness();
         const events = [

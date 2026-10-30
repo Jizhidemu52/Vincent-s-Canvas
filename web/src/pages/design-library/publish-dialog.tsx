@@ -4,6 +4,7 @@ import { Alert, App, Button, Checkbox, Form, Input, Modal, Select, Tag } from "a
 import { ImagePlus, X } from "lucide-react";
 
 import { createClientId } from "@/lib/client-id";
+import { useImageDrop } from "@/hooks/use-image-drop";
 import { formatBytes } from "@/lib/image-utils";
 import { publishDesignLibrary } from "@/services/api/design-library";
 import { listServerAssets, uploadServerAsset, type ServerAsset } from "@/services/api/server-assets";
@@ -68,16 +69,20 @@ export function PublishDialog({ onClose, onPublished, initialDraft }: { onClose:
         finally { if (mounted.current) setAssetLoading(false); }
     };
 
-    const addFiles = (selected: FileList | null) => {
-        if (!selected) return;
+    const addFiles = (selected: FileList | File[] | null) => {
+        if (!selected || busyRef.current || !ownerId || useUserStore.getState().user?.id !== ownerId) return;
         const incoming = Array.from(selected);
+        if (!incoming.length) return;
         if (incoming.some(file => !supportedTypes.has(file.type) || file.size > 20 * 1024 * 1024 || !file.size)) {
             message.error(t("请选择 PNG、JPG、WebP 或 GIF 图片，每张不超过 20 MB。")); return;
         }
-        if (files.length + selectedIds.length + incoming.length > 12) { message.warning(t("每次最多分享 12 张图片")); return; }
+        if (filesRef.current.length + selectedIds.length + incoming.length > 12) { message.warning(t("每次最多分享 12 张图片")); return; }
         dirty.current = true; setAcknowledged(false);
-        setFiles(current => [...current, ...incoming.map(file => ({ id: createClientId(), file, preview: URL.createObjectURL(file) }))]);
+        const next = [...filesRef.current, ...incoming.map(file => ({ id: createClientId(), file, preview: URL.createObjectURL(file) }))];
+        filesRef.current = next; setFiles(next);
     };
+
+    const imageDrop = useImageDrop({ scopeKey: "design-library:publish-draft", disabled: busy || !ownerId, onFiles: addFiles });
 
     const close = () => {
         if (busyRef.current) return;
@@ -86,7 +91,7 @@ export function PublishDialog({ onClose, onPublished, initialDraft }: { onClose:
     };
 
     const publish = async () => {
-        if (busyRef.current || !ownerId || !acknowledged) return;
+        if (busyRef.current || imageDrop.reading || !ownerId || !acknowledged) return;
         busyRef.current = true; setBusy(true);
         try {
             const assertOwner = () => { if (!mounted.current || useUserStore.getState().user?.id !== ownerId) throw new Error(t("员工身份已变化，请重新打开发布窗口")); };
@@ -113,20 +118,23 @@ export function PublishDialog({ onClose, onPublished, initialDraft }: { onClose:
         finally { busyRef.current = false; if (mounted.current) setBusy(false); }
     };
 
-    return <Modal open title={t("发布到公司设计灵感库")} width={920} onCancel={close} maskClosable={!busy} closable={!busy} keyboard={!busy} footer={<div className="flex flex-wrap justify-end gap-2"><Button disabled={busy} onClick={close}>{t("取消")}</Button><Button type="primary" loading={busy} disabled={!acknowledged} onClick={() => void publish()}>{t("确认公开并发布")}</Button></div>}>
+    return <Modal open title={t("发布到公司设计灵感库")} width={920} onCancel={close} maskClosable={!busy} closable={!busy} keyboard={!busy} footer={<div className="flex flex-wrap justify-end gap-2"><Button disabled={busy} onClick={close}>{t("取消")}</Button><Button type="primary" loading={busy} disabled={!acknowledged || imageDrop.reading} onClick={() => void publish()}>{t("确认公开并发布")}</Button></div>}>
         <div className="grid gap-6 py-3 lg:grid-cols-[1.2fr_1fr]">
             <Form form={form} layout="vertical" disabled={busy} initialValues={draft ? { title: draft.title, thought: draft.thought, prompt: draft.prompt, tags: draft.tags } : { title: "", thought: "", prompt: "", tags: [] }} onValuesChange={() => { dirty.current = true; setAcknowledged(false); }}>
                 <Form.Item label={t("作品标题")} name="title" rules={[{ required: true, whitespace: true, message: t("请填写作品标题") }, { max: 120 }]}><Input maxLength={120} placeholder={t("例如：春夏植物印花的色彩与构图探索")} /></Form.Item>
                 <Form.Item label={t("设计思路")} name="thought"><Input.TextArea rows={4} maxLength={12000} showCount placeholder={t("分享你的灵感、设计判断或尝试过程（选填）")} /></Form.Item>
                 <Form.Item label={t("生图提示词")} name="prompt"><Input.TextArea rows={4} maxLength={12000} showCount placeholder={t("只粘贴你愿意向全公司公开的提示词（选填）")} /></Form.Item>
                 <Form.Item label={t("标签")} name="tags" rules={[{ validator: (_, value: string[]) => value?.some(tag => tag.length > 32) ? Promise.reject(new Error(t("每个标签不超过 32 字"))) : Promise.resolve() }]}><Select mode="tags" maxCount={8} tokenSeparators={[",", "，"]} placeholder={t("输入标签后按回车，最多 8 个")} options={[]} /></Form.Item>
-                <div className="flex flex-wrap items-center justify-between gap-2"><span className="font-medium">{t("分享图片 ·")} {files.length + selectedIds.length}/12</span><Button icon={<ImagePlus size={16} />} onClick={() => inputRef.current?.click()}>{t("选择本地图片")}</Button></div>
+                <section {...imageDrop.dropProps} aria-label={t("分享图片")} aria-busy={imageDrop.reading} className={imageDrop.dragging ? "rounded-lg outline outline-2 outline-offset-2 outline-primary" : undefined}>
+                {imageDrop.dragging || imageDrop.reading ? <p role="status" className="mb-3 rounded-lg bg-primary/10 p-3 text-sm">{t(imageDrop.dragging ? "松开以添加到分享草稿，不会自动发布。" : "正在读取拖入图片，请稍候。")}</p> : null}
+                <div className="flex flex-wrap items-center justify-between gap-2"><span className="font-medium">{t("分享图片 ·")} {files.length + selectedIds.length}/12</span><Button disabled={imageDrop.reading} icon={<ImagePlus size={16} />} onClick={() => inputRef.current?.click()}>{t("选择本地图片")}</Button></div>
                 <input ref={inputRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden onChange={event => { addFiles(event.target.files); event.target.value = ""; }} />
                 <p className="my-2 text-xs text-muted-foreground">{t("每张 ≤20 MB，合计 ≤100 MB；按原始图片字节分享。")}</p>
                 <div className="mb-3 grid grid-cols-3 gap-2">{files.map(item => <div key={item.id} className="relative overflow-hidden rounded-lg border border-border"><img className="h-24 w-full object-contain" src={item.preview} alt={item.file.name} /><div className="truncate p-1 text-xs" title={item.file.name}>{item.file.name}</div><button type="button" disabled={busy} aria-label={t("移除 {p0}", { p0: String(item.file.name) })} className="absolute right-1 top-1 rounded-full bg-background p-1" onClick={() => { URL.revokeObjectURL(item.preview); setFiles(current => current.filter(file => file.id !== item.id)); setAcknowledged(false); }}><X size={14} /></button></div>)}</div>
                 <Select className="w-full" mode="multiple" value={selectedIds} loading={assetLoading} maxCount={12 - files.length} placeholder={t("或从我的私有图片选择")} optionFilterProp="label" onOpenChange={open => { if (open && !assetsLoaded) void loadAssets(); }} options={assets.map(asset => ({ value: asset.id, label: `${asset.filename} · ${formatBytes(asset.byteSize)}` }))} onChange={ids => { dirty.current = true; setSelectedIds(ids); setAcknowledged(false); }} />
                 {assetError && <Alert className="mt-2" type="warning" title={assetError} action={<Button size="small" onClick={() => void loadAssets()}>{t("重试")}</Button>} />}
                 {assetCursor ? <Button className="mt-2" block loading={assetLoading} onClick={() => void loadAssets(assetCursor)}>{t("加载更多私有图片")}</Button> : null}
+                </section>
             </Form>
             <aside className="space-y-4 rounded-xl bg-muted/40 p-4">
                 <div><div className="mb-1 text-xs font-semibold tracking-wide text-muted-foreground">{t("发布前核对 · 全公司设计师可见")}</div><h3 className="break-words text-lg font-semibold">{title}</h3></div>

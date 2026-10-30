@@ -16,6 +16,7 @@ import { createFeaturedModelsRouter } from "./featured-models";
 import { withTransaction } from "../db-transaction";
 import { applyDefaultChatModel, DEFAULT_CHAT_MODEL_TOOL_KEY } from "../chat-model-policy";
 import { readToolConfiguration } from "../tool-configuration";
+import { getApimartImageCost } from "../../../shared/apimart-image-costs";
 
 const protocol = z.enum(["openai", "openai-chat", "anthropic", "gemini", "apimart", "volcengine", "runninghub", "comfyui", "custom"]);
 const capabilities = z.array(z.enum(["generate", "edit", "upscale", "remove_background", "batch", "chat", "video", "audio"])).min(1);
@@ -86,6 +87,7 @@ export function createModelConfigurationRouter(db: Database, config: AppConfig) 
     router.post("/models", async (request, response, next) => {
         try {
             const input = modelInput.parse(request.body); const actor = (request as unknown as AuthenticatedRequest).auth;
+            input.rmbCost = getApimartImageCost(input.providerId, input.modelId)?.rmbPerImage ?? input.rmbCost;
             if (input.replacementModelConfigId && !(await db.query("SELECT 1 FROM model_configs WHERE id=$1", [input.replacementModelConfigId])).rows[0]) { response.status(400).json({ error: "INVALID_MODEL_REPLACEMENT", message: "替代模型不存在" }); return; }
             const result = await db.query(`INSERT INTO model_configs(provider_id,workflow_config_id,replacement_model_config_id,name,model_id,capabilities,credit_cost,rmb_cost,concurrency_limit,enabled,created_by)
                 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`, [input.providerId, input.workflowConfigId ?? null, input.replacementModelConfigId ?? null, input.name, input.modelId, input.capabilities, input.creditCost, input.rmbCost, input.concurrencyLimit, input.enabled, actor.id]);
@@ -100,6 +102,7 @@ export function createModelConfigurationRouter(db: Database, config: AppConfig) 
             const current = await db.query(`SELECT ${modelSelect} FROM model_configs m JOIN providers p ON p.id=m.provider_id LEFT JOIN workflow_configs w ON w.id=m.workflow_config_id WHERE m.id=$1`, [request.params.id]);
             if (!current.rows[0]) { response.status(404).json({ error: "NOT_FOUND", message: "模型不存在" }); return; }
             const value = { ...current.rows[0], ...input };
+            value.rmbCost = getApimartImageCost(value.providerId, value.modelId)?.rmbPerImage ?? value.rmbCost;
             await assertValidModelReplacement(db, request.params.id, value.replacementModelConfigId ?? null);
             await db.query(`UPDATE model_configs SET provider_id=$1,workflow_config_id=$2,replacement_model_config_id=$3,name=$4,model_id=$5,capabilities=$6,credit_cost=$7,rmb_cost=$8,concurrency_limit=$9,enabled=$10,updated_at=now() WHERE id=$11`,
                 [value.providerId, value.workflowConfigId ?? null, value.replacementModelConfigId ?? null, value.name, value.modelId, value.capabilities, value.creditCost, value.rmbCost, value.concurrencyLimit, value.enabled, request.params.id]);
@@ -126,7 +129,11 @@ export function createModelConfigurationRouter(db: Database, config: AppConfig) 
                 ...(rows.find((row) => row.toolKey === definition.toolKey) || { modelConfigId: null, enabled: true, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 0 }),
                 capabilities: definition.capabilities,
                 price: prices.find((price) => price.operationType === definition.operationType) || null,
-            }))) });
+            }))).map(tool => {
+                const identity: Record<string, unknown> = tool;
+                const imageCost = getApimartImageCost(identity.providerId, identity.modelId);
+                return imageCost ? { ...tool, imageCost, modelRmbCost: imageCost.rmbPerImage } : tool;
+            }) });
         } catch (error) { next(error); }
     });
     router.put("/tool-configurations/:toolKey", async (request, response, next) => {

@@ -1,4 +1,5 @@
 import { saveAs } from "file-saver";
+import { uiText } from "@/lib/i18n";
 
 import { createZip, type ZipOptions } from "@/lib/zip";
 import { getMediaBlob } from "@/services/file-storage";
@@ -16,7 +17,7 @@ import { encodeCanvasProject } from "./canvas-project-codec";
 import { mapCanvasAsyncPool } from "./canvas-async-pool";
 import { checkCanvasImageAbort, type CanvasImageTaskOptions } from "./canvas-image-worker";
 
-export async function exportCanvasProjects(projects: CanvasProject[], fileName = "无线画布", options: ZipOptions = {}) {
+export async function exportCanvasProjects(projects: CanvasProject[], fileName = uiText("无限画布"), options: ZipOptions = {}) {
     saveAs(await createCanvasProjectsArchive(projects, {}, options), `${safeFileName(fileName)}.zip`);
 }
 

@@ -1,7 +1,7 @@
 import { useUiText } from "@/lib/i18n";
 import { canvasActionLabel, canvasActionShortcut, type CanvasActionId } from "@/lib/canvas/canvas-actions";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { Copy, Download, FolderPlus, PencilLine, Plus, Trash2, Upload } from "lucide-react";
+import { Copy, Download, FolderPlus, PencilLine, Plus, Trash2, Upload, ClipboardPaste, Focus, Layers, Type, CheckSquare } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -20,6 +20,13 @@ type CanvasContextMenuProps = {
     onGenerate?: () => void;
     onRename?: () => void;
     onGroup?: () => void;
+    onPaste?: () => void;
+    onAddText?: () => void;
+    onSelectAll?: () => void;
+    onFitAll?: () => void;
+    onBringFront?: () => void;
+    onSendBack?: () => void;
+    onCopyPrompt?: () => void;
 };
 
 export function canvasContextMenuPosition(x: number, y: number, width: number, height: number, viewport: { width: number; height: number }) {
@@ -29,7 +36,7 @@ export function canvasContextMenuPosition(x: number, y: number, width: number, h
     return { left: Math.max(margin, Math.min(x, viewport.width - fittedWidth - margin)), top: Math.max(margin, Math.min(y, viewport.height - fittedHeight - margin)), width: fittedWidth, maxHeight: Math.max(0, viewport.height - margin * 2) };
 }
 
-export function CanvasNodeContextMenu({ menu, targetCount = 1, imageCount = 0, onDownloadImages, onClose, onDuplicate, onDelete, onUpload, onGenerate, onRename, onGroup }: CanvasContextMenuProps) {
+export function CanvasNodeContextMenu({ menu, targetCount = 1, imageCount = 0, onDownloadImages, onClose, onDuplicate, onDelete, onUpload, onGenerate, onRename, onGroup, onPaste, onAddText, onSelectAll, onFitAll, onBringFront, onSendBack, onCopyPrompt }: CanvasContextMenuProps) {
     const t = useUiText();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const canGenerate = useModuleEnabled("canvas-image");
@@ -41,8 +48,8 @@ export function CanvasNodeContextMenu({ menu, targetCount = 1, imageCount = 0, o
     const isMultiTarget = menu.type === "node" && targetCount > 1;
     const canRename = menu.type === "node" && !isMultiTarget && Boolean(onRename);
     const canDownload = menu.type === "node" && imageCount > 0 && Boolean(onDownloadImages);
-    const itemCount = menu.type === "canvas" ? Number(Boolean(onUpload)) + Number(Boolean(onGroup)) + Number(canGenerate && Boolean(onGenerate))
-        : (menu.type === "node" ? 2 + Number(canRename) + Number(canDownload) : 1) + Number(Boolean(onGroup));
+    const itemCount = menu.type === "canvas" ? [onUpload, onGroup, canGenerate && onGenerate, onPaste, onAddText, onSelectAll, onFitAll].filter(Boolean).length
+        : (menu.type === "node" ? 2 + Number(canRename) + Number(canDownload) + [onBringFront, onSendBack, onCopyPrompt].filter(Boolean).length : 1) + Number(Boolean(onGroup));
     const [position, setPosition] = useState(() => canvasContextMenuPosition(menu.x, menu.y, 300, 10 + itemCount * 32 + Math.max(0, itemCount - 1) * 4, { width: window.innerWidth, height: window.innerHeight }));
 
     useLayoutEffect(() => {
@@ -105,9 +112,20 @@ export function CanvasNodeContextMenu({ menu, targetCount = 1, imageCount = 0, o
             onKeyDown={onKeyDown}
         >
             {menu.type === "canvas" && onUpload ? <MenuButton icon={<Upload className="size-4" />} action="upload" onClick={() => choose(onUpload)} /> : null}
+            {menu.type === "canvas" ? <>
+                {onPaste ? <MenuButton icon={<ClipboardPaste className="size-4" />} action="pasteHere" onClick={() => choose(onPaste)} /> : null}
+                {onAddText ? <MenuButton icon={<Type className="size-4" />} action="text" onClick={() => choose(onAddText)} /> : null}
+                {onSelectAll ? <MenuButton icon={<CheckSquare className="size-4" />} action="selectAll" onClick={() => choose(onSelectAll)} /> : null}
+                {onFitAll ? <MenuButton icon={<Focus className="size-4" />} action="resetView" onClick={() => choose(onFitAll)} /> : null}
+            </> : null}
             {menu.type === "node" ? <MenuButton icon={<Copy className="size-4" />} action="duplicate" targetCount={targetCount} onClick={() => choose(onDuplicate)} /> : null}
             {canDownload && onDownloadImages ? <MenuButton icon={<Download className="size-4" />} action="downloadSelectedImages" targetCount={imageCount} onClick={() => choose(onDownloadImages)} /> : null}
             {canRename && onRename ? <MenuButton icon={<PencilLine className="size-4" />} action="rename" onClick={() => choose(onRename)} /> : null}
+            {menu.type === "node" ? <>
+                {onBringFront ? <MenuButton icon={<Layers className="size-4" />} action="bringFront" onClick={() => choose(onBringFront)} /> : null}
+                {onSendBack ? <MenuButton icon={<Layers className="size-4" />} action="sendBack" onClick={() => choose(onSendBack)} /> : null}
+                {onCopyPrompt ? <MenuButton icon={<Copy className="size-4" />} action="copyPrompt" onClick={() => choose(onCopyPrompt)} /> : null}
+            </> : null}
             {onGroup ? <MenuButton icon={<FolderPlus className="size-4" />} action="group" onClick={() => choose(onGroup)} /> : null}
             {menu.type === "canvas" ? canGenerate && onGenerate && <MenuButton icon={<Plus className="size-4" />} action="generate" onClick={() => choose(onGenerate)} /> : <MenuButton icon={<Trash2 className="size-4" />} action="delete" targetCount={isMultiTarget ? targetCount : 1} onClick={() => choose(onDelete)} />}
         </div>
@@ -124,7 +142,7 @@ export function MenuButton({ icon, action, targetCount = 1, onClick }: { icon: R
             onFocus={event => { event.currentTarget.style.background = theme.toolbar.itemHover; }} onBlur={event => { event.currentTarget.style.background = "transparent"; }}
             onClick={(event) => { event.preventDefault(); event.stopPropagation(); onClick(); }}>
             {icon}
-            <span>{canvasActionLabel(action, "context", targetCount)}</span><span className="ml-auto text-[10px] opacity-50">{canvasActionShortcut(action)}</span>
+            <span>{canvasActionLabel(action, "context", targetCount)}</span><span className="ml-auto text-xs opacity-50">{canvasActionShortcut(action)}</span>
         </button>
     );
 }

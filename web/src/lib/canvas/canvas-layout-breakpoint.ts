@@ -4,7 +4,3 @@ export const CANVAS_DESKTOP_MEDIA_QUERY = `(min-width: ${CANVAS_DESKTOP_BREAKPOI
 export function isCanvasDesktopLayout(viewportWidth: number) {
     return viewportWidth >= CANVAS_DESKTOP_BREAKPOINT;
 }
-
-export function shouldOpenCanvasCreationPanel(nodeCount: number, viewportWidth: number) {
-    return nodeCount === 0 && viewportWidth >= 1440;
-}

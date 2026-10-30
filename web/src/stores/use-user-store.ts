@@ -5,7 +5,7 @@ import { broadcastWorkspaceIdentity } from "@/lib/workspace-session-events";
 import { isWorkspaceRole } from "../../../shared/workspace-access";
 
 export type LocalUser = ApiUser & { avatarUrl: string };
-export type AuthStatus = "idle" | "loading" | "authenticated" | "guest";
+export type AuthStatus = "idle" | "loading" | "authenticated" | "expired" | "guest";
 
 type UserStore = {
     user: LocalUser | null;
@@ -15,6 +15,8 @@ type UserStore = {
     loginWithPassword: (identifier: string, password: string, portal: "designer" | "admin") => Promise<LocalUser>;
     clearSession: () => Promise<void>;
     invalidateSession: () => void;
+    expireSession: () => void;
+    reauthenticate: (password: string) => Promise<void>;
     updateUser: (user: ApiUser) => void;
 };
 
@@ -44,9 +46,13 @@ export const useUserStore = create<UserStore>((set, get) => ({
             .catch((error: unknown) => {
                 if (epoch !== sessionEpoch || rejectedOaToken) return;
                 // Preserve only an identity already verified in this page lifetime.
-                // Server APIs still authorize every request; 401/403 fail closed.
+                // Expired sessions retain only their old local drafts, not API authority.
                 const transient = error instanceof AuthRequestError && (error.status === null || error.status >= 500);
                 if (knownUser && transient) return;
+                if (knownUser && error instanceof AuthRequestError && error.status === 401) {
+                    set({ user: knownUser, status: "expired" });
+                    return;
+                }
                 set({ user: null, status: "guest" });
             })
             .finally(() => { if (hydration === pending) hydration = null; });
@@ -112,6 +118,30 @@ export const useUserStore = create<UserStore>((set, get) => ({
         invalidateSessionRequests();
         rejectedOaToken = true;
         set({ user: null, status: "guest" });
+    },
+    expireSession: () => {
+        if (get().status !== "authenticated" || !get().user) return;
+        invalidateSessionRequests();
+        set({ status: "expired" });
+    },
+    reauthenticate: async (password) => {
+        const previous = get().user;
+        if (!previous || get().status !== "expired") throw new Error("请重新打开登录页面");
+        const epoch = invalidateSessionRequests();
+        rejectedOaToken = true;
+        let user: ApiUser;
+        try { ({ user } = await loginWithPassword(previous.username, password, isAdminRole(previous.role) ? "admin" : "designer")); }
+        finally { if (epoch === sessionEpoch) rejectedOaToken = false; }
+        if (epoch !== sessionEpoch) throw new Error("登录请求已被新的身份操作替代");
+        // A different identity may never resume the old employee's mounted tools.
+        if (user.id !== previous.id || user.role !== previous.role || user.status !== "active") {
+            set({ user: null, status: "guest" });
+            broadcastWorkspaceIdentity(null);
+            throw new Error("登录账号已变化，请重新进入工作区");
+        }
+        rejectedOaToken = false;
+        set({ user: { ...user, avatarUrl: "" }, status: "authenticated" });
+        broadcastWorkspaceIdentity(isWorkspaceRole(user.role) ? user.id : null);
     },
     updateUser: (user) => {
         invalidateSessionRequests();

@@ -58,7 +58,7 @@ function sessionActions() {
         render(index = 0) {
             instance = index; cursor = 0;
             const tree = module.exports.PersonalSessionActions({ onSignedOut: () => calls.push("close") });
-            return { tree, elements: elements(tree), button: elements(tree).find(element => element.type === "button") };
+            return { tree, elements: elements(tree), button: elements(tree).find(element => element.type === "button" && element.props["aria-label"] === "退出登录") };
         },
     };
 }
@@ -152,6 +152,8 @@ test("an identity change during saving or logout does not log out or navigate th
 test("desktop footer and mobile drawer mount the same guarded personal account action", () => {
     const desktop = readFileSync(new URL("../src/components/layout/app-top-nav.tsx", import.meta.url), "utf8");
     const mobile = readFileSync(new URL("../src/components/layout/mobile-nav-drawer.tsx", import.meta.url), "utf8");
-    expect(desktop).toContain("<PersonalSessionActions />");
-    expect(mobile).toContain("<PersonalSessionActions onSignedOut={onClose} />");
+    const footer = readFileSync(new URL("../src/components/layout/navigation-footer.tsx", import.meta.url), "utf8");
+    expect(desktop).toContain("<NavigationFooter />");
+    expect(mobile).toContain("<NavigationFooter onNavigate={onClose} />");
+    expect(footer).toContain("<PersonalSessionActions onSignedOut={onNavigate} />");
 });

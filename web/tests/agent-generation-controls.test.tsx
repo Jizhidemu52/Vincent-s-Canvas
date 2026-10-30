@@ -53,11 +53,14 @@ test("Agent parameters reflect standard pixel sizes and quality instead of fabri
 
 test("Agent preserves Gemini 0.5K resolution but fixes every adapter to one task", () => {
     expect(controls({ imageModel: "nano-banana-2" }).markup).toContain(">0.5K</button>");
-    const markup = controls().markup;
-    expect(markup).toContain("1 个任务");
+    const result = controls();
+    const markup = result.markup;
+    expect(markup).not.toContain("1 个任务");
     expect(markup).not.toContain('aria-label="生成张数"');
     expect(markup).not.toContain('type="range"');
     expect(markup).toContain(">4K</button>");
+    result.effects.forEach((effect) => effect());
+    expect(result.changes).toContainEqual(expect.objectContaining({ imageCount: "1" }));
 });
 
 test("Midjourney shows speed and reference policy, not resolution or a useless output count selector", () => {

@@ -2,6 +2,7 @@ import { uiText } from "@/lib/i18n";
 import { setWorkbenchText, watchWorkbenchUi } from "../ui-text.js";
 import { PROJECT_VERSION, MAX_LAYERS, clone, clamp, canvasPoint, pointInLayer, checkDimensions, validateProject, resizeBase } from "./model.js";
 import { createProjectSession, mountProjectBar, sameProject } from "../project-session.js";
+import { bindLocalImageDrop } from "../image-drop";
 
 const STORAGE_KEY = "garment-pattern-placement-v1";
 const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
@@ -118,7 +119,7 @@ export async function mountPlacement(root, services) {
           <p class="placement-intro"><span data-ui-text="先选服装，再放图案。拖动胸前花朵，试试新的位置与比例。">先选服装，再放图案。拖动胸前花朵，试试新的位置与比例。</span></p>
           <button class="btn placement-upload" data-action="upload-base"><span data-ui-text="替换服装底图">替换服装底图</span></button>
           ${services.pickImage ? "<button class=\"btn ghost placement-upload\" data-action=\"asset-base\"><span data-ui-text=\"从素材库选择底图\">从素材库选择底图</span></button>" : ""}
-          <p class="hint"><span data-ui-text="PNG / JPG / WebP，单张 ≤ 15 MB">PNG / JPG / WebP，单张 ≤ 15 MB</span><br><span data-ui-text="原图保持不变，仅在工作台中合成。">原图保持不变，仅在工作台中合成。</span></p>
+          <p class="hint"><span data-ui-text="PNG / JPG / WebP，单张 ≤ 15 MB">PNG / JPG / WebP，单张 ≤ 15 MB</span><br><span data-ui-text="原图保持不变，仅在工作台中合成。">原图保持不变，仅在工作台中合成。</span><br><span data-ui-text="拖到底图按钮可替换底图；拖到画布可添加图案。">拖到底图按钮可替换底图；拖到画布可添加图案。</span></p>
           <div class="placement-divider"></div>
           <div class="section-title"><span data-ui-text="添加图案">添加图案</span></div>
           <div class="placement-materials">
@@ -337,7 +338,7 @@ export async function mountPlacement(root, services) {
         const image = await getImage(src);
         checkDimensions(image.naturalWidth, image.naturalHeight);
         await materializeImages();
-        if (!live || sequence !== operation) return;
+        if (!live || sequence !== operation || projects.view().switching) return;
         if (state.layers.length >= MAX_LAYERS) throw new Error("最多支持 30 个图案图层。");
         mutate(() => {
             const layer = {
@@ -366,6 +367,34 @@ export async function mountPlacement(root, services) {
         await projects.create(name, project);
         notify("已导入为新工程，原有工程保留。");
     }
+
+    async function importImage(file, kind, operation) {
+        const src = await readImageFile(file);
+        if (!live || sequence !== operation || projects.view().switching) return;
+        if (kind === "art") return addArtwork(src, file.name.slice(0, 80), operation);
+        const image = await getImage(src);
+        checkDimensions(image.naturalWidth, image.naturalHeight);
+        await materializeImages();
+        if (!live || sequence !== operation || projects.view().switching) return;
+        mutate(() => { state = resizeBase(state, { src, name: file.name.slice(0, 80), width: image.naturalWidth, height: image.naturalHeight }); });
+        notify("服装底图已替换；图案按新底图尺寸调整位置。原文件未修改。");
+    }
+
+    bindLocalImageDrop(root, services, {
+        scopeKey: () => sequence,
+        disabled: () => !live || exporting || !projects.view().ready || projects.view().switching,
+        onFiles: async (files, target) => {
+            const kind = target?.closest("[data-action=upload-base]") ? "base" : "art";
+            if (kind === "base" && files.length !== 1) throw new Error("每个参考图位置一次只能拖入一张图片，请分别放入对应位置。");
+            if (kind === "art" && state.layers.length + files.length > MAX_LAYERS) throw new Error("最多支持 30 个图案图层，请先删除不需要的图层。");
+            flushEdit();
+            const operation = sequence;
+            for (const file of files) {
+                if (!live || operation !== sequence) return;
+                await importImage(file, kind, operation);
+            }
+        },
+    });
 
     async function action(name) {
         flushEdit();
@@ -553,19 +582,7 @@ export async function mountPlacement(root, services) {
                     }
                     await importProject(project, operation, file.name.replace(/\.json$/i, "").slice(0, 80));
                 } else {
-                    const src = await readImageFile(file);
-                    if (!live || sequence !== operation) return;
-                    if (kind === "art") await addArtwork(src, file.name.slice(0, 80), operation);
-                    else {
-                        const image = await getImage(src);
-                        checkDimensions(image.naturalWidth, image.naturalHeight);
-                        await materializeImages();
-                        if (!live || sequence !== operation) return;
-                        mutate(() => {
-                            state = resizeBase(state, { src, name: file.name.slice(0, 80), width: image.naturalWidth, height: image.naturalHeight });
-                        });
-                        notify("服装底图已替换；图案按新底图尺寸调整位置。原文件未修改。");
-                    }
+                    await importImage(file, kind, operation);
                 }
             } catch (error) {
                 errorMessage(error);

@@ -89,7 +89,8 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
         owner.effects.forEach(effect => effect.cleanup?.());
     };
     const message = { success() {}, info() {}, warning: (warning: string) => warnings.push(warning), error: (error: string) => errors.push(error) };
-    const app = { message, modal: { confirm() {} } };
+    const confirmations: Array<{ onOk?: () => unknown }> = [];
+    const app = { message, modal: { confirm(options: { onOk?: () => unknown }) { confirmations.push(options); } } };
     const updateConfig = (key: string, value: unknown) => { config[key] = value; };
     const configState = { config, updateConfig, openConfigDialog() {} };
     const userState = () => ({ user: { id: ownerId, status: "active", role: "designer", creditBalance: 100 } });
@@ -151,6 +152,11 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
         "@/stores/use-business-config-store": { useBusinessConfigStore: (select: Function) => select({ models, estimate: () => ({ configured: true, credits: 0 }) }) },
         "@/stores/use-asset-store": { useAssetStore: (select: Function) => select({ addAsset() {} }) },
         "@/hooks/use-workbench-field": { useWorkbenchField: (_key: string, initialValue: unknown) => useState(initialValue) },
+        "@/hooks/use-generation-draft": { useGenerationDraft: (_key: string, initialValue: unknown) => [...useState(initialValue), true] },
+        // External DOM drag behavior has its own real-browser suite; this harness owns workspace state only.
+        "@/hooks/use-image-drop": { useImageDrop: () => ({ dropProps: {}, dragging: false, reading: false }) },
+        "@/hooks/use-unsaved-guard": { useUnsavedGuard: () => ({ confirmDiscard: async () => true }) },
+        "@/hooks/use-result-canvas": { useResultCanvas: () => ({ enabled: false, busy: false }) },
         "@/hooks/use-image-copy-editor": { useImageCopyEditor: () => ({ node: null }) },
         "@/pages/design-library/use-design-library-share": { useDesignLibraryShare: () => ({ canShare: false, busy: false }) },
         "@/hooks/use-can-manage-config": { useCanManageConfig: () => false },
@@ -181,6 +187,7 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
         ["@/components/prompts/prompt-select-dialog", "PromptSelectDialog"], ["@/components/canvas/asset-picker-modal", "AssetPickerModal"],
         ["./image-log-thumbnail", "ImageLogThumbnail"], ["../creative/garment-recipe-panel", "GarmentRecipePanel"],
     ]) dependencies[path!] = { [name!]: component(name!) };
+    Object.assign(dependencies["@/components/image-settings-panel"], { imageQualityLabel: (value: string) => value, imageSizeLabel: (value: string) => value });
     const workspaceModule = { exports: {} };
     const workspaceCode = ts.transpileModule(readFileSync(new URL("../src/hooks/use-generation-workspace.ts", import.meta.url), "utf8"), {
         compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ESNext },
@@ -217,7 +224,7 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
     const unmount = () => { cleanup(workspace); cleanup(wrapper); };
     disposers.push(unmount);
     return {
-        boundary, render, stored, requests, errors, warnings, config,
+        boundary, render, stored, requests, errors, warnings, config, confirmations,
         setRestoredDraft(value: Record<string, any>) { restoredDraft = value; },
         navigate(tool: string, query = "") { params = new URLSearchParams(`tool=${tool}${query ? `&${query}` : ""}`); },
         setOwner(value: string) { ownerId = value; },
@@ -254,6 +261,7 @@ describe("image workspace isolation", () => {
         page.panels()[0].onPreviewLog(page.panels()[0].logs[0]);
         await page.settle();
         elements(page.render()).find(element => element.props.children === "恢复为草稿继续改")!.props.onClick();
+        await page.confirmations.at(-1)?.onOk?.();
         await page.settle();
         expect(page.errors).toEqual([]);
         expect(page.prompt().value).toBe("original user input");
@@ -271,6 +279,7 @@ describe("image workspace isolation", () => {
         await page.settle();
         const before = page.prompt().value;
         elements(page.render()).find(element => element.props.children === "恢复为草稿继续改")!.props.onClick();
+        await page.confirmations.at(-1)?.onOk?.();
         await page.settle();
         expect(page.errors[0]).toContain("请先切换到历史原工具");
         expect(page.prompt().value).toBe(before);
@@ -355,7 +364,7 @@ describe("image workspace isolation", () => {
         page.references().onChange([{ id: "reference-a", name: "reference.png", type: "image/png", dataUrl: "data:image/png;base64,YQ==" }]);
         await page.settle();
         expect(page.panels()[0].activeLogId).toBe("a");
-        expect(page.prompt().value).toBe("a prompt");
+        expect(page.prompt().value).toBe("");
         page.navigate("image-generation", "prompt=new-prompt");
         page.render();
         expect(page.references().references).toHaveLength(1);
@@ -402,7 +411,7 @@ describe("image workspace isolation", () => {
         expect(page.errors).toEqual([]);
     });
 
-    test("clicking a displayed result refills its own prompt without replacing current references or model", async () => {
+    test("viewing a displayed result preserves the draft; explicit reuse confirms and leaves references and model unchanged", async () => {
         const page = pageHarness([storedLog("image-generation", "saved", 20)]);
         await page.settle();
         page.prompt().onChange({ target: { value: "changed draft" } });
@@ -411,8 +420,12 @@ describe("image workspace isolation", () => {
         const card = page.cards()[0]!;
         const view = (card.type as Function)(card.props);
         const image = elements(view).find(item => item.type === "Image")!;
-        expect(typeof image.props.onClick).toBe("function");
-        image.props.onClick();
+        expect(image.props.onClick).toBeUndefined();
+        expect(page.prompt().value).toBe("changed draft");
+        const reuse = elements(view).find(item => item.props.children === "复用提示词")!;
+        reuse.props.onClick();
+        expect(page.prompt().value).toBe("changed draft");
+        await page.confirmations.at(-1)?.onOk?.();
         expect(page.prompt().value).toBe("saved prompt");
         expect(page.references().references.map((reference: { id: string }) => reference.id)).toEqual(["draft-reference"]);
         expect(page.config.imageModel).toBe("another-model");
@@ -507,12 +520,13 @@ describe("image workspace isolation", () => {
         await page.settle();
         page.navigate("image-generation");
         await page.settle();
+        page.prompt().onChange({ target: { value: "new draft kept while browsing" } });
         page.panels()[0].onPreviewLog(page.panels()[0].logs.find((log: StoredLog) => log.id === "a-old"));
         await page.settle();
         pending.resolve([{ id: "late-a", dataUrl: "data:image/png;base64,YQ==" }]);
         await page.settle();
         expect(page.images().map(image => image.id)).toEqual(["a-old-image"]);
-        expect(page.prompt().value).toBe("a-old prompt");
+        expect(page.prompt().value).toBe("new draft kept while browsing");
         expect(page.panels()[0].activeLogId).toBe("a-old");
         expect(page.panels()[0].logs[0].images[0].id).toBe("late-a");
         expect(page.errors).toEqual([]);

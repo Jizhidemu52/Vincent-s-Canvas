@@ -127,7 +127,10 @@ describe("admin/team interaction guards", () => {
             "@/stores/use-module-store": { useModuleStore: (selector: any) => selector({ flags: {} }) },
             "./team-overview": { loadTeamOverview: async () => { loaded++; return {}; } },
         });
-        expect(harness.render().some(element => element.props.to === "/" && element.props.replace)).toBe(true);
+        const blocked = harness.render();
+        expect(blocked.some(element => element.props.role === "alert")).toBe(true);
+        expect(blocked.some(element => element.props.children === "当前未启用小组积分功能。")).toBe(true);
+        expect(blocked.some(element => element.props.to === "/")).toBe(true);
         await settle();
         expect(loaded).toBe(0);
         harness.unmount();
@@ -144,7 +147,10 @@ describe("admin/team interaction guards", () => {
             "@tanstack/react-query": { useInfiniteQuery: (value: any) => { options.push(value); return { data: { pages: [{ tasks: [], batches: [] }] }, isPending: false, isFetching: false, dataUpdatedAt: 0, refetch() {} }; } },
             "@/services/api/task-history": { listAdminTasks: async (query: unknown) => { requested.push(query); return { tasks: [], nextCursor: null }; }, listAdminBatches: async () => ({ batches: [], nextCursor: null }) },
         });
-        harness.render({ active: true });
+        const rendered = harness.render({ active: true });
+        const queuedAtColumn = rendered.filter(element => element.type === "Table")[1].props.columns.find((column: any) => column.dataIndex === "queuedAt");
+        expect(queuedAtColumn.title).toContain("北京时间");
+        expect(queuedAtColumn.render("2026-10-29T17:02:03Z")).toBe("2026-10-30 01:02:03");
         expect(options[0].queryKey).toEqual(["admin-tasks", "admin-a"]);
         expect(options[1].queryKey).toEqual(["admin-batches", "admin-a"]);
         expect(options[0].enabled).toBe(true);
@@ -161,5 +167,25 @@ describe("admin/team interaction guards", () => {
         expect(options[2].enabled).toBe(false);
         expect(options[3].enabled).toBe(false);
         harness.unmount();
+    });
+
+    test("consumption history renders Beijing time while retaining the original timestamp", async () => {
+        const record = { id: "history-a", createdAt: "2026-10-29T17:02:03Z", rmbCost: 0.05368 };
+        const harness = componentHarness("../src/pages/admin/components/task-history-panels.tsx", "HistoryManagementPanel", {
+            "@/stores/use-user-store": { useUserStore: (selector: any) => selector({ user: { id: "admin-a" } }) },
+            "@/components/infinite-load-more": { InfiniteLoadMore: "InfiniteLoadMore" },
+            "./task-reconciliation-panel": { TaskReconciliationPanel: "TaskReconciliationPanel" },
+            "@/hooks/use-workbench-field": { useWorkbenchField: (_key: string, initial: unknown) => [initial, () => undefined] },
+            "@tanstack/react-query": { useInfiniteQuery: () => ({ data: { pages: [{ history: [record], total: 1 }] }, isPending: false, isFetching: false }) },
+            "@/services/api/task-history": { listAdminHistoryOptions: async () => ({ users: [], models: [], operations: [] }) },
+        });
+        try {
+            const table = harness.render().find(element => element.type === "Table")!;
+            const column = table.props.columns.find((item: any) => item.dataIndex === "createdAt");
+            expect(column.title).toContain("北京时间");
+            expect(column.render(table.props.dataSource[0].createdAt)).toBe("2026-10-30 01:02:03");
+            expect(record.createdAt).toBe("2026-10-29T17:02:03Z");
+            await settle();
+        } finally { harness.unmount(); }
     });
 });

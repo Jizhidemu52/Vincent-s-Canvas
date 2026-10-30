@@ -2,13 +2,15 @@ import { i18nHarness } from "./helpers/i18n-harness";
 import { expect, test } from "bun:test";
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import * as React from "react";
 import ts from "typescript";
+import * as beijingTime from "../src/lib/beijing-time";
 
 const source = new URL("../src/pages/admin/components/usage-analytics-panel.tsx", import.meta.url);
 const requireModule = createRequire(source);
 const compiled = ts.transpileModule(readFileSync(source, "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ESNext, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
-const summary = { visits: 3, interactions: 6, generationRequests: 2, chatRequests: 1, succeeded: 2, failed: 1, pending: 0 };
+const summary = { visits: 3, interactions: 6, generationRequests: 2, chatRequests: 1, succeeded: 2, failed: 1, pending: 0, totalRmbCost: 0.2684, generatedImages: 5 };
 const coverage = { collectionStartedAt: "2026-10-15T00:00:00Z", historicalTasksAvailable: true, historicalClicksAvailable: false, historicalChatAvailable: false, droppedEventCount: 3, notes: [] };
 const person = { userId: "person-1", displayName: "张三", departmentName: "产品部", summary, lastActivityAt: "2026-10-15T02:00:00Z" };
 const people = { people: [person], pagination: { page: 1, pageSize: 20, total: 1 }, summary, breakdowns: { boards: [], models: [], controls: [], daily: [] }, coverage };
@@ -29,6 +31,7 @@ function harness(options: { role?: string; analyze?: (body: unknown, signal: Abo
     const equal = (a?: React.DependencyList, b?: React.DependencyList) => Boolean(a && b && a.length === b.length && a.every((item, index) => Object.is(item, b[index])));
     const dependencies: Record<string, any> = {
         "@/lib/i18n": i18nHarness,
+        "@/lib/beijing-time": beijingTime,
         react: { ...React,
             useState: (initial: any) => { const index = cursor++; if (!(index in state)) state[index] = typeof initial === "function" ? initial() : initial; return [state[index], (next: any) => { state[index] = typeof next === "function" ? next(state[index]) : next; }]; },
             useRef: (initial: any) => { const index = cursor++; return state[index] ||= { current: initial }; },
@@ -60,7 +63,7 @@ const button = (tree: React.ReactElement<any>[], name: string) => tree.find(elem
 const labelled = (tree: React.ReactElement<any>[], label: string) => tree.find(element => element.props["aria-label"] === label)!;
 
 test("employee charts and deterministic summary use only that person's breakdowns, totals and coverage", async () => {
-    const personalSummary = { ...summary, generationRequests: 7, chatRequests: 2, succeeded: 6, failed: 2, pending: 1 };
+    const personalSummary = { ...summary, generationRequests: 7, chatRequests: 2, succeeded: 6, failed: 2, pending: 1, totalRmbCost: 1.0065, generatedImages: 3 };
     const personalBreakdowns = { models: [{ key: "personal-model", label: "个人专用模型", count: 7 }], boards: [{ key: "personal-board", label: "个人改图板块", count: 12 }], controls: [{ key: "personal-control", label: "个人尺寸选择", count: 4 }], daily: [] };
     const personalCoverage = { ...coverage, droppedEventCount: 8 };
     const panel = harness({ detail: async () => ({ person, summary: personalSummary, breakdowns: personalBreakdowns, coverage: personalCoverage, records: [], pagination: { page: 1, pageSize: 20, total: 0 } }) });
@@ -78,6 +81,11 @@ test("employee charts and deterministic summary use only that person's breakdown
         }
         const brief = labelled(tree, "个人统计简述").props.children;
         expect(brief).toContain("该员工已记录 9 次模型请求");
+        expect(brief).toContain("已记账生成消费 ￥1.006500");
+        expect(brief).toContain("成功实际出图 3 张（不是请求次数）");
+        const personalTotals = elements(labelled(tree, "个人消费与出图统计"));
+        expect(personalTotals.find(element => element.props.title === "生成消费（元）")?.props.value).toBe("￥1.006500");
+        expect(personalTotals.find(element => element.props.title === "成功出图（张）")?.props.value).toBe(3);
         expect(brief).toContain("个人专用模型"); expect(brief).toContain("个人改图板块"); expect(brief).toContain("个人尺寸选择");
         expect(brief).toContain("8 条已知采集缺口"); expect(brief).not.toContain("3 条已知采集缺口");
         expect(brief).toContain("记录不足不能解释为未工作或未使用");
@@ -93,15 +101,93 @@ test("deterministic brief selects highest observed counts without assuming sort 
     expect(brief).toContain("历史点击与聊天不能回补"); expect(brief).not.toContain("已知采集缺口");
 });
 
-test("date filters are inclusive local days, reject impossible ranges and never send name searches in all-user exports", () => {
+test("date filters use inclusive Beijing days, reject impossible ranges and preserve searches for every scope", () => {
     const panel = harness();
-    const filters = panel.exports.usageRangeFilters({ from: "2026-10-01", to: "2026-10-15", search: "私有姓名" });
-    expect(new Date(filters.from).getDate()).toBe(1);
-    expect(new Date(filters.to).getDate()).toBe(16);
+    const filters = panel.exports.usageRangeFilters({ from: "2026-10-01", to: "2026-10-15", search: "  私有姓名  " });
+    expect(filters).toEqual({ from: "2026-09-30T16:00:00.000Z", to: "2026-10-15T16:00:00.000Z", search: "私有姓名" });
     expect(panel.exports.usageSelectionFilters({ from: "2026-10-01", to: "2026-10-15", search: "私有姓名" })).toEqual(filters);
     expect(panel.exports.usageSelectionFilters({ from: "2026-10-01", to: "2026-10-15", search: "" }, ["one", "one", "two"]).userIds).toEqual(["one", "two"]);
+    expect(panel.exports.usageRangeFilters({ from: "2024-02-29", to: "2024-02-29", search: " " })).toEqual({ from: "2024-02-28T16:00:00.000Z", to: "2024-02-29T16:00:00.000Z" });
+    expect(panel.exports.usageRangeFilters({ from: "2026-12-31", to: "2026-12-31", search: "" })).toEqual({ from: "2026-12-30T16:00:00.000Z", to: "2026-12-31T16:00:00.000Z" });
     for (const [from, to] of [["2026-02-30", "2026-03-01"], ["2026-10-16", "2026-10-15"], ["", "2026-10-15"]]) expect(() => panel.exports.usageRangeFilters({ from, to, search: "" })).toThrow();
     expect(() => panel.exports.usageSelectionFilters({ from: "2026-10-01", to: "2026-10-15", search: "" }, [])).toThrow();
+});
+
+test.each(["UTC", "America/Los_Angeles"])("Beijing date boundaries and recent 30 days ignore runtime timezone: %s", timeZone => {
+    const code = `
+        import { createRequire } from "node:module";
+        import { readFileSync } from "node:fs";
+        const require = createRequire(${JSON.stringify(import.meta.url)});
+        const ts = require("typescript");
+        const beijingTime = require(${JSON.stringify(new URL("../src/lib/beijing-time.ts", import.meta.url).href)});
+        const compiled = ts.transpileModule(readFileSync(new URL(${JSON.stringify(source.href)}), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ESNext, jsx: ts.JsxEmit.ReactJSX } }).outputText;
+        const loaded = { exports: {} };
+        new Function("require", "module", "exports", compiled)(name => name === "@/lib/beijing-time" ? beijingTime : {}, loaded, loaded.exports);
+        process.stdout.write(JSON.stringify({
+            range: loaded.exports.usageRangeFilters({ from: "2026-10-31", to: "2026-11-02", search: "张三" }),
+            before: loaded.exports.defaultUsageDateFilter(new Date("2026-10-29T15:59:59.999Z")),
+            midnight: loaded.exports.defaultUsageDateFilter(new Date("2026-10-29T16:00:00.000Z")),
+        }));`;
+    const result = spawnSync(process.execPath, ["--eval", code], { encoding: "utf8", env: { ...process.env, TZ: timeZone } });
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({
+        range: { from: "2026-10-30T16:00:00.000Z", to: "2026-11-02T16:00:00.000Z", search: "张三" },
+        before: { from: "2026-09-30", to: "2026-10-29", search: "" },
+        midnight: { from: "2026-10-01", to: "2026-10-30", search: "" },
+    });
+});
+
+test("summary, people rows and individual records distinguish six-decimal cost and actual image count from calls", async () => {
+    const record = { id: "generation-1", kind: "generation", status: "success", occurredAt: "2026-10-29T16:00:00Z", boardLabel: "图片生成", modelName: "图片模型", prompt: "测试", parameters: {}, totalRmbCost: 0.16104, generatedImages: 3 };
+    const panel = harness({ detail: async () => ({ ...people, person, records: [record] }) });
+    try {
+        let tree = await panel.settle();
+        const top = elements(labelled(tree, "使用简要统计"));
+        expect(top.find(element => element.props.title === "生成消费（元）")?.props.value).toBe("￥0.268400");
+        expect(top.find(element => element.props.title === "成功出图（张）")?.props.value).toBe(5);
+        expect(top.find(element => element.props.title === "模型调用次数")?.props.value).toBe(3);
+        const table = tree.find(element => element.type === "Table")!;
+        expect(text(table.props.columns.find((column: any) => column.title === "生成消费（元）").render(null, person))).toBe("￥0.268400");
+        expect(table.props.columns.find((column: any) => column.title === "成功出图（张）").render(null, person)).toBe(5);
+        expect(table.props.columns.find((column: any) => column.title === "模型调用").render(null, person)).toBe(3);
+        expect(table.props.columns.find((column: any) => column.title === "最后记录").render("2026-10-29T16:00:00Z")).toBe("2026-10-30 00:00:00");
+        expect(text(tree)).toContain("历史成本按原记录汇总，不按当前单价追溯重算");
+        expect(text(tree)).not.toContain("供应商积分");
+        table.props.columns.find((column: any) => column.title === "姓名").render(person.displayName, person).props.onClick();
+        tree = await panel.settle();
+        const card = tree.find(element => element.props.record?.id === record.id)!;
+        const cardText = text((card.type as Function)(card.props));
+        expect(cardText).toContain("已记账生成消费 ￥0.161040");
+        expect(cardText).toContain("成功实际出图 3 张");
+        expect(cardText).toContain("2026-10-30 00:00:00（北京时间）");
+        expect(text(tree)).toContain("成功请求 2 次");
+        expect(panel.calls.preview).toHaveLength(0);
+        expect(panel.calls.analyze).toHaveLength(0);
+    } finally { panel.dispose(); }
+});
+
+test("applying a person search keeps list, detail, export and free preview on the same Beijing period", async () => {
+    const panel = harness();
+    try {
+        let tree = await panel.settle();
+        labelled(tree, "搜索使用分析用户").props.onChange({ target: { value: " 张三 " } });
+        labelled(tree, "使用分析开始日期").props.onChange({ target: { value: "2026-10-01" } });
+        labelled(tree, "使用分析结束日期").props.onChange({ target: { value: "2026-10-30" } });
+        tree = panel.render(); button(tree, "应用筛选").props.onClick(); tree = await panel.settle();
+        const scope = { from: "2026-09-30T16:00:00.000Z", to: "2026-10-30T16:00:00.000Z", search: "张三" };
+        expect(panel.calls.list.at(-1).query).toEqual({ ...scope, page: 1, pageSize: 20 });
+        const table = tree.find(element => element.type === "Table")!;
+        table.props.columns.find((column: any) => column.title === "姓名").render(person.displayName, person).props.onClick();
+        tree = await panel.settle();
+        expect(panel.calls.detail.at(-1)[1]).toEqual({ ...scope, page: 1, pageSize: 20 });
+        button(tree, "导出筛选范围完整记录").props.onClick(); tree = panel.render(); button(tree, "开始导出完整记录").props.onClick(); tree = await panel.settle();
+        expect(panel.calls.export[0].body).toEqual(scope);
+        expect(panel.calls.saves[0][1]).toBe("使用记录-2026-10-01-2026-10-30-筛选用户.jsonl");
+        button(tree, "预览将发送的汇总").props.onClick(); await panel.settle();
+        expect(panel.calls.preview[0].body).toEqual({ ...scope, includePromptSamples: false });
+        expect(panel.calls.analyze).toHaveLength(0);
+    } finally { panel.dispose(); }
 });
 
 test("non-superadmins never read records or expose export and analysis controls", async () => {
@@ -217,7 +303,7 @@ test("full export has no silent row cap and double clicks create one completed b
     const panel = harness();
     try {
         let tree = await panel.settle();
-        button(tree, "导出全员完整记录").props.onClick(); tree = panel.render();
+        button(tree, "导出筛选范围完整记录").props.onClick(); tree = panel.render();
         const start = button(tree, "开始导出完整记录").props.onClick; start(); start();
         tree = await panel.settle();
         expect(panel.calls.export).toHaveLength(1); expect(panel.calls.export[0].body).not.toHaveProperty("userIds");
@@ -229,7 +315,7 @@ test("full export has no silent row cap and double clicks create one completed b
 test("incomplete export does not save a file and unmount cancels outstanding authenticated reads", async () => {
     const panel = harness({ export: async () => { throw new Error("未收到完整结束标记"); } });
     try {
-        let tree = await panel.settle(); button(tree, "导出全员完整记录").props.onClick(); tree = panel.render(); button(tree, "开始导出完整记录").props.onClick();
+        let tree = await panel.settle(); button(tree, "导出筛选范围完整记录").props.onClick(); tree = panel.render(); button(tree, "开始导出完整记录").props.onClick();
         tree = await panel.settle(); expect(panel.calls.saves).toHaveLength(0); expect(tree.some(element => element.type === "Alert" && element.props.title === "未收到完整结束标记")).toBe(true);
     } finally { panel.dispose(); }
     const pending = harness({ list: () => new Promise(() => undefined) });

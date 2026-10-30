@@ -54,6 +54,7 @@ type CanvasStore = {
 const initialViewport: ViewportTransform = { x: 0, y: 0, k: 1 };
 const initialSession = useUserStore.getState();
 const canvasOwnerId = deploymentFeatures.authenticationEnabled && initialSession.status === "authenticated" && initialSession.user && isWorkspaceRole(initialSession.user.role) ? initialSession.user.id : null;
+const canvasOwnerRole = initialSession.user?.role;
 const CANVAS_STORE_KEY = deploymentFeatures.authenticationEnabled
     ? `wireless-canvas:canvas_store:oa:user:${encodeURIComponent(canvasOwnerId || "")}`
     : "wireless-canvas:canvas_store";
@@ -316,7 +317,9 @@ export const useCanvasStore = create<CanvasStore>()(
 if (deploymentFeatures.authenticationEnabled && canvasOwnerId) {
     let restartingForOwner = false;
     useUserStore.subscribe((state) => {
-        if (restartingForOwner || (state.status === "authenticated" && state.user?.id === canvasOwnerId && isWorkspaceRole(state.user.role))) return;
+        if (restartingForOwner || ((state.status === "authenticated" || state.status === "expired") && state.user?.id === canvasOwnerId && state.user.role === canvasOwnerRole && isWorkspaceRole(state.user.role))) return;
+        // Same-owner expiry is locked by AuthGate. Retain that owner's local
+        // editor/cache, while isCanvasOwnerValid still blocks cloud writes.
         // A cookie may change in another tab. Never reuse a live editor or its
         // debounce/retry buffers for a different employee. Drain the old owner's
         // immutable storage key, hide the workspace, then bootstrap a fresh one.

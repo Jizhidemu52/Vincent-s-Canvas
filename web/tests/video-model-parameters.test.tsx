@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { VideoSettingsPanel, videoResolutionLabel } from "@/components/video-settings-panel";
+import { VideoSettingsPanel, videoResolutionLabel, videoDurationOptions } from "@/components/video-settings-panel";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { getVideoModelParameterSpec, normalizeVideoModelConfig, videoAspectRatioFollowsImage, videoModelRequestParameters } from "@/lib/video-model-parameters";
 import { defaultConfig } from "@/stores/use-config-store";
@@ -167,17 +167,17 @@ describe("model-specific video settings UI", () => {
 
     test("Seedance exposes 30 seconds, intelligent duration and documented 1080p", () => {
         const markup = render("doubao-seedance-2.5");
-        expect(markup).toContain('value="30"');
-        expect(markup).toContain('value="-1"');
+        expect(markup).toContain('role="combobox"');
+        expect(videoDurationOptions(getVideoModelParameterSpec("doubao-seedance-2.5")!).map(item => item.value)).toEqual(["-1", ...Array.from({ length: 27 }, (_, index) => String(index + 4))]);
         expect(markup).toContain("生成声音");
         expect(markup).toContain("1080p");
         expect(markup).not.toContain("1080P");
     });
 
     test("Wan and HappyHorse expose their different minimum durations", () => {
-        expect(render("wan2.7")).toContain('value="2"');
-        expect(render("happyhorse-1.1")).not.toContain('value="2"');
-        expect(render("happyhorse-1.1")).toContain('value="3"');
+        expect(videoDurationOptions(getVideoModelParameterSpec("wan2.7")!).map(item => item.value)).toContain("2");
+        expect(videoDurationOptions(getVideoModelParameterSpec("happyhorse-1.1")!).map(item => item.value)).not.toContain("2");
+        expect(videoDurationOptions(getVideoModelParameterSpec("happyhorse-1.1")!).map(item => item.value)).toContain("3");
     });
 
     test("known first-frame input replaces ignored ratio controls with the actual behavior", () => {

@@ -1,6 +1,6 @@
 import { uiText, useUiLocale } from "@/lib/i18n";
 import { useEffect, type ReactNode } from "react";
-import { Switch } from "antd";
+import { Select, Switch } from "antd";
 
 import { ImageSettingsTheme } from "@/components/image-settings-panel";
 import { type CanvasTheme } from "@/lib/canvas-theme";
@@ -39,12 +39,10 @@ export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = 
                 {showTitle ? <div className="text-lg font-semibold">{uiText("视频设置")}</div> : null}
                 {!spec ? <p className="text-sm leading-6" style={{ color: theme.node.muted }}>{uiText("当前模型尚未提供参数规格，请先选择已配置的视频模型。")}</p> : <>
                     <SettingGroup title={uiText("生成方式")} color={theme.node.muted}>
-                        <select aria-label={uiText("视频生成方式")} className="h-9 w-full cursor-pointer rounded-xl border px-3 text-sm outline-none" style={{ background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text }} value={normalized.videoMode} onChange={(event) => onConfigChange("videoMode", event.target.value)}>
-                            {spec.modes.map((mode) => <option key={mode} value={mode}>{uiText(videoModeLabels[mode])}</option>)}
-                        </select>
-                        {normalized.videoMode === "first-last-frame" ? <p className="text-[11px] leading-4" style={{ color: theme.node.muted }}>{uiText("图片 1 为首帧，图片 2 为尾帧；可在参考素材中调整顺序。")}</p> : null}
-                        {normalized.videoMode === "extend" ? <p className="text-[11px] leading-4" style={{ color: theme.node.muted }}>{uiText("请添加源视频，并在提示词中明确描述延长或续写内容。Wan 可加 1 张图片作为尾帧。")}</p> : null}
-                        {editing ? <p className="text-[11px] leading-4" style={{ color: theme.node.muted }}>{uiText("请添加至少 1 段 4–30 秒源视频，并明确描述编辑、删除或替换内容。")}</p> : null}
+                        <Select aria-label={uiText("视频生成方式")} className="w-full" value={normalized.videoMode} onChange={value => onConfigChange("videoMode", value)} options={spec.modes.map(mode => ({ value: mode, label: uiText(videoModeLabels[mode]) }))} />
+                        {normalized.videoMode === "first-last-frame" ? <p className="text-xs leading-4" style={{ color: theme.node.muted }}>{uiText("图片 1 为首帧，图片 2 为尾帧；可在参考素材中调整顺序。")}</p> : null}
+                        {normalized.videoMode === "extend" ? <p className="text-xs leading-4" style={{ color: theme.node.muted }}>{uiText("请添加源视频，并在提示词中明确描述延长或续写内容。Wan 可加 1 张图片作为尾帧。")}</p> : null}
+                        {editing ? <p className="text-xs leading-4" style={{ color: theme.node.muted }}>{uiText("请添加至少 1 段 4–30 秒源视频，并明确描述编辑、删除或替换内容。")}</p> : null}
                     </SettingGroup>
                     <SettingGroup title={uiText("分辨率")} color={theme.node.muted}>
                         <div className="grid grid-cols-2 gap-2.5">
@@ -57,18 +55,15 @@ export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = 
                                 <button key={value} type="button" aria-pressed={normalized.size === value} className="flex h-[72px] cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border bg-transparent px-1 text-sm transition hover:opacity-80" style={{ borderColor: normalized.size === value ? theme.node.text : theme.node.stroke, color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()} onClick={() => onConfigChange("size", value)}>
                                     <SizePreview ratio={value} color={theme.node.text} />
                                     <span>{value === "adaptive" ? uiText("自适应") : value}</span>
-                                    {value !== "adaptive" ? <span className="text-[10px] leading-none opacity-55">{uiText(ratioLabels[value])}</span> : null}
+                                    {value !== "adaptive" ? <span className="text-xs leading-none opacity-55">{uiText(ratioLabels[value])}</span> : null}
                                 </button>
                             ))}
                         </div>}
-                        {spec.ratioHint ? <p className="text-[11px] leading-4" style={{ color: theme.node.muted }}>{uiText(spec.ratioHint)}</p> : null}
+                        {spec.ratioHint ? <p className="text-xs leading-4" style={{ color: theme.node.muted }}>{uiText(spec.ratioHint)}</p> : null}
                     </SettingGroup>
                     <SettingGroup title={uiText("时长")} color={theme.node.muted}>
-                        <select aria-label={uiText("视频时长")} disabled={editing} className="h-9 w-full cursor-pointer rounded-xl border px-3 text-sm outline-none disabled:cursor-not-allowed" style={{ background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text }} value={normalized.videoSeconds} onChange={(event) => onConfigChange("videoSeconds", event.target.value)}>
-                            {spec.supportsAutoDuration ? <option value="-1">{uiText("智能时长")}</option> : null}
-                            {Array.from({ length: spec.seconds[1] - spec.seconds[0] + 1 }, (_, index) => spec.seconds[0] + index).map((seconds) => <option key={seconds} value={String(seconds)}>{seconds} {uiText("秒")}</option>)}
-                        </select>
-                        <div className="text-[11px] leading-4" style={{ color: theme.node.muted }}>{uiText("支持")}{spec.seconds[0]}–{spec.seconds[1]} {uiText("秒")}{spec.supportsAutoDuration ? uiText("，或由模型智能决定时长") : ""}。</div>
+                        <Select aria-label={uiText("视频时长")} disabled={editing} className="w-full" value={normalized.videoSeconds} onChange={value => onConfigChange("videoSeconds", value)} options={videoDurationOptions(spec)} />
+                        <div className="text-xs leading-4" style={{ color: theme.node.muted }}>{uiText("支持")}{spec.seconds[0]}–{spec.seconds[1]} {uiText("秒")}{spec.supportsAutoDuration ? uiText("，或由模型智能决定时长") : ""}。</div>
                         {normalized.videoSeconds === "-1" ? <p role="note" className="text-xs leading-5" style={{ color: theme.node.text }}>{editing ? uiText("编辑结果时长跟随源视频。") : uiText("实际输出时长由模型决定。")}{uiText("渠道账户按最多 30 秒输出预扣，参考视频输入时长也计费，完成后由渠道按实际用量结算。本应用积分仍按管理员配置的每任务价格计算。")}</p> : null}
                     </SettingGroup>
                     {spec.supportsAudio || spec.supportsWatermark ? <SettingGroup title={uiText("输出")} color={theme.node.muted}>
@@ -77,7 +72,7 @@ export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = 
                             {spec.supportsWatermark ? <SwitchRow label={uiText("添加水印")} checked={normalized.videoWatermark === "true"} theme={theme} onChange={(checked) => onConfigChange("videoWatermark", String(checked))} /> : null}
                         </div>
                     </SettingGroup> : null}
-                    <div className="space-y-1 text-[11px] leading-4" style={{ color: theme.node.muted }}><p>{uiText(spec.imageInputHint)}</p>{spec.mediaHint ? <p>{uiText(spec.mediaHint)}</p> : null}{spec.audioHint ? <p>{uiText(spec.audioHint)}</p> : null}</div>
+                    <div className="space-y-1 text-xs leading-4" style={{ color: theme.node.muted }}><p>{uiText(spec.imageInputHint)}</p>{spec.mediaHint ? <p>{uiText(spec.mediaHint)}</p> : null}{spec.audioHint ? <p>{uiText(spec.audioHint)}</p> : null}</div>
                 </>}
             </div>
         </ImageSettingsTheme>
@@ -87,6 +82,10 @@ export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = 
 export function videoResolutionLabel(value: string) {
     const normalized = normalizeVideoResolutionValue(value);
     return /k$/i.test(normalized) ? normalized.toUpperCase() : normalized + "p";
+}
+
+export function videoDurationOptions(spec: NonNullable<ReturnType<typeof getVideoModelParameterSpec>>) {
+    return [...(spec.supportsAutoDuration ? [{ value: "-1", label: uiText("智能时长") }] : []), ...Array.from({ length: spec.seconds[1] - spec.seconds[0] + 1 }, (_, index) => ({ value: String(spec.seconds[0] + index), label: `${spec.seconds[0] + index} ${uiText("秒")}` }))];
 }
 
 export function videoSizeLabel(value: string) {

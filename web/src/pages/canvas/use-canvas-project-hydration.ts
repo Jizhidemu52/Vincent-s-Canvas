@@ -1,6 +1,5 @@
 import { uiText } from "@/lib/i18n";
 import { type CanvasBackgroundMode } from "@/lib/canvas-theme";
-import { shouldOpenCanvasCreationPanel } from "@/lib/canvas/canvas-layout-breakpoint";
 import type { CanvasPerformanceScenarioNodeCount } from "@/lib/canvas/canvas-performance-scenario";
 import { abortPendingCanvasRequests, createCanvasProjectAsyncLifecycle } from "@/lib/canvas/canvas-project-async-lifecycle";
 import { normalizeCanvasSelectedNodeIds } from "@/lib/canvas/canvas-view-state";
@@ -132,7 +131,7 @@ export function useCanvasProjectHydration({ projectId, projectLoaded, setProject
         const commitRestoredProject = (restoredNodes: CanvasNodeData[], restoredSessions: CanvasAssistantSession[], restoredHistory = boundedCanvasHistory(project.history)) => {
             if (!lifecycle.isCurrent(restoreToken)) return;
             setNodes(restoredNodes);
-            setQuickGenerateOpen(shouldOpenCanvasCreationPanel(restoredNodes.length, window.innerWidth));
+            // Creation visibility is a small remembered layout preference, not a project default.
             setConnections(project.connections);
             setGroups(restoredGroups);
             setChatSessions(restoredSessions);

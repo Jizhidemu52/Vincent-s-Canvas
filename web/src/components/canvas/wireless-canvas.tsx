@@ -191,19 +191,22 @@ export const WirelessCanvas = forwardRef<WirelessCanvasHandle, WirelessCanvasPro
         // A trackpad can emit several events before paint. Read host bounds
         // once for that queued frame, then refresh them for the next frame.
         const rect = wheelBoundsRef.current ?? containerRef.current?.getBoundingClientRect();
-        if (!rect || event.deltaY === 0 || panState.current.isPanning) return;
+        if (!rect || (!event.deltaY && !event.deltaX) || panState.current.isPanning) return;
         // Include every event received before paint, even after a direction or anchor change.
         const current = pendingViewportRef.current ?? liveViewportRef.current;
-        const factor = canvasWheelZoomFactor(event.deltaY, event.deltaMode, rect.height);
+        const zooming = event.ctrlKey || event.metaKey;
+        const factor = zooming ? canvasWheelZoomFactor(event.deltaY, event.deltaMode, rect.height) : 1;
         const newScale = clampCanvasZoom(current.k * factor);
-        if (newScale === current.k) return;
+        if (zooming && newScale === current.k) return;
         wheelBoundsRef.current = rect;
 
         const mouseX = event.clientX - rect.left;
         const mouseY = event.clientY - rect.top;
         virtualizationRefreshDistanceRef.current = Math.max(160, Math.max(rect.width, rect.height) / 2);
         reportCanvasInteraction(true);
-        const next = zoomViewportAtPoint(current, { x: mouseX, y: mouseY }, newScale);
+        const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? rect.height : 1;
+        const next = zooming ? zoomViewportAtPoint(current, { x: mouseX, y: mouseY }, newScale)
+            : { ...current, x: current.x - event.deltaX * unit, y: current.y - event.deltaY * unit };
         queueLiveViewport(next);
         if (wheelCommitTimerRef.current) window.clearTimeout(wheelCommitTimerRef.current);
         wheelCommitTimerRef.current = window.setTimeout(() => {

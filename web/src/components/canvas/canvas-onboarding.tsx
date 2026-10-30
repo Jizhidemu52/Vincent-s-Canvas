@@ -66,9 +66,7 @@ export function CanvasOnboarding({ ref, empty, onImportImage, onUseTemplate, onO
         setOpen(false);
         manuallyOpened.current = false;
         setStorageError("");
-        void preferences.read().then(value => {
-            if (active && storage.isCurrent() && !value && empty && !manuallyOpened.current) setOpen(true);
-        }).catch(() => {
+        void preferences.read().catch(() => {
             if (active) setStorageError("引导状态暂时无法读取；仍可手动查看，不影响画布。 ");
         });
         return () => { active = false; };
@@ -204,9 +202,11 @@ export function CanvasOnboarding({ ref, empty, onImportImage, onUseTemplate, onO
                     </button>)}
                 </div>
                 {!localToolsEnabled ? <p className="mt-2 text-xs" style={{ color: theme.node.muted }}>{t("当前工作区未启用服装模板工具。")}</p> : null}
+                <button type="button" className="mt-4 inline-flex min-h-9 items-center gap-2 text-sm hover:underline" onClick={start}><BookOpen className="size-4" />{t("跟我走一遍")}</button>
+                {storageError ? <p role="status" className="mt-1 text-xs">{storageError}</p> : null}
             </div>
         </div> : null}
-        {!open && availableArea.width > 0 ? <div className="absolute bottom-[72px] z-40 max-w-[280px]" style={{ left: availableArea.left + 12, maxWidth: Math.max(0, availableArea.width - 24), color: theme.node.muted }}>
+        {!empty && !open && availableArea.width > 0 ? <div className="absolute bottom-[72px] z-40 max-w-[280px]" style={{ left: availableArea.left + 12, maxWidth: Math.max(0, availableArea.width - 24), color: theme.node.muted }}>
             <button type="button" className="inline-flex min-h-9 items-center gap-2 rounded-md px-2 text-xs hover:opacity-70" style={{ background: theme.node.panel }} onClick={start}><BookOpen className="size-4" aria-hidden />{t("新手引导")}</button>
             {storageError ? <p role="status" className="mt-1 text-xs">{storageError}</p> : null}
         </div> : null}

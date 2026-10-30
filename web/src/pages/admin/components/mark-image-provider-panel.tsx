@@ -2,7 +2,9 @@ import { Alert, App, Button, Form, Input, InputNumber, Space, Switch, Tag, Typog
 import { KeyRound, RefreshCw, Save } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { MARK_IMAGE_BASE_URL, MARK_PLATFORM_MODELS } from "../../../../../shared/mark-image-models";
+import { MARK_IMAGE_BASE_URL, MARK_IMAGE_PROVIDER_ID, MARK_PLATFORM_MODELS } from "../../../../../shared/mark-image-models";
+import { getApimartImageCost } from "../../../../../shared/apimart-image-costs";
+import { useUnsavedGuard } from "@/hooks/use-unsaved-guard";
 import { getMarkImageConfiguration, MarkImageConfigurationError, saveMarkImageConfiguration, type MarkImageConfiguration, type MarkImageConfigurationInput } from "@/services/api/mark-image-provider";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { useUserStore } from "@/stores/use-user-store";
@@ -27,7 +29,8 @@ function formValues(config: MarkImageConfiguration): Values {
         enabled: config.provider?.enabled ?? true,
         models: MARK_PLATFORM_MODELS.map(({ modelId, defaultEnabled }) => {
             const model = config.models.find((item) => item.modelId === modelId);
-            return { enabled: model?.enabled ?? defaultEnabled, creditCost: model?.creditCost ?? 0, rmbCost: model?.rmbCost ?? 0, concurrencyLimit: model?.concurrencyLimit ?? 2 };
+            const imageCost = model?.imageCost ?? getApimartImageCost(MARK_IMAGE_PROVIDER_ID, modelId);
+            return { enabled: model?.enabled ?? defaultEnabled, creditCost: model?.creditCost ?? 0, rmbCost: imageCost?.rmbPerImage ?? model?.rmbCost ?? 0, concurrencyLimit: model?.concurrencyLimit ?? 2 };
         }),
     };
 }
@@ -41,6 +44,8 @@ export function MarkImageProviderPanel() {
     const [config, setConfig] = useState<MarkImageConfiguration | null>(null);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
+    const [dirty, setDirty] = useState(false);
+    useUnsavedGuard(dirty, "APIMart 平台配置尚未保存，离开后将丢失修改；密钥不会自动保存。");
     const [loadError, setLoadError] = useState("");
     const requestVersion = useRef(0);
     const savingRef = useRef(false);
@@ -79,12 +84,16 @@ export function MarkImageProviderPanel() {
                 baseUrl: values.baseUrl.trim(),
                 apiKey: values.apiKey?.trim() || undefined,
                 enabled: values.enabled,
-                models: MARK_PLATFORM_MODELS.map(({ modelId }, index) => ({ ...values.models[index], modelId })),
+                models: MARK_PLATFORM_MODELS.map(({ modelId }, index) => {
+                    const imageCost = config.models.find(model => model.modelId === modelId)?.imageCost ?? getApimartImageCost(MARK_IMAGE_PROVIDER_ID, modelId);
+                    return { ...values.models[index], modelId, rmbCost: imageCost?.rmbPerImage ?? values.models[index].rmbCost };
+                }),
             });
             if (version !== requestVersion.current) return;
             setConfig(result);
             form.setFieldsValue(formValues(result));
             message.success("APIMart 平台配置已保存到服务端，未发起生成请求");
+            setDirty(false);
             try { await refreshBusinessConfig(); }
             catch { message.warning("配置已保存，但模型列表同步失败；请刷新页面后再选择模型。"); }
         } catch (error) {
@@ -113,7 +122,7 @@ export function MarkImageProviderPanel() {
             </div>
             <Alert className="mb-5" type="info" showIcon title="服务端独立保存，不改变现有板块绑定" description={`此入口用于正式业务服务，非演示模式配置。图片、文字、视频和多图融合共用此 APIMart 通道密钥，各模型独立启用；图片、视频与多图融合可设置积分、内部成本及并发。文字模型当前仅配置接入与开关。保存仅更新下方 ${MARK_PLATFORM_MODELS.length} 个模型，不切换其他模型，也不发起付费测试。`} />
             {loadError ? <Alert className="mb-5" type="error" showIcon title={loadError} action={<Button size="small" icon={<RefreshCw className="size-3" />} onClick={() => void load()} loading={loading}>重试读取</Button>} /> : null}
-            <Form form={form} layout="vertical" autoComplete="off" disabled={loading || saving || !config || Boolean(loadError)} onFinish={submit} initialValues={formValues({ provider: null, models: [] })}>
+            <Form form={form} layout="vertical" autoComplete="off" disabled={loading || saving || !config || Boolean(loadError)} onValuesChange={() => setDirty(true)} onFinish={submit} initialValues={formValues({ provider: null, models: [] })}>
                 <div className="grid gap-x-5 lg:grid-cols-2">
                     <Form.Item name="baseUrl" label="APIMart API Base URL" rules={[{ required: true, whitespace: true, message: "请输入 API Base URL" }, { type: "url", message: "请输入有效的 HTTP 或 HTTPS 地址" }]}>
                         <Input placeholder={MARK_IMAGE_BASE_URL} />
@@ -127,7 +136,7 @@ export function MarkImageProviderPanel() {
                 </Form.Item>
                 <div className="mb-4">
                     <Typography.Title level={4} className="!mb-1 !text-sm">独立模型设置</Typography.Title>
-                    <Typography.Text type="secondary" className="text-xs leading-5">积分是站内额度，成本仅用于内部记录；初始值 0 不代表上游 API 免费。并发范围为 1–100。模型需同时满足通道与自身启用才可用。</Typography.Text>
+                    <Typography.Text type="secondary" className="text-xs leading-5">站内积分与人民币成本分别管理。已配置固定单价的图片模型按成功出图张数统计成本，不叠加操作费，也不受板块人民币成本覆盖影响；其他模型的 0 元初始值不代表上游 API 免费。并发范围为 1–100。</Typography.Text>
                 </div>
                 <div className="grid gap-4">
                     {modelGroups.map(group => (
@@ -136,7 +145,9 @@ export function MarkImageProviderPanel() {
                                 <Typography.Title id={`mark-model-group-${group.key}`} level={4} className="!mb-1 !text-sm">{group.title}</Typography.Title>
                                 <Typography.Text type="secondary" className="text-xs">{group.description}</Typography.Text>
                             </div>
-                            {MARK_PLATFORM_MODELS.map((model, index) => group.matches(model.modelId) ? (
+                            {MARK_PLATFORM_MODELS.map((model, index) => {
+                                const imageCost = config?.models.find(item => item.modelId === model.modelId)?.imageCost ?? getApimartImageCost(MARK_IMAGE_PROVIDER_ID, model.modelId);
+                                return group.matches(model.modelId) ? (
                                 <div key={model.modelId} className="rounded-lg border border-[var(--border)] p-3 sm:p-4">
                                     <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
                                         <div className="min-w-0">
@@ -151,15 +162,15 @@ export function MarkImageProviderPanel() {
                                         <Form.Item name={["models", index, "creditCost"]} label="站内积分 / 次" rules={[{ required: true, type: "integer", min: 0, message: "请输入不小于 0 的整数" }]}>
                                             <InputNumber className="!w-full" min={0} precision={0} disabled={group.key === "text" ? true : undefined} aria-label={`${model.name} 站内积分`} />
                                         </Form.Item>
-                                        <Form.Item name={["models", index, "rmbCost"]} label="内部成本记录 / 元" rules={[{ required: true, type: "number", min: 0, message: "请输入不小于 0 的成本" }]}>
-                                            <InputNumber className="!w-full" min={0} precision={4} disabled={group.key === "text" ? true : undefined} aria-label={`${model.name} 内部成本`} />
+                                        <Form.Item name={["models", index, "rmbCost"]} label={imageCost ? "人民币成本 / 张" : "内部成本记录 / 元"} extra={imageCost ? `固定单价 ￥${imageCost.rmbPerImage.toFixed(6)} / 张，按成功出图张数统计。` : undefined} rules={[{ required: true, type: "number", min: 0, message: "请输入不小于 0 的成本" }]}>
+                                            <InputNumber className="!w-full" min={0} precision={6} readOnly={Boolean(imageCost)} controls={!imageCost} disabled={group.key === "text" ? true : undefined} aria-label={`${model.name} 内部成本`} />
                                         </Form.Item>
                                         <Form.Item name={["models", index, "concurrencyLimit"]} label="并发上限" rules={[{ required: true, type: "integer", min: 1, max: 100, message: "请输入 1–100 的整数" }]}>
                                             <InputNumber className="!w-full" min={1} max={100} precision={0} disabled={group.key === "text" ? true : undefined} aria-label={`${model.name} 并发上限`} />
                                         </Form.Item>
                                     </div>
                                 </div>
-                            ) : null)}
+                            ) : null; })}
                         </section>
                     ))}
                 </div>

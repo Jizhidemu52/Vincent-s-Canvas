@@ -152,7 +152,7 @@ async function runTask(taskId: string) {
       await withTransaction(db, async client => {
         const owned = await client.query("SELECT id FROM tasks WHERE id=$1 AND execution_token=$2 AND status='processing' FOR UPDATE", [task.id, executionToken]);
         if (!owned.rows[0]) throw new TaskExecutionLost("任务执行权已改变，不能重复结算");
-        await settleReservation(db, task.request_id, "capture", undefined, client);
+        await settleReservation(db, task.request_id, "capture", undefined, client, resultUrls.length);
         await client.query(
           "UPDATE tasks SET status='success',result_urls=$1,lease_expires_at=NULL,completed_at=now(),updated_at=now() WHERE id=$2",
           [JSON.stringify(resultUrls), task.id],

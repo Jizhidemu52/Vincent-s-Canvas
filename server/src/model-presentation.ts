@@ -1,5 +1,6 @@
 import { imageParameterProfile } from "./image-parameter-profile";
 import { MARK_PLATFORM_MODELS, MARK_IMAGE_PROVIDER_ID } from "../../shared/mark-image-models";
+import { getApimartImageCost } from "../../shared/apimart-image-costs";
 
 const imageCapabilities = ["generate", "edit", "upscale", "remove_background", "batch"];
 
@@ -140,6 +141,7 @@ export function presentPublicModel(model: Record<string, unknown>, role: unknown
   const profile = imageParameterProfile(model.protocol, model.modelId, model.providerId);
   const mark = markPlatformLabel(model);
   const label = image ? creativeImageLabel(model) : mark;
+  const imageCost = getApimartImageCost(model.providerId, model.modelId);
   return {
     id: model.id,
     name: label?.name || (hidden ? publicModelName(model) : model.name),
@@ -149,7 +151,8 @@ export function presentPublicModel(model: Record<string, unknown>, role: unknown
     ...(!image && mark ? { parameterModelId: mark.modelId } : {}),
     capabilities: model.capabilities,
     creditCost: model.creditCost,
-    rmbCost: model.rmbCost,
+    rmbCost: imageCost?.rmbPerImage ?? model.rmbCost,
+    ...(imageCost ? { imageCost } : {}),
     isFeatured: isFeaturedModelCandidate(model) && model.isFeatured === true,
     displayOrder: typeof model.displayOrder === "number" && Number.isFinite(model.displayOrder)
       ? model.displayOrder : 1000 + defaultModelOrder(model),
@@ -162,7 +165,8 @@ export function presentPublicModel(model: Record<string, unknown>, role: unknown
 }
 
 export function presentAdminModel(model: Record<string, unknown>) {
-  return { ...model, ...(isImageModel(model) ? { publicName: publicModelName(model) } : {}) };
+  const imageCost = getApimartImageCost(model.providerId, model.modelId);
+  return { ...model, ...(imageCost ? { imageCost, rmbCost: imageCost.rmbPerImage } : {}), ...(isImageModel(model) ? { publicName: publicModelName(model) } : {}) };
 }
 
 /** Demo configuration is in memory. Assign once from the full catalog, not the visible list. */

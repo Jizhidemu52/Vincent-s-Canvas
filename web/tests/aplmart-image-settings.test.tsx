@@ -58,7 +58,8 @@ test("Blend promotes dimensions, accepts custom aspect, fixes one task and rejec
   expect(imageTaskParameters(config, profile)).toEqual({ size: "7:5", midjourneySpeed: "turbo", dimensions: "PORTRAIT", nsfw_check: false, metadata: { tag: "qa" } });
   const html = renderToStaticMarkup(<ImageSettingsPanel config={config} theme={canvasThemes.light} onConfigChange={() => undefined} />);
   expect(html.indexOf('aria-label="比例预设"')).toBeLessThan(html.indexOf("全部高级参数"));
-  expect(html).toContain("1 个任务");
+  expect(html).not.toContain("1 个任务");
+  expect(html).not.toContain('aria-label="生成张数"');
   expect(html).toContain("size 优先于 dimensions");
 });
 

@@ -5,7 +5,7 @@ import type { Request, Response } from "express";
 import type { Database } from "../src/db";
 import type { AppConfig } from "../src/config";
 import { createAdminUsageRouter, createUsageRouter, streamUsageExport } from "../src/routes/usage-analytics";
-import { sanitizeUsagePrompt, submittedChatPrompt, safeUsageParameters, usageEventsSchema, usageFiltersSchema, usageSqlFilter, usageRecordsCte, mapUsageRecord } from "../src/usage-analytics";
+import { sanitizeUsagePrompt, submittedChatPrompt, safeUsageParameters, usageEventsSchema, usageFiltersSchema, usageSqlFilter, mapUsageRecord } from "../src/usage-analytics";
 import { sessionMiddleware } from "../src/session";
 import { loadConfig } from "../src/config";
 import { CHAT_COMPLETION_PROTOCOLS } from "../src/routes/chat";
@@ -59,7 +59,10 @@ describe("business usage input privacy", () => {
     const filter = usageSqlFilter({ userIds: [uid], boardKey: "image", to: "2026-10-16T00:00:00Z" });
     expect(filter.where).toBe("WHERE r.user_id=ANY($1::uuid[]) AND r.occurred_at<$2::timestamptz AND r.board_key=$3");
     expect(filter.values).toEqual([[uid], "2026-10-16T00:00:00Z", "image"]);
-    expect(usageRecordsCte).not.toContain("generation_history");
+    expect(usageFiltersSchema.parse({ search: "  姓名%_  " })).toEqual({ search: "姓名%_" });
+    const searched = usageSqlFilter({ search: "姓名%_' OR true --" });
+    expect(searched.values).toEqual(["%姓名\\%\\_' OR true --%"]);
+    expect(searched.where).not.toContain("姓名");
   });
 });
 

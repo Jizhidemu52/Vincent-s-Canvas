@@ -51,12 +51,13 @@ test("known identity survives network and 5xx outages without losing its working
     }
 });
 
-test("401 and 403 invalidate even a known identity", async () => {
+test("401 locks the known local draft while 403 revokes the identity", async () => {
     for (const status of [401, 403]) {
         const s = session(); s.state().updateUser(employee("a"));
         const task = s.state().hydrateSession();
         s.requests[0].resolve(Response.json({}, { status })); await task;
-        expect(s.state().user).toBeNull(); expect(s.state().status).toBe("guest");
+        if (status === 401) { expect(s.state().user.id).toBe("a"); expect(s.state().status).toBe("expired"); }
+        else { expect(s.state().user).toBeNull(); expect(s.state().status).toBe("guest"); }
     }
 });
 
@@ -147,7 +148,7 @@ test("failed logout does not claim success or restart, and session verification 
     const verification = s.state().hydrateSession();
     expect(s.requests[1].path).toBe("/api/auth/session");
     s.requests[1].resolve(Response.json({}, { status: 401 })); await verification;
-    expect(s.state().user).toBeNull();
+    expect(s.state().user).toBe(known); expect(s.state().status).toBe("expired");
 });
 
 test("late logout acknowledgement cannot clear a newer verified identity", async () => {
@@ -165,4 +166,34 @@ test("logout clears the local identity when the server confirms the session alre
     await logout;
     expect(s.state()).toMatchObject({ user: null, status: "guest" });
     expect(s.broadcasts).toEqual([null]);
+});
+
+test("same-owner reauthentication restores access without clearing local identity", async () => {
+    const s = session(); s.state().updateUser(employee("a"));
+    const cleared: unknown[] = []; s.store.subscribe((state: any) => { if (!state.user) cleared.push(state); });
+    s.state().expireSession(); expect(s.state().status).toBe("expired");
+    const resume = s.state().reauthenticate("fixture");
+    expect(s.state().status).toBe("expired");
+    await s.state().hydrateSession(); expect(s.requests).toHaveLength(1);
+    s.requests[0].resolve(response("a")); await resume;
+    expect(s.state().status).toBe("authenticated"); expect(cleared).toEqual([]);
+});
+
+test("failed reauthentication stays locked and a different returned account discards authority", async () => {
+    const s = session(); s.state().updateUser(employee("a")); s.state().expireSession();
+    const failed = s.state().reauthenticate("wrong");
+    s.requests[0].resolve(Response.json({}, { status: 401 }));
+    await expect(failed).rejects.toThrow();
+    expect(s.state()).toMatchObject({ status: "expired", user: { id: "a" } });
+    const mismatch = s.state().reauthenticate("fixture");
+    s.requests[1].resolve(response("b"));
+    await expect(mismatch).rejects.toThrow("登录账号已变化");
+    expect(s.state()).toMatchObject({ status: "guest", user: null });
+});
+
+test("late reauthentication cannot replace a new explicit identity", async () => {
+    const s = session(); s.state().updateUser(employee("a")); s.state().expireSession();
+    const resume = s.state().reauthenticate("fixture"); s.state().updateUser(employee("b"));
+    s.requests[0].resolve(response("a")); await expect(resume).rejects.toThrow("新的身份操作");
+    expect(s.state().user.id).toBe("b");
 });

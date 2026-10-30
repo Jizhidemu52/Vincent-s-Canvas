@@ -9,6 +9,7 @@ import {
     type QueuedTask,
 } from "@/services/api/generation-tasks";
 import { useUserStore } from "@/stores/use-user-store";
+import { generationErrorDiagnostic, generationErrorMessage } from "@/lib/generation-feedback";
 
 const originalFetch = globalThis.fetch;
 const originalTimeout = globalThis.setTimeout;
@@ -213,7 +214,8 @@ describe("unacknowledged media submissions retain request identity", () => {
             const error = await rejected(requestQueuedMedia(input(operation)));
             expect(error).toBeInstanceOf(Error);
             expect(error).not.toBeInstanceOf(QueuedTaskSubmissionUncertainError);
-            expect((error as Error).message).toContain(`rejected-${status}`);
+            expect((error as Error).message).toBe(generationErrorMessage(`rejected-${status}`, status));
+            expect(generationErrorDiagnostic(error)).toContain(`rejected-${status}`);
             expect(taskPosts()).toHaveLength(1);
             expect(polls()).toEqual([]);
             expect(cancellations()).toEqual([]);

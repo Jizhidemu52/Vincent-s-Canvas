@@ -1,4 +1,5 @@
 import { useUiText } from "@/lib/i18n";
+import { useCanvasDiagnosticsEnabled } from "@/lib/canvas/use-canvas-diagnostics-enabled";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { App, Dropdown, Modal, Segmented, Tooltip, type MenuProps } from "antd";
 import { Download, Ellipsis, FolderPlus, Image as ImageIcon, Info, MessageSquare, Minus, Music2, Pencil, Plus, RefreshCw, Settings2, Trash2, Upload, Video } from "lucide-react";
@@ -315,6 +316,7 @@ export function clampCanvasNodeToolbarPosition({ left, top, width, height, conta
 
 export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNodeData | null; open: boolean; onClose: () => void }) {
     const t = useUiText();
+    const diagnosticsEnabled = useCanvasDiagnosticsEnabled();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const [view, setView] = useState<"info" | "json">("info");
     const imageBytes = node?.type === CanvasNodeType.Image && node.metadata?.content ? getDataUrlByteSize(node.metadata.content) : 0;
@@ -341,7 +343,7 @@ export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNodeD
     const title = (
         <div className="flex items-center justify-between gap-4 pr-12">
             <span>{t("节点信息")}</span>
-            <Segmented
+            {diagnosticsEnabled ? <Segmented
                 size="small"
                 value={view}
                 onChange={(value) => setView(value as "info" | "json")}
@@ -349,7 +351,7 @@ export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNodeD
                     { label: t("信息"), value: "info" },
                     { label: "JSON", value: "json" },
                 ]}
-            />
+            /> : null}
         </div>
     );
 
@@ -357,7 +359,7 @@ export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNodeD
         <Modal className="canvas-node-info-modal" title={title} open={open && Boolean(node)} centered footer={null} onCancel={onClose}>
             {node ? (
                 <div className="h-[56vh] min-h-[360px] text-sm">
-                    {view === "info" ? (
+                    {view === "info" || !diagnosticsEnabled ? (
                         <div className="thin-scrollbar h-full space-y-3 overflow-auto pr-1">
                             <InfoRow label="ID" value={node.id} />
                             <InfoRow label={t("类型")} value={node.type === CanvasNodeType.Text ? t("文本") : node.type === CanvasNodeType.Image ? t("图片") : node.type === CanvasNodeType.Video ? t("视频") : node.type === CanvasNodeType.Audio ? t("音频") : t("生成配置")} />
