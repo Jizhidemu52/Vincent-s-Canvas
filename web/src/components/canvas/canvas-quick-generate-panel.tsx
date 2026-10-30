@@ -31,7 +31,7 @@ type CanvasQuickGeneratePanelProps = Omit<CanvasQuickGeneratePanelRenderState, "
 export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
     embedded = false, open, promptRef, promptRevision, model, size, quality, count, imageOptions, references, running,
     estimateCredits, estimateRmb, remainingCredits, config, onClose,
-    onModelChange, onSizeChange, onQualityChange, onCountChange, onImageOptionsChange, onPickReferences, onRemoveReference,
+    onModelChange, onSizeChange, onQualityChange, onCountChange, onImageOptionsChange, onSettingsNormalize, onPickReferences, onRemoveReference,
     onClearReferences, onMoveReference, onMissingConfig, onGenerate, onOptimizedPrompt, positioned, onClearPosition,
     referenceScopeKey = "", referencesLoading = false, onAddReferenceFiles,
     sourceNode, derivatives, visibleReferences = references, onPromptChange, onRestorePrompt, onContinue, onRegenerate, onRestoreGeneration, onLocateDerivative,
@@ -50,8 +50,8 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
     const availableModel = boundConfig.model;
     const toolEnabled = useToolEnabled(toolKey);
     useEffect(() => {
-        if (!running && modelStatus === "ready" && model !== availableModel) onModelChange(availableModel);
-    }, [availableModel, model, modelStatus, onModelChange, running]);
+        if (!running && modelStatus === "ready" && model !== availableModel) onSettingsNormalize?.({ model: availableModel });
+    }, [availableModel, model, modelStatus, onSettingsNormalize, running]);
     const profile = imageModelProfile(availableModel || model, models, role);
     const settings = normalizeImageModelSettings({ size, quality, count: String(count) }, profile);
     const activeQuality = settings.quality;
@@ -59,10 +59,12 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
     const referenceBusy = referencesLoading || imageDrop.reading;
     useEffect(() => {
         if (running || !availableModel) return;
-        if (size !== settings.size) onSizeChange(settings.size);
-        if (quality !== activeQuality) onQualityChange(activeQuality);
-        if (count !== Number(settings.count)) onCountChange(Number(settings.count));
-    }, [availableModel, running, size, quality, count, settings.size, activeQuality, settings.count, onSizeChange, onQualityChange, onCountChange]);
+        const normalized: Partial<Pick<CanvasQuickGeneratePanelProps, "size" | "quality" | "count">> = {};
+        if (size !== settings.size) normalized.size = settings.size;
+        if (quality !== activeQuality) normalized.quality = activeQuality;
+        if (count !== Number(settings.count)) normalized.count = Number(settings.count);
+        if (Object.keys(normalized).length) onSettingsNormalize?.(normalized);
+    }, [availableModel, running, size, quality, count, settings.size, activeQuality, settings.count, onSettingsNormalize]);
     if (!open) return null;
     const referenceValidation = validateImageReferences(modelOptionName(availableModel || model), references, profile);
     const disabled = !toolEnabled || optimizing || running || referenceBusy || !availableModel || model !== availableModel || (profile.requiresPrompt && !prompt.trim()) || !referenceValidation.valid || Boolean(imageModelSettingsError(settings.size, profile));
@@ -113,7 +115,7 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
                             if (key === "quality") onQualityChange(value);
                             if (key === "count") onCountChange(Number(value));
                             if (key === "imageOptions") onImageOptionsChange(value);
-                        }} />
+                        }} onConfigNormalize={(key, value) => onSettingsNormalize?.(key === "count" ? { count: Number(value) } : { [key]: value })} />
                 <div className={`cw-generate-action ${disabled ? "is-disabled" : ""}`}>
                     <button type="button" className="cw-generate-button" disabled={disabled} onClick={onGenerate} title={profile.requiresPrompt ? t("Enter 生成，Shift+Enter 换行") : undefined}>
                         {running ? <><LoaderCircle size={16} className="animate-spin" />{t("提交中…")}</> : !profile.requiresPrompt ? t("开始融合") : references.length ? t("生成修改图") : t("生成")}

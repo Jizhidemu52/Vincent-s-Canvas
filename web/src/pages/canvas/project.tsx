@@ -457,7 +457,7 @@ function WirelessCanvasPage() {
     });
     const {
         quickGenerateOpen, setQuickGenerateOpen, quickGeneratePromptRef, quickGeneratePromptRevision,
-        quickGenerateNodeId, loadQuickGenerationNode, onQuickPromptChange, flushQuickNodeDraft,
+        quickGenerateNodeId, loadQuickGenerationNode, onQuickPromptChange, flushQuickNodeDraft, normalizeQuickGenerateSettings,
         setQuickGeneratePrompt, quickGeneratePosition, setQuickGeneratePosition, quickGenerateModel,
         setQuickGenerateModel, quickGenerateSize, setQuickGenerateSize, quickGenerateQuality,
         setQuickGenerateQuality, quickGenerateCount, setQuickGenerateCount, quickGenerateImageOptions,
@@ -2696,6 +2696,7 @@ function WirelessCanvasPage() {
                         onQualityChange={setQuickGenerateQuality}
                         onCountChange={setQuickGenerateCount}
                         onImageOptionsChange={setQuickGenerateImageOptions}
+                        onSettingsNormalize={normalizeQuickGenerateSettings}
                         onPickReferences={pickQuickGenerateReferences}
                         referenceScopeKey={`${projectId}:${quickGenerateNodeId || "creation"}`}
                         referencesLoading={quickReferencesLoading}

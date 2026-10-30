@@ -1,6 +1,6 @@
 import { resolveCanvasNodeImageReferences } from "./canvas-image-references";
 import type { AiConfig } from "@/stores/use-config-store";
-import type { CanvasConnection, CanvasGenerationRecord, CanvasNodeData, CanvasNodeMetadata, CanvasStoredImageReference } from "@/types/canvas";
+import { CanvasNodeType, type CanvasConnection, type CanvasGenerationRecord, type CanvasNodeData, type CanvasNodeMetadata, type CanvasStoredImageReference } from "@/types/canvas";
 import type { ImageReferenceItem, ReferenceImage } from "@/types/image";
 
 export function createCanvasGenerationRecord(input: {
@@ -45,7 +45,9 @@ export function visibleCanvasGenerationReferences(record: CanvasGenerationRecord
 
 function legacyCanvasGenerationReferences(node: CanvasNodeData): { references: ImageReferenceItem[]; incomplete: boolean } {
     const metadata = node.metadata;
-    if (!metadata?.generationType && !metadata?.sourceTaskId) return { references: [], incomplete: false };
+    // Config generationType describes its next operation (including workflows
+    // and restored inputs), not an already-generated image's historical proof.
+    if (node.type !== CanvasNodeType.Image || (!metadata?.generationType && !metadata?.sourceTaskId)) return { references: [], incomplete: false };
     const saved = metadata.references;
     const comparisons = metadata.compareSources;
     // Only the archived values are trustworthy. Live connections, node ids and file
@@ -77,7 +79,7 @@ export function hasIncompleteCanvasGenerationReferences(node: CanvasNodeData): b
 export function canvasNodeGenerationReferences(node: CanvasNodeData, nodes: CanvasNodeData[], connections: CanvasConnection[], options: { visibleOnly?: boolean } = {}): ImageReferenceItem[] {
     const record = node.metadata?.generationRecord;
     if (!record && node.metadata?.draftImageReferences === undefined) {
-        if (node.metadata?.generationType || node.metadata?.sourceTaskId) return legacyCanvasGenerationReferences(node).references;
+        if (node.type === CanvasNodeType.Image && (node.metadata?.generationType || node.metadata?.sourceTaskId)) return legacyCanvasGenerationReferences(node).references;
         return resolveCanvasNodeImageReferences(node, nodes, connections);
     }
     const references = node.metadata?.draftImageReferences ?? record!.references;

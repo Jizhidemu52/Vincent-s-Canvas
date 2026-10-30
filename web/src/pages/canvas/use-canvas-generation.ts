@@ -84,7 +84,8 @@ export function useCanvasGeneration({ projectId, nodesRef, connectionsRef, desig
             const snapshotConnections = connectionsRef.current;
             const isCurrent = () => retryScope.active && designProjectIdRef.current === projectId && useUserStore.getState().user?.id === ownerId;
             const sourceNode = shared?.plan.targetNode || snapshotNodes.find((node) => node.id === nodeId);
-            const usesSavedInputs = Boolean(sourceNode?.metadata?.generationRecord || sourceNode?.metadata?.generationType || sourceNode?.metadata?.sourceTaskId || sourceNode?.metadata?.draftImageReferences !== undefined);
+            const usesSavedInputs = Boolean(sourceNode?.metadata?.generationRecord || sourceNode?.metadata?.draftImageReferences !== undefined
+                || (sourceNode?.type === CanvasNodeType.Image && (sourceNode.metadata?.generationType || sourceNode.metadata?.sourceTaskId)));
             // Capture editable inputs before hydration/imports. Later edits belong to the next run.
             const savedReferences = mode === "image" && !shared && sourceNode ? replay ? canvasGenerationRecordReferences(replay) : canvasNodeGenerationReferences(sourceNode, snapshotNodes, snapshotConnections) : [];
             let reported = false;

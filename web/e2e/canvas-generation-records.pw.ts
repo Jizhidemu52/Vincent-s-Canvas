@@ -80,6 +80,35 @@ test("selection restores archived inputs, rapid A/B draft switches are scoped an
     await assertNoGeneration(api);
 });
 
+test("viewing and normalizing settings leaves source metadata untouched; intentional settings changes persist only to that draft", async ({ page, api }) => {
+    const original = await scene(page, api);
+    await select(page, "result-a");
+    await expect(editor(page)).toHaveValue(INPUT);
+    const ratio = panel(page).getByRole("button", { name: "宽高比", exact: true });
+    await expect(ratio).toHaveAttribute("title", "宽高比：1:1");
+    await panel(page).getByRole("button", { name: "更多设置", exact: true }).click();
+    const settings = page.getByRole("dialog", { name: "图像高级设置", exact: true });
+    await expect(settings).toBeVisible();
+    await settings.getByRole("button", { name: "返回创建面板", exact: true }).click();
+    await expect(settings).toBeHidden();
+    await select(page, "result-b");
+    await expect(editor(page)).toHaveValue("B 原始用户输入");
+    await select(page, "result-a");
+    await expect(editor(page)).toHaveValue(INPUT);
+    await expect.poll(() => api.document(PROJECT)!.selectedNodeIds).toEqual(["result-a"]);
+    expect(api.document(PROJECT)!.nodes).toEqual(original.nodes);
+
+    await ratio.click();
+    await page.locator('[data-usage-control="size"][data-usage-value="1536x1024"]').click();
+    await expect.poll(() => node(api, "result-a").metadata.size).toBe("1536x1024");
+    expect(node(api, "result-a").metadata.generationRecord).toEqual(original.nodes[1]!.metadata.generationRecord);
+    expect(node(api, "result-b")).toEqual(original.nodes[2]);
+    await page.reload();
+    await expect(editor(page)).toHaveValue(INPUT);
+    await expect(ratio).toHaveAttribute("title", "宽高比：3:2");
+    await assertNoGeneration(api);
+});
+
 test("deleted source only hides the reference; replay uses exact archived input and one undo/redo includes result and edge", async ({ page, api }, info) => {
     const original = await scene(page, api);
     await select(page, "original-reference"); await page.keyboard.press("Delete");
@@ -87,8 +116,9 @@ test("deleted source only hides the reference; replay uses exact archived input 
     await select(page, "result-a");
     await expect(editor(page)).toHaveValue(INPUT);
     await expect(panel(page).locator(".cw-reference-preview")).toHaveCount(0);
-    // The editor normalizes the archived ratio to this model's concrete resolution before edits.
-    await expect.poll(() => node(api, "result-a").metadata.size).toBe("1024x1024");
+    // Display normalization must not turn viewing the archived input into a node edit.
+    await expect(panel(page).getByRole("button", { name: "宽高比", exact: true })).toHaveAttribute("title", "宽高比：1:1");
+    expect(node(api, "result-a").metadata.size).toBeUndefined();
     const before = structuredClone(api.document(PROJECT)!);
     before.nodes.find((item: any) => item.id === "result-a").metadata.draftPrompt = "新草稿不得污染再来一张";
     await page.evaluate(() => {

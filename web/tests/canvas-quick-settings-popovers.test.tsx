@@ -194,13 +194,41 @@ test("menus open below their triggers without upward flipping and the spacious d
 test("profile changes normalize resolution without opening the popover or overwriting unrelated advanced settings", () => {
     const module = componentModule("../src/components/canvas/canvas-quick-settings-popovers.tsx");
     const changes: Array<[string, string]> = [];
-    const props: Props = { config: config({ imageOptions: '{"resolution":"0.5k","output_format":"webp"}' }), profile: profile("mark-flare"), theme: canvasThemes.light, referenceCount: 0, disabled: false, onConfigChange: (key, value) => changes.push([key, value]) };
+    const normalized: Array<[string, string]> = [];
+    const props: Props = { config: config({ imageOptions: '{"resolution":"0.5k","output_format":"webp"}' }), profile: profile("mark-flare"), theme: canvasThemes.light, referenceCount: 0, disabled: false, onConfigChange: (key, value) => changes.push([key, value]), onConfigNormalize: (key, value) => normalized.push([key, value]) };
     const tree = module.render(exports => elements(exports.CanvasQuickSettingsPopovers(props)));
-    expect(changes).toEqual([["imageOptions", '{"resolution":"1k","output_format":"webp"}']]);
+    expect(normalized).toEqual([["imageOptions", '{"resolution":"1k","output_format":"webp"}']]);
+    expect(changes).toEqual([]);
     expect(tree.filter(item => ["size", "quality", "advanced"].includes(item.props.id)).every(item => item.props.active === null)).toBe(true);
-    changes.length = 0;
+    const advanced = tree.find(item => item.props.id === "advanced")!;
+    const advancedTree = elements((advanced.type as Function)(advanced.props));
+    expect(advancedTree.find(item => item.type === ImageSettingsPanel)!.props.onConfigNormalize).toBe(props.onConfigNormalize);
+    normalized.length = 0;
     module.render(exports => exports.CanvasQuickSettingsPopovers({ ...props, disabled: true }));
     expect(changes).toEqual([]);
+    expect(normalized).toEqual([]);
+});
+
+test("opening advanced settings normalizes only form state while actual user choices still persist", () => {
+    const module = componentModule("../src/components/image-settings-panel.tsx");
+    const changes: Array<[string, string]> = [], normalized: Array<[string, string]> = [];
+    const value = config({ size: "unsupported", quality: "unsupported", count: "5", imageOptions: '{"output_format":"webp"}' });
+    const original = structuredClone(value);
+    const tree = module.render(exports => elements(exports.ImageSettingsPanel({ compact: true, config: value, profile: profile("mark-flare"), theme: canvasThemes.light,
+        onConfigChange: (key: string, next: string) => changes.push([key, next]), onConfigNormalize: (key: string, next: string) => normalized.push([key, next]) })));
+    expect(normalized).toEqual([["size", "1:1"], ["quality", "auto"], ["count", "1"], ["imageOptions", '{"output_format":"webp","resolution":"1k"}']]);
+    expect(changes).toEqual([]);
+    expect(value).toEqual(original);
+    tree.find(item => item.props["aria-label"] === "输出格式")!.props.onChange({ target: { value: "png" } });
+    expect(changes).toEqual([["imageOptions", '{"output_format":"png"}']]);
+});
+
+test("non-canvas image settings retain their existing normalization callback behavior", () => {
+    const module = componentModule("../src/components/image-settings-panel.tsx");
+    const changes: Array<[string, string]> = [];
+    module.render(exports => exports.ImageSettingsPanel({ config: config({ imageOptions: "" }), profile: profile("mark-flare"), theme: canvasThemes.light,
+        onConfigChange: (key: string, next: string) => changes.push([key, next]) }));
+    expect(changes).toEqual([["imageOptions", '{"resolution":"1k"}']]);
 });
 
 test("every parameter popover has a persistent return action that only closes its current panel", () => {

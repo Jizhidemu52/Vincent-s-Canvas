@@ -11,7 +11,8 @@ import "./canvas-quick-settings-popovers.css";
 
 type Profile = ReturnType<typeof imageModelProfile>;
 type SettingChange = (key: "quality" | "size" | "count" | "imageOptions", value: string) => void;
-type Props = { config: AiConfig; profile: Profile; theme: CanvasTheme; referenceCount: number; disabled: boolean; onConfigChange: SettingChange };
+type Props = { config: AiConfig; profile: Profile; theme: CanvasTheme; referenceCount: number; disabled: boolean; onConfigChange: SettingChange; onConfigNormalize?: SettingChange };
+const ignoreConfigNormalization: SettingChange = () => undefined;
 type Parameter = "size" | "quality" | "advanced";
 
 function qualityLabel(value: string) {
@@ -98,7 +99,7 @@ function ParameterPopover({ id, label, summary, icon, disabled, active, onActive
     </Popover.Root>;
 }
 
-function AdvancedSettingsDialog({ active, onActiveChange, disabled, style, config, profile, theme, referenceCount, onConfigChange }: Props & {
+function AdvancedSettingsDialog({ active, onActiveChange, disabled, style, config, profile, theme, referenceCount, onConfigChange, onConfigNormalize }: Props & {
     id: "advanced"; active: Parameter | null; onActiveChange: (value: Parameter | null) => void; style: CSSProperties;
 }) {
     const t = useUiText();
@@ -115,7 +116,7 @@ function AdvancedSettingsDialog({ active, onActiveChange, disabled, style, confi
                 <div className="cw-settings-dialog-body">
                     <div className="cw-settings-overview"><span>{t("当前输出")}</span><strong>{sizeLabel(config.size)}</strong><span>{qualityLabel(config.quality)}</span><span>{t("每次 1 张")}</span></div>
                     <fieldset disabled={disabled} className="cw-advanced-fields"><ImageSettingsPanel spacious compact showTitle={false} config={config} profile={profile} referenceCount={referenceCount}
-                        theme={theme} onConfigChange={onConfigChange} /></fieldset>
+                        theme={theme} onConfigChange={onConfigChange} onConfigNormalize={onConfigNormalize} /></fieldset>
                 </div>
                 <footer className="cw-settings-dialog-footer"><span>{t("设置自动应用于下一次生成，不改变已有图片。")}</span><Dialog.Close asChild><button type="button" className="cw-settings-done">{t("完成设置")}</button></Dialog.Close></footer>
             </Dialog.Content>
@@ -123,7 +124,7 @@ function AdvancedSettingsDialog({ active, onActiveChange, disabled, style, confi
     </Dialog.Root>;
 }
 
-export function CanvasQuickSettingsPopovers({ config, profile, theme, referenceCount, disabled, onConfigChange }: Props) {
+export function CanvasQuickSettingsPopovers({ config, profile, theme, referenceCount, disabled, onConfigChange, onConfigNormalize = ignoreConfigNormalization }: Props) {
     const t = useUiText();
     const [active, setActive] = useState<Parameter | null>(null);
     const parameterRow = useRef<HTMLDivElement>(null!);
@@ -139,8 +140,8 @@ export function CanvasQuickSettingsPopovers({ config, profile, theme, referenceC
         "--cw-parameter-soft": theme.toolbar.itemHover, "--cw-parameter-panel": theme.node.panel } as CSSProperties;
     useEffect(() => { setActive(null); }, [config.model, disabled]);
     useEffect(() => {
-        if (!disabled && profile.resolutions.length && options.resolution !== resolution) onConfigChange("imageOptions", JSON.stringify({ ...options, resolution }));
-    }, [config.imageOptions, disabled, profile.resolutions.length, resolution, onConfigChange]);
+        if (!disabled && profile.resolutions.length && options.resolution !== resolution) onConfigNormalize("imageOptions", JSON.stringify({ ...options, resolution }));
+    }, [config.imageOptions, disabled, profile.resolutions.length, resolution, onConfigNormalize]);
     const common = { active, onActiveChange: setActive, style };
     return <div ref={parameterRow} className="cw-parameter-row" data-open={active || undefined} aria-label={t("生成参数")} style={style}>
         <ParameterPopover {...common} anchor={parameterRow} id="size" label={t("宽高比")} summary={sizeLabel(settings.size)} icon={<RatioOutline value={settings.size} />} disabled={disabled || !profile.verified}>
@@ -150,6 +151,6 @@ export function CanvasQuickSettingsPopovers({ config, profile, theme, referenceC
         <ParameterPopover {...common} anchor={parameterRow} id="quality" label={profile.resolutions.length ? t("分辨率与质量") : t(profile.qualityLabel)} summary={qualitySummary} disabled={disabled || !profile.verified}>
             <CanvasQuickQualityOptions config={config} profile={profile} referenceCount={referenceCount} onConfigChange={onConfigChange} />
         </ParameterPopover>
-        <AdvancedSettingsDialog {...common} id="advanced" config={config} profile={profile} theme={theme} referenceCount={referenceCount} onConfigChange={onConfigChange} disabled={disabled || !hasAdvanced} />
+        <AdvancedSettingsDialog {...common} id="advanced" config={config} profile={profile} theme={theme} referenceCount={referenceCount} onConfigChange={onConfigChange} onConfigNormalize={onConfigNormalize} disabled={disabled || !hasAdvanced} />
     </div>;
 }

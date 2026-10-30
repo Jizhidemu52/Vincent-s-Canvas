@@ -12,7 +12,7 @@ async function scene(page: Page, api: MockCanvasApi, count = 1, grouped = false)
         return { id: `alt-source-${index}`, type: "image", title: `原始款式 ${index}`, width: 80, height: 56,
             position: { x: index % 10 * 96, y: Math.floor(index / 10) * 72 },
             metadata: { status: "success", content: `/api/assets/${asset}/content`, naturalWidth: 256, naturalHeight: 256,
-                prompt: "原始提示词", size: "1024x1024", references: ["asset:reference"], generationOrigin: { sourceNodeId: "outside-source", configNodeId: "outside-config", runId: "historical-run", mode: "image" } } };
+                prompt: "原始提示词", size: "1:1", references: ["asset:reference"], generationOrigin: { sourceNodeId: "outside-source", configNodeId: "outside-config", runId: "historical-run", mode: "image" } } };
     });
     const document = { id: PROJECT, title: "Alt 拖拽隔离验收", createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z",
         nodes, connections: nodes.slice(1).map((node, index) => ({ id: `alt-link-${index}`, fromNodeId: nodes[index]!.id, toNodeId: node.id })),

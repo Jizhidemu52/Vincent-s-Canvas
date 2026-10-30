@@ -75,6 +75,9 @@ test("框选混合节点后从工具栏和右键下载原图 ZIP，排除未选�
         await expect(dialog).toBeHidden();
     };
     await downloadButton.click(); await downloadAndCheck();
+    // The selected image opens the creation rail; restore access to the
+    // underlying node before exercising its real context-menu interaction.
+    if (await collapse.isVisible()) await collapse.click();
     await nodes[0].click({ button: "right", position: { x: 30, y: 15 } });
     await page.getByRole("menuitem", { name: "下载所选图片（2 张）", exact: true }).click();
     await downloadAndCheck();

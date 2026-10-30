@@ -11,6 +11,7 @@ import "./image-settings-panel.css";
 type ImageSettingsPanelProps = {
     config: AiConfig;
     onConfigChange: (key: "quality" | "size" | "count" | "imageOptions", value: string) => void;
+    onConfigNormalize?: (key: "quality" | "size" | "count" | "imageOptions", value: string) => void;
     theme: CanvasTheme;
     showTitle?: boolean;
     className?: string;
@@ -23,7 +24,7 @@ type ImageSettingsPanelProps = {
     spacious?: boolean;
 };
 
-export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "", maxCount: maximum, profile: suppliedProfile, referenceCount = 0, compact = false, spacious = false }: ImageSettingsPanelProps) {
+export function ImageSettingsPanel({ config, onConfigChange, onConfigNormalize = onConfigChange, theme, showTitle = true, className = "", maxCount: maximum, profile: suppliedProfile, referenceCount = 0, compact = false, spacious = false }: ImageSettingsPanelProps) {
     useUiLocale();
     const [snapToStep, setSnapToStep] = useState(false);
     const cachedProfile = useImageModelProfile(config.model || config.imageModel);
@@ -56,12 +57,12 @@ export function ImageSettingsPanel({ config, onConfigChange, theme, showTitle = 
             // without fighting parent normalizers; request serialization omits it.
             if (key === "quality" && referenceQualityDisabled) continue;
             const value = key === "count" ? String(count) : normalized[key];
-            if (config[key] !== value) onConfigChange(key, value);
+            if (config[key] !== value) onConfigNormalize(key, value);
         }
-    }, [config.size, config.quality, config.count, normalized.size, normalized.quality, count, referenceQualityDisabled, onConfigChange]);
+    }, [config.size, config.quality, config.count, normalized.size, normalized.quality, count, referenceQualityDisabled, onConfigNormalize]);
     useEffect(() => {
-        if (profile.resolutions.length && options.resolution !== resolution) onConfigChange("imageOptions", JSON.stringify({ ...options, resolution }));
-    }, [config.imageOptions, profile.resolutions.length, resolution, onConfigChange]);
+        if (profile.resolutions.length && options.resolution !== resolution) onConfigNormalize("imageOptions", JSON.stringify({ ...options, resolution }));
+    }, [config.imageOptions, profile.resolutions.length, resolution, onConfigNormalize]);
     const commitDimension = (index: number, input: HTMLInputElement) => {
         const candidate = Math.round(Number(input.value));
         const value = Number.isSafeInteger(candidate) && candidate > 0 ? candidate : dimensions[index] || 1024;

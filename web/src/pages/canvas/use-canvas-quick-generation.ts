@@ -6,6 +6,7 @@ import { placeCanvasImageOutputs } from "@/lib/canvas/canvas-image-output-placem
 import { assertCanvasImageUploadSize } from "@/lib/canvas/canvas-image-upload-limit";
 import { canvasImageUsageInput } from "@/lib/canvas/canvas-image-usage";
 import { canvasGenerationEditorState, storeCanvasEditorReferences } from "@/lib/canvas/canvas-generation-editor";
+import type { CanvasQuickGenerateSettings } from "@/lib/canvas/canvas-quick-generate-render-stability";
 import { createCanvasGenerationRecord, hasIncompleteCanvasGenerationReferences } from "@/lib/canvas/canvas-generation-record";
 import { fitNodeSize, nodeSizeFromRatio } from "@/lib/canvas/canvas-node-size";
 import { type CanvasSelectionReference } from "@/lib/canvas/canvas-selection-references";
@@ -110,6 +111,20 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, c
     const setQuickGenerateQuality = useCallback((value: string) => { setQuickGenerateQualityState(value); patchNodeDraft({ quality: value }); }, [patchNodeDraft]);
     const setQuickGenerateCount = useCallback((value: number) => { setQuickGenerateCountState(value); patchNodeDraft({ count: value }); }, [patchNodeDraft]);
     const setQuickGenerateImageOptions = useCallback((value: string) => { setQuickGenerateImageOptionsState(value); patchNodeDraft({ imageOptions: value }); }, [patchNodeDraft]);
+    // Normalization only adapts the live form. Loading a historical node must not
+    // fill missing metadata or rewrite its saved inputs. Reject effects from an
+    // earlier binding, including A -> B -> A switches before effects finish.
+    const normalizationBinding = nodeDraftBindingRef.current;
+    const normalizeQuickGenerateSettings = useCallback((settings: Partial<CanvasQuickGenerateSettings>) => {
+        if (normalizationBinding !== nodeDraftBindingRef.current || draftScope !== currentDraftScopeRef.current) return;
+        const account = useUserStore.getState();
+        if (draftScope !== `${projectId}:${account.status}:${account.user?.id || ""}`) return;
+        if (settings.model !== undefined) setQuickGenerateModelState(settings.model);
+        if (settings.size !== undefined) setQuickGenerateSizeState(settings.size);
+        if (settings.quality !== undefined) setQuickGenerateQualityState(settings.quality);
+        if (settings.count !== undefined) setQuickGenerateCountState(settings.count);
+        if (settings.imageOptions !== undefined) setQuickGenerateImageOptionsState(settings.imageOptions);
+    }, [draftScope, normalizationBinding, projectId]);
     const setQuickGenerateReferences = useCallback((update: SetStateAction<CanvasSelectionReference[]>) => {
         const next = typeof update === "function" ? update(quickReferencesRef.current) : update;
         if (next === quickReferencesRef.current) return;
@@ -492,6 +507,7 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, c
         setQuickGenerateModel, quickGenerateSize, setQuickGenerateSize, quickGenerateQuality,
         setQuickGenerateQuality, quickGenerateCount, setQuickGenerateCount, quickGenerateImageOptions,
         setQuickGenerateImageOptions, quickGenerateReferences, setQuickGenerateReferences, quickGenerateRunning,
+        normalizeQuickGenerateSettings,
         setQuickGenerateRunning, quickGenerateEstimate, onQuickOptimizedPrompt, handleQuickReferenceInputChange, addQuickReferenceFiles, quickReferencesLoading,
         runQuickCanvasGeneration,
     };

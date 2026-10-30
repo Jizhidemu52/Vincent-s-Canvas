@@ -167,6 +167,28 @@ test("editing popover settings retains latest values without clearing inputs or 
     expect(changes).toEqual([["quality", "medium"], "generate"]);
 });
 
+test("automatic model and parameter effects never call user change handlers, including while closed", () => {
+    const changes: unknown[] = [], normalized: unknown[] = [];
+    const render = controls({ model: "retired-model", size: "1:1", quality: "unsupported", count: 5,
+        onModelChange: value => changes.push(["model", value]), onSizeChange: value => changes.push(["size", value]),
+        onQualityChange: value => changes.push(["quality", value]), onCountChange: value => changes.push(["count", value]),
+        onImageOptionsChange: value => changes.push(["imageOptions", value]), onSettingsNormalize: value => normalized.push(value),
+    });
+    const initial = render();
+    expect(changes).toEqual([]);
+    expect(normalized).toContainEqual({ model: "gpt-image-2" });
+    expect(normalized).toContainEqual({ size: "1024x1024", quality: "auto", count: 1 });
+    initial.settings.props.onConfigNormalize("imageOptions", '{"resolution":"1k"}');
+    expect(normalized.at(-1)).toEqual({ imageOptions: '{"resolution":"1k"}' });
+    expect(changes).toEqual([]);
+    initial.settings.props.onConfigChange("imageOptions", '{"resolution":"4k"}');
+    expect(changes).toEqual([["imageOptions", '{"resolution":"4k"}']]);
+    changes.length = 0; normalized.length = 0;
+    render({ open: false });
+    expect(changes).toEqual([]);
+    expect(normalized).toContainEqual({ size: "1024x1024", quality: "auto", count: 1 });
+});
+
 test("generation in progress locks all parameter popovers and submission", () => {
     const render = controls({ running: true });
     const opened = render();

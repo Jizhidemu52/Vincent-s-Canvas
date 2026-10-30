@@ -9,6 +9,10 @@ async function moveNode(page: Page, node: Locator, x: number, y: number) {
 
 async function connect(page: Page, source: Locator, target: Locator) {
     await source.click({ position: { x: 30, y: 15 } });
+    // Image selection opens the creation rail; close it before reaching the
+    // source's canvas connection ports with the real pointer.
+    const collapse = page.getByRole("button", { name: "收起创建面板", exact: true });
+    if (await collapse.isVisible()) await collapse.click();
     // Selection changes the image node's render tier; re-enter once settled so
     // its hover-only connection ports are exposed just as in normal pointer use.
     await page.mouse.move(20, 1000);

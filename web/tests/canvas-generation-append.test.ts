@@ -5,6 +5,7 @@ import ts from "typescript";
 import { defaultConfig } from "@/stores/use-config-store";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "@/types/canvas";
 import { createCanvasGenerationRecord } from "@/lib/canvas/canvas-generation-record";
+import { prepareImageSequenceStep } from "@/lib/canvas/canvas-image-sequence";
 import * as nodeGeneration from "@/components/canvas/canvas-node-generation";
 import { i18nHarness } from "./helpers/i18n-harness";
 
@@ -121,4 +122,22 @@ test("legacy text-to-image ignores live upstream inputs, while missing legacy ed
     expect(incomplete.submissions).toEqual([]);
     expect(incomplete.nodes.current).toHaveLength(2);
     expect(incomplete.feedback).toContain("旧版记录参考信息不完整，可恢复历史输入");
+});
+
+test("a prepared workflow config submits its connected image and resolved composer prompt, not legacy archive input", async () => {
+    const first: CanvasNodeData = { ...original, id: "first-config", type: CanvasNodeType.Config, metadata: { generationMode: "image", model: config.model, composerContent: "将背景改成白色" } };
+    const second: CanvasNodeData = { ...first, id: "second-config" };
+    const prepared = prepareImageSequenceStep({ nodes: [original, first, second], connections: [
+        { id: "input", fromNodeId: original.id, toNodeId: first.id }, { id: "workflow", fromNodeId: first.id, toNodeId: second.id, kind: "config-sequence" },
+    ] }, first.id, original.id);
+    const h = harness(prepared.nodes, prepared.connections);
+    const before = structuredClone(h.nodes.current);
+    await h.action.handleGenerateNode(first.id, "image", prepared.nodes[1]!.metadata!.composerContent!, undefined, "workflow-lock");
+    expect(h.feedback).toEqual([]);
+    expect(h.submissions).toHaveLength(1);
+    expect(h.submissions[0]!.references.map(reference => reference.id)).toEqual([original.id]);
+    expect(h.submissions[0]!.prompt).toContain("将背景改成白色");
+    expect(h.submissions[0]!.prompt).not.toContain("@[node:");
+    expect(h.nodes.current.slice(0, 3)).toEqual(before);
+    expect(h.nodes.current[3]!.metadata!.generationRecord!.references[0]!.sourceNodeId).toBe(original.id);
 });

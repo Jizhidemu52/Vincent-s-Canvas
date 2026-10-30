@@ -1,3 +1,11 @@
+export type CanvasQuickGenerateSettings = {
+    model: string;
+    size: string;
+    quality: string;
+    count: number;
+    imageOptions: string;
+};
+
 export type CanvasQuickGeneratePanelRenderState = {
     embedded: boolean;
     open: boolean;
@@ -31,6 +39,7 @@ export type CanvasQuickGeneratePanelRenderState = {
     onQualityChange: (value: string) => void;
     onCountChange: (value: number) => void;
     onImageOptionsChange: (value: string) => void;
+    onSettingsNormalize?: (settings: Partial<CanvasQuickGenerateSettings>) => void;
     onPickReferences: () => void;
     referenceScopeKey?: string;
     referencesLoading?: boolean;
@@ -79,6 +88,7 @@ export function canvasQuickGeneratePanelPropsEqual(previous: CanvasQuickGenerate
         previous.onQualityChange === next.onQualityChange &&
         previous.onCountChange === next.onCountChange &&
         previous.onImageOptionsChange === next.onImageOptionsChange &&
+        previous.onSettingsNormalize === next.onSettingsNormalize &&
         previous.onPickReferences === next.onPickReferences &&
         previous.referenceScopeKey === next.referenceScopeKey &&
         previous.referencesLoading === next.referencesLoading &&

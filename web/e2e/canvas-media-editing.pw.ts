@@ -105,6 +105,10 @@ test("图片缩略图失败回退原图，原图失败显示重试且不改动�
     await expect(page.getByRole("button", { name: "展开创建面板", exact: true })).toBeVisible();
     await uploadSizedImage(page, 1600, 1200);
     await expect.poll(() => api.document(id)?.nodes.length).toBe(1);
+    // Isolate the node preview's one fallback from the independent reference
+    // preview now shown when a saved image selection opens the creation panel.
+    await page.mouse.click(1600, 1000);
+    await expect.poll(() => api.document(id)?.selectedNodeIds).toEqual([]);
     const original = structuredClone(api.document(id)!.nodes[0]);
     let failing = true, thumbnailReads = 0, originalReads = 0;
     // A fresh device has no IndexedDB original to mask a failed server read.
@@ -119,6 +123,7 @@ test("图片缩略图失败回退原图，原图失败显示重试且不改动�
         return route.fallback();
     });
     await remotePage.goto(page.url());
+    await expect(remotePage.getByRole("region", { name: "已选参考图", exact: true })).toHaveCount(0);
     const node = remotePage.locator(`[data-node-id="${original.id}"]`);
     const retry = node.getByRole("button", { name: "重新加载图片", exact: true });
     await expect(retry).toBeVisible();

@@ -4,6 +4,7 @@ import { portableCanvasMedia } from "@/lib/canvas/canvas-portable-media";
 import { collectImageStorageKeys } from "@/services/image-storage";
 import { defaultConfig } from "@/stores/use-config-store";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
+import { prepareImageSequenceStep } from "@/lib/canvas/canvas-image-sequence";
 
 const source: CanvasNodeData = { id: "source", type: CanvasNodeType.Image, title: "原图", position: { x: 0, y: 0 }, width: 200, height: 200,
     metadata: { content: "blob:source", storageKey: "image:source", originalFileName: "原图.png" } };
@@ -104,4 +105,27 @@ test("legacy comparison snapshots may recover omitted raw-data references but ca
     const reference = canvasNodeGenerationReferences(staleCompare, [], [])[0]!;
     expect(reference.dataUrl).toBe("https://original.test/a.png");
     expect(reference.storageKey).toBeUndefined();
+});
+
+test("a live workflow config marked edit is not a historical image and retains its actual input", () => {
+    const config: CanvasNodeData = { ...source, id: "config", type: CanvasNodeType.Config, metadata: { generationMode: "image", composerContent: "白底图" } };
+    const graph = prepareImageSequenceStep({ nodes: [source, config], connections: [{ id: "input", fromNodeId: source.id, toNodeId: config.id }] }, config.id, source.id);
+    const prepared = graph.nodes[1]!;
+    expect(prepared.metadata!.generationType).toBe("edit");
+    expect(hasIncompleteCanvasGenerationReferences(prepared)).toBe(false);
+    expect(canvasNodeGenerationReferences(prepared, graph.nodes, graph.connections).map(reference => reference.id)).toEqual([source.id]);
+    const legacyImage: CanvasNodeData = { ...prepared, type: CanvasNodeType.Image, metadata: { content: "blob:old-output", generationType: "edit" } };
+    expect(hasIncompleteCanvasGenerationReferences(legacyImage)).toBe(true);
+    expect(canvasNodeGenerationReferences(legacyImage, [source, legacyImage], graph.connections)).toEqual([]);
+});
+
+test("live config edit markers preserve manual and connected reference ordering, exclusions and explicit drafts", () => {
+    const second = { ...source, id: "second", metadata: { content: "blob:second", storageKey: "image:second" } };
+    const config: CanvasNodeData = { ...source, id: "config", type: CanvasNodeType.Config, metadata: { generationType: "edit", sourceTaskId: "restored-task",
+        manualImageReferences: [{ id: "manual", referenceKey: "manual", name: "手动参考", type: "image/png", content: "blob:manual", origin: "upload" }],
+        imageReferenceOrder: ["node:second", "manual", "node:source"], excludedConnectedImageReferenceKeys: ["node:source"] } };
+    const nodes = [source, second, config], connections = [source, second].map(node => ({ id: node.id, fromNodeId: node.id, toNodeId: config.id }));
+    expect(hasIncompleteCanvasGenerationReferences(config)).toBe(false);
+    expect(canvasNodeGenerationReferences(config, nodes, connections).map(reference => reference.id)).toEqual(["second", "manual"]);
+    expect(canvasNodeGenerationReferences({ ...config, metadata: { ...config.metadata, draftImageReferences: [] } }, nodes, connections)).toEqual([]);
 });
