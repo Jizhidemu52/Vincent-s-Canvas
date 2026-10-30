@@ -36,6 +36,8 @@ async function decodedImages(nodes: Locator[]) {
 test("不同原图在低缩放失选、多选、单选焦点和AI编辑后仍真实解码显示", async ({ page, api }, testInfo) => {
     await page.setViewportSize({ width: 1366, height: 768 });
     const id = await newCanvas(page);
+    await expect(page.getByTestId("canvas-onboarding-tour")).toBeHidden();
+    await page.getByRole("button", { name: "跟我走一遍", exact: true }).click();
     await page.getByRole("button", { name: "跳过引导", exact: true }).click();
     await uploadImage(page, "gradient-reference.png");
     await expect.poll(() => api.document(id)?.nodes.length).toBe(1);

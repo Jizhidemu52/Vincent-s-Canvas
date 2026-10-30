@@ -45,7 +45,7 @@ async function emptyEntriesAreUncovered(page: Page, panel: Locator) {
         empty.getByRole("button", { name: /拖入图片/ }),
         empty.getByRole("button", { name: /用模板开始/ }),
         empty.getByRole("button", { name: /打开示例画布/ }),
-        page.getByRole("button", { name: "新手引导", exact: true }),
+        empty.getByRole("button", { name: "跟我走一遍", exact: true }),
     ];
     for (const control of controls) {
         await expect(control).toBeVisible();
@@ -59,10 +59,12 @@ async function emptyEntriesAreUncovered(page: Page, panel: Locator) {
     }
 }
 
-test("首次四步引导高亮真实控件，完成与以后再看均持久化且不调用模型", async ({ page, api }) => {
+test("手动开启四步引导高亮真实控件，完成与以后再看均持久化且不调用模型", async ({ page, api }) => {
     await page.setViewportSize({ width: 1366, height: 768 });
     await newCanvas(page);
     const tour = page.getByTestId("canvas-onboarding-tour");
+    await expect(tour).toBeHidden();
+    await page.getByRole("button", { name: "跟我走一遍", exact: true }).click();
     await expect(tour).toContainText("1 / 4");
     await highlightMatches(page, page.getByRole("button", { name: "上传素材", exact: true }));
     await tourLeavesToolbarsUsable(page);
@@ -85,7 +87,7 @@ test("首次四步引导高亮真实控件，完成与以后再看均持久化�
     await page.reload();
     await expect(page.getByTestId("canvas-empty-start")).toBeVisible();
     await expect(tour).toBeHidden();
-    await page.getByRole("button", { name: "新手引导", exact: true }).click();
+    await page.getByRole("button", { name: "跟我走一遍", exact: true }).click();
     await expect(tour).toContainText("1 / 4");
     await tour.getByRole("button", { name: /以后再看 ·/ }).click();
     await page.reload();
@@ -98,6 +100,8 @@ test("首次四步引导高亮真实控件，完成与以后再看均持久化�
 test("空画布三入口真实可用，模板和示例均不自动提交生成", async ({ page, api }) => {
     await page.setViewportSize({ width: 1280, height: 768 });
     const originalId = await newCanvas(page);
+    await expect(page.getByTestId("canvas-onboarding-tour")).toBeHidden();
+    await page.getByRole("button", { name: "跟我走一遍", exact: true }).click();
     await page.getByRole("button", { name: "跳过引导", exact: true }).click();
     const empty = page.getByTestId("canvas-empty-start");
     await expect(empty.getByRole("button", { name: /拖入图片/ })).toBeEnabled();
@@ -128,13 +132,17 @@ test("空画布三入口真实可用，模板和示例均不自动提交生成",
     await expect(page.locator(".node-element")).toHaveCount(4);
 });
 
-test("自动引导让位于实际节点编辑，不记完成；手动重开后不会被自动收起", async ({ page, api }) => {
+test("默认不自动引导，关闭后可编辑节点；手动重开后不会被自动收起", async ({ page, api }) => {
     await page.setViewportSize({ width: 1366, height: 768 });
     const id = await newCanvas(page);
     const tour = page.getByTestId("canvas-onboarding-tour");
+    await expect(tour).toBeHidden();
+    await page.getByRole("button", { name: "跟我走一遍", exact: true }).click();
     await expect(tour).toContainText("1 / 4");
     await tour.getByRole("button", { name: "下一步", exact: true }).click();
     await expect(page.getByTestId("canvas-quick-generate-panel")).toBeVisible();
+    await tour.getByRole("button", { name: "关闭引导，以后再看", exact: true }).click();
+    await page.getByRole("button", { name: "展开创建面板", exact: true }).click();
     await uploadImage(page, "first.png");
     await expect.poll(() => api.document(id)?.nodes.length).toBe(1);
     await expect(tour).toBeHidden();
@@ -159,12 +167,13 @@ test("自动引导让位于实际节点编辑，不记完成；手动重开后�
     await page.getByRole("button", { name: /^清\s*空$/ }).click();
     await expect.poll(() => api.document(id)?.nodes.find((node: any) => node.id === targetId).metadata.manualImageReferences?.length ?? 0).toBe(0);
 
-    // A fresh empty canvas still offers the unfinished guide: automatic
-    // collapse must not persist a completed/skipped/deferred outcome.
+    // A fresh empty canvas stays quiet but retains the explicit guide entry.
     const nextId = await newCanvas(page);
+    await expect(tour).toBeHidden();
+    await page.getByRole("button", { name: "跟我走一遍", exact: true }).click();
     await expect(tour).toContainText("1 / 4");
     await tour.getByRole("button", { name: /以后再看 ·/ }).click();
-    await page.getByRole("button", { name: "新手引导", exact: true }).click();
+    await page.getByRole("button", { name: "跟我走一遍", exact: true }).click();
     await expect(tour).toContainText("1 / 4");
     await uploadImage(page, "manual-tour.png");
     await expect.poll(() => api.document(nextId)?.nodes.length).toBe(1);
@@ -178,6 +187,8 @@ test("1280默认收起，1366打开最大创建面板与宽屏助手仍留一半
     await context.route("**/api/generation-capabilities?**", route => route.fulfill({ contentType: "application/json", body: JSON.stringify({ models: [] }) }));
     await page.setViewportSize({ width: 1280, height: 768 });
     await newCanvas(page);
+    await expect(page.getByTestId("canvas-onboarding-tour")).toBeHidden();
+    await page.getByRole("button", { name: "跟我走一遍", exact: true }).click();
     await page.getByRole("button", { name: "跳过引导", exact: true }).click();
     await expect(page.getByTestId("canvas-quick-generate-panel")).toBeHidden();
     await expect(page.locator(".cw-agent-panel")).toBeHidden();

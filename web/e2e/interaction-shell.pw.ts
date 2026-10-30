@@ -5,7 +5,7 @@ import { MockCanvasApi, IMAGE } from "./fixtures";
 
 const owner = "00000000-0000-4000-8000-000000000099";
 async function setup(page: Page) {
-    const api = new MockCanvasApi("http://127.0.0.1:5288"); await api.attach(page.context());
+    const api = new MockCanvasApi(test.info().project.use.baseURL); await api.attach(page.context());
     await page.context().route("**/api/prompt-templates?*", route => route.fulfill({ contentType: "application/json", body: JSON.stringify({ templates: [], total: 0 }) }));
     return api;
 }

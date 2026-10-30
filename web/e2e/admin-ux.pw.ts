@@ -5,7 +5,7 @@ const account = { id: "person", username: "zhangsan", displayName: "张三", ema
 const provider = { id: "provider", name: "隔离服务", protocol: "openai", baseUrl: "https://example.test/v1", enabled: true, hasCredentials: true };
 
 async function setup(page: Page) {
-    const api = new MockCanvasApi("http://127.0.0.1:5286"); api.role = "super_admin";
+    const api = new MockCanvasApi(test.info().project.use.baseURL); api.role = "super_admin";
     await api.attach(page.context());
     const writes: Array<{ path: string; data: any }> = [];
     let creditsEnabled = false;

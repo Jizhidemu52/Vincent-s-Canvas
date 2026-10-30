@@ -1,5 +1,5 @@
 import { useUiText, uiText, useUiLocale } from "@/lib/i18n";
-import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import copyToClipboard from "copy-to-clipboard";
 import { Bot, Copy, Cpu, History, ImageIcon, Maximize2, MoreHorizontal, PanelLeft, PanelRightClose, Plus, Settings2, Trash2, Video, X } from "lucide-react";
 import { Button, Dropdown, Modal, Popover, Segmented, Switch, Tooltip } from "antd";
@@ -12,6 +12,7 @@ import { ModelPicker } from "@/components/model-picker";
 import { CanvasPanelSizeControl } from "@/components/canvas/canvas-panel-size-control";
 import { ConversationImageTarget, conversationImageLabel, type ConversationImageAction, type ConversationImageItem } from "@/components/conversation-image-controls";
 import { useConversationImageTools } from "@/hooks/use-conversation-image-tools";
+import { useImageDrop } from "@/hooks/use-image-drop";
 import { getModelPickerOptions, resolveModelPickerSource } from "@/lib/model-picker-options";
 import { standaloneEdition } from "@/lib/standalone-edition";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
@@ -123,6 +124,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
     const brandName = locale === "en-US" ? "Inchoice TruCreate" : "无限画布";
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const user = useUserStore((state) => state.user);
+    const attachmentOwner = useUserStore(state => `${state.status}:${state.user?.id || ""}`);
     const baseConfig = useEffectiveConfig();
     const effectiveConfig = useToolConfig({ ...baseConfig, model: baseConfig.textModel || baseConfig.model }, "canvas-chat");
     const businessModels = useBusinessConfigStore((state) => state.models);
@@ -292,6 +294,14 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
 
     const safeSessions = localSessions.length ? localSessions : [createSession()];
     const activeSession = useMemo(() => safeSessions.find((session) => session.id === localActiveSessionId) || safeSessions[0] || null, [localActiveSessionId, safeSessions]);
+    const attachmentScope = `${onlineProjectId}:${attachmentOwner}:${activeSession?.id || ""}:${agentMode}:${Boolean(closing)}`;
+    const attachmentScopeRef = useRef(attachmentScope);
+    useLayoutEffect(() => {
+        attachmentScopeRef.current = attachmentScope;
+        attachmentReadRef.current = { token: {}, busy: false };
+        setAttachmentsLoading(false);
+        return () => { attachmentReadRef.current = { token: {}, busy: false }; };
+    }, [attachmentScope]);
     const historySessions = safeSessions.filter((session) => session.messages.length > 0);
     const messages = activeSession?.messages || [];
     const conversationImages = useMemo(() => canvasConversationImages(messages), [messages]);
@@ -1123,7 +1133,11 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
         const token = {};
         attachmentReadRef.current = { token, busy: true };
         setAttachmentsLoading(true);
-        const current = () => onlineMountedRef.current && attachmentReadRef.current.token === token;
+        const current = () => {
+            const account = useUserStore.getState();
+            return onlineMountedRef.current && attachmentReadRef.current.token === token && attachmentScopeRef.current === attachmentScope
+                && `${account.status}:${account.user?.id || ""}` === attachmentOwner;
+        };
         try {
             const available = CANVAS_AGENT_ATTACHMENT_LIMIT - uploadedReferences.reduce((bytes, item) => bytes + (item.dataUrl?.length || 0), 0);
             const result = await readCanvasAgentAttachments(Array.from(files || []), available, fileToDataUrl, current);
@@ -1134,6 +1148,11 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
             if (current()) { attachmentReadRef.current.busy = false; setAttachmentsLoading(false); }
         }
     };
+    const attachmentDrop = useImageDrop({
+        scopeKey: attachmentScope,
+        disabled: !onlineEnabled || !effectiveConfig.textModel || isRunning || attachmentsLoading || closing || agentMode !== "online",
+        onFiles: addImagesToAgent,
+    });
 
     const useImageForVideo = (attachment: CanvasAgentChatAttachment) => {
         if (attachment.mediaType === "video") return;
@@ -1412,9 +1431,11 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                         <span title={t("发送时读取可见、选中和预览中的素材；视频提供抽样画面，不含声音。关闭后仍保留画布结构与手动参考。")}>{autoContext ? t("自动读取画布 · 图片、视频画面与文字") : t("自动读取已关闭 · 仅结构与手动参考")}</span>
                         <button type="button" className="shrink-0 hover:underline" aria-pressed={autoContext} onClick={() => setAutoContext((current) => !current)}>{autoContext ? t("关闭") : t("开启")}</button>
                     </div>
+                    <div {...attachmentDrop.dropProps} data-testid="canvas-agent-attachment-drop">
+                    {attachmentDrop.dragging || attachmentDrop.reading ? <p role="status" className="mx-4 mb-2 text-xs" style={{ color: theme.node.text }}>{t(attachmentDrop.reading ? "正在读取拖入图片，请稍候。" : "松开以添加对话参考图，不会自动发送")}</p> : null}
                     <AgentChatComposer
                         key={`${activeSession?.id}:${onlineProjectId}:${user?.id || ""}`}
-                        disabled={!onlineEnabled || !effectiveConfig.textModel || attachmentsLoading}
+                        disabled={!onlineEnabled || !effectiveConfig.textModel || attachmentsLoading || attachmentDrop.reading}
                         prompt={prompt}
                         imageTarget={<ConversationImageTarget image={selectedConversationImage} mode={imageSelection?.mode} onCancel={() => setImageSelection(null)} />}
                         mentionImages={conversationImages}
@@ -1444,6 +1465,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                                 <CanvasPromptLibrary onSelect={setPrompt} />
                             </div>} />}
                     />
+                    </div>
                     {attachmentsLoading ? <p role="status" className="mx-4 mb-2 text-xs" style={{ color: theme.node.muted }}>{t("正在读取图片…")}</p> : null}
                     {attachmentErrors.length ? <p role="alert" className="mx-4 mb-2 whitespace-pre-wrap text-xs" style={{ color: theme.node.text }}>{attachmentErrors.join("\n")}</p> : null}
                 </>

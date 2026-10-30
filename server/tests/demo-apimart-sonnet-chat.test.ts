@@ -74,7 +74,7 @@ test("demo defaults every chat entry to Sonnet Messages and SSE regardless of st
     expect(calls[0]!.path).toBe("/mark/v1/messages");
     expect(calls[0]!.headers.get("anthropic-version")).toBe("2023-06-01");
     expect(calls[0]!.headers.get("x-api-key")).toBeNull();
-    expect(calls[0]!.body).toEqual({ model: "claude-sonnet-5-5", max_tokens: 4096, messages: [{ role: "user", content: "Inspect this knit. 中文🧶" }], tools: [{ name: "read_node", input_schema: tools[0]!.parameters }], tool_choice: { type: "any" } });
+    expect(calls[0]!.body).toEqual({ model: "claude-sonnet-5-5", max_tokens: 4096, system: "For this request, call an available tool.", messages: [{ role: "user", content: "Inspect this knit. 中文🧶" }], tools: [{ name: "read_node", input_schema: tools[0]!.parameters }], tool_choice: { type: "auto" } });
     expect(calls[0]!.raw).toContain("中文🧶");
     const stream = await chat(sonnet.id, { claude: { stream: true, maxTokens: 100_000 }, input: [{ type: "claude_assistant", content: assistantContent }, { type: "function_call_output", call_id: "read-1", output: "Cable knit 中文🧶" }] });
     expect(stream.headers.get("content-type")).toContain("text/event-stream");

@@ -132,6 +132,8 @@ test("canvas image controls lock an older result despite a model requesting a ne
         }) });
     });
     await page.goto(`/canvas/${project}`);
+    await expect(page.getByTestId("canvas-onboarding-tour")).toBeHidden();
+    await page.getByRole("button", { name: "跟我走一遍", exact: true }).click();
     const skip = page.getByRole("button", { name: "跳过引导", exact: true });
     await expect(skip).toBeVisible();
     await skip.click();

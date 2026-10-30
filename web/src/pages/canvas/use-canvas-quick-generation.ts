@@ -25,7 +25,7 @@ import type { ReferenceImage } from "@/types/image";
 import { App } from "antd";
 import { nanoid } from "nanoid";
 import type { Dispatch, ChangeEvent as ReactChangeEvent, RefObject, SetStateAction } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { buildImageGenerationMetadata, isGenerationCanceled } from "./canvas-project-utils";
 import { useCanvasBatchEdit } from "./use-canvas-batch-edit";
@@ -71,6 +71,17 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, r
     const [quickGenerateImageOptions, setQuickGenerateImageOptions] = useState(effectiveConfig.imageOptions || "");
     const [quickGenerateReferences, setQuickGenerateReferences] = useState<CanvasSelectionReference[]>([]);
     const [quickGenerateRunning, setQuickGenerateRunning] = useState(false);
+    const [quickReferencesLoading, setQuickReferencesLoading] = useState(false);
+    const referenceOwner = useUserStore(state => `${state.status}:${state.user?.id || ""}`);
+    const referenceScope = `${projectId}:${referenceOwner}`;
+    const referenceRead = useRef<symbol | null>(null);
+    const referenceContext = useRef({ scope: referenceScope, running: quickGenerateRunning, model: quickGenerateModel, references: quickGenerateReferences });
+    useLayoutEffect(() => { referenceContext.current = { scope: referenceScope, running: quickGenerateRunning, model: quickGenerateModel, references: quickGenerateReferences }; });
+    useLayoutEffect(() => {
+        referenceRead.current = null;
+        setQuickReferencesLoading(false);
+        return () => { referenceRead.current = null; };
+    }, [referenceScope]);
     const quickSubmissionRef = useRef<symbol | null>(null);
     const quickOptimizedDraft = useRef<{ prompt: string; input: import("../../../../shared/prompt-contracts").PromptInputData; references: ReferenceImage[] } | undefined>(undefined);
     const onQuickOptimizedPrompt = useCallback((prompt: string, input: import("../../../../shared/prompt-contracts").PromptInputData, references: ReferenceImage[]) => { quickOptimizedDraft.current = { prompt, input, references: [...references] }; }, []);
@@ -87,19 +98,27 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, r
         [effectiveConfig.imageModel, effectiveConfig.model, estimateUsage, quickGenerateModel, quickGenerateReferences.length],
     );
 
-    const handleQuickReferenceInputChange = useCallback(
-        async (event: ReactChangeEvent<HTMLInputElement>) => {
+    const addQuickReferenceFiles = useCallback(
+        async (input: File[]) => {
+            if (quickGenerateRunning || referenceRead.current) return;
             const maximum = validateImageReferences(modelOptionName(quickGenerateModel), quickGenerateReferences).maximum;
             const remaining = Math.max(0, maximum - quickGenerateReferences.length);
-            const files = Array.from(event.target.files || [])
+            const files = input
                 .filter((file) => file.type.startsWith("image/"))
                 .slice(0, remaining);
-            event.target.value = "";
             if (!files.length) {
                 message.warning(remaining ? uiText("请选择图片文件") : maximum ? uiText("当前模型最多添加 {value1} 张参考图", { value1: maximum }) : uiText("当前模型不支持参考图"));
                 return;
             }
 
+            const token = Symbol();
+            referenceRead.current = token;
+            setQuickReferencesLoading(true);
+            const current = () => {
+                const account = useUserStore.getState();
+                return referenceRead.current === token && referenceContext.current.scope === referenceScope && !referenceContext.current.running
+                    && `${account.status}:${account.user?.id || ""}` === referenceOwner;
+            };
             try {
                 files.forEach(assertCanvasImageUploadSize);
                 const uploaded = await Promise.all(
@@ -116,16 +135,26 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, r
                         } satisfies ReferenceImage;
                     }),
                 );
-                setQuickGenerateReferences((current) => [...current, ...uploaded]);
+                if (!current()) return;
+                const latest = referenceContext.current;
+                const slots = Math.max(0, validateImageReferences(modelOptionName(latest.model), latest.references).maximum - latest.references.length);
+                setQuickGenerateReferences((references) => [...references, ...uploaded.slice(0, slots)]);
             } catch (error) {
-                message.error(error instanceof Error ? error.message : uiText("参考图上传失败"));
+                if (current()) message.error(error instanceof Error ? error.message : uiText("参考图上传失败"));
+            } finally {
+                if (referenceRead.current === token) { referenceRead.current = null; setQuickReferencesLoading(false); }
             }
         },
-        [message, quickGenerateModel, quickGenerateReferences],
+        [message, quickGenerateModel, quickGenerateReferences, quickGenerateRunning, referenceOwner, referenceScope],
     );
+    const handleQuickReferenceInputChange = useCallback((event: ReactChangeEvent<HTMLInputElement>) => {
+        const files = Array.from(event.target.files || []);
+        event.target.value = "";
+        void addQuickReferenceFiles(files);
+    }, [addQuickReferenceFiles]);
 
     const runQuickCanvasGeneration = useCallback(async () => {
-        if (quickSubmissionRef.current) return;
+        if (quickSubmissionRef.current || referenceRead.current) return;
         const user = useUserStore.getState().user;
         const selectedModel = quickGenerateModel || effectiveConfig.imageModel || effectiveConfig.model;
         const toolKey = canvasToolKey("image", quickGenerateReferences.length > 0, imageModelProfile(selectedModel).kind);
@@ -369,7 +398,7 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, r
         setQuickGenerateModel, quickGenerateSize, setQuickGenerateSize, quickGenerateQuality,
         setQuickGenerateQuality, quickGenerateCount, setQuickGenerateCount, quickGenerateImageOptions,
         setQuickGenerateImageOptions, quickGenerateReferences, setQuickGenerateReferences, quickGenerateRunning,
-        setQuickGenerateRunning, quickGenerateEstimate, onQuickOptimizedPrompt, handleQuickReferenceInputChange,
+        setQuickGenerateRunning, quickGenerateEstimate, onQuickOptimizedPrompt, handleQuickReferenceInputChange, addQuickReferenceFiles, quickReferencesLoading,
         runQuickCanvasGeneration,
     };
 }

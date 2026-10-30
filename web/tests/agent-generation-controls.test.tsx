@@ -22,6 +22,8 @@ function controls(patch: Partial<AgentGenerationSettings> = {}) {
     const effects: Array<() => void> = [];
     const dependencies: Record<string, unknown> = {
         "@/lib/i18n": i18nHarness,
+        // External image drops are not part of these generation-parameter controls.
+        "@/hooks/use-image-drop": { useImageDrop: () => ({ dropProps: {}, dragging: false, reading: false }) },
         react: { ...React, useEffect: (effect: () => void) => effects.push(effect) },
         "@/lib/image-model-settings": { imageModelProfile, useImageModelProfile: (model: string) => imageModelProfile(model, []) },
         "@/hooks/use-tool-config": { canvasToolKey, useToolConfig: (config: unknown) => config },

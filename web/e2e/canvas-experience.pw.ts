@@ -4,6 +4,8 @@ import { test, expect, newCanvas } from "./fixtures";
 import type { Page } from "@playwright/test";
 
 async function skipGuide(page: Page) {
+    await expect(page.getByTestId("canvas-onboarding-tour")).toBeHidden();
+    await page.getByRole("button", { name: "跟我走一遍", exact: true }).click();
     const skip = page.getByRole("button", { name: "跳过引导", exact: true });
     await expect(skip).toBeVisible();
     await skip.click();
@@ -71,7 +73,7 @@ test("二十项常用命令可搜索，主题背景与重命名实际执行", as
     const id = await newCanvas(page); await skipGuide(page);
     await page.keyboard.press("Control+k");
     const search = page.getByRole("combobox", { name: "搜索命令、节点和素材" });
-    for (const query of ["上传素材", "添加文本", "添加图片节点", "添加视频节点", "添加音频节点", "添加生成配置", "打开画布生图", "批量改图", "我的素材", "使用设计模板", "重置视图", "切换小地图", "导出画布备份", "全部工具与板块", "重新查看新手引导", "切换主题", "清空画布", "移动画布", "显示图片信息", "快捷键"]) {
+    for (const query of ["上传素材", "添加文本", "添加图片节点", "添加视频节点", "添加音频节点", "添加生成配置", "打开画布生图", "批量改图", "我的素材", "使用设计模板", "适应全部内容", "切换小地图", "导出画布备份", "全部工具与板块", "重新查看新手引导", "切换主题", "清空画布", "移动画布", "显示图片信息", "快捷键"]) {
         await search.fill(query);
         await expect(page.getByRole("option").filter({ hasText: query })).toHaveCount(1);
     }

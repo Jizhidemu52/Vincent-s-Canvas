@@ -149,9 +149,9 @@ describe("durable local personal prompt templates", () => {
     expect(store.resolve(owner, created.id, { requestId: "no-published-price" }, ctx.value).pricing).toMatchObject({ reason: "price_unavailable", selectedModel: null, estimate: null });
     ctx.value.tools = [{ toolKey: "image", enabled: true, modelConfigId: modelId, creditCostOverride: 7, rmbCostOverride: .123456, configurationVersion: 8 }];
     const local = store.resolve(owner, created.id, { requestId: "local-price-override" }, ctx.value).pricing;
-    expect(local.estimate).toMatchObject({ totalCredits: 0, totalRmb: .2469, quantity: 2, toolKey: "image", configurationVersion: 8, creditCostOverride: 0, rmbCostOverride: .123456 });
+    expect(local.estimate).toMatchObject({ totalCredits: 0, totalRmb: .246912, quantity: 2, toolKey: "image", configurationVersion: 8, creditCostOverride: 0, rmbCostOverride: .123456 });
     ctx.value.creditsEnabled = true;
-    expect(store.resolve(owner, created.id, { requestId: "paid-price-override" }, ctx.value).pricing.estimate).toMatchObject({ totalCredits: 14, totalRmb: .2469, creditCostOverride: 7 });
+    expect(store.resolve(owner, created.id, { requestId: "paid-price-override" }, ctx.value).pricing.estimate).toMatchObject({ totalCredits: 14, totalRmb: .246912, creditCostOverride: 7 });
     ctx.value.moduleEnabled = () => false;
     expect(store.resolve(owner, created.id, { requestId: "disabled-tool-price" }, ctx.value).pricing).toMatchObject({ reason: "tool_unavailable", selectedModel: null, estimate: null });
   });

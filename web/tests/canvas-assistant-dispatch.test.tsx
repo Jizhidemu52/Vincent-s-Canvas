@@ -38,6 +38,7 @@ function panelHarness(options: { replies: ToolResponseResult[]; stream?: string;
     const memos: Array<{ dependencies?: DependencyList; value: unknown }> = [];
     const effects: Array<{ dependencies?: DependencyList; cleanup?: ReturnType<EffectCallback> }> = [];
     const pendingEffects: Array<() => void> = [];
+    const pendingLayoutEffects: Array<() => void> = [];
     let stateIndex = 0;
     let refIndex = 0;
     let memoIndex = 0;
@@ -60,6 +61,7 @@ function panelHarness(options: { replies: ToolResponseResult[]; stream?: string;
         { toolKey: "gpt-chat", modelConfigId: business.models.find(model => model.capabilities.includes("chat"))?.id || null, enabled: true, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 1 },
     ];
     const businessState = { ...business, status: "ready" as const, refresh: async () => undefined };
+    const userState = { status: options.userId ? "authenticated" : "guest", user: options.userId ? { id: options.userId } : null };
     let sessions: CanvasAssistantSession[] = options.history ? [{ id: "history", title: "History", createdAt: "2026-09-06", updatedAt: "2026-09-06", messages: options.history }] : [];
     let activeSessionId: string | null = null;
     const sessionCommits: Array<{ sessions: CanvasAssistantSession[]; activeId: string | null }> = [];
@@ -79,6 +81,16 @@ function panelHarness(options: { replies: ToolResponseResult[]; stream?: string;
         if (!memos[index] || !dependenciesEqual(memos[index].dependencies, dependencies)) memos[index] = { dependencies, value: factory() };
         return memos[index].value;
     };
+    const scheduleEffect = (effect: EffectCallback, dependencies: DependencyList | undefined, queue: Array<() => void>) => {
+        const index = effectIndex++;
+        const previous = effects[index];
+        if (!previous || !dependenciesEqual(previous.dependencies, dependencies)) {
+            queue.push(() => {
+                previous?.cleanup?.();
+                effects[index] = { dependencies, cleanup: effect() };
+            });
+        }
+    };
     const snapshotRef: { current: CanvasAgentSnapshot } = { current: { projectId: "project", title: "Canvas", nodes: options.nodes || options.selected || [], connections: [], selectedNodeIds: (options.selected || []).map((node) => node.id), viewport: { x: 0, y: 0, k: 1 }, viewportSize: { width: 800, height: 600 } } };
     const imageRequest = async (type: string, args: any[]) => {
         requests.push({ type, args });
@@ -92,6 +104,8 @@ function panelHarness(options: { replies: ToolResponseResult[]; stream?: string;
     const dependencies: Record<string, unknown> = {
         // Browser download/dialog effects are covered by their browser tests, not this planner dispatcher.
         "@/hooks/use-conversation-image-tools": { useConversationImageTools: () => ({ download: async () => undefined, compare: () => undefined, compareDialog: null }) },
+        // Native drag events are covered separately; onAddFiles below still runs the real attachment reader.
+        "@/hooks/use-image-drop": { useImageDrop: () => ({ dropProps: {}, dragging: false, reading: false }) },
         "@/lib/canvas/canvas-assistant-media": {
             captureCanvasContextSnapshot: (snapshot: CanvasAgentSnapshot) => snapshot,
             readCanvasContextImage: async (node: CanvasNodeData) => `data:image/jpeg;base64,${node.id}`,
@@ -101,16 +115,8 @@ function panelHarness(options: { replies: ToolResponseResult[]; stream?: string;
         react: {
             ...React,
             memo: (component: unknown) => component,
-            useEffect: (effect: EffectCallback, dependencies?: DependencyList) => {
-                const index = effectIndex++;
-                const previous = effects[index];
-                if (!previous || !dependenciesEqual(previous.dependencies, dependencies)) {
-                    pendingEffects.push(() => {
-                        previous?.cleanup?.();
-                        effects[index] = { dependencies, cleanup: effect() };
-                    });
-                }
-            },
+            useEffect: (effect: EffectCallback, dependencies?: DependencyList) => scheduleEffect(effect, dependencies, pendingEffects),
+            useLayoutEffect: (effect: EffectCallback, dependencies?: DependencyList) => scheduleEffect(effect, dependencies, pendingLayoutEffects),
             useMemo,
             // This manual renderer commits synchronously; scheduling itself is
             // covered by the production-browser input and session-switch tests.
@@ -126,7 +132,7 @@ function panelHarness(options: { replies: ToolResponseResult[]; stream?: string;
         "@/stores/use-config-store": { ...configModule, useEffectiveConfig: () => config, useConfigStore: (selector: (state: unknown) => unknown) => selector({ openConfigDialog: () => undefined, updateConfig: () => undefined }) },
         "@/lib/standalone-edition": { standaloneEdition: options.standalone || false },
         "@/stores/use-theme-store": { useThemeStore: (selector: (state: unknown) => unknown) => selector({ theme: "light" }) },
-        "@/stores/use-user-store": { useUserStore: (selector: (state: unknown) => unknown) => selector({ user: options.userId ? { id: options.userId } : null }) },
+        "@/stores/use-user-store": { useUserStore: Object.assign((selector: (state: typeof userState) => unknown) => selector(userState), { getState: () => userState }) },
         "@/lib/canvas/canvas-online-task-recovery": {
             ...onlineTaskRecovery,
             recoverOnlineAgentTask: (...args: Parameters<typeof onlineTaskRecovery.recoverOnlineAgentTask>) => onlineTaskRecovery.recoverOnlineAgentTask(args[0], args[1], args[2], options.recoveryIO),
@@ -191,6 +197,7 @@ function panelHarness(options: { replies: ToolResponseResult[]; stream?: string;
             canUndoOps: false, onUndoOps: () => null, onPasteImage: () => undefined,
             ...panelState, onAgentModeChange: () => undefined, onCollapse: () => undefined,
         }) as ReactElement<any>;
+        for (const effect of pendingLayoutEffects.splice(0)) effect();
         for (const effect of pendingEffects.splice(0)) effect();
         return element;
     };

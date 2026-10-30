@@ -4,6 +4,8 @@ import { test, expect, newCanvas, uploadImage } from "./fixtures";
 async function start(page: Page, width = 1366) {
     await page.setViewportSize({ width, height: 768 });
     const id = await newCanvas(page);
+    await expect(page.getByTestId("canvas-onboarding-tour")).toBeHidden();
+    await page.getByRole("button", { name: "跟我走一遍", exact: true }).click();
     await page.getByRole("button", { name: "跳过引导", exact: true }).click();
     return id;
 }
@@ -135,10 +137,11 @@ test("1366节点内联编辑高缩放不因最小逻辑宽度突破半屏", asyn
     await expect(panel).toBeVisible();
     await page.getByRole("button", { name: "画布缩放与视图", exact: true }).click();
     const zoom = page.getByRole("slider", { name: "放大/缩小画布", exact: true });
-    // Native keyboard adjustment exercises the public zoom control, not a
-    // store mutation. PageUp is a large increment on the browser range input.
-    await zoom.press("Home");
-    await zoom.press("PageUp");
+    // The public slider is logarithmic (5%–1600%). Two native large steps
+    // below its maximum reach about 505%, preserving the high-zoom assertion.
+    await zoom.press("End");
+    await zoom.press("PageDown");
+    await zoom.press("PageDown");
     await expect.poll(() => api.document(id)?.viewport.k ?? 0).toBeGreaterThan(4.2);
     await page.getByRole("button", { name: "画布缩放与视图", exact: true }).click();
     for (let attempt = 0; attempt < 12; attempt++) {

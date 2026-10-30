@@ -23,6 +23,9 @@ export type CanvasQuickGeneratePanelRenderState = {
     onCountChange: (value: number) => void;
     onImageOptionsChange: (value: string) => void;
     onPickReferences: () => void;
+    referenceScopeKey?: string;
+    referencesLoading?: boolean;
+    onAddReferenceFiles?: (files: File[]) => void | Promise<void>;
     onRemoveReference: (id: string) => void;
     onClearReferences: () => void;
     onMoveReference: (id: string, targetId: string) => void;
@@ -62,6 +65,9 @@ export function canvasQuickGeneratePanelPropsEqual(previous: CanvasQuickGenerate
         previous.onCountChange === next.onCountChange &&
         previous.onImageOptionsChange === next.onImageOptionsChange &&
         previous.onPickReferences === next.onPickReferences &&
+        previous.referenceScopeKey === next.referenceScopeKey &&
+        previous.referencesLoading === next.referencesLoading &&
+        previous.onAddReferenceFiles === next.onAddReferenceFiles &&
         previous.onRemoveReference === next.onRemoveReference &&
         previous.onClearReferences === next.onClearReferences &&
         previous.onMoveReference === next.onMoveReference &&

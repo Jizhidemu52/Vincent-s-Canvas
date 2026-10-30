@@ -32,7 +32,7 @@ async function fitsViewport(page: Page, dialog: Locator) {
 
 test("裁剪自由拖动与比例切换可用，取消保留原图且确认创建新图", async ({ page, api }, testInfo) => {
     const id = await newCanvas(page);
-    await page.getByRole("button", { name: "收起创建面板", exact: true }).click();
+    await expect(page.getByRole("button", { name: "展开创建面板", exact: true })).toBeVisible();
     await uploadImage(page);
     await expect.poll(() => api.document(id)?.nodes.length).toBe(1);
     const original = structuredClone(api.document(id)!.nodes[0]);
@@ -59,6 +59,10 @@ test("裁剪自由拖动与比例切换可用，取消保留原图且确认创�
     await fitsViewport(page, dialog);
     await dialog.screenshot({ path: testInfo.outputPath("crop-390.png") });
     await dialog.getByRole("button", { name: /^取\s*消$/ }).click();
+    const discard = page.getByRole("dialog", { name: "放弃未保存的裁剪？", exact: true });
+    await expect(discard).toBeVisible();
+    expect(api.document(id)!.nodes).toEqual([original]);
+    await discard.getByRole("button", { name: "放弃调整", exact: true }).click();
     await expect(dialog).toBeHidden();
     expect(api.document(id)!.nodes).toEqual([original]);
     await page.setViewportSize({ width: 1280, height: 900 });
@@ -79,7 +83,7 @@ test("裁剪自由拖动与比例切换可用，取消保留原图且确认创�
 
 test("参考图取消后重开不残留，已确认项目不可重复添加且清空后可重选", async ({ page, api }, testInfo) => {
     const id = await newCanvas(page);
-    await page.getByRole("button", { name: "收起创建面板", exact: true }).click();
+    await expect(page.getByRole("button", { name: "展开创建面板", exact: true })).toBeVisible();
     await uploadImage(page, "first.png");
     await expect.poll(() => api.document(id)?.nodes.length).toBe(1);
     // Existing-image AI editing uses the quick composer. The reference picker

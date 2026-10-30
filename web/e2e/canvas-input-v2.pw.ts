@@ -106,6 +106,7 @@ test("500 节点下搜索、长对话与配置输入的前后测量及最新值�
 
 test("报告一键复制只含汇总，窄屏与深浅主题均可操作", async ({ page, context, api }, info) => {
     test.skip(variant === "baseline", "复制按钮是本轮新增功能");
+    api.role = "super_admin";
     await preparePerformanceScene(context, api, new URL(info.project.use.baseURL!).origin);
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
     await openPerformanceScene(page);

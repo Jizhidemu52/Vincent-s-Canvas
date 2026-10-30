@@ -56,12 +56,14 @@ async function fixture(context: BrowserContext, baseURL: string, count = 25, fav
     return { lists, writes, unexpected, pageErrors, reviews: () => reviews, fail: () => { failNext = true; }, returnFavorite: (value: boolean) => { returnNext = value; },
         switchOwner: () => { owner = employeeB; }, hold: () => { gate = new Promise<void>(resolve => { release = resolve; }); }, release: () => { release?.(); gate = undefined; } };
 }
-const card = (page: Page, title: string) => page.locator("article").filter({ has: page.getByRole("heading", { name: title, exact: true }) });
+const titleButton = (page: Page, title: string) => page.getByRole("button", { name: `查看完整提示词：${title}`, exact: true });
+const card = (page: Page, title: string) => page.locator("article").filter({ has: titleButton(page, title) });
 async function loaded(page: Page) { await expect(page.locator('section[aria-busy="false"]')).toBeVisible(); }
 
 test("shared favorites use the API value without refetching templates or the review queue", async ({ page, context, baseURL }, info) => {
     const f = await fixture(context, baseURL!, 3);
     await page.goto("/prompts"); await loaded(page);
+    await page.getByText("团队提示词", { exact: true }).click(); await loaded(page);
     const target = card(page, "团队模板 01"), requests = f.lists.length, reviews = f.reviews();
     f.returnFavorite(false);
     await target.getByRole("button", { name: "收藏", exact: true }).click();
@@ -90,7 +92,7 @@ test("personal favorite failure remains retryable and a changed search waits for
     await expect(page.locator('section[aria-busy="true"]')).toBeVisible();
     expect(f.lists).toHaveLength(requests);
     f.release(); await loaded(page);
-    await expect(page.getByRole("heading", { name: "个人模板 03", exact: true })).toBeVisible();
+    await expect(titleButton(page, "个人模板 03")).toBeVisible();
     await expect(page.locator("article")).toHaveCount(1);
     expect(f.lists).toHaveLength(requests + 1); expect(f.lists.at(-1)?.searchParams.get("query")).toBe("03");
     expect(f.unexpected).toEqual([]); expect(f.pageErrors).toEqual([]);
@@ -103,8 +105,8 @@ test("favorites-only replaces the missing row with a one-item read, preserving f
     await expect.poll(() => f.lists.at(-1)?.searchParams.get("favorite")).toBe("true"); await loaded(page);
     const requests = f.lists.length;
     await card(page, "个人模板 01").getByRole("button", { name: "取消收藏", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "个人模板 01", exact: true })).not.toBeVisible();
-    await expect(page.getByRole("heading", { name: "个人模板 25", exact: true })).toBeVisible();
+    await expect(titleButton(page, "个人模板 01")).not.toBeVisible();
+    await expect(titleButton(page, "个人模板 25")).toBeVisible();
     await expect(page.locator("article")).toHaveCount(24); await expect(page.getByText("共 24 个模板", { exact: true })).toBeVisible();
     expect(f.lists).toHaveLength(requests + 1);
     expect(Object.fromEntries(f.lists.at(-1)!.searchParams)).toEqual({ scope: "personal", page: "24", pageSize: "1", favorite: "true", sort: "updated" });
@@ -135,7 +137,7 @@ test("a late previous-account failure never updates or alerts the new account", 
     await expect.poll(() => f.writes.length).toBe(1);
     f.switchOwner();
     await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
-    await expect(page.getByRole("heading", { name: "新账号模板 01", exact: true })).toBeVisible(); await loaded(page);
+    await expect(titleButton(page, "新账号模板 01")).toBeVisible(); await loaded(page);
     f.release();
     await expect(card(page, "新账号模板 01").getByRole("button", { name: "收藏", exact: true })).toBeEnabled();
     await expect(page.getByText("收藏服务暂不可用", { exact: true })).not.toBeVisible();

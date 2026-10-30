@@ -82,7 +82,7 @@ test("批量改图暂停和恢复不重复创建批次", async ({ page, api }) =
 
 test("真实拖线串联两个配置节点，后一步使用前一步结果", async ({ page, api }) => {
     const id = await newCanvas(page);
-    await page.getByRole("button", { name: "收起创建面板", exact: true }).click();
+    await expect(page.getByRole("button", { name: "展开创建面板", exact: true })).toBeVisible();
     await uploadImage(page);
     await expect.poll(() => api.document(id)?.nodes.length).toBe(1);
     const sourceId = api.document(id)!.nodes[0].id;

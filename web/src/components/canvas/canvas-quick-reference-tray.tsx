@@ -3,6 +3,7 @@ import { ArrowLeft, ArrowRight, X } from "lucide-react";
 import { useState } from "react";
 import { CanvasPersistedMediaPreview } from "@/components/canvas/canvas-persisted-media-preview";
 import type { ReferenceImage } from "@/types/image";
+import { INTERNAL_IMAGE_DRAG } from "@/lib/dropped-images";
 
 type Props = {
     references: ReferenceImage[];
@@ -38,7 +39,7 @@ export function CanvasQuickReferenceTray({ references, disabled, thumbnailSize, 
                             if (target) onMove(reference.id, target.id);
                         }
                     }}
-                    onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", reference.id); setDraggingId(reference.id); setActiveId(reference.id); }}
+                    onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData(INTERNAL_IMAGE_DRAG, reference.id); event.dataTransfer.setData("text/plain", reference.id); setDraggingId(reference.id); setActiveId(reference.id); }}
                     onDragEnd={() => setDraggingId(null)}>
                     <CanvasPersistedMediaPreview kind="image" url={reference.dataUrl} storageKey={reference.storageKey} alt={reference.name} className="cw-reference-preview" />
                     <span className="cw-reference-number">{labelForReference?.(reference, index) || index + 1}</span>

@@ -75,8 +75,13 @@ async function gesture(page: Page, label: string) {
 }
 
 test("500节点100栅格图：对照帧率、真实堆曲线与200步历史边界", async ({ page, context, api, browser }, testInfo) => {
+    // Production diagnostics are intentionally hidden from normal designers.
+    // Use the existing isolated administrator session for every comparison
+    // variant instead of changing the build, product gate, or measured scene.
+    api.role = "super_admin";
     const scene = await preparePerformanceScene(context, api);
     await openPerformanceScene(page);
+    await expect(page.getByTestId("canvas-task-feedback").locator("dl"), "Performance acceptance requires the real product diagnostics").toHaveCount(1);
     const uiImages = [...scene.requests];
     const renderedImages = await inspectRenderedPerformanceImages(page);
     expect(renderedImages.length).toBeGreaterThan(0);
@@ -128,6 +133,7 @@ test("500节点100栅格图：对照帧率、真实堆曲线与200步历史边�
     const memoryContext = await browser.newContext({ viewport: { width: 1800, height: 1200 }, serviceWorkers: "block", deviceScaleFactor: 1 });
     const MemoryApi = (await import("./fixtures")).MockCanvasApi;
     const memoryApi = new MemoryApi(testInfo.project.use.baseURL!);
+    memoryApi.role = "super_admin";
     await memoryApi.attach(memoryContext);
     await preparePerformanceScene(memoryContext, memoryApi);
     const memoryPage = await memoryContext.newPage();

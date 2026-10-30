@@ -12,12 +12,21 @@ const pageSource = ["project.tsx", "use-canvas-quick-generation.ts"]
 const source = ts.createSourceFile("project.tsx", pageSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 function callback(name: string, scope: Record<string, unknown>): (...args: any[]) => any {
     scope = { importLockRef: { current: false }, pastePositionRef: { current: null }, projectId: "upload-test", designProjectIdRef: { current: "upload-test" },
-        useUserStore: { getState: () => ({ user: { id: "owner" } }) }, nanoid: () => "test-import", setImportPlaceholder() {},
+        useUserStore: { getState: () => ({ status: "authenticated", user: { id: "owner" } }) }, nanoid: () => "test-import", setImportPlaceholder() {},
         getCanvasCenter: () => ({ x: 0, y: 0 }), isAudioFile: isCanvasAudioFile, canvasImportGridPosition,
         ...scope, message: { open() {}, info() {}, destroy() {}, ...(scope.message as object || {}) } };
     if (name === "handleDrop" || name === "handleImageInputChange") {
         scope.createImageFileNode ||= callback("createImageFileNode", scope);
         scope.importFiles = callback("importFiles", scope);
+    }
+    if (name === "handleQuickReferenceInputChange") {
+        const referenceScope = "upload-test:authenticated:owner";
+        scope.addQuickReferenceFiles = callback("addQuickReferenceFiles", {
+            ...scope, Symbol, quickGenerateRunning: false, referenceRead: { current: null },
+            referenceOwner: "authenticated:owner", referenceScope,
+            referenceContext: { current: { scope: referenceScope, running: false, model: scope.quickGenerateModel, references: scope.quickGenerateReferences } },
+            setQuickReferencesLoading() {},
+        });
     }
     if (name === "handleDrop") {
         const hook = ts.createSourceFile("drop.ts", readFileSync(new URL("../src/pages/canvas/use-canvas-clipboard-drop.ts", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true);

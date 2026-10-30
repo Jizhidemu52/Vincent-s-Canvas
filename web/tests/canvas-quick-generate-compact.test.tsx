@@ -119,6 +119,8 @@ function controls(patch: Partial<Props> = {}, toolEnabled = true) {
     let cursor = 0;
     const effects: (() => void)[] = [];
     const dependencies: Record<string, unknown> = {
+        // External drag handling has its own tests; keep this renderer focused on composer controls.
+        "@/hooks/use-image-drop": { useImageDrop: () => ({ dropProps: {}, dragging: false, reading: false }) },
         react: { ...React, memo: (component: unknown) => component, useId: () => "settings-test", useEffect: (effect: () => void) => effects.push(effect),
             useState: (initial: unknown) => {
                 const index = cursor++;

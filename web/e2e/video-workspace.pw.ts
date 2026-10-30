@@ -52,7 +52,7 @@ test("视频可并行提交且刷新恢复各自结果，手动入库不重复�
     await expect(page.locator("video")).toHaveCount(3);
     await expect.poll(() => lookupCount).toBeGreaterThan(0);
     expect(api.submissions).toHaveLength(3);
-    await page.getByRole("button", { name: "添加到素材", exact: true }).first().click();
+    await page.getByRole("button", { name: "保存到素材库", exact: true }).first().click();
     await expect(page.getByText("该视频已在我的素材中，无需重复添加")).toBeVisible();
     // Only generated server assets exist; no upload-request was issued for a result.
     expect(api.assets.size).toBe(2);
@@ -113,7 +113,14 @@ for (const parameterModelId of ["happyhorse-1.1", "wan2.7", "MiniMax-H3", "douba
         await context.route(`**/api/assets/${resultId}/content`, route => route.fulfill({ contentType: "video/mp4", body: video }));
         await page.goto("/video");
         await page.getByRole("textbox", { name: "视频提示词" }).fill("保留产品结构，缓慢移动镜头");
-        await page.getByRole("combobox", { name: "视频生成方式" }).selectOption("first-frame");
+        await page.getByRole("button", { name: /^调\s*整$/ }).click();
+        const settings = page.getByRole("dialog", { name: "参数", exact: true });
+        const mode = settings.getByRole("combobox", { name: "视频生成方式", exact: true });
+        await mode.click();
+        await page.locator(".ant-select-dropdown:visible").getByText("首帧", { exact: true }).click();
+        await expect(mode).toHaveAttribute("aria-expanded", "false");
+        await settings.getByRole("button", { name: "关闭", exact: true }).click();
+        await expect(settings).toBeHidden();
         await page.locator("summary").filter({ hasText: "参考素材" }).click();
         const choose = page.waitForEvent("filechooser");
         await page.getByRole("button", { name: "上传", exact: true }).first().click();

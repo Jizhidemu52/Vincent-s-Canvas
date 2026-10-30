@@ -107,14 +107,14 @@ test("4MP真实对比和导出：不冻结、精确差异、PNG透明、JPG白�
     const downloadDialog = page.getByRole("dialog", { name: "下载图片", exact: true });
     await downloadDialog.getByRole("radio", { name: "JPG（白底）", exact: true }).check();
     await page.evaluate(() => { (window as any).imageWorkerStats.hold = true; });
-    await downloadDialog.getByRole("button", { name: "下载 JPG 图片", exact: true }).click();
+    await downloadDialog.getByRole("button", { name: /^下载\s*JPG\s*图片$/ }).click();
     await expect.poll(() => page.evaluate(() => (window as any).imageWorkerStats.active)).toBe(1);
     await downloadDialog.getByRole("button", { name: "取消处理", exact: true }).click();
     await expect.poll(() => page.evaluate(() => (window as any).imageWorkerStats.active)).toBe(0);
     await page.evaluate(() => { (window as any).imageWorkerStats.hold = false; });
     for (const format of ["PNG", "JPG"] as const) {
         await downloadDialog.getByRole("radio", { name: format === "PNG" ? "PNG（保留透明）" : "JPG（白底）", exact: true }).check();
-        const event = page.waitForEvent("download"); await downloadDialog.getByRole("button", { name: `下载 ${format} 图片`, exact: true }).click();
+        const event = page.waitForEvent("download"); await downloadDialog.getByRole("button", { name: new RegExp(`^下载\\s*${format}\\s*图片$`) }).click();
         const download = await event; const path = info.outputPath(`4mp-export.${format.toLowerCase()}`); await download.saveAs(path); const bytes = await readFile(path);
         const decoded = await inspect(page, bytes, format === "PNG" ? "image/png" : "image/jpeg");
         expect([decoded.width, decoded.height]).toEqual([2000, 2000]);

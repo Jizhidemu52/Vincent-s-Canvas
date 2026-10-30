@@ -59,5 +59,8 @@ describe("canvas quick-generate panel render stability", () => {
     test("refreshes the panel when an action callback changes", () => {
         expect(canvasQuickGeneratePanelPropsEqual(state(), state({ onGenerate: () => undefined }))).toBe(false);
         expect(canvasQuickGeneratePanelPropsEqual(state(), state({ onImageOptionsChange: () => undefined }))).toBe(false);
+        expect(canvasQuickGeneratePanelPropsEqual(state(), state({ onAddReferenceFiles: () => undefined }))).toBe(false);
+        expect(canvasQuickGeneratePanelPropsEqual(state(), state({ referencesLoading: true }))).toBe(false);
+        expect(canvasQuickGeneratePanelPropsEqual(state(), state({ referenceScopeKey: "another-project" }))).toBe(false);
     });
 });

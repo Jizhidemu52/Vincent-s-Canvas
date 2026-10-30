@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { readFile, rm } from "node:fs/promises";
 import { resolve, sep } from "node:path";
-import { auxiliaryQualityCases, creativeQualityCases } from "../scripts/prompt-quality-cases";
+import { auxiliaryQualityCases, creativeQualityCases, qualityAssets } from "../scripts/prompt-quality-cases";
 import { loadBaselineBuilder, loadCurrentSceneAdapter, maySubmitPaidPost, protocolQualityCases, runQualityMatrix, sanitizePublicText, selectCompilationCost } from "../scripts/prompt-quality-matrix";
 import { getToolDefinition, toolDefinitions } from "../../shared/feature-catalog";
 
@@ -100,6 +100,11 @@ describe("prompt quality matrix safe execution", () => {
     expect(counts.compilationPosts).toBe(1); expect(counts.taskPosts).toBe(0);
   });
   test("partial batch never re-posts or reports full success", async () => {
+    // This protocol test needs readable image bytes, not the untracked live-QA photograph.
+    // Restore the in-process fixture mapping; never create or overwrite the user's live sample.
+    const fixture = qualityAssets.flat as { path: string }, originalPath = fixture.path;
+    fixture.path = qualityAssets.shirt.path;
+    cleanup.push(async () => { fixture.path = originalPath; });
     const counts = fakeApi("partial-batch"), { runId } = temporaryRun();
     const args = ["--run-id", runId, "--only", "batch-off", "--execute"];
     expect((await runQualityMatrix(args) as any).cases["batch-off"].status).toBe("uncertain");

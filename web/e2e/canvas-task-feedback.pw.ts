@@ -19,12 +19,14 @@ test.afterEach(async ({ page }) => {
 });
 
 async function startImage(page: Page) {
+    await page.getByRole("button", { name: "展开创建面板", exact: true }).click();
     const panel = page.getByTestId("canvas-quick-generate-panel");
     await panel.getByRole("textbox", { name: "描述图像", exact: true }).fill("生成反馈隔离回归图片");
     await panel.locator("button.cw-generate-button").click();
 }
 
 test("生成标题在成功后恢复，结果可定位且本页提交耗时有样本", async ({ page, api }) => {
+    api.role = "super_admin";
     api.taskStatus = "processing";
     await newCanvas(page);
     const originalTitle = await page.title();

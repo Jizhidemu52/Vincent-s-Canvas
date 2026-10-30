@@ -446,7 +446,7 @@ function WirelessCanvasPage() {
         setQuickGenerateModel, quickGenerateSize, setQuickGenerateSize, quickGenerateQuality,
         setQuickGenerateQuality, quickGenerateCount, setQuickGenerateCount, quickGenerateImageOptions,
         setQuickGenerateImageOptions, quickGenerateReferences, setQuickGenerateReferences, quickGenerateRunning,
-        quickGenerateEstimate, onQuickOptimizedPrompt, handleQuickReferenceInputChange,
+        quickGenerateEstimate, onQuickOptimizedPrompt, handleQuickReferenceInputChange, addQuickReferenceFiles, quickReferencesLoading,
         runQuickCanvasGeneration,
     } = quickGeneration;
 
@@ -2553,6 +2553,9 @@ function WirelessCanvasPage() {
                         onCountChange={setQuickGenerateCount}
                         onImageOptionsChange={setQuickGenerateImageOptions}
                         onPickReferences={pickQuickGenerateReferences}
+                        referenceScopeKey={projectId}
+                        referencesLoading={quickReferencesLoading}
+                        onAddReferenceFiles={addQuickReferenceFiles}
                         onRemoveReference={removeQuickGenerateReference}
                         onClearReferences={clearQuickGenerateReferences}
                         onMoveReference={moveQuickGenerateReference}

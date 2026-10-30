@@ -56,8 +56,10 @@ async function setup(context: BrowserContext, baseURL: string) {
 test('asset library filters, sort and deleted restore work through the visible UI', async ({ page, context, baseURL }) => {
     const fixture = await setup(context, baseURL!);
     await page.goto('/assets');
-    await expect(page.getByRole('heading', { name: '我的素材', exact: true })).toBeVisible();
-    await page.getByRole('textbox', { name: '按标签筛选' }).fill('服装');
+    await expect(page.getByRole('heading', { name: '素材库', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: '更多筛选', exact: true }).click();
+    await page.getByRole('combobox', { name: '按标签筛选' }).click();
+    await page.locator('.ant-select-item-option-content').getByText('服装', { exact: true }).click();
     await expect.poll(() => fixture.lists.at(-1)?.searchParams.get('tag')).toBe('服装');
     await page.getByRole('combobox', { name: '按项目筛选' }).click();
     await page.getByText('服装项目', { exact: true }).last().click();
@@ -69,7 +71,7 @@ test('asset library filters, sort and deleted restore work through the visible U
     await page.getByPlaceholder('创建开始日期').press('Enter');
     await page.getByPlaceholder('创建结束日期').fill('2026-10-03');
     await page.getByPlaceholder('创建结束日期').press('Enter');
-    await page.getByRole('heading', { name: '我的素材', exact: true }).click();
+    await page.getByRole('heading', { name: '素材库', exact: true }).click();
     await expect.poll(() => Boolean(fixture.lists.at(-1)?.searchParams.get('createdFrom'))).toBe(true);
     await page.getByText('最近删除', { exact: true }).click();
     await expect(page.getByRole('heading', { name: '最近删除', exact: true })).toBeVisible();

@@ -20,6 +20,7 @@ async function pasteReference(page: Page, label: string) {
 }
 
 test("desktop: persistent tool-scoped drafts and references with a visible submit footer", async ({ page, api }, info) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto("/image");
     const prompt = page.getByRole("textbox", { name: "图像提示词", exact: true });
     await expect(prompt).toBeVisible();
@@ -56,8 +57,11 @@ test("desktop: viewing generated image preserves the draft, explicit reuse confi
     expect(api.submissions).toHaveLength(1);
     await prompt.fill("下一条正在编辑的草稿");
     await page.locator(".ant-image").last().click();
+    const preview = page.locator(".ant-image-preview-img");
+    await expect(preview).toBeVisible();
     await expect(prompt).toHaveValue("下一条正在编辑的草稿");
     await page.keyboard.press("Escape");
+    await expect(preview).toBeHidden();
     await page.getByRole("button", { name: "复用提示词", exact: true }).last().click();
     await expect(page.getByRole("dialog")).toContainText("替换当前草稿");
     await page.getByRole("button", { name: "保留草稿", exact: true }).click();

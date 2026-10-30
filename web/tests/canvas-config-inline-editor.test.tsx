@@ -124,9 +124,11 @@ function uploadHarness(failUpload = false) {
     let uploading = false;
     let error = "";
     let nextId = 0;
+    const scope = { active: true, owner: "authenticated:designer" };
     const env = {
-        node, disabled: false, uploadingRef,
-        latest: { current: { node, references, onChange: (_id: string, patch: typeof patches[number]) => patches.push(patch) } },
+        node, disabled: false, uploadingRef, scope, operationRef: { current: null as object | null },
+        useUserStore: { getState: () => ({ status: "authenticated", user: { id: "designer" } }) },
+        latest: { current: { scope, props: { node, references, disabled: false, onChange: (_id: string, patch: typeof patches[number]) => patches.push(patch) } } },
         setUploading: (value: boolean) => { uploading = value; },
         setError: (value: string) => { error = value; },
         message: { error: (detail: string) => { messages.push(detail); } },

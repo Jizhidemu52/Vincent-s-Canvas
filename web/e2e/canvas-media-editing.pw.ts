@@ -30,7 +30,7 @@ async function openMask(page: Page, node: Locator) {
 
 test("大图蒙版笔刷按显示像素绘制，小预览不扫描原图，关闭保护且原尺寸提交", async ({ page, api }, testInfo) => {
     const id = await newCanvas(page);
-    await page.getByRole("button", { name: "收起创建面板", exact: true }).click();
+    await expect(page.getByRole("button", { name: "展开创建面板", exact: true })).toBeVisible();
     await uploadSizedImage(page, 3840, 2160);
     await expect.poll(() => api.document(id)?.nodes.length).toBe(1);
     const nodeId = api.document(id)!.nodes[0].id;
@@ -102,7 +102,7 @@ test("大图蒙版笔刷按显示像素绘制，小预览不扫描原图，关�
 
 test("图片缩略图失败回退原图，原图失败显示重试且不改动节点", async ({ page, browser, api }) => {
     const id = await newCanvas(page);
-    await page.getByRole("button", { name: "收起创建面板", exact: true }).click();
+    await expect(page.getByRole("button", { name: "展开创建面板", exact: true })).toBeVisible();
     await uploadSizedImage(page, 1600, 1200);
     await expect.poll(() => api.document(id)?.nodes.length).toBe(1);
     const original = structuredClone(api.document(id)!.nodes[0]);
