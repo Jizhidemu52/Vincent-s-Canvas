@@ -32,9 +32,9 @@ function harness(compile: () => Promise<unknown>, query: (id: string) => Promise
     const module = { exports: {} as { PromptOptimizeButton: (props: any) => ReactElement<any> } };
     new Function("require", "module", "exports", code)((name: string) => dependencies[name] || requireModule(name), module, module.exports);
     return {
-        render: (prompt = "Change blue", references: any[] = []) => {
+        render: (prompt = "Change blue", references: any[] = [], scopeKey = "") => {
             cursor = 0;
-            return module.exports.PromptOptimizeButton({ config: { model: "image-model" }, prompt, references, onApply: (...args: unknown[]) => applied.push(args) });
+            return module.exports.PromptOptimizeButton({ config: { model: "image-model" }, prompt, references, scopeKey, onApply: (...args: unknown[]) => applied.push(args) });
         },
         applied, notices, changeOwner: () => { ownerId = "employee-b"; },
     };
@@ -80,5 +80,29 @@ test("an account switch never applies another employee's completed optimization"
     const view = harness(() => new Promise(resolve => { finish = resolve; }));
     view.render().props.onClick();
     view.changeOwner(); finish(compilation); await tick();
+    expect(view.applied).toHaveLength(0);
+});
+
+test("identical cloned node inputs do not allow an optimization to overwrite another node scope", async () => {
+    let finish!: (value: unknown) => void;
+    const view = harness(() => new Promise(resolve => { finish = resolve; }));
+    const references = [{ id: "shared-reference", name: "原图", dataUrl: "image-a", storageKey: "image:source" }];
+    view.render("Same input", references, "project:node-a").props.onClick();
+    view.render("Same input", references, "project:node-b");
+    finish(compilation); await tick();
+    expect(view.applied).toHaveLength(0);
+    expect(view.notices[0]).toContain("未覆盖当前内容");
+});
+
+test("querying an uncertain optimization after a node switch keeps the original request but does not apply it", async () => {
+    let posts = 0;
+    const queried: string[] = [];
+    const view = harness(async () => { posts++; throw new PromptCompilationUncertainError("compile-request"); }, async id => { queried.push(id); return compilation; });
+    view.render("Same input", [], "project:node-a").props.onClick(); await tick();
+    const pending = view.render("Same input", [], "project:node-b");
+    expect(pending.props.children).toBe("查询原优化请求");
+    pending.props.onClick(); await tick();
+    expect(posts).toBe(1);
+    expect(queried).toEqual(["compile-request"]);
     expect(view.applied).toHaveLength(0);
 });

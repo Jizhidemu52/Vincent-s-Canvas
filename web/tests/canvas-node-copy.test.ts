@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { cloneCanvasNodeGraph, copyCanvasNodeGraph } from "@/lib/canvas/canvas-node-copy";
-import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type CanvasNodeGroup } from "@/types/canvas";
+import { CanvasNodeType, type CanvasConnection, type CanvasGenerationRecord, type CanvasNodeData, type CanvasNodeGroup } from "@/types/canvas";
 
 function node(id: string, x = 0): CanvasNodeData {
     return { id, type: CanvasNodeType.Image, title: id, width: 80, height: 60, position: { x, y: 10 }, metadata: { content: `blob:${id}`, storageKey: `image:${id}` } };
@@ -63,7 +63,9 @@ describe("canvas node graph copy", () => {
         expect(copied.connections[0]).toMatchObject({ kind: "config-target", fromNodeId: newConfig!.id, toNodeId: newSource!.id });
         expect(graph).toEqual(before);
         const outputOnly = cloneCanvasNodeGraph({ nodes: [output], connections: [] }, { x: 0, y: 0 });
-        expect(outputOnly.nodes[0]!.metadata!.generationOrigin).toBeUndefined();
+        expect(outputOnly.nodes[0]!.metadata!.generationOrigin).toEqual(output.metadata.generationOrigin);
+        const configOnly = cloneCanvasNodeGraph({ nodes: [config], connections: [] }, { x: 0, y: 0 });
+        expect(configOnly.nodes[0]!.metadata!.manualImageReferences![0]!.sourceNodeId).toBe("source");
     });
     test("copies only selected nodes, internal connections and completely selected style groups", () => {
         const copied = copyCanvasNodeGraph(nodes, connections, groups, new Set(["root", "child"]));
@@ -114,5 +116,33 @@ describe("canvas node graph copy", () => {
         const second = cloneCanvasNodeGraph(first, { x: 36, y: 36 });
         expect(second.nodes[0]!.title).toBe("one Copy");
         expect(second.nodes[0]!.id).not.toBe(first.nodes[0]!.id);
+    });
+
+    test("Alt copies keep exact titles and detach every nested metadata field", () => {
+        const original = { ...node("款式原图"), metadata: { ...node("款式原图").metadata,
+            imageOptions: '{"background":"transparent"}',
+            manualImageReferences: [{ id: "reference", sourceNodeId: "outside", referenceKey: "node:outside", origin: "canvas" as const, name: "历史原图", content: "asset:unchanged", type: "image/png" }],
+        } };
+        const copied = cloneCanvasNodeGraph({ nodes: [original], connections: [] }, { x: 12, y: -8 }, { preserveTitle: true }).nodes[0]!;
+        expect(copied.title).toBe(original.title);
+        expect(copied.position).toEqual({ x: 12, y: 2 });
+        expect(copied.metadata!.imageOptions).toBe(original.metadata.imageOptions);
+        expect(copied.metadata!.manualImageReferences![0]).not.toBe(original.metadata.manualImageReferences[0]);
+        expect(copied.metadata!.manualImageReferences![0]!.sourceNodeId).toBe("outside");
+    });
+
+    test("immutable generation archives stay historical while active graph origins remap", () => {
+        const record: CanvasGenerationRecord = { version: 1, id: "original-run", sourceNodeId: "source", configNodeId: "config", createdAt: "2026-10-30T00:00:00Z",
+            prompt: "use @[node:source]", inputPrompt: "原稿", references: [{ id: "source", sourceNodeId: "source", referenceKey: "canvas:source", origin: "canvas", name: "原图", type: "image/png", content: "asset:source", order: 0 }],
+            parameters: { model: "model", size: "1:1", quality: "high", imageOptions: "{}", systemPrompt: "", count: 1, generationType: "edit" } };
+        const output: CanvasNodeData = { ...node("output"), metadata: { generationRecord: record, generationOrigin: { sourceNodeId: "source", configNodeId: "config", runId: "original-run", mode: "image" } } };
+        const copied = cloneCanvasNodeGraph({ nodes: [node("source"), { ...node("config"), type: CanvasNodeType.Config }, output], connections: [] }, { x: 0, y: 0 });
+        const snapshot = copied.nodes[2]!.metadata!.generationRecord!;
+        expect(snapshot).toEqual(record);
+        expect(snapshot).not.toBe(record);
+        expect(snapshot.references).not.toBe(record.references);
+        expect(snapshot.references[0]).not.toBe(record.references[0]);
+        expect(snapshot.parameters).not.toBe(record.parameters);
+        expect(copied.nodes[2]!.metadata!.generationOrigin).toMatchObject({ sourceNodeId: copied.nodes[0]!.id, configNodeId: copied.nodes[1]!.id });
     });
 });

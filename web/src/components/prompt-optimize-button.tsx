@@ -10,8 +10,8 @@ import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
 
 /** Optional manual action. Never changes a prompt unless the user presses this button. */
-export function PromptOptimizeButton({ config, prompt, references = [], toolKey, disabled, onApply, onBusyChange }: {
-    config: AiConfig; prompt: string; references?: ReferenceImage[]; toolKey?: string; disabled?: boolean;
+export function PromptOptimizeButton({ config, prompt, references = [], toolKey, scopeKey = "", disabled, onApply, onBusyChange }: {
+    config: AiConfig; prompt: string; references?: ReferenceImage[]; toolKey?: string; scopeKey?: string; disabled?: boolean;
     onApply: (prompt: string, compilation: PublicPromptCompilation, input: PromptInputData) => void; onBusyChange?: (busy: boolean) => void;
 }) {
     useUiLocale();
@@ -20,16 +20,16 @@ export function PromptOptimizeButton({ config, prompt, references = [], toolKey,
     const [pending, setPending] = useState<string>();
     const lock = useRef(false);
     const pendingInput = useRef<PromptInputData | undefined>(undefined);
-    const pendingContext = useRef<{ ownerId?: string; model: string; prompt: string; references: ReferenceImage[] } | undefined>(undefined);
-    const current = useRef({ model: config.model, prompt, references });
-    current.current = { model: config.model, prompt, references };
+    const pendingContext = useRef<{ ownerId?: string; scopeKey: string; model: string; prompt: string; references: ReferenceImage[] } | undefined>(undefined);
+    const current = useRef({ scopeKey, model: config.model, prompt, references });
+    current.current = { scopeKey, model: config.model, prompt, references };
     const run = async () => {
         if (lock.current) return;
         lock.current = true; setBusy(true); onBusyChange?.(true);
         const requestId = pending || createClientId();
         const input: PromptInputData = pendingInput.current || { scene: "free-optimize", userText: prompt, fields: {}, mode: references.length ? "edit" : "generate", referenceRoles: references.map((image, index) => image.name || `图片${index + 1}`) };
         pendingInput.current = input;
-        const context = pendingContext.current || { ownerId: useUserStore.getState().user?.id, model: config.model, prompt, references: references.map(image => ({ ...image })) };
+        const context = pendingContext.current || { ownerId: useUserStore.getState().user?.id, scopeKey, model: config.model, prompt, references: references.map(image => ({ ...image })) };
         pendingContext.current = context;
         try {
             const result = pending
@@ -40,7 +40,7 @@ export function PromptOptimizeButton({ config, prompt, references = [], toolKey,
             pendingContext.current = undefined;
             const latest = current.current;
             if (context.ownerId !== useUserStore.getState().user?.id) return;
-            if (context.model !== latest.model || context.prompt !== latest.prompt || context.references.length !== latest.references.length || context.references.some((image, index) => {
+            if (context.scopeKey !== latest.scopeKey || context.model !== latest.model || context.prompt !== latest.prompt || context.references.length !== latest.references.length || context.references.some((image, index) => {
                 const other = latest.references[index];
                 return !other || image.id !== other.id || image.name !== other.name || image.dataUrl !== other.dataUrl || image.storageKey !== other.storageKey || image.sourceAssetId !== other.sourceAssetId;
             })) {

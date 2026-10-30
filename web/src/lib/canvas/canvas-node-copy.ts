@@ -13,7 +13,7 @@ export function copyCanvasNodeGraph(nodes: readonly CanvasNodeData[], connection
     };
 }
 
-export function cloneCanvasNodeGraph(graph: CanvasNodeGraph, offset: Position): CanvasNodeGraph {
+export function cloneCanvasNodeGraph(graph: CanvasNodeGraph, offset: Position, options: { preserveTitle?: boolean } = {}): CanvasNodeGraph {
     const idMap = new Map<string, string>();
     const nodes = graph.nodes.map((node, index) => {
         const id = `${node.type}-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`;
@@ -21,7 +21,7 @@ export function cloneCanvasNodeGraph(graph: CanvasNodeGraph, offset: Position): 
         return {
             ...node,
             id,
-            title: node.title.endsWith(" Copy") ? node.title : `${node.title} Copy`,
+            title: options.preserveTitle || node.title.endsWith(" Copy") ? node.title : `${node.title} Copy`,
             position: { x: node.position.x + offset.x, y: node.position.y + offset.y },
             metadata: node.metadata ? structuredClone(node.metadata) : undefined,
         };
@@ -57,9 +57,9 @@ export function cloneCanvasNodeGraph(graph: CanvasNodeGraph, offset: Position): 
         if (node.metadata.primaryImageId) node.metadata.primaryImageId = idMap.get(node.metadata.primaryImageId);
         const origin = node.metadata.generationOrigin;
         if (origin) {
-            const sourceNodeId = idMap.get(origin.sourceNodeId);
-            const configNodeId = origin.configNodeId ? idMap.get(origin.configNodeId) : undefined;
-            node.metadata.generationOrigin = sourceNodeId && (!origin.configNodeId || configNodeId) ? { ...origin, sourceNodeId, configNodeId } : undefined;
+            const sourceNodeId = idMap.get(origin.sourceNodeId) || origin.sourceNodeId;
+            const configNodeId = origin.configNodeId ? idMap.get(origin.configNodeId) || origin.configNodeId : undefined;
+            node.metadata.generationOrigin = { ...origin, sourceNodeId, configNodeId };
         }
         if (node.metadata.prompt) node.metadata.prompt = remapMention(node.metadata.prompt);
         if (node.metadata.composerContent) node.metadata.composerContent = remapMention(node.metadata.composerContent);
@@ -67,7 +67,7 @@ export function cloneCanvasNodeGraph(graph: CanvasNodeGraph, offset: Position): 
         if (node.metadata.manualImageReferences) node.metadata.manualImageReferences = node.metadata.manualImageReferences.map(reference => ({
             ...reference,
             id: reference.origin === "canvas" ? idMap.get(reference.id) || reference.id : reference.id,
-            sourceNodeId: reference.sourceNodeId ? idMap.get(reference.sourceNodeId) : undefined,
+            sourceNodeId: reference.sourceNodeId ? idMap.get(reference.sourceNodeId) || reference.sourceNodeId : undefined,
             referenceKey: remapReferenceKey(reference.referenceKey),
         }));
         if (node.metadata.imageReferenceOrder) node.metadata.imageReferenceOrder = node.metadata.imageReferenceOrder.map(remapReferenceKey);

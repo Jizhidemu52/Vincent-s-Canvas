@@ -9,6 +9,8 @@ import { uploadImage, type UploadedImage } from "@/services/image-storage";
 import { fitNodeSize } from "@/lib/canvas/canvas-node-size";
 import { mapCanvasAsyncPool } from "@/lib/canvas/canvas-async-pool";
 import { assertCanvasImageUploadSize } from "@/lib/canvas/canvas-image-upload-limit";
+import { compiledCanvasGenerationRecord, createCanvasGenerationRecord } from "@/lib/canvas/canvas-generation-record";
+import { imageModelProfile, normalizeImageModelSettings } from "@/lib/image-model-settings";
 import { deploymentFeatures } from "@/lib/deployment-features";
 import { modelOptionName, type AiConfig } from "@/stores/use-config-store";
 import type { AssetInput } from "@/stores/use-asset-store";
@@ -48,6 +50,7 @@ type Runtime = {
     setNodes: Dispatch<SetStateAction<CanvasNodeData[]>>;
     setConnections: Dispatch<SetStateAction<CanvasConnection[]>>;
     setSelectedNodeIds: Dispatch<SetStateAction<Set<string>>>;
+    flushPendingHistory?: () => unknown;
     message: { error: (text: string) => unknown; warning: (text: string) => unknown; success: (text: string) => unknown };
 };
 
@@ -56,7 +59,7 @@ export async function runCanvasBatchImageEdit({
     prompt: batchEditPrompt, optimizePrompt = false, setOptimizing, items: batchEditItems, config: batchGenerationConfig, estimate: estimateUsage, isAiConfigReady,
     onMissingModel: handleMissingModelConfig, user, projectId, getCenter: getCanvasCenter, imageMetadata, addAssets,
     setRunning: setBatchEditRunning, setServerId: setBatchEditServerId, setAction: setBatchEditAction, setItems: setBatchEditItems,
-    setNodes, setConnections, setSelectedNodeIds, message,
+    setNodes, setConnections, setSelectedNodeIds, flushPendingHistory, message,
 }: Runtime) {
         let prompt = batchEditPrompt.trim();
         let optimized = false;
@@ -146,6 +149,13 @@ export async function runCanvasBatchImageEdit({
                         height: sourceSize.height,
                         metadata: {
                             prompt,
+                            generationOrigin: { sourceNodeId: sourceId, runId: localBatchId, mode: "image" },
+                            generationRecord: createCanvasGenerationRecord({ id: localBatchId, sourceNodeId: sourceId, prompt, inputPrompt: batchEditPrompt,
+                                config: { ...batchGenerationConfig, ...normalizeImageModelSettings(batchGenerationConfig, imageModelProfile(model)) }, generationType: "edit", nodes: [],
+                                references: [{ id: sourceId, sourceNodeId: sourceId, name: item.file.name, originalFileName: item.file.name, type: uploadedSource.mimeType,
+                                    dataUrl: uploadedSource.url, storageKey: uploadedSource.storageKey, origin: "canvas" }],
+                                ...(optimizePrompt ? { promptInput: { scene: "batch-optimize", userText: batchEditPrompt.trim(), fields: {}, mode: "edit", referenceRoles: ["每个批次条目的独立原图"] } } : {}),
+                            }),
                             status: "loading",
                             generationType: "edit",
                             model,
@@ -158,7 +168,7 @@ export async function runCanvasBatchImageEdit({
                         },
                     },
                 );
-                initialBatchConnections.push({ id: nanoid(), fromNodeId: sourceId, toNodeId: resultId });
+                initialBatchConnections.push({ id: nanoid(), fromNodeId: sourceId, toNodeId: resultId, kind: "generation-output" });
                 prepared.push({ originalIndex: index, item, sourceId, resultId, uploadedSource });
                 setBatchEditItems((prev) => prev.map((entry) => (entry.id === item.id ? { ...entry, status: "waiting", sourceUrl: uploadedSource.url } : entry)));
             } catch (error) {
@@ -175,6 +185,7 @@ export async function runCanvasBatchImageEdit({
             return;
         }
 
+        flushPendingHistory?.();
         setNodes((prev) => [...prev, ...initialBatchNodes]);
         setConnections((prev) => [...prev, ...initialBatchConnections]);
 
@@ -198,7 +209,11 @@ export async function runCanvasBatchImageEdit({
                         await flushCanvasPersistence();
                     },
                     onOptimizing: () => setOptimizing?.(true),
-                    onCompiled: (finalPrompt, wasOptimized) => { prompt = finalPrompt; optimized = wasOptimized; setOptimizing?.(false); },
+                    onCompiled: (finalPrompt, wasOptimized) => {
+                        prompt = finalPrompt; optimized = wasOptimized; setOptimizing?.(false);
+                        const resultIds = new Set(prepared.map(entry => entry.resultId));
+                        setNodes(previous => previous.map(node => resultIds.has(node.id) ? { ...node, metadata: { ...node.metadata, prompt: finalPrompt, generationRecord: compiledCanvasGenerationRecord(node.metadata?.generationRecord, finalPrompt) } } : node));
+                    },
                     onSubmitted: setBatchEditServerId,
                     onProgress: (current) => {
                         const byPreparedIndex = new Map(current.map((task) => [task.itemIndex, task]));
@@ -286,6 +301,7 @@ export async function runCanvasBatchImageEdit({
                                           originalFileName: entry.item.file.name,
                                           imageName: entry.item.file.name.replace(/\.[^.]+$/, ""), imageVersion: 2,
                                           prompt,
+                                          generationRecord: compiledCanvasGenerationRecord(node.metadata?.generationRecord, prompt),
                                           generationType: "edit",
                                           model,
                                           size: batchGenerationConfig.size,

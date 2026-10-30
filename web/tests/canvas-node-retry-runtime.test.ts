@@ -186,7 +186,7 @@ function entry() {
     const module = Promise.withResolvers<{ retryCanvasNode: typeof retryCanvasNode }>();
     const invoked: unknown[] = [];
     const scope = {
-        uiText,
+        uiText, CanvasNodeType, handleRegenerateNode: async () => { throw new Error("Unexpected regeneration"); },
         ...h.context, retryScope: { active: true }, designProjectIdRef: { current: "project-a" }, projectSaveQueueRef: { current: null },
         useUserStore: { getState: () => ({ user: owner ? { id: owner } : null }) }, useCallback: (fn: unknown) => fn,
         require: (name: string) => { if (name !== "./canvas-node-retry-runtime") throw new Error(name); loads++; return module.promise; },

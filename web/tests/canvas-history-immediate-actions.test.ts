@@ -4,6 +4,8 @@ import ts from "typescript";
 
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import { cloneCanvasNodeGraph, copyCanvasNodeGraph } from "@/lib/canvas/canvas-node-copy";
+import { canvasRepeatCopyOffset } from "@/lib/canvas/canvas-drag-copy";
+import { mergeCanvasGenerationHistory } from "@/lib/canvas/canvas-generation-history";
 import { describeCanvasHistoryChange } from "@/lib/canvas/canvas-history-description";
 
 type Entry = { nodes: CanvasNodeData[]; connections: unknown[]; groups: unknown[]; chatSessions: unknown[]; activeChatId: string | null; backgroundMode: string; showImageInfo: boolean };
@@ -46,14 +48,15 @@ function harness(history: History, previous: Entry, current: Entry) {
     const notices: { kind: string; description: string }[] = [];
     let availability = { canUndo: history.past.length > 0, canRedo: history.future.length > 0 };
     const commandScope = {
-        copyCanvasNodeGraph, cloneCanvasNodeGraph, describeCanvasHistoryChange,
+        beforeHistoryAction: undefined,
+        copyCanvasNodeGraph, cloneCanvasNodeGraph, describeCanvasHistoryChange, canvasRepeatCopyOffset, mergeCanvasGenerationHistory, repeatCopyRef: { current: null },
         onHistoryAction: (kind: string, before: Parameters<typeof describeCanvasHistoryChange>[0], after: Parameters<typeof describeCanvasHistoryChange>[1]) => notices.push({ kind, description: describeCanvasHistoryChange(before, after) }),
-        nodesRef: { get current() { return live.nodes; } }, connectionsRef: { get current() { return live.connections; } },
-        groupsRef: { get current() { return live.groups; } },
+        nodesRef: { get current() { return live.nodes; }, set current(value) { live = { ...live, nodes: value }; } }, connectionsRef: { get current() { return live.connections; }, set current(value) { live = { ...live, connections: value }; } },
+        groupsRef: { get current() { return live.groups; }, set current(value) { live = { ...live, groups: value }; } },
         setNodes: (update: (nodes: CanvasNodeData[]) => CanvasNodeData[]) => { live = { ...live, nodes: update(live.nodes) }; },
         setConnections: (update: (connections: unknown[]) => unknown[]) => { live = { ...live, connections: update(live.connections) }; },
         setGroups: (update: (groups: unknown[]) => unknown[]) => { live = { ...live, groups: update(live.groups) }; },
-        setSelectedNodeIds() {}, setSelectedConnectionId() {}, setDialogNodeId() {},
+        setSelectedNodeIds() {}, commitSelectedNodeIds() {}, setSelectedConnectionId() {}, setDialogNodeId() {},
     };
     const actions = new Function("useCallback", "historyRef", "lastHistoryRef", "createHistoryEntry", "applyHistory", "historyCommitTimerRef", "applyingHistoryRef", "historyPausedRef", "setHistoryState", "clearTimeout", "setTimeout", "projectLoaded", "commandScope", `const { ${Object.keys(commandScope).join(",")} } = commandScope;\n${code}\nreturn { duplicateNodes, undoCanvas, redoCanvas, runHistoryEffect };`)(
         (callback: () => void) => callback,

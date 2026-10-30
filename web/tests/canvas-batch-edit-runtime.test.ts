@@ -5,6 +5,9 @@ import ts from "typescript";
 import { prepareCanvasBatchFiles } from "@/pages/canvas/canvas-batch-edit-runtime";
 import { assertCanvasImageUploadSize, CANVAS_IMAGE_MAX_BYTES } from "@/lib/canvas/canvas-image-upload-limit";
 import { QueuedTaskHttpError, QueuedTaskSubmissionUncertainError } from "@/services/api/generation-tasks";
+import { compiledCanvasGenerationRecord, createCanvasGenerationRecord } from "@/lib/canvas/canvas-generation-record";
+import { imageModelProfile, normalizeImageModelSettings } from "@/lib/image-model-settings";
+import { defaultConfig } from "@/stores/use-config-store";
 
 test("multi-file selection keeps all supported images in natural filename order", () => {
     const files = ["10.png", "2.png", "1.png"].map(name => new File(["image"], name, { type: "image/png" }));
@@ -71,6 +74,7 @@ test("definitive batch rejection clears bindings while uncertain submission reta
         const notices: string[] = [];
         const dependencies = {
             uiText,
+            createCanvasGenerationRecord, compiledCanvasGenerationRecord, imageModelProfile, normalizeImageModelSettings,
             assertCanvasImageUploadSize, QueuedTaskHttpError, QueuedTaskSubmissionUncertainError,
             modelOptionName: (model: string) => model, deploymentFeatures: { creditsEnabled: false }, CanvasNodeType: { Image: "image" },
             nanoid: () => "test", fitNodeSize: () => ({ width: 100, height: 100 }), flushSync: (action: () => void) => action(),
@@ -103,4 +107,45 @@ test("definitive batch rejection clears bindings while uncertain submission reta
             expect(posts).toBe(1);
         }
     }
+});
+
+test("a completed batch archives each original reference and final prompt in one appended group", async () => {
+    const source = ts.createSourceFile("canvas-batch-edit-runtime.ts", readFileSync(new URL("../src/pages/canvas/canvas-batch-edit-runtime.ts", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true);
+    const declaration = source.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === "runCanvasBatchImageEdit")!;
+    const code = ts.transpileModule(declaration.getText(source).replace(/^export\s+/, ""), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText;
+    let nodes: any[] = [], connections: any[] = [], flushes = 0, allocation = 0;
+    const files = [new File(["png"], "one.png", { type: "image/png" }), new File(["png"], "two.png", { type: "image/png" })];
+    let items: any[] = files.map((file, index) => ({ id: String(index), file, relativePath: file.name, status: "waiting" }));
+    const dependencies = {
+        uiText, createCanvasGenerationRecord, compiledCanvasGenerationRecord, imageModelProfile, normalizeImageModelSettings,
+        assertCanvasImageUploadSize, QueuedTaskHttpError, QueuedTaskSubmissionUncertainError,
+        modelOptionName: (model: string) => model, deploymentFeatures: { creditsEnabled: false }, CanvasNodeType: { Image: "image" },
+        nanoid: () => `id-${++allocation}`, fitNodeSize: () => ({ width: 100, height: 100 }), flushSync: (action: () => void) => action(),
+        useCanvasStore: { getState: () => ({ updateProject: () => {} }) }, flushCanvasPersistence: async () => {},
+        uploadImage: async (file: File | string) => ({ url: typeof file === "string" ? file : `blob:${file.name}`, storageKey: `image:${typeof file === "string" ? file : file.name}`, width: 100, height: 100, mimeType: "image/png" }),
+        requestBatchEdit: async (_config: unknown, _prompt: string, _files: unknown, options: any) => {
+            await options.onSubmissionStarted("batch", [{ itemIndex: 0 }, { itemIndex: 1 }]);
+            options.onCompiled("最终批次提示词", true);
+            return { batchId: "batch", failures: [], tasks: files.map((file, itemIndex) => ({ id: `task-${itemIndex}`, itemIndex, status: "success", resultUrls: [`result-${file.name}`] })) };
+        },
+        mapCanvasAsyncPool: async (entries: any[], _limit: number, map: Function) => Promise.all(entries.map(entry => map(entry))),
+        serverAssetIdFromContentUrl: () => undefined,
+    };
+    const run = new Function(...Object.keys(dependencies), `${code};return runCanvasBatchImageEdit`)(...Object.values(dependencies));
+    const noop = () => {};
+    await run({ prompt: "原始批次草稿", config: { ...defaultConfig, model: "gpt-image-2" }, items, estimate: () => ({ configured: true, credits: 0 }),
+        isAiConfigReady: () => true, onMissingModel: noop, user: { id: "owner", status: "active", creditBalance: 100 }, projectId: "canvas",
+        getCenter: () => ({ x: 0, y: 0 }), imageMetadata: (image: any) => ({ content: image.url, storageKey: image.storageKey, status: "success" }), addAssets: noop,
+        setRunning: noop, setServerId: noop, setAction: noop, setItems: (update: any) => { items = typeof update === "function" ? update(items) : update; },
+        setNodes: (update: any) => { nodes = typeof update === "function" ? update(nodes) : update; }, setConnections: (update: any) => { connections = typeof update === "function" ? update(connections) : update; },
+        setSelectedNodeIds: noop, flushPendingHistory: () => flushes++, message: { error: noop, warning: noop, success: noop },
+    });
+    const results = nodes.filter(node => node.metadata.generationRecord);
+    expect(nodes).toHaveLength(4);
+    expect(results).toHaveLength(2);
+    expect(flushes).toBe(1);
+    expect(connections.every(edge => edge.kind === "generation-output")).toBe(true);
+    expect(results.map(node => node.metadata.generationRecord.references[0].storageKey)).toEqual(["image:one.png", "image:two.png"]);
+    expect(results.every(node => node.metadata.generationRecord.prompt === "最终批次提示词" && node.metadata.generationRecord.inputPrompt === "原始批次草稿")).toBe(true);
+    expect(results.every(node => nodes.some(source => source.id === node.metadata.generationRecord.references[0].sourceNodeId))).toBe(true);
 });

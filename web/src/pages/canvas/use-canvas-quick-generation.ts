@@ -5,6 +5,8 @@ import { canvasImageReferenceIdentity } from "@/lib/canvas/canvas-image-filename
 import { placeCanvasImageOutputs } from "@/lib/canvas/canvas-image-output-placement";
 import { assertCanvasImageUploadSize } from "@/lib/canvas/canvas-image-upload-limit";
 import { canvasImageUsageInput } from "@/lib/canvas/canvas-image-usage";
+import { canvasGenerationEditorState, storeCanvasEditorReferences } from "@/lib/canvas/canvas-generation-editor";
+import { createCanvasGenerationRecord, hasIncompleteCanvasGenerationReferences } from "@/lib/canvas/canvas-generation-record";
 import { fitNodeSize, nodeSizeFromRatio } from "@/lib/canvas/canvas-node-size";
 import { type CanvasSelectionReference } from "@/lib/canvas/canvas-selection-references";
 import { deploymentFeatures } from "@/lib/deployment-features";
@@ -20,7 +22,7 @@ import { useAssetStore } from "@/stores/use-asset-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { defaultConfig, modelOptionName, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
-import { CanvasNodeType, type CanvasImageGenerationType, type CanvasNodeData, type Position } from "@/types/canvas";
+import { CanvasNodeType, type CanvasConnection, type CanvasImageGenerationType, type CanvasNodeData, type CanvasNodeMetadata, type Position } from "@/types/canvas";
 import type { ReferenceImage } from "@/types/image";
 import { App } from "antd";
 import { nanoid } from "nanoid";
@@ -34,6 +36,8 @@ type CanvasQuickGenerationOptions = {
     projectId: string;
     projectLoaded: boolean;
     nodesRef: RefObject<CanvasNodeData[]>;
+    connectionsRef?: RefObject<CanvasConnection[]>;
+    flushPendingHistoryRef?: RefObject<(() => void) | null>;
     runtime: ReturnType<typeof useCanvasGenerationRuntime>;
     batchEdit: Pick<ReturnType<typeof useCanvasBatchEdit>, "setBatchEditPrompt" | "setBatchImageSettings" | "setBatchEditOpen">;
     setDialogNodeId: Dispatch<SetStateAction<string | null>>;
@@ -42,13 +46,14 @@ type CanvasQuickGenerationOptions = {
     isAiConfigReady: (...args: unknown[]) => boolean;
 };
 
-export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, runtime, batchEdit, setDialogNodeId, getCanvasCenter, handleMissingModelConfig, isAiConfigReady }: CanvasQuickGenerationOptions) {
+export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, connectionsRef, flushPendingHistoryRef, runtime, batchEdit, setDialogNodeId, getCanvasCenter, handleMissingModelConfig, isAiConfigReady }: CanvasQuickGenerationOptions) {
     const { message, modal } = App.useApp();
     const [searchParams] = useSearchParams();
     const effectiveConfig = useEffectiveConfig();
     const estimateUsage = useBusinessConfigStore(state => state.estimate);
     const addAsset = useAssetStore(state => state.addAsset);
     const setNodes = useCanvasGraphSetter("nodes");
+    const setConnections = useCanvasGraphSetter("connections");
     const setSelectedNodeIds = useCanvasGraphSetter("selectedNodeIds");
     const setSelectedConnectionId = useCanvasGraphSetter("selectedConnectionId");
     const { createOptions, startGenerationRequest, finishGenerationRequest, setRunningNodeId } = runtime;
@@ -57,6 +62,35 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, r
     const NODE_STATUS_ERROR = "error" as const;
     const quickGenerateOpen = useCanvasPanelStore(state => state.creationOpen);
     const setQuickGenerateOpen = useCanvasPanelStore(state => state.setCreationOpen);
+    const referenceOwner = useUserStore(state => `${state.status}:${state.user?.id || ""}`);
+    const draftScope = `${projectId}:${referenceOwner}`;
+    const currentDraftScopeRef = useRef(draftScope);
+    currentDraftScopeRef.current = draftScope;
+    const nodeDraftBindingRef = useRef<{ nodeId: string; scope: string } | null>(null);
+    const pendingNodePromptRef = useRef<{ nodeId: string; scope: string; prompt: string; timer: ReturnType<typeof setTimeout> } | null>(null);
+    const [quickGenerateNodeId, setQuickGenerateNodeId] = useState<string | null>(null);
+    const patchNodeDraft = useCallback((patch: Partial<CanvasNodeMetadata>, binding = nodeDraftBindingRef.current) => {
+        if (!binding || binding.scope !== currentDraftScopeRef.current) return;
+        const account = useUserStore.getState();
+        if (binding.scope !== `${projectId}:${account.status}:${account.user?.id || ""}`) return;
+        setNodes(current => {
+            let changed = false;
+            const next = current.map(node => {
+                if (node.id !== binding.nodeId || !Object.entries(patch).some(([key, value]) => node.metadata?.[key as keyof CanvasNodeMetadata] !== value)) return node;
+                changed = true;
+                return { ...node, metadata: { ...node.metadata, ...patch } };
+            });
+            if (changed) nodesRef.current = next;
+            return changed ? next : current;
+        });
+    }, [nodesRef, projectId, setNodes]);
+    const flushQuickNodeDraft = useCallback(() => {
+        const pending = pendingNodePromptRef.current;
+        if (!pending) return;
+        clearTimeout(pending.timer);
+        pendingNodePromptRef.current = null;
+        patchNodeDraft({ draftPrompt: pending.prompt }, pending);
+    }, [patchNodeDraft]);
     const quickGeneratePromptRef = useRef("");
     const [quickGeneratePromptRevision, setQuickGeneratePromptRevision] = useState(0);
     const setQuickGeneratePrompt = useCallback((value: string) => {
@@ -64,16 +98,61 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, r
         setQuickGeneratePromptRevision((revision) => revision + 1);
     }, []);
     const [quickGeneratePosition, setQuickGeneratePosition] = useState<Position | null>(null);
-    const [quickGenerateModel, setQuickGenerateModel] = useState(effectiveConfig.imageModel || effectiveConfig.model);
-    const [quickGenerateSize, setQuickGenerateSize] = useState(effectiveConfig.size || defaultConfig.size);
-    const [quickGenerateQuality, setQuickGenerateQuality] = useState(effectiveConfig.quality || defaultConfig.quality);
-    const [quickGenerateCount, setQuickGenerateCount] = useState(2);
-    const [quickGenerateImageOptions, setQuickGenerateImageOptions] = useState(effectiveConfig.imageOptions || "");
-    const [quickGenerateReferences, setQuickGenerateReferences] = useState<CanvasSelectionReference[]>([]);
+    const [quickGenerateModel, setQuickGenerateModelState] = useState(effectiveConfig.imageModel || effectiveConfig.model);
+    const [quickGenerateSize, setQuickGenerateSizeState] = useState(effectiveConfig.size || defaultConfig.size);
+    const [quickGenerateQuality, setQuickGenerateQualityState] = useState(effectiveConfig.quality || defaultConfig.quality);
+    const [quickGenerateCount, setQuickGenerateCountState] = useState(2);
+    const [quickGenerateImageOptions, setQuickGenerateImageOptionsState] = useState(effectiveConfig.imageOptions || "");
+    const [quickGenerateReferences, setQuickGenerateReferencesState] = useState<CanvasSelectionReference[]>([]);
+    const quickReferencesRef = useRef(quickGenerateReferences);
+    const setQuickGenerateModel = useCallback((value: string) => { setQuickGenerateModelState(value); patchNodeDraft({ model: value }); }, [patchNodeDraft]);
+    const setQuickGenerateSize = useCallback((value: string) => { setQuickGenerateSizeState(value); patchNodeDraft({ size: value }); }, [patchNodeDraft]);
+    const setQuickGenerateQuality = useCallback((value: string) => { setQuickGenerateQualityState(value); patchNodeDraft({ quality: value }); }, [patchNodeDraft]);
+    const setQuickGenerateCount = useCallback((value: number) => { setQuickGenerateCountState(value); patchNodeDraft({ count: value }); }, [patchNodeDraft]);
+    const setQuickGenerateImageOptions = useCallback((value: string) => { setQuickGenerateImageOptionsState(value); patchNodeDraft({ imageOptions: value }); }, [patchNodeDraft]);
+    const setQuickGenerateReferences = useCallback((update: SetStateAction<CanvasSelectionReference[]>) => {
+        const next = typeof update === "function" ? update(quickReferencesRef.current) : update;
+        if (next === quickReferencesRef.current) return;
+        quickReferencesRef.current = next;
+        setQuickGenerateReferencesState(next);
+        patchNodeDraft({ draftImageReferences: storeCanvasEditorReferences(next) });
+    }, [patchNodeDraft]);
+    const onQuickPromptChange = useCallback((prompt: string) => {
+        quickGeneratePromptRef.current = prompt;
+        const binding = nodeDraftBindingRef.current;
+        const pending = pendingNodePromptRef.current;
+        if (pending) clearTimeout(pending.timer);
+        pendingNodePromptRef.current = binding ? { ...binding, prompt, timer: setTimeout(flushQuickNodeDraft, 180) } : null;
+    }, [flushQuickNodeDraft]);
+    const loadQuickGenerationNode = useCallback((node: CanvasNodeData | null) => {
+        // Commit the old node before rebinding; rapid selection must never move a draft to its neighbor.
+        const pending = pendingNodePromptRef.current;
+        flushQuickNodeDraft();
+        referenceRead.current = null;
+        setQuickReferencesLoading(false);
+        nodeDraftBindingRef.current = node ? { nodeId: node.id, scope: currentDraftScopeRef.current } : null;
+        setQuickGenerateNodeId(node?.id || null);
+        if (!node) return;
+        const state = canvasGenerationEditorState(node, nodesRef.current, connectionsRef?.current || [], effectiveConfig);
+        setQuickGeneratePrompt(pending?.nodeId === node.id && pending.scope === currentDraftScopeRef.current ? pending.prompt : state.prompt);
+        setQuickGenerateModelState(state.model);
+        setQuickGenerateSizeState(state.size);
+        setQuickGenerateQualityState(state.quality);
+        setQuickGenerateCountState(state.count);
+        setQuickGenerateImageOptionsState(state.imageOptions);
+        quickReferencesRef.current = state.references;
+        setQuickGenerateReferencesState(state.references);
+    }, [connectionsRef, effectiveConfig, flushQuickNodeDraft, nodesRef, setQuickGeneratePrompt]);
+    useEffect(() => () => flushQuickNodeDraft(), [flushQuickNodeDraft]);
+    useLayoutEffect(() => {
+        nodeDraftBindingRef.current = null;
+        if (pendingNodePromptRef.current) clearTimeout(pendingNodePromptRef.current.timer);
+        pendingNodePromptRef.current = null;
+        setQuickGenerateNodeId(null);
+    }, [draftScope]);
     const [quickGenerateRunning, setQuickGenerateRunning] = useState(false);
     const [quickReferencesLoading, setQuickReferencesLoading] = useState(false);
-    const referenceOwner = useUserStore(state => `${state.status}:${state.user?.id || ""}`);
-    const referenceScope = `${projectId}:${referenceOwner}`;
+    const referenceScope = `${draftScope}:${quickGenerateNodeId || "creation"}`;
     const referenceRead = useRef<symbol | null>(null);
     const referenceContext = useRef({ scope: referenceScope, running: quickGenerateRunning, model: quickGenerateModel, references: quickGenerateReferences });
     useLayoutEffect(() => { referenceContext.current = { scope: referenceScope, running: quickGenerateRunning, model: quickGenerateModel, references: quickGenerateReferences }; });
@@ -89,8 +168,8 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, r
     const quickGenerateRef = useRef<() => Promise<void>>(async () => undefined);
 
     useEffect(() => {
-        setQuickGenerateModel((current) => current || effectiveConfig.imageModel || effectiveConfig.model);
-        setQuickGenerateSize((current) => current || effectiveConfig.size || defaultConfig.size);
+        setQuickGenerateModelState((current) => current || effectiveConfig.imageModel || effectiveConfig.model);
+        setQuickGenerateSizeState((current) => current || effectiveConfig.size || defaultConfig.size);
     }, [effectiveConfig.imageModel, effectiveConfig.model, effectiveConfig.size]);
 
     const quickGenerateEstimate = useMemo(
@@ -155,7 +234,13 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, r
 
     const runQuickCanvasGeneration = useCallback(async () => {
         if (quickSubmissionRef.current || referenceRead.current) return;
+        flushQuickNodeDraft();
         const user = useUserStore.getState().user;
+        const sourceNode = nodeDraftBindingRef.current?.scope === currentDraftScopeRef.current ? nodesRef.current.find(node => node.id === nodeDraftBindingRef.current?.nodeId) : undefined;
+        if (sourceNode && sourceNode.metadata?.draftImageReferences === undefined && hasIncompleteCanvasGenerationReferences(sourceNode)) {
+            message.warning(uiText("旧版记录参考信息不完整，请先恢复历史输入或明确设置新的参考图"));
+            return;
+        }
         const selectedModel = quickGenerateModel || effectiveConfig.imageModel || effectiveConfig.model;
         const toolKey = canvasToolKey("image", quickGenerateReferences.length > 0, imageModelProfile(selectedModel).kind);
         const model = currentToolConfig({ ...effectiveConfig, model: selectedModel }, toolKey).model;
@@ -169,6 +254,7 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, r
         const toolMode = operationType === "inpaint" ? "image-edit" : "image-generation";
         const generationConfig: AiConfig = {
             ...effectiveConfig,
+            systemPrompt: sourceNode?.metadata?.systemPrompt ?? sourceNode?.metadata?.generationRecord?.parameters.systemPrompt ?? effectiveConfig.systemPrompt,
             model,
             imageModel: model,
             ...settings,
@@ -206,12 +292,13 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, r
         const gap = 36;
         const columns = Math.min(2, count);
         const rows = Math.ceil(count / columns);
-        const sourceNodes = references.flatMap((reference) => reference.canvasNodeId ? nodesRef.current.filter((node) => node.id === reference.canvasNodeId) : []);
+        const sourceNodes = sourceNode ? [sourceNode] : references.flatMap((reference) => reference.canvasNodeId ? nodesRef.current.filter((node) => node.id === reference.canvasNodeId) : []);
         const { x: startX, y: startY } = placeCanvasImageOutputs(nodesRef.current, sourceNodes, {
             width: columns * nodeSize.width + (columns - 1) * gap,
             height: rows * nodeSize.height + (rows - 1) * gap,
         }, origin, gap, quickGeneratePosition);
         const targetIds = Array.from({ length: count }, () => `quick-image-${nanoid()}`);
+        const runId = nanoid();
         const generationType: CanvasImageGenerationType = operationType === "inpaint" ? "edit" : "generation";
         const placeholders: CanvasNodeData[] = targetIds.map((id, index) => ({
             id,
@@ -227,6 +314,8 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, r
                 prompt,
                 status: NODE_STATUS_LOADING,
                 ...buildImageGenerationMetadata(generationType, generationConfig, count, references),
+                generationRecord: createCanvasGenerationRecord({ id: `${runId}:${index}`, sourceNodeId: sourceNode?.id || sourceNodes[0]?.id || "", prompt, inputPrompt: prompt, references, nodes: nodesRef.current, config: generationConfig, generationType }),
+                ...(sourceNode ? { generationOrigin: { sourceNodeId: sourceNode.id, runId, mode: "image" as const } } : {}),
             },
         }));
         const controller = new AbortController();
@@ -245,7 +334,9 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, r
             }
         };
         setQuickGenerateRunning(true);
+        flushPendingHistoryRef?.current?.();
         setNodes((current) => [...current, ...placeholders]);
+        if (sourceNode) setConnections(current => [...current, ...targetIds.map(targetId => ({ id: `conn-${nanoid()}`, kind: "generation-output" as const, fromNodeId: sourceNode.id, toNodeId: targetId }))]);
         setQuickGeneratePosition(null);
         if (!sourceNodes.length) setSelectedNodeIds(new Set(targetIds));
         setSelectedConnectionId(null);
@@ -275,8 +366,7 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, r
                                       metadata: {
                                           ...node.metadata,
                                           ...metadata,
-                                          prompt,
-                                          ...buildImageGenerationMetadata(generationType, generationConfig, count, references),
+                                          prompt: metadata.prompt ?? prompt,
                                       },
                                   }
                                 : node,
@@ -330,6 +420,8 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, r
         effectiveConfig,
         estimateUsage,
         finishGenerationRequest,
+        flushPendingHistoryRef,
+        flushQuickNodeDraft,
         getCanvasCenter,
         handleMissingModelConfig,
         isAiConfigReady,
@@ -361,6 +453,7 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, r
                     setBatchImageSettings({ model: selectedModel, imageModel: selectedModel, ...settings });
                     setBatchEditOpen(true);
                 } else {
+                    loadQuickGenerationNode(null);
                     setQuickGeneratePrompt(payload.template.prompt);
                     setQuickGenerateModel(selectedModel);
                     setQuickGenerateSize(settings.size);
@@ -394,6 +487,7 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, r
 
     return {
         quickGenerateOpen, setQuickGenerateOpen, quickGeneratePromptRef, quickGeneratePromptRevision,
+        quickGenerateNodeId, loadQuickGenerationNode, onQuickPromptChange, flushQuickNodeDraft,
         setQuickGeneratePrompt, quickGeneratePosition, setQuickGeneratePosition, quickGenerateModel,
         setQuickGenerateModel, quickGenerateSize, setQuickGenerateSize, quickGenerateQuality,
         setQuickGenerateQuality, quickGenerateCount, setQuickGenerateCount, quickGenerateImageOptions,

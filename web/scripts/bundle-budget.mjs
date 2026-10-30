@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { gzipSync } from "fflate";
 
 export const CANVAS_PROJECT_BUDGET = {
-    rawBytes: 250 * 1024,
+    rawBytes: 255 * 1024,
     // The canvas owns placement, naming and export entry points. Image editing,
     // PDF generation and assistant processing remain separate on-demand chunks.
     // Persisted undo/redo, offline-safe tool loading, and inline comparison's
@@ -14,7 +14,10 @@ export const CANVAS_PROJECT_BUDGET = {
     // Immediate undo must flush pending edits in the entry before changing history.
     // Reject oversized imports synchronously at drop/file/paste/reference entry points.
     // Reserve 512 B for the shared limit and immediate user feedback; keep the raw gate.
-    gzipBytes: 83 * 1024 + 640,
+    // Generation archives, node-scoped drafts, delivery-aware undo and Alt-copy
+    // must be ready for the first gesture. v0.5.12 measured 259320 B / 88691 B;
+    // allow only 5 KiB raw and 3456 B gzip more; record detail UI remains lazy.
+    gzipBytes: 87 * 1024,
 };
 
 export function bundleBudgetViolations(entries) {

@@ -10,6 +10,7 @@ import { useUserStore } from "@/stores/use-user-store";
 import { CanvasNodeType, type CanvasNodeData, type CanvasNodeMetadata } from "@/types/canvas";
 import type { ToolKey } from "../../../../shared/feature-catalog";
 import { imageModelProfile } from "@/lib/image-model-settings";
+import { compiledCanvasGenerationRecord } from "@/lib/canvas/canvas-generation-record";
 import { shouldCancelCanvasGeneration } from "@/lib/canvas/canvas-project-async-lifecycle";
 
 export type CanvasImageTaskScope = { projectId: string; mounted: boolean; recoveries: Map<string, AbortController> };
@@ -45,7 +46,7 @@ export default function createCanvasImageTaskRuntime({ nodes, setNodes, saveQueu
                     ...node,
                     ...(metadata.status === "success" && metadata.naturalWidth && metadata.naturalHeight
                         ? fitNodeSize(metadata.naturalWidth, metadata.naturalHeight, node.width, node.height) : {}),
-                    metadata: { ...node.metadata, ...metadata, ...(primary ? { primaryImageId: nodeId } : {}) },
+                    metadata: { ...node.metadata, ...metadata, ...(node.metadata?.generationRecord ? { generationRecord: compiledCanvasGenerationRecord(node.metadata.generationRecord, metadata.prompt) } : {}), ...(primary ? { primaryImageId: nodeId } : {}) },
                 };
             });
         }));
@@ -90,11 +91,11 @@ export default function createCanvasImageTaskRuntime({ nodes, setNodes, saveQueu
                 signal: controller.signal,
                 cancelOnAbort: () => shouldCancelCanvasGeneration(controller.signal) && current(nodeId, binding, prepared),
                 assertCurrent,
-                async generate(config: Parameters<typeof requestGeneration>[0], prompt: string, references?: Parameters<typeof requestEdit>[2], mask?: Parameters<typeof requestEdit>[3], edit = Boolean(references?.length || mask), promptInput?: import("../../../../shared/prompt-contracts").PromptInputData) {
+                async generate(config: Parameters<typeof requestGeneration>[0], prompt: string, references?: Parameters<typeof requestEdit>[2], mask?: Parameters<typeof requestEdit>[3], edit = Boolean(references?.length || mask), promptInput?: import("../../../../shared/prompt-contracts").PromptInputData, exactPrompt = false) {
                     assertCurrent();
                     if (!mask && imageModelProfile(config.model || config.imageModel).kind === "midjourney-blend") { edit = false; prompt = ""; }
                     config = { ...config, count: "1", canvasImageCount: "1" };
-                    const requestOptions = { ...options, promptInput: promptInput?.compilationId ? promptInput : promptInput ? { ...promptInput, userText: prompt, fields: { ...promptInput.fields, ...(promptInput.scene === "workflow-step" || Object.hasOwn(promptInput.fields || {}, "instruction") ? { instruction: prompt } : {}) }, hasMask: Boolean(mask) } : undefined, onOptimizing: () => { setNodes(previous => previous.map(node => node.id === nodeId ? { ...node, metadata: { ...node.metadata, optimizingPrompt: true } } : node)); }, onCompiled: (finalPrompt: string, optimized: boolean) => { setNodes(previous => previous.map(node => node.id === nodeId ? { ...node, metadata: { ...node.metadata, prompt: finalPrompt, optimized, optimizingPrompt: false } } : node)); }, tool: toolKey || (edit ? "canvas-edit" : "canvas-image") };
+                    const requestOptions = { ...options, exactPrompt, promptInput: exactPrompt ? undefined : promptInput?.compilationId ? promptInput : promptInput ? { ...promptInput, userText: prompt, fields: { ...promptInput.fields, ...(promptInput.scene === "workflow-step" || Object.hasOwn(promptInput.fields || {}, "instruction") ? { instruction: prompt } : {}) }, hasMask: Boolean(mask) } : undefined, onOptimizing: () => { if (current(nodeId, binding, prepared)) setNodes(previous => previous.map(node => node.id === nodeId ? { ...node, metadata: { ...node.metadata, optimizingPrompt: true } } : node)); }, onCompiled: (finalPrompt: string, optimized: boolean) => { if (current(nodeId, binding, prepared)) setNodes(previous => previous.map(node => node.id === nodeId ? { ...node, metadata: { ...node.metadata, prompt: finalPrompt, generationRecord: compiledCanvasGenerationRecord(node.metadata?.generationRecord, finalPrompt), optimized, optimizingPrompt: false } } : node)); }, tool: toolKey || (edit ? "canvas-edit" : "canvas-image") };
                     return options.receiveResult(edit
                         ? requestEdit(config, prompt, references || [], mask, requestOptions)
                         : requestGeneration(config, prompt, requestOptions, references));
@@ -110,6 +111,7 @@ export default function createCanvasImageTaskRuntime({ nodes, setNodes, saveQueu
                             imageTask: undefined, errorDetails: undefined, sourceTaskId: image.sourceTaskId,
                             ...(image.prompt !== undefined ? { prompt: image.prompt, optimized: image.optimized, userInput: image.userInput } : {}), optimizingPrompt: false,
                             content: uploaded.url, storageKey: uploaded.storageKey, status: "success",
+                            ...(nodes.current.find(node => node.id === nodeId)?.metadata?.generationRecord ? { generationRecord: compiledCanvasGenerationRecord(nodes.current.find(node => node.id === nodeId)?.metadata?.generationRecord, image.prompt) } : {}),
                             naturalWidth: uploaded.width, naturalHeight: uploaded.height, bytes: uploaded.bytes, mimeType: uploaded.mimeType,
                             ...(uploaded.originalFileName ? { originalFileName: uploaded.originalFileName, imageName: uploaded.originalFileName.replace(/\.[^.]+$/, ""), imageVersion: 1 } : {}),
                         };

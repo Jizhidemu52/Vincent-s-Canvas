@@ -6,13 +6,14 @@ import ts from "typescript";
 import { getNodeSpec } from "@/constant/canvas";
 import * as clipboard from "@/lib/canvas/canvas-system-clipboard";
 import * as nodeCopy from "@/lib/canvas/canvas-node-copy";
+import { canvasRepeatCopyOffset } from "@/lib/canvas/canvas-drag-copy";
 import { createCanvasImageOperationRunner } from "@/lib/canvas/canvas-image-operation";
 import { assertCanvasImageUploadSize, CANVAS_IMAGE_MAX_BYTES } from "@/lib/canvas/canvas-image-upload-limit";
 import { shouldIgnoreCanvasShortcut } from "@/lib/canvas/canvas-keyboard";
 import { matchCanvasActionShortcut } from "@/lib/canvas/canvas-actions";
 import { fitNodeSize } from "@/lib/canvas/canvas-node-size";
 import { canvasImportGridPosition } from "@/lib/canvas/canvas-interaction-ux";
-import { createCanvasSelectionGenerationSync } from "@/lib/canvas/canvas-selection-prompt";
+import { syncCanvasSelectionReferences } from "@/lib/canvas/canvas-selection-references";
 import { runCanvasGeneration } from "@/pages/canvas/canvas-shared-generation-runtime";
 import { defaultConfig } from "@/stores/use-config-store";
 import { isCanvasAudioFile } from "@/pages/canvas/use-canvas-clipboard-drop";
@@ -32,7 +33,7 @@ function containsIdentifier(node: ts.Node, names: string[]): boolean {
 }
 function collect(node: ts.Node) {
     if (ts.isExpressionStatement(node) && ts.isCallExpression(node.expression) && ts.isIdentifier(node.expression.expression) && node.expression.expression.text === "useEffect"
-        && containsIdentifier(node, ["syncSelectedGenerationRef"])) selectionEffect = node;
+        && containsIdentifier(node, ["lastEditorSelectionRef"])) selectionEffect = node;
     else if (ts.isVariableStatement(node) && node.declarationList.declarations.some(item => ts.isIdentifier(item.name) && callbackNames.has(item.name.text))) declarations.push(node);
     else if (ts.isFunctionDeclaration(node) && ["createCanvasNode", "imageMetadata", "useCanvasClipboardDrop", "useCanvasShortcuts", "handleCanvasShortcut"].includes(node.name?.text || "")) declarations.push(node);
     else if (ts.isExpressionStatement(node) && ts.isCallExpression(node.expression) && ts.isIdentifier(node.expression.expression) && node.expression.expression.text === "useCanvasShortcuts") declarations.push(node);
@@ -69,11 +70,19 @@ function harness(initialNodes: CanvasNodeData[] = [], initialConnections: Canvas
     const imageOperations = createCanvasImageOperationRunner();
     const generationRequestsRef = { current: new Map<string, { targetNodeId: string; originNodeId: string; runningNodeId: string }>() };
     const generationDispatchLocksRef = { current: new Set<string>() };
-    const syncSelectedGenerationRef = { current: createCanvasSelectionGenerationSync() };
+    const lastEditorSelectionRef = { current: "" };
+    const editorOwner = "authenticated:clipboard-owner";
     let prompt = "";
+    const loadQuickGenerationNode = (node: CanvasNodeData | null) => { if (node) prompt = node.metadata?.draftPrompt ?? node.metadata?.generationRecord?.inputPrompt ?? node.metadata?.prompt ?? ""; };
+    const setQuickGenerateReferences = () => {};
     function runSelectionEffect() {
-        const state = { useEffect: (effect: () => void) => effect(), syncSelectedGenerationRef, selectedNodeIds: selectedNodeIdsRef.current,
-            assistantSelectedNodes: nodesRef.current.filter(node => selectedNodeIdsRef.current.has(node.id)), projectId: "clipboard-test",
+        const singleSelectedNodeId = selectedNodeIdsRef.current.size === 1 ? selectedNodeIdsRef.current.values().next().value : null;
+        const nodeById = new Map(nodesRef.current.map(node => [node.id, node]));
+        const state = { useEffect: (effect: () => void) => effect(), lastEditorSelectionRef, selectedNodeIds: selectedNodeIdsRef.current,
+            editorSelectionKey: `clipboard-test:${editorOwner}:${Array.from(selectedNodeIdsRef.current).sort().join(",")}`,
+            singleSelectedNodeId, singleSelectedNode: singleSelectedNodeId ? nodeById.get(singleSelectedNodeId) : null, nodeById,
+            projectLoaded: true, assistantOpen: false, loadQuickGenerationNode, setQuickGenerateReferences, syncCanvasSelectionReferences, CanvasNodeType,
+            setDialogNodeId: () => {}, setQuickGenerateOpen: () => {},
             setQuickGeneratePrompt: (value: string) => { prompt = value; },
             setQuickGenerateModel: () => {}, setQuickGenerateSize: () => {}, setQuickGenerateQuality: () => {},
             setQuickGenerateCount: () => {}, setQuickGenerateImageOptions: () => {} };
@@ -87,6 +96,7 @@ function harness(initialNodes: CanvasNodeData[] = [], initialConnections: Canvas
         canvasImportGridPosition, pastePositionRef: { current: null }, importFiles: noop,
         designProjectIdRef: { current: "clipboard-test" }, useUserStore: Object.assign((select: Function) => select({ status: "authenticated", user: { id: "clipboard-owner" } }), { getState: () => ({ user: { id: "clipboard-owner" } }) }), setDropReading: noop,
         resetViewport: noop,
+        canvasRepeatCopyOffset, repeatCopyRef: { current: null },
         ...clipboard, ...nodeCopy, clipboardModule: clipboard, shouldIgnoreCanvasShortcut, matchCanvasActionShortcut, isCanvasAudioFile, fitNodeSize, getNodeSpec, CanvasNodeType, NODE_STATUS_SUCCESS: "success", assertCanvasImageUploadSize,
         window: target, navigator: {}, // HTTP/permissionless path: no navigator.clipboard exists.
         useCallback: (callback: unknown) => callback,
@@ -94,7 +104,7 @@ function harness(initialNodes: CanvasNodeData[] = [], initialConnections: Canvas
         flushPendingHistory: () => true,
         useEffect: (effect: () => (() => void) | void) => { const dispose = effect(); if (dispose) disposers.push(dispose); },
         nanoid: () => `fixture-${++nextId}`,
-        syncSelectedGenerationRef, projectId: "clipboard-test",
+        lastEditorSelectionRef, editorOwner, loadQuickGenerationNode, setQuickGenerateReferences, syncCanvasSelectionReferences, projectId: "clipboard-test",
         nodesRef, connectionsRef, groupsRef, selectedNodeIdsRef, generationRequestsRef, generationDispatchLocksRef, clipboardRef: { current: null },
         getCanvasCenter: () => ({ x: 300, y: 200 }),
         screenToCanvas: (x: number, y: number) => ({ x, y }), createVideoFileNode: noop, createAudioFileNode: noop,

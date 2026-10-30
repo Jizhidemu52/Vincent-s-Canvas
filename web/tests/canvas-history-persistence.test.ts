@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
+import { mergeCanvasGenerationHistory } from "@/lib/canvas/canvas-generation-history";
 
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type CanvasNodeGroup } from "@/types/canvas";
 
@@ -19,7 +20,7 @@ const functions = {} as {
     boundedCanvasHistory: (history?: History) => History;
     canvasHistoryForSave: (history: History, previous: Entry | null, current: Entry, applying: boolean) => History;
 };
-new Function("exports", code)(functions);
+new Function("exports", "mergeCanvasGenerationHistory", code)(functions, mergeCanvasGenerationHistory);
 const { boundedCanvasHistory, canvasHistoryForSave } = functions;
 
 function entry(label: string): Entry {

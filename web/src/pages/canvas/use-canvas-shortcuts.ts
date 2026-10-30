@@ -6,6 +6,7 @@ export type CanvasShortcutActions = {
     duplicate: () => void; group: () => void; undo: () => void; redo: () => void;
     selectAll: () => void; deleteSelection: () => void; escape: () => void;
     commands?: () => void;
+    continueFromImage?: () => void;
     resetView?: () => void; fitSelection?: () => void; zoomIn?: () => void; zoomOut?: () => void; zoomActual?: () => void;
 };
 export function handleCanvasShortcut(event: KeyboardEvent, actions: CanvasShortcutActions) {

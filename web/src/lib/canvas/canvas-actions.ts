@@ -16,6 +16,7 @@ export const canvasActions = [
     { id: "audio", label: "添加音频节点", toolbarLabel: "音频节点" },
     { id: "config", label: "添加生成配置", toolbarLabel: "生成配置" },
     { id: "generate", label: "打开画布生图", toolbarLabel: "画布生图", contextLabel: "生成" },
+    { id: "continueFromImage", label: "基于此图继续", key: "e", plain: true },
     { id: "batch", label: "批量改图" },
     { id: "assets", label: "我的素材" },
     { id: "designTemplate", label: "使用设计模板" },

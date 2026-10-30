@@ -9,6 +9,7 @@ import { QueuedTaskFailedError, QueuedTaskPausedError, type QueuedTask } from "@
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import { imageModelProfile } from "@/lib/image-model-settings";
 import { defaultConfig } from "@/stores/use-config-store";
+import { compiledCanvasGenerationRecord, createCanvasGenerationRecord } from "@/lib/canvas/canvas-generation-record";
 
 // Execute the actual page hook with explicit React/store/I/O boundaries, without a DOM
 // or global module mocks. The production task observer and sizing logic stay real.
@@ -93,6 +94,7 @@ function harness(options: {
         "@/lib/canvas/canvas-image-task-recovery": { observeCanvasImageTask },
         "@/lib/canvas/canvas-node-size": { fitNodeSize },
         "@/lib/canvas/canvas-project-async-lifecycle": { shouldCancelCanvasGeneration },
+        "@/lib/canvas/canvas-generation-record": { compiledCanvasGenerationRecord },
         "@/lib/image-model-settings": { imageModelProfile },
         "@/services/api/generation-tasks": {
             QueuedTaskFailedError, QueuedTaskPausedError,
@@ -174,6 +176,15 @@ function harness(options: {
 }
 
 describe("lazy canvas image task runtime", () => {
+    test("recovery synchronizes the immutable run's final prompt without altering its input draft or references", async () => {
+        const nodes = initialNodes(binding);
+        nodes[1]!.metadata!.generationRecord = createCanvasGenerationRecord({ id: "saved-run", sourceNodeId: "source-node", prompt: "before compilation", inputPrompt: "user input", generationType: "generation", config: defaultConfig, nodes, references: [] });
+        const h = harness({ nodes, query: async () => ({ ...completedTask, prompt: "compiled prompt" }) });
+        await h.action().recoverPending("result-node");
+        expect(h.result()!.metadata!.generationRecord).toMatchObject({ prompt: "compiled prompt", inputPrompt: "user input", references: [] });
+        expect(nodes[1]!.metadata!.generationRecord!.prompt).toBe("before compilation");
+        h.unmount();
+    });
     test.each([
         { tool: undefined, edit: false, expected: "canvas-image" },
         { tool: undefined, edit: true, expected: "canvas-edit" },

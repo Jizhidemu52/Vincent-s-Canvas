@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { canvasQuickGeneratePanelPropsEqual, type CanvasQuickGeneratePanelRenderState } from "@/lib/canvas/canvas-quick-generate-render-stability";
+import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 
 const noop = () => undefined;
 const references: unknown[] = [];
@@ -62,5 +63,16 @@ describe("canvas quick-generate panel render stability", () => {
         expect(canvasQuickGeneratePanelPropsEqual(state(), state({ onAddReferenceFiles: () => undefined }))).toBe(false);
         expect(canvasQuickGeneratePanelPropsEqual(state(), state({ referencesLoading: true }))).toBe(false);
         expect(canvasQuickGeneratePanelPropsEqual(state(), state({ referenceScopeKey: "another-project" }))).toBe(false);
+    });
+
+    test("source and derivative movement does not rerender the form, but their records and captions do", () => {
+        const source: CanvasNodeData = { id: "source", type: CanvasNodeType.Image, title: "source", position: { x: 0, y: 0 }, width: 100, height: 100, metadata: { prompt: "original" } };
+        const child = { ...source, id: "child", title: "child" };
+        const a = state({ sourceNode: source, derivatives: [child], visibleReferences: [] });
+        const moved = state({ sourceNode: { ...source, position: { x: 100, y: 90 } }, derivatives: [{ ...child, position: { x: 200, y: 80 } }], visibleReferences: [] });
+        expect(canvasQuickGeneratePanelPropsEqual(a, moved)).toBe(true);
+        expect(canvasQuickGeneratePanelPropsEqual(a, { ...moved, derivatives: [{ ...child, title: "renamed" }] })).toBe(false);
+        expect(canvasQuickGeneratePanelPropsEqual(a, { ...moved, sourceNode: { ...source, metadata: { prompt: "new" } } })).toBe(false);
+        expect(canvasQuickGeneratePanelPropsEqual(a, { ...moved, onRestoreGeneration: noop })).toBe(false);
     });
 });

@@ -31,3 +31,11 @@ test("node keyboard editing and movement never hijack modified shortcuts", () =>
     expect(canvasNodeKeyAction({ key: "Enter" })).toBe("edit");
     expect(canvasNodeKeyAction({ key: "ArrowDown", ctrlKey: true })).toBeNull();
 });
+
+test("continuing an image has one plain E binding without stealing modified keys", () => {
+    expect(matchCanvasActionShortcut({ key: "e" })).toBe("continueFromImage");
+    expect(matchCanvasActionShortcut({ key: "E" })).toBe("continueFromImage");
+    expect(matchCanvasActionShortcut({ key: "e", ctrlKey: true })).toBeUndefined();
+    expect(matchCanvasActionShortcut({ key: "e", altKey: true })).toBeUndefined();
+    expect(canvasActionShortcut("continueFromImage")).toBe("e");
+});

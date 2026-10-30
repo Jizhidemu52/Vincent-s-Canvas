@@ -1,5 +1,5 @@
 import { useUiText } from "@/lib/i18n";
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, LoaderCircle, Square } from "lucide-react";
 import { App, Button } from "antd";
 
@@ -17,15 +17,17 @@ import { CanvasAudioSettingsPopover, type CanvasAudioSettingKey } from "./canvas
 import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
 import { CanvasVideoSettingsPopover } from "./canvas-video-settings-popover";
 import { buildNodeGenerationContext } from "./canvas-node-generation";
+import { CanvasGenerationRecordDetails } from "./canvas-generation-record-details";
+import { CanvasPersistedMediaPreview } from "./canvas-persisted-media-preview";
+import { canvasNodePromptPanelInput, createCanvasNodePromptDraft } from "./canvas-node-prompt-panel-state";
 import { normalizeVideoModelConfig, resolveVideoMode, videoReferenceError } from "@/lib/video-model-parameters";
 import { CanvasImageReferenceDialog } from "./canvas-image-reference-dialog";
 import { ReferenceImageTray } from "@/components/reference-images/reference-image-tray";
 import type { InsertAssetPayload } from "./asset-picker-modal";
 import { loadAssetPickerModal } from "@/lib/canvas/canvas-node-tool-loaders";
 import { createImageReferenceItem, dedupeImageReferences, validateImageReferences } from "@/lib/image-reference-policy";
-import { canvasImageReferenceMentions, resolveCanvasNodeImageReferences, toCanvasStoredImageReference } from "@/lib/canvas/canvas-image-references";
+import { resolveCanvasNodeImageReferences, toCanvasStoredImageReference } from "@/lib/canvas/canvas-image-references";
 import { canvasNodePromptDraft } from "@/lib/canvas/canvas-node-prompt-draft";
-import { createCanvasTextDraft } from "@/lib/canvas/canvas-text-draft";
 import { assertCanvasImageUploadSize } from "@/lib/canvas/canvas-image-upload-limit";
 import { uploadImage } from "@/services/image-storage";
 import { CanvasNodeType, type CanvasConnection, type CanvasGenerationMode, type CanvasNodeData } from "@/types/canvas";
@@ -50,9 +52,11 @@ type CanvasNodePromptPanelProps = {
     canvasConnections?: CanvasConnection[];
     sharedConfig?: CanvasNodeData;
     onOpenSharedConfig?: (id: string) => void;
+    onRestoreGeneration?: (nodeId: string) => void;
+    onRegisterDraftFlush?: (flush: (() => void) | null) => void;
 };
 
-export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, onStop, mentionReferences = [], onImageSettingsOpenChange, canvasNodes = [], canvasConnections = [], sharedConfig, onOpenSharedConfig }: CanvasNodePromptPanelProps) {
+export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, onStop, mentionReferences = [], onImageSettingsOpenChange, canvasNodes = [], canvasConnections = [], sharedConfig, onOpenSharedConfig, onRestoreGeneration, onRegisterDraftFlush }: CanvasNodePromptPanelProps) {
     const t = useUiText();
     const { message } = App.useApp();
     const globalConfig = useEffectiveConfig();
@@ -61,9 +65,11 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const mode = sharedConfig ? sharedConfig.metadata?.generationMode || "image" : defaultMode(node.type);
-    const baseConfig = buildNodeConfig(globalConfig, sharedConfig || node, mode);
+    const nodeConfig = buildNodeConfig(globalConfig, sharedConfig || node, mode);
+    const imageInput = mode === "image" ? canvasNodePromptPanelInput(node, canvasNodes, canvasConnections, nodeConfig) : undefined;
+    const baseConfig = sharedConfig ? nodeConfig : imageInput?.config || nodeConfig;
     const baseProfile = useImageModelProfile(baseConfig.model);
-    const hasTaskImageInput = resolveCanvasNodeImageReferences(node, canvasNodes, canvasConnections).length > 0 || Boolean(sharedConfig && resolveCanvasNodeImageReferences(sharedConfig, canvasNodes, canvasConnections).length > 0);
+    const hasTaskImageInput = (sharedConfig ? resolveCanvasNodeImageReferences(node, canvasNodes, canvasConnections) : imageInput?.references || []).length > 0 || Boolean(sharedConfig && resolveCanvasNodeImageReferences(sharedConfig, canvasNodes, canvasConnections).length > 0);
     const toolKey = canvasToolKey(mode, mode === "image" && hasTaskImageInput, baseProfile.kind);
     const config = useToolConfig(baseConfig, toolKey);
     const profile = useImageModelProfile(config.model);
@@ -71,24 +77,19 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const toolEnabled = useToolEnabled(toolKey);
     const hasTextContent = node.type === CanvasNodeType.Text && Boolean(node.metadata?.content?.trim());
     const hasImageContent = node.type === CanvasNodeType.Image && Boolean(node.metadata?.content);
-    const isEditingExistingContent = hasTextContent || hasImageContent;
-    const [prompt, setPrompt] = useState(canvasNodePromptDraft(node));
-    const promptCommitRef = useRef({ nodeId: node.id, onPromptChange });
-    promptCommitRef.current = { nodeId: node.id, onPromptChange };
-    const promptDraftRef = useRef<ReturnType<typeof createCanvasTextDraft> | null>(null);
-    if (!promptDraftRef.current) {
-        promptDraftRef.current = createCanvasTextDraft(canvasNodePromptDraft(node), (value) => {
-            const current = promptCommitRef.current;
-            current.onPromptChange(current.nodeId, value);
-        });
-    }
+    const sourcePrompt = imageInput?.prompt ?? canvasNodePromptDraft(node);
+    const [promptState, setPromptState] = useState({ nodeId: node.id, value: sourcePrompt });
+    const prompt = promptState.nodeId === node.id ? promptState.value : sourcePrompt;
+    const promptCommitRef = useRef(onPromptChange);
+    promptCommitRef.current = onPromptChange;
+    const promptDraft = useMemo(() => createCanvasNodePromptDraft(node.id, sourcePrompt, (nodeId, value) => promptCommitRef.current(nodeId, value)), [node.id]);
     const [canvasPickerOpen, setCanvasPickerOpen] = useState(false);
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
     const uploadInputRef = useRef<HTMLInputElement>(null);
-    const imageReferences = mode === "image" ? resolveCanvasNodeImageReferences(node, canvasNodes, canvasConnections) : [];
-    const fixedReferenceKey = hasImageContent ? imageReferences[0]?.referenceKey : undefined;
+    const imageReferences = imageInput?.references || [];
+    const fixedReferenceKey = hasImageContent && !imageInput?.usesSnapshot ? imageReferences[0]?.referenceKey : undefined;
     const promptReferences: CanvasResourceReference[] = mode === "image" ? [
-        ...canvasImageReferenceMentions(imageReferences),
+        ...(imageInput?.mentions || []),
         ...mentionReferences.filter(reference => reference.kind !== "image"),
     ] : mentionReferences;
     const referenceValidation = mode === "image" ? validateImageReferences(modelOptionName(config.model), imageReferences, profile) : { valid: true, minimum: 0, maximum: 16, supportsReferences: true };
@@ -99,22 +100,25 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const credits = usage.configured ? usage.credits : 0;
 
     useEffect(() => {
-        const next = canvasNodePromptDraft(node);
-        setPrompt((current) => (current === next ? current : next));
-        promptDraftRef.current?.reset(next);
-    }, [node.id, node.metadata?.draftPrompt, node.metadata?.prompt]);
+        setPromptState(current => current.nodeId === node.id && current.value === sourcePrompt ? current : { nodeId: node.id, value: sourcePrompt });
+        promptDraft.reset(sourcePrompt);
+    }, [node.id, sourcePrompt, promptDraft]);
 
-    useEffect(() => () => promptDraftRef.current?.flush(), []);
+    useEffect(() => () => promptDraft.flush(), [promptDraft]);
+    useEffect(() => {
+        onRegisterDraftFlush?.(promptDraft.flush);
+        return () => onRegisterDraftFlush?.(null);
+    }, [onRegisterDraftFlush, promptDraft]);
 
     const updatePrompt = (value: string) => {
-        setPrompt(value);
-        promptDraftRef.current?.change(value);
+        setPromptState({ nodeId: node.id, value });
+        promptDraft.change(value);
     };
 
     const submit = () => {
         const text = prompt.trim();
-        if (!toolEnabled || (requiresPrompt && !text) || isRunning || !referenceValidation.valid || videoValidation) return;
-        promptDraftRef.current?.flush();
+        if (!toolEnabled || (requiresPrompt && !text) || isRunning || !referenceValidation.valid || videoValidation || imageInput?.incompleteReferences) return;
+        promptDraft.flush();
         onGenerate(node.id, mode, requiresPrompt ? text : "");
         // Retain the draft for refinement and failed-task recovery.
     };
@@ -166,6 +170,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
         const model = models.find(item => item.modelId === config.model || item.id === config.model);
         const modeLabel = { image: "图片", text: "文本", video: "视频", audio: "音频" }[mode];
         return <div className="rounded-xl border p-3 text-sm backdrop-blur" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }} onMouseDown={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()} onWheel={event => event.stopPropagation()}>
+            {mode === "image" && imageInput?.usesSnapshot ? <CanvasGenerationRecordDetails key={node.id} node={node} draftPrompt={sourcePrompt} disabled={isRunning} onRestoreGeneration={onRestoreGeneration ? () => onRestoreGeneration(node.id) : undefined} /> : null}
             <div className="font-medium">{t("继承配置：")}{sharedConfig.title || t("公共配置")}</div>
             <div className="mt-1 text-xs" style={{ color: theme.node.muted }}>{modeLabel} · {mode === "text" ? t("统一文本模型") : model?.publicName || model?.name || t("使用公共配置模型")}</div>
             <div className="mt-2 max-h-24 overflow-y-auto whitespace-pre-wrap break-words rounded-lg border px-3 py-2 text-xs leading-5" style={{ background: theme.node.fill, borderColor: theme.node.stroke }} aria-label={t("公共提示词预览")}>{sharedPrompt || t("未填写公共提示词，将使用任务输入")}</div>
@@ -185,6 +190,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
             onPointerDown={(event) => event.stopPropagation()}
             onWheel={(event) => event.stopPropagation()}
         >
+            {mode === "image" && imageInput?.usesSnapshot ? <CanvasGenerationRecordDetails key={node.id} node={node} draftPrompt={prompt} disabled={isRunning} onRestorePrompt={() => updatePrompt(node.metadata?.generationRecord?.inputPrompt ?? node.metadata?.prompt ?? "")} onRestoreGeneration={onRestoreGeneration ? () => onRestoreGeneration(node.id) : undefined} /> : null}
             {requiresPrompt ? <CanvasResourceMentionTextarea
                 value={prompt}
                 references={promptReferences}
@@ -195,7 +201,14 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 placeholder={t(promptPlaceholder(mode, hasImageContent, hasTextContent))}
             /> : <p role="status" className="text-xs leading-5">{t("多图融合需要 2–4 张参考图，不使用提示词。原有描述会保留。")}</p>}
 
-            {mode === "image" ? <div className="mt-2"><ReferenceImageTray references={imageReferences} fixedReferenceKey={fixedReferenceKey} validation={referenceValidation} onChange={saveReferences} onRequestUpload={() => uploadInputRef.current?.click()} onRequestAssets={() => setAssetPickerOpen(true)} onRequestCanvas={() => setCanvasPickerOpen(true)} /></div> : null}
+            {mode === "image" ? <div className="mt-2">{imageInput?.usesSnapshot ? <section aria-label={t("已选参考图")} className="min-w-0 space-y-2 text-xs">
+                {imageInput.visibleReferences.length ? <span className="font-medium">{t("参考图")}</span> : null}
+                <div className="flex gap-2 overflow-x-auto">{imageInput.visibleReferences.map(({ reference, index }) => <div key={reference.referenceKey} className="w-20 shrink-0 space-y-1" title={reference.name}>
+                    <CanvasPersistedMediaPreview kind="image" url={reference.dataUrl} storageKey={reference.storageKey} alt={reference.name} className="size-20 rounded border object-cover" />
+                    <span className="block truncate">{t("图片{count}", { count: index + 1 })}</span>
+                </div>)}</div>
+                {!referenceValidation.valid && referenceValidation.message ? <p role="alert" className="text-destructive">{referenceValidation.message}</p> : null}
+            </section> : <ReferenceImageTray references={imageReferences} fixedReferenceKey={fixedReferenceKey} validation={referenceValidation} onChange={saveReferences} onRequestUpload={() => uploadInputRef.current?.click()} onRequestAssets={() => setAssetPickerOpen(true)} onRequestCanvas={() => setCanvasPickerOpen(true)} />}</div> : null}
             {videoValidation ? <p role="alert" className="mt-2 text-xs text-destructive">{videoValidation}{t("。已连接素材会保留。")}</p> : null}
 
             <div className="mt-2 flex min-w-0 items-center justify-between gap-2">
@@ -231,7 +244,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                     className="!h-10 !min-w-16 shrink-0 !rounded-full !px-3"
                     danger={isRunning}
                     style={isRunning ? undefined : { background: theme.toolbar.primary, borderColor: theme.toolbar.primary }}
-                    disabled={!isRunning && (!toolEnabled || (mode === "text" && !config.textModel) || (requiresPrompt && !prompt.trim()) || !referenceValidation.valid || Boolean(videoValidation))}
+                    disabled={!isRunning && (!toolEnabled || (mode === "text" && !config.textModel) || (requiresPrompt && !prompt.trim()) || !referenceValidation.valid || Boolean(videoValidation) || imageInput?.incompleteReferences)}
                     onClick={() => (isRunning ? onStop(node.id) : submit())}
                     aria-label={isRunning ? t("停止生成") : t("生成")}
                 >

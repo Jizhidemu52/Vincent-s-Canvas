@@ -46,6 +46,7 @@ import { createConnectionAdjacency } from "@/lib/canvas/canvas-connection-geomet
 import { createCanvasConnectionSpatialIndex, refreshCanvasConnectionSpatialIndex, selectCanvasSpatialIndexConnections } from "@/lib/canvas/canvas-connection-spatial-index";
 import { canvasConnectionSvgSurfaceKind } from "@/lib/canvas/canvas-connection-svg-visibility";
 import { createCanvasDragNodeElementCache } from "@/lib/canvas/canvas-drag-node-element-cache";
+import { canvasRepeatCopyOffset, exceedsCanvasDragThreshold, removeCanvasDragCopies, type CanvasRepeatCopy } from "@/lib/canvas/canvas-drag-copy";
 import { createDragPreview, createLivePreviewNodeResolver, type CanvasDragPreview } from "@/lib/canvas/canvas-drag-preview";
 import { collectCanvasDragNodes } from "@/lib/canvas/canvas-drag-selection";
 import { collectAffectedConnectionIds, refreshVisibleConnectionsForDrag, sameCanvasIdSet } from "@/lib/canvas/canvas-drag-visible-connections";
@@ -76,7 +77,7 @@ import { createResizePreview, type CanvasResizePreview } from "@/lib/canvas/canv
 import { createCanvasMentionReferenceIndex, createCanvasResourceReferenceIndex } from "@/lib/canvas/canvas-resource-references";
 import { createCanvasSelectedNodeCache } from "@/lib/canvas/canvas-selected-node-cache";
 import { selectCanvasNodeIdsInBounds } from "@/lib/canvas/canvas-selection";
-import { createCanvasSelectionGenerationSync } from "@/lib/canvas/canvas-selection-prompt";
+import { canvasContinueFromImagePatch, canvasGenerationDerivatives, visibleCanvasEditorReferences } from "@/lib/canvas/canvas-generation-editor";
 import { syncCanvasSelectionReferences } from "@/lib/canvas/canvas-selection-references";
 import { boundsForViewport, createCanvasSpatialIndex, refreshCanvasSpatialIndex } from "@/lib/canvas/canvas-spatial-index";
 import { shouldPublishCanvasTextStream } from "@/lib/canvas/canvas-text-stream-visibility";
@@ -108,6 +109,7 @@ import {
     CanvasNodeType,
     type CanvasAssistantImage,
     type CanvasAssistantSession,
+    type CanvasConnection,
     type CanvasNodeData,
     type CanvasNodeGroup,
     type ContextMenuState,
@@ -239,6 +241,9 @@ function WirelessCanvasPage() {
     const batchFilesInputRef = useRef<HTMLInputElement>(null);
     const uploadTargetRef = useRef<{ nodeId?: string; position?: Position } | null>(null);
     const history = useCanvasHistoryState();
+    const flushQuickHistoryRef = useRef<(() => void) | null>(null);
+    const flushNodePanelDraftRef = useRef<(() => void) | null>(null);
+    const registerNodePanelDraftFlush = useCallback((flush: (() => void) | null) => { flushNodePanelDraftRef.current = flush; }, []);
     const { historyRef, lastHistoryRef, historyCommitTimerRef, applyingHistoryRef, pendingHistoryEntryRef, historyPausedRef, historyState, setHistoryState } = history;
 
     const transientTimeoutsRef = useRef(createCanvasTimeoutRegistry());
@@ -268,15 +273,24 @@ function WirelessCanvasPage() {
     const connectionSpatialIndexRef = useRef<ReturnType<typeof createCanvasConnectionSpatialIndex> | null>(null);
     const nodeByIdRef = useRef<ReturnType<typeof createCanvasNodeMap> | null>(null);
     const nodeDraggingRef = useRef(false);
+    const repeatCopyRef = useRef<CanvasRepeatCopy | null>(null);
+    const dragCopyRef = useRef<{
+        before: { nodes: CanvasNodeData[]; connections: CanvasConnection[]; groups: CanvasNodeGroup[] };
+        sourceSelection: Set<string>;
+        nodeIds: Set<string>; connectionIds: Set<string>; groupIds: Set<string>;
+        needsMount: boolean;
+    } | null>(null);
     const dragRef = useRef<{
         isDraggingNode: boolean;
         hasMoved: boolean;
+        altCopy: boolean;
         startX: number;
         startY: number;
         initialSelectedNodes: { id: string; x: number; y: number }[];
     }>({
         isDraggingNode: false,
         hasMoved: false,
+        altCopy: false,
         startX: 0,
         startY: 0,
         initialSelectedNodes: [],
@@ -429,7 +443,8 @@ function WirelessCanvasPage() {
         message.warning(uiText("当前没有可用模型，请联系管理员统一配置模型和 API"));
     }, [canManageConfig, message, openConfigDialog]);
 
-    const batchEdit = useCanvasBatchEdit({ projectId, generationDispatchLocksRef, getCanvasCenter, handleMissingModelConfig, isAiConfigReady });
+    const flushGenerationHistory = useCallback(() => flushQuickHistoryRef.current?.(), []);
+    const batchEdit = useCanvasBatchEdit({ projectId, generationDispatchLocksRef, getCanvasCenter, handleMissingModelConfig, isAiConfigReady, flushPendingHistory: flushGenerationHistory });
     const {
         batchEditOpen, setBatchEditOpen, batchEditPrompt, setBatchEditPrompt, batchOptimizePrompt, setBatchOptimizePrompt,
         batchOptimizing, batchImageSettings, setBatchImageSettings, batchEditItems, setBatchEditItems,
@@ -437,11 +452,12 @@ function WirelessCanvasPage() {
     } = batchEdit;
 
     const quickGeneration = useCanvasQuickGeneration({
-        projectId, projectLoaded, nodesRef, runtime: generationRuntime, batchEdit, setDialogNodeId,
+        projectId, projectLoaded, nodesRef, connectionsRef, flushPendingHistoryRef: flushQuickHistoryRef, runtime: generationRuntime, batchEdit, setDialogNodeId,
         getCanvasCenter, handleMissingModelConfig, isAiConfigReady,
     });
     const {
         quickGenerateOpen, setQuickGenerateOpen, quickGeneratePromptRef, quickGeneratePromptRevision,
+        quickGenerateNodeId, loadQuickGenerationNode, onQuickPromptChange, flushQuickNodeDraft,
         setQuickGeneratePrompt, quickGeneratePosition, setQuickGeneratePosition, quickGenerateModel,
         setQuickGenerateModel, quickGenerateSize, setQuickGenerateSize, quickGenerateQuality,
         setQuickGenerateQuality, quickGenerateCount, setQuickGenerateCount, quickGenerateImageOptions,
@@ -449,6 +465,7 @@ function WirelessCanvasPage() {
         quickGenerateEstimate, onQuickOptimizedPrompt, handleQuickReferenceInputChange, addQuickReferenceFiles, quickReferencesLoading,
         runQuickCanvasGeneration,
     } = quickGeneration;
+    const flushEditorDrafts = useCallback(() => { flushQuickNodeDraft(); flushNodePanelDraftRef.current?.(); }, [flushQuickNodeDraft]);
 
     // Persist current chat normally without making streaming/chat selection
     // changes restart the graph's history debounce or change command identity.
@@ -498,7 +515,9 @@ function WirelessCanvasPage() {
         current: { nodes, connections, groups, chatSessions, activeChatId, backgroundMode, showImageInfo },
         projectLoaded, createHistoryEntry, applyHistory,
         onHistoryAction: notifyHistoryAction,
+        beforeHistoryAction: flushEditorDrafts,
     });
+    flushQuickHistoryRef.current = flushPendingHistory;
 
     const cleanupCanvasFiles = useCallback(
         (extra?: unknown) => {
@@ -580,6 +599,7 @@ function WirelessCanvasPage() {
         groupsRef.current = groups;
         selectedNodeIdsRef.current = selectedNodeIds;
         viewportRef.current = viewport;
+        if (repeatCopyRef.current && !sameCanvasIdSet(repeatCopyRef.current.selectedIds, selectedNodeIds)) repeatCopyRef.current = null;
     }, [nodes, connections, groups, selectedNodeIds, viewport]);
 
     useEffect(() => {
@@ -813,6 +833,7 @@ function WirelessCanvasPage() {
 
     const commitSelectedNodeIds = useCallback((nextSelected: Set<string>) => {
         if (sameCanvasIdSet(selectedNodeIdsRef.current, nextSelected)) return;
+        if (repeatCopyRef.current && !sameCanvasIdSet(repeatCopyRef.current.selectedIds, nextSelected)) repeatCopyRef.current = null;
         selectedNodeIdsRef.current = nextSelected;
         setSelectedNodeIds(nextSelected);
     }, []);
@@ -910,9 +931,27 @@ function WirelessCanvasPage() {
     const hasMultipleSelectedNodes = selectedNodeIds.size > 1;
     const selectedExportImageCount = useMemo(() => canvasImageExportSelection(nodes, Array.from(selectedNodeIds)).length, [nodes, selectedNodeIds]);
 
+    const editorOwner = useUserStore(state => `${state.status}:${state.user?.id || ""}`);
+    const editorSelectionKey = `${projectId}:${editorOwner}:${Array.from(selectedNodeIds).sort().join(",")}`;
+    const lastEditorSelectionRef = useRef("");
     useEffect(() => {
-        setQuickGenerateReferences((current) => syncCanvasSelectionReferences(current, selectedNodeIds, nodeById));
-    }, [nodes, nodeById, selectedNodeIds]);
+        if (!projectLoaded || lastEditorSelectionRef.current === editorSelectionKey) return;
+        // Wait for the graph to hydrate before accepting the selection identity.
+        if (singleSelectedNodeId && !nodeById.has(singleSelectedNodeId)) return;
+        lastEditorSelectionRef.current = editorSelectionKey;
+        const image = singleSelectedNode?.type === CanvasNodeType.Image ? singleSelectedNode : null;
+        loadQuickGenerationNode(image);
+        if (image && (image.metadata?.content || image.metadata?.storageKey || image.metadata?.generationRecord)) {
+            setDialogNodeId(null);
+            if (!assistantOpen) setQuickGenerateOpen(true);
+        } else if (selectedNodeIds.size > 1) {
+            setQuickGeneratePrompt("");
+            setQuickGenerateReferences(current => syncCanvasSelectionReferences(current, selectedNodeIds, nodeById));
+        }
+    }, [assistantOpen, editorSelectionKey, loadQuickGenerationNode, nodeById, projectLoaded, selectedNodeIds, setQuickGenerateOpen, setQuickGeneratePrompt, setQuickGenerateReferences, singleSelectedNode, singleSelectedNodeId]);
+    const quickGenerateSourceNode = quickGenerateNodeId ? nodeById.get(quickGenerateNodeId) : undefined;
+    const quickVisibleReferences = useMemo(() => visibleCanvasEditorReferences(quickGenerateReferences, nodes), [quickGenerateReferences, nodes]);
+    const quickDerivatives = useMemo(() => quickGenerateNodeId ? canvasGenerationDerivatives(quickGenerateNodeId, nodes) : [], [quickGenerateNodeId, nodes]);
     const batchChildCountById = batchIndexes.childCountByRootId;
     const batchMotionForNode = batchIndexes.getMotion;
     const graphHighlight = useMemo(() => ({ selectedNodeId: singleSelectedNode?.id || null, multipleSelected: hasMultipleSelectedNodes, connectionAdjacency, connectionById }),
@@ -995,17 +1034,6 @@ function WirelessCanvasPage() {
     const agentSnapshotRef = useRef(agentSnapshot);
     agentSnapshotRef.current = agentSnapshot;
     const assistantSelectedNodes = agentSelectedNodeCacheRef.current.select(nodes, selectedNodeIds, nodeById, canvasSpatialIndex.nodeOrderById);
-    const syncSelectedGenerationRef = useRef(createCanvasSelectionGenerationSync());
-    useEffect(() => {
-        const saved = syncSelectedGenerationRef.current(selectedNodeIds, assistantSelectedNodes, projectId);
-        if (!saved) return;
-        setQuickGeneratePrompt(saved.prompt);
-        if (saved.model !== undefined) setQuickGenerateModel(saved.model);
-        if (saved.size !== undefined) setQuickGenerateSize(saved.size);
-        if (saved.quality !== undefined) setQuickGenerateQuality(saved.quality);
-        if (saved.count !== undefined) setQuickGenerateCount(saved.count);
-        if (saved.imageOptions !== undefined) setQuickGenerateImageOptions(saved.imageOptions);
-    }, [assistantSelectedNodes, projectId, selectedNodeIds]);
     const currentAgentSnapshot = useCallback((): CanvasAgentSnapshot => ({ projectId, title: projectTitle || "未命名画布", nodes: nodesRef.current, connections: connectionsRef.current, selectedNodeIds: Array.from(selectedNodeIdsRef.current), viewport: viewportRef.current }), [projectTitle, projectId]);
     const commitAgentSnapshot = useCallback((snapshot: CanvasAgentSnapshot) => {
         // Keep pending manual edits separate from either an agent batch or its inverse.
@@ -1240,16 +1268,20 @@ function WirelessCanvasPage() {
     const duplicateNodes = useCallback((ids: ReadonlySet<string>) => {
         const source = copyCanvasNodeGraph(nodesRef.current, connectionsRef.current, groupsRef.current, ids);
         if (!source.nodes.length) return;
-        const next = cloneCanvasNodeGraph(source, { x: 36, y: 36 });
+        const offset = canvasRepeatCopyOffset(repeatCopyRef.current, ids);
+        const next = cloneCanvasNodeGraph(source, offset);
         // Keep distinct commands separate even when the previous edit is still debounced.
         flushPendingHistory();
-        setNodes(prev => [...prev, ...next.nodes]);
-        setConnections(prev => [...prev, ...next.connections]);
-        if (next.groups?.length) setGroups(current => [...current, ...next.groups!]);
-        setSelectedNodeIds(new Set(next.nodes.map(node => node.id)));
+        setNodes(prev => nodesRef.current = [...prev, ...next.nodes]);
+        setConnections(prev => connectionsRef.current = [...prev, ...next.connections]);
+        if (next.groups?.length) setGroups(groupsRef.current = [...groupsRef.current, ...next.groups]);
+        const selected = new Set(next.nodes.map(node => node.id));
+        repeatCopyRef.current = { selectedIds: selected, offset };
+        commitSelectedNodeIds(selected);
         setSelectedConnectionId(null);
         setDialogNodeId(next.nodes.length === 1 ? next.nodes[0]!.id : null);
-    }, [flushPendingHistory]);
+        flushPendingHistory();
+    }, [commitSelectedNodeIds, flushPendingHistory]);
 
     const copySelectedNodes = useCallback(() => {
         const selectedIds = selectedNodeIdsRef.current;
@@ -1396,6 +1428,39 @@ function WirelessCanvasPage() {
         canvasGroupLayerRef.current?.refresh();
     }, []);
 
+    useLayoutEffect(() => {
+        const copy = dragCopyRef.current;
+        if (!copy?.needsMount || !dragRef.current.isDraggingNode) return;
+        // New IDs did not have elements at the threshold event. Discard any
+        // cached misses only after React mounts them, then resume the cheap rAF path.
+        dragNodeElementCacheRef.current?.clear();
+        dragNodeElementCacheRef.current?.warm(copy.nodeIds);
+        copy.needsMount = false;
+        applyLiveDragPreview(dragPreviewRef.current);
+    }, [nodes, applyLiveDragPreview]);
+
+    const materializeDragCopy = useCallback((dx: number, dy: number) => {
+        if (!dragRef.current.altCopy || dragCopyRef.current) return;
+        const sourceIds = new Set(dragRef.current.initialSelectedNodes.map(node => node.id));
+        const before = { nodes: nodesRef.current, connections: connectionsRef.current, groups: groupsRef.current };
+        const copied = cloneCanvasNodeGraph(copyCanvasNodeGraph(before.nodes, before.connections, before.groups, sourceIds), { x: 0, y: 0 }, { preserveTitle: true });
+        if (!copied.nodes.length) return;
+        const nodeIds = new Set(copied.nodes.map(node => node.id));
+        const connectionIds = new Set(copied.connections.map(connection => connection.id));
+        dragCopyRef.current = { before, sourceSelection: new Set(selectedNodeIdsRef.current), nodeIds, connectionIds,
+            groupIds: new Set(copied.groups?.map(group => group.id)), needsMount: true };
+        dragRef.current.initialSelectedNodes = copied.nodes.map(node => ({ id: node.id, ...node.position }));
+        dragPreviewRef.current = createDragPreview(dragRef.current.initialSelectedNodes, dx, dy);
+        setDragPreviewById(dragPreviewRef.current);
+        draggedConnectionIdsRef.current = connectionIds;
+        setDraggedConnectionIds(connectionIds);
+        setNodes(current => nodesRef.current = [...current, ...copied.nodes]);
+        setConnections(current => connectionsRef.current = [...current, ...copied.connections]);
+        if (copied.groups?.length) setGroups(groupsRef.current = [...groupsRef.current, ...copied.groups]);
+        commitSelectedNodeIds(nodeIds);
+        setDialogNodeId(null);
+    }, [commitSelectedNodeIds]);
+
     const handleNodeMouseDown = useCallback((event: ReactMouseEvent, nodeId: string, groupSelection?: ReadonlySet<string>) => {
         event.stopPropagation();
         if (event.button !== 0) return;
@@ -1434,10 +1499,12 @@ function WirelessCanvasPage() {
         dragRef.current = {
             isDraggingNode: true,
             hasMoved: false,
+            altCopy: event.altKey,
             startX: event.clientX,
             startY: event.clientY,
             initialSelectedNodes: dragNodes.nodes,
         };
+        dragCopyRef.current = null;
         flushPendingHistory();
         historyPausedRef.current = true;
         nodeDraggingRef.current = true;
@@ -1466,23 +1533,33 @@ function WirelessCanvasPage() {
         const dy = clientY == null ? 0 : (clientY - dragRef.current.startY) / currentViewport.k;
         const initialPositions = dragRef.current.initialSelectedNodes;
 
-        historyPausedRef.current = false;
         nodeDraggingRef.current = false;
         setIsNodeDragging(false);
         handleCanvasInteractionChange(false);
         if (dragRef.current.hasMoved && clientX != null && clientY != null) {
             const preview = createDragPreview(initialPositions, dx, dy);
-            setNodes((prev) =>
+            setNodes((prev) => nodesRef.current =
                 prev.map((node) => {
                     const position = preview.get(node.id);
                     return position ? { ...node, position } : node;
                 }),
             );
+            repeatCopyRef.current = dragCopyRef.current ? { selectedIds: dragCopyRef.current.nodeIds, offset: { x: dx, y: dy } } : null;
+        } else if (dragCopyRef.current) {
+            const copy = dragCopyRef.current;
+            setNodes(current => nodesRef.current = removeCanvasDragCopies(current, copy.nodeIds, copy.before.nodes));
+            setConnections(current => connectionsRef.current = removeCanvasDragCopies(current, copy.connectionIds, copy.before.connections));
+            setGroups(groupsRef.current = removeCanvasDragCopies(groupsRef.current, copy.groupIds, copy.before.groups));
+            commitSelectedNodeIds(copy.sourceSelection);
         } else if (dragRef.current.hasMoved) {
             // A cancelled pointer sequence has no final coordinates. Restore
             // the imperatively moved node elements to their persisted state.
             applyLiveDragPreview(createDragPreview(initialPositions, 0, 0));
         }
+        historyPausedRef.current = false;
+        // Commit the entire copy + move once, with live refs already updated.
+        // The next rapid gesture must not merge into the 180ms history debounce.
+        flushPendingHistory();
 
         dragPreviewRef.current = new Map();
         setDragPreviewById(dragPreviewRef.current);
@@ -1493,7 +1570,9 @@ function WirelessCanvasPage() {
 
         dragRef.current.isDraggingNode = false;
         dragRef.current.hasMoved = false;
+        dragRef.current.altCopy = false;
         dragRef.current.initialSelectedNodes = [];
+        dragCopyRef.current = null;
         draggingGroupRef.current = false;
         if (wasClick && clickedNodeId) {
             const clickedNode = nodesRef.current.find((node) => node.id === clickedNodeId);
@@ -1505,7 +1584,7 @@ function WirelessCanvasPage() {
                 setDialogNodeId(clickedNodeId);
             }
         }
-    }, [applyLiveDragPreview, handleCanvasInteractionChange]);
+    }, [applyLiveDragPreview, commitSelectedNodeIds, flushPendingHistory, handleCanvasInteractionChange]);
 
     const handleGlobalMouseMove = useCallback(
         (event: MouseEvent) => {
@@ -1514,10 +1593,9 @@ function WirelessCanvasPage() {
             if (dragRef.current.isDraggingNode) {
                 const dx = (event.clientX - dragRef.current.startX) / currentViewport.k;
                 const dy = (event.clientY - dragRef.current.startY) / currentViewport.k;
-                const initialPositions = dragRef.current.initialSelectedNodes;
-                if (Math.abs(event.clientX - dragRef.current.startX) > 3 || Math.abs(event.clientY - dragRef.current.startY) > 3) {
-                    dragRef.current.hasMoved = true;
-                }
+                if (!dragRef.current.hasMoved && !exceedsCanvasDragThreshold(dragRef.current.startX, dragRef.current.startY, event.clientX, event.clientY)) return;
+                dragRef.current.hasMoved = true;
+                materializeDragCopy(dx, dy);
 
                 pendingDragPreviewRef.current = { x: dx, y: dy };
                 if (rafRef.current) return;
@@ -1526,7 +1604,7 @@ function WirelessCanvasPage() {
                     const pending = pendingDragPreviewRef.current;
                     pendingDragPreviewRef.current = null;
                     if (!pending || !dragRef.current.isDraggingNode) return;
-                    const preview = createDragPreview(initialPositions, pending.x, pending.y);
+                    const preview = createDragPreview(dragRef.current.initialSelectedNodes, pending.x, pending.y);
                     applyLiveDragPreview(preview);
                     if (canvasConnectionFallback) setDragPreviewById(preview);
                 });
@@ -1535,7 +1613,7 @@ function WirelessCanvasPage() {
 
             moveConnection(event.clientX, event.clientY);
         },
-        [applyLiveDragPreview, canvasConnectionFallback, finishNodeDrag, moveConnection],
+        [applyLiveDragPreview, canvasConnectionFallback, materializeDragCopy, moveConnection],
     );
 
     const handleGlobalPointerMove = useCallback(
@@ -1632,13 +1710,17 @@ function WirelessCanvasPage() {
 
         // Clipboard import selects its new reference, but must not replace the live creation draft.
         // Consume this selection without inventing a source prompt on the uploaded image.
-        if (preserveQuickGeneratePrompt) syncSelectedGenerationRef.current(new Set([id]), [newNode], projectId);
+        if (preserveQuickGeneratePrompt) {
+            loadQuickGenerationNode(null);
+            lastEditorSelectionRef.current = `${projectId}:${editorOwner}:${id}`;
+            setQuickGenerateReferences(current => syncCanvasSelectionReferences(current, new Set([id]), new Map([[id, newNode]])));
+        }
         flushPendingHistory();
         setNodes((prev) => [...prev, newNode]);
         setSelectedNodeIds(new Set([id]));
         setSelectedConnectionId(null);
         if (openPanel) setDialogNodeId(id);
-    }, [flushPendingHistory, projectId]);
+    }, [editorOwner, flushPendingHistory, loadQuickGenerationNode, projectId, setQuickGenerateReferences]);
 
     const createVideoFileNode = useCallback(async (file: File, position: Position, openPanel = true) => {
         const ownerId = useUserStore.getState().user?.id;
@@ -1756,7 +1838,9 @@ function WirelessCanvasPage() {
         warning: text => message.warning(text), error: text => message.error(text),
     });
 
+    const continueFromImageRef = useRef<(nodeId?: string) => void>(() => undefined);
     useCanvasShortcuts({
+        continueFromImage: () => continueFromImageRef.current(),
         resetView: resetViewport,
         fitSelection: () => {
             const selected = nodesRef.current.filter(node => selectedNodeIdsRef.current.has(node.id));
@@ -1785,6 +1869,20 @@ function WirelessCanvasPage() {
             setMaskEditNodeId(null);
         },
     });
+
+    const prepareContinueFromImage = useCallback((nodeId?: string) => {
+        const id = nodeId || (selectedNodeIdsRef.current.size === 1 ? selectedNodeIdsRef.current.values().next().value : undefined);
+        const node = nodesRef.current.find(item => item.id === id);
+        if (!node || node.type !== CanvasNodeType.Image || !(node.metadata?.content || node.metadata?.storageKey)) return;
+        flushQuickNodeDraft();
+        flushPendingHistory();
+        const patch = canvasContinueFromImagePatch(node);
+        setNodes(current => current.map(item => item.id === node.id ? { ...item, metadata: { ...item.metadata, ...patch } } : item));
+        loadQuickGenerationNode({ ...node, metadata: { ...node.metadata, ...patch } });
+        commitSelectedNodeIds(new Set([node.id]));
+        setDialogNodeId(null); setQuickGeneratePosition(null); setQuickGenerateOpen(true);
+        requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('[data-testid="canvas-quick-generate-panel"] textarea')?.focus());
+    }, [commitSelectedNodeIds, flushPendingHistory, flushQuickNodeDraft, loadQuickGenerationNode, setQuickGenerateOpen, setQuickGeneratePosition]);
 
     const applyLiveResizePreview = useCallback(
         (preview: CanvasResizePreview) => {
@@ -1944,11 +2042,19 @@ function WirelessCanvasPage() {
     }, []);
 
     const handleNodePromptChange = useCallback((nodeId: string, prompt: string) => {
-        setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, ...canvasNodePromptDraftPatch(prompt) } } : node)));
+        setNodes((prev) => {
+            const next = prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, ...canvasNodePromptDraftPatch(prompt) } } : node));
+            nodesRef.current = next;
+            return next;
+        });
     }, []);
 
     const handleConfigNodeChange = useCallback((nodeId: string, patch: Partial<CanvasNodeData["metadata"]>) => {
-        setNodes((prev) => prev.map((node) => (node.id === nodeId ? applyNodeConfigPatch(node, patch) : node)));
+        setNodes((prev) => {
+            const next = prev.map((node) => (node.id === nodeId ? applyNodeConfigPatch(node, patch) : node));
+            nodesRef.current = next;
+            return next;
+        });
     }, []);
 
     const downloadNodeImage = useCallback(async (node: CanvasNodeData) => {
@@ -2186,10 +2292,16 @@ function WirelessCanvasPage() {
         setContextMenu({ type: "connection", x: event.clientX, y: event.clientY, connectionId: connection.id });
     }, [canvasConnectionFallback, findConnectionAtClientPoint, screenToCanvas]);
 
-    const { handleGenerateNode, handleRetryNode, generateImageFromTextNode, restoreNodeGenerationInput } = useCanvasGeneration({
+    const { handleGenerateNode, handleRegenerateNode, handleRetryNode, generateImageFromTextNode, restoreNodeGenerationInput } = useCanvasGeneration({
         projectId, nodesRef, connectionsRef, designProjectIdRef, projectSaveQueueRef, runtime: generationRuntime,
-        setDialogNodeId, focusCanvasArea, handleMissingModelConfig, isAiConfigReady,
+        setDialogNodeId, focusCanvasArea, handleMissingModelConfig, isAiConfigReady, flushPendingHistory,
     });
+    const recordActionsRef = useRef({ handleRegenerateNode, restoreNodeGenerationInput });
+    recordActionsRef.current = { handleRegenerateNode, restoreNodeGenerationInput };
+    const restorePanelGenerationInput = useCallback((nodeId: string) => {
+        const node = nodesRef.current.find(item => item.id === nodeId);
+        if (node) void recordActionsRef.current.restoreNodeGenerationInput(node);
+    }, []);
     useEffect(() => {
         generateNodeRef.current = handleGenerateNode;
     }, [handleGenerateNode]);
@@ -2337,6 +2449,8 @@ function WirelessCanvasPage() {
             setAssistantClosing(false);
         }, CANVAS_AGENT_PANEL_MOTION_MS);
     }, [assistantClosing, assistantMounted]);
+    const continueFromImage = useCallback((nodeId?: string) => { prepareContinueFromImage(nodeId); closeAgent(); }, [closeAgent, prepareContinueFromImage]);
+    continueFromImageRef.current = continueFromImage;
 
     const exportProjects = useCanvasExport();
     const exportCurrentCanvas = useCallback(async () => {
@@ -2393,8 +2507,10 @@ function WirelessCanvasPage() {
                         isRunning={runningNodeId === panelNode.id || connections.some((edge) => edge.kind === "config-target" && edge.toNodeId === panelNode.id && edge.fromNodeId === runningNodeId)}
                         mentionReferences={mentionReferenceIndex.get(panelNode.id)}
                         onPromptChange={handleNodePromptChange}
+                        onRegisterDraftFlush={registerNodePanelDraftFlush}
                         onConfigChange={handleConfigNodeChange}
                         onGenerate={handleGenerateNode}
+                        onRestoreGeneration={restorePanelGenerationInput}
                         onStop={(targetId) => confirmStopGeneration(generationRequestsRef.current.get(targetId)?.runningNodeId || runningNodeId || targetId)}
                         canvasNodes={nodes}
                         canvasConnections={connections}
@@ -2405,7 +2521,7 @@ function WirelessCanvasPage() {
                     />
                 </Suspense>
             ),
-        [confirmStopGeneration, connections, handleConfigNodeChange, handleGenerateNode, handleNodePromptChange, mentionReferenceIndex, nodes, runningNodeId],
+        [confirmStopGeneration, connections, handleConfigNodeChange, handleGenerateNode, handleNodePromptChange, mentionReferenceIndex, nodes, registerNodePanelDraftFlush, restorePanelGenerationInput, runningNodeId],
     );
 
     const configNodeActionsRef = useRef<{
@@ -2460,10 +2576,27 @@ function WirelessCanvasPage() {
         if (connectionsRef.current.some((edge) => edge.kind === "config-target" && edge.toNodeId === node.id)) {
             setDialogNodeId((current) => current === node.id ? null : node.id);
         } else if (node.type === CanvasNodeType.Image && (node.metadata?.content || node.metadata?.storageKey)) {
+            loadQuickGenerationNode(node);
             commitSelectedNodeIds(new Set([node.id])); setDialogNodeId(null); openQuickGenerateFromToolbar();
             requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('[data-testid="canvas-quick-generate-panel"] textarea')?.focus());
         } else setDialogNodeId((current) => current === node.id ? null : node.id);
-    }, [commitSelectedNodeIds, openQuickGenerateFromToolbar]);
+    }, [commitSelectedNodeIds, loadQuickGenerationNode, openQuickGenerateFromToolbar]);
+    const restoreQuickPrompt = useCallback(() => {
+        const node = nodesRef.current.find(item => item.id === quickGenerateNodeId);
+        if (!node) return;
+        const prompt = node.metadata?.generationRecord?.inputPrompt ?? node.metadata?.prompt ?? "";
+        setQuickGeneratePrompt(prompt); onQuickPromptChange(prompt); flushQuickNodeDraft();
+    }, [flushQuickNodeDraft, onQuickPromptChange, quickGenerateNodeId, setQuickGeneratePrompt]);
+    const continueQuickImage = useCallback(() => continueFromImage(quickGenerateNodeId || undefined), [continueFromImage, quickGenerateNodeId]);
+    const regenerateQuickImage = useCallback(() => {
+        flushQuickNodeDraft();
+        const node = nodesRef.current.find(item => item.id === quickGenerateNodeId);
+        if (node) void recordActionsRef.current.handleRegenerateNode(node);
+    }, [flushQuickNodeDraft, quickGenerateNodeId]);
+    const restoreQuickGenerationInput = useCallback(() => {
+        const node = nodesRef.current.find(item => item.id === quickGenerateNodeId);
+        if (node) void recordActionsRef.current.restoreNodeGenerationInput(node);
+    }, [quickGenerateNodeId]);
     const generateQuickFromPanel = useCallback(() => void runQuickCanvasGeneration(), [runQuickCanvasGeneration]);
     const cancelTitleEditing = useCallback(() => setTitleEditing(false), []);
     const goHomeFromTopBar = useCallback(() => navigate("/"), [navigate]);
@@ -2483,6 +2616,7 @@ function WirelessCanvasPage() {
         const top = Math.min(...matches.map(node => node.position.y));
         focusCanvasArea({ x: left, y: top }, Math.max(...matches.map(node => node.position.x + node.width)) - left, Math.max(...matches.map(node => node.position.y + node.height)) - top);
     }, [commitSelectedNodeIds, focusCanvasArea]);
+    const locateQuickDerivative = useCallback((id: string) => locateNodes([id]), [locateNodes]);
     const focusNodeByKeyboard = useCallback((id: string) => {
         if (!selectedNodeIdsRef.current.has(id)) commitSelectedNodeIds(new Set([id]));
         setSelectedConnectionId(null);
@@ -2504,6 +2638,7 @@ function WirelessCanvasPage() {
         upload: { run: uploadFromToolbar }, text: { run: addTextNodeFromToolbar }, image: { run: addImageNodeFromToolbar },
         video: { run: addVideoNodeFromToolbar }, audio: { run: addAudioNodeFromToolbar }, config: { run: addConfigNodeFromToolbar },
         generate: { run: openQuickGenerateFromToolbar }, batch: { run: openBatchEditFromToolbar },
+        continueFromImage: { run: () => continueFromImage(), enabled: singleSelectedNode?.type === CanvasNodeType.Image && Boolean(singleSelectedNode.metadata?.content || singleSelectedNode.metadata?.storageKey) },
         undo: { run: undoCanvas, enabled: historyState.canUndo }, redo: { run: redoCanvas, enabled: historyState.canRedo },
         duplicate: { run: () => duplicateNodes(new Set(selectedNodeIdsRef.current)), enabled: selectedNodeIds.size > 0 },
         delete: { run: deleteSelectedNodesFromToolbar, enabled: selectedNodeIds.size > 0 },
@@ -2539,6 +2674,15 @@ function WirelessCanvasPage() {
                         count={quickGenerateCount}
                         imageOptions={quickGenerateImageOptions}
                         references={quickGenerateReferences}
+                        visibleReferences={quickVisibleReferences}
+                        sourceNode={quickGenerateSourceNode}
+                        derivatives={quickDerivatives}
+                        onPromptChange={onQuickPromptChange}
+                        onRestorePrompt={restoreQuickPrompt}
+                        onContinue={continueQuickImage}
+                        onRegenerate={regenerateQuickImage}
+                        onRestoreGeneration={restoreQuickGenerationInput}
+                        onLocateDerivative={locateQuickDerivative}
                         running={quickGenerateRunning}
                         positioned={Boolean(quickGeneratePosition)}
                         onClearPosition={clearQuickGeneratePosition}
@@ -2553,7 +2697,7 @@ function WirelessCanvasPage() {
                         onCountChange={setQuickGenerateCount}
                         onImageOptionsChange={setQuickGenerateImageOptions}
                         onPickReferences={pickQuickGenerateReferences}
-                        referenceScopeKey={projectId}
+                        referenceScopeKey={`${projectId}:${quickGenerateNodeId || "creation"}`}
                         referencesLoading={quickReferencesLoading}
                         onAddReferenceFiles={addQuickReferenceFiles}
                         onRemoveReference={removeQuickGenerateReference}

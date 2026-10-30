@@ -41,14 +41,16 @@ test("shared per-image results anchor beyond the config and avoid earlier tasks 
     expect(nodes.slice(0, 3)).toEqual(initial);
 });
 
-test("the image execution path includes the shared config as an anchor and preserves empty-node positions", () => {
+test("the image execution path anchors shared results beyond config and appends beside empty sources", () => {
     const project = readFileSync(new URL("../src/pages/canvas/use-canvas-generation.ts", import.meta.url), "utf8");
     const expression = project.match(/const outputPosition = ([\s\S]*?);\r?\n/)?.[1];
     expect(expression).toBeDefined();
     const config = { ...source, type: CanvasNodeType.Config, position: { x: 440, y: 210 }, width: 400, height: 460 };
-    const env = { placeCanvasImageOutputs, isEmptyImageNode: false, workflowStep: false, parentPosition: source.position, nodesRef: { current: [source, config] },
+    const env = { placeCanvasImageOutputs, workflowStep: false, parentPosition: source.position, nodesRef: { current: [source, config] },
         shared: { plan: { configNode: config, targetNode: source } }, sourceNode: source, imageConfig: { width: 240, height: 240 }, parentConfig: { width: 240, height: 240 }, gap: 96 };
     const calculate = new Function("env", `const { ${Object.keys(env).join(",")} } = env; return ${expression};`);
     expect(calculate(env).x).toBe(936);
-    expect(calculate({ ...env, isEmptyImageNode: true })).toEqual(source.position);
+    // An empty source is retained as input; its newly generated result gets its own position.
+    expect(calculate({ ...env, shared: undefined, nodesRef: { current: [source] } })).toEqual({ x: 336, y: 0 });
+    expect(source.position).toEqual({ x: 0, y: 0 });
 });

@@ -9,6 +9,15 @@ export type CanvasQuickGeneratePanelRenderState = {
     count: number;
     imageOptions: string;
     references: readonly unknown[];
+    visibleReferences?: readonly unknown[];
+    sourceNode?: import("@/types/canvas").CanvasNodeData;
+    derivatives?: readonly import("@/types/canvas").CanvasNodeData[];
+    onPromptChange?: (value: string) => void;
+    onRestorePrompt?: () => void;
+    onContinue?: () => void;
+    onRegenerate?: () => void;
+    onRestoreGeneration?: () => void;
+    onLocateDerivative?: (nodeId: string) => void;
     running: boolean;
     positioned?: boolean;
     onClearPosition?: () => void;
@@ -51,6 +60,12 @@ export function canvasQuickGeneratePanelPropsEqual(previous: CanvasQuickGenerate
         previous.count === next.count &&
         previous.imageOptions === next.imageOptions &&
         previous.references === next.references &&
+        (previous.visibleReferences === next.visibleReferences || (previous.visibleReferences?.length === next.visibleReferences?.length && (previous.visibleReferences || []).every((item, index) => item === next.visibleReferences?.[index]))) &&
+        previous.sourceNode?.id === next.sourceNode?.id && previous.sourceNode?.metadata === next.sourceNode?.metadata &&
+        previous.sourceNode?.title === next.sourceNode?.title &&
+        (previous.derivatives === next.derivatives || (previous.derivatives?.length === next.derivatives?.length && (previous.derivatives || []).every((item, index) => item.id === next.derivatives?.[index].id && item.title === next.derivatives[index].title && item.metadata === next.derivatives[index].metadata))) &&
+        previous.onPromptChange === next.onPromptChange && previous.onRestorePrompt === next.onRestorePrompt &&
+        previous.onContinue === next.onContinue && previous.onRegenerate === next.onRegenerate && previous.onRestoreGeneration === next.onRestoreGeneration && previous.onLocateDerivative === next.onLocateDerivative &&
         previous.running === next.running &&
         previous.positioned === next.positioned &&
         previous.onClearPosition === next.onClearPosition &&

@@ -131,13 +131,14 @@ export function getInputSummary(inputs: NodeGenerationInput[]) {
 
 export function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | undefined, mode: CanvasNodeGenerationMode): AiConfig {
     const defaultModel = mode === "image" ? config.imageModel : mode === "video" ? config.videoModel : mode === "audio" ? config.audioModel : config.textModel;
+    const recorded = mode === "image" ? node?.metadata?.generationRecord?.parameters : undefined;
     return {
         ...config,
-        systemPrompt: node?.metadata?.systemPrompt ?? config.systemPrompt,
-        model: node?.metadata?.model || defaultModel || (mode === "audio" ? defaultConfig.audioModel : config.model || defaultConfig.model),
-        quality: node?.metadata?.quality || config.quality || defaultConfig.quality,
-        imageOptions: node?.metadata?.imageOptions ?? config.imageOptions,
-        size: node?.metadata?.size || config.size || defaultConfig.size,
+        systemPrompt: node?.metadata?.systemPrompt ?? recorded?.systemPrompt ?? config.systemPrompt,
+        model: node?.metadata?.model || recorded?.model || defaultModel || (mode === "audio" ? defaultConfig.audioModel : config.model || defaultConfig.model),
+        quality: mode === "image" ? node?.metadata?.quality ?? recorded?.quality ?? config.quality ?? defaultConfig.quality : node?.metadata?.quality || config.quality || defaultConfig.quality,
+        imageOptions: node?.metadata?.imageOptions ?? recorded?.imageOptions ?? config.imageOptions,
+        size: node?.metadata?.size || recorded?.size || config.size || defaultConfig.size,
         videoSeconds: node?.metadata?.seconds || config.videoSeconds || defaultConfig.videoSeconds,
         videoMode: node?.metadata?.videoMode || config.videoMode || defaultConfig.videoMode,
         vquality: node?.metadata?.vquality || config.vquality || defaultConfig.vquality,

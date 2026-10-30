@@ -38,7 +38,7 @@ export type ResponseFunctionTool = {
 export type ToolResponseResult = { content: string; toolCalls: ResponseToolCall[]; stopReason?: string; claudeAssistantContent?: ClaudeAssistantContent; responsesOutputItems?: Array<Record<string, unknown>> };
 
 type ToolChoice = "auto" | "required" | { type: "function"; name: string };
-type RequestOptions = { promptInput?: PromptInputData; onOptimizing?: () => void; onCompiled?: (prompt: string, optimized: boolean) => void; chatProfile?: "creative-chat" | "canvas-assistant"; profileContext?: Record<string, unknown>; requestId?: string; chatRequestId?: string; signal?: AbortSignal; operationType?: "image_generation" | "inpaint" | "upscale" | "batch_image"; tool?: string; referencePromptLanguage?: "zh" | "en"; webSearch?: boolean; onToolCallStart?: (name: string) => void; onChatSubmissionStarted?: (requestId: string) => void; cancelOnAbort?: () => boolean; onSubmissionStarted?: () => void | Promise<void>; onSubmitted?: (taskIds: string[]) => void | Promise<void> };
+type RequestOptions = { exactPrompt?: boolean; promptInput?: PromptInputData; onOptimizing?: () => void; onCompiled?: (prompt: string, optimized: boolean) => void; chatProfile?: "creative-chat" | "canvas-assistant"; profileContext?: Record<string, unknown>; requestId?: string; chatRequestId?: string; signal?: AbortSignal; operationType?: "image_generation" | "inpaint" | "upscale" | "batch_image"; tool?: string; referencePromptLanguage?: "zh" | "en"; webSearch?: boolean; onToolCallStart?: (name: string) => void; onChatSubmissionStarted?: (requestId: string) => void; cancelOnAbort?: () => boolean; onSubmissionStarted?: () => void | Promise<void>; onSubmitted?: (taskIds: string[]) => void | Promise<void> };
 type ResponseInputContent = { type: "input_text"; text: string } | { type: "input_image"; image_url: string };
 type ResponseInputItem = { role: "system" | "user" | "assistant"; content: string | ResponseInputContent[] } | { type: "claude_assistant"; content: ClaudeAssistantContent } | { type: "responses_assistant"; output: Array<Record<string, unknown>> } | { type: "function_call"; call_id: string; name: string; arguments: string; thoughtSignature?: string } | { type: "function_call_output"; call_id: string; output: string };
 type ResponseApiToolDefinition = { type: "function"; name: string; description?: string; parameters: Record<string, unknown>; strict?: boolean };
@@ -49,6 +49,7 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
     options?.signal?.throwIfAborted();
     const resolved = await resolveToolConfig(config, options?.operationType || "image_generation", options?.tool);
     options?.signal?.throwIfAborted();
+    if (options?.exactPrompt && config.model !== resolved.model.id && modelOptionName(config.model || config.imageModel) !== resolved.model.modelId) throw new Error("原生成模型当前不可用，未替换模型或提交任务");
     return requestResolvedGeneration(resolved, prompt, options, references);
 }
 
@@ -60,7 +61,7 @@ function requestResolvedGeneration(resolved: Awaited<ReturnType<typeof resolveTo
     const count = Number(normalized.count);
     const validation = validateImageReferences(resolved.model.modelId, references || [], profile);
     if (!validation.valid) throw new Error(validation.message);
-    const actualPrompt = profile.requiresPrompt ? options?.promptInput ? prompt : withSystemPrompt(config, prompt) : "";
+    const actualPrompt = profile.requiresPrompt ? options?.promptInput || options?.exactPrompt ? prompt : withSystemPrompt(config, prompt) : "";
     if (!options?.promptInput) validateImagePrompt(actualPrompt, profile);
     return requestQueuedImages({
         resolvedModel: resolved.model,
@@ -90,6 +91,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     }
     const resolved = await resolveToolConfig(config, options?.operationType || "inpaint", options?.tool);
     options?.signal?.throwIfAborted();
+    if (options?.exactPrompt && config.model !== resolved.model.id && modelOptionName(config.model || config.imageModel) !== resolved.model.modelId) throw new Error("原生成模型当前不可用，未替换模型或提交任务");
     config = resolved.config;
     options = { ...options, tool: resolved.toolKey };
     const profile = imageModelProfile(resolved.model.modelId, [resolved.model]);
@@ -104,7 +106,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     }
     const validation = validateImageReferences(resolved.model.modelId, references, profile);
     if (!validation.valid) throw new Error(validation.message);
-    const actualPrompt = options?.promptInput ? prompt : withSystemPrompt(config, buildImageReferencePromptText(prompt, references, options?.referencePromptLanguage));
+    const actualPrompt = options?.promptInput || options?.exactPrompt ? prompt : withSystemPrompt(config, buildImageReferencePromptText(prompt, references, options?.referencePromptLanguage));
     if (!options?.promptInput) validateImagePrompt(actualPrompt, profile);
     const count = Number(normalizeImageModelSettings(config, profile).count);
     const imageOptions = readImageOptions(config.imageOptions);

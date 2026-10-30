@@ -37,7 +37,7 @@ function loadComponent<T = (props: any) => ReactElement<any>>(path: string, name
     const requireModule = createRequire(url);
     const code = ts.transpileModule(readFileSync(url, "utf8"), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
     const dependencies: Record<string, unknown> = {
-        react: { ...React, useState: (initial: any) => [typeof initial === "function" ? initial() : initial, noop], useRef: (current: unknown) => ({ current }), useEffect: noop },
+        react: { ...React, useState: (initial: any) => [typeof initial === "function" ? initial() : initial, noop], useRef: (current: unknown) => ({ current }), useMemo: (factory: () => unknown) => factory(), useEffect: noop },
         antd: { ...requireModule("antd"), App: { useApp: () => ({ message: { error: noop } }) } },
         "@/stores/use-config-store": { ...requireModule("@/stores/use-config-store"), useEffectiveConfig: () => defaultConfig, useConfigStore: (select: Function) => select({ openConfigDialog: noop }) },
         "@/stores/use-business-config-store": { useBusinessConfigStore: (select: Function) => select({ estimate: () => ({ configured: true, credits: 0 }) }) },

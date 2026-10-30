@@ -42,6 +42,30 @@ export type CanvasStoredImageReference = {
     origin: "upload" | "asset" | "canvas";
 };
 
+export type CanvasGenerationReference = CanvasStoredImageReference & { order: number };
+
+/** A result's provenance. Editable drafts must never mutate this snapshot. */
+export type CanvasGenerationRecord = {
+    version: 1;
+    id: string;
+    sourceNodeId: string;
+    configNodeId?: string;
+    createdAt: string;
+    prompt: string;
+    inputPrompt: string;
+    references: CanvasGenerationReference[];
+    parameters: {
+        model: string;
+        size: string;
+        quality: string;
+        imageOptions: string;
+        systemPrompt: string;
+        count: 1;
+        generationType: CanvasImageGenerationType;
+    };
+    promptInput?: import("../../../shared/prompt-contracts").PromptInputData;
+};
+
 export type CanvasNodeMetadata = {
     promptInput?: import("../../../shared/prompt-contracts").PromptInputData;
     userInput?: import("../../../shared/prompt-contracts").PromptInputData;
@@ -60,6 +84,7 @@ export type CanvasNodeMetadata = {
         warnings: string[];
     };
     generationOrigin?: { configNodeId?: string; sourceNodeId: string; runId: string; mode: CanvasGenerationMode };
+    generationRecord?: CanvasGenerationRecord;
     imageTask?: import("@/lib/canvas/canvas-image-task-recovery").CanvasImageTaskBinding;
     mediaTask?: { requestId: string; taskId?: string; ownerId: string; projectId: string };
     generationSubmissionUncertain?: boolean;
@@ -74,6 +99,8 @@ export type CanvasNodeMetadata = {
     composerContent?: string;
     prompt?: string;
     draftPrompt?: string;
+    /** undefined restores the record inputs; [] deliberately means no references. */
+    draftImageReferences?: CanvasStoredImageReference[];
     status?: CanvasNodeStatus;
     errorDetails?: string;
     videoTaskId?: string;

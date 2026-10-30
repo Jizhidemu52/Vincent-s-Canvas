@@ -19,11 +19,13 @@ import { imageModelProfile, imageModelSettingsError, normalizeImageModelSettings
 import type { ReferenceImage } from "@/types/image";
 import { canvasToolKey, useToolConfig, useToolEnabled } from "@/hooks/use-tool-config";
 import { useImageDrop } from "@/hooks/use-image-drop";
+import { CanvasGenerationRecordDetails } from "./canvas-generation-record-details";
 
-type CanvasQuickGeneratePanelProps = Omit<CanvasQuickGeneratePanelRenderState, "embedded" | "config" | "references"> & {
+type CanvasQuickGeneratePanelProps = Omit<CanvasQuickGeneratePanelRenderState, "embedded" | "config" | "references" | "visibleReferences"> & {
     embedded?: boolean;
     config: AiConfig;
     references: ReferenceImage[];
+    visibleReferences?: ReferenceImage[];
 };
 
 export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
@@ -32,6 +34,7 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
     onModelChange, onSizeChange, onQualityChange, onCountChange, onImageOptionsChange, onPickReferences, onRemoveReference,
     onClearReferences, onMoveReference, onMissingConfig, onGenerate, onOptimizedPrompt, positioned, onClearPosition,
     referenceScopeKey = "", referencesLoading = false, onAddReferenceFiles,
+    sourceNode, derivatives, visibleReferences = references, onPromptChange, onRestorePrompt, onContinue, onRegenerate, onRestoreGeneration, onLocateDerivative,
 }: CanvasQuickGeneratePanelProps) {
     const t = useUiText();
     const [optimizing, setOptimizing] = useState(false);
@@ -72,6 +75,7 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
             onWheel={(event) => event.stopPropagation()}>
             {!embedded ? <div className="cw-tabs"><span>{t("创建")}</span><button className="cw-icon" style={{ marginLeft: "auto" }} aria-label={t("关闭画布生图")} onClick={onClose}><X size={16} /></button></div> : null}
             <div className="cw-generator-body">
+                {sourceNode ? <CanvasGenerationRecordDetails key={sourceNode.id} node={sourceNode} draftPrompt={prompt} derivatives={derivatives} disabled={running || referenceBusy} onRestorePrompt={onRestorePrompt} onContinue={onContinue} onRegenerate={onRegenerate} onRestoreGeneration={onRestoreGeneration} onLocate={onLocateDerivative} /> : null}
                 {positioned ? <div className="mb-3 flex items-center justify-between gap-2 text-xs" style={{ color: theme.node.muted }}><span>{t("下一次生成放在右键位置")}</span><button type="button" className="shrink-0 hover:underline" onClick={onClearPosition}>{t("取消定位")}</button></div> : null}
                 <div className="cw-media-kind"><ImageIcon size={15} /><span>{!profile.requiresPrompt ? t("多图融合") : references.length ? t("编辑图像") : t("图像")}</span>{profile.documentationUrl ? <a className="cw-model-info" href={profile.documentationUrl} target="_blank" rel="noreferrer" title={t("{value1} 点击查看接口文档", { value1: profile.tip })} aria-label={t("查看当前模型接口文档")}><Info size={14} /></a> : <span className="cw-model-info" title={profile.tip}><Info size={14} /></span>}</div>
                 <div className="cw-model-row">
@@ -80,13 +84,13 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
                 </div>
                 {profile.requiresPrompt ? <textarea className="cw-prompt" data-canvas-image-paste aria-label={t("描述图像")} placeholder={references.length ? t("描述想如何修改，可用「图1」「图2」指定参考图…") : t("描述你想创作的图像…")}
                     value={prompt} maxLength={profile.kind === "grok-image" ? 8000 : 2000} disabled={running} title={t("Enter 生成，Shift+Enter 换行")}
-                    onChange={(event) => { promptRef.current = event.target.value; setPrompt(event.target.value); }}
+                    onChange={(event) => { promptRef.current = event.target.value; setPrompt(event.target.value); onPromptChange?.(event.target.value); }}
                     onKeyDown={(event) => {
                         if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing || event.keyCode === 229) return;
                         event.preventDefault();
                         if (!disabled && !event.repeat) onGenerate();
                     }} /> : <p className="my-3 text-xs leading-5" role="status">{t("添加 2–4 张参考图，直接融合，不使用提示词。原有描述会保留，切换模型后可继续编辑。")}</p>}
-                {profile.requiresPrompt ? <PromptOptimizeButton config={boundConfig} prompt={prompt} references={references} toolKey={toolKey} disabled={running} onBusyChange={setOptimizing} onApply={(value, _compilation, input) => { promptRef.current = value; setPrompt(value); onOptimizedPrompt?.(value, input, references); }} /> : null}
+                {profile.requiresPrompt ? <PromptOptimizeButton scopeKey={referenceScopeKey} config={boundConfig} prompt={prompt} references={references} toolKey={toolKey} disabled={running} onBusyChange={setOptimizing} onApply={(value, _compilation, input) => { promptRef.current = value; setPrompt(value); onPromptChange?.(value); onOptimizedPrompt?.(value, input, references); }} /> : null}
                 {imageDrop.dragging || referenceBusy ? <p role="status" className="my-2 text-xs" style={{ color: theme.node.text }}>{t(referenceBusy ? "正在读取拖入图片，请稍候。" : "松开以添加参考图，不会自动生成")}</p> : null}
                 <div className="cw-reference-row">
                     <button type="button" className="cw-add-reference" aria-label={t("添加参考图")} disabled={running || referenceBusy || references.length >= referenceValidation.maximum} onClick={onPickReferences}><Plus size={15} aria-hidden /><span>{t("添加参考图")}</span></button>
@@ -100,7 +104,7 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
                         </Popover.Content></Popover.Portal>
                     </Popover.Root>
                 </div>
-                <CanvasQuickReferenceTray references={references} disabled={running || referenceBusy} onMove={onMoveReference} onRemove={onRemoveReference} onClear={onClearReferences} />
+                <CanvasQuickReferenceTray references={visibleReferences} referenceOrder={references.map(reference => reference.id)} disabled={running || referenceBusy} onMove={onMoveReference} onRemove={onRemoveReference} onClear={onClearReferences} />
                 {!referenceValidation.valid ? <p className="cw-reference-error" role="alert">{referenceValidation.message}</p> : null}
             </div>
             <div className="cw-generator-footer">

@@ -33,10 +33,9 @@ type Runtime = {
 export async function runCanvasGeneration(
     nodeId: string, mode: CanvasGenerationMode, prompt: string,
     onResult: ((result: CanvasGenerationResult) => void) | undefined,
-    { snapshot, getSnapshot, buildConfig, isAiConfigReady, execute: executeGenerateNode, recover: recoverPending, start: startGenerationRequest, finish: finishGenerationRequest, setRunning: setRunningNodeId, setNodes, message }: Runtime,
+    { snapshot, getSnapshot, buildConfig, isAiConfigReady, execute: executeGenerateNode, recover: recoverPending, start: startGenerationRequest, finish: finishGenerationRequest, setRunning: setRunningNodeId, message }: Runtime,
 ) {
         let controller: AbortController | undefined;
-        let sharedConfigId: string | undefined;
         try {
             const source = snapshot.nodes.find((node) => node.id === nodeId);
             if (source?.metadata?.mediaTask || source?.metadata?.generationSubmissionUncertain || snapshot.nodes.some(node => node.metadata?.mediaTask && node.metadata.generationOrigin?.sourceNodeId === nodeId)) throw new Error("该结果仍有关联的未决任务，请先使用结果节点的重试处理原任务，勿重复生成");
@@ -83,7 +82,6 @@ export async function runCanvasGeneration(
                 await executeGenerateNode(nodeId, mode, prompt, onResult);
                 return;
             }
-            sharedConfigId = inherited.id;
             // Resolve every input and model before starting: edits during execution affect only the next run.
             const plans = await Promise.all(targets.map(async (target) => {
                 const plan = resolveSharedGenerationPlan(target.id, inherited.id, planSnapshot);
@@ -110,7 +108,6 @@ export async function runCanvasGeneration(
             const runId = nanoid();
             controller = startGenerationRequest(nodeId, nodeId, nodeId);
             setRunningNodeId(nodeId);
-            setNodes((previous) => previous.map((node) => node.id === inherited.id ? { ...node, metadata: { ...node.metadata, status: "loading", errorDetails: undefined } } : node));
             const outputs: CanvasGenerationOutput[] = [];
             // Serial dispatch keeps stop behavior deterministic and bounds provider concurrency.
             for (const { plan, config, toolKey } of plans) {
@@ -128,13 +125,11 @@ export async function runCanvasGeneration(
             const successes = outputs.filter((output) => output.status === "success").length;
             const failures = outputs.filter((output) => output.status === "failed").length;
             const canceled = controller.signal.aborted;
-            setNodes((previous) => previous.map((node) => node.id === inherited.id ? { ...node, metadata: { ...node.metadata, status: canceled ? "idle" : failures ? "error" : "success", errorDetails: failures ? `${failures} 个任务失败，已完成结果会保留` : undefined } } : node));
             if (!canceled) message.info(uiText("公共配置执行完成：{value1}/{value2} 个成功{value3}", { value1: successes, value2: plans.length, value3: failures ? uiText("，{value1} 个失败", { value1: failures }) : "" }));
             onResult?.({ mode: inherited.metadata?.generationMode || "image", outputs });
         } catch (error) {
             const detail = error instanceof Error ? error.message : "共享配置执行失败";
             message.error(detail);
-            if (sharedConfigId) setNodes((previous) => previous.map((node) => node.id === sharedConfigId ? { ...node, metadata: { ...node.metadata, status: "error", errorDetails: detail } } : node));
             onResult?.({ mode, outputs: [{ nodeId, status: "failed", error: detail }] });
         } finally {
             if (controller) finishGenerationRequest(nodeId, controller);

@@ -5,6 +5,7 @@ import React, { type ReactElement } from "react";
 import ts from "typescript";
 
 import { cloneCanvasNodeGraph, copyCanvasNodeGraph } from "@/lib/canvas/canvas-node-copy";
+import { canvasRepeatCopyOffset } from "@/lib/canvas/canvas-drag-copy";
 import { removeCanvasGroupMembers } from "@/lib/canvas/canvas-node-groups";
 import { canvasGenerationRunsForNodes } from "@/lib/canvas/canvas-project-async-lifecycle";
 import { canvasImageExportSelection } from "@/lib/canvas/canvas-image-export-selection";
@@ -67,12 +68,12 @@ function pageHarness(initialNodes = [node("a"), node("b", 100), node("c", 300)],
     const scope: Record<string, unknown> = {
         uiText,
         React, lastHistoryRef: { current: { nodes: initialNodes } }, historyRef: { current: { past: [] } }, undoCanvas: () => {}, message: { info: () => {}, destroy: () => {} },
-        CanvasNodeType, copyCanvasNodeGraph, cloneCanvasNodeGraph, removeCanvasGroupMembers, clipboardRef,
+        CanvasNodeType, copyCanvasNodeGraph, cloneCanvasNodeGraph, canvasRepeatCopyOffset, repeatCopyRef: { current: null }, removeCanvasGroupMembers, clipboardRef,
         flushPendingHistory: () => true, generationRequestsRef: { current: new Map() }, generationDispatchLocksRef: { current: new Set() }, stopGenerationByRunningId: (...args: unknown[]) => stopped.push(args),
         canvasGenerationRunsForNodes, NODE_STATUS_LOADING: "loading", modal: { confirm: (value: { onOk: () => void }) => confirmations.push(value) },
         deleteNodes: (...args: unknown[]) => remove(...args),
-        nodesRef: { get current() { return state.nodes; } }, connectionsRef: { get current() { return state.connections; } },
-        groupsRef: { get current() { return state.groups; } }, selectedNodeIdsRef: { get current() { return state.selectedNodeIds; } },
+        nodesRef: { get current() { return state.nodes; }, set current(value) { state.nodes = value; } }, connectionsRef: { get current() { return state.connections; }, set current(value) { state.connections = value; } },
+        groupsRef: { get current() { return state.groups; }, set current(value) { state.groups = value; } }, selectedNodeIdsRef: { get current() { return state.selectedNodeIds; } },
         setNodes: update("nodes"), setConnections: update("connections"), setGroups: update("groups"),
         setSelectedNodeIds: update("selectedNodeIds"), commitSelectedNodeIds: update("selectedNodeIds"),
         setSelectedConnectionId: update("selectedConnectionId"), setDialogNodeId: update("dialogNodeId"), setContextMenu: update("contextMenu"),

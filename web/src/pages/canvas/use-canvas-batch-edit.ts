@@ -14,12 +14,13 @@ import type { BatchEditFileItem } from "./canvas-batch-edit-runtime";
 import { imageMetadata } from "./canvas-project-utils";
 const loadBatchEditRuntime = () => import("./canvas-batch-edit-runtime");
 
-export function useCanvasBatchEdit({ projectId, generationDispatchLocksRef, getCanvasCenter, handleMissingModelConfig, isAiConfigReady }: {
+export function useCanvasBatchEdit({ projectId, generationDispatchLocksRef, getCanvasCenter, handleMissingModelConfig, isAiConfigReady, flushPendingHistory }: {
     projectId: string;
     generationDispatchLocksRef: RefObject<Set<string>>;
     getCanvasCenter: () => Position;
     handleMissingModelConfig: () => void;
     isAiConfigReady: (...args: unknown[]) => boolean;
+    flushPendingHistory?: () => unknown;
 }) {
     const { message } = App.useApp();
     const effectiveConfig = useEffectiveConfig();
@@ -68,7 +69,7 @@ export function useCanvasBatchEdit({ projectId, generationDispatchLocksRef, getC
                 prompt: batchEditPrompt, optimizePrompt: batchOptimizePrompt, setOptimizing: setBatchOptimizing, items: batchEditItems, config: batchGenerationConfig, estimate: estimateUsage, isAiConfigReady,
                 onMissingModel: handleMissingModelConfig, user, projectId, getCenter: getCanvasCenter, imageMetadata, addAssets,
                 setRunning: setBatchEditRunning, setServerId: setBatchEditServerId, setAction: setBatchEditAction, setItems: setBatchEditItems,
-                setNodes, setConnections, setSelectedNodeIds, message,
+                setNodes, setConnections, setSelectedNodeIds, flushPendingHistory, message,
             });
         } catch (error) {
             message.error(error instanceof Error ? error.message : uiText("批量改图加载失败"));
@@ -76,7 +77,7 @@ export function useCanvasBatchEdit({ projectId, generationDispatchLocksRef, getC
             generationDispatchLocksRef.current.delete("canvas-batch");
             setBatchEditRunning(false);
         }
-    }, [addAssets, batchEditItems, batchEditPrompt, batchOptimizePrompt, batchGenerationConfig, estimateUsage, getCanvasCenter, handleMissingModelConfig, isAiConfigReady, message, projectId]);
+    }, [addAssets, batchEditItems, batchEditPrompt, batchOptimizePrompt, batchGenerationConfig, estimateUsage, flushPendingHistory, getCanvasCenter, handleMissingModelConfig, isAiConfigReady, message, projectId]);
 
     const controlActiveBatchEdit = useCallback(async (action: QueuedBatchAction) => {
         if (!batchEditServerId) return;
