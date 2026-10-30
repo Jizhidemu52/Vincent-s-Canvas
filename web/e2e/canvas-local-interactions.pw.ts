@@ -18,8 +18,12 @@ async function openCrop(page: Page, node: Locator) {
     }
     const dialog = page.getByRole("dialog", { name: "裁剪图片", exact: true });
     await expect(dialog.getByRole("button", { name: "确认裁剪", exact: true })).toBeEnabled();
-    // Wait for the modal's opening transform before deriving pointer coordinates.
+    // Hover's two stable frames can occur before rc-motion starts its zoom.
+    // Wait for both the opening motion lifecycle and transform to finish before
+    // deriving viewport-space pointer coordinates for the crop handles.
     await dialog.getByRole("button", { name: "调整裁剪框右", exact: true }).hover();
+    await expect(dialog).not.toHaveClass(/ant-zoom-(?:enter|appear)/);
+    await expect(dialog).toHaveCSS("transform", "none");
     return dialog;
 }
 

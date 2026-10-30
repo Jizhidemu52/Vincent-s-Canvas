@@ -172,6 +172,8 @@ jobs:
       - run: bun test
       - name: Install browser for isolated E2E
         run: bunx playwright install --with-deps chromium
+      - name: Install local media inspector for video E2E
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - name: Verify canvas interactions, recovery and live task notifications
         run: bun run test:e2e
 

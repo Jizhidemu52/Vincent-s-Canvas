@@ -157,31 +157,50 @@ export const AnimatedThemeToggler = ({ children, className, duration = 400, vari
             root.style.removeProperty("--magicui-theme-vt-clip-from");
         };
 
-        const transition = document.startViewTransition(() => {
-            flushSync(applyTheme);
-        });
-        if (typeof transition?.finished?.finally === "function") {
-            transition.finished.finally(cleanup);
+        let transition: ViewTransition;
+        try {
+            transition = document.startViewTransition(() => {
+                flushSync(applyTheme);
+            });
+        } catch (error) {
+            cleanup();
+            throw error;
+        }
+        // Visual transitions may be skipped (for example on resize or timeout).
+        // The browser still runs applyTheme; never retry it from these handlers.
+        if (typeof transition?.finished?.then === "function") {
+            transition.finished.then(cleanup, cleanup);
         } else {
             cleanup();
         }
+        // Observe the DOM-update outcome separately so handling the visual
+        // lifecycle promises never hides real callback errors or duplicates them.
+        transition?.updateCallbackDone?.catch((error: unknown) => {
+            cleanup();
+            window.reportError(error);
+        });
 
         const ready = transition?.ready;
         if (ready && typeof ready.then === "function") {
             ready.then(() => {
-                document.documentElement.animate(
-                    {
-                        clipPath,
-                    },
-                    {
-                        duration,
-                        // Star: linear avoids easing overshoot that fights polygon interpolation at t→1; VT group duration is synced above.
-                        easing: shape === "star" ? "linear" : "ease-in-out",
-                        fill: "forwards",
-                        pseudoElement: "::view-transition-new(root)",
-                    },
-                );
-            });
+                try {
+                    document.documentElement.animate(
+                        {
+                            clipPath,
+                        },
+                        {
+                            duration,
+                            // Star: linear avoids easing overshoot that fights polygon interpolation at t→1; VT group duration is synced above.
+                            easing: shape === "star" ? "linear" : "ease-in-out",
+                            fill: "forwards",
+                            pseudoElement: "::view-transition-new(root)",
+                        },
+                    );
+                } catch {
+                    // The browser may drop the pseudo-element after ready resolves.
+                    cleanup();
+                }
+            }, cleanup);
         }
     }, [shape, fromCenter, duration, isDark, targetTheme, onThemeChange]);
 
