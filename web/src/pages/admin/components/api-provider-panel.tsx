@@ -1,5 +1,5 @@
 import { App, Button, Form, Input, Select, Space, Switch, Table, Tag, Typography } from "antd";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { createServerProvider, listServerProviders, updateServerProvider, type ProviderProtocol, type ServerProvider } from "@/services/api/model-configuration";
 import { useUnsavedGuard } from "@/hooks/use-unsaved-guard";
@@ -18,13 +18,14 @@ const protocolOptions: Array<{ value: ProviderProtocol; label: string }> = [
 ];
 
 export function ApiProviderPanel({ isAdmin }: { isAdmin: boolean }) {
-    const { message } = App.useApp();
+    const { message, modal } = App.useApp();
     const [form] = Form.useForm<Values>();
     const [providers, setProviders] = useState<ServerProvider[]>([]);
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
     const [dirty, setDirty] = useState(false);
     const [saving, setSaving] = useState(false);
+    const writing = useRef(false);
     const { confirmDiscard } = useUnsavedGuard(dirty, "API 服务配置尚未保存，离开后将丢失修改；密钥不会自动保存。");
     const protocol = Form.useWatch("protocol", form);
     const selectProvider = async (id: string | null) => { if (id !== selectedId && await confirmDiscard()) { setDirty(false); setSelectedId(id); } };
@@ -43,7 +44,8 @@ export function ApiProviderPanel({ isAdmin }: { isAdmin: boolean }) {
     }, [form, selected]);
 
     const submit = async (values: Values) => {
-        if (saving) return;
+        if (writing.current) return;
+        writing.current = true;
         setSaving(true);
         const credentials = Object.entries({ apiKey: values.apiKey, walletApiKey: values.walletApiKey, accessKeyId: values.accessKeyId, secretAccessKey: values.secretAccessKey }).reduce<Record<string, string>>((result, [key, value]) => {
             if (value) result[key] = value;
@@ -51,10 +53,21 @@ export function ApiProviderPanel({ isAdmin }: { isAdmin: boolean }) {
         }, {});
         const input = { name: values.name, protocol: values.protocol, baseUrl: values.baseUrl, enabled: values.enabled, ...(Object.keys(credentials).length ? { credentials } : {}) };
         try {
+            const changes = selected ? [
+                selected.enabled && !values.enabled ? "停用服务" : "",
+                values.protocol !== selected.protocol ? "更改调用协议" : "",
+                values.baseUrl !== selected.baseUrl ? "更改接口地址" : "",
+                Object.keys(credentials).length ? "替换服务端凭据" : "",
+            ].filter(Boolean) : [];
+            if (changes.length && !await modal.confirm({
+                title: `确认修改共用 API 服务「${selected!.name}」？`,
+                content: `本次将${changes.join("、")}。影响所有绑定此服务的模型及使用这些模型的板块；停用或配置错误会阻止新调用，已提交上游的任务不保证停止，既有历史结果保留。请确认这是共用服务的预期调整。`,
+                okText: "确认修改共用服务", cancelText: "返回核对", okButtonProps: { danger: true },
+            })) return;
             const result = selected ? await updateServerProvider(selected.id, input) : await createServerProvider(input);
             setDirty(false); setSelectedId(result.provider.id); message.success("API 服务已保存到服务端"); await refresh();
         } catch (error) { message.error(error instanceof Error ? error.message : "API 服务保存失败"); }
-        finally { setSaving(false); }
+        finally { writing.current = false; setSaving(false); }
     };
 
     return (

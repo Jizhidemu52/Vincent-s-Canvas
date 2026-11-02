@@ -10,6 +10,7 @@ import { useUserStore } from "@/stores/use-user-store";
 import { InfiniteLoadMore } from "@/components/infinite-load-more";
 import { TaskReconciliationPanel } from "./task-reconciliation-panel";
 import { AdminDetails, adminLabel } from "../admin-labels";
+import { RecordMedia } from "../assets/components/asset-media";
 
 import {
     availableBatchActions,
@@ -358,14 +359,14 @@ export function HistoryManagementPanel() {
 
 function RecordDetails({ kind, id, onClose }: { kind: "task" | "history"; id: string; onClose: () => void }) {
     const userId = useUserStore(state => state.user?.id);
-    const query = useQuery({ queryKey: ["admin-record", userId, kind, id], queryFn: async () => kind === "task" ? (await getAdminTask(id)).task : (await getAdminHistory(id)).history });
+    const query = useQuery({ queryKey: ["admin-record", userId, kind, id], queryFn: async () => kind === "task" ? (await getAdminTask(id)).task : (await getAdminHistory(id)).history, retry: false, refetchOnWindowFocus: false });
     return <Drawer open onClose={onClose} title={kind === "task" ? "任务详情" : "生成历史详情"} size="large">
-        {query.isPending ? <p role="status">正在读取完整详情…</p> : query.error ? <Alert type="error" title="详情加载失败" description={query.error.message} /> : <>
+        {query.isPending ? <p role="status">正在读取完整详情…</p> : query.error ? <Alert type="error" title="详情加载失败" description={query.error.message} action={<Button onClick={() => void query.refetch()}>重试详情</Button>} /> : <>
             <p className="mb-3 break-all text-xs text-[var(--muted-foreground)]">{id}</p>
             <h3>提示词</h3><p className="mb-4 whitespace-pre-wrap break-words">{query.data?.prompt || "（无）"}</p>
             <h3 className="mb-2">参数</h3><div className="mb-4"><AdminDetails value={query.data?.parameters ?? {}} /></div>
-            <h3>原图</h3>{(query.data?.sourceUrls ?? []).map((url, index) => <p className="break-all" key={`${url}-${index}`}>{/^https?:\/\/|^\/api\//i.test(url) ? <a href={url} target="_blank" rel="noopener noreferrer">{url}</a> : url}</p>)}
-            <h3 className="mt-4">结果</h3>{(query.data?.resultUrls ?? []).map((url, index) => <p className="break-all" key={`${url}-${index}`}>{/^https?:\/\/|^\/api\//i.test(url) ? <a href={url} target="_blank" rel="noopener noreferrer">{url}</a> : url}</p>)}
+            <h3 className="mb-2">原图</h3><RecordMedia urls={query.data?.sourceUrls ?? []} label="原图" />
+            <h3 className="mb-2 mt-4">结果</h3><RecordMedia urls={query.data?.resultUrls ?? []} label="结果" />
         </>}
     </Drawer>;
 }

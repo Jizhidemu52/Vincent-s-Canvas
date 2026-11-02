@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { moduleDefinitions } from "../../shared/feature-catalog";
-import { USAGE_ACTIONS, USAGE_CONTROLS, USAGE_FALLBACK_CONTROL_PATTERN, USAGE_CANVAS_CONTROL_PATTERN, USAGE_MAX_EVENT_AGE_MS, USAGE_MAX_EVENT_FUTURE_MS, type UsageControlKey, type UsageClientEvent, type UsageFilters, type UsageParameters, type UsageRecord, type UsageCoverage, type UsageSummary, type UsageBreakdowns } from "../../shared/usage-analytics";
+import { USAGE_ACTIONS, USAGE_CONTROLS, USAGE_FALLBACK_CONTROL_PATTERN, USAGE_CANVAS_CONTROL_PATTERN, USAGE_MAX_EVENT_AGE_MS, USAGE_MAX_EVENT_FUTURE_MS, USAGE_PEOPLE_SORTS, type UsageControlKey, type UsageClientEvent, type UsageFilters, type UsageParameters, type UsageRecord, type UsageCoverage, type UsageSummary, type UsageBreakdowns, type UsagePeopleSort, type UsagePeopleSorting } from "../../shared/usage-analytics";
 import type { Database } from "./db";
 import { withTransaction } from "./db-transaction";
 
@@ -47,7 +47,9 @@ const filterShape = { userIds: z.array(z.string().uuid()).min(1).max(5000).optio
 const orderedDates = (value: UsageFilters) => !value.from || !value.to || Date.parse(value.from) <= Date.parse(value.to);
 export const usageFiltersSchema = z.object(filterShape).strict().refine(orderedDates, "开始时间不能晚于结束时间");
 export const usagePreviewSchema = z.object({ ...filterShape, includePromptSamples: z.boolean().default(false) }).strict().refine(orderedDates, "开始时间不能晚于结束时间");
-export const usageQuerySchema = z.object({ from: filterShape.from, to: filterShape.to, modelConfigId: filterShape.modelConfigId, boardKey: boardSchema.optional(), search: filterShape.search, page: z.coerce.number().int().min(1).max(1_000_000).default(1), pageSize: z.coerce.number().int().min(1).max(200).default(50) }).strict().refine(orderedDates, "开始时间不能晚于结束时间");
+const queryShape = { from: filterShape.from, to: filterShape.to, modelConfigId: filterShape.modelConfigId, boardKey: boardSchema.optional(), search: filterShape.search, page: z.coerce.number().int().min(1).max(1_000_000).default(1), pageSize: z.coerce.number().int().min(1).max(200).default(50) };
+export const usageQuerySchema = z.object(queryShape).strict().refine(orderedDates, "开始时间不能晚于结束时间");
+export const usagePeopleQuerySchema = z.object({ ...queryShape, sort: z.enum(USAGE_PEOPLE_SORTS).default("lastActivity"), order: z.enum(["asc", "desc"]).default("desc") }).strict().refine(orderedDates, "开始时间不能晚于结束时间");
 
 /** Preserve design prose, never credential-like values, links or inline image payloads. */
 export function sanitizeUsagePrompt(value: unknown, names: string[] = []) {
@@ -157,7 +159,7 @@ export async function usageCoverage(db: Pick<Database, "query">, filters: UsageF
   const scope = usageSqlFilter(filters);
   const dropped = await db.query(`${usageRecordsCte} SELECT COALESCE(sum((parameters->>'droppedEventCount')::int) FILTER(WHERE kind='gap'),0)::int AS count,count(*) FILTER(WHERE missing_generation_history)::int AS missing_history FROM usage_records r ${scope.where}`, scope.values);
   const missingHistory = dropped.rows[0]?.missing_history ?? 0;
-  return { collectionStartedAt: result.rows[0]?.startedAt ? new Date(result.rows[0].startedAt).toISOString() : null, historicalTasksAvailable: true, historicalClicksAvailable: false, historicalChatAvailable: false, droppedEventCount: dropped.rows[0]?.count ?? 0, notes: ["历史生成记录来自现有任务表，每个任务只计一次；恢复和重试不增加生成请求。", "生成成本汇总已保存的成功生成历史人民币金额（含图片、视频和音频），不按新单价重算；不含未独立结算的聊天费用及失败、待处理任务的预估金额。", "成功出图张数按图片任务实际保存的非空、去重结果计算，不按请求次数或申请数量推算；视频和音频任务、已确认非图片的内部素材不计为图片。历史外部链接或缺少素材记录时沿用原图片任务类型。", ...(missingHistory ? [`当前筛选中有 ${missingHistory} 个成功任务缺少成功结算历史，费用未计入且不补估；已保存的图片结果仍计入张数。`] : []), "启用采集前的点击、访问及聊天正文未被记录，不能补推；记录缺失不等于未使用。", "客户端明确报告的队列溢出另计采集缺口；离线、关闭页面或未上报的缺口可能未知。", "成功/失败按任务当前状态统计，日期按首次提交时间以北京时间（Asia/Shanghai）归组；取消和中断计入失败。", "仅分析软件工作习惯，不评价人格、能力或绩效；不采集逐键输入、密码、令牌或图片字节。"] };
+  return { collectionStartedAt: result.rows[0]?.startedAt ? new Date(result.rows[0].startedAt).toISOString() : null, historicalTasksAvailable: true, historicalClicksAvailable: false, historicalChatAvailable: false, droppedEventCount: dropped.rows[0]?.count ?? 0, missingHistoryCount: missingHistory, notes: ["历史生成记录来自现有任务表，每个任务只计一次；恢复和重试不增加生成请求。", "生成成本汇总已保存的成功生成历史人民币金额（含图片、视频和音频），不按新单价重算；不含未独立结算的聊天费用及失败、待处理任务的预估金额。", "成功出图张数按图片任务实际保存的非空、去重结果计算，不按请求次数或申请数量推算；视频和音频任务、已确认非图片的内部素材不计为图片。历史外部链接或缺少素材记录时沿用原图片任务类型。", ...(missingHistory ? [`当前筛选中有 ${missingHistory} 个成功任务缺少成功结算历史，费用未计入且不补估；已保存的图片结果仍计入张数。`] : []), "启用采集前的点击、访问及聊天正文未被记录，不能补推；记录缺失不等于未使用。", "客户端明确报告的队列溢出另计采集缺口；离线、关闭页面或未上报的缺口可能未知，按模型筛选无法归属未带模型标识的缺口。", "成功/失败按任务当前状态统计，日期按首次提交时间以北京时间（Asia/Shanghai）归组；取消和中断计入失败。", "仅分析软件工作习惯，不评价人格、能力或绩效；不采集逐键输入、密码、令牌或图片字节。"] };
 }
 export async function usageSummary(db: Pick<Database, "query">, filters: UsageFilters): Promise<UsageSummary> {
   const scope = usageSqlFilter(filters);
@@ -172,15 +174,17 @@ export async function usageBreakdowns(db: Pick<Database, "query">, filters: Usag
   const daily = await db.query(`${usageRecordsCte} SELECT to_char(occurred_at AT TIME ZONE 'Asia/Shanghai','YYYY-MM-DD') AS day,${summarySelect} FROM usage_records r ${scope.where} GROUP BY day ORDER BY day`, scope.values);
   return { boards: boards.map(row => ({ key: row.key ?? "unknown", label: usageBoardLabels[row.key] ?? "未记录板块", count: row.count })), controls: controls.map(row => ({ key: row.key ?? "unknown", label: usageControlLabel(row.key) ?? "未记录控件", count: row.count })), models: models.rows.map(row => ({ ...row, key: row.key ?? "unknown" })), daily: daily.rows };
 }
-export async function usagePeople(db: Database, filters: UsageFilters, query: { search?: string; page: number; pageSize: number }) {
+export async function usagePeople(db: Database, filters: UsageFilters, query: { search?: string; page: number; pageSize: number } & UsagePeopleSorting) {
   const search = filters.search ?? query.search;
   const scope = usageSqlFilter({ ...filters, search }); const values = [...scope.values];
   let userWhere = "WHERE COALESCE(u.is_guest,false)=false";
   if (filters.userIds) { values.push(filters.userIds); userWhere += ` AND u.id=ANY($${values.length}::uuid[])`; }
   if (search?.trim()) { values.push(usageSearchPattern(search)); userWhere += ` AND (u.display_name ILIKE $${values.length} OR u.username ILIKE $${values.length})`; }
   const base = `${usageRecordsCte}, stats AS (SELECT user_id,${summarySelect},max(occurred_at) AS "lastActivityAt" FROM usage_records r ${scope.where} GROUP BY user_id)`;
+  const sortColumns: Record<UsagePeopleSort, string> = { lastActivity: 's."lastActivityAt"', cost: 'COALESCE(s."totalRmbCost",0)', images: 'COALESCE(s."generatedImages",0)', requests: 'COALESCE(s."generationRequests",0)+COALESCE(s."chatRequests",0)', failed: "COALESCE(s.failed,0)" };
+  const order = `${sortColumns[query.sort ?? "lastActivity"]} ${query.order === "asc" ? "ASC" : "DESC"} NULLS LAST,u.id`;
   const count = await db.query(`${base} SELECT count(*)::int AS total FROM users u ${userWhere}`, values);
-  const result = await db.query(`${base} SELECT u.id AS "userId",u.display_name AS "displayName",d.name AS "departmentName",s.* FROM users u LEFT JOIN departments d ON d.id=u.department_id LEFT JOIN stats s ON s.user_id=u.id ${userWhere} ORDER BY s."lastActivityAt" DESC NULLS LAST,u.id LIMIT $${values.length + 1} OFFSET $${values.length + 2}`, [...values, query.pageSize, (query.page - 1) * query.pageSize]);
+  const result = await db.query(`${base} SELECT u.id AS "userId",u.display_name AS "displayName",d.name AS "departmentName",s.* FROM users u LEFT JOIN departments d ON d.id=u.department_id LEFT JOIN stats s ON s.user_id=u.id ${userWhere} ORDER BY ${order} LIMIT $${values.length + 1} OFFSET $${values.length + 2}`, [...values, query.pageSize, (query.page - 1) * query.pageSize]);
   return { people: result.rows.map(row => ({ userId: row.userId, displayName: row.displayName, departmentName: row.departmentName, summary: Object.fromEntries(Object.entries(emptyUsageSummary()).map(([key]) => [key, row[key] ?? 0])) as UsageSummary, lastActivityAt: row.lastActivityAt ? new Date(row.lastActivityAt).toISOString() : null })), pagination: { page: query.page, pageSize: query.pageSize, total: count.rows[0]?.total ?? 0 } };
 }
 export function mapUsageRecord(row: Record<string, any>): UsageRecord {

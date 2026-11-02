@@ -34,8 +34,15 @@ async function serve(role = "super_admin") {
   });
   // Only the database transport is replaced; validation, encryption, authorization,
   // routing and the values passed to INSERT/UPDATE run through production code.
+  let snapshot: Map<string, StoredProvider> | null = null;
   const db = {
     query: async (sql: string, values: unknown[] = []) => {
+      if (sql === "BEGIN") { snapshot = new Map([...providers].map(([id, row]) => [id, { ...row }])); return { rows: [] }; }
+      if (sql === "COMMIT") { snapshot = null; return { rows: [] }; }
+      if (sql === "ROLLBACK") {
+        providers.clear(); for (const [id, row] of snapshot ?? []) providers.set(id, row);
+        snapshot = null; return { rows: [] };
+      }
       if (sql.startsWith("INSERT INTO providers")) {
         const [name, protocol, baseUrl, enabled, encryptedCredentials] = values as [string, string, string, boolean, string | null];
         const id = crypto.randomUUID();
@@ -57,6 +64,7 @@ async function serve(role = "super_admin") {
       if (sql.startsWith("INSERT INTO audit_logs")) return { rows: [] };
       throw new Error(`Unexpected database operation: ${sql}`);
     },
+    connect: async () => ({ query: db.query, release() {} }),
   };
   const app = express();
   app.use(express.json());

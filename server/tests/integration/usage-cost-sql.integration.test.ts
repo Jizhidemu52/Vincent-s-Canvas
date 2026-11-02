@@ -60,6 +60,7 @@ sqlTest("usage costs and real image outputs share the searched population and Be
     ]);
     const coverage = await usageCoverage(db, filters);
     expect(coverage.droppedEventCount).toBe(7);
+    expect(coverage.missingHistoryCount).toBe(1);
     expect(coverage.notes.some(note => note.includes("1") && note.includes("缺少") && note.includes("费用"))).toBe(true);
     const records = await usageRecords(db, filters, { page: 1, pageSize: 200 });
     expect(records.records.find(record => record.id === `task:${multi}`)).toMatchObject({ totalRmbCost: .16104, generatedImages: 3 });
@@ -109,4 +110,54 @@ sqlTest("usage costs and real image outputs share the searched population and Be
     if (server) { server.closeAllConnections(); await new Promise<void>(done => server!.close(() => done())); }
     await fixture.close();
   }
+}, 60_000);
+
+sqlTest("usage model/board filters preserve zero-record people, kind-specific daily totals and stable server sorting before pagination", async () => {
+  const fixture = await createIsolatedPostgres(); const db = fixture.db;
+  try {
+    const alpha = randomUUID(), beta = randomUUID(), gamma = randomUUID(), idle = randomUUID(), guest = randomUUID();
+    for (const [id, name, isGuest] of [[alpha, "Alpha", false], [beta, "Beta", false], [gamma, "Gamma", false], [idle, "Idle", false], [guest, "Guest", true]]) await db.query("INSERT INTO users(id,username,display_name,role,is_guest,must_change_password) VALUES($1,$2,$3,'designer',$4,false)", [id, name, name, isGuest]);
+    const provider = randomUUID(), imageModel = randomUUID(), otherModel = randomUUID();
+    await db.query("INSERT INTO providers(id,name,protocol,base_url,encrypted_credentials) VALUES($1,'Usage sorting fixture','openai','https://never-called.invalid/v1','unused')", [provider]);
+    for (const [id, name] of [[imageModel, "Image fixture"], [otherModel, "Other fixture"]]) await db.query("INSERT INTO model_configs(id,provider_id,name,model_id,capabilities,rmb_cost) VALUES($1,$2,$3,$3,ARRAY['generate'],999)", [id, provider, name]);
+    const task = async (user: string, status: string, cost: number, urls: string[], options: { model?: string; board?: string; history?: boolean } = {}) => {
+      const id = randomUUID();
+      await db.query("INSERT INTO tasks(id,request_id,user_id,project_id,operation_type,model_config_id,prompt,parameters,tool_key,status,rmb_cost,result_urls,queued_at) VALUES($1::uuid,$1::uuid::text,$2,'usage-sorting','image_generation',$3,'fixture','{}',$4,$5,999,$6,'2026-11-02T01:00:00Z')", [id, user, options.model ?? imageModel, options.board ?? "image", status, JSON.stringify(urls)]);
+      if (status === "success" && options.history !== false) await db.query("INSERT INTO generation_history(task_id,user_id,project_id,operation_type,model_config_id,prompt,parameters,source_urls,result_urls,credits,rmb_cost,status) SELECT id,user_id,project_id,operation_type,model_config_id,prompt,parameters,source_urls,result_urls,0,$2,'success' FROM tasks WHERE id=$1", [id, cost]);
+    };
+    await task(alpha, "success", 1.25, ["alpha-a", "alpha-b"]);
+    await task(alpha, "success", 99, ["alpha-missing-history"], { history: false });
+    await task(beta, "failed", 0, []);
+    await task(gamma, "success", 1.25, ["gamma-a"]);
+    await task(gamma, "cancelled", 0, []);
+    await task(gamma, "success", 40, ["other-board"], { board: "canvas-image" });
+    await task(gamma, "success", 50, ["other-model"], { model: otherModel });
+    await task(guest, "success", 100, ["guest"]);
+    await db.query("INSERT INTO usage_chat_requests(id,user_id,model_config_id,board_key,prompt,status,created_at) VALUES($1,$2,$3,'image','fixture','success','2026-11-02T02:00:00Z')", [randomUUID(), alpha, imageModel]);
+    for (const [action, control, parameters] of [["visit", null, {}], ["change", "quality", { modelConfigId: imageModel, quality: "high" }], ["gap", "collection-gap", { droppedEventCount: 8 }]]) await db.query("INSERT INTO usage_events(event_id,user_id,board_key,action,control_key,parameters,occurred_at) VALUES($1,$2,'image',$3,$4,$5,'2026-11-02T03:00:00Z')", [randomUUID(), alpha, action, control, JSON.stringify(parameters)]);
+    const filters = { from: "2026-11-02T00:00:00+08:00", to: "2026-11-03T00:00:00+08:00", modelConfigId: imageModel, boardKey: "image" };
+    const summary = await usageSummary(db, filters);
+    expect(summary).toEqual({ visits: 0, interactions: 1, generationRequests: 5, chatRequests: 1, succeeded: 4, failed: 2, pending: 0, totalRmbCost: 2.5, generatedImages: 4 });
+    expect((await usageBreakdowns(db, filters)).daily).toEqual([{ day: "2026-11-02", ...summary }]);
+    const withoutModel = { ...filters, modelConfigId: undefined };
+    expect(await usageSummary(db, withoutModel)).toMatchObject({ visits: 1, interactions: 1, generationRequests: 6, chatRequests: 1 });
+    expect(await usageCoverage(db, filters)).toMatchObject({ missingHistoryCount: 1, droppedEventCount: 0 });
+    expect(await usageCoverage(db, withoutModel)).toMatchObject({ missingHistoryCount: 1, droppedEventCount: 8 });
+    const all = await usagePeople(db, filters, { page: 1, pageSize: 200 });
+    expect(all.pagination.total).toBe(4);
+    expect(all.people.find(person => person.userId === idle)).toMatchObject({ lastActivityAt: null, summary: { generationRequests: 0, totalRmbCost: 0 } });
+    expect(all.people.some(person => person.userId === guest)).toBe(false);
+    const value = (person: typeof all.people[number], sort: string) => sort === "cost" ? person.summary.totalRmbCost : sort === "images" ? person.summary.generatedImages : sort === "requests" ? person.summary.generationRequests + person.summary.chatRequests : sort === "failed" ? person.summary.failed : person.lastActivityAt ? Date.parse(person.lastActivityAt) : null;
+    for (const sort of ["cost", "images", "requests", "failed", "lastActivity"] as const) for (const order of ["asc", "desc"] as const) {
+      const expected = [...all.people].sort((a, b) => { const av = value(a, sort), bv = value(b, sort); return av === null && bv !== null ? 1 : bv === null && av !== null ? -1 : ((av ?? 0) - (bv ?? 0)) * (order === "asc" ? 1 : -1) || a.userId.localeCompare(b.userId); }).map(person => person.userId);
+      const first = await usagePeople(db, filters, { page: 1, pageSize: 2, sort, order });
+      const second = await usagePeople(db, filters, { page: 2, pageSize: 2, sort, order });
+      expect([...first.people, ...second.people].map(person => person.userId)).toEqual(expected);
+      expect(first.pagination.total).toBe(4); expect(second.pagination.total).toBe(4);
+    }
+    expect(await usageSummary(db, filters)).toEqual(summary);
+    const records = await usageRecords(db, filters, { page: 1, pageSize: 200 });
+    expect(records.records).toHaveLength(7);
+    expect(records.records.every(record => record.modelConfigId === imageModel && record.boardKey === "image" && record.userId !== guest)).toBe(true);
+  } finally { await fixture.close(); }
 }, 60_000);

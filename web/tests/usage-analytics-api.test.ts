@@ -32,7 +32,7 @@ test("usage API sends credentialed scoped reads and only frozen preview identifi
 
 test("person reads, export and free preview preserve the same search and Beijing UTC boundaries", async () => {
     const calls: Array<{ url: string; init?: RequestInit }> = [];
-    const filters = { search: "张三 & _%", from: "2026-09-30T16:00:00.000Z", to: "2026-10-30T16:00:00.000Z" };
+    const filters = { search: "张三 & _%", from: "2026-09-30T16:00:00.000Z", to: "2026-10-30T16:00:00.000Z", boardKey: "canvas-image", modelConfigId: "07bf04dd-3bee-4fc3-9757-2fdd321586be" };
     globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
         calls.push({ url: String(url), init });
         return String(url).endsWith("/export")
@@ -50,6 +50,13 @@ test("person reads, export and free preview preserve the same search and Beijing
     expect(JSON.parse(String(calls[2]!.init?.body))).toEqual(filters);
     expect(JSON.parse(String(calls[3]!.init?.body))).toEqual({ ...filters, includePromptSamples: false });
     expect(calls.some(call => call.url.endsWith("/analyze"))).toBe(false);
+});
+
+test("people sorting is sent to the server with pagination, not applied to a partial client page", async () => {
+    let url = "";
+    globalThis.fetch = (async input => { url = String(input); return Response.json({ code: 0, data: {}, msg: "ok" }); }) as typeof fetch;
+    await listUsagePeople({ boardKey: "image", sort: "cost", order: "asc", page: 3, pageSize: 20 });
+    expect(Object.fromEntries(new URL(url, "http://localhost").searchParams)).toEqual({ boardKey: "image", page: "3", pageSize: "20", sort: "cost", order: "asc" });
 });
 
 test("OA admin text model choices use the dedicated authenticated usage endpoint, never creative model APIs", async () => {

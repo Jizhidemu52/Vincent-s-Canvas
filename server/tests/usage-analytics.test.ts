@@ -5,7 +5,7 @@ import type { Request, Response } from "express";
 import type { Database } from "../src/db";
 import type { AppConfig } from "../src/config";
 import { createAdminUsageRouter, createUsageRouter, streamUsageExport } from "../src/routes/usage-analytics";
-import { sanitizeUsagePrompt, submittedChatPrompt, safeUsageParameters, usageEventsSchema, usageFiltersSchema, usageSqlFilter, mapUsageRecord } from "../src/usage-analytics";
+import { sanitizeUsagePrompt, submittedChatPrompt, safeUsageParameters, usageEventsSchema, usageFiltersSchema, usagePeopleQuerySchema, usageSqlFilter, mapUsageRecord } from "../src/usage-analytics";
 import { sessionMiddleware } from "../src/session";
 import { loadConfig } from "../src/config";
 import { CHAT_COMPLETION_PROTOCOLS } from "../src/routes/chat";
@@ -13,6 +13,15 @@ import { MARK_IMAGE_PROVIDER_ID, MARK_PLATFORM_MODELS } from "../../shared/mark-
 
 const uid = "10000000-0000-4000-8000-000000000001";
 const event = () => ({ eventId: crypto.randomUUID(), occurredAt: new Date().toISOString(), boardKey: "image", action: "change", controlKey: "resolution", parameters: { resolution: "2K" } });
+
+test("people sorting uses an explicit whitelist while export and preview scopes remain filter-only", () => {
+  expect(usagePeopleQuerySchema.parse({})).toMatchObject({ page: 1, pageSize: 50, sort: "lastActivity", order: "desc" });
+  for (const sort of ["lastActivity", "cost", "images", "requests", "failed"]) {
+    for (const order of ["asc", "desc"]) expect(usagePeopleQuerySchema.parse({ sort, order, boardKey: "image", modelConfigId: uid, page: "2" })).toMatchObject({ sort, order, page: 2 });
+  }
+  for (const input of [{ sort: "cost DESC; DROP TABLE users" }, { sort: "name" }, { order: "DESC NULLS FIRST" }, { order: "descending" }, { boardKey: "unknown" }, { modelConfigId: "unknown" }]) expect(usagePeopleQuerySchema.safeParse(input).success).toBe(false);
+  expect(usageFiltersSchema.safeParse({ sort: "cost", order: "desc" }).success).toBe(false);
+});
 
 describe("business usage input privacy", () => {
   test("accepts only known business metadata and semantic controls", () => {

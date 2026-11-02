@@ -17,6 +17,7 @@ import { withTransaction } from "../db-transaction";
 import { applyDefaultChatModel, DEFAULT_CHAT_MODEL_TOOL_KEY } from "../chat-model-policy";
 import { readToolConfiguration } from "../tool-configuration";
 import { getApimartImageCost } from "../../../shared/apimart-image-costs";
+import { configurationErrorHandler } from "./admin-configuration-errors";
 
 const protocol = z.enum(["openai", "openai-chat", "anthropic", "gemini", "apimart", "volcengine", "runninghub", "comfyui", "custom"]);
 const capabilities = z.array(z.enum(["generate", "edit", "upscale", "remove_background", "batch", "chat", "video", "audio"])).min(1);
@@ -40,6 +41,12 @@ export function createModelConfigurationRouter(db: Database, config: AppConfig) 
         next();
     });
     router.use(requireRole("super_admin"));
+    router.param("id", (_request, response, next, id) => {
+        if (!z.string().uuid().safeParse(id).success) {
+            response.status(400).json({ error: "INVALID_ID", message: "编号格式不正确" }); return;
+        }
+        next();
+    });
     router.use("/mark-images", createMarkImageProviderRouter(db, config));
     router.use("/featured-models", createFeaturedModelsRouter(db));
 
@@ -53,10 +60,13 @@ export function createModelConfigurationRouter(db: Database, config: AppConfig) 
             if (input.credentials && !config.PROVIDER_ENCRYPTION_KEY) { response.status(503).json({ error: "SECRET_KEY_NOT_CONFIGURED", message: "服务器尚未配置 Provider 凭据加密密钥" }); return; }
             const actor = (request as unknown as AuthenticatedRequest).auth;
             const encrypted = input.credentials ? encryptSecret(JSON.stringify(input.credentials), config.PROVIDER_ENCRYPTION_KEY!) : null;
-            const result = await db.query(`INSERT INTO providers(name,protocol,base_url,enabled,encrypted_credentials,created_by) VALUES($1,$2,$3,$4,$5,$6) RETURNING ${providerSelect}`,
-                [input.name, input.protocol, input.baseUrl, input.enabled, encrypted, actor.id]);
-            await writeAudit(db, { actor, action: "provider.created", targetType: "provider", targetId: result.rows[0].id, result: "success", detail: { name: input.name, protocol: input.protocol, credentialsConfigured: Boolean(input.credentials) }, ip: request.ip });
-            response.status(201).json({ provider: result.rows[0] });
+            const provider = await withTransaction(db, async client => {
+                const result = await client.query(`INSERT INTO providers(name,protocol,base_url,enabled,encrypted_credentials,created_by) VALUES($1,$2,$3,$4,$5,$6) RETURNING ${providerSelect}`,
+                    [input.name, input.protocol, input.baseUrl, input.enabled, encrypted, actor.id]);
+                await writeAudit(client, { actor, action: "provider.created", targetType: "provider", targetId: result.rows[0].id, result: "success", detail: { name: input.name, protocol: input.protocol, credentialsConfigured: Boolean(input.credentials) }, ip: request.ip });
+                return result.rows[0];
+            });
+            response.status(201).json({ provider });
         } catch (error) { next(error); }
     });
     router.patch("/providers/:id", async (request, response, next) => {
@@ -64,13 +74,17 @@ export function createModelConfigurationRouter(db: Database, config: AppConfig) 
             const input = providerUpdate.parse(request.body);
             if (input.credentials && !config.PROVIDER_ENCRYPTION_KEY) { response.status(503).json({ error: "SECRET_KEY_NOT_CONFIGURED", message: "服务器尚未配置 Provider 凭据加密密钥" }); return; }
             const actor = (request as unknown as AuthenticatedRequest).auth;
-            const current = await db.query(`SELECT ${providerSelect} FROM providers WHERE id=$1`, [request.params.id]);
-            if (!current.rows[0]) { response.status(404).json({ error: "NOT_FOUND", message: "Provider 不存在" }); return; }
             const encrypted = input.credentials ? encryptSecret(JSON.stringify(input.credentials), config.PROVIDER_ENCRYPTION_KEY!) : undefined;
-            const result = await db.query(`UPDATE providers SET name=$1,protocol=$2,base_url=$3,enabled=$4,encrypted_credentials=COALESCE($5,encrypted_credentials),updated_at=now() WHERE id=$6 RETURNING ${providerSelect}`,
-                [input.name ?? current.rows[0].name, input.protocol ?? current.rows[0].protocol, input.baseUrl ?? current.rows[0].baseUrl, input.enabled ?? current.rows[0].enabled, encrypted ?? null, request.params.id]);
-            await writeAudit(db, { actor, action: "provider.updated", targetType: "provider", targetId: request.params.id, result: "success", detail: { fields: Object.keys(input), credentialsChanged: Boolean(input.credentials) }, ip: request.ip });
-            response.json({ provider: result.rows[0] });
+            const provider = await withTransaction(db, async client => {
+                const current = await client.query(`SELECT ${providerSelect} FROM providers WHERE id=$1 FOR UPDATE`, [request.params.id]);
+                if (!current.rows[0]) return null;
+                const result = await client.query(`UPDATE providers SET name=$1,protocol=$2,base_url=$3,enabled=$4,encrypted_credentials=COALESCE($5,encrypted_credentials),updated_at=now() WHERE id=$6 RETURNING ${providerSelect}`,
+                    [input.name ?? current.rows[0].name, input.protocol ?? current.rows[0].protocol, input.baseUrl ?? current.rows[0].baseUrl, input.enabled ?? current.rows[0].enabled, encrypted ?? null, request.params.id]);
+                await writeAudit(client, { actor, action: "provider.updated", targetType: "provider", targetId: request.params.id, result: "success", detail: { fields: Object.keys(input), credentialsChanged: Boolean(input.credentials) }, ip: request.ip });
+                return result.rows[0];
+            });
+            if (!provider) { response.status(404).json({ error: "NOT_FOUND", message: "Provider 不存在" }); return; }
+            response.json({ provider });
         } catch (error) { next(error); }
     });
 
@@ -88,26 +102,32 @@ export function createModelConfigurationRouter(db: Database, config: AppConfig) 
         try {
             const input = modelInput.parse(request.body); const actor = (request as unknown as AuthenticatedRequest).auth;
             input.rmbCost = getApimartImageCost(input.providerId, input.modelId)?.rmbPerImage ?? input.rmbCost;
-            if (input.replacementModelConfigId && !(await db.query("SELECT 1 FROM model_configs WHERE id=$1", [input.replacementModelConfigId])).rows[0]) { response.status(400).json({ error: "INVALID_MODEL_REPLACEMENT", message: "替代模型不存在" }); return; }
-            const result = await db.query(`INSERT INTO model_configs(provider_id,workflow_config_id,replacement_model_config_id,name,model_id,capabilities,credit_cost,rmb_cost,concurrency_limit,enabled,created_by)
-                VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`, [input.providerId, input.workflowConfigId ?? null, input.replacementModelConfigId ?? null, input.name, input.modelId, input.capabilities, input.creditCost, input.rmbCost, input.concurrencyLimit, input.enabled, actor.id]);
-            const model = (await db.query(`SELECT ${modelSelect} FROM model_configs m JOIN providers p ON p.id=m.provider_id LEFT JOIN workflow_configs w ON w.id=m.workflow_config_id WHERE m.id=$1`, [result.rows[0].id])).rows[0];
-            await writeAudit(db, { actor, action: "model.created", targetType: "model", targetId: model.id, result: "success", detail: { modelId: input.modelId }, ip: request.ip });
+            const model = await withTransaction(db, async client => {
+                const result = await client.query(`INSERT INTO model_configs(provider_id,workflow_config_id,replacement_model_config_id,name,model_id,capabilities,credit_cost,rmb_cost,concurrency_limit,enabled,created_by)
+                    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`, [input.providerId, input.workflowConfigId ?? null, input.replacementModelConfigId ?? null, input.name, input.modelId, input.capabilities, input.creditCost, input.rmbCost, input.concurrencyLimit, input.enabled, actor.id]);
+                const saved = (await client.query(`SELECT ${modelSelect} FROM model_configs m JOIN providers p ON p.id=m.provider_id LEFT JOIN workflow_configs w ON w.id=m.workflow_config_id WHERE m.id=$1`, [result.rows[0].id])).rows[0];
+                await writeAudit(client, { actor, action: "model.created", targetType: "model", targetId: saved.id, result: "success", detail: { modelId: input.modelId }, ip: request.ip });
+                return saved;
+            });
             response.status(201).json({ model: presentAdminModel(model) });
         } catch (error) { next(error); }
     });
     router.patch("/models/:id", async (request, response, next) => {
         try {
             const input = modelUpdate.parse(request.body); const actor = (request as unknown as AuthenticatedRequest).auth;
-            const current = await db.query(`SELECT ${modelSelect} FROM model_configs m JOIN providers p ON p.id=m.provider_id LEFT JOIN workflow_configs w ON w.id=m.workflow_config_id WHERE m.id=$1`, [request.params.id]);
-            if (!current.rows[0]) { response.status(404).json({ error: "NOT_FOUND", message: "模型不存在" }); return; }
-            const value = { ...current.rows[0], ...input };
-            value.rmbCost = getApimartImageCost(value.providerId, value.modelId)?.rmbPerImage ?? value.rmbCost;
-            await assertValidModelReplacement(db, request.params.id, value.replacementModelConfigId ?? null);
-            await db.query(`UPDATE model_configs SET provider_id=$1,workflow_config_id=$2,replacement_model_config_id=$3,name=$4,model_id=$5,capabilities=$6,credit_cost=$7,rmb_cost=$8,concurrency_limit=$9,enabled=$10,updated_at=now() WHERE id=$11`,
-                [value.providerId, value.workflowConfigId ?? null, value.replacementModelConfigId ?? null, value.name, value.modelId, value.capabilities, value.creditCost, value.rmbCost, value.concurrencyLimit, value.enabled, request.params.id]);
-            const model = (await db.query(`SELECT ${modelSelect} FROM model_configs m JOIN providers p ON p.id=m.provider_id LEFT JOIN workflow_configs w ON w.id=m.workflow_config_id WHERE m.id=$1`, [request.params.id])).rows[0];
-            await writeAudit(db, { actor, action: "model.updated", targetType: "model", targetId: model.id, result: "success", detail: { fields: Object.keys(input) }, ip: request.ip });
+            const model = await withTransaction(db, async client => {
+                const current = await client.query(`SELECT ${modelSelect} FROM model_configs m JOIN providers p ON p.id=m.provider_id LEFT JOIN workflow_configs w ON w.id=m.workflow_config_id WHERE m.id=$1 FOR UPDATE OF m`, [request.params.id]);
+                if (!current.rows[0]) return null;
+                const value = { ...current.rows[0], ...input };
+                value.rmbCost = getApimartImageCost(value.providerId, value.modelId)?.rmbPerImage ?? value.rmbCost;
+                await assertValidModelReplacement(client, request.params.id, value.replacementModelConfigId ?? null);
+                await client.query(`UPDATE model_configs SET provider_id=$1,workflow_config_id=$2,replacement_model_config_id=$3,name=$4,model_id=$5,capabilities=$6,credit_cost=$7,rmb_cost=$8,concurrency_limit=$9,enabled=$10,updated_at=now() WHERE id=$11`,
+                    [value.providerId, value.workflowConfigId ?? null, value.replacementModelConfigId ?? null, value.name, value.modelId, value.capabilities, value.creditCost, value.rmbCost, value.concurrencyLimit, value.enabled, request.params.id]);
+                const saved = (await client.query(`SELECT ${modelSelect} FROM model_configs m JOIN providers p ON p.id=m.provider_id LEFT JOIN workflow_configs w ON w.id=m.workflow_config_id WHERE m.id=$1`, [request.params.id])).rows[0];
+                await writeAudit(client, { actor, action: "model.updated", targetType: "model", targetId: saved.id, result: "success", detail: { fields: Object.keys(input) }, ip: request.ip });
+                return saved;
+            });
+            if (!model) { response.status(404).json({ error: "NOT_FOUND", message: "模型不存在" }); return; }
             response.json({ model: presentAdminModel(model) });
         } catch (error) { next(error); }
     });
@@ -154,18 +174,20 @@ export function createModelConfigurationRouter(db: Database, config: AppConfig) 
                 }
             }
             const actor = (request as unknown as AuthenticatedRequest).auth;
-            const result = await db.query(`INSERT INTO tool_api_configurations(tool_key,model_config_id,enabled,updated_by,credit_cost_override,rmb_cost_override)
-                VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(tool_key) DO UPDATE SET model_config_id=EXCLUDED.model_config_id,
-                enabled=EXCLUDED.enabled,credit_cost_override=EXCLUDED.credit_cost_override,rmb_cost_override=EXCLUDED.rmb_cost_override,
-                configuration_version=tool_api_configurations.configuration_version+1,updated_by=EXCLUDED.updated_by,updated_at=now()
-                RETURNING tool_key AS "toolKey",model_config_id AS "modelConfigId",enabled,credit_cost_override AS "creditCostOverride",
-                rmb_cost_override::float8 AS "rmbCostOverride",configuration_version AS "configurationVersion",updated_at AS "updatedAt"`,
-                [selectedTool, input.modelConfigId, input.enabled, actor.id, input.creditCostOverride, input.rmbCostOverride]);
-            await writeAudit(db, { actor, action: "tool_api_configuration.updated", targetType: "tool", targetId: selectedTool, result: "success", detail: input, ip: request.ip });
-            const saved = result.rows[0];
-            response.json({ tool: selectedTool === "canvas-chat"
-                ? { ...saved, modelConfigId: (await readToolConfiguration(db, DEFAULT_CHAT_MODEL_TOOL_KEY)).modelConfigId }
-                : saved });
+            const saved = await withTransaction(db, async client => {
+                const result = await client.query(`INSERT INTO tool_api_configurations(tool_key,model_config_id,enabled,updated_by,credit_cost_override,rmb_cost_override)
+                    VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(tool_key) DO UPDATE SET model_config_id=EXCLUDED.model_config_id,
+                    enabled=EXCLUDED.enabled,credit_cost_override=EXCLUDED.credit_cost_override,rmb_cost_override=EXCLUDED.rmb_cost_override,
+                    configuration_version=tool_api_configurations.configuration_version+1,updated_by=EXCLUDED.updated_by,updated_at=now()
+                    RETURNING tool_key AS "toolKey",model_config_id AS "modelConfigId",enabled,credit_cost_override AS "creditCostOverride",
+                    rmb_cost_override::float8 AS "rmbCostOverride",configuration_version AS "configurationVersion",updated_at AS "updatedAt"`,
+                    [selectedTool, input.modelConfigId, input.enabled, actor.id, input.creditCostOverride, input.rmbCostOverride]);
+                await writeAudit(client, { actor, action: "tool_api_configuration.updated", targetType: "tool", targetId: selectedTool, result: "success", detail: input, ip: request.ip });
+                return selectedTool === "canvas-chat"
+                    ? { ...result.rows[0], modelConfigId: (await readToolConfiguration(client, DEFAULT_CHAT_MODEL_TOOL_KEY)).modelConfigId }
+                    : result.rows[0];
+            });
+            response.json({ tool: saved });
         } catch (error) { next(error); }
     });
 
@@ -214,6 +236,7 @@ export function createModelConfigurationRouter(db: Database, config: AppConfig) 
             response.status(204).end();
         } catch (error) { next(error); }
     });
+    router.use(configurationErrorHandler);
     return router;
 }
 

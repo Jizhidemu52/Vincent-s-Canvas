@@ -166,7 +166,7 @@ export async function resolveCurrentPromptPricing(
   };
 }
 
-export async function assertValidModelReplacement(db: Database, modelId: string, replacementId: string | null | undefined) {
+export async function assertValidModelReplacement(db: Pick<Database, "query">, modelId: string, replacementId: string | null | undefined) {
   if (!replacementId) return;
   const result = await db.query<{ id: string; replacementModelConfigId: string | null }>(
     `SELECT id,replacement_model_config_id AS "replacementModelConfigId" FROM model_configs`,

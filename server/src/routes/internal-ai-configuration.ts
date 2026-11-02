@@ -118,8 +118,7 @@ export function createInternalAiConfigurationRouter(
          ON CONFLICT(tool_key) DO UPDATE SET model_config_id=EXCLUDED.model_config_id,enabled=true,updated_by=EXCLUDED.updated_by,updated_at=now()`,
         [model.rows[0]!.id, actor.id],
       );
-      await client.query("COMMIT");
-      await writeAudit(db, {
+      await writeAudit(client, {
         actor,
         action: "internal_ai.configured",
         targetType: "provider",
@@ -132,7 +131,9 @@ export function createInternalAiConfigurationRouter(
         },
         ip: request.ip,
       });
-      response.json(await readPublicConfig(db, config));
+      const saved = await readPublicConfig(client, config);
+      await client.query("COMMIT");
+      response.json(saved);
     } catch (error) {
       await client.query("ROLLBACK").catch(() => undefined);
       next(error);
@@ -202,7 +203,7 @@ export function internalAiRequestTemplate() {
   };
 }
 
-async function readPublicConfig(db: Database, config: AppConfig) {
+async function readPublicConfig(db: Pick<Database, "query">, config: AppConfig) {
   const result = await db.query<ProviderRow & { submit_path: string | null }>(
     `SELECT p.id,p.base_url,p.encrypted_credentials,p.updated_at,w.submit_path
          FROM providers p LEFT JOIN workflow_configs w ON w.provider_id=p.id AND w.name=$2 WHERE p.name=$1`,

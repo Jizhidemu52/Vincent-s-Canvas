@@ -50,12 +50,15 @@ afterEach(() => { globalThis.window = originalWindow; globalThis.document = orig
 describe("admin/team interaction guards", () => {
     test("project supervision retains successful data when the independent assets read fails", async () => {
         const options: any[] = [];
+        let params = new URLSearchParams("tab=projects&keep=unchanged");
+        const designer = "11111111-1111-4111-8111-111111111111";
         const harness = componentHarness("../src/pages/admin/components/admin-assets-panel.tsx", "AdminAssetsPanel", {
+            "react-router-dom": { useSearchParams: () => [params, (update: any) => { params = typeof update === "function" ? update(params) : update; }] },
             "@/stores/use-user-store": { useUserStore: (selector: any) => selector({ user: { id: "admin-a" } }) },
             "@/components/infinite-load-more": { InfiniteLoadMore: "InfiniteLoadMore" },
             "@tanstack/react-query": {
                 useInfiniteQuery: (value: any) => { options.push(value); return { data: undefined, error: new Error("素材暂不可用"), isFetching: false }; },
-                useQuery: (value: any) => { options.push(value); return { data: value.queryKey[0] === "admin-asset-projects" ? { projects: [{ id: "project" }] } : { owners: [{ value: "designer-on-next-page", label: "未加载页设计师" }] }, isFetching: false }; },
+                useQuery: (value: any) => { options.push(value); return { data: value.queryKey[0] === "admin-asset-projects" ? { projects: [{ id: "project" }] } : { owners: [{ value: designer, label: "未加载页设计师" }] }, isFetching: false }; },
             },
             "@/services/api/server-assets": { listAdminServerAssets: async () => { throw new Error("素材暂不可用"); }, listAdminServerProjects: async () => ({ projects: [{ id: "project" }] }), listAdminAssetOwners: async () => ({ owners: [] }) },
         });
@@ -67,13 +70,67 @@ describe("admin/team interaction guards", () => {
         expect(tables.every((element) => element.props.scroll.x > 0)).toBe(true);
         expect(rendered.find((element) => element.type === "Alert")!.props.description).toContain("素材暂不可用");
         const ownerSelect = rendered.find(element => element.props["aria-label"] === "按设计师筛选素材")!;
-        expect(ownerSelect.props.options).toContainEqual({ value: "designer-on-next-page", label: "未加载页设计师" });
-        expect(options[0].queryKey).toEqual(["admin-assets", "admin-a", "all"]);
+        expect(ownerSelect.props.options).toContainEqual({ value: designer, label: "未加载页设计师" });
+        expect(options[0].queryKey).toEqual(["admin-assets", "admin-a", expect.objectContaining({ kind: "image", sort: "newest" })]);
         expect(options[0].retry).toBe(false);
-        ownerSelect.props.onChange("designer-on-next-page");
+        ownerSelect.props.onChange(designer);
         harness.render();
-        expect(options.at(-3).queryKey).toEqual(["admin-assets", "admin-a", "designer-on-next-page"]);
+        expect(options.at(-3).queryKey).toEqual(["admin-assets", "admin-a", expect.objectContaining({ ownerUserId: designer, kind: "image" })]);
+        expect(params.get("tab")).toBe("projects"); expect(params.get("keep")).toBe("unchanged");
         harness.unmount();
+    });
+
+    test("asset wall fetches details only after a click and closes them on filters or account changes", async () => {
+        let user = { id: "admin-a" }, params = new URLSearchParams("tab=projects");
+        const id = "11111111-1111-4111-8111-111111111111";
+        const asset = { id, metadata: {}, filename: "完整花型.png", ownerName: "设计师", kind: "image", status: "ready", createdAt: "2026-11-01T12:00:00Z" };
+        const requested: any[] = [], options: any[] = [];
+        const harness = componentHarness("../src/pages/admin/components/admin-assets-panel.tsx", "AdminAssetsPanel", {
+            "react-router-dom": { useSearchParams: () => [params, (update: any) => { params = update(params); }] },
+            "@/stores/use-user-store": { useUserStore: (selector: any) => selector({ user }) },
+            "@/components/infinite-load-more": { InfiniteLoadMore: "InfiniteLoadMore" },
+            "../assets/components/asset-detail": { AssetDetail: "AssetDetail" },
+            "../assets/components/asset-media": { AssetImage: "AssetImage" },
+            "@tanstack/react-query": {
+                useInfiniteQuery: (value: any) => { options.push(value); return { data: { pages: [{ assets: [asset] }] }, isFetching: false }; },
+                useQuery: (value: any) => ({ data: value.queryKey[0] === "admin-asset-projects" ? { projects: [{ id, name: "春季项目" }] } : { owners: [] }, isFetching: false }),
+            },
+            "@/services/api/server-assets": { listAdminServerAssets: async (...args: any[]) => { requested.push(args); return { assets: [] }; }, listAdminServerProjects: async () => ({ projects: [] }), listAdminAssetOwners: async () => ({ owners: [] }) },
+        });
+        let rendered = harness.render();
+        expect(rendered.some(element => element.type === "AssetDetail")).toBe(false);
+        const signal = new AbortController().signal;
+        await options[0].queryFn({ pageParam: "page-2", signal });
+        expect(requested[0]).toEqual([expect.objectContaining({ kind: "image", limit: 60, cursor: "page-2" }), signal]);
+        rendered.find(element => element.props["aria-label"] === "查看素材：完整花型.png")!.props.onClick();
+        rendered = harness.render(); expect(rendered.find(element => element.type === "AssetDetail")!.props).toMatchObject({ id, userId: "admin-a" });
+        rendered.find(element => element.props["aria-label"] === "素材视图")!.props.onChange("list");
+        rendered = harness.render(); expect(rendered.some(element => element.type === "AssetDetail")).toBe(false);
+        expect(options.at(-1).queryKey[2].kind).toBeUndefined();
+        const table = rendered.filter(element => element.type === "Table")[1];
+        const action = table.props.columns.at(-1).render(null, asset); action.props.onClick();
+        expect(harness.render().some(element => element.type === "AssetDetail")).toBe(true);
+        user = { id: "admin-b" }; rendered = harness.render();
+        expect(rendered.some(element => element.type === "AssetDetail")).toBe(false);
+        expect(params.toString()).toBe("tab=projects");
+        harness.unmount();
+    });
+
+    test("asset detail uses cancellable scoped reads and an explicit retry without automatic retries", async () => {
+        let query: any; let retried = 0;
+        const requests: any[] = [];
+        const harness = componentHarness("../src/pages/admin/assets/components/asset-detail.tsx", "AssetDetail", {
+            "@/hooks/use-copy-text": { useCopyText: () => () => undefined },
+            "@tanstack/react-query": { useQuery: (value: any) => { query = value; return { error: new Error("暂时不可用"), refetch: () => { retried++; } }; } },
+            "@/services/api/server-assets": { fetchServerAsset: (...args: any[]) => { requests.push(args); return Promise.resolve({ asset: {} }); } },
+        });
+        const rendered = harness.render({ id: "asset-a", userId: "admin-a", onClose() {} });
+        expect(query.queryKey).toEqual(["admin-asset-detail", "admin-a", "asset-a"]);
+        expect(query.retry).toBe(false); expect(query.refetchOnWindowFocus).toBe(false);
+        const signal = new AbortController().signal; await query.queryFn({ signal });
+        expect(requests).toEqual([["asset-a", signal]]);
+        rendered.find(element => element.type === "Alert")!.props.action.props.onClick();
+        expect(retried).toBe(1); harness.unmount();
     });
 
     test("team ignores late data after the account/group changes", async () => {

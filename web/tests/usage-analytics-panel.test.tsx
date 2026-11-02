@@ -113,6 +113,46 @@ test("date filters use inclusive Beijing days, reject impossible ranges and pres
     expect(() => panel.exports.usageSelectionFilters({ from: "2026-10-01", to: "2026-10-15", search: "" }, [])).toThrow();
 });
 
+test("Beijing presets cover today, trailing days and calendar months including leap/year boundaries", () => {
+    const panel = harness();
+    const preset = panel.exports.usageDatePreset;
+    expect(preset("today", new Date("2026-12-31T16:00:00Z"))).toEqual({ from: "2027-01-01", to: "2027-01-01" });
+    expect(preset("7days", new Date("2026-12-31T16:00:00Z"))).toEqual({ from: "2026-12-26", to: "2027-01-01" });
+    expect(preset("30days", new Date("2026-12-31T16:00:00Z"))).toEqual({ from: "2026-12-03", to: "2027-01-01" });
+    expect(preset("month", new Date("2026-10-31T15:59:59Z"))).toEqual({ from: "2026-10-01", to: "2026-10-31" });
+    expect(preset("lastMonth", new Date("2027-01-01T00:00:00Z"))).toEqual({ from: "2026-12-01", to: "2026-12-31" });
+    expect(preset("lastMonth", new Date("2024-03-01T00:00:00Z"))).toEqual({ from: "2024-02-01", to: "2024-02-29" });
+    expect(preset("lastMonth", new Date("2026-03-01T00:00:00Z"))).toEqual({ from: "2026-02-01", to: "2026-02-28" });
+});
+
+test("daily values keep visits and interactions separate from requests and do not rate unfinished work as failed", () => {
+    const panel = harness();
+    const daily = { ...summary, visits: 100, interactions: 200, generationRequests: 2, chatRequests: 3, succeeded: 2, failed: 1, pending: 2 };
+    expect(panel.exports.usageTrendValue(daily, "requests")).toBe(5);
+    expect(panel.exports.usageTrendValue(daily, "images")).toBe(summary.generatedImages);
+    expect(panel.exports.usageTrendValue(daily, "cost")).toBe(summary.totalRmbCost);
+    expect(panel.exports.usageTrendValue(daily, "successRate")).toBeCloseTo(66.666667);
+    expect(panel.exports.usageTrendValue({ ...daily, succeeded: 0, failed: 0 }, "successRate")).toBeNull();
+    const chart = panel.exports.UsageDailyTrend({ daily: [{ day: "2026-10-15", ...daily }], from: "2026-10-01", to: "2026-10-30", coverage: { ...coverage, missingHistoryCount: 2 } });
+    expect(text(chart)).toContain("2 个成功任务缺少结算历史");
+    expect(text(chart)).toContain("￥0.268400");
+    expect(text(chart)).toContain("66.7%");
+    expect(elements(chart).find(element => element.type === "table")?.props["aria-label"]).toBe("每日趋势数据表");
+    expect(elements(chart).find(element => element.type === "title")?.props.children).toContain("5");
+});
+
+test("unknown buckets stay visible but cannot become invalid query filters", () => {
+    const panel = harness(); const model = "07bf04dd-3bee-4fc3-9757-2fdd321586be";
+    expect(panel.exports.isUsageFilterBucket("model", model)).toBe(true);
+    expect(panel.exports.isUsageFilterBucket("board", "canvas-image")).toBe(true);
+    for (const kind of ["board", "model"]) expect(panel.exports.isUsageFilterBucket(kind, "unknown")).toBe(false);
+    const clicked: string[] = [];
+    const bars = panel.exports.UsageBars({ title: "模型调用分布", filterKind: "model", values: [{ key: "unknown", label: "未知模型", count: 4 }, { key: model, label: "图片模型", count: 3 }], onSelect: (key: string) => clicked.push(key) });
+    const buttons = elements(bars).filter(element => element.type === "button");
+    expect(buttons).toHaveLength(1); expect(text(bars)).toContain("未知模型"); buttons[0]!.props.onClick(); expect(clicked).toEqual([model]);
+    expect(() => panel.exports.usageRangeFilters({ from: "2026-10-01", to: "2026-10-30", search: "", modelConfigId: "unknown" })).toThrow("请选择有效的模型");
+});
+
 test.each(["UTC", "America/Los_Angeles"])("Beijing date boundaries and recent 30 days ignore runtime timezone: %s", timeZone => {
     const code = `
         import { createRequire } from "node:module";
@@ -174,8 +214,10 @@ test("applying a person search keeps list, detail, export and free preview on th
         labelled(tree, "搜索使用分析用户").props.onChange({ target: { value: " 张三 " } });
         labelled(tree, "使用分析开始日期").props.onChange({ target: { value: "2026-10-01" } });
         labelled(tree, "使用分析结束日期").props.onChange({ target: { value: "2026-10-30" } });
+        labelled(tree, "使用分析板块筛选").props.onChange("canvas-image");
+        labelled(tree, "使用分析模型筛选").props.onChange("07bf04dd-3bee-4fc3-9757-2fdd321586be");
         tree = panel.render(); button(tree, "应用筛选").props.onClick(); tree = await panel.settle();
-        const scope = { from: "2026-09-30T16:00:00.000Z", to: "2026-10-30T16:00:00.000Z", search: "张三" };
+        const scope = { from: "2026-09-30T16:00:00.000Z", to: "2026-10-30T16:00:00.000Z", search: "张三", boardKey: "canvas-image", modelConfigId: "07bf04dd-3bee-4fc3-9757-2fdd321586be" };
         expect(panel.calls.list.at(-1).query).toEqual({ ...scope, page: 1, pageSize: 20 });
         const table = tree.find(element => element.type === "Table")!;
         table.props.columns.find((column: any) => column.title === "姓名").render(person.displayName, person).props.onClick();
@@ -186,6 +228,48 @@ test("applying a person search keeps list, detail, export and free preview on th
         expect(panel.calls.saves[0][1]).toBe("使用记录-2026-10-01-2026-10-30-筛选用户.jsonl");
         button(tree, "预览将发送的汇总").props.onClick(); await panel.settle();
         expect(panel.calls.preview[0].body).toEqual({ ...scope, includePromptSamples: false });
+        expect(panel.calls.analyze).toHaveLength(0);
+    } finally { panel.dispose(); }
+});
+
+test("sorting retains cross-page selections while changing a filter clears detail, selection and frozen preview", async () => {
+    const panel = harness();
+    try {
+        let tree = await panel.settle();
+        let table = tree.find(element => element.type === "Table")!;
+        table.props.rowSelection.onChange(["person-1", "person-2"]);
+        tree = panel.render(); button(tree, "预览将发送的汇总").props.onClick(); tree = await panel.settle();
+        table = tree.find(element => element.type === "Table")!;
+        table.props.columns.find((column: any) => column.title === "姓名").render(person.displayName, person).props.onClick(); tree = await panel.settle();
+        table = tree.find(element => element.type === "Table")!;
+        table.props.onChange({}, {}, { columnKey: "cost", order: "descend" }, { action: "sort" }); tree = await panel.settle();
+        expect(panel.calls.list.at(-1).query).toMatchObject({ sort: "cost", order: "desc", page: 1 });
+        table = tree.find(element => element.type === "Table")!;
+        expect(table.props.rowSelection.selectedRowKeys).toEqual(["person-1", "person-2"]);
+        expect(tree.some(element => element.props["data-testid"] === "usage-analysis-preview")).toBe(true);
+        table.props.pagination.onChange(2); tree = await panel.settle();
+        expect(panel.calls.list.at(-1).query).toMatchObject({ sort: "cost", order: "desc", page: 2 });
+        expect(tree.find(element => element.type === "Table")!.props.rowSelection.selectedRowKeys).toEqual(["person-1", "person-2"]);
+        labelled(tree, "使用分析板块筛选").props.onChange("image"); tree = panel.render();
+        expect(tree.find(element => element.type === "Table")!.props.rowSelection.selectedRowKeys).toEqual([]);
+        expect(tree.find(element => element.type === "Drawer")!.props.open).toBe(false);
+        expect(tree.some(element => element.props["data-testid"] === "usage-analysis-preview")).toBe(false);
+        expect(button(tree, "导出筛选范围完整记录").props.disabled).toBe(true);
+        expect(panel.calls.analyze).toHaveLength(0);
+    } finally { panel.dispose(); }
+});
+
+test("drilling into a valid bucket applies the same scope and keeps model choices after narrowing", async () => {
+    const model = "07bf04dd-3bee-4fc3-9757-2fdd321586be"; let loads = 0;
+    const panel = harness({ list: async () => ({ ...people, breakdowns: { ...people.breakdowns, models: loads++ === 0 ? [{ key: model, label: "历史图片模型", count: 3 }] : [] } }) });
+    try {
+        let tree = await panel.settle();
+        expect(labelled(tree, "使用分析模型筛选").props.options).toEqual([{ value: model, label: "历史图片模型" }]);
+        tree.find(element => element.props.title === "模型调用分布")!.props.onSelect(model); tree = await panel.settle();
+        expect(panel.calls.list.at(-1).query).toMatchObject({ modelConfigId: model, page: 1 });
+        expect(labelled(tree, "使用分析模型筛选").props.options).toEqual([{ value: model, label: "历史图片模型" }]);
+        expect(labelled(tree, "使用分析模型筛选").props.value).toBe(model);
+        expect(text(tree)).toContain("保留当前搜索内零记录员工");
         expect(panel.calls.analyze).toHaveLength(0);
     } finally { panel.dispose(); }
 });

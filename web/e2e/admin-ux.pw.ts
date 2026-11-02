@@ -44,6 +44,30 @@ async function setup(page: Page) {
     return { api, writes };
 }
 
+test("shared provider changes require confirmation and cancellation sends no write", async ({ page }) => {
+    const { api, writes } = await setup(page);
+    await page.goto("/admin?tab=api");
+    await page.getByRole("tab", { name: "API 服务与密钥" }).click();
+    const baseUrlName = /^\*?\s*Base URL$/;
+    const form = page.locator("form").filter({ has: page.getByRole("textbox", { name: baseUrlName }) });
+    await expect(form.getByRole("textbox", { name: baseUrlName })).toHaveValue(provider.baseUrl);
+    await form.getByRole("textbox", { name: baseUrlName }).fill("https://changed.example.test/v1");
+    await form.getByRole("button", { name: "保存到服务端", exact: true }).click();
+    await expect(page.getByRole("dialog")).toContainText("确认修改共用 API 服务「隔离服务」");
+    await expect(page.getByRole("dialog")).toContainText("所有绑定此服务的模型及使用这些模型的板块");
+    expect(writes).toEqual([]);
+    await page.getByRole("button", { name: "返回核对", exact: true }).click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(form.getByRole("textbox", { name: baseUrlName })).toHaveValue("https://changed.example.test/v1");
+    expect(writes).toEqual([]);
+    await form.getByRole("button", { name: "保存到服务端", exact: true }).click();
+    await page.getByRole("button", { name: "确认修改共用服务", exact: true }).click();
+    await expect.poll(() => writes.length).toBe(1);
+    expect(writes[0]).toMatchObject({ path: "/api/admin/model-configuration/providers/provider", data: { baseUrl: "https://changed.example.test/v1" } });
+    expect(api.pageErrors).toEqual([]);
+    expect(api.unexpected).toEqual([]);
+});
+
 test("explicit credit target and amount, cancellation has no mutation, and account drafts block tab changes", async ({ page }) => {
     const { api, writes } = await setup(page);
     await page.goto("/admin");

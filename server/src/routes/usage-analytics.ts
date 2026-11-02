@@ -9,7 +9,7 @@ import { decryptSecret } from "../security";
 import type { AuthenticatedRequest } from "../types";
 import { CHAT_COMPLETION_PROTOCOLS, requestChatCompletion } from "./chat";
 import { presentPublicModel } from "../model-presentation";
-import { UsageError, insertUsageEvents, mapUsageRecord, sanitizeUsagePrompt, usageBreakdowns, usageContentHash, usageCoverage, usageEventsSchema, usageFiltersSchema, usagePeople, usagePreviewSchema, usageQuerySchema, usageRecords, usageRecordsCte, usageSqlFilter, usageSummary } from "../usage-analytics";
+import { UsageError, insertUsageEvents, mapUsageRecord, sanitizeUsagePrompt, usageBreakdowns, usageContentHash, usageCoverage, usageEventsSchema, usageFiltersSchema, usagePeople, usagePeopleQuerySchema, usagePreviewSchema, usageQuerySchema, usageRecords, usageRecordsCte, usageSqlFilter, usageSummary } from "../usage-analytics";
 
 const ok = <T>(response: Response, data: T) => response.json({ code: 0, data, msg: "ok" });
 const actorOf = (request: Request) => (request as AuthenticatedRequest).auth;
@@ -128,9 +128,9 @@ export function createAdminUsageRouter(db: Database, config: AppConfig, options:
   });
   router.get("/people", async (request, response, next) => {
     try {
-      const query = usageQuerySchema.parse(request.query); const filters: UsageFilters = { from: query.from, to: query.to, modelConfigId: query.modelConfigId, boardKey: query.boardKey, search: query.search };
+      const query = usagePeopleQuerySchema.parse(request.query); const filters: UsageFilters = { from: query.from, to: query.to, modelConfigId: query.modelConfigId, boardKey: query.boardKey, search: query.search };
       const people = await usagePeople(db, filters, query);
-      await auditUsage(db, request, "people.viewed", "success", { ...filterAudit(filters), page: query.page });
+      await auditUsage(db, request, "people.viewed", "success", { ...filterAudit(filters), page: query.page, sort: query.sort, order: query.order });
       ok(response, { ...people, summary: await usageSummary(db, filters), breakdowns: await usageBreakdowns(db, filters), coverage: await usageCoverage(db, filters) });
     } catch (error) { next(error); }
   });

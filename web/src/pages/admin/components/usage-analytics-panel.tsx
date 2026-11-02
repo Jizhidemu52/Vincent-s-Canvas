@@ -2,12 +2,15 @@ import { Alert, Button, Checkbox, Drawer, Empty, Input, Modal, Pagination, Selec
 import { Download, FileSearch, RefreshCw, Search, Sparkles, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { saveAs } from "file-saver";
-import type { UsageAnalysisModelsResult, UsageBreakdowns, UsageBucket, UsageCoverage, UsagePerson, UsageRecord, UsageSummary } from "../../../../../shared/usage-analytics";
+import type { UsageAnalysisModelsResult, UsageBreakdowns, UsageBucket, UsageCoverage, UsagePerson, UsageRecord, UsageSummary, UsagePeopleSort, UsagePeopleOrder } from "../../../../../shared/usage-analytics";
+import { moduleDefinitions } from "../../../../../shared/feature-catalog";
 import { analyzeUsage, exportUsageRecords, getUsagePerson, listUsageAnalysisModels, listUsagePeople, previewUsageAnalysis, type UsageAnalysisPreview, type UsageAnalysisResult, type UsageFilters, type UsagePeopleResult, type UsagePersonResult } from "@/services/api/usage-analytics";
 import { useUserStore } from "@/stores/use-user-store";
 import { formatBeijingDateTime } from "@/lib/beijing-time";
 
-type DateFilter = { from: string; to: string; search: string };
+type DateFilter = { from: string; to: string; search: string; boardKey?: string; modelConfigId?: string };
+type DatePreset = "today" | "7days" | "30days" | "month" | "lastMonth";
+type PeopleSorting = { sort: UsagePeopleSort; order: UsagePeopleOrder };
 type Operation = "list" | "detail" | "export" | "preview" | "analyze" | "models";
 type ExportSelection = { userIds?: string[]; label: string };
 type WritableExport = { write(data: Uint8Array): Promise<void>; close(): Promise<void>; abort(): Promise<void> };
@@ -17,14 +20,31 @@ const dateText = (value: string | null) => value ? formatBeijingDateTime(value) 
 const beijingDay = (date: Date) => formatBeijingDateTime(date).slice(0, 10);
 const dayMilliseconds = 24 * 60 * 60 * 1000;
 const formatRmbCost = (value: number) => `￥${value.toFixed(6)}`;
-export const defaultUsageDateFilter = (now = new Date()): DateFilter => ({ from: beijingDay(new Date(now.getTime() - 29 * dayMilliseconds)), to: beijingDay(now), search: "" });
+const datePresets: Array<{ key: DatePreset; label: string }> = [{ key: "today", label: "今天" }, { key: "7days", label: "近 7 天" }, { key: "30days", label: "近 30 天" }, { key: "month", label: "本月" }, { key: "lastMonth", label: "上月" }];
+const sortLabels: Record<UsagePeopleSort, string> = { lastActivity: "最后记录", cost: "生成费用", images: "成功出图", requests: "模型调用", failed: "失败次数" };
+const defaultSorting: PeopleSorting = { sort: "lastActivity", order: "desc" };
+export function usageDatePreset(preset: DatePreset, now = new Date()): Pick<DateFilter, "from" | "to"> {
+    const today = beijingDay(now), midnight = new Date(`${today}T00:00:00+08:00`).getTime();
+    if (preset === "lastMonth") {
+        const previousEnd = beijingDay(new Date(new Date(`${today.slice(0, 7)}-01T00:00:00+08:00`).getTime() - dayMilliseconds));
+        return { from: `${previousEnd.slice(0, 7)}-01`, to: previousEnd };
+    }
+    return { from: preset === "month" ? `${today.slice(0, 7)}-01` : beijingDay(new Date(midnight - (preset === "30days" ? 29 : preset === "7days" ? 6 : 0) * dayMilliseconds)), to: today };
+}
+export const defaultUsageDateFilter = (now = new Date()): DateFilter => ({ ...usageDatePreset("30days", now), search: "" });
+export function isUsageFilterBucket(kind: "board" | "model", key: string) {
+    return kind === "model" ? /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$/i.test(key)
+        : key === "home" || key === "dashboard" || moduleDefinitions.some(item => item.moduleKey === key);
+}
 
 /** Inclusive Beijing calendar dates become UTC instants with an exclusive next-day end. */
 export function usageRangeFilters(value: DateFilter): UsageFilters {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(value.from) || !/^\d{4}-\d{2}-\d{2}$/.test(value.to)) throw new Error("请选择完整的开始和结束日期。");
     const start = new Date(`${value.from}T00:00:00+08:00`), end = new Date(`${value.to}T00:00:00+08:00`);
     if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || beijingDay(start) !== value.from || beijingDay(end) !== value.to || start > end) throw new Error("日期无效，或开始日期晚于结束日期。");
-    return { from: start.toISOString(), to: new Date(end.getTime() + dayMilliseconds).toISOString(), ...(value.search.trim() ? { search: value.search.trim() } : {}) };
+    if (value.boardKey && !isUsageFilterBucket("board", value.boardKey)) throw new Error("请选择有效的板块；未记录板块不能下钻。");
+    if (value.modelConfigId && !isUsageFilterBucket("model", value.modelConfigId)) throw new Error("请选择有效的模型；未关联模型不能下钻。");
+    return { from: start.toISOString(), to: new Date(end.getTime() + dayMilliseconds).toISOString(), ...(value.search.trim() ? { search: value.search.trim() } : {}), ...(value.boardKey ? { boardKey: value.boardKey } : {}), ...(value.modelConfigId ? { modelConfigId: value.modelConfigId } : {}) };
 }
 
 export function usageSelectionFilters(value: DateFilter, userIds?: string[]): UsageFilters {
@@ -45,6 +65,8 @@ export function UsageAnalyticsPanel() {
     const [draft, setDraft] = useState<DateFilter>(defaultUsageDateFilter);
     const [applied, setApplied] = useState<DateFilter>(defaultUsageDateFilter);
     const [data, setData] = useState<UsagePeopleResult | null>(null);
+    const [knownModels, setKnownModels] = useState<UsageBucket[]>([]);
+    const [sorting, setSorting] = useState<PeopleSorting>(defaultSorting);
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
     const [detailPerson, setDetailPerson] = useState<UsagePerson | null>(null);
     const [detail, setDetail] = useState<UsagePersonResult | null>(null);
@@ -69,8 +91,16 @@ export function UsageAnalyticsPanel() {
     const selectedModelAvailable = modelsLoaded && textModels.some(model => model.id === textModelId);
     const summary = data?.summary || emptySummary;
     const mutableLocked = Boolean(busy.export || busy.preview || busy.analyze);
+    const queryLocked = mutableLocked || Boolean(busy.list);
+    const boardOptions = [...moduleDefinitions.map(item => ({ value: item.moduleKey, label: item.label })), { value: "home", label: "首页" }, { value: "dashboard", label: "工作台" }];
+    const appliedScope = `${applied.from} 至 ${applied.to}（北京时间，包含起止两天） · ${boardOptions.find(item => item.value === applied.boardKey)?.label || "全部板块"} · ${knownModels.find(item => item.key === applied.modelConfigId)?.label || (applied.modelConfigId ? "所选模型" : "全部模型")}`;
 
     const invalidatePreview = () => { setPreview(null); setPreviewUsed(false); setAnalysis(null); };
+    const clearScope = () => { setSelectedIds([]); setAnalysisScope("all"); invalidatePreview(); setDetailPerson(null); setDetail(null); controllers.current.get("detail")?.abort(); };
+    const changeDraft = (update: Partial<DateFilter>) => {
+        if (queryLocked) return;
+        setDraft(current => ({ ...current, ...update })); clearScope();
+    };
     const cancel = (operation: Operation) => {
         controllers.current.get(operation)?.abort();
         setNotice(operation === "analyze" ? "已取消等待分析结果。若请求已提交给供应商，仍可能产生费用；本页不会自动重发。" : "操作已取消，已有数据和文件不会被替换为不完整结果。");
@@ -92,11 +122,17 @@ export function UsageAnalyticsPanel() {
         }
     };
 
-    const load = (filters: DateFilter, page = 1, resetSelection = false) => run("list", async signal => {
-        const result = await listUsagePeople({ ...usageRangeFilters(filters), page, pageSize: 20 }, signal);
-        signal.throwIfAborted(); setData(result); setApplied({ ...filters });
-        if (resetSelection) { setSelectedIds([]); invalidatePreview(); setDetailPerson(null); setDetail(null); controllers.current.get("detail")?.abort(); }
+    const load = (filters: DateFilter, page = 1, resetSelection = false, nextSorting = sorting) => run("list", async signal => {
+        const result = await listUsagePeople({ ...usageRangeFilters(filters), page, pageSize: 20, ...(nextSorting.sort === "lastActivity" && nextSorting.order === "desc" ? {} : nextSorting) }, signal);
+        signal.throwIfAborted(); setData(result); setApplied({ ...filters }); setSorting(nextSorting);
+        setKnownModels(current => [...new Map([...current, ...result.breakdowns.models.filter(item => isUsageFilterBucket("model", item.key))].map(item => [item.key, item])).values()]);
+        if (resetSelection) clearScope();
     });
+    const drillDown = (kind: "board" | "model", key: string) => {
+        if (queryLocked || dirtyFilters || !isUsageFilterBucket(kind, key)) return;
+        const next = { ...applied, [kind === "board" ? "boardKey" : "modelConfigId"]: key };
+        setDraft(next); clearScope(); void load(next, 1, true);
+    };
     const loadTextModels = () => run("models", async signal => {
         setModelsLoaded(false); setTextModels([]);
         const result = await listUsageAnalysisModels(signal);
@@ -106,15 +142,15 @@ export function UsageAnalyticsPanel() {
     useEffect(() => {
         mounted.current = true;
         setBusy({}); setErrors({}); setNotice(""); setExportSelection(null); setExportProgress(0);
-        setData(null); setSelectedIds([]); setDetailPerson(null); setDetail(null); invalidatePreview();
+        setData(null); setKnownModels([]); setSorting(defaultSorting); setSelectedIds([]); setDetailPerson(null); setDetail(null); invalidatePreview();
         setTextModels([]); setTextModelId(undefined); setModelsLoaded(false); setAnalysisScope("all"); setIncludeSamples(false);
         const filters = defaultUsageDateFilter(); setDraft(filters); setApplied(filters);
-        if (isAdmin) { void load(filters, 1, true); void loadTextModels(); }
+        if (isAdmin) { void load(filters, 1, true, defaultSorting); void loadTextModels(); }
         return () => { mounted.current = false; controllers.current.forEach(controller => controller.abort()); controllers.current.clear(); };
     }, [isAdmin, user?.id]);
 
     const openDetail = (person: UsagePerson, page = 1) => {
-        if (controllers.current.has("detail")) return;
+        if (controllers.current.has("detail") || dirtyFilters || busy.list) return;
         setDetailPerson(person); if (page === 1) setDetail(null);
         void run("detail", async signal => {
             const result = await getUsagePerson(person.userId, { ...usageRangeFilters(applied), page, pageSize: 20 }, signal);
@@ -163,14 +199,17 @@ export function UsageAnalyticsPanel() {
                 <div><Typography.Title level={3} className="!mb-1 !text-lg">使用分析</Typography.Title><p className="text-sm text-[var(--muted-foreground)]">从可核查的记录了解工作流程与工具使用习惯，不做人格推断、绩效评分或人员排名。</p></div>
                 <Tag>仅超级管理员</Tag>
             </div>
-            <div className="mt-5 grid gap-3 md:grid-cols-[minmax(180px,1fr)_160px_160px_auto]">
-                <label className="grid gap-1.5 text-xs">搜索用户<Input aria-label="搜索使用分析用户" value={draft.search} maxLength={100} placeholder="姓名或账号" disabled={mutableLocked} prefix={<Search className="size-4" />} onChange={event => setDraft(current => ({ ...current, search: event.target.value }))} onPressEnter={() => void load(draft, 1, true)} /></label>
-                <label className="grid gap-1.5 text-xs">开始日期<Input type="date" aria-label="使用分析开始日期" value={draft.from} disabled={mutableLocked} onChange={event => setDraft(current => ({ ...current, from: event.target.value }))} /></label>
-                <label className="grid gap-1.5 text-xs">结束日期<Input type="date" aria-label="使用分析结束日期" value={draft.to} disabled={mutableLocked} onChange={event => setDraft(current => ({ ...current, to: event.target.value }))} /></label>
-                <div className="flex items-end gap-2"><Button type="primary" aria-label="应用筛选" icon={<RefreshCw className="size-4" />} loading={busy.list} disabled={mutableLocked} onClick={() => void load(draft, 1, true)}>应用筛选</Button>{busy.list ? <Button onClick={() => cancel("list")}>取消加载</Button> : null}</div>
+            <div className="mt-4 flex flex-wrap items-center gap-2" aria-label="使用分析日期快捷选项"><span className="mr-1 text-xs text-[var(--muted-foreground)]">日期快捷</span>{datePresets.map(preset => { const range = usageDatePreset(preset.key); return <Button key={preset.key} size="small" disabled={queryLocked} type={draft.from === range.from && draft.to === range.to ? "primary" : "default"} onClick={() => changeDraft(range)}>{preset.label}</Button>; })}<span className="text-xs text-[var(--muted-foreground)]">默认近 30 天 · 快捷项修改后需应用</span></div>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                <label className="grid min-w-0 gap-1.5 text-xs">搜索用户<Input aria-label="搜索使用分析用户" value={draft.search} maxLength={100} placeholder="姓名或账号" disabled={queryLocked} prefix={<Search className="size-4" />} onChange={event => changeDraft({ search: event.target.value })} onPressEnter={() => { if (!queryLocked) void load(draft, 1, true); }} /></label>
+                <label className="grid min-w-0 gap-1.5 text-xs">板块<Select aria-label="使用分析板块筛选" allowClear showSearch={{ optionFilterProp: "label" }} value={draft.boardKey} placeholder="全部板块" disabled={queryLocked} options={boardOptions} onChange={value => changeDraft({ boardKey: value })} /></label>
+                <label className="grid min-w-0 gap-1.5 text-xs">模型<Select aria-label="使用分析模型筛选" allowClear showSearch={{ optionFilterProp: "label" }} value={draft.modelConfigId} placeholder="全部模型" disabled={queryLocked} options={knownModels.map(item => ({ value: item.key, label: item.label }))} notFoundContent="已载入记录中暂无可筛选模型" onChange={value => changeDraft({ modelConfigId: value })} /></label>
+                <label className="grid gap-1.5 text-xs">开始日期<Input type="date" aria-label="使用分析开始日期" value={draft.from} disabled={queryLocked} onChange={event => changeDraft({ from: event.target.value })} /></label>
+                <label className="grid gap-1.5 text-xs">结束日期<Input type="date" aria-label="使用分析结束日期" value={draft.to} disabled={queryLocked} onChange={event => changeDraft({ to: event.target.value })} /></label>
+                <div className="flex flex-wrap items-end gap-2"><Button type="primary" aria-label="应用筛选" icon={<RefreshCw className="size-4" />} loading={busy.list} disabled={mutableLocked} onClick={() => void load(draft, 1, true)}>应用筛选</Button>{draft.boardKey || draft.modelConfigId ? <Button disabled={queryLocked} onClick={() => changeDraft({ boardKey: undefined, modelConfigId: undefined })}>清除板块 / 模型</Button> : null}{busy.list ? <Button onClick={() => cancel("list")}>取消加载</Button> : null}</div>
             </div>
-            <p className="mt-2 text-xs leading-5 text-[var(--muted-foreground)]">日期包含起止两天，固定按北京时间（UTC+8）；生成费用与出图按任务提交时间归入周期。搜索和日期同时作用于汇总、列表、导出及分析，所有时间均显示北京时间。</p>
-            <p className="mt-1 text-xs leading-5 text-[var(--muted-foreground)]">生成消费汇总图片、视频、音频的已记账人民币费用，不含未独立结算的聊天。历史成本按原记录汇总，不按当前单价追溯重算；成功出图统计实际图片张数，不是成功请求次数。</p>
+            <p aria-label="使用分析已应用范围" className="mt-3 text-xs leading-5">已应用：{appliedScope}</p>
+            <details className="mt-2 text-xs leading-5 text-[var(--muted-foreground)]"><summary className="cursor-pointer">查看筛选与费用口径</summary><p className="mt-2">日期包含起止两天，固定按北京时间（UTC+8）；生成费用与出图按任务提交时间归入周期。搜索、日期、板块和模型同时作用于汇总、列表、详情、导出及分析。模型选项来自本次打开页面后已载入的记录；可先清除板块 / 模型并应用时间范围，以载入更多模型。</p><p className="mt-1">生成消费汇总图片、视频、音频的已记账人民币费用，不含未独立结算的聊天。历史成本按原记录汇总，不按当前单价追溯重算；成功出图统计实际图片张数，不是成功请求次数。</p></details>
             {dirtyFilters ? <p role="status" className="mt-2 text-xs text-amber-700">筛选条件尚未应用，先应用后再导出或分析。</p> : null}
         </header>
         {errors.list ? <Alert type="error" showIcon title={errors.list} /> : null}
@@ -185,21 +224,29 @@ export function UsageAnalyticsPanel() {
             <SummaryTile title="交互操作记录" value={summary.interactions} detail="白名单操作事件，不采集键盘输入或页面正文" loaded={Boolean(data)} />
         </div>
         {data ? <p aria-label="统计简述" className="text-sm leading-6 text-[var(--muted-foreground)]">{usageSummaryText(data.summary, data.breakdowns, data.coverage)}</p> : null}
-        <div className="grid min-w-0 gap-4 lg:grid-cols-3"><UsageBars title="模型调用分布" values={data?.breakdowns.models || []} /><UsageBars title="板块使用分布" values={data?.breakdowns.boards || []} /><UsageBars title="操作控件分布" values={data?.breakdowns.controls || []} /></div>
+        {data ? <UsageDailyTrend daily={data.breakdowns.daily} from={applied.from} to={applied.to} coverage={data.coverage} /> : null}
+        <div className="grid min-w-0 gap-4 lg:grid-cols-3"><UsageBars title="模型调用分布" values={data?.breakdowns.models || []} filterKind="model" selectedKey={applied.modelConfigId} disabled={queryLocked || dirtyFilters} onSelect={key => drillDown("model", key)} /><UsageBars title="板块使用分布" values={data?.breakdowns.boards || []} filterKind="board" selectedKey={applied.boardKey} disabled={queryLocked || dirtyFilters} onSelect={key => drillDown("board", key)} /><UsageBars title="操作控件分布" values={data?.breakdowns.controls || []} /></div>
         <section className="wb-surface min-w-0 p-4 sm:p-5" aria-label="用户使用列表">
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-semibold">用户记录</h3><p className="mt-1 text-xs text-[var(--muted-foreground)]">点击姓名查看详细记录。已选 {selectedIds.length} 人；选择可跨页保留。</p></div><div className="flex flex-wrap gap-2"><Button icon={<Download className="size-4" />} disabled={!selectedIds.length || !data || dirtyFilters || mutableLocked} onClick={() => openExport({ userIds: selectedIds, label: `当前筛选内选中的 ${selectedIds.length} 位用户` })}>导出选中（{selectedIds.length}）</Button><Button disabled={!data || dirtyFilters || mutableLocked} onClick={() => openExport({ label: "当前搜索与日期范围内的全部用户" })}>导出筛选范围完整记录</Button></div></div>
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-semibold">用户记录</h3><p className="mt-1 text-xs text-[var(--muted-foreground)]">点击姓名查看详细记录。已选 {selectedIds.length} 人；翻页与排序保留选择，修改筛选清空选择。</p><p className="mt-1 text-xs text-[var(--muted-foreground)]">保留当前搜索内零记录员工；板块和模型只筛选记录。排序仅用于核账、定位问题，不表示人员排名或绩效。</p><p aria-label="使用分析人员排序" className="mt-1 text-xs">排序：{sortLabels[sorting.sort]} · {sorting.order === "asc" ? "升序" : "降序"}</p></div><div className="flex flex-wrap gap-2"><Button icon={<Download className="size-4" />} disabled={!selectedIds.length || !data || dirtyFilters || queryLocked} onClick={() => openExport({ userIds: selectedIds, label: `当前筛选内选中的 ${selectedIds.length} 位用户` })}>导出选中（{selectedIds.length}）</Button><Button disabled={!data || dirtyFilters || queryLocked} onClick={() => openExport({ label: "当前筛选范围内的全部用户" })}>导出筛选范围完整记录</Button></div></div>
             <Table<UsagePerson> size="small" rowKey="userId" loading={busy.list} dataSource={data?.people || []} scroll={{ x: 1120 }}
-                rowSelection={{ selectedRowKeys: selectedIds, preserveSelectedRowKeys: true, onChange: keys => { setSelectedIds(keys.map(String)); invalidatePreview(); }, getCheckboxProps: () => ({ disabled: mutableLocked }) }}
-                pagination={{ current: data?.pagination.page || 1, pageSize: 20, total: data?.pagination.total || 0, showSizeChanger: false, onChange: page => void load(applied, page) }}
+                rowSelection={{ selectedRowKeys: selectedIds, preserveSelectedRowKeys: true, onChange: keys => { setSelectedIds(keys.map(String)); invalidatePreview(); }, getCheckboxProps: () => ({ disabled: queryLocked || dirtyFilters }) }}
+                pagination={{ current: data?.pagination.page || 1, pageSize: 20, total: data?.pagination.total || 0, showSizeChanger: false, disabled: queryLocked || dirtyFilters, onChange: page => void load(applied, page) }}
+                sortDirections={["descend", "ascend"]}
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== "sort" || queryLocked || dirtyFilters) return;
+                    const selected = Array.isArray(sorter) ? sorter[0] : sorter;
+                    const next = selected?.order && typeof selected.columnKey === "string" && Object.hasOwn(sortLabels, selected.columnKey) ? { sort: selected.columnKey as UsagePeopleSort, order: selected.order === "ascend" ? "asc" as const : "desc" as const } : defaultSorting;
+                    void load(applied, 1, false, next);
+                }}
                 columns={[
-                    { title: "姓名", dataIndex: "displayName", width: 160, render: (name, person) => <Button type="link" className="!h-auto !p-0" disabled={busy.detail} onClick={() => openDetail(person)}>{name}</Button> },
+                    { title: "姓名", dataIndex: "displayName", width: 160, render: (name, person) => <Button type="link" className="!h-auto !p-0" disabled={busy.detail || busy.list || dirtyFilters} onClick={() => openDetail(person)}>{name}</Button> },
                     { title: "部门", dataIndex: "departmentName", render: value => value || "未分配" },
-                    { title: "生成消费（元）", width: 150, align: "right", render: (_, person) => <span className="tabular-nums">{formatRmbCost(person.summary.totalRmbCost)}</span> },
-                    { title: "成功出图（张）", width: 120, align: "right", render: (_, person) => person.summary.generatedImages },
-                    { title: "模型调用", render: (_, person) => person.summary.generationRequests + person.summary.chatRequests },
-                    { title: "成功 / 失败", render: (_, person) => `${person.summary.succeeded} / ${person.summary.failed}` },
+                    { title: "生成消费（元）", key: "cost", sorter: !queryLocked && !dirtyFilters, sortOrder: sorting.sort === "cost" ? sorting.order === "asc" ? "ascend" : "descend" : null, width: 150, align: "right", render: (_, person) => <span className="tabular-nums">{formatRmbCost(person.summary.totalRmbCost)}</span> },
+                    { title: "成功出图（张）", key: "images", sorter: !queryLocked && !dirtyFilters, sortOrder: sorting.sort === "images" ? sorting.order === "asc" ? "ascend" : "descend" : null, width: 140, align: "right", render: (_, person) => person.summary.generatedImages },
+                    { title: "模型调用", key: "requests", sorter: !queryLocked && !dirtyFilters, sortOrder: sorting.sort === "requests" ? sorting.order === "asc" ? "ascend" : "descend" : null, render: (_, person) => person.summary.generationRequests + person.summary.chatRequests },
+                    { title: "成功 / 失败", key: "failed", sorter: !queryLocked && !dirtyFilters, sortOrder: sorting.sort === "failed" ? sorting.order === "asc" ? "ascend" : "descend" : null, showSorterTooltip: { title: "按失败次数排序（含取消和中断）" }, render: (_, person) => `${person.summary.succeeded} / ${person.summary.failed}` },
                     { title: "访问 / 操作", render: (_, person) => `${person.summary.visits} / ${person.summary.interactions}` },
-                    { title: "最后记录", dataIndex: "lastActivityAt", width: 180, render: dateText },
+                    { title: "最后记录", key: "lastActivity", dataIndex: "lastActivityAt", sorter: !queryLocked && !dirtyFilters, sortOrder: sorting.sort === "lastActivity" ? sorting.order === "asc" ? "ascend" : "descend" : null, width: 180, render: dateText },
                     { title: "导出", width: 85, render: (_, person) => <Button size="small" disabled={dirtyFilters || mutableLocked} onClick={() => openExport({ userIds: [person.userId], label: person.displayName })}>单人</Button> },
                 ]} />
         </section>
@@ -218,7 +265,7 @@ export function UsageAnalyticsPanel() {
         </section>
         <Drawer open={Boolean(detailPerson)} title={detailPerson ? `${detailPerson.displayName} · 使用记录` : "使用记录"} width="min(960px, 100vw)" onClose={closeDetail} extra={detailPerson ? <Button disabled={mutableLocked || dirtyFilters} onClick={() => openExport({ userIds: [detailPerson.userId], label: detailPerson.displayName })}>导出此人完整记录</Button> : null}>
             <div className="space-y-4">
-                <p className="text-xs text-[var(--muted-foreground)]">{applied.from} 至 {applied.to}（北京时间，按提交时间统计生成记录）· 提示词、模型参数与操作事件分开呈现。</p>
+                <p className="text-xs text-[var(--muted-foreground)]">{appliedScope} · 按提交时间统计生成记录；提示词、模型参数与操作事件分开呈现。</p>
                 {busy.detail ? <div role="status" className="flex items-center gap-3"><Spin />读取记录中<Button onClick={() => cancel("detail")}>取消读取</Button></div> : null}
                 {errors.detail ? <Alert type="error" title={errors.detail} action={<Button onClick={() => detailPerson && openDetail(detailPerson)}>重试读取</Button>} /> : null}
                 {detail ? <>
@@ -228,6 +275,7 @@ export function UsageAnalyticsPanel() {
                         <SummaryTile title="成功出图（张）" value={detail.summary.generatedImages} detail="所选周期成功任务实际返回的图片张数" loaded />
                     </div>
                     <p aria-label="个人统计简述" className="text-sm leading-6">{usageSummaryText(detail.summary, detail.breakdowns, detail.coverage, "所选日期内，该员工")}</p>
+                    <UsageDailyTrend title="个人每日趋势" daily={detail.breakdowns.daily} from={applied.from} to={applied.to} coverage={detail.coverage} />
                     <div className="grid min-w-0 gap-3 md:grid-cols-3">
                         <UsageBars title="个人模型调用分布" values={detail.breakdowns.models} />
                         <UsageBars title="个人板块使用分布" values={detail.breakdowns.boards} />
@@ -240,7 +288,7 @@ export function UsageAnalyticsPanel() {
             </div>
         </Drawer>
         <Modal open={Boolean(exportSelection)} title="导出完整使用记录" onCancel={() => { if (busy.export) cancel("export"); setExportSelection(null); }} footer={<><Button onClick={() => { if (busy.export) cancel("export"); setExportSelection(null); }}>{busy.export ? "取消导出" : "返回"}</Button><Button type="primary" aria-label="开始导出完整记录" loading={busy.export} onClick={() => void startExport()}>开始导出完整记录</Button></>}>
-            <div className="space-y-4"><p>范围：{exportSelection?.label}；日期：{applied.from} 至 {applied.to}。</p><Alert type="warning" showIcon title="文件包含业务记录，请妥善保管" description="包含当前可采集的全部请求、已保存提示词、白名单参数、操作事件及覆盖说明；不含密钥、图片字节或未曾采集的历史操作。JSONL 支持逐行读取，不静默截断。" /><label className="grid gap-1.5 text-xs">保存方式<Select aria-label="使用记录保存方式" disabled={busy.export} value={exportMode} onChange={setExportMode} options={[{ value: "download", label: "浏览器下载" }, { value: "location", label: savePicker ? "选择保存位置（可选择桌面，适合大文件）" : "当前浏览器不支持选择位置，请使用下载", disabled: !savePicker }]} /></label><p className="text-xs text-[var(--muted-foreground)]">桌面位置需你在浏览器保存对话框选择；服务器不能直接写入你的桌面。大文件建议选择保存位置以流式写入。</p>{busy.export ? <p role="status">正在导出，已读取 {exportProgress} 条记录；收到完整结束标记后才保存。</p> : null}{errors.export ? <Alert type="error" title={errors.export} /> : null}</div>
+            <div className="space-y-4"><p>范围：{exportSelection?.label}；{appliedScope}。</p><Alert type="warning" showIcon title="文件包含业务记录，请妥善保管" description="包含当前可采集的全部请求、已保存提示词、白名单参数、操作事件及覆盖说明；不含密钥、图片字节或未曾采集的历史操作。JSONL 支持逐行读取，不静默截断。" /><label className="grid gap-1.5 text-xs">保存方式<Select aria-label="使用记录保存方式" disabled={busy.export} value={exportMode} onChange={setExportMode} options={[{ value: "download", label: "浏览器下载" }, { value: "location", label: savePicker ? "选择保存位置（可选择桌面，适合大文件）" : "当前浏览器不支持选择位置，请使用下载", disabled: !savePicker }]} /></label><p className="text-xs text-[var(--muted-foreground)]">桌面位置需你在浏览器保存对话框选择；服务器不能直接写入你的桌面。大文件建议选择保存位置以流式写入。</p>{busy.export ? <p role="status">正在导出，已读取 {exportProgress} 条记录；收到完整结束标记后才保存。</p> : null}{errors.export ? <Alert type="error" title={errors.export} /> : null}</div>
         </Modal>
     </section>;
 }
@@ -249,11 +297,42 @@ function SummaryTile({ title, value, detail, loaded }: { title: string; value: n
     return <section className="wb-surface p-4"><h3 className="text-xs text-[var(--muted-foreground)]">{title}</h3><p className="my-2 text-2xl font-semibold tabular-nums">{loaded ? value : "—"}</p><p className="text-xs leading-5 text-[var(--muted-foreground)]">{detail}</p></section>;
 }
 function CoverageNotice({ coverage }: { coverage: UsageCoverage }) {
-    return <Alert type="warning" showIcon title="采集覆盖有边界，零记录不等于未使用" description={<div className="space-y-1 text-xs leading-5"><p>交互采集起点：{dateText(coverage.collectionStartedAt)}。历史生成任务可统计；历史点击和历史聊天不能回补。</p>{(coverage.droppedEventCount || 0) > 0 ? <p>已知采集缺口：{coverage.droppedEventCount} 条事件未完整保存；统计可能低于实际使用量。</p> : null}{coverage.notes.map((note, index) => <p key={index}>{note}</p>)}</div>} />;
+    return <Alert type="warning" showIcon title="采集覆盖有边界，零记录不等于未使用" description={<div className="space-y-1 text-xs leading-5"><p>交互采集起点：{dateText(coverage.collectionStartedAt)}。历史点击和聊天不能回补。</p>{(coverage.droppedEventCount || 0) > 0 ? <p>已知采集缺口：{coverage.droppedEventCount} 条事件未完整保存；统计可能低于实际使用量。</p> : null}{(coverage.missingHistoryCount || 0) > 0 ? <p>费用缺口：{coverage.missingHistoryCount} 个成功任务缺少结算历史，费用未计入且不补估。</p> : null}<details><summary className="cursor-pointer">查看完整采集与统计说明</summary><div className="mt-2 space-y-1">{coverage.notes.map((note, index) => <p key={index}>{note}</p>)}</div></details></div>} />;
 }
-function UsageBars({ title, values }: { title: string; values: UsageBucket[] }) {
+export function UsageBars({ title, values, filterKind, selectedKey, disabled, onSelect }: { title: string; values: UsageBucket[]; filterKind?: "board" | "model"; selectedKey?: string; disabled?: boolean; onSelect?: (key: string) => void }) {
     const maximum = Math.max(1, ...values.map(value => value.count));
-    return <section className="wb-surface min-w-0 p-4 sm:p-5" aria-label={title}><h3 className="mb-4 font-semibold">{title}</h3>{values.length ? <ol className="max-h-72 space-y-3 overflow-y-auto">{values.map(value => <li key={value.key}><div className="mb-1 flex justify-between gap-3 text-xs"><span className="min-w-0 break-words">{value.label}</span><span className="shrink-0 tabular-nums">{value.count} 次</span></div><div className="h-2 rounded bg-[var(--muted)]"><div className="h-full rounded bg-[var(--primary)]" style={{ width: `${Math.max(0, value.count) / maximum * 100}%` }} /></div></li>)}</ol> : <p className="py-8 text-center text-xs text-[var(--muted-foreground)]">暂无可统计记录</p>}</section>;
+    return <section className="wb-surface min-w-0 p-4 sm:p-5" aria-label={title}><h3 className="font-semibold">{title}</h3>{onSelect ? <p className="mt-1 text-xs text-[var(--muted-foreground)]">点击已记录的{filterKind === "model" ? "模型" : "板块"}可筛选全部统计</p> : null}{values.length ? <ol className="mt-4 max-h-72 space-y-3 overflow-y-auto">{values.map(value => <li key={value.key}><div className="mb-1 flex items-start justify-between gap-3 text-xs">{onSelect && filterKind && isUsageFilterBucket(filterKind, value.key) ? <button type="button" aria-label={`筛选${title}：${value.label}`} aria-pressed={selectedKey === value.key} disabled={disabled} className="min-w-0 break-words text-left text-[var(--primary)] underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-60" onClick={() => onSelect(value.key)}>{value.label}{selectedKey === value.key ? " · 已筛选" : ""}</button> : <span className="min-w-0 break-words">{value.label}</span>}<span className="shrink-0 tabular-nums">{value.count} {filterKind === "model" ? "次调用" : "条记录"}</span></div><div className="h-2 rounded bg-[var(--muted)]"><div className="h-full rounded bg-[var(--primary)]" style={{ width: `${Math.max(0, value.count) / maximum * 100}%` }} /></div></li>)}</ol> : <p className="py-8 text-center text-xs text-[var(--muted-foreground)]">暂无可统计记录</p>}</section>;
+}
+type UsageTrendMetric = "requests" | "images" | "cost" | "successRate";
+const trendMetrics: Array<{ value: UsageTrendMetric; label: string }> = [{ value: "requests", label: "模型请求（次）" }, { value: "images", label: "成功出图（张）" }, { value: "cost", label: "已记账生成费用（元）" }, { value: "successRate", label: "终态成功率（%）" }];
+export function usageTrendValue(summary: UsageSummary, metric: UsageTrendMetric): number | null {
+    if (metric === "cost") return summary.totalRmbCost;
+    if (metric === "images") return summary.generatedImages;
+    if (metric === "successRate") return summary.succeeded + summary.failed ? summary.succeeded / (summary.succeeded + summary.failed) * 100 : null;
+    return summary.generationRequests + summary.chatRequests;
+}
+const trendValueText = (value: number | null, metric: UsageTrendMetric) => value === null ? "—" : metric === "cost" ? formatRmbCost(value) : metric === "successRate" ? `${value.toFixed(1)}%` : String(value);
+export function UsageDailyTrend({ daily, from, to, coverage, title = "每日趋势" }: { daily: UsageBreakdowns["daily"]; from: string; to: string; coverage: UsageCoverage; title?: string }) {
+    const [metric, setMetric] = useState<UsageTrendMetric>("requests");
+    const rows = [...daily].sort((a, b) => a.day.localeCompare(b.day));
+    const start = new Date(`${from}T00:00:00+08:00`).getTime();
+    const days = Math.max(1, (new Date(`${to}T00:00:00+08:00`).getTime() - start) / dayMilliseconds + 1);
+    const maximum = metric === "successRate" ? 100 : rows.reduce((max, row) => Math.max(max, usageTrendValue(row, metric) ?? 0), 1);
+    const metricLabel = trendMetrics.find(item => item.value === metric)!.label;
+    return <section className="wb-surface min-w-0 p-4 sm:p-5" aria-label={title}>
+        <div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-semibold">{title}</h3><p className="mt-1 text-xs text-[var(--muted-foreground)]">{from} 至 {to} · 北京时间 · 按提交日期与当前状态统计</p></div><Select aria-label={`${title}指标`} className="min-w-52" value={metric} options={trendMetrics} onChange={setMetric} /></div>
+        {(coverage.missingHistoryCount || 0) > 0 ? <p role="status" className="mt-3 text-xs">费用尚不完整：当前范围有 {coverage.missingHistoryCount} 个成功任务缺少结算历史；图中金额不含这些任务，也不补估。</p> : null}
+        {rows.length ? <>
+            <svg role="img" aria-label={`${title}：${metricLabel}，${from} 至 ${to}`} viewBox="0 0 720 148" className="mt-4 h-44 w-full text-[var(--muted-foreground)]">
+                <text x="66" y="15" textAnchor="end" fontSize="10" fill="currentColor">{metric === "cost" ? maximum.toFixed(6) : maximum}</text><text x="66" y="119" textAnchor="end" fontSize="10" fill="currentColor">0</text>
+                <line x1="72" y1="116" x2="692" y2="116" stroke="var(--border)" />
+                {rows.map(row => { const value = usageTrendValue(row, metric), offset = (new Date(`${row.day}T00:00:00+08:00`).getTime() - start) / dayMilliseconds, width = Math.max(.4, Math.min(18, 620 / days * .7)), height = value === null ? 0 : value / maximum * 100; return <rect key={row.day} x={72 + (offset + .5) / days * 620 - width / 2} y={116 - height} width={width} height={height} rx="1" fill="var(--primary)"><title>{row.day} · {metricLabel}：{trendValueText(value, metric)}</title></rect>; })}
+                <text x="72" y="139" fontSize="11" fill="currentColor">{from}</text><text x="692" y="139" textAnchor="end" fontSize="11" fill="currentColor">{to}</text>
+            </svg>
+            <details className="mt-2"><summary className="cursor-pointer text-xs">查看每日准确数据（{rows.length} 个有记录日期）</summary><div className="mt-3 max-h-80 overflow-auto"><table className="w-full whitespace-nowrap text-right text-xs tabular-nums" aria-label={`${title}数据表`}><thead><tr>{["日期", "生成请求", "文字请求", "成功", "失败 / 取消 / 中断", "未完成", "终态成功率", "实际图片", "已记账费用（元）", "访问", "交互"].map(label => <th key={label} scope="col" className="border-b border-[var(--border)] px-3 py-2 font-medium">{label}</th>)}</tr></thead><tbody>{rows.map(row => <tr key={row.day}><th scope="row" className="border-b border-[var(--border)] px-3 py-2 font-normal">{row.day}</th>{[row.generationRequests, row.chatRequests, row.succeeded, row.failed, row.pending, trendValueText(usageTrendValue(row, "successRate"), "successRate"), row.generatedImages, formatRmbCost(row.totalRmbCost), row.visits, row.interactions].map((value, index) => <td key={index} className="border-b border-[var(--border)] px-3 py-2">{value}</td>)}</tr>)}</tbody></table></div></details>
+        </> : <p className="py-8 text-center text-xs text-[var(--muted-foreground)]">当前筛选范围没有可展示的每日记录</p>}
+        <p className="mt-3 text-xs leading-5 text-[var(--muted-foreground)]">模型请求 = 生成请求 + 文字请求；访问、交互与采集缺口不算调用。终态成功率 = 成功 ÷（成功 + 失败 / 取消 / 中断），未完成不参与，无终态请求显示“—”。空白日期表示无已记录数据，不代表未使用；金额仅含已记账生成费用。</p>
+    </section>;
 }
 function UsageRecordCard({ record }: { record: UsageRecord }) {
     const isOperation = record.kind === "visit" || record.kind === "interaction" || record.kind === "gap";

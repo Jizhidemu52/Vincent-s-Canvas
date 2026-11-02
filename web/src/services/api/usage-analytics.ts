@@ -1,4 +1,4 @@
-import { USAGE_API, type UsageAnalysisPreview, type UsageAnalysisPreviewRequest, type UsageAnalysisResult, type UsageAnalyzeRequest, type UsageCoverage, type UsageEnvelope, type UsageFilters, type UsagePeopleResult, type UsagePersonResult } from "../../../../shared/usage-analytics";
+import { USAGE_API, type UsageAnalysisPreview, type UsageAnalysisPreviewRequest, type UsageAnalysisResult, type UsageAnalyzeRequest, type UsageCoverage, type UsageEnvelope, type UsageFilters, type UsagePeopleResult, type UsagePersonResult, type UsagePeopleSorting } from "../../../../shared/usage-analytics";
 
 export type { UsageAnalysisPreview, UsageAnalysisPreviewRequest, UsageAnalysisResult, UsageFilters, UsagePeopleResult, UsagePersonResult } from "../../../../shared/usage-analytics";
 
@@ -39,16 +39,16 @@ async function request<T>(url: string, signal?: AbortSignal, body?: unknown): Pr
 }
 
 export type UsageListQuery = Omit<UsageFilters, "userIds"> & { page?: number; pageSize?: number };
-function queryString(query: UsageListQuery) {
+function queryString(query: UsageListQuery & UsagePeopleSorting) {
     const params = new URLSearchParams();
-    for (const key of ["search", "from", "to", "modelConfigId", "boardKey", "page", "pageSize"] as const) {
+    for (const key of ["search", "from", "to", "modelConfigId", "boardKey", "page", "pageSize", "sort", "order"] as const) {
         const value = query[key];
         if (value !== undefined && value !== "") params.set(key, String(value));
     }
     return params.size ? `?${params}` : "";
 }
 
-export const listUsagePeople = (query: UsageListQuery, signal?: AbortSignal) => request<UsagePeopleResult>(`${USAGE_API.people}${queryString(query)}`, signal);
+export const listUsagePeople = (query: UsageListQuery & UsagePeopleSorting, signal?: AbortSignal) => request<UsagePeopleResult>(`${USAGE_API.people}${queryString(query)}`, signal);
 export const getUsagePerson = (id: string, query: UsageListQuery, signal?: AbortSignal) => request<UsagePersonResult>(`${USAGE_API.person(id)}${queryString(query)}`, signal);
 export async function listUsageAnalysisModels(signal?: AbortSignal) {
     const result = await request<import("../../../../shared/usage-analytics").UsageAnalysisModelsResult>(USAGE_API.analysisModels, signal);
