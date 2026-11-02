@@ -31,7 +31,7 @@ export function createAuthRouter(db: Database, cache: Cache, config: AppConfig) 
     const features = deploymentFeatures(config);
     const wecomEnabled = features.authenticationEnabled && !features.oaLoginEnabled && getWeComStatus(config).configured;
     const wecomStateCookieName = `${config.SESSION_COOKIE_NAME}_wecom_state`;
-    const requireSession = sessionMiddleware(db, cache, config, { allowAdminSession: true });
+    const requireSession = sessionMiddleware(db, cache, config, { allowAdminSession: true, refreshSessionCookie: true });
 
     router.use((request, response, next) => {
         const path = request.path.toLowerCase().replace(/\/+$/, "");
@@ -152,9 +152,12 @@ export function createAuthRouter(db: Database, cache: Cache, config: AppConfig) 
         } catch (error) { next(error); }
     });
 
-    router.get("/session", requireSession, (request, response) => response.json({ user: (request as unknown as AuthenticatedRequest).auth }));
+    router.get("/session", requireSession, (request, response) => {
+        response.set("Cache-Control", "no-store");
+        response.json({ user: (request as unknown as AuthenticatedRequest).auth });
+    });
 
-    router.post("/logout", sessionMiddleware(db, cache, config, { allowGuest: false }), async (request, response, next) => {
+    router.post("/logout", sessionMiddleware(db, cache, config, { allowGuest: false, renewSession: false }), async (request, response, next) => {
         try {
             const authenticated = request as unknown as AuthenticatedRequest;
             const token = request.cookies[config.SESSION_COOKIE_NAME];

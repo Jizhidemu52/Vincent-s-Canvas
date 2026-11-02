@@ -78,7 +78,7 @@ test("asset export includes every filtered page and original files, not only loa
     clean(api);
 });
 
-test("expired session locks mounted draft and same-account password login restores it without generation", async ({ page }) => {
+test("expired session preserves editable draft and opt-in same-account recovery without generation", async ({ page }) => {
     const api = await setup(page); let expired = false, loginCalls = 0;
     await page.context().route("**/api/auth/**", async route => {
         const path = new URL(route.request().url()).pathname;
@@ -94,14 +94,21 @@ test("expired session locks mounted draft and same-account password login restor
     const input = page.getByRole("textbox", { name: "图像提示词" });
     await input.fill("未提交的草稿，过期后不要丢失");
     expired = true; await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-    const dialog = page.getByRole("dialog", { name: "登录已过期" });
-    await expect(dialog).toBeVisible();
-    await expect(page.locator('[inert]')).toHaveCount(1);
-    await dialog.getByLabel("登录密码", { exact: true }).fill("FixtureOnly2026");
-    await dialog.getByRole("button", { name: "重新登录并继续" }).click();
-    await expect(dialog).toHaveCount(0);
-    await expect(input).toHaveValue("未提交的草稿，过期后不要丢失");
+    const recovery = page.getByRole("button", { name: "恢复登录", exact: true });
+    await expect(recovery).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "登录已过期" })).toHaveCount(0);
+    await expect(page.locator('[inert]')).toHaveCount(0);
+    await input.fill("未提交的草稿，过期后不要丢失，继续编辑");
+    await recovery.click();
+    await expect(page.getByRole("link", { name: "在新窗口登录（支持原登录方式）" })).toHaveAttribute("target", "_blank");
+    await page.getByRole("button", { name: "关闭", exact: true }).click();
+    await expect(page.getByLabel("登录密码", { exact: true })).toHaveCount(0);
+    await recovery.click();
+    await page.getByLabel("登录密码", { exact: true }).fill("FixtureOnly2026");
+    await page.getByRole("button", { name: "重新登录并继续" }).click();
+    await expect(recovery).toHaveCount(0);
+    await expect(input).toHaveValue("未提交的草稿，过期后不要丢失，继续编辑");
     await page.reload();
-    await expect(page.getByRole("textbox", { name: "图像提示词" })).toHaveValue("未提交的草稿，过期后不要丢失");
+    await expect(page.getByRole("textbox", { name: "图像提示词" })).toHaveValue("未提交的草稿，过期后不要丢失，继续编辑");
     expect(loginCalls).toBe(1); clean(api);
 });

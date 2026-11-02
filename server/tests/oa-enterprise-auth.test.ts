@@ -33,7 +33,7 @@ test("enterprise keeps QR routes disabled before database or upstream access", a
 
 test("OA deployment rejects local sessions and privileged OA sessions", async () => {
   for (const [auth_provider, role, is_guest] of [["local", "designer", false], ["oa", "super_admin", false], ["oa", "designer", true]]) {
-    const db = { query: async () => ({ rows: [{ session_id: "session-id", auth_provider, role, is_guest, status: "active" }] }) } as unknown as Database;
+    const db = { query: async () => ({ rows: [{ session_id: "session-id", session_remaining_seconds: 7200, auth_provider, role, is_guest, status: "active" }] }) } as unknown as Database;
     const app = express().use(cookieParser());
     app.get("/protected", sessionMiddleware(db, cache, config), (_req, res) => res.json({ accepted: true }));
     await serve(app, async (origin) => {
@@ -59,7 +59,7 @@ test("enterprise denies missing or expired sessions without creating guest ident
 });
 
 test("enterprise rejects a stale tab owner header without revoking the new employee session", async () => {
-  const db = { query: async (sql: string) => ({ rows: sql.includes("FROM credit_policy") ? [{ creditsEnabled: false, updatedAt: null }] : [{ ...user, auth_provider: "oa", session_id: "active-session" }] }) } as unknown as Database;
+  const db = { query: async (sql: string) => ({ rows: sql.includes("FROM credit_policy") ? [{ creditsEnabled: false, updatedAt: null }] : [{ ...user, auth_provider: "oa", session_id: "active-session", session_remaining_seconds: 7200 }] }) } as unknown as Database;
   const app = express().use(cookieParser());
   app.get("/creation", sessionMiddleware(db, cache, config), (_req, res) => res.json({ accepted: true }));
   await serve(app, async origin => {
@@ -77,7 +77,7 @@ test("enterprise rejects a stale tab owner header without revoking the new emplo
 
 test("enterprise administrator maintenance keeps its password session but cannot enter employee creation", async () => {
   for (const must_change_password of [true, false]) {
-    const stored = { id: "admin-user", session_id: "admin-session", auth_provider: "local", role: "super_admin", status: "active", is_guest: false, must_change_password };
+    const stored = { id: "admin-user", session_id: "admin-session", auth_provider: "local", session_remaining_seconds: 28800, role: "super_admin", status: "active", is_guest: false, must_change_password };
     const db = { query: async (sql: string) => ({ rows: sql.includes("FROM credit_policy") ? [{ creditsEnabled: false, updatedAt: null }] : [stored] }) } as unknown as Database;
     const app = express().use(cookieParser());
     app.use("/auth", createAuthRouter(db, cache, config));
@@ -193,7 +193,7 @@ test("OA logout revokes the session, invalidates its cache and clears its cookie
   const queries: { sql: string; values?: unknown[] }[] = [];
   const db = { query: async (sql: string, values?: unknown[]) => {
     queries.push({ sql, values });
-    return { rows: sql.includes("FROM credit_policy") ? [{ creditsEnabled: false, updatedAt: null }] : [{ ...user, auth_provider: "oa", session_id: "oa-session-id" }] };
+    return { rows: sql.includes("FROM credit_policy") ? [{ creditsEnabled: false, updatedAt: null }] : [{ ...user, auth_provider: "oa", session_id: "oa-session-id", session_remaining_seconds: 1200 }] };
   } } as unknown as Database;
   const deleted: string[] = [];
   const app = express().use(cookieParser());

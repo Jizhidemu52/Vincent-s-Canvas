@@ -7,13 +7,12 @@ import { useUsageTracking } from "@/hooks/use-usage-tracking";
 import { useUnsavedNavigationGuard } from "@/hooks/use-unsaved-guard";
 import { useUserStore } from "@/stores/use-user-store";
 import { deploymentFeatures } from "@/lib/deployment-features";
-import { SessionExpiredDialog } from "@/components/auth/session-expired-dialog";
+import { SessionRecoveryControl } from "@/components/auth/session-expired-dialog";
 import "@/styles/workbench.css";
 
 export default function UserLayout({ children }: { children: ReactNode }) {
     useUsageTracking();
     useUnsavedNavigationGuard();
-    const expired = useUserStore(state => state.status === "expired");
     useEffect(() => {
         if (!deploymentFeatures.authenticationEnabled) return;
         const check = () => {
@@ -28,9 +27,9 @@ export default function UserLayout({ children }: { children: ReactNode }) {
     const hideShell = /^\/canvas\/[^/]+/.test(pathname) || pathname === "/login" || pathname === "/admin/login";
 
     return (
-        <><div inert={expired || undefined} aria-hidden={expired || undefined} className={cn("flex h-dvh overflow-hidden", !hideShell && "wb-app")}>
+        <><div className={cn("flex h-dvh overflow-hidden", !hideShell && "wb-app")}>
             <AppTopNav />
             <div className={cn("min-h-0 flex-1 overflow-hidden", !hideShell && "pt-14 md:pt-0")}>{children}</div>
-        </div><SessionExpiredDialog /></>
+        </div><SessionRecoveryControl /></>
     );
 }
