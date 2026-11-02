@@ -103,7 +103,7 @@ export function PromptTemplateEditor({ open, initial, title, onCancel, onSubmit 
     });
 
     return (
-        <Modal title={title} open={open} onCancel={() => { if (!saving) onCancel(); }} onOk={() => void save()} okText={t("保存模板")} cancelText={t("取消")} okButtonProps={{ disabled: optionsLoading }} confirmLoading={saving} cancelButtonProps={{ disabled: saving }} closable={!saving} keyboard={!saving} maskClosable={!saving} width={760} destroyOnHidden>
+        <Modal title={title} open={open} onCancel={() => { if (!saving) onCancel(); }} onOk={() => void save()} okText={t("保存模板")} cancelText={t("取消")} okButtonProps={{ disabled: optionsLoading }} confirmLoading={saving} cancelButtonProps={{ disabled: saving }} closable={!saving} keyboard={!saving} mask={{ closable: !saving }} width={760} destroyOnHidden>
             {optionError ? <Alert type="warning" showIcon message={optionError} /> : null}
             <Form form={form} layout="vertical" className="pt-3" disabled={saving || optionsLoading}>
                 <div className="grid gap-x-4 md:grid-cols-2">

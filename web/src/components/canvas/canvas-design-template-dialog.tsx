@@ -1,6 +1,6 @@
 import { useUiText } from "@/lib/i18n";
 import { useEffect, useRef, useState } from "react";
-import { Alert, Button, Empty, Input, Modal, Segmented } from "antd";
+import { Alert, App, Button, Empty, Input, Modal, Segmented } from "antd";
 import localforage from "localforage";
 import { canvasDesignTemplates, type CanvasDesignTemplateId, type CanvasDesignTemplateSteps } from "@/lib/canvas/canvas-design-templates";
 import { createCanvasTemplateLibrary, validateTemplateContent, type PersonalCanvasTemplate } from "@/lib/canvas/canvas-template-library";
@@ -14,6 +14,7 @@ type Draft = Pick<TemplateCard, "title" | "steps">;
 
 export function CanvasDesignTemplateDialog({ hasReference, onApply, onClose }: { hasReference: boolean; onApply: (id: CanvasDesignTemplateId, steps: CanvasDesignTemplateSteps, title?: string) => void; onClose: () => void }) {
     const t = useUiText();
+    const { modal } = App.useApp();
     const theme = canvasThemes[useThemeStore(state => state.theme)];
     const [ownerId] = useState(() => useUserStore.getState().user?.id);
     const [library] = useState(() => createCanvasTemplateLibrary(createWorkspaceStorage("canvas_design_templates", { driver: localforage.INDEXEDDB }), ownerId, () => useUserStore.getState().user?.id));
@@ -65,7 +66,19 @@ export function CanvasDesignTemplateDialog({ hasReference, onApply, onClose }: {
             if (mounted.current) setNotice({ error: true, text: `保存未成功，编辑内容已保留：${error instanceof Error ? error.message : "请检查浏览器存储后重试"}` });
         } finally { busy.current = false; if (mounted.current) setSaving(false); }
     };
-    return <Modal open title={t("整套服装画布模板")} footer={null} onCancel={onClose} width={640}>
+    const remove = (template: TemplateCard) => modal.confirm({ title: t("删除个人模板？"), content: t("只删除「{name}」这个个人模板，不影响已添加到画布的节点。", { name: template.title }), okText: t("删除"), okButtonProps: { danger: true }, cancelText: t("保留"), onOk: async () => {
+        if (busy.current) return;
+        busy.current = true; setSaving(true);
+        try {
+            await library.remove(template.id);
+            if (!mounted.current || useUserStore.getState().user?.id !== ownerId) return;
+            setPersonal(current => current.filter(item => item.id !== template.id));
+            setDrafts(current => { const next = { ...current }; delete next[template.id]; return next; });
+            setNotice({ error: false, text: "个人模板已删除；画布节点未修改。" });
+        } catch (error) { if (mounted.current) setNotice({ error: true, text: error instanceof Error ? error.message : "删除未成功，模板已保留" }); throw error; }
+        finally { busy.current = false; if (mounted.current) setSaving(false); }
+    } });
+    return <Modal open centered title={t("整套服装画布模板")} footer={null} onCancel={onClose} width={800}>
         <p className="mb-3 text-sm opacity-70">{hasReference ? t("使用所选图片作为共同参考，保留原图。") : t("先创建参考图片节点，上传服装图后开始。")}{t("每个模板新增 3 个可编辑生成配置及连线，分别点击配置中的“生成”才会调用模型。")}</p>
         <Segmented className="mb-3" value={tab} onChange={value => setTab(value)} options={[{ label: t("内置模板"), value: "builtin" }, { label: t("我的模板{value1}", { value1: personal.length ? `（${personal.length}）` : "" }), value: "mine" }]} />
         <p className="mb-4 text-xs opacity-60">{t("我的模板按当前员工保存在本浏览器，刷新或重开后可复用；暂不跨设备同步。仅保存名称和提示词，不绑定这次的参考图片。")}</p>
@@ -84,6 +97,7 @@ export function CanvasDesignTemplateDialog({ hasReference, onApply, onClose }: {
                 <div className="flex flex-wrap gap-2">
                     <Button aria-expanded={isExpanded} aria-controls={`template-editor-${template.id}`} onClick={() => setExpanded(isExpanded ? null : template.id)}>{isExpanded ? t("收起提示词") : t("编辑流程提示词")}</Button>
                     <Button type="primary" disabled={invalid || saving} onClick={() => onApply(template.baseTemplateId, steps, template.personal ? draft.title : template.title)}>{t("添加这套流程")}</Button>
+                    {template.personal ? <Button danger disabled={saving || !loaded} onClick={() => remove(template)}>{t("删除模板")}</Button> : null}
                 </div>
                 {isExpanded ? <div id={`template-editor-${template.id}`} className="mt-4 space-y-4">
                     <div className="space-y-2"><label className="block text-sm" htmlFor={`${template.id}-name`}>{t("模板名称")}</label><Input id={`${template.id}-name`} maxLength={80} value={draft.title} disabled={saving} onChange={event => change(template, { title: event.target.value })} /></div>

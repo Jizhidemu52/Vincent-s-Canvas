@@ -3,12 +3,15 @@ import { readFileSync } from "node:fs";
 import ts from "typescript";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { createCanvasCloudSync, type CanvasCloudBaseline } from "@/lib/canvas/canvas-cloud-sync";
-import { CanvasRevisionConflict, type CloudCanvasDocument } from "@/services/api/canvas-documents";
+import { createCanvasCloudSync, CanvasCloudBatchError, type CanvasCloudBaseline } from "@/lib/canvas/canvas-cloud-sync";
+import { CanvasRevisionConflict, CanvasCloudRequestError, type CloudCanvasDocument } from "@/services/api/canvas-documents";
+import { isCanvasStorageQuotaError, requestCanvasPersistentStorage } from "@/lib/canvas/canvas-storage-capacity";
+import { clearImportedCanvasTasks } from "@/lib/canvas/canvas-import-task-state";
+import { canvasDuplicateTitle } from "@/lib/canvas/canvas-library-ux";
 import { collectProjectChanges, createProjectChangeBuffer, mergeProjectChanges } from "@/lib/canvas/canvas-persistence-merge";
 import { canvasProjectSummary } from "@/lib/canvas/canvas-project-summary";
 import { createDeferredPersistQueue } from "@/lib/deferred-persist-queue";
-import { applyCanvasProjectPatch } from "@/lib/canvas/canvas-project-update";
+import { applyCanvasProjectPatch, hasCanvasContentChange } from "@/lib/canvas/canvas-project-update";
 import { serializeCanvasProject } from "@/lib/canvas/canvas-project-codec";
 import type { CanvasProject } from "@/stores/canvas/use-canvas-store";
 import { isWorkspaceRole } from "../../shared/workspace-access";
@@ -32,7 +35,7 @@ function project(id = "cloud", title = "完整项目"): CanvasProject {
         id, title, createdAt: "2026-10-09T00:00:00Z", updatedAt: "2026-10-09T00:00:00Z",
         nodes: [{ id: "image", type: "image", title: "原稿", width: 640, height: 320, position: { x: -123, y: 456 }, metadata: { content: mediaUrl, bytes: 12, prompt: "保留原稿" } }],
         connections: [], chatSessions: [{ id: "chat", title: "讨论", createdAt: "old", updatedAt: "old", messages: [{ id: "m", role: "user", text: "完整讨论" }] }],
-        activeChatId: "chat", backgroundMode: "dots", showImageInfo: true, viewport: { x: 1, y: 2, k: .8 },
+        activeChatId: "chat", backgroundMode: "dots", showImageInfo: true, viewport: { x: 0, y: 0, k: 1 },
     } as CanvasProject;
 }
 const envelope = (document: CanvasProject | null, revision = 7, id = document?.id || "cloud"): CloudCanvasDocument => ({ id, document: clone(document), revision, deleted: !document, updatedAt: "now" });
@@ -60,6 +63,7 @@ function harness(remoteDocuments: CloudCanvasDocument[] = [envelope(project())],
         return clone(state.local);
     };
     const bindings = {
+        CanvasCloudBatchError, CanvasCloudRequestError, isCanvasStorageQuotaError,
         createCanvasCloudSync, collectProjectChanges, nanoid: () => `copy-${++state.nextId}`,
         localforage: {
             getItem: async () => { state.baselineReads += 1; await state.beforeBaselineRead?.(); return clone(state.baseline); },
@@ -82,6 +86,7 @@ function harness(remoteDocuments: CloudCanvasDocument[] = [envelope(project())],
             return portable;
         },
         readCanvasProjects, writeCanvasProjects,
+        readCanvasProject: async (_key: string, id: string) => clone(state.local.find(project => project.id === id) || null),
         window: undefined,
         setTimeout: (callback: () => void) => { timers.set(++timerId, callback); return timerId; },
         clearTimeout: (id: number) => timers.delete(id),
@@ -104,11 +109,14 @@ async function openStore(io: ReturnType<typeof harness>) {
     const drain = {} as typeof import("@/lib/workspace-identity-drain");
     new Function("exports", drainCode)(drain);
     const bindings = {
+        requestCanvasPersistentStorage, isCanvasStorageQuotaError, clearImportedCanvasTasks, hasCanvasContentChange, canvasDuplicateTitle,
         ...drain,
         isWorkspaceRole,
         create, persist, nanoid: () => `local-${++io.state.nextId}`, createDeferredPersistQueue: <T>(delay: number, flush: (value: T) => void) => createDeferredPersistQueue(delay, flush, { setTimeout: () => 1, clearTimeout() {} }),
         collectProjectChanges, createProjectChangeBuffer, applyCanvasProjectPatch,
         readCanvasProjects: io.readCanvasProjects, writeCanvasProjects: io.writeCanvasProjects, removeCanvasProjects: async () => { io.state.local = []; },
+        readCanvasLibrary: async () => ({ projects: await io.readCanvasProjects(), summaries: [] }),
+        readCanvasProject: async (_key: string, id: string) => clone(io.state.local.find(project => project.id === id) || null),
         deploymentFeatures: { authenticationEnabled: true, oaLoginEnabled: true }, useUserStore: userStore,
         createCloudCanvasPersistence: io.factory,
         window: { addEventListener() {}, location: { reload() { reloads += 1; } } },
@@ -328,6 +336,19 @@ test("a pending remote load does not overwrite a project made editable by a conc
     expect(await pending).toBe(edited);
     expect(tab.store.getState().openProject("cloud")).toBe(edited);
     expect(tab.store.getState().unloadedProjects).toEqual([]);
+});
+
+test("loading a library summary never removes its card before the durable document replaces it", async () => {
+    const io = harness(); const tab = await openStore(io);
+    const present: boolean[] = [];
+    const unsubscribe = tab.store.subscribe((state: any) => present.push([...state.projects, ...state.unloadedProjects].some(item => item.id === "cloud")));
+    expect(tab.store.getState().unloadedProjects.some((item: any) => item.id === "cloud")).toBe(true);
+    await tab.loadCanvasProject("cloud");
+    unsubscribe();
+    expect(present.length).toBeGreaterThan(0);
+    expect(present.every(Boolean)).toBe(true);
+    expect(tab.store.getState().unloadedProjects).toEqual([]);
+    expect(tab.store.getState().openProject("cloud")).toEqual(project());
 });
 
 test("cached data can never bypass the owner guard after employee identity changes", async () => {

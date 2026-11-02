@@ -7,6 +7,7 @@ export const CANVAS_CONNECTION_NODE_HIT_PADDING = 32;
 export type CanvasConnectionDropTarget = {
     nodeId: string | null;
     isNearNode: boolean;
+    invalidNodeId?: string;
 };
 
 export function findCanvasConnectionDropTarget({
@@ -31,6 +32,9 @@ export function findCanvasConnectionDropTarget({
     let isNearNode = false;
     let bestNodeId: string | null = null;
     let bestPriority = Number.POSITIVE_INFINITY;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    let invalidNodeId: string | undefined;
+    let invalidDistance = Number.POSITIVE_INFINITY;
 
     selectCanvasSpatialIndexNodes(
         index,
@@ -48,14 +52,20 @@ export function findCanvasConnectionDropTarget({
 
             if (!hitsHandle && !hitsInside && !hitsExpanded) return;
             isNearNode = true;
-            if (node.id === current.nodeId || !canConnect(node)) return;
+            if (node.id === current.nodeId) return;
+            const distance = dx * dx + dy * dy;
+            if (!canConnect(node)) {
+                if (distance < invalidDistance) { invalidNodeId = node.id; invalidDistance = distance; }
+                return;
+            }
 
-            const priority = hitsInside ? 0 : hitsHandle ? 1 : 2;
-            if (priority < bestPriority) {
+            const priority = hitsHandle ? 0 : hitsInside ? 1 : 2;
+            if (priority < bestPriority || (priority === bestPriority && distance < bestDistance)) {
                 bestNodeId = node.id;
                 bestPriority = priority;
+                bestDistance = distance;
             }
         });
 
-    return { nodeId: bestNodeId, isNearNode };
+    return { nodeId: bestNodeId, isNearNode, ...(!bestNodeId && invalidNodeId ? { invalidNodeId } : {}) };
 }

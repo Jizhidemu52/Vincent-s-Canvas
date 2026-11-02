@@ -92,6 +92,25 @@ export function canvasGenerationRecordConfig(record: CanvasGenerationRecord, con
     return { ...config, ...parameters, imageModel: parameters.model, count: "1", canvasImageCount: "1" };
 }
 
+/** Variations are explicit edits of this result; the archived original run stays immutable. */
+export function createCanvasVariationRecord(node: CanvasNodeData, strength: "subtle" | "strong", id: string): CanvasGenerationRecord {
+    const original = node.metadata?.generationRecord;
+    if (node.type !== CanvasNodeType.Image || !original || (!node.metadata?.content && !node.metadata?.storageKey)) throw new Error("这张图片没有完整生成档案，请先恢复历史输入。");
+    if (node.metadata.imageTask || node.metadata.status === "loading") throw new Error("当前图片任务尚未完成，请先查询原任务。");
+    const instruction = strength === "subtle"
+        ? "以参考图为基准制作轻微变体：保持主体、结构、构图与主色不变，仅微调细节和质感。"
+        : "以参考图为基准制作明显变体：保留主体身份和原始设计目标，可以明显调整细节、配色与构图，不添加无关主体。";
+    const prompt = `${instruction}\n\n原始设计要求：\n${original.inputPrompt || original.prompt}`;
+    return {
+        ...structuredClone(original), id, sourceNodeId: node.id, configNodeId: undefined, createdAt: new Date().toISOString(),
+        prompt, inputPrompt: prompt, promptInput: undefined, submittedPrompt: undefined,
+        parameters: { ...original.parameters, count: 1, generationType: "edit" },
+        references: [{ id: node.id, referenceKey: `node:${node.id}`, name: node.title || "变体原图", type: node.metadata.mimeType || "image/png",
+            content: node.metadata.content || "", storageKey: node.metadata.storageKey, sourceNodeId: node.id, origin: "canvas", order: 0,
+            originalFileName: node.metadata.originalFileName, imageName: node.metadata.imageName, imageVersion: node.metadata.imageVersion }],
+    };
+}
+
 export function canvasGenerationPrompt(node: CanvasNodeData) { return node.metadata?.generationRecord?.prompt ?? node.metadata?.prompt ?? ""; }
 export function canvasGenerationDraft(node: CanvasNodeData) { return node.metadata?.draftPrompt ?? node.metadata?.generationRecord?.inputPrompt ?? node.metadata?.prompt ?? ""; }
 export function canvasGenerationDraftResetPatch(node: CanvasNodeData): Partial<CanvasNodeMetadata> {
@@ -101,6 +120,7 @@ export function canvasGenerationDraftResetPatch(node: CanvasNodeData): Partial<C
 }
 
 /** Server compilation is part of this run, not a later edit to the saved draft. */
-export function compiledCanvasGenerationRecord(record: CanvasGenerationRecord | undefined, prompt: string | undefined) {
-    return record && prompt !== undefined && record.prompt !== prompt ? { ...record, prompt } : record;
+export function compiledCanvasGenerationRecord(record: CanvasGenerationRecord | undefined, prompt: string | undefined, submittedPrompt?: string) {
+    return record && prompt !== undefined && (record.prompt !== prompt || (submittedPrompt !== undefined && record.submittedPrompt !== submittedPrompt))
+        ? { ...record, prompt, ...(submittedPrompt !== undefined ? { submittedPrompt } : {}) } : record;
 }

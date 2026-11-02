@@ -15,12 +15,16 @@ type History = { past: Entry[]; future: Entry[] };
 const source = readFileSync(new URL("../src/pages/canvas/use-canvas-history.ts", import.meta.url), "utf8")
     + "\n" + readFileSync(new URL("../src/pages/canvas/project.tsx", import.meta.url), "utf8");
 const ast = ts.createSourceFile("project.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-const helperNames = new Set(["boundedCanvasHistory", "canvasHistoryForSave"]);
+const helperNames = new Set(["boundedCanvasHistory", "canvasHistoryForSave", "canvasHistoryContentChanged"]);
 const callbackNames = new Set(["flushPendingHistory", "duplicateNodes", "undoCanvas", "redoCanvas"]);
+const collectedCallbacks = new Set<string>();
 const callbacks: string[] = [];
 let historyEffect = "";
 function collect(node: ts.Node) {
-    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && callbackNames.has(node.name.text)) callbacks.push(`const ${node.getText(ast)};`);
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && callbackNames.has(node.name.text) && !collectedCallbacks.has(node.name.text)) {
+        collectedCallbacks.add(node.name.text);
+        callbacks.push(`const ${node.getText(ast)};`);
+    }
     if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "useEffect" && node.arguments[0]?.getText(ast).includes("historyCommitTimerRef.current = setTimeout")) historyEffect = `const runHistoryEffect = ${node.arguments[0].getText(ast)};`;
     ts.forEachChild(node, collect);
 }
@@ -48,7 +52,7 @@ function harness(history: History, previous: Entry, current: Entry) {
     const notices: { kind: string; description: string }[] = [];
     let availability = { canUndo: history.past.length > 0, canRedo: history.future.length > 0 };
     const commandScope = {
-        beforeHistoryAction: undefined,
+        beforeHistoryAction: undefined, options: {},
         copyCanvasNodeGraph, cloneCanvasNodeGraph, describeCanvasHistoryChange, canvasRepeatCopyOffset, mergeCanvasGenerationHistory, repeatCopyRef: { current: null },
         onHistoryAction: (kind: string, before: Parameters<typeof describeCanvasHistoryChange>[0], after: Parameters<typeof describeCanvasHistoryChange>[1]) => notices.push({ kind, description: describeCanvasHistoryChange(before, after) }),
         nodesRef: { get current() { return live.nodes; }, set current(value) { live = { ...live, nodes: value }; } }, connectionsRef: { get current() { return live.connections; }, set current(value) { live = { ...live, connections: value }; } },

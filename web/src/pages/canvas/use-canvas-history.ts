@@ -1,8 +1,18 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import type { CanvasHistorySnapshot } from "@/stores/canvas/use-canvas-store";
 import { mergeCanvasGenerationHistory } from "@/lib/canvas/canvas-generation-history";
 
 export type CanvasHistoryEntry = CanvasHistorySnapshot;
+
+export function canvasHistoryContentChanged(previous: CanvasHistoryEntry, current: CanvasHistoryEntry) {
+    if (previous.nodes !== current.nodes || previous.connections !== current.connections) return true;
+    const before = previous.groups || [], after = current.groups || [];
+    return before.length !== after.length || before.some((group, index) => {
+        const next = after[index];
+        return !next || group.id !== next.id || group.title !== next.title || group.nodeIds.length !== next.nodeIds.length
+            || group.nodeIds.some((id, nodeIndex) => id !== next.nodeIds[nodeIndex]);
+    });
+}
 
 export function boundedCanvasHistory(history?: { past: CanvasHistoryEntry[]; future: CanvasHistoryEntry[] }) {
     return { past: (history?.past || []).slice(-200), future: (history?.future || []).slice(-200) };
@@ -18,7 +28,7 @@ export function canvasHistoryForSave(history: { past: CanvasHistoryEntry[]; futu
     }
     // Chat remains in the legacy snapshot shape for storage compatibility, but
     // it is not an edit command and must neither add undo steps nor discard redo.
-    const changed = previous && (["nodes", "connections", "groups", "backgroundMode", "showImageInfo"] as const).some(key => previous[key] !== current[key]);
+    const changed = previous && canvasHistoryContentChanged(previous, current);
     if (!applyingHistory && changed) return { past: [...saved.past.slice(-199), previous!], future: [] };
     return saved;
 }
@@ -39,6 +49,8 @@ export function useCanvasHistory(history: ReturnType<typeof useCanvasHistoryStat
     createHistoryEntry: () => CanvasHistoryEntry; applyHistory: (entry: CanvasHistoryEntry) => void;
     onHistoryAction?: (kind: "undo" | "redo", before: CanvasHistoryEntry, after: CanvasHistoryEntry) => void;
     beforeHistoryAction?: () => void;
+    editTransactionRef?: RefObject<boolean>;
+    commitDelayRef?: RefObject<number>;
 }) {
     const { historyRef, lastHistoryRef, historyCommitTimerRef, applyingHistoryRef, pendingHistoryEntryRef, historyPausedRef, setHistoryState } = history;
     const { projectLoaded, createHistoryEntry, applyHistory, onHistoryAction, beforeHistoryAction } = options;
@@ -52,12 +64,13 @@ export function useCanvasHistory(history: ReturnType<typeof useCanvasHistoryStat
         const current = createHistoryEntry();
         historyRef.current = canvasHistoryForSave(historyRef.current, lastHistoryRef.current, current, false);
         lastHistoryRef.current = current;
+        if (options.commitDelayRef) options.commitDelayRef.current = 180;
         setHistoryState({ canUndo: historyRef.current.past.length > 0, canRedo: historyRef.current.future.length > 0 });
         return true;
     }, [createHistoryEntry, projectLoaded]);
 
     useEffect(() => {
-        if (!projectLoaded || applyingHistoryRef.current || historyPausedRef.current) return;
+        if (!projectLoaded || applyingHistoryRef.current || historyPausedRef.current || options.editTransactionRef?.current) return;
         const next = createHistoryEntry();
         const previous = lastHistoryRef.current;
         const pendingHistory = canvasHistoryForSave(historyRef.current, previous, next, false);
@@ -73,7 +86,7 @@ export function useCanvasHistory(history: ReturnType<typeof useCanvasHistoryStat
             return;
 
         if (historyCommitTimerRef.current) clearTimeout(historyCommitTimerRef.current);
-        historyCommitTimerRef.current = setTimeout(flushPendingHistory, 180);
+        historyCommitTimerRef.current = setTimeout(flushPendingHistory, options.commitDelayRef?.current || 180);
 
         return () => {
             if (historyCommitTimerRef.current) {

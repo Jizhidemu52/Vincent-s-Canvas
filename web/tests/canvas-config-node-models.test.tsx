@@ -116,14 +116,19 @@ describe("configuration node model availability", () => {
         }
     });
 
-    test("text configuration hides model identity and stale node selections cannot block the unified model", () => {
+    test("text configuration names the managed model without pretending it is selectable or using stale selections", () => {
         const tools = [{ toolKey: "gpt-chat", modelConfigId: "text", enabled: true, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 1 }];
         const stale = panel({ generationMode: "text", model: "gpt-image-2" }, { tools });
-        expect(stale).not.toContain("真实文本模型");
+        expect(stale).toContain("真实文本模型");
+        expect(stale).toContain("每次生成 1 份");
         expect(stale).not.toContain("chat-custom");
         expect(stale).not.toContain('data-usage-control="model"');
         expect(stale).not.toContain("gpt-image-2");
         expect(actionButton(stale)).not.toContain('disabled=""');
+        const published = panel({ generationMode: "text", model: "gpt-image-2", count: 4 }, { tools, models: models.map(model => model.id === "text" ? { ...model, publicName: "团队文案助手" } : model) });
+        expect(published).toContain("团队文案助手");
+        expect(published).not.toContain("真实文本模型");
+        expect(published).not.toContain("chat-custom");
         const synced = panel({ generationMode: "text", model: "chat-custom" }, { tools });
         expect(actionButton(synced)).not.toContain('disabled=""');
         expect(actionButton(panel({ generationMode: "text", model: "chat-custom", prompt: "" }, { tools }))).toContain('disabled=""');

@@ -20,13 +20,14 @@ function harness(reader: (file: File) => Promise<string> = async () => "data:ima
     const messages: any[] = [], requests: any[] = [];
     const state: any = { attachments: [], prompt: "make it blue", connected: true, sending: false, waiting: false, activeThreadId: "thread" };
     let serial = 0;
+    const scopeRef = { current: "project:user" }, requestRef = { current: null };
     const scope = { useCanvasAgentStore: { getState: () => state }, setAgentState: (patch: any) => Object.assign(state, patch), readDataUrl: reader, createId: () => String(++serial), addMessage: (item: any) => messages.push(item), addEventLog() {}, MAX_ATTACHMENTS: 6, MAX_ATTACHMENT_PAYLOAD_BYTES: 28 * 1024 * 1024, endpoint: "http://isolated.invalid", token: "fixture", snapshotRef: { current: { projectId: "project" } }, fetch: async (_url: string, init: any) => { requests.push(JSON.parse(init.body)); return { ok: true, status: 200, json: async () => ({ threadId: "thread" }) }; }, URL: { createObjectURL() { throw new Error("No Blob URL allocation is necessary"); }, revokeObjectURL() { throw new Error("Persistent previews must not be revoked"); } } };
     const handlers = () => {
         const code = ts.transpileModule(["attachmentPayloadBytes", "promptWithAttachments", "addAttachments", "removeAttachment", "sendPrompt"].map(functionSource).join("\n"), { compilerOptions: { target: ts.ScriptTarget.ESNext } }).outputText;
-        const values = { ...scope, ...state };
+        const values = { ...scope, scopeRef, requestRef, ...state };
         return new Function(...Object.keys(values), `${code}\nreturn { addAttachments, removeAttachment, sendPrompt };`)(...Object.values(values));
     };
-    return { state, messages, requests, handlers };
+    return { state, messages, requests, handlers, scopeRef, requestRef };
 }
 
 test("local-agent sent attachment preview remains valid after clearing the draft and remounting handlers", async () => {

@@ -1,9 +1,11 @@
-import type { CanvasConnectionGeometry } from "@/lib/canvas/canvas-connection-geometry";
+import { connectionGeometryArrow, type CanvasConnectionGeometry } from "@/lib/canvas/canvas-connection-geometry";
+import type { CanvasTheme } from "@/lib/canvas-theme";
 import { boundsForViewport, type CanvasBounds } from "@/lib/canvas/canvas-spatial-index";
 import type { CanvasConnection, ViewportTransform } from "@/types/canvas";
 
 export type CanvasConnectionDrawItem = {
     id?: string;
+    kind?: CanvasConnection["kind"];
     geometry: CanvasConnectionGeometry;
     active: boolean;
 };
@@ -11,7 +13,26 @@ export type CanvasConnectionDrawItem = {
 export type CanvasConnectionPalette = {
     stroke: string;
     activeStroke: string;
+    configStroke?: string;
+    generationStroke?: string;
+    sequenceStroke?: string;
+    sequenceInputStroke?: string;
 };
+
+export function canvasConnectionPalette(theme: CanvasTheme): CanvasConnectionPalette {
+    return { stroke: theme.node.muted, activeStroke: theme.node.activeStroke, configStroke: theme.toolbar.highResolution, generationStroke: theme.canvas.selectionStroke, sequenceStroke: theme.toolbar.primary, sequenceInputStroke: theme.node.warning };
+}
+
+export function canvasConnectionStyle(kind: CanvasConnection["kind"], active: boolean, palette: CanvasConnectionPalette) {
+    const styles = {
+        "config-target": { stroke: palette.configStroke, dash: [8, 5] },
+        "generation-output": { stroke: palette.generationStroke, dash: [] },
+        "config-sequence": { stroke: palette.sequenceStroke, dash: [12, 4, 2, 4] },
+        "sequence-input": { stroke: palette.sequenceInputStroke, dash: [2, 4] },
+    };
+    const style = kind ? styles[kind] : undefined;
+    return { stroke: active ? palette.activeStroke : style?.stroke || palette.stroke, dash: style?.dash || [] };
+}
 
 export type CanvasConnectionDrawBatches = {
     regular: CanvasConnectionDrawItem[];
@@ -77,7 +98,7 @@ export function createCanvasConnectionDrawCache(resolveGeometry: (connection: Ca
             const geometry = canReuseGeometry ? previousItem.geometry : resolveGeometry(connection);
             if (!geometry) return;
 
-            const item = canReuseGeometry ? previousItem : { id: connection.id, geometry, active: nextActiveIds.has(connection.id) };
+            const item = canReuseGeometry ? previousItem : { id: connection.id, kind: connection.kind, geometry, active: nextActiveIds.has(connection.id) };
             nextItemById.set(connection.id, item);
             nextItems.push(item);
         });
@@ -120,7 +141,7 @@ export function createCanvasConnectionDrawCache(resolveGeometry: (connection: Ca
                         geometryChanged = true;
                     }
                 } else if (!item) {
-                    itemById.set(id, { id, geometry, active: nextActiveIds.has(id) });
+                    itemById.set(id, { id, kind: connection.kind, geometry, active: nextActiveIds.has(id) });
                     geometryChanged = true;
                 } else if (geometry !== item.geometry) {
                     item.geometry = geometry;
@@ -148,26 +169,46 @@ function sameConnectionIds(previous: ReadonlySet<string>, next: ReadonlySet<stri
     return previous.size === next.size && Array.from(previous).every((id) => next.has(id));
 }
 
-export function drawCanvasConnectionBatches(context: CanvasRenderingContext2D, batches: CanvasConnectionDrawBatches, palette: CanvasConnectionPalette, visibleBounds?: CanvasBounds): boolean {
+export function drawCanvasConnectionBatches(context: CanvasRenderingContext2D, batches: CanvasConnectionDrawBatches, palette: CanvasConnectionPalette, visibleBounds?: CanvasBounds, scale = 1): boolean {
     try {
         const drawBatch = (batch: CanvasConnectionDrawItem[], active: boolean) => {
-            if (!batch.length) return;
-            context.beginPath();
-            let drawn = 0;
-            batch.forEach(({ geometry }) => {
-                if (visibleBounds && !connectionGeometryIntersectsBounds(geometry, visibleBounds)) return;
-                const { start, controlOne, controlTwo, end } = geometry.points;
-                context.moveTo(start.x, start.y);
-                context.bezierCurveTo(controlOne.x, controlOne.y, controlTwo.x, controlTwo.y, end.x, end.y);
-                drawn += 1;
-            });
-            if (!drawn) return;
-            context.strokeStyle = active ? palette.activeStroke : palette.stroke;
-            context.lineWidth = active ? 3 : 2;
-            context.globalAlpha = active ? 1 : 0.82;
-            context.shadowBlur = active ? 8 : 0;
-            context.shadowColor = active ? palette.activeStroke : "transparent";
-            context.stroke();
+            const byKind = new Map<CanvasConnection["kind"], CanvasConnectionDrawItem[]>();
+            for (const item of batch) {
+                if (visibleBounds && !connectionGeometryIntersectsBounds(item.geometry, visibleBounds)) continue;
+                const items = byKind.get(item.kind) || [];
+                items.push(item);
+                byKind.set(item.kind, items);
+            }
+            const safeScale = Math.max(scale, 0.0001);
+            for (const [kind, items] of byKind) {
+                const style = canvasConnectionStyle(kind, active, palette);
+                context.strokeStyle = style.stroke;
+                context.fillStyle = style.stroke;
+                context.lineWidth = (active ? 3 : scale <= 0.4 ? 1 : 2) / safeScale;
+                context.globalAlpha = active ? 1 : 0.82;
+                context.shadowBlur = active ? 8 : 0;
+                context.shadowColor = active ? palette.activeStroke : "transparent";
+                context.lineCap = "round";
+                context.setLineDash(style.dash.map(length => length / safeScale));
+                context.beginPath();
+                for (const { geometry } of items) {
+                    const { start } = geometry.segments[0];
+                    context.moveTo(start.x, start.y);
+                    for (const { controlOne, controlTwo, end } of geometry.segments) context.bezierCurveTo(controlOne.x, controlOne.y, controlTwo.x, controlTwo.y, end.x, end.y);
+                }
+                context.stroke();
+                // Arrowheads are a separate filled path so dashed links never
+                // lose their direction indicator in a dash gap.
+                context.beginPath();
+                for (const { geometry } of items) {
+                    const { tip, left, right } = connectionGeometryArrow(geometry, (active ? 9 : 8) / safeScale);
+                    context.moveTo(tip.x, tip.y);
+                    context.lineTo(left.x, left.y);
+                    context.lineTo(right.x, right.y);
+                    context.closePath();
+                }
+                context.fill();
+            }
         };
 
         drawBatch(batches.regular, false);
@@ -175,6 +216,7 @@ export function drawCanvasConnectionBatches(context: CanvasRenderingContext2D, b
         context.globalAlpha = 1;
         context.shadowBlur = 0;
         context.shadowColor = "transparent";
+        context.setLineDash([]);
         return true;
     } catch {
         return false;

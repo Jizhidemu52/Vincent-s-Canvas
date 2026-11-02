@@ -6,7 +6,7 @@ const blocks = [
     { type: "thinking", thinking: "", signature: "signed-for-plan-prefix" },
     { type: "redacted_thinking", data: "redacted-for-plan-prefix" },
     { type: "text", text: "我先查看图2。" },
-    { type: "tool_use", id: "inspect-old-image", name: "inspect_images", input: { image_ids: ["green-old"] } },
+    { type: "tool_use", id: "inspect-old-image", name: "look_at_images", input: { image_ids: ["green-old"] } },
 ];
 const replay: ResponseInput[] = [
     { role: "user", content: "只改图2的纽扣，不能用较新的图3。" },
@@ -17,10 +17,9 @@ const replay: ResponseInput[] = [
 test.each(["creative-chat", "canvas-assistant"] as const)("%s Sonnet replay retains tool evidence without stale prefix-bound reasoning", async profile => {
     const prepared = await prepareChatProfileInput({
         profile, toolKey: profile === "creative-chat" ? "gpt-chat" : "canvas-chat", input: replay, tools: [],
-        profileContext: profile === "creative-chat" ? {
-            phase: "after-inspection", currentUserText: "只改图2的纽扣", catalogTotal: 3,
-            imageCatalog: [{ image_id: "green-old" }], workingImageDetails: [], previewImageIds: ["green-old"],
-        } : { stage: "continue", userText: "只改图2的纽扣", editContext: { selectedTarget: { baseImageIds: ["green-old"] } } },
+        profileContext: { stage: "continue", currentUserText: "只改图2的纽扣，不能用较新的图3。", newCreation: false,
+            imageCatalog: [{ id: "green-old", label: "图2", kind: "result", previewed: true }], previewImageIds: ["green-old"],
+            focusImageId: "green-old", lockedImageId: "green-old", workNote: "墨绿衬衫" },
     }, async () => "仅修改用户指定的图片要求。");
     const before = JSON.stringify(prepared.input);
     const body = buildClaudeMessagesRequest(prepared.input, { modelId: "claude-sonnet-5-5", maxTokens: 2048, thinking: false });

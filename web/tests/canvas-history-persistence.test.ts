@@ -12,7 +12,7 @@ type History = { past: Entry[]; future: Entry[] };
 const source = readFileSync(new URL("../src/pages/canvas/project.tsx", import.meta.url), "utf8")
     + "\n" + readFileSync(new URL("../src/pages/canvas/use-canvas-history.ts", import.meta.url), "utf8");
 const ast = ts.createSourceFile("project.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-const names = new Set(["boundedCanvasHistory", "canvasHistoryForSave"]);
+const names = new Set(["boundedCanvasHistory", "canvasHistoryForSave", "canvasHistoryContentChanged"]);
 const code = ts.transpileModule(ast.statements.filter(statement => ts.isFunctionDeclaration(statement) && names.has(statement.name?.text || "")).map(statement => statement.getText(ast)).join("\n"), {
     compilerOptions: { target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.CommonJS },
 }).outputText;
@@ -33,7 +33,7 @@ describe("canvas persisted undo/redo", () => {
         const current = { ...previous, groups: [{ ...previous.groups[0], collapsed: true }] };
         const saved = canvasHistoryForSave({ past: [], future: [] }, previous, current, false);
         const restored = boundedCanvasHistory(JSON.parse(JSON.stringify(saved)));
-        expect(restored.past[0].groups).toEqual(previous.groups);
+        expect(restored.past).toEqual([]);
         const undoSaved = canvasHistoryForSave({ past: [], future: [current] }, current, previous, true);
         expect(boundedCanvasHistory(JSON.parse(JSON.stringify(undoSaved))).future[0].groups?.[0].collapsed).toBe(true);
         expect(current.nodes).toBe(previous.nodes);

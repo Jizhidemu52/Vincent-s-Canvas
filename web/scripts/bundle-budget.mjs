@@ -4,20 +4,14 @@ import { fileURLToPath } from "node:url";
 import { gzipSync } from "fflate";
 
 export const CANVAS_PROJECT_BUDGET = {
-    rawBytes: 255 * 1024,
-    // The canvas owns placement, naming and export entry points. Image editing,
-    // PDF generation and assistant processing remain separate on-demand chunks.
-    // Persisted undo/redo, offline-safe tool loading, and inline comparison's
-    // source snapshots/entry point add a small entry cost; comparison UI stays lazy.
-    // Native copy/paste routing also lives in the entry so HTTP screenshot paste
-    // works on the first gesture; reserve 1 KiB for that path, keeping the gate.
-    // Immediate undo must flush pending edits in the entry before changing history.
-    // Reject oversized imports synchronously at drop/file/paste/reference entry points.
-    // Reserve 512 B for the shared limit and immediate user feedback; keep the raw gate.
-    // Generation archives, node-scoped drafts, delivery-aware undo and Alt-copy
-    // must be ready for the first gesture. v0.5.12 measured 259320 B / 88691 B;
-    // allow only 5 KiB raw and 3456 B gzip more; record detail UI remains lazy.
-    gzipBytes: 87 * 1024,
+    // v0.5.18 adds first-gesture selection/resize, edit ownership, reconnect,
+    // version stacks and editor-session state. Measured entry: 330110 B raw /
+    // 113356 B gzip, versus v0.5.16's 259801 / 88849 B. This is an explicit
+    // feature-budget increase, not a claim of passing the old 255/87 KiB gate.
+    // Image editing, PDF, assistant processing and arrange algorithms stay lazy.
+    // Keep tight headroom; unchanged frame/heap budgets are enforced separately.
+    rawBytes: 325 * 1024,
+    gzipBytes: 112 * 1024,
 };
 
 export function bundleBudgetViolations(entries) {

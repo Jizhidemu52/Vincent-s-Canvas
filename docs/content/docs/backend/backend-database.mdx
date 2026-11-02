@@ -98,6 +98,8 @@ OA 员工模式的前端同步整张画布：节点位置与尺寸、连线、�
 
 `034_canvas_document_summaries.sql` 新增 `title`、`document_created_at`、`document_updated_at`、`node_count`、`connection_count`、`cover_url`。迁移一次性从现有 JSON 派生；之后保存正文与摘要在同一次原子写入完成，列表不再遍历节点。删除墓碑同步清空摘要。SQLite 在启动时以事务完成相同的派生字段初始化。
 
+`045_canvas_conflict_summary.sql` 为正式 PostgreSQL 表增加可空 `persistence_conflict jsonb` 摘要列，仅回填已有正文中的 `persistenceConflict`，不修改正文、版本、所属员工或文档时间。后续保存与 revision 比较并交换在同一条 SQL 中同步摘要；移除冲突标记或删除画布时清空该列。列表直接投影摘要列，既保留冲突副本标识，也不读取或解压完整 `document`。迁移在现有迁移事务内执行：新增空列不重写整表，但表锁会持续到一次性回填结束；回填检查存量文档并仅更新含冲突标记的行，发布前须核对行数和文档体积，在维护窗口内执行。
+
 本地提交先于云端提交；断网或同步失败保留缓存和待同步改动，恢复后重试并显示同步状态。旧匿名／共用本地画布不自动迁入员工账号，须由用户导出后导入。此机制不是实时协作或无限历史；非 OA／standalone 模式仍使用本地画布。新迁移在正式 PostgreSQL、S3／MinIO 联动及真实 OA 员工入口尚需目标部署环境验证。
 
 ## 公司设计灵感库

@@ -99,7 +99,7 @@ for (const scenario of [
     });
 }
 
-test("same-owner 401 keeps the canvas draft mounted and locked without a document reload", async ({ page, context, api }, info) => {
+test("same-owner 401 keeps the canvas draft editable without a modal or document reload", async ({ page, context, api }, info) => {
     let expired = false;
     let sessionCalls = 0;
     const documents = observeDocuments(page);
@@ -116,26 +116,29 @@ test("same-owner 401 keeps the canvas draft mounted and locked without a documen
     const timeOrigin = await page.evaluate(() => performance.timeOrigin);
     expired = true;
     await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-    const dialog = page.getByRole("dialog", { name: "登录已过期", exact: true });
-    await expect(dialog).toBeVisible();
-    await expect(page.locator("[inert]")).toHaveCount(1);
+    const recovery = page.getByRole("button", { name: "恢复登录", exact: true });
+    await expect(recovery).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "登录已过期", exact: true })).toHaveCount(0);
+    await expect(page.locator("[inert]")).toHaveCount(0);
     await expect(composer).toHaveValue(draft);
     await expect(page.locator(`[data-node-id="${NODE}"]`)).toHaveCount(1);
     await expect(page.getByRole("heading", { name: "登录状态已变化，工作区已暂停" })).toHaveCount(0);
     await page.waitForTimeout(11_500);
-    await expect(dialog).toBeVisible(); await expect(composer).toHaveValue(draft);
+    await expect(recovery).toBeVisible(); await expect(composer).toHaveValue(draft);
+    await composer.fill(`${draft}，仍可继续编辑`);
     expect(documents).toHaveLength(1);
     expect(await page.evaluate(() => performance.timeOrigin)).toBe(timeOrigin);
     await page.screenshot({ path: info.outputPath("401-draft-retained.png") });
     expired = false;
-    await dialog.getByRole("button", { name: "已在其他窗口登录", exact: true }).click();
-    await expect(dialog).toHaveCount(0);
+    await recovery.click();
+    await page.getByRole("button", { name: "已在其他窗口登录", exact: true }).click();
+    await expect(recovery).toHaveCount(0);
     await expect(page.locator("[inert]")).toHaveCount(0);
-    await expect(composer).toHaveValue(draft);
+    await expect(composer).toHaveValue(`${draft}，仍可继续编辑`);
     await expect(page.locator(`[data-node-id="${NODE}"]`)).toBeVisible();
     expect(documents).toHaveLength(1); assertNoGeneration(api);
     await info.attach("navigation-evidence", { contentType: "application/json", body: Buffer.from(JSON.stringify({
         scenario: "401", topLevelDocuments: documents.length, sessionCalls, observationMs: 11_500,
-        draftRetained: await composer.inputValue() === draft, resumedByExplicitSessionCheck: true,
+        draftRetained: await composer.inputValue() === `${draft}，仍可继续编辑`, resumedByExplicitSessionCheck: true,
     }, null, 2)) });
 });

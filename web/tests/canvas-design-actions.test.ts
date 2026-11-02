@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import ts from "typescript";
+import React from "react";
 import { i18nHarness } from "./helpers/i18n-harness";
 import { canvasArrangeOptions } from "../src/lib/canvas/canvas-node-arrange";
 
@@ -9,7 +10,7 @@ const componentUrl = new URL("../src/components/canvas/canvas-design-actions.tsx
 const localRequire = createRequire(componentUrl);
 const code = ts.transpileModule(readFileSync(componentUrl, "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ESNext, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
 const module = { exports: {} as typeof import("../src/components/canvas/canvas-design-actions") };
-new Function("require", "module", "exports", code)((name: string) => name === "@/lib/i18n" ? i18nHarness : name.endsWith(".css") ? {} : localRequire(name), module, module.exports);
+new Function("require", "module", "exports", code)((name: string) => name === "@/lib/i18n" ? i18nHarness : name === "react" ? { ...React, useState: (value: unknown) => [value, () => {}] } : name.endsWith(".css") ? {} : localRequire(name), module, module.exports);
 const { CanvasDesignActions } = module.exports;
 
 function menu(selectedCount: number, selectedImages: number, calls: string[]) {

@@ -41,7 +41,7 @@ export function normalizeCanvasConnection(first: CanvasNodeData, second: CanvasN
     if (first.id === second.id) return null;
     const [source, target] = firstHandleType === "source" ? [first, second] : [second, first];
     if (source.type === CanvasNodeType.Config && target.type === CanvasNodeType.Config) {
-        if ((source.metadata?.generationMode || "image") !== "image" || (target.metadata?.generationMode || "image") !== "image") return null;
+        if ((source.metadata?.generationMode || "image") !== "image" || !["image", "text", "video"].includes(target.metadata?.generationMode || "image")) return null;
         return { fromNodeId: source.id, toNodeId: target.id, kind: "config-sequence" };
     }
     return { fromNodeId: source.id, toNodeId: target.id, ...(source.type === CanvasNodeType.Config ? { kind: "config-target" as const } : {}) };

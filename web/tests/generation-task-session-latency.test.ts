@@ -42,6 +42,7 @@ function controlledNetwork(phase: "initial" | "final", options: { task?: QueuedT
     const submissions: Array<{ path: string; body: Record<string, unknown> }> = [];
     const observations: string[] = [];
     const task = options.task || completedTask;
+    let cancelled = false;
     globalThis.fetch = (async (input, init) => {
         const path = String(input);
         const method = init?.method || "GET";
@@ -58,6 +59,7 @@ function controlledNetwork(phase: "initial" | "final", options: { task?: QueuedT
         if (path === `/api/tasks/${task.id}/recover`) return Response.json({ task: { ...task, status: "running" }, recovered: true });
         if (path.endsWith("/cancel")) {
             cancellations.push(path);
+            cancelled = true;
             return Response.json({ changed: 1 });
         }
         if (path === "/api/auth/session") {
@@ -68,6 +70,9 @@ function controlledNetwork(phase: "initial" | "final", options: { task?: QueuedT
         }
         if (path === `/api/tasks/${task.id}` || (path.startsWith("/api/tasks?") && method === "GET")) {
             observations.push(path);
+            if (options.abort && !init?.signal && path === `/api/tasks/${task.id}`) return Response.json({ task: {
+                ...task, status: cancelled ? "cancelled" : "waiting", attempts: 0, upstreamTaskId: null, submissionStartedAt: null, resultUrls: [],
+            } });
             // Let the first real hydration finish, so finally must start a distinct final refresh.
             if (phase === "final") await useUserStore.getState().hydrateSession();
             if (options.abort) {

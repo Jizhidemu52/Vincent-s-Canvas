@@ -13,6 +13,7 @@ import { useThemeStore } from "@/stores/use-theme-store";
 import { imageModelSettingsError, normalizeImageModelSettings, useImageModelProfile } from "@/lib/image-model-settings";
 import { imageOptionFields, readImageOptions } from "@/lib/image-advanced-settings";
 import { buildCanvasEditMask, canvasMaskBrushPixels, canvasMaskPoint, canvasMaskPreviewSize, clearMaskCanvas, drawMaskStroke, renderMaskPreview } from "@/lib/canvas/canvas-mask-paint";
+import { canvasMaskAdaptationPlan } from "@/lib/canvas/canvas-mask-adaptation";
 
 export type CanvasImageMaskEditPayload = {
     prompt: string;
@@ -90,10 +91,23 @@ export function CanvasNodeMaskEditDialog({
     const [mode, setMode] = useState<DrawMode>("paint");
     const [error, setError] = useState("");
     const [confirmDiscard, setConfirmDiscard] = useState(false);
+    const viewportRef = useRef<HTMLDivElement>(null);
+    const [zoom, setZoom] = useState(1);
+    const [pan, setPan] = useState({ x: 0, y: 0 });
+    const spaceRef = useRef(false);
+    const panRef = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
+    const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
+    const historyRef = useRef<string[]>([]);
+    const [historyIndex, setHistoryIndex] = useState(-1);
+    const historyIndexRef = useRef(-1);
+    const editorEpochRef = useRef(0);
+    const restoringRef = useRef(false);
+    const [restoring, setRestoring] = useState(false);
     const previewSize = image ? canvasMaskPreviewSize(image) : null;
     let settingsError = "";
     let lockedSettings: ReturnType<typeof canvasMaskEditImageSettings> | undefined;
-    try { if (image) lockedSettings = canvasMaskEditImageSettings(effectiveConfig, image, profile); }
+    let adaptation: ReturnType<typeof canvasMaskAdaptationPlan> | undefined;
+    try { if (image) { adaptation = canvasMaskAdaptationPlan(image, profile); lockedSettings = canvasMaskEditImageSettings(effectiveConfig, adaptation, profile); } }
     catch (reason) { settingsError = reason instanceof Error ? reason.message : "原图尺寸不可用于当前模型的严格蒙版编辑"; }
     const outputOptions = readImageOptions(lockedSettings?.imageOptions);
     const outputFields = imageOptionFields(profile).filter(field => ["background", "output_format", "output_compression", "moderation"].includes(field.key));
@@ -114,6 +128,9 @@ export function CanvasNodeMaskEditDialog({
         setImageSettings({});
         setImage(null);
         setConfirmDiscard(false);
+        setZoom(1); setPan({ x: 0, y: 0 });
+        historyRef.current = []; historyIndexRef.current = -1; setHistoryIndex(-1);
+        editorEpochRef.current++; restoringRef.current = false; setRestoring(false);
         paintedRef.current = false;
         let active = true;
         void readCanvasMaskImageSize(dataUrl).then(size => { if (active) setImage(size); }).catch(reason => { if (active) setError(reason instanceof Error ? reason.message : "原图读取失败"); });
@@ -129,6 +146,36 @@ export function CanvasNodeMaskEditDialog({
             previewFrameRef.current = null;
         };
     }, [image, open]);
+
+    useEffect(() => {
+        const viewport = viewportRef.current;
+        if (!open || !viewport) return;
+        const wheel = (event: WheelEvent) => { if (!event.ctrlKey && !event.metaKey) return; event.preventDefault(); event.stopPropagation(); setZoom(current => Math.max(.25, Math.min(8, current * Math.exp(-event.deltaY * .002)))); };
+        viewport.addEventListener("wheel", wheel, { passive: false });
+        return () => viewport.removeEventListener("wheel", wheel);
+    }, [open, image]);
+
+    const saveStroke = () => {
+        const canvas = maskCanvasRef.current;
+        if (!canvas) return;
+        const frames = historyRef.current.slice(0, historyIndexRef.current + 1);
+        frames.push(canvas.toDataURL("image/png"));
+        historyRef.current = frames.slice(-30);
+        historyIndexRef.current = historyRef.current.length - 1; setHistoryIndex(historyIndexRef.current);
+    };
+    const restoreStroke = async (direction: number) => {
+        const index = historyIndexRef.current + direction, canvas = maskCanvasRef.current;
+        if (!canvas || restoringRef.current || index < 0 || index >= historyRef.current.length) return;
+        const epoch = editorEpochRef.current;
+        restoringRef.current = true;
+        setRestoring(true);
+        try {
+            const frame = new Image(); frame.src = historyRef.current[index]!; await frame.decode();
+            if (epoch !== editorEpochRef.current || canvas !== maskCanvasRef.current) return;
+            clearMaskCanvas(canvas); canvas.getContext("2d")?.drawImage(frame, 0, 0); historyIndexRef.current = index; setHistoryIndex(index); refreshPreview(true);
+        } catch { if (epoch === editorEpochRef.current) setError("笔画恢复失败，当前蒙版已保留，请重试。"); }
+        finally { if (epoch === editorEpochRef.current) { restoringRef.current = false; setRestoring(false); } }
+    };
 
     const refreshPreview = (withBorder = false) => {
         if (previewFrameRef.current !== null) cancelAnimationFrame(previewFrameRef.current);
@@ -159,26 +206,36 @@ export function CanvasNodeMaskEditDialog({
         event.preventDefault();
         event.stopPropagation();
         event.currentTarget.setPointerCapture(event.pointerId);
+        if (spaceRef.current) { panRef.current = { x: event.clientX, y: event.clientY, left: pan.x, top: pan.y }; return; }
+        if (restoringRef.current) return;
+        if (!historyRef.current.length) saveStroke();
         drawingRef.current = { active: true, last: null };
         draw(event);
     };
 
     const moveDraw = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+        const rect = event.currentTarget.getBoundingClientRect();
+        setCursor({ x: (event.clientX - rect.left) / zoom, y: (event.clientY - rect.top) / zoom });
+        if (panRef.current) { const start = panRef.current; setPan({ x: start.left + event.clientX - start.x, y: start.top + event.clientY - start.y }); return; }
         if (!drawingRef.current.active) return;
         event.preventDefault();
         draw(event);
     };
 
     const stopDraw = () => {
+        if (drawingRef.current.active) saveStroke();
+        panRef.current = null;
         drawingRef.current = { active: false, last: null };
         refreshPreview(true);
     };
 
     const resetMask = () => {
+        if (restoringRef.current) return;
         if (previewFrameRef.current !== null) cancelAnimationFrame(previewFrameRef.current);
         previewFrameRef.current = null;
         clearMaskCanvas(maskCanvasRef.current);
         clearMaskCanvas(previewCanvasRef.current);
+        saveStroke();
         paintedRef.current = false;
         setError("");
     };
@@ -189,7 +246,7 @@ export function CanvasNodeMaskEditDialog({
     };
 
     const submit = () => {
-        if (!toolEnabled || !profile.supportsMask) return;
+        if (!toolEnabled || !profile.supportsMask || restoringRef.current || confirmDiscard) return;
         const nextPrompt = prompt.trim();
         const canvas = maskCanvasRef.current;
         if (!nextPrompt) return setError("请输入修改要求");
@@ -202,12 +259,32 @@ export function CanvasNodeMaskEditDialog({
         onConfirm({ prompt: nextPrompt, maskDataUrl, model: effectiveConfig.model, imageSettings: { quality: lockedSettings.quality, imageOptions: lockedSettings.imageOptions } });
     };
 
+    useEffect(() => {
+        if (!open) return;
+        const keydown = (event: KeyboardEvent) => {
+            if (event.isComposing || confirmDiscard) return;
+            const input = event.target instanceof HTMLElement && Boolean(event.target.closest("input,textarea,[contenteditable=true]"));
+            if ((event.ctrlKey || event.metaKey) && event.key === "Enter") { event.preventDefault(); submit(); return; }
+            if (input) return;
+            if (event.code === "Space") { event.preventDefault(); spaceRef.current = true; }
+            if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") { event.preventDefault(); void restoreStroke(event.shiftKey ? 1 : -1); }
+            if (event.key === "[") setBrushSize(value => Math.max(8, value - 4));
+            if (event.key === "]") setBrushSize(value => Math.min(160, value + 4));
+            if (event.key.toLowerCase() === "b") setMode("paint");
+            if (event.key.toLowerCase() === "e") setMode("erase");
+        };
+        const keyup = (event: KeyboardEvent) => { if (event.code === "Space") spaceRef.current = false; };
+        const blur = () => { spaceRef.current = false; stopDraw(); };
+        window.addEventListener("keydown", keydown); window.addEventListener("keyup", keyup); window.addEventListener("blur", blur);
+        return () => { window.removeEventListener("keydown", keydown); window.removeEventListener("keyup", keyup); window.removeEventListener("blur", blur); };
+    });
+
     return (
         <>
         <Modal title={t("局部遮罩编辑")} open={open && Boolean(dataUrl)} onCancel={requestClose} footer={null} width={980} centered destroyOnHidden styles={{ body: { maxHeight: "calc(100dvh - 128px)", overflowY: "auto" } }}>
             <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
-                <div className="flex min-w-0 items-center justify-center overflow-hidden rounded-xl border bg-transparent p-0" style={{ borderColor: theme.node.stroke }}>
-                    <div className="relative inline-block max-w-full overflow-hidden rounded-lg bg-transparent select-none">
+                <div ref={viewportRef} className="relative flex min-w-0 items-center justify-center overflow-hidden rounded-xl border bg-transparent p-0" style={{ borderColor: theme.node.stroke }}>
+                    <div className="relative inline-block max-w-full rounded-lg bg-transparent select-none" style={{ transform: `translate(${pan.x}px,${pan.y}px) scale(${zoom})` }}>
                         <img src={dataUrl} alt="" className="block max-h-[68vh] max-w-full bg-transparent" draggable={false} />
                         {image && previewSize ? (
                             <>
@@ -222,13 +299,21 @@ export function CanvasNodeMaskEditDialog({
                                     onPointerMove={moveDraw}
                                     onPointerUp={stopDraw}
                                     onPointerCancel={stopDraw}
+                                    onPointerLeave={() => setCursor(null)}
                                 />
+                                {cursor ? <span aria-hidden className="pointer-events-none absolute rounded-full border" style={{ left: cursor.x, top: cursor.y, width: brushSize / zoom, height: brushSize / zoom, transform: "translate(-50%,-50%)", borderColor: theme.canvas.selectionStroke, boxShadow: `0 0 0 1px ${theme.node.fill}` }} /> : null}
                             </>
                         ) : null}
                     </div>
                 </div>
 
                 <div className="flex min-h-[360px] flex-col gap-5">
+                    <div className="flex flex-wrap items-center gap-2">
+                        <Button size="small" onClick={() => setZoom(value => Math.max(.25, value / 1.25))}>−</Button><span>{Math.round(zoom * 100)}%</span><Button size="small" onClick={() => setZoom(value => Math.min(8, value * 1.25))}>+</Button>
+                        <Button size="small" onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }); }}>适应窗口</Button>
+                        <Button size="small" disabled={restoring || historyIndex < 1} onClick={() => void restoreStroke(-1)}>撤销笔画</Button><Button size="small" disabled={restoring || historyIndex >= historyRef.current.length - 1} onClick={() => void restoreStroke(1)}>重做</Button>
+                        <span className="text-xs" style={{ color: theme.node.muted }}>空格拖动 · Ctrl + 滚轮缩放 · [ ] 调笔刷 · B / E 切换</span>
+                    </div>
                     <div>
                         <div className="mt-2 text-sm opacity-60">{image ? t("输出尺寸锁定为原图 {value1} × {value2}px", { value1: image.width, value2: image.height }) : t("读取真实像素尺寸中")}</div>
                     </div>
@@ -258,7 +343,7 @@ export function CanvasNodeMaskEditDialog({
                     </div>
 
                     <div className="space-y-3">
-                        <p className="text-xs leading-5" style={{ color: theme.node.muted }}>{t("蒙版坐标与原图像素一一对应，不调整比例、尺寸或分辨率，也不会自动拉伸原图或蒙版。")}</p>
+                        <p className="text-xs leading-5" style={{ color: theme.node.muted }}>{adaptation && image && (adaptation.width !== image.width || adaptation.height !== image.height) ? `自动适配至 ${adaptation.width} × ${adaptation.height}px：原图与蒙版等比缩放并补边，结果还原原尺寸，未涂抹区域保留原图像素。` : "按原图像素编辑；未涂抹区域保留原图像素。"}</p>
                         {profile.kind === "standard" || profile.kind === "quality-resolution" ? <label className="flex flex-col gap-1 text-xs">
                             <span>{t("图片质量")}</span>
                             <select aria-label={t("图片质量")} className="rounded border px-2 py-1.5" style={{ background: theme.node.fill, color: theme.node.text, borderColor: theme.node.stroke }} value={lockedSettings?.quality || effectiveConfig.quality} onChange={event => setImageSettings(current => ({ ...current, quality: event.target.value }))}>

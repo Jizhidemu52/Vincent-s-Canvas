@@ -8,10 +8,16 @@ const connections: CanvasConnection[] = [
     { id: "b", fromNodeId: "second", toNodeId: "third" },
 ];
 
-test("hides non-selected connection clutter in the far canvas overview", () => {
-    expect(selectCanvasOverviewConnections(connections, new Set())).toEqual([]);
+test("preserves ordinary graph relationships in the far canvas overview", () => {
+    expect(selectCanvasOverviewConnections(connections, new Set())).toBe(connections);
 });
 
 test("keeps selected connection context visible in the far canvas overview", () => {
-    expect(selectCanvasOverviewConnections(connections, new Set(["b"]))).toEqual([connections[1]]);
+    expect(selectCanvasOverviewConnections(connections, new Set(["b"]))).toBe(connections);
+});
+
+test("only exceptionally dense graphs fall back to selected paths", () => {
+    const dense = Array.from({ length: 2001 }, (_, index) => ({ id: String(index), fromNodeId: "a", toNodeId: "b" }));
+    expect(selectCanvasOverviewConnections(dense, new Set(["10"]))).toEqual([dense[10]]);
+    expect(selectCanvasOverviewConnections(dense, new Set())).toEqual([]);
 });

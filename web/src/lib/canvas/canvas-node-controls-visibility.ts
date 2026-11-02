@@ -10,8 +10,8 @@ type CanvasNodeControlsVisibility = {
     isImage?: boolean;
 };
 
-/** Selection owns resize controls; image hover alone only previews its outline. */
-export function shouldRenderCanvasNodeControls({ renderQuality, hovered, selected, multiSelected = false, connecting, kind = "connection", isImage = false }: CanvasNodeControlsVisibility) {
+/** Selection owns resize controls; hovering any node reveals its connection ports. */
+export function shouldRenderCanvasNodeControls({ renderQuality, hovered, selected, multiSelected = false, connecting, kind = "connection" }: CanvasNodeControlsVisibility) {
     if (renderQuality === "moving") return false;
     if (renderQuality === "overview" && selected && multiSelected) {
         // Keep one hovered node's ports (and active connection targets) usable,
@@ -20,5 +20,5 @@ export function shouldRenderCanvasNodeControls({ renderQuality, hovered, selecte
     }
     if (kind === "resize") return selected;
     const isPassiveOverviewNode = renderQuality === "overview" && !hovered && !selected;
-    return !isPassiveOverviewNode && (connecting || (isImage ? selected && hovered : hovered || selected));
+    return connecting || (!isPassiveOverviewNode && (hovered || selected));
 }

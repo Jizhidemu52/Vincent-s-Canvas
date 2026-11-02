@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { createImageSequence, prepareImageSequenceStep, runImageSequence } from "@/lib/canvas/canvas-image-sequence";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import { cloneCanvasNodeGraph, copyCanvasNodeGraph } from "@/lib/canvas/canvas-node-copy";
-import { addCanvasImageSequence, runCanvasImageSequence, type ImageSequenceOptions } from "@/pages/canvas/canvas-image-sequence-runtime";
+import { addCanvasImageSequence, prepareCanvasImageWorkflow, runCanvasImageSequence, type ImageSequenceOptions } from "@/pages/canvas/canvas-image-sequence-runtime";
 import { imageWorkflowConnectionError, resolveImageWorkflow } from "@/lib/canvas/canvas-image-workflow";
 import { createCanvasGraphStore } from "@/stores/canvas/canvas-graph-store";
 
@@ -192,5 +192,74 @@ describe("serial image sequence", () => {
         expect(imageWorkflowConnectionError({ fromNodeId: "1", toNodeId: "4", kind: "config-sequence" }, f.graph().connections)).toBeUndefined();
         expect(() => resolveImageWorkflow({ ...f.graph(), connections: f.graph().connections.filter(edge => edge.fromNodeId !== "source") }, "1")).toThrow("原图");
         expect(() => resolveImageWorkflow({ ...f.graph(), connections: [...f.graph().connections, { id: "cycle", fromNodeId: "3", toNodeId: "1", kind: "config-sequence" }] }, "1")).toThrow("循环");
+    });
+});
+
+function managedWorkflow() {
+    const store = createCanvasGraphStore();
+    store.getState().setField("nodes", [image("source")]);
+    const calls: string[] = [];
+    const options: ImageSequenceOptions = {
+        projectId: "workflow-test", nodes: { current: [] }, connections: { current: [] }, groups: { current: [] }, locks: { current: new Set() },
+        setNodes: value => store.getState().setField("nodes", value), setConnections: value => store.getState().setField("connections", value), setGroups() {}, stopGeneration() {},
+        generate: async id => {
+            calls.push(id);
+            const mode = store.getState().nodes.find(node => node.id === id)?.metadata?.generationMode || "image";
+            const output: CanvasNodeData = { ...image(`result-${calls.length}`), type: mode as CanvasNodeType, metadata: { content: mode === "text" ? "workflow summary" : `https://example.test/result-${calls.length}`, status: "success" } };
+            store.getState().setField("nodes", nodes => [...nodes, output]);
+            store.getState().setField("connections", edges => [...edges, { id: output.id, fromNodeId: id, toNodeId: output.id, kind: "generation-output" }]);
+            return { mode, outputs: [{ nodeId: output.id, status: "success", url: output.metadata!.content }] };
+        },
+    };
+    const created = addCanvasImageSequence(options, "source", [["一", "白底"], ["二", "紫色"], ["三", "模特"]], "model");
+    const ids = created.nodes.map(node => node.id);
+    const run = (rerunStepId?: string, onlyStep = false) => runCanvasImageSequence(() => options, { groupId: created.group.id, nodeId: ids[0], controller: new AbortController(), rerunStepId, onlyStep }, "lock", () => true);
+    return { store, options, ids, calls, run };
+}
+
+describe("incremental workflow execution", () => {
+    test("unchanged automatic inputs are stable and editing step three preserves steps one and two", async () => {
+        const f = managedWorkflow(); await f.run();
+        expect(f.calls).toEqual(f.ids);
+        await f.run();
+        expect(f.calls).toEqual(f.ids);
+        f.store.getState().setField("nodes", nodes => nodes.map(node => node.id === f.ids[2] ? { ...node, metadata: { ...node.metadata, composerContent: `${node.metadata?.composerContent}\n新场景` } } : node));
+        const group = prepareCanvasImageWorkflow(f.options, f.ids[0]!);
+        expect(group.imageSequence!.steps.map(step => step.status)).toEqual(["success", "success", "stale"]);
+        await f.run();
+        expect(f.calls).toEqual([...f.ids, f.ids[2]!]);
+    });
+    test("rerunning only one step marks descendants stale and a later continue executes only those descendants", async () => {
+        const f = managedWorkflow(); await f.run();
+        await f.run(f.ids[1], true);
+        expect(f.calls).toEqual([...f.ids, f.ids[1]!]);
+        expect(f.options.groups.current[0]!.imageSequence!.steps.map(step => step.status)).toEqual(["success", "success", "stale"]);
+        await f.run();
+        expect(f.calls).toEqual([...f.ids, f.ids[1]!, f.ids[2]!]);
+    });
+    test("manual reference changes invalidate that step and descendants but not predecessors", async () => {
+        const f = managedWorkflow(); await f.run();
+        f.store.getState().setField("nodes", nodes => nodes.map(node => node.id === f.ids[1] ? { ...node, metadata: { ...node.metadata, manualImageReferences: [{ id: "common", referenceKey: "upload:common", name: "风格", type: "image/png", content: "data:image/png;base64,abc", origin: "upload" }] } } : node));
+        await f.run();
+        expect(f.calls).toEqual([...f.ids, f.ids[1]!, f.ids[2]!]);
+    });
+    test("changing the original invalidates all steps and unresolved paid steps cannot be replayed", async () => {
+        const f = managedWorkflow(); await f.run();
+        f.store.getState().setField("nodes", nodes => nodes.map(node => node.id === "source" ? { ...node, metadata: { ...node.metadata, content: "replacement.png" } } : node));
+        const group = prepareCanvasImageWorkflow(f.options, f.ids[0]!);
+        expect(group.imageSequence!.steps.map(step => step.status)).toEqual(["stale", "stale", "stale"]);
+        group.imageSequence!.steps[1]!.status = "running";
+        expect(() => prepareCanvasImageWorkflow(f.options, f.ids[0]!, f.ids[1])).toThrow("原任务尚未确认");
+        expect(f.calls).toEqual(f.ids);
+    });
+    test("last text and video steps retain their mode and successful outputs are not regenerated", async () => {
+        for (const mode of ["text", "video"] as const) {
+            const f = managedWorkflow();
+            f.store.getState().setField("nodes", nodes => nodes.map(node => node.id === f.ids[2] ? { ...node, metadata: { ...node.metadata, generationMode: mode } } : node));
+            await f.run(); await f.run();
+            expect(f.calls).toEqual(f.ids);
+            expect(f.options.groups.current[0]!.imageSequence!.status).toBe("success");
+            expect(f.store.getState().nodes.find(node => node.id === f.ids[2])?.metadata?.generationMode).toBe(mode);
+        }
     });
 });

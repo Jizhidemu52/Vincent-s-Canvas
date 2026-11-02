@@ -53,7 +53,9 @@ export function readImageMeta(dataUrl: string) {
                 image.src = "";
                 reject(error);
             } else {
-                resolve({ width: image.naturalWidth, height: image.naturalHeight, mimeType: dataUrl.match(/^data:([^;,]+)/i)?.[1] || "image/png" });
+                const meta = { width: image.naturalWidth, height: image.naturalHeight, mimeType: dataUrl.match(/^data:([^;,]+)/i)?.[1] || "image/png" };
+                image.src = "";
+                resolve(meta);
             }
         };
         // Large originals may take longer than a few seconds to decode. A timeout

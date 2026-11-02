@@ -27,6 +27,7 @@ type ImageSettingsPanelProps = {
 export function ImageSettingsPanel({ config, onConfigChange, onConfigNormalize = onConfigChange, theme, showTitle = true, className = "", maxCount: maximum, profile: suppliedProfile, referenceCount = 0, compact = false, spacious = false }: ImageSettingsPanelProps) {
     useUiLocale();
     const [snapToStep, setSnapToStep] = useState(false);
+    const [sizeNotice, setSizeNotice] = useState("");
     const cachedProfile = useImageModelProfile(config.model || config.imageModel);
     const profile = suppliedProfile || cachedProfile;
     const normalized = normalizeImageModelSettings(config, profile);
@@ -57,7 +58,10 @@ export function ImageSettingsPanel({ config, onConfigChange, onConfigNormalize =
             // without fighting parent normalizers; request serialization omits it.
             if (key === "quality" && referenceQualityDisabled) continue;
             const value = key === "count" ? String(count) : normalized[key];
-            if (config[key] !== value) onConfigNormalize(key, value);
+            if (config[key] !== value) {
+                if (key === "size" && config.size) setSizeNotice(`该模型不支持 ${config.size}，已改为最接近的 ${value}`);
+                onConfigNormalize(key, value);
+            }
         }
     }, [config.size, config.quality, config.count, normalized.size, normalized.quality, count, referenceQualityDisabled, onConfigNormalize]);
     useEffect(() => {
@@ -75,6 +79,7 @@ export function ImageSettingsPanel({ config, onConfigChange, onConfigNormalize =
         <div className={`image-parameters${spacious ? " ip-spacious" : ""} ${className}`} style={{ "--ip-text": theme.node.text, "--ip-muted": theme.node.muted, "--ip-border": theme.node.stroke, "--ip-soft": theme.node.fill, "--ip-panel": theme.toolbar.panel } as CSSProperties}
             onMouseDown={event => event.stopPropagation()}>
             {showTitle ? <div className="ip-title">{uiText("图像设置")}</div> : null}
+            {sizeNotice ? <p role="status" className="mb-2 text-xs" style={{ color: theme.node.muted }}>{sizeNotice}</p> : null}
             {profile.kind === "midjourney-blend" ? <>
                 <div className="ip-row"><span className="ip-label">{uiText("比例预设")}</span><label className="ip-select">
                     <select aria-label={uiText("比例预设")} value={options.dimensions || "SQUARE"} onChange={event => updateOption("dimensions", event.target.value)}>

@@ -55,7 +55,7 @@ export function resolveSharedGenerationPlan(targetId: string, configId: string, 
     const addLabel = (id: string | undefined, label: string) => {
         if (!id) return;
         const previous = labels.get(id);
-        if (previous && previous !== label) throw new Error(`素材引用 ${id} 存在歧义，请重新选择引用。`);
+        if (previous && previous !== label) throw new Error(`素材“${byId.get(id)?.title || "已选参考图"}”存在重复引用，请重新选择。`);
         labels.set(id, label);
     };
     const labelImage = (image: ReferenceImage, aliases: Array<string | undefined>) => {
@@ -75,7 +75,7 @@ export function resolveSharedGenerationPlan(targetId: string, configId: string, 
     const sourcePrompt = configNode.metadata?.composerContent || configNode.metadata?.prompt || "";
     let prompt = sourcePrompt.replace(/@\[node:([^\]]+)\]/g, (_token, id: string) => {
         const label = labels.get(id);
-        if (!label) throw new Error(`提示词引用的素材 ${id} 不存在、为空或已被排除，请重新选择引用。`);
+        if (!label) throw new Error(`提示词中的“${byId.get(id)?.title || "已失效引用"}”不可用，请移除该引用并重新选择素材。`);
         return label;
     }).trim();
     const textBlocks = textInputs.map((input, index) => `【文本${index + 1}】\n${input.text || ""}`);

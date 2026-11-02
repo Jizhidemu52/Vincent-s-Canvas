@@ -29,6 +29,7 @@ export function useCanvasPersistence(options: {
     updateProject: UpdateProject; batchEditRunning: boolean; runningNodeId: string | null;
     viewport: ViewportTransform;
     selectedNodeIds?: ReadonlySet<string>;
+    writable?: RefObject<boolean>;
 }) {
     const { projectId, projectLoaded, usePerformanceScenario, projectSaveQueueRef, updateProject, batchEditRunning, runningNodeId, viewport, selectedNodeIds } = options;
     const { historyRef, lastHistoryRef, historyPausedRef, applyingHistoryRef, historyState } = options.history;
@@ -48,7 +49,7 @@ export function useCanvasPersistence(options: {
     }, [projectId]);
 
     useEffect(() => {
-        if (!projectLoaded || historyPausedRef.current || usePerformanceScenario) return;
+        if (!projectLoaded || historyPausedRef.current || usePerformanceScenario || options.writable?.current === false) return;
         projectSaveQueueRef.current?.schedule(
             {
                 projectId,
@@ -63,6 +64,7 @@ export function useCanvasPersistence(options: {
 
     useEffect(() => {
         const flushProjectSave = () => {
+            if (options.writable?.current === false) return;
             projectSaveQueueRef.current?.flush();
             viewportSaveQueueRef.current?.flush();
             // The editor queue feeds the store queue. Flush both in this order so
@@ -92,7 +94,7 @@ export function useCanvasPersistence(options: {
     }, []);
 
     useEffect(() => {
-        if (!projectLoaded || usePerformanceScenario) return;
+        if (!projectLoaded || usePerformanceScenario || options.writable?.current === false) return;
         // Capture the owner and value together: a project switch must never save
         // the next project's live viewport into the previous project.
         viewportSaveQueueRef.current?.schedule({ projectId, viewport,

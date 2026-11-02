@@ -1,5 +1,5 @@
 import { useUiText, uiText } from "@/lib/i18n";
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Copy, LocateFixed, Settings2 } from "lucide-react";
 import { useCopyText } from "@/hooks/use-copy-text";
 import { canvasExperienceReport } from "@/lib/canvas/canvas-performance-report";
@@ -30,13 +30,28 @@ export function CanvasTaskFeedback({ feedback }: { feedback: CanvasTaskFeedbackV
     const diagnosticsEnabled = useCanvasDiagnosticsEnabled();
     const copy = useCopyText();
     const { progress } = feedback;
+    const details = useRef<HTMLDetailsElement>(null);
+    const [showCompleted, setShowCompleted] = useState(true);
+    useEffect(() => {
+        setShowCompleted(true);
+        if (progress.active || !progress.total) return;
+        const timer = setTimeout(() => setShowCompleted(false), 10_000);
+        return () => clearTimeout(timer);
+    }, [progress.active, progress.total, progress.completed, progress.failed, progress.stopped]);
+    useEffect(() => {
+        if (!diagnosticsEnabled) return;
+        const outside = (event: PointerEvent) => { if (details.current?.open && !details.current.contains(event.target as Node)) details.current.open = false; };
+        const escape = (event: KeyboardEvent) => { if (event.key === "Escape" && details.current?.open) { event.preventDefault(); event.stopPropagation(); details.current.open = false; details.current.querySelector("summary")?.focus(); } };
+        document.addEventListener("pointerdown", outside, true); document.addEventListener("keydown", escape, true);
+        return () => { document.removeEventListener("pointerdown", outside, true); document.removeEventListener("keydown", escape, true); };
+    }, [diagnosticsEnabled]);
     return <div className="flex items-center gap-3 text-xs" style={{ color: theme.toolbar.item }} data-canvas-no-zoom data-testid="canvas-task-feedback">
         <span role="status" aria-live="polite" aria-atomic="true">
-            {progress.active ? t("生成进度 {value1}/{value2}", { value1: progress.completed, value2: progress.total }) : progress.total ? t("已结束：{value1} 个成功{value2}{value3}", { value1: progress.successful, value2: progress.failed ? uiText("，{value1} 个失败", { value1: progress.failed }) : "", value3: progress.stopped ? uiText("，{value1} 个已停止观察", { value1: progress.stopped }) : "" }) : ""}
+            {progress.active ? t("生成进度 {value1}/{value2}", { value1: progress.completed, value2: progress.total }) : showCompleted && progress.total ? t("已结束：{value1} 个成功{value2}{value3}", { value1: progress.successful, value2: progress.failed ? uiText("，{value1} 个失败", { value1: progress.failed }) : "", value3: progress.stopped ? uiText("，{value1} 个已停止观察", { value1: progress.stopped }) : "" }) : ""}
         </span>
         {feedback.latestResultIds.length ? <button type="button" className="inline-flex items-center gap-1.5 rounded px-1 py-1 hover:opacity-75" onClick={feedback.locateLatest}>
             <LocateFixed size={14} />{t("定位到结果")}</button> : null}
-        {diagnosticsEnabled ? <details className="relative">
+        {diagnosticsEnabled ? <details ref={details} className="relative">
             <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded px-1 py-1 hover:opacity-75" aria-label={t("本页体验数据")}><Settings2 size={14} /><span>{t("体验数据")}</span></summary>
             <div className="absolute bottom-full right-0 z-[220] mb-3 w-72 max-w-[calc(100vw-2rem)] rounded-xl border p-4 text-xs" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}>
                 <div>

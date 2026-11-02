@@ -21,12 +21,13 @@ function harness(model = "gpt-image-2") {
     const executedIds: string[] = [];
     const errors: string[] = [];
     let result: CanvasGenerationResult | undefined;
-    let afterExecute: (() => void) | undefined;
+    let afterExecute: (() => void | Promise<void>) | undefined;
     let recovered = 0;
-    const run = (id = "config") => runCanvasGeneration(id, "image", "ignored", value => { result = value; }, {
+    const run = (id = "config", retryFailedOnly = false) => runCanvasGeneration(id, "image", "ignored", value => { result = value; }, {
+        retryFailedOnly,
         snapshot: { nodes, connections }, getSnapshot: () => ({ nodes, connections }),
         buildConfig: () => ({ ...defaultConfig, model }), isAiConfigReady: () => true,
-        execute: async (id, mode, _prompt, onResult, shared) => { executedIds.push(id); if (shared) calls.push(shared); onResult?.({ mode, outputs: [{ nodeId: id, status: "success" }] }); afterExecute?.(); },
+        execute: async (id, mode, _prompt, onResult, shared) => { executedIds.push(id); if (shared) calls.push(shared); onResult?.({ mode, outputs: [{ nodeId: id, status: "success" }] }); await afterExecute?.(); },
         recover: async () => { recovered++; return [{ nodeId: "existing", status: "success" }]; },
         start: () => controller, finish: () => {}, setRunning: () => {},
         setNodes: value => { nodes = typeof value === "function" ? value(nodes) : value; },
@@ -36,11 +37,11 @@ function harness(model = "gpt-image-2") {
         setNodes: (value: CanvasNodeData[]) => { nodes = value; }, get nodes() { return nodes; },
         setConnections: (value: CanvasConnection[]) => { connections = value; }, get connections() { return connections; },
         disconnectB: () => { connections = connections.filter(edge => edge.toNodeId !== "b"); },
-        afterExecute: (callback: () => void) => { afterExecute = callback; },
+        afterExecute: (callback: () => void | Promise<void>) => { afterExecute = callback; },
     };
 }
 
-test("shared targets dispatch serially with a frozen single-task config and tool route", async () => {
+test("shared targets dispatch with a frozen single-task config and tool route", async () => {
     const h = harness(); await h.run();
     expect(h.calls.map(call => call.plan.targetNode.id)).toEqual(["a", "b"]);
     expect(h.calls.every(call => call.config.count === "1" && call.toolKey === "canvas-image")).toBe(true);
@@ -50,9 +51,10 @@ test("mixed generation and editing targets reject before any task submission", a
     const h = harness(); h.setNodes(h.nodes.map(item => item.id === "a" ? { ...item, metadata: { content: "blob:a" } } : item));
     await h.run(); expect(h.calls).toHaveLength(0); expect(h.errors[0]).toContain("拆成两套配置");
 });
-test("an invalid later target prevents submitting earlier valid targets", async () => {
+test("an invalid later target is reported without discarding earlier valid targets", async () => {
     const h = harness(); h.setNodes(h.nodes.map(item => item.id === "b" ? { ...item, type: CanvasNodeType.Audio, metadata: { content: "blob:audio" } } : item));
-    await h.run(); expect(h.calls).toHaveLength(0); expect(h.errors).toHaveLength(1);
+    await h.run(); expect(h.calls.map(item => item.plan.targetNode.id)).toEqual(["a"]); expect(h.errors).toEqual([]);
+    expect(h.result?.outputs.find(item => item.nodeId === "b")?.status).toBe("failed");
 });
 test("alternating image board bindings reject before task submission", async () => {
     const h = harness(); h.setNodes(h.nodes.map(item => item.type === CanvasNodeType.Image ? { ...item, metadata: { content: `blob:${item.id}` } } : item));
@@ -66,9 +68,36 @@ test("disconnecting a pending target skips it without executing the stale snapsh
     const h = harness(); h.afterExecute(h.disconnectB); await h.run();
     expect(h.calls).toHaveLength(1); expect(h.result?.outputs[1]).toMatchObject({ nodeId: "b", status: "failed", error: "目标或连线已删除" });
 });
-test("stop aborts later serial tasks and single-target entry does not run siblings", async () => {
+test("stop aborts targets not yet dispatched and single-target entry does not run siblings", async () => {
     const h = harness(); h.afterExecute(() => h.controller.abort()); await h.run(); expect(h.calls).toHaveLength(1);
     const single = harness(); await single.run("b"); expect(single.calls.map(call => call.plan.targetNode.id)).toEqual(["b"]);
+});
+
+test("shared dispatch runs at most three independent targets concurrently", async () => {
+    const h = harness();
+    h.setNodes([node("config", CanvasNodeType.Config), ...["a", "b", "c", "d", "e"].map(id => node(id))]);
+    h.setConnections(["a", "b", "c", "d", "e"].map(id => ({ id, fromNodeId: "config", toNodeId: id, kind: "config-target" })));
+    const firstWave = Promise.withResolvers<void>();
+    let active = 0, peak = 0;
+    h.afterExecute(async () => { active++; peak = Math.max(peak, active); await firstWave.promise; active--; });
+    const running = h.run(); await new Promise(resolve => setTimeout(resolve, 0));
+    expect(h.executedIds).toEqual(["a", "b", "c"]); expect(peak).toBe(3);
+    firstWave.resolve(); await running;
+    expect(h.executedIds).toEqual(["a", "b", "c", "d", "e"]); expect(peak).toBe(3);
+});
+
+test("retry failed targets keeps prior successes and never reruns an unresolved original task", async () => {
+    const h = harness();
+    h.setNodes([...h.nodes,
+        { ...node("a-success"), metadata: { status: "success", generationOrigin: { configNodeId: "config", sourceNodeId: "a", runId: "prior", mode: "image" } } },
+        { ...node("b-failed"), metadata: { status: "error", generationOrigin: { configNodeId: "config", sourceNodeId: "b", runId: "prior", mode: "image" } } },
+    ]);
+    await h.run("config", true);
+    expect(h.executedIds).toEqual(["b"]);
+    const pending = harness();
+    pending.setNodes([...pending.nodes, { ...node("unresolved"), metadata: { status: "error", imageTask: {} as NonNullable<CanvasNodeData["metadata"]>["imageTask"], generationOrigin: { configNodeId: "config", sourceNodeId: "b", runId: "prior", mode: "image" } } }]);
+    await pending.run("config", true);
+    expect(pending.recovered).toBe(1); expect(pending.executedIds).toEqual([]);
 });
 test("pending image outputs recover rather than resubmitting the shared group", async () => {
     const h = harness(); h.setNodes([...h.nodes, { ...node("existing"), metadata: { generationOrigin: { configNodeId: "config", sourceNodeId: "a", runId: "old", mode: "image" }, imageTask: {} as NonNullable<CanvasNodeData["metadata"]>["imageTask"] } }]);

@@ -27,10 +27,10 @@ export function resolveImageWorkflow(graph: ImageWorkflowGraph, nodeId: string):
     }
     for (const id of component) {
         const node = byId.get(id);
-        if (node?.type !== CanvasNodeType.Config || (node.metadata?.generationMode || "image") !== "image") throw new Error("图片工作流的步骤必须是生图配置节点");
+        const mode = node?.metadata?.generationMode || "image";
+        if (node?.type !== CanvasNodeType.Config || !["image", "text", "video"].includes(mode) || (mode !== "image" && edges.some(edge => edge.fromNodeId === id))) throw new Error("工作流中间步骤使用生图配置，末步可使用文本或视频配置");
         if (!(node.metadata?.composerContent || node.metadata?.prompt || "").replace(/@\[node:[^\]]+\]/g, "").trim()) throw new Error(`${node.title}：请先填写提示词`);
         if (graph.connections.some(edge => edge.fromNodeId === id && edge.kind === "config-target")) throw new Error(`${node.title}：请断开共享任务连线，只保留通往下一步配置的工作流连线`);
-        if (node.metadata?.manualImageReferences?.length) throw new Error(`${node.title}：当前改图工作流每步使用一张上游图片，请移除额外的手动参考图`);
     }
     const roots = [...component].filter(id => !parent.has(id));
     if (roots.length !== 1) throw new Error("工作流存在循环或缺少起点，请检查连线");
@@ -52,9 +52,18 @@ export function resolveImageWorkflow(graph: ImageWorkflowGraph, nodeId: string):
     return { sourceNodeId: sources[0]!.id, steps };
 }
 
-export function imageWorkflowDefinitionKey(plan: ImageWorkflowPlan, nodes: CanvasNodeData[]) {
-    return JSON.stringify([plan, plan.steps.map(step => {
-        const metadata = nodes.find(node => node.id === step.configNodeId)?.metadata;
-        return [(metadata?.composerContent || metadata?.prompt || "").replace(/@\[node:[^\]]+\]/g, "").trim(), metadata?.model, metadata?.size, metadata?.quality, metadata?.imageOptions, metadata?.systemPrompt, metadata?.promptInput];
-    })]);
+export function imageWorkflowStepKey(configNodeId: string, nodes: CanvasNodeData[], automaticInputs: readonly string[] = [], sourceRevision?: unknown) {
+    const metadata = nodes.find(node => node.id === configNodeId)?.metadata;
+    const automatic = new Set(automaticInputs);
+    const prompt = (metadata?.composerContent || metadata?.prompt || "").replace(/@\[node:([^\]]+)\]/g, (token, id) => automatic.has(id) ? "" : token).trim();
+    return JSON.stringify([prompt, metadata?.model, metadata?.size, metadata?.quality, metadata?.imageOptions, metadata?.systemPrompt, metadata?.promptInput, metadata?.manualImageReferences,
+        (metadata?.imageReferenceOrder || []).filter(key => !automatic.has(key.replace(/^node:/, ""))), metadata?.generationMode || "image", metadata?.videoMode, metadata?.seconds, metadata?.vquality, metadata?.generateAudio, metadata?.watermark, sourceRevision]);
+}
+export function imageWorkflowPlanStepKey(plan: ImageWorkflowPlan, step: ImageWorkflowPlan["steps"][number], graph: ImageWorkflowGraph) {
+    const source = !step.inputConfigId ? graph.nodes.find(node => node.id === plan.sourceNodeId) : undefined;
+    const automaticInputs = source ? [source.id] : graph.connections.filter(edge => edge.kind === "sequence-input" && edge.toNodeId === step.configNodeId).map(edge => edge.fromNodeId);
+    return imageWorkflowStepKey(step.configNodeId, graph.nodes, automaticInputs, source ? [source.metadata?.storageKey, source.metadata?.content, source.metadata?.naturalWidth, source.metadata?.naturalHeight] : undefined);
+}
+export function imageWorkflowDefinitionKey(plan: ImageWorkflowPlan, nodes: CanvasNodeData[], connections: CanvasConnection[] = []) {
+    return JSON.stringify([plan, plan.steps.map(step => imageWorkflowPlanStepKey(plan, step, { nodes, connections }))]);
 }

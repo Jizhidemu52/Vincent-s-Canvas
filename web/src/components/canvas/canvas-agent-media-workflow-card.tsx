@@ -7,11 +7,12 @@ import { canGenerateWorkflowVideo } from "@/lib/canvas/agent-media-workflow";
 import { imageModelDisplayName } from "@/lib/model-display";
 import { CanvasPersistedMediaPreview } from "./canvas-persisted-media-preview";
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
-import type { CanvasAgentMediaWorkflow } from "@/types/canvas";
+import type { CanvasAgentMediaWorkflow, CanvasNodeData } from "@/types/canvas";
 import { ImageSettingsPanel } from "@/components/image-settings-panel";
 import { canvasThemes, type CanvasTheme } from "@/lib/canvas-theme";
 import { defaultConfig } from "@/stores/use-config-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
+import { getVideoModelParameterSpec, videoAspectRatioFollowsImage } from "@/lib/video-model-parameters";
 
 type CanvasAgentMediaWorkflowCardProps = {
     workflow: CanvasAgentMediaWorkflow;
@@ -29,6 +30,7 @@ type CanvasAgentMediaWorkflowCardProps = {
     onGenerateVideo?: () => void;
     onRetry?: (stage: "image" | "video") => void;
     onOpenResult?: () => void;
+    referenceNodes?: CanvasNodeData[];
 };
 
 export function getCanvasAgentMediaWorkflowCardState(workflow: CanvasAgentMediaWorkflow, actions: { hasVideoAction: boolean }) {
@@ -82,7 +84,7 @@ export function getCanvasAgentMediaWorkflowCardContract(workflow: CanvasAgentMed
         label: uiText("初始参考图 {value1} 张", { value1: workflow.referenceNodeIds.length }),
         items: workflow.referenceNodeIds.map((nodeId, index) => ({
             nodeId,
-            label: uiText("参考图 {value1} · {value2}", { value1: index + 1, value2: shortNodeId(nodeId) }),
+            label: uiText("图{number}", { number: index + 1 }),
         })),
     };
 
@@ -94,7 +96,7 @@ export function getCanvasAgentMediaWorkflowCardContract(workflow: CanvasAgentMed
         videoSeconds: workflow.videoSeconds,
         aspectRatio: workflow.aspectRatio,
         initialReferenceSummary,
-        selectedCandidateSummary: selectedCandidate ? `${selectedCandidate.label} · ${selectedCandidate.nodeId}` : uiText("未选择候选图"),
+        selectedCandidateSummary: selectedCandidate ? selectedCandidate.label : uiText("未选择候选图"),
         videoResult: workflow.videoResult ? { ...workflow.videoResult, canOpen: Boolean(actions.hasResultAction) } : undefined,
         imageModelSelect: { value: imageModel, disabled: !actions.hasImageModelChange },
         videoModelSelect: { value: videoModel, disabled: !actions.hasVideoModelChange },
@@ -125,6 +127,7 @@ export function CanvasAgentMediaWorkflowCard({
     onGenerateVideo,
     onRetry,
     onOpenResult,
+    referenceNodes = [],
 }: CanvasAgentMediaWorkflowCardProps) {
     const t = useUiText();
     const card = getCanvasAgentMediaWorkflowCardContract(workflow, {
@@ -140,6 +143,10 @@ export function CanvasAgentMediaWorkflowCard({
     });
     const showImageStage = workflow.intent !== "video";
     const showVideoStage = workflow.intent !== "image";
+    const videoSpec = getVideoModelParameterSpec(workflow.videoModel);
+    const seconds = videoSpec ? Array.from({ length: videoSpec.seconds[1] - videoSpec.seconds[0] + 1 }, (_, index) => String(videoSpec.seconds[0] + index)) : [workflow.videoSeconds];
+    const ratios = videoSpec ? [...videoSpec.sizes] : [workflow.aspectRatio];
+    const imageRatio = videoAspectRatioFollowsImage(workflow.videoModel, workflow.selectedCandidateNodeId ? 1 : workflow.referenceNodeIds.length);
 
     return (
         <section className="overflow-hidden rounded-xl border border-black/10 bg-black/[0.025] text-sm dark:border-white/10 dark:bg-white/[0.04]" aria-label={t("图片转视频工作流")}>
@@ -150,11 +157,12 @@ export function CanvasAgentMediaWorkflowCard({
                         <div className="space-y-1.5 rounded-lg bg-black/[0.035] p-2 text-xs dark:bg-white/[0.06]">
                             <p className="opacity-65">{card.initialReferenceSummary.label}</p>
                             <div className="flex flex-wrap gap-1.5">
-                                {card.initialReferenceSummary.items.map((reference) => (
-                                    <span key={reference.nodeId} title={reference.nodeId} className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/15">
-                                        {reference.label}
-                                    </span>
-                                ))}
+                                {card.initialReferenceSummary.items.map((reference) => {
+                                    const node = referenceNodes.find(node => node.id === reference.nodeId);
+                                    return <span key={reference.nodeId} title={node?.title || reference.label} className="inline-flex items-center gap-1 rounded border px-2 py-0.5" style={{ borderColor: theme.node.stroke }}>
+                                        {node ? <CanvasPersistedMediaPreview kind="image" url={node.metadata?.content} storageKey={node.metadata?.storageKey} alt="" className="size-7 rounded object-cover" /> : null}{reference.label}{node?.title ? ` · ${node.title}` : ""}
+                                    </span>;
+                                })}
                             </div>
                         </div>
                     ) : null}
@@ -204,8 +212,8 @@ export function CanvasAgentMediaWorkflowCard({
                     <WorkflowStageTitle icon={<Video className="size-3.5" />} title={showImageStage ? t("第二步：生成视频") : t("生成视频")} status={workflow.videoStatus} />
                     <ModelSelect ariaLabel={t("选择视频模型")} emptyLabel={t("暂无视频模型")} models={videoModels} value={card.videoModelSelect.value} disabled={card.videoModelSelect.disabled} onChange={onVideoModelChange} />
                     <div className="grid grid-cols-2 gap-2">
-                        <WorkflowValueSelect ariaLabel={t("视频时长")} value={card.videoSeconds} values={["3", "5", "6", "8", "10", "15"]} suffix={t(" 秒")} disabled={!onVideoSecondsChange} onChange={onVideoSecondsChange} />
-                        <WorkflowValueSelect ariaLabel={t("画面比例")} value={card.aspectRatio} values={["1:1", "16:9", "9:16", "4:3", "3:4"]} disabled={!onAspectRatioChange} onChange={onAspectRatioChange} />
+                        <WorkflowValueSelect ariaLabel={t("视频时长")} value={card.videoSeconds} values={seconds} suffix={t(" 秒")} disabled={!onVideoSecondsChange} onChange={onVideoSecondsChange} />
+                        {imageRatio ? <span className="self-center text-xs opacity-65">比例由原图决定</span> : <WorkflowValueSelect ariaLabel={t("画面比例")} value={card.aspectRatio} values={ratios} disabled={!onAspectRatioChange} onChange={onAspectRatioChange} />}
                     </div>
                     <p className="text-xs opacity-65">{t("已选图片：")}{card.selectedCandidateSummary}</p>
                     <Button block disabled={card.videoGenerateButton.disabled} icon={workflow.videoStatus === "running" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Video className="size-3.5" />} onClick={onGenerateVideo}>
@@ -238,7 +246,7 @@ function ModelSelect({ ariaLabel, emptyLabel, models, value, disabled, onChange 
             <SelectTrigger aria-label={ariaLabel} className="h-9 w-full text-sm">
                 <span className="truncate">{value ? labelFor(value) : ariaLabel}</span>
             </SelectTrigger>
-            <SelectContent position="popper" align="start" className="z-[1200]">
+            <SelectContent position="popper" align="start" className="z-[var(--cw-z-popover,900)]">
                 {models.length ? models.map((model) => <SelectItem key={model} value={model}>{labelFor(model)}</SelectItem>) : <SelectItem value="__empty_model__" disabled>{emptyLabel}</SelectItem>}
             </SelectContent>
         </Select>

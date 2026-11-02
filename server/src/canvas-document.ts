@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { selectCanvasCoverNode } from "../../shared/canvas-cover";
 
 export const CANVAS_DOCUMENT_MAX_BYTES = 20 * 1024 * 1024;
 export class CanvasDocumentError extends Error {
@@ -11,18 +12,18 @@ export type CanvasDocumentEnvelope = {
 export type CanvasDocumentAcknowledgement = Omit<CanvasDocumentEnvelope, "document">;
 
 export function canvasDocumentMetadata(document: Record<string, unknown> | null) {
-    const nodes = (document?.nodes ?? []) as Array<{ type: string; metadata?: { content?: string } }>;
+    const nodes = (document?.nodes ?? []) as Array<{ id: string; type: string; metadata?: { content?: string; status?: string; sourceTaskId?: string; generationRecord?: { createdAt?: string } } }>;
     return {
         title: String(document?.title ?? ""),
         createdAt: document?.createdAt as string | null ?? null,
         updatedAt: document?.updatedAt as string | null ?? null,
         nodeCount: nodes.length,
         connectionCount: (document?.connections as unknown[] | undefined)?.length ?? 0,
-        coverUrl: nodes.find(node => node.type === "image" && node.metadata?.content)?.metadata?.content ?? null,
+        coverUrl: selectCanvasCoverNode(nodes, typeof document?.coverNodeId === "string" ? document.coverNodeId : undefined)?.metadata?.content ?? null,
     };
 }
 export type CanvasDocumentSummary = Omit<CanvasDocumentEnvelope, "document"> & {
-    summary: { id: string; title: string; createdAt: string; updatedAt: string; nodeCount: number; connectionCount: number; cover: { content?: string; storageKey?: string } | null } | null;
+    summary: { id: string; title: string; createdAt: string; updatedAt: string; nodeCount: number; connectionCount: number; persistenceConflict?: { projectId: string; paths: string[]; savedAt: string }; cover: { content?: string; storageKey?: string } | null } | null;
 };
 
 const idSchema = z.string().min(1).max(200).refine(value => value.trim().length > 0);
@@ -44,6 +45,7 @@ const groupsSchema = z.array(z.object({
 }).passthrough()).refine(groups => new Set(groups.map(group => group.id)).size === groups.length);
 const documentSchema = z.object({
     id: idSchema, title: z.string().max(1000), createdAt: dateSchema, updatedAt: dateSchema,
+    coverNodeId: idSchema.optional(),
     nodes: z.array(nodeSchema),
     groups: groupsSchema.optional(),
     connections: z.array(z.object({ id: idSchema, fromNodeId: idSchema, toNodeId: idSchema }).passthrough()),

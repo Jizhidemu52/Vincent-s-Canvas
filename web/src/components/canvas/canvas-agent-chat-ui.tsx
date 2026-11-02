@@ -1,18 +1,22 @@
 import { useUiText } from "@/lib/i18n";
-import { memo, useEffect, useRef, useState, type ReactNode } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Button, Tooltip } from "antd";
-import { ArrowUp, CheckCircle2, CircleAlert, ImagePlus, LoaderCircle, Square, UserRound, WandSparkles, Wrench, X, XCircle } from "lucide-react";
+import { ArrowUp, Bot, CheckCircle2, CircleAlert, Copy, ImagePlus, LoaderCircle, Pencil, Square, UserRound, WandSparkles, Wrench, X, XCircle } from "lucide-react";
+import copyToClipboard from "copy-to-clipboard";
+import { ChatMarkdown } from "@/pages/chat/chat-markdown";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { displayModelMetadata, maskImageModelText } from "@/lib/model-display";
 import { CanvasPersistedMediaPreview } from "./canvas-persisted-media-preview";
 import { ConversationImageActions, conversationImageLabel, type ConversationImageAction, type ConversationImageItem } from "@/components/conversation-image-controls";
 import { useImageMentions } from "@/hooks/use-image-mentions";
+import { useCanManageConfig } from "@/hooks/use-can-manage-config";
 import type { LocalUser } from "@/stores/use-user-store";
+import { useCanvasAgentStore } from "@/stores/canvas/use-canvas-agent-store";
 
-export type CanvasAgentChatAttachment = { id: string; name: string; url: string; storageKey?: string; mediaType?: "image" | "video" };
+export type CanvasAgentChatAttachment = { id: string; name: string; url: string; storageKey?: string; width?: number; height?: number; mediaType?: "image" | "video" };
 export type CanvasAgentMode = "online" | "local";
-export type CanvasAgentChatImageControl = { image: ConversationImageItem; originalDisabledReason?: string; compareDisabledReason?: string };
+export type CanvasAgentChatImageControl = { image: ConversationImageItem; version?: number; originalDisabledReason?: string; compareDisabledReason?: string; onMask?: () => void };
 export type CanvasAgentChatMessage = {
     id: string;
     role: "user" | "assistant" | "system" | "tool" | "error";
@@ -25,11 +29,11 @@ export type CanvasAgentChatMessage = {
 
 const WORKING_TEXT = "处理中…";
 
-export const AgentChatMessage = memo(function AgentChatMessage({ item, theme, user, onRejectTool, onApproveTool, onUseImageForVideo, imageControls, activeImageId, imageActionsDisabled, onImageAction }: { item: CanvasAgentChatMessage; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; user: LocalUser | null; onRejectTool?: (id: string) => void; onApproveTool?: (id: string) => void; onUseImageForVideo?: (attachment: CanvasAgentChatAttachment) => void; imageControls?: ReadonlyMap<string, CanvasAgentChatImageControl>; activeImageId?: string; imageActionsDisabled?: boolean; onImageAction?: (action: ConversationImageAction, imageId: string) => void }) {
+export const AgentChatMessage = memo(function AgentChatMessage({ item, theme, user, onRejectTool, onApproveTool, onUseImageForVideo, imageControls, activeImageId, imageActionsDisabled, onImageAction, onMaskImage, onEditMessage }: { item: CanvasAgentChatMessage; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; user: LocalUser | null; onRejectTool?: (id: string) => void; onApproveTool?: (id: string) => void; onUseImageForVideo?: (attachment: CanvasAgentChatAttachment) => void; imageControls?: ReadonlyMap<string, CanvasAgentChatImageControl>; activeImageId?: string; imageActionsDisabled?: boolean; onImageAction?: (action: ConversationImageAction, imageId: string) => void; onMaskImage?: (imageId: string) => void; onEditMessage?: (id: string) => void }) {
     const t = useUiText();
     const isUser = item.role === "user";
     const isSystem = item.role === "system";
-    const color = item.role === "error" ? "#dc2626" : item.role === "tool" ? "#2563eb" : theme.node.text;
+    const color = item.role === "error" ? theme.node.danger : item.role === "tool" ? theme.canvas.selectionStroke : theme.node.text;
     if (isSystem) {
         return (
             <div className="flex justify-center text-xs">
@@ -53,26 +57,39 @@ export const AgentChatMessage = memo(function AgentChatMessage({ item, theme, us
         <div className={`flex items-start gap-3 ${isUser ? "justify-end" : "justify-start"}`}>
             {!isUser ? <AgentAvatar theme={theme} /> : null}
             <div className={`min-w-0 max-w-[82%] text-sm leading-6 ${isUser ? "text-right" : "text-left"}`} style={{ color }}>
-                <div className="whitespace-pre-wrap break-words text-left">{item.text}</div>
-                {item.attachments?.length ? <AgentMessageAttachments messageId={item.id} attachments={item.attachments} theme={theme} onUseImageForVideo={onUseImageForVideo} imageControls={imageControls} activeImageId={activeImageId} disabled={imageActionsDisabled} onImageAction={onImageAction} /> : null}
+                <div className="break-words text-left">{isUser ? <div className="whitespace-pre-wrap">{item.text}</div> : <ChatMarkdown>{item.text}</ChatMarkdown>}</div>
+                {item.attachments?.length ? <AgentMessageAttachments messageId={item.id} attachments={item.attachments} theme={theme} onUseImageForVideo={onUseImageForVideo} imageControls={imageControls} activeImageId={activeImageId} disabled={imageActionsDisabled} onImageAction={onImageAction} onMaskImage={onMaskImage} /> : null}
                 {item.meta ? <div className="mt-1 text-[11px] opacity-45">{maskImageModelText(item.meta)}</div> : null}
+                <div className="mt-1 flex gap-2 text-[11px]" style={{ color: theme.node.muted }}>
+                    <button type="button" className="inline-flex min-h-7 items-center gap-1 hover:underline" onClick={() => copyToClipboard(item.text)} aria-label={t("复制消息")}><Copy size={12} />{t("复制")}</button>
+                    {isUser && onEditMessage ? <button type="button" disabled={imageActionsDisabled} className="inline-flex min-h-7 items-center gap-1 hover:underline disabled:opacity-40" onClick={() => onEditMessage(item.id)}><Pencil size={12} />{t("编辑后重发")}</button> : null}
+                </div>
             </div>
             {isUser ? <AgentUserAvatar user={user} theme={theme} /> : null}
         </div>
     );
-});
+}, (previous, next) => previous.item === next.item && previous.theme === next.theme && previous.user === next.user
+    && previous.onRejectTool === next.onRejectTool && previous.onApproveTool === next.onApproveTool
+    && previous.onEditMessage === next.onEditMessage && previous.imageActionsDisabled === next.imageActionsDisabled
+    && (!next.item.attachments?.length || (previous.onUseImageForVideo === next.onUseImageForVideo && previous.imageControls === next.imageControls
+        && previous.activeImageId === next.activeImageId && previous.onImageAction === next.onImageAction && previous.onMaskImage === next.onMaskImage)));
 
 export function AgentPendingToolCard({ summary, detail, theme, onReject, onApprove }: { summary: string; detail?: unknown; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onReject?: () => void; onApprove?: () => void }) {
     const t = useUiText();
+    const showDetails = useToolDetailsEnabled() && Boolean(detail);
+    const Container = showDetails ? "details" : "div";
+    const Summary = showDetails ? "summary" : "div";
     const running = objectField(detail, "status") === "running";
+    const preview = objectField(detail, "preview");
+    const previewNodes = (ids: string[]) => useCanvasAgentStore.getState().setAgentState({ previewNodeIds: ids });
     return (
         <div className="flex items-start gap-3">
             <AgentAvatar theme={theme} />
             <div className="min-w-0 flex-1 rounded-xl border p-4" style={{ borderColor: theme.node.stroke, background: "transparent", color: theme.node.text }}>
-                <details>
-                    <summary className="cursor-pointer list-none">
+                <Container>
+                    <Summary className={showDetails ? "cursor-pointer list-none" : undefined}>
                         <div className="flex items-start gap-3">
-                            <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg border" style={{ borderColor: "rgba(217,119,6,.24)", color: "#d97706", background: "rgba(217,119,6,.04)" }}>
+                            <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg border" style={{ borderColor: `${theme.node.warning}40`, color: theme.node.warning, background: `${theme.node.warning}0a` }}>
                                 {running ? <LoaderCircle className="size-4 animate-spin" /> : <CircleAlert className="size-4" />}
                             </span>
                             <div className="min-w-0 flex-1">
@@ -81,21 +98,26 @@ export function AgentPendingToolCard({ summary, detail, theme, onReject, onAppro
                                     <span className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium" style={{ borderColor: "rgba(217,119,6,.22)", color: "#d97706", background: "rgba(217,119,6,.04)" }}>
                                         {running ? t("执行中") : t("等待确认")}
                                     </span>
-                                    {detail ? <span className="ml-auto text-xs font-normal" style={{ color: theme.node.muted }}>{t("详情")}</span> : null}
+                                    {showDetails ? <span className="ml-auto text-xs font-normal" style={{ color: theme.node.muted }}>{t("详情")}</span> : null}
                                 </div>
                                 <div className="mt-2 text-sm leading-6" style={{ color: theme.node.text }}>
                                     {summary}
                                 </div>
+                                {Array.isArray(preview) ? preview.map((action, index) => <div key={index} className="mt-2 text-xs" style={{ color: action.destructive ? theme.node.danger : theme.node.muted }} onPointerEnter={() => previewNodes(action.nodes?.map((node: { id: string }) => node.id) || [])} onPointerLeave={() => previewNodes([])}>
+                                    <div>{action.destructive ? `将删除 ${action.count} 个对象` : action.outputCount ? `生成 ${action.outputCount} 张 · ${maskImageModelText(action.model || "当前模型")}` : `影响 ${action.count} 个对象`}</div>
+                                    {action.nodes?.map((node: { id: string; title: string; url?: string; storageKey?: string }) => <span key={node.id} tabIndex={0} className="mr-2 inline-flex items-center gap-1" onPointerEnter={() => previewNodes([node.id])} onPointerLeave={() => previewNodes([])} onFocus={() => previewNodes([node.id])} onBlur={() => previewNodes([])}>{node.url || node.storageKey ? <CanvasPersistedMediaPreview kind="image" url={node.url} storageKey={node.storageKey} alt="" className="size-8 rounded object-cover" /> : null}{node.title || t("未命名节点")}</span>)}
+                                    {action.prompt ? <p className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap">{t("最终提示词：")}{action.prompt}</p> : null}
+                                </div>) : null}
                             </div>
                         </div>
-                    </summary>
-                    {detail ? <AgentDetailBlock detail={detail} theme={theme} /> : null}
-                </details>
+                    </Summary>
+                    {showDetails ? <AgentDetailBlock detail={detail} theme={theme} /> : null}
+                </Container>
                 {onReject || onApprove ? (
                     <div className="mt-4 grid grid-cols-2 gap-2">
-                        <Button danger disabled={running} className="!h-9" icon={<XCircle className="size-4" />} onClick={() => onReject?.()}>
+                        <Button danger disabled={running} className="!h-9" icon={<XCircle className="size-4" />} onClick={() => { previewNodes([]); onReject?.(); }}>
                             {t("拒绝执行")}</Button>
-                        <Button disabled={running} loading={running} className="!h-9" icon={<CheckCircle2 className="size-4" />} style={{ borderColor: "rgba(22,163,74,.42)", color: "#16a34a", background: "transparent" }} onClick={() => onApprove?.()}>
+                        <Button disabled={running} loading={running} className="!h-9" icon={<CheckCircle2 className="size-4" />} style={{ borderColor: theme.node.success, color: theme.node.success, background: "transparent" }} onClick={() => { previewNodes([]); onApprove?.(); }}>
                             {running ? t("正在执行") : t("批准执行")}
                         </Button>
                     </div>
@@ -107,10 +129,13 @@ export function AgentPendingToolCard({ summary, detail, theme, onReject, onAppro
 
 export function AgentToolCard({ title, text, detail, theme }: { title: string; text: string; detail?: unknown; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
     const t = useUiText();
-    const state = toolCardState(title, text, detail);
+    const showDetails = useToolDetailsEnabled() && Boolean(detail);
+    const Container = showDetails ? "details" : "div";
+    const Summary = showDetails ? "summary" : "div";
+    const state = toolCardState(detail, theme);
     return (
-        <details className="min-w-0 flex-1 rounded-xl border px-4 py-3.5 text-left" style={{ borderColor: theme.node.stroke, background: "transparent", color: theme.node.text }}>
-            <summary className="cursor-pointer list-none">
+        <Container className="min-w-0 flex-1 rounded-xl border px-4 py-3.5 text-left" style={{ borderColor: theme.node.stroke, background: "transparent", color: theme.node.text }}>
+            <Summary className={showDetails ? "cursor-pointer list-none" : undefined}>
                 <div className="flex items-start gap-3">
                     <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg border" style={{ borderColor: state.softBorder, color: state.color, background: state.softBg }}>
                         {state.icon}
@@ -121,16 +146,16 @@ export function AgentToolCard({ title, text, detail, theme }: { title: string; t
                             <span className="inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium" style={{ borderColor: state.softBorder, color: state.color, background: state.softBg }}>
                                 {t(state.label)}
                             </span>
-                            {detail ? <span className="ml-auto text-xs font-normal" style={{ color: theme.node.muted }}>{t("详情")}</span> : null}
+                            {showDetails ? <span className="ml-auto text-xs font-normal" style={{ color: theme.node.muted }}>{t("详情")}</span> : null}
                         </div>
                         <div className="mt-2 text-sm leading-6" style={{ color: state.isError ? state.color : theme.node.muted }}>
                             {text}
                         </div>
                     </div>
                 </div>
-            </summary>
-            {detail ? <AgentDetailBlock detail={detail} theme={theme} /> : null}
-        </details>
+            </Summary>
+            {showDetails ? <AgentDetailBlock detail={detail} theme={theme} /> : null}
+        </Container>
     );
 }
 
@@ -159,6 +184,7 @@ export function AgentChatComposer({
     attachments = [],
     attachmentPreview,
     disabled,
+    submitDisabled,
     sending,
     placeholder,
     theme,
@@ -177,6 +203,7 @@ export function AgentChatComposer({
     attachments?: CanvasAgentChatAttachment[];
     attachmentPreview?: ReactNode;
     disabled?: boolean;
+    submitDisabled?: boolean;
     sending?: boolean;
     placeholder: string;
     theme: (typeof canvasThemes)[keyof typeof canvasThemes];
@@ -189,11 +216,18 @@ export function AgentChatComposer({
     generationControls?: ReactNode;
     imageTarget?: ReactNode;
     mentionImages?: ConversationImageItem[];
-    onMentionImage?: (image: ConversationImageItem) => boolean | void | Promise<boolean | void>;
+    onMentionImage?: (image: ConversationImageItem) => boolean | void | string | Promise<boolean | void | string>;
 }) {
     const t = useUiText();
     const fileInputRef = useRef<HTMLInputElement>(null);
-    const canSubmit = !disabled && !sending && Boolean(prompt.trim() || attachments.length);
+    const textareaRef = useRef<HTMLTextAreaElement>(null);
+    useLayoutEffect(() => {
+        const textarea = textareaRef.current;
+        if (!textarea) return;
+        textarea.style.height = "auto";
+        textarea.style.height = `${Math.min(192, Math.max(80, textarea.scrollHeight))}px`;
+    }, [prompt]);
+    const canSubmit = !disabled && !submitDisabled && !sending && Boolean(prompt.trim());
     const mentions = useImageMentions({ value: prompt, onChange: onPromptChange, images: mentionImages, onSelect: onMentionImage || (() => false), disabled: disabled || sending });
     return (
         <div className="min-w-0 w-full shrink-0 px-2 pb-2 pt-2" onWheelCapture={(event) => event.stopPropagation()}>
@@ -217,6 +251,7 @@ export function AgentChatComposer({
                 {mentions.menu}
                 <textarea
                     {...mentions.inputProps}
+                    ref={textareaRef}
                     value={prompt}
                     onChange={mentions.handleChange}
                     onSelect={mentions.handleSelect}
@@ -228,16 +263,19 @@ export function AgentChatComposer({
                         void onAddFiles(images);
                     }}
                     onKeyDown={(event) => {
+                        if (event.nativeEvent.isComposing || event.keyCode === 229) return;
                         if (mentions.handleKeyDown(event)) return;
+                        if (event.key === "Escape" && sending && onStop) { event.preventDefault(); event.stopPropagation(); onStop(); return; }
                         if (event.key !== "Enter" || event.shiftKey || event.ctrlKey || event.metaKey || event.nativeEvent.isComposing || event.keyCode === 229) return;
                         event.preventDefault();
                         if (canSubmit && !event.repeat) void onSubmit();
                     }}
-                    className="thin-scrollbar max-h-32 min-h-20 w-full resize-none border-0 bg-transparent px-1 py-1 text-sm leading-5 outline-none placeholder:opacity-45"
-                    style={{ color: theme.node.text }}
+                    className="thin-scrollbar max-h-48 min-h-20 w-full resize-none border-0 bg-transparent px-1 py-1 text-sm leading-5 outline-none placeholder:text-[var(--canvas-placeholder)] placeholder:opacity-100"
+                    style={{ color: theme.node.text, "--canvas-placeholder": theme.node.placeholder } as CSSProperties}
                     placeholder={placeholder}
                 />
                 </div>
+                {!prompt.trim() && attachments.length ? <p className="px-1 text-[11px]" style={{ color: theme.node.muted }}>{t("请写下希望如何处理这些图片")}</p> : null}
                 <div data-testid="canvas-agent-composer-controls" className="mt-2 grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-2 border-t pt-2" style={{ borderColor: theme.node.stroke }}>
                     {generationControls ? <div data-testid="canvas-agent-generation-slot" className="contents">{generationControls}</div>
                         : <div className="flex min-w-0 flex-wrap items-center gap-1">{left}</div>}
@@ -295,10 +333,15 @@ export function AgentPanelTabs<T extends string>({ value, items, theme, right, o
     );
 }
 
+function useToolDetailsEnabled() {
+    const canManageConfig = useCanManageConfig();
+    const enabled = useCanvasAgentStore(state => state.showToolDetails);
+    return canManageConfig && enabled;
+}
+
 function AgentDetailBlock({ detail, theme }: { detail: unknown; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
-    const t = useUiText();
     return (
-        <pre className="thin-scrollbar mt-3 max-h-64 overflow-auto rounded-lg border p-3 text-[11px] leading-4" style={{ borderColor: theme.node.stroke, background: theme.toolbar.panel, color: theme.node.muted }}>
+        <pre data-testid="canvas-agent-tool-detail" className="thin-scrollbar mt-3 max-h-64 overflow-auto rounded-lg border p-3 text-[11px] leading-4" style={{ borderColor: theme.node.stroke, background: theme.toolbar.panel, color: theme.node.muted }}>
             {JSON.stringify(displayModelMetadata(toolDetailPreview(detail)), null, 2)}
         </pre>
     );
@@ -348,8 +391,8 @@ function stripToolSignatures(value: unknown): unknown {
 function AgentAvatar({ theme }: { theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
     const t = useUiText();
     return (
-        <span className="grid size-8 shrink-0 place-items-center" role="img" aria-label="OpenAI">
-            <span className="size-5 opacity-80" style={{ background: theme.node.text, WebkitMask: "url(/icons/openai.svg) center / contain no-repeat", mask: "url(/icons/openai.svg) center / contain no-repeat" }} />
+        <span className="grid size-8 shrink-0 place-items-center" role="img" aria-label={t("画布助手")}>
+            <Bot className="size-5 opacity-80" style={{ color: theme.node.text }} />
         </span>
     );
 }
@@ -364,18 +407,21 @@ function AgentUserAvatar({ user, theme }: { user: LocalUser | null; theme: (type
     );
 }
 
-function AgentMessageAttachments({ messageId, attachments, theme, onUseImageForVideo, imageControls, activeImageId, disabled, onImageAction }: { messageId: string; attachments: CanvasAgentChatAttachment[]; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onUseImageForVideo?: (attachment: CanvasAgentChatAttachment) => void; imageControls?: ReadonlyMap<string, CanvasAgentChatImageControl>; activeImageId?: string; disabled?: boolean; onImageAction?: (action: ConversationImageAction, imageId: string) => void }) {
+function AgentMessageAttachments({ messageId, attachments, theme, onUseImageForVideo, imageControls, activeImageId, disabled, onImageAction, onMaskImage }: { messageId: string; attachments: CanvasAgentChatAttachment[]; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onUseImageForVideo?: (attachment: CanvasAgentChatAttachment) => void; imageControls?: ReadonlyMap<string, CanvasAgentChatImageControl>; activeImageId?: string; disabled?: boolean; onImageAction?: (action: ConversationImageAction, imageId: string) => void; onMaskImage?: (imageId: string) => void }) {
     const t = useUiText();
     return (
         <div className="mt-2 grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 260px), 1fr))" }}>
             {attachments.map((item) => {
                 const control = imageControls?.get(`${messageId}:${item.id}`);
-                const selected = control?.image.id === activeImageId;
+                const selected = Boolean(control && control.image.id === activeImageId);
+                const version = control?.version && Number.isInteger(control.version) && control.version > 0 ? control.version : undefined;
                 const preview = (
                     <CanvasPersistedMediaPreview
                         kind={item.mediaType === "video" ? "video" : "image"}
                         url={item.url}
                         storageKey={item.storageKey}
+                        width={item.width}
+                        height={item.height}
                         alt={item.name}
                         controls={item.mediaType === "video"}
                         className={item.mediaType === "video" ? "aspect-video w-full bg-black object-cover" : "h-48 w-full object-contain"}
@@ -385,26 +431,28 @@ function AgentMessageAttachments({ messageId, attachments, theme, onUseImageForV
                         <button type="button" disabled={disabled} className="inline-flex min-h-9 items-center justify-center gap-1.5 px-2 py-2 text-xs font-medium transition hover:opacity-70 disabled:opacity-35" onClick={() => onUseImageForVideo(item)}>
                             <WandSparkles className="size-3.5" />
                             {t("选此图生成视频")}</button>) : null;
-                return <div key={item.id} className="group overflow-hidden rounded-xl border" style={{ borderColor: selected ? theme.node.activeStroke : theme.node.stroke }}>
+                return <div key={item.id} data-testid="canvas-agent-image-result" data-image-id={control?.image.id} className="group/result relative overflow-hidden rounded-xl border" style={{ borderColor: selected ? theme.node.activeStroke : theme.node.stroke }}>
                     {control && onImageAction ? <button type="button" disabled={disabled || Boolean(control.image.unavailableReason)} onClick={() => onImageAction("edit", control.image.id)} aria-pressed={selected} aria-label={t("选择 {label} 作为编辑目标", { label: conversationImageLabel(control.image.label) })} className="relative block w-full focus-visible:outline-2 focus-visible:outline-offset-[-2px]" style={{ outlineColor: theme.canvas.selectionStroke }}>
-                        {preview}<span className="absolute bottom-1 left-1 rounded px-1.5 py-0.5 text-[11px]" style={{ color: theme.node.text, background: theme.node.panel }}>{conversationImageLabel(control.image.label)}</span>
+                        {preview}<span className="pointer-events-none absolute left-2 top-2 rounded px-1.5 py-0.5 text-xs" style={{ color: theme.node.text, background: theme.node.panel }}>{conversationImageLabel(control.image.label)}{version ? ` · V${version}` : ""}</span>
+                        {selected ? <span data-testid="canvas-agent-image-current" className="pointer-events-none absolute right-2 top-2 rounded px-1.5 py-0.5 text-xs font-medium" style={{ color: theme.node.panel, background: theme.canvas.selectionStroke }}>{t("当前")}</span> : null}
                     </button> : preview}
-                    {control && onImageAction ? <ConversationImageActions {...control} disabled={disabled} onAction={onImageAction} extra={videoAction} /> : videoAction}
+                    {control && onImageAction ? <div data-testid="canvas-agent-image-actions" className="absolute inset-x-2 bottom-2 transition-opacity group-hover/result:pointer-events-auto group-hover/result:opacity-100 group-focus-within/result:pointer-events-auto group-focus-within/result:opacity-100 [@media(hover:hover)]:pointer-events-none [@media(hover:hover)]:opacity-0 motion-reduce:transition-none">
+                        <ConversationImageActions {...control} compact disabled={disabled} onAction={onImageAction} onMask={control.onMask || (onMaskImage ? () => onMaskImage(control.image.id) : undefined)} extra={videoAction} />
+                    </div> : videoAction}
                 </div>
             })}
         </div>
     );
 }
 
-function toolCardState(title: string, text: string, detail?: unknown) {
-    const raw = `${title} ${text} ${normalizeText(objectField(detail, "error"))}`;
-    const lower = raw.toLowerCase();
-    const tool = String(objectField(detail, "name") || objectField(detail, "tool") || "");
-    if (objectField(detail, "status") === "noop" || /未生效|无需|没有找到|没有.*可|已存在/.test(raw)) return { label: "未生效", color: "#d97706", softBorder: "rgba(217,119,6,.22)", softBg: "rgba(217,119,6,.04)", icon: <CircleAlert className="size-4" />, isError: false };
-    if (/拒绝|取消/.test(raw) || lower.includes("rejected")) return { label: "拒绝执行", color: "#dc2626", softBorder: "rgba(220,38,38,.20)", softBg: "rgba(220,38,38,.04)", icon: <XCircle className="size-4" />, isError: true };
-    if (/失败|错误/.test(raw) || lower.includes("failed") || lower.includes("error")) return { label: "执行失败", color: "#dc2626", softBorder: "rgba(220,38,38,.20)", softBg: "rgba(220,38,38,.04)", icon: <XCircle className="size-4" />, isError: true };
-    if (/完成|成功/.test(raw) || lower.includes("completed") || lower.includes("succeeded")) return { label: tool === "canvas_apply_ops" || /画布操作/.test(title) ? "已批准执行" : "执行完成", color: "#16a34a", softBorder: "rgba(22,163,74,.20)", softBg: "rgba(22,163,74,.04)", icon: <CheckCircle2 className="size-4" />, isError: false };
-    return { label: "工具调用", color: "#2563eb", softBorder: "rgba(37,99,235,.20)", softBg: "rgba(37,99,235,.04)", icon: <Wrench className="size-4" />, isError: false };
+function toolCardState(detail: unknown, theme: (typeof canvasThemes)[keyof typeof canvasThemes]) {
+    const status = objectField(detail, "status");
+    const colors = (color: string) => ({ color, softBorder: `${color}38`, softBg: `${color}0a` });
+    if (status === "noop" || status === "expired") return { label: status === "expired" ? "确认已过期" : "未生效", ...colors(theme.node.warning), icon: <CircleAlert className="size-4" />, isError: false };
+    if (status === "rejected" || status === "cancelled") return { label: "已取消", ...colors(theme.node.danger), icon: <XCircle className="size-4" />, isError: true };
+    if (status === "failed" || status === "error") return { label: "执行失败", ...colors(theme.node.danger), icon: <XCircle className="size-4" />, isError: true };
+    if (status === "completed" || status === "succeeded") return { label: "执行完成", ...colors(theme.node.success), icon: <CheckCircle2 className="size-4" />, isError: false };
+    return { label: "工具调用", ...colors(theme.canvas.selectionStroke), icon: <Wrench className="size-4" />, isError: false };
 }
 
 function normalizeText(value: unknown) {

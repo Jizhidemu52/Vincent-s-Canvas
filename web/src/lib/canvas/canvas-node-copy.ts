@@ -5,15 +5,15 @@ import type { CanvasConnection, CanvasNodeData, CanvasNodeGroup, Position } from
 export type CanvasNodeGraph = { nodes: CanvasNodeData[]; connections: CanvasConnection[]; groups?: CanvasNodeGroup[] };
 
 /** Both clipboard and context-menu copies own only the selected graph. */
-export function copyCanvasNodeGraph(nodes: readonly CanvasNodeData[], connections: readonly CanvasConnection[], groups: readonly CanvasNodeGroup[], selectedIds: ReadonlySet<string>): CanvasNodeGraph {
+export function copyCanvasNodeGraph(nodes: readonly CanvasNodeData[], connections: readonly CanvasConnection[], groups: readonly CanvasNodeGroup[], selectedIds: ReadonlySet<string>, options: { preserveExternalInputs?: boolean } = {}): CanvasNodeGraph {
     return {
         nodes: nodes.filter(node => selectedIds.has(node.id)).map(node => structuredClone(node)),
-        connections: connections.filter(connection => selectedIds.has(connection.fromNodeId) && selectedIds.has(connection.toNodeId)).map(connection => ({ ...connection })),
+        connections: connections.filter(connection => selectedIds.has(connection.toNodeId) && (selectedIds.has(connection.fromNodeId) || options.preserveExternalInputs)).map(connection => ({ ...connection })),
         groups: groups.filter(group => group.nodeIds.length && group.nodeIds.every(id => selectedIds.has(id))).map(group => structuredClone(group)),
     };
 }
 
-export function cloneCanvasNodeGraph(graph: CanvasNodeGraph, offset: Position, options: { preserveTitle?: boolean } = {}): CanvasNodeGraph {
+export function cloneCanvasNodeGraph(graph: CanvasNodeGraph, offset: Position, options: { preserveTitle?: boolean; preserveExternalInputs?: boolean } = {}): CanvasNodeGraph {
     const idMap = new Map<string, string>();
     const nodes = graph.nodes.map((node, index) => {
         const id = `${node.type}-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`;
@@ -21,14 +21,14 @@ export function cloneCanvasNodeGraph(graph: CanvasNodeGraph, offset: Position, o
         return {
             ...node,
             id,
-            title: options.preserveTitle || node.title.endsWith(" Copy") ? node.title : `${node.title} Copy`,
+            title: options.preserveTitle ? node.title : `${node.title.replace(/(?: Copy| 副本(?: \d+)?)$/, "")} 副本`,
             position: { x: node.position.x + offset.x, y: node.position.y + offset.y },
             metadata: node.metadata ? structuredClone(node.metadata) : undefined,
         };
     });
     const connections = graph.connections.flatMap((connection, index) => {
         if (connection.kind === "sequence-input") return [];
-        const fromNodeId = idMap.get(connection.fromNodeId);
+        const fromNodeId = idMap.get(connection.fromNodeId) || (options.preserveExternalInputs ? connection.fromNodeId : undefined);
         const toNodeId = idMap.get(connection.toNodeId);
         if (!fromNodeId || !toNodeId) return [];
         return [{ ...connection, id: `conn-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`, fromNodeId, toNodeId }];

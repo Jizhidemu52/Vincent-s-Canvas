@@ -1,11 +1,28 @@
 import { describe, expect, test } from "bun:test";
-import { assignCanvasNodeGroup, canvasGroupBounds, canvasGroupMemberIds, createCanvasGroupIndex, removeCanvasGroupMembers } from "../src/lib/canvas/canvas-node-groups";
+import { assignCanvasNodeGroup, canvasGroupBounds, canvasGroupVisualBounds, collapsedCanvasConnectionNodes, canvasGroupMemberIds, createCanvasGroupIndex, removeCanvasGroupMembers } from "../src/lib/canvas/canvas-node-groups";
 import { CanvasNodeType, type CanvasNodeData, type CanvasNodeGroup } from "../src/types/canvas";
 
 const node = (id: string, x: number, y = 100): CanvasNodeData => ({ id, type: CanvasNodeType.Image, title: id, position: { x, y }, width: 100, height: 80 });
 const group = (id: string, nodeIds: string[], collapsed = false): CanvasNodeGroup => ({ id, nodeIds, title: id, collapsed });
 
 describe("canvas style groups", () => {
+    test("collapsed endpoint proxies keep a 300 by 44 screen card and original node identity data", () => {
+        const nodes = [node("a", 100), node("b", 400), node("outside", 900)];
+        const map = new Map(nodes.map(item => [item.id, item]));
+        const resolved = createCanvasGroupIndex([group("coat", ["a", "b"], true)], map).groups;
+        for (const scale of [0.05, 0.25, 1, 2]) {
+            const bounds = canvasGroupVisualBounds(resolved[0], scale)!;
+            expect(bounds.width * scale).toBeCloseTo(300);
+            expect(bounds.height * scale).toBeCloseTo(44);
+            const proxies = collapsedCanvasConnectionNodes(resolved, map, scale);
+            expect(proxies.byId.get("a")?.position).toEqual({ x: bounds.x, y: bounds.y });
+            expect(proxies.byId.get("a")?.id).toBe("a");
+            expect(proxies.groupByNodeId.get("a")).toBe(proxies.groupByNodeId.get("b"));
+            expect(proxies.byId.get("outside")).toBe(nodes[2]);
+        }
+        expect(nodes[0].position).toEqual({ x: 100, y: 100 });
+        expect(map.get("a")?.width).toBe(100);
+    });
     test("includes a complete image batch when any batch member is grouped, without missing nodes", () => {
         const nodes = [
             { ...node("cover", 100), metadata: { isBatchRoot: true, batchChildIds: ["a", "b", "missing"] } },
@@ -48,7 +65,7 @@ describe("canvas style groups", () => {
         const nodes = new Map([node("a", 100), node("b", 300), node("c", 500)].map(n => [n.id, n]));
         const previous = [group("old", ["a", "b"])];
         const next = assignCanvasNodeGroup(previous, group("new", ["b", "c"]), nodes);
-        expect(next.map(g => [g.id, g.nodeIds])).toEqual([["old", ["a"]], ["new", ["b", "c"]]]);
+        expect(next.map(g => [g.id, g.nodeIds])).toEqual([["new", ["b", "c"]]]);
         expect(previous[0].nodeIds).toEqual(["a", "b"]);
     });
 

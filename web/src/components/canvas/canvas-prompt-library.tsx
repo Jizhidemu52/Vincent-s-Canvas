@@ -7,7 +7,7 @@ import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 
-export function CanvasPromptLibrary({ onSelect }: { onSelect: (prompt: string) => void }) {
+export function CanvasPromptLibrary({ onSelect, onSelectTemplate }: { onSelect: (prompt: string) => void; onSelectTemplate?: (templateId: string) => Promise<void> }) {
     const t = useUiText();
     const [open, setOpen] = useState(false);
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
@@ -24,7 +24,7 @@ export function CanvasPromptLibrary({ onSelect }: { onSelect: (prompt: string) =
                     aria-label={t("提示词库")}
                 />
             </Tooltip>
-            <PromptSelectDialog open={open} onOpenChange={setOpen} onSelect={onSelect} />
+            <PromptSelectDialog open={open} onOpenChange={setOpen} onSelect={onSelect} onSelectTemplate={onSelectTemplate} />
         </>
     );
 }

@@ -38,7 +38,7 @@ function picker(models: PublicModel[], props: Record<string, unknown> = {}, bind
     const selected: string[] = [], usage: unknown[][] = [];
     const state = { models, status: "ready", refresh: async () => undefined, tools: binding ? [{ toolKey: "canvas-image", ...binding }] : [] };
     const exports = loadComponent("../src/components/model-picker.tsx", {
-        react: { ...React, useEffect() {}, useMemo: (factory: () => unknown) => factory(), useId: () => "picker", useState: () => [false, () => undefined] },
+        react: { ...React, useEffect() {}, useRef: (current: unknown) => ({ current }), useMemo: (factory: () => unknown) => factory(), useId: () => "picker", useState: () => [false, () => undefined] },
         "@/components/ui/select": { Select: "Select", SelectContent: "SelectContent", SelectItem: "SelectItem", SelectTrigger: "SelectTrigger" },
         "@/components/canvas/canvas-model-picker": { CanvasModelPicker: "CanvasModelPicker" },
         "@/hooks/use-can-manage-config": { useCanManageConfig: () => false },

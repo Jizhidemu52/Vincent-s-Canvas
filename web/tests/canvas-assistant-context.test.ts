@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { buildCanvasAssistantContext, selectCanvasContext } from "@/lib/canvas/canvas-assistant-context";
+import { buildCanvasAssistantContext as buildContext, selectCanvasContext as selectContext } from "@/lib/canvas/canvas-assistant-context";
 import type { CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 
@@ -10,8 +10,18 @@ function snapshot(nodes: CanvasNodeData[], extra: Partial<CanvasAgentSnapshot> =
     return { projectId: "p", title: "项目", nodes, connections: [], selectedNodeIds: [], viewport: { x: -200, y: -100, k: 2 }, viewportSize: { width: 800, height: 600 }, ...extra };
 }
 const readers = { image: async (item: CanvasNodeData) => `data:image/png;base64,${item.id}`, video: async () => [{ seconds: 0, dataUrl: "data:image/jpeg;base64,start" }, { seconds: 3, dataUrl: "data:image/jpeg;base64,end" }] };
+const selectCanvasContext = (value: CanvasAgentSnapshot) => selectContext(value, { includeVisibleMedia: true });
+const buildCanvasAssistantContext = (value: CanvasAgentSnapshot, explicit: Set<string>, io: typeof readers) => buildContext(value, explicit, io, { includeVisibleMedia: true });
 
-test("only viewport intersections are automatic; preview and selection have priority even offscreen", () => {
+test("default context ignores viewport media but retains explicit selection and preview", async () => {
+    const value = snapshot([node("visible"), node("selected", CanvasNodeType.Image, -1000), node("preview", CanvasNodeType.Image, 3000)], { selectedNodeIds: ["selected"], previewNodeId: "preview" });
+    expect(selectContext(value).nodes.map(item => item.node.id)).toEqual(["preview", "selected"]);
+    const result = await buildContext(value, new Set(), readers);
+    expect(result.summary.total).toBe(2);
+    expect(JSON.stringify(result.content)).not.toContain("base64,visible");
+});
+
+test("one-time viewport reads use intersections; preview and selection have priority even offscreen", () => {
     const result = selectCanvasContext(snapshot([node("visible"), node("partial", CanvasNodeType.Text, 490), node("edge", CanvasNodeType.Text, 500), node("off", CanvasNodeType.Image, 900), node("selected", CanvasNodeType.Image, -1000), node("preview", CanvasNodeType.Image, 3000)], { selectedNodeIds: ["selected"], previewNodeId: "preview" }));
     expect(result.nodes.map((item) => item.node.id)).toEqual(["preview", "selected", "visible", "partial"]);
     expect(result.nodes[0]).toMatchObject({ previewing: true, visible: false });
@@ -64,7 +74,7 @@ test("large canvases bound node, image and text work and disclose omitted items"
     const result = await buildCanvasAssistantContext(snapshot(images, { selectedNodeIds: ["image-39"] }), new Set(), readers);
     expect(result.summary).toMatchObject({ total: 40, included: 24, omitted: 16 });
     expect(result.summary.items[0].id).toBe("image-39");
-    expect(result.content.filter((part) => part.type === "image_url")).toHaveLength(6);
+    expect(result.content.filter((part) => part.type === "image_url")).toHaveLength(5);
     const texts = Array.from({ length: 20 }, (_, index) => ({ ...node(`text-${index}`, CanvasNodeType.Text), metadata: { content: "x".repeat(10000) } }));
     const textResult = await buildCanvasAssistantContext(snapshot(texts), new Set(), readers);
     expect(textResult.summary.items.reduce((total, item) => total + item.text.length, 0)).toBe(12000);

@@ -24,7 +24,7 @@ function composer(initial: Partial<Props> = {}) {
     const code = ts.transpileModule(readFileSync(url, "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ESNext, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
     const refs: Array<{ current: unknown }> = [];
     let cursor = 0;
-    const react = { ...React, useRef(value: unknown) { const index = cursor++; return refs[index] ||= { current: value }; } };
+    const react = { ...React, useLayoutEffect() {}, useRef(value: unknown) { const index = cursor++; return refs[index] ||= { current: value }; } };
     const module = { exports: {} as { AgentChatComposer: (props: Props) => ReactElement<any> } };
     new Function("require", "module", "exports", code)((id: string) => id === "@/lib/i18n" ? i18nHarness
         // The real mention popup and keyboard selection run in browser tests; this tree harness has no DOM dispatcher.
@@ -175,7 +175,9 @@ test("prompt and submit callbacks remain intact with disabled and sending states
 
     const blank = { prompt: " \n\t ", attachments: [] };
     expect(control(panel.render(blank), "发送").props.disabled).toBe(true);
-    expect(control(panel.render({ ...blank, attachments: [{ id: "reference", name: "reference.png", url: "blob:reference" }] }), "发送").props.disabled).toBe(false);
+    const imageOnly = panel.render({ ...blank, attachments: [{ id: "reference", name: "reference.png", url: "blob:reference" }] });
+    expect(control(imageOnly, "发送").props.disabled).toBe(true);
+    expect(imageOnly.some(element => element.props.children === "请写下希望如何处理这些图片")).toBe(true);
     expect(control(panel.render({ disabled: true }), "发送").props.disabled).toBe(true);
     const sending = panel.render({ sending: true });
     expect(control(sending, "发送").props.disabled).toBe(true);

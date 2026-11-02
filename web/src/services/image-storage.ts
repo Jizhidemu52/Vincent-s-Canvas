@@ -1,5 +1,5 @@
 import { createWorkspaceStorage } from "@/lib/workspace-storage";
-import { forgetMediaSource, rememberMediaSource } from "./canvas-media-links";
+import { forgetMediaSource, rememberMediaSource, readMediaSource } from "./canvas-media-links";
 
 import { nanoid } from "nanoid";
 import { readImageMeta } from "@/lib/image-utils";
@@ -72,11 +72,17 @@ export async function resolveImageUrl(storageKey?: string, fallback = "") {
     store.assertAccess();
     const cached = objectUrls.get(storageKey);
     if (cached) return cached;
-    return (await loadObjectUrl(storageKey)) || fallback;
+    return (await loadObjectUrl(storageKey)) || (await readMediaSource(storageKey)) || fallback;
 }
 
 export async function getImageBlob(storageKey: string) {
     return store.getItem<Blob>(storageKey);
+}
+
+/** Only the verified-cloud maintenance path calls this; keep thumbnails and live object URLs. */
+export async function evictStoredImageCache(storageKey: string) {
+    store.assertAccess();
+    await store.removeItem(storageKey);
 }
 
 export async function setImageBlob(storageKey: string, blob: Blob) {

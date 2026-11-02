@@ -1,7 +1,7 @@
 import { nanoid } from "nanoid";
 import { placeCanvasImageOutputs } from "@/lib/canvas/canvas-image-output-placement";
 import { deploymentFeatures } from "@/lib/deployment-features";
-import { resolveCompletePrompt } from "@/lib/prompt-template-reuse";
+import { loadCanvasPromptTemplate } from "@/lib/canvas/canvas-prompt-template";
 import { canvasHistoryForSave } from "@/pages/canvas/use-canvas-history";
 import { flushCanvasPersistence, loadCanvasProject, useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useUserStore } from "@/stores/use-user-store";
@@ -29,10 +29,9 @@ export async function insertPromptIntoCanvas(templateId: string, targetProjectId
         assertWorkspace();
         if (!loaded) throw new Error("目标画布已不存在，请重新选择");
     }
-    const payload = await resolveCompletePrompt(templateId, "fill", assertWorkspace);
+    const { payload, metadata } = await loadCanvasPromptTemplate(templateId, assertWorkspace);
     assertWorkspace();
     const template = payload.template;
-    if (!template.prompt.trim()) throw new Error("模板提示词为空，未插入画布");
     const state = useCanvasStore.getState();
     const projectId = targetProjectId || state.createProject(`${template.title} · 提示词草稿`);
     // Re-read after asynchronous authorization/loading so concurrent edits are preserved.
@@ -41,21 +40,12 @@ export async function insertPromptIntoCanvas(templateId: string, targetProjectId
     const width = typeof window === "undefined" ? 1200 : window.innerWidth;
     const height = typeof window === "undefined" ? 800 : window.innerHeight;
     const scale = Number.isFinite(project.viewport.k) && project.viewport.k > 0 ? project.viewport.k : 1;
-    const size = { width: 420, height: 300 };
+    const size = { width: 420, height: 520 };
     const center = { x: (width / 2 - project.viewport.x) / scale, y: (height / 2 - project.viewport.y) / scale };
     const node: CanvasNodeData = {
-        id: nanoid(), type: CanvasNodeType.Text, title: template.title, ...size,
+        id: nanoid(), type: CanvasNodeType.Config, title: template.title, ...size,
         position: placeCanvasImageOutputs(project.nodes, [], size, center),
-        metadata: {
-            content: template.prompt, status: "idle",
-            promptTemplateSource: {
-                templateId: template.id, versionId: template.currentVersionId, version: template.version,
-                title: template.title, targetTool: template.targetTool, modelConfigId: template.modelConfigId,
-                modelSnapshot: template.modelSnapshot, parameters: template.parameters,
-                referenceAssetIds: template.referenceAssetIds, sourceTaskId: template.sourceTaskId, sourceAssetId: template.sourceAssetId,
-                resolvedModel: payload.pricing.selectedModel, warnings: payload.warnings,
-            },
-        },
+        metadata: { ...metadata, status: "idle" },
     };
     const nodes = [...project.nodes, node];
     const previous = {

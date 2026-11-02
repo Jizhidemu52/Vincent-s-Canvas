@@ -28,8 +28,11 @@ const GraphNode = memo(function GraphNode({ nodeId, ...props }: Omit<NodeProps, 
 
 export const CanvasNodeLayer = memo(function CanvasNodeLayer({ nodes, highlight, nodeProps, resourceReferences, globalReferences }: CanvasNodeLayerProps) {
     const { activeNodeId, related } = useCanvasGraphHighlight(highlight);
+    const selectedIds = useCanvasGraphStore(state => state.selectedNodeIds);
+    const keyboardNodeId = (nodes.find(node => selectedIds.has(node.id)) || nodes[0])?.id;
     const references = useMemo(() => resourceReferences(activeNodeId), [resourceReferences, activeNodeId]);
     return nodes.map(node => <GraphNode key={node.id} nodeId={node.id} {...nodeProps(node)}
+        keyboardTabIndex={node.id === keyboardNodeId ? 0 : -1}
         isRelated={related.nodeIds.has(node.id)} isFocusRelated={activeNodeId === node.id}
         resourceLabel={references.get(node.id) || globalReferences.get(node.id)} />);
 });

@@ -6,16 +6,16 @@ test("omits inactive node controls from the canvas DOM", () => {
     expect(shouldRenderCanvasNodeControls({ renderQuality: "full", hovered: false, selected: false, connecting: false })).toBe(false);
 });
 
-test("hovering an image shows neither resize hit targets nor connection dots", () => {
+test("hovering an unselected image reveals connection ports but not resize handles", () => {
     const state = { renderQuality: "full" as const, hovered: true, selected: false, connecting: false, isImage: true };
     expect(shouldRenderCanvasNodeControls({ ...state, kind: "resize" })).toBe(false);
-    expect(shouldRenderCanvasNodeControls({ ...state, kind: "connection" })).toBe(false);
+    expect(shouldRenderCanvasNodeControls({ ...state, kind: "connection" })).toBe(true);
 });
 
-test("selected images keep resize controls after the pointer leaves, but hide connection dots", () => {
+test("selected images keep resize and connection access after the pointer leaves", () => {
     const state = { renderQuality: "full" as const, hovered: false, selected: true, connecting: false, isImage: true };
     expect(shouldRenderCanvasNodeControls({ ...state, kind: "resize" })).toBe(true);
-    expect(shouldRenderCanvasNodeControls({ ...state, kind: "connection" })).toBe(false);
+    expect(shouldRenderCanvasNodeControls({ ...state, kind: "connection" })).toBe(true);
 });
 
 test("selected image hover and active connection gestures preserve connection access", () => {

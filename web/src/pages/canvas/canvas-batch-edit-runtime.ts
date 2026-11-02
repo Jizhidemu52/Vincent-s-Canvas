@@ -138,7 +138,7 @@ export async function runCanvasBatchImageEdit({
                         position: { x: sourceX, y: rowY },
                         width: sourceSize.width,
                         height: sourceSize.height,
-                        metadata: { ...imageMetadata(uploadedSource), prompt, batchRootId: localBatchId },
+                        metadata: { ...imageMetadata(uploadedSource), prompt },
                     },
                     {
                         id: resultId,
@@ -164,7 +164,6 @@ export async function runCanvasBatchImageEdit({
                             imageOptions: batchGenerationConfig.imageOptions,
                             count: 1,
                             references: [uploadedSource.storageKey || uploadedSource.url],
-                            batchRootId: localBatchId,
                         },
                     },
                 );
@@ -209,10 +208,10 @@ export async function runCanvasBatchImageEdit({
                         await flushCanvasPersistence();
                     },
                     onOptimizing: () => setOptimizing?.(true),
-                    onCompiled: (finalPrompt, wasOptimized) => {
+                    onCompiled: (finalPrompt, wasOptimized, submittedPrompt) => {
                         prompt = finalPrompt; optimized = wasOptimized; setOptimizing?.(false);
                         const resultIds = new Set(prepared.map(entry => entry.resultId));
-                        setNodes(previous => previous.map(node => resultIds.has(node.id) ? { ...node, metadata: { ...node.metadata, prompt: finalPrompt, generationRecord: compiledCanvasGenerationRecord(node.metadata?.generationRecord, finalPrompt) } } : node));
+                        setNodes(previous => previous.map(node => resultIds.has(node.id) ? { ...node, metadata: { ...node.metadata, prompt: finalPrompt, submittedPrompt, generationRecord: compiledCanvasGenerationRecord(node.metadata?.generationRecord, finalPrompt, submittedPrompt) } } : node));
                     },
                     onSubmitted: setBatchEditServerId,
                     onProgress: (current) => {

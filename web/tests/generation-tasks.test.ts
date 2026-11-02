@@ -1,9 +1,22 @@
 import { describe, expect, test } from "bun:test";
 
-import { createImageTaskRequests, createQueuedMediaTaskPayloads, restoreBatchItemIndices } from "../src/services/api/generation-tasks";
+import { createImageTaskRequests, createQueuedMediaTaskPayloads, restoreBatchItemIndices, imageTaskPrompts } from "../src/services/api/generation-tasks";
+import { compiledCanvasGenerationRecord } from "@/lib/canvas/canvas-generation-record";
 import { imageTaskParameters } from "../src/services/api/image";
 
 describe("canvas batch item mapping", () => {
+    test("server exclusion snapshot keeps the authoring prompt replayable and archives the submitted prompt", () => {
+        const original = "蓝色衬衫", submitted = `${original}\n\n排除要求：水印`;
+        const prompts = imageTaskPrompts({ prompt: submitted, parameters: { promptExclusions: { sourcePrompt: original, submittedPrompt: submitted } } });
+        expect(prompts).toEqual({ prompt: original, submittedPrompt: submitted });
+        const record = { version: 1 as const, id: "run", sourceNodeId: "source", createdAt: "now", prompt: original, inputPrompt: "原始草稿", references: [],
+            parameters: { model: "m", size: "1:1", quality: "high", imageOptions: '{"negative_prompt":"水印"}', systemPrompt: "", count: 1 as const, generationType: "generation" as const } };
+        const archived = compiledCanvasGenerationRecord(record, prompts.prompt, prompts.submittedPrompt)!;
+        expect(archived).toMatchObject({ prompt: original, inputPrompt: "原始草稿", submittedPrompt: submitted });
+        expect(record).not.toHaveProperty("submittedPrompt");
+        expect(imageTaskPrompts({ prompt: "legacy" })).toEqual({ prompt: "legacy", submittedPrompt: undefined });
+        expect(imageTaskPrompts({ prompt: "actual", parameters: { promptExclusions: { sourcePrompt: "wrong", submittedPrompt: "different" } } }).prompt).toBe("actual");
+    });
     test("uses the identical request id and source payload for video preflight and submit", () => {
         expect(createQueuedMediaTaskPayloads({
             requestId: "video-request",

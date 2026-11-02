@@ -4,7 +4,7 @@ import { canvasThemes } from "../src/lib/canvas-theme";
 
 test("light canvas uses a neutral gray field and contrasting selection", () => {
     expect(canvasThemes.light.canvas.background).toBe("#f2f2f2");
-    expect(canvasThemes.light.canvas.selectionStroke).toBe("#3bbaa5");
+    expect(canvasThemes.light.canvas.selectionStroke).toBe("#168774");
     expect(canvasThemes.light.canvas.dot).toBe("rgba(0,0,0,.16)");
 });
 

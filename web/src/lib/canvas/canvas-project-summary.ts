@@ -1,4 +1,5 @@
 import type { CanvasProject } from "@/stores/canvas/use-canvas-store";
+import { selectCanvasCoverNode } from "../../../../shared/canvas-cover";
 
 export type CanvasProjectSummary = Pick<CanvasProject, "id" | "title" | "createdAt" | "updatedAt" | "persistenceConflict"> & {
     nodeCount: number;
@@ -11,7 +12,7 @@ const summaries = new WeakMap<CanvasProject, CanvasProjectSummary>();
 export function canvasProjectSummary(project: CanvasProject): CanvasProjectSummary {
     const cached = summaries.get(project);
     if (cached) return cached;
-    const image = project.nodes.find(node => node.type === "image" && (node.metadata?.storageKey || node.metadata?.content));
+    const image = selectCanvasCoverNode(project.nodes, project.coverNodeId);
     const summary: CanvasProjectSummary = {
         id: project.id, title: project.title, createdAt: project.createdAt, updatedAt: project.updatedAt,
         persistenceConflict: project.persistenceConflict,

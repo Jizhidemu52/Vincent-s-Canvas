@@ -7,7 +7,7 @@ type History = { past: CanvasHistorySnapshot[]; future: CanvasHistorySnapshot[] 
 // references and batch/group structure remain ordinary user-editable history.
 const runtimeKeys = [
     "status", "errorDetails", "imageTask", "sourceTaskId", "generationSubmissionUncertain",
-    "optimizingPrompt", "optimized", "prompt", "userInput", "content", "storageKey",
+    "optimizingPrompt", "optimized", "prompt", "submittedPrompt", "userInput", "content", "storageKey",
     "naturalWidth", "naturalHeight", "bytes", "mimeType", "originalFileName", "imageName", "imageVersion", "primaryImageId",
 ] as const satisfies readonly (keyof CanvasNodeMetadata)[];
 
@@ -34,7 +34,7 @@ export function mergeCanvasGenerationHistory(history: History, previous: CanvasH
     for (const after of current.nodes) {
         const before = beforeById.get(after.id), a = before?.metadata, b = after.metadata;
         if (!before || before === after || !a?.generationRecord?.id || a.generationRecord.id !== b?.generationRecord?.id) continue;
-        const compiled = a.generationRecord.prompt !== b.generationRecord.prompt;
+        const compiled = a.generationRecord.prompt !== b.generationRecord.prompt || a.generationRecord.submittedPrompt !== b.generationRecord.submittedPrompt;
         const inFlight = a.status === "loading" || b.status === "loading" || a.imageTask || b.imageTask || a.optimizingPrompt || b.optimizingPrompt;
         if (!inFlight && !compiled) continue;
         if (!compiled && !runtimeKeys.some(key => !Object.is(a[key], b[key]))) continue;
@@ -64,8 +64,9 @@ export function mergeCanvasGenerationHistory(history: History, previous: CanvasH
             if (Object.hasOwn(patch.after.metadata!, key)) fields[key] = patch.after.metadata![key];
             else delete fields[key];
         }
-        metadata.generationRecord = node.metadata.generationRecord!.prompt === patch.after.metadata!.generationRecord!.prompt
-            ? node.metadata.generationRecord : { ...node.metadata.generationRecord!, prompt: patch.after.metadata!.generationRecord!.prompt };
+        const deliveredRecord = patch.after.metadata!.generationRecord!;
+        metadata.generationRecord = node.metadata.generationRecord!.prompt === deliveredRecord.prompt && node.metadata.generationRecord!.submittedPrompt === deliveredRecord.submittedPrompt
+            ? node.metadata.generationRecord : { ...node.metadata.generationRecord!, prompt: deliveredRecord.prompt, submittedPrompt: deliveredRecord.submittedPrompt };
         // A historical explicit resize has its own dimensions; do not overwrite
         // it with another version's result-fit geometry.
         const resize = patch.resize && node.width === patch.before.width && node.height === patch.before.height;

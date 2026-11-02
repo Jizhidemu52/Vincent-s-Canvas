@@ -51,7 +51,8 @@ describe("shared canvas generation relationships", () => {
         expect(normalizeCanvasConnection(first, first, "source")).toBeNull();
         expect(normalizeCanvasConnection(settings, { ...settings, id: "other" }, "source")).toEqual({ fromNodeId: "config", toNodeId: "other", kind: "config-sequence" });
         expect(normalizeCanvasConnection(settings, { ...settings, id: "other" }, "target")).toEqual({ fromNodeId: "other", toNodeId: "config", kind: "config-sequence" });
-        expect(normalizeCanvasConnection(settings, { ...config("video"), id: "video" }, "source")).toBeNull();
+        expect(normalizeCanvasConnection(settings, { ...config("video"), id: "video" }, "source")).toEqual({ fromNodeId: "config", toNodeId: "video", kind: "config-sequence" });
+        expect(normalizeCanvasConnection({ ...config("video"), id: "video" }, settings, "source")).toBeNull();
     });
 });
 
@@ -93,15 +94,15 @@ describe("shared canvas generation plans", () => {
         const snapshot = { nodes: [settings, image("a"), image("excluded")], connections: [targetEdge("a"), edge("a", "config"), edge("excluded", "config")] };
         expect(resolveSharedGenerationPlan("a", "config", snapshot).context.referenceImages.map(item => item.id)).toEqual(["a"]);
         settings.metadata!.composerContent = "@[node:excluded]";
-        expect(() => resolveSharedGenerationPlan("a", "config", snapshot)).toThrow("已被排除");
+        expect(() => resolveSharedGenerationPlan("a", "config", snapshot)).toThrow("不可用，请移除该引用");
     });
 
     test("rejects missing and sibling-target tokens instead of silently dropping them", () => {
         const settings = config("image", { composerContent: "@[node:b]" });
         const snapshot = { nodes: [settings, image("a"), image("b")], connections: [targetEdge("a"), targetEdge("b")] };
-        expect(() => resolveSharedGenerationPlan("a", "config", snapshot)).toThrow("素材 b");
+        expect(() => resolveSharedGenerationPlan("a", "config", snapshot)).toThrow("“b”不可用");
         settings.metadata!.composerContent = "@[node:missing]";
-        expect(() => resolveSharedGenerationPlan("a", "config", snapshot)).toThrow("素材 missing");
+        expect(() => resolveSharedGenerationPlan("a", "config", snapshot)).toThrow("已失效引用");
     });
 
     test("injects each text body once despite duplicate edges, repeated tokens and target/common overlap", () => {

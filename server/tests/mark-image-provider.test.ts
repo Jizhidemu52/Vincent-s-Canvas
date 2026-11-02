@@ -34,6 +34,7 @@ async function fixture(role = "super_admin", encryptionKey: string | undefined =
     }
     if (sql.startsWith("SELECT") && sql.includes("FROM model_configs")) {
       expect(values[0]).toBe(MARK_IMAGE_PROVIDER_ID);
+      if (sql.includes('AS "workflowProviderId"')) return { rows: models.filter(model => model.modelId === values[1]).map(model => ({ workflowConfigId: model.workflowConfigId, workflowProviderId: model.workflowProviderId, workflowCapability: model.workflowCapability, workflowEnabled: model.workflowEnabled })) };
       return { rows: models.map(({ providerId, ...model }) => model) };
     }
     if (sql.startsWith("INSERT INTO providers")) {
@@ -47,7 +48,8 @@ async function fixture(role = "super_admin", encryptionKey: string | undefined =
       expect(providerId).toBe(MARK_IMAGE_PROVIDER_ID);
       if (modelId === failAtModel) throw new Error("fixture insert failure");
       const existing = models.find(model => model.modelId === modelId);
-      const model = { id: existing?.id || crypto.randomUUID(), providerId, name, modelId, capabilities, creditCost, rmbCost, concurrencyLimit, enabled };
+      expect(sql).not.toContain("workflow_config_id=NULL"); expect(sql).not.toContain("replacement_model_config_id=NULL");
+      const model = { ...existing, id: existing?.id || crypto.randomUUID(), providerId, name, modelId, capabilities, creditCost, rmbCost, concurrencyLimit, enabled };
       models = [...models.filter(item => item.modelId !== modelId), model];
       return { rows: [] };
     }
@@ -101,6 +103,28 @@ test("separate Mark configuration is atomic, idempotent, and never returns plain
   expect(f.state().provider!.enabled).toBe(false);
   expect(f.state().models).toHaveLength(MARK_PLATFORM_MODELS.length);
   expect(JSON.stringify(f.audit)).not.toContain("fixture-mark-key");
+});
+
+test("dedicated credential saves preserve model replacement and compatible workflow bindings", async () => {
+  const f = await fixture();
+  expect((await save(f.url, input())).status).toBe(200);
+  const selected = f.state().models.find(model => model.capabilities.includes("edit"))!;
+  Object.assign(selected, { replacementModelConfigId: "replacement", workflowConfigId: "workflow", workflowProviderId: MARK_IMAGE_PROVIDER_ID, workflowCapability: "edit", workflowEnabled: true });
+  expect((await save(f.url, { ...input(), apiKey: "" })).status).toBe(200);
+  expect(f.state().models.find(model => model.id === selected.id)).toMatchObject({ replacementModelConfigId: "replacement", workflowConfigId: "workflow" });
+});
+
+test("incompatible workflow bindings return a repairable conflict and rollback instead of clearing fields", async () => {
+  const f = await fixture();
+  expect((await save(f.url, input())).status).toBe(200);
+  const selected = f.state().models[0]!;
+  Object.assign(selected, { replacementModelConfigId: "replacement", workflowConfigId: "workflow", workflowProviderId: "other-provider", workflowCapability: "edit", workflowEnabled: true });
+  const before = structuredClone(f.state());
+  const response = await save(f.url, { ...input(), apiKey: "", enabled: false });
+  expect(response.status).toBe(409);
+  expect((await response.json()).error).toBe("INCOMPATIBLE_MODEL_WORKFLOW");
+  expect(f.state()).toEqual(before);
+  expect(f.statements).toContain("ROLLBACK");
 });
 
 test("APIMart saves do not overwrite an explicit shared model selection or clearing", async () => {

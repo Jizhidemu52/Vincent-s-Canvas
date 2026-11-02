@@ -10,6 +10,9 @@ test("canvas thumbnail tier follows displayed dimensions, zoom and DPR", () => {
     expect(canvasImagePreviewEdge(node, 1, 2)).toBe(1024);
     expect(canvasImagePreviewEdge(node, 3, 1)).toBe(0);
     expect(canvasImagePreviewEdge({ ...node, width: 200, height: 150 }, 1, 1)).toBe(256);
+    // A tiny node still only needs a thumbnail at high world zoom.
+    expect(canvasImagePreviewEdge({ ...node, width: 100, height: 75 }, 3, 1)).toBe(512);
+    expect(canvasImagePreviewEdge({ ...node, width: 100, height: 75 }, 8, 1)).toBe(1024);
 });
 
 test("small images, near-native views, unavailable metadata and non-images keep originals", () => {

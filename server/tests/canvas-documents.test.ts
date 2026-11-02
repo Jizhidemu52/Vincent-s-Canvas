@@ -215,7 +215,7 @@ async function serve(app: express.Express, run: (origin: string) => Promise<void
 // This remains an isolated SQL-contract test, not a PostgreSQL migration test.
 function databaseFixture() {
     const sqlite = new Sqlite(":memory:");
-    sqlite.run("CREATE TABLE canvas_documents(owner_user_id TEXT,external_id TEXT,revision INTEGER,deleted INTEGER,document TEXT,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,title TEXT,document_created_at TEXT,document_updated_at TEXT,node_count INTEGER,connection_count INTEGER,cover_url TEXT,PRIMARY KEY(owner_user_id,external_id))");
+    sqlite.run("CREATE TABLE canvas_documents(owner_user_id TEXT,external_id TEXT,revision INTEGER,deleted INTEGER,document TEXT,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,title TEXT,document_created_at TEXT,document_updated_at TEXT,node_count INTEGER,connection_count INTEGER,cover_url TEXT,persistence_conflict TEXT,PRIMARY KEY(owner_user_id,external_id))");
     const allowedAssets = new Set([assetId]);
     const db = { query: async (sql: string, parameters: unknown[] = []) => {
         if (sql.includes("FROM assets a")) {
@@ -227,6 +227,7 @@ function databaseFixture() {
         }
         const statement = sql.replace(/::double precision|::jsonb/g, "")
             .replace(/jsonb_build_object\(/g, "json_object(")
+            .replace(/'persistenceConflict',persistence_conflict/g, "'persistenceConflict',json(persistence_conflict)")
             .replace(/jsonb_array_length\(/g, "json_array_length(")
             .replace(/jsonb_array_elements\(document->'nodes'\) AS node/g, "json_each(document,'$.nodes') AS node")
             .replace(/\bnode->/g, "node.value->")
@@ -297,6 +298,31 @@ test("canvas API refuses guessed or unreadable server asset ids before writing",
         expect(response.status).toBe(403);
         expect((await response.json()).error).toBe("CANVAS_ASSET_FORBIDDEN");
         expect(fixture.sqlite.query("SELECT count(*) AS n FROM canvas_documents").get()).toEqual({ n: 0 });
+    }); } finally { fixture.sqlite.close(); }
+});
+
+test("library summaries carry conflict identity and selected covers without exposing whole documents", async () => {
+    const fixture = databaseFixture();
+    const app = express().use(express.json());
+    app.use((req, _res, next) => { (req as AuthenticatedRequest).auth = actor("employee-a"); next(); });
+    app.use("/api/canvas-documents", createCanvasDocumentsRouter(fixture.db));
+    const generatedId = "77777777-7777-4777-8777-777777777777";
+    fixture.allowAsset(generatedId);
+    const generatedUrl = `/api/assets/${generatedId}/content`;
+    const document = { ...project(), persistenceConflict: { projectId: "original", paths: ["nodes"], savedAt: "2026-11-02T00:00:00Z" } };
+    const generatedNode = { ...document.nodes[0], id: "generated", metadata: { content: generatedUrl, prompt: "generated", sourceTaskId: "completed-task" } };
+    document.nodes.push(generatedNode);
+    try { await serve(app, async origin => {
+        const headers = { "content-type": "application/json", "X-Canvas-Owner-Id": "employee-a" };
+        const url = `${origin}/api/canvas-documents`;
+        expect((await fetch(`${url}/${document.id}`, { method: "PUT", headers, body: JSON.stringify({ baseRevision: 0, document }) })).status).toBe(200);
+        const first = await fetch(url, { headers }).then(result => result.json());
+        expect(first.documents[0].summary.persistenceConflict).toEqual(document.persistenceConflict);
+        expect(first.documents[0].summary.cover).toEqual({ content: generatedUrl });
+        expect(first.documents[0]).not.toHaveProperty("document");
+        expect((await fetch(`${url}/${document.id}`, { method: "PUT", headers, body: JSON.stringify({ baseRevision: 1, document: { ...document, coverNodeId: "image-1" } }) })).status).toBe(200);
+        const selected = await fetch(url, { headers }).then(result => result.json());
+        expect(selected.documents[0].summary.cover).toEqual({ content: document.nodes[0].metadata.content });
     }); } finally { fixture.sqlite.close(); }
 });
 

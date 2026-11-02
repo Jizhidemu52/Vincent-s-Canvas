@@ -40,12 +40,16 @@ function respond(read: (path: string, init?: RequestInit) => unknown | Promise<u
     }) as typeof fetch;
 }
 
-function respondToGeneration(onPoll: (init?: RequestInit) => unknown = () => ({ task: originalTask })) {
+const waitingTask = (): QueuedTask => ({ ...originalTask, status: "waiting", resultUrls: [], attempts: 0, upstreamTaskId: null, submissionStartedAt: null });
+function respondToGeneration(onPoll: (init?: RequestInit) => unknown = () => ({ task: originalTask }), cancellation?: { task: QueuedTask }) {
     respond((path, init) => {
         if (path === "/api/models") return { models: [model], tools: [], prices: [] };
         if (path === "/api/tasks" && init?.method === "POST") return { task: { id: originalTask.id } };
-        if (path === `/api/tasks/${originalTask.id}`) return onPoll(init);
-        if (path === `/api/tasks/${originalTask.id}/cancel`) return new Response(null, { status: 204 });
+        if (path === `/api/tasks/${originalTask.id}`) return cancellation && !init?.signal ? cancellation : onPoll(init);
+        if (path === `/api/tasks/${originalTask.id}/cancel`) {
+            if (cancellation) cancellation.task = { ...cancellation.task, status: "cancelled" };
+            return new Response(null, { status: 204 });
+        }
         throw new Error(`Unexpected HTTP ${init?.method || "GET"} ${path}`);
     });
 }
@@ -113,7 +117,7 @@ describe("image observation and cancellation", () => {
         const controller = new AbortController();
         const saving = Promise.withResolvers<void>();
         const saved = Promise.withResolvers<void>();
-        respondToGeneration();
+        respondToGeneration(undefined, { task: waitingTask() });
         let explicitlyStopped = false;
         const result = requestQueuedImages({ ...baseInput, signal: controller.signal,
             cancelOnAbort: () => explicitlyStopped,
@@ -125,7 +129,7 @@ describe("image observation and cancellation", () => {
         saved.resolve();
         await expect(result).rejects.toMatchObject({ name: "AbortError" });
         expect(writes()).toEqual(mode === "stop" ? ["/api/tasks", `/api/tasks/${originalTask.id}/cancel`] : ["/api/tasks"]);
-        expect(calls.some(call => call.method === "GET" && call.path === `/api/tasks/${originalTask.id}`)).toBe(false);
+        expect(calls.filter(call => call.method === "GET" && call.path === `/api/tasks/${originalTask.id}`)).toHaveLength(mode === "stop" ? 2 : 0);
     });
 
     test.each(["navigation", "stop", "default"])("%s abort uses the current cancellation intent after a task was accepted", async mode => {
@@ -137,7 +141,7 @@ describe("image observation and cancellation", () => {
             controller.abort();
             expect(init?.signal?.aborted).toBe(true);
             throw new DOMException("请求已取消", "AbortError");
-        });
+        }, { task: waitingTask() });
         const result = requestQueuedImages({ ...baseInput, signal: controller.signal, ...(mode === "default" ? {} : { cancelOnAbort: () => explicitlyStopped }) });
         await expect(result).rejects.toMatchObject({ name: "AbortError" });
         expect(writes()).toEqual(mode === "navigation" ? ["/api/tasks"] : ["/api/tasks", `/api/tasks/${originalTask.id}/cancel`]);

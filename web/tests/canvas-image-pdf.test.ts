@@ -163,7 +163,7 @@ test("rejects empty selections, duplicate IDs, blank set names and oversized ind
     await expect(createCanvasImagePdfExport({ nodes: [], setName: "set", mode: "merged" }, dependencies)).rejects.toThrow("至少选择");
     await expect(createCanvasImagePdfExport({ nodes: [node("a"), node("a")], setName: "set", mode: "merged" }, dependencies)).rejects.toThrow("重复图片");
     await expect(createCanvasImagePdfExport({ nodes: [node("a")], setName: " .pdf ", mode: "merged" }, dependencies)).rejects.toThrow("有效的图片集名称");
-    await expect(createCanvasImagePdfExport({ nodes: [node("a")], setName: "set", mode: "merged" }, { ...dependencies, measureImage: async () => ({ width: 10_000, height: 10_000 }) })).rejects.toThrow("2000 万像素");
+    await expect(createCanvasImagePdfExport({ nodes: [node("a")], setName: "set", mode: "merged" }, { ...dependencies, measureImage: async () => ({ width: 10_000, height: 10_000 }) })).rejects.toThrow("4000 万像素");
 });
 
 test("batch cover selection expands child order and all-images list does not repeat covers", () => {

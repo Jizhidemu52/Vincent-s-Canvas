@@ -64,7 +64,7 @@ export function renderMaskPreview(mask: HTMLCanvasElement, preview: HTMLCanvasEl
     context.restore();
 }
 
-/** Export original-pixel alpha: any painted pixel is editable, untouched pixels stay opaque. */
+/** Ignore antialiasing/eraser residue; untouched pixels stay opaque. */
 export function buildCanvasEditMask(selectionCanvas: HTMLCanvasElement) {
     const selectionContext = selectionCanvas.getContext("2d");
     const canvas = document.createElement("canvas");
@@ -76,7 +76,7 @@ export function buildCanvasEditMask(selectionCanvas: HTMLCanvasElement) {
     const mask = context.createImageData(canvas.width, canvas.height);
     mask.data.fill(255);
     let painted = false;
-    for (let index = 3; index < selection.length; index += 4) if (selection[index] > 0) {
+    for (let index = 3; index < selection.length; index += 4) if (selection[index] >= 128) {
         mask.data[index] = 0;
         painted = true;
     }

@@ -94,9 +94,9 @@ test("only administrators receive branded guidance and model documentation", () 
     expect(imageModelProfile("midjourney", [], "super_admin").tip).toContain("MJ");
 });
 
-test("changing models resets unsupported quality, dimensions and output counts", () => {
+test("changing models resets unsupported quality and count while preserving the nearest aspect ratio", () => {
     const initial = { ...defaultConfig, quality: "0.5k", size: "21:9", count: "10" };
-    expect(normalizeImageModelSettings(initial, imageModelProfile("gpt-image-2", []))).toEqual({ quality: "auto", size: "1024x1024", count: "1" });
+    expect(normalizeImageModelSettings(initial, imageModelProfile("gpt-image-2", []))).toEqual({ quality: "auto", size: "2048x1152", count: "1" });
     expect(normalizeImageModelSettings(initial, imageModelProfile("midjourney-blend", []))).toEqual({ quality: "relax", size: "21:9", count: "1" });
 });
 

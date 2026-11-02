@@ -11,7 +11,6 @@ export type AgentThreadSummary = { id: string; preview: string; name?: string | 
 export type AgentPanelTab = "chat" | "setup" | "history" | "log";
 
 type CanvasAgentStore = {
-    width: number;
     url: string;
     token: string;
     connected: boolean;
@@ -28,6 +27,11 @@ type CanvasAgentStore = {
     loadingThreads: boolean;
     activeTab: AgentPanelTab;
     confirmTools: boolean;
+    onlineConfirmTools: boolean;
+    showToolDetails: boolean;
+    onlineRunning: boolean;
+    previewNodeIds: string[];
+    canvasScope: string;
     activity: string;
     connectError: string;
     pendingTool: AgentPendingToolCall | null;
@@ -38,7 +42,6 @@ type CanvasAgentStore = {
 };
 
 export const useCanvasAgentStore = create<CanvasAgentStore>((set) => ({
-    width: typeof window === "undefined" ? 440 : Number(localStorage.getItem("canvas-agent-panel-width")) || 440,
     url: typeof window === "undefined" ? "http://127.0.0.1:17371" : localStorage.getItem("canvas-agent-url") || "http://127.0.0.1:17371",
     token: typeof window === "undefined" ? "" : localStorage.getItem("canvas-agent-token") || "",
     connected: false,
@@ -55,6 +58,11 @@ export const useCanvasAgentStore = create<CanvasAgentStore>((set) => ({
     loadingThreads: false,
     activeTab: "setup",
     confirmTools: true,
+    onlineConfirmTools: false,
+    showToolDetails: false,
+    onlineRunning: false,
+    previewNodeIds: [],
+    canvasScope: "",
     activity: "就绪",
     connectError: "",
     pendingTool: null,

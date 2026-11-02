@@ -169,13 +169,16 @@ describe("task invalidation SSE HTTP contract", () => {
       const request = (query: string, owner?: string) => fetch(`${fixture.url}?${query}`, { headers: owner ? { "x-test-owner": owner } : {} });
       expect((await request(`ids=${taskA}&ownerId=${ownerA}`, "none")).status).toBe(401);
       expect((await request(`ids=${taskA}&ownerId=${ownerB}`)).status).toBe(403);
-      for (const query of ["", `ownerId=${ownerA}`, `ids=&ownerId=${ownerA}`, `ids=not-uuid&ownerId=${ownerA}`,
+      for (const query of ["", `ids=&ownerId=${ownerA}`, `ids=not-uuid&ownerId=${ownerA}`,
         `ids=${taskA}&ids=${taskB}&ownerId=${ownerA}`, `ids=${taskA}&ownerId=bad`, `ids=${[...ids, crypto.randomUUID()].join(",")}&ownerId=${ownerA}`])
         expect((await request(query)).status).toBe(400);
       expect(subscriptions).toBe(0);
       const accepted = await request(`ids=${ids.join(",")}&ownerId=${ownerA}`);
       expect(accepted.status).toBe(200); expect(await accepted.text()).toContain(JSON.stringify({ ids }));
       expect(subscriptions).toBe(1);
+      const workspace = await request(`ownerId=${ownerA}`);
+      expect(workspace.status).toBe(200); expect(await workspace.text()).toContain(JSON.stringify({ ids: [] }));
+      expect(subscriptions).toBe(2);
     } finally { await fixture.close(); }
   });
 

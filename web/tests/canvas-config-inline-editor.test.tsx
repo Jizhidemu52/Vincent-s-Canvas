@@ -20,13 +20,13 @@ test("per-image display separates task inputs from common image numbering and me
         { nodeId: "text", type: "text" as const, title: "说明", text: "保留轮廓" },
     ];
     const separate = configReferencePresentation(references, inputs, "image", true);
-    expect(separate.trayLabels).toEqual({ "connection:a": "任务输入1", "connection:b": "任务输入2", "upload:common": "图片2" });
-    expect(separate.mentionLabels).toEqual({ common: "图片2" });
+    expect(separate.trayLabels).toEqual({ "connection:a": "任务输入1", "connection:b": "任务输入2", "upload:common": "图2" });
+    expect(separate.mentionLabels).toEqual({ common: "图2" });
     expect(separate.inputs.map(input => input.nodeId)).toEqual(["text", "common"]);
     const html = renderToStaticMarkup(<CanvasConfigImageReferences node={node} references={references} labels={separate.trayLabels} disabled={false} onChange={noop} />);
     expect(html).toContain("任务输入1");
     expect(html).toContain("任务输入2");
-    expect(html).toContain('aria-label="移除图片2"');
+    expect(html).toContain('aria-label="移除图2"');
     expect(html).not.toContain("参考图3");
     // Combined references and explicit-target mode use the established full input list.
     const combined = configReferencePresentation(references, inputs, "image", false);

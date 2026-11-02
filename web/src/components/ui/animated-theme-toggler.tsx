@@ -138,7 +138,7 @@ export const AnimatedThemeToggler = ({ children, className, duration = 400, vari
             onThemeChange?.(nextTheme);
         };
 
-        if (typeof document.startViewTransition !== "function") {
+        if (typeof document.startViewTransition !== "function" || button.closest?.(".cw-workspace") || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
             applyTheme();
             return;
         }

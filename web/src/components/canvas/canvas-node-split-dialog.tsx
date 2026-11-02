@@ -1,6 +1,6 @@
 import { useUiText } from "@/lib/i18n";
 import { useEffect, useState } from "react";
-import { Button, InputNumber, Modal } from "antd";
+import { App, Button, InputNumber, Modal } from "antd";
 import { Grid2x2 } from "lucide-react";
 
 import { readImageMeta } from "@/lib/image-utils";
@@ -11,8 +11,10 @@ export type CanvasImageSplitParams = ImageSplitParams;
 const defaultParams: CanvasImageSplitParams = { rows: 2, columns: 2 };
 const maxGridSize = 12;
 
-export function CanvasNodeSplitDialog({ dataUrl, open, onClose, onConfirm }: { dataUrl: string; open: boolean; onClose: () => void; onConfirm: (params: CanvasImageSplitParams) => void }) {
+export function CanvasNodeSplitDialog({ dataUrl, open, onClose, onConfirm }: { dataUrl: string; open: boolean; onClose: () => void; onConfirm: (params: CanvasImageSplitParams) => void | Promise<unknown> }) {
     const t = useUiText();
+    const { modal } = App.useApp();
+    const [processing, setProcessing] = useState(false);
     const [params, setParams] = useState(defaultParams);
     const [image, setImage] = useState<{ width: number; height: number } | null>(null);
     const [imageError, setImageError] = useState("");
@@ -39,13 +41,22 @@ export function CanvasNodeSplitDialog({ dataUrl, open, onClose, onConfirm }: { d
     const update = (key: keyof CanvasImageSplitParams, value: string | number | null) => {
         setParams((current) => ({ ...current, [key]: clampGrid(value ?? current[key]) }));
     };
+    const submit = async () => {
+        if (processing) return;
+        setProcessing(true);
+        try { await onConfirm(params); }
+        finally { setProcessing(false); }
+    };
+    const confirm = () => {
+        if (total > 16) modal.confirm({ title: t("确认批量切图"), content: t("将创建 {count} 个独立图片节点，可能需要较长时间。", { count: total }), okText: t("开始切图"), cancelText: t("返回调整"), onOk: submit });
+        else void submit();
+    };
 
     return (
-        <Modal title={null} open={open && Boolean(dataUrl)} onCancel={onClose} footer={null} width={780} centered destroyOnHidden>
+        <Modal title={t("切分图片")} open={open && Boolean(dataUrl)} onCancel={onClose} footer={null} width={800} centered destroyOnHidden>
             <div className="space-y-5">
                 {imageError ? <div role="alert" className="text-sm">{imageError}</div> : null}
                 <div>
-                    <h2 className="text-xl font-semibold">{t("切分图片")}</h2>
                     <p className="mt-1 text-sm opacity-60">{t("生成")}{total} {t(" 个图片子节点，并按原图网格排列到画布右侧")}</p>
                 </div>
                 <div className="grid gap-6 md:grid-cols-[minmax(260px,1fr)_280px]">
@@ -74,7 +85,7 @@ export function CanvasNodeSplitDialog({ dataUrl, open, onClose, onConfirm }: { d
                                 <span className="font-semibold">{pieceSize ? `${pieceSize.width} x ${pieceSize.height}` : t("未知")}</span>
                             </div>
                         </div>
-                        <Button type="primary" size="large" className="w-full" icon={<Grid2x2 className="size-4" />} disabled={!image} onClick={() => onConfirm(params)}>
+                        <Button type="primary" size="large" className="w-full" icon={<Grid2x2 className="size-4" />} loading={processing} disabled={!image} onClick={confirm}>
                             {t("生成子节点")}</Button>
                     </div>
                 </div>

@@ -9,6 +9,10 @@ import { minimapPropsEqual } from "@/lib/canvas/canvas-floating-surface-render-s
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { ViewportTransform } from "@/types/canvas";
+import { X } from "lucide-react";
+import { useUiText } from "@/lib/i18n";
+import { clampCanvasZoom } from "@/lib/canvas/canvas-zoom";
+import { canvasWheelZoomFactor } from "@/lib/canvas/canvas-wheel-zoom";
 
 const MinimapNodeLayer = memo(function MinimapNodeLayer({ rects }: { rects: MinimapNodeRect[] }) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -42,13 +46,16 @@ export const Minimap = memo(function Minimap({
     viewportSize,
     onViewportPreview,
     onViewportChange,
+    onClose,
 }: {
     nodes: readonly MinimapNodeGeometry[];
     viewport: ViewportTransform;
     viewportSize: { width: number; height: number };
     onViewportPreview: (viewport: ViewportTransform) => void;
     onViewportChange: (viewport: ViewportTransform) => void;
+    onClose?: () => void;
 }) {
+    const t = useUiText();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const containerRef = useRef<HTMLDivElement>(null);
     const containerRectRef = useRef<DOMRect | null>(null);
@@ -59,7 +66,7 @@ export const Minimap = memo(function Minimap({
     const liveViewportRef = useRef(viewport);
     const isDraggingRef = useRef(false);
     const [previewViewport, setPreviewViewport] = useState(viewport);
-    const width = 240;
+    const width = Math.min(240, Math.max(160, viewportSize.width - 24));
     const height = 160;
 
     useEffect(() => {
@@ -102,7 +109,7 @@ export const Minimap = memo(function Minimap({
         const nextLayout = layoutRef.current ? refreshMinimapLayout(layoutRef.current, nodes, width, height) : createMinimapLayout(nodes, width, height);
         layoutRef.current = nextLayout;
         return nextLayout;
-    }, [nodes]);
+    }, [nodes, width]);
     const { worldBounds, scale, offset } = layout;
 
     const toMinimap = useCallback(
@@ -156,14 +163,44 @@ export const Minimap = memo(function Minimap({
         isDraggingRef.current = false;
         onViewportChangeRef.current(liveViewportRef.current);
     };
+    const zoomAtCenter = useCallback((factor: number) => {
+        const current = liveViewportRef.current;
+        const center = { x: (viewportSize.width / 2 - current.x) / current.k, y: (viewportSize.height / 2 - current.y) / current.k };
+        const next = minimapViewportAtWorldPoint(center, viewportSize, clampCanvasZoom(current.k * factor));
+        liveViewportRef.current = next; setPreviewViewport(next); onViewportChangeRef.current(next);
+    }, [viewportSize]);
+    useEffect(() => {
+        const map = containerRef.current;
+        if (!map) return;
+        const wheel = (event: WheelEvent) => {
+            // Ctrl/Cmd is already handled once by the workspace capture listener.
+            if (event.ctrlKey || event.metaKey) return;
+            event.preventDefault(); event.stopPropagation(); zoomAtCenter(canvasWheelZoomFactor(event.deltaY, event.deltaMode));
+        };
+        map.addEventListener("wheel", wheel, { passive: false });
+        return () => map.removeEventListener("wheel", wheel);
+    }, [zoomAtCenter]);
 
     return (
-        <div className="absolute bottom-16 right-3 z-50 overflow-hidden rounded-lg border shadow-[0_12px_30px_rgba(15,23,42,.10)] backdrop-blur-sm" style={{ width, height, background: theme.toolbar.panel, borderColor: theme.toolbar.border }}>
+        <div data-testid="canvas-mini-map" data-canvas-no-zoom data-canvas-shortcuts="ignore" className="absolute right-3 z-30 overflow-hidden rounded-lg border shadow-sm" style={{ bottom: "var(--cw-minimap-bottom, 112px)", width, height, background: theme.toolbar.panel, borderColor: theme.toolbar.border }}>
             <div
                 ref={containerRef}
                 className="relative h-full w-full cursor-crosshair"
+                tabIndex={0} role="application" aria-label={t("画布小地图：方向键平移，加减号缩放")}
+                onKeyDown={event => {
+                    if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+                    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); commitPreviewViewport(); onClose?.(); return; }
+                    if (["+", "=", "-"].includes(event.key)) { event.preventDefault(); zoomAtCenter(event.key === "-" ? 1 / 1.25 : 1.25); return; }
+                    const delta = event.shiftKey ? 160 : 40;
+                    const movement = { ArrowLeft: [delta, 0], ArrowRight: [-delta, 0], ArrowUp: [0, delta], ArrowDown: [0, -delta] }[event.key];
+                    if (!movement) return;
+                    event.preventDefault(); event.stopPropagation();
+                    const next = { ...liveViewportRef.current, x: liveViewportRef.current.x + movement[0], y: liveViewportRef.current.y + movement[1] };
+                    liveViewportRef.current = next; setPreviewViewport(next); onViewportChangeRef.current(next);
+                }}
                 onPointerDown={(event) => {
                     event.preventDefault();
+                    event.currentTarget.focus({ preventScroll: true });
                     event.currentTarget.setPointerCapture(event.pointerId);
                     isDraggingRef.current = true;
                     syncContainerRect();
@@ -173,11 +210,14 @@ export const Minimap = memo(function Minimap({
                     if (isDraggingRef.current) updateViewportFromEvent(event);
                 }}
                 onPointerUp={commitPreviewViewport}
-                onPointerLeave={commitPreviewViewport}
+                onPointerCancel={commitPreviewViewport}
+                onLostPointerCapture={commitPreviewViewport}
+                onBlur={commitPreviewViewport}
             >
                 <MinimapNodeLayer rects={nodeRects} />
                 <div className="pointer-events-none absolute border" style={{ left: viewportRect.x, top: viewportRect.y, width: viewportRect.w, height: viewportRect.h, borderColor: theme.canvas.selectionStroke, background: `${theme.canvas.selectionStroke}18` }} />
             </div>
+            {onClose ? <button type="button" className="cw-icon absolute right-1 top-1 !size-6" style={{ background: theme.node.panel, color: theme.node.text }} aria-label={t("关闭小地图")} onClick={onClose}><X size={14} /></button> : null}
         </div>
     );
 }, minimapPropsEqual);

@@ -114,14 +114,16 @@ function elements(value: unknown): ReactElement<any>[] {
     return [element, ...elements(element.props.children)];
 }
 
-function controls(patch: Partial<Props> = {}, toolEnabled = true) {
+function controls(patch: Partial<Props> = {}, toolEnabled = true, boundModel?: string) {
     const state: unknown[] = [];
     let cursor = 0;
     const effects: (() => void)[] = [];
+    let mentionOptions: any;
     const dependencies: Record<string, unknown> = {
         // External drag handling has its own tests; keep this renderer focused on composer controls.
         "@/hooks/use-image-drop": { useImageDrop: () => ({ dropProps: {}, dragging: false, reading: false }) },
-        react: { ...React, memo: (component: unknown) => component, useId: () => "settings-test", useEffect: (effect: () => void) => effects.push(effect),
+        "@/hooks/use-image-mentions": { useImageMentions: (options: any) => { mentionOptions = options; return { menu: null, inputProps: {}, handleChange: (event: any) => options.onChange(event.target.value), handleSelect() {}, handleKeyDown: () => false }; } },
+        react: { ...React, memo: (component: unknown) => component, useMemo: (create: () => unknown) => create(), useId: () => "settings-test", useEffect: (effect: () => void) => effects.push(effect),
             useState: (initial: unknown) => {
                 const index = cursor++;
                 if (!(index in state)) state[index] = initial;
@@ -133,7 +135,7 @@ function controls(patch: Partial<Props> = {}, toolEnabled = true) {
         "@/hooks/use-tool-config": {
             canvasToolKey,
             // This harness has no administrator model binding; retain the supplied composer config.
-            useToolConfig: (config: Props["config"]) => config,
+            useToolConfig: (config: Props["config"]) => boundModel ? { ...config, model: boundModel } : config,
             useToolEnabled: (key: string) => toolEnabled && ["canvas-image", "canvas-edit"].includes(key),
         },
     };
@@ -143,7 +145,7 @@ function controls(patch: Partial<Props> = {}, toolEnabled = true) {
         cursor = 0; effects.length = 0;
         const tree = elements(module.exports.CanvasQuickGeneratePanel({ ...initialProps, ...patch, ...next }));
         effects.forEach(effect => effect());
-        return { tree, settings: tree.find(element => element.type === CanvasQuickSettingsPopovers)! };
+        return { tree, settings: tree.find(element => element.type === CanvasQuickSettingsPopovers)!, mentions: mentionOptions };
     };
 }
 
@@ -167,7 +169,7 @@ test("editing popover settings retains latest values without clearing inputs or 
     expect(changes).toEqual([["quality", "medium"], "generate"]);
 });
 
-test("automatic model and parameter effects never call user change handlers, including while closed", () => {
+test("a populated draft retains model and parameters until its replacement is explicitly accepted", () => {
     const changes: unknown[] = [], normalized: unknown[] = [];
     const render = controls({ model: "retired-model", size: "1:1", quality: "unsupported", count: 5,
         onModelChange: value => changes.push(["model", value]), onSizeChange: value => changes.push(["size", value]),
@@ -176,17 +178,48 @@ test("automatic model and parameter effects never call user change handlers, inc
     });
     const initial = render();
     expect(changes).toEqual([]);
-    expect(normalized).toContainEqual({ model: "gpt-image-2" });
-    expect(normalized).toContainEqual({ size: "1024x1024", quality: "auto", count: 1 });
+    expect(normalized).toEqual([]);
+    const accept = initial.tree.find(element => element.props.children === "使用当前可用模型")!;
+    expect(accept).toBeDefined();
+    accept.props.onClick();
+    expect(changes).toEqual([["model", "gpt-image-2"]]);
+    changes.length = 0;
     initial.settings.props.onConfigNormalize("imageOptions", '{"resolution":"1k"}');
-    expect(normalized.at(-1)).toEqual({ imageOptions: '{"resolution":"1k"}' });
+    expect(initial.settings.props.disabled).toBe(true);
+    expect(normalized).toEqual([]);
     expect(changes).toEqual([]);
     initial.settings.props.onConfigChange("imageOptions", '{"resolution":"4k"}');
     expect(changes).toEqual([["imageOptions", '{"resolution":"4k"}']]);
     changes.length = 0; normalized.length = 0;
     render({ open: false });
     expect(changes).toEqual([]);
+    expect(normalized).toEqual([]);
+    render({ model: "gpt-image-2" });
     expect(normalized).toContainEqual({ size: "1024x1024", quality: "auto", count: 1 });
+});
+
+test("an empty new draft may adopt an available model without inventing prompt or references", () => {
+    const normalized: unknown[] = [];
+    const promptRef = { current: "" };
+    controls({ model: "retired-model", promptRef, references: [], onSettingsNormalize: value => normalized.push(value) })();
+    expect(normalized).toEqual([{ model: "gpt-image-2" }]);
+    expect(promptRef.current).toBe("");
+});
+
+test("quick @ selection numbers the existing tray, adds only a reference, and respects the model limit", async () => {
+    const writes: unknown[] = [];
+    const newImage = { id: "canvas:new", name: "新图片", label: "图99", source: "canvas" as const, dataUrl: "blob:new" };
+    const render = controls({ mentionImages: [newImage], onAddMentionReference: image => { writes.push(image); return true; }, onGenerate: () => writes.push("generate"), onModelChange: value => writes.push(value) });
+    const original = initialProps.promptRef.current;
+    expect(await render().mentions.onSelect({ id: "ref-1", label: "图8", name: "旧图片" })).toBe("图1");
+    expect(writes).toEqual([]);
+    expect(await render().mentions.onSelect(newImage)).toBe("图2");
+    expect(writes).toEqual([newImage]);
+    expect(initialProps.promptRef.current).toBe(original);
+    writes.length = 0;
+    const refs = Array.from({ length: 16 }, (_, index) => ({ ...initialProps.references[0], id: `limit-${index}`, dataUrl: `blob:${index}` }));
+    expect(await render({ references: refs }).mentions.onSelect(newImage)).toBe(false);
+    expect(writes).toEqual([]);
 });
 
 test("generation in progress locks all parameter popovers and submission", () => {

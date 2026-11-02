@@ -115,7 +115,7 @@ function canvasHarness(mode: "select" | "hand" = "select", theme: "light" | "dar
             root.onPointerDownCapture(event);
             if (!stopped) root.onPointerDown(event);
         },
-        wheel() { render().onWheel({ target: surface, deltaX: 0, deltaY: -100, ctrlKey: true, deltaMode: 0, clientX: 100, clientY: 100 }); },
+        wheel() { render(); dispatch("wheel", { deltaX: 0, deltaY: -100, ctrlKey: true, deltaMode: 0, clientX: 100, clientY: 100 }, surface); },
         flushTimers() { for (const [id, callback] of [...timers]) { timers.delete(id); callback(); } },
         get scheduledWork() { return timers.size + frames.size; },
     };

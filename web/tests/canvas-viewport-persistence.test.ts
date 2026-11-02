@@ -71,7 +71,8 @@ test("rapid viewport changes remain debounced and unmount saves the last committ
     app.render({ viewport: { x: 12, y: -7, k: 1.5 } });
     app.render({ viewport: { x: 24, y: -17, k: 2 } });
     expect(app.writes).toEqual([]);
-    expect(app.timers.size).toBe(1);
+    // One debounce plus the independent maximum-wait deadline.
+    expect(app.timers.size).toBe(2);
     app.unmount();
     expect(app.writes).toEqual([{ id: "first", viewport: { x: 24, y: -17, k: 2 } }]);
     expect(app.timers.size).toBe(0);

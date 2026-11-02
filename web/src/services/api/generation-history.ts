@@ -11,7 +11,7 @@ export type GenerationDraftInput = { prompt: string; config: GenerationDraftConf
 export type ArchivedReference = { id: string; name: string; originalFileName?: string; type: string; bytes: number; sha256: string; url: string; sourceAssetId?: string };
 export type GenerationInputArchive = {
     version: 1; ownerId: string; modelConfigId: string; modelId: string;
-    prompt: string; userInput?: PromptInputData; optimized?: boolean; effectivePrompt: string; config: GenerationDraftConfig;
+    prompt: string; userInput?: PromptInputData; optimized?: boolean; effectivePrompt: string; submittedPrompt?: string; config: GenerationDraftConfig;
     parameters: Record<string, unknown>; references: ArchivedReference[];
     maskReferenceIndex?: number;
 };

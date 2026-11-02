@@ -1,23 +1,23 @@
 import { useUiText } from "@/lib/i18n";
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { App, Button, Modal, Select } from "antd";
+import { App, Button, InputNumber, Modal, Select } from "antd";
 import { Check, X } from "lucide-react";
 
 import { readImageMeta } from "@/lib/image-utils";
-import { fitCropRatio, moveCrop, resizeCrop, type CanvasCropHandle as ResizeHandle, type CanvasImageCropRect } from "@/lib/canvas/canvas-crop-geometry";
+import { cropFromPixels, cropPixels, fitCropRatio, moveCrop, newCrop, resizeCrop, type CanvasCropHandle as ResizeHandle, type CanvasImageCropRect } from "@/lib/canvas/canvas-crop-geometry";
 export type { CanvasImageCropRect } from "@/lib/canvas/canvas-crop-geometry";
 
-type DragMode = "move" | "resize";
+type DragMode = "move" | "resize" | "new";
 
 const handles: ResizeHandle[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
 const defaultCrop = { x: 0.12, y: 0.12, width: 0.76, height: 0.76 };
 const ratioOptions = [
     { value: "free", label: "自由比例" }, { value: "original", label: "原图比例" },
-    ...["1:1", "4:3", "3:4", "3:2", "2:3", "16:9", "9:16"].map(value => ({ value, label: value })),
+    ...["1:1", "4:5", "5:4", "4:3", "3:4", "3:2", "2:3", "16:9", "9:16"].map(value => ({ value, label: value })),
 ];
 const handleNames: Record<ResizeHandle, string> = { n: "上", e: "右", s: "下", w: "左", ne: "右上", nw: "左上", se: "右下", sw: "左下" };
 
-export function CanvasNodeCropDialog({ dataUrl, open, onClose, onConfirm }: { dataUrl: string; open: boolean; onClose: () => void; onConfirm: (crop: CanvasImageCropRect) => void }) {
+export function CanvasNodeCropDialog({ dataUrl, open, onClose, onConfirm }: { dataUrl: string; open: boolean; onClose: () => void; onConfirm: (crop: CanvasImageCropRect) => void | Promise<unknown> }) {
     const t = useUiText();
     const { modal } = App.useApp();
     const boxRef = useRef<HTMLDivElement>(null);
@@ -26,6 +26,8 @@ export function CanvasNodeCropDialog({ dataUrl, open, onClose, onConfirm }: { da
     const [ratioKey, setRatioKey] = useState("free");
     const [image, setImage] = useState<{ width: number; height: number } | null>(null);
     const [imageError, setImageError] = useState("");
+    const [processing, setProcessing] = useState(false);
+    const submit = async () => { if (!image || processing) return; setProcessing(true); try { await onConfirm(cropFromPixels(cropPixels(crop, image), image)); } finally { setProcessing(false); } };
     const requestClose = () => {
         if (ratioKey === "free" && Object.keys(defaultCrop).every(key => crop[key as keyof CanvasImageCropRect] === defaultCrop[key as keyof CanvasImageCropRect])) { onClose(); return; }
         modal.confirm({ title: t("放弃未保存的裁剪？"), content: t("当前裁剪调整尚未应用，关闭后将丢失。原图不会改变。"), okText: t("放弃调整"), cancelText: t("继续裁剪"), onOk: onClose });
@@ -41,7 +43,7 @@ export function CanvasNodeCropDialog({ dataUrl, open, onClose, onConfirm }: { da
         dragCleanupRef.current?.();
         setRatioKey(key);
         const ratio = normalizedRatio(key);
-        if (ratio !== null) setCrop(current => fitCropRatio(current, ratio));
+        if (ratio !== null && image) setCrop(current => fitCropRatio(current, ratio, image));
     };
 
     useEffect(() => {
@@ -63,7 +65,7 @@ export function CanvasNodeCropDialog({ dataUrl, open, onClose, onConfirm }: { da
 
     const startDrag = (mode: DragMode, event: ReactPointerEvent, handle?: ResizeHandle) => {
         const box = boxRef.current?.getBoundingClientRect();
-        if (!image || !box?.width || !box.height) return;
+        if (processing || event.button !== 0 || !image || !box?.width || !box.height) return;
         event.preventDefault();
         event.stopPropagation();
         dragCleanupRef.current?.();
@@ -71,7 +73,7 @@ export function CanvasNodeCropDialog({ dataUrl, open, onClose, onConfirm }: { da
         const move = (event: PointerEvent) => {
             const dx = (event.clientX - start.x) / box.width;
             const dy = (event.clientY - start.y) / box.height;
-            setCrop(mode === "move" ? moveCrop(start.crop, dx, dy) : resizeCrop(start.crop, dx, dy, handle || "se", normalizedRatio(ratioKey)));
+            setCrop(mode === "new" ? newCrop({ x: (start.x - box.left) / box.width, y: (start.y - box.top) / box.height }, { x: (event.clientX - box.left) / box.width, y: (event.clientY - box.top) / box.height }, image, normalizedRatio(ratioKey)) : mode === "move" ? moveCrop(start.crop, dx, dy) : resizeCrop(start.crop, dx, dy, handle || "se", normalizedRatio(ratioKey), image));
         };
         const up = () => {
             document.removeEventListener("pointermove", move);
@@ -86,30 +88,31 @@ export function CanvasNodeCropDialog({ dataUrl, open, onClose, onConfirm }: { da
     };
 
     return (
-        <Modal title={t("裁剪图片")} open={open && Boolean(dataUrl)} onCancel={requestClose} mask={{ closable: false }} footer={null} width={780} centered destroyOnHidden>
-            <div className="space-y-4">
+        <Modal title={t("裁剪图片")} open={open && Boolean(dataUrl)} onCancel={requestClose} mask={{ closable: false }} footer={null} width={800} centered destroyOnHidden>
+            <div className="space-y-4" onKeyDown={event => { if (event.key === "Enter" && !event.nativeEvent.isComposing && !(event.target as Element).closest(".ant-select")) { event.preventDefault(); event.stopPropagation(); void submit(); } }}>
                 {imageError ? <div role="alert" className="text-sm">{imageError}</div> : null}
-                <div className="flex justify-center">
-                    <div ref={boxRef} className="relative inline-block max-w-full touch-none overflow-hidden rounded-lg bg-black select-none">
-                        <img src={dataUrl} alt="" className="block max-h-[62vh] max-w-full opacity-90" draggable={false} />
+                <div className="flex justify-center p-3">
+                    <div ref={boxRef} className="relative inline-block max-w-full touch-none rounded-lg bg-black select-none" onPointerDown={event => startDrag("new", event)}>
+                        <img src={dataUrl} alt="" className="block max-h-[48vh] max-w-full opacity-90" draggable={false} />
                         <CropMask crop={crop} />
-                        <div aria-label={t("裁剪选区")} className="absolute cursor-move border-2 border-white shadow-[0_0_0_1px_rgba(0,0,0,.3),0_0_28px_rgba(0,0,0,.28)]" style={cropStyle(crop)} onPointerDown={(event) => startDrag("move", event)}>
+                        <div aria-label={t("裁剪选区")} className="absolute cursor-move border-2 border-white shadow-[0_0_0_1px_rgba(0,0,0,.3),0_0_28px_rgba(0,0,0,.28)]" style={cropStyle(crop)} onPointerDown={(event) => startDrag("move", event)} onDoubleClick={() => void submit()}>
                             <div className="pointer-events-none absolute inset-x-0 top-1/3 border-t border-white/50" />
                             <div className="pointer-events-none absolute inset-x-0 top-2/3 border-t border-white/50" />
                             <div className="pointer-events-none absolute inset-y-0 left-1/3 border-l border-white/50" />
                             <div className="pointer-events-none absolute inset-y-0 left-2/3 border-l border-white/50" />
                             {handles.map((handle) => (
                                 <button key={handle} type="button" disabled={!image} className="absolute size-3 rounded-full border border-black bg-white" style={handleStyle(handle)} onPointerDown={(event) => startDrag("resize", event, handle)} aria-label={t("调整裁剪框{value1}", { value1: t(handleNames[handle]) })} onKeyDown={event => {
-                                    const delta = event.shiftKey ? 0.05 : 0.01;
-                                    const dx = event.key === "ArrowLeft" ? -delta : event.key === "ArrowRight" ? delta : 0;
-                                    const dy = event.key === "ArrowUp" ? -delta : event.key === "ArrowDown" ? delta : 0;
-                                    if (dx || dy) { event.preventDefault(); event.stopPropagation(); setCrop(current => resizeCrop(current, dx, dy, handle, normalizedRatio(ratioKey))); }
+                                    const delta = event.shiftKey ? 10 : 1;
+                                    const dx = (event.key === "ArrowLeft" ? -delta : event.key === "ArrowRight" ? delta : 0) / (image?.width || 1);
+                                    const dy = (event.key === "ArrowUp" ? -delta : event.key === "ArrowDown" ? delta : 0) / (image?.height || 1);
+                                    if (dx || dy) { event.preventDefault(); event.stopPropagation(); setCrop(current => resizeCrop(current, dx, dy, handle, normalizedRatio(ratioKey), image || undefined)); }
                                 }} />
                             ))}
                         </div>
                     </div>
                 </div>
 
+                {image ? <div className="flex flex-wrap gap-3">{(["x", "y", "width", "height"] as const).map(key => <label key={key} className="flex items-center gap-2 text-sm">{t({ x: "X", y: "Y", width: "宽", height: "高" }[key])}<InputNumber aria-label={t(`裁剪${{ x: "X", y: "Y", width: "宽度", height: "高度" }[key]}（像素）`)} className="!w-24" min={key === "x" || key === "y" ? 0 : 1} max={key === "x" || key === "width" ? image.width : image.height} precision={0} disabled={processing} value={cropPixels(crop, image)[key]} onChange={value => { if (value !== null) { setRatioKey("free"); setCrop(current => cropFromPixels({ ...cropPixels(current, image), [key]: value }, image)); } }} />px</label>)}</div> : null}
                 <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border px-3 py-2">
                     <div className="flex flex-wrap items-center gap-3 text-sm opacity-80">
                         <span>{t("裁剪尺寸")}{cropSize ? `${cropSize.width} x ${cropSize.height}` : t("未知")}</span>
@@ -127,7 +130,7 @@ export function CanvasNodeCropDialog({ dataUrl, open, onClose, onConfirm }: { da
                     <Button onClick={() => { dragCleanupRef.current?.(); setCrop(defaultCrop); setRatioKey("free"); }}>{t("重置")}</Button>
                     <Button icon={<X className="size-4" />} onClick={requestClose}>
                         {t("取消")}</Button>
-                    <Button type="primary" icon={<Check className="size-4" />} disabled={!image} onClick={() => onConfirm(crop)}>
+                    <Button type="primary" icon={<Check className="size-4" />} disabled={!image} loading={processing} onClick={() => void submit()}>
                         {t("确认裁剪")}</Button>
                 </div>
             </div>

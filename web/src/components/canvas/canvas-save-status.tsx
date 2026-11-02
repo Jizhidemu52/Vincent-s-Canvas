@@ -16,11 +16,11 @@ export function CanvasSaveStatus({ compact = false }: { compact?: boolean } = {}
     const description = status === "local" || status === "local-error"
         ? "图片、节点位置、连线、对话和最近 200 步撤销/重做记录保存在当前浏览器；关闭后用同一浏览器、同一地址重新打开即可恢复。清理浏览器数据或更换设备前，请导出画布备份。"
         : status === "synced"
-            ? "服务器已保存原图、节点位置、连线、画布对话和最近 200 步撤销/重做记录；从公司 OA 用同一员工身份进入可恢复。"
+            ? "服务器已保存原图、节点位置、连线和画布对话；从公司 OA 用同一员工身份进入可恢复。最近 200 步撤销/重做记录仅保留在当前浏览器和导出备份内。"
             : "当前只有本机临时恢复缓存，尚未确认服务器保存成功。请等待完成；失败时重试或导出备份。";
     const failed = status === "error" || status === "local-error";
     if (!compact) return <button type="button" data-testid="canvas-save-status" className="text-xs opacity-70 hover:opacity-100 disabled:cursor-default" disabled={!failed} title={error || t(description)} onClick={() => void flushCanvasCloudPersistence().catch(() => undefined)}>{t(labels[status])}</button>;
-    const Icon = failed ? TriangleAlert : status === "local" ? HardDrive : status === "synced" ? CloudCheck : LoaderCircle;
+    const Icon = failed ? TriangleAlert : status === "local" || status === "pending" ? HardDrive : status === "synced" ? CloudCheck : LoaderCircle;
     return <Tooltip title={<><strong>{t(labels[status])}</strong><br />{error || t(description)}</>} placement="bottom">
         <button type="button" data-testid="canvas-save-status" className={compact ? `cw-save-status ${failed ? "is-error" : ""}` : "text-xs opacity-70 hover:opacity-100"} aria-label={t(labels[status])} onClick={failed ? () => void flushCanvasCloudPersistence().catch(() => undefined) : undefined}>
             {compact ? <><Icon size={14} className={Icon === LoaderCircle ? "animate-spin" : undefined} />{failed ? <span>{t("保存失败 · 重试")}</span> : null}</> : t(labels[status])}

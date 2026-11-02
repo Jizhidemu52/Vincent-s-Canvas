@@ -1,6 +1,6 @@
 import type { CanvasProject } from "@/stores/canvas/use-canvas-store";
 
-export type CanvasProjectPatch = Partial<Pick<CanvasProject, "nodes" | "groups" | "connections" | "chatSessions" | "activeChatId" | "backgroundMode" | "showImageInfo" | "viewport" | "selectedNodeIds" | "history" | "persistenceConflict">>;
+export type CanvasProjectPatch = Partial<Pick<CanvasProject, "nodes" | "groups" | "connections" | "chatSessions" | "activeChatId" | "backgroundMode" | "showImageInfo" | "viewport" | "selectedNodeIds" | "history" | "persistenceConflict" | "coverNodeId">>;
 
 /** Keep large graph arrays by reference; never serialize them just to detect a no-op. */
 export function applyCanvasProjectPatch(project: CanvasProject, patch: CanvasProjectPatch): CanvasProject {
@@ -15,5 +15,14 @@ export function applyCanvasProjectPatch(project: CanvasProject, patch: CanvasPro
         }
         return !Object.is(project[key], patch[key]);
     });
-    return changed ? { ...project, ...patch, updatedAt: new Date().toISOString() } : project;
+    const contentChanged = (Object.keys(patch) as Array<keyof CanvasProjectPatch>)
+        .some(key => key !== "viewport" && key !== "selectedNodeIds" && key !== "history" && key !== "coverNodeId" && !Object.is(project[key], patch[key]));
+    return changed ? { ...project, ...patch, ...(contentChanged ? { updatedAt: new Date().toISOString() } : {}) } : project;
+}
+
+/** View and undo cache writes must not schedule a cloud document upload. */
+export function hasCanvasContentChange(before: CanvasProject | null, after: CanvasProject | null) {
+    if (!before || !after) return before !== after;
+    return (["title", "nodes", "groups", "connections", "chatSessions", "activeChatId", "backgroundMode", "showImageInfo", "persistenceConflict", "coverNodeId"] as const)
+        .some(key => before[key] !== after[key]);
 }

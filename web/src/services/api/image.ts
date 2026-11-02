@@ -38,7 +38,7 @@ export type ResponseFunctionTool = {
 export type ToolResponseResult = { content: string; toolCalls: ResponseToolCall[]; stopReason?: string; claudeAssistantContent?: ClaudeAssistantContent; responsesOutputItems?: Array<Record<string, unknown>> };
 
 type ToolChoice = "auto" | "required" | { type: "function"; name: string };
-type RequestOptions = { exactPrompt?: boolean; promptInput?: PromptInputData; onOptimizing?: () => void; onCompiled?: (prompt: string, optimized: boolean) => void; chatProfile?: "creative-chat" | "canvas-assistant"; profileContext?: Record<string, unknown>; requestId?: string; chatRequestId?: string; signal?: AbortSignal; operationType?: "image_generation" | "inpaint" | "upscale" | "batch_image"; tool?: string; referencePromptLanguage?: "zh" | "en"; webSearch?: boolean; onToolCallStart?: (name: string) => void; onChatSubmissionStarted?: (requestId: string) => void; cancelOnAbort?: () => boolean; onSubmissionStarted?: () => void | Promise<void>; onSubmitted?: (taskIds: string[]) => void | Promise<void> };
+type RequestOptions = { exactPrompt?: boolean; promptInput?: PromptInputData; onOptimizing?: () => void; onCompiled?: (prompt: string, optimized: boolean, submittedPrompt?: string) => void; chatProfile?: "creative-chat" | "canvas-assistant"; imageAgentProfile?: "creative-chat" | "canvas-assistant"; profileContext?: Record<string, unknown>; requestId?: string; chatRequestId?: string; signal?: AbortSignal; operationType?: "image_generation" | "inpaint" | "upscale" | "batch_image"; tool?: string; referencePromptLanguage?: "zh" | "en"; webSearch?: boolean; onToolCallStart?: (name: string) => void; onChatSubmissionStarted?: (requestId: string) => void; cancelOnAbort?: () => boolean; onSubmissionStarted?: () => void | Promise<void>; onSubmitted?: (taskIds: string[]) => void | Promise<void> };
 type ResponseInputContent = { type: "input_text"; text: string } | { type: "input_image"; image_url: string };
 type ResponseInputItem = { role: "system" | "user" | "assistant"; content: string | ResponseInputContent[] } | { type: "claude_assistant"; content: ClaudeAssistantContent } | { type: "responses_assistant"; output: Array<Record<string, unknown>> } | { type: "function_call"; call_id: string; name: string; arguments: string; thoughtSignature?: string } | { type: "function_call_output"; call_id: string; output: string };
 type ResponseApiToolDefinition = { type: "function"; name: string; description?: string; parameters: Record<string, unknown>; strict?: boolean };
@@ -73,7 +73,7 @@ function requestResolvedGeneration(resolved: Awaited<ReturnType<typeof resolveTo
         count,
         operationType: options?.operationType || "image_generation",
         tool: options?.tool,
-        parameters: imageTaskParameters(config, profile, { referenceCount: references?.length || 0 }),
+        parameters: { ...imageTaskParameters(config, profile, { referenceCount: references?.length || 0 }), ...(options?.imageAgentProfile ? { imageAgentProfile: options.imageAgentProfile } : {}) },
         draft: generationDraftInput({ ...config, ...normalized }, profile.requiresPrompt ? options?.promptInput?.userText ?? prompt : ""),
         references,
         requestId: options?.requestId,
@@ -126,7 +126,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
         count,
         operationType: options?.operationType || "inpaint",
         tool: options?.tool,
-        parameters: { ...imageTaskParameters(config, profile, { mask: Boolean(mask), referenceCount: references.length }), ...(transparent ? { background: "transparent", output_format: "png" } : {}) },
+        parameters: { ...imageTaskParameters(config, profile, { mask: Boolean(mask), referenceCount: references.length }), ...(transparent ? { background: "transparent", output_format: "png" } : {}), ...(options?.imageAgentProfile ? { imageAgentProfile: options.imageAgentProfile } : {}) },
         draft: { ...generationDraftInput({ ...config, ...normalizeImageModelSettings(config, profile) }, options?.promptInput?.userText ?? prompt), ...(mask ? { maskReferenceIndex: references.length } : {}) },
         references: [...references, ...(mask ? [mask] : [])],
         requestId: options?.requestId,
@@ -138,7 +138,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
 }
 
 export function imageTaskParameters(config: AiConfig, profile = imageModelProfile(config.model || config.imageModel), options: { mask?: boolean; referenceCount?: number } = {}) {
-    if (!profile.verified) return {};
+    if (!profile.verified) return imageAdvancedParameters(config.imageOptions, { kind: "unverified" });
     const error = imageModelSettingsError(config.size, profile);
     if (error) throw new Error(error);
     const { size, quality } = normalizeImageModelSettings(config, profile);
@@ -155,7 +155,7 @@ export function imageTaskParameters(config: AiConfig, profile = imageModelProfil
     return { size, resolution: quality, ...advanced };
 }
 
-export async function requestBatchEdit(config: AiConfig, prompt: string, files: Array<{ file: File; title: string }>, options?: { optimizePrompt?: boolean; onOptimizing?: () => void; onCompiled?: (prompt: string, optimized: boolean) => void; onSubmissionStarted?: (requestId: string, items: Array<{ itemIndex: number }>) => void | Promise<void>; signal?: AbortSignal; onSubmitted?: (batchId: string) => void; onProgress?: (items: QueuedBatchItem[]) => void }) {
+export async function requestBatchEdit(config: AiConfig, prompt: string, files: Array<{ file: File; title: string }>, options?: { optimizePrompt?: boolean; onOptimizing?: () => void; onCompiled?: (prompt: string, optimized: boolean, submittedPrompt?: string) => void; onSubmissionStarted?: (requestId: string, items: Array<{ itemIndex: number }>) => void | Promise<void>; signal?: AbortSignal; onSubmitted?: (batchId: string) => void; onProgress?: (items: QueuedBatchItem[]) => void }) {
     if (!files.length || files.length > 100) throw new Error("每批请选择 1–100 张图片，每张独立生成 1 张结果。");
     const resolved = await resolveToolConfig(config, "batch_image", "canvas-batch");
     config = resolved.config;
@@ -223,7 +223,7 @@ async function requestServerResponse(config: AiConfig, input: ResponseInputItem[
     config = resolved.config;
     const modelId = modelOptionName(config.model || config.textModel);
     const claude = isClaudeModel(resolved.model.parameterModelId || resolved.model.modelId)
-        ? { stream: options?.chatProfile ? false : config.claudeStream !== "false", thinking: options?.chatProfile ? false : config.claudeThinking === "true", maxTokens: normalizeClaudeMaxTokens(config.claudeMaxTokens) }
+        ? { stream: options?.chatProfile ? true : config.claudeStream !== "false", ...(!options?.chatProfile ? { thinking: config.claudeThinking === "true" } : {}), maxTokens: normalizeClaudeMaxTokens(config.claudeMaxTokens) }
         : undefined;
     options?.signal?.throwIfAborted();
     const requestId = options?.chatRequestId || createClientId();

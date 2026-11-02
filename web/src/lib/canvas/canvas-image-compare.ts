@@ -64,7 +64,9 @@ export function canvasCompareCandidates(nodes: CanvasNodeData[]) {
 
 export function canvasCompareSources(nodes: CanvasNodeData[], current: CanvasNodeData): { images: CanvasNodeData[]; automatic: boolean } {
     const { sources, automatic } = inlineCompareSources(current);
-    const candidates = canvasCompareCandidates(nodes);
+    // Inline comparison needs only this node's own lineage, not snapshots and hashes
+    // from every other image on the canvas. Advanced comparison may pass its catalog.
+    const candidates = canvasCompareImages(nodes);
     const images: CanvasNodeData[] = [];
     for (const source of sources) {
         if (sameCompareMedia(current.metadata, source)) continue;
@@ -83,7 +85,7 @@ export function chooseCanvasComparePair(nodes: CanvasNodeData[], selected: reado
         if (chosen.length === 2) return [chosen[0].id, chosen[1].id] as const;
     }
     if (!chosen[0]) return ["", ""] as const;
-    const sources = canvasCompareSources(nodes, chosen[0]);
+    const sources = canvasCompareSources(images, chosen[0]);
     return [sources.automatic ? sources.images[0].id : "", chosen[0].id] as const;
 }
 const compareImageBlobs = new WeakMap<HTMLImageElement, Blob>();
@@ -158,7 +160,7 @@ export async function drawCanvasDifference(canvas: HTMLCanvasElement, before: HT
         target.putImageData(first, 0, 0);
     } finally { scratch.width = 0; scratch.height = 0; }
 }
-export function drawCanvasCompare(canvas: HTMLCanvasElement, before: HTMLImageElement, after: HTMLImageElement, mode: CanvasCompareMode, value: number, background: string, foreground: string) {
+export function drawCanvasCompare(canvas: HTMLCanvasElement, before: HTMLImageElement, after: HTMLImageElement, mode: CanvasCompareMode, value: number, background: string, foreground: string, resolution: "preview" | "original" = "preview") {
     if (mode === "difference") {
         const layout = canvasDifferenceLayout(before, after);
         canvas.width = layout.width; canvas.height = layout.height;
@@ -175,7 +177,11 @@ export function drawCanvasCompare(canvas: HTMLCanvasElement, before: HTMLImageEl
         context.putImageData(beforePixels, 0, 0);
         return;
     }
-    const width = mode === "side" ? 1600 : 1000, height = 1000, header = 48;
+    const boxWidth = Math.max(before.naturalWidth, after.naturalWidth);
+    const width = resolution === "original" ? boxWidth * (mode === "side" ? 2 : 1) : mode === "side" ? 1600 : 1000;
+    const height = resolution === "original" ? Math.max(before.naturalHeight, after.naturalHeight) : 1000;
+    const header = resolution === "original" ? Math.max(48, Math.round(width / 30)) : 48;
+    if (width * (height + header) > 40_000_000 || width > 16384 || height + header > 16384) throw new Error("原分辨率对比图超过 4000 万像素或单边 16384px，请导出预览尺寸或分别下载原图");
     canvas.width = width; canvas.height = height + header;
     const context = canvas.getContext("2d");
     if (!context) throw new Error("浏览器不支持图片合成");
@@ -184,5 +190,5 @@ export function drawCanvasCompare(canvas: HTMLCanvasElement, before: HTMLImageEl
     const ratio = Math.min(1, Math.max(0, value / 100));
     if (mode === "side") { draw(before, 0, width / 2); draw(after, width / 2, width / 2); }
     else { draw(before); context.save(); if (mode === "slider") { context.beginPath(); context.rect(width * ratio, header, width * (1 - ratio), height); context.clip(); } else context.globalAlpha = ratio; draw(after); context.restore(); if (mode === "slider") { context.strokeStyle = foreground; context.beginPath(); context.moveTo(width * ratio, header); context.lineTo(width * ratio, height + header); context.stroke(); } }
-    context.fillStyle = foreground; context.font = "20px sans-serif"; context.textAlign = "left"; context.fillText("改款前", 20, 31); context.textAlign = "right"; context.fillText("改款后", width - 20, 31);
+    context.fillStyle = foreground; context.font = `${Math.round(header * .42)}px sans-serif`; context.textAlign = "left"; context.fillText("改款前", header * .42, header * .65); context.textAlign = "right"; context.fillText("改款后", width - header * .42, header * .65);
 }

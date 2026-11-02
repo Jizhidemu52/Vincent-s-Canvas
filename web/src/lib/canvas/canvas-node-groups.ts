@@ -58,13 +58,34 @@ export function canvasGroupBounds(resolved: ResolvedCanvasGroup, resolveNode?: (
     };
 }
 
+/** Collapsed groups remain a readable screen-space card at every canvas zoom. */
+export function canvasGroupVisualBounds(resolved: ResolvedCanvasGroup, scale: number, resolveNode?: (id: string) => CanvasNodeData | undefined) {
+    const bounds = canvasGroupBounds(resolved, resolveNode);
+    return bounds && resolved.group.collapsed ? { ...bounds, width: 300 / Math.max(0.05, scale), height: 44 / Math.max(0.05, scale) } : bounds;
+}
+
+/** Visual endpoints only: original edge IDs and saved graph ownership never change. */
+export function collapsedCanvasConnectionNodes(groups: ResolvedCanvasGroup[], nodes: ReadonlyMap<string, CanvasNodeData>, scale: number) {
+    const byId = new Map(nodes), groupByNodeId = new Map<string, ResolvedCanvasGroup>();
+    for (const group of groups) {
+        if (!group.group.collapsed) continue;
+        const bounds = canvasGroupVisualBounds(group, scale);
+        if (!bounds) continue;
+        for (const node of group.nodes) {
+            groupByNodeId.set(node.id, group);
+            byId.set(node.id, { ...node, position: { x: bounds.x, y: bounds.y }, width: bounds.width, height: bounds.height });
+        }
+    }
+    return { byId, groupByNodeId };
+}
+
 export function removeCanvasGroupMembers(groups: CanvasNodeGroup[], removed: ReadonlySet<string>) {
     let changed = false;
     const next = groups.flatMap(group => {
         const nodeIds = group.nodeIds.filter(id => !removed.has(id));
         if (nodeIds.length === group.nodeIds.length) return [group];
         changed = true;
-        return nodeIds.length ? [{ ...group, nodeIds }] : [];
+        return nodeIds.length >= 2 ? [{ ...group, nodeIds }] : [];
     });
     return changed ? next : groups;
 }

@@ -79,8 +79,9 @@ describe("compact image toolbar", () => {
         const opened = elements(harness.render());
         expect(opened.find((element) => element.props.menu?.items)?.props.open).toBe(true);
         expect(opened.find((element) => Array.isArray(element.props.selectedIds))?.props.open).toBe(false);
-        const actions: Record<string, string> = { compare: "onCompare", designTemplate: "onDesignTemplate", restoreGeneration: "onRestoreGeneration", info: "onInfo", delete: "onDelete", retry: "onRetry", saveAsset: "onSaveAsset", maskEdit: "onMaskEdit", copyPrompt: "onCopyPrompt", reversePrompt: "onReversePrompt", replace: "onUpload", resize: "onToggleFreeResize", crop: "onCrop", split: "onSplit", upscale: "onUpscale", superResolve: "onSuperResolve", angle: "onAngle", view: "onViewImage" };
+        const actions: Record<string, string> = { compare: "onCompare", designTemplate: "onDesignTemplate", restoreGeneration: "onRestoreGeneration", info: "onInfo", delete: "onDelete", retry: "onRetry", saveAsset: "onSaveAsset", maskEdit: "onMaskEdit", copyPrompt: "onCopyPrompt", reversePrompt: "onReversePrompt", replace: "onUpload", resize: "onToggleFreeResize", crop: "onCrop", split: "onSplit", upscale: "onUpscale", angle: "onAngle", view: "onViewImage" };
         const items = dropdown.props.menu.items.flatMap((item: any) => item.children || [item]);
+        expect(items.some((item: any) => item.key === "superResolve")).toBe(false);
         for (const [id, handler] of Object.entries(actions)) {
             expect(items.some((item: any) => item.key === id)).toBe(true);
             dropdown.props.menu.onClick({ key: id, domEvent: { stopPropagation() {} } });

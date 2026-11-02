@@ -4,7 +4,7 @@ import { canvasImageBaseName, canvasImageVersion, originalCanvasImageFileName } 
 
 export type CanvasSelectionReference = ReferenceImage & { canvasNodeId?: string };
 
-/** Selecting images replaces canvas references; deselection never clears the edit draft. */
+/** Selection appends references; removal is an explicit tray action, never a canvas side effect. */
 export function syncCanvasSelectionReferences(
     current: CanvasSelectionReference[],
     selectedIds: ReadonlySet<string>,
@@ -15,7 +15,7 @@ export function syncCanvasSelectionReferences(
         const node = nodeById.get(id);
         return node?.type === CanvasNodeType.Image && (node.metadata?.content || node.metadata?.storageKey);
     });
-    const referenceIds = imageIds.length ? imageIds : current.flatMap(reference => reference.canvasNodeId ? [reference.canvasNodeId] : []);
+    const referenceIds = new Set([...current.flatMap(reference => reference.canvasNodeId ? [reference.canvasNodeId] : []), ...imageIds]);
     for (const id of referenceIds) {
         const node = nodeById.get(id);
         if (node?.type !== CanvasNodeType.Image || !(node.metadata?.content || node.metadata?.storageKey)) continue;
@@ -33,7 +33,7 @@ export function syncCanvasSelectionReferences(
         if (!reference.canvasNodeId) { next.push(reference); continue; }
         const updated = selected.get(reference.canvasNodeId);
         // A removed canvas node does not invalidate its already attached image snapshot.
-        if (!updated) { if (!imageIds.length) next.push(reference); continue; }
+        if (!updated) { next.push(reference); continue; }
         const unchanged = reference.name === updated.name && reference.type === updated.type &&
             reference.dataUrl === updated.dataUrl && reference.url === updated.url && reference.storageKey === updated.storageKey && reference.originalFileName === updated.originalFileName && reference.imageName === updated.imageName && reference.imageVersion === updated.imageVersion;
         next.push(unchanged ? reference : updated);

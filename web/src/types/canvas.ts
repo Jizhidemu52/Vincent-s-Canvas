@@ -53,6 +53,7 @@ export type CanvasGenerationRecord = {
     createdAt: string;
     prompt: string;
     inputPrompt: string;
+    submittedPrompt?: string;
     references: CanvasGenerationReference[];
     parameters: {
         model: string;
@@ -67,10 +68,14 @@ export type CanvasGenerationRecord = {
 };
 
 export type CanvasNodeMetadata = {
+    locked?: boolean;
+    imageAgent?: { parentNodeId?: string; workId: string; version: number; note: import("@/lib/image-agent/work-note").ImageAgentWorkNote };
+    maskAdaptation?: import("@/lib/canvas/canvas-mask-adaptation").CanvasMaskAdaptation;
     promptInput?: import("../../../shared/prompt-contracts").PromptInputData;
     userInput?: import("../../../shared/prompt-contracts").PromptInputData;
     optimizingPrompt?: boolean;
     compiledPrompt?: string;
+    submittedPrompt?: string;
     optimized?: boolean;
     reversePrompt?: { requestId: string; outputNodeId: string };
     promptTemplateSource?: {
@@ -85,6 +90,10 @@ export type CanvasNodeMetadata = {
     };
     generationOrigin?: { configNodeId?: string; sourceNodeId: string; runId: string; mode: CanvasGenerationMode };
     generationRecord?: CanvasGenerationRecord;
+    /** A display-only root; real task records remain on its children. */
+    generationResultStack?: boolean;
+    /** Stable input identity used only to group equivalent single-image runs. */
+    generationStackSourceId?: string;
     imageTask?: import("@/lib/canvas/canvas-image-task-recovery").CanvasImageTaskBinding;
     mediaTask?: { requestId: string; taskId?: string; ownerId: string; projectId: string };
     generationSubmissionUncertain?: boolean;
@@ -139,6 +148,7 @@ export type CanvasNodeMetadata = {
     imageBatchExpanded?: boolean;
     storageKey?: string;
     mimeType?: string;
+    serverAssetId?: string;
     bytes?: number;
     durationMs?: number;
     fps?: number;
@@ -236,7 +246,8 @@ export type CanvasNodeGroup = {
         steps: {
             configNodeId: string;
             inputConfigId?: string;
-            status: "idle" | "running" | "success" | "failed";
+            status: "idle" | "running" | "success" | "failed" | "stale";
+            definitionKey?: string;
             outputNodeId?: string;
             previousOutputIds?: string[];
         }[];
@@ -272,6 +283,11 @@ export type CanvasAssistantSession = {
     messages: CanvasAssistantMessage[];
     createdAt: string;
     updatedAt: string;
+    focusImageId?: string;
+    focusLocked?: boolean;
+    newCreation?: boolean;
+    focusRevision?: number;
+    imageAgentRegion?: import("@/lib/image-agent/mask").ImageAgentRegionSelection;
 };
 
 export type ConnectionHandle = {
@@ -280,6 +296,9 @@ export type ConnectionHandle = {
 };
 
 export type SelectionBox = {
+    startClientX?: number;
+    startClientY?: number;
+    fullyContained?: boolean;
     startWorldX: number;
     startWorldY: number;
     currentWorldX: number;

@@ -80,7 +80,7 @@ function harness(kind: "connection" | "overview" = "connection") {
             clearRect: () => { clearCalls.push(this.surface); },
             translate: (x: number, y: number) => { this.x = x; this.y = y; },
             scale: (k: number) => { this.k = k; },
-            beginPath: () => {}, moveTo: () => {}, bezierCurveTo: () => {}, rect: () => {}, fill: () => {},
+            beginPath: () => {}, moveTo: () => {}, bezierCurveTo: () => {}, rect: () => {}, fill: () => {}, setLineDash: () => {}, lineTo: () => {}, closePath: () => {},
             stroke: () => { paints.push({ surface: this.surface, viewport: { x: this.x, y: this.y, k: this.k } }); },
         };
         constructor() { surfaces.push(this); }

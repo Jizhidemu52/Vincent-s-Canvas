@@ -1,0 +1,11 @@
+import { defineConfig } from "@playwright/test";
+import { resolve } from "node:path";
+
+export default defineConfig({
+    testDir: "../e2e", testMatch: ["canvas-connections-v517.pw.ts", "canvas-video-poster-v517.pw.ts", "canvas-video-node-v517.pw.ts"], workers: 1, retries: 0,
+    timeout: 30_000, expect: { timeout: 10_000 },
+    outputDir: "../../output/canvas-ux-v517/connections-browser",
+    use: { baseURL: "http://127.0.0.1:5208", viewport: { width: 1500, height: 900 }, serviceWorkers: "block", trace: "retain-on-failure" },
+    reporter: [["list"]],
+    webServer: { command: "bun x vite --config e2e/vite.config.ts --host 127.0.0.1 --port 5208 --strictPort", cwd: resolve(import.meta.dirname, ".."), url: "http://127.0.0.1:5208", reuseExistingServer: false },
+});

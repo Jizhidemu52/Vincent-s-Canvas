@@ -31,15 +31,20 @@ describe("page-private generation dispatch", () => {
         const locks = new Set<string>();
         const messages: string[] = [];
         const connectionsRef = { current: [] as Array<{ kind: string; fromNodeId: string; toNodeId: string }> };
-        const execute = () => {};
+        const executions: unknown[][] = [];
+        const execute = (...args: unknown[]) => { executions.push(args); };
+        const acquireDispatch = evaluateCallback("use-canvas-generation.ts", "acquireDispatch", {
+            dispatchOwnersRef: { current: new Map() }, generationDispatchLocksRef: { current: locks },
+        });
         const run = evaluateCallback("use-canvas-generation.ts", "handleGenerateNode", {
-            generationDispatchLocksRef: { current: locks }, nodesRef: { current: [] }, connectionsRef,
+            generationDispatchLocksRef: { current: locks }, nodesRef: { current: [] }, connectionsRef, acquireDispatch,
+            runtime: { generationRequestsRef: { current: new Map() } },
             effectiveConfig: {}, buildGenerationConfig: () => ({}), isAiConfigReady: () => true,
             executeGenerateNode: execute, recoverPending: () => null, startGenerationRequest: () => {}, finishGenerationRequest: () => {},
             setRunningNodeId: () => {}, setNodes: () => {}, message: { info: (text: string) => messages.push(text), error: (text: string) => messages.push(text) },
             loadGenerationRuntime: load,
         }, code => code.replace('import("./canvas-shared-generation-runtime")', "loadGenerationRuntime()"));
-        return { run, locks, messages, connectionsRef, execute };
+        return { run, locks, messages, connectionsRef, execute, executions };
     }
 
     test("locks synchronously before chunk loading and releases once after dispatch", async () => {
@@ -55,7 +60,9 @@ describe("page-private generation dispatch", () => {
         await first;
         expect(calls).toHaveLength(1);
         expect(calls[0]!.slice(0, 3)).toEqual(["image", "image", "latest prompt"]);
-        expect((calls[0]![4] as { execute: unknown }).execute).toBe(state.execute);
+        (calls[0]![4] as { execute: Function }).execute("target", "image", "captured prompt", undefined, undefined);
+        expect(state.executions[0]!.slice(0, 5)).toEqual(["target", "image", "captured prompt", undefined, undefined]);
+        expect(typeof state.executions[0]![6]).toBe("function");
         expect(state.locks.size).toBe(0);
     });
 
@@ -94,7 +101,7 @@ describe("page-private connection completion", () => {
         const pendingConnectionCreateRef = { current: null as unknown };
         const events: unknown[] = [];
         const finish = evaluateCallback("use-canvas-connections.ts", "finishConnection", {
-            connectingParamsRef, pendingConnectionCreateRef,
+            connectingParamsRef, pendingConnectionCreateRef, connectionStartRef: { current: null }, reconnectingIdRef: { current: null },
             flushConnectionPointer: () => events.push("flush"),
             getConnectionDropTarget: () => target,
             connectNodes: (...args: unknown[]) => events.push(args),

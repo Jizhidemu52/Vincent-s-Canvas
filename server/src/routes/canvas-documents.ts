@@ -11,6 +11,7 @@ const summaryColumns = `external_id AS id,revision::double precision AS revision
     CASE WHEN deleted THEN NULL ELSE jsonb_build_object(
         'id',external_id,'title',title,'createdAt',document_created_at,'updatedAt',document_updated_at,
         'nodeCount',node_count,'connectionCount',connection_count,
+        'persistenceConflict',persistence_conflict,
         'cover',CASE WHEN cover_url IS NULL THEN NULL ELSE jsonb_build_object('content',cover_url) END
     ) END AS summary`;
 
@@ -29,8 +30,12 @@ export function createCanvasDocumentsRouter(db: Database) {
     router.get("/", async (request, response, next) => {
         try {
             const actor = (request as unknown as AuthenticatedRequest).auth;
-            const result = await db.query(`SELECT ${summaryColumns} FROM canvas_documents WHERE owner_user_id=$1 ORDER BY updated_at DESC,external_id`, [actor.id]);
-            response.json({ documents: result.rows });
+            const result = await db.query<{ summary: Record<string, unknown> | null }>(`SELECT ${summaryColumns} FROM canvas_documents WHERE owner_user_id=$1 ORDER BY updated_at DESC,external_id`, [actor.id]);
+            response.json({ documents: result.rows.map(row => {
+                if (!row.summary || row.summary.persistenceConflict !== null) return row;
+                const { persistenceConflict: _emptyConflict, ...summary } = row.summary;
+                return { ...row, summary };
+            }) });
         } catch (error) { next(error); }
     });
     router.get("/:id", async (request, response, next) => {
@@ -54,13 +59,14 @@ export function createCanvasDocumentsRouter(db: Database) {
             }
             const json = document === null ? null : JSON.stringify(document);
             const metadata = canvasDocumentMetadata(document);
-            const summaryValues = [metadata.title, metadata.createdAt, metadata.updatedAt, metadata.nodeCount, metadata.connectionCount, metadata.coverUrl];
+            const conflict = document?.persistenceConflict;
+            const summaryValues = [metadata.title, metadata.createdAt, metadata.updatedAt, metadata.nodeCount, metadata.connectionCount, metadata.coverUrl, conflict == null ? null : JSON.stringify(conflict)];
             // Both branches are atomic CAS writes. A tombstone can never become live again.
             const result = baseRevision === 0
-                ? await db.query(`INSERT INTO canvas_documents(owner_user_id,external_id,revision,deleted,document,title,document_created_at,document_updated_at,node_count,connection_count,cover_url)
-                    VALUES($1,$2,1,$3,$4::jsonb,$5,$6,$7,$8,$9,$10) ON CONFLICT(owner_user_id,external_id) DO NOTHING RETURNING ${acknowledgementColumns}`, [actor.id, id, document === null, json, ...summaryValues])
+                ? await db.query(`INSERT INTO canvas_documents(owner_user_id,external_id,revision,deleted,document,title,document_created_at,document_updated_at,node_count,connection_count,cover_url,persistence_conflict)
+                    VALUES($1,$2,1,$3,$4::jsonb,$5,$6,$7,$8,$9,$10,$11::jsonb) ON CONFLICT(owner_user_id,external_id) DO NOTHING RETURNING ${acknowledgementColumns}`, [actor.id, id, document === null, json, ...summaryValues])
                 : await db.query(`UPDATE canvas_documents SET revision=revision+1,deleted=$4,document=$5::jsonb,updated_at=now(),
-                    title=$6,document_created_at=$7,document_updated_at=$8,node_count=$9,connection_count=$10,cover_url=$11
+                    title=$6,document_created_at=$7,document_updated_at=$8,node_count=$9,connection_count=$10,cover_url=$11,persistence_conflict=$12::jsonb
                     WHERE owner_user_id=$1 AND external_id=$2 AND revision=$3 AND (NOT deleted OR $4=true) RETURNING ${acknowledgementColumns}`, [actor.id, id, baseRevision, document === null, json, ...summaryValues]);
             if (!result.rows[0]) {
                 const current = await db.query(`SELECT ${columns} FROM canvas_documents WHERE owner_user_id=$1 AND external_id=$2`, [actor.id, id]);

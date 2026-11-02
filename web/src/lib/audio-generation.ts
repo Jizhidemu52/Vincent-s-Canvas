@@ -1,17 +1,17 @@
 export const audioVoiceOptions = [
-    { value: "alloy", label: "Alloy" },
-    { value: "ash", label: "Ash" },
-    { value: "ballad", label: "Ballad" },
-    { value: "coral", label: "Coral" },
-    { value: "echo", label: "Echo" },
-    { value: "fable", label: "Fable" },
-    { value: "nova", label: "Nova" },
-    { value: "onyx", label: "Onyx" },
-    { value: "sage", label: "Sage" },
-    { value: "shimmer", label: "Shimmer" },
-    { value: "verse", label: "Verse" },
-    { value: "marin", label: "Marin" },
-    { value: "cedar", label: "Cedar" },
+    { value: "alloy", label: "Alloy", chineseLabel: "合金" },
+    { value: "ash", label: "Ash", chineseLabel: "白蜡" },
+    { value: "ballad", label: "Ballad", chineseLabel: "歌谣" },
+    { value: "coral", label: "Coral", chineseLabel: "珊瑚" },
+    { value: "echo", label: "Echo", chineseLabel: "回声" },
+    { value: "fable", label: "Fable", chineseLabel: "寓言" },
+    { value: "nova", label: "Nova", chineseLabel: "新星" },
+    { value: "onyx", label: "Onyx", chineseLabel: "黑曜" },
+    { value: "sage", label: "Sage", chineseLabel: "鼠尾草" },
+    { value: "shimmer", label: "Shimmer", chineseLabel: "微光" },
+    { value: "verse", label: "Verse", chineseLabel: "诗韵" },
+    { value: "marin", label: "Marin", chineseLabel: "马林" },
+    { value: "cedar", label: "Cedar", chineseLabel: "雪松" },
 ];
 
 export const audioFormatOptions = [
@@ -20,8 +20,14 @@ export const audioFormatOptions = [
     { value: "opus", label: "Opus" },
     { value: "aac", label: "AAC" },
     { value: "flac", label: "FLAC" },
-    { value: "pcm", label: "PCM" },
 ];
+
+// Public samples documented by OpenAI, not recordings from this project's
+// configured provider. Only verified sample files are offered; no voice aliases.
+const sampledVoices = new Set(["alloy", "ash", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer"]);
+export function audioVoiceSampleUrl(voice: string): string | undefined {
+    return sampledVoices.has(voice) ? `https://cdn.openai.com/API/docs/audio/${voice}.wav` : undefined;
+}
 
 export function normalizeAudioVoiceValue(value: string) {
     return audioVoiceOptions.some((item) => item.value === value) ? value : "alloy";
@@ -39,7 +45,8 @@ export function normalizeAudioSpeedValue(value: string) {
 
 export function audioVoiceLabel(value: string) {
     const voice = normalizeAudioVoiceValue(value);
-    return audioVoiceOptions.find((item) => item.value === voice)?.label || voice;
+    const option = audioVoiceOptions.find((item) => item.value === voice);
+    return option ? `${option.chineseLabel} ${option.label}` : voice;
 }
 
 export function audioFormatLabel(value: string) {

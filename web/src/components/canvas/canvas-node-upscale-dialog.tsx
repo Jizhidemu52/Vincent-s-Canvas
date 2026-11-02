@@ -30,6 +30,9 @@ export function CanvasNodeUpscaleDialog({ dataUrl, open, onClose, onConfirm }: {
     const [params, setParams] = useState<CanvasImageUpscaleParams>(defaultParams);
     const [image, setImage] = useState<{ width: number; height: number } | null>(null);
     const [imageError, setImageError] = useState("");
+    const [previewOpen, setPreviewOpen] = useState(false);
+    const [preview, setPreview] = useState("");
+    const [previewBusy, setPreviewBusy] = useState(false);
     const sourceLongEdge = image ? Math.max(image.width, image.height) : 0;
     const outputSize = useMemo(() => (image ? resolveUpscaleSize(image.width, image.height, params.targetLongEdge) : null), [image, params.targetLongEdge]);
     const canUpscale = Boolean(image && sourceLongEdge < params.targetLongEdge && params.targetLongEdge <= MAX_UPSCALE_LONG_EDGE);
@@ -57,13 +60,26 @@ export function CanvasNodeUpscaleDialog({ dataUrl, open, onClose, onConfirm }: {
         const nextTarget = targetOptions.find((option) => sourceLongEdge < option.value)?.value || MAX_UPSCALE_LONG_EDGE;
         setParams((current) => ({ ...current, targetLongEdge: nextTarget }));
     }, [image, sourceLongEdge]);
+    useEffect(() => {
+        if (!open || !previewOpen || !canUpscale) return;
+        const controller = new AbortController();
+        let url = "";
+        setPreviewBusy(true); setPreview("");
+        const timer = setTimeout(() => {
+            void import("@/lib/canvas/canvas-image-data").then(module => module.upscaleImageBlob(dataUrl, params, { signal: controller.signal })).then(blob => {
+                if (controller.signal.aborted) return;
+                url = URL.createObjectURL(blob); setPreview(url);
+            }).catch(error => { if (!controller.signal.aborted) setImageError(error instanceof Error ? error.message : "预览失败"); }).finally(() => { if (!controller.signal.aborted) setPreviewBusy(false); });
+        }, 150);
+        return () => { clearTimeout(timer); controller.abort(); if (url) URL.revokeObjectURL(url); };
+    }, [dataUrl, open, previewOpen, canUpscale, params]);
 
     return (
-        <Modal title={null} open={open && Boolean(dataUrl)} onCancel={onClose} footer={null} width={820} centered destroyOnHidden>
+        <Modal title={t("插值放大（非 AI）")} open={open && Boolean(dataUrl)} onCancel={onClose} footer={null} width={800} centered destroyOnHidden>
             <div className="space-y-5">
                 {imageError ? <div role="alert" className="text-sm">{imageError}</div> : null}
                 <div>
-                    <h2 className="text-xl font-semibold">{t("图片放大")}</h2>
+                    <p className="text-sm opacity-70">{t("仅用浏览器插值增加像素尺寸，不会生成真实新细节，不调用 AI。")}</p>
                 </div>
                 <div className="grid gap-6 md:grid-cols-[minmax(260px,1fr)_360px]">
                     <div className="rounded-xl border p-4">
@@ -74,6 +90,10 @@ export function CanvasNodeUpscaleDialog({ dataUrl, open, onClose, onConfirm }: {
                             <span className="opacity-60">{t("源图")}</span>
                             <span className="font-semibold">{image ? `${image.width} x ${image.height} px` : imageError ? t("读取失败") : t("读取中")}</span>
                         </div>
+                        <Button className="mt-3" size="small" disabled={!canUpscale} onClick={() => setPreviewOpen(value => !value)}>{t(previewOpen ? "收起 100% 预览" : "查看 100% 局部预览")}</Button>
+                        {previewOpen ? <div className="mt-2 h-52 overflow-auto rounded border" aria-label={t("100% 插值效果预览")}>
+                            {previewBusy ? <p className="p-3 text-sm">{t("正在生成同算法预览…")}</p> : preview && outputSize ? <img src={preview} alt={t("放大结果 100% 局部")} draggable={false} className="max-w-none" style={{ width: outputSize.width, height: outputSize.height }} onLoad={event => { const box = event.currentTarget.parentElement; if (box) { box.scrollLeft = (outputSize.width - box.clientWidth) / 2; box.scrollTop = (outputSize.height - box.clientHeight) / 2; } }} /> : null}
+                        </div> : null}
                     </div>
                     <div className="space-y-6 py-2">
                         <div className="space-y-2">

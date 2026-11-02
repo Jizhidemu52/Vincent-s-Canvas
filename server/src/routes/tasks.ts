@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { publicTaskFailurePayload } from "../../../shared/generation-error";
 import { Router } from "express";
 import { z } from "zod";
 import { taskSubmissionSchema as singleSchema, batchSubmissionSchema as batchSchema } from "../../../shared/task-contracts";
@@ -26,6 +27,8 @@ import { scheduleQueuedTask } from "../task-queue";
 import { requiredPromptScene } from "../../../shared/prompt-contracts";
 import type { PromptCompiler } from "../prompt-compiler";
 import { preparePromptTaskInput } from "../prompt-task-input";
+import { readImageAgentGenerationProfile } from "../image-agent-profile";
+import { applyImagePromptExclusions, isImagePromptOperation, validateImagePromptExclusions } from "../image-prompt-exclusions";
 import { PromptOptimizationError } from "../prompt-safety";
 import { promptHash } from "../prompt-recipe-store";
 import { withTransaction } from "../db-transaction";
@@ -48,14 +51,28 @@ const batchStatsJoin = `LEFT JOIN LATERAL (SELECT
 
 export function createTasksRouter(db: Database, cache: Cache, creditPolicy: boolean | (() => Promise<boolean>) = true, videoPreflight = preflightStoredVideoTask, options: { maxInflightTasks?: number; promptCompiler?: PromptCompiler } = {}) {
   const router = Router();
+  router.use((_request, response, next) => {
+    const json = response.json.bind(response);
+    response.json = body => json(publicTaskFailurePayload(body));
+    next();
+  });
   const prepare = async <T extends ReturnType<typeof singleSchema.parse>>(actor: AuthenticatedRequest["auth"], input: T) => {
-    if (!input.promptInput && !requiredPromptScene(input.toolKey ?? String(input.parameters.tool ?? ""))) return { ...input, optimized: false };
+    readImageAgentGenerationProfile(input.parameters, input.operationType);
+    validateImagePromptExclusions(input);
+    const finish = async <P extends T>(prepared: P) => {
+      if (!isImagePromptOperation(prepared.operationType) || !prepared.parameters.negative_prompt) return applyImagePromptExclusions(prepared);
+      const execution = "toolConfiguration" in prepared && prepared.toolConfiguration
+        ? prepared.toolConfiguration as Awaited<ReturnType<typeof resolveToolExecution>> : await resolveToolExecution(db, prepared);
+      const target = (await db.query<{ modelId: string; protocol: string }>(`SELECT m.model_id AS "modelId",p.protocol FROM model_configs m JOIN providers p ON p.id=m.provider_id WHERE m.id=$1`, [execution.modelConfigId])).rows[0];
+      return applyImagePromptExclusions(prepared, target);
+    };
+    if (!input.promptInput && !requiredPromptScene(input.toolKey ?? String(input.parameters.tool ?? ""))) return finish({ ...input, optimized: false });
     if (!options.promptCompiler) throw new PromptOptimizationError("PROMPT_UNAVAILABLE", "提示词优化尚未配置，未提交生成", 503);
     const active = await db.query<{ count: number }>("SELECT count(*)::int AS count FROM tasks WHERE user_id=$1 AND status IN ('waiting','processing','paused')", [actor.id]);
     if (Number(active.rows[0]?.count) >= (options.maxInflightTasks ?? 100)) throw new BillingError("USER_TASK_LIMIT_REACHED", "在途任务已达到上限，请等待任务完成或取消未提交的任务");
     const prior = actor.role === "super_admin" && input.promptInput?.compilationId ? await options.promptCompiler.store.getCompilation(input.promptInput.compilationId, actor.id) : null;
     const execution = await resolveToolExecution(db, input, { allowModelOverride: prior?.adminTest === true });
-    return preparePromptTaskInput(options.promptCompiler, actor, { ...input, modelConfigId: execution.modelConfigId, toolKey: execution.toolKey, toolConfiguration: execution });
+    return finish(await preparePromptTaskInput(options.promptCompiler, actor, { ...input, modelConfigId: execution.modelConfigId, toolKey: execution.toolKey, toolConfiguration: execution }));
   };
   const existingBatchResult = async (requestId: string, userId: string) => {
     const batch = await readBatchAdmission(db, requestId, userId);
@@ -145,7 +162,7 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
           userId: actor.id,
           departmentId: actor.departmentId,
         });
-      response.status(201).json({ task: { ...task, prompt: prepared.prompt, userInput: "userInput" in prepared ? prepared.userInput : null, optimized: prepared.optimized } });
+      response.status(201).json({ task: { ...task, prompt: prepared.prompt, parameters: prepared.parameters, userInput: "userInput" in prepared ? prepared.userInput : null, optimized: prepared.optimized } });
     } catch (error) {
       if (error instanceof BillingError) {
         response

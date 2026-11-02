@@ -6,7 +6,7 @@
 .cw-command-help { margin:12px 0 0; }
 .cw-shortcuts-list { max-height:65vh; overflow:auto; }
 .cw-shortcuts-list > div { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:8px 2px; border-bottom:1px solid color-mix(in srgb, currentColor 12%, transparent); font-size:12px; }
-.cw-shortcuts-list kbd { font-size:11px; }
+.cw-shortcuts-list kbd, .cw-command-results kbd { font-size:11px; padding:2px 5px; border:1px solid color-mix(in srgb, currentColor 22%, transparent); border-radius:4px; background:color-mix(in srgb, currentColor 4%, transparent); }
 .cw-shortcuts-list span { text-align:right; opacity:.7; }
 .node-element:focus-visible { outline:3px solid var(--cw-active); outline-offset:7px; border-radius:8px; }
 .node-element[data-task-highlight=true]::after { content:""; position:absolute; inset:-6px; border:3px solid var(--cw-active); border-radius:10px; pointer-events:none; box-shadow:0 0 0 4px color-mix(in srgb, var(--cw-active) 12%, transparent); }

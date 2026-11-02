@@ -5,8 +5,8 @@ export type ImageThumbnailEdge = (typeof imageThumbnailEdges)[number];
 
 /** Stable preview tiers avoid resampling every time a wheel gesture settles. */
 export function canvasPreviewScaleBucket(scale: number) {
-    if (!Number.isFinite(scale) || scale > 2) return Number.POSITIVE_INFINITY;
-    return scale <= 0.5 ? 0.5 : scale <= 1 ? 1 : 2;
+    if (!Number.isFinite(scale)) return Number.POSITIVE_INFINITY;
+    return scale <= 0.5 ? 0.5 : 2 ** Math.ceil(Math.log2(scale));
 }
 
 export function canvasServerThumbnailUrl(content: string, edge: ImageThumbnailEdge | 0) {

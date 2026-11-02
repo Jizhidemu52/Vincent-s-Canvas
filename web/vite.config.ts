@@ -18,6 +18,9 @@ export default defineConfig(({ mode }) => {
                 }) });
             },
         }],
+        // The image Worker lazily imports PDF support. Keep it an ES module so
+        // Vite can emit that optional dependency as a separate worker chunk.
+        worker: { format: "es" },
         build: {
             // build.mjs points Vite at a fresh sibling directory, then publishes
             // only after type checking and the bundle budget succeed.

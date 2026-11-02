@@ -8,6 +8,9 @@ import { ModelPicker } from "@/components/model-picker";
 import { ImageSettingsPanel } from "@/components/image-settings-panel";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
+import { normalizeImageModelSettings, useImageModelProfile } from "@/lib/image-model-settings";
+import { useBusinessConfigStore } from "@/stores/use-business-config-store";
+import { resolveCanvasToolModel } from "@/lib/canvas/canvas-generation-model";
 
 export type CanvasImageAngleParams = {
     horizontalAngle: number;
@@ -31,12 +34,23 @@ export function CanvasNodeAngleDialog({ dataUrl, open, onClose, onConfirm }: { d
     const [imageSettings, setImageSettings] = useState<Partial<AiConfig>>({});
     const theme = canvasThemes[useThemeStore(state => state.theme)];
     const baseConfig = useEffectiveConfig();
-    const config = useToolConfig({ ...baseConfig, ...imageSettings, count: "1", model: params.model || baseConfig.imageModel || baseConfig.model }, "canvas-angle");
+    const business = useBusinessConfigStore();
+    const rawConfig = useToolConfig({ ...baseConfig, ...imageSettings, count: "1", model: params.model || baseConfig.imageModel || baseConfig.model }, "canvas-angle");
+    let config = rawConfig;
+    try { config = business.status === "ready" ? resolveCanvasToolModel("canvas-angle", rawConfig, business) : { ...rawConfig, model: "" }; } catch { config = { ...rawConfig, model: "" }; }
+    const profile = useImageModelProfile(config.model);
+    const [sourceSize, setSourceSize] = useState("");
     const toolEnabled = useToolEnabled("canvas-angle");
 
     useEffect(() => {
-        if (open) { setParams(defaultParams); setImageSettings({}); }
+        if (open) { setParams(defaultParams); setImageSettings({}); setSourceSize(""); }
+        let active = true;
+        if (open) { const image = new Image(); image.src = dataUrl; void image.decode().then(() => { if (active) setSourceSize(`${image.naturalWidth}x${image.naturalHeight}`); }).catch(() => undefined); }
+        return () => { active = false; };
     }, [dataUrl, open]);
+    useEffect(() => {
+        if (sourceSize) setImageSettings(current => current.size ? current : { ...current, size: normalizeImageModelSettings({ size: sourceSize, quality: config.quality, count: "1" }, profile).size });
+    }, [sourceSize, config.model]);
 
     const update = <Key extends keyof CanvasImageAngleParams>(key: Key, value: CanvasImageAngleParams[Key]) => setParams((current) => ({ ...current, [key]: value }));
 
@@ -51,7 +65,7 @@ export function CanvasNodeAngleDialog({ dataUrl, open, onClose, onConfirm }: { d
                     <div className="flex min-h-[300px] flex-col justify-between rounded-xl border p-4">
                         <div className="grid flex-1 place-items-center">
                             <div className="relative">
-                                <img src={dataUrl} alt="" className="size-48 rounded-2xl object-cover shadow-2xl" draggable={false} style={{ transform: previewTransform(params) }} />
+                                <img src={dataUrl} alt="" className="max-h-64 max-w-64 rounded-xl object-contain" draggable={false} style={{ transform: previewTransform(params) }} />
                                 <div className="absolute -bottom-6 left-1/2 h-10 w-24 -translate-x-1/2 rounded-full border bg-black/20 backdrop-blur" />
                             </div>
                         </div>

@@ -50,7 +50,7 @@ export const imageToolDefinitions: ImageToolDefinition[] = [
     { id: "imageSequence", defaultVisible: false, panelLabel: "图片工作流", label: "图片工作流 · 快速搭建", title: "创建并连接白底 → 改色 → 模特上身节点，也可自行拖线编排", icon: () => <Workflow className="size-[18px]" />, run: (node, handlers) => handlers.onImageSequence?.(node) },
     { id: "compare", defaultVisible: false, panelLabel: "高级对比", label: "高级对比 · 差异图与导出", title: "原位滑块位于结果图下方；此处打开差异图、并排、叠加和 PNG 导出工具", icon: () => <Columns2 className="size-[18px]" />, run: (node, handlers) => handlers.onCompare?.(node) },
     { id: "designTemplate", defaultVisible: false, panelLabel: "服装画布模板", label: "服装画布模板 · 得到整套生成流程", title: "以当前图为参考，新增线稿、改色、效果图等可编辑生成配置", icon: () => <PanelsTopLeft className="size-[18px]" />, run: (node, handlers) => handlers.onDesignTemplate?.(node) },
-    { id: "restoreGeneration", defaultVisible: false, panelLabel: "恢复生成输入", label: "恢复生成输入 · 找回参考图和参数", title: "恢复当时的提示词、参考原图和参数，不自动生成", icon: () => <History className="size-[18px]" />, run: (node, handlers) => handlers.onRestoreGeneration?.(node) },
+    { id: "restoreGeneration", defaultVisible: true, panelLabel: "恢复生成输入", label: "恢复生成输入 · 找回参考图和参数", title: "恢复当时的提示词、参考原图和参数，不自动生成", icon: () => <History className="size-[18px]" />, run: (node, handlers) => handlers.onRestoreGeneration?.(node) },
     {
         id: "manualEdit", defaultVisible: true, panelLabel: "编辑图片", label: "编辑图片", title: "编辑图片",
         icon: () => <PencilRuler className="size-[18px]" />,
@@ -128,15 +128,6 @@ export const imageToolDefinitions: ImageToolDefinition[] = [
         title: "放大图片分辨率",
         icon: () => <ZoomIn className="size-[18px]" />,
         run: (node, handlers) => handlers.onUpscale(node),
-    },
-    {
-        id: "superResolve",
-        defaultVisible: false,
-        panelLabel: "超分",
-        label: "超分",
-        title: "AI 超分",
-        icon: () => <Sparkles className="size-[18px]" />,
-        run: (node, handlers) => handlers.onSuperResolve(node),
     },
     {
         id: "angle",

@@ -64,11 +64,12 @@ export const CanvasTopBar = memo(function CanvasTopBar({
     return (
         <>
             <div className="cw-topbar">
-                <div className={`cw-project-card cw-surface ${agentOpen ? "is-agent-open" : ""}`}>
-                    <Dropdown trigger={["click"]} menu={{ items: [
+                <div className={`cw-project-card ${agentOpen ? "is-agent-open" : ""}`}>
+                    <Dropdown trigger={["click"]} styles={{ root: { zIndex: 900 } }} menu={{ items: [
                         canvasActionMenuItem("home", onHome, <Home className="size-4" />),
                         canvasActionMenuItem("projects", onProjects, <Images className="size-4" />),
                         canvasActionMenuItem("newProject", onCreateProject, <Plus className="size-4" />),
+                        canvasActionMenuItem("renameProject", onStartTitleEditing),
                         canvasActionMenuItem("tools", onOpenTools, <LayoutGrid className="size-4" />),
                         { type: "divider" },
                         canvasActionMenuItem("upload", onImportImage, <Upload className="size-4" />),
@@ -83,20 +84,20 @@ export const CanvasTopBar = memo(function CanvasTopBar({
                         { type: "divider" },
                         canvasActionMenuItem("deleteProject", onDeleteProject, <Trash2 className="size-4" />),
                     ] }}>
-                        <button type="button" className="cw-icon cw-brand" aria-label={uiText("打开画布菜单")} title={uiText("INCHOICE · 画布菜单")}><InchoiceBrand /><ChevronDown className="size-3 shrink-0" /></button>
+                        <button type="button" className="cw-icon cw-brand" aria-label={uiText("打开画布菜单")} title={uiText("无限画布菜单")}><InchoiceBrand /><ChevronDown className="size-3 shrink-0" /></button>
                     </Dropdown>
                     <div ref={titleRef} className="cw-project-title">
                         {isTitleEditing ? (
                             <input autoFocus value={titleDraft} onChange={(event) => onTitleDraftChange(event.target.value)} onBlur={onFinishTitleEditing}
-                                onKeyDown={(event) => { if (event.key === "Enter") onFinishTitleEditing(); if (event.key === "Escape") onCancelTitleEditing(); }} aria-label={uiText("画布名称")} />
+                                onKeyDown={(event) => { if (event.nativeEvent.isComposing || event.keyCode === 229) return; if (event.key === "Enter") onFinishTitleEditing(); if (event.key === "Escape") onCancelTitleEditing(); }} aria-label={uiText("画布名称")} />
                         ) : (
-                            <button type="button" onDoubleClick={onStartTitleEditing} title={uiText("双击修改画布名称")}>{title}</button>
+                            <button type="button" onClick={onStartTitleEditing} onKeyDown={event => { if (event.key === "F2") { event.preventDefault(); onStartTitleEditing(); } }} title={uiText("点击或按 Enter 修改画布名称")}>{title}</button>
                         )}
                     </div>
                     <CanvasSaveStatus compact />
                     <button type="button" className="cw-share" title={uiText("复制链接；不会公开画布。本机试用跨设备请导出")} onClick={onShare}>{uiText("复制画布链接")}</button>
                 </div>
-                <div className="cw-account-card cw-surface">
+                <div className="cw-account-card">
                     <LanguageSwitch compact />
                     <span className="cw-account-avatar" aria-hidden="true">{userName.slice(0, 1)}</span>
                     <span className="cw-account-name" title={userName}>{userName}</span>
@@ -114,15 +115,15 @@ function CompactAgentStatus({ status, onClick }: { status: { connected: boolean;
     useUiLocale();
     const colorTheme = useThemeStore((state) => state.theme);
     const theme = canvasThemes[colorTheme];
-    const label = status.connected ? uiText("已连接到本地 Codex") : status.enabled ? status.activity || uiText("连接中") : uiText("正在连接本地 Codex");
-    const dotColor = status.connected ? "#22c55e" : status.enabled ? "#f59e0b" : theme.node.muted;
+    const label = status.connected ? uiText("已连接本机助手") : status.enabled ? status.activity || uiText("连接中") : uiText("本机助手未连接");
+    const dotColor = status.connected ? theme.node.success : status.enabled ? theme.node.warning : theme.node.muted;
     return (
         <button
             type="button"
-            className="flex h-10 items-center gap-2 rounded-xl px-3 text-sm font-medium transition hover:opacity-85"
-            style={{ background: theme.toolbar.panel, color: theme.node.text, boxShadow: "0 10px 30px rgba(28,25,23,.10)" }}
+            className="cw-text-button"
+            style={{ color: theme.node.text }}
             onClick={onClick}
-            title={uiText("打开本地 Codex 面板")}
+            title={uiText("打开本机助手面板")}
         >
             <span className="size-2 rounded-full" style={{ background: dotColor }} />
             <span className="max-w-[180px] truncate">{label}</span>

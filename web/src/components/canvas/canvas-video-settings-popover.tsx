@@ -97,7 +97,7 @@ function VideoSettingsPortal({
     const topPlacement = placement?.startsWith("top");
     const style = {
         position: "fixed",
-        zIndex: 1200,
+        zIndex: "var(--cw-z-popover, 900)",
         width,
         left: Math.max(margin, Math.min(window.innerWidth - width - margin, left)),
         ...(topPlacement ? { bottom: window.innerHeight - buttonRect.top + gap, maxHeight: Math.max(260, buttonRect.top - margin * 2) } : { top: buttonRect.bottom + gap, maxHeight: Math.max(260, window.innerHeight - buttonRect.bottom - margin * 2) }),

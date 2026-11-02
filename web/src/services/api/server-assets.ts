@@ -106,6 +106,33 @@ export async function fetchServerAssetContent(id: string, signal?: AbortSignal) 
     return response.blob();
 }
 
+export type ServerAssetPoster = { status: "pending"; retryAfterMs: number } | { status: "ready"; blob: Blob; durationMs?: number };
+export type ServerImageThumbnail = { status: "pending"; retryAfterMs: number } | { status: "ready"; blob: Blob };
+export async function fetchServerImageThumbnail(url: string, signal: AbortSignal): Promise<ServerImageThumbnail> {
+    if (!/^\/api\/assets\/[0-9a-f-]{36}\/thumb\?w=(256|1024)$/i.test(url)) throw new Error("图片预览地址无效");
+    const response = await fetch(`${url}&pending=1`, { credentials: "include", signal, cache: "no-store" });
+    if (response.status === 202) {
+        const seconds = Number(response.headers.get("Retry-After"));
+        return { status: "pending", retryAfterMs: Math.max(1000, Math.min(10_000, (Number.isFinite(seconds) && seconds > 0 ? seconds : 3) * 1000)) };
+    }
+    if (!response.ok || !response.headers.get("Content-Type")?.startsWith("image/")) throw new Error(`图片预览暂时不可用（${response.status}）`);
+    const blob = await response.blob();
+    if (!blob.size || blob.size > 8 * 1024 * 1024) throw new Error("图片预览格式无效");
+    return { status: "ready", blob };
+}
+export async function fetchServerAssetPoster(id: string, signal?: AbortSignal): Promise<ServerAssetPoster> {
+    const response = await fetch(`/api/assets/${encodeURIComponent(id)}/thumb?w=256`, { credentials: "include", signal });
+    if (response.status === 202) {
+        const seconds = Number(response.headers.get("Retry-After"));
+        return { status: "pending", retryAfterMs: Math.max(1000, Math.min(10_000, (Number.isFinite(seconds) && seconds > 0 ? seconds : 3) * 1000)) };
+    }
+    if (!response.ok || !response.headers.get("Content-Type")?.startsWith("image/")) throw new Error("视频封面暂时不可用，仍可播放原视频");
+    const blob = await response.blob();
+    if (!blob.size || blob.size > 8 * 1024 * 1024) throw new Error("视频封面格式无效");
+    const durationMs = Number(response.headers.get("X-Canvas-Media-Duration-Ms"));
+    return { status: "ready", blob, ...(Number.isFinite(durationMs) && durationMs > 0 ? { durationMs } : {}) };
+}
+
 export const recordServerAssetEvent = (id: string, eventType: AssetEventType, metadata: Record<string, unknown> = {}, projectId?: string) =>
     request<{ eventId: string; projection: AssetProjection }>(`/api/assets/${id}/events`, {
         method: "POST",

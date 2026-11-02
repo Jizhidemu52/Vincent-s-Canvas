@@ -34,6 +34,9 @@ export function createCanvasImageOperationRunner() {
                 feedback.finish();
             }
         },
+        cancel(key: string) {
+            pending.get(key)?.abort(new DOMException("图片处理已取消", "AbortError"));
+        },
         cancelAll() {
             for (const controller of pending.values()) controller.abort();
             pending.clear();

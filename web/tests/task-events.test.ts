@@ -21,7 +21,7 @@ test("concurrent task observers share one stream and only relevant changes wake 
     const first = f.stream.subscribe(["one"]), second = f.stream.subscribe(["two", "one"]);
     await Bun.sleep(45);
     expect(f.connections).toHaveLength(1);
-    expect(new URL(f.connections[0]!.url, "http://canvas").searchParams.get("ids")).toBe("one,two");
+    expect(new URL(f.connections[0]!.url, "http://canvas").searchParams.get("ids")).toBeNull();
     f.connections[0]!.emit(["two"]);
     expect(first.version).toBe(0);
     expect(second.version).toBe(1);
@@ -29,6 +29,21 @@ test("concurrent task observers share one stream and only relevant changes wake 
     expect(first.version).toBe(1);
     first.close(); second.close();
     expect(f.connections[0]!.closed).toBe(true);
+});
+
+test("adding and removing task IDs keeps the same employee stream; reconnect hints refresh all watches", async () => {
+    const f = fixture();
+    const first = f.stream.subscribe(["one"]);
+    await Bun.sleep(45);
+    const second = f.stream.subscribe(["two"]);
+    await Bun.sleep(45);
+    first.close();
+    await Bun.sleep(45);
+    expect(f.connections).toHaveLength(1);
+    expect(f.connections[0].closed).toBe(false);
+    f.connections[0].emit([]);
+    expect(second.version).toBe(1);
+    second.close();
 });
 
 test("notifications arriving during GET are not lost before the next wait", async () => {

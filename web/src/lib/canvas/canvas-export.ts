@@ -28,13 +28,25 @@ export async function createCanvasProjectsArchive(projects: CanvasProject[], sou
     origin?: string;
 } = {}, options: ZipOptions = {}) {
     options.onProgress?.({ phase: "preparing", completed: 0, total: projects.length, label: "正在收集画布与原始媒体…" });
-    const prepared = await collectCanvasExportMedia(projects.map(encodeCanvasProject), sources);
+    const missing: string[] = [];
+    const recordMissing = (path: string, error: unknown) => missing.push(`${path}: ${error instanceof Error ? error.message : "素材不可用"}`);
+    const prepared = await collectCanvasExportMedia(projects.map(encodeCanvasProject), { ...sources, onMissing: recordMissing });
     const zipFiles: { name: string; data: BlobPart }[] = [];
     const exportedProjects = await mapCanvasAsyncPool(prepared.document, 4, async (project) => {
             const files: CanvasExportAsset[] = [];
             await mapCanvasAsyncPool(collectStorageKeys(project), 4, async (storageKey) => {
-                    const blob = prepared.blobs.get(storageKey) || (storageKey.startsWith("image:") ? await (sources.getImageBlob || getImageBlob)(storageKey) : await (sources.getMediaBlob || getMediaBlob)(storageKey));
-                    if (!blob) throw new Error("画布原始媒体缺失，未生成不完整的备份");
+                    let blob: Blob | null;
+                    try {
+                        blob = prepared.blobs.get(storageKey) || (storageKey.startsWith("image:") ? await (sources.getImageBlob || getImageBlob)(storageKey) : await (sources.getMediaBlob || getMediaBlob)(storageKey));
+                        if (!blob) {
+                            const source = await readMediaSource(storageKey);
+                            if (source && serverMediaId(source)) {
+                                const response = sources.fetchBlob ? await sources.fetchBlob(source) : await fetch(source, { credentials: "include", signal: AbortSignal.timeout(30000) }).then(result => { if (!result.ok) throw new Error(`素材读取失败（${result.status}）`); return result.blob(); });
+                                blob = response;
+                            }
+                        }
+                        if (!blob) throw new Error("原始素材缺失，保留了文档中的来源记录");
+                    } catch (error) { recordMissing(`${project.title}/${storageKey}`, error); return; }
                     const path = `projects/${project.id}/files/${safeFileName(storageKey)}.${fileExtension(blob.type, storageKey)}`;
                     files.push({ storageKey, path, mimeType: blob.type || "application/octet-stream", bytes: blob.size });
                     zipFiles.push({ name: path, data: blob });
@@ -43,6 +55,8 @@ export async function createCanvasProjectsArchive(projects: CanvasProject[], sou
         });
 
     const data: CanvasExportFile = { app: "wireless-canvas", version: 3, exportedAt: new Date().toISOString(), projects: exportedProjects };
+    if (missing.length) zipFiles.push({ name: "missing.txt", data: `此备份不完整：以下 ${missing.length} 个素材未能读取。其余画布内容与可读取原件已保留，原项目未修改。\n请保留本文件，恢复网络或存储后重新导出完整备份。\n\n${missing.join("\n")}` });
+    options.onProgress?.({ phase: "preparing", completed: projects.length, total: projects.length, label: missing.length ? `已保留可读取内容；${missing.length} 个缺失素材已列入 missing.txt` : "原始媒体收集完成" });
     return createZip([{ name: "projects.json", data: JSON.stringify(exportModelMetadata(data)) }, ...zipFiles], options);
 }
 

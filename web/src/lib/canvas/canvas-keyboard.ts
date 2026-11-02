@@ -1,10 +1,12 @@
 import { CANVAS_WHEEL_PASSTHROUGH_SELECTOR } from "./canvas-wheel-target";
 
-const interactiveSelector = `input,textarea,select,button,[contenteditable]:not([contenteditable='false']),[role='textbox'],[role='dialog'],[role='menu'],${CANVAS_WHEEL_PASSTHROUGH_SELECTOR}`;
+const panelSelector = "[data-canvas-shortcuts='ignore'],.cw-agent-panel,.cw-create-panel";
+const interactiveSelector = `input,textarea,select,button,[contenteditable]:not([contenteditable='false']),[role='textbox'],[role='dialog'],[role='menu'],${panelSelector},${CANVAS_WHEEL_PASSTHROUGH_SELECTOR}`;
 
 export function shouldIgnoreCanvasShortcut(event: Pick<KeyboardEvent, "isComposing" | "keyCode" | "defaultPrevented">, target: EventTarget | null, allowCanvasControls = false) {
+    if (typeof document !== "undefined" && document.querySelector?.('[data-canvas-edit-blocked="true"]')) return true;
     const selector = allowCanvasControls
-        ? "input,textarea,select,[contenteditable]:not([contenteditable='false']),[role='textbox'],[role='dialog'],[role='menu'],.ant-modal,.ant-popover,.ant-dropdown,.ant-select-dropdown,.ant-picker-dropdown"
+        ? `input,textarea,select,[contenteditable]:not([contenteditable='false']),[role='textbox'],[role='dialog'],[role='menu'],${panelSelector},.ant-modal,.ant-popover,.ant-dropdown,.ant-select-dropdown,.ant-picker-dropdown`
         : interactiveSelector;
     return event.defaultPrevented || event.isComposing || event.keyCode === 229 || Boolean((target as Element | null)?.closest?.(selector));
 }
@@ -16,7 +18,7 @@ export function bindCanvasSpaceKey(target: Pick<EventTarget, "addEventListener" 
         if (event.type !== "blur" && event.code !== "Space") return;
         const pressed = event.type === "keydown";
         if (pressed) {
-            if (event.repeat || event.ctrlKey || event.metaKey || event.altKey || shouldIgnoreCanvasShortcut(event, event.target)) return;
+            if (event.repeat || event.ctrlKey || event.metaKey || event.altKey || shouldIgnoreCanvasShortcut(event, event.target, true)) return;
             event.preventDefault();
         }
         onPressed(pressed);

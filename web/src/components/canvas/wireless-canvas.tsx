@@ -22,7 +22,9 @@ type WirelessCanvasProps = {
     onViewportChange: (viewport: ViewportTransform) => void;
     onViewportPreview?: (viewport: ViewportTransform) => void;
     onInteractionChange?: (isInteracting: boolean) => void;
+    onTouchGestureStart?: () => void;
     onCanvasMouseDown?: (event: React.PointerEvent<HTMLDivElement>) => void;
+    onCanvasDoubleClick?: (event: React.MouseEvent<HTMLDivElement>) => void;
     onOverviewNodePointerDown?: (event: React.PointerEvent<HTMLDivElement>) => boolean;
     onConnectionPointerDown?: (event: React.PointerEvent<HTMLDivElement>) => boolean;
     onCanvasDeselect?: () => void;
@@ -37,7 +39,7 @@ export type WirelessCanvasHandle = {
 };
 
 export const WirelessCanvas = forwardRef<WirelessCanvasHandle, WirelessCanvasProps>(function WirelessCanvas(
-    { containerRef, viewport, backgroundMode = "lines", interactionMode, onViewportChange, onViewportPreview, onInteractionChange, onCanvasMouseDown, onOverviewNodePointerDown, onConnectionPointerDown, onCanvasDeselect, onContextMenu, onDrop, underlay, children },
+    { containerRef, viewport, backgroundMode = "lines", interactionMode, onViewportChange, onViewportPreview, onInteractionChange, onTouchGestureStart, onCanvasMouseDown, onCanvasDoubleClick, onOverviewNodePointerDown, onConnectionPointerDown, onCanvasDeselect, onContextMenu, onDrop, underlay, children },
     ref,
 ) {
     const themeName = useThemeStore((state) => state.theme);
@@ -184,9 +186,10 @@ export const WirelessCanvas = forwardRef<WirelessCanvasHandle, WirelessCanvasPro
 
     useImperativeHandle(ref, () => ({ previewViewport }), [previewViewport]);
 
-    const handleWheel = (event: React.WheelEvent<HTMLDivElement>) => {
+    const handleWheel = (event: WheelEvent) => {
         const target = event.target instanceof Element ? event.target : null;
-        if (!shouldCanvasCaptureWheel(target)) return;
+        const zooming = event.ctrlKey || event.metaKey;
+        if (!zooming && !shouldCanvasCaptureWheel(target)) return;
 
         // A trackpad can emit several events before paint. Read host bounds
         // once for that queued frame, then refresh them for the next frame.
@@ -194,7 +197,6 @@ export const WirelessCanvas = forwardRef<WirelessCanvasHandle, WirelessCanvasPro
         if (!rect || (!event.deltaY && !event.deltaX) || panState.current.isPanning) return;
         // Include every event received before paint, even after a direction or anchor change.
         const current = pendingViewportRef.current ?? liveViewportRef.current;
-        const zooming = event.ctrlKey || event.metaKey;
         const factor = zooming ? canvasWheelZoomFactor(event.deltaY, event.deltaMode, rect.height) : 1;
         const newScale = clampCanvasZoom(current.k * factor);
         if (zooming && newScale === current.k) return;
@@ -206,7 +208,7 @@ export const WirelessCanvas = forwardRef<WirelessCanvasHandle, WirelessCanvasPro
         reportCanvasInteraction(true);
         const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? rect.height : 1;
         const next = zooming ? zoomViewportAtPoint(current, { x: mouseX, y: mouseY }, newScale)
-            : { ...current, x: current.x - event.deltaX * unit, y: current.y - event.deltaY * unit };
+            : { ...current, x: current.x - (event.shiftKey ? event.deltaY || event.deltaX : event.deltaX) * unit, y: current.y - (event.shiftKey ? 0 : event.deltaY) * unit };
         queueLiveViewport(next);
         if (wheelCommitTimerRef.current) window.clearTimeout(wheelCommitTimerRef.current);
         wheelCommitTimerRef.current = window.setTimeout(() => {
@@ -310,17 +312,101 @@ export const WirelessCanvas = forwardRef<WirelessCanvasHandle, WirelessCanvasPro
         };
     }, [commitLiveViewport, onCanvasDeselect, queueLiveViewport, reportCanvasInteraction]);
 
+    const wheelHandlerRef = useRef(handleWheel);
+    wheelHandlerRef.current = handleWheel;
     useEffect(() => {
         const container = containerRef.current;
         if (!container) return;
 
         const preventCanvasWheelScroll = (event: WheelEvent) => {
             const target = event.target instanceof Element ? event.target : null;
-            if (shouldCanvasCaptureWheel(target)) event.preventDefault();
+            if (event.ctrlKey || event.metaKey) {
+                // Portals and sibling panels are outside the viewport DOM. A
+                // page-scoped capture listener also sees text editors that stop
+                // propagation. Modal editors keep their own local zoom.
+                event.preventDefault();
+                if (!target?.closest(".ant-modal,[role='dialog'],[data-canvas-local-zoom]")) wheelHandlerRef.current(event);
+            } else if (target && container.contains(target) && shouldCanvasCaptureWheel(target)) {
+                event.preventDefault();
+                wheelHandlerRef.current(event);
+            }
         };
-        container.addEventListener("wheel", preventCanvasWheelScroll, { passive: false });
-        return () => container.removeEventListener("wheel", preventCanvasWheelScroll);
+        window.addEventListener("wheel", preventCanvasWheelScroll, { passive: false, capture: true });
+        return () => window.removeEventListener("wheel", preventCanvasWheelScroll, true);
     }, [containerRef]);
+
+    useEffect(() => {
+        const container = containerRef.current;
+        if (!container) return;
+        type Pinch = { initial: ViewportTransform; distance: number; x: number; y: number };
+        const touches = new Map<number, { x: number; y: number }>();
+        let pinch: Pinch | null = null;
+        let safari: { initial: ViewportTransform; x: number; y: number } | null = null;
+        const point = () => {
+            const [a, b] = [...touches.values()];
+            return a && b ? { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, distance: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)) } : null;
+        };
+        const down = (event: PointerEvent) => {
+            if (event.pointerType !== "touch") return;
+            touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
+            const pair = point();
+            if (!pair || pinch) return;
+            event.preventDefault();
+            event.stopPropagation();
+            onTouchGestureStart?.();
+            panState.current.isPanning = false;
+            setIsPanning(false);
+            pinch = { initial: pendingViewportRef.current || liveViewportRef.current, ...pair };
+            reportCanvasInteraction(true);
+        };
+        const move = (event: PointerEvent) => {
+            if (!touches.has(event.pointerId)) return;
+            touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
+            const pair = point();
+            if (!pinch || !pair) return;
+            event.preventDefault();
+            event.stopPropagation();
+            const rect = container.getBoundingClientRect();
+            const next = zoomViewportAtPoint(pinch.initial, { x: pinch.x - rect.left, y: pinch.y - rect.top }, clampCanvasZoom(pinch.initial.k * pair.distance / pinch.distance));
+            queueLiveViewport({ ...next, x: next.x + pair.x - pinch.x, y: next.y + pair.y - pinch.y });
+        };
+        const end = (event: PointerEvent) => {
+            touches.delete(event.pointerId);
+            if (!pinch || touches.size >= 2) return;
+            event.stopPropagation();
+            pinch = null;
+            commitLiveViewport();
+            reportCanvasInteraction(false);
+        };
+        const gesture = (raw: Event) => {
+            const event = raw as Event & { scale: number; clientX: number; clientY: number };
+            event.preventDefault();
+            if ((event.target as Element | null)?.closest?.(".ant-modal,[role='dialog'],[data-canvas-local-zoom]")) return;
+            const rect = container.getBoundingClientRect();
+            if (event.type === "gesturestart") {
+                safari = { initial: pendingViewportRef.current || liveViewportRef.current, x: event.clientX || rect.left + rect.width / 2, y: event.clientY || rect.top + rect.height / 2 };
+                reportCanvasInteraction(true);
+            } else if (event.type === "gesturechange" && safari && Number.isFinite(event.scale)) {
+                queueLiveViewport(zoomViewportAtPoint(safari.initial, { x: safari.x - rect.left, y: safari.y - rect.top }, clampCanvasZoom(safari.initial.k * event.scale)));
+            } else if (event.type === "gestureend" && safari) {
+                safari = null;
+                commitLiveViewport();
+                reportCanvasInteraction(false);
+            }
+        };
+        container.addEventListener("pointerdown", down, true);
+        window.addEventListener("pointermove", move, { capture: true, passive: false });
+        window.addEventListener("pointerup", end, true);
+        window.addEventListener("pointercancel", end, true);
+        for (const name of ["gesturestart", "gesturechange", "gestureend"]) window.addEventListener(name, gesture, { capture: true, passive: false });
+        return () => {
+            container.removeEventListener("pointerdown", down, true);
+            window.removeEventListener("pointermove", move, true);
+            window.removeEventListener("pointerup", end, true);
+            window.removeEventListener("pointercancel", end, true);
+            for (const name of ["gesturestart", "gesturechange", "gestureend"]) window.removeEventListener(name, gesture, true);
+        };
+    }, [commitLiveViewport, containerRef, onTouchGestureStart, queueLiveViewport, reportCanvasInteraction]);
 
     return (
         <div
@@ -330,8 +416,13 @@ export const WirelessCanvas = forwardRef<WirelessCanvasHandle, WirelessCanvasPro
             data-cursor-mode={interactionMode === "select" && !isSpacePressed ? "select" : "grab"}
             data-cursor-panning={isPanning}
             className="relative h-full w-full select-none overflow-hidden"
-            style={{ background: theme.canvas.background }}
+            style={{ background: theme.canvas.background, touchAction: "none" }}
             onPointerDown={handlePointerDown}
+            onDoubleClick={event => {
+                const target = event.target instanceof Element ? event.target : null;
+                if (!target?.closest("[data-node-id],[data-connection-id],[data-canvas-group-id],[data-canvas-no-zoom],button,input,textarea")) onCanvasDoubleClick?.(event);
+            }}
+            onScroll={event => { event.currentTarget.scrollLeft = 0; event.currentTarget.scrollTop = 0; }}
             onPointerDownCapture={(event) => {
                 if (event.button !== 0 && event.button !== 1) return;
                 if (interactionMode !== "hand" && !(interactionMode && isSpacePressed) && event.button !== 1) return;
@@ -340,7 +431,6 @@ export const WirelessCanvas = forwardRef<WirelessCanvasHandle, WirelessCanvasPro
                 event.stopPropagation();
                 handlePointerDown(event);
             }}
-            onWheel={handleWheel}
             onContextMenu={onContextMenu}
             onDragOver={(event) => event.preventDefault()}
             onDrop={onDrop}

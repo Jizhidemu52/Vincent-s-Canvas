@@ -1,5 +1,5 @@
 import { useUiText, uiText } from "@/lib/i18n";
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import { App, Button, Input, Segmented, Tooltip } from "antd";
 import copyToClipboard from "copy-to-clipboard";
@@ -12,11 +12,14 @@ import { createClientId } from "@/lib/client-id";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { useCanvasAgentStore, type AgentAttachment, type AgentChatItem, type AgentEventLog, type AgentPanelTab, type AgentPendingToolCall, type AgentThreadSummary } from "@/stores/canvas/use-canvas-agent-store";
+import { useCanvasPanelStore } from "@/stores/canvas/use-canvas-panel-store";
 import { summarizeCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
 import { AgentChatComposer, AgentChatMessage, AgentPanelTabs, AgentPendingToolCard, AgentWorkingMessage, type CanvasAgentChatAttachment } from "./canvas-agent-chat-ui";
 import { agentMessageWindow, DEFAULT_AGENT_MESSAGE_WINDOW, expandAgentMessageWindow } from "@/lib/canvas/agent-message-window";
 import { selectLocalAgentPanelState } from "@/lib/canvas/canvas-local-agent-selection";
 import { canvasAgentUndoMessage } from "@/lib/canvas/canvas-agent-undo-report";
+import { useChatBottomFollow } from "@/hooks/use-chat-bottom-follow";
+import { canvasOpsDeleteContent, canvasToolCallPreview } from "@/lib/canvas/canvas-assistant-ux";
 
 const PANEL_MOTION_SECONDS = 0.5;
 const MAX_ATTACHMENTS = 6;
@@ -46,21 +49,29 @@ type AgentThreadResponse = { ok?: boolean; workspace?: AgentWorkspace; thread?: 
 type AgentConfigResponse = { ok?: boolean; url?: string; token?: string; hasToken?: boolean };
 const EMPTY_AGENT_SNAPSHOT: CanvasAgentSnapshot = { projectId: "", title: "", nodes: [], connections: [], selectedNodeIds: [], viewport: { x: 0, y: 0, k: 1 } };
 
-export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotRef, canUndoOps, collapsed, embedded, headless, autoConnect, onApplyOps, onUndoOps }: { snapshot?: CanvasAgentSnapshot; snapshotRef?: { current: CanvasAgentSnapshot }; canUndoOps: boolean; collapsed?: boolean; embedded?: boolean; headless?: boolean; autoConnect?: boolean; onApplyOps: (ops: CanvasAgentOp[]) => unknown; onUndoOps: () => CanvasAgentSnapshot | null | Promise<CanvasAgentSnapshot | null> }) {
+export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotRef, canUndoOps, collapsed, embedded, headless, autoConnect, onApplyOps, onUndoOps }: { snapshot?: CanvasAgentSnapshot; snapshotRef?: { current: CanvasAgentSnapshot }; canUndoOps: boolean; collapsed?: boolean; embedded?: boolean; headless?: boolean; autoConnect?: boolean; onApplyOps: (ops: CanvasAgentOp[], options?: { turnId: string }) => unknown; onUndoOps: (turnId?: string) => CanvasAgentSnapshot | null | Promise<CanvasAgentSnapshot | null> }) {
     const t = useUiText();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const user = useUserStore((state) => state.user);
     const { message, modal } = App.useApp();
     const [searchParams] = useSearchParams();
-    const { width, url, token, connected, enabled, prompt, attachments, sending, waiting, messages, messageCount, eventLogs, eventLogCount, threads, threadCount, activeThreadId, workspacePath, loadingThreads, activeTab, confirmTools, activity, connectError, pendingTool, setAgentState, addMessage: pushMessage, addEventLog: pushEventLog, clearEventLogs } = useCanvasAgentStore(useShallow(state => selectLocalAgentPanelState(state, headless, embedded)));
+    const { url, token, connected, enabled, prompt, attachments, sending, waiting, messages, messageCount, eventLogs, eventLogCount, threads, threadCount, activeThreadId, workspacePath, loadingThreads, activeTab, confirmTools, activity, connectError, pendingTool, setAgentState, addMessage: pushMessage, addEventLog: pushEventLog, clearEventLogs } = useCanvasAgentStore(useShallow(state => selectLocalAgentPanelState(state, headless, embedded)));
+    const width = useCanvasPanelStore(state => headless || embedded ? 0 : state.chatWidth);
+    const setPanelWidth = useCanvasPanelStore(state => state.setWidth);
     const [resizing, setResizing] = useState(false);
     const [undoing, setUndoing] = useState(false);
     const undoingRef = useRef(false);
     const undoLifetimeRef = useRef({ active: true });
     const [messageRenderLimit, setMessageRenderLimit] = useState(DEFAULT_AGENT_MESSAGE_WINDOW);
-    const listRef = useRef<HTMLDivElement>(null);
+    const scrollContent = useMemo(() => ({ messages, pendingTool, waiting }), [messages, pendingTool, waiting]);
+    const chatFollow = useChatBottomFollow(scrollContent, activeThreadId);
+    const listRef = chatFollow.listRef;
     const fallbackSnapshotRef = useRef<CanvasAgentSnapshot>(snapshot || EMPTY_AGENT_SNAPSHOT);
     const snapshotRef: { current: CanvasAgentSnapshot } = externalSnapshotRef || fallbackSnapshotRef;
+    const scope = `${snapshotRef.current.projectId}:${user?.id || ""}`;
+    const scopeRef = useRef(scope); scopeRef.current = scope;
+    const turnIdRef = useRef(createClientId());
+    const requestRef = useRef<AbortController | null>(null);
     const confirmToolsRef = useRef(confirmTools);
     const pendingToolRef = useRef<AgentPendingToolCall | null>(null);
     const onApplyOpsRef = useRef(onApplyOps);
@@ -69,15 +80,16 @@ export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotR
     const errorLoggedRef = useRef(false);
     const clientIdRef = useRef(createClientId());
     const endpoint = useMemo(() => url.trim().replace(/\/$/, ""), [url]);
-    const urlAgentAutoConnect = searchParams.has("agentUrl") && searchParams.has("agentToken");
     const renderedMessageWindow = useMemo(() => agentMessageWindow(messages.length, messageRenderLimit), [messageRenderLimit, messages.length]);
     const renderedMessages = useMemo(() => messages.slice(renderedMessageWindow.start), [messages, renderedMessageWindow.start]);
     const loadThreads = useCallback(async () => {
         const projectId = snapshotRef.current.projectId;
+        const requestScope = scopeRef.current;
         if ((!connectedRef.current && !useCanvasAgentStore.getState().connected) || !projectId) return;
         setAgentState({ loadingThreads: true });
         try {
             const data = await fetchAgentJson<AgentThreadsResponse>(endpoint, token, `/agent/codex/threads?canvasId=${encodeURIComponent(projectId)}`);
+            if (requestScope !== scopeRef.current) return;
             const current = useCanvasAgentStore.getState();
             setAgentState({
                 threads: data.data || [],
@@ -87,12 +99,14 @@ export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotR
             const nextThreadId = data.workspace?.activeThreadId || current.activeThreadId;
             if (nextThreadId && !current.messages.length) {
                 const thread = await fetchAgentJson<AgentThreadResponse>(endpoint, token, `/agent/codex/threads/${encodeURIComponent(nextThreadId)}?canvasId=${encodeURIComponent(projectId)}`);
+                if (requestScope !== scopeRef.current) return;
                 setAgentState({ messages: normalizeHistoryMessages(thread.messages || []) });
             }
         } catch (error) {
+            if (requestScope !== scopeRef.current) return;
             addEventLog("读取历史失败", error);
         } finally {
-            setAgentState({ loadingThreads: false });
+            if (requestScope === scopeRef.current) setAgentState({ loadingThreads: false });
         }
     }, [endpoint, setAgentState, token]);
 
@@ -117,17 +131,28 @@ export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotR
     useEffect(() => {
         onApplyOpsRef.current = onApplyOps;
     }, [onApplyOps]);
-    useEffect(() => {
-        listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
-    }, [messages, pendingTool, waiting]);
+    useLayoutEffect(() => {
+        scopeRef.current = scope;
+        return () => { scopeRef.current = ""; requestRef.current?.abort(); setAgentState({ previewNodeIds: [] }); };
+    }, [scope]);
+    useLayoutEffect(() => {
+        if (useCanvasAgentStore.getState().canvasScope === scope) return;
+        requestRef.current?.abort();
+        clientIdRef.current = createClientId();
+        pendingToolRef.current = null;
+        setAgentState({ canvasScope: scope, messages: [], prompt: "", attachments: [], eventLogs: [], threads: [], activeThreadId: "", workspacePath: "", pendingTool: null, waiting: false, sending: false, loadingThreads: false, previewNodeIds: [] });
+    }, [scope, setAgentState]);
 
     useEffect(() => {
         if (!enabled || !token.trim()) return;
         localStorage.setItem("canvas-agent-url", endpoint);
         localStorage.setItem("canvas-agent-token", token);
         const clientId = clientIdRef.current;
+        const connectionScope = scope;
+        const isCurrent = () => scopeRef.current === connectionScope && clientIdRef.current === clientId;
         const source = new EventSource(`${endpoint}/events?token=${encodeURIComponent(token)}&clientId=${encodeURIComponent(clientId)}`);
         source.addEventListener("hello", () => {
+            if (!isCurrent()) return;
             errorLoggedRef.current = false;
             connectedRef.current = true;
             setAgentState({ connected: true, activity: "已连接", connectError: "", messages: useCanvasAgentStore.getState().messages.filter((item) => !isConnectionErrorMessage(item)) });
@@ -135,28 +160,35 @@ export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotR
             void postState(endpoint, token, clientId, snapshotRef.current);
         });
         source.addEventListener("tool_call", (event) => {
+            if (!isCurrent()) return;
             const data = parseEventData<AgentPendingToolCall>(event);
             if (data) void handleToolCall(endpoint, token, data);
         });
         source.addEventListener("agent_event", (event) => {
+            if (!isCurrent()) return;
             const data = parseEventData<AgentEventPayload>(event);
+            if (data?.type === "turn.started") turnIdRef.current = createClientId();
             if (data) handleAgentEvent(data);
         });
         source.addEventListener("agent_log", (event) => {
+            if (!isCurrent()) return;
             const text = parseEventData<{ text?: unknown }>(event)?.text;
             addEventLog("日志", text, text);
         });
         source.addEventListener("agent_error", (event) => {
+            if (!isCurrent()) return;
             const message = parseEventData<{ message?: unknown }>(event)?.message;
             setAgentState({ activity: "出错", waiting: false });
             addMessage({ role: "error", title: "错误", text: normalizeText(message) });
             addEventLog("错误", message, message);
         });
         source.addEventListener("agent_done", () => {
+            if (!isCurrent()) return;
             setAgentState({ activity: "完成", waiting: false, sending: false });
             void loadThreads();
         });
         source.onerror = () => {
+            if (!isCurrent()) return;
             const wasConnected = connectedRef.current;
             const text = wasConnected ? "本地 Agent 连接失败或已断开" : "连接失败，请检查地址和 token";
             if (!errorLoggedRef.current || wasConnected) {
@@ -176,7 +208,7 @@ export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotR
             connectedRef.current = false;
             setAgentState({ connected: false });
         };
-    }, [enabled, endpoint, loadThreads, message, setAgentState, token]);
+    }, [enabled, endpoint, loadThreads, message, setAgentState, token, scope]);
 
     useEffect(() => {
         if (connected) void loadThreads();
@@ -197,6 +229,9 @@ export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotR
     }, [connected, endpoint, snapshotRef, token]);
 
     const sendPrompt = async () => {
+        const requestScope = scopeRef.current;
+        const controller = new AbortController();
+        requestRef.current = controller;
         const text = prompt.trim();
         const files = attachments;
         const requestPrompt = promptWithAttachments(text, files);
@@ -209,22 +244,26 @@ export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotR
         addMessage({ role: "user", text: text || "发送了图片", attachments: files });
         addEventLog("用户发送", { text, attachments: files.map(({ name, type, size }) => ({ name, type, size })) });
         try {
-            const res = await fetch(`${endpoint}/agent/codex/turn?token=${encodeURIComponent(token)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ prompt: requestPrompt, canvasId: snapshotRef.current.projectId, threadId: useCanvasAgentStore.getState().activeThreadId || undefined, attachments: files.map(({ name, type, dataUrl }) => ({ name, type, dataUrl })) }) });
+            const res = await fetch(`${endpoint}/agent/codex/turn?token=${encodeURIComponent(token)}`, { method: "POST", signal: controller.signal, headers: { "content-type": "application/json" }, body: JSON.stringify({ prompt: requestPrompt, canvasId: snapshotRef.current.projectId, threadId: useCanvasAgentStore.getState().activeThreadId || undefined, attachments: files.map(({ name, type, dataUrl }) => ({ name, type, dataUrl })) }) });
             if (!res.ok) throw new Error("本地 Agent 拒绝了请求");
             const data = (await res.json()) as { threadId?: string };
+            if (controller.signal.aborted || requestScope !== scopeRef.current) return;
             if (data.threadId) setAgentState({ activeThreadId: data.threadId });
             addEventLog("本地 Agent 已接收", { status: res.status });
-            setAgentState({ prompt: "", attachments: [] });
+            const latest = useCanvasAgentStore.getState();
+            setAgentState({ ...(latest.prompt.trim() === text ? { prompt: "" } : {}), ...(latest.attachments === files ? { attachments: [] } : {}) });
         } catch (error) {
+            if (controller.signal.aborted || requestScope !== scopeRef.current) return;
             setAgentState({ activity: "发送失败", waiting: false });
             addMessage({ role: "error", title: "发送失败", text: error instanceof Error ? error.message : "发送失败" });
             addEventLog("发送失败", error);
         } finally {
-            setAgentState({ sending: false });
+            if (!controller.signal.aborted && requestScope === scopeRef.current) setAgentState({ sending: false });
         }
     };
 
     const addAttachments = async (files: FileList | File[] | null) => {
+        const requestScope = scopeRef.current;
         if (!files) return;
         const images = Array.from(files).filter((file) => file.type.startsWith("image/"));
         const prev = useCanvasAgentStore.getState().attachments;
@@ -235,6 +274,7 @@ export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotR
                 // sent message or remounted panel never holds a revoked Blob URL.
                 return { id: createId(), name: file.name, type: file.type, size: file.size, url: dataUrl, dataUrl };
             }));
+            if (requestScope !== scopeRef.current) return;
             const current = useCanvasAgentStore.getState().attachments;
             const merged = [...current, ...next.slice(0, Math.max(0, MAX_ATTACHMENTS - current.length))];
             if (attachmentPayloadBytes(merged) > MAX_ATTACHMENT_PAYLOAD_BYTES) {
@@ -243,6 +283,7 @@ export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotR
             }
             if (next.length) setAgentState({ attachments: merged });
         } catch (error) {
+            if (requestScope !== scopeRef.current) return;
             addMessage({ role: "error", title: "图片读取失败", text: error instanceof Error ? error.message : "图片读取失败" });
         }
     };
@@ -252,7 +293,7 @@ export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotR
     };
 
     const handleToolCall = async (endpoint: string, token: string, payload: AgentPendingToolCall) => {
-        if (confirmToolsRef.current && payload.name === "canvas_apply_ops") {
+        if ((confirmToolsRef.current || canvasOpsDeleteContent(payload.input?.ops)) && payload.name === "canvas_apply_ops") {
             if (pendingToolRef.current) {
                 await postToolResult(endpoint, token, clientIdRef.current, { requestId: payload.requestId, error: "仍有待确认的画布工具调用" });
                 return;
@@ -266,20 +307,24 @@ export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotR
     };
 
     const runToolCall = async (endpoint: string, token: string, payload: AgentPendingToolCall) => {
+        const requestScope = scopeRef.current;
         try {
             const input: { ops?: CanvasAgentOp[] } = payload.input || {};
             setAgentState({ activity: payload.name === "canvas_apply_ops" ? "执行画布操作" : "读取画布", waiting: true });
             addEventLog(toolName(payload.name), payload, payload);
-            const result = payload.name === "canvas_apply_ops" ? onApplyOpsRef.current(input.ops || []) : snapshotRef.current;
+            if (!useCanvasAgentStore.getState().enabled || requestScope !== scopeRef.current) return;
+            const result = payload.name === "canvas_apply_ops" ? onApplyOpsRef.current(input.ops || [], { turnId: turnIdRef.current }) : snapshotRef.current;
             await postToolResult(endpoint, token, clientIdRef.current, { requestId: payload.requestId, result });
+            if (requestScope !== scopeRef.current) return;
             if (payload.name === "canvas_apply_ops") void postState(endpoint, token, clientIdRef.current, result as CanvasAgentSnapshot);
             setAgentState({ activity: "工具完成", waiting: true });
             addEventLog(`${toolName(payload.name)}完成`, result, result);
-            addMessage({ role: "tool", title: `${toolName(payload.name)}完成`, text: payload.name === "canvas_apply_ops" ? summarizeCanvasAgentOps(input.ops || []) || "画布操作" : "已完成", detail: { requestId: payload.requestId, name: payload.name, input, result } });
+            addMessage({ role: "tool", title: `${toolName(payload.name)}完成`, text: payload.name === "canvas_apply_ops" ? summarizeCanvasAgentOps(input.ops || []) || "画布操作" : "已完成", detail: { status: "completed", turnId: turnIdRef.current, requestId: payload.requestId, name: payload.name } });
         } catch (error) {
+            if (requestScope !== scopeRef.current) return;
             const message = error instanceof Error ? error.message : "画布操作失败";
             setAgentState({ activity: "工具失败", waiting: false });
-            addMessage({ role: "tool", title: "工具失败", text: message, detail: payload });
+            addMessage({ role: "tool", title: "工具失败", text: message, detail: { ...payload, status: "failed" } });
             await postToolResult(endpoint, token, clientIdRef.current, { requestId: payload.requestId, error: message });
         }
     };
@@ -288,7 +333,7 @@ export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotR
         if (!pendingTool) return;
         await postToolResult(endpoint, token, clientIdRef.current, { requestId: pendingTool.requestId, error: "用户取消了画布工具调用" });
         setAgentState({ activity: "已取消", waiting: false });
-        addMessage({ role: "tool", title: "拒绝执行", text: toolName(pendingTool.name), detail: { requestId: pendingTool.requestId, name: pendingTool.name, input: pendingTool.input } });
+        addMessage({ role: "tool", title: "拒绝执行", text: toolName(pendingTool.name), detail: { status: "rejected", requestId: pendingTool.requestId, name: pendingTool.name } });
         pendingToolRef.current = null;
         setAgentState({ pendingTool: null });
     };
@@ -301,13 +346,13 @@ export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotR
         await runToolCall(endpoint, token, tool);
     };
 
-    const undoLastTool = async () => {
+    const undoLastTool = async (turnId?: string) => {
         const lifetime = undoLifetimeRef.current;
         if (!lifetime.active || undoingRef.current) return;
         undoingRef.current = true;
         setUndoing(true);
         try {
-            const restored = await onUndoOps();
+            const restored = await onUndoOps(turnId);
             if (!lifetime.active || !restored) return;
             const report = restored.undoReport;
             const title = report?.conflicts.length ? report.applied ? "部分撤销" : "暂未撤销" : "已撤销";
@@ -357,9 +402,15 @@ export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotR
         setAgentState({ url: nextEndpoint, token: nextToken, enabled: true, connected: false, activity: "连接中", connectError: "", activeTab: "setup" });
     };
 
-    useEffect(() => {
-        if (urlAgentAutoConnect && confirmTools) setAgentState({ confirmTools: false });
-    }, [confirmTools, setAgentState, urlAgentAutoConnect]);
+    const stopLocalAgent = () => {
+        requestRef.current?.abort();
+        const pending = pendingToolRef.current;
+        if (pending) void postToolResult(endpoint, token, clientIdRef.current, { requestId: pending.requestId, error: "用户停止了本机画布操作" });
+        pendingToolRef.current = null;
+        clientIdRef.current = createClientId();
+        setAgentState({ enabled: false, connected: false, waiting: false, sending: false, pendingTool: null, activity: "已停止本机连接" });
+        addMessage({ role: "system", text: "已停止本机连接和后续画布操作。已提交到服务端的生成任务可能继续，请查询原任务，不要重复提交。" });
+    };
 
     useEffect(() => {
         if (!autoConnect || autoConnectRef.current || enabled || connected) return;
@@ -384,42 +435,50 @@ export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotR
 
     const startNewThread = async () => {
         const projectId = snapshotRef.current.projectId;
+        const requestScope = scopeRef.current;
         if (!connected || !projectId) return;
         setAgentState({ loadingThreads: true });
         try {
             const data = await fetchAgentJson<AgentThreadResponse>(endpoint, token, "/agent/codex/threads/new", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ canvasId: projectId }) });
+            if (requestScope !== scopeRef.current) return;
             setAgentState({ activeThreadId: data.thread?.id || data.workspace?.activeThreadId || "", messages: [], activeTab: "chat", activity: "新对话" });
             await loadThreads();
         } catch (error) {
+            if (requestScope !== scopeRef.current) return;
             addEventLog("新建对话失败", error);
             message.error(error instanceof Error ? error.message : t("新建对话失败"));
         } finally {
-            setAgentState({ loadingThreads: false });
+            if (requestScope === scopeRef.current) setAgentState({ loadingThreads: false });
         }
     };
 
     const resumeThread = async (threadId: string) => {
         const projectId = snapshotRef.current.projectId;
+        const requestScope = scopeRef.current;
         if (!connected || !projectId || !threadId) return;
         setAgentState({ loadingThreads: true });
         try {
             const data = await fetchAgentJson<AgentThreadResponse>(endpoint, token, `/agent/codex/threads/${encodeURIComponent(threadId)}/resume`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ canvasId: projectId }) });
+            if (requestScope !== scopeRef.current) return;
             setAgentState({ activeThreadId: data.thread?.id || threadId, messages: normalizeHistoryMessages(data.messages || []), activeTab: "chat", activity: "已恢复会话" });
             await loadThreads();
         } catch (error) {
+            if (requestScope !== scopeRef.current) return;
             addEventLog("恢复对话失败", error);
             message.error(error instanceof Error ? error.message : t("恢复对话失败"));
         } finally {
-            setAgentState({ loadingThreads: false });
+            if (requestScope === scopeRef.current) setAgentState({ loadingThreads: false });
         }
     };
 
     const deleteThread = async (threadId: string) => {
         const projectId = snapshotRef.current.projectId;
+        const requestScope = scopeRef.current;
         if (!connected || !projectId || !threadId) return;
         setAgentState({ loadingThreads: true });
         try {
             await fetchAgentJson(endpoint, token, `/agent/codex/threads/${encodeURIComponent(threadId)}/delete`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ canvasId: projectId }) });
+            if (requestScope !== scopeRef.current) return;
             const current = useCanvasAgentStore.getState();
             setAgentState({
                 threads: current.threads.filter((thread) => thread.id !== threadId),
@@ -428,10 +487,11 @@ export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotR
             });
             message.success(t("记录已删除"));
         } catch (error) {
+            if (requestScope !== scopeRef.current) return;
             addEventLog("删除对话失败", error);
             message.error(error instanceof Error ? error.message : t("删除对话失败"));
         } finally {
-            setAgentState({ loadingThreads: false });
+            if (requestScope === scopeRef.current) setAgentState({ loadingThreads: false });
         }
     };
 
@@ -454,10 +514,9 @@ export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotR
         let nextWidth = startWidth;
         const onMove = (moveEvent: PointerEvent) => {
             nextWidth = clamp(startWidth + startX - moveEvent.clientX, 360, 760);
-            setAgentState({ width: nextWidth });
+            setPanelWidth("chat", nextWidth);
         };
         const onUp = () => {
-            localStorage.setItem("canvas-agent-panel-width", String(nextWidth));
             window.removeEventListener("pointermove", onMove);
             window.removeEventListener("pointerup", onUp);
             setResizing(false);
@@ -524,7 +583,7 @@ export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotR
                 }}
                 right={
                     <>
-                        <Button size="small" type="text" disabled={!canUndoOps || undoing} loading={undoing} icon={<RotateCcw className="size-3.5" />} onClick={undoLastTool}>
+                        <Button size="small" type="text" disabled={!canUndoOps || undoing} loading={undoing} icon={<RotateCcw className="size-3.5" />} onClick={() => void undoLastTool()}>
                             {t("撤销")}</Button>
                     </>
                 }
@@ -567,19 +626,22 @@ export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotR
                 />
             ) : (
                 <>
-                    <div ref={listRef} className="thin-scrollbar min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
+                    <div ref={listRef} onScroll={chatFollow.onScroll} data-canvas-shortcuts="ignore" className="thin-scrollbar min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
                         {renderedMessageWindow.hidden ? (
                             <div className="flex justify-center">
                                 <Button size="small" type="text" onClick={() => setMessageRenderLimit((current) => expandAgentMessageWindow(current, messages.length))}>
                                     {t("加载更早消息（")}{renderedMessageWindow.hidden} {t(" 条）")}</Button>
                             </div>
                         ) : null}
-                        {renderedMessages.map((item) => (
-                            <AgentChatMessage key={item.id} item={item} theme={theme} user={user} />
-                        ))}
-                        {pendingTool ? <AgentPendingToolCard summary={summarizeCanvasAgentOps(pendingTool.input?.ops || []) || toolName(pendingTool.name)} detail={{ requestId: pendingTool.requestId, name: pendingTool.name, input: pendingTool.input }} theme={theme} onReject={rejectPendingTool} onApprove={approvePendingTool} /> : null}
+                        {renderedMessages.map((item, index) => {
+                            const turnId = objectField(item.detail, "turnId");
+                            const showUndo = typeof turnId === "string" && !renderedMessages.slice(index + 1).some(next => objectField(next.detail, "turnId") === turnId);
+                            return <div key={item.id}><AgentChatMessage item={item} theme={theme} user={user} />{showUndo ? <Button size="small" disabled={!canUndoOps || waiting || sending || undoing} onClick={() => void undoLastTool(turnId)}>撤销本轮</Button> : null}</div>;
+                        })}
+                        {pendingTool ? <AgentPendingToolCard summary={summarizeCanvasAgentOps(pendingTool.input?.ops || []) || toolName(pendingTool.name)} detail={{ status: "pending", preview: canvasToolCallPreview([{ id: pendingTool.requestId, type: "function", function: { name: pendingTool.name, arguments: JSON.stringify(pendingTool.input || {}) } }], snapshotRef.current) }} theme={theme} onReject={rejectPendingTool} onApprove={approvePendingTool} /> : null}
                         {waiting && !pendingTool ? <AgentWorkingMessage theme={theme} /> : null}
                     </div>
+                    {chatFollow.hasNewMessages ? <div className="flex shrink-0 justify-center"><button type="button" className="px-3 py-1 text-xs hover:underline" onClick={chatFollow.scrollToBottom}>↓ 新消息</button></div> : null}
                     <AgentChatComposer
                         prompt={prompt}
                         attachments={attachments.map(agentAttachmentToChatAttachment)}
@@ -589,6 +651,7 @@ export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotR
                         theme={theme}
                         onPromptChange={(prompt) => setAgentState({ prompt })}
                         onSubmit={sendPrompt}
+                        onStop={stopLocalAgent}
                         onAddFiles={addAttachments}
                         onRemoveAttachment={removeAttachment}
                         left={attachments.length ? <span className="text-[11px]" style={{ color: theme.node.muted }}>{formatBytes(attachmentPayloadBytes(attachments))} / 30MB</span> : null}

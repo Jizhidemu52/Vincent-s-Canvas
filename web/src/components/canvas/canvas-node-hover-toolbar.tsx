@@ -29,6 +29,9 @@ type CanvasNodeHoverToolbarProps = {
     onEditText: (node: CanvasNodeData) => void;
     onDecreaseFont: (node: CanvasNodeData) => void;
     onIncreaseFont: (node: CanvasNodeData) => void;
+    onFontSize?: (node: CanvasNodeData, size: number) => void;
+    onRegenerate?: (node: CanvasNodeData) => void;
+    onVariation?: (node: CanvasNodeData, strength: "subtle" | "strong") => void;
     onToggleDialog: (node: CanvasNodeData) => void;
     onGenerateImage: (node: CanvasNodeData) => void;
     onUpload: (node: CanvasNodeData) => void;
@@ -71,6 +74,7 @@ export function CanvasNodeHoverToolbar({
     onEditText,
     onDecreaseFont,
     onIncreaseFont,
+    onFontSize, onRegenerate, onVariation,
     onToggleDialog,
     onGenerateImage,
     onUpload,
@@ -93,8 +97,9 @@ export function CanvasNodeHoverToolbar({
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const flags = useModuleStore(state => state.flags);
     const bindings = useBusinessConfigStore(state => state.tools);
-    const [quickImageToolIds, setQuickImageToolIds] = useState<ImageQuickToolId[]>(defaultImageQuickToolIds);
-    const [showImageToolLabels, setShowImageToolLabels] = useState(true);
+    const [initialTools] = useState(() => { try { return readImageQuickToolsConfig(JSON.parse(window.localStorage.getItem(IMAGE_QUICK_TOOLS_STORAGE_KEY) || "null")); } catch { return { ids: defaultImageQuickToolIds, showLabels: true }; } });
+    const [quickImageToolIds, setQuickImageToolIds] = useState<ImageQuickToolId[]>(initialTools.ids);
+    const [showImageToolLabels, setShowImageToolLabels] = useState(initialTools.showLabels);
     const [draftImageToolIds, setDraftImageToolIds] = useState<ImageQuickToolId[]>(defaultImageQuickToolIds);
     const [draftShowImageToolLabels, setDraftShowImageToolLabels] = useState(true);
     const [imageToolSettingsOpen, setImageToolSettingsOpen] = useState(false);
@@ -103,19 +108,6 @@ export function CanvasNodeHoverToolbar({
     const [toolbarBounds, setToolbarBounds] = useState({ width: 360, height: 44, containerWidth: 0, containerHeight: 0 });
     const { message } = App.useApp();
     const copyText = useCopyText();
-
-    useEffect(() => {
-        try {
-            const stored = window.localStorage.getItem(IMAGE_QUICK_TOOLS_STORAGE_KEY);
-            if (!stored) return;
-            const parsed = JSON.parse(stored) as unknown;
-            const config = readImageQuickToolsConfig(parsed);
-            setQuickImageToolIds(config.ids);
-            setShowImageToolLabels(config.showLabels);
-        } catch {
-            // A malformed preference must not erase the user's stored configuration.
-        }
-    }, []);
 
     useEffect(() => {
         setImageToolSettingsOpen(false);
@@ -144,7 +136,8 @@ export function CanvasNodeHoverToolbar({
     const activeNode = node;
     const { left, top } = clampCanvasNodeToolbarPosition({
         left: viewport.x + (node.position.x + node.width / 2) * viewport.k,
-        top: viewport.y + node.position.y * viewport.k - 10,
+        // Keep the node's fixed-screen title/drag handle reachable beneath the toolbar.
+        top: viewport.y + node.position.y * viewport.k - 28,
         ...toolbarBounds,
     });
     const isImage = node.type === CanvasNodeType.Image;
@@ -182,6 +175,8 @@ export function CanvasNodeHoverToolbar({
         { id: "delete", title: "移除节点", label: "删除", icon: <Trash2 className="size-4" />, onClick: () => onDelete(node), danger: true },
     ];
     const nodeToolbarTools: ToolbarTool[] = [
+        ...(hasImage && node.metadata?.generationRecord && onRegenerate ? [{ id: "regenerate", title: "按保存的原始输入再生成一张，会创建独立任务", label: "同参数再来一张", icon: <RefreshCw className="size-4" />, onClick: () => onRegenerate(node) }] : []),
+        ...(hasImage && onVariation ? (["subtle", "strong"] as const).map(strength => ({ id: `variation-${strength}`, title: "以当前图片为参考创建独立生成任务", label: strength === "subtle" ? "变体 · 轻微" : "变体 · 强烈", icon: <ImageIcon className="size-4" />, onClick: () => onVariation(node, strength) })) : []),
         ...(canRetry && !(videoRecovery && node.metadata?.videoTaskCanRecover === false) ? [{ id: "retry", title: videoRecovery ? "恢复原任务查询，不会重新生成" : "重新生成", label: videoRecovery ? "恢复查询" : "重试", icon: <RefreshCw className="size-4" />, onClick: () => onRetry(node) }] : []),
         ...(hasImage || hasVideo || isText ? [{ id: "saveAsset", title: "加入我的素材", label: "存素材", icon: <FolderPlus className="size-4" />, onClick: () => onSaveAsset(node) }] : []),
         ...(hasImage || hasVideo || hasAudio ? [{ id: "download", title: hasAudio ? "下载音频" : hasVideo ? "下载视频" : "下载图片", label: "下载", icon: <Download className="size-4" />, onClick: () => onDownload(node) }] : []),
@@ -189,8 +184,8 @@ export function CanvasNodeHoverToolbar({
         ...(isText ? [{ id: "editText", title: "编辑文本", label: "编辑文字", icon: <Pencil className="size-4" />, onClick: () => onEditText(node) }] : []),
         ...(isText ? [{ id: "generateImage", title: "用文本生图", label: "生图", icon: <ImageIcon className="size-4" />, onClick: () => onGenerateImage(node) }] : []),
         ...(isConfig ? [{ id: "config", title: "生成配置", label: "生成配置", icon: <Settings2 className="size-4" />, onClick: () => onToggleDialog(node) }] : []),
-        ...(isText ? [{ id: "decreaseFont", title: "减小字号", label: "缩小", icon: <Minus className="size-4" />, onClick: () => onDecreaseFont(node) }] : []),
-        ...(isText ? [{ id: "increaseFont", title: "增大字号", label: "放大", icon: <Plus className="size-4" />, onClick: () => onIncreaseFont(node) }] : []),
+        ...(isText && !onFontSize ? [{ id: "decreaseFont", title: "减小字号", label: "缩小", icon: <Minus className="size-4" />, onClick: () => onDecreaseFont(node) }] : []),
+        ...(isText && !onFontSize ? [{ id: "increaseFont", title: "增大字号", label: "放大", icon: <Plus className="size-4" />, onClick: () => onIncreaseFont(node) }] : []),
         ...(isImage && !hasImage ? [{ id: "uploadImage", title: "上传图片", label: "上传图片", icon: <Upload className="size-4" />, onClick: () => onUpload(node) }] : []),
         ...(isVideo ? [{ id: "uploadVideo", title: hasVideo ? "替换视频" : "上传视频", label: hasVideo ? "替换视频" : "上传视频", icon: <Video className="size-4" />, onClick: () => onUpload(node) }] : []),
         ...(isAudio ? [{ id: "uploadAudio", title: hasAudio ? "替换音频" : "上传音频", label: hasAudio ? "替换音频" : "上传音频", icon: <Music2 className="size-4" />, onClick: () => onUpload(node) }] : []),
@@ -254,7 +249,7 @@ export function CanvasNodeHoverToolbar({
                 role="toolbar"
                 aria-label={hasImage ? t("图片工具栏") : t("节点工具栏")}
                 data-canvas-node-toolbar="true"
-                className="absolute z-[70] flex h-10 -translate-x-1/2 -translate-y-full items-center overflow-visible rounded-lg border px-1 text-xs shadow-[0_2px_8px_rgba(24,24,27,.06)]"
+                className="absolute z-[var(--cw-z-node-tools,30)] flex h-10 -translate-x-1/2 -translate-y-full items-center overflow-visible rounded-lg border px-1 text-xs shadow-[0_2px_8px_rgba(24,24,27,.06)]"
                 style={{ left, top, maxWidth: "calc(100% - 24px)", background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text, "--node-tool-hover": theme.toolbar.itemHover } as React.CSSProperties}
                 onMouseEnter={() => onKeep(node.id)}
                 onMouseLeave={() => {
@@ -264,6 +259,7 @@ export function CanvasNodeHoverToolbar({
                 onPointerDown={(event) => event.stopPropagation()}
             >
                 <div className="hide-scrollbar flex min-w-0 items-center overflow-x-auto">
+                    {isText && onFontSize ? <select aria-label={t("文字字号")} className="mx-1 h-8 rounded px-1 text-xs" style={{ color: theme.node.text, background: theme.node.panel }} value={node.metadata?.fontSize || 14} onChange={event => onFontSize(node, Number(event.target.value))}>{Array.from(new Set([12, 14, 16, 18, 20, 24, 28, 32, 40, 48, node.metadata?.fontSize || 14])).sort((a,b) => a-b).map(value => <option key={value} value={value}>{value}px</option>)}</select> : null}
                     {toolbarTools.map((tool) => (
                         <ToolbarAction key={tool.id} {...tool} highResolution={tool.id === "upscale" || tool.id === "superResolve"} showLabel={showImageToolLabels} />
                     ))}

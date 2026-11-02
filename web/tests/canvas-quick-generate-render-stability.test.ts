@@ -64,6 +64,8 @@ describe("canvas quick-generate panel render stability", () => {
         expect(canvasQuickGeneratePanelPropsEqual(state(), state({ onAddReferenceFiles: () => undefined }))).toBe(false);
         expect(canvasQuickGeneratePanelPropsEqual(state(), state({ referencesLoading: true }))).toBe(false);
         expect(canvasQuickGeneratePanelPropsEqual(state(), state({ referenceScopeKey: "another-project" }))).toBe(false);
+        expect(canvasQuickGeneratePanelPropsEqual(state(), state({ mentionImages: [] }))).toBe(false);
+        expect(canvasQuickGeneratePanelPropsEqual(state(), state({ onAddMentionReference: () => true }))).toBe(false);
     });
 
     test("source and derivative movement does not rerender the form, but their records and captions do", () => {

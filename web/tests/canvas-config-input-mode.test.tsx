@@ -128,7 +128,7 @@ test("converted prompt executes both isolated single-image tasks and preserves a
             setNodes: update => { nodes = typeof update === "function" ? update(nodes) : update; }, message: { info: () => {}, error: value => errors.push(value) },
         });
         expect(errors).toEqual([]);
-        expect(phases).toEqual(["start:a", "finish:a", "start:b", "finish:b"]);
+        expect(phases).toEqual(["start:a", "start:b", "finish:a", "finish:b"]);
         expect(calls.map(call => call.plan.context.referenceImages.map(image => image.id))).toEqual([["a", "common"], ["b", "common"]]);
         expect(calls.map(call => call.plan.prompt)).toEqual(["将 图片1 改为 图片2 的配色", "将 图片1 改为 图片2 的配色"]);
         expect(calls.every(call => call.config.count === "1" && call.toolKey === "canvas-edit")).toBe(true);

@@ -54,7 +54,7 @@ const reverseSchema = z.object({ idempotencyKey: z.string().trim().min(8).max(16
 const assetSelect = `a.id,a.owner_user_id AS "ownerUserId",u.display_name AS "ownerName",a.department_id AS "departmentId",d.name AS "departmentName",a.project_id AS "projectId",p.name AS "projectName",a.task_id AS "taskId",a.filename,a.mime_type AS "mimeType",a.byte_size::int AS "byteSize",a.kind,a.source,a.operation_type AS "operationType",a.prompt,m.name AS "modelName",a.status,a.visibility_scope AS "visibilityScope",a.metadata,a.deleted_at AS "deletedAt",a.created_at AS "createdAt"`;
 const primaryImageAssetClause = `NOT (COALESCE(a.metadata->'imageResult'->>'version','')='1' AND COALESCE(a.metadata->'imageResult'->>'role','') IN ('provider-original','export'))`;
 const variantAssetSelect = `a.id,a.owner_user_id AS "ownerUserId",a.task_id AS "taskId",a.filename,a.mime_type AS "mimeType",a.status,a.metadata,a.deleted_at AS "deletedAt"`;
-const assetUrls = `'/api/assets/'||a.id||'/content' AS "contentUrl",CASE WHEN a.kind='image' THEN '/api/assets/'||a.id||'/thumb?w=256' END AS "thumbnailUrl",CASE WHEN a.kind='image' THEN '/api/assets/'||a.id||'/thumb?w=1024' END AS "previewUrl"`;
+const assetUrls = `'/api/assets/'||a.id||'/content' AS "contentUrl",CASE WHEN a.kind IN ('image','video') THEN '/api/assets/'||a.id||'/thumb?w=256' END AS "thumbnailUrl",CASE WHEN a.kind IN ('image','video') THEN '/api/assets/'||a.id||'/thumb?w=1024' END AS "previewUrl"`;
 const lightAssetSelect = assetSelect.replace('a.prompt,', `(COALESCE(NULLIF(btrim(a.prompt),''),NULLIF(btrim(a.metadata->>'prompt'),''),NULLIF(btrim(a.metadata->>'recreatePath'),''),NULLIF(btrim(a.metadata->>'content'),'')) IS NOT NULL) AS "canRecreate",NULL::text AS prompt,`).replace('a.metadata,',
   `jsonb_strip_nulls(jsonb_build_object(${assetListMetadataFields.map(key => `'${key}',a.metadata->'${key}'`).join(',')})) AS metadata,`)
   .replace('a.created_at AS "createdAt"', `to_char(a.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS "createdAt"`);
@@ -366,11 +366,23 @@ export function createAssetsRouter(db: Database, storage: ObjectStorage) {
       const actor = (request as unknown as AuthenticatedRequest).auth;
       const access = accessClause(actor);
       const shifted = access.sql.replace(/\$(\d+)/g, (_, number) => `$${Number(number) + 1}`);
-      const result = await db.query<{ object_key: string; thumbnail_key: string | null; mime_type: string; filename: string }>(
-        `SELECT object_key,thumbnail_${width}_key AS thumbnail_key,mime_type,filename FROM assets a WHERE a.id=$1 AND a.kind='image' AND a.status='ready' AND a.deleted_at IS NULL AND ${shifted}`, [request.params.id, ...access.values]);
+      const result = await db.query<{ object_key: string; thumbnail_key: string | null; mime_type: string; filename: string; kind: string; metadata: Record<string, unknown>; thumbnail_attempts: number; thumbnail_lease_token: string | null }>(
+        `SELECT object_key,thumbnail_${width}_key AS thumbnail_key,mime_type,filename,kind,metadata,thumbnail_attempts,thumbnail_lease_token FROM assets a WHERE a.id=$1 AND a.kind IN ('image','video') AND a.status='ready' AND a.deleted_at IS NULL AND ${shifted}`, [request.params.id, ...access.values]);
       const asset = result.rows[0];
       if (!asset) { response.status(404).end(); return; }
-      if (!asset.thumbnail_key) scheduleAssetThumbnails(db, storage, request.params.id);
+      if (!asset.thumbnail_key) {
+        scheduleAssetThumbnails(db, storage, request.params.id);
+        if (asset.kind === 'video' || request.query.pending === '1') {
+          // Opt-in image consumers understand pending responses and must not
+          // decode an original while its display derivative is being generated.
+          // Keep legacy direct <img> consumers on their existing fallback.
+          response.set('Cache-Control', 'no-store');
+          if (asset.thumbnail_attempts >= 4 && !asset.thumbnail_lease_token) { response.status(422).end(); return; }
+          response.set('Retry-After', '3').status(202).end(); return;
+        }
+      }
+      const durationMs = Number(asset.metadata?.durationMs);
+      if (asset.kind === 'video' && Number.isFinite(durationMs) && durationMs > 0) response.set('X-Canvas-Media-Duration-Ms', String(durationMs));
       await streamAssetContent(request, response, storage, asset.thumbnail_key ? { object_key: asset.thumbnail_key, mime_type: 'image/webp', filename: `${asset.filename}.thumb-${width}.webp` } : asset);
     } catch (error) { next(error); }
   });

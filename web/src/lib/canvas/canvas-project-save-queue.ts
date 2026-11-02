@@ -16,9 +16,11 @@ const browserScheduler: CanvasProjectSaveScheduler = {
 
 export function createCanvasProjectSaveQueue<T>(delayMs: number, onFlush: (snapshot: T) => void, scheduler: CanvasProjectSaveScheduler = browserScheduler): CanvasProjectSaveQueue<T> {
     let timer: unknown | null = null;
+    let deadline: unknown | null = null;
     let pending: T | null = null;
 
     const flush = () => {
+        if (deadline !== null) { scheduler.clear(deadline); deadline = null; }
         if (timer !== null) {
             scheduler.clear(timer);
             timer = null;
@@ -30,6 +32,7 @@ export function createCanvasProjectSaveQueue<T>(delayMs: number, onFlush: (snaps
 
     return {
         schedule(snapshot: T, nextDelayMs = delayMs) {
+            if (deadline === null) deadline = scheduler.set(flush, 3000);
             pending = snapshot;
             if (timer !== null) scheduler.clear(timer);
             timer = scheduler.set(flush, nextDelayMs);

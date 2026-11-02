@@ -6,6 +6,7 @@ import React, { type ReactElement } from "react";
 import ts from "typescript";
 import { canvasMaskEditImageSettings, readCanvasMaskImageSize, type CanvasImageMaskEditPayload } from "@/components/canvas/canvas-node-mask-edit-dialog";
 import { imageModelProfile } from "@/lib/image-model-settings";
+import { canvasMaskAdaptationPlan } from "@/lib/canvas/canvas-mask-adaptation";
 import { imageTaskParameters } from "@/services/api/image";
 import { defaultConfig, type AiConfig } from "@/stores/use-config-store";
 import { buildApiMartImageRequest } from "../../server/src/apimart-image";
@@ -91,16 +92,18 @@ function dialog(image: { width: number; height: number }) {
     return elements(module.exports.CanvasNodeMaskEditDialog({ dataUrl: "source", open: true, config: globalConfig, model: markModel.id, onModelChange: () => {}, onClose: () => {}, onConfirm: () => {} }));
 }
 
-test("mask dialog exposes quality/output only and disables an incompatible original size", () => {
+test("mask dialog exposes quality/output only and announces automatic size adaptation", () => {
     const legal = dialog({ width: 768, height: 1024 });
     const labels = legal.filter(element => element.type === "select" || element.type === "input").map(element => element.props["aria-label"]);
     expect(labels).toContain("图片质量"); expect(labels).toContain("输出格式");
     expect(labels).not.toContain("宽高比"); expect(labels).not.toContain("清晰度 / 分辨率");
     expect(labels).not.toContain("宽度"); expect(labels).not.toContain("高度");
     expect(legal.find(element => element.props.children === "AI 修改")?.props.disabled).toBe(false);
-    const illegal = dialog({ width: 512, height: 512 });
-    expect(illegal.find(element => element.props.children === "AI 修改")?.props.disabled).toBe(true);
-    expect(illegal.filter(element => element.props.role === "alert").some(element => String(element.props.children).includes("尚未提交"))).toBe(true);
+    const adapted = dialog({ width: 512, height: 512 });
+    expect(adapted.find(element => element.props.children === "AI 修改")?.props.disabled).toBe(false);
+    expect(adapted.some(element => typeof element.props.children === "string" && element.props.children.includes("自动适配至 1024 × 1024px"))).toBe(true);
+    const invalid = dialog({ width: 0, height: 512 });
+    expect(invalid.find(element => element.props.children === "AI 修改")?.props.disabled).toBe(true);
 });
 
 async function submitFromProject(sourceSize: { width: number; height: number }, maskSize = sourceSize) {
@@ -119,6 +122,9 @@ async function submitFromProject(sourceSize: { width: number; height: number }, 
     const deps = {
         effectiveConfig: globalConfig, currentToolConfig: (config: AiConfig) => config, modelOptionName: (value: string) => value,
         estimateUsage: () => ({ configured: true, credits: 0 }), buildGenerationConfig: () => globalConfig, imageModelProfile: () => markProfile,
+        ensureCanvasModelsReady: async () => ({}), resolveCanvasToolModel: () => ({ model: markModel.id }), canvasMaskAdaptationPlan,
+        uploadImage: async (value: string) => ({ storageKey: `stored-${value}` }),
+        adaptCanvasMaskInputs: async () => ({ sourceDataUrl: "adapted-source", maskDataUrl: "adapted-mask" }),
         loadMaskModule: async () => ({ canvasMaskEditImageSettings, readCanvasMaskImageSize: async (value: string) => value === "source" ? sourceSize : maskSize }),
         isAiConfigReady: (config: AiConfig) => { seen.push(config); return false; }, handleMissingModelConfig: () => {},
         message: { error: (error: string) => errors.push(error) }, createOptions: () => { paidCalls++; },
@@ -141,8 +147,11 @@ test("actual project submit recomputes pixels after merging payload and ignores 
     expect(result.paidCalls).toBe(0);
 });
 
-test("actual project submit blocks unsupported pixels and source/mask mismatch before any task work", async () => {
-    for (const result of [await submitFromProject({ width: 512, height: 512 }), await submitFromProject({ width: 768, height: 1024 }, { width: 1024, height: 1024 })]) {
+test("actual project submit adapts ordinary photos but blocks invalid pixels and mismatched masks before task work", async () => {
+    const adapted = await submitFromProject({ width: 512, height: 512 });
+    expect(adapted.errors).toEqual([]);
+    expect(adapted.seen[0]?.size).toBe("1024x1024");
+    for (const result of [await submitFromProject({ width: 0, height: 512 }), await submitFromProject({ width: 768, height: 1024 }, { width: 1024, height: 1024 })]) {
         expect(result.seen).toEqual([]); expect(result.errors).toHaveLength(1);
         expect(result.errors[0]).toContain("尚未提交"); expect(result.paidCalls).toBe(0);
     }

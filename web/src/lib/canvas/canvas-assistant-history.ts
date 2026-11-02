@@ -4,7 +4,7 @@ import { latestChatContext } from "@/lib/chat-context";
 import { imageReferenceLabel } from "@/lib/image-reference-prompt";
 
 type Content = Exclude<AiTextMessage["content"], string>;
-export const CANVAS_HISTORY_LIMITS = { images: 20, imageCharacters: 6 * 1024 * 1024 };
+export const CANVAS_HISTORY_LIMITS = { images: 5, imageCharacters: 6 * 1024 * 1024 };
 
 function messageImages(message: CanvasAssistantMessage, isCurrent: boolean) {
     return [

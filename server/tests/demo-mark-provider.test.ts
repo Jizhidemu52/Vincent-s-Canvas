@@ -8,6 +8,7 @@ import { DemoStateStore, DemoStorageError, materializeDemoAsset } from "../src/d
 import { ImageResultPersistenceError } from "../src/image-result-storage";
 import { imageTaskApiReplacer, imageTaskFailureDetail, imageTaskPauseReason, type ImageTaskFailureDetail } from "../src/image-task-diagnostics";
 import { isPublicHttpUrl } from "../src/apimart-upload";
+import { imageAgentProviderPrompt } from "../src/image-agent-profile";
 
 const stores: DemoStateStore[] = [];
 afterEach(() => { for (const store of stores.splice(0)) store.close(); });
@@ -29,6 +30,7 @@ function harness(failure?: "prepare" | "preflight" | "submission" | "polling" | 
   let paid = 0;
   let downloads = 0;
   const dependencies = {
+    imageAgentProviderPrompt,
     demoState, DemoStorageError, materializeDemoAsset, ImageResultPersistenceError, ApiMartImageProviderFailure, MARK_IMAGE_PROVIDER_ID,
     imageTaskFailureDetail, imageTaskPauseReason, isPublicHttpUrl,
     demoAssets: new Map(), demoTasks: new Map(), now: () => new Date().toISOString(),

@@ -5,7 +5,8 @@ import ts from "typescript";
 import { observeCanvasImageTask, type CanvasImageTaskBinding } from "@/lib/canvas/canvas-image-task-recovery";
 import { fitNodeSize } from "@/lib/canvas/canvas-node-size";
 import { shouldCancelCanvasGeneration, stopCanvasObservation } from "@/lib/canvas/canvas-project-async-lifecycle";
-import { QueuedTaskFailedError, QueuedTaskPausedError, type QueuedTask } from "@/services/api/generation-tasks";
+import { QueuedTaskFailedError, QueuedTaskPausedError, imageTaskPrompts, type QueuedTask } from "@/services/api/generation-tasks";
+import { restoreCanvasMaskResult } from "@/lib/canvas/canvas-mask-adaptation";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import { imageModelProfile } from "@/lib/image-model-settings";
 import { defaultConfig } from "@/stores/use-config-store";
@@ -96,8 +97,9 @@ function harness(options: {
         "@/lib/canvas/canvas-project-async-lifecycle": { shouldCancelCanvasGeneration },
         "@/lib/canvas/canvas-generation-record": { compiledCanvasGenerationRecord },
         "@/lib/image-model-settings": { imageModelProfile },
+        "@/lib/canvas/canvas-mask-adaptation": { restoreCanvasMaskResult },
         "@/services/api/generation-tasks": {
-            QueuedTaskFailedError, QueuedTaskPausedError,
+            QueuedTaskFailedError, QueuedTaskPausedError, imageTaskPrompts,
             getQueuedTask: (id: string, signal: AbortSignal) => query({ kind: "task", id, signal }),
             getQueuedTaskByRequestId: (id: string, signal: AbortSignal) => query({ kind: "request", id, signal }),
         },

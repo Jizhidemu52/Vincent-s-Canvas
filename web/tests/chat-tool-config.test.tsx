@@ -16,7 +16,7 @@ function elements(node: unknown): ReactElement<any>[] {
     if (Array.isArray(node)) return node.flatMap(elements);
     if (!React.isValidElement(node)) return [];
     const element = node as ReactElement<any>;
-    return [element, ...elements(element.props.children), ...(element.type === "Select" ? (element.props.options || []).map((option: any) => React.createElement("option", { value: option.value }, option.label)) : [])];
+    return [element, ...elements(element.props.children), ...(element.type === "Popover" ? elements(element.props.content) : []), ...(element.type === "Select" ? (element.props.options || []).map((option: any) => React.createElement("option", { value: option.value }, option.label)) : [])];
 }
 
 function chatPageHarness(initial: BusinessConfig, savedImageModelId?: string) {
@@ -50,13 +50,15 @@ function chatPageHarness(initial: BusinessConfig, savedImageModelId?: string) {
         "@/hooks/use-copy-text": { useCopyText: () => async () => true },
         // External drops have isolated browser coverage; this harness owns no React context.
         "@/hooks/use-image-drop": { useImageDrop: () => ({ dropProps: {}, dragging: false, reading: false }) },
+        // Recovery owns a separate hook harness and browser cases; these fixtures contain no image tasks.
+        "./use-chat-task-recovery": { useChatTaskRecovery: () => ({ checking: new Set(), query() {}, stop() {} }) },
         react: { ...React, useState, useMemo, useCallback: (callback: unknown, dependencies?: DependencyList) => useMemo(() => callback, dependencies),
             useRef: (value: unknown) => { const index = cursor++; return values[index] ||= { current: value }; },
             useEffect: (effect: EffectCallback, dependencies?: DependencyList) => {
                 const index = cursor++;
                 if (!effects[index] || !equal(effects[index].deps, dependencies)) pending.push(() => { effects[index]?.cleanup?.(); effects[index] = { deps: dependencies, cleanup: effect() }; });
             } },
-        antd: { App: { useApp: () => app }, Button: "Button", Tooltip: "Tooltip", Select: "Select", Checkbox: "Checkbox" },
+        antd: { App: { useApp: () => app }, Button: "Button", Tooltip: "Tooltip", Popover: "Popover", Select: "Select", Checkbox: "Checkbox" },
         "lucide-react": new Proxy({}, { get: (_, name) => String(name) }),
         "react-router-dom": { useNavigate: () => () => undefined },
         "@/lib/deployment-features": { deploymentFeatures: { oaLoginEnabled: true, creditsEnabled: false } },

@@ -84,6 +84,8 @@ export function bindCanvasClipboardEvents(target: Pick<EventTarget, "addEventLis
     const copy: EventListener = value => {
         const event = value as ClipboardEvent;
         if (ignore(event) || !event.clipboardData) return;
+        // A visible browser text selection always belongs to native copy/cut.
+        if (typeof window !== "undefined" && window.getSelection?.()?.toString()) return;
         if (event.type === "cut" && actions.canCutNodes?.() === false) {
             event.preventDefault();
             return;

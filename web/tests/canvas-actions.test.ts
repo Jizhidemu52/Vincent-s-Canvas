@@ -39,3 +39,10 @@ test("continuing an image has one plain E binding without stealing modified keys
     expect(matchCanvasActionShortcut({ key: "e", altKey: true })).toBeUndefined();
     expect(canvasActionShortcut("continueFromImage")).toBe("e");
 });
+
+test("H and V select canvas tools without stealing paste or modified browser shortcuts", () => {
+    expect(matchCanvasActionShortcut({ key: "h" })).toBe("pan");
+    expect(matchCanvasActionShortcut({ key: "v" })).toBe("select");
+    expect(matchCanvasActionShortcut({ key: "v", ctrlKey: true })).toBeUndefined();
+    expect(matchCanvasActionShortcut({ key: "h", metaKey: true })).toBeUndefined();
+});

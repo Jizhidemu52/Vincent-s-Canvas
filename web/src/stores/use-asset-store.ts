@@ -86,7 +86,11 @@ export const useAssetStore = create<AssetStore>()(
                     // Other authenticated owners and trial canvases may share old blob storage.
                     // An active owner's project list cannot prove a blob is unused.
                     if (deploymentFeatures.authenticationEnabled) return;
-                    const shared = { assets: get().assets, projects: useCanvasStore.getState().projects, extra: extras };
+                    const canvas = useCanvasStore.getState();
+                    // Lazy library summaries do not contain every media reference.
+                    // Never infer that an unopened local canvas's originals are unused.
+                    if (!canvas.hydrated || canvas.unloadedProjects.length) return;
+                    const shared = { assets: get().assets, projects: canvas.projects, extra: extras };
                     // Chat originals share image_files but are not canvas/asset nodes.
                     // A failed history read must stop both cleanup passes.
                     const assertChatImagesUnchanged = chatImageCleanupGuard();

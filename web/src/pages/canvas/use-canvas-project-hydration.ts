@@ -35,12 +35,13 @@ type CanvasProjectHydrationOptions = {
         setViewport: Setter<ViewportTransform>;
     };
     resetEditor: () => void;
+    flushSave?: () => void;
 };
 
 const loadExperienceMetrics = () => import("@/lib/canvas/canvas-experience-metrics");
 const loadHydrationRuntime = () => import("./canvas-project-hydration");
 
-export function useCanvasProjectHydration({ projectId, projectLoaded, setProjectLoaded, nodesRef, history, runtime, quickGeneration, scenario, view, resetEditor }: CanvasProjectHydrationOptions) {
+export function useCanvasProjectHydration({ projectId, projectLoaded, setProjectLoaded, nodesRef, history, runtime, quickGeneration, scenario, view, resetEditor, flushSave }: CanvasProjectHydrationOptions) {
     const { message } = App.useApp();
     const navigate = useNavigate();
     const hydrated = useCanvasStore((state) => state.hydrated);
@@ -55,6 +56,8 @@ export function useCanvasProjectHydration({ projectId, projectLoaded, setProject
     const { usePerformanceScenario, performanceFixtureSize, performanceScenarioIncludesImages } = scenario;
     const { setGroups, setChatSessions, setActiveChatId, setBackgroundMode, setShowImageInfo, setViewport } = view;
     const projectAsyncLifecycleRef = useRef(createCanvasProjectAsyncLifecycle());
+    const flushSaveRef = useRef(flushSave);
+    flushSaveRef.current = flushSave;
 
     const releaseStaleCanvasObjectUrls = useCallback((restoredNodes: CanvasNodeData[], restoredSessions: CanvasAssistantSession[]) => {
         const assets = useAssetStore.getState().assets;
@@ -186,6 +189,30 @@ export function useCanvasProjectHydration({ projectId, projectLoaded, setProject
 
     useEffect(() => {
         // Only the live restored graph is observed; history hydration stays side-effect free.
-        if (projectLoaded && !usePerformanceScenario && nodesRef.current.some(node => node.metadata?.imageTask)) void recoverPending();
+        if (!projectLoaded || usePerformanceScenario) return;
+        let active = true;
+        const mediaRecoveries = new Map<string, AbortController>();
+        const reconnect = () => {
+            if (document.visibilityState === "hidden" || !navigator.onLine) return;
+            if (nodesRef.current.some(node => node.metadata?.imageTask)) void recoverPending();
+            for (const node of nodesRef.current) {
+                if (!node.metadata?.mediaTask || generationRequestsRef.current.has(node.id) || mediaRecoveries.has(node.id)) continue;
+                const controller = new AbortController();
+                mediaRecoveries.set(node.id, controller);
+                void import("./canvas-media-generation-runtime").then(({ recoverCanvasMediaTask }) => {
+                    if (!active) return;
+                    return recoverCanvasMediaTask(node.id, { projectId, nodes: nodesRef, setNodes, flushSave: () => flushSaveRef.current?.(), isCurrent: () => active }, controller.signal, true);
+                }).catch(() => undefined).finally(() => mediaRecoveries.delete(node.id));
+            }
+        };
+        reconnect();
+        window.addEventListener("online", reconnect);
+        document.addEventListener("visibilitychange", reconnect);
+        const timer = window.setInterval(reconnect, 60_000);
+        return () => {
+            active = false;
+            for (const controller of mediaRecoveries.values()) controller.abort();
+            clearInterval(timer); window.removeEventListener("online", reconnect); document.removeEventListener("visibilitychange", reconnect);
+        };
     }, [projectLoaded, projectId, recoverPending, usePerformanceScenario]);
 }

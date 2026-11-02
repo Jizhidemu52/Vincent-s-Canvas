@@ -13,6 +13,7 @@ import type { CanvasNodeData } from "@/types/canvas";
 import type { InsertAssetPayload } from "./asset-picker-modal";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasShortcutsDialog } from "./canvas-shortcuts-dialog";
+import { canvasShortcutLabel } from "@/lib/canvas/canvas-shortcut-label";
 
 export type CanvasCommandBindings = Partial<Record<CanvasActionId, { run: () => void; enabled?: boolean }>>;
 export function CanvasCommandPalette({ nodes, bindings, onLocate, onAsset, onClose }: {
@@ -69,7 +70,7 @@ export function CanvasCommandPalette({ nodes, bindings, onLocate, onAsset, onClo
                 if (event.key === "Enter") { event.preventDefault(); execute(active); }
             }} />
         <div id="canvas-command-results" role="listbox" aria-label={t("搜索结果")} aria-busy={query !== deferredQuery} className="cw-command-results">{matches.map((item, index) => <button id={`canvas-command-${index}`} key={item.id} type="button" role="option" aria-selected={active === index} onMouseEnter={() => setActive(index)} onClick={() => execute(index, item.id)}>
-            <span><small>{item.category}</small>{item.label}</span><kbd>{item.shortcut}</kbd>
+            <span><small>{item.category}</small>{item.label}</span>{item.id.startsWith("node:") || item.id.startsWith("asset:") ? <span className="text-xs opacity-60">{item.shortcut}</span> : <kbd>{canvasShortcutLabel(item.shortcut)}</kbd>}
         </button>)}{!matches.length && <p role="status">{t("没有匹配的可用操作或素材")}</p>}</div>
         <p className="cw-command-help">{t("↑ ↓ 选择 · Enter 执行 · Esc 关闭 · 云端素材请打开“我的素材”")}</p>
     </Modal>;

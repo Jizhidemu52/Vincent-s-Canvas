@@ -93,7 +93,7 @@ test("switching to Nano removes GPT-only fields and only offers 1K, 2K and 4K", 
   expect(profile.supportsMask).toBe(false);
   const html = renderToStaticMarkup(<ImageSettingsPanel config={config} theme={canvasThemes.light} onConfigChange={() => undefined} />);
   expect(html).toContain('aria-label="清晰度 / 分辨率"');
-  for (const unsupported of ["0.5K", "图片质量", "output_format", "background", "google_search"]) expect(html).not.toContain(unsupported);
+  for (const unsupported of ["0.5K", "图片质量", 'data-image-field="output_format"', 'data-image-field="background"', 'data-image-field="google_search"']) expect(html).not.toContain(unsupported);
 });
 
 test("Mark reference validation allows GPT's 16 references and labels Nano's local cap as an application limit", () => {

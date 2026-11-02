@@ -44,6 +44,7 @@ test("image metadata uses decoded dimensions and clears the load handlers and ti
     expect(h.timers.size).toBe(0);
     expect(h.images[0]!.onload).toBeNull();
     expect(h.images[0]!.onerror).toBeNull();
+    expect(h.images[0]!.src).toBe("");
 });
 
 test("a decoder error and a zero-size decode reject instead of inventing 1024px dimensions", async () => {
@@ -100,6 +101,7 @@ function storageHarness(options: { decode?: () => Promise<Metadata>; response?: 
             async removeItem(key: string) { if (options.failCleanup) throw new Error("storage unavailable"); stored.delete(key); },
         }) },
         "./canvas-media-links": {
+            async readMediaSource(key: string) { return sources.get(key) || null; },
             async rememberMediaSource(key: string, url: string) { events.push("source"); sources.set(key, url); if (options.failSource) throw new Error("source write failed"); },
             async forgetMediaSource(key: string) { sources.delete(key); },
         },

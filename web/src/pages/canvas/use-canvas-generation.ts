@@ -4,8 +4,11 @@ import type { CanvasNodeGenerationMode } from "@/components/canvas/canvas-node-p
 import { NODE_DEFAULT_SIZE, getNodeSpec } from "@/constant/canvas";
 import { canvasToolKey, currentToolConfig } from "@/hooks/use-tool-config";
 import { placeCanvasImageOutputs } from "@/lib/canvas/canvas-image-output-placement";
-import { canvasGenerationRecordConfig, canvasGenerationRecordReferences, canvasNodeGenerationReferences, createCanvasGenerationRecord, hasIncompleteCanvasGenerationReferences } from "@/lib/canvas/canvas-generation-record";
-import { fitNodeSize } from "@/lib/canvas/canvas-node-size";
+import { canvasGenerationRecordConfig, canvasGenerationRecordReferences, canvasNodeGenerationReferences, createCanvasGenerationRecord, createCanvasVariationRecord, hasIncompleteCanvasGenerationReferences } from "@/lib/canvas/canvas-generation-record";
+import { fitNodeSize, nodeSizeFromRatio } from "@/lib/canvas/canvas-node-size";
+import { ensureCanvasModelsReady } from "@/lib/canvas/canvas-generation-model";
+import { rememberCanvasPrompt } from "@/lib/canvas/canvas-prompt-history";
+import { appendCanvasGenerationResultStack } from "@/lib/canvas/canvas-generation-stack";
 import { imageModelProfile, normalizeImageModelSettings } from "@/lib/image-model-settings";
 import { validateImageReferences } from "@/lib/image-reference-policy";
 import { requestImageQuestion } from "@/services/api/image";
@@ -34,9 +37,10 @@ type CanvasGenerationOptions = {
     handleMissingModelConfig: () => void;
     isAiConfigReady: (...args: unknown[]) => boolean;
     flushPendingHistory?: () => unknown;
+    resultStackExcludedNodeIds?: () => ReadonlySet<string>;
 };
 
-export function useCanvasGeneration({ projectId, nodesRef, connectionsRef, designProjectIdRef, projectSaveQueueRef, runtime, setDialogNodeId, focusCanvasArea, handleMissingModelConfig, isAiConfigReady, flushPendingHistory }: CanvasGenerationOptions) {
+export function useCanvasGeneration({ projectId, nodesRef, connectionsRef, designProjectIdRef, projectSaveQueueRef, runtime, setDialogNodeId, focusCanvasArea, handleMissingModelConfig, isAiConfigReady, flushPendingHistory, resultStackExcludedNodeIds }: CanvasGenerationOptions) {
     const { message, modal } = App.useApp();
     const effectiveConfig = useEffectiveConfig();
     const addAsset = useAssetStore(state => state.addAsset);
@@ -55,6 +59,17 @@ export function useCanvasGeneration({ projectId, nodesRef, connectionsRef, desig
         return () => { retryScope.active = false; };
     }, [retryScope]);
     const restoringGenerationRef = useRef(false);
+    const dispatchOwnersRef = useRef(new Map<string, symbol>());
+    const acquireDispatch = (nodeId: string) => {
+        const owner = Symbol(nodeId);
+        dispatchOwnersRef.current.set(nodeId, owner);
+        generationDispatchLocksRef.current.add(nodeId);
+        return () => {
+            if (dispatchOwnersRef.current.get(nodeId) !== owner) return;
+            dispatchOwnersRef.current.delete(nodeId);
+            generationDispatchLocksRef.current.delete(nodeId);
+        };
+    };
 
     const restoreNodeGenerationInput = async (node: CanvasNodeData) => {
         if (!node.metadata?.sourceTaskId || restoringGenerationRef.current) return;
@@ -65,7 +80,7 @@ export function useCanvasGeneration({ projectId, nodesRef, connectionsRef, desig
             const draft = await restoreGenerationDraft(node.metadata.sourceTaskId);
             if (designProjectIdRef.current !== projectId) return;
             if (nodesRef.current.find(item => item.id === node.id) !== node) { message.warning(uiText("图片已变化，未应用历史输入，请重新打开")); return; }
-            const position = { x: Math.max(...nodesRef.current.map(item => item.position.x + item.width)) + 120, y: node.position.y };
+            const position = placeCanvasImageOutputs(nodesRef.current, [node], NODE_DEFAULT_SIZE[CanvasNodeType.Config], node.position, 96);
             const restored = createCanvasRestoredGenerationNode(draft, position);
             setNodes(current => [...current, restored]);
             setSelectedNodeIds(new Set([restored.id]));
@@ -78,7 +93,7 @@ export function useCanvasGeneration({ projectId, nodesRef, connectionsRef, desig
     };
 
     const executeGenerateNode = useCallback(
-        async (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string, onResult?: (result: CanvasGenerationResult) => void, shared?: SharedGenerationExecution, replay?: CanvasGenerationRecord) => {
+        async (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string, onResult?: (result: CanvasGenerationResult) => void, shared?: SharedGenerationExecution, replay?: CanvasGenerationRecord, onDispatched?: () => void) => {
             const ownerId = useUserStore.getState().user?.id;
             const snapshotNodes = nodesRef.current;
             const snapshotConnections = connectionsRef.current;
@@ -111,15 +126,17 @@ export function useCanvasGeneration({ projectId, nodesRef, connectionsRef, desig
                 return;
             }
             let generationConfig = replay ? canvasGenerationRecordConfig(replay, effectiveConfig) : shared?.config || buildGenerationConfig(effectiveConfig, sourceNode, mode);
+            await ensureCanvasModelsReady();
             if (!isAiConfigReady(generationConfig, generationConfig.model)) {
                 handleMissingModelConfig();
                 reportResult([{ nodeId, status: "failed", error: "模型配置不可用" }]);
                 return;
             }
 
-            const runningId = shared?.runningId || nodeId;
+            const requestKey = mode === "image" && !shared ? `image-run:${nanoid()}` : nodeId;
+            const runningId = shared?.runningId || requestKey;
             setRunningNodeId(runningId);
-            const runController = startGenerationRequest(nodeId, nodeId, runningId, shared?.controller);
+            const runController = startGenerationRequest(requestKey, nodeId, runningId, shared?.controller);
             const generationOrigin = { configNodeId: shared?.plan.configNode.id, sourceNodeId: nodeId, runId: shared?.runId || nanoid(), mode };
             const sourceTextContent = sourceNode?.type === CanvasNodeType.Text ? sourceNode.metadata?.content?.trim() || "" : "";
             const editingTextNode = mode === "text" && Boolean(sourceTextContent);
@@ -131,7 +148,7 @@ export function useCanvasGeneration({ projectId, nodesRef, connectionsRef, desig
                 generationContext = await hydrateNodeGenerationContext(context);
                 if (!isCurrent()) throw new DOMException("画布所属账号已变化", "AbortError");
             } catch (error) {
-                finishGenerationRequest(nodeId, runController);
+                finishGenerationRequest(requestKey, runController);
                 if (!shared) setRunningNodeId(null);
                 const detail = error instanceof Error ? error.message : "无法读取输入素材";
                 if (isCurrent()) message.error(detail);
@@ -140,7 +157,7 @@ export function useCanvasGeneration({ projectId, nodesRef, connectionsRef, desig
             }
             const effectivePrompt = generationContext.prompt.trim();
             if (runController.signal.aborted) {
-                finishGenerationRequest(nodeId, runController);
+                finishGenerationRequest(requestKey, runController);
                 if (!shared) setRunningNodeId(null);
                 reportResult([{ nodeId, status: "failed", error: "生成已取消" }]);
                 return;
@@ -148,12 +165,13 @@ export function useCanvasGeneration({ projectId, nodesRef, connectionsRef, desig
             const markSourceStatus = mode !== "image" && !shared && sourceNode?.type !== CanvasNodeType.Image && !editingTextNode;
             const statusPrompt = sourceNode?.type === CanvasNodeType.Config ? effectivePrompt : prompt;
             if (!effectivePrompt && (mode === "text" || mode === "audio")) {
-                finishGenerationRequest(nodeId, runController);
+                finishGenerationRequest(requestKey, runController);
                 if (!shared) setRunningNodeId(null);
                 reportResult([{ nodeId, status: "failed", error: "缺少生成提示词" }]);
                 return;
             }
             let pendingChildIds: string[] = [];
+            void rememberCanvasPrompt(prompt).catch(() => undefined);
             if (markSourceStatus) setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, prompt: statusPrompt, status: NODE_STATUS_LOADING, errorDetails: undefined } } : node)));
 
             try {
@@ -164,7 +182,7 @@ export function useCanvasGeneration({ projectId, nodesRef, connectionsRef, desig
                     let toolKey = shared?.toolKey;
                     if (!shared) {
                         const { resolveCanvasImageConfig } = await import("@/lib/canvas/canvas-generation-model");
-                        const resolved = resolveCanvasImageConfig(generationConfig, useBusinessConfigStore.getState(), referenceImages.length > 0);
+                        const resolved = resolveCanvasImageConfig(generationConfig, useBusinessConfigStore.getState(), referenceImages.length > 0, Boolean(replay));
                         generationConfig = resolved.config;
                         toolKey = resolved.toolKey;
                         if (replay && generationConfig.model !== replay.parameters.model) throw new Error("原生成模型当前不可用，未替换模型或提交任务");
@@ -177,7 +195,7 @@ export function useCanvasGeneration({ projectId, nodesRef, connectionsRef, desig
                     const referenceValidation = validateImageReferences(modelOptionName(generationConfig.model), referenceImages, profile);
                     if (!referenceValidation.valid) {
                         message.error(referenceValidation.message);
-                        finishGenerationRequest(nodeId, runController);
+                        finishGenerationRequest(requestKey, runController);
                         if (!shared) setRunningNodeId(null);
                         reportResult([{ nodeId, status: "failed", error: referenceValidation.message }]);
                         return;
@@ -193,14 +211,17 @@ export function useCanvasGeneration({ projectId, nodesRef, connectionsRef, desig
                     if (replay) generationRecord.references = structuredClone(replay.references);
                     const generationMetadata = { ...buildImageGenerationMetadata(generationType, generationConfig, count, referenceImages), generationOrigin, generationRecord, systemPrompt: generationConfig.systemPrompt };
                     const parentConfig = NODE_DEFAULT_SIZE[isConfigNode ? CanvasNodeType.Config : isImageNode ? CanvasNodeType.Image : CanvasNodeType.Text];
-                    const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
+                    const imageConfig = nodeSizeFromRatio(generationConfig.size, 320, 320) || { width: 320, height: 320 };
                     const parentPosition = sourceNode?.position || { x: 0, y: 0 };
                     const workflowStep = isConfigNode && connectionsRef.current.some(edge => edge.kind === "config-sequence" && (edge.fromNodeId === nodeId || edge.toNodeId === nodeId));
+                    const sourceRecord = sourceNode?.metadata?.generationRecord;
+                    const stackSourceId = !shared && !workflowStep ? replay && replay.id !== sourceRecord?.id ? replay.sourceNodeId
+                        : sourceNode?.metadata?.generationStackSourceId || replay?.sourceNodeId || (usesSavedInputs ? sourceRecord?.sourceNodeId : undefined) || nodeId : undefined;
                     const gap = 96;
                     const rowGap = 36;
                     const outputPosition = placeCanvasImageOutputs(
                         nodesRef.current,
-                        workflowStep ? [] : shared ? [shared.plan.configNode, shared.plan.targetNode] : sourceNode ? [sourceNode] : [],
+                        shared ? [shared.plan.targetNode] : referenceImages.map(reference => snapshotNodes.find(node => node.id === reference.id)).filter((node): node is CanvasNodeData => Boolean(node)).concat(sourceNode ? [sourceNode] : []),
                         imageConfig,
                         workflowStep ? { x: parentPosition.x + parentConfig.width / 2, y: parentPosition.y + parentConfig.height + gap + imageConfig.height / 2 }
                             : { x: parentPosition.x + parentConfig.width + gap + imageConfig.width / 2, y: parentPosition.y + parentConfig.height / 2 },
@@ -224,6 +245,7 @@ export function useCanvasGeneration({ projectId, nodesRef, connectionsRef, desig
                             batchChildIds: count > 1 ? childIds : undefined,
                             batchUsesReferenceImages: referenceImages.length > 0,
                             ...generationMetadata,
+                            generationStackSourceId: stackSourceId,
                             imageBatchExpanded: count > 1 ? true : undefined,
                         },
                     };
@@ -242,15 +264,13 @@ export function useCanvasGeneration({ projectId, nodesRef, connectionsRef, desig
                     const batchConnections = [{ id: nanoid(), fromNodeId: nodeId, toNodeId: rootId, kind: "generation-output" as const }, ...childIds.map((childId) => ({ id: nanoid(), fromNodeId: rootId, toNodeId: childId, kind: "generation-output" as const }))];
 
                     flushPendingHistory?.();
-                    setNodes((prev) => [
-                        ...prev,
-                        rootNode,
-                        ...childNodes,
-                    ]);
+                    setNodes((prev) => { const next = [...prev, rootNode, ...childNodes]; nodesRef.current = next; return next; });
                     setConnections((prev) => [...prev, ...batchConnections]);
                     setSelectedNodeIds(new Set([nodeId]));
                     setSelectedConnectionId(null);
                     setDialogNodeId(nodeId);
+                    if (!shared) onDispatched?.();
+                    if (!shared) focusCanvasArea(rootNode.position, rootNode.width, rootNode.height);
 
                     const controller = runController;
                     targetIds.forEach((targetId) => startGenerationRequest(targetId, nodeId, runningId, controller));
@@ -264,7 +284,7 @@ export function useCanvasGeneration({ projectId, nodesRef, connectionsRef, desig
                                 const imageTask = await createOptions(targetId, controller, undefined, toolKey);
                                 const { metadata, uploaded } = await imageTask.generate({ ...generationConfig, count: "1" }, effectivePrompt, referenceImages.length ? referenceImages : undefined, undefined, generationType === "edit", promptInput, Boolean(replay));
                                 if (!isCurrent() || controller.signal.aborted) return false;
-                                const imageSize = fitNodeSize(uploaded.width, uploaded.height, imageConfig.width, imageConfig.height);
+                                const imageSize = fitNodeSize(uploaded.width, uploaded.height, 320, 320);
                                 setNodes((prev) => {
                                     const root = prev.find((node) => node.id === rootId);
                                     return prev.map((node) => {
@@ -289,11 +309,7 @@ export function useCanvasGeneration({ projectId, nodesRef, connectionsRef, desig
                                         return node;
                                     });
                                 });
-                                // Keep the first completed result in view, including Agent-created edit flows.
-                                if (!workflowStep && (targetId === rootId || !hasSuccess)) {
-                                    const target = targetId === rootId ? rootNode : childNodes.find((node) => node.id === targetId) || rootNode;
-                                    focusCanvasArea(target.position, imageSize.width, imageSize.height);
-                                }
+                                // Submission reveals the placeholder. Completion must not steal a moved viewport.
                                 addAsset({
                                     kind: "image",
                                     title: effectivePrompt.slice(0, 24) || "画布生成图片",
@@ -342,6 +358,16 @@ export function useCanvasGeneration({ projectId, nodesRef, connectionsRef, desig
                                     : node,
                         ),
                     );
+                    if (hasSuccess && stackSourceId) {
+                        let stacked: ReturnType<typeof appendCanvasGenerationResultStack> | undefined;
+                        setNodes(previous => { stacked = appendCanvasGenerationResultStack(previous, rootId, nanoid, resultStackExcludedNodeIds?.()); nodesRef.current = stacked.nodes; return stacked.nodes; });
+                        if (stacked?.rootId) {
+                            const stack = stacked, members = new Set(stack.nodes.find(node => node.id === stack.rootId)?.metadata?.batchChildIds || []);
+                            setConnections(previous => { const ids = new Set(previous.map(edge => edge.id)); const next = [...previous, ...stack.addedConnections.filter(edge => !ids.has(edge.id))]; connectionsRef.current = next; return next; });
+                            setSelectedNodeIds(previous => [...previous].some(id => members.has(id)) ? new Set([...previous].map(id => members.has(id) ? stack.rootId! : id)) : previous);
+                            setDialogNodeId(previous => previous && members.has(previous) ? stack.rootId! : previous);
+                        }
+                    }
                     reportResult(imageOutputs);
                     return;
                 }
@@ -358,7 +384,7 @@ export function useCanvasGeneration({ projectId, nodesRef, connectionsRef, desig
 
                 let streamed = "";
                 const isConfigNode = sourceNode?.type === CanvasNodeType.Config;
-                const textCount = !shared && isConfigNode ? getGenerationCount(generationConfig.count) : 1;
+                const textCount = 1;
                 const parentConfig = NODE_DEFAULT_SIZE[isConfigNode ? CanvasNodeType.Config : CanvasNodeType.Text];
                 const textConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Text];
                 const parentPosition = sourceNode?.position || { x: 0, y: 0 };
@@ -393,7 +419,6 @@ export function useCanvasGeneration({ projectId, nodesRef, connectionsRef, desig
                             (text) => {
                                 localStreamed = text;
                                 streamed = text;
-                                if (isConfigNode) return;
                                 textStreamBufferRef.current?.push({ nodeId: targetNodeId, content: text });
                             },
                             { signal: controller.signal, tool: "canvas-chat", onChatSubmissionStarted: shared ? (textRequestId) => {
@@ -436,53 +461,71 @@ export function useCanvasGeneration({ projectId, nodesRef, connectionsRef, desig
                 );
                 reportResult((pendingChildIds.length ? pendingChildIds : [nodeId]).map((outputNodeId) => ({ nodeId: outputNodeId, status: "failed", error: errorDetails })));
             } finally {
-                finishGenerationRequest(nodeId, runController);
+                finishGenerationRequest(requestKey, runController);
                 if (!shared && isCurrent()) setRunningNodeId(null);
             }
         },
-        [createOptions, effectiveConfig, finishGenerationRequest, flushPendingHistory, handleMissingModelConfig, isAiConfigReady, message, projectId, recoverPending, retryScope, startGenerationRequest],
+        [createOptions, effectiveConfig, finishGenerationRequest, flushPendingHistory, handleMissingModelConfig, isAiConfigReady, message, projectId, recoverPending, resultStackExcludedNodeIds, retryScope, startGenerationRequest],
     );
-    const handleGenerateNode = useCallback(async (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string, onResult?: (result: CanvasGenerationResult) => void, sequenceLock?: string, sequenceSignal?: AbortSignal) => {
+    const handleGenerateNode = useCallback(async (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string, onResult?: (result: CanvasGenerationResult) => void, sequenceLock?: string, sequenceSignal?: AbortSignal, retryFailedOnly = false) => {
         if (!sequenceLock && connectionsRef.current.some(edge => edge.kind === "config-sequence" && (edge.fromNodeId === nodeId || edge.toNodeId === nodeId))) {
             message.info(uiText("请从配置节点的“运行工作流”按钮启动相连步骤")); return;
         }
         // Lock before the lazy import: rapid double clicks must not submit twice.
-        const ownsSequenceLock = sequenceLock && generationDispatchLocksRef.current.size === 1 && generationDispatchLocksRef.current.has(sequenceLock);
-        if (generationDispatchLocksRef.current.size && !ownsSequenceLock) {
-            message.info(uiText("请先完成或停止当前任务"));
+        const ownsSequenceLock = sequenceLock && generationDispatchLocksRef.current.has(sequenceLock);
+        if (generationDispatchLocksRef.current.has(nodeId) && !ownsSequenceLock) {
+            message.info(uiText("此节点正在提交，请稍候；其他节点可同时生成"));
             return;
         }
-        if (!ownsSequenceLock) generationDispatchLocksRef.current.add(nodeId);
+        const releaseDispatch = ownsSequenceLock ? undefined : acquireDispatch(nodeId);
         const snapshot = { nodes: nodesRef.current, connections: connectionsRef.current };
         try {
             const { runCanvasGeneration } = await import("./canvas-shared-generation-runtime");
             if (sequenceSignal?.aborted) return;
             await runCanvasGeneration(nodeId, mode, prompt, onResult, {
-                snapshot, getSnapshot: () => ({ nodes: nodesRef.current, connections: connectionsRef.current }),
+                snapshot, retryFailedOnly, getSnapshot: () => ({ nodes: nodesRef.current, connections: connectionsRef.current }),
                 buildConfig: (node, selectedMode) => buildGenerationConfig(effectiveConfig, node, selectedMode),
-                isAiConfigReady, execute: executeGenerateNode, recover: recoverPending, start: startGenerationRequest, finish: finishGenerationRequest,
-                setRunning: setRunningNodeId, setNodes, message,
+                isAiConfigReady, execute: (id, selectedMode, inputPrompt, callback, shared) => executeGenerateNode(id, selectedMode, inputPrompt, callback, shared, undefined, releaseDispatch), recover: recoverPending, start: startGenerationRequest, finish: finishGenerationRequest,
+                setRunning: setRunningNodeId, setNodes, message, isObserving: id => runtime.generationRequestsRef.current.has(id),
             });
         } catch (error) {
             const detail = error instanceof Error ? error.message : "加载失败";
             message.error(detail);
             onResult?.({ mode, outputs: [{ nodeId, status: "failed", error: detail }] });
         } finally {
-            if (!ownsSequenceLock) generationDispatchLocksRef.current.delete(nodeId);
+            releaseDispatch?.();
         }
     }, [effectiveConfig, executeGenerateNode, finishGenerationRequest, isAiConfigReady, message, recoverPending, startGenerationRequest]);
+
+    const handleRetryFailedTargets = useCallback((nodeId: string) => {
+        const node = nodesRef.current.find(item => item.id === nodeId);
+        if (!node) return;
+        return handleGenerateNode(nodeId, node.metadata?.generationMode || "image", node.metadata?.composerContent ?? node.metadata?.prompt ?? "", undefined, undefined, undefined, true);
+    }, [handleGenerateNode]);
 
     const handleRegenerateNode = useCallback(async (node: CanvasNodeData) => {
         const record = node.metadata?.generationRecord;
         if (!record || node.type !== CanvasNodeType.Image) { message.info(uiText("这张图片没有完整生成档案，请先恢复历史输入")); return; }
-        if (generationDispatchLocksRef.current.size) { message.info(uiText("请先完成或停止当前任务")); return; }
+        if (generationDispatchLocksRef.current.has(node.id)) { message.info(uiText("此节点正在提交，请稍候")); return; }
         if (nodesRef.current.find(item => item.id === node.id) !== node) { message.warning(uiText("图片已变化，请重新选择后生成")); return; }
-        generationDispatchLocksRef.current.add(node.id);
+        const releaseDispatch = acquireDispatch(node.id);
         try {
-            await executeGenerateNode(node.id, "image", record.prompt, undefined, undefined, record);
+            await executeGenerateNode(node.id, "image", record.prompt, undefined, undefined, record, releaseDispatch);
         } catch (error) {
             if (retryScope.active && designProjectIdRef.current === projectId) message.error(error instanceof Error ? error.message : uiText("重新生成失败"));
-        } finally { generationDispatchLocksRef.current.delete(node.id); }
+        } finally { releaseDispatch(); }
+    }, [executeGenerateNode, message, projectId, retryScope]);
+
+    const handleVariationNode = useCallback(async (node: CanvasNodeData, strength: "subtle" | "strong") => {
+        if (generationDispatchLocksRef.current.has(node.id)) { message.info(uiText("此节点正在提交，请稍候")); return; }
+        if (nodesRef.current.find(item => item.id === node.id) !== node) { message.warning(uiText("图片已变化，请重新选择后生成")); return; }
+        const releaseDispatch = acquireDispatch(node.id);
+        try {
+            const record = createCanvasVariationRecord(node, strength, nanoid());
+            await executeGenerateNode(node.id, "image", record.prompt, undefined, undefined, record, releaseDispatch);
+        } catch (error) {
+            if (retryScope.active && designProjectIdRef.current === projectId) message.error(error instanceof Error ? error.message : uiText("变体生成失败"));
+        } finally { releaseDispatch(); }
     }, [executeGenerateNode, message, projectId, retryScope]);
 
 const handleRetryNode = useCallback(async (node: CanvasNodeData) => {
@@ -544,5 +587,5 @@ const handleRetryNode = useCallback(async (node: CanvasNodeData) => {
         [effectiveConfig.canvasImageCount, effectiveConfig.count, effectiveConfig.imageModel, effectiveConfig.model, effectiveConfig.size, flushPendingHistory, message],
     );
 
-    return { handleGenerateNode, handleRegenerateNode, handleRetryNode, generateImageFromTextNode, restoreNodeGenerationInput };
+    return { handleGenerateNode, handleRetryFailedTargets, handleRegenerateNode, handleVariationNode, handleRetryNode, generateImageFromTextNode, restoreNodeGenerationInput };
 }

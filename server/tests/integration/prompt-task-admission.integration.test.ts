@@ -375,6 +375,28 @@ integration(
       await fixture?.close();
     });
 
+    test("exclusion constraints persist in real SQL admission without overwriting source prompts or replaying duplicate tasks", async () => {
+      const actor = await user();
+      const value = input("", { toolKey: "image", promptInput: undefined, prompt: "蓝色衬衫", parameters: { negative_prompt: "水印", inputArchive: { prompt: "用户草稿", effectivePrompt: "蓝色衬衫" } } });
+      const response = await request(actor, "/api/tasks", "POST", value);
+      expect(response.status).toBe(201);
+      const { task } = await response.json();
+      expect(task.prompt.match(/排除要求/g)).toHaveLength(1);
+      expect(task.parameters.promptExclusions).toMatchObject({ sourcePrompt: "蓝色衬衫", negativePrompt: "水印", submittedPrompt: task.prompt, mode: "prompt" });
+      expect(task.parameters.inputArchive).toMatchObject({ prompt: "用户草稿", effectivePrompt: "蓝色衬衫", submittedPrompt: task.prompt });
+      const stored = (await query("SELECT prompt,parameters FROM tasks WHERE id=$1", [task.id])).rows[0]!;
+      expect(stored).toMatchObject({ prompt: task.prompt, parameters: task.parameters });
+      const duplicate = await request(actor, "/api/tasks", "POST", value);
+      expect(duplicate.status).toBe(200); expect((await duplicate.json()).task.id).toBe(task.id);
+      expect(await count("tasks", actor)).toBe(1); expect(await count("credit_reservations", actor)).toBe(1);
+      const invalid = await request(actor, "/api/tasks", "POST", { ...value, requestId: randomUUID(), parameters: { negative_prompt: 7 } });
+      expect(invalid.status).toBe(400);
+      const beforeOptimization = calls.length;
+      const invalidOptimized = await request(actor, "/api/tasks", "POST", input("Bad exclusion", { parameters: { negative_prompt: [] } }));
+      expect(invalidOptimized.status).toBe(400); expect(calls.length).toBe(beforeOptimization);
+      expect(await count("tasks", actor)).toBe(1);
+    });
+
     test("successful optimization stores trusted prompt, original user input and one reservation before queue delivery", async () => {
       const actor = await user(),
         value = input("retain the original jacket shape"),

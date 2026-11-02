@@ -19,7 +19,16 @@ type Dependencies = {
     newId: () => string;
     onCopy: (copy: CanvasProject) => Promise<void>;
 };
-const snapshot = (project: CanvasProject | null) => project ? serializeCanvasProject(project) : null;
+export function canvasCloudDocument(project: CanvasProject): CanvasProject {
+    const { history: _history, selectedNodeIds: _selection, ...content } = project;
+    return { ...content, viewport: { x: 0, y: 0, k: 1 } };
+}
+const snapshot = (project: CanvasProject | null) => project ? serializeCanvasProject(canvasCloudDocument(project)) : null;
+export class CanvasCloudBatchError extends Error {
+    constructor(public failures: Array<{ id: string; error: unknown }>) {
+        super(failures.map(({ id, error }) => `${id}: ${error instanceof Error ? error.message : "同步失败"}`).join("；"));
+    }
+}
 // PostgreSQL jsonb does not retain object-key order. Equality must not create
 // conflict copies merely because a successful response was lost or reordered.
 const canonical = (value: unknown) => JSON.stringify(value, (_key, child) => child && typeof child === "object" && !Array.isArray(child)
@@ -29,6 +38,7 @@ const sameDocument = (a: CanvasProject | null, b: CanvasProject | null) => snaps
 /** A per-owner CAS synchronizer. Callers serialize saves and durably store hydrate's result before saving. */
 export function createCanvasCloudSync(baseline: CanvasCloudBaseline, io: Dependencies) {
     Object.setPrototypeOf(baseline, null);
+    for (const entry of Object.values(baseline)) if (entry.local) entry.local = snapshot(parseCanvasProject(entry.local));
     const hydrated = new Map<string, BaselineEntry>();
     const deferred = new Map<string, CloudCanvasSummary>();
     let hydrationCheckpointPending = false;
@@ -56,9 +66,10 @@ export function createCanvasCloudSync(baseline: CanvasCloudBaseline, io: Depende
         }
     }
     function copyOf(project: CanvasProject, plan: CopyPlan) {
-        return { ...project, id: plan.id, title: `${project.title}（云端冲突副本）`, persistenceConflict: { projectId: project.id, paths: ["$cloudRevision"], savedAt: plan.savedAt } };
+        return { ...canvasCloudDocument(project), id: plan.id, title: `${project.title}（云端冲突副本）`, persistenceConflict: { projectId: project.id, paths: ["$cloudRevision"], savedAt: plan.savedAt } };
     }
     return {
+        synchronizedProjectIds: (projects: CanvasProject[]) => projects.filter(project => baseline[project.id]?.local === snapshot(project)).map(project => project.id),
         async hydrate(local: CanvasProject[], options: { live?: boolean; deferUncached?: boolean } = {}) {
             const documents = await io.list();
             const projects = new Map(local.map(project => [project.id, project]));
@@ -99,6 +110,14 @@ export function createCanvasCloudSync(baseline: CanvasCloudBaseline, io: Depende
             hydrated.set(id, { revision: remote.revision, local: snapshot(remote.document) });
             return remote.document;
         },
+        async refreshCached(project: CanvasProject) {
+            const remote = await io.get(project.id);
+            if (!remote.document) return;
+            if (sameDocument(project, remote.document) || sameDocument(await io.portable(canvasCloudDocument(structuredClone(project))), remote.document)) {
+                baseline[project.id] = { revision: remote.revision, local: snapshot(project) };
+                await checkpoint();
+            }
+        },
         async confirmHydrated(projects: CanvasProject[]): Promise<void> {
             // Call after durable local storage, before exposing hydrated projects to
             // editors that can immediately change updatedAt, history or media caches.
@@ -109,7 +128,7 @@ export function createCanvasCloudSync(baseline: CanvasCloudBaseline, io: Depende
             // be retried even when the next load finds that local document.
             if (hydrationCheckpointPending) await checkpoint();
         },
-        async save(projects: CanvasProject[]) {
+        async save(projects: CanvasProject[], changedIds?: Iterable<string>, skippedIds: ReadonlySet<string> = new Set()) {
             // All dirty decisions use the batch's initial baseline, not changes made
             // by onCopy. Otherwise a stale clean recovery copy can overwrite a newer edit.
             const current = new Map(structuredClone(projects).map(project => [project.id, project]));
@@ -118,7 +137,8 @@ export function createCanvasCloudSync(baseline: CanvasCloudBaseline, io: Depende
             acceptHydrated(current);
             const initial = structuredClone(baseline);
             Object.setPrototypeOf(initial, null);
-            const ids = new Set([...current.keys(), ...Object.keys(initial)]);
+            const ids = new Set(changedIds || [...current.keys(), ...Object.keys(initial)]);
+            const failures: Array<{ id: string; error: unknown }> = [];
 
             async function preserveCopy(ownerId: string, source: CanvasProject, cloudSource: CanvasProject, revision: number, kind: "remote" | "recovery") {
                 // HTTP LAN origins may not expose WebCrypto. Keep an exact canonical key.
@@ -156,7 +176,7 @@ export function createCanvasCloudSync(baseline: CanvasCloudBaseline, io: Depende
 
             async function write(id: string, local: CanvasProject | null, revision: number) {
                 const encoded = snapshot(local);
-                const portable = local ? await io.portable(structuredClone(local)) : null;
+                const portable = local ? await io.portable(canvasCloudDocument(structuredClone(local))) : null;
                 let saved: CloudCanvasAcknowledgement;
                 try { saved = await io.put(id, revision, portable); }
                 catch (error) {
@@ -179,6 +199,8 @@ export function createCanvasCloudSync(baseline: CanvasCloudBaseline, io: Depende
             }
 
             for (const id of ids) {
+                if (skippedIds.has(id)) continue;
+                try {
                 const local = current.get(id) || null;
                 const encoded = snapshot(local);
                 const entry = initial[id];
@@ -200,8 +222,10 @@ export function createCanvasCloudSync(baseline: CanvasCloudBaseline, io: Depende
                 } else await write(id, local, entry?.revision || 0);
                 hydrated.delete(id);
                 await checkpoint();
+                } catch (error) { failures.push({ id, error }); }
             }
             await checkpoint();
+            if (failures.length) throw new CanvasCloudBatchError(failures);
         },
     };
 }

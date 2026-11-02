@@ -9,10 +9,24 @@ function memory() {
         values,
         async getItem<T>(key: string) { return structuredClone(values.get(key) ?? null) as T | null; },
         async setItem<T>(key: string, value: T) { values.set(key, structuredClone(value)); return value; },
+        async removeItem(key: string) { values.delete(key); },
         async iterate<T, U>(callback: (value: T, key: string, iteration: number) => U) { let index = 0; for (const [key, value] of values) callback(structuredClone(value) as T, key, ++index); return undefined as U; },
     };
 }
 const draft = () => ({ baseTemplateId: "development" as const, title: "我的改款流程", steps: [["自定义线稿", "保留衣领，绘制背面线稿\n不要文字"], ["定制配色", "主体改为酒红色"], ["模特", "正面全身摄影"]] as const });
+
+test("removing a personal template affects only the exact current-owner key and rejects a stale identity", async () => {
+    const store = memory(); let owner = "a";
+    const library = createCanvasTemplateLibrary(store, "a", () => owner);
+    const first = await library.save(draft()), second = await library.save(draft());
+    const other = await createCanvasTemplateLibrary(store, "b", () => "b").save(draft());
+    await library.remove(first.id);
+    expect(await library.list()).toEqual([second]);
+    expect(await createCanvasTemplateLibrary(store, "b", () => "b").list()).toEqual([other]);
+    owner = "b";
+    await expect(library.remove(second.id)).rejects.toThrow("身份已变化");
+    expect(store.values.size).toBe(2);
+});
 
 test("personal template survives a fresh reader, updates the same id, and copies without changing built-ins", async () => {
     const store = memory(), builtin = JSON.stringify(canvasDesignTemplates);

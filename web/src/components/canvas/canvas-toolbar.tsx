@@ -1,7 +1,8 @@
 import { useUiText } from "@/lib/i18n";
 import { canvasActionHint, canvasActionLabel, type CanvasActionId } from "@/lib/canvas/canvas-actions";
 import { canvasActionMenuItem } from "./canvas-action-menu-item";
-import { memo } from "react";
+import { memo, useState } from "react";
+import { Check } from "lucide-react";
 import { Dropdown, Tooltip } from "antd";
 import { Download, Eraser, FolderOpen, FolderPlus, Grid3X3, Hand, Image as ImageIcon, MoreHorizontal, MousePointer2, Music2, Redo2, Settings2, Sparkles, Trash2, Type, Undo2, Upload, Video, WandSparkles, type LucideIcon } from "lucide-react";
 import { canvasToolbarPropsEqual, type CanvasToolbarRenderState } from "@/lib/canvas/canvas-toolbar-render-stability";
@@ -12,6 +13,7 @@ import "./canvas-toolbar.css";
 
 export const CanvasToolbar = memo(function CanvasToolbar(props: CanvasToolbarRenderState) {
     const t = useUiText();
+    const [moreOpen, setMoreOpen] = useState(false);
     const localToolsEnabled = useModuleEnabled("canvas-local-tools");
     const flags = useModuleStore(state => state.flags);
     const bindings = useBusinessConfigStore(state => state.tools);
@@ -27,7 +29,7 @@ export const CanvasToolbar = memo(function CanvasToolbar(props: CanvasToolbarRen
                 <ActionButton action="pan" icon={Hand} pressed={interactionMode === "hand"} onClick={() => { onDeselect(); onInteractionModeChange?.("hand"); }} />
                 <ActionButton action="upload" icon={Upload} onClick={onUpload} />
                 <ActionButton action="text" icon={Type} onClick={onAddText} />
-                <Dropdown trigger={["click"]} placement="topLeft" classNames={{ root: "cw-tool-menu" }} menu={{ items: [
+                <Dropdown trigger={["click"]} placement="topLeft" onOpenChange={setMoreOpen} styles={{ root: { zIndex: 900 } }} classNames={{ root: "cw-tool-menu" }} menu={{ items: [
                     canvasActionMenuItem("generate", onOpenQuickGenerate, <Sparkles className="size-4" />),
                     canvasActionMenuItem("config", onAddConfig, <Settings2 className="size-4" />),
                     canvasActionMenuItem("image", onAddImage, <ImageIcon className="size-4" />),
@@ -36,12 +38,12 @@ export const CanvasToolbar = memo(function CanvasToolbar(props: CanvasToolbarRen
                     canvasActionMenuItem("batch", onOpenBatchEdit, <WandSparkles className="size-4" />),
                     ...(localToolsEnabled && props.onGroupSelection ? [canvasActionMenuItem("group", props.onGroupSelection, <FolderPlus className="size-4" />, selectedCount < 2)] : []),
                     { type: "divider" as const },
-                    { key: "background", label: <span data-usage-control="canvas-tool.background">{t("画布背景")}</span>, children: (["dots", "lines", "blank"] as const).map((mode) => ({ key: mode, label: `${backgroundMode === mode ? "✓ " : ""}${canvasActionLabel(mode === "dots" ? "backgroundDots" : mode === "lines" ? "backgroundLines" : "backgroundBlank", "toolbar")}`, onClick: () => onBackgroundModeChange(mode) })) },
-                    { key: "info", label: `${showImageInfo ? "✓ " : ""}${canvasActionLabel("imageInfo")}`, onClick: () => onShowImageInfoChange(!showImageInfo) },
+                    { key: "background", label: <span data-usage-control="canvas-tool.background">{t("画布背景")}</span>, children: (["dots", "lines", "blank"] as const).map((mode) => ({ key: mode, icon: <Check aria-hidden className={`size-4 ${backgroundMode === mode ? "" : "invisible"}`} />, label: canvasActionLabel(mode === "dots" ? "backgroundDots" : mode === "lines" ? "backgroundLines" : "backgroundBlank", "toolbar"), onClick: () => onBackgroundModeChange(mode) })) },
+                    { key: "info", icon: <Check aria-hidden className={`size-4 ${showImageInfo ? "" : "invisible"}`} />, label: canvasActionLabel("imageInfo"), onClick: () => onShowImageInfoChange(!showImageInfo) },
                     { type: "divider" as const },
                     canvasActionMenuItem("delete", onDelete, <Trash2 className="size-4" />, !selectedCount),
                     canvasActionMenuItem("clear", onClear, <Eraser className="size-4" />),
-                ].filter(item => !item.key || !canvasActionModules[item.key] || isModuleAvailable(flags, bindings, canvasActionModules[item.key]!)) }}><Tooltip title={t("更多工具")}><button data-usage-control="canvas-tool.more" type="button" className="cw-icon" aria-label={t("更多工具")} aria-haspopup="menu"><MoreHorizontal className="size-4" /></button></Tooltip></Dropdown>
+                ].filter(item => !item.key || !canvasActionModules[item.key] || isModuleAvailable(flags, bindings, canvasActionModules[item.key]!)) }}><Tooltip title={moreOpen ? null : t("更多工具")}><button data-usage-control="canvas-tool.more" type="button" className="cw-icon" aria-label={t("更多工具")} aria-haspopup="menu"><MoreHorizontal className="size-4" /></button></Tooltip></Dropdown>
                 <span className="cw-divider" aria-hidden="true" />
                 <ActionButton action="undo" icon={Undo2} disabled={!canUndo} onClick={onUndo} />
                 <ActionButton action="redo" icon={Redo2} disabled={!canRedo} onClick={onRedo} />

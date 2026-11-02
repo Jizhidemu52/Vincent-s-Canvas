@@ -1,5 +1,5 @@
 import type { Locator } from "@playwright/test";
-import { test, expect, IMAGE, ORIGIN } from "./fixtures";
+import { test, expect, IMAGE } from "./fixtures";
 
 async function pasteFiles(composer: Locator, names: string[], bytes = [...IMAGE]) {
     // Browser integration for multi-file clipboard payloads (native clipboard APIs
@@ -12,8 +12,8 @@ async function pasteFiles(composer: Locator, names: string[], bytes = [...IMAGE]
 }
 
 test("独立对话支持真实 Ctrl+V 图片，并保留普通文字粘贴", async ({ page, context, api }, testInfo) => {
-    await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: ORIGIN });
     await page.goto("/chat");
+    await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: new URL(page.url()).origin });
     const composer = page.getByRole("textbox", { name: "对话内容", exact: true });
     await expect(composer).toBeEnabled();
     await composer.fill("保留我的改图说明");

@@ -2,11 +2,11 @@ import { expect, test } from "bun:test";
 import { assertImagePromptInvariantCoverage, canvasAssistantDisplayMessage, canvasAssistantDisplayText, CanvasImagePromptLanguageError, ensureEnglishImagePrompt, isEnglishImagePrompt } from "@/lib/canvas/canvas-assistant-output";
 import type { CanvasAssistantMessage } from "@/types/canvas";
 
-test("rendering removes old full prompts and keeps source message and attachments untouched", () => {
+test("rendering preserves final prompts and keeps source message and attachments untouched", () => {
     const original: CanvasAssistantMessage = { id: "generated", role: "assistant", text: "已生成 1 张图片。\n\n使用提示词：\nKeep all garment details; change the background to white.", detail: { kind: "agent_generation", status: "completed", prompt: "Keep all garment details; change the background to white.", settings: { mode: "image" } }, attachments: [{ id: "image", name: "结果", url: "data:image/png;base64,RESULT", mediaType: "image" }] };
     const before = JSON.stringify(original);
     const display = canvasAssistantDisplayMessage(original)!;
-    expect(display.text).toBe("已生成 1 张图片。");
+    expect(display.text).toBe(original.text);
     expect(display.detail).toBeUndefined();
     expect(display.attachments).toBe(original.attachments);
     expect(JSON.stringify(original)).toBe(before);
@@ -16,7 +16,8 @@ test("thinking and tool payloads are not presented as user-facing output", () =>
     expect(canvasAssistantDisplayText("<think>First I need to inspect nodes.</think>已把背景改为白色。\ncanvas_get_snapshot({})")).toBe("已把背景改为白色。");
     expect(canvasAssistantDisplayText("<reasoning>unfinished internal reasoning")).toBe("");
     expect(canvasAssistantDisplayText('```json\n{"tool_calls": [{"name":"canvas_generate_image"}]}\n```\n已完成。')).toBe("已完成。");
-    expect(canvasAssistantDisplayMessage({ id: "tool", role: "tool", text: "RAW RESULT", detail: { status: "completed", results: [{ raw: "secret prompt" }] } })).toBeNull();
+    expect(canvasAssistantDisplayMessage({ id: "tool", role: "tool", text: "新增节点 1", detail: { status: "completed", results: [{ raw: "secret prompt" }] } })).toMatchObject({ text: "新增节点 1", detail: { status: "completed" } });
+    expect(JSON.stringify(canvasAssistantDisplayMessage({ id: "tool", role: "tool", text: "新增节点 1", detail: { status: "completed", results: [{ raw: "secret prompt" }] } }))).not.toContain("secret prompt");
     expect(canvasAssistantDisplayMessage({ id: "progress", role: "assistant", text: "现在调用画布工具", detail: { kind: "agent_tool_progress" } })).toBeNull();
 });
 
@@ -26,12 +27,29 @@ test("pending confirmation retains controls but excludes internal tool arguments
     expect(display?.detail).not.toHaveProperty("toolCalls");
 });
 
+test("media completion is displayed by its result card, not another tool log", () => {
+    const original: CanvasAssistantMessage = { id: "done", role: "tool", title: "工具自动执行完成", text: "已生成", detail: { status: "completed", turnId: "turn", results: [{ name: "edit_image", result: { ok: true } }] } };
+    expect(canvasAssistantDisplayMessage(original)).toBeNull();
+    expect(original.detail?.turnId).toBe("turn");
+    expect(canvasAssistantDisplayMessage({ ...original, id: "failed", detail: { status: "failed" } })).toMatchObject({ role: "error", text: "已生成", title: undefined });
+    expect(canvasAssistantDisplayMessage({ ...original, id: "structure", detail: { status: "completed", turnId: "turn", results: [{ name: "canvas_add_node" }] } })).toMatchObject({ role: "assistant", title: undefined, detail: { turnId: "turn" } });
+});
+
 test("user source text is not filtered and running generation has Chinese status only", () => {
     const user: CanvasAssistantMessage = { id: "u", role: "user", text: "生成提示词：保留产品，白色背景" };
     expect(canvasAssistantDisplayMessage(user)).toBe(user);
     expect(canvasAssistantDisplayMessage({ id: "a", role: "assistant", text: "复杂执行策略\n生成提示词：secret", detail: { kind: "agent_generation", status: "running", settings: { mode: "image" } } })?.text).toBe("正在生成图片…");
-    expect(canvasAssistantDisplayText("背景已改为白色。\n\n**English prompt**: Keep the bag untouched.")).toBe("背景已改为白色。");
-    expect(canvasAssistantDisplayText("背景已改为白色。\n\n完整英文生成提示词：Keep the bag untouched.")).toBe("背景已改为白色。");
+    expect(canvasAssistantDisplayText("背景已改为白色。\n\n**English prompt**: Keep the bag untouched.")).toContain("Keep the bag untouched.");
+    expect(canvasAssistantDisplayText("背景已改为白色。\n\n完整英文生成提示词：Keep the bag untouched.")).toContain("Keep the bag untouched.");
+});
+
+test("ordinary prompt-writing replies retain all sections; only explicit hidden content is removed", () => {
+    const text = "提示词：\n1. 春日海报\n2. 夏日海报\n3. 秋日海报\n\n说明：三种颜色";
+    expect(canvasAssistantDisplayText(text)).toBe(text);
+    const source: CanvasAssistantMessage = { id: "same", role: "assistant", text: `${text}\nINTERNAL_RECIPE`, detail: { hiddenPrompts: ["INTERNAL_RECIPE"] } };
+    const display = canvasAssistantDisplayMessage(source);
+    expect(display?.text).toBe(text);
+    expect(canvasAssistantDisplayMessage(source)).toBe(display);
 });
 
 test("English prompts pass unchanged without an extra translation request", async () => {

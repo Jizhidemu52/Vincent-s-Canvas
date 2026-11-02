@@ -28,7 +28,7 @@ function deferred() {
 
 type TogglerProps = { onThemeChange?: (theme: "light" | "dark") => void };
 
-function harness(options: { noApi?: boolean; startError?: Error; themeError?: Error; animateError?: Error; invokeBeforeStartError?: boolean } = {}) {
+function harness(options: { noApi?: boolean; reducedMotion?: boolean; canvas?: boolean; startError?: Error; themeError?: Error; animateError?: Error; invokeBeforeStartError?: boolean } = {}) {
     const ready = deferred();
     const finished = deferred();
     const updateCallbackDone = deferred();
@@ -73,7 +73,7 @@ function harness(options: { noApi?: boolean; startError?: Error; themeError?: Er
             useState: (value: boolean) => [value, () => undefined],
             useEffect: () => undefined,
             useCallback: (callback: unknown) => callback,
-            useRef: () => ({ current: { getBoundingClientRect: () => ({ top: 20, left: 10, width: 40, height: 40 }) } }),
+            useRef: () => ({ current: { closest: () => options.canvas ? {} : null, getBoundingClientRect: () => ({ top: 20, left: 10, width: 40, height: 40 }) } }),
         },
         "react/jsx-runtime": jsxRuntime,
     };
@@ -84,7 +84,7 @@ function harness(options: { noApi?: boolean; startError?: Error; themeError?: Er
             return dependencies[name];
         },
         module, module.exports, document,
-        { innerWidth: 1000, innerHeight: 800, reportError: (error: unknown) => { reported.push(error); } },
+        { innerWidth: 1000, innerHeight: 800, matchMedia: () => ({ matches: Boolean(options.reducedMotion) }), reportError: (error: unknown) => { reported.push(error); } },
     );
     const button = module.exports.AnimatedThemeToggler({ onThemeChange: theme => {
         applied.push(theme);
@@ -117,6 +117,12 @@ function harness(options: { noApi?: boolean; startError?: Error; themeError?: Er
 }
 
 describe("animated theme transition", () => {
+    test("canvas and reduced-motion preferences apply directly without a page screenshot", () => {
+        for (const options of [{ canvas: true }, { reducedMotion: true }]) {
+            const h = harness(options); h.click();
+            expect(h.applied).toEqual(["dark"]); expect(h.animations).toEqual([]); h.expectClean();
+        }
+    });
     test("applies the theme once, waits for ready to animate and cleans up on finish", async () => {
         const h = harness();
         h.click();

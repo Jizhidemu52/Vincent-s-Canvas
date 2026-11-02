@@ -18,7 +18,8 @@ function httpFixture(enabled = true) {
     const sessions = new Map<string, Record<string, unknown>>();
     const addSession = (token: string, actor: DesignLibraryActor, authProvider: "local" | "oa", guest = false) => {
         const row = { id: actor.id, username: actor.id, display_name: actor.name, role: actor.role, status: "active", department_id: actor.departmentId, department_name: actor.departmentName,
-            session_id: uuid(200 + sessions.size), auth_provider: authProvider, is_guest: guest, must_change_password: false, group_id: null, group_name: null, group_role: null };
+            session_id: uuid(200 + sessions.size), auth_provider: authProvider, session_remaining_seconds: authProvider === "oa" ? 7200 : 28800,
+            is_guest: guest, must_change_password: false, group_id: null, group_name: null, group_role: null };
         sessions.set(hashToken(token), row);
     };
     addSession("author-oa", author, "oa"); addSession("viewer-oa", viewer, "oa"); addSession("admin-local", admin, "local");
@@ -27,7 +28,7 @@ function httpFixture(enabled = true) {
     const authDb = { query: async (sql: string, values: unknown[]) => {
         authQueries++;
         if (sql.includes("FROM credit_policy")) return { rows: [{ creditsEnabled: false, updatedAt: null }] };
-        if (!sql.includes("FROM sessions s")) throw new Error("Authentication must never create a guest or write the database");
+        if (!sql.includes("FROM sessions s")) throw new Error("Authentication must never create a guest or write business data");
         const row = sql.includes("s.token_hash=$1") ? sessions.get(String(values[0])) : [...sessions.values()].find(value => value.session_id === values[0]);
         return { rows: row ? [row] : [] };
     } } as unknown as Database;

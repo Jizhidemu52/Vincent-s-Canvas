@@ -8,6 +8,7 @@ export type CanvasGraphHighlightInput = {
     multipleSelected: boolean;
     connectionAdjacency: ReadonlyMap<string, ReadonlySet<string>>;
     connectionById: ReadonlyMap<string, CanvasConnection>;
+    hoveredConnectionId?: string | null;
 };
 export function useCanvasGraphHighlight(input: CanvasGraphHighlightInput) {
     const hoveredNodeId = useCanvasGraphStore(state => state.hoveredNodeId);
@@ -15,7 +16,7 @@ export function useCanvasGraphHighlight(input: CanvasGraphHighlightInput) {
     const activeNodeId = input.multipleSelected ? null : input.selectedNodeId || hoveredNodeId;
     const related = useMemo(() => buildCanvasRelatedHighlight(activeNodeId, input.connectionAdjacency, input.connectionById),
         [activeNodeId, input.connectionAdjacency, input.connectionById]);
-    const activeConnectionIds = useMemo(() => selectedConnectionId ? new Set([...related.connectionIds, selectedConnectionId]) : related.connectionIds,
-        [related.connectionIds, selectedConnectionId]);
+    const activeConnectionIds = useMemo(() => selectedConnectionId || input.hoveredConnectionId ? new Set([...related.connectionIds, ...[selectedConnectionId, input.hoveredConnectionId].filter((id): id is string => Boolean(id))]) : related.connectionIds,
+        [related.connectionIds, selectedConnectionId, input.hoveredConnectionId]);
     return { activeNodeId, related, activeConnectionIds };
 }

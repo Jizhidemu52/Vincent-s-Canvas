@@ -2,7 +2,7 @@ import React, { forwardRef, memo, useCallback, useImperativeHandle, useLayoutEff
 
 import { createConnectionGeometryCache, type CanvasConnectionGeometry } from "@/lib/canvas/canvas-connection-geometry";
 import { getFastCanvas2DContext } from "@/lib/canvas/canvas-2d-context";
-import { canvasConnectionViewportBounds, createCanvasConnectionDrawCache, drawCanvasConnectionBatches, filterCanvasConnectionDrawBatches, type CanvasConnectionDrawBatches } from "@/lib/canvas/canvas-connection-layer";
+import { canvasConnectionPalette, canvasConnectionViewportBounds, createCanvasConnectionDrawCache, drawCanvasConnectionBatches, filterCanvasConnectionDrawBatches, type CanvasConnectionDrawBatches } from "@/lib/canvas/canvas-connection-layer";
 import { canvasConnectionCanvasSize, type CanvasConnectionCanvasSize } from "@/lib/canvas/canvas-connection-canvas-size";
 import { shouldDrawCanvasConnectionLayer, shouldRedrawCanvasConnectionLayer, type CanvasConnectionLayerPaintState } from "@/lib/canvas/canvas-dynamic-connection-layer";
 import { createCanvasViewportPreview } from "@/lib/canvas/canvas-viewport-interaction";
@@ -55,7 +55,7 @@ export const CanvasConnectionLayer = memo(forwardRef<CanvasConnectionLayerHandle
     const wasDraggingNodesRef = useRef(false);
     const previousResolverRef = useRef(resolveNode);
     const failedRef = useRef(false);
-    const staticPaintKey = `${theme.node.muted}:${theme.node.activeStroke}`;
+    const staticPaintKey = JSON.stringify(canvasConnectionPalette(theme));
     resolveGeometryRef.current = (connection) => {
         const from = resolveNode(connection.fromNodeId);
         const to = resolveNode(connection.toNodeId);
@@ -67,7 +67,7 @@ export const CanvasConnectionLayer = memo(forwardRef<CanvasConnectionLayerHandle
     const syncCanvasSize = useCallback((cssWidth: number, cssHeight: number) => {
         const pixelRatio = window.devicePixelRatio || 1;
         const nextStatic = canvasConnectionCanvasSize(cssWidth, cssHeight, pixelRatio);
-        const nextDynamic = canvasConnectionCanvasSize(cssWidth, cssHeight, pixelRatio, 1);
+        const nextDynamic = canvasConnectionCanvasSize(cssWidth, cssHeight, pixelRatio);
         if (!sameCanvasSize(staticCanvasSizeRef.current, nextStatic)) {
             staticCanvasSizeRef.current = nextStatic;
             staticPaintStateRef.current = null;
@@ -103,14 +103,15 @@ export const CanvasConnectionLayer = memo(forwardRef<CanvasConnectionLayerHandle
                 return drawCanvasConnectionBatches(
                     context,
                     batches,
-                    { stroke: theme.node.muted, activeStroke: theme.node.activeStroke },
+                    canvasConnectionPalette(theme),
                     canvasConnectionViewportBounds(nextViewport, { width: size.cssWidth, height: size.cssHeight }),
+                    nextViewport.k,
                 );
             } catch {
                 return false;
             }
         },
-        [syncCanvasSize, theme.node.activeStroke, theme.node.muted],
+        [syncCanvasSize, theme],
     );
 
     const splitBatches = useCallback((connectionIds: ReadonlySet<string>) => {

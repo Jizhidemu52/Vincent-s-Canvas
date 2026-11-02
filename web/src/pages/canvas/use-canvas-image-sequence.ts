@@ -29,12 +29,12 @@ export function useCanvasImageSequence(options: ImageSequenceOptions) {
         } catch (error) { message.error(error instanceof Error ? error.message : uiText("添加失败")); }
         finally { adding.current = false; }
     };
-    const run = async (groupId?: string, nodeId?: string) => {
+    const run = async (groupId?: string, nodeId?: string, onlyStep?: boolean, rerun = false) => {
         const current = latest.current;
-        if (active.current || current.locks.current.size) { message.info(uiText("请先完成或停止当前任务")); return; }
+        if (active.current) { message.info(uiText("当前工作流仍在运行，请先停止该工作流")); return; }
         const projectId = current.projectId;
         const lockKey = `image-sequence:${nodeId || groupId}`;
-        const session: ImageSequenceSession = { groupId: groupId || "", nodeId, controller: new AbortController() };
+        const session: ImageSequenceSession = { groupId: groupId || "", nodeId, controller: new AbortController(), rerunStepId: rerun ? nodeId : undefined, onlyStep };
         active.current = session; current.locks.current.add(lockKey);
         const isCurrent = () => latest.current.projectId === projectId && active.current === session;
         try {
@@ -54,5 +54,5 @@ export function useCanvasImageSequence(options: ImageSequenceOptions) {
         session.controller.abort();
         if (session.configId) latest.current.stopGeneration(session.configId);
     };
-    return { dialog, setDialog, activeGroupId, add, run, runFromNode: (nodeId: string) => run(undefined, nodeId), stop };
+    return { dialog, setDialog, activeGroupId, add, run, runFromNode: (nodeId: string) => run(undefined, nodeId), rerunStep: (nodeId: string, onlyStep = false) => run(undefined, nodeId, onlyStep, true), stop };
 }

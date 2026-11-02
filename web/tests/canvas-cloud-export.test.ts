@@ -110,8 +110,10 @@ describe("cloud canvas offline ZIP backup", () => {
         for (const file of manifest.projects[0].files) expect(new Uint8Array(await entries.get(file.path)!.arrayBuffer())).toEqual(sourceBytes);
     });
 
-    test("a missing cloud download fails export instead of producing an incomplete ZIP", async () => {
-        await expect(createCanvasProjectsArchive([project()], { fetchBlob: async () => { throw new Error("403 denied"); } })).rejects.toThrow("403 denied");
+    test("missing media produces an explicitly incomplete rescue backup without losing the document", async () => {
+        const entries = await readZip(await createCanvasProjectsArchive([project()], { fetchBlob: async () => { throw new Error("403 denied"); } }));
+        expect(await entries.get("missing.txt")!.text()).toContain("403 denied");
+        expect(entries.has("projects.json")).toBe(true);
         expect(() => restoreCanvasExportMedia({ url: "canvas-archive:image:missing" }, new Map())).toThrow("缺少媒体文件");
     });
 });

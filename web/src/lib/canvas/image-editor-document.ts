@@ -1,3 +1,5 @@
+import { checkEditedImageBlob, editedCanvasMimeType } from "./canvas-edited-image-format";
+
 export type EditorPoint = { x: number; y: number };
 export type EditorRect = EditorPoint & { width: number; height: number };
 export type EditorSize = { width: number; height: number };
@@ -205,7 +207,11 @@ export function renderEditorDocument(canvas: HTMLCanvasElement, image: HTMLImage
 }
 
 export function editorPngBlob(canvas: HTMLCanvasElement) {
+    return editorImageBlob(canvas, "image/png");
+}
+
+export function editorImageBlob(canvas: HTMLCanvasElement, sourceMimeType?: string) {
     return new Promise<Blob>((resolve, reject) => {
-        canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error("图片导出失败，请保留编辑面板后重试")), "image/png");
+        canvas.toBlob(blob => { try { checkEditedImageBlob(blob); resolve(blob); } catch (error) { reject(error); } }, editedCanvasMimeType(canvas, sourceMimeType), .92);
     });
 }

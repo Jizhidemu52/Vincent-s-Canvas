@@ -825,7 +825,7 @@ test("card exposes image count, video duration, ratio, selected-image summary, a
         imageCount: 1,
         videoSeconds: "10",
         aspectRatio: "16:9",
-        selectedCandidateSummary: "候选图 1 · image-2",
+        selectedCandidateSummary: "候选图 1",
         videoResult: { nodeId: "video-3", url: "blob:video-3", canOpen: true },
     });
 });
@@ -852,8 +852,8 @@ test("card exposes a separate readable initial-reference summary for the image s
         count: 2,
         label: "初始参考图 2 张",
         items: [
-            { nodeId: "garment-front-reference-node", label: "参考图 1 · garment-…node" },
-            { nodeId: "logo-2", label: "参考图 2 · logo-2" },
+            { nodeId: "garment-front-reference-node", label: "图1" },
+            { nodeId: "logo-2", label: "图2" },
         ],
     });
     expect(card.selectedCandidateSummary).toBe("未选择候选图");

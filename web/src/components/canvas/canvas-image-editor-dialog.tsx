@@ -6,7 +6,7 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { useAsyncAction } from "@/hooks/use-async-action";
 import { resolveImageUrl, uploadImage, type UploadedImage } from "@/services/image-storage";
-import { EDITOR_MAX_DIMENSION, editorDocumentSize, editorPngBlob, editorPoint, editorRect, editorSizeError, paintEditorMark, renderEditorDocument, type EditorPoint, type EditorRect, type EditorResizeMode, type ImageEditorMark, type ImageEditorOperation } from "@/lib/canvas/image-editor-document";
+import { EDITOR_MAX_DIMENSION, editorDocumentSize, editorImageBlob, editorPoint, editorRect, editorSizeError, paintEditorMark, renderEditorDocument, type EditorPoint, type EditorRect, type EditorResizeMode, type ImageEditorMark, type ImageEditorOperation } from "@/lib/canvas/image-editor-document";
 import type { CanvasNodeData } from "@/types/canvas";
 import { editorRectangles, editorRectangleMove } from "@/lib/canvas/image-editor-document";
 
@@ -23,7 +23,7 @@ const hints: Record<Tool, string> = {
     text: "先输入文字，再点击图片放置；可以撤销后重新放置。", mosaic: "拖动框选要打码的区域。马赛克用于视觉遮挡，敏感信息请用不透明涂画完全覆盖。",
 };
 
-export function CanvasImageEditorDialog({ node, onClose, onConfirm, saveHint = "保存回当前节点 · 原图可通过画布撤销恢复 · 不调用 AI", successMessage = "编辑结果已保存到画布，可继续进行 AI 编辑", cancelDescription = "画布上的图片不会改变，面板内未保存的修改将丢弃。" }: { node: CanvasNodeData; onClose: () => void; onConfirm: (image: UploadedImage) => Promise<void>; saveHint?: string; successMessage?: string; cancelDescription?: string }) {
+export function CanvasImageEditorDialog({ node, onClose, onConfirm, saveHint = "另存为新版本节点 · 原图保留 · 不调用 AI", successMessage = "编辑结果已另存为新版本，原图保留", cancelDescription = "画布上的图片不会改变，面板内未保存的修改将丢弃。" }: { node: CanvasNodeData; onClose: () => void; onConfirm: (image: UploadedImage) => Promise<void>; saveHint?: string; successMessage?: string; cancelDescription?: string }) {
     const t = useUiText();
     const theme = canvasThemes[useThemeStore(state => state.theme)];
     const { message, modal } = App.useApp();
@@ -88,9 +88,9 @@ export function CanvasImageEditorDialog({ node, onClose, onConfirm, saveHint = "
     const attachCanvas = useCallback((canvas: HTMLCanvasElement | null) => {
         canvasRef.current = canvas;
         if (!image || !canvas) return;
-        try { renderEditorDocument(canvas, image, operations); }
+        try { renderEditorDocument(canvas, image, committedOperations); }
         catch (error) { setLoadError(error instanceof Error ? error.message : "图片渲染失败"); }
-    }, [image, operations]);
+    }, [image, committedOperations]);
 
     useEffect(() => {
         const stage = stageRef.current;
@@ -107,6 +107,7 @@ export function CanvasImageEditorDialog({ node, onClose, onConfirm, saveHint = "
         previewFrameRef.current = null;
         const canvas = overlayRef.current;
         canvas?.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
+        if (gestureRef.current?.movingIndex !== undefined && image && canvasRef.current) renderEditorDocument(canvasRef.current, image, committedOperations);
         gestureRef.current = null;
         setMovingPreview(null);
     };
@@ -126,7 +127,7 @@ export function CanvasImageEditorDialog({ node, onClose, onConfirm, saveHint = "
         setResizeDraft(null); setSelection(null); setSelectedRectangle(null); setZoom(1);
     };
     const markFor = (gesture: Gesture): ImageEditorMark => {
-        const style = { color, width: lineWidth, ...(selection ? { clip: selection } : {}) };
+        const style = { color, width: lineWidth / scale, ...(selection ? { clip: selection } : {}) };
         if (gesture.tool === "brush") return { kind: "brush", points: gesture.points, ...style };
         return { kind: gesture.tool === "arrow" ? "arrow" : "rectangle", start: gesture.start, end: gesture.end, ...style };
     };
@@ -142,6 +143,7 @@ export function CanvasImageEditorDialog({ node, onClose, onConfirm, saveHint = "
             if (hit) {
                 setSelectedRectangle(hit.index);
                 gestureRef.current = { pointerId: event.pointerId, tool, start: point, end: point, points: [], movingIndex: hit.index };
+                if (canvasRef.current) renderEditorDocument(canvasRef.current, image, committedOperations.map((operation, index) => index === hit.index ? { kind: "brush", points: [], color, width: 1 } : operation));
                 event.currentTarget.setPointerCapture(event.pointerId);
                 return;
             }
@@ -149,7 +151,7 @@ export function CanvasImageEditorDialog({ node, onClose, onConfirm, saveHint = "
         setSelectedRectangle(null);
         if (tool === "text") {
             if (!text.trim()) { message.info(t("请先输入要添加的文字")); return; }
-            commit({ kind: "text", at: point, text: text.trim(), fontSize, color, width: lineWidth, ...(selection ? { clip: selection } : {}) }); return;
+            commit({ kind: "text", at: point, text: text.trim(), fontSize: fontSize / scale, color, width: lineWidth / scale, ...(selection ? { clip: selection } : {}) }); return;
         }
         if (tool === "select") setSelection(null);
         gestureRef.current = { pointerId: event.pointerId, tool, start: point, end: point, points: [point] };
@@ -168,7 +170,14 @@ export function CanvasImageEditorDialog({ node, onClose, onConfirm, saveHint = "
             const context = canvas?.getContext("2d");
             if (!canvas || !context || !current) return;
             context.clearRect(0, 0, canvas.width, canvas.height);
-            if (current.movingIndex !== undefined) { setMovingPreview(movingOperation(current)); return; }
+            if (current.movingIndex !== undefined) {
+                const move = movingOperation(current);
+                setMovingPreview(move);
+                const bounds = editorRectangles([...committedOperations, move], { width: image!.naturalWidth, height: image!.naturalHeight }).find(rect => rect.index === current.movingIndex);
+                const original = committedOperations[current.movingIndex];
+                if (bounds && original?.kind === "rectangle") paintEditorMark(context, { ...original, clip: undefined, start: { x: bounds.x, y: bounds.y }, end: { x: bounds.x + bounds.width, y: bounds.y + bounds.height } });
+                return;
+            }
             if (current.tool === "select" || current.tool === "mosaic") {
                 const rect = editorRect(current.start, current.end, size);
                 context.fillStyle = theme.canvas.selectionFill;
@@ -191,7 +200,7 @@ export function CanvasImageEditorDialog({ node, onClose, onConfirm, saveHint = "
             if (Math.hypot(gesture.end.x - gesture.start.x, gesture.end.y - gesture.start.y) > 2 / scale) {
                 const rect = editorRect(gesture.start, gesture.end, size);
                 if (gesture.tool === "select") setSelection(rect);
-                else commit({ kind: "mosaic", rect, blockSize: Math.max(4, lineWidth) });
+                else commit({ kind: "mosaic", rect, blockSize: Math.max(1, lineWidth / scale) });
             }
         } else {
             if (gesture.tool === "brush") gesture.points.push(gesture.end);
@@ -208,13 +217,13 @@ export function CanvasImageEditorDialog({ node, onClose, onConfirm, saveHint = "
     };
     const save = () => run(async () => {
         if (!canvasRef.current || !dirty || gestureRef.current) return;
-        if (!uploadedRef.current) uploadedRef.current = await uploadImage(await editorPngBlob(canvasRef.current));
+        if (!uploadedRef.current) uploadedRef.current = await uploadImage(await editorImageBlob(canvasRef.current, node.metadata?.mimeType));
         await onConfirm(uploadedRef.current);
         onClose();
         message.success(t(successMessage));
     });
 
-    return <Modal title={t("编辑图片")} open centered width="min(1280px, calc(100vw - 24px))" onCancel={cancel} closable={!saving} keyboard={!saving} maskClosable={false} destroyOnHidden
+    return <Modal title={t("编辑图片")} open centered width="min(1200px, calc(100vw - 24px))" onCancel={cancel} closable={!saving} keyboard={!saving} mask={{ closable: false }} destroyOnHidden
         styles={{ body: { maxHeight: "calc(100dvh - 160px)", overflow: "auto" } }}
         footer={<div className="flex flex-wrap items-center justify-between gap-3"><span style={{ color: theme.node.muted }} className="text-xs">{t(saveHint)}</span><div className="flex gap-2"><Button disabled={saving} onClick={cancel}>{t("取消")}</Button><Button type="primary" icon={<Check className="size-4" />} loading={saving} disabled={!image || !dirty || Boolean(loadError)} onClick={() => void save()}>{t("确定并保存")}</Button></div></div>}>
         <div onKeyDown={event => {

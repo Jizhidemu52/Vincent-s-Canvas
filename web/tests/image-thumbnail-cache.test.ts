@@ -59,14 +59,17 @@ test("cached previews do not decode originals and released previews can be reacq
     expect(h.generated).toEqual([]);
 });
 
-test("one decoder runs at a time and pending work has a hard bound", async () => {
+test("one decoder runs at a time and overload waits instead of falling back to originals", async () => {
     let finish!: (blob: Blob) => void;
     const h = harness({ limit: 2, generate: () => new Promise((resolve) => { finish = resolve; }) });
     const first = h.cache.acquire(request);
     await h.flush();
     const second = h.cache.acquire({ ...request, storageKey: "image:2" });
     const third = h.cache.acquire({ ...request, storageKey: "image:3" });
-    expect(await h.cache.acquire({ ...request, storageKey: "image:4" })).toBeNull();
+    let fourthSettled = false;
+    const fourth = h.cache.acquire({ ...request, storageKey: "image:4" }).then(value => { fourthSettled = true; return value; });
+    await h.flush();
+    expect(fourthSettled).toBe(false);
     expect(h.generated).toEqual(["image:source"]);
     finish(blob);
     await h.flush();
@@ -75,7 +78,11 @@ test("one decoder runs at a time and pending work has a hard bound", async () =>
     await h.flush();
     finish(blob);
     await h.flush();
-    (await first)?.release(); (await second)?.release(); (await third)?.release();
+    expect(h.generated).toEqual(["image:source", "image:2", "image:3", "image:4"]);
+    finish(blob);
+    await h.flush();
+    expect(fourthSettled).toBe(true);
+    (await first)?.release(); (await second)?.release(); (await third)?.release(); (await fourth)?.release();
 });
 
 test("unmounted queued previews are skipped while a surviving duplicate still works", async () => {
@@ -93,6 +100,40 @@ test("unmounted queued previews are skipped while a surviving duplicate still wo
     await h.flush();
     expect(await canceled2).toBeNull();
     expect((await kept)?.url).toBe("blob:thumbnail-1");
+});
+
+test("one hundred cold previews all receive derivatives without overload fallback", async () => {
+    const h = harness();
+    let settled = 0;
+    const requests = Array.from({ length: 100 }, (_, index) => h.cache.acquire({ ...request, storageKey: `image:cold-${index}` }).then(value => { settled++; return value; }));
+    await Promise.resolve();
+    expect(settled).toBe(0);
+    expect(h.generated).toHaveLength(0);
+    expect(h.scheduled).toHaveLength(1);
+    await h.flush(3000);
+    const leases = await Promise.all(requests);
+    expect(leases.filter(Boolean)).toHaveLength(100);
+    expect(h.generated).toHaveLength(100);
+    expect(new Set(leases.map(lease => lease?.url)).size).toBe(100);
+    leases.forEach(lease => lease?.release());
+    expect(h.revoked).toHaveLength(100);
+});
+
+test("waiting previews abort without reading blobs and employee changes drain pending admissions", async () => {
+    const h = harness({ limit: 1 });
+    const first = h.cache.acquire(request);
+    const controller = new AbortController();
+    const canceled = h.cache.acquire({ ...request, storageKey: "image:waiting-abort" }, controller.signal);
+    const waiting = h.cache.acquire({ ...request, storageKey: "image:waiting-owner" });
+    controller.abort();
+    expect(await canceled).toBeNull();
+    expect(h.generated).toEqual([]);
+    h.switchEmployee();
+    await h.flush();
+    expect(await first).toBeNull();
+    expect(await waiting).toBeNull();
+    expect(h.generated).toEqual([]);
+    expect(h.stored.size).toBe(0);
 });
 
 test("sixty canceled queued previews free admission for sixty requests at the next zoom tier", async () => {
@@ -126,7 +167,10 @@ test("queue pruning retains a shared job while any consumer is still interested"
     const kept = h.cache.acquire(request);
     firstController.abort();
 
-    expect(await h.cache.acquire({ ...request, storageKey: "image:over-budget" })).toBeNull();
+    const overBudgetAbort = new AbortController();
+    const overBudget = h.cache.acquire({ ...request, storageKey: "image:over-budget" }, overBudgetAbort.signal);
+    overBudgetAbort.abort();
+    expect(await overBudget).toBeNull();
     await h.flush();
     expect(await canceled).toBeNull();
     expect((await kept)?.url).toBe("blob:thumbnail-1");

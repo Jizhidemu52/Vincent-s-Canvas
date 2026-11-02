@@ -36,6 +36,16 @@ export type QueuedTaskProgress = {
     retryAfterSeconds: number | null;
 };
 export type QueuedTask = { prompt?: string; userInput?: PromptInputData; optimized?: boolean; id: string; requestId: string; operationType?: string; attempts?: number; status: string; stage?: string; errorCode?: string | null; upstreamTaskId?: string | null; submissionStartedAt?: string | null; resultUrls: string[]; failureReason: string | null; createdAt?: string; updatedAt?: string; userId?: string; ownerUserId?: string; parameters?: Record<string, unknown> };
+
+/** The server snapshot keeps exclusion text out of the editable/replay prompt. */
+export function imageTaskPrompts(task: Pick<QueuedTask, "prompt" | "parameters">, fallback = ""): { prompt: string; submittedPrompt?: string } {
+    const snapshot = task.parameters?.promptExclusions;
+    if (snapshot && typeof snapshot === "object" && "sourcePrompt" in snapshot && "submittedPrompt" in snapshot
+        && typeof snapshot.sourcePrompt === "string" && typeof snapshot.submittedPrompt === "string" && snapshot.submittedPrompt === task.prompt) {
+        return { prompt: snapshot.sourcePrompt, submittedPrompt: snapshot.submittedPrompt };
+    }
+    return { prompt: task.prompt ?? fallback, submittedPrompt: undefined };
+}
 export class QueuedTaskPausedError extends Error {
     readonly taskId: string;
     readonly canRecover: boolean;
@@ -127,7 +137,7 @@ export function createImageTaskRequests(input: {
     } satisfies Omit<TaskSubmission, "promptInput"> & { promptInput?: PromptInputData }));
 }
 
-export async function requestQueuedImages(input: { modelId: string; resolvedModel?: PublicModel; prompt: string; promptInput?: PromptInputData; onOptimizing?: () => void; onCompiled?: (prompt: string, optimized: boolean) => void; count: number; operationType: ImageOperationType; tool?: string; parameters?: Record<string, unknown>; draft?: GenerationDraftInput; references?: ReferenceImage[]; requestId?: string; signal?: AbortSignal; cancelOnAbort?: () => boolean; onSubmissionStarted?: () => void | Promise<void>; onSubmitted?: (taskIds: string[]) => void | Promise<void> }) {
+export async function requestQueuedImages(input: { modelId: string; resolvedModel?: PublicModel; prompt: string; promptInput?: PromptInputData; onOptimizing?: () => void; onCompiled?: (prompt: string, optimized: boolean, submittedPrompt?: string) => void; count: number; operationType: ImageOperationType; tool?: string; parameters?: Record<string, unknown>; draft?: GenerationDraftInput; references?: ReferenceImage[]; requestId?: string; signal?: AbortSignal; cancelOnAbort?: () => boolean; onSubmissionStarted?: () => void | Promise<void>; onSubmitted?: (taskIds: string[]) => void | Promise<void> }) {
     input.signal?.throwIfAborted();
     const ownerId = useUserStore.getState().user?.id;
     if (!ownerId) throw new Error("当前账号不可用");
@@ -191,13 +201,13 @@ export async function requestQueuedImages(input: { modelId: string; resolvedMode
                 signal: input.signal,
                 });
                 if (typeof result?.task?.id !== "string" || !result.task.id.trim()) throw new Error("服务器未返回任务编号");
-                if (result.task.prompt !== undefined) input.onCompiled?.(result.task.prompt, result.task.optimized === true);
+                if (result.task.prompt !== undefined) { const prompts = imageTaskPrompts(result.task); input.onCompiled?.(prompts.prompt, result.task.optimized === true, prompts.submittedPrompt); }
                 return result;
             } catch (error) {
                 if (error instanceof QueuedTaskHttpError && error.submissionRejected) throw error;
                 // Both the optimizer and image submission are looked up; neither POST is replayed.
                 const [original] = await Promise.all([getQueuedTaskByRequestId(task.requestId).catch(() => null), input.promptInput ? getPromptCompilation(task.requestId).catch(() => null) : Promise.resolve(null)]);
-                if (original?.id) { input.onCompiled?.(original.prompt || input.prompt, original.optimized === true); return { task: original }; }
+                if (original?.id) { const prompts = imageTaskPrompts(original, input.prompt); input.onCompiled?.(prompts.prompt, original.optimized === true, prompts.submittedPrompt); return { task: original }; }
                 throw new QueuedTaskSubmissionUncertainError(task.requestId, undefined, error);
             }
         }),
@@ -212,7 +222,7 @@ export async function requestQueuedImages(input: { modelId: string; resolvedMode
         const tasks = await waitForTasks(ids, input.signal, undefined, true);
         const failed = tasks.find((task) => task.status === "failed" || task.status === "cancelled");
         if (failed) throw new QueuedTaskFailedError(failed);
-        return tasks.flatMap((task) => task.resultUrls.map((dataUrl) => ({ id: nanoid(), dataUrl, sourceTaskId: task.id, prompt: task.prompt || input.prompt, userInput: task.userInput || input.promptInput, optimized: task.optimized === true })));
+        return tasks.flatMap((task) => task.resultUrls.map((dataUrl) => ({ id: nanoid(), dataUrl, sourceTaskId: task.id, ...imageTaskPrompts(task, input.prompt), userInput: task.userInput || input.promptInput, optimized: task.optimized === true })));
     } catch (error) {
         if (input.signal?.aborted && (input.cancelOnAbort?.() ?? true)) await cancelTasks(ids);
         throw error;
@@ -221,7 +231,7 @@ export async function requestQueuedImages(input: { modelId: string; resolvedMode
     }
 }
 
-export async function requestQueuedImageBatch(input: { modelId: string; resolvedModel?: PublicModel; prompt: string; promptInput?: PromptInputData; onOptimizing?: () => void; onCompiled?: (prompt: string, optimized: boolean) => void; parameters?: Record<string, unknown>; files: Array<{ file: File; title: string }>; onSubmissionStarted?: (requestId: string, items: Array<{ itemIndex: number }>) => void | Promise<void>; signal?: AbortSignal; onSubmitted?: (batchId: string) => void; onProgress?: (items: QueuedBatchItem[]) => void }) {
+export async function requestQueuedImageBatch(input: { modelId: string; resolvedModel?: PublicModel; prompt: string; promptInput?: PromptInputData; onOptimizing?: () => void; onCompiled?: (prompt: string, optimized: boolean, submittedPrompt?: string) => void; parameters?: Record<string, unknown>; files: Array<{ file: File; title: string }>; onSubmissionStarted?: (requestId: string, items: Array<{ itemIndex: number }>) => void | Promise<void>; signal?: AbortSignal; onSubmitted?: (batchId: string) => void; onProgress?: (items: QueuedBatchItem[]) => void }) {
     if (!input.files.length || input.files.length > 100) throw new Error("每批请选择 1–100 张图片，每张独立生成 1 张结果。");
     const ownerId = useUserStore.getState().user?.id;
     if (!ownerId) throw new Error("当前账号不可用");
@@ -251,7 +261,7 @@ export async function requestQueuedImageBatch(input: { modelId: string; resolved
     const result = await request<{
         prompt?: string; optimized?: boolean;
         batchId: string;
-        tasks: Array<{ id: string; itemIndex: number }>;
+        tasks: Array<{ id: string; itemIndex: number; prompt?: string; parameters?: Record<string, unknown> }>;
         failures: QueuedBatchFailure[];
     }>("/api/tasks/batch", {
         method: "POST",
@@ -274,7 +284,7 @@ export async function requestQueuedImageBatch(input: { modelId: string; resolved
         if (original && original.submissionComplete !== false) return original;
         throw new QueuedTaskSubmissionUncertainError(requestId, undefined, error);
     });
-    if (result.prompt !== undefined) input.onCompiled?.(result.prompt, result.optimized === true);
+    if (result.prompt !== undefined) { const prompts = imageTaskPrompts(result.tasks.find(task => task.parameters?.promptExclusions) || { prompt: result.prompt }); input.onCompiled?.(prompts.prompt, result.optimized === true, prompts.submittedPrompt); }
     const remapped = restoreBatchItemIndices(uploadedItems, result.tasks, result.failures);
     const itemIndexByTaskId = new Map(remapped.tasks.map((task) => [task.id, task.itemIndex]));
     const failures = [...uploadFailures, ...remapped.failures];
@@ -523,7 +533,14 @@ export async function waitForTasks(ids: string[], signal?: AbortSignal, onPoll?:
 }
 
 async function cancelTasks(ids: string[]) {
-    await Promise.allSettled(ids.map((id) => request<void>(`/api/tasks/${id}/cancel`, { method: "POST" })));
+    const results = await Promise.allSettled(ids.map(id => cancelQueuedTask(id)));
+    const unresolved = results.findIndex(result => result.status === "rejected" || result.value.status !== "cancelled");
+    if (unresolved >= 0) {
+        const outcome = results[unresolved]!;
+        const error = new QueuedTaskSubmissionUncertainError(outcome.status === "fulfilled" ? outcome.value.requestId : "", ids[unresolved], outcome.status === "rejected" ? outcome.reason : undefined);
+        error.message = "已停止本页等待，但上游任务未确认取消，仍可能完成并产生费用；请查询原任务，不要重复生成。";
+        throw error;
+    }
 }
 
 async function refreshSessionBalance() {

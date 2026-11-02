@@ -86,7 +86,7 @@ describe("canvas node graph copy", () => {
         expect(child!.id).not.toBe("child");
         expect(root!.id).not.toBe(child!.id);
         expect(result.nodes.map(item => item.position)).toEqual([{ x: 36, y: 46 }, { x: 136, y: 46 }]);
-        expect(result.nodes.map(item => item.title)).toEqual(["root Copy", "child Copy"]);
+        expect(result.nodes.map(item => item.title)).toEqual(["root 副本", "child 副本"]);
         expect(root!.metadata).toMatchObject({ content: "blob:root", storageKey: "image:root", batchChildIds: [child!.id], primaryImageId: child!.id });
         expect(child!.metadata?.batchRootId).toBe(root!.id);
         expect(result.connections).toHaveLength(1);
@@ -110,11 +110,11 @@ describe("canvas node graph copy", () => {
         expect(rootOnly.nodes[0]!.metadata?.primaryImageId).toBeUndefined();
     });
 
-    test("an empty or stale selection produces no graph and repeated copies do not append Copy again", () => {
+    test("an empty or stale selection produces no graph and repeated copies do not append the copy suffix again", () => {
         expect(copyCanvasNodeGraph(nodes, connections, groups, new Set(["missing"]))).toEqual({ nodes: [], connections: [], groups: [] });
         const first = cloneCanvasNodeGraph({ nodes: [node("one")], connections: [] }, { x: 36, y: 36 });
         const second = cloneCanvasNodeGraph(first, { x: 36, y: 36 });
-        expect(second.nodes[0]!.title).toBe("one Copy");
+        expect(second.nodes[0]!.title).toBe("one 副本");
         expect(second.nodes[0]!.id).not.toBe(first.nodes[0]!.id);
     });
 

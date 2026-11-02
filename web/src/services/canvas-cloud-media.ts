@@ -5,6 +5,7 @@ import { readMediaSource, readUploadedMedia, rememberUploadedMedia, serverMediaI
 import { portableCanvasMedia, type PortableMediaResolver } from "@/lib/canvas/canvas-portable-media";
 import type { CanvasProject } from "@/stores/canvas/use-canvas-store";
 import { decodeCanvasProject, encodeCanvasProject } from "@/lib/canvas/canvas-project-codec";
+import { isCanvasStorageQuotaError } from "@/lib/canvas/canvas-storage-capacity";
 
 const inFlight = new Map<string, Promise<string>>();
 export function ensureCloudMedia(owner: string, input: Parameters<PortableMediaResolver>[0], metadata: Record<string, unknown> = {}) {
@@ -30,7 +31,8 @@ export function ensureCloudMedia(owner: string, input: Parameters<PortableMediaR
         // Local storage keys are immutable and reused by assets, current nodes and undo snapshots.
         const id = await uploadServerAsset(file, metadata, { expectedOwnerId: owner, ...(input.storageKey ? { clientReferenceId: `canvas:${input.storageKey}` } : {}) });
         const url = `/api/assets/${id}/content`;
-        await rememberUploadedMedia(owner, key, url);
+        try { await rememberUploadedMedia(owner, key, url); }
+        catch (error) { if (!isCanvasStorageQuotaError(error)) throw error; }
         return url;
     })().finally(() => inFlight.delete(flightKey));
     inFlight.set(flightKey, pending);

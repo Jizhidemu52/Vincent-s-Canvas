@@ -6,7 +6,10 @@ import type { PreviewImage } from "@/hooks/use-image-preview";
 import type { ImageThumbnailLease } from "@/lib/image-thumbnail-cache";
 
 const code = ts.transpileModule(readFileSync(new URL("../src/hooks/use-image-preview.ts", import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText;
-function harness(thumbnail: () => Promise<ImageThumbnailLease | null>) {
+function harness(
+    thumbnail: () => Promise<ImageThumbnailLease | null>,
+    serverThumbnail = async (_url: string, _signal: AbortSignal): Promise<ImageThumbnailLease> => ({ url: "blob:server-thumbnail", release() {} }),
+) {
     let state: any, effect: () => void | (() => void), cleanup: void | (() => void);
     let originalCalls = 0, thumbnailCalls = 0;
     const module = { exports: {} as any };
@@ -15,6 +18,11 @@ function harness(thumbnail: () => Promise<ImageThumbnailLease | null>) {
         "@/services/image-storage": { resolveImageUrl: async () => { originalCalls++; return "blob:original"; } },
         "@/services/image-thumbnails": { acquireImageThumbnail: () => { thumbnailCalls++; return thumbnail(); } },
         "@/lib/canvas/canvas-image-thumbnail": { canvasServerThumbnailUrl },
+        "@/stores/use-user-store": { useUserStore: (selector: (state: { owner: string }) => unknown) => selector({ owner: "employee-a:user" }) },
+        "@/services/server-image-thumbnails": {
+            serverImagePreviewOwner: (state: { owner: string }) => state.owner,
+            acquireServerImageThumbnail: serverThumbnail,
+        },
     };
     new Function("require", "module", "exports", code)((name: string) => dependencies[name], module, module.exports);
     return {
@@ -34,10 +42,38 @@ test("generated result previews share derivatives without altering the original"
     expect(h.state()).toEqual({ url: "blob:thumbnail", originalCalls: 0, thumbnailCalls: 1 });
     expect(JSON.stringify(original)).toBe(before); h.unmount(); expect(released).toBe(1);
 });
-test("server images resolve directly to authorized thumbnail URLs without loading original blobs", async () => {
-    const h = harness(async () => null);
+test("server images use the authorized resolver lease without loading original blobs", async () => {
+    let requested = "", released = 0;
+    const h = harness(async () => null, async (url, signal) => {
+        requested = url;
+        expect(signal.aborted).toBe(false);
+        return { url: "blob:authorized-thumbnail", release: () => { released++; } };
+    });
     await h.run({ ...original, dataUrl: "/api/assets/10000000-0000-4000-8000-000000000001/content" });
-    expect(h.state()).toEqual({ url: "/api/assets/10000000-0000-4000-8000-000000000001/thumb?w=256", originalCalls: 0, thumbnailCalls: 0 });
+    expect(requested).toBe("/api/assets/10000000-0000-4000-8000-000000000001/thumb?w=256");
+    expect(h.state()).toEqual({ url: "blob:authorized-thumbnail", originalCalls: 0, thumbnailCalls: 0 });
+    h.unmount(); expect(released).toBe(1);
+});
+test("pending or failed cloud derivatives remain placeholders and never fall back to originals", async () => {
+    const pending = Promise.withResolvers<ImageThumbnailLease>();
+    const h = harness(async () => null, () => pending.promise);
+    await h.run({ ...original, dataUrl: "/api/assets/10000000-0000-4000-8000-000000000001/content" });
+    expect(h.state()).toEqual({ url: "", originalCalls: 0, thumbnailCalls: 0 });
+    pending.reject(new Error("preview generation timeout"));
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    expect(h.state()).toEqual({ url: "", originalCalls: 0, thumbnailCalls: 0 });
+    h.unmount();
+});
+test("a cloud preview completing after cancellation releases its lease without installing it", async () => {
+    const pending = Promise.withResolvers<ImageThumbnailLease>();
+    let signal: AbortSignal | undefined, released = 0;
+    const h = harness(async () => null, (_url, requestSignal) => { signal = requestSignal; return pending.promise; });
+    await h.run({ ...original, dataUrl: "/api/assets/10000000-0000-4000-8000-000000000001/content" });
+    h.unmount(); expect(signal?.aborted).toBe(true);
+    pending.resolve({ url: "blob:late-server-thumbnail", release: () => { released++; } });
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    expect(h.state()).toEqual({ url: "", originalCalls: 0, thumbnailCalls: 0 });
+    expect(released).toBe(1);
 });
 test("offscreen history remains unopened; missing thumbnail support falls back to originals", async () => {
     const h = harness(async () => null); await h.run(original, false);

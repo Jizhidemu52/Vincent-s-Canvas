@@ -12,6 +12,9 @@ import { CanvasNodeType } from "@/types/canvas";
 import { canvasGenerationRunsForNodes } from "@/lib/canvas/canvas-project-async-lifecycle";
 import { describeCanvasHistoryChange } from "@/lib/canvas/canvas-history-description";
 import { mergeCanvasGenerationHistory } from "@/lib/canvas/canvas-generation-history";
+import { canvasHistoryContentChanged } from "@/pages/canvas/use-canvas-history";
+import { nanoid } from "nanoid";
+import { normalizeCanvasSelectedNodeIds } from "@/lib/canvas/canvas-view-state";
 
 // Run the actual editor callbacks, restore layout effect, and autosave effect.
 // The harness replaces only React setters/timers and unrelated generation/UI services.
@@ -57,7 +60,8 @@ function editor(initial = project(), previous = frame(initial), loadUndoAction: 
     const pendingHistoryEntryRef = { current: null as CanvasHistorySnapshot | null };
     const historyPausedRef = { current: false };
     const historyCommitTimerRef = { current: null as number | null };
-    const agentUndoRecordRef = { current: null as CanvasAgentUndoRecord | null };
+    const agentUndoRecordsRef = { current: new Map<string, CanvasAgentUndoRecord[]>() };
+    const latestAgentTurnRef = { current: null as string | null };
     const selectedNodeIdsRef = { current: new Set<string>() };
     const generationRequestsRef = { current: new Map<string, { targetNodeId: string; originNodeId: string; runningNodeId: string }>() };
     const timers = new Map<number, () => void>();
@@ -66,7 +70,7 @@ function editor(initial = project(), previous = frame(initial), loadUndoAction: 
     const stopped: unknown[][] = [];
     let queuedSave: { patch: CanvasHistorySnapshot & { history: CanvasProject["history"] } } | null = null;
     const scope = {
-        uiText,
+        uiText, nanoid, options: {}, canvasHistoryContentChanged, normalizeCanvasSelectedNodeIds,
         React, useCallback: (callback: unknown) => callback, applyCanvasAgentOps, canvasGenerationRunsForNodes,
         describeCanvasHistoryChange, mergeCanvasGenerationHistory, onHistoryAction: undefined, beforeHistoryAction: undefined,
         stopGenerationByRunningId: (...args: unknown[]) => stopped.push(args),
@@ -75,7 +79,7 @@ function editor(initial = project(), previous = frame(initial), loadUndoAction: 
             return loadUndoAction();
         },
         projectId: initial.id, projectTitle: initial.title, projectLoaded: true, usePerformanceScenario: false, batchEditRunning: false, runningNodeId: null,
-        historyRef, lastHistoryRef, applyingHistoryRef, pendingHistoryEntryRef, historyPausedRef, historyCommitTimerRef, agentUndoRecordRef, selectedNodeIdsRef, generationRequestsRef,
+        historyRef, lastHistoryRef, applyingHistoryRef, pendingHistoryEntryRef, historyPausedRef, historyCommitTimerRef, agentUndoRecordsRef, latestAgentTurnRef, selectedNodeIdsRef, generationRequestsRef,
         nodesRef: { get current() { return live.nodes; }, set current(nodes) { live = { ...live, nodes }; } },
         connectionsRef: { get current() { return live.connections; }, set current(connections) { live = { ...live, connections }; } },
         viewportRef: { get current() { return live.viewport; }, set current(viewport) { live = { ...live, viewport }; } },
@@ -103,7 +107,7 @@ function editor(initial = project(), previous = frame(initial), loadUndoAction: 
         transientTimeoutsRef: { current: { clearAll() {} } }, rafRef: { current: null }, connectionPreviewFrameRef: { current: null }, cancelAnimationFrame() {},
     };
     const actions = new Function("scope", `const { ${Object.keys(scope).join(", ")} } = scope;\n${commandCode}`)(scope) as {
-        applyAgentOps: (ops: CanvasAgentOp[]) => CanvasAgentSnapshot; undoAgentOps: () => Promise<CanvasAgentSnapshot | null>;
+        applyAgentOps: (ops: CanvasAgentOp[], options?: { turnId?: string }) => CanvasAgentSnapshot; undoAgentOps: (turnId?: string) => Promise<CanvasAgentSnapshot | null>;
         undoCanvas: () => void; redoCanvas: () => void; flushPendingHistory: () => void; createHistoryEntry: () => CanvasHistorySnapshot;
         canvasHistoryForSave: unknown;
     };
@@ -113,9 +117,9 @@ function editor(initial = project(), previous = frame(initial), loadUndoAction: 
     };
     return {
         ...actions, historyRef, applyingHistoryRef, generationRequestsRef, warnings, successes, errors, timers, stopped,
-        live: () => live, canUndoAgent: () => canUndoAgent, undoRecord: () => agentUndoRecordRef.current,
+        live: () => live, canUndoAgent: () => canUndoAgent, undoRecord: () => agentUndoRecordsRef.current.get(latestAgentTurnRef.current || "")?.at(-1) || null,
         edit: (patch: Partial<CanvasProject>) => { live = { ...live, ...patch }; },
-        clearAgentPatch: () => { agentUndoRecordRef.current = null; canUndoAgent = false; },
+        clearAgentPatch: () => { agentUndoRecordsRef.current.clear(); latestAgentTurnRef.current = null; canUndoAgent = false; },
         unmount: () => runEffect("unmount")(),
         undo: () => { actions.undoCanvas(); runEffect("restore"); },
         redo: () => { actions.redoCanvas(); runEffect("restore"); },
@@ -275,14 +279,29 @@ describe("agent inverse and ordinary history integration", () => {
         expect(app.live().nodes[0]).toMatchObject({ title: "User during load", width: 100 });
     });
 
+    test("one turn reverses tool batches without capturing manual edits between them", async () => {
+        const app = editor();
+        app.applyAgentOps([{ type: "update_node", id: "one", patch: { title: "First tool", width: 200 } }], { turnId: "first" });
+        app.edit({ nodes: [{ ...app.live().nodes[0], title: "Manual between tools" }, app.live().nodes[1]] });
+        app.applyAgentOps([{ type: "update_node", id: "one", patch: { title: "Second tool", height: 300 } }], { turnId: "first" });
+        app.applyAgentOps([{ type: "update_node", id: "two", patch: { title: "Later turn" } }], { turnId: "second" });
+        const result = await app.undoAgentOps("first");
+        expect(app.live().nodes[0]).toMatchObject({ title: "Manual between tools", width: 100, height: 100 });
+        expect(app.live().nodes[1].title).toBe("Later turn");
+        expect(result?.undoReport?.conflicts).toHaveLength(1);
+        await app.undoAgentOps("second");
+        expect(app.live().nodes[1].title).toBe("two");
+        expect(app.live().nodes[0].title).toBe("Manual between tools");
+    });
+
     test("a newer batch or project reset invalidates an in-flight undo click", async () => {
         for (const change of ["batch", "project"]) {
             const loading = Promise.withResolvers<typeof undoAction>();
             const base = project();
             const app = editor(base, frame(base), () => loading.promise);
-            app.applyAgentOps([{ type: "update_node", id: "one", patch: { title: "First batch" } }]);
+            app.applyAgentOps([{ type: "update_node", id: "one", patch: { title: "First batch" } }], { turnId: "same-turn" });
             const pending = app.undoAgentOps();
-            if (change === "batch") app.applyAgentOps([{ type: "update_node", id: "one", patch: { width: 200 } }]);
+            if (change === "batch") app.applyAgentOps([{ type: "update_node", id: "one", patch: { width: 200 } }], { turnId: "same-turn" });
             else app.clearAgentPatch();
             const beforeResolution = app.live();
             const beforeHistory = app.historyRef.current;
@@ -293,7 +312,7 @@ describe("agent inverse and ordinary history integration", () => {
             expect(app.successes).toHaveLength(0);
             if (change === "batch") {
                 await app.undoAgentOps();
-                expect(app.live().nodes[0]).toMatchObject({ title: "First batch", width: 100 });
+                expect(app.live().nodes[0]).toMatchObject({ title: "one", width: 100 });
             }
         }
     });

@@ -36,10 +36,11 @@ export function createImageSequence(source: CanvasNodeData, steps: readonly Read
 
 /** Bind a result without destroying any user-authored dependency wires. */
 export function prepareImageSequenceStep(graph: Graph, configId: string, inputId: string): Graph {
+    const oldInputs = new Set(graph.connections.filter(edge => edge.toNodeId === configId && edge.kind === "sequence-input").map(edge => edge.fromNodeId).concat(inputId));
     return {
         nodes: graph.nodes.map(node => node.id !== configId ? node : { ...node, metadata: { ...node.metadata,
-            composerContent: `@[node:${inputId}]\n${imageSequencePrompt(node)}`, generationMode: "image", generationType: "edit", count: 1, configImageInputMode: "combined",
-            excludedConnectedImageReferenceKeys: [], imageReferenceOrder: [],
+            composerContent: `@[node:${inputId}]\n${(node.metadata?.composerContent ?? node.metadata?.prompt ?? "").replace(/@\[node:([^\]]+)\]\n?/g, (token, id) => oldInputs.has(id) ? "" : token).trim()}`, generationMode: node.metadata?.generationMode || "image", generationType: "edit", count: 1, configImageInputMode: "combined",
+            excludedConnectedImageReferenceKeys: [], imageReferenceOrder: [`node:${inputId}`, ...(node.metadata?.imageReferenceOrder || []).filter(key => !oldInputs.has(key.replace(/^node:/, "")))],
         } }),
         connections: [...graph.connections.filter(edge => !(edge.toNodeId === configId && edge.kind === "sequence-input")),
             ...(graph.connections.some(edge => edge.fromNodeId === inputId && edge.toNodeId === configId && edge.kind !== "sequence-input") ? [] : [{ id: `sequence-input:${configId}`, fromNodeId: inputId, toNodeId: configId, kind: "sequence-input" as const }])],
@@ -48,6 +49,7 @@ export function prepareImageSequenceStep(graph: Graph, configId: string, inputId
 
 type Runtime = {
     signal: AbortSignal;
+    onlyStepId?: string;
     getGraph: () => Graph;
     getGroup: () => CanvasNodeGroup | undefined;
     update: (group: CanvasNodeGroup) => void;
@@ -72,37 +74,41 @@ export async function runImageSequence(runtime: Runtime) {
         for (const step of sequence.steps) {
             const node = initial.nodes.find(item => item.id === step.configNodeId);
             if (node?.type !== CanvasNodeType.Config) throw new Error("流程配置已移除，请检查连线");
-            if ((node.metadata?.generationMode || "image") !== "image" || !imageSequencePrompt(node)) throw new Error(`${node.title}：请使用图片模式并填写提示词`);
+            const mode = node.metadata?.generationMode || "image";
+            if (!["image", "text", "video"].includes(mode) || (mode !== "image" && sequence.steps.some(item => item.inputConfigId === node.id)) || !imageSequencePrompt(node)) throw new Error(`${node.title}：中间步骤使用图片，末步可选文本或视频；请填写提示词`);
         }
         const topology = JSON.stringify({ sourceNodeId: sequence.sourceNodeId, steps: sequence.steps.map(({ configNodeId, inputConfigId }) => ({ configNodeId, ...(inputConfigId ? { inputConfigId } : {}) })) });
         sequence.status = "running"; sequence.error = undefined; publish();
         for (const [index, step] of sequence.steps.entries()) {
+            if (runtime.onlyStepId && step.configNodeId !== runtime.onlyStepId) continue;
             activeIndex = index;
             if (signal.aborted || !getGroup()) break;
             const graph = getGraph();
+            const mode = graph.nodes.find(node => node.id === step.configNodeId)?.metadata?.generationMode || "image";
+            const usable = (node?: CanvasNodeData) => mode === "image" ? hasImage(node) : Boolean(node && node.type === mode && node.metadata?.status === "success" && (node.metadata.content || node.metadata.storageKey));
             if (JSON.stringify(resolveImageWorkflow(graph, sequence.steps[0]!.configNodeId)) !== topology) throw new Error("工作流连线已改变，后续步骤已停止，请按新连线重新运行");
             const inputId = step.inputConfigId ? sequence.steps.find(item => item.configNodeId === step.inputConfigId)?.outputNodeId : sequence.sourceNodeId;
             if (!inputId) throw new Error("上游节点尚未产出图片，后续步骤未提交");
             if (!hasImage(graph.nodes.find(node => node.id === inputId))) throw new Error("上一步图片已移除或不可用，无法继续");
             if (step.status === "success") {
-                if (!hasImage(graph.nodes.find(node => node.id === step.outputNodeId))) throw new Error("已完成的结果图已移除，请恢复图片或创建新流程");
+                if (!usable(graph.nodes.find(node => node.id === step.outputNodeId))) throw new Error("已完成的结果已移除，请恢复结果或重跑本步");
                 continue;
             }
             // An interrupted attempt may already have completed on the server. Prefer its output.
             const outputs = graph.connections.filter(edge => edge.kind === "generation-output" && edge.fromNodeId === step.configNodeId).map(edge => edge.toNodeId);
             const attemptOutputs = graph.nodes.filter(node => outputs.includes(node.id) && !step.previousOutputIds?.includes(node.id));
-            const recovered = step.status !== "idle" ? attemptOutputs.find(node => node.metadata?.status === "success" && hasImage(node)) : undefined;
+            const recovered = step.status !== "idle" && step.status !== "stale" ? attemptOutputs.find(node => usable(node)) : undefined;
             if (recovered) {
                 step.outputNodeId = recovered.id; step.status = "success"; publish(); continue;
             }
-            if (step.status === "running" && !attemptOutputs.some(node => node.metadata?.imageTask)) throw new Error("上次请求状态尚未确认，已阻止重复提交。请先检查该步骤的结果或任务记录");
+            if (step.status === "running" && !attemptOutputs.some(node => node.metadata?.imageTask || node.metadata?.mediaTask)) throw new Error("上次请求状态尚未确认，已阻止重复提交。请先检查该步骤的结果或任务记录");
             if (step.status !== "running" && !attemptOutputs.some(node => node.metadata?.imageTask)) step.previousOutputIds = outputs;
             step.status = "running"; sequence.error = undefined; publish();
             prepare(step.configNodeId, inputId);
             if (signal.aborted) break;
             const result = await generate(step.configNodeId);
-            const success = result?.mode === "image" && result.outputs.length === 1 && result.outputs[0]?.status === "success" ? result.outputs[0] : undefined;
-            if (success && hasImage(getGraph().nodes.find(node => node.id === success.nodeId))) {
+            const success = result?.mode === mode && result.outputs.length === 1 && result.outputs[0]?.status === "success" ? result.outputs[0] : undefined;
+            if (success && usable(getGraph().nodes.find(node => node.id === success.nodeId))) {
                 step.outputNodeId = success.nodeId; step.status = "success"; publish();
             } else if (!signal.aborted) {
                 throw new Error(result?.outputs.find(output => output.status === "failed")?.error || "本步未得到唯一的可用图片，后续步骤未提交");
@@ -113,7 +119,7 @@ export async function runImageSequence(runtime: Runtime) {
                 if (!dispatched) step.status = "idle";
             }
         }
-        sequence.status = signal.aborted ? "stopped" : "success";
+        sequence.status = signal.aborted || sequence.steps.some(step => step.status !== "success") ? "stopped" : "success";
     } catch (error) {
         sequence.status = signal.aborted ? "stopped" : "failed";
         sequence.error = error instanceof Error ? error.message : "连续改图失败";

@@ -5,6 +5,7 @@ import { nanoid } from "nanoid";
 import { NODE_DEFAULT_SIZE } from "@/constant/canvas";
 import type { NodeGenerationContext } from "@/components/canvas/canvas-node-generation";
 import { fitNodeSize, nodeSizeFromRatio } from "@/lib/canvas/canvas-node-size";
+import { placeCanvasImageOutputs } from "@/lib/canvas/canvas-image-output-placement";
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
 import { getQueuedTask, getQueuedTaskByRequestId, QueuedTaskFailedError, QueuedTaskPausedError, QueuedTaskSubmissionUncertainError, recoverQueuedMedia } from "@/services/api/generation-tasks";
 import { requestVideoGeneration, storeGeneratedVideo } from "@/services/api/video";
@@ -110,7 +111,7 @@ export async function runCanvasMediaGeneration(input: Generation): Promise<Canva
     const parent = source?.position || { x: 0, y: 0 };
     const output: CanvasNodeData = { id: outputId, type: mode === "video" ? CanvasNodeType.Video : CanvasNodeType.Audio,
         title: context.prompt.slice(0, 32) || (mode === "video" ? "Generated Video" : "Generated Audio"),
-        position: empty ? source.position : { x: parent.x + (source?.width || spec.width) + 96, y: parent.y + (mode === "audio" ? ((source?.height || spec.height) - spec.height) / 2 : 0) },
+        position: empty ? source.position : placeCanvasImageOutputs(input.nodes.current, context.referenceImages.map(image => input.nodes.current.find(node => node.id === image.id)).filter((node): node is CanvasNodeData => Boolean(node)).concat(source ? [source] : []), spec, parent, 96),
         width: empty ? source.width : spec.width, height: empty ? source.height : spec.height,
         metadata: { prompt: context.prompt, generationOrigin: input.origin || { sourceNodeId: nodeId, runId: nanoid(), mode }, systemPrompt: config.systemPrompt, status: "loading", ...configMetadata(config, mode, context) } };
     flushSync(() => input.setNodes(previous => empty ? previous.map(node => node.id === nodeId ? { ...node, ...output } : node)
@@ -138,7 +139,7 @@ export async function runCanvasMediaGeneration(input: Generation): Promise<Canva
 }
 
 /** Query/recover the recorded task only. A missing response or a 404 never authorizes a replacement POST. */
-export async function recoverCanvasMediaTask(nodeId: string, context: MediaCanvas, signal?: AbortSignal): Promise<CanvasGenerationOutput | null> {
+export async function recoverCanvasMediaTask(nodeId: string, context: MediaCanvas, signal?: AbortSignal, observationOnly = false): Promise<CanvasGenerationOutput | null> {
     const node = findNode(context, nodeId);
     const binding = node?.metadata?.mediaTask;
     if (!node || !binding) return null;
@@ -148,6 +149,8 @@ export async function recoverCanvasMediaTask(nodeId: string, context: MediaCanva
         signal?.throwIfAborted();
         const task = binding.taskId ? await getQueuedTask(binding.taskId, signal) : await getQueuedTaskByRequestId(binding.requestId, signal);
         if (!task) throw new QueuedTaskSubmissionUncertainError(binding.requestId, binding.taskId);
+        if (!task.id || (binding.taskId && task.id !== binding.taskId) || task.requestId !== binding.requestId || [task.ownerUserId, task.userId].some(owner => owner !== undefined && owner !== binding.ownerId)) throw new Error("原音视频任务标识或归属不匹配，已停止恢复。");
+        if (observationOnly && !["success", "failed", "cancelled"].includes(task.status)) return null;
         await submission.onSubmitted(task);
         if (task.status === "failed" || task.status === "cancelled") throw new QueuedTaskFailedError(task);
         const [url] = task.status === "success" ? task.resultUrls : await recoverQueuedMedia(task.id, signal);
@@ -198,7 +201,7 @@ export async function retryCanvasMediaNode(nodeId: string, context: MediaCanvas 
     finish: (targetId: string, controller: AbortController) => void; setRunning: Dispatch<SetStateAction<string | null>>;
     message: { success: (text: string) => unknown; warning: (text: string) => unknown; error: (text: string) => unknown };
 }) {
-    if (context.locks.size) return;
+    if (context.locks.has(nodeId)) return;
     context.locks.add(nodeId);
     const controller = context.start(nodeId, nodeId, nodeId);
     context.setRunning(nodeId);

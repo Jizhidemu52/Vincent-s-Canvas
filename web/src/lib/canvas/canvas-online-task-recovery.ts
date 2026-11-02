@@ -4,14 +4,20 @@ import { storeGeneratedVideo } from "@/services/api/video";
 import { storeGeneratedAudio } from "@/services/api/audio";
 import { buildAgentGeneratedMediaOps } from "@/lib/agent-direct-generation";
 import type { CanvasImageEditLineage } from "./canvas-assistant-image-edit";
+import type { CanvasImageAgentRecord } from "./canvas-image-agent";
 import type { CanvasAssistantAttachment } from "@/types/canvas";
 import { CanvasNodeType } from "@/types/canvas";
 import type { CanvasAgentOp } from "./canvas-agent-ops";
+import { restoreChatMaskResult } from "@/lib/image-agent/mask";
+import type { CanvasMaskAdaptation } from "./canvas-mask-adaptation";
 
 export type PendingOnlineAgentTask = {
     ownerId: string; projectId: string; requestId: string; taskIds?: string[];
     mode: "image" | "video" | "audio"; prompt: string; model: string;
     nodeId?: string; imageEdit?: CanvasImageEditLineage;
+    imageAgent?: CanvasImageAgentRecord;
+    signature?: string;
+    maskAdaptation?: CanvasMaskAdaptation;
 };
 
 export function pendingOnlineAgentTask(value: unknown): PendingOnlineAgentTask | null {
@@ -21,7 +27,7 @@ export function pendingOnlineAgentTask(value: unknown): PendingOnlineAgentTask |
         && ["image", "video", "audio"].includes(task.mode) ? task : null;
 }
 
-const services = { getQueuedTask, getQueuedTaskByRequestId, recoverQueuedTask, waitForTasks, uploadImage, storeGeneratedVideo, storeGeneratedAudio,
+const services = { getQueuedTask, getQueuedTaskByRequestId, recoverQueuedTask, waitForTasks, uploadImage, storeGeneratedVideo, storeGeneratedAudio, restoreChatMaskResult,
     fetch: (...args: Parameters<typeof fetch>) => fetch(...args) };
 
 /** Only query the recorded request/task. Never create replacement generation. */
@@ -32,15 +38,29 @@ export async function recoverOnlineAgentTask(pending: PendingOnlineAgentTask, po
         : [await io.getQueuedTaskByRequestId(pending.requestId, signal)];
     signal.throwIfAborted();
     const attachments: CanvasAssistantAttachment[] = [], ops: CanvasAgentOp[] = [];
+    const assertReceipt = (task: (typeof originals)[number], requestId: string, taskId?: string) => {
+        if (!task) throw new Error("原任务尚未查到或无权读取，请稍后查询；不会重复生成。");
+        if (!task.id || task.requestId !== requestId || (taskId && task.id !== taskId)) throw new Error("原任务回执身份不匹配，未接入结果；请稍后查询，不会重复生成。");
+    };
+    // Older saved requests may contain one task per output, in submission order.
+    // Validate the entire batch before any result is stored or resumed.
+    originals.forEach((original, index) => {
+        const requestId = pending.mode === "image" && originals.length > 1 && pending.requestId.endsWith(":0")
+            ? `${pending.requestId.slice(0, -2)}:${index}` : pending.requestId;
+        assertReceipt(original, requestId, pending.taskIds?.[index]);
+    });
     for (const original of originals) {
         if (!original) throw new Error("原任务尚未查到或无权读取，请稍后查询；不会重复生成。");
         let task = original;
         if (task.status === "paused") {
             if (!task.upstreamTaskId) throw new QueuedTaskPausedError(task);
             task = await io.recoverQueuedTask(task.id, signal);
+            signal.throwIfAborted();
+            assertReceipt(task, original.requestId, original.id);
         }
         if (task.status !== "success" && !["failed", "cancelled"].includes(task.status)) [task] = await io.waitForTasks([task.id], signal, undefined, true);
         signal.throwIfAborted();
+        assertReceipt(task, original.requestId, original.id);
         if (!task || task.status !== "success") throw new QueuedTaskFailedError(task || original);
         if (!task.resultUrls.length) throw new Error("原任务结果暂不可用，请稍后查询。");
         for (const [index, url] of task.resultUrls.entries()) {
@@ -54,7 +74,7 @@ export async function recoverOnlineAgentTask(pending: PendingOnlineAgentTask, po
                 ops.push({ type: "add_node", id, nodeType: CanvasNodeType.Audio, title: "生成音频", position,
                     metadata: { content: audio.url, storageKey: audio.storageKey, mimeType: audio.mimeType, prompt: pending.prompt, model: pending.model, status: "success", sourceTaskId: task.id } });
             } else {
-                const file = pending.mode === "image" ? await io.uploadImage(url) : await io.storeGeneratedVideo({ url, mimeType: "video/mp4" });
+                const file = pending.mode === "image" ? await io.uploadImage(pending.maskAdaptation ? await io.restoreChatMaskResult(pending, url) : url) : await io.storeGeneratedVideo({ url, mimeType: "video/mp4" });
                 signal.throwIfAborted();
                 attachments.push({ id, name: pending.mode === "image" ? `生成图片 ${index + 1}` : "生成视频", mediaType: pending.mode, ...file });
             }

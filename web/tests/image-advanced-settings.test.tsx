@@ -37,6 +37,16 @@ test("PNG does not submit compression and other-model settings do not leak into 
     expect(imageAdvancedParameters(value, imageModelProfile("gemini-3.1-flash-image", []))).toEqual({});
 });
 
+test("generic exclusion is transported separately and only verified MJ exposes seed", () => {
+    for (const kind of ["standard", "gpt", "gemini", "grok-image", "quality-resolution", "resolution-1k"]) {
+        const fields = imageOptionFields({ kind });
+        expect(fields.find(field => field.key === "negative_prompt")?.tip).toContain("自然语言");
+        expect(fields.some(field => field.key === "seed")).toBe(false);
+        expect(imageAdvancedParameters(options({ negative_prompt: "水印", seed: "23" }), { kind })).toEqual({ negative_prompt: "水印" });
+    }
+    expect(imageOptionFields({ kind: "midjourney-blend" }).some(field => field.key === "negative_prompt")).toBe(false);
+});
+
 test("APIMart Gemini, GPT and MJ options remain typed and image search implies text search", () => {
     expect(imageAdvancedParameters(options({ nsfw_check: "false", official_fallback: "true" }), { kind: "gpt" })).toEqual({ nsfw_check: false, official_fallback: true });
     expect(imageAdvancedParameters(options({ google_image_search: "true" }), { kind: "gemini" })).toEqual({ google_image_search: true, google_search: true });

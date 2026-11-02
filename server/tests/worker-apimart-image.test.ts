@@ -38,7 +38,8 @@ function harness(claim = true, failQuery?: () => unknown) {
     },
     fetchProviderResult: async (url: string) => { downloaded++; return { url, bytes, mimeType: "image/png" }; },
   };
-  const execute = new Function(...Object.keys(dependencies), `${code};return executeApiMartImage`)(...Object.values(dependencies));
+  const executeApiMartImage = new Function(...Object.keys(dependencies), `${code};return executeApiMartImage`)(...Object.values(dependencies));
+  const execute = (input: { prompt: string }, credentials: Record<string, string>) => executeApiMartImage(input, credentials, input.prompt);
   return { execute, statements, calls, deadline, loaded: () => loaded, downloaded: () => downloaded };
 }
 
@@ -51,6 +52,7 @@ test("Worker isolates PNG mask, persists Mark upstream ID and deadline, then yie
   expect(h.calls[0]!.maskImage.bytes).toBe(bytes);
   expect(h.calls[0]!.sourceDataUrls).toBeUndefined();
   expect(h.calls[0]!.parameters).toMatchObject({ quality: "xhigh", resolution: "4k" });
+  expect(h.calls[0]!.prompt).toBe(task.prompt);
   expect(task.upstream_task_id).toBe("provider-image-task");
   expect(task.upstream_submission_started_at).not.toBeNull();
   expect(h.downloaded()).toBe(0);

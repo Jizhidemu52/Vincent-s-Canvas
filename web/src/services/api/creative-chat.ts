@@ -4,6 +4,7 @@ import { requestToolResponse, toolResponseToInput } from "@/services/api/image";
 import { imageToDataUrl } from "@/services/image-storage";
 import type { AiConfig } from "@/stores/use-config-store";
 import type { ReferenceImage } from "@/types/image";
+import { resolveImageAgentFocus, selectImageAgentWorkingSet } from "@/lib/image-agent/focus";
 
 export function creativeChatPreviewSize(width: number, height: number) {
     if (!Number.isFinite(width) || !Number.isFinite(height) || width < 1 || height < 1) throw new Error("参考图尺寸无效");
@@ -51,17 +52,19 @@ async function createPlanningPreview(reference: ReferenceImage, signal?: AbortSi
     return { ...reference, dataUrl: preview, type: "image/jpeg", storageKey: undefined, width: size.width, height: size.height };
 }
 
-/** At most one read-only inspection then a final decision; never uploads, creates, or retries tasks. */
+/** One planning request normally suffices; an older-image lookup is optional and read-only. */
 export async function requestCreativeChatPlan(config: AiConfig, history: CreativeChatMessage[], current: CreativeChatMessage, options: CreativeChatImageSelection & { signal?: AbortSignal; onDelta?: (text: string) => void; onPhase?: (text: string) => void; selectedImageId?: string } = {}): Promise<CreativeChatPlan> {
     options.signal?.throwIfAborted();
     const catalog = buildCreativeImageCatalog(history, current);
-    const currentImageIds = new Set(buildCreativeImageCatalog([], current).map((item) => item.id));
-    const selectedImageId = options.explicitTargetImageId || options.selectedImageId || current.editTargetImageId;
+    const newCreation = options.newCreation ?? current.newCreation;
+    const focus = resolveImageAgentFocus(catalog, { focusId: options.explicitTargetImageId || options.selectedImageId || current.focusImageId || current.editTargetImageId, newCreation });
+    const selectedImageId = focus?.id;
+    const lockedImageId = options.explicitTargetImageId || (current.focusLocked ? focus?.id : undefined);
     const planningCurrent = withCreativeChatImageSelection(current, catalog, options);
     // This is a structural permission boundary, not keyword-based intent classification.
     // Textless uploads may be read and discussed, but their contents cannot authorize image execution.
     const allowImageCreation = Boolean(current.content.trim());
-    let references = resolveCreativeChatReferences(history, current, selectedImageId, catalog).filter(item => currentImageIds.has(item.id));
+    let references = resolveCreativeChatReferences(history, current, selectedImageId, catalog, { newCreation, referenceImageIds: options.referenceImageIds });
     const previewCache = new Map<string, ReferenceImage>();
     // Originals remain authoritative for editing; temporary previews never enter lineage or storage.
     const previewsFor = async (originals: ReferenceImage[]) => {
@@ -73,13 +76,7 @@ export async function requestCreativeChatPlan(config: AiConfig, history: Creativ
                 try {
                     if (!previewCache.has(reference.id)) previewCache.set(reference.id, await createPlanningPreview(reference, options.signal));
                     return previewCache.get(reference.id)!;
-                } catch (error) {
-                    options.signal?.throwIfAborted();
-                    if (currentImageIds.has(reference.id)) throw error;
-                    const entry = catalog.find((item) => item.id === reference.id);
-                    if (entry) entry.unavailableReason = "历史原图暂时无法读取；若本轮需要使用它，请重新发送图片";
-                    return undefined;
-                }
+                } catch (error) { options.signal?.throwIfAborted(); throw error; }
             }));
             previews.push(...batch.filter((preview): preview is ReferenceImage => Boolean(preview)));
         }
@@ -90,25 +87,24 @@ export async function requestCreativeChatPlan(config: AiConfig, history: Creativ
     let previews = await previewsFor(references);
     references = references.filter((item) => previews.some((preview) => preview.id === item.id));
     options.signal?.throwIfAborted();
-    const context = { catalog, selectedImageId };
+    const context = { catalog, selectedImageId, lockedImageId, newCreation, referenceImageIds: options.referenceImageIds };
     const requestOptions = {
         tool: "gpt-chat",
         chatProfile: "creative-chat" as const,
         signal: options.signal,
         onToolCallStart: (name: string) => {
-            if (name === "create_image") options.onPhase?.("正在整理图片修改要求…");
-            else if (name === "inspect_images") options.onPhase?.("正在查看相关图片…");
+            if (name === "edit_image") options.onPhase?.("正在整理图片修改要求…");
+            else if (name === "look_at_images") options.onPhase?.("正在查看较早的图片…");
         },
     };
-    let prepared = buildCreativeChatRequest(history, planningCurrent, previews, context);
+    let prepared = await buildCreativeChatRequest(history, planningCurrent, previews, context);
     let result = await requestToolResponse(config, prepared.messages, [], "auto", options.onDelta, { ...requestOptions, profileContext: prepared.profileContext });
     options.signal?.throwIfAborted();
     const inspectionIds = parseCreativeChatInspection(result, catalog);
     if (inspectionIds) {
-        // Requested images get the detail budget first, allowing text-directed return to an old branch.
-        const nextIds = inspectionIds;
-        references = nextIds.map((id) => {
-            const { name, type, dataUrl, storageKey } = catalog.find((item) => item.id === id)!;
+        const inspectedWorkingSet = selectImageAgentWorkingSet(catalog, { focusId: selectedImageId, newCreation, explicitIds: [...new Set([...inspectionIds, ...(options.referenceImageIds || [])])] });
+        const nextIds = inspectedWorkingSet.map(item => item.id);
+        references = inspectedWorkingSet.map(({ id, name, type, dataUrl, storageKey }) => {
             return { id, name, type, dataUrl, ...(storageKey ? { storageKey } : {}) };
         });
         options.onPhase?.("正在查看指定图片，确认修改对象…");
@@ -116,12 +112,14 @@ export async function requestCreativeChatPlan(config: AiConfig, history: Creativ
         references = references.filter((item) => previews.some((preview) => preview.id === item.id));
         options.signal?.throwIfAborted();
         const inspectedResult = result;
-        prepared = buildCreativeChatRequest(history, planningCurrent, previews, context);
+        const initialMessages = prepared.messages.filter(message => typeof message.content === "string");
+        prepared = await buildCreativeChatRequest(history, planningCurrent, previews, { ...context, inspectionImageIds: inspectionIds });
         result = await requestToolResponse(config, [
-            ...prepared.messages,
+            ...initialMessages,
             ...toolResponseToInput(inspectedResult),
             { role: "tool", tool_call_id: inspectedResult.toolCalls[0]!.id, content: JSON.stringify({ inspected_image_ids: inspectionIds, previewed_image_ids: previews.map((item) => item.id), unavailable_image_ids: nextIds.filter((id) => !previews.some((item) => item.id === id)) }) },
-        ], [], "auto", options.onDelta, { ...requestOptions, profileContext: { ...prepared.profileContext, phase: "after-inspection" } });
+            ...prepared.messages.filter(message => Array.isArray(message.content)),
+        ], [], "auto", options.onDelta, { ...requestOptions, profileContext: { ...prepared.profileContext, stage: "continue" } });
         options.signal?.throwIfAborted();
     }
     return parseCreativeChatPlan(result, references, { ...context, previewedImageIds: previews.map((item) => item.id), allowImageCreation });

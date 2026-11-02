@@ -195,14 +195,14 @@ export function ImageToolSettingsModal({
                         <Space size={8}>
                             <span>{t("快捷工具")}</span>
                             <Tag className="m-0">
-                                {selectedTools.length}/{tools.length}
+                                {selectedTools.length}/4
                             </Tag>
                         </Space>
                     }
                 >
                     <Checkbox.Group value={selectedIds} className="grid w-full gap-3 md:grid-cols-3" onChange={(values) => updateSelectedTools(values as ImageQuickToolId[])}>
                         {tools.map((tool) => (
-                            <Checkbox key={tool.id} value={tool.id} className="m-0">
+                            <Checkbox key={tool.id} value={tool.id} className="m-0" disabled={!selectedIds.includes(tool.id) && selectedTools.length >= 4}>
                                 <span className="inline-flex items-center gap-2">
                                     {tool.icon}
                                     {t(tool.label)}

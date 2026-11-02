@@ -23,6 +23,7 @@ import { loadCanvasNodeInfoModal } from "@/lib/canvas/canvas-node-hover-loaders"
 import { loadAssetPickerModal, loadCanvasNodeAngleDialog, loadCanvasNodeCropDialog, loadCanvasImageEditorDialog, loadCanvasNodeMaskEditDialog, loadCanvasNodeSplitDialog, loadCanvasNodeUpscaleDialog } from "@/lib/canvas/canvas-node-tool-loaders";
 
 const CanvasImageCompareDialog = lazy(() => import("@/components/canvas/canvas-image-compare-dialog").then(module => ({ default: module.CanvasImageCompareDialog })));
+const CanvasImageViewerDialog = lazy(() => import("@/components/canvas/canvas-image-viewer-dialog").then(module => ({ default: module.CanvasImageViewerDialog })));
 const CanvasDesignTemplateDialog = lazy(() => import("@/components/canvas/canvas-design-template-dialog").then(module => ({ default: module.CanvasDesignTemplateDialog })));
 const CanvasGroupNameDialog = lazy(() => import("@/components/canvas/canvas-group-name-dialog").then(module => ({ default: module.CanvasGroupNameDialog })));
 const CanvasNodeAngleDialog = lazy(loadCanvasNodeAngleDialog);
@@ -99,7 +100,7 @@ export const CanvasDialogsHost = memo(function CanvasDialogsHost({ projectId, st
 
                 {localToolsEnabled && cropNode?.metadata?.content ? (
                     <Suspense fallback={null}>
-                        <CanvasNodeCropDialog dataUrl={cropNode.metadata.content} open={Boolean(cropNode)} onClose={() => setCropNodeId(null)} onConfirm={(crop) => void cropImageNode(cropNode!, crop)} />
+                        <CanvasNodeCropDialog key={cropNode.id} dataUrl={cropNode.metadata.content} open={Boolean(cropNode)} onClose={() => setCropNodeId(null)} onConfirm={(crop) => cropImageNode(cropNode!, crop)} />
                     </Suspense>
                 ) : null}
 
@@ -120,7 +121,7 @@ export const CanvasDialogsHost = memo(function CanvasDialogsHost({ projectId, st
 
                 {localToolsEnabled && splitNode?.metadata?.content ? (
                     <Suspense fallback={null}>
-                        <CanvasNodeSplitDialog dataUrl={splitNode.metadata.content} open={Boolean(splitNode)} onClose={() => setSplitNodeId(null)} onConfirm={(params) => void splitImageNode(splitNode!, params)} />
+                        <CanvasNodeSplitDialog key={splitNode.id} dataUrl={splitNode.metadata.content} open={Boolean(splitNode)} onClose={() => setSplitNodeId(null)} onConfirm={(params) => splitImageNode(splitNode!, params)} />
                     </Suspense>
                 ) : null}
 
@@ -140,17 +141,7 @@ export const CanvasDialogsHost = memo(function CanvasDialogsHost({ projectId, st
                     </Suspense>
                 ) : null}
 
-                <Modal
-                    title={t("图片详情")}
-                    open={Boolean(previewNode?.metadata?.content)}
-                    centered
-                    onCancel={() => setPreviewNodeId(null)}
-                    footer={null}
-                    width="auto"
-                    styles={{ body: { padding: 0, display: "flex", justifyContent: "center", alignItems: "center", maxHeight: "80vh" } }}
-                >
-                    {previewNode?.metadata?.content ? <img src={previewNode.metadata.content} alt={previewNode.title || t("图片")} style={{ maxWidth: "100%", maxHeight: "80vh", objectFit: "contain" }} /> : null}
-                </Modal>
+                {previewNode ? <Suspense fallback={null}><CanvasImageViewerDialog node={previewNode} nodes={nodes} onSelect={setPreviewNodeId} onClose={() => setPreviewNodeId(null)} /></Suspense> : null}
 
                 <Modal
                     title={t("清空画布？")}

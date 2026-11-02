@@ -1,6 +1,7 @@
 import { canvasImageDownloadFileName, canvasImageExportStem } from "@/lib/canvas/canvas-image-filename";
 import { encodeImageBlob, prepareCanvasImageFormat, validateImageBlob } from "@/lib/canvas/canvas-image-encoding";
-import { checkCanvasImageAbort, type CanvasImageTaskOptions } from "./canvas-image-worker";
+import { checkCanvasImageAbort, requireCanvasImageFallback, runCanvasImageTask, type CanvasImageTaskOptions } from "./canvas-image-worker";
+import type { CanvasPdfPage } from "./canvas-image-pdf-render";
 import { createZip } from "@/lib/zip";
 import { resolveImageUrl } from "@/services/image-storage";
 import type { CanvasNodeData } from "@/types/canvas";
@@ -26,8 +27,14 @@ type PdfDependencies = {
 };
 
 // Bound both encoded data and decoded pixel memory. Images are loaded and flushed sequentially.
-export const CANVAS_IMAGE_PDF_LIMITS = { images: 200, sourceBytes: 256 * 1024 * 1024, imagePixels: 20_000_000 };
-const pointsPerPixel = 72 / 96;
+export const CANVAS_IMAGE_PDF_LIMITS = { images: 200, sourceBytes: 256 * 1024 * 1024, imagePixels: 40_000_000 };
+
+async function buildPdf(pages: CanvasPdfPage[], title: string, options: CanvasImageTaskOptions) {
+    checkCanvasImageAbort(options.signal);
+    const result = typeof Worker !== "undefined" ? await runCanvasImageTask({ kind: "pdf", pages, title }, options) as Blob : await (await import("./canvas-image-pdf-render")).renderCanvasImagePdf(pages, title);
+    checkCanvasImageAbort(options.signal);
+    return result;
+}
 
 /** Builds the entire result before the caller downloads anything; failed pages are never omitted. */
 export async function createCanvasImagePdfExport(options: CanvasImagePdfOptions, dependencies: PdfDependencies = {}) {
@@ -42,11 +49,9 @@ export async function createCanvasImagePdfExport(options: CanvasImagePdfOptions,
     if (!setName) throw new Error("请填写有效的图片集名称");
 
     onProgress?.({ completed: 0, total: nodes.length, label: "正在准备图片集导出" });
-    // This heavyweight dependency must remain outside the initial canvas bundle.
-    const PDFDocument = mode === "merged" || mode === "separate" ? (await import("pdf-lib")).PDFDocument : null;
     const loadImage = dependencies.loadImage || loadCanvasPdfImage;
     const measureImage = dependencies.measureImage || ((blob: Blob) => measureImageBlob(blob, signal));
-    const merged = mode === "merged" ? await PDFDocument!.create() : null;
+    const merged: CanvasPdfPage[] = [];
     const files: { name: string; data: Blob }[] = [];
     let sourceBytes = 0;
 
@@ -72,7 +77,7 @@ export async function createCanvasImagePdfExport(options: CanvasImagePdfOptions,
             checkCanvasImageAbort(signal);
             const pixels = dimensions.width * dimensions.height;
             if (!Number.isFinite(pixels) || dimensions.width <= 0 || dimensions.height <= 0) throw new Error("无法读取原图尺寸");
-            if (pixels > CANVAS_IMAGE_PDF_LIMITS.imagePixels) throw new Error("单张图片超过 2000 万像素，请先缩小图片");
+            if (pixels > CANVAS_IMAGE_PDF_LIMITS.imagePixels) throw new Error("单张图片超过 4000 万像素，请先缩小图片");
 
             if (mode === "png" || mode === "jpg") {
                 const converted = await prepareCanvasImageFormat(blob, mode, dependencies.encodeImage, { signal, onProgress: progress => onProgress?.({ completed: index + progress.percent / 100, total: nodes.length, label: `${index + 1}/${nodes.length}：${progress.label}` }) });
@@ -86,24 +91,19 @@ export async function createCanvasImagePdfExport(options: CanvasImagePdfOptions,
             const signature = new Uint8Array(await blob.slice(0, 8).arrayBuffer());
             const isJpeg = signature[0] === 0xff && signature[1] === 0xd8;
             const isPng = signature[0] === 0x89 && signature[1] === 0x50 && signature[2] === 0x4e && signature[3] === 0x47;
+            if (isJpeg) {
+                const { orientation } = await import("exifr");
+                const value = await orientation(new Uint8Array(await blob.arrayBuffer()));
+                if (value && value !== 1) blob = await (dependencies.encodeImage || encodeImageBlob)(blob, "image/jpeg", { signal });
+            }
             if (!isJpeg && !isPng) blob = await (dependencies.convertImage ? dependencies.convertImage(blob) : encodeImageBlob(blob, "image/png", { signal, onProgress: progress => onProgress?.({ completed: index, total: nodes.length, label: `${index + 1}/${nodes.length}：${progress.label}` }) }));
             checkCanvasImageAbort(signal);
             if (blob.size > CANVAS_IMAGE_PDF_LIMITS.sourceBytes) throw new Error("转换后的图片过大，请先缩小图片");
 
-            const pdf = merged || await PDFDocument!.create();
-            const bytes = await blob.arrayBuffer();
-            const image = isJpeg ? await pdf.embedJpg(bytes) : await pdf.embedPng(bytes);
-            // 96 px = 72 pt. Very long images are uniformly reduced to the PDF 200-inch page limit.
-            const scale = Math.min(pointsPerPixel, 14_400 / Math.max(image.width, image.height));
-            const width = image.width * scale;
-            const height = image.height * scale;
-            pdf.addPage([width, height]).drawImage(image, { x: 0, y: 0, width, height });
-            await pdf.flush();
-            checkCanvasImageAbort(signal);
-            if (!merged) {
-                pdf.setTitle(`${setName} — ${imageName}`);
-                files.push({ name: `${String(index + 1).padStart(3, "0")}_${imageName}.pdf`, data: new Blob([new Uint8Array(await pdf.save())], { type: "application/pdf" }) });
-            }
+            if (typeof Worker === "undefined" && typeof document !== "undefined") requireCanvasImageFallback(dimensions.width, dimensions.height, { signal });
+            const page = { image: blob, name: imageName };
+            if (mode === "merged") merged.push(page);
+            else files.push({ name: `${String(index + 1).padStart(3, "0")}_${imageName}.pdf`, data: await buildPdf([page], `${setName} — ${imageName}`, { signal }) });
             onProgress?.({ completed: index + 1, total: nodes.length, label: `已处理 ${index + 1}/${nodes.length} 张图片` });
             await new Promise((resolve) => setTimeout(resolve, 0));
         } catch (error) {
@@ -115,11 +115,10 @@ export async function createCanvasImagePdfExport(options: CanvasImagePdfOptions,
 
     checkCanvasImageAbort(signal);
     onProgress?.({ completed: nodes.length, total: nodes.length, label: mode === "merged" ? "正在生成 PDF 文件" : "正在打包文件" });
-    if (merged) {
-        merged.setTitle(setName);
-        const bytes = new Uint8Array(await merged.save());
-        checkCanvasImageAbort(signal);
-        return { blob: new Blob([bytes], { type: "application/pdf" }), fileName: `${setName}.pdf`, imageCount: nodes.length };
+    if (mode === "merged") {
+        const blob = await buildPdf(merged, setName, { signal, onProgress: progress => onProgress?.({ completed: progress.percent / 100 * nodes.length, total: nodes.length, label: progress.label }) });
+        onProgress?.({ completed: nodes.length, total: nodes.length, label: "PDF 文件已生成" });
+        return { blob, fileName: `${setName}.pdf`, imageCount: nodes.length };
     }
     const blob = await createZip(files, { signal, onProgress: progress => onProgress?.({ completed: progress.completed, total: progress.total || 1, label: progress.label }) });
     checkCanvasImageAbort(signal);

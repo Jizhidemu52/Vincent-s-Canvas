@@ -46,6 +46,18 @@ test("bound task uses only the injected single-task query and returns its origin
     expect(listeners.size).toBe(0);
 });
 
+test("only an explicit recovery callback can resume a paused task with a known upstream ID", async () => {
+    let reads = 0, recoveries = 0;
+    const info = setup({
+        getTask: async () => task(reads++ ? "success" : "paused", { upstreamTaskId: "upstream-original" }),
+        recoverTask: async id => { expect(id).toBe(binding.taskId); recoveries++; return task("processing"); },
+    });
+    expect((await observeCanvasImageTask(binding, info.options))?.status).toBe("success");
+    expect(recoveries).toBe(1);
+    const unknown = setup({ getTask: async () => task("paused"), recoverTask: async () => { throw new Error("must not resubmit unknown task"); } });
+    expect((await observeCanvasImageTask(binding, unknown.options))?.status).toBe("paused");
+});
+
 test("processing waits for persistence, then polls the same task until success", async () => {
     const persisted = deferred<void>();
     const notified = deferred<void>();

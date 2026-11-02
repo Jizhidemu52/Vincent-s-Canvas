@@ -31,6 +31,7 @@ export function createCanvasTextStreamBuffer(
     scheduler: CanvasFrameScheduler = createCanvasFrameScheduler(),
 ) {
     const pending = new Map<string, string>();
+    const latest = new Map<string, string>();
     let frameHandle: number | null = null;
 
     const flush = () => {
@@ -48,15 +49,19 @@ export function createCanvasTextStreamBuffer(
 
     return {
         push(update: CanvasTextStreamUpdate) {
+            latest.set(update.nodeId, update.content);
             pending.set(update.nodeId, update.content);
             schedule();
         },
         clear(nodeId: string) {
             pending.delete(nodeId);
+            latest.delete(nodeId);
         },
+        read(nodeId: string) { return latest.get(nodeId); },
         flush,
         cancel() {
             pending.clear();
+            latest.clear();
             if (frameHandle === null) return;
             scheduler.cancel(frameHandle);
             frameHandle = null;

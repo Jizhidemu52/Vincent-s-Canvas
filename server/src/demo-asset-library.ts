@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { fileTypeFromBuffer } from "file-type";
 import { assetResponseHeaders, matchesAssetEtag } from "./asset-delivery";
 import { assetPage, lightAssetMetadata, parseAssetListQuery } from "./asset-query";
-import { createAssetThumbnailBytes } from "./asset-thumbnails";
+import { createAssetThumbnailDetails } from "./asset-thumbnails";
 import { demoAssetByteLength, demoAssetFields } from "./demo-state-store";
 
 export const demoAssetPurgeAfter = (deletedAt: string) => new Date(Date.parse(deletedAt) + 30 * 86_400_000).toISOString();
@@ -27,7 +27,7 @@ export function demoAssetPage<T extends ListedAsset>(assets: T[], query: Record<
     prompt: null, metadata: lightAssetMetadata(asset.metadata) })) };
 }
 
-type MediaAsset = { id: string; bytes: Uint8Array; mimeType: string; filename: string };
+type MediaAsset = { id: string; bytes: Uint8Array; mimeType: string; filename: string; metadata?: Record<string, unknown> };
 const representations = new WeakMap<MediaAsset, { etag: string; mime: string }>();
 export async function demoAssetContentResponse(asset: MediaAsset, request?: Request) {
   let representation = representations.get(asset);
@@ -55,7 +55,7 @@ function sourceToken(asset: MediaAsset) {
   if (!token) { token = {}; sourceTokens.set(asset, token); }
   return token;
 }
-const cache = new Map<string, { token: object; thumbnails: Record<256 | 1024, Buffer> }>();
+const cache = new Map<string, { token: object; thumbnails: Record<256 | 1024, Buffer>; metadata: Record<string, unknown> }>();
 const pending = new Set<string>();
 const jobs: Array<() => Promise<void>> = [];
 let running = 0;
@@ -64,21 +64,21 @@ function drain() {
 }
 export function scheduleDemoAssetThumbnails(asset: MediaAsset) {
   const token = sourceToken(asset);
-  if (!asset.mimeType.startsWith("image/") || !demoAssetByteLength(asset) || pending.has(asset.id) || cache.get(asset.id)?.token === token) return;
+  if (!/^(image|video)\//.test(asset.mimeType) || !demoAssetByteLength(asset) || pending.has(asset.id) || cache.get(asset.id)?.token === token) return;
   pending.add(asset.id);
   jobs.push(async () => {
     try {
-      const thumbnails = await createAssetThumbnailBytes(asset.bytes);
-      cache.set(asset.id, { token, thumbnails });
+      const { thumbnails, metadata } = await createAssetThumbnailDetails(asset.bytes);
+      cache.set(asset.id, { token, thumbnails, metadata });
       while (cache.size > 128) cache.delete(cache.keys().next().value!);
     } catch (error) { console.warn("Demo asset thumbnail unavailable", asset.id, error instanceof Error ? error.message : "unknown"); }
     finally { pending.delete(asset.id); }
   });
   drain();
 }
-export function demoAssetThumbnail(asset: MediaAsset, width: 256 | 1024): MediaAsset {
+export function demoAssetThumbnail(asset: MediaAsset, width: 256 | 1024): MediaAsset | null {
   const cached = cache.get(asset.id);
-  if (cached?.token === sourceToken(asset)) return { ...demoAssetFields(asset), bytes: cached.thumbnails[width], mimeType: "image/webp", filename: `${asset.filename}.thumb-${width}.webp` };
+  if (cached?.token === sourceToken(asset)) return { ...demoAssetFields(asset), bytes: cached.thumbnails[width], mimeType: "image/webp", filename: `${asset.filename}.thumb-${width}.webp`, metadata: { ...asset.metadata, ...cached.metadata } };
   scheduleDemoAssetThumbnails(asset);
-  return asset;
+  return asset.mimeType.startsWith("video/") ? null : asset;
 }

@@ -20,9 +20,16 @@ export function useCanvasGenerationRuntime({ projectId, nodesRef, setNodes, proj
     textStreamPublishingEnabledRef: RefObject<boolean>;
 }) {
     const NODE_STATUS_LOADING = "loading", NODE_STATUS_IDLE = "idle";
-    const [runningNodeId, setRunningNodeId] = useState<string | null>(null);
+    const [runningNodeIds, setRunningNodeIds] = useState<Set<string>>(new Set());
+    const runningNodeId = runningNodeIds.values().next().value || null;
     const setStreamedTextById = useCanvasGraphSetter("streamedTextById");
     const generationRequestsRef = useRef(new Map<string, CanvasGenerationRequest>());
+    // Compatibility for existing callers; completed runs are removed by finish(), not by a global null.
+    const setRunningNodeId = useCallback((value: SetStateAction<string | null>) => {
+        const next = typeof value === "function" ? value(null) : value;
+        if (next) setRunningNodeIds(current => new Set([...current, next]));
+        else setRunningNodeIds(new Set([...generationRequestsRef.current.values()].map(request => request.runningNodeId)));
+    }, []);
     const generationDispatchLocksRef = useRef(new Set<string>());
     const textStreamBufferRef = useRef<ReturnType<typeof createCanvasTextStreamBuffer> | null>(null);
     const clearStreamedText = useCallback((nodeIds: Iterable<string>) => {
@@ -41,6 +48,7 @@ export function useCanvasGenerationRuntime({ projectId, nodesRef, setNodes, proj
         if (previous?.controller !== controller) previous?.controller.abort();
         clearStreamedText([targetNodeId]);
         generationRequestsRef.current.set(targetNodeId, { targetNodeId, originNodeId, runningNodeId: runningId, controller });
+        setRunningNodeIds(current => new Set([...current, runningId]));
         return controller;
     }, [clearStreamedText]);
 
@@ -48,6 +56,7 @@ export function useCanvasGenerationRuntime({ projectId, nodesRef, setNodes, proj
         const request = generationRequestsRef.current.get(targetNodeId);
         if (request?.controller === controller) {
             generationRequestsRef.current.delete(targetNodeId);
+            setRunningNodeIds(new Set([...generationRequestsRef.current.values()].map(request => request.runningNodeId)));
             textStreamBufferRef.current?.clear(targetNodeId);
             clearStreamedText([targetNodeId]);
         }
@@ -63,12 +72,13 @@ export function useCanvasGenerationRuntime({ projectId, nodesRef, setNodes, proj
             affectedNodeIds.add(request.targetNodeId);
             affectedNodeIds.add(request.originNodeId);
         });
+        const partial = new Map([...affectedNodeIds].map(nodeId => [nodeId, textStreamBufferRef.current?.read(nodeId)]));
         affectedNodeIds.forEach((nodeId) => textStreamBufferRef.current?.clear(nodeId));
         clearStreamedText(affectedNodeIds);
-        setRunningNodeId((current) => (current === runningId ? null : current));
+        setRunningNodeIds(current => new Set([...current].filter(id => id !== runningId)));
         if (!affectedNodeIds.size) return;
-        setNodes((prev) => prev.map((node) => (affectedNodeIds.has(node.id) && node.metadata?.status === NODE_STATUS_LOADING ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_IDLE, errorDetails: undefined } } : node)));
+        setNodes((prev) => prev.map((node) => (affectedNodeIds.has(node.id) && node.metadata?.status === NODE_STATUS_LOADING ? { ...node, metadata: { ...node.metadata, ...(partial.get(node.id) ? { content: partial.get(node.id) } : {}), status: NODE_STATUS_IDLE, errorDetails: partial.get(node.id) ? "生成已停止，已保留当前文字，可继续编辑或生成。" : undefined } } : node)));
     }, [clearStreamedText]);
-    return { createOptions, recoverPending, runningNodeId, setRunningNodeId, generationRequestsRef, generationDispatchLocksRef,
+    return { createOptions, recoverPending, runningNodeId, runningNodeIds, setRunningNodeId, generationRequestsRef, generationDispatchLocksRef,
         textStreamBufferRef, clearStreamedText, startGenerationRequest, finishGenerationRequest, stopGenerationByRunningId };
 }

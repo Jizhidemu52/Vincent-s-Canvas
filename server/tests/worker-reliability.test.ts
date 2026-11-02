@@ -9,6 +9,7 @@ import { ApiMartImageProviderFailure, ApiMartImageTaskPending } from "../src/api
 import { buildOpenAiAudioRequest } from "../src/media-runtime";
 import { normalizeWorkflowOutputs, readPath } from "../src/workflow-runtime";
 import { assertWorkflowTaskContext, workflowTaskContext, WorkflowTaskPending } from "../src/workflow-task-context";
+import { imageAgentProviderPrompt } from "../src/image-agent-profile";
 
 const text = await Bun.file(new URL("../src/worker.ts", import.meta.url)).text();
 const source = ts.createSourceFile("worker.ts", text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
@@ -153,7 +154,7 @@ test.each(["image", "audio", "workflow"])("%s POST waits for the durable submiss
         : Response.json({ data: [{ url: "https://result.invalid/image.png" }], outputs: ["https://result.invalid/image.png"] });
     };
     const worker = productionFunctions(["executeProvider", "executeOpenAiAudio", "executeWorkflow", "claimProviderSubmission", "assertProviderSubmissionResponse"], {
-      assertWorkflowTaskContext, workflowTaskContext,
+      assertWorkflowTaskContext, workflowTaskContext, imageAgentProviderPrompt,
       db: { query: async () => { events.push("claim"); return { rows: owned ? [{ id: "task" }] : [] }; } },
       config: { PROVIDER_ENCRYPTION_KEY: "test-only" }, decryptSecret: () => '{"apiKey":"test-only"}',
       assertImageEditMaskSupport: () => {}, openAiImageParameters: () => ({}), VideoSubmissionClaimLost,
@@ -175,7 +176,7 @@ test.each(["image", "audio", "workflow"])("%s POST waits for the durable submiss
 });
 
 test.each(["network", "http_started", "initial_tls", "rejected"])("paid submission outcome %s preserves or settles the original reservation correctly", async phase => {
-  const task = { id: "task", request_id: "request", operation_type: "image_generation", attempts: 1, model_config_id: "model",
+  const task = { id: "task", request_id: "request", operation_type: "image_generation", attempts: 1, model_config_id: "model", parameters: {},
     upstream_submission_started_at: "started", upstream_task_id: null, execution_token: "token", batch_id: null };
   let releasedSlots = 0;
   const settlements: string[] = [], statements: string[] = [], outcomes: string[] = [];

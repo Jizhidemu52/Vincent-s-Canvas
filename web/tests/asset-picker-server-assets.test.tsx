@@ -143,7 +143,7 @@ describe("shared asset picker server-backed materials", () => {
         expect(elements(picker.render()).some(node => node.props.role === "status")).toBe(true);
         expect(picker.nodes().some(node => node.type === "Empty")).toBe(false);
         expect(picker.requests).toHaveLength(1);
-        expect(picker.requests[0]).toMatchObject({ path: "/api/assets", init: { credentials: "include" } });
+        expect(picker.requests[0]).toMatchObject({ path: "/api/assets?limit=24", init: { credentials: "include" } });
         const material = serverAsset("formal-image");
         material.metadata = { ...material.metadata, title: "前台复测素材", storageKey: "obsolete-browser-key", imageName: "原图", imageVersion: 2 };
         picker.requests[0]!.succeed([material]);

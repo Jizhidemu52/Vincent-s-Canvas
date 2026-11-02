@@ -17,6 +17,7 @@ export type CanvasImageTaskRecoveryOptions = {
     getByRequestId: (requestId: string, signal: AbortSignal) => Promise<QueuedTask | null>;
     onTask: (task: QueuedTask) => void | Promise<void>;
     wait?: (signal: AbortSignal) => Promise<void>;
+    recoverTask?: (id: string, signal: AbortSignal) => Promise<QueuedTask>;
 };
 
 const abortError = () => new DOMException("图片任务恢复已取消", "AbortError");
@@ -57,7 +58,7 @@ export async function observeCanvasImageTask(binding: CanvasImageTaskBinding, op
         if (events) await guarded(() => events!.ready(Math.max(0, deadline - Date.now()), signal));
         if (Date.now() >= deadline) throw new TaskObservationStoppedError("timeout", taskId ? [taskId] : []);
         const revision = events?.version ?? 0;
-        const task = await guarded(() => taskId ? getTask(taskId, signal) : getByRequestId(requestId, signal));
+        let task = await guarded(() => taskId ? getTask(taskId, signal) : getByRequestId(requestId, signal));
         assertCurrent();
         if (!task) return null;
         if (!task.id || (taskId && task.id !== taskId) || task.requestId !== requestId ||
@@ -67,9 +68,16 @@ export async function observeCanvasImageTask(binding: CanvasImageTaskBinding, op
         if (!["waiting", "processing", "success", "failed", "cancelled", "paused"].includes(task.status)) {
             throw new Error(`原图片任务状态未知（${task.status || "空"}），已停止查询，请勿重复生成`);
         }
-        await guarded(() => onTask(task));
+        const observedTask = task;
+        await guarded(() => onTask(observedTask));
         assertCurrent();
         taskId = task.id;
+        if (task.status === "paused" && options.recoverTask && task.upstreamTaskId) {
+            task = await guarded(() => options.recoverTask!(taskId!, signal));
+            // The next GET revalidates ownership and request identity before any result delivery.
+            if (task.id !== taskId) throw new Error("恢复接口返回了不同的任务，已停止查询");
+            if (task.status !== "paused") continue;
+        }
         if (task.status !== "waiting" && task.status !== "processing") return task;
         if (!wait && !events) events = watchTaskEvents([taskId], { background: true });
         await guarded(() => wait ? wait(signal) : events!.next(revision, Math.max(0, deadline - Date.now()), signal));

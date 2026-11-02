@@ -35,7 +35,8 @@ function harness(response: (url: string, init?: RequestInit) => Promise<Response
       return { rows: options.persist === false ? [] : [{ poll_deadline_at: new Date(Date.now() + 30_000).toISOString() }] };
     } },
   };
-  return { calls, statements, execute: new Function(...Object.keys(deps), `${code};return executeWorkflow`)(...Object.values(deps)) as (input: any, credentials: Record<string, string>) => Promise<unknown> };
+  const executeWorkflow = new Function(...Object.keys(deps), `${code};return executeWorkflow`)(...Object.values(deps)) as (input: any, credentials: Record<string, string>, providerPrompt: string) => Promise<unknown>;
+  return { calls, statements, execute: (input: any, credentials: Record<string, string>) => executeWorkflow(input, credentials, input.prompt) };
 }
 
 test.each([500, 60_000])("async workflow submission persists the original ID then yields at the configured legal interval %d", async interval => {

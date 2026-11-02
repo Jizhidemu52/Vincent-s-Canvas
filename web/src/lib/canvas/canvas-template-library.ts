@@ -13,6 +13,7 @@ export type PersonalCanvasTemplate = {
 type TemplateStore = {
     getItem<T>(key: string): Promise<T | null>;
     setItem<T>(key: string, value: T): Promise<T>;
+    removeItem(key: string): Promise<void>;
     iterate<T, U>(iterator: (value: T, key: string, iteration: number) => U): Promise<U>;
 };
 type TemplateInput = Pick<PersonalCanvasTemplate, "baseTemplateId" | "title" | "steps"> & { id?: string };
@@ -36,6 +37,15 @@ export function createCanvasTemplateLibrary(store: TemplateStore, ownerId: strin
     const prefix = `owner:${encodeURIComponent(ownerId || "")}:template:`;
     const assertOwner = () => { if (!ownerId || getOwner() !== ownerId) throw new Error("员工身份已变化，请重新打开模板窗口"); };
     return {
+        async remove(id: string) {
+            assertOwner();
+            if (!/^[\w-]{1,80}$/.test(id)) throw new Error("模板标识无效");
+            const saved = await store.getItem<unknown>(prefix + id);
+            assertOwner();
+            if (saved && readTemplate(saved).id !== id) throw new Error("模板标识不一致，记录未修改");
+            await store.removeItem(prefix + id);
+            assertOwner();
+        },
         async list() {
             assertOwner();
             const templates: PersonalCanvasTemplate[] = [];

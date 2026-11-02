@@ -128,10 +128,10 @@ test("large custom dimension controls preserve positive-number fallback and opti
     expect(panel.config().size).toBe("1008x1024");
 });
 
-test("Blend excludes duplicate dimensions and unverified models never gain invented advanced controls", () => {
+test("Blend excludes duplicate dimensions and unverified models only gain a server-merged exclusion", () => {
     const blend = settings("midjourney-blend");
     const keys = blend.render().filter(item => item.props["data-image-field"]).map(item => item.props["data-image-field"]);
     expect(keys).toEqual(["nsfw_check", "metadata"]);
     const unknown = settings("opaque-unknown-model");
-    expect(unknown.render().some(item => item.props["data-image-field"])).toBe(false);
+    expect(unknown.render().filter(item => item.props["data-image-field"]).map(item => item.props["data-image-field"])).toEqual(["negative_prompt"]);
 });

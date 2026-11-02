@@ -37,6 +37,9 @@ import { imageResultExtension, storeImageResult } from "./image-result-storage";
 import { scheduleAssetThumbnails } from "./asset-thumbnails";
 import { assertWorkflowTaskContext, workflowTaskContext, WorkflowTaskPending, type WorkflowTaskContext } from "./workflow-task-context";
 import { resetWorkerHealth, startWorkerHealth } from "./worker-health";
+import { imageAgentProviderPrompt } from "./image-agent-profile";
+import { postgresPromptRecipeStore } from "./prompt-recipe-postgres";
+import { PromptOptimizationError } from "./prompt-safety";
 
 type WorkRow = {
   id: string;
@@ -181,8 +184,9 @@ async function runTask(taskId: string) {
       keepModelSlot = true; outcome = "paused"; return;
     }
     const transportDiagnostics = readProviderSubmissionDiagnostics(error);
-    const reason =
-      error instanceof Error ? error.message.slice(0, 2_000) : "任务执行失败";
+    const reason = task.parameters.imageAgentProfile && !(error instanceof PromptOptimizationError)
+      ? "图片助手任务未完成，请查询任务状态；服务端已隐藏上游内部详情。"
+      : error instanceof Error ? error.message.slice(0, 2_000) : "任务执行失败";
     if (providerProducedResult) {
       // Local processing/storage failures must not replay paid work or claim it never happened.
       await db.query(
@@ -294,10 +298,14 @@ async function executeProvider(task: WorkRow, timing: GenerationTiming) {
     if (task.protocol !== "apimart") throw new Error("当前视频执行器仅支持已配置的 APIMart 视频模型，请检查 Provider 协议");
     return executeApiMartVideo(task, credentials);
   }
+  // The persisted task and asset prompt stay public. Private recipe text exists
+  // only in this execution-local value, and is not needed when polling old work.
+  const providerPrompt = task.upstream_task_id || task.upstream_submission_started_at ? task.prompt
+    : await imageAgentProviderPrompt({ prompt: task.prompt, parameters: task.parameters, operationType: task.operation_type }, async profile => (await postgresPromptRecipeStore(db).active(profile)).version.systemPrompt);
   if (task.workflow_config_id && task.submit_path && task.output_path)
-    return executeWorkflow(task, credentials);
+    return executeWorkflow(task, credentials, providerPrompt);
   if (task.protocol === "apimart")
-    return executeApiMartImage(task, credentials);
+    return executeApiMartImage(task, credentials, providerPrompt);
   const authorization: Record<string, string> = credentials.apiKey
     ? { authorization: `Bearer ${credentials.apiKey}` }
     : {};
@@ -310,7 +318,7 @@ async function executeProvider(task: WorkRow, timing: GenerationTiming) {
   ) {
     const form = new FormData();
     form.set("model", task.model_id);
-    form.set("prompt", task.prompt);
+    form.set("prompt", providerPrompt);
     form.set("n", "1");
     if (!task.model_id.startsWith("gpt-image-")) form.set("response_format", "b64_json");
     for (const [key, value] of Object.entries(openAiImageParameters(task.parameters, task.model_id))) form.set(key, String(value));
@@ -342,14 +350,14 @@ async function executeProvider(task: WorkRow, timing: GenerationTiming) {
       task.protocol === "openai"
         ? {
             model: task.model_id,
-            prompt: task.prompt,
+            prompt: providerPrompt,
             n: 1,
             ...(!task.model_id.startsWith("gpt-image-") ? { response_format: "b64_json" } : {}),
             ...openAiImageParameters(task.parameters, task.model_id),
           }
         : {
             model: task.model_id,
-            prompt: task.prompt,
+            prompt: providerPrompt,
             sourceUrls: task.source_urls,
             credentials: Object.fromEntries(
               Object.entries(credentials).filter(([key]) => key !== "apiKey"),
@@ -390,6 +398,7 @@ async function executeProvider(task: WorkRow, timing: GenerationTiming) {
 async function executeApiMartImage(
   task: WorkRow,
   credentials: Record<string, string>,
+  providerPrompt: string,
 ) {
   if (task.upstream_task_id) {
     // Backfill deadlines for image tasks submitted by the old blocking worker.
@@ -416,7 +425,7 @@ async function executeApiMartImage(
     apiKey: credentials.apiKey || "",
     modelId: task.model_id!,
     submissionKey: task.id,
-    prompt: task.prompt,
+    prompt: providerPrompt,
     parameters: task.parameters,
     sourceImages: editInput.references,
     ...(editInput.mask ? { maskImage: editInput.mask } : {}),
@@ -508,6 +517,7 @@ async function executeApiMartVideo(task: WorkRow, credentials: Record<string, st
 async function executeWorkflow(
   task: WorkRow,
   credentials: Record<string, string>,
+  providerPrompt: string,
 ) {
   const context = task.upstream_workflow_context
     ? assertWorkflowTaskContext(task, task.upstream_workflow_context) : workflowTaskContext(task);
@@ -565,12 +575,12 @@ async function executeWorkflow(
   const requestedResolution = String(
     task.parameters.resolution ?? "1k",
   ).toLowerCase();
-  const { inputArchive: _inputArchive, ...providerParameters } = task.parameters;
+  const { inputArchive: _inputArchive, promptExclusions: _promptExclusions, ...providerParameters } = task.parameters;
   const variables: Record<string, unknown> = {
     taskId: task.id,
-    prompt: task.prompt,
+    prompt: providerPrompt,
     ...providerParameters,
-    ...parsePromptVariables(task.prompt),
+    ...parsePromptVariables(providerPrompt),
     count:
       Number.isInteger(requestedCount) &&
       requestedCount >= 1 &&

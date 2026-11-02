@@ -27,6 +27,8 @@ type CanvasContextMenuProps = {
     onBringFront?: () => void;
     onSendBack?: () => void;
     onCopyPrompt?: () => void;
+    onCopyImage?: () => void;
+    onToggleLock?: () => void;
 };
 
 export function canvasContextMenuPosition(x: number, y: number, width: number, height: number, viewport: { width: number; height: number }) {
@@ -36,7 +38,7 @@ export function canvasContextMenuPosition(x: number, y: number, width: number, h
     return { left: Math.max(margin, Math.min(x, viewport.width - fittedWidth - margin)), top: Math.max(margin, Math.min(y, viewport.height - fittedHeight - margin)), width: fittedWidth, maxHeight: Math.max(0, viewport.height - margin * 2) };
 }
 
-export function CanvasNodeContextMenu({ menu, targetCount = 1, imageCount = 0, onDownloadImages, onClose, onDuplicate, onDelete, onUpload, onGenerate, onRename, onGroup, onPaste, onAddText, onSelectAll, onFitAll, onBringFront, onSendBack, onCopyPrompt }: CanvasContextMenuProps) {
+export function CanvasNodeContextMenu({ menu, targetCount = 1, imageCount = 0, onDownloadImages, onClose, onDuplicate, onDelete, onUpload, onGenerate, onRename, onGroup, onPaste, onAddText, onSelectAll, onFitAll, onBringFront, onSendBack, onCopyPrompt, onCopyImage, onToggleLock }: CanvasContextMenuProps) {
     const t = useUiText();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const canGenerate = useModuleEnabled("canvas-image");
@@ -49,7 +51,7 @@ export function CanvasNodeContextMenu({ menu, targetCount = 1, imageCount = 0, o
     const canRename = menu.type === "node" && !isMultiTarget && Boolean(onRename);
     const canDownload = menu.type === "node" && imageCount > 0 && Boolean(onDownloadImages);
     const itemCount = menu.type === "canvas" ? [onUpload, onGroup, canGenerate && onGenerate, onPaste, onAddText, onSelectAll, onFitAll].filter(Boolean).length
-        : (menu.type === "node" ? 2 + Number(canRename) + Number(canDownload) + [onBringFront, onSendBack, onCopyPrompt].filter(Boolean).length : 1) + Number(Boolean(onGroup));
+        : (menu.type === "node" ? 2 + Number(canRename) + Number(canDownload) + [onBringFront, onSendBack, onCopyPrompt, onCopyImage, onToggleLock].filter(Boolean).length : 1) + Number(Boolean(onGroup));
     const [position, setPosition] = useState(() => canvasContextMenuPosition(menu.x, menu.y, 300, 10 + itemCount * 32 + Math.max(0, itemCount - 1) * 4, { width: window.innerWidth, height: window.innerHeight }));
 
     useLayoutEffect(() => {
@@ -125,6 +127,8 @@ export function CanvasNodeContextMenu({ menu, targetCount = 1, imageCount = 0, o
                 {onBringFront ? <MenuButton icon={<Layers className="size-4" />} action="bringFront" onClick={() => choose(onBringFront)} /> : null}
                 {onSendBack ? <MenuButton icon={<Layers className="size-4" />} action="sendBack" onClick={() => choose(onSendBack)} /> : null}
                 {onCopyPrompt ? <MenuButton icon={<Copy className="size-4" />} action="copyPrompt" onClick={() => choose(onCopyPrompt)} /> : null}
+                {onCopyImage ? <MenuButton icon={<Copy className="size-4" />} action="copyImage" onClick={() => choose(onCopyImage)} /> : null}
+                {onToggleLock ? <MenuButton icon={<Layers className="size-4" />} action="lock" onClick={() => choose(onToggleLock)} /> : null}
             </> : null}
             {onGroup ? <MenuButton icon={<FolderPlus className="size-4" />} action="group" onClick={() => choose(onGroup)} /> : null}
             {menu.type === "canvas" ? canGenerate && onGenerate && <MenuButton icon={<Plus className="size-4" />} action="generate" onClick={() => choose(onGenerate)} /> : <MenuButton icon={<Trash2 className="size-4" />} action="delete" targetCount={isMultiTarget ? targetCount : 1} onClick={() => choose(onDelete)} />}

@@ -28,6 +28,7 @@ export function CanvasWorkspaceTools({ open, onOpenChange }: CanvasWorkspaceTool
     const theme = canvasThemes[useThemeStore(state => state.theme)];
     const [query, setQuery] = useState("");
     const [group, setGroup] = useState("全部");
+    const [active, setActive] = useState(0);
     const searchRef = useRef<HTMLInputElement>(null);
     const triggerRef = useRef<HTMLElement | null>(null);
     const entries = useMemo(() => canvasWorkspaceTools({
@@ -37,11 +38,14 @@ export function CanvasWorkspaceTools({ open, onOpenChange }: CanvasWorkspaceTool
     const groups = ["全部", ...new Set(entries.map(item => item.group))];
     const visible = filterCanvasWorkspaceTools(entries, query, groups.includes(group) ? group : "全部");
     const visibleGroups = [...new Set(visible.map(item => item.group))];
+    const ordered = visibleGroups.flatMap(section => visible.filter(item => item.group === section));
     const currentCanvas = /^\/canvas\/[^/]+/.test(location.pathname);
 
     useEffect(() => {
         if (!open) { setQuery(""); setGroup("全部"); }
     }, [open]);
+    useEffect(() => { setActive(0); }, [query, group]);
+    useEffect(() => { if (open) document.getElementById(`workspace-tool-${ordered[active]?.id}`)?.scrollIntoView({ block: "nearest" }); }, [active, open, query, group]);
 
     const enter = (item: WorkspaceToolEntry) => {
         onOpenChange(false);
@@ -61,7 +65,7 @@ export function CanvasWorkspaceTools({ open, onOpenChange }: CanvasWorkspaceTool
     return <Dialog.Root open={open} onOpenChange={onOpenChange}>
         <Dialog.Portal>
             <Dialog.Overlay className="canvas-workspace-tools-overlay" />
-            <Dialog.Content className="canvas-workspace-tools" style={style} onOpenAutoFocus={event => {
+            <Dialog.Content className="canvas-workspace-tools" style={style} onEscapeKeyDown={event => { if (query) { event.preventDefault(); setQuery(""); searchRef.current?.focus(); } }} onOpenAutoFocus={event => {
                 event.preventDefault();
                 triggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
                 searchRef.current?.focus();
@@ -73,15 +77,20 @@ export function CanvasWorkspaceTools({ open, onOpenChange }: CanvasWorkspaceTool
                     <div><Dialog.Title>{t("全部工具")}</Dialog.Title><Dialog.Description>{t("原有工作台与工具，都在这里。")}</Dialog.Description></div>
                     <Dialog.Close className="cwt-close" aria-label={t("关闭全部工具")}><X size={19} strokeWidth={1.5} /></Dialog.Close>
                 </header>
-                <label className="cwt-search"><Search size={18} strokeWidth={1.6} /><input ref={searchRef} type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder={t("搜索工具或工作台")} aria-label={t("搜索工具或工作台")} /><kbd>Esc</kbd></label>
+                <label className="cwt-search"><Search size={18} strokeWidth={1.6} /><input ref={searchRef} type="text" value={query} onChange={event => setQuery(event.target.value)} placeholder={t("搜索工具或工作台")} aria-label={t("搜索工具或工作台")} role="combobox" aria-expanded={open} aria-controls="canvas-workspace-tool-results" aria-activedescendant={ordered[active] ? `workspace-tool-${ordered[active].id}` : undefined}
+                    onKeyDown={event => {
+                        if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+                        if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setActive(value => ordered.length ? (value + (event.key === "ArrowDown" ? 1 : -1) + ordered.length) % ordered.length : 0); }
+                        if (event.key === "Enter" && ordered[active]) { event.preventDefault(); enter(ordered[active]); }
+                    }} /><kbd>Esc</kbd></label>
                 <nav className="cwt-categories" aria-label={t("工具分类")}>{groups.map(item => <button type="button" key={item} aria-pressed={group === item} onClick={() => setGroup(item)}>{t(item)}</button>)}</nav>
-                <div className="cwt-body">
+                <div className="cwt-body" id="canvas-workspace-tool-results" role="listbox" aria-label={t("可用工具")}>
                     {visibleGroups.map(section => <section key={section} className="cwt-section" aria-label={t(section)}>
                         <h3>{t(section)}</h3>
                         <div className="cwt-grid">{visible.filter(item => item.group === section).map(item => {
                             const Icon = navigationTools.find(tool => tool.path === item.path)?.icon ?? (section === "创意工具" ? Shapes : item.id === "home" ? Grid2X2 : Sparkles);
                             const isCanvas = item.moduleKey === "canvas" && currentCanvas;
-                            return <button key={item.id} type="button" className="cwt-tool" data-usage-control={`workspace-tool.${item.id}`} onClick={() => enter(item)} aria-label={`${t(item.label)}${isCanvas ? ` (${t("当前画布")})` : ""}`} title={item.capabilities.length ? t("{value1}内：{value2}", { value1: t(item.label), value2: item.capabilities.map(capability => t(capability.label)).join(" / ") }) : t(item.label)}>
+                            return <button key={item.id} id={`workspace-tool-${item.id}`} role="option" aria-selected={ordered[active]?.id === item.id} type="button" className="cwt-tool" data-usage-control={`workspace-tool.${item.id}`} onMouseEnter={() => setActive(ordered.findIndex(entry => entry.id === item.id))} onClick={() => enter(item)} aria-label={`${t(item.label)}${isCanvas ? ` (${t("当前画布")})` : ""}`} title={item.capabilities.length ? t("{value1}内：{value2}", { value1: t(item.label), value2: item.capabilities.map(capability => t(capability.label)).join(" / ") }) : t(item.label)}>
                                 <span className="cwt-tool-icon"><Icon size={21} strokeWidth={1.4} /></span>
                                 <span className="cwt-tool-copy"><strong>{t(item.label)}{isCanvas && <small>{t("当前画布")}</small>}</strong>{item.capabilities.length ? <span>{item.capabilities.map(capability => t(capability.label)).join(" · ")}</span> : null}</span>
                                 {isCanvas ? <ChevronRight className="cwt-arrow" size={16} /> : <ArrowUpRight className="cwt-arrow" size={16} />}
@@ -90,7 +99,7 @@ export function CanvasWorkspaceTools({ open, onOpenChange }: CanvasWorkspaceTool
                     </section>)}
                     {!visible.length && <div className="cwt-empty"><Search size={25} strokeWidth={1.3} /><strong>{t("没有找到对应工具")}</strong><p>{t("试试其他名称，或切换到全部分类。")}</p><button type="button" onClick={() => { setQuery(""); setGroup("全部"); }}>{t("查看全部工具")}</button></div>}
                 </div>
-                <footer className="cwt-footer"><span>{visible.length} {t(" 个可用入口")}</span><span>{t("工具按当前权限显示")}</span></footer>
+                <footer className="cwt-footer"><span>{t("{count} 个可用入口", { count: visible.length })}</span><span>{t("↑↓ 选择 · Enter 打开 · Esc 清空搜索或关闭")}</span></footer>
             </Dialog.Content>
         </Dialog.Portal>
     </Dialog.Root>;

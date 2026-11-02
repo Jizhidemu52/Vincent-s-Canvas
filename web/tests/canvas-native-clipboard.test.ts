@@ -8,11 +8,13 @@ import * as clipboard from "@/lib/canvas/canvas-system-clipboard";
 import * as nodeCopy from "@/lib/canvas/canvas-node-copy";
 import { canvasRepeatCopyOffset } from "@/lib/canvas/canvas-drag-copy";
 import { createCanvasImageOperationRunner } from "@/lib/canvas/canvas-image-operation";
-import { assertCanvasImageUploadSize, CANVAS_IMAGE_MAX_BYTES } from "@/lib/canvas/canvas-image-upload-limit";
+import { assertCanvasImageUploadSize, CANVAS_IMAGE_MAX_BYTES, CANVAS_LARGE_IMAGE_NOTICE, isLargeCanvasImage } from "@/lib/canvas/canvas-image-upload-limit";
 import { shouldIgnoreCanvasShortcut } from "@/lib/canvas/canvas-keyboard";
 import { matchCanvasActionShortcut } from "@/lib/canvas/canvas-actions";
 import { fitNodeSize } from "@/lib/canvas/canvas-node-size";
 import { canvasImportGridPosition } from "@/lib/canvas/canvas-interaction-ux";
+import { mapCanvasAsyncPool } from "@/lib/canvas/canvas-async-pool";
+import { isCanvasBatchChildHidden } from "@/lib/canvas/canvas-batch-visibility";
 import { syncCanvasSelectionReferences } from "@/lib/canvas/canvas-selection-references";
 import { runCanvasGeneration } from "@/pages/canvas/canvas-shared-generation-runtime";
 import { defaultConfig } from "@/stores/use-config-store";
@@ -21,10 +23,10 @@ import { CanvasNodeType, type CanvasNodeData, type CanvasConnection, type Canvas
 
 // Execute the page's real keyboard/copy/paste/import callbacks, without mounting its unrelated editor UI.
 // Only the image storage boundary and React state setters are supplied by this harness.
-const source = ["project.tsx", "canvas-project-utils.ts", "use-canvas-clipboard-drop.ts", "use-canvas-shortcuts.ts"]
+const source = ["project.tsx", "canvas-project-utils.ts", "canvas-import-media.ts", "use-canvas-clipboard-drop.ts", "use-canvas-shortcuts.ts"]
     .map(file => readFileSync(new URL(`../src/pages/canvas/${file}`, import.meta.url), "utf8")).join("\n");
 const ast = ts.createSourceFile("project.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-const callbackNames = new Set(["duplicateNodes", "copySelectedNodes", "pasteCopiedNodes", "createImageFileNode", "createTextNodeFromClipboard", "pasteSystemClipboard", "handleDrop"]);
+const callbackNames = new Set(["duplicateNodes", "copySelectedNodes", "pasteCopiedNodes", "createImageFileNode", "importFiles", "createTextNodeFromClipboard", "pasteSystemClipboard", "handleDrop"]);
 const declarations: ts.Node[] = [];
 let selectionEffect: ts.Node;
 function containsIdentifier(node: ts.Node, names: string[]): boolean {
@@ -35,7 +37,7 @@ function collect(node: ts.Node) {
     if (ts.isExpressionStatement(node) && ts.isCallExpression(node.expression) && ts.isIdentifier(node.expression.expression) && node.expression.expression.text === "useEffect"
         && containsIdentifier(node, ["lastEditorSelectionRef"])) selectionEffect = node;
     else if (ts.isVariableStatement(node) && node.declarationList.declarations.some(item => ts.isIdentifier(item.name) && callbackNames.has(item.name.text))) declarations.push(node);
-    else if (ts.isFunctionDeclaration(node) && ["createCanvasNode", "imageMetadata", "useCanvasClipboardDrop", "useCanvasShortcuts", "handleCanvasShortcut"].includes(node.name?.text || "")) declarations.push(node);
+    else if (ts.isFunctionDeclaration(node) && ["createCanvasNode", "imageMetadata", "prepareCanvasMediaNode", "useCanvasClipboardDrop", "useCanvasShortcuts", "handleCanvasShortcut"].includes(node.name?.text || "")) declarations.push(node);
     else if (ts.isExpressionStatement(node) && ts.isCallExpression(node.expression) && ts.isIdentifier(node.expression.expression) && node.expression.expression.text === "useCanvasShortcuts") declarations.push(node);
     else if (ts.isExpressionStatement(node) && ts.isCallExpression(node.expression) && ts.isIdentifier(node.expression.expression) && node.expression.expression.text === "useEffect"
         && containsIdentifier(node, ["handleKeyDown", "bindCanvasClipboardEvents"])) declarations.push(node);
@@ -43,7 +45,8 @@ function collect(node: ts.Node) {
 }
 collect(ast);
 const code = ts.transpileModule(declarations.map(node => node.getText(ast).replace(/^export\s+/, "")).join("\n"), { compilerOptions: { target: ts.ScriptTarget.ESNext } }).outputText
-    .replace('import("@/lib/canvas/canvas-system-clipboard")', "({ then: callback => { callback(clipboardModule); return { catch: () => {} }; } })");
+    .replace('import("@/lib/canvas/canvas-system-clipboard")', "({ then: callback => { callback(clipboardModule); return { catch: () => {} }; } })")
+    .replace('import("@/lib/canvas/canvas-clipboard-media-check")', "Promise.resolve({ unavailableCanvasClipboardMedia: async () => [] })");
 const selectionCode = ts.transpileModule(selectionEffect!.getText(ast), { compilerOptions: { target: ts.ScriptTarget.ESNext } }).outputText;
 
 function data(files: File[] = [], text = "", items: Array<{ kind: string; type: string; getAsFile(): File | null }> = []) {
@@ -66,6 +69,7 @@ function harness(initialNodes: CanvasNodeData[] = [], initialConnections: Canvas
     const warnings: string[] = [];
     const pending: Promise<unknown>[] = [];
     const history: string[] = [];
+    const historyBoundaries: number[] = [];
     const disposers: Array<() => void> = [];
     const imageOperations = createCanvasImageOperationRunner();
     const generationRequestsRef = { current: new Map<string, { targetNodeId: string; originNodeId: string; runningNodeId: string }>() };
@@ -93,7 +97,9 @@ function harness(initialNodes: CanvasNodeData[] = [], initialConnections: Canvas
     const update = <T>(ref: { current: T }) => (value: T | ((current: T) => T)) => { ref.current = typeof value === "function" ? (value as (current: T) => T)(ref.current) : value; };
     const env = {
         uiText,
-        canvasImportGridPosition, pastePositionRef: { current: null }, importFiles: noop,
+        CANVAS_LARGE_IMAGE_NOTICE, isLargeCanvasImage,
+        canvasImportGridPosition, mapCanvasAsyncPool, pastePositionRef: { current: null }, importQueueRef: { current: Promise.resolve() }, setImportPlaceholder: noop, flushEditorDrafts: noop,
+        savedProjectIdRef: { current: "clipboard-test" }, hiddenGroupNodeIds: new Set(), isCanvasBatchChildHidden, batchRootsById: new Map(), collapsingBatchIds: new Set(),
         designProjectIdRef: { current: "clipboard-test" }, useUserStore: Object.assign((select: Function) => select({ status: "authenticated", user: { id: "clipboard-owner" } }), { getState: () => ({ user: { id: "clipboard-owner" } }) }), setDropReading: noop,
         resetViewport: noop,
         canvasRepeatCopyOffset, repeatCopyRef: { current: null },
@@ -101,12 +107,13 @@ function harness(initialNodes: CanvasNodeData[] = [], initialConnections: Canvas
         window: target, navigator: {}, // HTTP/permissionless path: no navigator.clipboard exists.
         useCallback: (callback: unknown) => callback,
         useRef: (current: unknown) => ({ current }), useLayoutEffect: (run: () => void) => run(),
-        flushPendingHistory: () => true,
+        flushPendingHistory: () => { historyBoundaries.push(nodesRef.current.length); return true; },
         useEffect: (effect: () => (() => void) | void) => { const dispose = effect(); if (dispose) disposers.push(dispose); },
         nanoid: () => `fixture-${++nextId}`,
         lastEditorSelectionRef, editorOwner, loadQuickGenerationNode, setQuickGenerateReferences, syncCanvasSelectionReferences, projectId: "clipboard-test",
         nodesRef, connectionsRef, groupsRef, selectedNodeIdsRef, generationRequestsRef, generationDispatchLocksRef, clipboardRef: { current: null },
         getCanvasCenter: () => ({ x: 300, y: 200 }),
+        getPastePosition: () => ({ x: 300, y: 200 }),
         screenToCanvas: (x: number, y: number) => ({ x, y }), createVideoFileNode: noop, createAudioFileNode: noop,
         setNodes: update(nodesRef), setConnections: update(connectionsRef), setGroups: update(groupsRef),
         setSelectedNodeIds: (value: Set<string>) => { selectedNodeIdsRef.current = value; queueMicrotask(runSelectionEffect); }, commitSelectedNodeIds: update(selectedNodeIdsRef),
@@ -119,7 +126,7 @@ function harness(initialNodes: CanvasNodeData[] = [], initialConnections: Canvas
         redoCanvas: () => history.push("redo"), undoCanvas: () => history.push("undo"), openCommands: () => history.push("commands"), cancelSelectionPreview: noop, setConnecting: noop,
         setHoveredNodeId: noop, setToolbarNodeId: noop, setEditingNodeId: noop, setInfoNodeId: noop,
         setCropNodeId: noop, setMaskEditNodeId: noop, setPendingConnectionCreate: noop,
-        message: { success: noop, warning: (text: string) => warnings.push(text) },
+        message: { success: noop, info: noop, open: noop, destroy: noop, error: (error: unknown) => errors.push(error), warning: (text: string) => warnings.push(text) },
         uploadImage: async (file: File) => {
             imports.push(file);
             await waitForUpload?.();
@@ -149,7 +156,7 @@ function harness(initialNodes: CanvasNodeData[] = [], initialConnections: Canvas
         return event;
     }
     return {
-        nodes: () => nodesRef.current, connections: () => connectionsRef.current, imports, errors, warnings, emit, key, history,
+        nodes: () => nodesRef.current, connections: () => connectionsRef.current, imports, errors, warnings, emit, key, history, historyBoundaries,
         activeRequest: (request: { targetNodeId: string; originNodeId: string; runningNodeId: string }) => generationRequestsRef.current.set(request.targetNodeId, request),
         activeDispatch: (nodeId: string) => generationDispatchLocksRef.current.add(nodeId),
         groups: () => groupsRef.current, setGroups: (groups: CanvasNodeGroup[]) => { groupsRef.current = groups; }, selected: () => [...selectedNodeIdsRef.current],
@@ -400,14 +407,33 @@ describe("native canvas clipboard", () => {
     });
 
     test("two separate paste gestures each import once even while the first image is still being stored", async () => {
-        const canvas = harness();
+        const upload = Promise.withResolvers<void>();
+        const canvas = harness([], [], () => upload.promise);
         const image = screenshot();
         canvas.paste(data([image]));
         canvas.paste(data([image]));
+        for (let turn = 0; turn < 5; turn++) await Promise.resolve();
+        expect(canvas.imports).toEqual([image]);
+        expect(canvas.nodes()).toEqual([]);
+        upload.resolve();
         await canvas.flush();
         expect(canvas.nodes()).toHaveLength(2);
         expect(canvas.imports).toEqual([image, image]);
         expect(canvas.errors).toEqual([]);
+        expect(canvas.historyBoundaries).toEqual([0, 1, 1, 2]);
+    });
+
+    test("a failed paste batch does not discard the next queued gesture or commit an empty undo step", async () => {
+        let uploads = 0;
+        const canvas = harness([], [], async () => { if (++uploads === 1) throw new Error("first upload failed"); });
+        const first = screenshot(), second = new File(["second"], "second.png", { type: "image/png" });
+        canvas.paste(data([first]));
+        canvas.paste(data([second]));
+        await canvas.flush();
+        expect(canvas.imports).toEqual([first, second]);
+        expect(canvas.nodes().map(node => node.title)).toEqual(["second.png"]);
+        expect(canvas.errors).toEqual(["screenshot.png：first upload failed"]);
+        expect(canvas.historyBoundaries).toEqual([0, 1]);
     });
 
     test("native copy/paste retains selected nodes and reconnects the copied endpoints", async () => {
@@ -484,9 +510,9 @@ describe("native canvas clipboard", () => {
         expect(canvas.prompt()).toBe("提示词必须保留");
         expect(canvas.nodes().slice(1).every(item => item.metadata?.prompt === undefined)).toBe(true);
         canvas.select(["generated"]);
-        expect(canvas.prompt()).toBe("原图提示词");
+        expect(canvas.prompt()).toBe("提示词必须保留");
         canvas.select([canvas.nodes()[1]!.id]);
-        expect(canvas.prompt()).toBe(""); // Manual image selection keeps its established provenance behavior.
+        expect(canvas.prompt()).toBe("提示词必须保留"); // Selection appends references without replacing the user's creation draft.
     });
 
     test("typing during an in-flight screenshot import is not replaced by an earlier draft", async () => {

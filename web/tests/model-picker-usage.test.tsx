@@ -25,7 +25,7 @@ function picker(models: PublicModel[], current: string, bound = false) {
     const selected: string[] = [];
     const dependencies: Record<string, unknown> = {
         "@/lib/i18n": i18nHarness,
-        react: { ...React, useEffect() {}, useMemo: (factory: () => unknown) => factory(), useId: () => "picker", useState: () => [false, () => undefined] },
+        react: { ...React, useEffect() {}, useRef: (current: unknown) => ({ current }), useMemo: (factory: () => unknown) => factory(), useId: () => "picker", useState: () => [false, () => undefined] },
         "@/components/ui/select": { Select: "Select", SelectContent: "SelectContent", SelectItem: "SelectItem", SelectTrigger: "SelectTrigger" },
         "@/hooks/use-can-manage-config": { useCanManageConfig: () => false },
         "@/stores/use-business-config-store": { useBusinessConfigStore: (select: Function) => select(state) },

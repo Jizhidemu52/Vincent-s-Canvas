@@ -4,10 +4,10 @@ import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import { createCanvasBatchRootIndex, isCanvasBatchChildHidden } from "./canvas-batch-visibility";
 
 type Content = Exclude<AiTextMessage["content"], string>;
-export const CANVAS_CONTEXT_LIMITS = { nodes: 24, images: 6, videos: 2, text: 12_000 };
+export const CANVAS_CONTEXT_LIMITS = { nodes: 24, images: 5, videos: 2, text: 12_000 };
 
 /** Uses actual viewport intersections, not the render cache's offscreen overscan. */
-export function selectCanvasContext(snapshot: CanvasAgentSnapshot) {
+export function selectCanvasContext(snapshot: CanvasAgentSnapshot, options: { includeVisibleMedia?: boolean } = {}) {
     const selected = new Set(snapshot.selectedNodeIds);
     const batchRoots = createCanvasBatchRootIndex(snapshot.nodes);
     const hidden = new Set(snapshot.hiddenNodeIds);
@@ -28,7 +28,7 @@ export function selectCanvasContext(snapshot: CanvasAgentSnapshot) {
         }
         return regions.length > 0;
     };
-    const candidates = snapshot.nodes.filter((node) => node.id === snapshot.previewNodeId || selected.has(node.id) || visible(node));
+    const candidates = snapshot.nodes.filter((node) => node.id === snapshot.previewNodeId || selected.has(node.id) || (options.includeVisibleMedia === true && visible(node)));
     const rank = (node: CanvasNodeData) => node.id === snapshot.previewNodeId ? 0 : selected.has(node.id) ? 1 : 2;
     candidates.sort((a, b) => rank(a) - rank(b));
     return {
@@ -44,8 +44,8 @@ export type CanvasContextReaders = {
     video: (node: CanvasNodeData) => Promise<Array<{ seconds: number; dataUrl: string }>>;
 };
 
-export async function buildCanvasAssistantContext(snapshot: CanvasAgentSnapshot, explicitIds: Set<string>, readers: CanvasContextReaders) {
-    const selection = selectCanvasContext(snapshot);
+export async function buildCanvasAssistantContext(snapshot: CanvasAgentSnapshot, explicitIds: Set<string>, readers: CanvasContextReaders, options: { includeVisibleMedia?: boolean } = {}) {
+    const selection = selectCanvasContext(snapshot, options);
     let imageCount = 0, videoCount = 0, textLeft = CANVAS_CONTEXT_LIMITS.text;
     const content: Content = [];
     const items = [];
@@ -61,6 +61,8 @@ export async function buildCanvasAssistantContext(snapshot: CanvasAgentSnapshot,
             item.reading = value.length > length ? "文本已截断" : "文本";
         } else if (explicitIds.has(node.id)) {
             item.reading = "已作为显式参考提供";
+        } else if (options.includeVisibleMedia !== true && !scope.selected && !scope.previewing) {
+            item.reading = "未启用可见素材读取";
         } else if (node.metadata?.content || node.metadata?.storageKey) {
             try {
                 if (node.type === CanvasNodeType.Image && imageCount < CANVAS_CONTEXT_LIMITS.images) {

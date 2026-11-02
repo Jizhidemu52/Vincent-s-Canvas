@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
-import { canvasNodeResizePointerDelta } from "@/lib/canvas/canvas-node-resize";
+import { canvasNodeResizePointerDelta, resolveCanvasNodeResize } from "@/lib/canvas/canvas-node-resize";
 import { CanvasNodeType } from "@/types/canvas";
 
 // Exercise the component's actual refs, callbacks and cleanup with dependency-aware hooks.
@@ -21,7 +21,7 @@ test("active resize survives callback changes, uses latest callbacks and fully r
     const moves: unknown[][] = [], finishes: unknown[][] = [], previews: unknown[] = [];
     const base = {
         data: { id: "node", type: CanvasNodeType.Image, width: 320, height: 180, position: { x: 10, y: 20 }, metadata: {} },
-        resizeRef, resizePreviewFrameRef, pendingResizePreviewRef, CanvasNodeType, canvasNodeResizePointerDelta,
+        resizeRef, resizePreviewFrameRef, pendingResizePreviewRef, CanvasNodeType, canvasNodeResizePointerDelta, resolveCanvasNodeResize, screenToCanvas: undefined,
         window: { addEventListener: (type: string, listener: (event?: any) => void) => listeners.set(type, listener),
             removeEventListener: (type: string, listener: (event?: any) => void) => { if (listeners.get(type) === listener) listeners.delete(type); } },
         requestAnimationFrame: (callback: () => void) => { frames.set(++frameId, callback); return frameId; }, cancelAnimationFrame: (id: number) => frames.delete(id),
@@ -41,19 +41,20 @@ test("active resize survives callback changes, uses latest callbacks and fully r
     const down = () => ({ stopPropagation() {}, preventDefault() {}, button: 0, clientX: 100, clientY: 100 });
     const first = render(1, 1);
     first.handleResizeMouseDown(down(), "bottom-right");
-    listeners.get("mousemove")!({ clientX: 110, clientY: 100 });
+    listeners.get("pointermove")!({ clientX: 110, clientY: 100, shiftKey: false });
     const second = render(2, 0.5);
     expect(second.handleResizeMove).toBe(first.handleResizeMove);
     expect(second.handleResizeUp).toBe(first.handleResizeUp);
-    expect(listeners.size).toBe(2);
-    listeners.get("mousemove")!({ clientX: 130, clientY: 100 });
-    expect(moves.at(-1)!.slice(0, 4)).toEqual([2, "node", 380, 213.75]);
-    listeners.get("mouseup")!();
-    expect(finishes[0]!.slice(0, 4)).toEqual([2, "node", 380, 213.75]);
+    expect(listeners.size).toBe(5);
+    listeners.get("pointermove")!({ clientX: 130, clientY: 100, shiftKey: false });
+    const constrained = resolveCanvasNodeResize({ position: base.data.position, width: 320, height: 180, delta: { x: 60, y: 0 }, handle: "bottom-right", keepRatio: true });
+    expect(moves.at(-1)!.slice(0, 4)).toEqual([2, "node", constrained.width, constrained.height]);
+    listeners.get("pointerup")!();
+    expect(finishes[0]!.slice(0, 4)).toEqual([2, "node", constrained.width, constrained.height]);
     expect(listeners.size).toBe(0);
     expect(frames.size).toBe(0);
     second.handleResizeMouseDown(down(), "bottom-right");
-    listeners.get("mousemove")!({ clientX: 140, clientY: 100 });
+    listeners.get("pointermove")!({ clientX: 140, clientY: 100, shiftKey: false });
     cleanup?.();
     expect(listeners.size).toBe(0);
     expect(frames.size).toBe(0);

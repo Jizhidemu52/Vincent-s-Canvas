@@ -27,12 +27,12 @@ export function createTaskEventStream(options: {
         reconnect = undefined;
         const ids = activeIds();
         const ownerId = options.owner();
-        if (!ids.length || !ownerId || !options.connect || (options.visibility?.hidden && !hasBackgroundWork()) || ids.length > 100) { closeSource(); return; }
-        const key = `${ownerId}:${ids.join(",")}`;
+        if (!ids.length || !ownerId || !options.connect || (options.visibility?.hidden && !hasBackgroundWork())) { closeSource(); return; }
+        const key = ownerId;
         if (source && sourceKey === key) return;
         closeSource();
         try {
-            const connection = options.connect(`/api/tasks/events?${new URLSearchParams({ ids: ids.join(","), ownerId })}`);
+            const connection = options.connect(`/api/tasks/events?${new URLSearchParams({ ownerId })}`);
             source = connection;
             sourceKey = key;
             connection.addEventListener("tasks-changed", event => {
@@ -42,7 +42,7 @@ export function createTaskEventStream(options: {
                     if (!Array.isArray(payload.ids) || !payload.ids.every(id => typeof id === "string")) return;
                     healthy = true;
                     const changed = new Set(payload.ids);
-                    for (const watch of watches) if (watch.ownerId === ownerId && [...watch.ids].some(id => changed.has(id))) {
+                    for (const watch of watches) if (watch.ownerId === ownerId && (!changed.size || [...watch.ids].some(id => changed.has(id)))) {
                         watch.version++;
                         wake(watch);
                     }

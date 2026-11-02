@@ -1,3 +1,5 @@
+import { publicGenerationFailure } from "../../../shared/generation-error";
+
 /** Keep human guidance separate from the original diagnostic. Never infer that an unknown paid submission failed. */
 export function generationErrorMessage(error: unknown, status?: number): string {
     const raw = error instanceof Error ? error.message : String(error || "");
@@ -10,6 +12,7 @@ export function generationErrorMessage(error: unknown, status?: number): string 
     if (status === 408 || status === 504 || /timeout|timed out|超时/i.test(raw)) return "服务响应超时。已提交的任务请继续查询，确认失败后再重试。";
     if (/Failed to fetch|NetworkError|network|Load failed|断网/i.test(raw)) return "网络连接失败，请检查网络；已提交的任务请继续查询，不要重复生成。";
     if (status && status >= 500) return "生成服务暂时不可用，请稍后查询原任务或联系管理员。";
+    if (/requires? \d|unsupported|not.support|invalid.{0,20}(parameter|size|resolution|format)|output_compression|invalid.?api.?key|certificate|\b(?:403|429|502|503|504)\b/i.test(raw)) return publicGenerationFailure(raw);
     return /[\u3400-\u9fff]/.test(raw) ? raw : "操作未完成，请稍后重试或复制诊断信息联系管理员。";
 }
 

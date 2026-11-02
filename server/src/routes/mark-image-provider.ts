@@ -71,9 +71,17 @@ export function createMarkImageProviderRouter(db: Database, config: AppConfig) {
       [MARK_IMAGE_PROVIDER_ID, MARK_IMAGE_PROVIDER_NAME, input.baseUrl, input.enabled, encrypted, actor.id]);
       for (const preset of MARK_PLATFORM_MODELS) {
         const model = input.models.find(item => item.modelId === preset.modelId)!;
+        // These are administrator-owned fields in /models/:id. A credential/price save
+        // must not silently clear them; reject incompatible workflows for explicit repair.
+        const bindings = (await client.query(`SELECT m.workflow_config_id AS "workflowConfigId",w.provider_id AS "workflowProviderId",w.capability AS "workflowCapability",w.enabled AS "workflowEnabled"
+          FROM model_configs m LEFT JOIN workflow_configs w ON w.id=m.workflow_config_id WHERE m.provider_id=$1 AND m.model_id=$2`, [MARK_IMAGE_PROVIDER_ID, preset.modelId])).rows[0];
+        if (bindings?.workflowConfigId && (bindings.workflowProviderId !== MARK_IMAGE_PROVIDER_ID || bindings.workflowEnabled !== true || !(preset.capabilities as readonly string[]).includes(bindings.workflowCapability))) {
+          await client.query("ROLLBACK");
+          response.status(409).json({ error: "INCOMPATIBLE_MODEL_WORKFLOW", message: "已有模型工作流绑定与当前渠道能力不兼容。请在模型管理中修复或明确解除绑定后再保存；本次未清空绑定。" }); return;
+        }
         await client.query(`INSERT INTO model_configs(provider_id,name,model_id,capabilities,credit_cost,rmb_cost,concurrency_limit,enabled,created_by)
           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(provider_id,model_id) DO UPDATE SET name=EXCLUDED.name,capabilities=EXCLUDED.capabilities,
-          workflow_config_id=NULL,replacement_model_config_id=NULL,credit_cost=EXCLUDED.credit_cost,rmb_cost=EXCLUDED.rmb_cost,
+          credit_cost=EXCLUDED.credit_cost,rmb_cost=EXCLUDED.rmb_cost,
           concurrency_limit=EXCLUDED.concurrency_limit,enabled=EXCLUDED.enabled,updated_at=now()`,
         [MARK_IMAGE_PROVIDER_ID, preset.name, preset.modelId, [...preset.capabilities], model.creditCost,
           getApimartImageCost(MARK_IMAGE_PROVIDER_ID, preset.modelId)?.rmbPerImage ?? model.rmbCost, model.concurrencyLimit, model.enabled, actor.id]);

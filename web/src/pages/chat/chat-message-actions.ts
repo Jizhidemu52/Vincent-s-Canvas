@@ -11,9 +11,9 @@ export function chatSourceTurn(session: ChatSession, messageId: string): ChatMes
 
 /** A user-requested branch never overwrites its source or includes later turns. */
 export function createChatBranch(session: ChatSession, messageId: string, id: string, now: string) {
-    if (session.messages.some((item) => item.pendingImageTask)) throw new Error("原图片任务尚未核实，请先查询原任务");
     const source = chatSourceTurn(session, messageId);
     if (!source) throw new Error("找不到原始消息，无法重新发送");
+    if (session.messages.some(item => item.pendingImageTask?.parentMessageId === source.id || item.id === messageId && item.pendingImageTask)) throw new Error("这条消息的原图片任务尚未核实，请先查询原任务；可以继续发送新的消息。");
     const index = session.messages.indexOf(source);
     const { canvasProjectId: _canvas, ...original } = session;
     return {
@@ -21,6 +21,8 @@ export function createChatBranch(session: ChatSession, messageId: string, id: st
         session: {
             ...original, id, title: `${session.title || "对话"} · 分支`, updatedAt: now,
             messages: session.messages.slice(0, index), editTargetImageId: source.editTargetImageId,
+            focusImageId: source.focusImageId || source.editTargetImageId, focusLocked: source.focusLocked,
+            newCreation: source.newCreation, focusRevision: 0,
             branchOf: { sessionId: session.id, messageId: source.id },
         } satisfies ChatSession,
     };

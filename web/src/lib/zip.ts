@@ -25,7 +25,9 @@ export async function readZip(file: Blob, options: ZipOptions = {}): Promise<Map
     return runZipTask({ kind: "read", file }, options) as Promise<Map<string, Blob>>;
 }
 
-function runZipTask(task: ZipTask, { signal, timeoutMs = 120_000, onProgress }: ZipOptions): Promise<ZipTaskResult> {
+function runZipTask(task: ZipTask, { signal, timeoutMs, onProgress }: ZipOptions): Promise<ZipTaskResult> {
+    const bytes = task.kind === "read" ? task.file.size : task.files.reduce((sum, file) => sum + (file.data instanceof Blob ? file.data.size : typeof file.data === "string" ? file.data.length * 2 : file.data.byteLength), 0);
+    timeoutMs ??= Math.max(120_000, Math.min(30 * 60_000, 120_000 + bytes / (1024 * 1024) * 1000));
     return new Promise((resolve, reject) => {
         if (signal?.aborted) { reject(signal.reason); return; }
         let settled = false;

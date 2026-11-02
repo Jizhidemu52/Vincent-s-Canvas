@@ -37,3 +37,20 @@ test("extracted shortcuts preserve clipboard, IME, focused-input and repeat guar
     run("d"); run("g"); run("z"); run("z", { shiftKey: true }); run("a"); run("Delete", { ctrlKey: false }); run("Escape", { ctrlKey: false });
     expect(called).toEqual(["duplicate", "group", "undo", "redo", "selectAll", "deleteSelection", "escape"]);
 });
+
+test("zoom shortcuts override browser zoom over inputs without stealing modal editor zoom", () => {
+    let zooms = 0;
+    const actions = { zoomIn: () => zooms++ } as CanvasShortcutActions;
+    const make = (modal: boolean, composing = false) => ({ key: "=", ctrlKey: true, metaKey: false, altKey: false, shiftKey: false, isComposing: composing, keyCode: 0, defaultPrevented: false, target: { closest: (selector: string) => selector.includes(".ant-modal") ? modal : true }, preventDefault() { this.defaultPrevented = true; } });
+    const input = make(false);
+    handleCanvasShortcut(input as unknown as KeyboardEvent, actions);
+    expect(input.defaultPrevented).toBe(true);
+    expect(zooms).toBe(1);
+    const modal = make(true);
+    handleCanvasShortcut(modal as unknown as KeyboardEvent, actions);
+    expect(modal.defaultPrevented).toBe(true);
+    expect(zooms).toBe(1);
+    const ime = make(false, true);
+    handleCanvasShortcut(ime as unknown as KeyboardEvent, actions);
+    expect(ime.defaultPrevented).toBe(false);
+});

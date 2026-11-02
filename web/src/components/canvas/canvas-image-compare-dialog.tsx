@@ -8,6 +8,7 @@ import { canvasCompareCandidates, canvasCompareImages, canvasCompareSameImage, c
 import { encodeCanvasComparePng } from "@/lib/canvas/canvas-image-encoding";
 import type { CanvasImageProgress } from "@/lib/canvas/canvas-image-worker";
 import type { CanvasNodeData } from "@/types/canvas";
+import { canvasImageExportStem } from "@/lib/canvas/canvas-image-filename";
 import { CanvasCompareThumbnail, CanvasImageComparePicker, canvasCompareImageLabel } from "./canvas-image-compare-picker";
 
 type LoadedPair = { before: HTMLImageElement; after: HTMLImageElement };
@@ -64,7 +65,7 @@ export function CanvasImageCompareDialog({ nodes, initialIds, onClose, compariso
         const controller = new AbortController();
         renderJob.current = controller;
         exportJob.current?.abort(); exportJob.current = null; setExporting(false);
-        setRendered(null); setRenderError(""); setProgress(null);
+        setRendered(current => current?.source === loaded && current.mode === mode ? current : null); setRenderError(""); setProgress(null);
         if (!loaded || !canvas.current) return;
         const frame = requestAnimationFrame(async () => {
             const target = canvas.current;
@@ -88,6 +89,7 @@ export function CanvasImageCompareDialog({ nodes, initialIds, onClose, compariso
     }, [loaded]);
     const error = loadError || renderError;
     const ready = Boolean(loaded && rendered?.source === loaded && rendered.mode === mode && rendered.value === value && rendered.background === theme.node.fill && rendered.foreground === theme.node.text && !loading && !error);
+    const visibleReady = Boolean(loaded && rendered?.source === loaded && rendered.mode === mode && !loading && !error);
     const scale = canvasComparePreviewScale(rendered?.width || 1, rendered?.height || 1, stageSize.width - 2, stageSize.height - 2, zoom);
     const close = () => { renderJob.current?.abort(); exportJob.current?.abort(); onClose(); };
     const cancel = () => {
@@ -95,17 +97,19 @@ export function CanvasImageCompareDialog({ nodes, initialIds, onClose, compariso
         else { renderJob.current?.abort(); renderJob.current = null; setRenderError("差异计算已取消，可重新加载或换图"); }
         setProgress(null);
     };
-    const exportImage = async () => {
-        if (!canvas.current || !ready || exporting) return;
+    const exportImage = async (resolution: "preview" | "original" = "preview") => {
+        if (!canvas.current || !ready || !loaded || !before || !after || exporting) return;
         const controller = new AbortController(); exportJob.current = controller;
         setExporting(true);
+        const target = resolution === "original" && mode !== "difference" ? document.createElement("canvas") : canvas.current;
         try {
-            const blob = await encodeCanvasComparePng(canvas.current, { signal: controller.signal, onProgress: update => { if (!controller.signal.aborted) setProgress(update); } });
-            if (!controller.signal.aborted) saveAs(blob, `改款前后对比-${mode}.png`);
+            if (target !== canvas.current) drawCanvasCompare(target, loaded.before, loaded.after, mode, value, theme.node.fill, theme.node.text, "original");
+            const blob = await encodeCanvasComparePng(target, { signal: controller.signal, onProgress: update => { if (!controller.signal.aborted) setProgress(update); } });
+            if (!controller.signal.aborted) saveAs(blob, `${canvasImageExportStem(before)}_vs_${canvasImageExportStem(after)}_${{ slider: "滑块", side: "并排", overlay: "叠加", difference: "差异" }[mode]}${resolution === "original" ? "_原分辨率" : ""}.png`);
         } catch (error) { if (!controller.signal.aborted) message.error(error instanceof Error ? error.message : t("导出失败，请重试")); }
-        finally { if (exportJob.current === controller) { exportJob.current = null; setExporting(false); setProgress(null); } }
+        finally { if (target !== canvas.current) { target.width = 0; target.height = 0; } if (exportJob.current === controller) { exportJob.current = null; setExporting(false); setProgress(null); } }
     };
-    return <Modal open title={t("改款前后对比")} width={1000} onCancel={close} footer={<Button onClick={() => void exportImage()} disabled={!ready} loading={exporting}>{t("导出当前对比 PNG")}</Button>}>
+    return <Modal open centered title={t("改款前后对比")} width={1200} onCancel={close} footer={<div className="flex flex-wrap justify-end gap-2"><Button onClick={() => void exportImage()} disabled={!ready} loading={exporting}>{t("导出预览 PNG")}</Button>{mode !== "difference" ? <Button type="primary" onClick={() => void exportImage("original")} disabled={!ready} loading={exporting}>{t("按原分辨率导出")}</Button> : null}</div>}>
         <p className="mb-3 text-sm opacity-70">{t(comparisonBasis === "original" ? "与该图片已记录的原图比较；有多张原图时请手动选择。不改原图、不调用 AI，也不是自动质检。" : "默认与本次修改前的直接上版比较，点击图片卡可换选其他图。不改原图、不调用 AI；不做配准，也不是自动质检。")}</p>
         <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
             {([0, 1] as const).map(index => {
@@ -135,8 +139,8 @@ export function CanvasImageCompareDialog({ nodes, initialIds, onClose, compariso
         {progress ? <div aria-live="polite" className="mt-2"><Progress percent={progress.percent} size="small" /><span className="text-xs">{progress.label}</span>{progress.percent < 100 ? <Button type="text" size="small" onClick={cancel}>{t("取消处理")}</Button> : null}</div> : null}
         <div ref={stage} tabIndex={0} role="region" aria-label={t("对比预览，可用方向键或触摸滚动")} className="mt-3 h-[min(52dvh,560px)] min-h-48 overflow-auto overscroll-contain rounded-lg" style={{ background: theme.node.fill, color: theme.node.text }}>
             <div className="flex min-h-full w-max min-w-full items-center justify-center">
-                {loading || (loaded && !error && !ready) ? <Spin /> : error ? <div className="max-w-72 p-5 text-center"><p role="alert" className="mb-3 break-words text-sm">{error}</p><Button onClick={() => setReload(value => value + 1)}>{t("重新加载")}</Button></div> : !loaded ? <p className="max-w-72 p-6 text-sm opacity-70">{t("请选择两张不同的图片；没有可靠的修改前记录时，请通过上方缩略图面板手动选图。")}</p> : null}
-                <canvas ref={canvas} aria-label={t("改款前后对比预览")} style={{ display: ready ? "block" : "none", width: (rendered?.width || 1) * scale, height: (rendered?.height || 1) * scale, maxWidth: "none", flex: "none", imageRendering: zoom === "fit" ? "auto" : "pixelated" }} />
+                {loading || (loaded && !error && !visibleReady) ? <Spin /> : error ? <div className="max-w-72 p-5 text-center"><p role="alert" className="mb-3 break-words text-sm">{error}</p><Button onClick={() => setReload(value => value + 1)}>{t("重新加载")}</Button></div> : !loaded ? <p className="max-w-72 p-6 text-sm opacity-70">{t("请选择两张不同的图片；没有可靠的修改前记录时，请通过上方缩略图面板手动选图。")}</p> : null}
+                <canvas ref={canvas} aria-label={t("改款前后对比预览")} style={{ display: visibleReady ? "block" : "none", width: (rendered?.width || 1) * scale, height: (rendered?.height || 1) * scale, maxWidth: "none", flex: "none", imageRendering: zoom === "fit" ? "auto" : "pixelated" }} />
             </div>
         </div>
         {ready && loaded ? <p className="mt-2 text-xs" style={{ color: theme.node.muted }}>{t("原图")}{loaded.before.naturalWidth}×{loaded.before.naturalHeight} / {loaded.after.naturalWidth}×{loaded.after.naturalHeight} {t(" · 输出")}{rendered?.width}×{rendered?.height} PNG{mode === "difference" ? t("（无标题栏）") : t(" 展示图")} · {zoom === "fit" ? t("适应 {value1}%", { value1: Math.round(scale * 100) }) : `${zoom}×`}</p> : null}

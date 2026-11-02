@@ -10,10 +10,10 @@ const byId = new Map([red, blue, green].map((node) => [node.id, node]));
 const sync = (refs: CanvasSelectionReference[], ids: string[], map = byId) => syncCanvasSelectionReferences(refs, new Set(ids), map);
 
 describe("canvas selection reference composition", () => {
-    test("single click uses the selected image and selecting another replaces it", () => {
+    test("single click adds the selected image and selecting another appends it", () => {
         const selected = sync([], ["red"]);
         expect(selected[0]).toMatchObject({ id: "canvas:red", canvasNodeId: "red", dataUrl: "blob:red", storageKey: "stored-red" });
-        expect(sync(selected, ["blue"]).map((ref) => ref.canvasNodeId)).toEqual(["blue"]);
+        expect(sync(selected, ["blue"]).map((ref) => ref.canvasNodeId)).toEqual(["red", "blue"]);
     });
     test("box selection includes every usable image, excluding text, video and pending images", () => {
         const mixed = new Map(byId);
@@ -34,7 +34,7 @@ describe("canvas selection reference composition", () => {
     test("removing or clearing selected references does not resurrect them, uploads remain independent", () => {
         const upload = { id: "upload", name: "uploaded.png", type: "image/png", dataUrl: "blob:upload" };
         const refs = sync([upload], ["red", "blue"]);
-        expect(sync(refs, ["blue"]).map((ref) => ref.id)).toEqual(["upload", "canvas:blue"]);
+        expect(sync(refs.filter(ref => ref.canvasNodeId !== "red"), ["blue"]).map((ref) => ref.id)).toEqual(["upload", "canvas:blue"]);
         expect(sync([upload], [])).toEqual([upload]);
         expect(sync([], [])).toEqual([]);
     });

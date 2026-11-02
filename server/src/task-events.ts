@@ -10,7 +10,7 @@ export const TASK_EVENTS_MAX_CONNECTION_MS = 5 * 60_000;
 
 const changeSchema = z.object({ id: z.string().uuid(), userId: z.string().uuid() });
 const subscriptionSchema = z.object({
-  ids: z.string().max(3_699).transform(value => value.split(",")).pipe(z.array(z.string().uuid()).min(1).max(100)),
+  ids: z.string().max(3_699).transform(value => value.split(",")).pipe(z.array(z.string().uuid()).min(1).max(100)).optional(),
   ownerId: z.string().uuid(),
 });
 
@@ -144,7 +144,7 @@ export class TaskEventsService {
     const bucket = this.subscriptions.get(change.data.userId.toLowerCase());
     if (!bucket) return;
     const id = change.data.id.toLowerCase();
-    for (const subscription of [...bucket]) if (subscription.ids.has(id)) this.emit(subscription, [id]);
+    for (const subscription of [...bucket]) if (!subscription.ids.size || subscription.ids.has(id)) this.emit(subscription, [id]);
   }
 
   private emit(subscription: Subscription, ids: string[]) {
@@ -172,7 +172,7 @@ export function createTasksEventsRouter(events: Pick<TaskEventsService, "subscri
         return;
       }
       if (response.destroyed) return;
-      const ids = [...new Set(input.ids.map(id => id.toLowerCase()))];
+      const ids = [...new Set((input.ids || []).map(id => id.toLowerCase()))];
       response.status(200).set({ "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "private, no-store", "X-Accel-Buffering": "no" });
       response.flushHeaders();
       let ended = false;

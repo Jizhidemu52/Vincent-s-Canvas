@@ -6,11 +6,14 @@ import { i18nHarness } from "./helpers/i18n-harness";
 import { imageModelProfile } from "@/lib/image-model-settings";
 import { modelLabelWithUsage } from "@/lib/model-picker-options";
 import { chatImageQualitySettings, chatImageRequestOptions, preferredChatImageModel, resolveChatImageQuality } from "@/pages/chat/image-quality";
+import { resolveChatImageSize } from "@/pages/chat/image-size";
 import { createChatSessionStorage } from "@/pages/chat/chat-session-storage";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { defaultConfig } from "@/stores/use-config-store";
 import { imageTaskParameters } from "@/services/api/image";
 import { assertCreativeChatImageSelection, buildCreativeImageCatalog } from "@/lib/creative-chat";
+import { chatFocusImage } from "@/pages/chat/chat-image-selection";
+import { chatImageTaskSignature, duplicateChatImageTask, completeChatImageTask } from "@/pages/chat/chat-image-tasks";
 
 const originalModels = useBusinessConfigStore.getState().models;
 afterEach(() => useBusinessConfigStore.setState({ models: originalModels }));
@@ -70,27 +73,31 @@ test("public standard models expose actual quality tiers, not invented K resolut
     expect(speed.options).toEqual([{ value: "relax", label: "模型默认" }]);
 });
 
-function sendHarness({ action = "generate", quality = "high", resolution = undefined as string | undefined, imageModels = models.slice(0, 1), discussion = false, planGate = Promise.resolve() } = {}) {
+function sendHarness({ action = "generate", quality = "high", resolution = undefined as string | undefined, size = undefined as string | undefined, sourceSize = { width: 256, height: 256 }, imageModels = models.slice(0, 1), discussion = false, planGate = Promise.resolve() } = {}) {
     useBusinessConfigStore.setState({ models });
     if (!sendExpression) throw new Error("Actual send handler not found");
-    const initial = { id: "session-a", title: "会话A", imageModelId: models[0].modelId, imageQuality: quality, imageResolution: resolution, messages: [] as any[] };
+    const initial = { id: "session-a", title: "会话A", imageModelId: models[0].modelId, imageQuality: quality, imageResolution: resolution, imageSize: size, messages: [] as any[] };
     const sessionsRef = { current: [initial] };
     const snapshots: any[] = [];
     const calls: any[] = [];
-    const config = { model: "chat-model", imageModel: models[0].modelId, quality: "4k", imageOptions: '{"resolution":"2k","output_format":"webp"}' };
+    const config = { model: "chat-model", imageModel: models[0].modelId, size: "1:1", quality: "4k", imageOptions: '{"resolution":"2k","output_format":"webp"}' };
     const bindings = {
         ...i18nHarness,
         sessionsReady: true, draft: "只改花瓣", attachments: [], readingAttachments: false, sendingRef: { current: false }, placingImageRef: { current: false }, activeSession: initial,
         hydratingMedia: false, isCurrentScope: () => true,
-        imageTarget: null, referenceImageIds: [], setImageTarget() {}, setReferenceImageIds() {}, assertCreativeChatImageSelection, buildCreativeImageCatalog,
+        imageTarget: null, referenceImageIds: [], setImageTarget() {}, setReferenceImageIds() {}, assertCreativeChatImageSelection, buildCreativeImageCatalog, chatFocusImage,
+        regionSelection: null, setRegionSelection() {}, chatImageTaskSignature, duplicateChatImageTask, completeChatImageTask,
+        imageRequestsRef: { current: new Map() }, setActiveImageRequestIds() {}, activeSessionIdRef: { current: initial.id },
+        restoreChatMaskResult: async (_pending: unknown, url: string) => url,
         chatMedia: { async hydrateSession<T>(session: T) { return session; }, async persist<T>(image: T, assertCurrent: () => void) { assertCurrent(); return image; } },
         selectedModel: "chat-model", selected: { modelId: "chat-model" }, creativeModelId: "chat-model", config, imageModels, preferredChatImageModel, resolveChatImageQuality, chatImageRequestOptions,
+        resolveChatImageSize: (...args: Parameters<typeof resolveChatImageSize>) => resolveChatImageSize(args[0], args[1], args[2], args[3], args[4], async () => sourceSize),
         activeSendRef: { current: null }, preparingMessageRef: { current: false }, loadedStorageKeyRef: { current: "user-a" }, storageKey: "user-a", sessionsRef,
         createClientId: (() => { let count = 0; return () => `message-${++count}`; })(),
         persistSessions: async (value: any[]) => { snapshots.push(structuredClone(value)); }, persistence: { clear() {} }, setIsSending() {}, setSendPhase() {}, setDraft() {}, setAttachments() {},
         updateSession: (id: string, update: (value: any) => any) => { sessionsRef.current = sessionsRef.current.map(value => value.id === id ? update(value) : value); },
         followBottomRef: { current: false }, activeStreamRef: { current: null }, createChatStreamBuffer: () => ({ push() {}, flush() {}, cancel() {} }),
-        requestCreativeChatPlan: async () => { await planGate; return discussion ? { kind: "discussion", content: "只讨论" } : { kind: "image", action, prompt: "只改花瓣", content: "", references: [], lineage: { sourceImageIds: [], preservedConstraints: [] } }; },
+        requestCreativeChatPlan: async () => { await planGate; return discussion ? { kind: "discussion", content: "只讨论" } : { kind: "image", action, prompt: "只改花瓣", content: "", references: action === "edit" ? [{ id: "base", name: "底图.png", type: "image/png", dataUrl: "data:image/png;base64,AQID" }] : [], keep: [], workNote: { summary: "花瓣变细", keep: [] } }; },
         requestGeneration: async (cfg: any, _prompt: string, options: any) => submit(cfg, options),
         requestEdit: async (cfg: any, _prompt: string, _refs: any, _mask: any, options: any) => submit(cfg, options),
         imageToDataUrl: async (image: any) => image.dataUrl, message: { warning() {}, error() {} },
@@ -128,6 +135,33 @@ test("a planning delay cannot change the quality snapshot of the already sent re
     gate.resolve();
     await pending;
     expect(page.calls[0].quality).toBe("medium");
+});
+
+test.each([
+    [{ width: 1500, height: 2000 }, "3:4"],
+    [{ width: 2000, height: 1500 }, "4:3"],
+    [{ width: 1000, height: 1000 }, "1:1"],
+] as const)("the actual send records resolved %s size in config, pending signature and generated history", async (sourceSize, expected) => {
+    const page = sendHarness({ action: "edit", quality: "1k", sourceSize, imageModels: [models[1]] });
+    await page.send();
+    expect(page.calls[0]?.size).toBe(expected);
+    const pending = page.snapshots[1][0].messages.at(-1).pendingImageTask;
+    expect(pending.size).toBe(expected);
+    expect(pending.signature).toBe(chatImageTaskSignature(pending));
+    expect(page.sessionsRef.current[0].messages.at(-1).generatedImages[0].size).toBe(expected);
+    expect(page.config.size).toBe("1:1");
+    expect(page.sessionsRef.current[0].imageSize).toBeUndefined();
+});
+
+test("a planning delay freezes an explicit size without overwriting a later session choice", async () => {
+    const gate = Promise.withResolvers<void>();
+    const page = sendHarness({ action: "edit", quality: "1k", sourceSize: { width: 1500, height: 2000 }, size: "1:1", imageModels: [models[1]], planGate: gate.promise });
+    const pending = page.send();
+    await Promise.resolve();
+    page.sessionsRef.current[0] = { ...page.sessionsRef.current[0], imageSize: "16:9" };
+    gate.resolve(); await pending;
+    expect(page.calls[0]?.size).toBe("1:1");
+    expect(page.sessionsRef.current[0].imageSize).toBe("16:9");
 });
 
 test("an incompatible action fallback blocks submission and changes the available profile so the user can resolve it", async () => {
@@ -186,9 +220,10 @@ test("the actual quality selector changes only the active session and persists d
     expect(await storage.load("owner-b", () => null)).toEqual([{ id: "other", imageQuality: "auto" }]);
 });
 
-test("the selector is disabled before hydration, while sending or recovering, with no image model, or for speed-only models", () => {
+test("settings are disabled only before hydration or during planning, not while earlier tasks recover", () => {
     expect(qualitySelect().select.props.disabled).toBe(false);
-    for (const options of [{ ready: false }, { sending: true }, { modelsLoading: true }, { pending: true }, { model: null }, { model: models[3] }]) expect(qualitySelect(options).select.props.disabled).toBe(true);
+    expect(qualitySelect({ pending: true }).select.props.disabled).toBe(false);
+    for (const options of [{ ready: false }, { sending: true }, { modelsLoading: true }, { model: null }, { model: models[3] }]) expect(qualitySelect(options).select.props.disabled).toBe(true);
 });
 
 test("Mark GPT exposes independent quality and resolution while Nano exposes only 1K / 2K / 4K", () => {

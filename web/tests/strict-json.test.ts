@@ -7,10 +7,10 @@ import { defaultConfig } from "../src/stores/use-config-store";
 const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; });
 const reference = { id: "shirt", name: "shirt.png", type: "image/png", dataUrl: "data:image/png;base64,QQ==" };
-const args = (preserve: string) => `{"action":"edit","prompt":"衣身改蓝色","target_image_id":"shirt",${preserve}}`;
-const call = (raw: string) => ({ id: "call-one", type: "function" as const, function: { name: "create_image", arguments: raw } });
+const args = (keep: string) => `{"base":"shirt","prompt":"衣身改蓝色",${keep}}`;
+const call = (raw: string) => ({ id: "call-one", type: "function" as const, function: { name: "edit_image", arguments: raw } });
 
-function toolStream(raw: string, name = "create_image") {
+function toolStream(raw: string, name = "edit_image") {
     const halfway = Math.floor(raw.length / 2);
     const events = [
         { type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "call-one", name, input: {} } },
@@ -47,15 +47,16 @@ describe("strict JSON duplicate-key boundary", () => {
     });
 
     test("direct planner replay cannot bypass the strict boundary with duplicate arrays", () => {
-        expect(() => parseCreativeChatPlan({ content: "", toolCalls: [call(args('"preserve":["领口不变"],"preserve":["白底不变"]'))] }, [reference])).toThrow(DuplicateJsonKeyError);
+        expect(() => parseCreativeChatPlan({ content: "", toolCalls: [call(args('"keep":["领口不变"],"keep":["白底不变"]'))] }, [reference])).toThrow(DuplicateJsonKeyError);
     });
 
     test.each([
-        '"preserve":["领口不变"],"preserve":["白底不变"]',
-        String.raw`"preserve":["领口不变"],"pre\u0073erve":["白底不变"]`,
-    ])("native SSE rejects ambiguous raw arguments before normalization: %s", async (preserve) => {
+        '"keep":["领口不变"],"keep":["白底不变"]',
+        String.raw`"keep":["领口不变"],"k\u0065ep":["白底不变"]`,
+        '"keep":"领口不变","keep":"白底不变"',
+    ])("native SSE rejects ambiguous raw arguments before normalization: %s", async (keep) => {
         let executablePlans = 0;
-        const pending = readClaudeSseResponse(toolStream(args(preserve))).then((result) => {
+        const pending = readClaudeSseResponse(toolStream(args(keep))).then((result) => {
             parseCreativeChatPlan(result, [reference]);
             executablePlans += 1;
         });
@@ -64,18 +65,49 @@ describe("strict JSON duplicate-key boundary", () => {
     });
 
     test("native SSE preserves every valid constraint through the executable plan", async () => {
-        const result = await readClaudeSseResponse(toolStream(args('"preserve":["领口形状不变","七颗纽扣不变","白底不变"]')));
+        const result = await readClaudeSseResponse(toolStream(args('"keep":["领口形状不变","七颗纽扣不变","白底不变"]')));
         const plan = parseCreativeChatPlan(result, [reference]);
         expect(plan.kind).toBe("image");
         if (plan.kind !== "image") throw new Error("expected image plan");
-        expect(plan.lineage.preservedConstraints).toEqual(["领口形状不变", "七颗纽扣不变", "白底不变"]);
-        plan.lineage.preservedConstraints.forEach((constraint) => expect(plan.prompt).toContain(constraint));
+        expect(plan.keep).toEqual(["领口形状不变", "七颗纽扣不变", "白底不变"]);
+        expect(plan.workNote.keep).toEqual(plan.keep);
+        plan.keep.forEach((constraint) => expect(plan.prompt).toContain(constraint));
     });
 
     test("native SSE rejects duplicate keys in a complete content_block_start input", async () => {
-        const raw = `{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"call-one","name":"create_image","input":${args('"preserve":"领口不变","preserve":"白底不变"')}}}`;
+        const raw = `{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"call-one","name":"edit_image","input":${args('"keep":"领口不变","keep":"白底不变"')}}}`;
         const response = new Response(`data: ${raw}\n\n`, { headers: { "content-type": "text/event-stream" } });
         await expect(readClaudeSseResponse(response)).rejects.toThrow(DuplicateJsonKeyError);
+    });
+
+    test("native SSE uses base none for new creation and retains the complete keep list", async () => {
+        const result = await readClaudeSseResponse(toolStream('{"base":"none","prompt":"创作平面小花","keep":["背景纯白","不添加文字"]}'));
+        expect(parseCreativeChatInspection(result, [])).toBeNull();
+        const plan = parseCreativeChatPlan(result, []);
+        expect(plan.kind).toBe("image");
+        if (plan.kind !== "image") throw new Error("expected image plan");
+        expect(plan.action).toBe("generate");
+        expect(plan.references).toEqual([]);
+        expect(plan.keep).toEqual(["背景纯白", "不添加文字"]);
+        plan.keep.forEach(constraint => expect(plan.prompt).toContain(constraint));
+    });
+
+    test("valid non-SSE edit_image arguments retain all keep constraints with one request", async () => {
+        const calls: string[] = [];
+        const keep = ["针织衫保持米白底色配浅蓝与粉色小碎花的基调", "搭配米色裤装"];
+        globalThis.fetch = (async url => {
+            if (String(url) === "/api/models") return Response.json({ models: [{ id: "current-keep-fixture", modelId: "current-keep-fixture", name: "fixture", capabilities: ["chat"], creditCost: 0, rmbCost: 0 }], tools: [{ toolKey: "gpt-chat", modelConfigId: "current-keep-fixture", enabled: true, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 1 }], prices: [] });
+            calls.push(String(url));
+            return Response.json({ content: "", toolCalls: [call(args(`"keep":${JSON.stringify(keep)}`))] });
+        }) as typeof fetch;
+        const result = await requestToolResponse({ ...defaultConfig, model: "current-keep-fixture", textModel: "current-keep-fixture", systemPrompt: "" }, [{ role: "user", content: "衣身改蓝色，其他不变" }], []);
+        const plan = parseCreativeChatPlan(result, [reference]);
+        expect(plan.kind).toBe("image");
+        if (plan.kind !== "image") throw new Error("expected image plan");
+        expect(plan.keep).toEqual(keep);
+        expect(plan.parentId).toBe("shirt");
+        plan.keep.forEach(constraint => expect(plan.prompt).toContain(constraint));
+        expect(calls).toEqual(["/api/chat/responses"]);
     });
 
     test("non-SSE raw tool arguments are checked without retries or image submission", async () => {
@@ -83,20 +115,23 @@ describe("strict JSON duplicate-key boundary", () => {
         globalThis.fetch = (async (url) => {
             if (String(url) === "/api/models") return Response.json({ models: [{ id: "strict-json-fixture", modelId: "strict-json-fixture", name: "fixture", capabilities: ["chat"], creditCost: 0, rmbCost: 0 }], tools: [{ toolKey: "gpt-chat", modelConfigId: "strict-json-fixture", enabled: true, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 1 }], prices: [] });
             calls.push(String(url));
-            return Response.json({ content: "", toolCalls: [call(args('"preserve":["领口不变"],"preserve":["白底不变"]'))] });
+            return Response.json({ content: "", toolCalls: [call(args('"keep":["领口不变"],"keep":["白底不变"]'))] });
         }) as typeof fetch;
         await expect(requestToolResponse({ ...defaultConfig, model: "strict-json-fixture", textModel: "strict-json-fixture", systemPrompt: "" }, [{ role: "user", content: "衣身改蓝色，其他不变" }], [])).rejects.toThrow(DuplicateJsonKeyError);
         expect(calls).toEqual(["/api/chat/responses"]);
     });
 });
 
-describe("create_image duplicate preserve recovery", () => {
+describe("legacy create_image transport recovery cannot re-enter image-agent planning", () => {
+    const args = (preserve: string) => `{"action":"edit","prompt":"衣身改蓝色","target_image_id":"shirt",${preserve}}`;
+    const call = (raw: string) => ({ id: "legacy-call", type: "function" as const, function: { name: "create_image", arguments: raw } });
+    const legacyToolStream = (raw: string, name = "create_image") => toolStream(raw, name);
     // Preserve values captured from the real two-image Claude response; IDs and
     // prompt use the local replay fixture so no image or model request is needed.
     const observed = args('"preserve":"针织衫保持米白底色配浅蓝与粉色小碎花的基调","preserve":"搭配米色裤装"');
 
-    test("recovers both observed constraints before inspection and final planning", async () => {
-        const result = await readClaudeSseResponse(toolStream(observed));
+    test("recovers both observed transport constraints but rejects the retired tool during inspection and planning", async () => {
+        const result = await readClaudeSseResponse(legacyToolStream(observed));
         const expected = ["针织衫保持米白底色配浅蓝与粉色小碎花的基调", "搭配米色裤装"];
         expect(parseStrictJson(result.toolCalls[0]!.function.arguments)).toEqual({
             action: "edit", prompt: "衣身改蓝色", target_image_id: "shirt", preserve: expected,
@@ -104,17 +139,13 @@ describe("create_image duplicate preserve recovery", () => {
         expect(result.claudeAssistantContent?.[0]?.input).toEqual({
             action: "edit", prompt: "衣身改蓝色", target_image_id: "shirt", preserve: expected,
         });
-        expect(parseCreativeChatInspection(result, [])).toBeNull();
-        const plan = parseCreativeChatPlan(result, [reference]);
-        expect(plan.kind).toBe("image");
-        if (plan.kind !== "image") throw new Error("expected image plan");
-        expect(plan.lineage.preservedConstraints).toEqual(expected);
-        expected.forEach(constraint => expect(plan.prompt).toContain(constraint));
+        expect(() => parseCreativeChatInspection(result, [])).toThrow("未授权工具");
+        expect(() => parseCreativeChatPlan(result, [reference])).toThrow("未授权工具");
     });
 
     test("decodes escaped preserve names and retains source order, whitespace and repeated values", async () => {
         const raw = args(String.raw`"preserve":"  领口不变\n", "pre\u0073erve":"\"preserve\": {装饰} \\ 保留\ud83e\uddf5", "preserve":"  领口不变\n"`);
-        const result = await readClaudeSseResponse(toolStream(raw));
+        const result = await readClaudeSseResponse(legacyToolStream(raw));
         expect((parseStrictJson(result.toolCalls[0]!.function.arguments) as { preserve: string[] }).preserve)
             .toEqual(["  领口不变\n", '"preserve": {装饰} \\ 保留🧵', "  领口不变\n"]);
         // The generic parser and raw direct planner replay remain fail-closed.
@@ -122,18 +153,15 @@ describe("create_image duplicate preserve recovery", () => {
         expect(() => parseCreativeChatPlan({ content: "", toolCalls: [call(raw)] }, [reference])).toThrow(DuplicateJsonKeyError);
     });
 
-    test("accepts the existing generate action and an action placed after preserve", async () => {
-        const result = await readClaudeSseResponse(toolStream('{"preserve":"背景纯白","prompt":"创作平面小花","preserve":"不添加文字","action":"generate"}'));
-        const plan = parseCreativeChatPlan(result, []);
-        expect(plan.kind).toBe("image");
-        if (plan.kind !== "image") throw new Error("expected image plan");
-        expect(plan.action).toBe("generate");
-        expect(plan.lineage.preservedConstraints).toEqual(["背景纯白", "不添加文字"]);
+    test("transport preserves the old generate action without authorizing it in the new planner", async () => {
+        const result = await readClaudeSseResponse(legacyToolStream('{"preserve":"背景纯白","prompt":"创作平面小花","preserve":"不添加文字","action":"generate"}'));
+        expect(parseStrictJson(result.toolCalls[0]!.function.arguments)).toEqual({ action: "generate", prompt: "创作平面小花", preserve: ["背景纯白", "不添加文字"] });
+        expect(() => parseCreativeChatPlan(result, [])).toThrow("未授权工具");
     });
 
     test("accepts twenty complete constraints and a four-hundred-code-unit string without truncation", async () => {
         const constraints = ["长".repeat(400), ...Array.from({ length: 19 }, (_, index) => `完整约束${index + 1}`)];
-        const result = await readClaudeSseResponse(toolStream(args(constraints.map(value => `"preserve":${JSON.stringify(value)}`).join(","))));
+        const result = await readClaudeSseResponse(legacyToolStream(args(constraints.map(value => `"preserve":${JSON.stringify(value)}`).join(","))));
         expect((parseStrictJson(result.toolCalls[0]!.function.arguments) as { preserve: string[] }).preserve).toEqual(constraints);
     });
 
@@ -158,7 +186,7 @@ describe("create_image duplicate preserve recovery", () => {
         ["missing action", '{"prompt":"创作小花","preserve":"背景纯白","preserve":"不添加文字"}'],
         ["nested object inside root array", `[${observed}]`],
     ])("blocks ambiguous recovery: %s", async (_name, raw) => {
-        await expect(readClaudeSseResponse(toolStream(raw!))).rejects.toThrow(DuplicateJsonKeyError);
+        await expect(readClaudeSseResponse(legacyToolStream(raw!))).rejects.toThrow(DuplicateJsonKeyError);
     });
 
     test.each([
@@ -168,14 +196,14 @@ describe("create_image duplicate preserve recovery", () => {
         `${observed.slice(0, -1)} // comment\n}`,
         observed.replace('"preserve":"搭配米色裤装"', '"preserve":undefined'),
     ])("does not recover invalid JSON syntax: %s", async raw => {
-        await expect(readClaudeSseResponse(toolStream(raw))).rejects.toThrow(SyntaxError);
+        await expect(readClaudeSseResponse(legacyToolStream(raw))).rejects.toThrow(SyntaxError);
     });
 
-    test("does not grant the preserve exception to another tool", async () => {
-        await expect(readClaudeSseResponse(toolStream(observed, "inspect_images"))).rejects.toThrow(DuplicateJsonKeyError);
+    test.each(["look_at_images", "edit_image"])("does not grant the legacy preserve exception to %s", async name => {
+        await expect(readClaudeSseResponse(legacyToolStream(observed, name))).rejects.toThrow(DuplicateJsonKeyError);
     });
 
-    test("normalizes non-streaming raw string arguments before the strict planner without resubmitting", async () => {
+    test("normalizes legacy non-streaming arguments but blocks planning without resubmitting", async () => {
         const requests: string[] = [];
         globalThis.fetch = (async url => {
             if (String(url) === "/api/models") return Response.json({ models: [{ id: "preserve-recovery-fixture", modelId: "preserve-recovery-fixture", name: "fixture", capabilities: ["chat"], creditCost: 0, rmbCost: 0 }], tools: [{ toolKey: "gpt-chat", modelConfigId: "preserve-recovery-fixture", enabled: true, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 1 }], prices: [] });
@@ -183,10 +211,8 @@ describe("create_image duplicate preserve recovery", () => {
             return Response.json({ content: "", toolCalls: [call(observed)] });
         }) as typeof fetch;
         const result = await requestToolResponse({ ...defaultConfig, model: "preserve-recovery-fixture", textModel: "preserve-recovery-fixture", systemPrompt: "" }, [{ role: "user", content: "衣身改蓝色，其他不变" }], []);
-        const plan = parseCreativeChatPlan(result, [reference]);
-        expect(plan.kind).toBe("image");
-        if (plan.kind !== "image") throw new Error("expected image plan");
-        expect(plan.lineage.preservedConstraints).toEqual(["针织衫保持米白底色配浅蓝与粉色小碎花的基调", "搭配米色裤装"]);
+        expect((parseStrictJson(result.toolCalls[0]!.function.arguments) as { preserve: string[] }).preserve).toEqual(["针织衫保持米白底色配浅蓝与粉色小碎花的基调", "搭配米色裤装"]);
+        expect(() => parseCreativeChatPlan(result, [reference])).toThrow("未授权工具");
         expect(requests).toEqual(["/api/chat/responses"]);
     });
 });

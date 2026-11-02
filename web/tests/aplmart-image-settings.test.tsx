@@ -74,7 +74,7 @@ test("Nano2 Official keeps its four resolution tiers, strips fallback and never 
   expect(profile.qualities).toEqual(["0.5k", "1k", "2k", "4k"]);
   expect(profile.supportsMask).toBe(false);
   expect(profile.supportsOfficialFallback).toBe(false);
-  expect(imageOptionFields(profile).map(field => field.key)).toEqual(["nsfw_check", "google_search", "google_image_search"]);
+  expect(imageOptionFields(profile).map(field => field.key)).toEqual(["nsfw_check", "google_search", "google_image_search", "negative_prompt"]);
   const config = { ...defaultConfig, model: "mark-nano2", size: "3:4", quality: "0.5k", count: "8", imageOptions: '{"quality":"high","resolution":"4k","official_fallback":"true","google_image_search":"true","output_format":"webp","background":"transparent"}' };
   expect(normalizeImageModelSettings(config, profile)).toEqual({ size: "3:4", quality: "0.5k", count: "1" });
   expect(imageTaskParameters(config, profile)).toEqual({ size: "3:4", resolution: "0.5k", google_image_search: true, google_search: true });

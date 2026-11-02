@@ -31,10 +31,11 @@ export function largeCanvasDocument(id: string, assetId: string, nodeCount = 500
     };
 }
 
-export function expectedCanvasSummary(document: ReturnType<typeof largeCanvasDocument>) {
+export function expectedCanvasSummary(document: ReturnType<typeof largeCanvasDocument> & { persistenceConflict?: { projectId: string; paths: string[]; savedAt: string } }) {
     return {
         id: document.id, title: document.title, createdAt: document.createdAt, updatedAt: document.updatedAt,
         nodeCount: document.nodes.length, connectionCount: document.connections.length,
+        ...(document.persistenceConflict == null ? {} : { persistenceConflict: document.persistenceConflict }),
         cover: { content: document.nodes[0]!.metadata.content },
     };
 }

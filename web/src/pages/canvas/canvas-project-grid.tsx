@@ -27,7 +27,7 @@ const CanvasProjectGridRow = memo(function CanvasProjectGridRow({ projects, colu
         return () => observer.disconnect();
     }, [index, onMeasure]);
     return (
-        <div ref={ref} data-canvas-project-row={index} className="absolute inset-x-0 grid gap-5 sm:grid-cols-2 xl:grid-cols-3" style={{ top }}>
+        <div ref={ref} data-canvas-project-row={index} className="absolute inset-x-0 grid gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 min-[120rem]:grid-cols-5" style={{ top }}>
             {projects.slice(index * columns, (index + 1) * columns).map(project => <CanvasProjectCard key={project.id} project={project} />)}
         </div>
     );
@@ -38,7 +38,7 @@ export function CanvasProjectGrid({ projects, scrollElement }: { projects: Canva
     const ref = useRef<HTMLDivElement>(null);
     const editingId = useCanvasUiStore(state => state.editingProjectId);
     const [metrics, setMetrics] = useState(() => ({
-        columns: typeof window === "undefined" ? 1 : window.innerWidth >= 1280 ? 3 : window.innerWidth >= 640 ? 2 : 1,
+        columns: typeof window === "undefined" ? 1 : window.innerWidth >= 1920 ? 5 : window.innerWidth >= 1536 ? 4 : window.innerWidth >= 1280 ? 3 : window.innerWidth >= 640 ? 2 : 1,
         height: 300, gap: 20, measured: new Map<number, number>(),
     }));
     const [viewport, setViewport] = useState({ top: 0, height: 1 });

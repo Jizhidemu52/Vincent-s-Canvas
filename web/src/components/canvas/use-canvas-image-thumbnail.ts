@@ -4,6 +4,8 @@ import { acquireImageThumbnail } from "@/services/image-thumbnails";
 import { canvasServerThumbnailUrl, type ImageThumbnailEdge } from "@/lib/canvas/canvas-image-thumbnail";
 import type { ImageThumbnailLease } from "@/lib/image-thumbnail-cache";
 import type { CanvasNodeData } from "@/types/canvas";
+import { acquireServerImageThumbnail, serverImagePreviewOwner } from "@/services/server-image-thumbnails";
+import { useUserStore } from "@/stores/use-user-store";
 
 type PreviewImage = { source: string; url: string; thumbnail: boolean; edge: ImageThumbnailEdge | 0; lease: ImageThumbnailLease | null };
 type PreviewState = Omit<PreviewImage, "lease"> & { loaded: boolean; failed: boolean; placeholderUrl: string; request: number };
@@ -14,7 +16,8 @@ export function useCanvasImageThumbnail(node: CanvasNodeData, edge: ImageThumbna
     const content = node.metadata?.content || "";
     const width = node.metadata?.naturalWidth || 0;
     const height = node.metadata?.naturalHeight || 0;
-    const source = `${storageKey || ""}\n${content}`;
+    const owner = useUserStore(serverImagePreviewOwner);
+    const source = `${owner || ""}\n${storageKey || ""}\n${content}`;
     const [attempt, setAttempt] = useState(0);
     const [originalOnly, setOriginalOnly] = useState<string | null>(null);
     const displayed = useRef<PreviewImage | null>(null);
@@ -46,7 +49,11 @@ export function useCanvasImageThumbnail(node: CanvasNodeData, edge: ImageThumbna
         };
         const resolve = async (requestedEdge: ImageThumbnailEdge | 0): Promise<PreviewImage | null> => {
             const serverThumbnail = originalOnly === source ? null : canvasServerThumbnailUrl(content, requestedEdge);
-            if (serverThumbnail) return { source, url: serverThumbnail, thumbnail: true, edge: requestedEdge, lease: null };
+            if (serverThumbnail) {
+                const lease = await acquireServerImageThumbnail(serverThumbnail, controller.signal);
+                if (controller.signal.aborted) { lease.release(); return null; }
+                return { source, url: lease.url, thumbnail: true, edge: requestedEdge, lease };
+            }
             if (originalOnly !== source && requestedEdge && storageKey && width && height) {
                 const lease = await acquireImageThumbnail({ storageKey, edge: requestedEdge, width, height }, controller.signal);
                 if (controller.signal.aborted) { lease?.release(); return null; }
@@ -110,8 +117,10 @@ export function useCanvasImageThumbnail(node: CanvasNodeData, edge: ImageThumbna
         },
         onError: () => {
             if (current.request !== request.current || current.source !== source) return;
-            // A failed derivative gets one original fallback, never an automatic retry loop.
-            if (current.thumbnail) setOriginalOnly(source);
+            // Local unsupported derivatives may fall back. Cloud failures never
+            // upgrade a lightweight request to original; explicit edge 0 is
+            // already an original request and must not be blocked by its placeholder.
+            if (current.thumbnail && (edge === 0 || !canvasServerThumbnailUrl(content, current.edge))) setOriginalOnly(source);
             else setPreview(value => value.source === source && value.url === current.url ? { ...value, failed: true } : value);
         },
         retry: () => { setOriginalOnly(null); setAttempt(value => value + 1); },

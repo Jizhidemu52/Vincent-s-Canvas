@@ -6,7 +6,8 @@ import { Button, Input, Segmented } from "antd";
 
 import { ModelPicker } from "@/components/model-picker";
 import { defaultConfig, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
-import { CreditSymbol, requestCreditCost } from "@/constant/credits";
+import { CreditSymbol } from "@/constant/credits";
+import { referencePolicyForModel } from "@/lib/image-reference-policy";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { deploymentFeatures } from "@/lib/deployment-features";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -20,7 +21,10 @@ import { canvasToolKey, useToolConfig, useToolEnabled } from "@/hooks/use-tool-c
 import { imageModelProfile, useImageModelProfile } from "@/lib/image-model-settings";
 import { configUsesSeparateImageInputs } from "@/lib/canvas/canvas-shared-connections";
 import { CanvasConfigComposer, CONFIG_REFERENCE_PATTERN, type CanvasConfigComposerHandle } from "./canvas-config-composer";
-import { CanvasConfigImageReferences } from "./canvas-config-image-references";
+import { CanvasConfigImageReferences, configImageReferencePatch } from "./canvas-config-image-references";
+import { useCanvasMentionImages } from "./canvas-mention-images";
+import { appendCanvasMentionImage, configMentionInputs } from "@/lib/canvas/canvas-node-mention-images";
+import type { ConversationImageItem } from "@/components/conversation-image-controls";
 import type { NodeGenerationInput } from "./canvas-node-generation";
 import type { ImageReferenceItem } from "@/types/image";
 import { resolveCanvasImageConfig } from "@/lib/canvas/canvas-generation-model";
@@ -36,12 +40,13 @@ type CanvasConfigNodePanelProps = {
     inputSummary: { textCount: number; imageCount: number; videoCount: number; audioCount: number };
     onConfigChange: (nodeId: string, patch: Partial<CanvasNodeMetadata>) => void;
     onGenerate: (nodeId: string) => void;
+    onRetryFailed?: (nodeId: string) => void;
     onStop: (nodeId: string) => void;
     onComposerToggle?: () => void;
-    workflow?: { status?: string; stepStatus?: string; onRun: () => void; onStop: () => void };
+    workflow?: { status?: string; stepStatus?: string; onRun: () => void; onStop: () => void; onRunStep?: (onlyStep: boolean) => void };
 };
 
-export function CanvasConfigNodePanel({ node, isRunning, linkedTaskCount = 0, linkedTaskHasImages = false, inputSummary, inputImageTaskCount = inputSummary.imageCount, inputs = [], imageReferences, onConfigChange, onGenerate, onStop, workflow }: CanvasConfigNodePanelProps) {
+export function CanvasConfigNodePanel({ node, isRunning, linkedTaskCount = 0, linkedTaskHasImages = false, inputSummary, inputImageTaskCount = inputSummary.imageCount, inputs = [], imageReferences, onConfigChange, onGenerate, onRetryFailed, onStop, workflow }: CanvasConfigNodePanelProps) {
     const t = useUiText();
     const [optimizing, setOptimizing] = useState(false);
     const composerRef = useRef<CanvasConfigComposerHandle>(null);
@@ -77,6 +82,8 @@ export function CanvasConfigNodePanel({ node, isRunning, linkedTaskCount = 0, li
     const modelIsBound = Boolean(boundModelId) || imageModelIsBound;
     const pickerToolKey = imageModelIsBound && !boundModelId ? initialToolKey : toolKey;
     const model = config.model;
+    const textModel = mode === "text" ? businessModels.find(item => item.modelId === model) : undefined;
+    const textModelName = textModel?.publicName || textModel?.name;
     const profile = useImageModelProfile(model);
     const blend = mode === "image" && !profile.requiresPrompt;
     const separateImages = configUsesSeparateImageInputs(node, inputImageTaskCount, linkedTaskCount, profile.requiresPrompt);
@@ -85,7 +92,8 @@ export function CanvasConfigNodePanel({ node, isRunning, linkedTaskCount = 0, li
     const toolEnabled = useToolEnabled(toolKey);
     const hasAvailableModel = Boolean(model);
     const count = 1;
-    const credits = requestCreditCost({ channelMode: config.channelMode, model: config.model, count: mode === "image" ? count : 1 }) * Math.max(1, taskCount);
+    const estimate = useBusinessConfigStore(state => state.estimate);
+    const credits = estimate({ operationType: mode === "image" ? hasImages ? "inpaint" : "image_generation" : mode === "video" ? "video_generation" : mode === "audio" ? "audio_generation" : "chat", toolKey, modelId: config.model, quantity: Math.max(1, taskCount) }).credits;
     const chipStyle = { background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text };
     const hasAnyInput = Boolean(linkedTaskCount || inputSummary.textCount || (mode !== "audio" && imageCount) || (mode === "video" && (inputSummary.videoCount || inputSummary.audioCount)));
     const hasComposerContent = Boolean((node.metadata?.composerContent ?? node.metadata?.prompt ?? "").trim());
@@ -94,7 +102,19 @@ export function CanvasConfigNodePanel({ node, isRunning, linkedTaskCount = 0, li
     const inputModeCheck = separateImages ? configImageInputModeChange(node, references, inputs, "per-image", node.metadata?.composerContent ?? node.metadata?.prompt ?? "") : undefined;
     const fixedTaskReference = inputModeCheck && (!inputModeCheck.patch || inputModeCheck.patch.composerContent !== undefined);
     const canGenerate = !optimizing && toolEnabled && hasAvailableModel && modelIsSynced && !fixedTaskReference && (linkedTaskCount > 0 || (blend ? imageCount >= 2 && imageCount <= 4 : mode === "video" ? hasPromptInput || hasAnyInput : hasPromptInput));
+    const disabledReason = optimizing ? "正在优化提示词…" : !toolEnabled ? "当前功能已停用" : businessConfigStatus !== "ready" ? businessConfigStatus === "error" ? "模型列表加载失败，请打开模型选择器重试" : "正在加载模型…" : routingError || (!hasAvailableModel ? "当前功能没有可用模型" : !modelIsSynced ? "正在同步模型…" : fixedTaskReference ? "请改为按图片1引用当前任务主图" : blend && (imageCount < 2 || imageCount > 4) ? "融合需要 2–4 张参考图" : !hasPromptInput && !hasAnyInput ? "请先输入提示词或连接素材" : "");
     const referencePresentation = configReferencePresentation(references, inputs, mode, separateImages);
+    const mentionCatalog = useCanvasMentionImages();
+    const mentionInputs = configMentionInputs(referencePresentation.inputs, references, mode === "audio" ? [] : mentionCatalog.images, referencePresentation.mentionLabels, separateImages ? 1 : 0);
+    const addMentionImage = (image: ConversationImageItem) => {
+        if (isRunning || mode === "audio" || !mentionCatalog.isCurrent(image)) return null;
+        const added = appendCanvasMentionImage(references, image, referencePolicyForModel(model, profile).maximum, mentionCatalog.scopeKey);
+        if (!added) { setInputModeFeedback({ error: true, text: "参考图不可用或已达到模型上限，请先移除已有参考图。" }); return null; }
+        if (added.added) onConfigChange(node.id, configImageReferencePatch(node, references, added.references));
+        const common = separateImages ? added.references.filter(reference => reference.origin !== "connection") : added.references;
+        return { nodeId: added.reference.id, type: "image" as const, title: added.reference.name, image: added.reference,
+            mentionLabel: `图${common.indexOf(added.reference) + (separateImages ? 2 : 1)}` };
+    };
     const changeInputMode = (value: "per-image" | "combined") => {
         const prompt = composerRef.current?.read() ?? node.metadata?.composerContent ?? node.metadata?.prompt ?? "";
         const result = configImageInputModeChange(node, references, inputs, value, prompt);
@@ -109,7 +129,8 @@ export function CanvasConfigNodePanel({ node, isRunning, linkedTaskCount = 0, li
     }, [mode, routingError, modelIsBound, businessConfigStatus, isRunning, model, node.id, node.metadata?.model, onConfigChange]);
 
     return (
-        <div className="thin-scrollbar flex h-full w-full cursor-move flex-col overflow-y-auto px-3 pb-3 pt-7 text-sm" style={{ color: theme.node.text }} onWheel={(event) => event.stopPropagation()}>
+        <div className="flex h-full min-h-0 w-full cursor-move flex-col overflow-hidden px-3 pb-3 pt-7 text-sm" style={{ color: theme.node.text }} onWheel={(event) => event.stopPropagation()}>
+            <div className="thin-scrollbar min-h-0 flex-1 overflow-y-auto" aria-label={t("生成配置内容")}>
             <div className="mb-2 flex items-center justify-between gap-3">
                 <div className="min-w-0 truncate text-sm font-semibold" title={node.title}>{node.title || t("生成配置")}</div>
                 <div className="cursor-default" onMouseDown={(event) => event.stopPropagation()}>
@@ -117,7 +138,7 @@ export function CanvasConfigNodePanel({ node, isRunning, linkedTaskCount = 0, li
                         size="small"
                         className="canvas-config-mode !rounded-md !p-0.5"
                         value={mode}
-                        disabled={isRunning || Boolean(workflow)}
+                        disabled={isRunning}
                         onChange={(value) => {
                             const nextMode = value as CanvasGenerationMode;
                             const nextModel = businessConfigStatus === "ready" ? nextMode === "text" ? globalConfig.textModel : resolveCapabilityModel(globalConfig, nextMode, businessModels, node.metadata?.model) : "";
@@ -168,23 +189,18 @@ export function CanvasConfigNodePanel({ node, isRunning, linkedTaskCount = 0, li
                         onChange={value => changeInputMode(value as "per-image" | "combined")}
                         options={[{ value: "per-image", label: t("逐图执行 · {value1} 个任务", { value1: inputImageTaskCount }) }, { value: "combined", label: t("合并参考 · 1 个任务") }]} />
                 </div> : <div>{workflow ? t("工作流：左侧接原图或上一步，右侧接下一步配置") : t("左侧接素材；右侧接下一步生图配置可创建工作流")}</div>}
-                {workflow ? <div role="status">{workflow.stepStatus === "success" ? t("本步已完成") : workflow.stepStatus === "running" ? isRunning ? t("本步正在执行") : t("本步待核查") : workflow.stepStatus === "failed" ? t("本步失败，下游未提交") : t("上游出图后自动执行本步")} {t(" · 每步单独调用，请保持本页打开")}</div> : null}
+                {workflow ? <div role="status">{workflow.stepStatus === "success" ? t("本步已完成，再次运行会复用结果") : workflow.stepStatus === "running" ? isRunning ? t("本步正在执行") : t("请点击继续工作流查询原任务，不会重复生成") : workflow.stepStatus === "stale" ? t("上游或参数已变化，运行时更新本步") : workflow.stepStatus === "failed" ? t("本步失败，下游未提交") : t("上游出图后自动执行本步")} {t(" · 每步单独调用，请保持本页打开")}</div> : null}
+                {workflow?.onRunStep ? <div className="mt-1 flex gap-2"><Button size="small" disabled={isRunning} onClick={() => workflow.onRunStep?.(true)}>重跑本步</Button><Button size="small" disabled={isRunning} onClick={() => workflow.onRunStep?.(false)}>从本步开始</Button></div> : null}
                 {taskCount > 0 ? <div role="status"><span style={{ color: theme.node.text }}>{t("待执行 {count} 个任务", { count: taskCount })}</span> · {separateImages ? t("每个任务主图均为图片1，公共参考从图片2起") : t("每个任务使用自身输入与公共素材")}</div> : showInputMode ? <div role="status">{t("多张参考图共同生成 1 张结果")}</div> : null}
                 {inputModeFeedback ? <div role={inputModeFeedback.error ? "alert" : "status"} className="mt-1">{t(inputModeFeedback.text)}</div> : null}
                 {fixedTaskReference ? <div role="alert" className="mt-1">{t("逐图提示词仍固定引用某张任务图片。请改为“图片1”（每个任务的主图）；需要固定共享的图片请添加为公共参考，或切回合并参考。")}</div> : null}
             </div>
 
             <div className="mb-2 shrink-0 space-y-2">
-                {workflow ? <div className="cursor-text" onMouseDown={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>
-                    <div className="mb-2 text-xs font-semibold">{t("提示词")}</div>
-                    <Input.TextArea aria-label={t("提示词")} autoSize={{ minRows: 3, maxRows: 6 }} disabled={isRunning}
-                        value={(node.metadata?.composerContent ?? node.metadata?.prompt ?? "").replace(/@\[node:[^\]]+\]\n?/g, "")}
-                        onChange={event => onConfigChange(node.id, { composerContent: event.target.value, prompt: event.target.value })} />
-                    <div className="mt-2 text-[11px] opacity-60">{t("输入图片由连线自动传入，无需在提示词中插入引用。")}</div>
-                </div> : !blend ? <CanvasConfigComposer ref={composerRef} compact value={node.metadata?.composerContent ?? node.metadata?.prompt ?? ""} inputs={referencePresentation.inputs} referenceLabels={referencePresentation.mentionLabels} disabled={isRunning} label={mode === "audio" ? t("朗读文本") : t("提示词")} onChange={composerContent => { setInputModeFeedback(null); onConfigChange(node.id, { composerContent, ...(node.metadata?.promptInput?.scene === "free-optimize" ? { promptInput: undefined, compiledPrompt: undefined } : {}) }); }} /> : <span role="status" className="text-xs">{t("融合 2–4 张参考图，不使用提示词。")}</span>}
+                {!blend ? <CanvasConfigComposer ref={composerRef} compact value={node.metadata?.composerContent ?? node.metadata?.prompt ?? ""} inputs={referencePresentation.inputs} mentionInputs={mentionInputs} onAddMentionImage={addMentionImage} referenceLabels={referencePresentation.mentionLabels} disabled={isRunning} label={mode === "audio" ? t("朗读文本") : t("提示词")} onChange={composerContent => { setInputModeFeedback(null); onConfigChange(node.id, { composerContent, ...(node.metadata?.promptInput?.scene === "free-optimize" ? { promptInput: undefined, compiledPrompt: undefined } : {}) }); }} /> : <span role="status" className="text-xs">{t("融合 2–4 张参考图，不使用提示词。")}</span>}
                 {mode === "image" && !blend && (!node.metadata?.promptInput || node.metadata.promptInput.scene === "free-optimize") ? <PromptOptimizeButton config={config} prompt={node.metadata?.composerContent ?? node.metadata?.prompt ?? ""} references={references} toolKey={toolKey} disabled={isRunning} onBusyChange={setOptimizing} onApply={(value, _compilation, input) => { composerRef.current?.replace(value); onConfigChange(node.id, { prompt: value, composerContent: value, promptInput: input, compiledPrompt: value }); }} /> : null}
                 {node.metadata?.optimizingPrompt ? <span role="status" className="text-xs">{t("正在优化提示词…")}</span> : null}
-                {mode !== "audio" && !workflow ? <CanvasConfigImageReferences node={node} references={references} labels={referencePresentation.trayLabels} disabled={isRunning} onChange={onConfigChange} /> : null}
+                {mode !== "audio" ? <CanvasConfigImageReferences node={node} references={references} maximum={referencePolicyForModel(model, profile).maximum} labels={referencePresentation.trayLabels} disabled={isRunning} onChange={onConfigChange} /> : null}
                 {mode === "video" && (inputSummary.videoCount > 0 || inputSummary.audioCount > 0) ? <div className="flex flex-wrap gap-1.5">
                     {inputSummary.videoCount > 0 ? <InputChip label={t("已连视频")} value={t("{value1} 个", { value1: inputSummary.videoCount })} style={chipStyle} /> : null}
                     {inputSummary.audioCount > 0 ? <InputChip label={t("已连音频")} value={t("{value1} 个", { value1: inputSummary.audioCount })} style={chipStyle} /> : null}
@@ -194,7 +210,7 @@ export function CanvasConfigNodePanel({ node, isRunning, linkedTaskCount = 0, li
             {mode !== "text" ? <div className={`mb-2 grid min-w-0 cursor-default items-center gap-2 ${hasAvailableModel ? "grid-cols-[minmax(0,1fr)_148px]" : "grid-cols-1"}`} onMouseDown={(event) => event.stopPropagation()}>
                 <ModelPicker toolKey={pickerToolKey} className="canvas-compact-control h-10" config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability={mode} modelsSource="server" disabled={isRunning} onMissingConfig={() => openConfigDialog(true)} fullWidth />
                 {hasAvailableModel && mode === "video" ? (
-                    <CanvasVideoSettingsPopover config={config} placement="topRight" buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))} />
+                    <CanvasVideoSettingsPopover config={config} referenceCount={imageCount} imageMode={config.videoMode} placement="topRight" buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))} />
                 ) : hasAvailableModel && mode === "image" ? (
                     <CanvasImageSettingsPopover config={config} taskCount={Math.max(1, taskCount)} referenceCount={separateImages ? 1 + (node.metadata?.manualImageReferences?.length || 0) : imageCount} placement="topRight" autoAdjustOverflow={false} buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, key === "count" ? { count: Number(value) || 1 } : { [key]: value })} />
                 ) : hasAvailableModel && mode === "audio" ? (
@@ -202,12 +218,16 @@ export function CanvasConfigNodePanel({ node, isRunning, linkedTaskCount = 0, li
                 ) : null}
             </div> : null}
 
-            {routingError ? <div role="alert" className="mb-2 text-xs" style={{ color: theme.node.muted }}>{routingError}</div> : null}
+            {mode === "text" ? <div className="mb-2 text-xs" style={{ color: theme.node.muted }}>{t("文本模型")}：{textModelName || t(businessConfigStatus === "ready" ? "未配置" : "正在加载模型…")} · {t("后台统一指定 · 每次生成 1 份")}</div> : null}
+            {!isRunning && !canGenerate && disabledReason ? <div role="status" className="mb-2 text-xs" style={{ color: theme.node.muted }}>{disabledReason}</div> : null}
+            {!workflow && taskCount > 1 && onRetryFailed ? <Button size="small" className="mb-2" disabled={isRunning} onClick={() => onRetryFailed(node.id)}>仅重试失败或未完成项</Button> : null}
+            </div>
             <Button
                 type="primary"
-                className="mt-auto shrink-0 !h-9 !w-full !cursor-pointer !rounded-lg"
+                className="mt-2 shrink-0 !h-9 !w-full !cursor-pointer !rounded-lg"
                 danger={isRunning}
                 disabled={!workflow && !isRunning && !canGenerate}
+                onPointerDown={(event) => event.stopPropagation()}
                 onMouseDown={(event) => event.stopPropagation()}
                 onClick={() => { if (workflow) { if (isRunning) workflow.onStop(); else workflow.onRun(); } else if (isRunning) onStop(node.id); else if (canGenerate) onGenerate(node.id); }}
             >
@@ -259,8 +279,8 @@ export function configImageInputModeChange(node: CanvasNodeData, references: Ima
 export function configReferencePresentation(references: ImageReferenceItem[], inputs: NodeGenerationInput[], mode: CanvasGenerationMode, separateImages: boolean) {
     const common = separateImages ? references.filter(image => image.origin !== "connection") : references;
     const taskIds = inputs.filter(input => input.type === "image" && references.some(image => image.origin === "connection" && image.id === input.nodeId)).map(input => input.nodeId);
-    const trayLabels = separateImages ? Object.fromEntries(references.map(image => [image.referenceKey, image.origin === "connection" ? `任务输入${taskIds.indexOf(image.id) + 1}` : `图片${common.indexOf(image) + 2}`])) : undefined;
-    const mentionLabels = separateImages ? Object.fromEntries(common.map((image, index) => [image.id, `图片${index + 2}`])) : undefined;
+    const trayLabels = separateImages ? Object.fromEntries(references.map(image => [image.referenceKey, image.origin === "connection" ? `任务输入${taskIds.indexOf(image.id) + 1}` : `图${common.indexOf(image) + 2}`])) : undefined;
+    const mentionLabels = separateImages ? Object.fromEntries(common.map((image, index) => [image.id, `图${index + 2}`])) : undefined;
     return {
         trayLabels, mentionLabels,
         inputs: [

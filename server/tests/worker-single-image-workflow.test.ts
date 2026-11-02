@@ -26,7 +26,8 @@ function harness() {
       return Response.json({ outputs: ["https://fixture.invalid/result.png"], data: { data: { list: ["https://fixture.invalid/result.png"] } } });
     },
   };
-  const execute = new Function(...Object.keys(deps), `${code};return executeWorkflow;`)(...Object.values(deps));
+  const executeWorkflow = new Function(...Object.keys(deps), `${code};return executeWorkflow;`)(...Object.values(deps));
+  const execute = (input: { prompt: string }, credentials: Record<string, string>) => executeWorkflow(input, credentials, input.prompt);
   const task = (overrides: Record<string, unknown> = {}) => ({
     id: "offline-task", workflow_config_id: "workflow", model_config_id: "model", provider_id: "provider", operation_type: "image_generation", model_id: "gpt-image-2", protocol: "custom", source_urls: [], user_id: "owner",
     prompt: "cloth", parameters: singleImageTaskParameters("image_generation"), request_template: { n: "$n", prompt: "$prompt" },

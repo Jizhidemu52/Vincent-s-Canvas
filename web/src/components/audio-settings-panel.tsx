@@ -1,8 +1,8 @@
 import { uiText, useUiLocale } from "@/lib/i18n";
-import { type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { ImageSettingsTheme } from "@/components/image-settings-panel";
-import { audioFormatOptions, audioSpeedLabel, audioVoiceOptions, normalizeAudioFormatValue, normalizeAudioSpeedValue, normalizeAudioVoiceValue } from "@/lib/audio-generation";
+import { audioFormatOptions, audioSpeedLabel, audioVoiceLabel, audioVoiceOptions, audioVoiceSampleUrl, normalizeAudioFormatValue, normalizeAudioSpeedValue, normalizeAudioVoiceValue } from "@/lib/audio-generation";
 import { type CanvasTheme } from "@/lib/canvas-theme";
 import type { AiConfig } from "@/stores/use-config-store";
 
@@ -23,6 +23,21 @@ export function AudioSettingsPanel({ config, onConfigChange, theme, showTitle = 
     const voice = normalizeAudioVoiceValue(config.audioVoice);
     const format = normalizeAudioFormatValue(config.audioFormat);
     const speed = normalizeAudioSpeedValue(config.audioSpeed);
+    const audio = useRef<HTMLAudioElement>(null), timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+    const [preview, setPreview] = useState<"idle" | "loading" | "playing" | "error">("idle");
+    const sample = audioVoiceSampleUrl(voice);
+    const stopPreview = useCallback(() => {
+        clearTimeout(timer.current); timer.current = undefined;
+        if (audio.current) { audio.current.pause(); audio.current.removeAttribute("src"); audio.current.load(); }
+    }, []);
+    useEffect(() => { stopPreview(); setPreview("idle"); return stopPreview; }, [voice, stopPreview]);
+    const playPreview = () => {
+        if (!sample || !audio.current) return;
+        if (preview === "playing" || preview === "loading") { stopPreview(); setPreview("idle"); return; }
+        const player = audio.current;
+        player.src = sample; player.currentTime = 0; setPreview("loading");
+        void player.play().catch(() => { if (player.getAttribute("src") === sample) { stopPreview(); setPreview("error"); } });
+    };
 
     return (
         <ImageSettingsTheme theme={theme}>
@@ -32,10 +47,18 @@ export function AudioSettingsPanel({ config, onConfigChange, theme, showTitle = 
                     <div className="grid grid-cols-3 gap-2.5">
                         {audioVoiceOptions.map((item) => (
                             <OptionPill key={item.value} selected={voice === item.value} theme={theme} onClick={() => onConfigChange("audioVoice", item.value)}>
-                                {item.label}
+                                <span className="block text-xs leading-4">{item.chineseLabel}<span className="ml-1 opacity-70">{item.label}</span></span>
                             </OptionPill>
                         ))}
                     </div>
+                    <div className="flex items-center gap-2 text-xs">
+                        <button type="button" disabled={!sample} onClick={playPreview} className="rounded-lg border px-3 py-2 disabled:cursor-not-allowed disabled:opacity-50" style={{ borderColor: theme.node.stroke }} aria-label={`${preview === "playing" || preview === "loading" ? "停止试听" : "试听 3 秒"} ${audioVoiceLabel(voice)}`}>
+                            {preview === "playing" ? "停止试听" : preview === "loading" ? "正在加载 · 停止" : "试听 3 秒"}
+                        </button>
+                        <span role="status" style={{ color: theme.node.muted }}>{!sample ? "此音色暂无内置样例" : preview === "error" ? "样例加载失败，可重试或打开官方演示" : preview === "playing" ? "3 秒后自动停止" : "官方样例 · 不生成任务"}</span>
+                    </div>
+                    <audio ref={audio} preload="none" className="hidden" aria-label="音色官方样例" onPlaying={() => { clearTimeout(timer.current); setPreview("playing"); timer.current = setTimeout(() => { stopPreview(); setPreview("idle"); }, 3000); }} onTimeUpdate={() => { if ((audio.current?.currentTime || 0) >= 3) { stopPreview(); setPreview("idle"); } }} onEnded={() => { stopPreview(); setPreview("idle"); }} onError={() => { if (audio.current?.getAttribute("src")) { stopPreview(); setPreview("error"); } }} />
+                    <p className="text-xs leading-5" style={{ color: theme.node.muted }}>试听为 AI 生成的官方英语样例，不代表当前通道或中文效果；只在点击时加载，不提交本项目任务。中文为音色识别名。<a href="https://www.openai.fm/" target="_blank" rel="noopener noreferrer" className="underline">打开官方音色演示</a></p>
                 </SettingGroup>
                 <SettingGroup title={uiText("格式")} color={theme.node.muted}>
                     <div className="grid grid-cols-3 gap-2.5">

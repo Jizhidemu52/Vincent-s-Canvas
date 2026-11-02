@@ -1,5 +1,6 @@
 /** Employee-facing interaction copy. User content and protocol identifiers are not translation keys. */
 export default {
+    "大图优先使用轻量预览；原图保留，下载原图不降质": "Large images use lightweight previews where available. Originals are retained and original downloads keep their quality.",
     // Original-task reconciliation never resubmits an uncertain paid request.
     "刷新状态": "Refresh status",
     "恢复原任务查询": "Resume original task polling",
@@ -55,6 +56,10 @@ export default {
     "尚未恢复登录，请完成登录后再试。": "You are not signed in yet. Complete sign-in and try again.",
     "登录未成功，请检查密码或网络后重试。": "Sign-in was unsuccessful. Check your password or network and try again.",
     "登录已过期": "Your session has expired",
+    "恢复登录": "Restore sign-in",
+    "恢复登录面板": "Sign-in recovery panel",
+    "草稿仍保留，可继续编辑。云端保存和生成需恢复同一账号登录，不会自动重新提交生成。": "Your draft is kept and remains editable. Sign in with the same account to save to the cloud or generate. Generation will not be resubmitted automatically.",
+    "在新窗口登录（支持原登录方式）": "Sign in in a new window using your usual method",
     "当前页面已锁定，未提交的内容仍保留在此页面。恢复同一账号登录后可继续，不会自动重新提交生成。": "This page is locked, but your unsubmitted work remains here. Sign in with the same account to continue. Generation will not be resubmitted automatically.",
     "请在新窗口从企业微信的公司 OA 重新进入画布，保留此页面；完成后回来检查登录。": "Keep this page open. In a new window, reopen Canvas through your company OA portal in WeCom, then return here to check your sign-in.",
     "我已从 OA 登录，继续检查": "I signed in through OA — check again",
@@ -297,4 +302,6 @@ export default {
     "这张图片没有完整生成档案，请先恢复历史输入": "This image has no complete generation record. Restore historical inputs first",
     "图片已变化，请重新选择后生成": "The image has changed. Select it again before generating",
     "重新生成失败": "Regeneration failed",
+    "视频封面": "Video poster",
+    "播放视频": "Play video",
 } satisfies Record<string, string>;

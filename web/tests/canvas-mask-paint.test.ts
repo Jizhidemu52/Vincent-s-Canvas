@@ -47,7 +47,7 @@ test("export reads the source once, preserves exact dimensions and binary edit a
         expect(buildCanvasEditMask(source)).toBe("data:image/png;base64,mask");
         expect(sourceReads).toBe(1);
         expect([output.width, output.height]).toEqual([3, 2]);
-        expect(Array.from(written!).filter((_value, index) => index % 4 === 3)).toEqual([0, 0, 255, 255, 255, 0]);
+    expect(Array.from(written!).filter((_value, index) => index % 4 === 3)).toEqual([255, 0, 255, 255, 255, 255]);
         expect(Array.from(written!).filter((_value, index) => index % 4 !== 3).every(value => value === 255)).toBe(true);
         input.fill(0);
         expect(() => buildCanvasEditMask(source)).toThrow("请先涂抹");

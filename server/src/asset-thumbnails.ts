@@ -11,7 +11,7 @@ import type { Database } from "./db";
 import type { ObjectStorage } from "./object-storage";
 
 const maxBytes = 200 * 1024 * 1024;
-const formats = "png_pipe,jpeg_pipe,webp_pipe,gif,mov,mp4,m4a,3gp,3g2,mj2,avif";
+const formats = "png_pipe,jpeg_pipe,webp_pipe,gif,mov,mp4,m4a,3gp,3g2,mj2,avif,matroska,webm";
 function run(tool: "ffmpeg" | "ffprobe", args: string[], maxBuffer = 8 * 1024 * 1024, signal?: AbortSignal): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     execFile(process.env[tool === "ffmpeg" ? "FFMPEG_PATH" : "FFPROBE_PATH"] || tool, args,
@@ -21,10 +21,10 @@ function run(tool: "ffmpeg" | "ffprobe", args: string[], maxBuffer = 8 * 1024 * 
 }
 const limits = ["-v", "error", "-max_alloc", "134217728", "-threads", "1", "-protocol_whitelist", "file,pipe", "-format_whitelist", formats];
 async function thumbnailsFromFile(file: string, signal?: AbortSignal, sizes: readonly (256 | 1024)[] = [256, 1024]) {
-  const info = JSON.parse((await run("ffprobe", [...limits, "-show_entries", "stream=width,height", "-of", "json", file], 64 * 1024, signal)).toString());
+  const info = JSON.parse((await run("ffprobe", [...limits, "-select_streams", "v:0", "-show_entries", "stream=width,height,duration:format=duration", "-of", "json", file], 64 * 1024, signal)).toString());
   const { width, height } = info.streams?.[0] || {};
   if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 || width > 16384 || height > 16384 || width * height > 67_108_864) {
-    throw new Error("缩略图原图尺寸无效或超出安全限制");
+    throw new Error("缩略图媒体尺寸无效或超出安全限制");
   }
   const result = {} as Record<256 | 1024, Buffer>;
   for (const size of sizes) {
@@ -33,7 +33,9 @@ async function thumbnailsFromFile(file: string, signal?: AbortSignal, sizes: rea
       "-threads", "1", "-c:v", "libwebp", "-quality", "82", "-f", "image2pipe", "pipe:1"], undefined, signal);
     if ((await fileTypeFromBuffer(result[size]))?.mime !== "image/webp") throw new Error("缩略图编码器未返回 WebP");
   }
-  return result;
+  const streamDuration = Number(info.streams?.[0]?.duration);
+  const duration = Number.isFinite(streamDuration) && streamDuration > 0 ? streamDuration : Number(info.format?.duration);
+  return { thumbnails: result, metadata: { width, height, ...(Number.isFinite(duration) && duration > 0 ? { durationMs: Math.round(duration * 1000) } : {}) } };
 }
 async function withInput(write: (path: string) => Promise<void>, signal?: AbortSignal, sizes?: readonly (256 | 1024)[]) {
   const directory = await mkdtemp(join(tmpdir(), "canvas-asset-thumb-"));
@@ -46,6 +48,10 @@ async function withInput(write: (path: string) => Promise<void>, signal?: AbortS
 export function createAssetThumbnailBytes(bytes: Uint8Array): Promise<Record<256 | 1024, Buffer>>;
 export function createAssetThumbnailBytes<S extends 256 | 1024>(bytes: Uint8Array, sizes: readonly S[]): Promise<Record<S, Buffer>>;
 export async function createAssetThumbnailBytes(bytes: Uint8Array, sizes: readonly (256 | 1024)[] = [256, 1024]) {
+  return (await createAssetThumbnailDetails(bytes, sizes)).thumbnails;
+}
+
+export async function createAssetThumbnailDetails(bytes: Uint8Array, sizes: readonly (256 | 1024)[] = [256, 1024]) {
   if (!bytes.length || bytes.length > maxBytes) throw new Error("缩略图原文件超过限制");
   return withInput(path => writeFile(path, bytes), undefined, sizes);
 }
@@ -54,12 +60,12 @@ export async function generateAssetThumbnails(db: Database, storage: ObjectStora
   const { signal, leaseToken } = options;
   signal?.throwIfAborted();
   const result = await db.query<{ object_key: string; thumbnail_256_key: string | null; thumbnail_1024_key: string | null }>(
-    "SELECT object_key,thumbnail_256_key,thumbnail_1024_key FROM assets WHERE id=$1 AND kind='image' AND status='ready' AND deleted_at IS NULL AND ($2::uuid IS NULL OR thumbnail_lease_token=$2)", [assetId, leaseToken ?? null]);
+    "SELECT object_key,thumbnail_256_key,thumbnail_1024_key FROM assets WHERE id=$1 AND kind IN ('image','video') AND status='ready' AND deleted_at IS NULL AND ($2::uuid IS NULL OR thumbnail_lease_token=$2)", [assetId, leaseToken ?? null]);
   const asset = result.rows[0];
   if (!asset || asset.thumbnail_256_key && asset.thumbnail_1024_key) return;
   const object = await storage.get(asset.object_key, { abortSignal: signal });
   if (!object.Body || Number(object.ContentLength || 0) > maxBytes) throw new Error("缩略图原文件不可用或超过限制");
-  const thumbs = await withInput(async path => {
+  const { thumbnails: thumbs, metadata } = await withInput(async path => {
     let bytes = 0;
     const bound = new Transform({ transform(chunk, _encoding, done) {
       bytes += chunk.length;
@@ -71,8 +77,8 @@ export async function generateAssetThumbnails(db: Database, storage: ObjectStora
   await storage.put(small, thumbs[256], "image/webp", { abortSignal: signal });
   await storage.put(large, thumbs[1024], "image/webp", { abortSignal: signal });
   signal?.throwIfAborted();
-  await db.query("UPDATE assets SET thumbnail_256_key=$2,thumbnail_1024_key=$3 WHERE id=$1 AND object_key=$4 AND status='ready' AND deleted_at IS NULL AND ($5::uuid IS NULL OR thumbnail_lease_token=$5)",
-    [assetId, small, large, asset.object_key, leaseToken ?? null]);
+  await db.query("UPDATE assets SET thumbnail_256_key=$2,thumbnail_1024_key=$3,metadata=CASE WHEN kind='video' THEN COALESCE(metadata,'{}'::jsonb)||$6::jsonb ELSE metadata END WHERE id=$1 AND object_key=$4 AND status='ready' AND deleted_at IS NULL AND ($5::uuid IS NULL OR thumbnail_lease_token=$5)",
+    [assetId, small, large, asset.object_key, leaseToken ?? null, JSON.stringify(metadata)]);
 }
 
 interface ThumbnailMaintenance { wake(): void; stop(): Promise<void> }
@@ -109,7 +115,7 @@ export function startAssetThumbnailMaintenance(db: Database, storage: ObjectStor
     const token = randomUUID();
     const claimed = await db.query<{ id: string; thumbnail_attempts: number }>(`
       WITH candidates AS (SELECT id FROM assets
-        WHERE kind='image' AND status='ready' AND deleted_at IS NULL
+        WHERE kind IN ('image','video') AND status='ready' AND deleted_at IS NULL
           AND (thumbnail_256_key IS NULL OR thumbnail_1024_key IS NULL)
           AND thumbnail_attempts < 4 AND (thumbnail_retry_at IS NULL OR thumbnail_retry_at <= now())
         ORDER BY thumbnail_retry_at NULLS FIRST,created_at,id LIMIT $1 FOR UPDATE SKIP LOCKED)

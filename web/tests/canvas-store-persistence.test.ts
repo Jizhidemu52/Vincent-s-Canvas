@@ -5,7 +5,10 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { createDeferredPersistQueue } from "@/lib/deferred-persist-queue";
 import { collectProjectChanges, createProjectChangeBuffer, mergeProjectChanges } from "@/lib/canvas/canvas-persistence-merge";
-import { applyCanvasProjectPatch } from "@/lib/canvas/canvas-project-update";
+import { applyCanvasProjectPatch, hasCanvasContentChange } from "@/lib/canvas/canvas-project-update";
+import { isCanvasStorageQuotaError, requestCanvasPersistentStorage } from "@/lib/canvas/canvas-storage-capacity";
+import { clearImportedCanvasTasks } from "@/lib/canvas/canvas-import-task-state";
+import { canvasDuplicateTitle } from "@/lib/canvas/canvas-library-ux";
 import { createCanvasProjectSaveQueue } from "@/lib/canvas/canvas-project-save-queue";
 import type { CanvasProject } from "@/stores/canvas/use-canvas-store";
 import { CanvasNodeType } from "@/types/canvas";
@@ -78,6 +81,7 @@ async function openTab(io: ReturnType<typeof database>, oaOwnerId?: string | nul
     let cloudValid: (() => boolean) | undefined;
     let cloudSchedules = 0;
     const bindings = {
+        hasCanvasContentChange, isCanvasStorageQuotaError, requestCanvasPersistentStorage, clearImportedCanvasTasks, canvasDuplicateTitle,
         ...drain,
         isWorkspaceRole, normalizeCanvasSelectedNodeIds,
         create, persist, nanoid: () => `new-${++ids}`, collectProjectChanges, createProjectChangeBuffer, mergeProjectChanges, applyCanvasProjectPatch,
@@ -90,6 +94,8 @@ async function openTab(io: ReturnType<typeof database>, oaOwnerId?: string | nul
         localForageStorage: io.adapter,
         updateCanvasStorage: io.update,
         readCanvasProjects: async (key: string) => JSON.parse(await io.adapter.getItem(key) || "null")?.state.projects || [],
+        readCanvasLibrary: async (key: string) => ({ projects: JSON.parse(await io.adapter.getItem(key) || "null")?.state.projects || [], summaries: [] }),
+        readCanvasProject: async (key: string, id: string) => (JSON.parse(await io.adapter.getItem(key) || "null")?.state.projects || []).find((project: CanvasProject) => project.id === id) || null,
         writeCanvasProjects: async (key: string, changes: Parameters<typeof mergeProjectChanges<CanvasProject>>[1]) => {
             let written: CanvasProject[] = [];
             await io.update(key, stored => {
@@ -144,6 +150,46 @@ test("two consecutive actual write failures produce one incident within five sec
     await expect(tab.flush()).rejects.toThrow();
     await expect(tab.runRetry()).rejects.toThrow();
     expect(tab.store.getState().localSaveFailureId).toBeGreaterThan(incident);
+});
+
+test("view-only store saves never schedule cloud sync, but failed content writes still enqueue cloud backup", async () => {
+    const io = database(), tab = await openTab(io, "employee-a");
+    const id = tab.store.getState().createProject("cloud independent");
+    await tab.flush();
+    const before = tab.cloudSchedules();
+    const timestamp = tab.store.getState().openProject(id).updatedAt;
+    tab.store.getState().updateProject(id, { viewport: { x: 99, y: -80, k: .7 }, selectedNodeIds: [] });
+    await tab.flush();
+    expect(tab.cloudSchedules()).toBe(before);
+    expect(tab.store.getState().openProject(id).updatedAt).toBe(timestamp);
+    io.failNextWrite();
+    tab.store.getState().renameProject(id, "unsaved local but cloud queued");
+    await expect(tab.flush()).rejects.toThrow("本机失败");
+    expect(tab.cloudSchedules()).toBe(before + 1);
+});
+
+test("library rename retains recency and duplication copies a complete independent graph without active tasks", async () => {
+    const io = database(), tab = await openTab(io);
+    const original = tab.store.getState().openProject("shared") as CanvasProject;
+    tab.store.getState().renameProject("shared", "改名不置顶");
+    expect(tab.store.getState().openProject("shared").updatedAt).toBe(original.updatedAt);
+    const pending = { ...original.nodes[0], metadata: { ...original.nodes[0].metadata, status: "loading", imageTask: { requestId: "original-paid", ownerId: "owner", projectId: "shared", resultIndex: 0 } } };
+    tab.store.getState().updateProject("shared", { nodes: [pending, original.nodes[1]], coverNodeId: "a" });
+    const source = tab.store.getState().openProject("shared");
+    tab.store.setState({ unloadedProjects: [{ id: "remote", title: "改名不置顶（副本）", createdAt: "old", updatedAt: "old", nodeCount: 0, connectionCount: 0 }] });
+    const id = tab.store.getState().duplicateProject("shared");
+    const copy = tab.store.getState().openProject(id);
+    expect(copy.title).toBe("改名不置顶（副本 2）");
+    expect(copy.id).not.toBe(source.id);
+    expect(copy.coverNodeId).toBe("a");
+    expect(copy.nodes[0].metadata.imageTask).toBeUndefined();
+    expect(copy.nodes[0].metadata.storageKey).toBe(source.nodes[0].metadata.storageKey);
+    expect(copy.nodes).not.toBe(source.nodes);
+    expect(source.nodes[0].metadata.imageTask.requestId).toBe("original-paid");
+    expect(copy.connections).toEqual(source.connections);
+    expect(copy.chatSessions).toEqual(source.chatSessions);
+    await tab.flush();
+    expect(io.read().find(project => project.id === id)?.nodes).toEqual(copy.nodes);
 });
 
 test("one failed write followed by successful retry never escalates, and owner changes cancel retry state", async () => {

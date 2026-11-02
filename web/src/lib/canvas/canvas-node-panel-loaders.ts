@@ -13,7 +13,3 @@ export function loadCanvasNodePromptPanel() {
 export function loadCanvasQuickGeneratePanel() {
     return import("@/components/canvas/canvas-quick-generate-panel").then(({ CanvasQuickGeneratePanel }) => ({ default: CanvasQuickGeneratePanel }));
 }
-
-export function loadCanvasInspectorPanel() {
-    return import("@/components/canvas/canvas-inspector-panel").then(({ CanvasInspectorPanel }) => ({ default: CanvasInspectorPanel }));
-}

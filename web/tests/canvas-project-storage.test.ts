@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import ts from "typescript";
 import { mergeProjectChanges } from "@/lib/canvas/canvas-persistence-merge";
 import { decodeCanvasProject, encodeCanvasProject, parseCanvasProject, serializeCanvasProject } from "@/lib/canvas/canvas-project-codec";
+import { canvasProjectSummary } from "@/lib/canvas/canvas-project-summary";
 
 // Exercise the current adapter with substituted browser storage boundaries.
 const source = readFileSync(new URL("../src/lib/canvas/canvas-project-storage.ts", import.meta.url), "utf8");
@@ -20,6 +21,7 @@ function fallback(initial: string | null) {
         localForageStorage: { getItem: async () => value },
         updateCanvasStorage: async (_name: string, update: (stored: string | null) => string | null) => { value = update(value); },
         mergeProjectChanges,
+        canvasProjectSummary,
         decodeCanvasProject, encodeCanvasProject, parseCanvasProject, serializeCanvasProject,
     };
     const exports = {} as { readCanvasProjects: (name: string) => Promise<unknown[]>; writeCanvasProjects: (name: string, changes: Map<string, any>) => Promise<unknown[]>; removeCanvasProjects: (name: string) => Promise<void> };

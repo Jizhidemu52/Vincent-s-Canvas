@@ -9,6 +9,8 @@ import { CanvasNodeType } from "@/types/canvas";
 import type { CanvasProject } from "@/stores/canvas/use-canvas-store";
 import type * as Reuse from "@/lib/prompt-template-reuse";
 import type * as Insertion from "@/lib/canvas/prompt-canvas-insertion";
+import type * as CanvasTemplate from "@/lib/canvas/canvas-prompt-template";
+import { promptImageSettings } from "@/lib/prompt-editor-parameters";
 import { isWorkspaceRole } from "../../shared/workspace-access";
 
 function load<T>(path: string, dependencies: Record<string, unknown>): T {
@@ -67,6 +69,9 @@ function harness(options: { failResolve?: boolean; failHydrate?: boolean; failFl
         "@/lib/canvas/canvas-image-output-placement": { placeCanvasImageOutputs },
         "@/pages/canvas/use-canvas-history": { canvasHistoryForSave },
         "@/types/canvas": { CanvasNodeType },
+        "@/lib/prompt-editor-parameters": { promptImageSettings },
+        "@/services/api/server-assets": { fetchServerAsset: async () => ({ asset: { kind: "image", status: "ready", filename: "参考图.png", contentUrl: "/api/assets/accessible-asset/content" } }) },
+        "@/services/image-storage": { uploadImage: async () => ({ storageKey: "image:template-reference", url: "blob:template-reference", mimeType: "image/png" }) },
         "@/stores/canvas/use-canvas-store": {
             useCanvasStore: { getState: () => state },
             loadCanvasProject: async (id: string) => { steps.push("load"); options.onLoad?.(); return state.openProject(id); },
@@ -75,6 +80,7 @@ function harness(options: { failResolve?: boolean; failHydrate?: boolean; failFl
     };
     const reuse = load<typeof Reuse>("../src/lib/prompt-template-reuse.ts", dependencies);
     dependencies["@/lib/prompt-template-reuse"] = reuse;
+    dependencies["@/lib/canvas/canvas-prompt-template"] = load<typeof CanvasTemplate>("../src/lib/canvas/canvas-prompt-template.ts", dependencies);
     const insertion = load<typeof Insertion>("../src/lib/canvas/prompt-canvas-insertion.ts", dependencies);
     const start = (target: string | undefined = "canvas") => {
         const guard = reuse.createPromptActionGuard(reuse.promptActionIdentity(), () => alive);
@@ -94,24 +100,27 @@ test("insertion authorizes and hydrates the complete template, preserving origin
     const after = h.state.projects[0], node = after.nodes[1];
     expect(h.steps).toEqual(["load", "resolve", "hydrate", "append", "flush"]);
     expect(h.resolveCalls).toEqual([["template", "fill"]]);
-    expect(node.type).toBe(CanvasNodeType.Text);
-    expect(node.metadata?.content).toBe(payload.template.prompt);
+    expect(node.type).toBe(CanvasNodeType.Config);
+    expect(node.metadata?.composerContent).toBe(payload.template.prompt);
     expect(node.metadata?.promptTemplateSource).toMatchObject({
         templateId: "template", versionId: "version-8", version: 8, parameters: payload.template.parameters,
         referenceAssetIds: ["accessible-asset"], modelConfigId: "original-config", modelSnapshot: payload.template.modelSnapshot,
         resolvedModel: payload.pricing.selectedModel, sourceTaskId: "task", sourceAssetId: "asset",
     });
-    expect(node.metadata?.generationMode).toBeUndefined();
-    expect(node.metadata?.model).toBeUndefined();
+    expect(node.metadata?.generationMode).toBe("image");
+    expect(node.metadata?.model).toBe("enabled-model");
+    expect(node.metadata?.count).toBe(1);
+    expect(node.metadata?.manualImageReferences?.[0]).toMatchObject({ referenceKey: "asset:accessible-asset", storageKey: "image:template-reference" });
     for (const key of ["groups", "connections", "chatSessions"] as const) expect(after[key]).toBe(before[key]);
     expect(after.nodes[0]).toBe(before.nodes[0]);
-    expect(node.position.y).toBeGreaterThan(before.nodes[0].position.y + before.nodes[0].height);
+    const old = before.nodes[0];
+    expect(node.position.x + node.width <= old.position.x || node.position.x >= old.position.x + old.width || node.position.y + node.height <= old.position.y || node.position.y >= old.position.y + old.height).toBe(true);
     expect(after.viewport.x + (node.position.x + node.width / 2) * after.viewport.k).toBe(600);
     expect(after.viewport.y + (node.position.y + node.height / 2) * after.viewport.k).toBe(400);
     expect(h.subscriberCount()).toBe(0);
 });
 
-test("inserted text and undo snapshot survive the real persistence codec without nested project/history fields", async () => {
+test("inserted config and undo snapshot survive the real persistence codec without nested project/history fields", async () => {
     const h = harness(); await h.start();
     const restored = parseCanvasProject(serializeCanvasProject(h.state.projects[0]));
     const previous = restored.history!.past.pop()!;
@@ -119,15 +128,17 @@ test("inserted text and undo snapshot survive the real persistence codec without
     expect(Object.keys(previous)).not.toContain("history");
     expect(Object.keys(previous)).not.toContain("id");
     const nextHistory = canvasHistoryForSave({ past: [], future: [restored] }, restored, previous, true);
-    expect(nextHistory.future[0].nodes[1].metadata?.content).toBe(payload.template.prompt);
+    expect(nextHistory.future[0].nodes[1].metadata?.composerContent).toBe(payload.template.prompt);
     expect(restored.nodes[1].metadata?.promptTemplateSource?.parameters).toEqual(payload.template.parameters);
 });
 
-test("all target tools become ordinary editable text instead of unsupported or automatically running config nodes", async () => {
+test("templates become editable image/video config drafts and never automatically run", async () => {
     for (const target of ["image-generation", "detail-enhance", "image-edit", "angle-control", "batch-edit", "seamless-stitch", "video", "canvas"] as PromptTargetTool[]) {
         const h = harness(); h.payload.template.targetTool = target;
         await h.start();
-        expect(h.state.projects[0].nodes[1].type).toBe(CanvasNodeType.Text);
+        expect(h.state.projects[0].nodes[1].type).toBe(CanvasNodeType.Config);
+        expect(h.state.projects[0].nodes[1].metadata?.status).toBe("idle");
+        expect(h.state.projects[0].nodes[1].metadata?.generationMode).toBe(target === "video" ? "video" : "image");
         expect(h.state.projects[0].nodes[1].metadata?.promptTemplateSource?.targetTool).toBe(target);
     }
 });

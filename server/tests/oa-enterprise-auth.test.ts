@@ -33,7 +33,7 @@ test("enterprise keeps QR routes disabled before database or upstream access", a
 
 test("OA deployment rejects local sessions and privileged OA sessions", async () => {
   for (const [auth_provider, role, is_guest] of [["local", "designer", false], ["oa", "super_admin", false], ["oa", "designer", true]]) {
-    const db = { query: async () => ({ rows: [{ session_id: "session-id", auth_provider, role, is_guest, status: "active" }] }) } as unknown as Database;
+    const db = { query: async () => ({ rows: [{ session_id: "session-id", session_remaining_seconds: 7200, auth_provider, role, is_guest, status: "active" }] }) } as unknown as Database;
     const app = express().use(cookieParser());
     app.get("/protected", sessionMiddleware(db, cache, config), (_req, res) => res.json({ accepted: true }));
     await serve(app, async (origin) => {
@@ -59,7 +59,7 @@ test("enterprise denies missing or expired sessions without creating guest ident
 });
 
 test("enterprise rejects a stale tab owner header without revoking the new employee session", async () => {
-  const db = { query: async (sql: string) => ({ rows: sql.includes("FROM credit_policy") ? [{ creditsEnabled: false, updatedAt: null }] : [{ ...user, auth_provider: "oa", session_id: "active-session" }] }) } as unknown as Database;
+  const db = { query: async (sql: string) => ({ rows: sql.includes("FROM credit_policy") ? [{ creditsEnabled: false, updatedAt: null }] : [{ ...user, auth_provider: "oa", session_id: "active-session", session_remaining_seconds: 7200 }] }) } as unknown as Database;
   const app = express().use(cookieParser());
   app.get("/creation", sessionMiddleware(db, cache, config), (_req, res) => res.json({ accepted: true }));
   await serve(app, async origin => {
@@ -77,7 +77,7 @@ test("enterprise rejects a stale tab owner header without revoking the new emplo
 
 test("enterprise administrator maintenance keeps its password session but cannot enter employee creation", async () => {
   for (const must_change_password of [true, false]) {
-    const stored = { id: "admin-user", session_id: "admin-session", auth_provider: "local", role: "super_admin", status: "active", is_guest: false, must_change_password };
+    const stored = { id: "admin-user", session_id: "admin-session", auth_provider: "local", session_remaining_seconds: 28800, role: "super_admin", status: "active", is_guest: false, must_change_password };
     const db = { query: async (sql: string) => ({ rows: sql.includes("FROM credit_policy") ? [{ creditsEnabled: false, updatedAt: null }] : [stored] }) } as unknown as Database;
     const app = express().use(cookieParser());
     app.use("/auth", createAuthRouter(db, cache, config));
@@ -193,7 +193,7 @@ test("OA logout revokes the session, invalidates its cache and clears its cookie
   const queries: { sql: string; values?: unknown[] }[] = [];
   const db = { query: async (sql: string, values?: unknown[]) => {
     queries.push({ sql, values });
-    return { rows: sql.includes("FROM credit_policy") ? [{ creditsEnabled: false, updatedAt: null }] : [{ ...user, auth_provider: "oa", session_id: "oa-session-id" }] };
+    return { rows: sql.includes("FROM credit_policy") ? [{ creditsEnabled: false, updatedAt: null }] : [{ ...user, auth_provider: "oa", session_id: "oa-session-id", session_remaining_seconds: 1200 }] };
   } } as unknown as Database;
   const deleted: string[] = [];
   const app = express().use(cookieParser());
@@ -204,5 +204,33 @@ test("OA logout revokes the session, invalidates its cache and clears its cookie
     expect(response.headers.get("set-cookie")).toContain("session=;");
     expect(queries.find((q) => q.sql.startsWith("UPDATE sessions"))?.values).toEqual(["oa-session-id"]);
     expect(deleted).toContain(`session:${hashToken("oa-session")}`);
+  });
+});
+
+test("active OA sessions renew with original TTL and send cookies only on the short status route", async () => {
+  const updates: Array<{ sql: string; values: unknown[] }> = [];
+  let remaining = 6000;
+  const db = { query: async (sql: string, values: unknown[]) => {
+    if (sql.startsWith("UPDATE sessions s SET expires_at=")) { updates.push({ sql, values }); remaining = Number(values[1]); return { rows: [{ session_remaining_seconds: remaining }] }; }
+    return { rows: [{ ...user, auth_provider: "oa", session_id: "oa-sliding", session_remaining_seconds: remaining, credit_period_start: "period", current_credit_period_start: "period" }] };
+  } } as unknown as Database;
+  const app = express().use(cookieParser());
+  app.get("/work", sessionMiddleware(db, cache, config), (_req, res) => res.json({ accepted: true }));
+  app.use("/auth", createAuthRouter(db, cache, config));
+  await serve(app, async origin => {
+    const response = await fetch(`${origin}/work`, { headers: { cookie: "session=oa-sliding-token", "X-Canvas-Owner-Id": user.id } });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("set-cookie")).toBeNull();
+    expect(updates).toHaveLength(1);
+    expect(updates[0].values).toEqual(["oa-sliding", 7200, 600, user.id, "oa", "designer", hashToken("oa-sliding-token")]);
+    expect(updates[0].sql).not.toContain("LEAST(now()");
+    expect(updates[0].sql).not.toContain("created_at+");
+    expect(updates[0].sql).toContain("expires_at>now()");
+    await fetch(`${origin}/work`, { headers: { cookie: "session=oa-sliding-token", "X-Canvas-Owner-Id": "different-owner" } });
+    expect(updates).toHaveLength(1);
+    const status = await fetch(`${origin}/auth/session`, { headers: { cookie: "session=oa-sliding-token" } });
+    expect(status.status).toBe(200);
+    expect(status.headers.get("set-cookie")).toContain("Max-Age=7200");
+    expect(updates).toHaveLength(1);
   });
 });

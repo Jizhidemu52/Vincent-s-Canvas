@@ -2,7 +2,8 @@ export type CanvasImageProgress = { percent: number; label: string; fallback?: b
 export type CanvasImageTaskOptions = { signal?: AbortSignal; onProgress?: (progress: CanvasImageProgress) => void; timeoutMs?: number };
 export type CanvasImageTask =
     | { kind: "difference"; before: Blob | ImageBitmap; after: Blob | ImageBitmap }
-    | { kind: "encode"; source: Blob | ImageBitmap; mimeType: string };
+    | { kind: "encode"; source: Blob | ImageBitmap; mimeType: string }
+    | { kind: "pdf"; pages: import("./canvas-image-pdf-render").CanvasPdfPage[]; title: string };
 export type CanvasImageWorkerMessage =
     | { type: "progress"; progress: CanvasImageProgress }
     | { type: "result"; result: Blob | ImageBitmap }
@@ -25,7 +26,7 @@ function closeResult(result: Blob | ImageBitmap) { if (!(result instanceof Blob)
 
 /** One task owns one Worker: cancellation/timeout terminates computation, not just its UI. */
 export function runCanvasImageTask(task: CanvasImageTask, { signal, onProgress, timeoutMs = 60_000 }: CanvasImageTaskOptions = {}): Promise<Blob | ImageBitmap> {
-    const transfers = (task.kind === "difference" ? [task.before, task.after] : [task.source]).filter((source): source is ImageBitmap => !(source instanceof Blob));
+    const transfers = (task.kind === "difference" ? [task.before, task.after] : task.kind === "encode" ? [task.source] : []).filter((source): source is ImageBitmap => !(source instanceof Blob));
     return new Promise((resolve, reject) => {
         let worker: Worker | undefined, settled = false, sent = false;
         const cleanup = () => {
@@ -47,7 +48,7 @@ export function runCanvasImageTask(task: CanvasImageTask, { signal, onProgress, 
                 if (data.type === "progress") { try { onProgress?.(data.progress); } catch (error) { fail(error); } }
                 else if (data.type === "error") { const error = new Error(data.message); error.name = data.name; fail(error); }
                 else if (data.type === "result") {
-                    if (task.kind === "encode" ? !(data.result instanceof Blob) : typeof ImageBitmap === "undefined" || !(data.result instanceof ImageBitmap)) { fail(new Error("后台图片处理返回无效结果")); return; }
+                    if (task.kind !== "difference" ? !(data.result instanceof Blob) : typeof ImageBitmap === "undefined" || !(data.result instanceof ImageBitmap)) { fail(new Error("后台图片处理返回无效结果")); return; }
                     settled = true; cleanup(); resolve(data.result);
                 }
             };

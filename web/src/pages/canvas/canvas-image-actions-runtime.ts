@@ -10,7 +10,10 @@ import { mapCanvasAsyncPool } from "@/lib/canvas/canvas-async-pool";
 import { canvasCompareSource } from "@/lib/canvas/canvas-image-compare-source";
 import { canvasImageBaseName, canvasImageVersion, originalCanvasImageFileName } from "@/lib/canvas/canvas-image-filename";
 import { loadCanvasImageTools } from "@/lib/canvas/canvas-image-tool-loader";
-import { fitNodeSize } from "@/lib/canvas/canvas-node-size";
+import { fitNodeSize, nodeSizeFromRatio } from "@/lib/canvas/canvas-node-size";
+import { placeCanvasImageOutputs } from "@/lib/canvas/canvas-image-output-placement";
+import { adaptCanvasMaskInputs, canvasMaskAdaptationPlan } from "@/lib/canvas/canvas-mask-adaptation";
+import { ensureCanvasModelsReady, resolveCanvasToolModel } from "@/lib/canvas/canvas-generation-model";
 import { deploymentFeatures } from "@/lib/deployment-features";
 import { imageModelProfile } from "@/lib/image-model-settings";
 import { uploadImage, type UploadedImage } from "@/services/image-storage";
@@ -21,7 +24,7 @@ import { modelOptionName, type AiConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { CanvasNodeType, type CanvasNodeData, type ContextMenuState } from "@/types/canvas";
 import { nanoid } from "nanoid";
-import type { SetStateAction } from "react";
+import { createElement, type SetStateAction } from "react";
 import { buildAngleLabel, buildAnglePrompt, buildGenerationConfig, buildImageGenerationMetadata, createCanvasNode, imageMetadata, isGenerationCanceled } from "./canvas-project-utils";
 import type { App } from "antd";
 import type { createCanvasGraphStore } from "@/stores/canvas/canvas-graph-store";
@@ -47,7 +50,7 @@ export function runCanvasLocalImageOperation({ scope, projectId, message, key, l
     const runner = scope.runner ||= createCanvasImageOperationRunner();
     const messageKey = `canvas-image:${projectId}:${key}`;
     return runner.run(key, task, {
-        start: () => { void message.loading({ key: messageKey, content: uiText("{value1}中…", { value1: uiText(label) }), duration: 0 }); },
+        start: () => { void message.loading({ key: messageKey, content: createElement("span", null, uiText("{value1}中…", { value1: uiText(label) }), " ", createElement("button", { type: "button", className: "ml-2 cursor-pointer underline", onClick: () => runner.cancel(key) }, uiText("取消"))), duration: 0 }); },
         error: error => { void message.error(uiText("{value1}失败：{value2}", { value1: uiText(label), value2: error instanceof Error ? error.message : uiText("请重试") })); },
         finish: () => message.destroy(messageKey),
     });
@@ -100,25 +103,33 @@ export function createCanvasImageActionsRuntime(context: CanvasImageActionRuntim
 
     const saveManualImageEdit = async (image: UploadedImage) => {
         if (!manualEditNode || !isCurrent() || savedProjectIdRef.current !== projectId) throw new Error("画布已切换，请重新打开图片编辑");
-        const { applyCanvasImageEdit, rollbackCanvasImageEdit } = await import("@/lib/canvas/canvas-image-edit");
+        const { createCanvasImageEditVersion } = await import("@/lib/canvas/canvas-image-edit");
         if (!isCurrent() || savedProjectIdRef.current !== projectId) throw new Error("画布已切换，请重新打开图片编辑");
         const before = nodesRef.current;
-        const next = applyCanvasImageEdit(before, manualEditNode, image);
+        const existing = before.find(node => node.metadata?.storageKey === image.storageKey);
+        if (existing) return;
+        const size = fitNodeSize(image.width, image.height);
+        const child = createCanvasImageEditVersion(before, manualEditNode, image, nanoid(), placeCanvasImageOutputs(before, [manualEditNode], size, manualEditNode.position, 96));
+        const next = [...before, child];
         projectSaveQueueRef.current?.flush();
         nodesRef.current = next;
         setNodes(next);
         updateProject(projectId, { nodes: next });
+        setConnections(previous => { const connections = [...previous, { id: nanoid(), fromNodeId: manualEditNode.id, toNodeId: child.id }]; updateProject(projectId, { connections }); return connections; });
         try { await flushCanvasPersistence(); }
         catch (error) {
             if (savedProjectIdRef.current === projectId) {
-                const restored = rollbackCanvasImageEdit(nodesRef.current, before, image.storageKey);
+                const restored = nodesRef.current.filter(node => node.id !== child.id || node.metadata?.storageKey !== image.storageKey);
                 projectSaveQueueRef.current?.flush();
                 nodesRef.current = restored;
                 setNodes(restored);
                 updateProject(projectId, { nodes: restored });
+                setConnections(previous => { const connections = previous.filter(edge => edge.fromNodeId !== child.id && edge.toNodeId !== child.id); updateProject(projectId, { connections }); return connections; });
             }
             throw error;
         }
+        setSelectedNodeIds(new Set([child.id]));
+        setDialogNodeId(child.id);
     };
 
     const cropImageNode = async (node: CanvasNodeData, crop: CanvasImageCropRect) => {
@@ -126,7 +137,7 @@ export function createCanvasImageActionsRuntime(context: CanvasImageActionRuntim
         const source = node.metadata.content;
         await runLocalImageOperation(`crop:${node.id}`, "裁剪图片", async (signal) => {
             const { cropImageBlob } = await loadCanvasImageTools();
-            const cropped = await cropImageBlob(source, crop, { signal });
+            const cropped = await cropImageBlob(source, crop, { signal, sourceMimeType: node.metadata?.mimeType });
             signal.throwIfAborted();
             const image = await uploadImage(cropped);
             signal.throwIfAborted();
@@ -135,15 +146,15 @@ export function createCanvasImageActionsRuntime(context: CanvasImageActionRuntim
             const child: CanvasNodeData = {
                 id: childId,
                 type: CanvasNodeType.Image,
-                title: "Cropped Image",
-                position: { x: node.position.x + node.width + 96, y: node.position.y },
+                title: `${node.title || "图片"}_裁剪`,
+                position: placeCanvasImageOutputs(nodesRef.current, [node], { width, height: width * (image.height / image.width) }, node.position, 96),
                 width,
                 height: width * (image.height / image.width),
                 metadata: {
                     ...imageMetadata(image),
                     compareSources: [canvasCompareSource(node.metadata || {})],
                     originalFileName: originalCanvasImageFileName(node),
-                    imageName: canvasImageBaseName(node), imageVersion: canvasImageVersion(node) + 1,
+                    imageName: `${canvasImageBaseName(node)}_裁剪`, imageVersion: canvasImageVersion(node) + 1,
                     prompt: node.metadata?.prompt,
                 },
             };
@@ -151,7 +162,7 @@ export function createCanvasImageActionsRuntime(context: CanvasImageActionRuntim
             setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: node.id, toNodeId: childId }]);
             setSelectedNodeIds(new Set([childId]));
             setDialogNodeId(childId);
-            setCropNodeId(null);
+            setCropNodeId(current => current === node.id ? null : current);
         });
     };
 
@@ -159,15 +170,15 @@ export function createCanvasImageActionsRuntime(context: CanvasImageActionRuntim
             if (!node.metadata?.content) return;
             const source = node.metadata.content;
             await runLocalImageOperation(`split:${node.id}`, "切分图片", async (signal) => {
-                setSplitNodeId(null);
                 const { splitImageBlobs } = await loadCanvasImageTools();
-                const pieces = await splitImageBlobs(source, params, { signal });
+                const pieces = await splitImageBlobs(source, params, { signal, sourceMimeType: node.metadata?.mimeType });
                 signal.throwIfAborted();
                 const gap = 16;
                 const cellWidth = node.width / params.columns;
                 const cellHeight = node.height / params.rows;
-                const startX = node.position.x + node.width + 96;
-                const startY = node.position.y;
+                const start = placeCanvasImageOutputs(nodesRef.current, [node], { width: params.columns * (cellWidth + gap) - gap, height: params.rows * (cellHeight + gap) - gap }, node.position, 96);
+                const startX = start.x;
+                const startY = start.y;
                 const childNodes = await mapCanvasAsyncPool(
                     pieces, 4, async (piece) => {
                         signal.throwIfAborted();
@@ -197,6 +208,7 @@ export function createCanvasImageActionsRuntime(context: CanvasImageActionRuntim
                 setSelectedNodeIds(new Set(childNodes.map((child) => child.id)));
                 setSelectedConnectionId(null);
                 setDialogNodeId(null);
+                setSplitNodeId(current => current === node.id ? null : current);
                 message.success(uiText("已切分为 {value1} 个子节点", { value1: childNodes.length }));
             });
         };
@@ -204,16 +216,23 @@ export function createCanvasImageActionsRuntime(context: CanvasImageActionRuntim
     const maskEditImageNode = async (node: CanvasNodeData, payload: CanvasImageMaskEditPayload) => {
             if (!node.metadata?.content) return;
             const user = useUserStore.getState().user;
-            const selectedModel = currentToolConfig({ ...effectiveConfig, model: payload.model || effectiveConfig.imageModel || effectiveConfig.model }, "canvas-mask-edit").model;
+            const business = await ensureCanvasModelsReady();
+            const selectedModel = resolveCanvasToolModel("canvas-mask-edit", { ...effectiveConfig, model: payload.model || effectiveConfig.imageModel || effectiveConfig.model }, business).model;
             const usage = estimateUsage({ operationType: "inpaint", toolKey: "canvas-mask-edit", modelId: modelOptionName(selectedModel), quantity: 1 });
             let generationConfig: AiConfig;
+            let maskAdaptation: import("@/lib/canvas/canvas-mask-adaptation").CanvasMaskAdaptation;
+            let adapted: Awaited<ReturnType<typeof adaptCanvasMaskInputs>>;
             try {
                 const { canvasMaskEditImageSettings, readCanvasMaskImageSize } = await import("@/components/canvas/canvas-node-mask-edit-dialog");
                 const [sourceSize, maskSize] = await Promise.all([readCanvasMaskImageSize(node.metadata.content), readCanvasMaskImageSize(payload.maskDataUrl)]);
                 if (!isCurrent()) return;
                 if (sourceSize.width !== maskSize.width || sourceSize.height !== maskSize.height) throw new Error("蒙版尺寸与当前原图不一致，请重新绘制；尚未提交生成，不会自动拉伸。");
                 const baseConfig = { ...buildGenerationConfig(effectiveConfig, node, "image"), ...payload.imageSettings };
-                generationConfig = { ...baseConfig, ...canvasMaskEditImageSettings(baseConfig, sourceSize, imageModelProfile(selectedModel)), model: selectedModel, imageModel: selectedModel, count: "1" };
+                const plan = canvasMaskAdaptationPlan(sourceSize, imageModelProfile(selectedModel));
+                generationConfig = { ...baseConfig, ...canvasMaskEditImageSettings(baseConfig, plan, imageModelProfile(selectedModel)), model: selectedModel, imageModel: selectedModel, count: "1" };
+                const [original, mask] = await Promise.all([node.metadata.storageKey ? Promise.resolve({ storageKey: node.metadata.storageKey }) : uploadImage(node.metadata.content), uploadImage(payload.maskDataUrl)]);
+                maskAdaptation = { ...plan, sourceStorageKey: original.storageKey, maskStorageKey: mask.storageKey };
+                adapted = await adaptCanvasMaskInputs(node.metadata.content, payload.maskDataUrl, plan);
             } catch (error) {
                 message.error(error instanceof Error ? error.message : uiText("无法确认原图与蒙版尺寸，尚未提交生成"));
                 return;
@@ -237,7 +256,7 @@ export function createCanvasImageActionsRuntime(context: CanvasImageActionRuntim
             const userPrompt = payload.prompt.trim();
             const prompt = `只修改蒙版透明区域，其他区域保持不变。${userPrompt}`;
             const childId = nanoid();
-            const source = { id: node.id, name: node.title || node.id, originalFileName: originalCanvasImageFileName(node), imageName: canvasImageBaseName(node), imageVersion: canvasImageVersion(node), type: node.metadata.mimeType || "image/png", dataUrl: node.metadata.content, storageKey: node.metadata.storageKey };
+            const source = { id: node.id, name: node.title || "编辑原图", originalFileName: originalCanvasImageFileName(node), imageName: canvasImageBaseName(node), imageVersion: canvasImageVersion(node), type: "image/png", dataUrl: adapted.sourceDataUrl };
             const generationMetadata = buildImageGenerationMetadata("edit", generationConfig, 1, [source]);
             setMaskEditNodeId(null);
             setRunningNodeId(childId);
@@ -247,10 +266,10 @@ export function createCanvasImageActionsRuntime(context: CanvasImageActionRuntim
                     id: childId,
                     type: CanvasNodeType.Image,
                     title: userPrompt.slice(0, 32) || "局部编辑结果",
-                    position: { x: node.position.x + node.width + 96, y: node.position.y },
+                    position: placeCanvasImageOutputs(nodesRef.current, [node], node, node.position, 96),
                     width: node.width,
                     height: node.height,
-                    metadata: { prompt, status: NODE_STATUS_LOADING, ...generationMetadata },
+                    metadata: { prompt, status: NODE_STATUS_LOADING, ...generationMetadata, maskAdaptation },
                 },
             ]);
             setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: node.id, toNodeId: childId }]);
@@ -260,7 +279,7 @@ export function createCanvasImageActionsRuntime(context: CanvasImageActionRuntim
             const controller = startGenerationRequest(childId, node.id, childId);
             try {
                 const imageTask = await createOptions(childId, controller, undefined, "canvas-mask-edit");
-                const { metadata, uploaded } = await imageTask.generate(generationConfig, prompt, [source], { id: `${node.id}-mask`, name: "mask.png", type: "image/png", dataUrl: payload.maskDataUrl });
+                const { metadata, uploaded } = await imageTask.generate(generationConfig, prompt, [source], { id: `${node.id}-mask`, name: "mask.png", type: "image/png", dataUrl: adapted.maskDataUrl });
                 const size = fitNodeSize(uploaded.width, uploaded.height, node.width, node.height);
                 setNodes((prev) => prev.map((item) => (item.id === childId ? { ...item, width: size.width, height: size.height, metadata: { ...item.metadata, ...metadata, prompt, ...generationMetadata } } : item)));
                 addAsset({
@@ -296,9 +315,8 @@ export function createCanvasImageActionsRuntime(context: CanvasImageActionRuntim
         if (!node.metadata?.content) return;
         const source = node.metadata.content;
         await runLocalImageOperation(`upscale:${node.id}`, "放大图片", async (signal) => {
-            setUpscaleNodeId(null);
             const { upscaleImageBlob } = await loadCanvasImageTools();
-            const upscaled = await upscaleImageBlob(source, params, { signal });
+            const upscaled = await upscaleImageBlob(source, params, { signal, sourceMimeType: node.metadata?.mimeType });
             signal.throwIfAborted();
             const image = await uploadImage(upscaled);
             signal.throwIfAborted();
@@ -307,15 +325,15 @@ export function createCanvasImageActionsRuntime(context: CanvasImageActionRuntim
             const child: CanvasNodeData = {
                 id: childId,
                 type: CanvasNodeType.Image,
-                title: "Upscaled Image",
-                position: { x: node.position.x + node.width + 96, y: node.position.y },
+                title: `${node.title || "图片"}_放大${Math.round(params.targetLongEdge / 1024)}K`,
+                position: placeCanvasImageOutputs(nodesRef.current, [node], size, node.position, 96),
                 width: size.width,
                 height: size.height,
                 metadata: {
                     ...imageMetadata(image),
                     compareSources: [canvasCompareSource(node.metadata || {})],
                     originalFileName: originalCanvasImageFileName(node),
-                    imageName: canvasImageBaseName(node), imageVersion: canvasImageVersion(node) + 1,
+                    imageName: `${canvasImageBaseName(node)}_放大${Math.round(params.targetLongEdge / 1024)}K`, imageVersion: canvasImageVersion(node) + 1,
                     prompt: node.metadata?.prompt,
                 },
             };
@@ -323,18 +341,19 @@ export function createCanvasImageActionsRuntime(context: CanvasImageActionRuntim
             setConnections((prev) => [...prev, { id: nanoid(), fromNodeId: node.id, toNodeId: childId }]);
             setSelectedNodeIds(new Set([childId]));
             setDialogNodeId(childId);
+            setUpscaleNodeId(current => current === node.id ? null : current);
         });
     };
 
     const generateAngleNode = async (node: CanvasNodeData, params: CanvasImageAngleParams) => {
             if (!node.metadata?.content) return;
-            const generationConfig = currentToolConfig({ ...buildGenerationConfig(effectiveConfig, node, "image"), ...params.imageSettings, ...(params.model ? { model: params.model } : {}), count: "1" }, "canvas-angle");
+            const generationConfig = resolveCanvasToolModel("canvas-angle", { ...buildGenerationConfig(effectiveConfig, node, "image"), ...params.imageSettings, ...(params.model ? { model: params.model } : {}), count: "1" }, await ensureCanvasModelsReady());
             if (!isAiConfigReady(generationConfig, generationConfig.model)) {
                 handleMissingModelConfig();
                 return;
             }
             const childId = nanoid();
-            const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
+            const imageConfig = nodeSizeFromRatio(generationConfig.size, 320, 320) || fitNodeSize(node.width, node.height, 320, 320);
             const title = buildAngleLabel(params);
             const prompt = buildAnglePrompt(params);
             const generationMetadata = buildImageGenerationMetadata("edit", generationConfig, 1, [
@@ -348,7 +367,7 @@ export function createCanvasImageActionsRuntime(context: CanvasImageActionRuntim
                     id: childId,
                     type: CanvasNodeType.Image,
                     title,
-                    position: { x: node.position.x + node.width + 96, y: node.position.y },
+                    position: placeCanvasImageOutputs(nodesRef.current, [node], imageConfig, node.position, 96),
                     width: imageConfig.width,
                     height: imageConfig.height,
                     metadata: { prompt, status: NODE_STATUS_LOADING, ...generationMetadata },
@@ -388,6 +407,7 @@ export function createCanvasImageActionsRuntime(context: CanvasImageActionRuntim
             } catch (error) {
                 if (isGenerationCanceled(error)) return;
                 const errorDetails = error instanceof Error ? error.message : "生成失败";
+                message.error(errorDetails);
                 setNodes((prev) => prev.map((item) => (item.id === childId ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails } } : item)));
             } finally {
                 finishGenerationRequest(childId, controller);

@@ -30,7 +30,13 @@ test("real Demo HTTP compiles once, fails closed, keeps private rules server-sid
       const isChat = Array.isArray(body.tools) && body.tools.length > 0;
       (isChat ? chatCalls : optimizerCalls).push(body);
       await Bun.sleep(20);
-      const content = output === "invalid" ? "not valid JSON" : output === "leak" ? (isChat ? chatRules : JSON.stringify({ prompt: rules, avoid: [], keep_text: [] })) : isChat ? "已检查衬衫。" : JSON.stringify({ prompt: finalPrompt, avoid: [], keep_text: [] });
+      const content = output === "invalid" ? "not valid JSON" : output === "leak" ? (isChat ? body.system : JSON.stringify({ prompt: rules, avoid: [], keep_text: [] })) : isChat ? "已检查衬衫。" : JSON.stringify({ prompt: finalPrompt, avoid: [], keep_text: [] });
+      if (body.stream) return new Response([
+        { type: "message_start", message: { id: "fixture-stream" } },
+        { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+        { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: content } },
+        { type: "content_block_stop", index: 0 }, { type: "message_delta", delta: { stop_reason: "end_turn" } }, { type: "message_stop" },
+      ].map(event => `data: ${JSON.stringify(event)}\n\n`).join(""), { headers: { "content-type": "text/event-stream" } });
       return Response.json({ content: [{ type: "text", text: content }], stop_reason: "end_turn", usage: { input_tokens: 125, output_tokens: 30 } });
     }
     if (path === "/opentoken/v1/images/generations" || path === "/opentoken/v1/images/edits") {
@@ -103,10 +109,14 @@ test("real Demo HTTP compiles once, fails closed, keeps private rules server-sid
     }
     expect(optimizerCalls).toHaveLength(3);
     output = "good";
-    const chatInput = { modelId: optimizerId, toolKey: "canvas-chat", profile: "canvas-assistant", profileContext: { stage: "plan", userText: "检查衬衫" }, input: [{ role: "user", content: "检查衬衫" }], tools: [], claude: { stream: true, thinking: true } };
+    const chatInput = { modelId: optimizerId, toolKey: "canvas-chat", profile: "canvas-assistant", profileContext: { stage: "plan", currentUserText: "检查衬衫", newCreation: false, imageCatalog: [], previewImageIds: [], workNote: "" }, input: [{ role: "user", content: "检查衬衫" }], tools: [], claude: { stream: false, thinking: true } };
     const chat = await request("/api/chat/responses", "POST", chatInput);
     expect(chat.status).toBe(200); expect(await chat.json()).toEqual({ content: "已检查衬衫。", toolCalls: [], stopReason: "end_turn" });
-    expect(chatCalls[0]!.system).toContain(chatRules); expect(chatCalls[0]!.thinking).toBeUndefined(); expect(chatCalls[0]!.stream).not.toBe(true);
+    expect(chatCalls[0]!.system).not.toContain(chatRules); expect(chatCalls[0]!.thinking).toBeUndefined(); expect(chatCalls[0]!.stream).not.toBe(true);
+    expect(chatCalls[0]!.output_config).toEqual({ effort: "medium" });
+    const stream = await request("/api/chat/responses", "POST", { ...chatInput, claude: { stream: true, thinking: true } });
+    expect(stream.headers.get("content-type")).toContain("text/event-stream");
+    expect(await stream.text()).toContain("已检查衬衫。"); expect(chatCalls[1]!.stream).toBe(true);
     output = "leak";
     const rejectedChat = await request("/api/chat/responses", "POST", chatInput);
     expect(rejectedChat.status).toBe(422); expect(await rejectedChat.text()).not.toContain(chatRules);
@@ -151,6 +161,39 @@ test("real Demo HTTP compiles once, fails closed, keeps private rules server-sid
       expect(optimizerCalls).toHaveLength(5); expect(imageCalls).toHaveLength(3);
     }
     finally { saved.close(); }
+
+    const exclusionInput = { ...input, requestId: crypto.randomUUID(), toolKey: "canvas-image", promptInput: undefined,
+      prompt: "一件蓝色衬衫", parameters: { negative_prompt: "水印、额外文字", inputArchive: { prompt: "用户草稿", effectivePrompt: "一件蓝色衬衫", config: { imageOptions: '{"negative_prompt":"水印、额外文字"}' } } } };
+    const excluded = await (await request("/api/tasks", "POST", exclusionInput)).json();
+    expect(excluded.task.parameters.promptExclusions).toMatchObject({ sourcePrompt: exclusionInput.prompt, submittedPrompt: excluded.task.prompt, mode: "prompt" });
+    expect(excluded.task.prompt).toContain("水印、额外文字"); expect(excluded.task.prompt.match(/排除要求/g)).toHaveLength(1);
+    expect(excluded.task.parameters.inputArchive).toMatchObject({ prompt: "用户草稿", effectivePrompt: exclusionInput.prompt, submittedPrompt: excluded.task.prompt });
+    expect((await settle(excluded.task.id)).status).toBe("success");
+    expect(imageCalls.at(-1)!.prompt).toBe(excluded.task.prompt); expect(imageCalls.at(-1)).not.toHaveProperty("negative_prompt");
+    expect((await (await request("/api/tasks", "POST", exclusionInput)).json()).task.id).toBe(excluded.task.id);
+    expect(imageCalls).toHaveLength(4);
+    const excludedBatch = await (await request("/api/tasks/batch", "POST", { ...batch, requestId: crypto.randomUUID(), promptInput: undefined, prompt: "变成蓝色", parameters: { negative_prompt: "水印" } })).json();
+    expect(excludedBatch.failures).toEqual([]);
+    for (const task of excludedBatch.tasks) {
+      expect(task.parameters.promptExclusions.sourcePrompt).toBe("变成蓝色");
+      expect(task.prompt.match(/排除要求/g)).toHaveLength(1);
+      expect((await settle(task.id)).status).toBe("success");
+    }
+    expect(imageCalls).toHaveLength(6);
+
+    // Agent generation uses the already planned public prompt, without a second
+    // optimizer call. The recipe exists only in the outbound image request.
+    const agentInput = { ...exclusionInput, requestId: crypto.randomUUID(), prompt: "只把衬衫领口改成V领", parameters: { imageAgentProfile: "canvas-assistant", inputArchive: { prompt: "只把衬衫领口改成V领" } } };
+    const plannedCalls = optimizerCalls.length;
+    const agent = await (await request("/api/tasks", "POST", agentInput)).json();
+    expect(agent.task.prompt).toBe(agentInput.prompt); expect(JSON.stringify(agent)).not.toContain(chatRules);
+    const finished = await settle(agent.task.id); expect(finished.status).toBe("success");
+    expect(optimizerCalls).toHaveLength(plannedCalls); expect(imageCalls).toHaveLength(7);
+    expect(imageCalls.at(-1)!.prompt).toContain(chatRules); expect(String(imageCalls.at(-1)!.prompt).endsWith(agentInput.prompt)).toBe(true);
+    expect(finished.prompt).toBe(agentInput.prompt); expect(JSON.stringify(finished)).not.toContain(chatRules);
+    const repeated = await (await request("/api/tasks", "POST", agentInput)).json();
+    expect(repeated.task.id).toBe(agent.task.id); expect(imageCalls).toHaveLength(7);
+    expect((await request("/api/tasks", "POST", { ...agentInput, requestId: crypto.randomUUID(), operationType: "video_generation" })).status).toBe(400);
   } finally {
     child.kill(); await child.exited; provider.stop(true); rmSync(directory, { recursive: true, force: true });
   }

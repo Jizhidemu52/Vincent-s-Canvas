@@ -38,6 +38,7 @@ export function CanvasGenerationRecordDetails({ node, draftPrompt, derivatives =
                 <Copy className="mr-1 inline size-3 align-text-bottom" aria-hidden />{prompt}
             </button> : <p className="opacity-60">{t("本次生成未使用提示词")}</p>}
             {prompt.length > 160 ? <button type="button" className="hover:underline" onClick={() => setExpanded(value => !value)}>{t(expanded ? "收起原提示词" : "展开原提示词")}</button> : null}
+            {record?.submittedPrompt && record.submittedPrompt !== prompt ? <details className="min-w-0"><summary className="cursor-pointer py-1">{t("实际发送提示词（含排除要求）")}</summary><button type="button" className="max-h-48 w-full overflow-y-auto whitespace-pre-wrap break-words text-left leading-5 opacity-80" aria-label={t("复制实际发送提示词")} onClick={() => copyText(record.submittedPrompt!, t("提示词已复制"))}>{record.submittedPrompt}</button></details> : null}
             {modified ? <div className="flex items-center justify-between gap-2" role="status"><span>{t("草稿已修改")}</span>{onRestorePrompt ? <button type="button" className="hover:underline disabled:opacity-40" disabled={disabled} onClick={onRestorePrompt}>{t("恢复原提示词")}</button> : null}</div> : null}
         </> : null}
         {onContinue || (record && onRegenerate) ? <div className="flex flex-wrap items-center gap-1">

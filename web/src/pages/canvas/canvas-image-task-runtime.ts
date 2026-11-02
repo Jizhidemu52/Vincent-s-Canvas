@@ -2,7 +2,8 @@ import type { Dispatch, RefObject, SetStateAction } from "react";
 import { flushSync } from "react-dom";
 import { observeCanvasImageTask, type CanvasImageTaskBinding } from "@/lib/canvas/canvas-image-task-recovery";
 import { fitNodeSize } from "@/lib/canvas/canvas-node-size";
-import { getQueuedTask, getQueuedTaskByRequestId, QueuedTaskFailedError } from "@/services/api/generation-tasks";
+import { getQueuedTask, getQueuedTaskByRequestId, recoverQueuedTask, QueuedTaskFailedError, imageTaskPrompts } from "@/services/api/generation-tasks";
+import { restoreCanvasMaskResult } from "@/lib/canvas/canvas-mask-adaptation";
 import { requestEdit, requestGeneration } from "@/services/api/image";
 import { uploadImage } from "@/services/image-storage";
 import { flushCanvasPersistence, useCanvasStore } from "@/stores/canvas/use-canvas-store";
@@ -46,7 +47,7 @@ export default function createCanvasImageTaskRuntime({ nodes, setNodes, saveQueu
                     ...node,
                     ...(metadata.status === "success" && metadata.naturalWidth && metadata.naturalHeight
                         ? fitNodeSize(metadata.naturalWidth, metadata.naturalHeight, node.width, node.height) : {}),
-                    metadata: { ...node.metadata, ...metadata, ...(node.metadata?.generationRecord ? { generationRecord: compiledCanvasGenerationRecord(node.metadata.generationRecord, metadata.prompt) } : {}), ...(primary ? { primaryImageId: nodeId } : {}) },
+                    metadata: { ...node.metadata, ...metadata, ...(node.metadata?.generationRecord ? { generationRecord: compiledCanvasGenerationRecord(node.metadata.generationRecord, metadata.prompt, metadata.submittedPrompt) } : {}), ...(primary ? { primaryImageId: nodeId } : {}) },
                 };
             });
         }));
@@ -95,23 +96,24 @@ export default function createCanvasImageTaskRuntime({ nodes, setNodes, saveQueu
                     assertCurrent();
                     if (!mask && imageModelProfile(config.model || config.imageModel).kind === "midjourney-blend") { edit = false; prompt = ""; }
                     config = { ...config, count: "1", canvasImageCount: "1" };
-                    const requestOptions = { ...options, exactPrompt, promptInput: exactPrompt ? undefined : promptInput?.compilationId ? promptInput : promptInput ? { ...promptInput, userText: prompt, fields: { ...promptInput.fields, ...(promptInput.scene === "workflow-step" || Object.hasOwn(promptInput.fields || {}, "instruction") ? { instruction: prompt } : {}) }, hasMask: Boolean(mask) } : undefined, onOptimizing: () => { if (current(nodeId, binding, prepared)) setNodes(previous => previous.map(node => node.id === nodeId ? { ...node, metadata: { ...node.metadata, optimizingPrompt: true } } : node)); }, onCompiled: (finalPrompt: string, optimized: boolean) => { if (current(nodeId, binding, prepared)) setNodes(previous => previous.map(node => node.id === nodeId ? { ...node, metadata: { ...node.metadata, prompt: finalPrompt, generationRecord: compiledCanvasGenerationRecord(node.metadata?.generationRecord, finalPrompt), optimized, optimizingPrompt: false } } : node)); }, tool: toolKey || (edit ? "canvas-edit" : "canvas-image") };
+                    const requestOptions = { ...options, exactPrompt, promptInput: exactPrompt ? undefined : promptInput?.compilationId ? promptInput : promptInput ? { ...promptInput, userText: prompt, fields: { ...promptInput.fields, ...(promptInput.scene === "workflow-step" || Object.hasOwn(promptInput.fields || {}, "instruction") ? { instruction: prompt } : {}) }, hasMask: Boolean(mask) } : undefined, onOptimizing: () => { if (current(nodeId, binding, prepared)) setNodes(previous => previous.map(node => node.id === nodeId ? { ...node, metadata: { ...node.metadata, optimizingPrompt: true } } : node)); }, onCompiled: (finalPrompt: string, optimized: boolean, submittedPrompt?: string) => { if (current(nodeId, binding, prepared)) setNodes(previous => previous.map(node => node.id === nodeId ? { ...node, metadata: { ...node.metadata, prompt: finalPrompt, submittedPrompt, generationRecord: compiledCanvasGenerationRecord(node.metadata?.generationRecord, finalPrompt, submittedPrompt), optimized, optimizingPrompt: false } } : node)); }, tool: toolKey || (edit ? "canvas-edit" : "canvas-image") };
                     return options.receiveResult(edit
                         ? requestEdit(config, prompt, references || [], mask, requestOptions)
                         : requestGeneration(config, prompt, requestOptions, references));
                 },
-                async receiveResult<T extends { dataUrl: string; sourceTaskId?: string; prompt?: string; optimized?: boolean; userInput?: import("../../../../shared/prompt-contracts").PromptInputData }>(request: Promise<T[]>) {
+                async receiveResult<T extends { dataUrl: string; sourceTaskId?: string; prompt?: string; submittedPrompt?: string; optimized?: boolean; userInput?: import("../../../../shared/prompt-contracts").PromptInputData }>(request: Promise<T[]>) {
                     try {
                         const image = (await request)[0];
                         assertCurrent();
                         if (!image) throw new Error("接口没有返回图片");
-                        const uploaded = await uploadImage(image.dataUrl);
+                        const target = nodes.current.find(node => node.id === nodeId)!;
+                        const uploaded = await uploadImage(await restoreCanvasMaskResult(target, image.dataUrl));
                         assertCurrent();
                         const metadata: CanvasNodeMetadata = {
                             imageTask: undefined, errorDetails: undefined, sourceTaskId: image.sourceTaskId,
-                            ...(image.prompt !== undefined ? { prompt: image.prompt, optimized: image.optimized, userInput: image.userInput } : {}), optimizingPrompt: false,
+                            ...(image.prompt !== undefined ? { prompt: image.prompt, submittedPrompt: image.submittedPrompt, optimized: image.optimized, userInput: image.userInput } : {}), optimizingPrompt: false,
                             content: uploaded.url, storageKey: uploaded.storageKey, status: "success",
-                            ...(nodes.current.find(node => node.id === nodeId)?.metadata?.generationRecord ? { generationRecord: compiledCanvasGenerationRecord(nodes.current.find(node => node.id === nodeId)?.metadata?.generationRecord, image.prompt) } : {}),
+                            ...(nodes.current.find(node => node.id === nodeId)?.metadata?.generationRecord ? { generationRecord: compiledCanvasGenerationRecord(nodes.current.find(node => node.id === nodeId)?.metadata?.generationRecord, image.prompt, image.submittedPrompt) } : {}),
                             naturalWidth: uploaded.width, naturalHeight: uploaded.height, bytes: uploaded.bytes, mimeType: uploaded.mimeType,
                             ...(uploaded.originalFileName ? { originalFileName: uploaded.originalFileName, imageName: uploaded.originalFileName.replace(/\.[^.]+$/, ""), imageVersion: 1 } : {}),
                         };
@@ -147,7 +149,7 @@ export default function createCanvasImageTaskRuntime({ nodes, setNodes, saveQueu
             const pending = nodes.current.filter(node => node.type === CanvasNodeType.Image && node.metadata?.imageTask
                 && (!nodeId || node.id === nodeId || (source?.metadata?.isBatchRoot && node.metadata.batchRootId === nodeId)));
             if (!pending.length) return null;
-            await Promise.all(pending.map(node => runtime.recoverImageTask(node.id, node.metadata!.imageTask!)));
+            await Promise.all(pending.map(node => runtime.recoverImageTask(node.id, node.metadata!.imageTask!, Boolean(nodeId))));
             return pending.map(node => {
                 const restored = nodes.current.find(item => item.id === node.id);
                 return restored?.metadata?.status === "success"
@@ -155,14 +157,14 @@ export default function createCanvasImageTaskRuntime({ nodes, setNodes, saveQueu
                     : { nodeId: node.id, status: "failed", error: restored?.metadata?.errorDetails || "原图片任务仍待查询" };
             });
         },
-        async recoverImageTask(nodeId: string, binding: CanvasImageTaskBinding) {
+        async recoverImageTask(nodeId: string, binding: CanvasImageTaskBinding, explicit = false) {
             const recoveries = scope.recoveries;
             if (!current(nodeId, binding) || recoveries.has(nodeId) || generating.current.has(nodeId)) return;
             const controller = new AbortController();
             // No await precedes this shared lock, including after concurrent imports.
             recoveries.set(nodeId, controller);
             try {
-                await runtime.recover(nodeId, binding, controller.signal);
+                await runtime.recover(nodeId, binding, controller.signal, explicit);
             } finally {
                 if (recoveries.get(nodeId) === controller) recoveries.delete(nodeId);
             }
@@ -191,13 +193,14 @@ export default function createCanvasImageTaskRuntime({ nodes, setNodes, saveQueu
             if (!taskId) throw new Error("服务器没有返回图片任务编号");
             await patch(nodeId, binding, { imageTask: { ...binding, taskId }, sourceTaskId: taskId });
         },
-        async recover(nodeId: string, binding: CanvasImageTaskBinding, signal: AbortSignal) {
+        async recover(nodeId: string, binding: CanvasImageTaskBinding, signal: AbortSignal, explicit = false) {
             const valid = () => current(nodeId, binding) && !signal.aborted;
             try {
                 await patch(nodeId, binding, { status: "loading", errorDetails: undefined });
                 const task = await observeCanvasImageTask(binding, {
                     signal, isCurrent: valid,
                     getTask: getQueuedTask, getByRequestId: getQueuedTaskByRequestId,
+                    ...(explicit ? { recoverTask: recoverQueuedTask } : {}),
                     onTask: async task => {
                         if (nodes.current.find(node => node.id === nodeId)?.metadata?.imageTask?.taskId !== task.id) {
                             await patch(nodeId, binding, { imageTask: { ...binding, taskId: task.id }, sourceTaskId: task.id });
@@ -217,7 +220,8 @@ export default function createCanvasImageTaskRuntime({ nodes, setNodes, saveQueu
                 }
                 const url = task.resultUrls[binding.resultIndex];
                 if (!url) throw new Error("原图片任务已完成，但结果暂不可用；再次点击仅查询原任务。");
-                const image = await uploadImage(url);
+                const target = nodes.current.find(node => node.id === nodeId)!;
+                const image = await uploadImage(await restoreCanvasMaskResult(target, url));
                 if (!valid()) return;
                 // Refill the original node at its existing position, respecting the image ratio.
                 await patch(nodeId, binding, {
@@ -225,7 +229,7 @@ export default function createCanvasImageTaskRuntime({ nodes, setNodes, saveQueu
                     naturalWidth: image.width, naturalHeight: image.height, bytes: image.bytes, mimeType: image.mimeType,
                     status: "success", errorDetails: undefined, optimizingPrompt: false,
                     // Older task records omit these fields; missing metadata must not erase the saved request.
-                    ...(task.prompt !== undefined ? { prompt: task.prompt } : {}),
+                    ...(task.prompt !== undefined ? imageTaskPrompts(task) : {}),
                     ...(task.optimized !== undefined ? { optimized: task.optimized } : {}),
                     ...(task.userInput !== undefined ? { userInput: task.userInput } : {}),
                 });

@@ -1,4 +1,5 @@
 import { authenticateDemoAccount, demoAccounts } from "./demo-accounts";
+import { publicTaskFailurePayload } from "../../shared/generation-error";
 import { readDemoTaskProgress } from "./task-progress";
 import { logDemoRequest } from "./request-logging";
 import { taskSubmissionSchema, batchSubmissionSchema, type TaskSubmission } from "../../shared/task-contracts";
@@ -13,6 +14,7 @@ import { appendDemoDownloadReceipt, demoDownloadProjection, demoDownloadReceiptS
 import { assignDemoPublicModelNumbers, isSelectableCreativeModel, presentAdminModel, presentPublicModel } from "./model-presentation";
 import { redactDesignerModelData } from "./model-privacy";
 import { openAiImageParameters } from "./openai-image-parameters";
+import { applyImagePromptExclusions, validateImagePromptExclusions } from "./image-prompt-exclusions";
 import { ImageEditInputError, prepareImageEditInput, type ImageEditInput } from "./image-edit-input";
 import { deploymentFeatures } from "./deployment-features";
 import { billedDemoCredits, resolveStandaloneDemoUser } from "./demo-standalone-mode";
@@ -26,7 +28,7 @@ import { DEMO_STREAM_IDLE_TIMEOUT_SECONDS } from "./demo-server-config";
 import { resolveDemoHost } from "./demo-network-config";
 import { isOpenTokenImageModel, runOpenTokenImage, type OpenTokenImageModel } from "./opentoken-image";
 import { createGenerationTiming } from "./generation-timing";
-import { ANTHROPIC_MESSAGES_VERSION, buildClaudeMessagesRequest, buildGeminiRequestBody, chatFunctionToolsSchema, isClaudeMessagesModel, readClaudeResponse, readGeminiResponse, requestChatCompletion, requestClaudeStream } from "./routes/chat";
+import { ANTHROPIC_MESSAGES_VERSION, buildClaudeMessagesRequest, buildGeminiRequestBody, chatFunctionToolsSchema, imageAgentModelInput, isClaudeMessagesModel, readClaudeResponse, readGeminiResponse, requestChatCompletion, requestClaudeStream } from "./routes/chat";
 import { fetchProviderSubmission } from "./provider-submission-transport";
 import { normalizeDemoPublicAssetOrigin } from "./demo-public-assets";
 import { createDemoProviderVideoSources, resolveOwnedDemoVideoSources } from "./demo-video-sources";
@@ -62,6 +64,8 @@ import { DemoAdmissionGate, DemoPromptBatchStore } from "./demo-prompt-batches";
 import { promptHash } from "./prompt-recipe-store";
 import { preparePromptTaskInput } from "./prompt-task-input";
 import { prepareChatProfileInput, validateChatProfileOutput, type ChatPromptProfile } from "./prompt-chat-profiles";
+import { imageAgentProviderPrompt } from "./image-agent-profile";
+import { imageAgentClaudeStream } from "./image-agent-stream";
 import { PromptOptimizationError } from "./prompt-safety";
 
 const sessions = new Map<string, string>();
@@ -683,8 +687,8 @@ function describeDemoAsset(asset: DemoAsset) {
     modelName: demoModels.find(model => model.id === task?.modelConfigId)?.name || null, status: 'ready', visibilityScope: 'private',
     metadata: asset.metadata || {}, createdAt: asset.createdAt, ...demoDownloadProjection(asset),
     deletedAt: asset.deletedAt || null, purgeAfter: asset.deletedAt ? demoAssetPurgeAfter(asset.deletedAt) : null,
-    contentUrl: asset.deletedAt ? null : `/api/assets/${asset.id}/content`, thumbnailUrl: !asset.deletedAt && kind === 'image' ? `/api/assets/${asset.id}/thumb?w=256` : null,
-    previewUrl: !asset.deletedAt && kind === 'image' ? `/api/assets/${asset.id}/thumb?w=1024` : null };
+    contentUrl: asset.deletedAt ? null : `/api/assets/${asset.id}/content`, thumbnailUrl: !asset.deletedAt && (kind === 'image' || kind === 'video') ? `/api/assets/${asset.id}/thumb?w=256` : null,
+    previewUrl: !asset.deletedAt && (kind === 'image' || kind === 'video') ? `/api/assets/${asset.id}/thumb?w=1024` : null };
 }
 
 /** Keep running-task aliases, but expose changes only after the whole transaction commits. */
@@ -767,7 +771,7 @@ Bun.serve({
     const path = url.pathname;
     const json = (body: unknown, status = 200, extra: Record<string, string> = {}) => new Response(JSON.stringify(
       path.startsWith("/api/") && !path.startsWith("/api/admin/") && path !== "/api/models"
-        ? redactDesignerModelData(body, demoModels, sessionUser(request)?.role) : body,
+        ? redactDesignerModelData(path.startsWith("/api/tasks") ? publicTaskFailurePayload(body) : body, demoModels, sessionUser(request)?.role) : body,
       (key, value) => key === "promptCompilationId" || key === "submissionHash" ? undefined : imageTaskApiReplacer(key, value),
     ), { status, headers: { ...headers, ...extra } });
     if (!["GET", "HEAD", "OPTIONS"].includes(request.method)) {
@@ -1037,10 +1041,15 @@ Bun.serve({
         const apiKey = provider ? demoChatProviderApiKey(String(provider.id)) : "";
         if (!provider || !selectedConfig || !apiKey) return json({ error: "PROVIDER_NOT_CONFIGURED", message: "所选对话 API 服务尚未配置服务端密钥" }, 503);
         try {
-          const result = await requestChatCompletion({ model_id: selectedModel, base_url: String(provider.baseUrl), protocol: String(provider.protocol), encrypted_credentials: null }, { apiKey }, {
+          const model = { model_id: selectedModel, base_url: String(provider.baseUrl), protocol: String(provider.protocol), encrypted_credentials: null };
+          const chatInput = imageAgentModelInput(model, {
             ...prepared.input,
             claude: { ...prepared.input.claude, maxTokens: Math.max(1, Math.min(16_384, Math.floor(prepared.input.claude?.maxTokens || 2048))) },
           });
+          if (isClaudeMessagesModel(model) && chatInput.claude?.stream) {
+            return imageAgentClaudeStream(await requestClaudeStream(model, { apiKey }, chatInput), prepared.privateRules, chatInput.tools);
+          }
+          const result = await requestChatCompletion(model, { apiKey }, chatInput);
           const { usage: _internalUsage, ...payload } = validateChatProfileOutput(result, prepared.privateRules);
           if (!payload.content.trim() && !payload.toolCalls.length) return json({ error: "CHAT_RESPONSE_EMPTY", message: "模型未返回有效回复；不会自动重新提交。" }, 502, { "cache-control": "no-store" });
           return json(payload, 200, { "cache-control": "no-store" });
@@ -1214,8 +1223,13 @@ Bun.serve({
       const width = url.searchParams.get('w') || '256';
       if (width !== '256' && width !== '1024') return json({ error: 'INVALID_WIDTH', message: '缩略图仅支持256或1024' }, 400);
       const asset = demoAssets.get(path.split('/')[3]!);
-      if (!asset || !asset.mimeType.startsWith('image/') || (asset.ownerUserId !== user.id && !canManageDemoOwner(user, asset.ownerUserId)) || !demoAssetByteLength(asset)) return json({ error: 'NOT_FOUND', message: '素材不存在或无权访问' }, 404);
-      return demoAssetContentResponse(demoAssetThumbnail(asset, Number(width) as 256 | 1024), request);
+      if (!asset || !/^(image|video)\//.test(asset.mimeType) || (asset.ownerUserId !== user.id && !canManageDemoOwner(user, asset.ownerUserId)) || !demoAssetByteLength(asset)) return json({ error: 'NOT_FOUND', message: '素材不存在或无权访问' }, 404);
+      const thumbnail = demoAssetThumbnail(asset, Number(width) as 256 | 1024);
+      if (!thumbnail) return new Response(null, { status: 202, headers: { 'Cache-Control': 'no-store', 'Retry-After': '3' } });
+      const result = await demoAssetContentResponse(thumbnail, request);
+      const durationMs = Number(thumbnail.metadata?.durationMs);
+      if (asset.mimeType.startsWith('video/') && Number.isFinite(durationMs) && durationMs > 0) result.headers.set('X-Canvas-Media-Duration-Ms', String(durationMs));
+      return result;
     }
     if (path === "/api/generation-capabilities" && request.method === "GET") {
       const capabilityTool = url.searchParams.get("toolKey") || "video";
@@ -1250,13 +1264,18 @@ Bun.serve({
           ? json({ task: existingTask })
           : json({ error: "DUPLICATE_REQUEST", message: "任务请求标识已被使用" }, 400);
       const taskTool = resolveDemoToolConfiguration({ ...input, operationType: input.operationType || "" }, demoToolConfigurations, demoModels, demoProviders, demoModuleFlags);
+      validateImagePromptExclusions(input);
       input.modelConfigId = taskTool.modelConfigId;
       input.parameters = singleImageTaskParameters(input.operationType || "", { ...input.parameters, tool: taskTool.toolKey });
       // This argument is supplied only by the in-process batch coordinator, never parsed from HTTP.
       const prepared: PreparedDemoTask = trustedBatch
         ? { ...input, prompt: trustedBatch.prepared.prompt, parameters: structuredClone(trustedBatch.prepared.parameters), promptInput: trustedBatch.prepared.promptInput,
             userInput: trustedBatch.prepared.userInput, promptCompilationId: trustedBatch.prepared.promptCompilationId, optimized: trustedBatch.prepared.optimized }
-        : await preparePromptTaskInput(demoPromptCompiler, user, { ...input, toolKey: taskTool.toolKey });
+        : applyImagePromptExclusions(await preparePromptTaskInput(demoPromptCompiler, user, { ...input, toolKey: taskTool.toolKey }), (() => {
+            const model = demoModels.find(item => item.id === taskTool.modelConfigId);
+            const provider = demoProviders.find(item => item.id === model?.providerId);
+            return model && provider ? { modelId: String(model.modelId), protocol: String(provider.protocol) } : undefined;
+          })());
       input = prepared;
       const promptMetadata = { userInput: prepared.userInput ?? null, optimized: prepared.optimized,
         ...(prepared.promptCompilationId ? { promptCompilationId: prepared.promptCompilationId } : {}), submissionHash,
@@ -1614,10 +1633,13 @@ Bun.serve({
         }
         if (input.promptInput && input.promptInput.scene !== "batch-optimize") throw new PromptOptimizationError("PROMPT_RECIPE_MISMATCH", "批处理仅支持批量优化配方");
         const batchTool = resolveDemoToolConfiguration(input, demoToolConfigurations, demoModels, demoProviders, demoModuleFlags);
-        const prepared = await preparePromptTaskInput(demoPromptCompiler, user, {
+        validateImagePromptExclusions(input);
+        const batchModel = demoModels.find(item => item.id === batchTool.modelConfigId);
+        const batchProvider = demoProviders.find(item => item.id === batchModel?.providerId);
+        const prepared = applyImagePromptExclusions(await preparePromptTaskInput(demoPromptCompiler, user, {
           ...input, modelConfigId: batchTool.modelConfigId, toolKey: batchTool.toolKey,
           parameters: singleImageTaskParameters(input.operationType, { ...input.parameters, tool: batchTool.toolKey }), sourceUrls: input.items[0]!.sourceUrls,
-        });
+        }), batchModel && batchProvider ? { modelId: String(batchModel.modelId), protocol: String(batchProvider.protocol) } : undefined);
         const batch = await demoPromptBatches.create(user.id, input.requestId, inputHash, { prompt: prepared.prompt, optimized: prepared.optimized, projectId: input.projectId, operationType: input.operationType, modelConfigId: batchTool.modelConfigId, totalItems: input.items.length });
         const taskInputs = createDemoBatchTaskInputs({ ...input, modelConfigId: batchTool.modelConfigId, prompt: prepared.prompt, parameters: prepared.parameters, toolKey: batchTool.toolKey });
         for (const [itemIndex, taskInput] of taskInputs.entries()) {
@@ -2249,9 +2271,11 @@ async function runApiMartImageTaskForDemo(
   try {
     sources = sources.map(materializeDemoAsset);
     const editInput = isMarkImage ? preparedInput || await prepareImageEditInput(sources, parameters, { protocol: "apimart", modelId, operationType: task.operationType }) : undefined;
+    const providerPrompt = task.upstreamTaskId || task.submissionStartedAt ? prompt
+      : await imageAgentProviderPrompt({ prompt, parameters, operationType: task.operationType }, async profile => (await demoPromptCompiler.store.active(profile)).version.systemPrompt);
     phase = "submission";
     if (!isMarkImage) updateDemoTask(task, { submissionStartedAt: now(), updatedAt: now() });
-    const resultUrl = await callApiMartImage(modelId, prompt, parameters, sources, providerId, editInput, isMarkImage ? task : undefined);
+    const resultUrl = await callApiMartImage(modelId, providerPrompt, parameters, sources, providerId, editInput, isMarkImage ? task : undefined);
     phase = "result_store";
     if (isMarkImage) updateDemoTask(task, { stage: "saving", updatedAt: now() });
     await completeDemoImageTask(task, user.id, resultUrl, editInput);
@@ -2274,6 +2298,7 @@ async function runApiMartImageTaskForDemo(
     }
     finishDemoTaskFailure(task, error, { status: "failed", failureReason: isProviderNetworkError(error)
       ? "无法与图像服务建立安全连接。请检查服务器外网、TLS 证书策略或稍后重试；本次积分已自动退还。"
+      : parameters.imageAgentProfile && !(error instanceof PromptOptimizationError) ? "图片助手任务未完成，服务端已隐藏上游内部详情。"
       : error instanceof Error ? error.message : "APIMart 图片任务失败" }, user);
   }
 }
@@ -2290,19 +2315,21 @@ async function runOpenTokenImageTaskForDemo(
   const timing = createGenerationTiming({ taskId: task.id, requestId: task.requestId, modelConfigId: task.modelConfigId, runtime: "demo" });
   try {
     const editInput = preparedInput || await timing.measure("prepare", () => prepareImageEditInput(sources, parameters, { protocol: "openai", modelId, operationType: task.operationType }));
+    const providerPrompt = await imageAgentProviderPrompt({ prompt, parameters, operationType: task.operationType }, async profile => (await demoPromptCompiler.store.active(profile)).version.systemPrompt);
     updateDemoTask(task, { submissionStartedAt: now(), updatedAt: now() });
     const resultUrl = await runOpenTokenImage({
       baseUrl: openTokenBaseUrl,
       apiKey: openTokenApiKey,
       modelId,
-      prompt,
+      prompt: providerPrompt,
       ...openAiImageParameters(parameters, modelId),
       references: editInput.references.map((source) => ({ filename: source.filename, mimeType: source.mimeType, bytes: source.bytes })),
       ...(editInput.mask ? { mask: { filename: editInput.mask.filename, mimeType: editInput.mask.mimeType, bytes: editInput.mask.bytes } } : {}),
     }, timing);
     await timing.measure("result_store", () => completeDemoImageTask(task, user.id, resultUrl, editInput));
   } catch (error) {
-    finishDemoTaskFailure(task, error, { status: "failed", failureReason: error instanceof Error ? error.message : "OpenToken image task failed" }, user);
+    finishDemoTaskFailure(task, error, { status: "failed", failureReason: parameters.imageAgentProfile && !(error instanceof PromptOptimizationError)
+      ? "图片助手任务未完成，服务端已隐藏上游内部详情。" : error instanceof Error ? error.message : "OpenToken image task failed" }, user);
   } finally {
     timing.finish(task.status === "success" ? "success" : task.status === "paused" ? "paused" : "failed");
   }

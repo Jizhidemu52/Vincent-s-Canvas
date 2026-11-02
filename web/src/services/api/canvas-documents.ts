@@ -10,14 +10,22 @@ const decodeDocument = (value: EncodedCloudDocument): CloudCanvasDocument => ({ 
 export class CanvasRevisionConflict extends Error {
     constructor(public current: CloudCanvasDocument) { super("画布已在另一处更新"); }
 }
+export class CanvasCloudRequestError extends Error {
+    constructor(message: string, public status = 0) { super(message); }
+    get retryable() { return !this.status || this.status === 408 || this.status === 429 || this.status >= 500; }
+}
 async function request<T>(owner: string, path: string, init?: RequestInit): Promise<T> {
-    const response = await fetch(`/api/canvas-documents${path}`, {
-        ...init, credentials: "include", cache: "no-store", signal: AbortSignal.timeout(20000),
+    let response: Response;
+    try { response = await fetch(`/api/canvas-documents${path}`, {
+        ...init, credentials: "include", cache: "no-store", signal: AbortSignal.timeout(Math.min(120000, 20000 + (typeof init?.body === "string" ? new Blob([init.body]).size / 1024 / 1024 * 5000 : 0))),
         headers: { "content-type": "application/json", "X-Canvas-Owner-Id": owner },
-    });
-    const body = await response.json();
+    }); } catch (error) {
+        throw new CanvasCloudRequestError(error instanceof Error && error.name === "TimeoutError" ? "画布云端同步超时，已保留改动，请检查网络后重试" : "无法连接画布云端，请检查网络后重试");
+    }
+    const body = response.headers.get("content-type")?.includes("json") ? await response.json().catch(() => null) : null;
+    if (!body) throw new CanvasCloudRequestError(`画布云端返回异常响应（${response.status}），请稍后重试`, response.status >= 400 ? response.status : 502);
     if (response.status === 409 && body.error === "CANVAS_REVISION_CONFLICT") throw new CanvasRevisionConflict(decodeDocument(body.document));
-    if (!response.ok) throw new Error(body.message || body.msg || "画布云端同步失败");
+    if (!response.ok) throw new CanvasCloudRequestError(body.message || body.msg || "画布云端同步失败", response.status);
     return body as T;
 }
 export const listCloudCanvases = (owner: string) => request<{ documents: CloudCanvasSummary[] }>(owner, "");

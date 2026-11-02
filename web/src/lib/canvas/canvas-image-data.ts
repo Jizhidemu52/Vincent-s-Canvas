@@ -1,3 +1,5 @@
+import { checkEditedImageBlob, editedCanvasMimeType, sourceImageMimeType } from "./canvas-edited-image-format";
+
 export type ImageCropRect = {
     x: number;
     y: number;
@@ -32,24 +34,26 @@ export type ImageSplitPiece = {
     dataUrl: string;
 };
 
-export type ImageToolOptions = { signal?: AbortSignal; timeoutMs?: number };
+export type ImageToolOptions = { signal?: AbortSignal; timeoutMs?: number; sourceMimeType?: string };
 export type ImageSplitBlobPiece = { row: number; column: number; blob: Blob };
 export const IMAGE_TOOL_TIMEOUT_MS = 15_000;
 
 export async function cropDataUrl(dataUrl: string, crop?: ImageCropRect, options?: ImageToolOptions) {
-    return canvasToDataUrl(await cropCanvas(dataUrl, crop, options));
+    return canvasToDataUrl(await cropCanvas(dataUrl, crop, options), sourceImageMimeType(dataUrl, options?.sourceMimeType));
 }
 
 /** Keep edited pixels binary through persistence instead of PNG → base64 → Blob. */
 export async function cropImageBlob(dataUrl: string, crop?: ImageCropRect, options?: ImageToolOptions) {
-    return canvasToBlob(await cropCanvas(dataUrl, crop, options), options);
+    return canvasToBlob(await cropCanvas(dataUrl, crop, options), { ...options, sourceMimeType: sourceImageMimeType(dataUrl, options?.sourceMimeType) });
 }
 
 async function cropCanvas(dataUrl: string, crop?: ImageCropRect, options?: ImageToolOptions) {
     const image = await loadImage(dataUrl, options);
     options?.signal?.throwIfAborted();
     if (crop) {
-        return drawCropCanvas(image, Math.floor(crop.x * image.width), Math.floor(crop.y * image.height), Math.ceil(crop.width * image.width), Math.ceil(crop.height * image.height));
+        const x = Math.max(0, Math.min(image.width - 1, Math.round(crop.x * image.width)));
+        const y = Math.max(0, Math.min(image.height - 1, Math.round(crop.y * image.height)));
+        return drawCropCanvas(image, x, y, Math.min(image.width - x, Math.round(crop.width * image.width)), Math.min(image.height - y, Math.round(crop.height * image.height)));
     }
     const size = Math.min(image.width, image.height);
     const sx = Math.max(0, Math.floor((image.width - size) / 2));
@@ -60,7 +64,7 @@ async function cropCanvas(dataUrl: string, crop?: ImageCropRect, options?: Image
 export async function splitDataUrl(dataUrl: string, params: ImageSplitParams, options?: ImageToolOptions): Promise<ImageSplitPiece[]> {
     const pieces: ImageSplitPiece[] = [];
     for await (const piece of splitCanvases(dataUrl, params, options)) {
-        pieces.push({ row: piece.row, column: piece.column, dataUrl: canvasToDataUrl(piece.canvas) });
+        pieces.push({ row: piece.row, column: piece.column, dataUrl: canvasToDataUrl(piece.canvas, sourceImageMimeType(dataUrl, options?.sourceMimeType)) });
     }
     return pieces;
 }
@@ -69,7 +73,7 @@ export async function splitImageBlobs(dataUrl: string, params: ImageSplitParams,
     const pieces: ImageSplitBlobPiece[] = [];
     for await (const piece of splitCanvases(dataUrl, params, options)) {
         // Encoding each piece asynchronously yields to input/paint and bounds canvas memory.
-        pieces.push({ row: piece.row, column: piece.column, blob: await canvasToBlob(piece.canvas, options) });
+        pieces.push({ row: piece.row, column: piece.column, blob: await canvasToBlob(piece.canvas, { ...options, sourceMimeType: sourceImageMimeType(dataUrl, options?.sourceMimeType) }) });
     }
     return pieces;
 }
@@ -133,11 +137,11 @@ export async function transformAngleDataUrl(dataUrl: string, params: ImageAngleT
 }
 
 export async function upscaleDataUrl(dataUrl: string, params: ImageUpscaleParams, options?: ImageToolOptions) {
-    return canvasToDataUrl(await upscaleCanvas(dataUrl, params, options));
+    return canvasToDataUrl(await upscaleCanvas(dataUrl, params, options), sourceImageMimeType(dataUrl, options?.sourceMimeType));
 }
 
 export async function upscaleImageBlob(dataUrl: string, params: ImageUpscaleParams, options?: ImageToolOptions) {
-    return canvasToBlob(await upscaleCanvas(dataUrl, params, options), options);
+    return canvasToBlob(await upscaleCanvas(dataUrl, params, options), { ...options, sourceMimeType: sourceImageMimeType(dataUrl, options?.sourceMimeType) });
 }
 
 async function upscaleCanvas(dataUrl: string, params: ImageUpscaleParams, options?: ImageToolOptions) {
@@ -207,9 +211,9 @@ function releaseCanvas(canvas: HTMLCanvasElement) {
     canvas.height = 0;
 }
 
-function canvasToDataUrl(canvas: HTMLCanvasElement) {
+function canvasToDataUrl(canvas: HTMLCanvasElement, sourceMimeType?: string) {
     try {
-        const result = canvas.toDataURL("image/png");
+        const result = canvas.toDataURL(editedCanvasMimeType(canvas, sourceMimeType), .92);
         if (result === "data:,") throw new Error("图片编码失败，请重试");
         return result;
     } finally { releaseCanvas(canvas); }
@@ -225,14 +229,13 @@ function canvasToBlob(canvas: HTMLCanvasElement, options: ImageToolOptions = {})
             options.signal?.removeEventListener("abort", abort);
             releaseCanvas(canvas);
             if (error) reject(error);
-            else if (!blob || !blob.size) reject(new Error("图片编码失败，请重试"));
-            else resolve(blob);
+            else { try { checkEditedImageBlob(blob || null); resolve(blob!); } catch (failure) { reject(failure); } }
         };
         const abort = () => finish(null, options.signal?.reason || new DOMException("图片处理已取消", "AbortError"));
         const timer = setTimeout(() => finish(null, new Error("图片编码超时，请重试")), options.timeoutMs ?? IMAGE_TOOL_TIMEOUT_MS);
         options.signal?.addEventListener("abort", abort, { once: true });
         if (options.signal?.aborted) { abort(); return; }
-        try { canvas.toBlob(blob => finish(blob), "image/png"); }
+        try { canvas.toBlob(blob => finish(blob), editedCanvasMimeType(canvas, options.sourceMimeType), .92); }
         catch (error) { finish(null, error); }
     });
 }

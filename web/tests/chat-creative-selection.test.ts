@@ -101,13 +101,14 @@ function imageActionHarness() {
         { id: "u", role: "user", content: "", attachments: [{ id: "original", name: "原图.png", kind: "image", dataUrl: "data:image/png;base64,AQID" }] },
         { id: "a", role: "assistant", content: "", generatedImages: [{ id: "result", dataUrl: "data:image/png;base64,AgID", storageKey: "image:result", lineage: { parentImageId: "original", sourceImageIds: ["original"], preservedConstraints: [] } }] },
     ]);
-    const memory = { target: null as { id: string; mode: string; sessionId: string } | null, references: [] as string[], attachments: [] as any[], disabled: false, currentScope: true, focus: 0 };
+    const memory = { target: null as { id: string; mode: string; sessionId: string } | null, session: { id: "session" } as any, references: [] as string[], attachments: [] as any[], disabled: false, currentScope: true, focus: 0 };
     const warnings: string[] = [], downloads: unknown[] = [], comparisons: unknown[] = [];
     const code = ts.transpileModule(`const selectImageTarget = ${initializers.get("selectImageTarget")}; const addImageReference = ${initializers.get("addImageReference")}; exports.act = ${initializers.get("imageAction")}; exports.select = selectImageTarget;`, { compilerOptions: { target: ts.ScriptTarget.ESNext } }).outputText;
     const render = () => {
         const bindings = {
             ...i18nHarness, buildCreativeImageCatalog, chatImageOriginal, composerImageCatalog: catalog, imageActionsDisabled: memory.disabled,
-            activeSession: { id: "session" }, isCurrentScope: () => memory.currentScope, attachments: memory.attachments,
+            activeSession: memory.session, isCurrentScope: () => memory.currentScope, attachments: memory.attachments,
+            updateSession: (_id: string, update: (session: any) => any) => { memory.session = update(memory.session); }, setRegionSelection() {},
             selectedImage: catalog.find((item) => item.id === memory.target?.id),
             setImageTarget: (value: typeof memory.target) => { memory.target = value; },
             setReferenceImageIds: (update: (ids: string[]) => string[]) => { memory.references = update(memory.references); },
@@ -127,6 +128,7 @@ test("real image handlers select the result or verified root without executing a
     const page = imageActionHarness();
     page.act("edit", "result");
     expect(page.memory.target).toEqual({ id: "result", mode: "edit", sessionId: "session" });
+    expect(page.memory.session).toMatchObject({ focusImageId: "result", focusLocked: true, newCreation: false, focusRevision: 1 });
     page.act("original", "result");
     expect(page.memory.target).toEqual({ id: "original", mode: "original", sessionId: "session" });
     expect(page.memory.attachments).toEqual([]);

@@ -6,7 +6,7 @@ const moderation = boolean("nsfw_check", "提交前内容检查", "额外调用�
 const fallback = boolean("official_fallback", "允许官方渠道回退", "由渠道决定回退方式，可能增加费用。");
 
 /** Only documented fields for the selected adapter are exposed or submitted. */
-export function imageOptionFields(profile: Profile): ImageOptionField[] {
+function nativeImageOptionFields(profile: Profile): ImageOptionField[] {
     if (profile.kind === "grok-image") return [{ key: "resolution", label: "清晰度 / 分辨率", options: ["1k", "2k"] }, moderation];
     if (profile.kind === "standard" || profile.kind === "quality-resolution") return profile.outputFormats?.length ? [
         ...(profile.kind === "quality-resolution" ? [{ key: "resolution", label: "清晰度 / 分辨率", options: ["1k", "2k", "4k"] }] : []),
@@ -30,6 +30,12 @@ export function imageOptionFields(profile: Profile): ImageOptionField[] {
         { key: "extra", label: "其他原生参数", tip: "如 --xxx，直接追加到渠道提示词；仅使用目标版本支持的参数。" },
         { key: "metadata", label: "任务附加信息 JSON", type: "json" },
     ];
+}
+
+export function imageOptionFields(profile: Profile): ImageOptionField[] {
+    const fields = nativeImageOptionFields(profile);
+    if (["midjourney", "midjourney-blend"].includes(profile.kind)) return fields;
+    return [...fields, { key: "negative_prompt", label: "排除内容", tip: "此模型没有原生排除参数；由服务端作为自然语言要求加入实际发送的提示词，不保证逐项排除。原提示词保持不变。" }];
 }
 
 export function readImageOptions(value?: string): Record<string, string> {

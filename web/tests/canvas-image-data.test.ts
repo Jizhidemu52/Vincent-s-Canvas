@@ -71,14 +71,14 @@ const unpackBlob = async (blob: Blob) => JSON.parse(await blob.text());
 const allReleased = () => expect(canvases.every(canvas => canvas.width === 0 && canvas.height === 0)).toBe(true);
 
 describe("image binary output contracts", () => {
-    test("crop Blob preserves old exact rectangle rounding without base64 encoding", async () => {
+    test("crop Blob matches the pixel-rounded rectangle shown by the precise crop controls without base64 encoding", async () => {
         const crop = { x: .12, y: .07, width: .67, height: .83 };
         const blob = await cropImageBlob("blob:original", crop);
         expect(dataUrlCalls).toBe(0);
         expect(blob.type).toBe("image/png");
         const actual = await unpackBlob(blob);
         expect(actual).toEqual(unpackDataUrl(await cropDataUrl("blob:original", crop)));
-        expect(actual).toMatchObject({ width: Math.ceil(4033 * .67), height: Math.ceil(2161 * .83), draw: [Math.floor(4033 * .12), Math.floor(2161 * .07), Math.ceil(4033 * .67), Math.ceil(2161 * .83), 0, 0, Math.ceil(4033 * .67), Math.ceil(2161 * .83)] });
+        expect(actual).toMatchObject({ width: Math.round(4033 * .67), height: Math.round(2161 * .83), draw: [Math.round(4033 * .12), Math.round(2161 * .07), Math.round(4033 * .67), Math.round(2161 * .83), 0, 0, Math.round(4033 * .67), Math.round(2161 * .83)] });
         allReleased();
     });
     test("center crop keeps its original square geometry", async () => {

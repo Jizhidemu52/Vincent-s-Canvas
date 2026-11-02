@@ -1,23 +1,27 @@
 import { expect, test } from "bun:test";
 
-import { canvasConnectionViewportBounds, createCanvasConnectionDrawBatches, createCanvasConnectionDrawCache, drawCanvasConnectionBatches, drawCanvasConnections, filterCanvasConnectionDrawBatches } from "@/lib/canvas/canvas-connection-layer";
+import { canvasConnectionPalette, canvasConnectionStyle, canvasConnectionViewportBounds, createCanvasConnectionDrawBatches, createCanvasConnectionDrawCache, drawCanvasConnectionBatches, drawCanvasConnections, filterCanvasConnectionDrawBatches } from "@/lib/canvas/canvas-connection-layer";
 import type { CanvasConnectionGeometry } from "@/lib/canvas/canvas-connection-geometry";
 import { shouldRedrawCanvasConnectionLayer } from "@/lib/canvas/canvas-dynamic-connection-layer";
+import { canvasThemes } from "@/lib/canvas-theme";
+
+const arrowContext = { setLineDash() {}, lineTo() {}, closePath() {}, fill() {} };
 
 const geometry: CanvasConnectionGeometry = {
     d: "M 10 20 C 40 20, 70 80, 100 80",
-    points: {
+    segments: [{
         start: { x: 10, y: 20 },
         controlOne: { x: 40, y: 20 },
         controlTwo: { x: 70, y: 80 },
         end: { x: 100, y: 80 },
-    },
+    }],
     bounds: { minX: 10, minY: 20, maxX: 100, maxY: 80 },
 };
 
 test("draws visible connections with separate normal and active styles", () => {
     const calls: string[] = [];
     const context = {
+        ...arrowContext,
         beginPath: () => calls.push("begin"),
         moveTo: (x: number, y: number) => calls.push(`move:${x},${y}`),
         bezierCurveTo: (...points: number[]) => calls.push(`curve:${points.join(",")}`),
@@ -45,9 +49,13 @@ test("draws visible connections with separate normal and active styles", () => {
         "curve:40,20,70,80,100,80",
         "stroke",
         "begin",
+        "move:100,80",
+        "begin",
         "move:10,20",
         "curve:40,20,70,80,100,80",
         "stroke",
+        "begin",
+        "move:100,80",
     ]);
     expect(context.strokeStyle).toBe("#2dd4bf");
     expect(context.lineWidth).toBe(3);
@@ -63,9 +71,19 @@ test("signals a draw failure so the SVG fallback can be enabled", () => {
     expect(drawCanvasConnections(context, [{ geometry, active: false }], { stroke: "#94a3b8", activeStroke: "#2dd4bf" })).toBe(false);
 });
 
+test("stroke widths stay legible in screen pixels at different zoom levels", () => {
+    const widths: number[] = [];
+    const context = { ...arrowContext, beginPath() {}, moveTo() {}, bezierCurveTo() {}, stroke() { widths.push(this.lineWidth); }, lineWidth: 0 } as unknown as CanvasRenderingContext2D;
+    for (const scale of [0.25, 0.5, 2]) {
+        drawCanvasConnectionBatches(context, { regular: [{ geometry, active: false }], active: [{ geometry, active: true }] }, { stroke: "gray", activeStroke: "green" }, undefined, scale);
+    }
+    expect(widths).toEqual([4, 12, 4, 6, 1, 1.5]);
+});
+
 test("batches regular connections into one canvas stroke", () => {
     const calls: string[] = [];
     const context = {
+        ...arrowContext,
         beginPath: () => calls.push("begin"),
         moveTo: () => calls.push("move"),
         bezierCurveTo: () => calls.push("curve"),
@@ -78,12 +96,13 @@ test("batches regular connections into one canvas stroke", () => {
     } as unknown as CanvasRenderingContext2D;
 
     expect(drawCanvasConnections(context, [{ geometry, active: false }, { geometry, active: false }, { geometry, active: true }], { stroke: "#94a3b8", activeStroke: "#2dd4bf" })).toBe(true);
-    expect(calls).toEqual(["begin", "move", "curve", "move", "curve", "stroke", "begin", "move", "curve", "stroke"]);
+    expect(calls).toEqual(["begin", "move", "curve", "move", "curve", "stroke", "begin", "move", "move", "begin", "move", "curve", "stroke", "begin", "move"]);
 });
 
 test("skips offscreen connection paths while preserving curves that cross the viewport", () => {
     const calls: string[] = [];
     const context = {
+        ...arrowContext,
         beginPath: () => calls.push("begin"),
         moveTo: (x: number) => calls.push(`move:${x}`),
         bezierCurveTo: () => calls.push("curve"),
@@ -108,7 +127,7 @@ test("skips offscreen connection paths while preserving curves that cross the vi
             canvasConnectionViewportBounds({ x: 0, y: 0, k: 1 }, { width: 400, height: 300 }),
         ),
     ).toBe(true);
-    expect(calls).toEqual(["begin", "move:10", "curve", "stroke"]);
+    expect(calls).toEqual(["begin", "move:10", "curve", "stroke", "begin", "move:100"]);
 });
 
 test("precomputes normal and active batches before a viewport redraw", () => {
@@ -217,4 +236,44 @@ test("full refresh recovers missing endpoints and removes stale endpoint paths",
     expect(cache.sync(connections, new Set(["a"]), new Set(), true).active[0].id).toBe("a");
     currentGeometry = undefined;
     expect(cache.sync(connections, new Set(["a"]), new Set(), true).active).toEqual([]);
+});
+
+test("all connection kinds share themed styles across Canvas and SVG, including active dash patterns", () => {
+    for (const theme of Object.values(canvasThemes)) {
+        const palette = canvasConnectionPalette(theme);
+        const kinds = [undefined, "config-target", "generation-output", "config-sequence", "sequence-input"] as const;
+        const styles = kinds.map(kind => canvasConnectionStyle(kind, false, palette));
+        expect(new Set(styles.map(style => `${style.stroke}:${style.dash.join(",")}`)).size).toBe(kinds.length);
+        for (const kind of kinds) {
+            expect(canvasConnectionStyle(kind, true, palette).stroke).toBe(theme.node.activeStroke);
+            expect(canvasConnectionStyle(kind, true, palette).dash).toEqual(canvasConnectionStyle(kind, false, palette).dash);
+        }
+    }
+});
+
+test("draws one themed stroke and solid arrow batch per connection kind at fixed screen dimensions", () => {
+    const strokes: Array<{ color: string; dash: number[] }> = [];
+    const fills: string[] = [];
+    const arrowPoints: number[][] = [];
+    let dash: number[] = [];
+    const context = { ...arrowContext, beginPath() {}, moveTo() {}, bezierCurveTo() {},
+        setLineDash(value: number[]) { dash = value; }, lineTo(x: number, y: number) { arrowPoints.push([x, y]); },
+        stroke() { strokes.push({ color: this.strokeStyle, dash }); }, fill() { fills.push(this.fillStyle); }, strokeStyle: "", fillStyle: "",
+    } as unknown as CanvasRenderingContext2D;
+    const items = ["config-target", "config-target", "generation-output"] as const;
+    expect(drawCanvasConnectionBatches(context, createCanvasConnectionDrawBatches(items.map(kind => ({ kind, geometry, active: false }))), canvasConnectionPalette(canvasThemes.light), undefined, 0.5)).toBe(true);
+    expect(strokes).toEqual([{ color: canvasThemes.light.toolbar.highResolution, dash: [16, 10] }, { color: canvasThemes.light.canvas.selectionStroke, dash: [] }]);
+    expect(fills).toEqual(strokes.map(stroke => stroke.color));
+    expect(arrowPoints[0]).toEqual([84, 72]);
+    expect(arrowPoints[1]).toEqual([84, 88]);
+    expect(dash).toEqual([]);
+});
+
+test("kind changes invalidate cached batches even when the path geometry is unchanged", () => {
+    const edge = { id: "edge", fromNodeId: "from", toNodeId: "to", kind: "config-target" as const };
+    const cache = createCanvasConnectionDrawCache(() => geometry);
+    const initial = cache.sync([edge], new Set(), new Set(), false);
+    const updated = cache.sync([{ ...edge, kind: "generation-output" }], new Set(), new Set(), false);
+    expect(updated).not.toBe(initial);
+    expect(updated.regular[0].kind).toBe("generation-output");
 });

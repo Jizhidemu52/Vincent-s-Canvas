@@ -1,0 +1,958 @@
+{
+  "schema": 1,
+  "description": "本地回归语料：20组4–6轮及额外1组15轮；每个image轮只要求一张。语料本身不代表已执行或已通过。",
+  "conventions": {
+    "isolatedCases": "每组必须新建独立会话和测试画布，不能继承上一组的图号、焦点或作品笔记。",
+    "numbering": "每次上传和每张成功生成的结果依出现顺序分配图N；讨论轮不产生图号。任一预期图像轮未成功时应停止该组，不能继续假定后续图号。",
+    "expectBase": "仅记录并断言实际底图，不为让用例通过而自动改选；none表示新创作无底图。省略focus的轮次专门验证模型或自动焦点。",
+    "references": "只列本轮明确需要的额外参考图，不包括底图；未指定的旧参考不应因视口可见就自动加入。",
+    "verification": "API成功、底图正确、参考顺序、笔记继承和最终视觉合规是不同验收项；不能仅凭任务成功宣称视觉一致。局部文字修改不承诺像素级不变。",
+    "paidExecution": "此文件不自动运行。真实付费执行及预算控制由主任务的独立runner负责；失败回执先查询原任务，不自动重发。",
+    "fixtureInputs": "版本内只包含测试语料和素材元信息，不包含本机路径或生产数据。实际运行器显式配置IMAGE_AGENT_FIXTURE_DIR后解析uploads；不得把缺少素材的用例标为通过。"
+  },
+  "cases": [
+    {
+      "id": "01-cardigan-color-chain",
+      "title": "单图连续改色与保留项继承",
+      "turns": [
+        {
+          "text": "把这件米色麻花开衫改成浅蓝色。只改纱线颜色，圆领、六颗纽扣、麻花排列、衣长和背景都保持原样，只出一张。",
+          "uploads": [
+            "cable-cardigan.jpg"
+          ],
+          "expectBase": "图1",
+          "call": "image"
+        },
+        {
+          "text": "颜色再深一点，调成柔和的雾霾蓝，其他要求沿用。",
+          "expectBase": "图2",
+          "call": "image"
+        },
+        {
+          "text": "先别生成。用一句话说说现在保留了哪些不能改变的地方。",
+          "call": "discussion"
+        },
+        {
+          "text": "就按当前这版，只把纽扣改成与衣身接近的蓝色。",
+          "expectBase": "图3",
+          "call": "image"
+        },
+        {
+          "text": "最后把背景换成纯白，衣服颜色和刚改的纽扣不要变化。",
+          "expectBase": "图4",
+          "call": "image"
+        }
+      ],
+      "expected": {
+        "checks": [
+          "每次图像调用只有一张结果",
+          "讨论轮不得提交图像任务",
+          "底图依次为图1、图2、图3、图4",
+          "保留项在省略重述时仍生效"
+        ]
+      }
+    },
+    {
+      "id": "02-beanie-detail-chain",
+      "title": "针织帽局部细节逐轮修改",
+      "turns": [
+        {
+          "text": "把这顶蓝色罗纹针织帽改成燕麦米色，帽型、翻边高度、罗纹粗细和拍摄角度都不变。只做一张。",
+          "uploads": [
+            "rib-beanie.jpg"
+          ],
+          "expectBase": "图1",
+          "call": "image"
+        },
+        {
+          "text": "在当前帽子的翻边正中加一枚很小的棕色方形皮标，皮标上不要文字。",
+          "expectBase": "图2",
+          "call": "image"
+        },
+        {
+          "text": "皮标缩小一点，其他都保留。",
+          "expectBase": "图3",
+          "call": "image"
+        },
+        {
+          "text": "先不要再改图，帮我确认现在是米色帽子加无字棕色小皮标，对吗？",
+          "call": "discussion"
+        },
+        {
+          "text": "保持当前米色和皮标，把投影减淡一点，白色背景不变。",
+          "expectBase": "图4",
+          "call": "image"
+        }
+      ],
+      "expected": {
+        "checks": [
+          "细节修改基于最新结果",
+          "不能重新变回蓝色原图",
+          "不能在无生成意图的确认轮出图"
+        ]
+      }
+    },
+    {
+      "id": "03-dress-pattern-chain",
+      "title": "连衣裙花型比例与底色独立控制",
+      "turns": [
+        {
+          "text": "把这条碎花连衣裙的米白底色改成很浅的淡黄色。原有花朵种类、位置、数量以及裙子版型保持不变，先只出一张。",
+          "uploads": [
+            "floral-dress.jpg"
+          ],
+          "expectBase": "图1",
+          "call": "image"
+        },
+        {
+          "text": "再把所有粉色花朵改成淡紫色，绿叶和淡黄底色不变。",
+          "expectBase": "图2",
+          "call": "image"
+        },
+        {
+          "text": "当前花型整体缩小约百分之十五，保持均匀散点分布，裙子的轮廓和袖长不变。",
+          "expectBase": "图3",
+          "call": "image"
+        },
+        {
+          "text": "先只回答：目前改的是底色、粉花颜色和花型大小，没有改版型，对吗？",
+          "call": "discussion"
+        },
+        {
+          "text": "现在把淡黄底色恢复为米白色，但保留这版淡紫色小花，不要回到最初那张。",
+          "expectBase": "图4",
+          "call": "image"
+        },
+        {
+          "text": "当前这一版的花朵颜色整体再淡一点，绿叶不要变化。",
+          "expectBase": "图5",
+          "call": "image"
+        }
+      ],
+      "expected": {
+        "checks": [
+          "恢复一个属性不等于回原图",
+          "文字历史与版本信息不能丢失",
+          "每轮仅有一个图像任务"
+        ]
+      }
+    },
+    {
+      "id": "04-natural-original-reset",
+      "title": "自然语言回到原图而非最新版",
+      "turns": [
+        {
+          "text": "把这件开衫改成酒红色，保持原有圆领、纽扣、麻花和版型。",
+          "uploads": [
+            "cable-cardigan.jpg"
+          ],
+          "expectBase": "图1",
+          "call": "image"
+        },
+        {
+          "text": "在当前酒红色开衫上，把纽扣改成金色。",
+          "expectBase": "图2",
+          "call": "image"
+        },
+        {
+          "text": "不要以金色纽扣那张为底图。回到最初上传的原图，只改成浅绿色，原来的纽扣也保留。",
+          "expectBase": "图1",
+          "call": "image"
+        },
+        {
+          "text": "先不生成，告诉我刚才浅绿色版本的修改底图是哪一张。",
+          "call": "discussion"
+        },
+        {
+          "text": "在当前浅绿色版本上，把背景改成很浅的暖灰色。",
+          "expectBase": "图4",
+          "call": "image"
+        }
+      ],
+      "expected": {
+        "checks": [
+          "自然语言原图请求解析为图1",
+          "回原图分支不得继承金色纽扣",
+          "完成后自动聚焦新分支结果"
+        ]
+      }
+    },
+    {
+      "id": "05-ui-previous-branch",
+      "title": "上一版控件形成正确分支",
+      "turns": [
+        {
+          "text": "把针织帽改成浅灰色，帽型、罗纹和翻边不变。",
+          "uploads": [
+            "rib-beanie.jpg"
+          ],
+          "expectBase": "图1",
+          "call": "image"
+        },
+        {
+          "text": "在当前浅灰帽子的翻边上加一条细黑色横线。",
+          "expectBase": "图2",
+          "call": "image"
+        },
+        {
+          "text": "以我选择的上一版为底图，只改成奶油白，不要加黑线。",
+          "focus": "previous",
+          "expectBase": "图2",
+          "call": "image"
+        },
+        {
+          "text": "这一版的白色再暖一点，依然不要黑线。",
+          "expectBase": "图4",
+          "call": "image"
+        }
+      ],
+      "expected": {
+        "checks": [
+          "上一版控件选择图2",
+          "图4父图为图2而不是图3",
+          "后续继续图4分支"
+        ]
+      }
+    },
+    {
+      "id": "06-two-image-color-reference",
+      "title": "双图明确底图与配色参考",
+      "turns": [
+        {
+          "text": "图1是要修改的开衫，图2只参考蓝色。把图1开衫改成接近图2帽子的蓝色，不要把帽子形状或罗纹复制到衣服上，开衫结构保持不变。",
+          "uploads": [
+            "cable-cardigan.jpg",
+            "rib-beanie.jpg"
+          ],
+          "focus": "图1",
+          "references": [
+            "图2"
+          ],
+          "expectBase": "图1",
+          "call": "image"
+        },
+        {
+          "text": "在刚生成的开衫基础上，把蓝色稍微调浅一点。",
+          "expectBase": "图3",
+          "call": "image"
+        },
+        {
+          "text": "回到图1原开衫重新做一版，这次只把纽扣改成图2的蓝色，衣身保留原本米色。",
+          "references": [
+            "图2"
+          ],
+          "expectBase": "图1",
+          "call": "image"
+        },
+        {
+          "text": "先不出图，解释这一版和前一版哪个地方不同。",
+          "call": "discussion"
+        },
+        {
+          "text": "沿用当前米色衣身蓝纽扣的版本，把背景换成纯白。",
+          "expectBase": "图5",
+          "call": "image"
+        }
+      ],
+      "expected": {
+        "checks": [
+          "输入顺序必须底图在前参考在后",
+          "参考图不成为底图",
+          "第二分支不得遗留蓝色衣身"
+        ]
+      }
+    },
+    {
+      "id": "07-three-image-role-separation",
+      "title": "三图分工与跨品类参考隔离",
+      "turns": [
+        {
+          "text": "图1开衫是主体；图2帽子只提供蓝色；图3连衣裙只提供小花元素。把图1开衫改成图2的蓝色，在左胸增加一朵参考图3风格的小花刺绣，开衫结构不变，出一张。",
+          "uploads": [
+            "cable-cardigan.jpg",
+            "rib-beanie.jpg",
+            "floral-dress.jpg"
+          ],
+          "focus": "图1",
+          "references": [
+            "图2",
+            "图3"
+          ],
+          "expectBase": "图1",
+          "call": "image"
+        },
+        {
+          "text": "当前左胸小花缩小一半，颜色与其他部分都保持。",
+          "expectBase": "图4",
+          "call": "image"
+        },
+        {
+          "text": "现在只讨论：三张参考分别负责什么？不要提交生成。",
+          "call": "discussion"
+        },
+        {
+          "text": "把当前开衫上的小花换成淡粉色，花的位置和大小不变。",
+          "expectBase": "图5",
+          "call": "image"
+        },
+        {
+          "text": "保持当前开衫和刺绣，把背景调整为浅暖灰。",
+          "expectBase": "图6",
+          "call": "image"
+        }
+      ],
+      "expected": {
+        "checks": [
+          "三图语义角色明确",
+          "不能把连衣裙或帽子结构合入开衫",
+          "缩小与变色逐轮累积"
+        ]
+      }
+    },
+    {
+      "id": "08-cross-work-switch",
+      "title": "同会话两件作品来回切换",
+      "turns": [
+        {
+          "text": "先做这件开衫，只把它改成浅蓝色，保持其余细节。",
+          "uploads": [
+            "cable-cardigan.jpg"
+          ],
+          "expectBase": "图1",
+          "call": "image"
+        },
+        {
+          "text": "在这版浅蓝开衫上把纽扣改成深蓝色。",
+          "expectBase": "图2",
+          "call": "image"
+        },
+        {
+          "text": "现在换做新上传的针织帽，把帽子改成橙色，帽型和罗纹不要变化。这是另一件作品。",
+          "uploads": [
+            "rib-beanie.jpg"
+          ],
+          "focus": "图4",
+          "expectBase": "图4",
+          "call": "image"
+        },
+        {
+          "text": "当前橙色帽子的翻边加一枚无字黑色小布标。",
+          "expectBase": "图5",
+          "call": "image"
+        },
+        {
+          "text": "现在只改我选中的浅蓝开衫，把背景改成纯白，不要改帽子，也不要加入帽子的布标。",
+          "focus": "图2",
+          "expectBase": "图2",
+          "call": "image"
+        },
+        {
+          "text": "回到选中的橙色帽子，把帽身颜色调浅一点，其他保持。",
+          "focus": "图5",
+          "expectBase": "图5",
+          "call": "image"
+        }
+      ],
+      "expected": {
+        "checks": [
+          "开衫与帽子各自保留作品链",
+          "切回旧版不误继承另一作品保留项",
+          "底图链图1-2-3、图4-5-6、图2-7、图5-8"
+        ]
+      }
+    },
+    {
+      "id": "09-new-creation-clears-work",
+      "title": "新创作明确解除旧图与保留项",
+      "turns": [
+        {
+          "text": "把这件开衫改成淡紫色，保持纽扣、圆领和麻花不变。",
+          "uploads": [
+            "cable-cardigan.jpg"
+          ],
+          "expectBase": "图1",
+          "call": "image"
+        },
+        {
+          "text": "先别生成，请记住当前作品是淡紫色麻花开衫。",
+          "call": "discussion"
+        },
+        {
+          "text": "开始全新作品：生成一张纯白背景的暖黄色无图案帆布托特包商品图，不使用之前的开衫或它的任何结构。只做一张。",
+          "focus": "new",
+          "expectBase": "none",
+          "call": "image"
+        },
+        {
+          "text": "把当前托特包的提手加长一点，包身颜色、白背景和无图案要求保持。",
+          "expectBase": "图3",
+          "call": "image"
+        }
+      ],
+      "expected": {
+        "checks": [
+          "新创作无底图且无历史参考",
+          "新作品不继承开衫纽扣和麻花约束",
+          "后续基于托特包结果"
+        ]
+      }
+    },
+    {
+      "id": "10-constraint-replacement",
+      "title": "用户新要求替换旧保留项",
+      "turns": [
+        {
+          "text": "把开衫改成浅粉色，先保留原来的圆领、纽扣和衣长。",
+          "uploads": [
+            "cable-cardigan.jpg"
+          ],
+          "expectBase": "图1",
+          "call": "image"
+        },
+        {
+          "text": "现在明确允许修改领口，把圆领改成小V领；浅粉色、纽扣和衣长依然保持。",
+          "expectBase": "图2",
+          "call": "image"
+        },
+        {
+          "text": "先不做图，说明哪条旧的保留要求已经被我取消。",
+          "call": "discussion"
+        },
+        {
+          "text": "继续用当前小V领版本，只把衣身颜色改成奶油白。",
+          "expectBase": "图3",
+          "call": "image"
+        },
+        {
+          "text": "现在允许把衣长缩短一点，但小V领、奶油白和原有纽扣都保留。",
+          "expectBase": "图4",
+          "call": "image"
+        }
+      ],
+      "expected": {
+        "checks": [
+          "圆领不变约束被新V领要求覆盖",
+          "取消一个保留项不能清空其他保留项",
+          "后续版本不能恢复圆领"
+        ]
+      }
+    },
+    {
+      "id": "11-discussion-does-not-generate",
+      "title": "讨论与执行的意图区分",
+      "turns": [
+        {
+          "text": "我想讨论针织帽配色。先别出图，奶油白和浅灰哪个更适合做基础款？",
+          "call": "discussion"
+        },
+        {
+          "text": "现在执行：把这顶蓝色帽子改成奶油白，帽型和罗纹保持不变，只做一张。",
+          "uploads": [
+            "rib-beanie.jpg"
+          ],
+          "expectBase": "图1",
+          "call": "image"
+        },
+        {
+          "text": "看当前这张，只讨论它还能改哪里。不要调用生图，也不要帮我先做方案图。",
+          "call": "discussion"
+        },
+        {
+          "text": "执行其中一个具体修改：只把翻边高度稍微降低，奶油白和其他结构保持。",
+          "expectBase": "图2",
+          "call": "image"
+        }
+      ],
+      "expected": {
+        "checks": [
+          "第1和第3轮图像任务数为零",
+          "明确执行轮各提交一个图像任务",
+          "讨论不改变当前底图"
+        ]
+      }
+    },
+    {
+      "id": "12-short-followup-retains-constraints",
+      "title": "短指令依赖当前作品记忆",
+      "turns": [
+        {
+          "text": "把这条连衣裙的背景改成浅灰，衣服本身所有细节都不要改：花型、颜色、版型、长度和袖子必须保持。",
+          "uploads": [
+            "floral-dress.jpg"
+          ],
+          "expectBase": "图1",
+          "call": "image"
+        },
+        {
+          "text": "背景再亮一点。",
+          "expectBase": "图2",
+          "call": "image"
+        },
+        {
+          "text": "再暖一点。",
+          "expectBase": "图3",
+          "call": "image"
+        },
+        {
+          "text": "先暂停修改，复述现在允许修改与必须保持的部分。",
+          "call": "discussion"
+        },
+        {
+          "text": "就这版，背景稍微均匀一点。",
+          "expectBase": "图4",
+          "call": "image"
+        }
+      ],
+      "expected": {
+        "checks": [
+          "短句指向当前背景修改任务",
+          "衣服保留项跨轮继承",
+          "不能把再暖一点解释成改变裙子花色"
+        ]
+      }
+    },
+    {
+      "id": "13-explicit-old-label",
+      "title": "指定历史图号不能被最新版覆盖",
+      "turns": [
+        {
+          "text": "把针织帽改成浅绿色，帽型和翻边不变。",
+          "uploads": [
+            "rib-beanie.jpg"
+          ],
+          "expectBase": "图1",
+          "call": "image"
+        },
+        {
+          "text": "当前帽子增加一枚无字白色方形布标。",
+          "expectBase": "图2",
+          "call": "image"
+        },
+        {
+          "text": "明确使用图2作为底图，不用图3。把图2的浅绿改成浅粉，不要加布标。",
+          "expectBase": "图2",
+          "call": "image"
+        },
+        {
+          "text": "现在这顶无布标浅粉帽子的投影减淡，其他保持。",
+          "expectBase": "图4",
+          "call": "image"
+        }
+      ],
+      "expected": {
+        "checks": [
+          "模型按自然语言选图2",
+          "不强制点选来掩盖模型选错底图",
+          "图4不得带有图3布标"
+        ]
+      }
+    },
+    {
+      "id": "14-consent-without-execution",
+      "title": "肯定答复不等于额外出图",
+      "turns": [
+        {
+          "text": "把开衫改成柔和的灰绿色，只改颜色，不改结构。",
+          "uploads": [
+            "cable-cardigan.jpg"
+          ],
+          "expectBase": "图1",
+          "call": "image"
+        },
+        {
+          "text": "这张先留着。接下来只给我两条可以修改的建议，不要生成。",
+          "call": "discussion"
+        },
+        {
+          "text": "好的，我知道了。先不要执行任何修改。",
+          "call": "discussion"
+        },
+        {
+          "text": "现在只执行一项：把当前灰绿色开衫的纽扣改成米白色。",
+          "expectBase": "图2",
+          "call": "image"
+        },
+        {
+          "text": "收到，这组到此为止，不要再出图。",
+          "call": "discussion"
+        }
+      ],
+      "expected": {
+        "checks": [
+          "建议、肯定与停止轮没有图像调用",
+          "只执行明确指定的单项修改",
+          "不能为了展示建议自动出变体"
+        ]
+      }
+    },
+    {
+      "id": "15-negative-constraint-edit",
+      "title": "增加后取消元素不污染后续",
+      "turns": [
+        {
+          "text": "把针织帽改成米白色，保持原帽型和罗纹。",
+          "uploads": [
+            "rib-beanie.jpg"
+          ],
+          "expectBase": "图1",
+          "call": "image"
+        },
+        {
+          "text": "在当前帽子翻边中央加一枚小圆形金属标，不要文字。",
+          "expectBase": "图2",
+          "call": "image"
+        },
+        {
+          "text": "取消金属标，把它完全去掉，帽子仍保留米白色。以后也不要再加标。",
+          "expectBase": "图3",
+          "call": "image"
+        },
+        {
+          "text": "先不生成。请确认现在的保留要求里不再有金属标。",
+          "call": "discussion"
+        },
+        {
+          "text": "把当前无标帽子改成淡灰色，保持它没有任何标识。",
+          "expectBase": "图4",
+          "call": "image"
+        }
+      ],
+      "expected": {
+        "checks": [
+          "显式移除覆盖先前添加元素",
+          "后续不能因记忆残留恢复标识",
+          "不能回到原蓝色帽子"
+        ]
+      }
+    },
+    {
+      "id": "16-localized-text-edit",
+      "title": "文字描述局部编辑范围不扩大",
+      "turns": [
+        {
+          "text": "只把这件开衫最上面的一颗纽扣改成深棕色，其余五颗纽扣、米色纱线和全部版型细节不变。",
+          "uploads": [
+            "cable-cardigan.jpg"
+          ],
+          "expectBase": "图1",
+          "call": "image"
+        },
+        {
+          "text": "把刚才那颗深棕色纽扣再调浅一点，其他纽扣仍不要动。",
+          "expectBase": "图2",
+          "call": "image"
+        },
+        {
+          "text": "先不生成。你这次修改的是所有纽扣还是最上面一颗？",
+          "call": "discussion"
+        },
+        {
+          "text": "继续仅修改最上面一颗纽扣，让它接近浅木色。",
+          "expectBase": "图3",
+          "call": "image"
+        },
+        {
+          "text": "保持所有纽扣和衣服不动，只减淡整张图的背景阴影。",
+          "expectBase": "图4",
+          "call": "image"
+        }
+      ],
+      "expected": {
+        "checks": [
+          "限制对象始终是一颗指定纽扣",
+          "仅文字局部要求不能冒充像素级蒙版保证",
+          "背景修改不扩大为衣服结构重做"
+        ]
+      }
+    },
+    {
+      "id": "17-background-only",
+      "title": "背景独立修改不重绘主体设计",
+      "turns": [
+        {
+          "text": "保留这顶蓝色罗纹帽子的主体原样，只把纯白背景改成浅米色，帽型、蓝色、罗纹和翻边都不能改。",
+          "uploads": [
+            "rib-beanie.jpg"
+          ],
+          "expectBase": "图1",
+          "call": "image"
+        },
+        {
+          "text": "背景再改成非常浅的灰色，帽子保持当前的蓝色。",
+          "expectBase": "图2",
+          "call": "image"
+        },
+        {
+          "text": "暂停出图。确认现在帽子本身还应保留原版哪些特征。",
+          "call": "discussion"
+        },
+        {
+          "text": "背景回到纯白，但保持当前帽子主体和拍摄角度，不要另生成一个帽型。",
+          "expectBase": "图3",
+          "call": "image"
+        }
+      ],
+      "expected": {
+        "checks": [
+          "恢复白背景不是恢复到其他作品",
+          "所有生成沿当前帽子链",
+          "不声称模型编辑具备未验证的像素一致性"
+        ]
+      }
+    },
+    {
+      "id": "18-upload-reference-not-new-base",
+      "title": "中途上传参考时锁定当前底图",
+      "turns": [
+        {
+          "text": "把这件开衫改成浅灰色，保持原来的纽扣、麻花和版型。",
+          "uploads": [
+            "cable-cardigan.jpg"
+          ],
+          "expectBase": "图1",
+          "call": "image"
+        },
+        {
+          "text": "当前开衫只把纽扣改成深灰色。",
+          "expectBase": "图2",
+          "call": "image"
+        },
+        {
+          "text": "新上传的帽子只作为蓝色参考，继续修改我选中的图3开衫，把衣身调成这个蓝色。不要编辑帽子，深灰纽扣和开衫结构不变。",
+          "uploads": [
+            "rib-beanie.jpg"
+          ],
+          "focus": "图3",
+          "references": [
+            "图4"
+          ],
+          "expectBase": "图3",
+          "call": "image"
+        },
+        {
+          "text": "先别生成，刚才新增的图4是参考还是底图？",
+          "call": "discussion"
+        },
+        {
+          "text": "当前蓝色开衫的颜色稍浅一点，纽扣保持深灰。",
+          "expectBase": "图5",
+          "call": "image"
+        }
+      ],
+      "expected": {
+        "checks": [
+          "新增上传不能抢走显式锁定底图",
+          "图4仅做参考",
+          "后续仍编辑开衫"
+        ]
+      }
+    },
+    {
+      "id": "19-material-description",
+      "title": "材质描述与产品身份保持",
+      "turns": [
+        {
+          "text": "把这顶蓝色帽子改成暖灰色，并让纱线看起来稍微柔软蓬松一些。帽型、罗纹方向和翻边高度必须保持，不要新增毛球或标识。",
+          "uploads": [
+            "rib-beanie.jpg"
+          ],
+          "expectBase": "图1",
+          "call": "image"
+        },
+        {
+          "text": "蓬松感收敛一点，依然看得清楚罗纹，不要变成毛茸茸的皮草。",
+          "expectBase": "图2",
+          "call": "image"
+        },
+        {
+          "text": "先只解释一下：柔软纱线质感和完全覆盖罗纹的长毛效果有什么区别？不要出图。",
+          "call": "discussion"
+        },
+        {
+          "text": "保持当前罗纹清晰的质感，只把暖灰色改成奶油白。",
+          "expectBase": "图3",
+          "call": "image"
+        },
+        {
+          "text": "当前这版的投影再轻一点，无毛球、无标识的要求继续保留。",
+          "expectBase": "图4",
+          "call": "image"
+        }
+      ],
+      "expected": {
+        "checks": [
+          "材质迭代不改变产品品类",
+          "负面保留项跨轮存在",
+          "讨论轮无图像请求"
+        ]
+      }
+    },
+    {
+      "id": "20-single-output-and-reference-removal",
+      "title": "单结果约束及停止使用旧参考",
+      "turns": [
+        {
+          "text": "图1连衣裙是主体，图2帽子只参考蓝色。仅把图1裙子的底色改成接近图2的深蓝，保留全部花卉和版型。只要一张，不要多方案。",
+          "uploads": [
+            "floral-dress.jpg",
+            "rib-beanie.jpg"
+          ],
+          "focus": "图1",
+          "references": [
+            "图2"
+          ],
+          "expectBase": "图1",
+          "call": "image"
+        },
+        {
+          "text": "继续用当前裙子，把深蓝底色调浅一点，花朵与版型不要变化，仍只做一张。",
+          "expectBase": "图3",
+          "call": "image"
+        },
+        {
+          "text": "这一轮不出图。后面不用帽子的蓝色参考了，以当前裙子的颜色为准。",
+          "call": "discussion"
+        },
+        {
+          "text": "以当前裙子为底图，把花朵里的粉色统一改成淡橙色，不再引用帽子。",
+          "expectBase": "图4",
+          "call": "image"
+        },
+        {
+          "text": "只减淡当前裙子在白背景上的投影，颜色、花型和版型全部保留。",
+          "expectBase": "图5",
+          "call": "image"
+        }
+      ],
+      "expected": {
+        "checks": [
+          "每个执行轮只提交一张",
+          "停止参考后不能继续把帽子作为输入",
+          "当前图与历史参考区分清楚"
+        ]
+      }
+    },
+    {
+      "id": "21-long-15-turns",
+      "title": "15轮长对话压缩后仍保留图号和作品链",
+      "turns": [
+        {
+          "text": "这件开衫作为作品A。先只把衣身改成浅蓝色，圆领、六颗纽扣、麻花排列和衣长保持原样。",
+          "uploads": [
+            "cable-cardigan.jpg"
+          ],
+          "expectBase": "图1",
+          "call": "image"
+        },
+        {
+          "text": "当前浅蓝开衫的纽扣改成米白色，其他保持。",
+          "expectBase": "图2",
+          "call": "image"
+        },
+        {
+          "text": "先不要生成。记住作品A目前是浅蓝衣身和米白纽扣，原图是图1。",
+          "call": "discussion"
+        },
+        {
+          "text": "当前开衫的蓝色再淡一点，米白纽扣、麻花和版型都不变。",
+          "expectBase": "图3",
+          "call": "image"
+        },
+        {
+          "text": "开始另一件作品B：把新上传的帽子改成浅橙色，保持帽型、罗纹和翻边，不要套用开衫的纽扣要求。",
+          "uploads": [
+            "rib-beanie.jpg"
+          ],
+          "focus": "图5",
+          "expectBase": "图5",
+          "call": "image"
+        },
+        {
+          "text": "给当前浅橙帽子的翻边加一枚无字棕色小皮标。",
+          "expectBase": "图6",
+          "call": "image"
+        },
+        {
+          "text": "先只总结A和B分别是什么，以及它们各自当前颜色，不要调用图像生成。",
+          "call": "discussion"
+        },
+        {
+          "text": "切回我选中的图4开衫，把背景改成纯白；浅蓝衣身和米白纽扣保持。",
+          "focus": "图4",
+          "expectBase": "图4",
+          "call": "image"
+        },
+        {
+          "text": "继续当前开衫，把米白纽扣改成浅木色，不要加入帽子的皮标。",
+          "expectBase": "图8",
+          "call": "image"
+        },
+        {
+          "text": "先不出图。开衫仍是作品A，帽子仍是作品B，它们不应合并成同一作品。",
+          "call": "discussion"
+        },
+        {
+          "text": "选择图7帽子，在保留棕色小皮标的基础上把浅橙色调成奶油白。",
+          "focus": "图7",
+          "expectBase": "图7",
+          "call": "image"
+        },
+        {
+          "text": "当前奶油白帽子的皮标缩小一点，其他保持。",
+          "expectBase": "图10",
+          "call": "image"
+        },
+        {
+          "text": "继续当前帽子，把背景投影减淡，奶油白和小皮标保持。",
+          "expectBase": "图11",
+          "call": "image"
+        },
+        {
+          "text": "回到作品A最初上传的图1原开衫，只改成浅绿色，原图的纽扣、领口和麻花都保留，不要用后来浅木色纽扣那版。",
+          "focus": "图1",
+          "expectBase": "图1",
+          "call": "image"
+        },
+        {
+          "text": "在刚生成的浅绿开衫上，把背景改成纯白；不加入帽子的皮标，不改变原图纽扣。",
+          "expectBase": "图13",
+          "call": "image"
+        }
+      ],
+      "expected": {
+        "checks": [
+          "15轮内文本历史可压缩但图号和父子关系不能丢失",
+          "作品A与B的保留项互不串入",
+          "第3、7、10轮不出图",
+          "第14轮回原图清楚排除后续纽扣修改",
+          "不能把压缩摘要当作新增授权"
+        ]
+      }
+    }
+  ],
+  "assetFixtures": {
+    "rootEnvironmentVariable": "IMAGE_AGENT_FIXTURE_DIR",
+    "defaultRelativeDirectory": "image-agent-sources",
+    "resolution": "uploads中的文件名相对于IMAGE_AGENT_FIXTURE_DIR；未设置时相对于本JSON同目录下image-agent-sources。素材不随语料分发，执行前必须校验文件存在；缺失时报告输入不足，不得自动下载或替换。",
+    "required": [
+      {
+        "file": "cable-cardigan.jpg",
+        "description": "米色圆领六扣长袖麻花开衫，正面完整商品图，浅灰背景。",
+        "width": 1500,
+        "height": 2000
+      },
+      {
+        "file": "floral-dress.jpg",
+        "description": "米白底多色小花短袖连衣裙，正面完整商品图，白色背景。",
+        "width": 400,
+        "height": 600
+      },
+      {
+        "file": "rib-beanie.jpg",
+        "description": "蓝色罗纹翻边针织帽，三分之四角度完整商品图，白色背景。",
+        "width": 1181,
+        "height": 1181
+      }
+    ]
+  }
+}

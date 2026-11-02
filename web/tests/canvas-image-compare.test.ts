@@ -30,6 +30,21 @@ describe("comparison immutable media identity", () => {
 });
 
 describe("comparison defaults follow the direct saved source", () => {
+    test("inline source lookup never expands unrelated image histories", () => {
+        let unrelatedLineageReads = 0;
+        const unrelated = Array.from({ length: 50 }, (_, index) => {
+            const node = imageNode(`unrelated-${index}`);
+            Object.defineProperty(node.metadata!, "compareSources", { get() { unrelatedLineageReads++; return [source(`prior-${index}`)]; } });
+            return node;
+        });
+        const after = imageNode("after", { compareSources: [source("deleted-original")] });
+        const resolved = canvasCompareSources([...unrelated, after], after);
+        expect(resolved.automatic).toBe(true);
+        expect(resolved.images).toHaveLength(1);
+        expect(resolved.images[0].metadata?.storageKey).toBe("image:deleted-original");
+        expect(unrelatedLineageReads).toBe(0);
+    });
+
     test("one selected result defaults to its actual source, not a nearby same-name version", () => {
         const before = imageNode("before", { imageName: "renamed-original", imageVersion: 12, content: "blob:rehydrated-before" });
         const decoy = imageNode("decoy", { imageName: "shirt", imageVersion: 2 });

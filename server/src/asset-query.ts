@@ -30,7 +30,7 @@ export function assetPage<T extends { id: string; createdAt: string | Date }>(ro
   return { assets: items, ...page };
 }
 
-export const assetListMetadataFields = ["title", "tags", "source", "width", "height", "naturalWidth", "naturalHeight", "module", "imageName", "imageVersion"] as const;
+export const assetListMetadataFields = ["title", "tags", "source", "width", "height", "naturalWidth", "naturalHeight", "durationMs", "module", "imageName", "imageVersion"] as const;
 export function lightAssetMetadata(metadata: Record<string, unknown>) {
   return Object.fromEntries(assetListMetadataFields.filter(key => metadata[key] !== undefined).map(key => [key, metadata[key]]));
 }

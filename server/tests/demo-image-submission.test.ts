@@ -6,6 +6,7 @@ import { MARK_IMAGE_PROVIDER_ID } from "../../shared/mark-image-models";
 import { DemoStateStore, DemoStorageError, materializeDemoAsset } from "../src/demo-state-store";
 import { ImageResultPersistenceError } from "../src/image-result-storage";
 import { queryProviderTaskStatus } from "../src/provider-status-query";
+import { imageAgentProviderPrompt } from "../src/image-agent-profile";
 
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL0VQAAAABJRU5ErkJggg==", "base64");
 
@@ -56,6 +57,7 @@ function createHarness(failurePhase?: FailurePhase) {
   let completed = 0;
   const failure = Object.assign(new Error("unknown certificate verification error: https://provider.invalid/private?key=mock-model-key"), { code: "UNKNOWN_CERTIFICATE_VERIFICATION_ERROR" });
   const dependencies = {
+    imageAgentProviderPrompt,
     demoState, DemoStorageError, materializeDemoAsset, ImageResultPersistenceError, demoAssets: new Map(), demoTasks: new Map(), now: () => new Date().toISOString(),
     apiMartBaseUrl: "https://apimart.invalid/v1",
     apiMartApiKey: "mock-model-key",

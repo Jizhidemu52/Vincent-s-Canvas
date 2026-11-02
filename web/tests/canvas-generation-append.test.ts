@@ -36,7 +36,7 @@ function harness(initial: CanvasNodeData[], initialConnections: CanvasConnection
             if (reference) reference.current = typeof value === "function" ? value(reference.current) : value;
         } },
         "@/components/canvas/canvas-node-generation": { ...nodeGeneration, hydrateNodeGenerationContext: options.hydrate || (async (context: any) => context) },
-        "@/lib/canvas/canvas-generation-model": { resolveCanvasImageConfig: (input: typeof config, _business: unknown, hasReferences: boolean) => ({ config: input, toolKey: hasReferences ? "canvas-edit" : "canvas-image" }) },
+        "@/lib/canvas/canvas-generation-model": { ensureCanvasModelsReady: async () => ({}), resolveCanvasImageConfig: (input: typeof config, _business: unknown, hasReferences: boolean) => ({ config: input, toolKey: hasReferences ? "canvas-edit" : "canvas-image" }) },
         "./canvas-shared-generation-runtime": { runCanvasGeneration: async (nodeId: string, mode: string, prompt: string, onResult: Function, runtime: any) => runtime.execute(nodeId, mode, prompt, onResult) },
     } as Record<string, unknown>;
     const exports = {} as { useCanvasGeneration: Hook };
@@ -140,4 +140,66 @@ test("a prepared workflow config submits its connected image and resolved compos
     expect(h.submissions[0]!.prompt).not.toContain("@[node:");
     expect(h.nodes.current.slice(0, 3)).toEqual(before);
     expect(h.nodes.current[3]!.metadata!.generationRecord!.references[0]!.sourceNodeId).toBe(original.id);
+});
+
+test("independent image submissions from the same source overlap and append distinct non-overlapping outputs", async () => {
+    const release = Promise.withResolvers<void>();
+    const h = harness([original], [], { generate: () => release.promise });
+    const first = h.action.handleGenerateNode(original.id, "image", "first");
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(h.submissions).toHaveLength(1);
+    const second = h.action.handleGenerateNode(original.id, "image", "second");
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(h.submissions).toHaveLength(2);
+    expect(new Set(h.submissions.map(item => item.targetId)).size).toBe(2);
+    const [a, b] = h.nodes.current.slice(1);
+    expect(a!.position.x + a!.width <= b!.position.x || b!.position.x + b!.width <= a!.position.x || a!.position.y + a!.height <= b!.position.y || b!.position.y + b!.height <= a!.position.y).toBe(true);
+    release.resolve(); await Promise.all([first, second]);
+    expect(h.nodes.current.slice(1).every(node => node.metadata?.status === "success")).toBe(true);
+    expect(h.feedback).toEqual([]);
+});
+
+test("a rapid second click while references hydrate is blocked, then the lock releases for a deliberate next task", async () => {
+    const release = Promise.withResolvers<void>();
+    const h = harness([original], [], { hydrate: async context => { await release.promise; return context; } });
+    const first = h.action.handleGenerateNode(original.id, "image", "first");
+    await h.action.handleGenerateNode(original.id, "image", "accidental second");
+    expect(h.submissions).toEqual([]);
+    expect(h.feedback).toContain("此节点正在提交，请稍候；其他节点可同时生成");
+    release.resolve(); await first;
+    await h.action.handleGenerateNode(original.id, "image", "deliberate next");
+    expect(h.submissions).toHaveLength(2);
+    expect(h.submissions.map(item => item.prompt)).not.toContain("accidental second");
+});
+
+test("subtle and strong variations edit the selected result and preserve its archived parameters and draft", async () => {
+    for (const strength of ["subtle", "strong"] as const) {
+        const record = createCanvasGenerationRecord({ id: "old", sourceNodeId: "older", prompt: "old final", inputPrompt: "织物外套", references: [], config: { ...config, size: "1536x1024", quality: "high" }, generationType: "generation", nodes: [] });
+        const h = harness([{ ...original, metadata: { ...original.metadata, generationRecord: record, draftPrompt: "pending manual draft" } }]);
+        const before = structuredClone(h.nodes.current[0]);
+        await h.action.handleVariationNode(h.nodes.current[0]!, strength);
+        expect(h.submissions).toHaveLength(1);
+        expect(h.submissions[0]!.references.map(item => item.storageKey)).toEqual(["image:original"]);
+        expect(h.submissions[0]!.prompt).toContain(strength === "subtle" ? "轻微变体" : "明显变体");
+        expect(h.submissions[0]!.config).toMatchObject({ size: "1536x1024", quality: "high", count: "1" });
+        expect(h.nodes.current[0]).toEqual(before);
+    }
+});
+
+test("successive same-input single-image requests and exact regeneration share one display stack without extra requests", async () => {
+    const h = harness([original]);
+    await h.action.handleGenerateNode(original.id, "image", "same prompt");
+    await h.action.handleGenerateNode(original.id, "image", "same prompt");
+    expect(h.submissions).toHaveLength(2);
+    let stack = h.nodes.current.find(node => node.metadata?.generationResultStack)!;
+    expect(stack.metadata?.batchChildIds).toHaveLength(2);
+    expect(h.nodes.current.filter(node => node.metadata?.generationRecord && !node.metadata.generationResultStack)).toHaveLength(2);
+    expect(h.nodes.current[0]).toEqual(original);
+    await h.action.handleRegenerateNode(stack);
+    expect(h.submissions).toHaveLength(3);
+    stack = h.nodes.current.find(node => node.metadata?.generationResultStack)!;
+    expect(stack.metadata?.batchChildIds).toHaveLength(3);
+    expect(h.nodes.current.filter(node => node.metadata?.generationResultStack)).toHaveLength(1);
+    expect(new Set(h.submissions.map(item => item.targetId)).size).toBe(3);
+    expect(h.submissions[2].exact).toBe(true);
 });

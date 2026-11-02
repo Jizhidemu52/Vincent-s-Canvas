@@ -21,9 +21,10 @@ function serverAssetPath(value: string, origin?: string) {
 export async function collectCanvasExportMedia<T>(document: T, options: {
     origin?: string;
     fetchBlob?: (path: string) => Promise<Blob>;
+    onMissing?: (path: string, error: unknown) => void;
 } = {}) {
     const blobs = new Map<string, Blob>();
-    const requests = new Map<string, Promise<string>>();
+    const requests = new Map<string, Promise<string | null>>();
     const origin = options.origin ?? (typeof window === "undefined" ? undefined : window.location.origin);
     const fetchBlob = options.fetchBlob ?? (async (path: string) => {
         const response = await fetch(path, { credentials: "include" });
@@ -40,7 +41,7 @@ export async function collectCanvasExportMedia<T>(document: T, options: {
             const key = `${kind}:archive-${asset.id}`;
             blobs.set(key, blob);
             return key;
-        }));
+        }).catch(error => { if (!options.onMissing) throw error; options.onMissing(asset.path, error); return null; }));
         return requests.get(asset.path)!;
     }
     async function visit(value: unknown, mediaContext = false, field = ""): Promise<unknown> {
@@ -48,7 +49,8 @@ export async function collectCanvasExportMedia<T>(document: T, options: {
         if (!value || typeof value !== "object") {
             if (typeof value !== "string" || !(mediaFields.has(field) || (mediaContext && (field === "content" || referenceFields.has(field))))) return value;
             const downloaded = download(value);
-            return downloaded ? `${archivePrefix}${await downloaded}` : value;
+            const key = downloaded ? await downloaded : null;
+            return key ? `${archivePrefix}${key}` : value;
         }
         const input = value as MediaRecord;
         const isMedia = mediaContext || typeof input.storageKey === "string" || /^(image|video|audio)(\/|$)/.test(String(input.type || input.kind || input.mediaType || input.mimeType)) || Boolean(input.referenceKey);

@@ -49,7 +49,7 @@ test.each(["stored", "store-failed", "lease-lost"])("worker disposes generated v
   class TaskExecutionLost extends Error {}
   let disposed = 0, paid = 0, captures = 0, stored = 0;
   const statements: string[] = [];
-  const task = { id: "task", request_id: "request", attempts: 1, operation_type: "video_generation", batch_id: null, upstream_submission_started_at: "started" };
+  const task = { id: "task", request_id: "request", attempts: 1, operation_type: "video_generation", parameters: {}, batch_id: null, upstream_submission_started_at: "started" };
   const db = { query: async (sql: string) => { statements.push(sql); return { rows: [task] }; } };
   const api = functions(["runTask"], {
     disposeProviderResults, db, cache: {}, randomUUID: () => "token", TASK_LEASE_SECONDS: 180, config: { TASK_MOCK_MODE: "false" },

@@ -4,6 +4,7 @@ import { openAiImageParameters } from "../src/openai-image-parameters";
 import { buildOpenTokenImageRequest } from "../src/opentoken-image";
 import { inlineProviderImageDataUrl } from "../src/provider-image-result";
 import { assertImageEditMaskSupport, prepareImageEditInput } from "../src/image-edit-input";
+import { imageAgentProviderPrompt } from "../src/image-agent-profile";
 
 const rgba = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAACXBIWXMAAAABAAAAAQBPJcTWAAAAFUlEQVR4nGP8////fwYGBgYWEAHCAD4KBAICIHhuAAAAAElFTkSuQmCC", "base64");
 const sources = [
@@ -35,6 +36,7 @@ function harness(extra: Record<string, unknown> = {}) {
     config: { PROVIDER_ENCRYPTION_KEY: "unit-test" },
     decryptSecret: () => '{"apiKey":"unit-test"}',
     openAiImageParameters,
+    imageAgentProviderPrompt,
     inlineProviderImageDataUrl,
     assertImageEditMaskSupport,
     prepareImageEditInput,

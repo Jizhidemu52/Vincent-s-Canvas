@@ -41,7 +41,7 @@ function editor(initial = snapshot()) {
     let live = initial;
     const historyRef = { current: { past: [] as CanvasHistorySnapshot[], future: [] as CanvasHistorySnapshot[] } };
     const lastHistoryRef = { current: initial };
-    const scope = { historyRef, lastHistoryRef, historyCommitTimerRef: { current: null }, applyingHistoryRef: { current: false }, historyPausedRef: { current: false },
+    const scope = { options: {}, historyRef, lastHistoryRef, historyCommitTimerRef: { current: null }, applyingHistoryRef: { current: false }, historyPausedRef: { current: false },
         projectLoaded: true, canvasHistoryForSave, clearTimeout() {}, setHistoryState() {}, useCallback: (callback: unknown) => callback, onHistoryAction: undefined, beforeHistoryAction: undefined,
         createHistoryEntry: () => live, applyHistory: (entry: CanvasHistorySnapshot) => { live = entry; lastHistoryRef.current = entry; } };
     const actions = new Function("scope", `const { ${Object.keys(scope).join(",")} } = scope; ${commands}; return { flushPendingHistory, undoCanvas, redoCanvas };`)(scope) as {
@@ -52,6 +52,16 @@ function editor(initial = snapshot()) {
 }
 
 describe("generation delivery belongs to its original canvas command", () => {
+    test("server exclusion snapshot folds into original result command and survives redo without changing the user prompt", () => {
+        const e = editor(), before = e.current();
+        e.set(snapshot([sourceNode, placeholder])); e.flushPendingHistory();
+        const submittedPrompt = `${record.prompt}\n\n排除要求：水印`;
+        e.set(update(e.current(), "result", {}, { submittedPrompt, generationRecord: { ...record, submittedPrompt } })); e.flushPendingHistory();
+        e.set(complete(e.current())); e.flushPendingHistory();
+        expect(e.historyRef.current.past).toEqual([before]);
+        e.undoCanvas(); expect(e.current()).toBe(before);
+        e.redoCanvas(); expect(e.current().nodes[1]!.metadata).toMatchObject({ prompt: record.prompt, submittedPrompt, generationRecord: { prompt: record.prompt, submittedPrompt } });
+    });
     test("placeholder, compilation, binding, success and fitted size undo once with the edge; redo restores the final record", () => {
         const e = editor(), before = e.current();
         e.set(snapshot([sourceNode, placeholder])); e.flushPendingHistory();

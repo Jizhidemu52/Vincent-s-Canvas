@@ -1,5 +1,5 @@
 import { uiText, useUiLocale } from "@/lib/i18n";
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Cpu } from "lucide-react";
 import { CanvasModelPicker } from "@/components/canvas/canvas-model-picker";
 import { canvasImageModelDetails, canvasModelPresentation } from "@/lib/canvas/canvas-model-picker-options";
@@ -34,13 +34,14 @@ type ModelPickerProps = {
 };
 
 export function shouldRefreshModelPickerConfig(capability: ModelCapability | undefined, status: "idle" | "loading" | "ready" | "error", source: ModelPickerSource = "server") {
-    return source === "server" && Boolean(capability) && status === "idle";
+    return source === "server" && Boolean(capability) && (status === "idle" || status === "error");
 }
 
 export function ModelPicker({ config, value, onChange, capability, className, fullWidth = false, placeholder = uiText("选择模型"), onMissingConfig, modelsSource, disabled = false, toolKey, variant }: ModelPickerProps) {
     useUiLocale();
     const pickerId = useId();
     const [open, setOpen] = useState(false);
+    const automaticRetryRef = useRef(false);
     const canManageConfig = useCanManageConfig();
     const businessConfigStatus = useBusinessConfigStore((state) => state.status);
     const refreshBusinessConfig = useBusinessConfigStore((state) => state.refresh);
@@ -55,6 +56,7 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
         .filter(item => toolKey !== "midjourney-blend" || item.imageParameterProfile === "blend" || item.imageParameterProfile === "midjourney-blend" || item.modelId === "midjourney-blend") : [], [businessConfigStatus, businessModels, capability, usesServerModels, binding?.modelConfigId, toolKey]);
     useEffect(() => {
         if (!shouldRefreshModelPickerConfig(capability, businessConfigStatus, source)) return;
+        if (businessConfigStatus === "error") { if (automaticRetryRef.current) return; automaticRetryRef.current = true; }
         void refreshBusinessConfig().catch(() => undefined);
     }, [businessConfigStatus, capability, refreshBusinessConfig, source]);
     const options = useMemo(
@@ -85,6 +87,7 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
     const changeOpen = (nextOpen: boolean) => {
         if (pickerDisabled && nextOpen) return;
         if (nextOpen) emitModelUsage("open");
+        if (nextOpen && businessConfigStatus === "error" && usesServerModels) void refreshBusinessConfig().catch(() => undefined);
         if (nextOpen && !options.length && source === "local" && canManageConfig) onMissingConfig?.();
         if (nextOpen) window.dispatchEvent(new CustomEvent("model-picker-open", { detail: pickerId }));
         setOpen(nextOpen);

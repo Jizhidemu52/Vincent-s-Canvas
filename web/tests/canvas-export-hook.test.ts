@@ -6,7 +6,7 @@ import { create } from "zustand";
 
 import { mapCanvasAsyncPool } from "@/lib/canvas/canvas-async-pool";
 import { createCanvasProjectsArchive } from "@/lib/canvas/canvas-export";
-import type { ZipOptions } from "@/lib/zip";
+import { readZip, type ZipOptions } from "@/lib/zip";
 import type { CanvasProject } from "@/stores/canvas/use-canvas-store";
 import { CanvasNodeType } from "@/types/canvas";
 
@@ -178,7 +178,7 @@ describe("shared canvas archive export entry points", () => {
         expect(h.archives).toHaveLength(1);
     });
 
-    test("a real cloud-media failure preserves its original error and releases the shared lock", async () => {
+    test("unreadable cloud media creates a clearly marked rescue archive and releases the shared lock", async () => {
         const cloud = project("cloud");
         cloud.nodes = [{ id: "image", type: CanvasNodeType.Image, title: "original", position: { x: 0, y: 0 }, width: 400, height: 300,
             metadata: { content: "/api/assets/11111111-1111-4111-8111-111111111111/content" } }];
@@ -189,15 +189,20 @@ describe("shared canvas archive export entry points", () => {
                 return new Blob([new Uint8Array([1, 2, 3])], { type: "image/png" });
             },
         }, options) });
-        expect(await h.action()([cloud.id], "media", [cloud])).toBe(false);
-        expect(h.archives).toHaveLength(0);
-        expect(h.notices.filter(item => item.type === "success")).toHaveLength(0);
-        expect(h.notices.at(-1)).toMatchObject({ type: "error", content: "403 原始媒体访问已失效", duration: 5 });
+        const original = JSON.stringify(cloud);
+        expect(await h.action()([cloud.id], "media", [cloud])).toBe(true);
+        expect(h.archives).toHaveLength(1);
+        const rescue = await readZip(h.archives[0]);
+        expect(rescue.has("projects.json")).toBe(true);
+        expect(await rescue.get("missing.txt")!.text()).toContain("403 原始媒体访问已失效");
+        expect(h.notices.some(item => item.content.includes("missing.txt"))).toBe(true);
+        expect(JSON.stringify(cloud)).toBe(original);
         expect(h.state().exportingProjectIds).toEqual([]);
         expect([...h.visibleNotices.values()].some(item => item.type === "loading")).toBe(false);
         downloadFails = false;
         expect(await h.action()([cloud.id], "retry", [cloud])).toBe(true);
-        expect(h.archives).toHaveLength(1);
+        expect(h.archives).toHaveLength(2);
+        expect((await readZip(h.archives[1])).has("missing.txt")).toBe(false);
     });
 
     test("loader errors keep the original message and unknown errors use the safe fallback", async () => {

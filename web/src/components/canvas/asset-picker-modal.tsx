@@ -1,6 +1,6 @@
 import { useUiText } from "@/lib/i18n";
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Button, Empty, Input, Modal, Pagination, Spin, Tag } from "antd";
+import { Alert, Button, Empty, Input, Modal, Spin, Tag } from "antd";
 import { Search } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -30,13 +30,13 @@ export function AssetPickerModal({ open, onInsert, onInsertMany, onClose, select
     const t = useUiText();
     const ownerId = useUserStore((state) => state.user?.id);
     return (
-        <Modal title={t("选择素材")} open={open} onCancel={onClose} footer={null} width={860} destroyOnHidden styles={{ body: { padding: "0 24px 24px", minHeight: 480 } }}>
+        <Modal title={t("选择素材")} open={open} centered onCancel={onClose} footer={null} width={800} destroyOnHidden styles={{ body: { maxHeight: "70dvh", overflowY: "auto", minHeight: 320 } }}>
             <MyAssetsTab key={ownerId || "signed-out"} open={open} onInsert={onInsert} onInsertMany={onInsertMany} selectionMode={selectionMode} />
         </Modal>
     );
 }
 
-const PAGE_SIZE = 8;
+const PAGE_SIZE = 24;
 
 const kindOptions = [
     { label: "全部", value: "all" },
@@ -100,7 +100,9 @@ function MyAssetsTab({ open, onInsert, onInsertMany, selectionMode }: { open: bo
     const [keyword, setKeyword] = useState("");
     const deferredKeyword = useDeferredValue(keyword);
     const [kindFilter, setKindFilter] = useState("all");
-    const [page, setPage] = useState(1);
+    const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+    const loadSentinel = useRef<HTMLDivElement>(null);
+    const loadNext = useRef<() => void>(() => {});
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [nextCursor, setNextCursor] = useState<string | null>(null);
     const [loadingMore, setLoadingMore] = useState(false);
@@ -119,7 +121,7 @@ function MyAssetsTab({ open, onInsert, onInsertMany, selectionMode }: { open: bo
         const isCurrent = () => !controller.signal.aborted && queryScopeRef.current === queryScope && useUserStore.getState().user?.id === ownerId;
         setServerState((current) => ({ ownerId, assets: current?.ownerId === ownerId ? current.assets : [], loading: true, error: "" }));
         setNextCursor(null);
-        void listServerAssets({ q: deferredKeyword || undefined, kind: selectionMode === "multiple-images" ? "image" : kindFilter === "all" ? undefined : kindFilter as "image" | "video" | "text" }, controller.signal).then(({ assets, nextCursor: cursor }) => {
+        void listServerAssets({ limit: PAGE_SIZE, q: deferredKeyword || undefined, kind: selectionMode === "multiple-images" ? "image" : kindFilter === "all" ? undefined : kindFilter as "image" | "video" | "text" }, controller.signal).then(({ assets, nextCursor: cursor }) => {
             if (isCurrent()) { setServerState({ ownerId, assets: assets.filter(isSupportedServerAsset).map(serverAssetToLocal), loading: false, error: "" }); setNextCursor(cursor || null); }
         }).catch((error: unknown) => {
             if (isCurrent()) setServerState((current) => ({ ownerId, assets: current?.ownerId === ownerId ? current.assets : [], loading: false, error: error instanceof Error ? error.message : "素材加载失败，请重试" }));
@@ -147,13 +149,19 @@ function MyAssetsTab({ open, onInsert, onInsertMany, selectionMode }: { open: bo
             .filter((a) => !query || [a.title, ...(a.tags || [])].join(" ").toLowerCase().includes(query));
     }, [assets, deferredKeyword, kindFilter, selectionMode, serverAssetIds, user]);
 
-    const visible = useMemo(() => filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE), [filtered, page]);
+    const visible = useMemo(() => filtered.slice(0, visibleCount), [filtered, visibleCount]);
     const selected = useMemo(() => filtered.filter((asset) => selectedIds.has(asset.id)), [filtered, selectedIds]);
 
     useEffect(() => {
-        const maxPage = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-        setPage((v) => Math.min(v, maxPage));
-    }, [filtered.length]);
+        setVisibleCount(PAGE_SIZE);
+    }, [queryScope]);
+    useEffect(() => {
+        const target = loadSentinel.current;
+        if (!target || !open || typeof IntersectionObserver === "undefined") return;
+        const observer = new IntersectionObserver(entries => { if (entries.some(entry => entry.isIntersecting)) loadNext.current(); }, { rootMargin: "160px" });
+        observer.observe(target);
+        return () => observer.disconnect();
+    }, [open, visible.length, nextCursor, loading, loadingMore]);
 
     const toPayload = (asset: Asset): InsertAssetPayload => {
         if (asset.kind === "text") {
@@ -193,7 +201,7 @@ function MyAssetsTab({ open, onInsert, onInsertMany, selectionMode }: { open: bo
         const isCurrent = () => !controller.signal.aborted && queryScopeRef.current === queryScope && useUserStore.getState().user?.id === ownerId;
         setLoadingMore(true);
         try {
-            const result = await listServerAssets({ cursor: nextCursor, q: deferredKeyword || undefined, kind: selectionMode === "multiple-images" ? "image" : kindFilter === "all" ? undefined : kindFilter as "image" | "video" | "text" }, controller.signal);
+            const result = await listServerAssets({ limit: PAGE_SIZE, cursor: nextCursor, q: deferredKeyword || undefined, kind: selectionMode === "multiple-images" ? "image" : kindFilter === "all" ? undefined : kindFilter as "image" | "video" | "text" }, controller.signal);
             if (!isCurrent()) return;
             setServerState(current => current?.ownerId === ownerId ? { ...current, assets: [...current.assets, ...result.assets.filter(isSupportedServerAsset).filter(asset => !current.assets.some(item => item.id === asset.id)).map(serverAssetToLocal)] } : current);
             setNextCursor(result.nextCursor || null);
@@ -201,6 +209,11 @@ function MyAssetsTab({ open, onInsert, onInsertMany, selectionMode }: { open: bo
         finally { if (pageController.current === controller) { pageController.current = null; setLoadingMore(false); } }
     };
 
+    loadNext.current = () => {
+        if (loading || loadingMore || error) return;
+        if (visibleCount < filtered.length) setVisibleCount(value => value + PAGE_SIZE);
+        else if (nextCursor) void loadMore();
+    };
     const confirmMultiple = () => {
         const currentUser = useUserStore.getState().user;
         if (!open || !ownerId || currentUser?.id !== ownerId) return;
@@ -219,7 +232,7 @@ function MyAssetsTab({ open, onInsert, onInsertMany, selectionMode }: { open: bo
                     value={keyword}
                     allowClear
                     onChange={(e) => {
-                        setPage(1);
+                        setVisibleCount(PAGE_SIZE);
                         setKeyword(e.target.value);
                     }}
                 />
@@ -230,7 +243,7 @@ function MyAssetsTab({ open, onInsert, onInsertMany, selectionMode }: { open: bo
                             checked={kindFilter === opt.value}
                             className={cn("prompt-filter-tag", kindFilter === opt.value && "is-active")}
                             onChange={() => {
-                                setPage(1);
+                                setVisibleCount(PAGE_SIZE);
                                 setKindFilter(opt.value);
                             }}
                         >
@@ -244,7 +257,7 @@ function MyAssetsTab({ open, onInsert, onInsertMany, selectionMode }: { open: bo
 
             {error ? <Alert type="error" showIcon title={t("素材加载失败")} description={error} action={<Button size="small" onClick={() => setRefreshRevision((value) => value + 1)}>{t("重试")}</Button>} /> : null}
             {visible.length ? (
-                <div className="grid grid-cols-4 gap-3">
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
                     {visible.map((asset) => (
                         <PickerCard key={asset.id} asset={asset} selected={selectedIds.has(asset.id)} onClick={() => void handleInsert(asset)} />
                     ))}
@@ -255,12 +268,8 @@ function MyAssetsTab({ open, onInsert, onInsertMany, selectionMode }: { open: bo
                 <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("没有素材")} className="py-12" />
             ) : null}
 
-            {filtered.length > PAGE_SIZE && (
-                <div className="flex justify-center">
-                    <Pagination size="small" current={page} pageSize={PAGE_SIZE} total={filtered.length} onChange={setPage} showSizeChanger={false} />
-                </div>
-            )}
-            {nextCursor ? <Button block loading={loadingMore} onClick={() => void loadMore()}>{t("加载更多素材")}</Button> : null}
+            <div ref={loadSentinel} className="h-1" aria-hidden />
+            {nextCursor || visibleCount < filtered.length ? <Button block loading={loadingMore} disabled={loading} onClick={() => { if (visibleCount < filtered.length) setVisibleCount(value => value + PAGE_SIZE); else void loadMore(); }}>{t("加载更多素材")}</Button> : null}
             {inserting ? <p role="status" className="text-sm text-muted-foreground">{t("正在读取完整文本…")}</p> : null}
         </div>
     );

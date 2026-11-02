@@ -15,6 +15,7 @@ import { deploymentFeatures } from "../deployment-features";
 import { DuplicateJsonKeyError, parseStrictJson } from "../strict-json";
 import { chatPromptProfiles, prepareChatProfileInput, validateChatProfileOutput, type ChatPromptProfile } from "../prompt-chat-profiles";
 import { PromptOptimizationError } from "../prompt-safety";
+import { imageAgentClaudeStream } from "../image-agent-stream";
 
 type ResponseContent = { type: "input_text"; text: string } | { type: "input_image"; image_url: string };
 export type ResponseInput =
@@ -34,6 +35,14 @@ export const CHAT_COMPLETION_PROTOCOLS = ["openai", "custom", "apimart", "gemini
 
 export function isClaudeMessagesModel(model: Pick<ChatModel, "protocol" | "model_id">) {
     return model.protocol === "anthropic" || (model.protocol === "apimart" && model.model_id === "claude-sonnet-5-5");
+}
+
+/** Enable only the hidden-thinking variants already supported by our adapters. */
+export function imageAgentModelInput<T extends ChatCompletionInput>(model: Pick<ChatModel, "protocol" | "model_id">, input: T): T {
+    if (!input.privateProfile || !isClaudeMessagesModel(model)) return input;
+    const hiddenThinking = /^claude-(opus|sonnet|fable)-5$/i.test(model.model_id) || ["claude-sonnet-5-5", "claude-fable-5-1"].includes(model.model_id.toLowerCase());
+    if (!hiddenThinking && input.claude?.thinking === true) throw new PromptOptimizationError("CHAT_PRIVATE_THINKING_UNSUPPORTED", "当前模型不支持安全隐藏思考，请关闭思考或选择支持隐藏思考的模型。", 422);
+    return { ...input, claude: { ...input.claude, stream: input.claude?.stream !== false, thinking: hiddenThinking ? input.claude?.thinking !== false : false } };
 }
 
 // This endpoint returns client-side function plans only. Hosted tools (notably
@@ -123,7 +132,7 @@ export function createChatRouter(db: Database, config: AppConfig, options: ChatR
             };
             const actor = (request as unknown as AuthenticatedRequest).auth;
             const prepared = await prepareChatProfileInput(parsed, options.loadProfileRules ? profile => options.loadProfileRules!(profile, actor) : undefined);
-            const input = prepared.input;
+            let input = prepared.input;
             const execution = await resolveToolExecution(db, { ...input, operationType: "chat" });
             const result = await db.query<ChatModel>(
                 `SELECT m.model_id,p.base_url,p.protocol,p.encrypted_credentials
@@ -144,6 +153,7 @@ export function createChatRouter(db: Database, config: AppConfig, options: ChatR
             }
 
             const credentials = JSON.parse(decryptSecret(model.encrypted_credentials, config.PROVIDER_ENCRYPTION_KEY)) as Record<string, string>;
+            input = imageAgentModelInput(model, input);
             billingReservationId = await beginChatBilling(db, {
                 requestId: input.requestId, userId: actor.id,
                 anonymous: (request as AuthenticatedRequest).allowsAnonymousCreation,
@@ -156,7 +166,10 @@ export function createChatRouter(db: Database, config: AppConfig, options: ChatR
             }
             providerInFlight = true;
             if (isClaudeMessagesModel(model) && input.claude?.stream) {
-                const upstream = await requestClaudeStream(model, credentials, input);
+                const rawStream = await requestClaudeStream(model, credentials, input);
+                const upstream = prepared.privateRules.length
+                    ? imageAgentClaudeStream(rawStream, prepared.privateRules, input.tools, result => options.validateProfileOutput?.(result, prepared.privateRules))
+                    : rawStream;
                 response.setHeader("content-type", "text/event-stream; charset=utf-8");
                 response.setHeader("cache-control", "no-cache");
                 const streamOutcome = new ChatStreamOutcome();
@@ -327,7 +340,7 @@ async function readNativeChatPayload(upstream: Response): Promise<Record<string,
 export async function requestClaudeStream(
     model: ChatModel,
     credentials: Record<string, string>,
-    input: { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown; claude?: { thinking?: boolean; maxTokens?: number } },
+    input: { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown; privateProfile?: boolean; claude?: { thinking?: boolean; maxTokens?: number } },
 ) {
     const upstream = await fetchProviderSubmission(claudeMessagesUrl(model.base_url), {
         method: "POST",
@@ -335,7 +348,7 @@ export async function requestClaudeStream(
         body: JSON.stringify({ model: model.model_id, ...buildClaudeMessagesRequest(input, { modelId: model.model_id, maxTokens: input.claude?.maxTokens || 2048, thinking: input.claude?.thinking, stream: true }) }),
         signal: AbortSignal.timeout(180000),
     });
-    if (!upstream.ok) throw await upstreamError("Claude Provider", upstream, model.protocol === "apimart");
+    if (!upstream.ok) throw await upstreamError("Claude Provider", upstream, model.protocol === "apimart" || input.privateProfile);
     if (!upstream.body) throw new ChatProtocolError("CLAUDE_STREAM_EMPTY", "Claude 流式响应为空");
     return upstream;
 }
@@ -432,6 +445,7 @@ export function buildClaudeMessagesRequest(
         ...(tools.length ? { tools, tool_choice: toolChoice } : {}),
         ...(options.stream ? { stream: true } : {}),
         ...claudeThinkingParameters(options),
+        ...(input.privateProfile && options.modelId?.toLowerCase() === "claude-sonnet-5-5" && options.thinking !== false ? { output_config: { effort: "medium" } } : {}),
     };
 }
 

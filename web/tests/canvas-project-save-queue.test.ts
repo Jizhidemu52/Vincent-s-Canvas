@@ -68,5 +68,5 @@ test("lets batch generation request a longer coalescing delay", () => {
 
     queue.schedule("batch-result", 900);
 
-    expect(timers.requestedDelays()).toEqual([900]);
+    expect(timers.requestedDelays()).toEqual([3000, 900]);
 });

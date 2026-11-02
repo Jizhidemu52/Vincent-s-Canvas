@@ -15,7 +15,6 @@ export function selectLocalAgentPanelState(state: AgentState, headless = false, 
     return {
         url: state.url, token: state.token, enabled: state.enabled, connected: state.connected,
         confirmTools: state.confirmTools, pendingTool: state.pendingTool,
-        width: headless || embedded ? 0 : state.width,
         activeTab: tab, activeThreadId: headless ? "" : state.activeThreadId,
         prompt: chat ? state.prompt : "", attachments: chat ? state.attachments : noAttachments,
         sending: chat || log ? state.sending : false, waiting: chat || log ? state.waiting : false,

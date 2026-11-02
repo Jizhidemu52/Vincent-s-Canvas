@@ -19,7 +19,7 @@ function harness(file: string, name: string) {
     const values: any[] = []; let cursor = 0;
     const module = { exports: {} as Record<string, Function> };
     const dependencies: Record<string, any> = {
-        react: { ...React, useEffect() {}, useMemo: (factory: Function) => factory(), useRef: (initial: unknown) => { const index = cursor++; return values[index] ||= { current: initial }; }, useState: (initial: any) => { const index = cursor++; if (!(index in values)) values[index] = typeof initial === "function" ? initial() : initial; return [values[index], (next: any) => { values[index] = typeof next === "function" ? next(values[index]) : next; }]; } },
+        react: { ...React, useEffect() {}, useMemo: (factory: Function, deps: unknown[]) => { const index = cursor++, previous = values[index]; if (!previous || previous.deps.length !== deps.length || deps.some((value, offset) => !Object.is(value, previous.deps[offset]))) values[index] = { deps, value: factory() }; return values[index].value; }, useRef: (initial: unknown) => { const index = cursor++; return values[index] ||= { current: initial }; }, useState: (initial: any) => { const index = cursor++; if (!(index in values)) values[index] = typeof initial === "function" ? initial() : initial; return [values[index], (next: any) => { values[index] = typeof next === "function" ? next(values[index]) : next; }]; } },
         antd: { App: { useApp: () => ({ message: { error() {} } }) }, Input: "Input", Popover: "Popover", Button: "Button", Modal: "Modal", Segmented: "Segmented", Slider: "Slider", Spin: "Spin" },
         "@/stores/use-theme-store": { useThemeStore: (select: Function) => select({ theme: "light" }) },
         "./use-canvas-image-thumbnail": { useCanvasImageThumbnail: (image: CanvasNodeData) => ({ url: image.metadata?.content || "", thumbnail: true }) },
@@ -134,14 +134,16 @@ test("an overwritten selected node cannot redirect either dialog side to its new
     expect(afterPicker.props.images.find((image: CanvasNodeData) => image.id === afterPicker.props.selectedId).metadata.storageKey).toBe("image:after");
 });
 
-test("unrelated same-name images never activate comparison and a changed result resets a manual choice", () => {
+test("unrelated same-name images never activate comparison and a changed saved result resets a manual choice", () => {
     const result = node("after", "同名"), other = node("other", "同名");
     const page = harness("canvas-inline-image-compare", "CanvasInlineImageCompare");
     const props = { node: result, nodes: [other, result], scale: 1, showImageInfo: false, onAdvanced() {} };
     let tree = page.render(props);
-    expect(popoverPicker(tree).props.selectedId).toBeUndefined();
-    expect(tree.some(element => element.props.children === "未记录修改前图片，可手动选择")).toBe(true);
-    popoverPicker(tree).props.onChoose(other); expect(popoverPicker(page.render(props)).props.selectedId).toBe("other");
+    expect(tree).toEqual([]);
+    const saved = { ...result, metadata: { ...result.metadata, compareSources: [{ type: "image" as const, content: "blob:prior", storageKey: "image:prior" }] } };
+    const savedProps = { ...props, node: saved, nodes: [other, saved] };
+    tree = page.render(savedProps);
+    popoverPicker(tree).props.onChoose(other); expect(popoverPicker(page.render(savedProps)).props.selectedId).toBe("other");
     const updated = { ...result, metadata: { ...result.metadata, storageKey: "image:new", content: "blob:new", compareSources: [{ type: "image" as const, content: "blob:after", storageKey: "image:after" }] } };
     tree = page.render({ ...props, node: updated, nodes: [other, updated] });
     expect(popoverPicker(tree).props.selectedId).toBe(popoverPicker(tree).props.preferredId);

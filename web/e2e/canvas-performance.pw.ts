@@ -6,6 +6,7 @@ import { test, expect } from "./fixtures";
 import { decodePerformanceThumbnails, inspectRenderedPerformanceImages, openPerformanceScene, preparePerformanceScene, PROJECT_ID } from "./canvas-performance-fixture";
 import { summarizeFrames, memoryBudgetFailures } from "../scripts/canvas-performance-budget.mjs";
 import { analyzeCanvasHeap } from "../scripts/canvas-performance-heap.mjs";
+import { parseCanvasProject } from "../src/lib/canvas/canvas-project-codec";
 
 const variant = process.env.CANVAS_PERF_VARIANT;
 const output = resolve(import.meta.dirname, `../../output/canvas-performance/${variant || "not-run"}`);
@@ -44,6 +45,39 @@ async function experienceMetrics(page: Page) {
     const match = text.match(/最近 FPS · P95\s*([\d.]+)\s*·\s*([\d.]+) ms/);
     if (!match) throw new Error(`Existing canvas tracker did not publish a valid interaction: ${text}`);
     return { text, fps: Number(match[1]), p95Ms: Number(match[2]) };
+}
+async function readSavedPerformanceProject(page: Page, ownerId: string) {
+    // History is browser-local; cloud documents intentionally omit it. Read one
+    // exact authenticated owner's persisted key, never private stores or all accounts.
+    const key = JSON.stringify([`wireless-canvas:canvas_store:oa:user:${encodeURIComponent(ownerId)}:project-documents:v1`, PROJECT_ID]);
+    const saved = await page.evaluate(key => new Promise<string | undefined>((resolveRead, reject) => {
+        const opening = indexedDB.open("wireless-canvas");
+        opening.onupgradeneeded = () => { opening.transaction?.abort(); reject(new Error("Performance storage is not initialized")); };
+        opening.onerror = () => reject(opening.error || new Error("Cannot read performance storage"));
+        opening.onblocked = () => reject(new Error("Performance storage is blocked"));
+        opening.onsuccess = () => {
+            const database = opening.result;
+            database.onversionchange = () => database.close();
+            let transaction: IDBTransaction;
+            try { transaction = database.transaction("app_state", "readonly"); }
+            catch (error) { database.close(); reject(error); return; }
+            let result: string | undefined;
+            transaction.onabort = () => { database.close(); reject(transaction.error || new Error("Performance read aborted")); };
+            transaction.onerror = () => { database.close(); reject(transaction.error || new Error("Performance read failed")); };
+            transaction.oncomplete = () => { database.close(); resolveRead(result); };
+            const request = transaction.objectStore("app_state").get(key);
+            request.onsuccess = () => {
+                if (request.result !== undefined && typeof request.result !== "string") { transaction.abort(); return; }
+                result = request.result;
+            };
+        };
+    }), key);
+    if (saved === undefined) return null;
+    // Decode outside the measured browser heap; no injected app module or
+    // retained decoded graph may contaminate the product's memory sample.
+    const project = parseCanvasProject(saved);
+    if (project.id !== PROJECT_ID) throw new Error("Persisted performance project ID does not match its owner-scoped key");
+    return project;
 }
 async function resetView(page: Page) {
     await page.getByRole("button", { name: "画布缩放与视图", exact: true }).click();
@@ -141,6 +175,13 @@ test("500节点100栅格图：对照帧率、真实堆曲线与200步历史边�
     await expect(memoryPage.locator('[data-node-id="performance-node-0"]')).toBeVisible();
     const skip = memoryPage.getByRole("button", { name: "跳过引导", exact: true }); if (await skip.isVisible()) await skip.click();
     await decodePerformanceThumbnails(memoryPage);
+    const memoryOwnerId = await memoryPage.evaluate(async () => {
+        const response = await fetch("/api/auth/session", { cache: "no-store" });
+        if (!response.ok) throw new Error("Performance session is not authenticated");
+        const session = await response.json();
+        if (typeof session.user?.id !== "string" || !session.user.id || session.user.role !== "super_admin") throw new Error("Performance session owner is missing or unexpected");
+        return session.user.id as string;
+    });
     const cdp = await memoryContext.newCDPSession(memoryPage);
     const curve: any[] = [];
     const sample = async (step: number) => {
@@ -149,13 +190,17 @@ test("500节点100栅格图：对照帧率、真实堆曲线与200步历史边�
             // checkpoint. Wait for this batch's cloud acknowledgement so the
             // persistence queue can release its previous merge baseline.
             await expect.poll(() => memoryApi.documents.get(PROJECT_ID)?.revision || 0, { timeout: 15_000 }).toBeGreaterThan(curve.at(-1).cloudRevision);
-            await expect.poll(() => memoryApi.document(PROJECT_ID)?.history?.past?.length, { timeout: 15_000 }).toBe(Math.min(step, 200));
             await expect(memoryPage.getByRole("button", { name: "画布与图片已保存至服务器", exact: true })).toBeVisible();
         }
+        await expect.poll(async () => {
+            const project = await readSavedPerformanceProject(memoryPage, memoryOwnerId);
+            return project ? project.history?.past?.length || 0 : undefined;
+        }, { timeout: 15_000 }).toBe(Math.min(step, 200));
+        const historyLength = (await readSavedPerformanceProject(memoryPage, memoryOwnerId))!.history?.past?.length || 0;
         await memoryPage.waitForTimeout(300);
         await cdp.send("HeapProfiler.collectGarbage");
         const heap = await cdp.send("Runtime.getHeapUsage");
-        curve.push({ step, ...heap, historyLength: memoryApi.document(PROJECT_ID)?.history?.past?.length ?? 0, cloudRevision: memoryApi.documents.get(PROJECT_ID)?.revision || 0 });
+        curve.push({ step, ...heap, historyLength, cloudRevision: memoryApi.documents.get(PROJECT_ID)?.revision || 0 });
         console.log(`${variant} memory step ${step}: ${(heap.usedSize / 1024 ** 2).toFixed(2)} MiB / ${curve.at(-1).historyLength} history entries`);
         report.memory = { curve };
         await writeFile(resolve(output, "report.json"), JSON.stringify(report, null, 2));
@@ -168,8 +213,9 @@ test("500节点100栅格图：对照帧率、真实堆曲线与200步历史边�
         // the exact same 200-entry value every two commands. Persistence then
         // correctly elides that no-op and retains an older equivalent graph.
         await node.press("ArrowRight");
-        // Separate history commands, exceeding the actual 180ms coalescing delay.
-        await memoryPage.waitForTimeout(210);
+        // N-37 merges consecutive nudges within 500ms into one history entry.
+        // Exceed that business boundary for each of the 220 distinct commands.
+        await memoryPage.waitForTimeout(550);
         if (step % 20 === 0) await sample(step);
     }
     expect(curve.find(point => point.step === 200).historyLength).toBe(200);
@@ -184,6 +230,7 @@ test("500节点100栅格图：对照帧率、真实堆曲线与200步历史边�
     const growthThrough220MiB = (curve.at(-1).usedSize - curve[0].usedSize) / 1024 ** 2;
     const afterCapMiB = (curve.at(-1).usedSize - curve.find(point => point.step === 200).usedSize) / 1024 ** 2;
     report.memory = { method: "Chrome CDP Runtime.getHeapUsage after HeapProfiler.collectGarbage", workload: "220 distinct one-pixel ArrowRight edits of one node, saved every 20 commands", curve, growthMiB, growthThrough220MiB, afterCapMiB, sharing,
+        historyObservation: { ownerId: memoryOwnerId, projectId: PROJECT_ID, source: "readonly IndexedDB app_state, exact owner/project document key, decoded using parseCanvasProject outside the measured browser heap", cloudAcknowledgementRequired: true },
         scope: "JS heap only; does not measure native image decode/GPU/process RSS. Raster thumbnails are retained equally in baseline and candidate.",
         boundary: "200 snapshots per undo/redo stack; metadata and unchanged nodes shared for single-node movement. All-node edits, unique media strings, chat, imported histories may retain substantially more; no universal byte cap." };
     report.memory.budgetFailures = memoryBudgetFailures(report.memory);

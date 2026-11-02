@@ -40,7 +40,7 @@ function findElements(value: unknown): ReactElement<any>[] {
     if (Array.isArray(value)) return value.flatMap(findElements);
     if (!React.isValidElement(value)) return [];
     const element = value as ReactElement<any>;
-    return [element, ...findElements(element.props.children)];
+    return [element, ...findElements(element.props.children), ...findElements(element.props.content)];
 }
 
 test("Agent parameters reflect standard pixel sizes and quality instead of fabricated resolution", () => {
@@ -91,14 +91,13 @@ test("Agent only shows supported video audio and includes Seedance intelligent d
     expect(seedance).not.toContain('value="1080P"');
 });
 
-test("image and video generation models occupy a full-width row without narrow or fixed-height overrides", () => {
+test("image and video generation models stay full-width inside the settings popover", () => {
     for (const mode of ["image", "video"] as const) {
         const result = controls({ mode, imageModel: "gpt-image-2.5-flare" });
         const row = result.elements.find(element => element.props["data-testid"] === "canvas-agent-generation-model");
         expect(row).toBeDefined();
-        expect(row!.props.className).toContain("col-span-2");
-        expect(row!.props.className).toContain("min-w-0");
-        expect(row!.props.className).toContain("w-full");
+        const popover = result.elements.find(element => element.props.content);
+        expect(findElements(popover!.props.content)).toContain(row!);
         const picker = findElements(row).find(element => element.props.toolKey);
         expect(picker).toBeDefined();
         expect(picker!.props.variant).toBe("canvas");
@@ -112,18 +111,17 @@ test("image and video generation models occupy a full-width row without narrow o
     }
 });
 
-test("type and settings controls stay together on a separate row with 44-pixel targets and unchanged mode changes", () => {
+test("compact type and settings controls preserve image and video mode changes", () => {
     const result = controls({ imageModel: "gpt-image-2.5-flare" });
     const actions = result.elements.find(element => element.props["data-testid"] === "canvas-agent-generation-actions");
     expect(actions).toBeDefined();
     const actionElements = findElements(actions);
-    expect(actionElements.some(element => element.props.toolKey)).toBe(false);
-    const image = actionElements.find(element => element.props.role === "tab" && element.props["aria-label"] === "图像")!;
-    const video = actionElements.find(element => element.props.role === "tab" && element.props["aria-label"] === "视频")!;
+    const mode = actionElements.find(element => element.type === "select" && element.props["aria-label"] === "生成类型")!;
     const settings = actionElements.find(element => element.type === "button" && element.props["aria-label"] === "图像设置")!;
-    for (const control of [image, video, settings]) expect(control.props.className).toContain("size-11");
-    video.props.onClick();
+    expect(settings.props.className).toContain("min-h-9");
+    expect(actionElements.some(element => element.props.role === "tab")).toBe(false);
+    mode.props.onChange({ target: { value: "video" } });
     expect(result.changes.at(-1)).toMatchObject({ mode: "video", videoModel: "wan2.7" });
-    image.props.onClick();
+    mode.props.onChange({ target: { value: "image" } });
     expect(result.changes.at(-1)).toMatchObject({ mode: "image", imageModel: "gpt-image-2.5-flare", imageCount: "1" });
 });

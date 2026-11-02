@@ -33,10 +33,11 @@ function expectImagePreviewHosts(html: string, count = 1) {
 }
 
 describe("bulk overview node output", () => {
-    test("keeps offscreen skipping for image previews while reusing empty bulk overview paint", () => {
+    test("keeps selected titles unclipped and skips painting inactive image previews", () => {
         expect(markup({ data: { ...image, metadata: {} } })).toContain("content-visibility:visible");
         for (const patch of [{}, { renderQuality: "moving" as const }]) {
-            expect(markup(patch)).toContain("content-visibility:auto");
+            expect(markup(patch)).toContain("content-visibility:visible");
+            expect(markup(patch)).toContain('data-node-title="image"');
         }
         for (const patch of [{ isMultiSelected: false }, { isFocusRelated: true }, { isConnectionTarget: true }, { showPanel: true }, { isConnecting: true }, { renderQuality: "full" as const }]) {
             expect(markup(patch)).toContain("content-visibility:visible");
@@ -45,7 +46,7 @@ describe("bulk overview node output", () => {
     });
 
     test("keeps empty images and non-image nodes lightweight without media, editors or resize controls", () => {
-        for (const type of [CanvasNodeType.Image, CanvasNodeType.Video, CanvasNodeType.Audio, CanvasNodeType.Text, CanvasNodeType.Config]) {
+        for (const type of [CanvasNodeType.Image, CanvasNodeType.Audio, CanvasNodeType.Text, CanvasNodeType.Config]) {
             const html = markup({ data: { ...image, type, metadata: type === CanvasNodeType.Image ? {} : image.metadata } });
             expect(html).toContain('data-node-id="image"');
             expect(html).toContain('data-testid="canvas-node-overview"');
@@ -61,7 +62,7 @@ describe("bulk overview node output", () => {
         for (const patch of [{ isSelected: false, isMultiSelected: false }, { isSelected: true, isMultiSelected: true }]) {
             const html = markup(patch);
             expectImagePreviewHosts(html);
-            expect(html).toContain("content-visibility:auto");
+            expect(html).toContain(`content-visibility:${patch.isSelected ? "visible" : "auto"}`);
             expect(html).not.toContain('data-testid="canvas-node-overview"');
             expect(html).not.toContain("data-canvas-resize-handle");
         }
@@ -87,7 +88,8 @@ describe("bulk overview node output", () => {
         const html = markup({ data: { ...image, metadata: { storageKey: "image:persisted", status: "success" } } });
         // Server rendering cannot run the IndexedDB effect, but must retain its preview host.
         expectImagePreviewHosts(html);
-        expect(html).toContain("content-visibility:auto");
+        expect(html).toContain("content-visibility:visible");
+        expect(html).toContain('data-node-title="image"');
         expect(html).not.toContain('data-testid="canvas-node-overview"');
         expect(html).not.toContain("空图片节点");
         expect(html).not.toContain("data-canvas-resize-handle");

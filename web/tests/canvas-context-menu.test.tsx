@@ -109,7 +109,7 @@ test("generation and optional upload remain separate existing callbacks", () => 
 
 test("node and connection actions preserve behavior with Chinese labels and stable usage actions", () => {
     withMenu(harness => {
-        expect(harness.labels).toEqual(["复制", "重命名", "创建款式组", "删除"]);
+        expect(harness.labels).toEqual(["创建副本", "重命名", "创建款式组", "删除"]);
         expect(harness.menuButtons.map(item => item.props.action)).toEqual(["duplicate", "rename", "group", "delete"]);
         harness.menuButtons[0]!.props.onClick();
         expect(harness.events).toEqual(["duplicate", "close"]);

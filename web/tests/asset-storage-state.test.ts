@@ -46,6 +46,29 @@ function imageAsset(overrides: Partial<Asset> = {}): Asset {
 }
 
 describe("asset server storage state", () => {
+    test("automatic trial cleanup never deletes originals while canvas documents are unloaded", async () => {
+        let runCleanup: (extras: unknown[]) => Promise<void> = async () => {};
+        let canvas = { hydrated: false, projects: [], unloadedProjects: [] as unknown[] };
+        const passes: string[] = [];
+        const isolation = {
+            ...boundary,
+            deploymentFeatures: { authenticationEnabled: false },
+            useCanvasStore: { getState: () => canvas },
+            createCoalescedAsyncTask: (run: typeof runCleanup) => { runCleanup = run; return { schedule() {} }; },
+            chatImageCleanupGuard: () => () => {}, collectChatImageReferences: async () => [],
+            cleanupUnusedImages: async () => { passes.push("image"); }, cleanupUnusedMedia: async () => { passes.push("media"); },
+        };
+        new Function(...Object.keys(isolation), "exports", code)(...Object.values(isolation), {});
+        await runCleanup([]);
+        expect(passes).toEqual([]);
+        canvas = { hydrated: true, projects: [], unloadedProjects: [{ id: "unopened-with-original-media" }] };
+        await runCleanup([]);
+        expect(passes).toEqual([]);
+        canvas = { hydrated: true, projects: [], unloadedProjects: [] };
+        await runCleanup([]);
+        expect(passes).toEqual(["image", "media"]);
+    });
+
     test("recognizes a result that already has an explicit server asset id", () => {
         expect(serverAssetIdFromAsset(imageAsset({ metadata: { serverAssetId } }))).toBe(serverAssetId);
     });

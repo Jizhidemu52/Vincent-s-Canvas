@@ -68,17 +68,17 @@ test.each([
     expect(() => buildClaudeMessagesRequest({ input, ...request, tools: [...request.tools] }, { modelId: model.model_id, maxTokens: 2048 })).toThrow(expect.objectContaining({ code: "CLAUDE_TOOL_CHOICE_INVALID" }));
 });
 
-test("canvas repair preserves the exact tool-use/result pair with one allowed tool and auto wire choice", async () => {
-    const call = { type: "tool_use", id: "image-before-submission", name: "canvas_generate_image", input: { prompt: "Change the collar only." } };
-    const output = JSON.stringify({ ok: false, data: { phase: "image_preflight", submitted: false, expectedMode: "update" } });
+test("canvas continuation preserves the exact read/result pair with minimal tools and auto wire choice", async () => {
+    const call = { type: "tool_use", id: "read-before-submission", name: "look_at_images", input: { image_ids: ["edit-original-0"] } };
+    const output = JSON.stringify({ ok: true, image_ids: ["edit-original-0"] });
     const prepared = await prepareChatProfileInput({
         profile: "canvas-assistant", toolKey: "canvas-chat", tools: [],
-        profileContext: { stage: "repair-image-contract", userText: "只改领口颜色。", editContext: { selectedTarget: { mode: "original", baseImageIds: ["edit-original-0"] } } },
+        profileContext: { stage: "continue", currentUserText: "只改领口颜色。", imageCatalog: [{ id: "edit-original-0", label: "图1", kind: "upload", previewed: true }], previewImageIds: ["edit-original-0"], newCreation: false, focusImageId: "edit-original-0", lockedImageId: "edit-original-0", workNote: "" },
         input: [{ role: "user", content: "只改领口颜色。" }, { type: "claude_assistant", content: [call] }, { type: "function_call_output", call_id: call.id, output }],
     }, async () => "Preserve the requested garment structure.");
     const wire = buildClaudeMessagesRequest(prepared.input, { modelId: model.model_id, maxTokens: 2048, thinking: false });
     expect(wire.tool_choice).toEqual({ type: "auto" });
-    expect(wire.tools?.map(tool => tool.name)).toEqual(["canvas_generate_image"]);
+    expect(wire.tools?.map(tool => tool.name)).toEqual(["edit_image", "generate_video", "canvas_get_state"]);
     expect(wire.messages.slice(-2)).toEqual([{ role: "assistant", content: [call] }, { role: "user", content: [{ type: "tool_result", tool_use_id: call.id, content: output }] }]);
 });
 

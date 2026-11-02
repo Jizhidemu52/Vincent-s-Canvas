@@ -6,7 +6,11 @@ import { canvasServerThumbnailUrl, type ImageThumbnailEdge } from "@/lib/canvas/
 import type { ImageThumbnailLease } from "@/lib/image-thumbnail-cache";
 
 const code = ts.transpileModule(readFileSync(new URL("../src/components/canvas/use-canvas-image-thumbnail.ts", import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText;
-function harness(thumbnail: () => Promise<ImageThumbnailLease | null>, original = async () => "blob:original") {
+function harness(
+    thumbnail: () => Promise<ImageThumbnailLease | null>,
+    original = async () => "blob:original",
+    serverThumbnail = async (_url: string, _signal: AbortSignal): Promise<ImageThumbnailLease> => ({ url: "blob:server-thumbnail", release() {} }),
+) {
     const values: any[] = [];
     let cursor = 0;
     const dependenciesBefore = new Map<number, unknown[]>();
@@ -15,6 +19,8 @@ function harness(thumbnail: () => Promise<ImageThumbnailLease | null>, original 
     let edge: ImageThumbnailEdge | 0 = 0;
     let originalCalls = 0;
     let thumbnailCalls = 0;
+    let serverThumbnailCalls = 0;
+    let owner = "employee-a:user";
     const effects: Array<{ index: number; run: () => void | (() => void) }> = [];
     const module = { exports: {} as any };
     const dependencies: Record<string, unknown> = {
@@ -41,6 +47,11 @@ function harness(thumbnail: () => Promise<ImageThumbnailLease | null>, original 
         "@/services/image-storage": { resolveImageUrl: async () => { originalCalls++; return original(); } },
         "@/services/image-thumbnails": { acquireImageThumbnail: () => { thumbnailCalls++; return thumbnail(); } },
         "@/lib/canvas/canvas-image-thumbnail": { canvasServerThumbnailUrl },
+        "@/stores/use-user-store": { useUserStore: (selector: (state: { owner: string }) => unknown) => selector({ owner }) },
+        "@/services/server-image-thumbnails": {
+            serverImagePreviewOwner: (state: { owner: string }) => state.owner,
+            acquireServerImageThumbnail: (url: string, signal: AbortSignal) => { serverThumbnailCalls++; return serverThumbnail(url, signal); },
+        },
     };
     new Function("require", "module", "exports", code)((name: string) => dependencies[name], module, module.exports);
     const node: CanvasNodeData = { id: "node", type: CanvasNodeType.Image, title: "原图", position: { x: 0, y: 0 }, width: 400, height: 300, metadata: { storageKey: "image:original", content: "blob:persisted-original", naturalWidth: 4000, naturalHeight: 3000 } };
@@ -57,6 +68,7 @@ function harness(thumbnail: () => Promise<ImageThumbnailLease | null>, original 
     };
     return {
         node,
+        setOwner: (value: string) => { owner = value; },
         run: async (nextEdge: ImageThumbnailEdge | 0 = edge, load = true) => {
             edge = nextEdge;
             render();
@@ -68,7 +80,7 @@ function harness(thumbnail: () => Promise<ImageThumbnailLease | null>, original 
             render();
         },
         unmount: () => cleanups.forEach(cleanup => cleanup()),
-        state: () => ({ preview: render(), originalCalls, thumbnailCalls }),
+        state: () => ({ preview: render(), originalCalls, thumbnailCalls, serverThumbnailCalls }),
     };
 }
 
@@ -177,19 +189,67 @@ test("missing and rejected original reads show error and a later manual retry ca
     expect(h.state().originalCalls).toBe(3);
 });
 
-test("server derivative failure uses the original and source changes clear the error", async () => {
+test("server derivative decode failure stays lightweight; manual retry and source change clear the error", async () => {
     const h = harness(async () => null);
     h.node.metadata = { content: "/api/assets/12345678-1234-1234-1234-123456789012/content", naturalWidth: 2000, naturalHeight: 1000 };
     await h.run(256);
-    expect(h.state().preview.url).toContain("/thumb?w=256");
+    expect(h.state().preview.url).toBe("blob:server-thumbnail");
     expect(h.state().originalCalls).toBe(0);
     h.state().preview.onError(); await h.run();
-    expect(h.state().preview.thumbnail).toBe(false);
-    h.state().preview.onError(); await h.run();
-    expect(h.state().preview.failed).toBe(true);
+    expect(h.state().preview).toMatchObject({ thumbnail: true, failed: true });
+    expect(h.state().originalCalls).toBe(0);
+    expect(h.state().serverThumbnailCalls).toBe(1);
+    h.state().preview.retry(); await h.run();
+    expect(h.state().preview.failed).toBe(false);
+    expect(h.state().serverThumbnailCalls).toBe(2);
     h.node.metadata.content = "data:image/png;base64,new";
     await h.run();
     expect(h.state().preview.failed).toBe(false);
+    h.unmount();
+});
+
+test("pending and rejected cloud previews never resolve originals for a lightweight request", async () => {
+    const pending = Promise.withResolvers<ImageThumbnailLease>();
+    const h = harness(async () => null, async () => "blob:original", () => pending.promise);
+    h.node.metadata = { content: "/api/assets/12345678-1234-1234-1234-123456789012/content", naturalWidth: 2000, naturalHeight: 1000 };
+    await h.run(256);
+    expect(h.state().preview).toMatchObject({ url: "", failed: false });
+    expect(h.state().originalCalls).toBe(0);
+    pending.reject(new Error("preview generation timeout"));
+    await h.run();
+    expect(h.state().preview).toMatchObject({ url: "", failed: true });
+    expect(h.state().originalCalls).toBe(0);
+    h.unmount();
+});
+
+test("an explicit original request may bypass a failed cloud bootstrap", async () => {
+    const h = harness(async () => null, async () => "blob:original", async () => { throw new Error("thumbnail unavailable"); });
+    h.node.metadata = { content: "/api/assets/12345678-1234-1234-1234-123456789012/content", naturalWidth: 2000, naturalHeight: 1000 };
+    await h.run(0);
+    expect(h.state().preview).toMatchObject({ url: "blob:original", thumbnail: false, failed: false });
+    expect(h.state().originalCalls).toBe(1);
+    h.unmount();
+});
+
+test("employee changes discard displayed cloud leases and late pending previews", async () => {
+    const next = Promise.withResolvers<ImageThumbnailLease>();
+    let calls = 0, releases = 0;
+    const h = harness(async () => null, async () => "blob:original", async () => ++calls === 1
+        ? { url: "blob:employee-a", release: () => { releases++; } }
+        : next.promise);
+    h.node.metadata = { content: "/api/assets/12345678-1234-1234-1234-123456789012/content", naturalWidth: 2000, naturalHeight: 1000 };
+    await h.run(256);
+    expect(h.state().preview.url).toBe("blob:employee-a");
+    h.setOwner("employee-b:user");
+    await h.run(256);
+    expect(h.state().preview).toMatchObject({ url: "", placeholderUrl: "" });
+    expect(releases).toBe(1);
+    h.unmount();
+    next.resolve({ url: "blob:employee-b-late", release: () => { releases++; } });
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    expect(h.state().preview.url).toBe("");
+    expect(h.state().originalCalls).toBe(0);
+    expect(releases).toBe(2);
 });
 
 test("unsupported thumbnail creation falls back to the original resolver", async () => {

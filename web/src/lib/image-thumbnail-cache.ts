@@ -20,13 +20,25 @@ export function createImageThumbnailCache(deps: Dependencies, maxPending = 64) {
     const pending = new Map<string, { promise: Promise<Blob | null>; signals: Array<AbortSignal | undefined>; write?: Promise<unknown> }>();
     const urls = new Map<string, { url: string; references: number }>();
     const queue: Array<{ interested: () => boolean; run: () => Promise<void>; cancel: () => void }> = [];
+    const admissionWaiters = new Set<() => void>();
     let running = false;
+    const admitWaiting = () => {
+        const slots = Math.max(0, maxPending - queue.length);
+        for (const wake of [...admissionWaiters].slice(0, slots)) wake();
+    };
+    const waitForAdmission = (signal?: AbortSignal) => new Promise<void>(resolve => {
+        const wake = () => { admissionWaiters.delete(wake); signal?.removeEventListener("abort", wake); resolve(); };
+        admissionWaiters.add(wake);
+        signal?.addEventListener("abort", wake, { once: true });
+        if (signal?.aborted || !deps.isCurrent()) wake();
+    });
     const pruneCanceled = () => {
         for (let index = queue.length - 1; index >= 0; index--) {
             if (queue[index].interested()) continue;
             const [task] = queue.splice(index, 1);
             task.cancel();
         }
+        admitWaiting();
     };
     const drain = () => {
         pruneCanceled();
@@ -35,6 +47,7 @@ export function createImageThumbnailCache(deps: Dependencies, maxPending = 64) {
         deps.schedule(() => {
             pruneCanceled();
             const task = queue.shift();
+            admitWaiting();
             if (!task) { running = false; return; }
             void task.run().finally(() => { running = false; drain(); });
         });
@@ -57,44 +70,55 @@ export function createImageThumbnailCache(deps: Dependencies, maxPending = 64) {
             let entry = urls.get(key);
             if (!entry) {
                 let job = pending.get(key);
-                if (!job) {
-                    if (queue.length >= maxPending) return null;
-                    const signals = [signal];
-                    const interested = () => signals.some((item) => !item?.aborted);
-                    let resolveWork!: (blob: Blob | null) => void;
-                    const work = new Promise<Blob | null>((resolve) => { resolveWork = resolve; });
-                    job = { promise: work, signals };
-                    pending.set(key, job);
-                    queue.push({
-                        interested,
-                        cancel: () => {
-                            if (pending.get(key)?.promise === work) pending.delete(key);
-                            resolveWork(null);
-                        },
-                        run: async () => {
-                            try {
-                                if (!current() || !interested()) return resolveWork(null);
-                                // Cache failure must never make an original image unavailable.
-                                const cached = await deps.read(key).catch(() => null);
-                                if (!current() || !interested()) return resolveWork(null);
-                                const blob = cached || await deps.generate(request);
-                                if (!current()) return resolveWork(null);
-                                if (blob && !cached) {
-                                    job!.write = deps.write(key, blob).catch(() => undefined);
-                                    await job!.write;
-                                }
-                                resolveWork(current() ? blob : null);
-                            } catch { resolveWork(null); }
-                        },
-                    });
-                    void work.finally(() => { if (pending.get(key)?.promise === work) pending.delete(key); });
-                    drain();
-                } else job.signals.push(signal);
-                const blob = await job.promise;
-                if (!current()) { if (!deps.isCurrent()) clearUrls(); return null; }
-                if (!blob || signal?.aborted) return null;
-                entry = urls.get(key);
-                if (!entry) { entry = { url: deps.createUrl(blob), references: 0 }; urls.set(key, entry); }
+                // Queue pressure is not a missing derivative. Wait without decoding
+                // or reading any Blob, instead of making callers load full originals.
+                while (!entry && !job && queue.length >= maxPending) {
+                    await waitForAdmission(signal);
+                    if (!current() || signal?.aborted) return null;
+                    pruneCanceled();
+                    entry = urls.get(key);
+                    job = pending.get(key);
+                }
+                // Another consumer may have completed this key while admission waited.
+                if (!entry) {
+                    if (!job) {
+                        const signals = [signal];
+                        const interested = () => current() && signals.some((item) => !item?.aborted);
+                        let resolveWork!: (blob: Blob | null) => void;
+                        const work = new Promise<Blob | null>((resolve) => { resolveWork = resolve; });
+                        job = { promise: work, signals };
+                        pending.set(key, job);
+                        queue.push({
+                            interested,
+                            cancel: () => {
+                                if (pending.get(key)?.promise === work) pending.delete(key);
+                                resolveWork(null);
+                            },
+                            run: async () => {
+                                try {
+                                    if (!current() || !interested()) return resolveWork(null);
+                                    // Cache failure must never make an original image unavailable.
+                                    const cached = await deps.read(key).catch(() => null);
+                                    if (!current() || !interested()) return resolveWork(null);
+                                    const blob = cached || await deps.generate(request);
+                                    if (!current()) return resolveWork(null);
+                                    if (blob && !cached) {
+                                        job!.write = deps.write(key, blob).catch(() => undefined);
+                                        await job!.write;
+                                    }
+                                    resolveWork(current() ? blob : null);
+                                } catch { resolveWork(null); }
+                            },
+                        });
+                        void work.finally(() => { if (pending.get(key)?.promise === work) pending.delete(key); });
+                        drain();
+                    } else job.signals.push(signal);
+                    const blob = await job.promise;
+                    if (!current()) { if (!deps.isCurrent()) clearUrls(); return null; }
+                    if (!blob || signal?.aborted) return null;
+                    entry = urls.get(key);
+                    if (!entry) { entry = { url: deps.createUrl(blob), references: 0 }; urls.set(key, entry); }
+                }
             }
             entry.references += 1;
             const leased = entry;

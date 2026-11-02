@@ -12,7 +12,7 @@ async function fixture(stale: boolean, creditsEnabled: boolean, invalidAfterRefr
   const queries: string[] = [];
   let connections = 0, reads = 0;
   // Deliberately differs from the host month: database time owns this decision.
-  const row = { id: "user", session_id: "session", auth_provider: "local", role: "designer", status: "active", is_guest: false,
+  const row = { id: "user", session_id: "session", auth_provider: "local", session_remaining_seconds: 600, role: "designer", status: "active", is_guest: false,
     credit_period_start: stale ? "2031-12-01" : "2032-01-01", current_credit_period_start: "2032-01-01" };
   const query = async (sql: string) => {
     queries.push(sql);

@@ -87,9 +87,9 @@ test("historical manual numbering restarts per message while aliases retain each
     expect(historyText).not.toContain("图片3");
     expect(result.references.find(item => item.id === "history-old-a-0")?.storageKey).toBe("image:older-shared");
     expect(result.references.find(item => item.id === "history-old-b-0")?.storageKey).toBe("image:newer-shared");
-    expect(result.references.find(item => item.id === "history-old-a-2")?.storageKey).toBe("image:canvas-a");
+    expect(result.references.find(item => item.id === "history-old-a-2")).toBeUndefined();
     expect(images(result.messages)).toEqual([
-        await preview(older), await preview(ref("other")), await preview(ref("canvas-a")), await preview(newer), await preview(ref("canvas-b")),
+        await preview(older), await preview(ref("other")), await preview(newer), await preview(ref("canvas-b")),
     ]);
     expect(JSON.stringify(result.currentContent)).toContain("消息 feedback · 本轮图片1 · 用户参考图 · current-shared，referenceNodeIds 可显式使用 shared");
     expect(images([{ role: "user", content: result.currentContent }])).toEqual([await preview(latest)]);
@@ -143,8 +143,8 @@ test("a broken image is disclosed without dropping valid images or feedback", as
 test("one shared image budget prioritizes current uploads then recent versions, and discloses omitted media", async () => {
     const result = await buildCanvasConversationHistory(Array.from({ length: 28 }, (_, index) => ({ id: `m${index}`, role: "user", text: `feedback ${index}`, references: [ref(`image${index}`)] })), { ...current, references: [ref("current")] }, preview,
         [{ type: "text", text: "自动画布帧" }, { type: "image_url", image_url: { url: "data:image/png;base64,AAAA" } }]);
-    expect(images([...result.messages, { role: "user", content: result.currentContent }])).toHaveLength(20);
-    expect(result.summary).toMatchObject({ historyMessages: 24, omittedMessages: 4, omitted: 6, failed: 0 });
+    expect(images([...result.messages, { role: "user", content: result.currentContent }])).toHaveLength(5);
+    expect(result.summary).toMatchObject({ historyMessages: 24, omittedMessages: 4, omitted: 21, failed: 0 });
     expect(images([{ role: "user", content: result.currentContent }])).toEqual([await preview(ref("current"))]);
     expect(JSON.stringify(result.messages)).toContain("未提供图片");
 });

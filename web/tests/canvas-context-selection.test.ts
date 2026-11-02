@@ -8,6 +8,7 @@ import { cloneCanvasNodeGraph, copyCanvasNodeGraph } from "@/lib/canvas/canvas-n
 import { canvasRepeatCopyOffset } from "@/lib/canvas/canvas-drag-copy";
 import { removeCanvasGroupMembers } from "@/lib/canvas/canvas-node-groups";
 import { canvasGenerationRunsForNodes } from "@/lib/canvas/canvas-project-async-lifecycle";
+import { reconcileCanvasGenerationStackNodes } from "@/lib/canvas/canvas-generation-stack";
 import { canvasImageExportSelection } from "@/lib/canvas/canvas-image-export-selection";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type CanvasNodeGroup, type ContextMenuState } from "@/types/canvas";
 
@@ -70,7 +71,7 @@ function pageHarness(initialNodes = [node("a"), node("b", 100), node("c", 300)],
         React, lastHistoryRef: { current: { nodes: initialNodes } }, historyRef: { current: { past: [] } }, undoCanvas: () => {}, message: { info: () => {}, destroy: () => {} },
         CanvasNodeType, copyCanvasNodeGraph, cloneCanvasNodeGraph, canvasRepeatCopyOffset, repeatCopyRef: { current: null }, removeCanvasGroupMembers, clipboardRef,
         flushPendingHistory: () => true, generationRequestsRef: { current: new Map() }, generationDispatchLocksRef: { current: new Set() }, stopGenerationByRunningId: (...args: unknown[]) => stopped.push(args),
-        canvasGenerationRunsForNodes, NODE_STATUS_LOADING: "loading", modal: { confirm: (value: { onOk: () => void }) => confirmations.push(value) },
+        canvasGenerationRunsForNodes, reconcileCanvasGenerationStackNodes, NODE_STATUS_LOADING: "loading", modal: { confirm: (value: { onOk: () => void }) => confirmations.push(value) },
         deleteNodes: (...args: unknown[]) => remove(...args),
         nodesRef: { get current() { return state.nodes; }, set current(value) { state.nodes = value; } }, connectionsRef: { get current() { return state.connections; }, set current(value) { state.connections = value; } },
         groupsRef: { get current() { return state.groups; }, set current(value) { state.groups = value; } }, selectedNodeIdsRef: { get current() { return state.selectedNodeIds; } },
@@ -102,6 +103,22 @@ function pageHarness(initialNodes = [node("a"), node("b", 100), node("c", 300)],
 }
 
 describe("page context-menu input and selection", () => {
+    test.each([{}, { shiftKey: true }, { ctrlKey: true }, { metaKey: true }])("a locked-node primary click updates selection without starting a drag, with modifiers %j", modifiers => {
+        const locked = { ...node("a"), metadata: { ...node("a").metadata, locked: true } };
+        const page = pageHarness([locked, node("b", 100)], ["a", "b"]);
+        const dragRef = { current: { isDraggingNode: false } };
+        const historyPausedRef = { current: false };
+        const down = callback("handleNodeMouseDown", { ...page.scope, connectingParams: null,
+            draggingGroupRef: { current: false }, nodeById: new Map(page.state.nodes.map(item => [item.id, item])),
+            dragRef, historyPausedRef, collectCanvasDragNodes: () => { throw new Error("Locked node must not start a drag"); } });
+        const before = structuredClone(page.state.nodes);
+        down(pointer(modifiers, 0), "a");
+        expect(page.state.selectedNodeIds).toEqual(new Set(Object.keys(modifiers).length ? ["b"] : ["a"]));
+        expect(dragRef.current).toEqual({ isDraggingNode: false });
+        expect(historyPausedRef.current).toBe(false);
+        expect(page.state.nodes).toEqual(before);
+    });
+
     test.each([false, true])("right mousedown/up does not drag, pause history or open a panel (group proxy=%s)", throughGroup => {
         const page = pageHarness();
         const originalSelection = page.state.selectedNodeIds;
@@ -149,6 +166,7 @@ describe("page context-menu input and selection", () => {
         const changes: unknown[] = [], projected: number[][] = [];
         const start = callback("handleConnectStart", {
             connectionInitialPreviewRef, connectionTargetNodeIdRef,
+            connectingParamsRef: { current: null }, connectionStartRef: { current: null }, connectionPointerRef: { current: null }, connectNodes() {},
             screenToCanvas: (x: number, y: number) => { projected.push([x, y]); return { x: x / 2, y: y / 2 }; },
             setConnecting: (value: unknown) => { changes.push(value); }, setConnectionTargetNodeId: (value: unknown) => { changes.push(value); },
             setSelectedConnectionId: (value: unknown) => { changes.push(value); },
@@ -165,6 +183,34 @@ describe("page context-menu input and selection", () => {
         expect(connectionInitialPreviewRef.current).toEqual({ handle: { nodeId: "a", handleType }, mouseWorld: { x: 120, y: 80 } });
         expect(changes).toEqual([{ nodeId: "a", handleType }, null, null]);
         expect(connectionTargetNodeIdRef.current).toBeNull();
+    });
+});
+
+describe("page text font-size sizing", () => {
+    test.each([
+        { name: "overflowing larger text grows", height: 100, currentFont: 14, nextFont: 32, scroll: 240, client: 68, expected: 272 },
+        { name: "a larger user-sized node stays large", height: 500, currentFont: 14, nextFont: 32, scroll: 468, client: 468, expected: 500 },
+        { name: "larger text that fits keeps its size", height: 100, currentFont: 14, nextFont: 16, scroll: 68, client: 68, expected: 100 },
+        { name: "a font decrease does not shrink or grow", height: 200, currentFont: 32, nextFont: 14, scroll: 240, client: 168, expected: 200 },
+        { name: "a locked node does not resize", height: 100, currentFont: 14, nextFont: 32, scroll: 240, client: 68, expected: 100, locked: true },
+    ])("$name", ({ height, currentFont, nextFont, scroll, client, expected, locked }) => {
+        const original = { ...node("text"), type: CanvasNodeType.Text, height, metadata: { content: "第一行\n第二行\n第三行", fontSize: currentFont, locked } };
+        const untouched = node("peer", 300);
+        const page = pageHarness([original, untouched], ["text"]);
+        const measured: Array<{ fontSize: string; lineHeight: string }> = [];
+        const style = { fontSize: `${currentFont}px`, lineHeight: `${Math.round(currentFont * 1.65)}px` };
+        const previous = { ...style };
+        const text = { style, get scrollHeight() { measured.push({ ...style }); return scroll; }, clientHeight: client };
+        const resize = callback("handleFontSizeChange", { ...page.scope, CSS: { escape: (id: string) => id },
+            containerRef: { current: { querySelector: () => ({ querySelector: () => text }) } } });
+        resize("text", nextFont);
+        expect(page.state.nodes[0]).toMatchObject({ height: expected, width: original.width, position: original.position, metadata: { content: original.metadata.content, fontSize: nextFont } });
+        expect(page.state.nodes[1]).toBe(untouched);
+        expect(style).toEqual(previous);
+        if (nextFont > currentFont && !locked) {
+            expect(measured.length).toBeGreaterThan(0);
+            expect(measured.every(value => value.fontSize === `${nextFont}px` && value.lineHeight === `${Math.round(nextFont * 1.65)}px`)).toBe(true);
+        } else expect(measured).toEqual([]);
     });
 });
 

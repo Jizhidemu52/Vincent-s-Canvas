@@ -27,7 +27,7 @@ sqlTest("migrations 032-036 create their actual SQL schema and 034 backfills liv
             "users.deleted_at", "assets.thumbnail_256_key", "assets.thumbnail_1024_key",
             "tasks.available_at", "tasks.execution_token", "tasks.model_slot_token", "tasks.model_slot_expires_at", "tasks.poll_deadline_at",
             "canvas_documents.title", "canvas_documents.document_created_at", "canvas_documents.document_updated_at",
-            "canvas_documents.node_count", "canvas_documents.connection_count", "canvas_documents.cover_url",
+            "canvas_documents.node_count", "canvas_documents.connection_count", "canvas_documents.cover_url", "canvas_documents.persistence_conflict",
         ]) expect(names).toContain(name);
         const indexes = await fixture.db.query<{ indexname: string }>("SELECT indexname FROM pg_indexes WHERE schemaname='public'");
         for (const name of [
@@ -62,10 +62,37 @@ sqlTest("migrations 032-036 create their actual SQL schema and 034 backfills liv
     } finally { await fixture.close(); }
 }, 60_000);
 
+sqlTest("migration 045 copies only conflict metadata without changing employee documents, revisions or tombstones", async () => {
+    const fixture = await createIsolatedPostgres();
+    const owner = randomUUID(), other = randomUUID();
+    const conflict = { projectId: "original", paths: ["nodes", "chatSessions"], savedAt: "2026-11-02T00:00:00Z" };
+    const document = { ...largeCanvasDocument("existing-copy", randomUUID(), 12), persistenceConflict: conflict };
+    try {
+        await fixture.db.query("ALTER TABLE canvas_documents DROP COLUMN persistence_conflict");
+        await fixture.db.query("INSERT INTO users(id,username,display_name) VALUES($1,'conflict-owner','Owner'),($2,'conflict-other','Other')", [owner, other]);
+        await fixture.db.query(`INSERT INTO canvas_documents(owner_user_id,external_id,revision,deleted,document,updated_at)
+            VALUES($1,'existing-copy',7,false,$3::jsonb,'2026-10-19T00:00:00Z'),
+                  ($1,'no-conflict',3,false,$4::jsonb,'2026-10-20T00:00:00Z'),
+                  ($1,'deleted-copy',8,true,NULL,'2026-10-21T00:00:00Z'),
+                  ($2,'existing-copy',2,false,$4::jsonb,'2026-10-22T00:00:00Z')`,
+        [owner, other, JSON.stringify(document), JSON.stringify(largeCanvasDocument("no-conflict", randomUUID(), 12))]);
+        const untouched = "SELECT owner_user_id::text,external_id,revision::int,deleted,document,updated_at::text,title,document_created_at,document_updated_at,node_count,connection_count,cover_url FROM canvas_documents ORDER BY owner_user_id,external_id";
+        const before = (await fixture.db.query(untouched)).rows;
+        const migration = await readFile(new URL("../../src/migrations/045_canvas_conflict_summary.sql", import.meta.url), "utf8");
+        await fixture.db.query(`DO $canvas_conflict_migration$ BEGIN\n${migration}\nEND $canvas_conflict_migration$`);
+        expect((await fixture.db.query(untouched)).rows).toEqual(before);
+        const copied = (await fixture.db.query<{ owner_user_id: string; external_id: string; persistence_conflict: unknown }>(
+            "SELECT owner_user_id::text,external_id,persistence_conflict FROM canvas_documents",
+        )).rows;
+        expect(copied.find(row => row.owner_user_id === owner && row.external_id === "existing-copy")?.persistence_conflict).toEqual(conflict);
+        expect(copied.filter(row => row.owner_user_id !== owner || row.external_id !== "existing-copy").every(row => row.persistence_conflict === null)).toBe(true);
+    } finally { await fixture.close(); }
+}, 60_000);
+
 sqlTest("formal PostgreSQL canvas routes preserve complete detail while ACKs and metadata summaries remain compact and owner-scoped", async () => {
     const fixture = await createIsolatedPostgres();
     const owner = randomUUID(), other = randomUUID(), image = randomUUID();
-    const document = largeCanvasDocument("canvas-summary-sql", image, 12);
+    const document = { ...largeCanvasDocument("canvas-summary-sql", image, 12), persistenceConflict: { projectId: "original", paths: ["nodes"], savedAt: "2026-11-02T00:00:00Z" } };
     let server: ReturnType<express.Express["listen"]> | undefined;
     try {
         await fixture.db.query("INSERT INTO users(id,username,display_name) VALUES($1,'summary-owner','Owner'),($2,'summary-other','Other owner')", [owner, other]);
@@ -110,6 +137,7 @@ sqlTest("formal PostgreSQL canvas routes preserve complete detail while ACKs and
         expect(listed.text).not.toContain("canvas-history-delta-v1");
         expect(fixture.statements).toHaveLength(1);
         expect(fixture.statements[0]).toContain("jsonb_build_object");
+        expect(fixture.statements[0]).toContain("persistence_conflict");
         expect(fixture.statements[0]).not.toMatch(/\bdocument\b|jsonb_array/i);
         const detail = await api("GET", document.id);
         expect(detail.status).toBe(200);
@@ -122,8 +150,8 @@ sqlTest("formal PostgreSQL canvas routes preserve complete detail while ACKs and
         expect(changed.body.document).not.toHaveProperty("document");
         expect((await api("GET")).body.documents).toEqual([{ ...changed.body.document, summary: expectedCanvasSummary(updated) }]);
         expect((await api("GET", document.id)).body.document.document).toEqual(updated);
-        const persisted = await fixture.db.query("SELECT title,node_count,connection_count,cover_url FROM canvas_documents WHERE owner_user_id=$1 AND external_id=$2", [owner, document.id]);
-        expect(persisted.rows).toEqual([{ title: updated.title, node_count: 8, connection_count: 7, cover_url: `/api/assets/${compactHistoryAssetId}/content` }]);
+        const persisted = await fixture.db.query("SELECT title,node_count,connection_count,cover_url,persistence_conflict FROM canvas_documents WHERE owner_user_id=$1 AND external_id=$2", [owner, document.id]);
+        expect(persisted.rows).toEqual([{ title: updated.title, node_count: 8, connection_count: 7, cover_url: `/api/assets/${compactHistoryAssetId}/content`, persistence_conflict: null }]);
 
         fixture.statements.length = 0;
         expect((await api("GET", document.id, undefined, other, owner)).status).toBe(403);
@@ -138,7 +166,7 @@ sqlTest("formal PostgreSQL canvas routes preserve complete detail while ACKs and
         expect((await api("PUT", document.id, { baseRevision: 2, document: noAssets }, other)).status).toBe(409);
         expect((await api("GET", document.id)).body.document).toEqual({ ...changed.body.document, document: updated });
 
-        const candidates = [{ ...updated, title: "并发版本 A" }, { ...updated, title: "并发版本 B" }];
+        const candidates = ["A", "B"].map(name => ({ ...updated, title: `并发版本 ${name}`, persistenceConflict: { projectId: `original-${name}`, paths: ["nodes"], savedAt: "2026-11-02T01:00:00Z" } }));
         const concurrent = await Promise.all(candidates.map(candidate => api("PUT", document.id, { baseRevision: 2, document: candidate })));
         expect(concurrent.map(result => result.status).sort()).toEqual([200, 409]);
         const winnerIndex = concurrent.findIndex(result => result.status === 200);
@@ -147,7 +175,11 @@ sqlTest("formal PostgreSQL canvas routes preserve complete detail while ACKs and
         expect(winner.body.document).not.toHaveProperty("document");
         expect(conflict.body).toMatchObject({ error: "CANVAS_REVISION_CONFLICT", document: { revision: 3, document: candidates[winnerIndex] } });
         expect((await api("GET", document.id)).body.document).toEqual({ ...winner.body.document, document: candidates[winnerIndex] });
-        expect((await api("GET")).body.documents[0].summary.title).toBe(candidates[winnerIndex]!.title);
+        const winningSummary = (await api("GET")).body.documents[0].summary;
+        expect(winningSummary.title).toBe(candidates[winnerIndex]!.title);
+        expect(winningSummary.persistenceConflict).toEqual(candidates[winnerIndex]!.persistenceConflict);
+        expect((await fixture.db.query("SELECT persistence_conflict FROM canvas_documents WHERE owner_user_id=$1 AND external_id=$2", [owner, document.id])).rows)
+            .toEqual([{ persistence_conflict: candidates[winnerIndex]!.persistenceConflict }]);
 
         const deleted = await api("PUT", document.id, { baseRevision: 3, document: null });
         expect(deleted.status).toBe(200);
@@ -155,8 +187,8 @@ sqlTest("formal PostgreSQL canvas routes preserve complete detail while ACKs and
         expect(deleted.body.document).not.toHaveProperty("document");
         expect((await api("GET")).body.documents).toEqual([{ ...deleted.body.document, summary: null }]);
         expect((await api("GET", document.id)).body.document).toEqual({ ...deleted.body.document, document: null });
-        expect((await fixture.db.query("SELECT title,node_count,connection_count,cover_url FROM canvas_documents WHERE owner_user_id=$1 AND external_id=$2", [owner, document.id])).rows)
-            .toEqual([{ title: "", node_count: 0, connection_count: 0, cover_url: null }]);
+        expect((await fixture.db.query("SELECT title,node_count,connection_count,cover_url,persistence_conflict FROM canvas_documents WHERE owner_user_id=$1 AND external_id=$2", [owner, document.id])).rows)
+            .toEqual([{ title: "", node_count: 0, connection_count: 0, cover_url: null, persistence_conflict: null }]);
         for (const revision of [0, 3, 4]) {
             expect((await api("PUT", document.id, { baseRevision: revision, document: updated })).status).toBe(409);
         }

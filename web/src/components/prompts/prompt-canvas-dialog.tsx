@@ -45,7 +45,7 @@ export function PromptCanvasDialog({ templateId, title, identity, onClose }: { t
         }
     };
     // Modal's confirmLoading ignores onCancel; keep cancellation available while fetching.
-    return <Modal open title={t("插入到画布")} okText={t("插入并打开画布")} cancelText={t("取消")} okButtonProps={{ disabled: !hydrated, loading: pending }} onOk={() => void insert()} onCancel={close} maskClosable={!pending}>
+    return <Modal open title={t("插入到画布")} okText={t("插入并打开画布")} cancelText={t("取消")} okButtonProps={{ disabled: !hydrated, loading: pending }} onOk={() => void insert()} onCancel={close} mask={{ closable: !pending }}>
         <p className="mb-2 font-medium">{title}</p>
         <p className="mb-4 text-sm text-muted-foreground">{t("添加完整、可编辑的提示词文字节点，保留模板来源与参数。不覆盖已有内容，不自动生成；参考图仅保留可访问的资产编号，不复制图片。")}</p>
         <Select aria-label={t("目标画布")} className="w-full" value={target} onChange={setTarget} disabled={!hydrated || pending} loading={!hydrated} showSearch optionFilterProp="label" options={[{ value: "", label: t("新建提示词草稿画布") }, ...options]} />

@@ -2,7 +2,10 @@ import type { Dispatch, RefObject, SetStateAction } from "react";
 import { createImageSequence, prepareImageSequenceStep, runImageSequence } from "@/lib/canvas/canvas-image-sequence";
 import type { CanvasConnection, CanvasNodeData, CanvasNodeGroup } from "@/types/canvas";
 import type { CanvasGenerationResult } from "./canvas-shared-generation-runtime";
-import { imageWorkflowDefinitionKey, resolveImageWorkflow } from "@/lib/canvas/canvas-image-workflow";
+import { imageWorkflowDefinitionKey, imageWorkflowPlanStepKey, resolveImageWorkflow } from "@/lib/canvas/canvas-image-workflow";
+import { placeCanvasImageOutputs } from "@/lib/canvas/canvas-image-output-placement";
+import { NODE_DEFAULT_SIZE } from "@/constant/canvas";
+import { CanvasNodeType } from "@/types/canvas";
 import { nanoid } from "nanoid";
 
 export type ImageSequenceOptions = {
@@ -17,7 +20,7 @@ export type ImageSequenceOptions = {
     generate: (configId: string, lockKey: string, signal: AbortSignal) => Promise<CanvasGenerationResult | undefined>;
     stopGeneration: (configId: string) => void;
 };
-export type ImageSequenceSession = { groupId: string; nodeId?: string; controller: AbortController; configId?: string };
+export type ImageSequenceSession = { groupId: string; nodeId?: string; controller: AbortController; configId?: string; rerunStepId?: string; onlyStep?: boolean };
 
 function readGraph(options: ImageSequenceOptions) {
     // Zustand setters are synchronous; capture async generation results without waiting for a React effect.
@@ -30,7 +33,8 @@ export function addCanvasImageSequence(options: ImageSequenceOptions, sourceId: 
     const graph = readGraph(options);
     const source = graph.nodes.find(node => node.id === sourceId);
     if (!source) throw new Error("原图已移除，请重新选择");
-    const position = { x: Math.max(...graph.nodes.map(node => node.position.x + node.width)) + 120, y: source.position.y };
+    const configSize = NODE_DEFAULT_SIZE[CanvasNodeType.Config];
+    const position = placeCanvasImageOutputs(graph.nodes, [source], { width: steps.length * (configSize.width + 160) - 160, height: configSize.height }, source.position, 120);
     const created = createImageSequence(source, steps, position, model);
     options.nodes.current = [...graph.nodes, ...created.nodes]; options.setNodes(options.nodes.current);
     options.connections.current = [...graph.connections, ...created.connections]; options.setConnections(options.connections.current);
@@ -39,10 +43,10 @@ export function addCanvasImageSequence(options: ImageSequenceOptions, sourceId: 
 }
 
 /** Groups retain progress only; they never supply the execution order. */
-export function prepareCanvasImageWorkflow(options: ImageSequenceOptions, nodeId: string) {
+export function prepareCanvasImageWorkflow(options: ImageSequenceOptions, nodeId: string, rerunStepId?: string) {
     const graph = readGraph(options);
     const plan = resolveImageWorkflow(graph, nodeId);
-    const definitionKey = imageWorkflowDefinitionKey(plan, graph.nodes);
+    const definitionKey = imageWorkflowDefinitionKey(plan, graph.nodes, graph.connections);
     const ids = new Set(plan.steps.map(step => step.configNodeId));
     const existing = options.groups.current.find(group => group.imageSequence?.steps.some(step => ids.has(step.configNodeId)));
     const previous = existing?.imageSequence;
@@ -51,11 +55,24 @@ export function prepareCanvasImageWorkflow(options: ImageSequenceOptions, nodeId
         && (!previous.definitionKey || previous.definitionKey === definitionKey);
     // A graph edit must not conceal an unresolved paid attempt from the previous run.
     if (!samePlan && previous?.steps.some(step => step.status === "running" && ids.has(step.configNodeId))) throw new Error("原工作流仍有待核查任务，请先恢复原来的连线并核查结果，不能重新提交");
-    const keepProgress = samePlan && previous.status !== "success";
+    const invalidated = new Set<string>();
+    let legacyKeys: unknown[] = [];
+    try { if (previous?.definitionKey) legacyKeys = JSON.parse(previous.definitionKey)[1]; } catch { /* An unrecognized archive is not reusable evidence. */ }
+    const steps = plan.steps.map(step => {
+        const saved = previous?.steps.find(item => item.configNodeId === step.configNodeId && item.inputConfigId === step.inputConfigId);
+        const key = imageWorkflowPlanStepKey(plan, step, graph);
+        const legacyKey = legacyKeys[previous?.steps.findIndex(item => item.configNodeId === step.configNodeId) ?? -1];
+        const matchesLegacy = Array.isArray(legacyKey) && JSON.stringify(legacyKey) === JSON.stringify(JSON.parse(key).slice(0, 7)) && !graph.nodes.find(node => node.id === step.configNodeId)?.metadata?.manualImageReferences?.length;
+        const unchanged = saved && (saved.definitionKey === key || (!saved.definitionKey && (samePlan || matchesLegacy))) && previous?.sourceNodeId === plan.sourceNodeId;
+        const changed = !unchanged || step.configNodeId === rerunStepId || Boolean(step.inputConfigId && invalidated.has(step.inputConfigId));
+        if (changed) invalidated.add(step.configNodeId);
+        if (changed && saved?.status === "running") throw new Error("此步骤的原任务尚未确认，请先查询原结果；未重新提交。");
+        return changed ? { ...step, definitionKey: key, status: saved?.outputNodeId ? "stale" as const : "idle" as const, previousOutputIds: graph.connections.filter(edge => edge.kind === "generation-output" && edge.fromNodeId === step.configNodeId).map(edge => edge.toNodeId) } : { ...saved!, definitionKey: key };
+    });
     const group: CanvasNodeGroup = {
         id: existing?.id || `workflow-${nanoid()}`, title: existing?.title || "图片工作流", collapsed: false,
         nodeIds: [...new Set([...(existing?.nodeIds || []), ...ids])],
-        imageSequence: keepProgress ? { ...previous, definitionKey } : { ...plan, definitionKey, status: "idle", steps: plan.steps.map(step => ({ ...step, status: "idle" })) },
+        imageSequence: { ...plan, definitionKey, status: "idle", steps },
     };
     options.groups.current = [...options.groups.current.filter(item => item.id !== group.id).map(item => item.imageSequence?.steps.some(step => ids.has(step.configNodeId)) ? { ...item, imageSequence: undefined } : item), group];
     options.setGroups(options.groups.current);
@@ -68,10 +85,11 @@ export async function runCanvasImageSequence(current: () => ImageSequenceOptions
     const options = current();
     const startId = session.nodeId || options.groups.current.find(group => group.id === session.groupId)?.imageSequence?.steps[0]?.configNodeId;
     if (!startId) throw new Error("请先连接图片与配置节点");
-    session.groupId = prepareCanvasImageWorkflow(options, startId).id;
+    session.groupId = prepareCanvasImageWorkflow(options, startId, session.rerunStepId).id;
     onStart?.(session.groupId);
     await runImageSequence({
         signal: session.controller.signal,
+        onlyStepId: session.onlyStep ? session.rerunStepId : undefined,
         getGraph: () => readGraph(current()),
         getGroup: () => isCurrent() ? current().groups.current.find(group => group.id === session.groupId) : undefined,
         update: group => {

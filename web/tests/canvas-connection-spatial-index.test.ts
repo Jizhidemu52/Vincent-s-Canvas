@@ -4,6 +4,7 @@ import { createCanvasConnectionSpatialIndex, refreshCanvasConnectionSpatialIndex
 import { boundsForCanvasConnection, connectionIntersectsCanvasBounds } from "@/lib/canvas/canvas-connection-visibility";
 import type { CanvasBounds } from "@/lib/canvas/canvas-spatial-index";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "@/types/canvas";
+import { connectionGeometryPointAt, createConnectionGeometry } from "@/lib/canvas/canvas-connection-geometry";
 
 const node = (id: string, x: number, y: number): CanvasNodeData => ({
     id,
@@ -57,6 +58,18 @@ test("keeps extremely long connections as bounded global candidates", () => {
 
     expect(index.globalConnectionIds.has("very-long")).toBe(true);
     expect(selectCanvasSpatialIndexConnections(index, { minX: 0, minY: 0, maxX: 800, maxY: 500 }).map((item) => item.id)).toEqual(["very-long"]);
+});
+
+test("reverse routing stays indexed when only its outer corridor is visible", () => {
+    const from = node("from", 600, 400), to = node("to", 0, 400);
+    const nodes = new Map([[from.id, from], [to.id, to]]);
+    const edge = connection("reverse", from.id, to.id);
+    const geometry = createConnectionGeometry(from, to);
+    const middle = connectionGeometryPointAt(geometry, 0.5);
+    const bounds = { minX: middle.x - 10, minY: middle.y - 10, maxX: middle.x + 10, maxY: middle.y + 10 };
+    expect(boundsForCanvasConnection(from, to)).toEqual(geometry.bounds);
+    expect(connectionIntersectsCanvasBounds(from, to, bounds)).toBe(true);
+    expect(selectCanvasSpatialIndexConnections(createCanvasConnectionSpatialIndex([edge], nodes, 64), bounds)).toEqual([edge]);
 });
 
 test("reuses connection cells when endpoints keep the same geometry", () => {

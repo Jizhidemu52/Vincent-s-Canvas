@@ -1,11 +1,12 @@
 import type { AiTextMessage } from "@/services/api/image";
 import { imageReferenceLabel } from "@/lib/image-reference-prompt";
 import { seedanceReferenceLabel } from "@/lib/seedance-video";
-import type { ReferenceImage } from "@/types/image";
+import type { ImageReferenceItem, ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 import { CanvasNodeType, type CanvasConnection, type CanvasGenerationMode, type CanvasNodeData } from "@/types/canvas";
 import { getGenerationResourceNodes } from "@/lib/canvas/canvas-resource-references";
 import { canvasImageBaseName, canvasImageVersion } from "@/lib/canvas/canvas-image-filename";
+import { resolveCanvasImageReferences } from "@/lib/canvas/canvas-image-references";
 
 export type NodeGenerationContext = {
     prompt: string;
@@ -42,7 +43,19 @@ export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData
         }
     }
     if (sourceNode?.type === CanvasNodeType.Config && Boolean(sourceNode.metadata?.composerContent?.trim())) {
-        return buildComposerGenerationContext(inputs, prompt);
+        const images = resolveCanvasImageReferences(sourceNode, nodes, connections);
+        const excluded = new Set(sourceNode.metadata?.excludedConnectedImageReferenceKeys || []);
+        const aliases = [
+            ...inputs.flatMap(input => input.image && !excluded.has(`node:${input.nodeId}`) ? [{ image: input.image, ids: [input.nodeId, `node:${input.nodeId}`] }] : []),
+            ...(sourceNode.metadata?.manualImageReferences || []).map(image => ({
+                image: { id: image.id, name: image.name, type: image.type, dataUrl: image.content, storageKey: image.storageKey },
+                ids: [image.id, image.referenceKey, image.sourceNodeId].filter((id): id is string => Boolean(id)),
+            })),
+        ];
+        return buildComposerGenerationContext([
+            ...inputs.filter(input => input.type !== "image"),
+            ...images.map(image => ({ nodeId: image.id, type: "image" as const, title: image.name, image })),
+        ], prompt, images, aliases);
     }
 
     const upstreamText = inputs
@@ -65,12 +78,25 @@ export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNodeData
     };
 }
 
-function buildComposerGenerationContext(inputs: NodeGenerationInput[], prompt: string): NodeGenerationContext {
+function buildComposerGenerationContext(inputs: NodeGenerationInput[], prompt: string, images: ImageReferenceItem[], aliases: { image: ReferenceImage; ids: string[] }[]): NodeGenerationContext {
     const inputByNodeId = new Map(inputs.map((input) => [input.nodeId, input]));
-    const selectedInputs: NodeGenerationInput[] = [];
+    const selectedInputs: NodeGenerationInput[] = inputs.filter(input => input.type === "image");
     const labelByNodeId = new Map<string, string>();
     const textBlocks: string[] = [];
-    const counts = { image: 0, video: 0, audio: 0, text: 0 };
+    const counts = { image: images.length, video: 0, audio: 0, text: 0 };
+    // The tray is the authoritative request order, even when a later image is
+    // mentioned first or a reference is attached without an explicit token.
+    [...images.map(image => ({ image, ids: [image.id, image.referenceKey] })), ...aliases].forEach(({ image, ids }) => {
+        const index = images.findIndex(current => current.id === image.id || Boolean(current.storageKey && current.storageKey === image.storageKey) || Boolean(current.dataUrl && current.dataUrl === image.dataUrl));
+        if (index < 0) return;
+        const input = inputs.find(item => item.type === "image" && item.nodeId === images[index]!.id)!;
+        for (const alias of ids) {
+            const label = imageReferenceLabel(index);
+            if (labelByNodeId.has(alias) && labelByNodeId.get(alias) !== label) throw new Error("参考图片存在重复标识，请移除后重新选择。");
+            inputByNodeId.set(alias, input);
+            labelByNodeId.set(alias, label);
+        }
+    });
     let hasToken = false;
     let lastIndex = 0;
     let nextPrompt = "";
@@ -80,8 +106,9 @@ function buildComposerGenerationContext(inputs: NodeGenerationInput[], prompt: s
         hasToken = true;
         nextPrompt += prompt.slice(lastIndex, match.index);
         const input = inputByNodeId.get(match[1]);
+        if (!input) throw new Error("提示词中含有已失效引用，请移除该引用并重新选择素材。");
         if (input) {
-            let label = labelByNodeId.get(input.nodeId);
+            let label = labelByNodeId.get(match[1]) || labelByNodeId.get(input.nodeId);
             if (!label) {
                 label = generationLabel(input.type, counts[input.type]++);
                 labelByNodeId.set(input.nodeId, label);
@@ -102,11 +129,11 @@ function buildComposerGenerationContext(inputs: NodeGenerationInput[], prompt: s
     if (!hasToken) {
         return {
             prompt,
-            referenceImages: [],
+            referenceImages,
             referenceVideos: [],
             referenceAudios: [],
             textCount: 0,
-            imageCount: 0,
+            imageCount: referenceImages.length,
             videoCount: 0,
             audioCount: 0,
         };

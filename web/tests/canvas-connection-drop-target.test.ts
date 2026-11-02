@@ -28,7 +28,7 @@ test("chooses the topmost compatible node at the same drop location", () => {
     expect(result).toEqual({ nodeId: "top", isNearNode: true });
 });
 
-test("keeps the inside-node priority over a nearby handle", () => {
+test("prioritizes the actual port over the body of a nearby node", () => {
     const inside = node("inside", 100, 100);
     const handleOnly = node("handle", 200, 90);
 
@@ -40,7 +40,7 @@ test("keeps the inside-node priority over a nearby handle", () => {
         canConnect: () => true,
     });
 
-    expect(result).toEqual({ nodeId: "inside", isNearNode: true });
+    expect(result).toEqual({ nodeId: "handle", isNearNode: true });
 });
 
 test("keeps a near but incompatible node from becoming a drop target", () => {
@@ -52,5 +52,16 @@ test("keeps a near but incompatible node from becoming a drop target", () => {
         canConnect: () => false,
     });
 
+    expect(result).toEqual({ nodeId: null, isNearNode: true, invalidNodeId: "target" });
+});
+
+test("chooses the closest port independently of array order", () => {
+    for (const nodes of [[node("near", 100, 100), node("far", 130, 100)], [node("far", 130, 100), node("near", 100, 100)]]) {
+        expect(findCanvasConnectionDropTarget({ index: createCanvasSpatialIndex(nodes), world: { x: 105, y: 150 }, current: { nodeId: "source", handleType: "source" }, scale: 1, canConnect: () => true }).nodeId).toBe("near");
+    }
+});
+
+test("a hidden node and the originating port cannot become targets", () => {
+    const result = findCanvasConnectionDropTarget({ index: createCanvasSpatialIndex([node("source", 100, 100), node("hidden", 100, 100)]), world: { x: 100, y: 150 }, current: { nodeId: "source", handleType: "source" }, scale: 1, canConnect: () => true, isHiddenNode: node => node.id === "hidden" });
     expect(result).toEqual({ nodeId: null, isNearNode: true });
 });

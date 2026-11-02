@@ -19,7 +19,7 @@ export function CanvasImageDownloadDialog({ node, variants, onClose }: {
     const { message } = App.useApp();
     const theme = canvasThemes[useThemeStore(state => state.theme)];
     const [downloading, setDownloading] = useState<string | null>(null);
-    const [format, setFormat] = useState<"png" | "jpg">("png");
+    const [format, setFormat] = useState<"png" | "jpg">("jpg");
     const busy = useRef(false);
     const job = useRef<AbortController | null>(null);
     const [progress, setProgress] = useState<CanvasImageProgress | null>(null);
@@ -64,15 +64,15 @@ export function CanvasImageDownloadDialog({ node, variants, onClose }: {
     return (
         <Modal title={t("下载图片")} open centered footer={null} onCancel={close} width={480} destroyOnHidden>
             <div className="space-y-5 py-1">
+                <div><Button type="primary" block icon={<Download className="size-4" />} loading={downloading === "original"} disabled={downloading !== null && downloading !== "original"} onClick={() => void downloadCurrent("original")}>{t("下载原图（原格式，推荐）")}</Button><p className="mb-0 mt-2 text-xs leading-5" style={{ color: theme.node.muted }}>{t("保留当前图片的原始字节、像素尺寸与透明信息，不重新编码。")}</p></div>
                 {progress ? <div aria-live="polite"><Progress percent={progress.percent} size="small" /><p className="text-xs">{progress.label}</p><Button size="small" onClick={cancel}>{t("取消处理")}</Button></div> : null}
                 <div className="space-y-3">
-                    <p className="m-0 text-sm font-medium">{t("当前图片导出格式")}</p>
+                    <p className="m-0 text-sm font-medium">{t("格式转换（可选）")}</p>
                     <Radio.Group aria-label={t("图片下载格式")} value={format} disabled={downloading !== null} onChange={event => setFormat(event.target.value)} options={[{ value: "png", label: t("PNG（保留透明）") }, { value: "jpg", label: t("JPG（白底）") }]} />
-                    <Button type="primary" block icon={<Download className="size-4" />} loading={downloading === format} disabled={downloading !== null && downloading !== format} onClick={() => void downloadCurrent(format)}>{t("下载")}{format.toUpperCase()} {t(" 图片")}</Button>
+                    <Button block icon={<Download className="size-4" />} loading={downloading === format} disabled={downloading !== null && downloading !== format} onClick={() => void downloadCurrent(format)}>{t("下载")}{format.toUpperCase()} {t(" 图片")}</Button>
                     <p className="m-0 text-xs leading-5" style={{ color: theme.node.muted }}>{t("保持原图像素尺寸，不裁切、不修改画布原图。PNG 保留已有透明区域；JPG 为高质量有损格式，透明区域填充白色，不保证逐像素一致。格式转换时，动态图仅导出静态画面。")}</p>
                 </div>
                 {variants?.warning ? <p role="alert" className="m-0 text-sm leading-6" style={{ color: theme.toolbar.primary }}>{t("后处理提示：")}{variants.warning}</p> : null}
-                {!variants ? <div><Button block icon={<Download className="size-4" />} loading={downloading === "original"} disabled={downloading !== null && downloading !== "original"} onClick={() => void downloadCurrent("original")}>{t("下载原文件（不转换）")}</Button><p className="mb-0 mt-2 text-xs leading-5" style={{ color: theme.node.muted }}>{t("保留当前图片的原始格式与文件内容。")}</p></div> : null}
                 {options.map(option => (
                     <div key={option.key}>
                         <Button block icon={<Download className="size-4" />} loading={downloading === option.key} disabled={downloading !== null && downloading !== option.key} onClick={() => void download(option)}>

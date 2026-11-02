@@ -2,19 +2,42 @@ import { expect, test } from "bun:test";
 import { uiText } from "@/lib/i18n";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
-import { assertCanvasImageUploadSize, CANVAS_IMAGE_MAX_BYTES } from "@/lib/canvas/canvas-image-upload-limit";
+import { assertCanvasImageUploadSize, CANVAS_IMAGE_MAX_BYTES, CANVAS_LARGE_IMAGE_NOTICE, isLargeCanvasImage } from "@/lib/canvas/canvas-image-upload-limit";
 import { isCanvasAudioFile } from "@/pages/canvas/use-canvas-clipboard-drop";
 import { canvasImportGridPosition } from "@/lib/canvas/canvas-interaction-ux";
 import * as droppedImages from "@/lib/dropped-images";
+import { mapCanvasAsyncPool } from "@/lib/canvas/canvas-async-pool";
+import { fitNodeSize } from "@/lib/canvas/canvas-node-size";
+import { NODE_DEFAULT_SIZE } from "@/constant/canvas";
+import { CanvasNodeType } from "@/types/canvas";
+import { audioMetadata, imageMetadata, videoMetadata } from "@/pages/canvas/canvas-project-utils";
+
+const preparationCode = ts.transpileModule(readFileSync(new URL("../src/pages/canvas/canvas-import-media.ts", import.meta.url), "utf8"), {
+    compilerOptions: { target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.CommonJS },
+}).outputText;
+function prepareMedia(scope: Record<string, unknown>) {
+    const dependencies: Record<string, unknown> = {
+        nanoid: { nanoid: () => "imported" }, "@/constant/canvas": { NODE_DEFAULT_SIZE }, "@/types/canvas": { CanvasNodeType },
+        "@/lib/canvas/canvas-image-upload-limit": { assertCanvasImageUploadSize }, "@/lib/canvas/canvas-node-size": { fitNodeSize },
+        "@/services/image-storage": { uploadImage: scope.uploadImage }, "@/services/file-storage": { uploadMediaFile: scope.uploadMediaFile },
+        "./canvas-project-utils": { audioMetadata, imageMetadata, videoMetadata },
+    };
+    const module = { exports: {} as { prepareCanvasMediaNode: (file: File, position: { x: number; y: number }) => Promise<unknown> } };
+    new Function("require", "module", "exports", preparationCode)((name: string) => dependencies[name], module, module.exports);
+    return module.exports.prepareCanvasMediaNode;
+}
 
 const pageSource = ["project.tsx", "use-canvas-quick-generation.ts"]
     .map(file => readFileSync(new URL(`../src/pages/canvas/${file}`, import.meta.url), "utf8")).join("\n");
 const source = ts.createSourceFile("project.tsx", pageSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 function callback(name: string, scope: Record<string, unknown>): (...args: any[]) => any {
-    scope = { importLockRef: { current: false }, pastePositionRef: { current: null }, projectId: "upload-test", designProjectIdRef: { current: "upload-test" },
+    scope = { importQueueRef: { current: Promise.resolve() }, pastePositionRef: { current: null }, projectId: "upload-test", designProjectIdRef: { current: "upload-test" },
         useUserStore: { getState: () => ({ status: "authenticated", user: { id: "owner" } }) }, nanoid: () => "test-import", setImportPlaceholder() {},
-        getCanvasCenter: () => ({ x: 0, y: 0 }), isAudioFile: isCanvasAudioFile, canvasImportGridPosition,
+        getCanvasCenter: () => ({ x: 0, y: 0 }), getPastePosition: () => ({ x: 0, y: 0 }), isAudioFile: isCanvasAudioFile, canvasImportGridPosition, mapCanvasAsyncPool,
+        flushEditorDrafts() {}, flushPendingHistory() {}, setNodes() {}, nodesRef: { current: [] }, commitSelectedNodeIds() {}, setSelectedConnectionId() {},
+        loadQuickGenerationNode() {}, lastEditorSelectionRef: { current: "" }, editorOwner: "owner", setQuickGenerateReferences() {}, setDialogNodeId() {},
         ...scope, message: { open() {}, info() {}, destroy() {}, ...(scope.message as object || {}) } };
+    scope.prepareCanvasMediaNode ||= prepareMedia(scope);
     if (name === "handleDrop" || name === "handleImageInputChange") {
         scope.createImageFileNode ||= callback("createImageFileNode", scope);
         scope.importFiles = callback("importFiles", scope);
@@ -48,10 +71,18 @@ function callback(name: string, scope: Record<string, unknown>): (...args: any[]
     visit(source);
     if (!expression) throw new Error(`Missing callback: ${name}`);
     const code = ts.transpileModule(`const run = ${expression.getText(source)};`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
-    return new Function("scope", `with (scope) { ${code} return run; }`)(new Proxy({ uiText, Error, Array, Math, assertCanvasImageUploadSize, ...scope }, { has: () => true }));
+    return new Function("scope", `with (scope) { ${code} return run; }`)(new Proxy({ uiText, Error, Array, Math, Boolean, Set, CanvasNodeType, CANVAS_LARGE_IMAGE_NOTICE, isLargeCanvasImage, assertCanvasImageUploadSize, ...scope }, { has: () => true }));
 }
 const large = { name: "too-large.png", type: "image/png", size: CANVAS_IMAGE_MAX_BYTES + 1 };
 const small = { name: "normal.png", type: "image/png", size: 100 };
+
+test("large-image guidance considers file bytes and decoded pixels without changing the upload limit", () => {
+    expect(isLargeCanvasImage({ bytes: 10 * 1024 * 1024, width: 4000, height: 4000 })).toBe(false);
+    expect(isLargeCanvasImage({ bytes: 10 * 1024 * 1024 + 1 })).toBe(true);
+    expect(isLargeCanvasImage({ bytes: 100, width: 6000, height: 4000 })).toBe(true);
+    expect(isLargeCanvasImage({})).toBe(false);
+    expect(CANVAS_LARGE_IMAGE_NOTICE).toContain("原图保留");
+});
 
 test("20 MiB is accepted unchanged and even one extra byte is rejected with a clear limit", () => {
     expect(() => assertCanvasImageUploadSize(small)).not.toThrow();
@@ -127,7 +158,7 @@ test("multi-file drop imports every supported file in order and continues after 
     };
     const drop = callback("handleDrop", {
         screenToCanvas: () => ({ x: 10, y: 20 }), isAudioFile: (file: typeof small) => file.type.startsWith("audio/"),
-        createImageFileNode: create, createVideoFileNode: create, createAudioFileNode: create,
+        prepareCanvasMediaNode: async (file: typeof small, position: { x: number; y: number }) => { await create(file, position); return { id: file.name }; },
         message: { error: (text: string) => errors.push(text), warning: (text: string) => warnings.push(text) },
     });
     await drop({ dataTransfer: { files: [small, { ...small, name: "broken.png" }, { name: "notes.txt", type: "text/plain" }, { name: "clip.mp4", type: "video/mp4" }, { name: "audio.mp3", type: "audio/mpeg" }], types: ["Files"] }, preventDefault() {}, stopPropagation() {}, clientX: 0, clientY: 0 });

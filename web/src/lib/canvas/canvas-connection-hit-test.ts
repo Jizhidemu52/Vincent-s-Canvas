@@ -1,5 +1,4 @@
-import { createConnectionGeometry } from "@/lib/canvas/canvas-connection-geometry";
-import { boundsForCanvasConnection } from "@/lib/canvas/canvas-connection-visibility";
+import { createConnectionGeometry, type CanvasConnectionCurve } from "@/lib/canvas/canvas-connection-geometry";
 import type { CanvasBounds } from "@/lib/canvas/canvas-spatial-index";
 import type { CanvasConnection, CanvasNodeData, Position } from "@/types/canvas";
 
@@ -10,8 +9,6 @@ type CanvasConnectionHitTestOptions = {
     tolerance: number;
 };
 
-const curveSegments = 24;
-
 export function findCanvasConnectionHit({ connections, nodeById, world, tolerance }: CanvasConnectionHitTestOptions) {
     const thresholdSquared = Math.max(0, tolerance) ** 2;
 
@@ -20,14 +17,10 @@ export function findCanvasConnectionHit({ connections, nodeById, world, toleranc
         const from = nodeById.get(connection.fromNodeId);
         const to = nodeById.get(connection.toNodeId);
         if (!from || !to) continue;
-        if (!pointMayHitCanvasConnectionBounds(boundsForCanvasConnection(from, to), world, tolerance)) continue;
-        const points = createConnectionGeometry(from, to).points;
-        let previous = points.start;
-        for (let segment = 1; segment <= curveSegments; segment += 1) {
-            const current = pointOnCubic(points, segment / curveSegments);
-            if (distanceSquaredToSegment(world, previous, current) <= thresholdSquared) return connection;
-            previous = current;
-        }
+        const geometry = createConnectionGeometry(from, to);
+        if (!pointMayHitCanvasConnectionBounds(geometry.bounds, world, tolerance)) continue;
+        const flatnessSquared = Math.max(0.05, tolerance / 2) ** 2;
+        if (geometry.segments.some(segment => hitsCurve(segment, world, thresholdSquared, flatnessSquared))) return connection;
     }
     return null;
 }
@@ -42,16 +35,18 @@ export function pointMayHitCanvasConnectionBounds(bounds: CanvasBounds, world: P
     return world.x >= bounds.minX - padding && world.x <= bounds.maxX + padding && world.y >= bounds.minY - padding && world.y <= bounds.maxY + padding;
 }
 
-function pointOnCubic(
-    points: ReturnType<typeof createConnectionGeometry>["points"],
-    progress: number,
-): Position {
-    const inverse = 1 - progress;
-    return {
-        x: inverse ** 3 * points.start.x + 3 * inverse ** 2 * progress * points.controlOne.x + 3 * inverse * progress ** 2 * points.controlTwo.x + progress ** 3 * points.end.x,
-        y: inverse ** 3 * points.start.y + 3 * inverse ** 2 * progress * points.controlOne.y + 3 * inverse * progress ** 2 * points.controlTwo.y + progress ** 3 * points.end.y,
-    };
+function hitsCurve(curve: CanvasConnectionCurve, world: Position, thresholdSquared: number, flatnessSquared: number, depth = 0): boolean {
+    const { start, controlOne, controlTwo, end } = curve;
+    if (depth >= 12 || Math.max(distanceSquaredToSegment(controlOne, start, end), distanceSquaredToSegment(controlTwo, start, end)) <= flatnessSquared) {
+        return distanceSquaredToSegment(world, start, end) <= thresholdSquared;
+    }
+    const a = midpoint(start, controlOne), b = midpoint(controlOne, controlTwo), c = midpoint(controlTwo, end);
+    const d = midpoint(a, b), e = midpoint(b, c), center = midpoint(d, e);
+    return hitsCurve({ start, controlOne: a, controlTwo: d, end: center }, world, thresholdSquared, flatnessSquared, depth + 1)
+        || hitsCurve({ start: center, controlOne: e, controlTwo: c, end }, world, thresholdSquared, flatnessSquared, depth + 1);
 }
+
+const midpoint = (first: Position, second: Position): Position => ({ x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 });
 
 function distanceSquaredToSegment(point: Position, start: Position, end: Position) {
     const dx = end.x - start.x;

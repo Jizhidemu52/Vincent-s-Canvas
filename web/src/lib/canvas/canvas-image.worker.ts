@@ -4,6 +4,10 @@ import type { CanvasImageTask, CanvasImageWorkerMessage } from "./canvas-image-w
 const progress = (percent: number, label: string) => self.postMessage({ type: "progress", progress: { percent, label } } satisfies CanvasImageWorkerMessage);
 
 async function execute(task: CanvasImageTask) {
+    if (task.kind === "pdf") {
+        const { renderCanvasImagePdf } = await import("./canvas-image-pdf-render");
+        return renderCanvasImagePdf(task.pages, task.title, completed => progress(Math.round(completed / task.pages.length * 95), `正在后台生成 PDF：${completed}/${task.pages.length}`));
+    }
     if (typeof OffscreenCanvas === "undefined") { const error = new Error("后台画布不可用"); error.name = "CanvasImageCapabilityError"; throw error; }
     if (task.kind === "difference") {
         progress(5, "正在后台解码对比原图");
@@ -36,7 +40,7 @@ async function execute(task: CanvasImageTask) {
     try { bitmap = task.source instanceof Blob ? await createImageBitmap(task.source) : task.source; }
     catch { const error = new Error("此格式需要兼容解码"); error.name = "CanvasImageCapabilityError"; throw error; }
     try {
-        if (!bitmap.width || !bitmap.height || bitmap.width * bitmap.height > 20_000_000) throw new Error("单张图片超过 2000 万像素或尺寸无效，请先缩小图片");
+        if (!bitmap.width || !bitmap.height || bitmap.width * bitmap.height > 40_000_000) throw new Error("单张图片超过 4000 万像素或尺寸无效，请先缩小图片");
         const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
         const context = canvas.getContext("2d");
         if (!context) throw new Error("无法创建后台导出画布");
@@ -58,6 +62,6 @@ self.onmessage = async (event: MessageEvent<CanvasImageTask>) => {
         self.postMessage({ type: "error", message: error instanceof Error ? error.message : "图片处理失败", name: error instanceof Error ? error.name : "Error" } satisfies CanvasImageWorkerMessage);
     } finally {
         if (task.kind === "difference") { if (!(task.before instanceof Blob)) task.before.close(); if (!(task.after instanceof Blob)) task.after.close(); }
-        else if (!(task.source instanceof Blob)) task.source.close();
+        else if (task.kind === "encode" && !(task.source instanceof Blob)) task.source.close();
     }
 };

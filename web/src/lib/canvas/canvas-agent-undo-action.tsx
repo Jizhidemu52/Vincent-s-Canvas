@@ -35,6 +35,34 @@ export function executeCanvasAgentUndo(input: {
     return { ...result.snapshot, undoReport: result.report };
 }
 
+/** Reverse each tool batch separately so manual edits between tools are not captured. */
+export function undoCanvasAgentTurn(current: CanvasAgentSnapshot, records: CanvasAgentUndoRecord[], groups: CanvasNodeGroup[], requests: Iterable<RunningRequest>) {
+    const running = [...requests];
+    const remaining: CanvasAgentUndoRecord[] = [];
+    const report: CanvasAgentUndoReport = { applied: 0, conflicts: [], retryable: false };
+    let snapshot = current;
+    for (const record of records.toReversed()) {
+        const result = undoCanvasAgentBatch(snapshot, record, groups, running);
+        snapshot = result.snapshot;
+        report.applied += result.report.applied;
+        report.conflicts.push(...result.report.conflicts);
+        if (result.remaining) remaining.unshift(result.remaining);
+    }
+    report.retryable = remaining.length > 0;
+    return { snapshot, report, remaining };
+}
+
+export function executeCanvasAgentTurnUndo(input: {
+    current: CanvasAgentSnapshot; records: CanvasAgentUndoRecord[]; groups: CanvasNodeGroup[]; requests: Iterable<RunningRequest>;
+    commit: (snapshot: CanvasAgentSnapshot) => void; setRecords: (remaining: CanvasAgentUndoRecord[]) => void; feedback: UndoFeedback;
+}) {
+    const result = undoCanvasAgentTurn(input.current, input.records, input.groups, input.requests);
+    input.setRecords(result.remaining);
+    if (result.report.applied) input.commit(result.snapshot);
+    showCanvasAgentUndoResult(result.report, input.feedback);
+    return { ...result.snapshot, undoReport: result.report };
+}
+
 function showCanvasAgentUndoResult(report: CanvasAgentUndoReport, { modal, message }: UndoFeedback) {
     if (report.conflicts.length) modal.warning({
         title: report.applied ? "助手操作已部分撤销" : "助手操作暂未撤销",

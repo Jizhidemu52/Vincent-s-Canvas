@@ -30,7 +30,7 @@ function waitForMedia(target: HTMLImageElement | HTMLVideoElement, event: string
 
 function capture(source: CanvasImageSource, width: number, height: number) {
     if (!width || !height) throw new Error("媒体没有有效尺寸");
-    const scale = Math.min(1, 1280 / Math.max(width, height));
+    const scale = Math.min(1, 1024 / Math.max(width, height));
     const canvas = document.createElement("canvas");
     canvas.width = Math.max(1, Math.round(width * scale));
     canvas.height = Math.max(1, Math.round(height * scale));

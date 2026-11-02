@@ -66,11 +66,18 @@ export function useImageModelProfile(model: string) {
     return imageModelProfile(model, models, role);
 }
 
+export function nearestImageSize(size: string, choices: readonly string[]) {
+    const ratio = (value: string) => { const parts = /^(\d+(?:\.\d+)?)[x:](\d+(?:\.\d+)?)$/.exec(value); return parts ? Number(parts[1]) / Number(parts[2]) : null; };
+    const target = ratio(size);
+    if (!target) return choices.includes(size) ? size : choices[0]!;
+    const valid = choices.filter(value => ratio(value));
+    return valid.length ? valid.reduce((best, value) => Math.abs(Math.log(ratio(value)! / target)) < Math.abs(Math.log(ratio(best)! / target)) ? value : best) : choices[0]!;
+}
+
 export function normalizeImageModelSettings(config: Pick<AiConfig, "size" | "quality" | "count">, profile: ReturnType<typeof imageModelProfile>) {
     const rawSize = String(config.size || "").trim().toLowerCase();
     const size = profile.sizes.includes(rawSize) || (profile.customSize && /^[1-9]\d*x[1-9]\d*$/.test(rawSize)) || (profile.customAspect && /^[1-9]\d*:[1-9]\d*$/.test(rawSize)) ? rawSize
-        : profile.sizeConstraints ? (flexibleRatioSizes[rawSize] || profile.sizes[0]!)
-            : profile.kind === "standard" ? ({ "1:1": "1024x1024", "3:2": "1536x1024", "2:3": "1024x1536" }[rawSize] || profile.sizes[0]!) : profile.sizes[0]!;
+        : profile.sizeConstraints ? (flexibleRatioSizes[rawSize] || nearestImageSize(rawSize, profile.sizes)) : nearestImageSize(rawSize, profile.sizes);
     const rawQuality = String(config.quality || "").toLowerCase();
     const quality = profile.qualities.includes(rawQuality) ? rawQuality : profile.kind === "grok-image" ? "medium" : profile.kind === "gemini" ? "1k" : profile.qualities[0]!;
     const count = "1";

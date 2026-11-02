@@ -34,6 +34,10 @@ import { CanvasNodeType, type CanvasConnection, type CanvasGenerationMode, type 
 import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import { canvasToolKey, useToolConfig, useToolEnabled } from "@/hooks/use-tool-config";
 import { useImageModelProfile } from "@/lib/image-model-settings";
+import { resolveCanvasImageConfig } from "@/lib/canvas/canvas-generation-model";
+import { getRecentCanvasPrompts, rememberCanvasPrompt } from "@/lib/canvas/canvas-prompt-history";
+import { loadCanvasPromptTemplate } from "@/lib/canvas/canvas-prompt-template";
+import { createPromptActionGuard, promptActionIdentity } from "@/lib/prompt-template-reuse";
 
 export type CanvasNodeGenerationMode = CanvasGenerationMode;
 
@@ -62,6 +66,8 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const globalConfig = useEffectiveConfig();
     const estimate = useBusinessConfigStore((state) => state.estimate);
     const models = useBusinessConfigStore((state) => state.models);
+    const tools = useBusinessConfigStore(state => state.tools);
+    const modelsStatus = useBusinessConfigStore(state => state.status);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const mode = sharedConfig ? sharedConfig.metadata?.generationMode || "image" : defaultMode(node.type);
@@ -71,7 +77,13 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const baseProfile = useImageModelProfile(baseConfig.model);
     const hasTaskImageInput = (sharedConfig ? resolveCanvasNodeImageReferences(node, canvasNodes, canvasConnections) : imageInput?.references || []).length > 0 || Boolean(sharedConfig && resolveCanvasNodeImageReferences(sharedConfig, canvasNodes, canvasConnections).length > 0);
     const toolKey = canvasToolKey(mode, mode === "image" && hasTaskImageInput, baseProfile.kind);
-    const config = useToolConfig(baseConfig, toolKey);
+    const boundConfig = useToolConfig(baseConfig, toolKey);
+    let config = boundConfig;
+    let modelError = "";
+    if (mode === "image") {
+        try { config = modelsStatus === "ready" ? resolveCanvasImageConfig(boundConfig, { models, tools, prices: [] }, hasTaskImageInput).config : { ...boundConfig, model: "" }; }
+        catch (error) { config = { ...boundConfig, model: "" }; modelError = error instanceof Error ? error.message : "模型暂不可用"; }
+    }
     const profile = useImageModelProfile(config.model);
     const requiresPrompt = mode !== "image" || profile.requiresPrompt;
     const toolEnabled = useToolEnabled(toolKey);
@@ -83,6 +95,10 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const promptCommitRef = useRef(onPromptChange);
     promptCommitRef.current = onPromptChange;
     const promptDraft = useMemo(() => createCanvasNodePromptDraft(node.id, sourcePrompt, (nodeId, value) => promptCommitRef.current(nodeId, value)), [node.id]);
+    const promptHistoryIndex = useRef(-1);
+    const panelIdentity = useRef(node.id);
+    panelIdentity.current = node.id;
+    useEffect(() => { panelIdentity.current = node.id; return () => { panelIdentity.current = ""; }; }, [node.id]);
     const [canvasPickerOpen, setCanvasPickerOpen] = useState(false);
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
     const uploadInputRef = useRef<HTMLInputElement>(null);
@@ -115,10 +131,29 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
         promptDraft.change(value);
     };
 
+    const applyPromptTemplate = async (templateId: string) => {
+        const sourceId = node.id;
+        const guard = createPromptActionGuard(promptActionIdentity(), () => panelIdentity.current === sourceId);
+        try {
+            const { payload, metadata } = await loadCanvasPromptTemplate(templateId, guard.assert);
+            guard.assert();
+            if (metadata.generationMode !== mode) throw new Error("模板类型与当前节点不一致，请从提示词库的“插入画布”新建完整配置。");
+            if (sharedConfig) throw new Error("当前节点使用共享配置，请打开共享配置后套用模板。");
+            promptDraft.flush();
+            onConfigChange(node.id, { ...metadata, ...(mode === "image" ? { draftImageReferences: metadata.manualImageReferences || [] } : {}) });
+            updatePrompt(payload.template.prompt);
+            promptDraft.flush();
+            payload.warnings.forEach(warning => message.warning(warning));
+            message.success("已套用提示词、模型、参数和参考图，尚未生成");
+        } finally { guard.dispose(); }
+    };
+
     const submit = () => {
         const text = prompt.trim();
+        if (!config.model) { message.warning(modelError || (modelsStatus === "error" ? "模型列表加载失败，请打开模型选择器重试" : "正在加载模型，请稍候")); return; }
         if (!toolEnabled || (requiresPrompt && !text) || isRunning || !referenceValidation.valid || videoValidation || imageInput?.incompleteReferences) return;
         promptDraft.flush();
+        void rememberCanvasPrompt(text).catch(() => undefined);
         onGenerate(node.id, mode, requiresPrompt ? text : "");
         // Retain the draft for refinement and failed-task recovery.
     };
@@ -196,10 +231,21 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                 references={promptReferences}
                 onChange={updatePrompt}
                 onSubmit={submit}
+                onKeyDown={event => {
+                    if (event.nativeEvent.isComposing || event.key !== "ArrowUp" || event.currentTarget.selectionStart !== 0 || event.currentTarget.selectionEnd !== 0) return;
+                    event.preventDefault();
+                    const sourceId = node.id;
+                    void getRecentCanvasPrompts().then(items => { if (!items.length || !canvasNodes.some(item => item.id === sourceId)) return; promptHistoryIndex.current = Math.min(items.length - 1, promptHistoryIndex.current + 1); updatePrompt(items[promptHistoryIndex.current]!); }).catch(() => undefined);
+                }}
                 className="thin-scrollbar h-24 w-full resize-none rounded-lg border px-3 py-2 text-sm leading-5 outline-none"
                 style={{ background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text }}
                 placeholder={t(promptPlaceholder(mode, hasImageContent, hasTextContent))}
             /> : <p role="status" className="text-xs leading-5">{t("多图融合需要 2–4 张参考图，不使用提示词。原有描述会保留。")}</p>}
+
+            {mode === "text" && hasTextContent && node.metadata?.errorDetails?.startsWith("生成已停止，已保留当前文字") ? <div className="mt-2 flex items-center justify-between gap-2 text-xs" style={{ color: theme.node.muted }}>
+                <span>已保留停止前的文字；续写会新增一个结果，原文不变。</span>
+                <Button size="small" disabled={isRunning || !toolEnabled || !config.model || !config.textModel} onClick={() => { promptDraft.flush(); onGenerate(node.id, "text", `${node.metadata?.prompt || prompt}\n\n请接着当前已有文本继续写，不重复已写内容，保持原要求和行文风格。`); }}>继续生成</Button>
+            </div> : null}
 
             {mode === "image" ? <div className="mt-2">{imageInput?.usesSnapshot ? <section aria-label={t("已选参考图")} className="min-w-0 space-y-2 text-xs">
                 {imageInput.visibleReferences.length ? <span className="font-medium">{t("参考图")}</span> : null}
@@ -213,7 +259,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
 
             <div className="mt-2 flex min-w-0 items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-2">
-                    {requiresPrompt ? <CanvasPromptLibrary onSelect={updatePrompt} /> : null}
+                    {requiresPrompt ? <CanvasPromptLibrary onSelect={updatePrompt} onSelectTemplate={applyPromptTemplate} /> : null}
                     {mode === "image" ? (
                         <>
                             <ModelPicker toolKey={toolKey} config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="image" onMissingConfig={() => openConfigDialog(true)} />
@@ -244,7 +290,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                     className="!h-10 !min-w-16 shrink-0 !rounded-full !px-3"
                     danger={isRunning}
                     style={isRunning ? undefined : { background: theme.toolbar.primary, borderColor: theme.toolbar.primary }}
-                    disabled={!isRunning && (!toolEnabled || (mode === "text" && !config.textModel) || (requiresPrompt && !prompt.trim()) || !referenceValidation.valid || Boolean(videoValidation) || imageInput?.incompleteReferences)}
+                    disabled={!isRunning && (!toolEnabled || !config.model || (mode === "text" && !config.textModel) || (requiresPrompt && !prompt.trim()) || !referenceValidation.valid || Boolean(videoValidation) || imageInput?.incompleteReferences)}
                     onClick={() => (isRunning ? onStop(node.id) : submit())}
                     aria-label={isRunning ? t("停止生成") : t("生成")}
                 >

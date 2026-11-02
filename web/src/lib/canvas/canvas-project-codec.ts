@@ -1,8 +1,8 @@
 import type { CanvasHistorySnapshot, CanvasProject } from "@/stores/canvas/use-canvas-store";
 
 const historyFormat = "canvas-history-delta-v1";
-const snapshotKeys = ["nodes", "groups", "connections", "chatSessions", "activeChatId", "backgroundMode", "showImageInfo"] as const;
-const arrayKeys = new Set<string>(["nodes", "groups", "connections", "chatSessions"]);
+const snapshotKeys = ["nodes", "groups", "connections", "chatSessions", "activeChatId", "backgroundMode", "showImageInfo", "selectedNodeIds"] as const;
+const arrayKeys = new Set<string>(["nodes", "groups", "connections", "chatSessions", "selectedNodeIds"]);
 const allowedKeys = new Set<string>(snapshotKeys);
 type SnapshotKey = typeof snapshotKeys[number];
 type Fields = Partial<Record<SnapshotKey, unknown>>;
@@ -27,7 +27,7 @@ function equalValue(a: unknown, b: unknown): boolean {
 }
 
 function snapshot(project: CanvasProject): CanvasHistorySnapshot {
-    return Object.fromEntries(snapshotKeys.filter(key => project[key] !== undefined).map(key => [key, project[key]])) as CanvasHistorySnapshot;
+    return Object.fromEntries(snapshotKeys.filter(key => project[key] !== undefined).map(key => [key, project[key]])) as unknown as CanvasHistorySnapshot;
 }
 
 function arrayDelta(before: unknown[], after: unknown[]): ArrayDelta | undefined {
@@ -132,7 +132,7 @@ function applySnapshotDelta(before: CanvasHistorySnapshot, value: unknown): Canv
     const remove = (value.remove || []) as unknown[];
     const touched = [...Object.keys(set), ...Object.keys(arrays), ...remove];
     if (touched.some(key => typeof key !== "string" || !allowedKeys.has(key)) || new Set(touched).size !== touched.length) return invalid();
-    if (remove.some(key => key !== "groups")) return invalid();
+    if (remove.some(key => key !== "groups" && key !== "selectedNodeIds")) return invalid();
     if (Object.keys(arrays).some(key => !arrayKeys.has(key))) return invalid();
     for (const [key, field] of Object.entries(set)) if (arrayKeys.has(key) && !Array.isArray(field)) return invalid();
     if (Object.hasOwn(set, "activeChatId") && set.activeChatId !== null && typeof set.activeChatId !== "string") return invalid();

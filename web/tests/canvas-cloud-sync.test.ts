@@ -12,7 +12,7 @@ function project(id = "original", title = "完整画布"): CanvasProject {
         id, title, createdAt: "2026-09-17T00:00:00Z", updatedAt: "2026-09-17T00:00:00Z",
         nodes: [{ id: "image-a", type: "image", title: "原图", position: { x: -500, y: 280 }, width: 400, height: 220, metadata: { content: "/api/assets/11111111-2222-4333-8444-555555555555/content", prompt: "保留修改记录", naturalWidth: 2400, naturalHeight: 1320 } }],
         connections: [], chatSessions: [{ id: "chat", title: "历史", createdAt: "2026-09-17T00:00:00Z", updatedAt: "2026-09-17T00:00:00Z", messages: [{ id: "m1", role: "user", text: "保留完整讨论" }] }],
-        activeChatId: "chat", backgroundMode: "dots", showImageInfo: true, viewport: { x: 100, y: 200, k: 0.6 },
+        activeChatId: "chat", backgroundMode: "dots", showImageInfo: true, viewport: { x: 0, y: 0, k: 1 },
     } as CanvasProject;
 }
 const envelope = (document: CanvasProject | null, revision = 1, id = document?.id || "original"): CloudCanvasDocument => ({ id, revision, deleted: document === null, document: clone(document), updatedAt: "2026-09-17T01:00:00Z" });
@@ -107,7 +107,7 @@ test("style groups and their undo state persist through cloud save, fresh-device
     const main = restored.find(item => item.id === original.id)!;
     const copy = restored.find(item => item.id !== original.id)!;
     expect(main.groups).toEqual([{ id: "style-a", title: "款式 A", nodeIds: ["image-a"], collapsed: true }]);
-    expect(main.history?.past[0].groups).toEqual([]);
+    expect(main.history).toBeUndefined();
     expect(copy.groups).toEqual([{ id: "style-a", title: "另一设备名称", nodeIds: ["image-a"], collapsed: false }]);
     for (const item of restored) expect(item.nodes).toEqual(original.nodes);
 });
@@ -375,4 +375,28 @@ test("hydration confirmation neither advances unmatched local data nor uploads e
     expect(h.state.persisted.original).toEqual(known(original).original);
     expect(h.state.persisted.dirty).toBeUndefined();
     expect(h.state.putCalls).toHaveLength(0);
+});
+
+test("one rejected project cannot block independent canvases and partial saves cannot delete unrelated documents", async () => {
+    const first = project("first"), second = project("second"), untouched = project("untouched");
+    const h = harness([first, second, untouched], [], {});
+    h.state.beforePut = id => { if (id === first.id) throw new Error("fixture oversize"); };
+    await expect(h.engine.save([first, second], [first.id, second.id])).rejects.toThrow("fixture oversize");
+    expect(h.remote.get(second.id)?.document?.title).toBe(second.title);
+    expect(h.state.putCalls.map(call => call.id)).toEqual(["first", "second"]);
+    expect(h.state.putCalls.every(call => call.document !== null)).toBe(true);
+});
+
+test("view/selection/history-only changes do not upload and cloud payload omits undo cache", async () => {
+    const original = project();
+    const h = harness([original], [envelope(original)], known(original));
+    const current = { ...original, viewport: { x: 800, y: -900, k: 0.2 }, selectedNodeIds: ["image-a"], history: { past: [{ ...original }], future: [] } };
+    await h.engine.save([current]);
+    expect(h.state.putCalls).toHaveLength(0);
+    await h.engine.save([{ ...current, title: "真正编辑" }]);
+    expect(h.state.putCalls).toHaveLength(1);
+    expect(h.state.putCalls[0].document?.history).toBeUndefined();
+    expect(h.state.putCalls[0].document?.selectedNodeIds).toBeUndefined();
+    expect(h.state.putCalls[0].document?.viewport).toEqual({ x: 0, y: 0, k: 1 });
+    expect(current.history.past).toHaveLength(1);
 });

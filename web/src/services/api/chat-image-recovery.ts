@@ -1,6 +1,8 @@
 import { getQueuedTask, getQueuedTaskByRequestId, recoverQueuedTask, type QueuedTask } from "@/services/api/generation-tasks";
 import { classifyTaskRecovery } from "@/services/api/task-result-reconciliation";
 import type { CreativeImageLineage } from "@/lib/creative-chat";
+import type { ImageAgentWorkNote } from "@/lib/image-agent/work-note";
+import type { CanvasMaskAdaptation } from "@/lib/canvas/canvas-mask-adaptation";
 
 export type ChatImageRecoveryMode = "observe" | "resume" | "investigate";
 
@@ -10,10 +12,18 @@ export type PendingChatImageTask = {
     modelId: string;
     quality?: string;
     resolution?: string;
+    size?: string;
     action: "generate" | "edit";
     taskId?: string;
     parentMessageId?: string;
     lineage?: CreativeImageLineage;
+    parentId?: string;
+    workId?: string;
+    workNote?: ImageAgentWorkNote;
+    referenceImageIds?: string[];
+    focusRevision?: number;
+    signature?: string;
+    maskAdaptation?: CanvasMaskAdaptation;
     explanation?: string;
     recovery?: ChatImageRecoveryMode;
     taskStatus?: string;

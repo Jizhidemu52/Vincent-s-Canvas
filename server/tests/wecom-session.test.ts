@@ -12,7 +12,7 @@ const config = {
     SESSION_COOKIE_NAME: "wecom_session_fixture", SESSION_TTL_SECONDS: 600, NODE_ENV: "test",
 } as AppConfig;
 
-type StoredSession = UserRow & { session_id: string; auth_provider: string };
+type StoredSession = UserRow & { session_id: string; auth_provider: string; session_remaining_seconds: number };
 type FixtureOptions = {
     row?: Partial<StoredSession>;
     deployment?: Partial<AppConfig>;
@@ -33,7 +33,8 @@ async function withSession(options: FixtureOptions, run: (fixture: {
         credit_balance: 20, credit_limit: 100, monthly_credit_limit: 100, temporary_credit_adjustment: 0,
         credit_period_start: options.refreshedRole ? "2031-12-01" : "2032-01-01",
         current_credit_period_start: "2032-01-01", credit_reset_at: "2032-02-01",
-        session_id: "trusted-session-id", auth_provider: "wecom", ...options.row,
+        session_id: "trusted-session-id", auth_provider: "wecom",
+        session_remaining_seconds: options.row?.auth_provider === "oa" ? 7200 : config.SESSION_TTL_SECONDS, ...options.row,
     };
     const statements: string[] = [];
     let sessionReads = 0;
