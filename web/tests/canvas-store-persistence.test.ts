@@ -17,6 +17,9 @@ const ast = ts.createSourceFile("store.ts", source, ts.ScriptTarget.Latest, true
 const code = ts.transpileModule(ast.statements.filter(statement => !ts.isImportDeclaration(statement)).map(statement => statement.getText(ast)).join("\n"), {
     compilerOptions: { target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.CommonJS },
 }).outputText;
+const drainCode = ts.transpileModule(readFileSync(new URL("../src/lib/workspace-identity-drain.ts", import.meta.url), "utf8"), {
+    compilerOptions: { target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.CommonJS },
+}).outputText;
 const storageKey = "wireless-canvas:canvas_store";
 function project(): CanvasProject {
     return { id: "shared", title: "原画布", createdAt: "old", updatedAt: "old", backgroundMode: "dots", showImageInfo: false, viewport: { x: 0, y: 0, k: 1 }, activeChatId: null, chatSessions: [], connections: [], nodes: [
@@ -62,19 +65,28 @@ function database() {
     };
 }
 
-async function openTab(io: ReturnType<typeof database>, oaOwnerId?: string | null, browser = true, oaMode = true, role = "designer") {
+async function openTab(io: ReturnType<typeof database>, oaOwnerId?: string | null, browser = true, oaMode = true, role = "designer", identityAlreadyChanged = false) {
     let ids = 0;
     let reloads = 0;
     const userStore = create<{ user: { id: string; role?: string } | null; status: string }>(() => ({ user: oaOwnerId ? { id: oaOwnerId, role } : null, status: oaOwnerId ? "authenticated" : "guest" }));
     const errors: unknown[][] = [];
     const retryTimers = new Map<number, { callback: () => void; delay: number }>();
     let timerId = 0;
+    const drain = {} as typeof import("@/lib/workspace-identity-drain");
+    new Function("exports", drainCode)(drain);
+    if (identityAlreadyChanged) drain.startWorkspaceIdentityDrain();
+    let cloudValid: (() => boolean) | undefined;
+    let cloudSchedules = 0;
     const bindings = {
+        ...drain,
         isWorkspaceRole, normalizeCanvasSelectedNodeIds,
         create, persist, nanoid: () => `new-${++ids}`, collectProjectChanges, createProjectChangeBuffer, mergeProjectChanges, applyCanvasProjectPatch,
         deploymentFeatures: { authenticationEnabled: oaOwnerId !== undefined, oaLoginEnabled: oaMode && oaOwnerId !== undefined },
         useUserStore: userStore,
-        createCloudCanvasPersistence: () => ({ hydrate: async (projects: CanvasProject[]) => projects, schedule() {}, async flush() {} }),
+        createCloudCanvasPersistence: (_owner: string, _name: string, hooks: { valid: () => boolean }) => {
+            cloudValid = hooks.valid;
+            return { hydrate: async (projects: CanvasProject[]) => projects, schedule() { cloudSchedules++; }, async flush() {} };
+        },
         localForageStorage: io.adapter,
         updateCanvasStorage: io.update,
         readCanvasProjects: async (key: string) => JSON.parse(await io.adapter.getItem(key) || "null")?.state.projects || [],
@@ -97,8 +109,9 @@ async function openTab(io: ReturnType<typeof database>, oaOwnerId?: string | nul
     const exports = {} as { useCanvasStore: any; flushCanvasPersistence: () => Promise<void>; flushCanvasCloudPersistence: () => Promise<void>; hasPendingCanvasPersistence: () => boolean };
     new Function(...Object.keys(bindings), "exports", code)(...Object.values(bindings), exports);
     const store = exports.useCanvasStore;
-    if (!store.persist.hasHydrated() && oaOwnerId !== null) await new Promise<void>(resolve => { const unsubscribe = store.persist.onFinishHydration(() => { unsubscribe(); resolve(); }); });
-    return { store, flush: exports.flushCanvasPersistence, retry: exports.flushCanvasCloudPersistence, hasPending: exports.hasPendingCanvasPersistence, errors, userStore, reloads: () => reloads, retryTimers,
+    if (!store.persist.hasHydrated() && oaOwnerId !== null && !identityAlreadyChanged) await new Promise<void>(resolve => { const unsubscribe = store.persist.onFinishHydration(() => { unsubscribe(); resolve(); }); });
+    return { store, flush: exports.flushCanvasPersistence, retry: exports.flushCanvasCloudPersistence, hasPending: exports.hasPendingCanvasPersistence, errors, userStore, reloads: () => reloads, retryTimers, drain,
+        cloudValid: () => cloudValid?.() ?? false, cloudSchedules: () => cloudSchedules,
         runRetry: async () => { for (const [id, timer] of [...retryTimers]) { retryTimers.delete(id); timer.callback(); } await exports.flushCanvasPersistence(); },
     };
 }
@@ -295,19 +308,64 @@ test(`${oaMode ? "OA" : "password"} canvas persistence isolates employee keys an
     expect(io.read()).toEqual([project()]);
 });
 
-test(`${oaMode ? "OA" : "password"} owner changes flush the old immutable key, clear the live editor and restart authentication`, async () => {
+test(`${oaMode ? "OA" : "password"} owner changes flush the old immutable key and clear the live editor without restarting the page`, async () => {
     const io = database(), a = await openTab(io, "employee-A", true, oaMode);
     a.store.getState().createProject("旧员工未完成的自动保存");
     a.userStore.setState({ user: { id: "employee-B" } });
     expect(a.store.getState().projects).toEqual([]);
     expect(a.store.getState().hydrated).toBe(false);
     expect(a.userStore.getState()).toMatchObject({ user: null, status: "loading" });
+    expect(a.cloudValid()).toBe(false);
+    expect(a.drain.getWorkspaceIdentityDrainStatus()).toBe("saving");
     await a.flush();
     await Promise.resolve();
-    expect(a.reloads()).toBe(1);
+    expect(a.reloads()).toBe(0);
+    expect(a.drain.getWorkspaceIdentityDrainStatus()).toBe("saved");
+    expect(a.cloudSchedules()).toBe(0);
     expect(io.read(`${storageKey}:oa:user:employee-A`).map(item => item.title)).toEqual(["旧员工未完成的自动保存"]);
     expect(io.read(`${storageKey}:oa:user:employee-B`)).toEqual([]);
     expect(io.read()).toEqual([project()]);
+});
+
+test(`${oaMode ? "OA" : "password"} slow identity drains keep reload disabled until the real old-partition write completes`, async () => {
+    const io = database(), a = await openTab(io, "employee-A", true, oaMode);
+    const gate = Promise.withResolvers<void>();
+    io.pauseNextWrite(gate.promise);
+    a.store.getState().createProject("等待旧分区真实落盘");
+    a.drain.startWorkspaceIdentityDrain();
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    expect(a.store.getState().projects).toEqual([]);
+    expect(a.drain.getWorkspaceIdentityDrainStatus()).toBe("saving");
+    expect(a.cloudValid()).toBe(false); expect(a.reloads()).toBe(0);
+    expect(io.read(`${storageKey}:oa:user:employee-A`)).toEqual([]);
+    gate.resolve(); await a.flush(); await Promise.resolve();
+    expect(a.drain.getWorkspaceIdentityDrainStatus()).toBe("saved");
+    expect(io.read(`${storageKey}:oa:user:employee-A`)[0].title).toBe("等待旧分区真实落盘");
+    expect(a.cloudSchedules()).toBe(0); expect(a.reloads()).toBe(0);
+});
+
+test(`${oaMode ? "OA" : "password"} failed identity drains preserve the durable old partition and never restart or enable the new owner`, async () => {
+    const io = database(), a = await openTab(io, "employee-A", true, oaMode);
+    const id = a.store.getState().createProject("已落盘旧稿"); await a.flush();
+    const schedules = a.cloudSchedules();
+    a.store.getState().renameProject(id, "未落盘的新修改"); io.failNextWrite();
+    a.userStore.setState({ user: null, status: "guest" });
+    await expect(a.flush()).rejects.toThrow(); await Promise.resolve();
+    expect(a.drain.getWorkspaceIdentityDrainStatus()).toBe("failed");
+    expect(a.reloads()).toBe(0); expect(a.cloudValid()).toBe(false);
+    expect(io.read(`${storageKey}:oa:user:employee-A`)[0].title).toBe("已落盘旧稿");
+    a.userStore.setState({ user: { id: "employee-B", role: "designer" }, status: "authenticated" });
+    expect(a.cloudValid()).toBe(false); expect(a.store.getState().projects).toEqual([]);
+    expect(a.cloudSchedules()).toBe(schedules);
+    expect(io.read(`${storageKey}:oa:user:employee-B`)).toEqual([]);
+});
+
+test(`${oaMode ? "OA" : "password"} a canvas module imported after invalidation never hydrates or writes the later identity`, async () => {
+    const io = database(), a = await openTab(io, "employee-B", true, oaMode, "designer", true);
+    expect(a.store.persist.hasHydrated()).toBe(false);
+    expect(a.store.getState().projects).toEqual([]); expect(a.cloudValid()).toBe(false);
+    a.store.getState().createProject("不可写入的晚到模块"); await a.flush();
+    expect(io.writes).toEqual([]); expect(a.cloudSchedules()).toBe(0); expect(a.reloads()).toBe(0);
 });
 
 test(`${oaMode ? "OA" : "password"} guest bootstrap never hydrates or persists the legacy shared workspace`, async () => {

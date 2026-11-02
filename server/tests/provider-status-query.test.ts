@@ -29,6 +29,25 @@ test("status queries stop at three attempts; authorization failures are not retr
   }
 });
 
+test("durable callers can opt for one bounded GET without an inner retry or sleep", async () => {
+  for (const failure of ["network", 503] as const) {
+    let calls = 0;
+    const result = queryProviderTaskStatus("https://provider.invalid/tasks/existing", {}, {
+      maxAttempts: 1, timeoutMs: 20,
+      fetch: async (_url, init) => {
+        calls++;
+        expect(init?.method).toBe("GET");
+        expect(init?.signal).toBeInstanceOf(AbortSignal);
+        if (failure === "network") throw new TypeError("network interrupted");
+        return new Response("{}", { status: failure });
+      }, sleep: async () => { throw new Error("Durable callers defer using their own queue"); },
+    });
+    if (failure === "network") await expect(result).rejects.toThrow("network interrupted");
+    else expect((await result).status).toBe(503);
+    expect(calls).toBe(1);
+  }
+});
+
 test("recovered image status queries only GET the original ID, never repeat a paid POST", async () => {
   let calls = 0;
   const result = await runApiMartImageTask({ baseUrl: "https://provider.invalid/v1", apiKey: "test", modelId: "gpt-image-2", prompt: "test", parameters: {}, upstreamTaskId: "original", submissionStarted: true }, {

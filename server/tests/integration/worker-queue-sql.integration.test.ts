@@ -7,7 +7,7 @@ import { acquireModelLease, releaseModelLease, renewTaskLease, startTaskLeaseHea
 import { popReadyTask, removeQueuedTask, scheduleQueuedTask } from "../../src/task-queue";
 import { canAutomaticallyRetryTask, queueScore, recalculateBatch, restoreWaitingTasksToQueue, TASK_LEASE_SECONDS, transitionTask } from "../../src/tasks";
 import { stepApiMartVideoTask, VideoProviderFailure, VideoSubmissionClaimLost, VideoTaskPending, type ApiMartVideoInput } from "../../src/media-runtime";
-import { ApiMartImageProviderFailure, ApiMartImageTaskPending, stepApiMartImageTask, type ApiMartImageTaskInput } from "../../src/apimart-image";
+import { ApiMartImageProviderFailure, ApiMartImageQueryRetryable, ApiMartImageTaskPending, stepApiMartImageTask, type ApiMartImageTaskInput } from "../../src/apimart-image";
 import { ProviderSubmissionRejected, submissionWasNotSent } from "../../src/provider-submission-policy";
 import { createIsolatedPostgres } from "../helpers/isolated-postgres";
 import { createIsolatedQueueCache } from "../helpers/isolated-queue-cache";
@@ -50,7 +50,7 @@ async function databaseFixture(kind: "image" | "video" = "video") {
 }
 
 async function productionWorker(dependencies: Record<string, unknown>) {
-  dependencies = { disposeProviderResults, WorkflowTaskPending, ...dependencies };
+  dependencies = { disposeProviderResults, WorkflowTaskPending, ApiMartImageQueryRetryable, ...dependencies };
   // Exercise the real orchestration/provider functions without importing the
   // worker entrypoint (which intentionally starts configured production services).
   const file = await Bun.file(new URL("../../src/worker.ts", import.meta.url)).text();
@@ -63,8 +63,8 @@ async function productionWorker(dependencies: Record<string, unknown>) {
   }).join("\n");
   const js = ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText;
   return new Function(...Object.keys(dependencies), `${js};
-    async function executeProvider(task) { return task.operation_type === 'image_generation'
-      ? executeApiMartImage(task,{apiKey:'fixture-only'}) : executeApiMartVideo(task,{apiKey:'fixture-only'}); }
+    async function executeProvider(task) { return task.operation_type === 'video_generation'
+      ? executeApiMartVideo(task,{apiKey:'fixture-only'}) : executeApiMartImage(task,{apiKey:'fixture-only'}); }
     return {runTask};`)(...Object.values(dependencies)) as { runTask(id: string): Promise<void> };
 }
 
@@ -160,6 +160,146 @@ for (const kind of ["video", "image"] as const) integration(`30 mock ${kind}s re
     expect(await redis.zCard(`model:${model}:leases`)).toBe(0);
   } finally { await fixture.close(); }
 }, 120_000);
+
+integration("two inconclusive original image queries retain their slots, then settle and unblock six waiting tasks without replay", async () => {
+  const fixture = await databaseFixture("image");
+  const { db, redis, model } = fixture;
+  const requests: Array<{ method: string; id: string }> = [];
+  const originalIds: string[] = [];
+  const remote = new Map<string, { polls: number; terminal: "completed" | "failed"; complete: boolean }>();
+  let inflight = 2, maxInflight = 2;
+  const fakeFetch = async (url: string, init?: RequestInit) => {
+    if (init?.method === "POST") {
+      const id = JSON.parse(String(init.body)).prompt as string;
+      expect(remote.has(id)).toBe(false);
+      requests.push({ method: "POST", id });
+      remote.set(id, { polls: 0, terminal: "completed", complete: false });
+      inflight++; maxInflight = Math.max(maxInflight, inflight);
+      return Response.json({ data: [{ task_id: id }] });
+    }
+    expect(init?.method).toBe("GET");
+    const id = decodeURIComponent(url.split("/tasks/")[1]!);
+    requests.push({ method: "GET", id });
+    const task = remote.get(id)!;
+    if (++task.polls === 1 && originalIds.includes(id)) return Response.json({ code: 200, data: { status: "unknown" } });
+    if (!task.complete) { task.complete = true; inflight--; }
+    return Response.json({ code: 200, data: { status: task.terminal, progress: 100,
+      result: { images: [{ url: [`https://provider.invalid/files/${id}.png`] }] }, actual_time: 174, credits_cost: 0.09778, cost: 0.009778,
+    } });
+  };
+  const worker = await productionWorker({
+    db, cache: redis.cache, randomUUID, TASK_LEASE_SECONDS, config: { TASK_MOCK_MODE: "false" },
+    acquireModelLease, releaseModelLease, startTaskLeaseHeartbeat, TaskExecutionLost,
+    withTransaction, settleReservation, scheduleQueuedTask, queueScore, canAutomaticallyRetryTask, recalculateBatch,
+    VideoTaskPending, ApiMartImageTaskPending, VideoSubmissionClaimLost, VideoProviderFailure, ApiMartImageProviderFailure,
+    ProviderSubmissionRejected, submissionWasNotSent, readProviderSubmissionDiagnostics: () => undefined,
+    createGenerationTiming: () => ({ measure: async (_stage: string, action: () => unknown) => action(), finish() {} }),
+    loadSourceAssets: async () => [],
+    stepApiMartImageTask: (input: ApiMartImageTaskInput) => stepApiMartImageTask(input, { fetch: fakeFetch,
+      sleep: async () => { throw new Error("Worker status retries must use the delayed queue"); },
+    }),
+    fetchProviderResult: async () => ({ bytes: new Uint8Array([1, 2, 3]), mimeType: "image/png" }),
+    storeResults: async (task: { id: string }) => [`/api/assets/${task.id}/content`],
+  });
+  const drainReady = async () => {
+    for (let wave = 0; wave < 20; wave++) {
+      const ids = (await Promise.all(Array.from({ length: 10 }, () => popReadyTask(redis.cache))))
+        .filter((id): id is string => Boolean(id));
+      if (!ids.length) return;
+      await Promise.all(ids.map(id => worker.runTask(id)));
+    }
+    throw new Error("Inconclusive queries must not spin in the ready queue");
+  };
+  try {
+    await db.query("UPDATE model_configs SET concurrency_limit=2 WHERE id=$1", [model]);
+    for (const terminal of ["completed", "failed"] as const) {
+      const id = await fixture.task();
+      originalIds.push(id);
+      remote.set(id, { polls: 0, terminal, complete: false });
+      await db.query(`UPDATE tasks SET status='processing',attempts=1,upstream_task_id=id::text,
+        upstream_submission_started_at=now()-interval '3 minutes',poll_deadline_at=now()+interval '12 minutes',
+        model_slot_token=gen_random_uuid(),model_slot_expires_at=now()-interval '1 second' WHERE id=$1`, [id]);
+    }
+    const waiting = await Promise.all(Array.from({ length: 6 }, () => fixture.task()));
+    const manuallyPaused = await fixture.task();
+    await db.query("UPDATE tasks SET status='paused' WHERE id=$1", [manuallyPaused]);
+    await db.query("UPDATE tasks SET operation_type='inpaint'");
+    await db.query("UPDATE credit_reservations SET operation_type='inpaint'");
+    const identity = () => db.query(`SELECT id,request_id,upstream_task_id,upstream_submission_started_at,attempts,
+      model_slot_token,poll_deadline_at,queued_at FROM tasks WHERE id=ANY($1::uuid[]) ORDER BY id`, [originalIds]);
+    const original = (await identity()).rows;
+
+    await restoreWaitingTasksToQueue(db, redis.cache);
+    await drainReady();
+    expect(requests).toHaveLength(2);
+    expect(requests.every(request => request.method === "GET")).toBe(true);
+    expect((await identity()).rows).toEqual(original);
+    expect((await db.query("SELECT count(*)::int AS n FROM tasks WHERE status='processing' AND execution_token IS NULL AND lease_expires_at IS NULL AND model_slot_token IS NOT NULL")).rows[0].n).toBe(2);
+    expect((await db.query("SELECT count(*)::int AS n FROM tasks WHERE status='waiting' AND attempts=0 AND model_slot_token IS NULL")).rows[0].n).toBe(6);
+    expect((await db.query("SELECT bool_and(available_at>now()+interval '5 seconds') AS deferred FROM tasks WHERE id=ANY($1::uuid[])", [originalIds])).rows[0].deferred).toBe(true);
+    expect((await db.query("SELECT count(*)::int AS n FROM credit_reservations WHERE status='held'")).rows[0].n).toBe(9);
+    expect(await popReadyTask(redis.cache)).toBeNull();
+
+    // A restart may lose only Redis. It must recover the same polling IDs and
+    // deadline, not their paid submission or the user-paused task.
+    await redis.clear();
+    for (let round = 0; round < 12; round++) {
+      await db.query("UPDATE tasks SET available_at=now()-interval '1 millisecond' WHERE status IN ('waiting','processing') AND execution_token IS NULL");
+      await restoreWaitingTasksToQueue(db, redis.cache);
+      await drainReady();
+      if ((await db.query("SELECT count(*)::int AS n FROM tasks WHERE status IN ('success','failed')")).rows[0].n === 8) break;
+    }
+    expect(requests.filter(request => request.method === "POST").map(request => request.id).sort()).toEqual(waiting.map(id => `task-${id}`).sort());
+    expect(originalIds.every(id => remote.get(id)?.polls === 2)).toBe(true);
+    expect(maxInflight).toBe(2);
+    expect(inflight).toBe(0);
+    expect((await db.query("SELECT status,count(*)::int AS n FROM tasks GROUP BY status ORDER BY status")).rows).toEqual([{ status: "failed", n: 1 }, { status: "paused", n: 1 }, { status: "success", n: 7 }]);
+    expect((await db.query("SELECT status,attempts,upstream_task_id FROM tasks WHERE id=$1", [manuallyPaused])).rows[0]).toEqual({ status: "paused", attempts: 0, upstream_task_id: null });
+    expect((await db.query("SELECT status,count(*)::int AS n FROM credit_reservations GROUP BY status ORDER BY status")).rows).toEqual([{ status: "captured", n: 7 }, { status: "held", n: 1 }, { status: "released", n: 1 }]);
+    expect((await db.query("SELECT count(*)::int AS n FROM tasks WHERE model_slot_token IS NOT NULL OR execution_token IS NOT NULL")).rows[0].n).toBe(0);
+    expect((await db.query("SELECT count(*)::int AS n FROM generation_history")).rows[0].n).toBe(8);
+    expect((await db.query("SELECT count(*)::int AS n FROM credit_ledger")).rows[0].n).toBe(0);
+    expect(await redis.zCard(`model:${model}:leases`)).toBe(0);
+    expect((await identity()).rows.map(({ model_slot_token: _slot, ...task }) => task)).toEqual(original.map(({ model_slot_token: _slot, ...task }) => task));
+  } finally { await fixture.close(); }
+}, 60_000);
+
+for (const failure of ["not-found", "deadline"] as const) integration(`known image ID with a missing legacy submission timestamp preserves its hold and slot after ${failure}`, async () => {
+  const fixture = await databaseFixture("image");
+  const { db, redis } = fixture;
+  let queries = 0;
+  const worker = await productionWorker({
+    db, cache: redis.cache, randomUUID, TASK_LEASE_SECONDS, config: { TASK_MOCK_MODE: "false" },
+    acquireModelLease, releaseModelLease, startTaskLeaseHeartbeat, TaskExecutionLost,
+    withTransaction, settleReservation, scheduleQueuedTask, queueScore, canAutomaticallyRetryTask, recalculateBatch,
+    VideoTaskPending, ApiMartImageTaskPending, VideoSubmissionClaimLost, VideoProviderFailure, ApiMartImageProviderFailure,
+    ProviderSubmissionRejected, submissionWasNotSent, readProviderSubmissionDiagnostics: () => undefined,
+    createGenerationTiming: () => ({ measure: async (_stage: string, action: () => unknown) => action(), finish() {} }),
+    loadSourceAssets: async () => { throw new Error("Cannot reload old references"); },
+    stepApiMartImageTask: (input: ApiMartImageTaskInput) => stepApiMartImageTask(input, { fetch: async (_url, init) => {
+      expect(init?.method).toBe("GET"); queries++;
+      return Response.json({ error: { code: "invalid_request_error", message: "Task not found or has expired." } }, { status: 400 });
+    } }),
+  });
+  try {
+    const id = await fixture.task();
+    await db.query(`UPDATE tasks SET status='processing',attempts=1,upstream_task_id='legacy-original',
+      upstream_submission_started_at=NULL,poll_deadline_at=now()+($2::int * interval '1 second'),
+      model_slot_token=gen_random_uuid(),model_slot_expires_at=now()+interval '3 minutes' WHERE id=$1`, [id, failure === "deadline" ? -1 : 900]);
+    const original = (await db.query("SELECT request_id,upstream_task_id,upstream_submission_started_at,attempts,model_slot_token,poll_deadline_at FROM tasks WHERE id=$1", [id])).rows[0];
+    await restoreWaitingTasksToQueue(db, redis.cache);
+    expect(await popReadyTask(redis.cache)).toBe(id);
+    await worker.runTask(id);
+    expect(queries).toBe(failure === "deadline" ? 0 : 1);
+    expect((await db.query("SELECT request_id,upstream_task_id,upstream_submission_started_at,attempts,model_slot_token,poll_deadline_at FROM tasks WHERE id=$1", [id])).rows[0]).toEqual(original);
+    expect((await db.query("SELECT status,execution_token,lease_expires_at FROM tasks WHERE id=$1", [id])).rows[0]).toEqual({ status: "paused", execution_token: null, lease_expires_at: null });
+    expect((await db.query("SELECT status FROM credit_reservations WHERE request_id=$1", [`request-${id}`])).rows[0].status).toBe("held");
+    expect((await db.query("SELECT count(*)::int AS n FROM generation_history")).rows[0].n).toBe(0);
+    expect((await db.query("SELECT count(*)::int AS n FROM credit_ledger")).rows[0].n).toBe(0);
+    await restoreWaitingTasksToQueue(db, redis.cache);
+    expect(await popReadyTask(redis.cache)).toBeNull();
+  } finally { await fixture.close(); }
+}, 60_000);
 
 for (const [kind, minutes] of [["image", 15], ["video", 20]] as const) integration(`resuming an expired ${kind} gives ${minutes} minutes and only requeues the original held task`, async () => {
   const fixture = await databaseFixture(kind);

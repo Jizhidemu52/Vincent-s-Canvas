@@ -49,6 +49,14 @@ export default {
     "请重新打开登录页面": "Please reopen the sign-in page.",
     "登录账号已变化，请重新进入工作区": "The signed-in account has changed. Please reopen the workspace.",
     "当前账号已变化，请重新进入工作区": "Your account has changed. Please reopen the workspace.",
+    "登录状态已变化，工作区已暂停": "Your sign-in status changed. The workspace is paused.",
+    "已停止旧账号的操作，页面不会自动刷新。": "Actions for the previous account have stopped. This page will not reload automatically.",
+    "正在保存旧账号的本机草稿，请暂时保留此页面…": "Saving the previous account's local drafts. Keep this page open…",
+    "旧账号草稿未确认保存。请保留本页并联系管理员协助；重新加载可能丢失尚未写入的修改。": "The previous account's drafts have not been confirmed as saved. Keep this page open and contact your administrator. Reloading may lose changes that have not been written to storage.",
+    "旧账号的本机保存检查已完成。可主动重新加载，重新验证登录状态。": "The previous account's local save check is complete. You can reload to verify your sign-in again.",
+    "如需重新登录，请从企业微信中的公司 OA 再次进入。": "To sign in again, reopen this workspace through your company OA portal in WeCom.",
+    "等待草稿保存…": "Waiting for drafts to save…",
+    "旧账号草稿尚未确认保存。重新加载可能丢失未写入的修改。仍要继续？": "The previous account's drafts have not been confirmed as saved. Reloading may lose changes that have not been written to storage. Continue anyway?",
 
     // Canvas interaction and recoverable changes.
     "无限画布-{count}个项目": "Canvas-{count}-projects",

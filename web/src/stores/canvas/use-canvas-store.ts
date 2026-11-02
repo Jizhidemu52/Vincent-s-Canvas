@@ -8,6 +8,7 @@ import { readCanvasProjects, writeCanvasProjects, removeCanvasProjects } from "@
 import { applyCanvasProjectPatch, type CanvasProjectPatch } from "@/lib/canvas/canvas-project-update";
 import { normalizeCanvasSelectedNodeIds } from "@/lib/canvas/canvas-view-state";
 import { deploymentFeatures } from "@/lib/deployment-features";
+import { getWorkspaceIdentityDrainStatus, registerWorkspaceIdentityDrain, startWorkspaceIdentityDrain } from "@/lib/workspace-identity-drain";
 import { createCloudCanvasPersistence, type CloudSaveState } from "@/services/canvas-cloud-persistence";
 import { useUserStore } from "@/stores/use-user-store";
 import type { CanvasBackgroundMode } from "@/lib/canvas-theme";
@@ -58,7 +59,7 @@ const canvasOwnerRole = initialSession.user?.role;
 const CANVAS_STORE_KEY = deploymentFeatures.authenticationEnabled
     ? `wireless-canvas:canvas_store:oa:user:${encodeURIComponent(canvasOwnerId || "")}`
     : "wireless-canvas:canvas_store";
-let canvasOwnerValid = !deploymentFeatures.authenticationEnabled || Boolean(canvasOwnerId);
+let canvasOwnerValid = !deploymentFeatures.authenticationEnabled || (Boolean(canvasOwnerId) && getWorkspaceIdentityDrainStatus() === "idle");
 const isCanvasOwnerValid = () => canvasOwnerValid && (!canvasOwnerId || (useUserStore.getState().status === "authenticated" && useUserStore.getState().user?.id === canvasOwnerId && isWorkspaceRole(useUserStore.getState().user?.role)));
 const cloudPersistence = canvasOwnerId ? createCloudCanvasPersistence(canvasOwnerId, CANVAS_STORE_KEY, {
     valid: isCanvasOwnerValid,
@@ -315,21 +316,22 @@ export const useCanvasStore = create<CanvasStore>()(
 );
 
 if (deploymentFeatures.authenticationEnabled && canvasOwnerId) {
-    let restartingForOwner = false;
-    useUserStore.subscribe((state) => {
-        if (restartingForOwner || ((state.status === "authenticated" || state.status === "expired") && state.user?.id === canvasOwnerId && state.user.role === canvasOwnerRole && isWorkspaceRole(state.user.role))) return;
-        // Same-owner expiry is locked by AuthGate. Retain that owner's local
-        // editor/cache, while isCanvasOwnerValid still blocks cloud writes.
-        // A cookie may change in another tab. Never reuse a live editor or its
-        // debounce/retry buffers for a different employee. Drain the old owner's
-        // immutable storage key, hide the workspace, then bootstrap a fresh one.
-        restartingForOwner = true;
+    let drainingForOwner = false;
+    registerWorkspaceIdentityDrain(() => {
+        // Never reuse the old editor, retries or immutable storage key for a
+        // new employee. Only the user may reload after this local drain settles.
+        drainingForOwner = true;
         canvasOwnerValid = false;
         clearPersistRetry();
         consecutivePersistFailures = 0;
         persistQueue.flush();
         useCanvasStore.setState({ projects: [], unloadedProjects: [], hydrated: false, localSaveFailureCount: 0, localSaveFailureId: 0 });
         useUserStore.setState({ user: null, status: "loading" });
-        void flushCanvasPersistence().catch(() => undefined).finally(() => window.location.reload());
+        return flushCanvasPersistence();
+    });
+    useUserStore.subscribe((state) => {
+        // Same-owner expiry stays locked in AuthGate without losing local drafts.
+        if (drainingForOwner || ((state.status === "authenticated" || state.status === "expired") && state.user?.id === canvasOwnerId && state.user.role === canvasOwnerRole && isWorkspaceRole(state.user.role))) return;
+        startWorkspaceIdentityDrain();
     });
 }

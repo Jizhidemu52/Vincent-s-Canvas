@@ -23,7 +23,7 @@ import {
 } from "./media-runtime";
 import { recordAssetEvent } from "./asset-events";
 import { classifyDesignDirection } from "./design-direction";
-import { ApiMartImageProviderFailure, ApiMartImageTaskPending, stepApiMartImageTask } from "./apimart-image";
+import { ApiMartImageProviderFailure, ApiMartImageQueryRetryable, ApiMartImageTaskPending, stepApiMartImageTask } from "./apimart-image";
 import { videoSourceMetadata, type ProviderVideoSource } from "./video-models";
 import { probeMediaBytes, probeMediaStream } from "./media-probe";
 import { disposeProviderResults, downloadVideoResult, type ProviderResult } from "./media-result-file";
@@ -170,6 +170,9 @@ async function runTask(taskId: string) {
       // Keep the model's upstream-inflight reservation, release only this
       // execution slot. A later short invocation queries the persisted ID.
       keepModelSlot = true;
+      if (error instanceof ApiMartImageTaskPending && error.queryFailure) {
+        console.warn(JSON.stringify({ event: "worker.image_query_deferred", taskId: task.id, ...error.queryFailure, retryMs: error.nextPollMs }));
+      }
       await deferTask(task, error.nextPollMs, true);
       outcome = "retry";
       return;
@@ -187,7 +190,7 @@ async function runTask(taskId: string) {
         [`${reason}；上游已返回结果，不能直接恢复或重新生成，请先检查已保存素材。`, task.id, executionToken],
       );
       outcome = "paused";
-    } else if (task.upstream_submission_started_at && !(error instanceof VideoProviderFailure) && !(error instanceof ApiMartImageProviderFailure)
+    } else if ((task.upstream_task_id || task.upstream_submission_started_at) && !(error instanceof VideoProviderFailure) && !(error instanceof ApiMartImageProviderFailure)
       && !(error instanceof ProviderSubmissionRejected) && !submissionWasNotSent(error)) {
       keepModelSlot = true;
       // Keep the original reservation while upstream work may still exist. Recovery only polls its persisted ID.
@@ -407,7 +410,8 @@ async function executeApiMartImage(
   const editInput = sourceAssets.length ? await prepareImageEditInput(sourceAssets, task.parameters, {
     protocol: "apimart", modelId: task.model_id!, operationType: task.operation_type,
   }) : { references: sourceAssets };
-  const result = await stepApiMartImageTask({
+  let result: Awaited<ReturnType<typeof stepApiMartImageTask>>;
+  try { result = await stepApiMartImageTask({
     baseUrl: task.base_url!,
     apiKey: credentials.apiKey || "",
     modelId: task.model_id!,
@@ -419,6 +423,7 @@ async function executeApiMartImage(
     upstreamTaskId: task.upstream_task_id,
     submissionStarted: Boolean(task.upstream_submission_started_at),
     submissionStartedAt: task.upstream_submission_started_at || task.started_at,
+    pollDeadlineAt: task.poll_deadline_at,
     beforeSubmit: async () => {
       const claimed = await db.query("UPDATE tasks SET upstream_submission_started_at=now(),updated_at=now() WHERE id=$1 AND execution_token=$2 AND lease_expires_at>now() AND status='processing' AND upstream_submission_started_at IS NULL RETURNING id", [task.id, task.execution_token]);
       if (!claimed.rows[0]) throw new VideoSubmissionClaimLost();
@@ -429,7 +434,12 @@ async function executeApiMartImage(
       const persisted = await db.query("UPDATE tasks SET upstream_task_id=$1,poll_deadline_at=COALESCE(poll_deadline_at,now()+interval '15 minutes'),updated_at=now() WHERE id=$2 AND (upstream_task_id IS NULL OR upstream_task_id=$1) RETURNING id", [id, task.id]);
       if (!persisted.rows[0]) throw new VideoSubmissionClaimLost("原上游任务身份已改变");
     },
-  });
+  }); } catch (error) {
+    if (!(error instanceof ApiMartImageQueryRetryable) || !task.upstream_task_id) throw error;
+    const remaining = new Date(task.poll_deadline_at!).getTime() - Date.now();
+    if (!(remaining > 0)) throw new Error("图片状态查询超时；可恢复查询原任务，不会重新生成");
+    throw new ApiMartImageTaskPending(Math.min(error.nextPollMs, remaining), { code: error.code, httpStatus: error.httpStatus });
+  }
   if (result.status === "pending") throw new ApiMartImageTaskPending(result.nextPollMs);
   return Promise.all(result.urls.map(url => fetchProviderResult(url)));
 }

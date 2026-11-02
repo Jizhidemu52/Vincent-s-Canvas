@@ -22,6 +22,7 @@ function moduleCode(path: string) {
 }
 const serviceCode = moduleCode("../src/services/canvas-cloud-persistence.ts");
 const storeCode = moduleCode("../src/stores/canvas/use-canvas-store.ts");
+const drainCode = moduleCode("../src/lib/workspace-identity-drain.ts");
 const clone = <T>(value: T): T => structuredClone(value);
 const owner = "employee-a";
 const name = `wireless-canvas:canvas_store:oa:user:${owner}`;
@@ -100,7 +101,10 @@ function harness(remoteDocuments: CloudCanvasDocument[] = [envelope(project())],
 async function openStore(io: ReturnType<typeof harness>) {
     const userStore = create<any>(() => ({ user: { id: owner, role: "designer" }, status: "authenticated" }));
     let reloads = 0;
+    const drain = {} as typeof import("@/lib/workspace-identity-drain");
+    new Function("exports", drainCode)(drain);
     const bindings = {
+        ...drain,
         isWorkspaceRole,
         create, persist, nanoid: () => `local-${++io.state.nextId}`, createDeferredPersistQueue: <T>(delay: number, flush: (value: T) => void) => createDeferredPersistQueue(delay, flush, { setTimeout: () => 1, clearTimeout() {} }),
         collectProjectChanges, createProjectChangeBuffer, applyCanvasProjectPatch,

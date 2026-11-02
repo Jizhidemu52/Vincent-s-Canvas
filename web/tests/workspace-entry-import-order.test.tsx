@@ -20,6 +20,9 @@ const code = ts.transpileModule(readFileSync(new URL("../src/main.tsx", import.m
         return ts.visitNode(source, visit) as ts.SourceFile;
     }] },
 }).outputText;
+const drainCode = ts.transpileModule(readFileSync(new URL("../src/lib/workspace-identity-drain.ts", import.meta.url), "utf8"), {
+    compilerOptions: { target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.CommonJS },
+}).outputText;
 
 function deferred<T>() {
     let resolve!: (value: T) => void;
@@ -55,14 +58,21 @@ function harness(owner: string | null = "employee-a", oaMode = true, role = "des
     const PasswordChangeEntry = () => null;
     const AppProviders = () => null;
     const RouterProvider = () => null;
+    const drain = {} as typeof import("@/lib/workspace-identity-drain");
+    new Function("exports", drainCode)(drain);
+    const allowReload = { current: false };
+    let gateEffectCleanup: (() => void) | undefined;
+    let confirmDiscard = false;
+    const windowListeners = new Map<string, (event: any) => void>();
     const state = {
         user: owner ? { id: owner, role } : null,
-        invalidateSession: () => { events.push("invalidate"); state.user = null; },
+        invalidateSession: () => { events.push("invalidate"); state.user = null; userChanged?.(state); },
     };
     const dependencies: Record<string, unknown> = {
         "@/lib/i18n": { ...i18nHarness, initializeUiLocale: async () => undefined },
         "../../shared/workspace-access": { isWorkspaceRole },
-        react: React,
+        react: { ...React, useSyncExternalStore: (_subscribe: unknown, snapshot: () => unknown) => snapshot(), useRef: () => allowReload,
+            useEffect: (effect: () => (() => void)) => { gateEffectCleanup?.(); gateEffectCleanup = effect(); } },
         "react/jsx-runtime": jsxRuntime,
         "react-dom/client": { createRoot: () => ({ render: (element: ReactElement) => { renders.push(element); } }) },
         "react-router-dom": { RouterProvider },
@@ -83,19 +93,23 @@ function harness(owner: string | null = "employee-a", oaMode = true, role = "des
             return entry.promise;
         } },
         "@/lib/workspace-session-events": { subscribeWorkspaceIdentity: (listener: typeof identityChanged) => { identityChanged = listener; } },
+        "@/lib/workspace-identity-drain": drain,
         "@/stores/use-user-store": { useUserStore: {
             getState: () => state,
             subscribe: (listener: typeof userChanged) => { userChanged = listener; },
         } },
     };
     const module = { exports: {} };
-    new Function("require", "module", "exports", "window", "document", "importModule", code)(
+    const { IdentityChangedWorkspace } = new Function("require", "module", "exports", "window", "document", "importModule", `${code}\nreturn { IdentityChangedWorkspace };`)(
         (name: string) => {
             if (!Object.hasOwn(dependencies, name)) throw new Error(`Unexpected static dependency: ${name}`);
             return dependencies[name];
         },
         module, module.exports,
-        { location: { pathname: "/canvas/test", reload: () => { events.push("reload"); } }, history: {} },
+        { location: { pathname: "/canvas/test", reload: () => { events.push("reload"); } }, history: {},
+            confirm: () => { events.push("confirm"); return confirmDiscard; },
+            addEventListener: (name: string, listener: (event: any) => void) => windowListeners.set(name, listener),
+            removeEventListener: (name: string) => windowListeners.delete(name) },
         { getElementById: () => ({}), body: { style: {} } },
         (name: string) => {
             dynamicImports.push(name);
@@ -105,7 +119,10 @@ function harness(owner: string | null = "employee-a", oaMode = true, role = "des
         },
     );
     return {
-        events, renders, features, entry, dynamicImports,
+        events, renders, features, entry, dynamicImports, drain, IdentityChangedWorkspace,
+        renderIdentityGate: () => IdentityChangedWorkspace() as ReactElement,
+        confirmDiscard: (confirmed: boolean) => { confirmDiscard = confirmed; },
+        beforeUnload: () => { let blocked = false; windowListeners.get("beforeunload")?.({ preventDefault: () => { blocked = true; } }); return blocked; },
         done: () => startup,
         CompanyOaEntry, ServiceUnavailable, AdminLoginEntry, PasswordLoginEntry, PasswordChangeEntry, AppProviders, RouterProvider,
         resolveImport: (name: string) => {
@@ -192,11 +209,11 @@ describe("workspace entry dynamic import boundary", () => {
         await flushMicrotasks();
         expect(h.dynamicImports).toEqual([providersPath, routerPath]);
         h.changeUser("employee-b");
-        expect(h.renders.at(-1)?.type).toBe(h.CompanyOaEntry);
+        expect(h.renders.at(-1)?.type).toBe(h.IdentityChangedWorkspace);
         h.resolveImport(providersPath);
         h.resolveImport(routerPath);
         await h.done();
-        expect(h.renders.at(-1)?.type).toBe(h.CompanyOaEntry);
+        expect(h.renders.at(-1)?.type).toBe(h.IdentityChangedWorkspace);
         expect(h.renders.some(element => element.type === React.StrictMode)).toBe(false);
     });
 
@@ -218,12 +235,78 @@ describe("workspace entry dynamic import boundary", () => {
         expect(h.renders.at(-1)?.type).toBe(h.PasswordChangeEntry);
     });
 
-    test("password identity changes during imports reload instead of mounting either account's workspace", async () => {
+    test("password identity changes during imports pause without reloading or mounting either account's workspace", async () => {
         const h = harness("password-a", false);
         h.features.resolve(true); h.entry.resolve("workspace");
         await flushMicrotasks(); h.changeUser("password-b");
         h.resolveImport(providersPath); h.resolveImport(routerPath); await h.done();
-        expect(h.events).toContain("reload");
+        expect(h.events).not.toContain("reload");
+        expect(h.renders.at(-1)?.type).toBe(h.IdentityChangedWorkspace);
         expect(h.renders.some(element => element.type === React.StrictMode)).toBe(false);
     });
+
+    test("a transient return to the first identity during imports cannot reopen the invalidated workspace", async () => {
+        const h = harness("employee-a", false);
+        h.features.resolve(true); h.entry.resolve("workspace");
+        await flushMicrotasks(); h.changeUser("employee-b"); h.changeUser("employee-a");
+        h.resolveImport(providersPath); h.resolveImport(routerPath); await h.done();
+        expect(h.renders.at(-1)?.type).toBe(h.IdentityChangedWorkspace);
+        expect(h.renders.some(element => element.type === React.StrictMode)).toBe(false);
+        expect(h.events).not.toContain("reload");
+    });
+
+    test("mounted OA and password workspaces unmount, wait for the old drain and reload only on an explicit click", async () => {
+        for (const oa of [true, false]) {
+            const h = harness("employee-a", oa);
+            const pending = deferred<void>();
+            h.drain.registerWorkspaceIdentityDrain(() => pending.promise);
+            h.features.resolve(true); h.entry.resolve("workspace");
+            await flushMicrotasks(); h.resolveImport(providersPath); h.resolveImport(routerPath); await h.done();
+            h.broadcast(null);
+            expect(h.renders.at(-1)?.type).toBe(h.IdentityChangedWorkspace);
+            let gate = h.renderIdentityGate();
+            let button = elements(gate).find(element => element.type === "button")!;
+            expect((button.props as any).disabled).toBe(true);
+            (button.props as any).onClick();
+            expect(h.beforeUnload()).toBe(true);
+            expect(h.events).not.toContain("reload");
+            pending.resolve(); await flushMicrotasks();
+            gate = h.renderIdentityGate(); button = elements(gate).find(element => element.type === "button")!;
+            expect((button.props as any).disabled).toBe(false);
+            expect(text(gate)).toContain("页面不会自动刷新");
+            if (oa) expect(text(gate)).toContain("公司 OA");
+            expect(h.events).not.toContain("reload");
+            (button.props as any).onClick();
+            expect(h.events.filter(event => event === "reload")).toHaveLength(1);
+        }
+    });
+
+    test("a failed old-partition drain warns, preserves the page on cancel and requires explicit discard confirmation", async () => {
+        const h = harness("employee-a", false);
+        h.drain.registerWorkspaceIdentityDrain(() => Promise.reject(new Error("disk failed")));
+        h.features.resolve(true); h.entry.resolve("workspace");
+        await flushMicrotasks(); h.resolveImport(providersPath); h.resolveImport(routerPath); await h.done();
+        h.changeUser("employee-b"); await flushMicrotasks();
+        const gate = h.renderIdentityGate();
+        const button = elements(gate).find(element => element.type === "button")!;
+        expect(text(gate)).toContain("旧账号草稿未确认保存");
+        expect(h.beforeUnload()).toBe(true);
+        (button.props as any).onClick();
+        expect(h.events).toContain("confirm"); expect(h.events).not.toContain("reload");
+        expect(h.beforeUnload()).toBe(true);
+        h.confirmDiscard(true); (button.props as any).onClick();
+        expect(h.events.filter(event => event === "reload")).toHaveLength(1);
+        expect(h.beforeUnload()).toBe(false);
+    });
 });
+
+function elements(node: unknown): ReactElement[] {
+    if (Array.isArray(node)) return node.flatMap(elements);
+    if (!React.isValidElement(node)) return [];
+    return [node, ...elements((node.props as { children?: unknown }).children)];
+}
+function text(node: unknown): string {
+    if (Array.isArray(node)) return node.map(text).join("");
+    if (React.isValidElement(node)) return text((node.props as { children?: unknown }).children);
+    return typeof node === "string" ? node : "";
+}

@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import ts from "typescript";
 import { assertImageEditMaskSupport, prepareImageEditInput } from "../src/image-edit-input";
-import { ApiMartImageTaskPending } from "../src/apimart-image";
+import { ApiMartImageQueryRetryable, ApiMartImageTaskPending } from "../src/apimart-image";
 
 const bytes = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAACXBIWXMAAAABAAAAAQBPJcTWAAAAFUlEQVR4nGP8////fwYGBgYWEAHCAD4KBAICIHhuAAAAAElFTkSuQmCC", "base64");
 const assets = ["original.png", "mask.png", "texture.png"].map(filename => ({ filename, bytes, mimeType: "image/png" }));
@@ -13,7 +13,7 @@ const newTask = () => ({ id: "image-task", execution_token: "execution-one", use
   prompt: "edit", parameters: { inputArchive: { maskReferenceIndex: 1 }, quality: "xhigh", resolution: "4k" }, source_urls: ["original", "mask", "texture"], upstream_task_id: null as string | null, upstream_submission_started_at: null as string | null,
   poll_deadline_at: null as string | null });
 
-function harness(claim = true) {
+function harness(claim = true, failQuery?: () => unknown) {
   const statements: Array<{ sql: string; values: unknown[] }> = [];
   const calls: Record<string, any>[] = [];
   let loaded = 0;
@@ -22,7 +22,7 @@ function harness(claim = true) {
   const dependencies = {
     loadSourceAssets: async () => { loaded++; return assets; }, prepareImageEditInput,
     db: { query: async (sql: string, values: unknown[]) => { statements.push({ sql, values }); return { rows: claim ? [{ id: "image-task", poll_deadline_at: deadline }] : [] }; } },
-    VideoSubmissionClaimLost: class extends Error {}, ApiMartImageTaskPending,
+    VideoSubmissionClaimLost: class extends Error {}, ApiMartImageTaskPending, ApiMartImageQueryRetryable,
     stepApiMartImageTask: async (input: Record<string, any>) => {
       calls.push(input);
       if (!input.upstreamTaskId) {
@@ -33,6 +33,7 @@ function harness(claim = true) {
         expect(statements.at(-1)?.values).toEqual(["provider-image-task", "image-task"]);
         return { status: "pending", upstreamTaskId: "provider-image-task", nextPollMs: 3_000 };
       }
+      if (failQuery) throw failQuery();
       return { status: "completed", upstreamTaskId: input.upstreamTaskId, urls: ["https://example.test/result-1.png", "https://example.test/result-2.png"] };
     },
     fetchProviderResult: async (url: string) => { downloaded++; return { url, bytes, mimeType: "image/png" }; },
@@ -66,6 +67,7 @@ test("Worker resumes original upstream image without loading or uploading refere
   expect(h.loaded()).toBe(0);
   expect(h.statements).toHaveLength(0);
   expect(h.calls[0]!.upstreamTaskId).toBe("existing-task");
+  expect(h.calls[0]!.pollDeadlineAt).toBe(h.deadline);
   expect(h.calls[0]!.sourceImages).toHaveLength(0);
   expect(h.downloaded()).toBe(2);
 });
@@ -88,6 +90,42 @@ test("Worker expires an existing image polling deadline without any provider req
   expect(h.calls).toHaveLength(0);
   expect(h.statements).toHaveLength(0);
   expect(h.loaded()).toBe(0);
+});
+
+test("Worker defers an inconclusive original-ID query only within its unchanged deadline", async () => {
+  const h = harness(true, () => new ApiMartImageQueryRetryable("unknown", "PROVIDER_STATUS_INVALID", 30_000));
+  const deadline = new Date(Date.now() + 5_000).toISOString();
+  const task = { ...newTask(), upstream_task_id: "existing-task", upstream_submission_started_at: "started", poll_deadline_at: deadline };
+  let caught: unknown;
+  try { await h.execute(task, { apiKey: "fixture-only" }); } catch (error) { caught = error; }
+  expect(caught).toBeInstanceOf(ApiMartImageTaskPending);
+  expect((caught as ApiMartImageTaskPending).nextPollMs).toBeGreaterThan(0);
+  expect((caught as ApiMartImageTaskPending).nextPollMs).toBeLessThanOrEqual(5_000);
+  expect((caught as ApiMartImageTaskPending).queryFailure).toEqual({ code: "PROVIDER_STATUS_INVALID", httpStatus: undefined });
+  expect(task.poll_deadline_at).toBe(deadline);
+  expect(h.statements).toHaveLength(0);
+  expect(h.loaded()).toBe(0);
+  expect(h.downloaded()).toBe(0);
+});
+
+test("Worker stops retrying if an original-ID query exhausts its deadline", async () => {
+  const task = { ...newTask(), upstream_task_id: "existing-task", upstream_submission_started_at: "started", poll_deadline_at: new Date(Date.now() + 60_000).toISOString() };
+  const h = harness(true, () => {
+    task.poll_deadline_at = new Date(Date.now() - 1).toISOString();
+    return new ApiMartImageQueryRetryable("network interrupted", "PROVIDER_POLL_NETWORK_ERROR", 10_000);
+  });
+  await expect(h.execute(task, { apiKey: "fixture-only" })).rejects.toThrow("状态查询超时");
+  expect(h.calls).toHaveLength(1);
+  expect(h.statements).toHaveLength(0);
+});
+
+test("Worker does not turn a permanent original-ID query error into automatic retries", async () => {
+  const failure = Object.assign(new Error("Task not found or has expired."), { code: "PROVIDER_POLL_HTTP_ERROR", httpStatus: 400 });
+  const h = harness(true, () => failure);
+  const task = { ...newTask(), upstream_task_id: "existing-task", upstream_submission_started_at: "started", poll_deadline_at: h.deadline };
+  await expect(h.execute(task, { apiKey: "fixture-only" })).rejects.toBe(failure);
+  expect(h.calls).toHaveLength(1);
+  expect(h.statements).toHaveLength(0);
 });
 
 test("Worker does not replay image submissions whose upstream ID is still unknown", async () => {
