@@ -330,22 +330,46 @@ for (const role of ["department_admin", "designer"])
         expect(f.errors).toEqual([]);
     });
 
-test("privilege change immediately purges visible recipe content and no recipe text is persisted", async ({ page, context, baseURL }) => {
+test("privilege change purges recipe content and requires an explicit reload into the reduced-role guard", async ({ page, context, baseURL }, info) => {
     const f = await fixture(context, baseURL!);
+    const documents: string[] = [];
+    page.on("request", request => {
+        if (request.isNavigationRequest() && request.resourceType() === "document" && request.frame() === page.mainFrame()) documents.push(request.url());
+    });
     await page.goto("/admin/prompt-recipes");
     await expect(page.getByRole("textbox", { name: "系统提示词", exact: true })).toHaveValue("PRIVATE RECIPE RULE - fixture only");
     const count = f.requests.filter((path) => path.includes("prompt-recipes")).length;
+    const timeOrigin = await page.evaluate(() => performance.timeOrigin);
     f.flags.role = "department_admin";
     await page.evaluate(async () => {
         const store = await import("/src/stores/use-user-store.ts");
         const user = store.useUserStore.getState().user;
         store.useUserStore.setState({ user: { ...user, role: "department_admin" } });
     });
-    await expect(page.getByText(/登录账号已变化|仅超级管理员可管理提示词配方/).first()).toBeVisible();
+    const paused = page.getByRole("heading", { name: "登录状态已变化，工作区已暂停", exact: true });
+    await expect(paused).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "系统提示词", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "保存为新版本草稿", exact: true })).toHaveCount(0);
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(paused).toBeVisible();
+    expect(documents).toHaveLength(1);
+    expect(await page.evaluate(() => performance.timeOrigin)).toBe(timeOrigin);
+    expect(f.requests.filter((path) => path.includes("prompt-recipes"))).toHaveLength(count);
+    expect(await page.evaluate(() => JSON.stringify({ ...localStorage }))).not.toContain("PRIVATE RECIPE RULE");
+    await page.getByRole("button", { name: "重新加载", exact: true }).click();
+    await expect(page.getByText("仅超级管理员可管理提示词配方", { exact: true })).toBeVisible();
+    expect(documents).toHaveLength(2);
+    expect(await page.evaluate(() => performance.timeOrigin)).not.toBe(timeOrigin);
     await expect(page.getByRole("textbox", { name: "系统提示词", exact: true })).toHaveCount(0);
     expect(f.requests.filter((path) => path.includes("prompt-recipes"))).toHaveLength(count);
     expect(await page.evaluate(() => JSON.stringify({ ...localStorage }))).not.toContain("PRIVATE RECIPE RULE");
+    expect(f.tests).toEqual([]); expect(f.submissions).toEqual([]);
+    expect(f.unexpected).toEqual([]);
     expect(f.errors).toEqual([]);
+    await info.attach("identity-navigation", { contentType: "application/json", body: Buffer.from(JSON.stringify({
+        documentsBeforeExplicitReload: 1, documentsAfterExplicitReload: documents.length, privateRecipeRequestsBeforeAndAfter: count,
+        reducedRoleDeniedAfterReload: true, recipeTextNotPersisted: true,
+    })) });
 });
 
 test("390px dark layout keeps editor controls reachable without horizontal page overflow", async ({ page, context, baseURL }, info) => {

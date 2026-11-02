@@ -4,6 +4,7 @@ import ts from "typescript";
 
 import { createChatSessionStorage } from "@/pages/chat/chat-session-storage";
 import { recoverChatImageTask, type PendingChatImageTask } from "@/services/api/chat-image-recovery";
+import type { watchTaskReconciliation } from "@/services/api/task-result-reconciliation";
 
 const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; });
@@ -12,11 +13,13 @@ const source = readFileSync(new URL("../src/pages/chat/index.tsx", import.meta.u
 const ast = ts.createSourceFile("chat.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 let effect: ts.Expression | undefined;
 let queryHandlerName: string | undefined;
+let recoveryAction: ts.JsxElement | undefined;
 const pageFunctions = new Map<string, ts.Expression>();
 const visit = (node: ts.Node) => {
     if (ts.isCallExpression(node) && node.expression.getText(ast) === "useEffect" && node.arguments[0]?.getText(ast).includes("await recoverChatImageTask(")) effect = node.arguments[0];
     if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) pageFunctions.set(node.name.text, node.initializer);
-    if (ts.isJsxElement(node) && node.children.some((child) => (ts.isJsxText(child) && child.text.trim() === "查询原任务") || (ts.isJsxExpression(child) && child.expression && ts.isCallExpression(child.expression) && child.expression.expression.getText(ast) === "uiText" && child.expression.arguments[0] && ts.isStringLiteral(child.expression.arguments[0]) && child.expression.arguments[0].text === "查询原任务"))) {
+    if (ts.isJsxElement(node) && node.openingElement.attributes.properties.some((item) => ts.isJsxAttribute(item) && item.name.getText(ast) === "data-testid" && item.initializer?.getText(ast) === '"chat-image-recovery-action"')) {
+        recoveryAction = node;
         const attribute = node.openingElement.attributes.properties.find((item) => ts.isJsxAttribute(item) && item.name.getText(ast) === "onClick");
         if (attribute && ts.isJsxAttribute(attribute) && attribute.initializer && ts.isJsxExpression(attribute.initializer) && attribute.initializer.expression && ts.isIdentifier(attribute.initializer.expression)) queryHandlerName = attribute.initializer.expression.text;
     }
@@ -27,13 +30,26 @@ if (!effect) throw new Error("The actual chat image recovery effect was not foun
 const queryHandler = queryHandlerName && pageFunctions.get(queryHandlerName);
 if (!queryHandler) throw new Error("The original-task query button handler was not found");
 const effectCode = ts.transpileModule(`exports.run = ${effect.getText(ast)}; exports.query = ${queryHandler.getText(ast)};`, { compilerOptions: { target: ts.ScriptTarget.ESNext } }).outputText;
+if (!recoveryAction) throw new Error("The recovery action was not found");
+const actionCode = ts.transpileModule(`exports.action = ${recoveryAction.getText(ast)};`, { compilerOptions: { target: ts.ScriptTarget.ESNext, jsx: ts.JsxEmit.React } }).outputText;
+
+test.each(["observe", "resume", "investigate"])("the actual %s action label describes only the action it authorizes", (pendingImageRecovery) => {
+    const exports = {} as { action: { children: string[]; props: { onClick: () => void } } };
+    const queryOriginalImageTask = () => undefined;
+    new Function("React", "Button", "uiText", "pendingImageRecovery", "recoveringImageTask", "queryOriginalImageTask", "exports", actionCode)(
+        { createElement: (_type: unknown, props: unknown, ...children: string[]) => ({ props, children }) }, "button", (text: string) => text,
+        pendingImageRecovery, false, queryOriginalImageTask, exports,
+    );
+    expect(exports.action.children.join("")).toBe(pendingImageRecovery === "resume" ? "恢复原任务查询" : "刷新状态");
+    expect(exports.action.props.onClick).toBe(queryOriginalImageTask);
+});
 
 const pending: PendingChatImageTask = { requestId: "original-request", prompt: "保留中文，只改花瓣", modelId: "gpt-image-2.5-flare", quality: "high", action: "edit", parentMessageId: "user-turn", explanation: "只改花瓣，保留其余设计", lineage: { parentImageId: "old-task:0", sourceImageIds: ["old-task:0", "attachment-1"], preservedConstraints: ["保留中文", "保留版型"] } };
 const originalImage = "data:image/png;base64,cmVzdWx0LW9yaWdpbmFs";
 const task = { id: "original-task", requestId: "original-request:0", status: "success", resultUrls: ["/api/assets/original/content"], failureReason: null };
 
-type ResumeRequest = { storageKey: string; sessionId: string; messageId: string; requestId: string; taskId?: string };
-const matchingResumeRequest: ResumeRequest = { storageKey: "user-a", sessionId: "original-session", messageId: "original-assistant", requestId: pending.requestId, taskId: task.id };
+type ResumeRequest = { storageKey: string; sessionId: string; messageId: string; requestId: string; taskId?: string; resumePaused: boolean };
+const matchingResumeRequest: ResumeRequest = { storageKey: "user-a", sessionId: "original-session", messageId: "original-assistant", requestId: pending.requestId, taskId: task.id, resumePaused: true };
 
 async function recoveryPageHarness(options: { pending?: PendingChatImageTask; sourceGate?: Promise<void>; resumeRequest?: ResumeRequest; click?: boolean; stopped?: boolean } = {}) {
     const initial = [
@@ -57,9 +73,12 @@ async function recoveryPageHarness(options: { pending?: PendingChatImageTask; so
     const recoveryPromises: Array<Promise<unknown>> = [];
     const signals: AbortSignal[] = [];
     const recovering: boolean[] = [];
+    const watchers: Array<Parameters<typeof watchTaskReconciliation>[0]> = [];
+    const watchStarted = Promise.withResolvers<void>();
     let reloadCount = 0;
     const bindings = {
         sessionsReady: true, isSending: false, activeSession,
+        activeSessionIdRef: { current: "original-session" },
         recoveringImageTask: false,
         pendingImageMessage: activeSession.messages[1],
         imageRecoveryRequestRef: { current: options.resumeRequest || null },
@@ -81,12 +100,18 @@ async function recoveryPageHarness(options: { pending?: PendingChatImageTask; so
             recoveryPromises.push(result);
             return result;
         },
+        async watchTaskReconciliation(options: Parameters<typeof watchTaskReconciliation>[0]) {
+            watchers.push(options);
+            await options.reconcile();
+            watchStarted.resolve();
+            if (!options.signal.aborted) await new Promise<void>((resolve) => options.signal.addEventListener("abort", () => resolve(), { once: true }));
+        },
     };
     const exports = {} as { run: () => () => void; query: () => void };
     new Function(...Object.keys(bindings), "exports", effectCode)(...Object.values(bindings), exports);
     if (options.click) { exports.query(); exports.query(); expect(reloadCount).toBe(1); }
     const cleanup = exports.run();
-    return { completed: completed.promise, sourceStarted: sourceStarted.promise, cleanup, run: exports.run, database, writes, initial, sessionsRef, bindings, recovering, recoveryPromises, signals };
+    return { completed: completed.promise, watching: watchStarted.promise, watchers, wake: async () => { await watchers.at(-1)?.reconcile(); }, sourceStarted: sourceStarted.promise, cleanup, run: exports.run, database, writes, initial, sessionsRef, bindings, recovering, recoveryPromises, signals };
 }
 
 test("a user-stopped image task stays locally paused across reloads until the original-task button is clicked", async () => {
@@ -95,6 +120,7 @@ test("a user-stopped image task stays locally paused across reloads until the or
     const paused = await recoveryPageHarness({ stopped: true, pending: { ...pending, taskId: task.id } });
     await paused.completed;
     expect(requests).toEqual([]); expect(paused.writes).toEqual([]); expect(paused.cleanup).toBeUndefined();
+    expect(paused.watchers).toEqual([]);
     const resumed = await recoveryPageHarness({ stopped: true, pending: { ...pending, taskId: task.id }, click: true });
     await resumed.completed; expect(requests).toEqual(["/api/tasks/original-task"]);
     expect((resumed.database.get("user-a") as any[])[1].messages[1].generatedImages[0].id).toBe("original-task:0");
@@ -122,7 +148,7 @@ test.each([false, true])("the restored page writes the original task result into
     expect(saved[1].messages[1].content).toContain(pending.explanation);
     expect(saved[1].messages[1].pendingImageTask).toBeUndefined();
     expect(page.writes).toHaveLength(2);
-    expect((page.writes[0]!.value as any[])[1].messages[1].pendingImageTask).toEqual({ ...pending, resolution: "4k", taskId: task.id });
+    expect((page.writes[0]!.value as any[])[1].messages[1].pendingImageTask).toMatchObject({ ...pending, resolution: "4k", taskId: task.id });
     expect(page.recovering).toEqual([true, false]);
     page.cleanup();
 });
@@ -133,7 +159,7 @@ test("an explicit query token resumes only its verified original task and is con
         requests.push(`${init?.method || "GET"} ${url}`);
         return Response.json({ task: init?.method === "POST" ? task : { ...task, status: "paused", upstreamTaskId: "upstream-original" } });
     }) as typeof fetch;
-    const page = await recoveryPageHarness({ pending: { ...pending, taskId: task.id }, click: true });
+    const page = await recoveryPageHarness({ pending: { ...pending, taskId: task.id, recovery: "resume" }, click: true });
     await page.completed;
     expect(requests).toEqual(["GET /api/tasks/original-task", "POST /api/tasks/original-task/recover"]);
     expect(page.bindings.imageRecoveryRequestRef.current).toBeNull();
@@ -143,7 +169,7 @@ test("an explicit query token resumes only its verified original task and is con
     const cleanup = page.run();
     await page.recoveryPromises.at(-1);
     for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
-    expect(requests).toEqual(["GET /api/tasks/original-task", "POST /api/tasks/original-task/recover", "GET /api/tasks/original-task"]);
+    expect(requests).toEqual(["GET /api/tasks/original-task", "POST /api/tasks/original-task/recover"]);
     cleanup();
 });
 
@@ -157,8 +183,8 @@ test.each([
         return Response.json({ task: { ...task, status: "paused", upstreamTaskId: "upstream-original" } });
     }) as typeof fetch;
     const page = await recoveryPageHarness({ pending: { ...pending, taskId: task.id }, resumeRequest: { ...matchingResumeRequest, ...change } });
-    await page.completed;
-    expect(requests).toEqual(["GET /api/tasks/original-task"]);
+    await page.watching;
+    expect(requests).toEqual(["GET /api/tasks/original-task", "GET /api/tasks/original-task"]);
     expect(page.bindings.imageRecoveryRequestRef.current).toBeNull();
     page.cleanup();
 });
@@ -171,8 +197,9 @@ test.each(["paused", "missing", "failed"])("the restored page records %s without
     }) as typeof fetch;
     const page = await recoveryPageHarness({ pending: { ...pending, taskId: task.id } });
     await page.completed;
+    if (state !== "failed") await page.watching;
     const reply = (page.database.get("user-a") as any[])[1].messages[1];
-    expect(requests).toEqual(["GET /api/tasks/original-task"]);
+    expect(requests).toEqual(state === "failed" ? ["GET /api/tasks/original-task"] : ["GET /api/tasks/original-task", "GET /api/tasks/original-task"]);
     expect(reply.id).toBe("original-assistant");
     expect(reply.generatedImages).toBeUndefined();
     if (state === "failed") {
@@ -186,7 +213,7 @@ test.each(["paused", "missing", "failed"])("the restored page records %s without
     page.cleanup();
 });
 
-test.each(["account-change", "unmount"])("recovery cannot save a fetched result after %s", async (reason) => {
+test.each(["account-change", "session-change", "unmount"])("recovery cannot save a fetched result after %s", async (reason) => {
     globalThis.fetch = (async () => Response.json({ task })) as typeof fetch;
     const gate = Promise.withResolvers<void>();
     const page = await recoveryPageHarness({ pending: { ...pending, taskId: task.id }, sourceGate: gate.promise });
@@ -196,6 +223,7 @@ test.each(["account-change", "unmount"])("recovery cannot save a fetched result 
         page.bindings.loadedStorageKeyRef.current = "user-b";
         page.sessionsRef.current = structuredClone(page.database.get("user-b") as any[]);
     }
+    if (reason === "session-change") page.bindings.activeSessionIdRef.current = "unrelated";
     page.cleanup();
     gate.resolve();
     await Promise.allSettled(page.recoveryPromises);
@@ -204,4 +232,68 @@ test.each(["account-change", "unmount"])("recovery cannot save a fetched result 
     expect(page.writes).toHaveLength(1);
     expect((page.database.get("user-a") as any[])[1].messages[1].pendingImageTask.taskId).toBe(task.id);
     expect(page.database.get("user-b")).toEqual([{ id: "account-b", messages: [] }]);
+});
+
+test.each(["processing", "waiting", "paused-unknown", "paused-upstream", "missing"])("a later success after %s fills the original message once and removes the send blocker", async (state) => {
+    let completed = false;
+    const requests: string[] = [];
+    globalThis.fetch = (async (url, init) => {
+        requests.push(`${init?.method || "GET"} ${url}`);
+        if (completed) return Response.json({ task });
+        if (state === "missing") return Response.json({}, { status: 404 });
+        return Response.json({ task: { ...task, status: state.startsWith("paused") ? "paused" : state, upstreamTaskId: state === "paused-upstream" ? "upstream-original" : null, resultUrls: [] } });
+    }) as typeof fetch;
+    const page = await recoveryPageHarness({ pending: { ...pending, taskId: task.id } });
+    await page.watching;
+    expect(requests).toEqual(["GET /api/tasks/original-task", "GET /api/tasks/original-task"]);
+    expect(page.watchers[0]!.taskIds).toEqual([task.id]);
+    const waiting = (page.database.get("user-a") as any[])[1].messages[1];
+    expect(waiting.pendingImageTask.recovery).toBe(state === "paused-unknown" || state === "missing" ? "investigate" : state === "paused-upstream" ? "resume" : "observe");
+    const writesBeforeWake = page.writes.length;
+    await page.wake();
+    expect(page.writes).toHaveLength(writesBeforeWake);
+    completed = true;
+    await page.wake();
+    const saved = page.database.get("user-a") as any[];
+    expect(saved[0]).toEqual(page.initial[0]);
+    expect(saved[1].messages).toHaveLength(2);
+    expect(saved[1].messages[0]).toEqual(page.initial[1]!.messages[0]);
+    expect(saved[1].messages[1]).toMatchObject({ id: "original-assistant", generatedImages: [{ id: "original-task:0", dataUrl: originalImage }] });
+    expect(saved[1].messages.some((item: any) => item.pendingImageTask)).toBe(false);
+    expect(saved[1].editTargetImageId).toBe("original-task:0");
+    expect(page.signals.at(-1)!.aborted).toBe(true);
+    const settledWrites = page.writes.length;
+    await page.wake();
+    expect(page.writes).toHaveLength(settledWrites);
+    expect(requests).toHaveLength(4);
+    expect(requests.every((request) => request.startsWith("GET "))).toBe(true);
+    page.cleanup();
+});
+
+test.each([null, "upstream-original"])("refreshing an investigation never authorizes a resume even if its latest upstream ID is %j", async (upstreamTaskId) => {
+    const requests: string[] = [];
+    globalThis.fetch = (async (url, init) => {
+        requests.push(`${init?.method || "GET"} ${url}`);
+        return Response.json({ task: { ...task, status: "paused", upstreamTaskId, resultUrls: [] } });
+    }) as typeof fetch;
+    const page = await recoveryPageHarness({ pending: { ...pending, taskId: task.id, recovery: "investigate" }, click: true });
+    await page.watching;
+    await page.wake();
+    expect(requests).toEqual(Array(3).fill("GET /api/tasks/original-task"));
+    expect((page.database.get("user-a") as any[])[1].messages[1].pendingImageTask.recovery).toBe(upstreamTaskId ? "resume" : "investigate");
+    page.cleanup();
+});
+
+test("an explicitly resumed task that pauses again is only observed by the watcher", async () => {
+    const requests: string[] = [];
+    globalThis.fetch = (async (url, init) => {
+        requests.push(`${init?.method || "GET"} ${url}`);
+        return Response.json({ task: { ...task, status: init?.method === "POST" ? "processing" : "paused", upstreamTaskId: "upstream-original", resultUrls: [] } });
+    }) as typeof fetch;
+    const page = await recoveryPageHarness({ pending: { ...pending, taskId: task.id, recovery: "resume" }, click: true });
+    await page.watching;
+    await page.wake();
+    expect(requests).toEqual(["GET /api/tasks/original-task", "POST /api/tasks/original-task/recover", "GET /api/tasks/original-task", "GET /api/tasks/original-task"]);
+    expect((page.database.get("user-a") as any[])[1].messages[1].pendingImageTask.recovery).toBe("resume");
+    page.cleanup();
 });

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ApiMartImageProviderFailure, apiMartImageModel, buildApiMartImageRequest, runApiMartImageTask } from "../src/apimart-image";
+import { ApiMartImageProviderFailure, ApiMartImageQueryRetryable, apiMartImageModel, buildApiMartImageRequest, runApiMartImageTask } from "../src/apimart-image";
 import { uploadApiMartImage } from "../src/apimart-upload";
 
 const reference = "data:image/png;base64,AQID";
@@ -206,16 +206,22 @@ describe("Mark APIMart image contracts", () => {
   });
 
   test("completed without output and query errors remain ambiguous errors without new POST", async () => {
-    for (const response of [json({ data: { status: "completed", result: { images: [] } } }), json({ error: { message: "Unavailable" } }, 503)]) {
-      let calls = 0;
-      try {
-        await runApiMartImageTask({ ...base, upstreamTaskId: "task_saved" }, { sleep: async () => {}, fetch: async (_url, init) => { calls++; expect(init?.method).not.toBe("POST"); return response.clone(); } });
-        throw new Error("Expected ambiguous failure");
-      } catch (error) {
-        expect(error?.constructor.name).toBe("Error");
-        expect(String(error)).not.toContain("Expected ambiguous failure");
-      }
-      expect(calls).toBe(response.status === 503 ? 3 : 1);
+    for (const { response, code, httpStatus, calls } of [
+      { response: json({ data: { status: "completed", result: { images: [] } } }), code: "PROVIDER_RESULT_MISSING", httpStatus: undefined, calls: 1 },
+      { response: json({ error: { message: "Unavailable" } }, 503), code: "PROVIDER_POLL_HTTP_ERROR", httpStatus: 503, calls: 3 },
+    ]) {
+      const requests: Array<{ url: string; method: string | undefined }> = [];
+      const error = await runApiMartImageTask({ ...base, upstreamTaskId: "task_saved", submissionStarted: true,
+        beforeSubmit: () => { throw new Error("Must not claim another paid submission"); },
+        onSubmitted: () => { throw new Error("Must not replace the saved upstream task"); },
+      }, { sleep: async () => {}, fetch: async (url, init) => {
+        requests.push({ url, method: init?.method });
+        return response.clone();
+      } }).catch(error => error);
+      expect(error).toBeInstanceOf(ApiMartImageQueryRetryable);
+      expect(error).not.toBeInstanceOf(ApiMartImageProviderFailure);
+      expect(error).toMatchObject({ code, httpStatus, nextPollMs: 10_000 });
+      expect(requests).toEqual(Array.from({ length: calls }, () => ({ url: "https://provider.example/v1/tasks/task_saved", method: "GET" })));
     }
   });
 

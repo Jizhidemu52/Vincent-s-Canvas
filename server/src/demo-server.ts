@@ -17,7 +17,7 @@ import { ImageEditInputError, prepareImageEditInput, type ImageEditInput } from 
 import { deploymentFeatures } from "./deployment-features";
 import { billedDemoCredits, resolveStandaloneDemoUser } from "./demo-standalone-mode";
 import { serveStandaloneWeb } from "./demo-standalone-web";
-import { ApiMartImageProviderFailure, apiMartImageModel, runApiMartImageTask } from "./apimart-image";
+import { ApiMartImageProviderFailure, ApiMartImageQueryRetryable, apiMartImageModel, runApiMartImageTask } from "./apimart-image";
 import { createDemoMarkProvider } from "./demo-mark-provider";
 import { MARK_IMAGE_PROVIDER_ID } from "../../shared/mark-image-models";
 import { listAvailableDemoModels, resolveDemoExternalProviders, videoModelConfigIds } from "./demo-provider-configuration";
@@ -2641,6 +2641,8 @@ function isLocalCertificateError(error: unknown) {
 }
 
 function isProviderNetworkError(error: unknown) {
+  // Classification only: never copy the private transport cause into task/UI text.
+  if (error instanceof ApiMartImageQueryRetryable) error = error.cause;
   const message = error instanceof Error ? error.message : String(error);
   return isLocalCertificateError(error) || /ECONNRESET|secure TLS connection|fetch failed|TLS handshake/i.test(message);
 }

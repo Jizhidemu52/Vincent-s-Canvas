@@ -43,8 +43,27 @@ describe("read-only chat image recovery", () => {
 
     test("an upstream ID alone never authorizes resuming a paused task", async () => {
         respond(() => ({ task: { ...originalTask, status: "paused", upstreamTaskId: "upstream-original" } }));
-        expect(await recoverChatImageTask(pending)).toMatchObject({ kind: "needs_attention" });
+        expect(await recoverChatImageTask(pending)).toMatchObject({ kind: "needs_attention", recovery: "resume" });
         expect(calls).toEqual([{ url: "/api/tasks/original-task", method: "GET" }]);
+    });
+
+    test.each(["waiting", "processing"])("a %s reconciliation snapshot reads once and leaves scheduling to the event watcher", async (status) => {
+        respond(() => ({ task: { ...originalTask, status, resultUrls: [] } }));
+        const result = await recoverChatImageTask(pending, { snapshotOnly: true });
+        expect(result).toMatchObject({ kind: "needs_attention", recovery: "observe", task: { status } });
+        expect(calls).toEqual([{ url: "/api/tasks/original-task", method: "GET" }]);
+    });
+
+    test.each([null, "", "   "])("a paused task with upstream ID %j gives investigation guidance, never a recovery promise", async (upstreamTaskId) => {
+        respond(() => ({ task: { ...originalTask, status: "paused", upstreamTaskId } }));
+        const result = await recoverChatImageTask(pending, { snapshotOnly: true });
+        expect(result).toMatchObject({ kind: "needs_attention", recovery: "investigate" });
+        if (result.kind !== "needs_attention") throw new Error("Expected needs_attention");
+        expect(result.content).toContain("暂无法恢复上游查询");
+        expect(result.content).toContain("管理员或供应商核查");
+        expect(result.content).toContain("刷新状态仅核对服务端记录");
+        expect(result.content).not.toContain("继续查询");
+        expect(calls).toHaveLength(1);
     });
 
     test("returns the original completed image with one direct GET, including older tasks", async () => {

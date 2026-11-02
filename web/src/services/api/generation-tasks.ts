@@ -9,6 +9,7 @@ import { dataUrlToFile } from "@/lib/image-utils";
 import { createClientId } from "@/lib/client-id";
 import { fetchServerAsset, uploadServerAsset } from "@/services/api/server-assets";
 import { observeTask } from "./task-observation";
+import { classifyTaskRecovery, submissionInvestigationMessage } from "./task-result-reconciliation";
 import { watchTaskEvents } from "./task-events";
 import { readTaskSnapshot } from "./task-snapshot-query";
 import { workspaceOwnerHeaders } from "@/services/api/workspace-owner";
@@ -38,12 +39,14 @@ export type QueuedTask = { prompt?: string; userInput?: PromptInputData; optimiz
 export class QueuedTaskPausedError extends Error {
     readonly taskId: string;
     readonly canRecover: boolean;
+    readonly recovery: "resume" | "investigate";
     constructor(readonly task: QueuedTask, message?: string) {
-        const canRecover = Boolean(task.upstreamTaskId?.trim());
-        super(`${message || task.failureReason || "任务查询已暂停"}（任务 ${task.id}）。${canRecover ? "可恢复查询原任务，不会重新生成。" : "提交状态待核查，请勿重复生成。"}`);
+        const canRecover = classifyTaskRecovery(task) === "resume";
+        super(`${message || task.failureReason || "任务查询已暂停"}（任务 ${task.id}）。${canRecover ? "可恢复查询原任务，不会重新生成。" : submissionInvestigationMessage}`);
         this.name = "QueuedTaskPausedError";
         this.taskId = task.id;
         this.canRecover = canRecover;
+        this.recovery = canRecover ? "resume" : "investigate";
     }
 }
 export class QueuedTaskFailedError extends Error {

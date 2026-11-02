@@ -130,17 +130,47 @@ test("removing the last favorite on the last page navigates to the valid page", 
     expect(f.unexpected).toEqual([]); expect(f.pageErrors).toEqual([]);
 });
 
-test("a late previous-account failure never updates or alerts the new account", async ({ page, context, baseURL }) => {
+test("a late previous-account failure stays isolated through the pause and explicit reload", async ({ page, context, baseURL }, info) => {
     const f = await fixture(context, baseURL!, 3);
+    const documents: string[] = [];
+    page.on("request", request => {
+        if (request.isNavigationRequest() && request.resourceType() === "document" && request.frame() === page.mainFrame()) documents.push(request.url());
+    });
     await page.goto("/my-prompts"); await loaded(page);
+    const timeOrigin = await page.evaluate(() => performance.timeOrigin), listCount = f.lists.length;
     f.hold(); f.fail(); await card(page, "个人模板 01").getByRole("button", { name: "收藏", exact: true }).click();
     await expect.poll(() => f.writes.length).toBe(1);
     f.switchOwner();
     await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
-    await expect(titleButton(page, "新账号模板 01")).toBeVisible(); await loaded(page);
+    const paused = page.getByRole("heading", { name: "登录状态已变化，工作区已暂停", exact: true });
+    await expect(paused).toBeVisible();
+    await expect(page.locator("article")).toHaveCount(0);
+    await expect(titleButton(page, "个人模板 01")).toHaveCount(0);
+    await expect(titleButton(page, "新账号模板 01")).toHaveCount(0);
+    expect(f.lists).toHaveLength(listCount);
+    expect(documents).toHaveLength(1);
+    expect(await page.evaluate(() => performance.timeOrigin)).toBe(timeOrigin);
+    // Deliver the old response while its document still exists: the unmounted
+    // owner's callback must be inert before the user starts a fresh workspace.
+    const lateFailure = page.waitForResponse(response => response.request().method() === "PUT" && response.url().endsWith("/favorite") && response.status() === 503);
     f.release();
+    await (await lateFailure).finished();
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => resolve())));
+    await expect(paused).toBeVisible();
+    await expect(page.getByText("收藏服务暂不可用", { exact: true })).not.toBeVisible();
+    expect(f.lists).toHaveLength(listCount); expect(documents).toHaveLength(1);
+    await page.getByRole("button", { name: "重新加载", exact: true }).click();
+    await expect(titleButton(page, "新账号模板 01")).toBeVisible(); await loaded(page);
+    expect(documents).toHaveLength(2);
+    expect(await page.evaluate(() => performance.timeOrigin)).not.toBe(timeOrigin);
+    await expect(titleButton(page, "个人模板 01")).toHaveCount(0);
     await expect(card(page, "新账号模板 01").getByRole("button", { name: "收藏", exact: true })).toBeEnabled();
+    await expect(card(page, "新账号模板 01").getByRole("button", { name: "取消收藏", exact: true })).toHaveCount(0);
     await expect(page.getByText("收藏服务暂不可用", { exact: true })).not.toBeVisible();
     expect(f.writes).toHaveLength(1); expect(f.writes[0].owner).toBe(employeeA);
     expect(f.unexpected).toEqual([]); expect(f.pageErrors).toEqual([]);
+    await info.attach("identity-navigation", { contentType: "application/json", body: Buffer.from(JSON.stringify({
+        documentsBeforeExplicitReload: 1, documentsAfterExplicitReload: documents.length, previousOwnerWrites: f.writes.length,
+        lateFailureDeliveredWhilePaused: true, newOwnerFavoriteUnchanged: true,
+    })) });
 });

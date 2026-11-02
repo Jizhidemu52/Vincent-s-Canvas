@@ -1,5 +1,20 @@
 /** Employee-facing interaction copy. User content and protocol identifiers are not translation keys. */
 export default {
+    // Original-task reconciliation never resubmits an uncertain paid request.
+    "刷新状态": "Refresh status",
+    "恢复原任务查询": "Resume original task polling",
+    "提交结果待核查": "Submission needs investigation",
+    "原任务状态核对": "Checking original task status",
+    "刷新原任务状态（": "Refresh original task status (",
+    "停止自动核对": "Stop automatic checks",
+    "提交结果待核查，暂无法恢复上游查询。请联系管理员核对原任务；可刷新状态，请勿重复提交。": "The submission needs investigation and upstream polling cannot be resumed. Contact an administrator to verify the original task. You can refresh its status; do not submit it again.",
+    "本会话有尚未核实的图片任务，请先核对任务状态，勿重复生成": "This conversation has an unverified image task. Check its status before generating again.",
+    "正在核对原图片任务状态，不会重新提交…": "Checking the original image task without resubmitting…",
+    "已停止本页等待；可刷新状态核对原任务，确认结果前不能继续发送。": "Waiting is stopped on this page. Refresh the original task's status; sending remains unavailable until its result is verified.",
+    "提交或结果待核查；请复制诊断信息交由管理员或供应商核查，确认前请勿重复生成。": "The submission or result needs investigation. Copy the diagnostics for an administrator or provider; do not generate again until it is verified.",
+    "上游查询已暂停；可手动恢复原任务查询，确认结果前不能继续发送。": "Upstream polling is paused. You can manually resume the original task's polling; sending remains unavailable until its result is verified.",
+    "本页正在自动核对原任务结果；也可刷新状态，确认结果前不能继续发送。": "This page is automatically checking the original task. You can also refresh its status; sending remains unavailable until its result is verified.",
+    "请先核对原任务状态，避免重复提交": "Check the original task's status first to avoid duplicate submissions",
     // Navigation, authentication and session recovery.
     "无限画布": "Canvas",
     "INCHOICE · 无限画布首页": "Inchoice TruCreate · Home",

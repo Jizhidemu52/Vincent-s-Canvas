@@ -1,7 +1,6 @@
 import { uiText, useUiLocale } from "@/lib/i18n";
 import { Drawer } from "antd";
 import { Link } from "react-router-dom";
-import { UsageCollectionNotice } from "@/components/layout/frequent-navigation";
 import { InchoiceBrand } from "@/components/layout/inchoice-brand";
 import { NavigationMenu } from "@/components/layout/navigation-menu";
 import { NavigationFooter } from "@/components/layout/navigation-footer";
@@ -14,7 +13,6 @@ export function MobileNavDrawer({ open, onClose }: { open: boolean; activeToolSl
             <Link to="/" onClick={onClose} className="block text-foreground" aria-label={uiText("INCHOICE · 无限画布首页")}><InchoiceBrand /></Link>
             <nav aria-label={uiText("主导航")}><NavigationMenu onNavigate={onClose} /></nav>
             <NavigationFooter onNavigate={onClose} />
-            <UsageCollectionNotice />
         </div>
     </Drawer>;
 }

@@ -348,8 +348,10 @@ export class ApiMartImageTaskPending extends Error {
 
 /** A known task's GET was inconclusive, not a failed or unsubmitted generation. */
 export class ApiMartImageQueryRetryable extends Error {
-  constructor(message: string, readonly code: string, readonly nextPollMs: number, readonly httpStatus?: number) {
-    super(message);
+  constructor(message: string, readonly code: string, readonly nextPollMs: number, readonly httpStatus?: number, options?: ErrorOptions) {
+    // Keep transport diagnostics private in the standard non-enumerable cause;
+    // callers persist only the safe outer code/status, never the cause itself.
+    super(message, options);
   }
 }
 
@@ -442,8 +444,8 @@ export async function stepApiMartImageTask(input: ApiMartImageTaskInput, runtime
       // loop that could continue issuing GETs beyond the original deadline.
       ...(deadline === undefined ? {} : { maxAttempts: 1, timeoutMs: Math.min(60_000, deadline - now) }),
     });
-  } catch {
-    throw new ApiMartImageQueryRetryable("APIMart 图片任务状态查询暂时中断", "PROVIDER_POLL_NETWORK_ERROR", nextQueryMs);
+  } catch (cause) {
+    throw new ApiMartImageQueryRetryable("APIMart 图片任务状态查询暂时中断", "PROVIDER_POLL_NETWORK_ERROR", nextQueryMs, undefined, { cause });
   }
   if (!statusResponse.ok) {
     const message = `APIMart 图片任务状态查询失败：${statusResponse.status} ${await providerMessage(statusResponse, input.apiKey)}`;

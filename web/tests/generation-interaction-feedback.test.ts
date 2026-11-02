@@ -27,6 +27,12 @@ describe("generation interaction safety", () => {
         expect(result).toContain("继续查询原任务");
         expect(result).toContain("不要重复生成");
     });
+    test("an unrecoverable submission keeps the investigation guidance instead of promising recovery", () => {
+        const result = generationErrorMessage("upstream HTTP 500，提交结果待核查，暂无法恢复上游查询。请勿重复提交。");
+        expect(result).toContain("联系管理员");
+        expect(result).toContain("刷新状态");
+        expect(result).not.toContain("继续查询原任务");
+    });
     test.each([[401, "登录已过期"], [402, "额度不足"], [429, "服务请求较多"], [504, "响应超时"], [503, "暂时不可用"]])("HTTP %s maps to actionable Chinese guidance", (status, expected) => {
         expect(generationErrorMessage("upstream error", Number(status))).toContain(String(expected));
     });

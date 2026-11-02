@@ -118,6 +118,9 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
     const request = async (kind: string, args: any[]) => {
         requests.push({ kind, args });
         if (!generate) throw new Error("Unexpected image request: this regression test must not call a real API");
+        // Real image submission assigns and persists the pending record before
+        // returning a result; exercise that same identity transition here.
+        await args[kind === "edit" ? 4 : 2].onSubmissionStarted?.();
         return generate();
     };
     const component = (name: string) => name;
@@ -484,7 +487,12 @@ describe("image workspace isolation", () => {
         await page.settle();
         page.navigate("image-generation");
         await page.settle();
-        expect(page.images().map(image => image.id)).toEqual(["a-old-image"]);
+        expect(page.images()).toEqual([]);
+        expect(page.failedCards()).toHaveLength(1);
+        expect(page.failedCards()[0]!.props.recovery).toMatchObject({
+            requestId: page.requests[0]!.args[2].requestId,
+            ownerId: "designer-a", tool: "image-generation",
+        });
         pending.resolve([{ id: "new-a", dataUrl: "data:image/png;base64,YQ==", sourceTaskId: "task-new-a" }]);
         await page.settle();
         expect(page.images().map(image => image.id)).toEqual(["new-a"]);

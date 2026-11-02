@@ -21,6 +21,7 @@ export async function observeTask<T>(options: {
     done: (value: T) => boolean;
     signal?: AbortSignal;
     timeoutMs?: number;
+    finalReadTimeoutMs?: number;
     intervalMs?: number;
     taskIds?: string[];
     now?: () => number;
@@ -35,18 +36,23 @@ export async function observeTask<T>(options: {
         options.signal?.throwIfAborted();
         await options.ready?.(Math.max(0, deadline - now()), options.signal);
         const remaining = deadline - now();
-        if (remaining <= 0) throw new TaskObservationStoppedError("timeout", options.taskIds);
-        const timeoutSignal = AbortSignal.timeout(Math.max(1, Math.min(20_000, remaining)));
+        // A push may have been missed, or completion may race the observation
+        // deadline. Check the authoritative snapshot once before parking the UI.
+        // This is a bounded GET, never another generation or recovery request.
+        const finalRead = remaining <= 0;
+        const timeoutSignal = AbortSignal.timeout(finalRead ? options.finalReadTimeoutMs ?? 5_000 : Math.max(1, Math.min(20_000, remaining)));
         const querySignal = options.signal ? AbortSignal.any([options.signal, timeoutSignal]) : timeoutSignal;
         let value: T;
         try { value = await options.read(querySignal); failures = 0; }
         catch (error) {
             options.signal?.throwIfAborted();
+            if (finalRead) throw new TaskObservationStoppedError("timeout", options.taskIds);
             if (++failures >= 3) throw new TaskObservationStoppedError("unavailable", options.taskIds);
             await (options.delay || observationDelay)(Math.min(1_000 * 2 ** failures, Math.max(0, deadline - now())), options.signal);
             continue;
         }
         if (options.done(value)) return value;
+        if (finalRead) throw new TaskObservationStoppedError("timeout", options.taskIds);
         if (options.waitForChange) await options.waitForChange(Math.max(0, deadline - now()), options.signal);
         else await (options.delay || observationDelay)(Math.min(options.intervalMs ?? 2_500, Math.max(0, deadline - now())), options.signal);
     }

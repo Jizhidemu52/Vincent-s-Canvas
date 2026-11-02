@@ -1,6 +1,7 @@
 /** Keep human guidance separate from the original diagnostic. Never infer that an unknown paid submission failed. */
 export function generationErrorMessage(error: unknown, status?: number): string {
     const raw = error instanceof Error ? error.message : String(error || "");
+    if (/暂无法恢复上游查询|提交结果待核查/.test(raw)) return "提交结果待核查，暂无法恢复上游查询。请联系管理员核对原任务；可刷新状态，请勿重复提交。";
     if (/待核查|勿重复|不要重复|查询暂停|停止本页查询|原请求待查询/.test(raw)) return "原任务状态尚未确认，请继续查询原任务，不要重复生成。";
     if (status === 401 || /unauthorized|session.*expired|登录.*过期/i.test(raw)) return "登录已过期，请重新登录后继续；不要重复提交尚未确认的任务。";
     if (status === 402 || /insufficient|balance|额度不足|余额不足/i.test(raw)) return "可用额度不足，请联系管理员补充额度后重试。";

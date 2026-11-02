@@ -421,7 +421,7 @@ test("a persisted pending image request blocks a new send in the same conversati
     const page = pageSendHarness({ mode: "create" });
     page.bindings.activeSession.messages.push({ id: "assistant", role: "assistant", pendingImageTask: { requestId: "original-request" } });
     await page.send();
-    expect(page.events).toEqual(["本会话有尚未核实的图片任务，请先查询原任务，勿重复生成"]);
+    expect(page.events).toEqual(["本会话有尚未核实的图片任务，请先核对任务状态，勿重复生成"]);
     expect(page.snapshots).toEqual([]);
 });
 

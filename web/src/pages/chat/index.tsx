@@ -36,6 +36,7 @@ import { isClaudeModel, requestEdit, requestGeneration } from "@/services/api/im
 import { requestCreativeChatPlan } from "@/services/api/creative-chat";
 import { resolveToolModel } from "@/services/api/business-config";
 import { recoverChatImageTask, type PendingChatImageTask } from "@/services/api/chat-image-recovery";
+import { watchTaskReconciliation } from "@/services/api/task-result-reconciliation";
 import { uploadImage } from "@/services/image-storage";
 import { flushCanvasPersistence, useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
@@ -69,6 +70,7 @@ function dataUrlBytes(dataUrl: string) {
 export default function ChatPage() {
     useUiText();
     const { message, modal } = App.useApp();
+    const copyText = useCopyText();
     const navigate = useNavigate();
     const user = useUserStore((state) => state.user);
     const config = useEffectiveConfig();
@@ -115,7 +117,7 @@ export default function ChatPage() {
     const [placingImage, setPlacingImage] = useState(false);
     const placingImageRef = useRef(false);
     const [imageRecoveryReload, setImageRecoveryReload] = useState(0);
-    const imageRecoveryRequestRef = useRef<{ storageKey: string; sessionId: string; messageId: string; requestId: string; taskId?: string } | null>(null);
+    const imageRecoveryRequestRef = useRef<{ storageKey: string; sessionId: string; messageId: string; requestId: string; taskId?: string; resumePaused: boolean } | null>(null);
     const [recoveringImageTask, setRecoveringImageTask] = useState(false);
     const scrollRef = useRef<HTMLDivElement>(null);
     const followBottomRef = useRef(true);
@@ -220,6 +222,7 @@ export default function ChatPage() {
 
     const activeSession = useMemo(() => sessions.find((item) => item.id === activeSessionId) || sessions[0], [activeSessionId, sessions]);
     const pendingImageMessage = activeSession?.messages.find((item) => item.pendingImageTask);
+    const pendingImageRecovery = pendingImageMessage?.pendingImageTask?.recovery || "observe";
     const imageBinding = toolBindings.find(item => item.toolKey === "gpt-chat-image");
     const chatImageEnabled = useModuleEnabled("gpt-chat-image");
     const selected = modelsStatus === "ready" ? resolveToolModel(businessConfig, "gpt-chat") : undefined;
@@ -276,51 +279,83 @@ export default function ChatPage() {
         const { signal } = controller;
         const sessionId = activeSession.id;
         const assistantId = pendingImageMessage.id;
-        const resumePaused = Boolean(resumeRequest && resumeRequest.storageKey === storageKey && resumeRequest.sessionId === sessionId
+        const queriedByUser = Boolean(resumeRequest && resumeRequest.storageKey === storageKey && resumeRequest.sessionId === sessionId
             && resumeRequest.messageId === assistantId && resumeRequest.requestId === pending.requestId && resumeRequest.taskId === pending.taskId);
-        if (pendingImageMessage.stopped && !resumePaused) { setRecoveringImageTask(false); return; }
-        const stillCurrent = () => !signal.aborted && isCurrentScope();
+        if (pendingImageMessage.stopped && !queriedByUser) { setRecoveringImageTask(false); return; }
+        const stillCurrent = () => !signal.aborted && isCurrentScope() && (!activeSessionIdRef.current || activeSessionIdRef.current === sessionId);
+        const stillPending = () => stillCurrent() && sessionsRef.current.find((session) => session.id === sessionId)?.messages
+            .some((item) => item.id === assistantId && item.pendingImageTask?.requestId === pending.requestId);
+        let latestPending = pending;
+        let settled = false;
         const saveUpdate = async (update: (item: ChatMessage) => ChatMessage, editTargetImageId?: string) => {
-            if (!stillCurrent()) return;
-            updateSession(sessionId, (session) => ({ ...session, ...(editTargetImageId ? { editTargetImageId } : {}), messages: session.messages.map((item) => item.id === assistantId ? update(item) : item), updatedAt: new Date().toISOString() }));
-            if (!stillCurrent()) return;
+            if (!stillPending()) return;
+            let changed = false;
+            updateSession(sessionId, (session) => {
+                const messages = session.messages.map((item) => {
+                    if (item.id !== assistantId || item.pendingImageTask?.requestId !== pending.requestId) return item;
+                    const next = update(item);
+                    changed = next !== item;
+                    return next;
+                });
+                return changed ? { ...session, ...(editTargetImageId ? { editTargetImageId } : {}), messages, updatedAt: new Date().toISOString() } : session;
+            });
+            if (!changed || !stillCurrent()) return;
             persistence.clear();
             await persistSessions(sessionsRef.current);
         };
-        setRecoveringImageTask(true);
-        void (async () => {
-            const result = await recoverChatImageTask(pending, {
-                signal,
-                resumePaused,
-                onTask: (task) => saveUpdate((item) => ({ ...item, pendingImageTask: { ...pending, taskId: task.id }, content: `正在查询原图片任务 ${task.id}，不会重新生成或扣费。` })),
-            });
-            if (!stillCurrent()) return;
-            if (result.kind === "success") {
-                const images = await Promise.all(result.resultUrls.map((url, index) => chatMedia.persist({ id: `${result.task.id}:${index}`, dataUrl: url, prompt: pending.prompt, modelId: pending.modelId, quality: pending.quality, ...(pending.resolution ? { resolution: pending.resolution } : {}), lineage: pending.lineage }, () => { if (!stillCurrent()) throw new DOMException("会话已切换", "AbortError"); })));
-                if (!stillCurrent()) return;
-                await saveUpdate((item) => {
-                    const { pendingImageTask: _pending, ...saved } = item;
-                    return { ...saved, parentMessageId: pending.parentMessageId, role: "assistant", content: `${pending.explanation ? `${pending.explanation}\n\n` : ""}已找回原图片任务结果，可以直接继续提修改要求；未重新生成或扣费。`, generatedImages: images };
-                }, images[0]?.id);
-            } else if (result.kind === "failed") {
-                await saveUpdate((item) => {
-                    const { pendingImageTask: _pending, ...saved } = item;
-                    return { ...saved, role: "error", content: result.content };
+        const reconcile = async (resumePaused: boolean) => {
+            if (!stillPending() || settled) return;
+            setRecoveringImageTask(true);
+            try {
+                const result = await recoverChatImageTask(latestPending, {
+                    signal, resumePaused, snapshotOnly: true,
+                    onTask: (task) => {
+                        latestPending = { ...latestPending, taskId: task.id, taskStatus: task.status, upstreamTaskId: task.upstreamTaskId || null, taskFailureReason: task.failureReason || null };
+                        return saveUpdate((item) => item.pendingImageTask?.taskId === task.id && item.pendingImageTask?.taskStatus === task.status
+                            && item.pendingImageTask?.upstreamTaskId === latestPending.upstreamTaskId && item.pendingImageTask?.taskFailureReason === latestPending.taskFailureReason && !item.stopped ? item
+                            : { ...item, stopped: undefined, pendingImageTask: latestPending });
+                    },
                 });
-            } else {
-                await saveUpdate((item) => ({ ...item, pendingImageTask: { ...pending, ...(result.task ? { taskId: result.task.id } : {}) }, content: result.content }));
+                if (!stillPending()) return;
+                if (result.kind === "success") {
+                    const images = await Promise.all(result.resultUrls.map((url, index) => chatMedia.persist({ id: `${result.task.id}:${index}`, dataUrl: url, prompt: pending.prompt, modelId: pending.modelId, quality: pending.quality, ...(pending.resolution ? { resolution: pending.resolution } : {}), lineage: pending.lineage }, () => { if (!stillPending()) throw new DOMException("会话已切换", "AbortError"); })));
+                    if (!stillPending()) return;
+                    await saveUpdate((item) => {
+                        const { pendingImageTask: _pending, stopped: _stopped, ...saved } = item;
+                        return { ...saved, parentMessageId: pending.parentMessageId, role: "assistant", content: `${pending.explanation ? `${pending.explanation}\n\n` : ""}已找回原图片任务结果，可以直接继续提修改要求；本次核查未重新生成。`, generatedImages: images };
+                    }, images[0]?.id);
+                    settled = true;
+                } else if (result.kind === "failed") {
+                    await saveUpdate((item) => {
+                        const { pendingImageTask: _pending, stopped: _stopped, ...saved } = item;
+                        return { ...saved, role: "error", content: result.content };
+                    });
+                    settled = true;
+                } else {
+                    latestPending = { ...latestPending, recovery: result.recovery };
+                    await saveUpdate((item) => item.content === result.content && item.pendingImageTask?.recovery === result.recovery && !item.stopped ? item
+                        : { ...item, stopped: undefined, pendingImageTask: latestPending, content: result.content });
+                }
+            } catch (error) {
+                if (!stillPending()) return;
+                await saveUpdate((item) => ({ ...item, content: `原图片任务状态读取未完成：${error instanceof Error ? error.message : "读取失败"}。可刷新状态或复制诊断信息交由管理员核查，请勿重复生成。` }));
+            } finally {
+                if (stillCurrent()) setRecoveringImageTask(false);
+                if (settled) controller.abort();
             }
-        })().catch((error: unknown) => {
-            if (!stillCurrent()) return;
-            void saveUpdate((item) => ({ ...item, content: `原图片任务查询未完成：${error instanceof Error ? error.message : "读取失败"}。请查询原任务，勿重复生成。` })).catch(() => undefined);
-        }).finally(() => { if (stillCurrent()) setRecoveringImageTask(false); });
+        };
+        void (async () => {
+            await reconcile(queriedByUser && resumeRequest?.resumePaused === true);
+            if (!stillPending() || settled) return;
+            await watchTaskReconciliation({ taskIds: latestPending.taskId ? [latestPending.taskId] : [], signal, reconcile: () => reconcile(false) });
+        })().catch(() => undefined);
         return () => controller.abort();
     }, [sessionsReady, isSending, activeSession?.id, pendingImageMessage?.id, pendingImageMessage?.pendingImageTask?.requestId, storageKey, imageRecoveryReload]);
 
     const queryOriginalImageTask = () => {
         const pending = pendingImageMessage?.pendingImageTask;
         if (!sessionsReady || isSending || recoveringImageTask || imageRecoveryRequestRef.current || !activeSession || !pending || !pendingImageMessage) return;
-        imageRecoveryRequestRef.current = { storageKey, sessionId: activeSession.id, messageId: pendingImageMessage.id, requestId: pending.requestId, taskId: pending.taskId };
+        imageRecoveryRequestRef.current = { storageKey, sessionId: activeSession.id, messageId: pendingImageMessage.id, requestId: pending.requestId, taskId: pending.taskId, resumePaused: pending.recovery === "resume" };
         setImageRecoveryReload((value) => value + 1);
     };
 
@@ -464,7 +499,7 @@ export default function ChatPage() {
 
     const send = async (resend?: { messageId: string; content?: string }) => {
         if (!sessionsReady || !isCurrentScope() || sendingRef.current || placingImageRef.current || readingAttachments || hydratingMedia || !activeSession) return;
-        if (activeSession.messages.some((item) => item.pendingImageTask)) { message.warning(uiText("本会话有尚未核实的图片任务，请先查询原任务，勿重复生成")); return; }
+        if (activeSession.messages.some((item) => item.pendingImageTask)) { message.warning(uiText("本会话有尚未核实的图片任务，请先核对任务状态，勿重复生成")); return; }
         if (!selectedModel || !selected) {
             message.warning(uiText("管理员尚未启用可用的对话模型"));
             return;
@@ -751,8 +786,18 @@ export default function ChatPage() {
 
                     <div className="border-t border-border bg-card px-4 py-4 md:px-[8%]">
                         <div className="mx-auto max-w-3xl">
-                            {pendingImageMessage && !isSending ? <div role="status" className="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground"><span>{recoveringImageTask ? uiText("正在查询原图片任务，不会重新生成…") : uiText("本会话有图片任务尚未核实；确认结果前不能继续发送。")}</span><Button size="small" disabled={recoveringImageTask} onClick={queryOriginalImageTask}>{uiText("查询原任务")}</Button></div> : null}
-                            {pendingImageMessage?.pendingImageTask?.taskId && <GenerationTaskCancel taskId={pendingImageMessage.pendingImageTask.taskId} />}
+                            {pendingImageMessage && !isSending ? <div role="status" className="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
+                                <span>{recoveringImageTask ? uiText("正在核对原图片任务状态，不会重新提交…")
+                                    : pendingImageMessage.stopped ? uiText("已停止本页等待；可刷新状态核对原任务，确认结果前不能继续发送。")
+                                        : pendingImageRecovery === "investigate" ? uiText("提交或结果待核查；请复制诊断信息交由管理员或供应商核查，确认前请勿重复生成。")
+                                            : pendingImageRecovery === "resume" ? uiText("上游查询已暂停；可手动恢复原任务查询，确认结果前不能继续发送。")
+                                                : uiText("本页正在自动核对原任务结果；也可刷新状态，确认结果前不能继续发送。")}</span>
+                                <div className="flex shrink-0 flex-wrap gap-2">
+                                    <Button data-testid="chat-image-recovery-action" size="small" disabled={recoveringImageTask} onClick={queryOriginalImageTask}>{pendingImageRecovery === "resume" ? uiText("恢复原任务查询") : uiText("刷新状态")}</Button>
+                                    <Button size="small" onClick={() => void copyText(JSON.stringify({ requestId: `${pendingImageMessage.pendingImageTask!.requestId}:0`, taskId: pendingImageMessage.pendingImageTask?.taskId, status: pendingImageMessage.pendingImageTask?.taskStatus, upstreamTaskId: pendingImageMessage.pendingImageTask?.upstreamTaskId, recovery: pendingImageRecovery, failureReason: pendingImageMessage.pendingImageTask?.taskFailureReason, detail: pendingImageMessage.content }, null, 2), uiText("诊断信息已复制"))}>{uiText("复制诊断信息")}</Button>
+                                </div>
+                            </div> : null}
+                            {!pendingImageMessage?.stopped && pendingImageRecovery !== "investigate" && pendingImageMessage?.pendingImageTask?.taskId && <GenerationTaskCancel taskId={pendingImageMessage.pendingImageTask.taskId} />}
                             {editing ? <div role="status" className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground"><span>{uiText("编辑后将从这条消息创建新分支，原会话和附件保留；发送会重新调用模型。")}</span><Button size="small" disabled={isSending} onClick={() => setEditing(null)}>{uiText("取消编辑")}</Button></div> : null}
                             <div className="relative rounded-2xl border border-input bg-background p-3 focus-within:border-orange-400">
                                 {!editing ? <ConversationImageTarget image={selectedImage} mode={imageTarget?.mode} onCancel={() => setImageTarget(null)} /> : null}
@@ -773,7 +818,7 @@ export default function ChatPage() {
                                 </div>
                                 <input ref={fileInputRef} type="file" multiple disabled={!sessionsReady || isSending || Boolean(editing) || readingAttachments} accept={CHAT_ATTACHMENT_ACCEPT} className="hidden" onChange={(event) => { void addFiles(event.target.files); event.currentTarget.value = ""; }} />
                                 {imageBinding?.modelConfigId ? <p role="status" className="mt-2 text-xs text-muted-foreground">{uiText("当前出图模型由管理员固定，无需选择。")}</p> : null}
-                                {!isSending && (!sessionsReady || !selectedModel || (!composerText.trim() && !composerAttachments.length) || placingImage || readingAttachments || hydratingMedia || pendingImageMessage) ? <p role="status" className="mt-2 text-xs text-muted-foreground">{!sessionsReady ? uiText("正在读取对话，请稍候") : !selectedModel ? uiText("暂无可用对话模型，请联系管理员") : readingAttachments ? uiText("正在读取附件，请稍候") : hydratingMedia ? uiText("正在恢复图片，请稍候") : placingImage ? uiText("正在保存画布，请稍候") : pendingImageMessage ? uiText("请先查询原任务，避免重复提交") : uiText("还差：填写消息或添加附件")}</p> : null}
+                                {!isSending && (!sessionsReady || !selectedModel || (!composerText.trim() && !composerAttachments.length) || placingImage || readingAttachments || hydratingMedia || pendingImageMessage) ? <p role="status" className="mt-2 text-xs text-muted-foreground">{!sessionsReady ? uiText("正在读取对话，请稍候") : !selectedModel ? uiText("暂无可用对话模型，请联系管理员") : readingAttachments ? uiText("正在读取附件，请稍候") : hydratingMedia ? uiText("正在恢复图片，请稍候") : placingImage ? uiText("正在保存画布，请稍候") : pendingImageMessage ? uiText("请先核对原任务状态，避免重复提交") : uiText("还差：填写消息或添加附件")}</p> : null}
                             </div>
                             <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground"><CornerDownLeft className="size-3.5" /><span>{uiText("Ctrl / ⌘ + V 粘贴图片")}</span><span className="opacity-45">·</span><span>{uiText("Ctrl / ⌘ + Enter 发送")}</span><span className="opacity-45">·</span><span>{uiText("输入 @ 选图，编辑目标与参考图合计最多 5 张")}</span><span className="opacity-45">·</span><span>{deploymentFeatures.creditsEnabled ? uiText("对话按成功模型调用计费（含工具续答），生成图片另计积分") : uiText("直接继续提要求，无需重复上传")}</span></p>
                             {isSending ? <p className="mt-1 text-xs text-muted-foreground">{uiText("停止仅中断本页等待，服务端执行与计费不保证取消。")}</p> : null}

@@ -4,7 +4,6 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useState } from "react";
 import { MobileNavDrawer } from "@/components/layout/mobile-nav-drawer";
 import { InchoiceBrand } from "@/components/layout/inchoice-brand";
-import { UsageCollectionNotice } from "@/components/layout/frequent-navigation";
 import { NavigationMenu } from "@/components/layout/navigation-menu";
 import { NavigationFooter } from "@/components/layout/navigation-footer";
 import { nextProjectTitle } from "@/lib/project-title";
@@ -35,7 +34,6 @@ export function AppTopNav() {
                 </div>
                 <nav aria-label={uiText("主导航")} className="hide-scrollbar mt-6 min-h-0 flex-1 overflow-y-auto pb-6"><NavigationMenu /></nav>
                 <NavigationFooter />
-                <UsageCollectionNotice />
             </aside>
             <header className="wb-sidebar fixed inset-x-0 top-0 z-20 flex h-14 items-center justify-between border-b px-4 md:hidden">
                 <Link to="/" className="flex min-w-0 items-center text-foreground" aria-label={uiText("INCHOICE · 无限画布首页")}><InchoiceBrand className="!w-[144px]" /></Link>

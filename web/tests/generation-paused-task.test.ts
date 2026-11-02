@@ -52,7 +52,7 @@ test.each([false, true])("an image task paused after interruption stops waiting 
     expect(paused.taskId).toBe("interrupted-image-task");
     expect(paused.canRecover).toBe(false);
     expect(paused.message).toContain("interrupted-image-task");
-    expect(paused.message).toContain("请勿重复生成");
+    expect(paused.message).toContain("请勿重复提交");
     expect(polls).toBe(initiallyProcessing ? 2 : 1);
     expect(requests.filter((request) => request.method === "POST")).toEqual([{ path: "/api/tasks", method: "POST" }]);
 });

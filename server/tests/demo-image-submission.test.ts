@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import ts from "typescript";
-import { ApiMartImageProviderFailure, apiMartImageModel, apiMartImageOptions, buildApiMartImageRequest } from "../src/apimart-image";
+import { ApiMartImageProviderFailure, ApiMartImageQueryRetryable, apiMartImageModel, apiMartImageOptions, buildApiMartImageRequest } from "../src/apimart-image";
 import { apiMartPollIntervalMs } from "../src/apimart-poll-interval";
 import { MARK_IMAGE_PROVIDER_ID } from "../../shared/mark-image-models";
 import { DemoStateStore, DemoStorageError, materializeDemoAsset } from "../src/demo-state-store";
@@ -44,6 +44,7 @@ type RecordedRequest = { url: string; method: string; init?: RequestInit };
 type DemoImageTask = { id: string; requestId: string; credits: number; status: string; failureReason?: string; parameters: Record<string, unknown> };
 type Harness = {
   callGptImage2(prompt: string, parameters: Record<string, unknown>, sources: Array<{ mimeType: string; bytes: Uint8Array }>): Promise<string>;
+  callApiMartImage(modelId: string, prompt: string, parameters: Record<string, unknown>, sources: unknown[]): Promise<string>;
   runApiMartImageTaskForDemo(task: DemoImageTask, user: { id: string; creditBalance: number }, modelId: string, prompt: string, parameters: Record<string, unknown>, sources: unknown[]): Promise<void>;
 };
 
@@ -53,13 +54,13 @@ function createHarness(failurePhase?: FailurePhase) {
   const paid: RecordedRequest[] = [];
   const reads: RecordedRequest[] = [];
   let completed = 0;
-  const failure = Object.assign(new Error("unknown certificate verification error"), { code: "UNKNOWN_CERTIFICATE_VERIFICATION_ERROR" });
+  const failure = Object.assign(new Error("unknown certificate verification error: https://provider.invalid/private?key=mock-model-key"), { code: "UNKNOWN_CERTIFICATE_VERIFICATION_ERROR" });
   const dependencies = {
     demoState, DemoStorageError, materializeDemoAsset, ImageResultPersistenceError, demoAssets: new Map(), demoTasks: new Map(), now: () => new Date().toISOString(),
     apiMartBaseUrl: "https://apimart.invalid/v1",
     apiMartApiKey: "mock-model-key",
     gptImage2ProviderId: "legacy-apimart", MARK_IMAGE_PROVIDER_ID,
-    buildApiMartImageRequest, apiMartImageModel, apiMartImageOptions, apiMartPollIntervalMs, ApiMartImageProviderFailure,
+    buildApiMartImageRequest, apiMartImageModel, apiMartImageOptions, apiMartPollIntervalMs, ApiMartImageProviderFailure, ApiMartImageQueryRetryable,
     Bun: { sleep: async () => {} },
     sleep: async () => {},
     completeDemoImageTask: async () => { completed++; },
@@ -86,11 +87,27 @@ function createHarness(failurePhase?: FailurePhase) {
   const injected = { ...dependencies,
     queryProviderTaskStatus: (url: string, headers: HeadersInit) => queryProviderTaskStatus(url, headers, { fetch: dependencies.fetch, sleep: async () => {} }),
   };
-  const api = new Function(...Object.keys(injected), `${productionCode}\nreturn { callGptImage2, runApiMartImageTaskForDemo };`)(...Object.values(injected)) as Harness;
+  const api = new Function(...Object.keys(injected), `${productionCode}\nreturn { callGptImage2, callApiMartImage, runApiMartImageTaskForDemo };`)(...Object.values(injected)) as Harness;
   return { api, paid, reads, failure, completed: () => completed };
 }
 
 describe("demo image paid-submission boundaries", () => {
+  test("APIMart query classification retains a private TLS cause without exposing it or repeating the paid POST", async () => {
+    const harness = createHarness("polling");
+    const error = await harness.api.callApiMartImage("gemini-3.1-flash-image-preview", "paid prompt", {}, []).catch(error => error);
+    expect(error).toBeInstanceOf(ApiMartImageQueryRetryable);
+    expect(error).toMatchObject({ code: "PROVIDER_POLL_NETWORK_ERROR", nextPollMs: 10_000 });
+    expect(error.cause).toBe(harness.failure);
+    expect(Object.getOwnPropertyDescriptor(error, "cause")?.enumerable).toBe(false);
+    for (const text of [String(error), error.stack, JSON.stringify(error)]) {
+      expect(text).not.toContain("mock-model-key");
+      expect(text).not.toContain("https://provider.invalid/private");
+    }
+    expect(harness.paid).toHaveLength(1);
+    expect(harness.paid[0]).toMatchObject({ url: "https://apimart.invalid/v1/images/generations", method: "POST" });
+    expect(harness.reads.map(({ url, method }) => ({ url, method }))).toEqual(Array.from({ length: 3 }, () => ({ url: "https://apimart.invalid/v1/tasks/original-task", method: "GET" })));
+  });
+
   test("GPT Image2 submits through the helper once and keeps polling/download on ordinary GET", async () => {
     const harness = createHarness();
     const result = await harness.api.callGptImage2("reference prompt", { size: "16:9", resolution: "2k" }, [{ mimeType: "image/png", bytes: new Uint8Array([0, 255]) }]);
@@ -122,6 +139,8 @@ describe("demo image paid-submission boundaries", () => {
       await harness.api.runApiMartImageTaskForDemo(task, user, "gemini-3.1-flash-image-preview", "paid prompt", {}, []);
       expect(task.status).toBe("failed");
       expect(task.failureReason).toContain("无法与图像服务建立安全连接");
+      expect(task.failureReason).not.toContain("mock-model-key");
+      expect(task.failureReason).not.toContain("https://provider.invalid/private");
       expect(user.creditBalance).toBe(13);
       expect(harness.completed()).toBe(0);
       expect(harness.paid).toHaveLength(1);
