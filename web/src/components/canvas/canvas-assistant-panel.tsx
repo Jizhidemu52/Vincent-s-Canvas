@@ -45,7 +45,7 @@ import { CanvasNodeType, type CanvasAgentMediaWorkflow, type CanvasAssistantAtta
 import { useCanvasAgentStore } from "@/stores/canvas/use-canvas-agent-store";
 import { summarizeCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
 import { classifyAgentMediaIntent, resolveAgentMediaToolDispatch } from "@/lib/canvas/agent-media-workflow";
-import { agentQuickstartPreset, buildAgentGeneratedMediaOps, buildAgentGenerationBrief, buildAgentGenerationPlan, buildAgentReferenceImageContent, buildAgentVideoPrompt, createAgentVideoConfirmation, normalizeAgentImageSettings, normalizeAgentVideoSettings, resolveAgentGeneratedMediaPosition, selectAgentVideoReferences, type AgentGenerationSettings, type AgentVideoConfirmation } from "@/lib/agent-direct-generation";
+import { agentQuickstartPreset, buildAgentGeneratedMediaOps, buildAgentGenerationBrief, buildAgentGenerationPlan, buildAgentReferenceImageContent, buildAgentVideoPrompt, createAgentVideoConfirmation, normalizeAgentImageSettings, normalizeAgentVideoSettings, resolveAgentGeneratedMediaPosition, resolveAgentImageGenerationSettings, selectAgentVideoReferences, type AgentGenerationSettings, type AgentVideoConfirmation } from "@/lib/agent-direct-generation";
 import { imageModelProfile, useImageModelProfile } from "@/lib/image-model-settings";
 import { getVideoModelParameterSpec } from "@/lib/video-model-parameters";
 import { getGenerationCapabilities, getImageGenerationModels, QueuedTaskFailedError, QueuedTaskPausedError, type GenerationCapabilityModel, type ImageGenerationModel } from "@/services/api/generation-tasks";
@@ -1138,7 +1138,10 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
         assertTarget();
         baseConfig = resolved.config;
         settings = { ...settings, imageCount: "1", ...(settings.mode === "video" ? { videoModel: baseConfig.model } : { imageModel: baseConfig.model }) };
-        const plan = buildAgentGenerationPlan(settings, text, references, imageModelProfile(resolved.model.modelId, [resolved.model]));
+        const profile = imageModelProfile(resolved.model.modelId, [resolved.model]);
+        const baseImageId = !profile.requiresPrompt ? undefined : imageAgent ? imageAgent.baseImageId : references[0]?.id;
+        settings = await resolveAgentImageGenerationSettings(settings, references, baseImageId, profile, assertTarget);
+        const plan = buildAgentGenerationPlan(settings, text, references, profile);
         const activeReferences = plan.kind === "video" ? selectAgentVideoReferences(plan.model, references) : references;
         const progressId = nanoid();
         let prompt = plan.kind === "image" && !plan.requiresPrompt ? "" : text.trim();
@@ -1793,7 +1796,7 @@ function AgentGenerationControls({ settings: savedSettings, config: baseConfig, 
     const settings = { ...savedSettings, ...(savedSettings.mode === "image" ? { imageModel: config.model } : { videoModel: config.model }) };
     const isImage = settings.mode === "image";
     const imageProfile = useImageModelProfile(settings.imageModel);
-    const imageSettings = normalizeAgentImageSettings(settings, imageProfile);
+    const imageSettings = normalizeAgentImageSettings({ ...settings, size: settings.requestedImageSize || settings.size }, imageProfile);
     const currentModel = isImage ? settings.imageModel : settings.videoModel;
     const currentModels = isImage ? imageCapabilities : videoCapabilities;
     const videoCapability = videoCapabilities.find((model) => model.modelId === settings.videoModel)?.capability;
@@ -1819,8 +1822,12 @@ function AgentGenerationControls({ settings: savedSettings, config: baseConfig, 
                     <div data-testid="canvas-agent-generation-model">{modelPicker}</div>
                     {loading ? <p className="mb-3" role="status">{t("正在加载模型与参数…")}</p> : error ? <div className="mb-3 space-y-2" role="alert"><p>{error}</p><Button size="small" onClick={onRetry}>{t("重新加载")}</Button></div> : !currentModels.length ? <p className="mb-3" role="status">{t("尚未配置可用的")}{isImage ? t("图像") : t("视频")}{t("模型，请在后台启用模型后重新加载。")}</p> : null}
                     <div className="grid gap-2">
-                        {isImage ? <ImageSettingsPanel maxCount={1} config={{ ...config, model: settings.imageModel, imageModel: settings.imageModel, size: imageSettings.size, quality: imageSettings.quality, count: "1", imageOptions: imageSettings.imageOptions }} profile={imageProfile} referenceCount={editing ? 1 : 0} theme={theme} showTitle={false}
-                            onConfigChange={(key, value) => onChange({ [key === "count" ? "imageCount" : key]: value })} /> : <>
+                        {isImage ? <>
+                            <p className="leading-5 opacity-60">{settings.requestedImageSize ? <>{t("编辑使用已选画幅：")}{settings.requestedImageSize} <button type="button" className="underline" onClick={() => onChange({ requestedImageSize: undefined })}>{t("恢复跟随底图")}</button></> : <>{t("编辑默认跟随底图画幅；下方尺寸用于新创作。 ")}<button type="button" className="underline" onClick={() => onChange({ requestedImageSize: imageSettings.size })}>{t("编辑也使用下方尺寸")}</button></>}</p>
+                            <ImageSettingsPanel maxCount={1} config={{ ...config, model: settings.imageModel, imageModel: settings.imageModel, size: imageSettings.size, quality: imageSettings.quality, count: "1", imageOptions: imageSettings.imageOptions }} profile={imageProfile} referenceCount={editing ? 1 : 0} theme={theme} showTitle={false}
+                                onConfigNormalize={(key, value) => onChange({ [key === "count" ? "imageCount" : key]: value })}
+                                onConfigChange={(key, value) => onChange({ [key === "count" ? "imageCount" : key]: value, ...(key === "size" ? { requestedImageSize: value } : {}) })} />
+                        </> : <>
                             <AgentParameterSelect label={t("时长")} value={settings.videoSeconds} values={videoCapability ? [...(videoSpec?.supportsAutoDuration ? ["-1"] : []), ...Array.from({ length: videoCapability.seconds[1] - videoCapability.seconds[0] + 1 }, (_, index) => String(videoCapability.seconds[0] + index))] : []} suffix={t(" 秒")} onChange={(videoSeconds) => onChange({ videoSeconds })} />
                             <AgentParameterSelect label={t("宽高比")} value={settings.size} values={videoCapability?.sizes.map((size) => size === "adaptive" ? "auto" : size) || []} onChange={(size) => onChange({ size })} />
                             <AgentParameterSelect label={t("分辨率")} value={settings.videoQuality} values={[...videoCapability?.resolutions || []]} onChange={(videoQuality) => onChange({ videoQuality })} />

@@ -1,11 +1,14 @@
 import { CanvasNodeType, type CanvasAssistantAttachment, type CanvasNodeMetadata } from "@/types/canvas";
 import type { CanvasAgentOp, CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
 import { fitNodeSize } from "@/lib/canvas/canvas-node-size";
-import { imageModelProfile, normalizeImageModelSettings } from "@/lib/image-model-settings";
+import { imageModelProfile, imageModelSettingsError, nearestImageSize, normalizeImageModelSettings } from "@/lib/image-model-settings";
 import { imageModelDisplayName } from "@/lib/model-display";
 import { referencePolicyForModel } from "@/lib/image-reference-policy";
 import { getVideoModelParameterSpec } from "@/lib/video-model-parameters";
 import { readImageOptions } from "@/lib/image-advanced-settings";
+import { readImageMeta } from "@/lib/image-utils";
+import { imageToDataUrl } from "@/services/image-storage";
+import type { ReferenceImage } from "@/types/image";
 
 export type AgentGenerationMode = "image" | "video";
 export type AgentImageAfterAction = "images_only" | "select_then_video" | "auto_first_image_video";
@@ -15,6 +18,8 @@ export type AgentGenerationSettings = {
     imageModel: string;
     videoModel: string;
     size: string;
+    /** A user-selected image size, separate from model/global defaults and video size. */
+    requestedImageSize?: string;
     quality: string;
     imageOptions?: string;
     imageCount: string;
@@ -45,6 +50,60 @@ export function normalizeAgentImageSettings(settings: AgentGenerationSettings, p
     const resolution = profile.resolutions.includes(options.resolution || "") ? options.resolution : "1k";
     return { ...settings, size: normalized.size, quality: normalized.quality, imageCount: normalized.count,
         ...(profile.resolutions.length ? { imageOptions: JSON.stringify({ ...options, resolution }) } : {}) };
+}
+
+function imageAspect(value: string) {
+    const parts = /^(\d+(?:\.\d+)?)[x:](\d+(?:\.\d+)?)$/.exec(value);
+    const ratio = parts ? Number(parts[1]) / Number(parts[2]) : NaN;
+    return Number.isFinite(ratio) && ratio > 0 ? ratio : undefined;
+}
+
+async function readAgentSourceSize(source: ReferenceImage, assertCurrent: () => void) {
+    const dataUrl = await imageToDataUrl(source);
+    assertCurrent();
+    return readImageMeta(dataUrl);
+}
+
+/** Only a resolved editing base supplies the default aspect; style references do not. */
+export async function resolveAgentImageGenerationSettings(
+    settings: AgentGenerationSettings,
+    references: ReferenceImage[],
+    baseImageId: string | undefined,
+    profile: ReturnType<typeof imageModelProfile>,
+    assertCurrent: () => void,
+    readSize: (source: ReferenceImage, assertCurrent: () => void) => Promise<{ width: number; height: number }> = readAgentSourceSize,
+) {
+    assertCurrent();
+    if (settings.mode !== "image") return settings;
+    const requested = settings.requestedImageSize;
+    let size = requested || settings.size;
+    if (!requested && baseImageId) {
+        const base = references.find(reference => reference.id === baseImageId);
+        if (!base) throw new Error("没有可用的编辑底图，图片任务尚未提交。");
+        const source = await readSize(base, assertCurrent);
+        assertCurrent();
+        if (!Number.isFinite(source.width) || !Number.isFinite(source.height) || source.width <= 0 || source.height <= 0) throw new Error("底图尺寸无法读取，图片任务尚未提交。请重新添加底图。");
+        const target = source.width / source.height;
+        const exact = profile.sizes.find(value => {
+            const ratio = imageAspect(value);
+            return ratio !== undefined && Math.abs(Math.log(ratio / target)) < 1e-9;
+        });
+        if (!exact) {
+            const choices = profile.sizes.filter(value => imageAspect(value) !== undefined);
+            const nearest = choices.length ? nearestImageSize(`${source.width}:${source.height}`, choices) : "";
+            throw new Error(`当前模型不能精确保留底图画幅（${source.width} × ${source.height}）。请在出图设置明确选择${nearest ? ` ${nearest} 等支持的尺寸，或更换模型` : "其他模型"}；图片任务尚未提交。`);
+        }
+        size = exact;
+    }
+    const normalized = normalizeAgentImageSettings({ ...settings, size }, profile);
+    const requestedAspect = requested && imageAspect(requested);
+    const normalizedAspect = imageAspect(normalized.size);
+    if (requested && (requested === "auto" && normalized.size !== "auto" || requestedAspect && (!normalizedAspect || Math.abs(Math.log(requestedAspect / normalizedAspect)) >= 1e-9))) {
+        throw new Error("当前模型不支持已选择的图片尺寸，请在出图设置重新选择；图片任务尚未提交。");
+    }
+    const error = imageModelSettingsError(normalized.size, profile);
+    if (error) throw new Error(error);
+    return normalized;
 }
 
 export function createAgentVideoConfirmation(

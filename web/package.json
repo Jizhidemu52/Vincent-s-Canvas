@@ -10,6 +10,7 @@
         "clean:dist": "bun scripts/clean-dist.mjs",
         "test": "bun test",
         "test:e2e": "playwright test",
+        "test:e2e:image-agent-streaming": "node node_modules/@playwright/test/cli.js test --config tests/image-agent-streaming-dom.config.ts",
         "start": "vite preview --host 0.0.0.0 --port 3000",
         "format": "prettier --write .",
         "format:check": "prettier --check ."

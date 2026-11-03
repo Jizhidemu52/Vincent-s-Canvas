@@ -88,6 +88,22 @@ describe("canvas image-agent execution invariants", () => {
         expect(images.map(item => item.nodeId)).toEqual(["original", "result"]);
         expect(originalImageAgentImage(images, images[1]!).nodeId).toBe("original");
     });
+
+    test.each(["draft", "conversation"])("a deleted ancestor remains missing when an old result enters a new chat through %s", mode => {
+        const next = node("result");
+        next.metadata!.imageAgent = { parentNodeId: "deleted-original", workId: "work", version: 2, note: { summary: "蓝色", keep: [] } };
+        const reference = { id: next.id, type: CanvasNodeType.Image, title: next.title, storageKey: "image:result" };
+        const images = mode === "draft"
+            ? canvasImageAgentCatalog([], [next], [reference])
+            : canvasImageAgentCatalog([{ id: "new-chat-turn", role: "user", text: "查看这张图", references: [reference] }], [next]);
+        const current = images[0]!;
+        const selection = { focusId: current.id, previewedIds: [current.id] };
+        expect(images).toHaveLength(1);
+        expect(current.parentId).toBe("canvas-image:deleted-original");
+        expect(resolveCanvasImageAgentEdit({ base: "focus", prompt: "继续改当前图" }, images, selection).base?.nodeId).toBe("result");
+        expect(() => resolveCanvasImageAgentEdit({ base: "original", prompt: "回原图修改" }, images, selection)).toThrow("原图已不可用");
+        expect(() => resolveCanvasImageAgentEdit({ base: "previous", prompt: "回上一版修改" }, images, selection)).toThrow("重新选择");
+    });
 });
 
 const pending: PendingOnlineAgentTask = { ownerId: "owner", projectId: "project", requestId: "request:0", taskIds: ["original-task"], mode: "image", prompt: "blue shirt", model: "image" };

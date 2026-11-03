@@ -125,3 +125,31 @@ test("compact type and settings controls preserve image and video mode changes",
     mode.props.onChange({ target: { value: "image" } });
     expect(result.changes.at(-1)).toMatchObject({ mode: "image", imageModel: "gpt-image-2.5-flare", imageCount: "1" });
 });
+
+test("canvas image controls distinguish explicit size changes from automatic normalization and can restore following", () => {
+    const result = controls({ size: "1:1" });
+    expect(result.markup).toContain("编辑默认跟随底图画幅");
+    result.elements.find(element => element.type === "button" && element.props.children === "编辑也使用下方尺寸")!.props.onClick();
+    expect(result.changes.at(-1)).toEqual({ requestedImageSize: "1:1" });
+    const panel = result.elements.find(element => element.props.onConfigChange && element.props.onConfigNormalize)!;
+    panel.props.onConfigNormalize("size", "3:4");
+    expect(result.changes.at(-1)).toEqual({ size: "3:4" });
+    panel.props.onConfigChange("quality", "2k");
+    expect(result.changes.at(-1)).toEqual({ quality: "2k" });
+    panel.props.onConfigChange("size", "1:1");
+    expect(result.changes.at(-1)).toEqual({ size: "1:1", requestedImageSize: "1:1" });
+    const explicit = controls({ size: "3:4", requestedImageSize: "3:4" });
+    expect(explicit.markup).toContain("编辑使用已选画幅");
+    explicit.elements.find(element => element.type === "button" && element.props.children === "恢复跟随底图")!.props.onClick();
+    expect(explicit.changes.at(-1)).toEqual({ requestedImageSize: undefined });
+});
+
+test("canvas model and mode normalization retain the exact user-selected image size for submission validation", () => {
+    const result = controls({ size: "3:4", requestedImageSize: "3:4" });
+    result.elements.find(element => element.props.toolKey === "canvas-image")!.props.onChange("gpt-image-2");
+    expect(result.changes.at(-1)).toMatchObject({ size: "1152x1536", requestedImageSize: "3:4" });
+    result.elements.find(element => element.type === "select" && element.props["aria-label"] === "生成类型")!.props.onChange({ target: { value: "video" } });
+    expect(result.changes.at(-1)).toMatchObject({ mode: "video", requestedImageSize: "3:4" });
+    const returned = controls({ size: "16:9", requestedImageSize: "3:4" });
+    expect(returned.elements.find(element => element.props.onConfigChange && element.props.onConfigNormalize)!.props.config.size).toBe("3:4");
+});

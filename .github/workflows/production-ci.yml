@@ -176,6 +176,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - name: Verify canvas interactions, recovery and live task notifications
         run: bun run test:e2e
+      - name: Verify image-agent DOM streaming over isolated local HTTP
+        run: npm run test:e2e:image-agent-streaming
 
   compose-recovery:
     runs-on: ubuntu-latest

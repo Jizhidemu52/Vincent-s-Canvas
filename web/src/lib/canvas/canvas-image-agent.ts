@@ -50,7 +50,9 @@ export function canvasImageAgentCatalog(messages: CanvasAssistantMessage[], node
         const reference = { id: node.id, type: CanvasNodeType.Image, title: node.title, dataUrl: node.metadata?.content, storageKey: node.metadata?.storageKey };
         const image: CanvasImageAgentImage = { id: `canvas-image:${node.id}`, label: `图${catalog.length + 1}`, name: node.title,
             kind: record ? "generated" : "upload", nodeId: node.id, reference, dataUrl: reference.dataUrl, storageKey: reference.storageKey,
-            parentId: parentImage?.id, workId: record?.workId, note: record?.note };
+            // Keep a missing ancestor's identity so original/previous cannot
+            // silently treat this result as an original in a different chat.
+            parentId: parentImage?.id || (record?.parentNodeId ? `canvas-image:${record.parentNodeId}` : undefined), workId: record?.workId, note: record?.note };
         catalog.push(image);
         return image;
     };
@@ -68,7 +70,7 @@ export function canvasImageAgentCatalog(messages: CanvasAssistantMessage[], node
             image.note ||= node.metadata.imageAgent.note;
             image.workId ||= node.metadata.imageAgent.workId;
             const parent = nodes.find(item => item.id === node.metadata!.imageAgent!.parentNodeId);
-            if (!image.parentId && parent) image.parentId = addNode(parent)?.id;
+            if (!image.parentId && node.metadata.imageAgent.parentNodeId) image.parentId = (parent && addNode(parent)?.id) || `canvas-image:${node.metadata.imageAgent.parentNodeId}`;
         }
     }
     for (const reference of draft) {
