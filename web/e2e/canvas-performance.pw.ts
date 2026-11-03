@@ -185,22 +185,28 @@ test("500节点100栅格图：对照帧率、真实堆曲线与200步历史边�
     const cdp = await memoryContext.newCDPSession(memoryPage);
     const curve: any[] = [];
     const sample = async (step: number) => {
+        const position = (project: { nodes?: Array<{ id: string; position: { x: number } }> } | null | undefined) => project?.nodes?.find(node => node.id === "performance-node-0")?.position.x;
         if (step) {
-            // Once history is capped, length=200 alone also matches the old
-            // checkpoint. Wait for this batch's cloud acknowledgement so the
-            // persistence queue can release its previous merge baseline.
+            // A revision can advance midway through this batch, and length=200
+            // also matches the previous checkpoint. Require the exact final
+            // edit in both durability paths before measuring a settled graph.
             await expect.poll(() => memoryApi.documents.get(PROJECT_ID)?.revision || 0, { timeout: 15_000 }).toBeGreaterThan(curve.at(-1).cloudRevision);
+            await expect.poll(() => position(memoryApi.documents.get(PROJECT_ID)?.document), { timeout: 15_000 }).toBe(step);
             await expect(memoryPage.getByRole("button", { name: "画布与图片已保存至服务器", exact: true })).toBeVisible();
         }
+        const expectedHistoryPositions = Array.from({ length: Math.min(step, 200) }, (_, index) => Math.max(0, step - 200) + index);
         await expect.poll(async () => {
             const project = await readSavedPerformanceProject(memoryPage, memoryOwnerId);
-            return project ? project.history?.past?.length || 0 : undefined;
-        }, { timeout: 15_000 }).toBe(Math.min(step, 200));
-        const historyLength = (await readSavedPerformanceProject(memoryPage, memoryOwnerId))!.history?.past?.length || 0;
+            return { nodePosition: position(project), historyPositions: project?.history?.past.map(position) || [] };
+        }, { timeout: 15_000 }).toEqual({ nodePosition: step, historyPositions: expectedHistoryPositions });
+        const savedProject = (await readSavedPerformanceProject(memoryPage, memoryOwnerId))!;
+        const historyLength = savedProject.history?.past?.length || 0;
         await memoryPage.waitForTimeout(300);
         await cdp.send("HeapProfiler.collectGarbage");
         const heap = await cdp.send("Runtime.getHeapUsage");
-        curve.push({ step, ...heap, historyLength, cloudRevision: memoryApi.documents.get(PROJECT_ID)?.revision || 0 });
+        curve.push({ step, ...heap, historyLength, cloudRevision: memoryApi.documents.get(PROJECT_ID)?.revision || 0,
+            savedNodePosition: position(savedProject), cloudNodePosition: position(memoryApi.documents.get(PROJECT_ID)?.document),
+            historyFirstPosition: position(savedProject.history?.past[0]), historyLastPosition: position(savedProject.history?.past.at(-1)) });
         console.log(`${variant} memory step ${step}: ${(heap.usedSize / 1024 ** 2).toFixed(2)} MiB / ${curve.at(-1).historyLength} history entries`);
         report.memory = { curve };
         await writeFile(resolve(output, "report.json"), JSON.stringify(report, null, 2));
@@ -230,7 +236,7 @@ test("500节点100栅格图：对照帧率、真实堆曲线与200步历史边�
     const growthThrough220MiB = (curve.at(-1).usedSize - curve[0].usedSize) / 1024 ** 2;
     const afterCapMiB = (curve.at(-1).usedSize - curve.find(point => point.step === 200).usedSize) / 1024 ** 2;
     report.memory = { method: "Chrome CDP Runtime.getHeapUsage after HeapProfiler.collectGarbage", workload: "220 distinct one-pixel ArrowRight edits of one node, saved every 20 commands", curve, growthMiB, growthThrough220MiB, afterCapMiB, sharing,
-        historyObservation: { ownerId: memoryOwnerId, projectId: PROJECT_ID, source: "readonly IndexedDB app_state, exact owner/project document key, decoded using parseCanvasProject outside the measured browser heap", cloudAcknowledgementRequired: true },
+        historyObservation: { ownerId: memoryOwnerId, projectId: PROJECT_ID, source: "readonly IndexedDB app_state, exact owner/project document key, decoded using parseCanvasProject outside the measured browser heap", cloudAcknowledgementRequired: true, exactEditAndHistoryRangeRequired: true },
         scope: "JS heap only; does not measure native image decode/GPU/process RSS. Raster thumbnails are retained equally in baseline and candidate.",
         boundary: "200 snapshots per undo/redo stack; metadata and unchanged nodes shared for single-node movement. All-node edits, unique media strings, chat, imported histories may retain substantially more; no universal byte cap." };
     report.memory.budgetFailures = memoryBudgetFailures(report.memory);
