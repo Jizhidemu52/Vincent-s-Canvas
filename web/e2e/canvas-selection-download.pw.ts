@@ -52,6 +52,9 @@ test("框选混合节点后从工具栏和右键下载原图 ZIP，排除未选�
     const textId = api.document(id)!.nodes.find((node: any) => node.type === "text").id;
     const text = page.locator(`[data-node-id="${textId}"]`);
     await moveNode(page, text, 220, 700);
+    // Selection is saved locally before the cloud debounce finishes. Capture
+    // the no-mutation baseline only after this last drag is acknowledged.
+    await expect.poll(() => api.document(id)?.nodes.find((node: any) => node.id === textId)?.position).toEqual({ x: 220, y: 700 });
     await boxSelect(page, [nodes[0], nodes[1], text]);
     await expect.poll(async () => (await readCanvasViewState(page, id))?.selectedNodeIds?.length).toBe(3);
     const before = JSON.parse(JSON.stringify(api.document(id)));
