@@ -27,6 +27,7 @@ async function setup(context: BrowserContext, baseURL: string) {
         if (path === '/api/deployment') return json({ authenticationEnabled: true, creditsEnabled: false, rolePortalsEnabled: false, oaLoginEnabled: false });
         if (path === '/api/auth/session') return json({ user: { id: owner, displayName: '隔离验证员工', username: 'asset-e2e', role: 'designer', departmentId: '72000000-0000-4000-8000-000000000001', status: 'active', mustChangePassword: false } });
         if (path === '/api/modules') return json({ modules: moduleDefinitions.map(item => ({ moduleKey: item.moduleKey, enabled: true })) });
+        if (request.method() === 'GET' && path === '/api/release-notes') return json({ notes: [], hasMore: false });
         if (path === '/api/models') return json({ models: [], tools: [], prices: [] });
         if (path === '/api/canvas-documents') return json({ documents: [] });
         if (path === '/api/usage/events') return json({ code: 0, data: [] });

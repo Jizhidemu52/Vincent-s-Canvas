@@ -64,6 +64,7 @@ async function fixture(context: BrowserContext, baseURL: string, role = "super_a
         if (path === "/api/auth/session") return json({ user: user() });
         if (path === "/api/auth/methods") return json({ password: true, wecom: false, wecomLoginUrl: null });
         if (path === "/api/modules") return json({ modules: moduleDefinitions.map((item) => ({ moduleKey: item.moduleKey, enabled: true })) });
+        if (method === "GET" && path === "/api/release-notes") return json({ notes: [], hasMore: false });
         if (path === "/api/models") return json({ models, prices: [], tools: toolDefinitions.map((tool) => ({ ...tool, enabled: true, modelConfigId: imageId, configurationVersion: 1 })) });
         if (path === "/api/canvas-documents") return json({ documents: [] });
         if (path === "/api/projects") return json({ projects: [] });

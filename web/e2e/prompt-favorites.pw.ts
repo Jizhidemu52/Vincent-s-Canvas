@@ -26,6 +26,7 @@ async function fixture(context: BrowserContext, baseURL: string, count = 25, fav
         if (path === "/api/deployment") return json({ authenticationEnabled: true, creditsEnabled: false, rolePortalsEnabled: false, oaLoginEnabled: false });
         if (path === "/api/auth/session") return json({ user: { id: owner, displayName: owner === employeeA ? "收藏验证员工" : "新账号员工", username: owner, role: "designer", groupId: "group-a", groupRole: "leader", departmentId: "department-a", status: "active", mustChangePassword: false } });
         if (path === "/api/modules") return json({ modules: moduleDefinitions.map(item => ({ moduleKey: item.moduleKey, enabled: true })) });
+        if (path === "/api/release-notes" && request.method() === "GET") return json({ notes: [], hasMore: false });
         if (path === "/api/models") return json({ models: [], tools: [], prices: [] });
         if (path === "/api/canvas-documents") return json({ documents: [] });
         if (path === "/api/projects") return json({ projects: [] });
