@@ -109,6 +109,8 @@ test("仅允许恢复的任务显示原上游编号选项，窄屏核查面板�
     for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
         await page.setViewportSize(viewport);
         await expect(dialog).toBeVisible();
+        await expect(dialog).not.toHaveClass(/ant-zoom-(?:enter|appear)/);
+        await expect(dialog).toHaveCSS("transform", "none");
         const bounds = await dialog.boundingBox();
         expect(bounds!.x).toBeGreaterThanOrEqual(0);
         expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(viewport.width + 1);

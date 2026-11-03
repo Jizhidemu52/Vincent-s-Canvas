@@ -178,6 +178,18 @@ jobs:
         run: bun run test:e2e
       - name: Verify image-agent DOM streaming over isolated local HTTP
         run: npm run test:e2e:image-agent-streaming
+      - name: Preserve failed browser verification evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-browser-failure-${{ github.run_id }}
+          path: |
+            output/phase1-e2e/test-results/
+            output/phase1-e2e/report/
+            output/image-agent-validation/streaming-dom-acceptance/test-results/
+            output/image-agent-validation/streaming-dom-acceptance/playwright-results.json
+          if-no-files-found: ignore
+          retention-days: 14
 
   compose-recovery:
     runs-on: ubuntu-latest

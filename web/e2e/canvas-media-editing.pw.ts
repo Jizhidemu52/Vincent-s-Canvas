@@ -26,6 +26,8 @@ async function openMask(page: Page, node: Locator) {
     const dialog = page.getByRole("dialog", { name: "局部遮罩编辑", exact: true });
     await expect(dialog.getByRole("button", { name: "AI 修改", exact: true })).toBeEnabled();
     await dialog.locator('[aria-label="蒙版绘制区"]').hover();
+    await expect(dialog).not.toHaveClass(/ant-zoom-(?:enter|appear)/);
+    await expect(dialog).toHaveCSS("transform", "none");
     return dialog;
 }
 

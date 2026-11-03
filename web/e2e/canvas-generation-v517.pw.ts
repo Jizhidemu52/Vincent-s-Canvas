@@ -149,6 +149,8 @@ test("the same original supports two consecutive drag crops without stale select
         const before = Number(await width.inputValue());
         const resizeHandle = page.getByRole("button", { name: "调整裁剪框右下", exact: true });
         await resizeHandle.hover();
+        await expect(page.getByRole("dialog")).not.toHaveClass(/ant-zoom-(?:enter|appear)/);
+        await expect(page.getByRole("dialog")).toHaveCSS("transform", "none");
         const handle = (await resizeHandle.boundingBox())!;
         await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2); await page.mouse.down();
         await page.mouse.move(handle.x + handle.width / 2 - distance, handle.y + handle.height / 2 - distance, { steps: 8 }); await page.mouse.up();
@@ -185,6 +187,8 @@ test("manual editor renders screen-sized strokes and caches the image while drag
     const overlay = page.getByLabel("图片编辑画布");
     await expect(overlay).toBeVisible();
     await page.getByRole("button", { name: /^矩\s*形$/ }).click();
+    await expect(page.getByRole("dialog")).not.toHaveClass(/ant-zoom-(?:enter|appear)/);
+    await expect(page.getByRole("dialog")).toHaveCSS("transform", "none");
     const bounds = (await overlay.boundingBox())!;
     await page.mouse.move(bounds.x + 60, bounds.y + 80); await page.mouse.down(); await page.mouse.move(bounds.x + 160, bounds.y + 180, { steps: 4 }); await page.mouse.up();
     await expect(page.getByLabel("选中的矩形标注")).toBeVisible();
@@ -271,6 +275,8 @@ test("mask UI paints, undoes/redoes, zooms locally, uses shortcuts and confirms 
     await expect(page.getByText("自动适配至", { exact: false })).toBeVisible();
     await expect(page.getByRole("button", { name: "撤销笔画", exact: true })).toBeDisabled();
     const paintedPixels = () => page.locator("canvas.hidden").evaluate((canvas: HTMLCanvasElement) => { const data = canvas.getContext("2d")!.getImageData(0, 0, canvas.width, canvas.height).data; return Array.from(data).filter((value, index) => index % 4 === 3 && value >= 128).length; });
+    await expect(page.getByRole("dialog")).not.toHaveClass(/ant-zoom-(?:enter|appear)/);
+    await expect(page.getByRole("dialog")).toHaveCSS("transform", "none");
     const box = (await paint.boundingBox())!;
     await page.mouse.move(box.x + box.width * .45, box.y + box.height * .45); await page.mouse.down();
     await page.mouse.move(box.x + box.width * .55, box.y + box.height * .55, { steps: 5 }); await page.mouse.up();

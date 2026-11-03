@@ -28,6 +28,10 @@ async function openCrop(page: Page, node: Locator) {
 }
 
 async function fitsViewport(page: Page, dialog: Locator) {
+    // Reopening and immediately changing viewport can sample rc-motion's zoom
+    // around the previous desktop click position rather than the settled layout.
+    await expect(dialog).not.toHaveClass(/ant-zoom-(?:enter|appear)/);
+    await expect(dialog).toHaveCSS("transform", "none");
     const box = (await dialog.boundingBox())!;
     expect(box.x).toBeGreaterThanOrEqual(0);
     expect(box.x + box.width).toBeLessThanOrEqual(page.viewportSize()!.width + 1);

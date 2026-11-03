@@ -181,6 +181,8 @@ test("canvas mask UI submits paired mask and preserves original outside pixels",
     await expect.poll(() => paint.evaluate(canvas => {
         const rect = canvas.getBoundingClientRect(); return [Math.round(rect.width), Math.round(rect.height)];
     })).toEqual([460, 460]);
+    await expect(dialog).not.toHaveClass(/ant-zoom-(?:enter|appear)/);
+    await expect(dialog).toHaveCSS("transform", "none");
     await paint.click({ trial: true });
     const box = (await paint.boundingBox())!;
     await page.mouse.move(box.x + box.width * .5, box.y + box.height * .5); await page.mouse.down(); await page.mouse.move(box.x + box.width * .6, box.y + box.height * .5, { steps: 8 }); await page.mouse.up();

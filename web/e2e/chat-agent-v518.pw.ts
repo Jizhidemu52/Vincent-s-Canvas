@@ -196,6 +196,8 @@ test("圈选保存真实蒙版，提交时尺寸配对并保留选区外像素",
     const paint = dialog.getByLabel("修改区域画布", { exact: true });
     await expect(paint).toBeVisible();
     await paint.click({ trial: true });
+    await expect(dialog).not.toHaveClass(/ant-zoom-(?:enter|appear)/);
+    await expect(dialog).toHaveCSS("transform", "none");
     const box = (await paint.boundingBox())!;
     expect(box.width).toBeGreaterThan(200); expect(box.height).toBeGreaterThan(200);
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await page.mouse.down(); await page.mouse.move(box.x + box.width * .6, box.y + box.height / 2, { steps: 8 }); await page.mouse.up();
