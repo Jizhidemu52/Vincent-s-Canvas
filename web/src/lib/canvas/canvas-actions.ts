@@ -39,6 +39,7 @@ export const canvasActions = [
     { id: "downloadSelectedImages", label: "下载所选图片" },
     { id: "tools", label: "全部工具与板块", toolbarLabel: "全部工具" },
     { id: "guide", label: "重新查看新手引导" },
+    { id: "examples", label: "操作案例" },
     { id: "theme", label: "切换主题" },
     { id: "rename", label: "重命名选中节点", contextLabel: "重命名", key: "F2", plain: true },
     { id: "clear", label: "清空画布" },

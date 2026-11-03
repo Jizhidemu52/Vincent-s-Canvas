@@ -9,6 +9,7 @@ import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { nextProjectTitle } from "@/lib/project-title";
 import { navigationTools, navigationModuleKey } from "@/constant/navigation-tools";
 import { HomeResources } from "./home-resources";
+import { HomeReleaseNote } from "@/components/release-notes";
 import { canvasLibrarySummaries } from "@/lib/canvas/canvas-project-summary";
 import type { ModuleKey } from "@/services/api/modules";
 import "./home.css";
@@ -42,6 +43,7 @@ export default function IndexPage() {
                     <div><p className="wb-eyebrow">{uiText("VINCENT'S CANVAS / 创作工作台")}</p><h1 className="wb-title">{uiText("让想法，开始成形。")}</h1><p className="wb-description">{uiText("选一个工具开始，或回到上次的画布继续创作。")}</p></div>
                     {canvasAvailable ? <button type="button" className="wb-primary-link" disabled={!hydrated} onClick={createAndEnter}><Plus size={18} />{uiText("新建画布")}</button> : null}
                 </header>
+                <HomeReleaseNote />
                 <section className="home-tools" aria-label={uiText("选择创作工具")}>
                     {entries.filter(entry => isModuleAvailable(flags, tools, entry.flag)).map(({ path, icon: Icon, title, description, action }, index) => <Link to={path} className="wb-surface home-tool" key={path}>
                         <div className="home-tool-top"><Icon size={24} strokeWidth={1.4} /><span>0{index + 1}</span></div>

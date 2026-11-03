@@ -29,6 +29,7 @@ const GroupManagementPanel = lazy(() => import("./components/group-management-pa
 const ModuleSwitchPanel = lazy(() => import("./components/module-switch-panel").then((module) => ({ default: module.ModuleSwitchPanel })));
 const CreditPolicyPanel = lazy(() => import("./components/credit-policy-panel").then((module) => ({ default: module.CreditPolicyPanel })));
 const PerformanceDashboard = lazy(() => import("@/pages/performance/dashboard").then((module) => ({ default: module.PerformanceDashboard })));
+const ReleaseNotesPanel = lazy(() => import("./release-notes"));
 
 type CreditFormValues = {
     designerId: string;
@@ -167,6 +168,7 @@ export default function AdminPage() {
         { key: "batch", label: "批量任务" },
         { key: "audit", label: "审计日志" },
         { key: "integrations", label: "系统集成" },
+        { key: "release-notes", label: "版本更新" },
     ].filter((tab) => isAdmin || departmentAdminTabs.has(tab.key));
 
     const submitCreditChange = async (values: CreditFormValues) => {
@@ -325,7 +327,7 @@ export default function AdminPage() {
                     {[
                         { label: "成员与额度", keys: ["accounts", "groups", "performance"] },
                         { label: "模型与价格", keys: ["api", "pricing", "mark-images"] },
-                        { label: "内容", keys: ["projects", "history"] },
+                        { label: "内容", keys: ["projects", "history", "release-notes"] },
                         { label: "运维", keys: ["modules", "usage-analysis", "batch", "audit", "integrations"] },
                     ].map((group) => {
                         const tabs = adminTabOptions.filter((tab) => group.keys.includes(tab.key));
@@ -579,6 +581,11 @@ export default function AdminPage() {
                                         ]}
                                     />
                                 ),
+                            },
+                            {
+                                key: "release-notes",
+                                label: "版本更新",
+                                children: isAdmin ? <ReleaseNotesPanel /> : null,
                             },
                             {
                                 key: "integrations",

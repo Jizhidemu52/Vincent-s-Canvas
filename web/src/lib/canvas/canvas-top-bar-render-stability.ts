@@ -17,6 +17,7 @@ export type CanvasTopBarRenderState = {
     onHome: () => void;
     onProjects: () => void;
     onCreateProject: () => void;
+    onOpenExamples?: () => void;
     onDeleteProject: () => void;
     onImportImage: () => void;
     onUndo: () => void;
@@ -54,6 +55,7 @@ export function canvasTopBarPropsEqual(previous: CanvasTopBarRenderState, next: 
         previous.onHome === next.onHome &&
         previous.onProjects === next.onProjects &&
         previous.onCreateProject === next.onCreateProject &&
+        previous.onOpenExamples === next.onOpenExamples &&
         previous.onDeleteProject === next.onDeleteProject &&
         previous.onImportImage === next.onImportImage &&
         previous.onUndo === next.onUndo &&

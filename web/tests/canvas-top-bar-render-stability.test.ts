@@ -50,4 +50,7 @@ describe("canvas top bar render stability", () => {
     test("refreshes when command search changes", () => {
         expect(canvasTopBarPropsEqual(state(), state({ onOpenCommands: () => undefined }))).toBe(false);
     });
+    test("refreshes when the independent teaching canvas action changes", () => {
+        expect(canvasTopBarPropsEqual(state(), state({ onOpenExamples: () => undefined }))).toBe(false);
+    });
 });

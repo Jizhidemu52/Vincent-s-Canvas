@@ -73,13 +73,13 @@ test("empty layout is relative to its canvas container and handles a centered wi
 test("example graph is editable, source-preserving and idle without dispatching any generation", () => {
     let id = 0;
     const result = createCanvasExampleGraph(() => `example-${++id}`);
-    expect(result.nodes).toHaveLength(4);
-    const image = result.nodes.find(node => node.type === "image")!;
-    const config = result.nodes.find(node => node.type === "config")!;
-    expect(image.metadata?.content).toBe("/design-workbench/assets/garment.png");
+    expect(result.nodes.length).toBeGreaterThan(50);
+    const image = result.nodes.find(node => node.type === "image" && node.id.startsWith("canvas-example-config-practice-"))!;
+    const config = result.nodes.find(node => node.type === "config" && node.id.startsWith("canvas-example-config-practice-"))!;
+    expect(image.metadata?.content).toBe("/design-examples/knit-source.webp");
     expect(config.metadata?.status).toBe("idle");
     expect(config.metadata?.composerContent).toContain(`@[node:${image.id}]`);
     expect(result.connections.some(edge => edge.fromNodeId === image.id && edge.toNodeId === config.id)).toBe(true);
     expect(result.nodes.every(node => !node.metadata?.sourceTaskId && node.metadata?.status !== "loading")).toBe(true);
-    expect(result.nodes.find(node => node.title.includes("说明"))?.metadata?.content).toContain("未调用模型");
+    expect(result.nodes.find(node => node.title === "教材属性与使用边界")?.metadata?.content).toContain("未调用本项目模型");
 });

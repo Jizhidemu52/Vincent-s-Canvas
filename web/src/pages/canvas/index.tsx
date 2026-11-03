@@ -2,13 +2,14 @@ import { useUiLocale, useUiText, uiText } from "@/lib/i18n";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { App, Button, Select, Skeleton } from "antd";
-import { Download, FileUp, HardDrive, MessageSquareText, Plus } from "lucide-react";
+import { BookOpen, Download, FileUp, HardDrive, MessageSquareText, Plus } from "lucide-react";
 
 import { CanvasDeleteProjectsDialog } from "@/components/canvas/canvas-delete-projects-dialog";
 import { CanvasProjectGrid } from "./canvas-project-grid";
 import { CanvasSaveStatus } from "@/components/canvas/canvas-save-status";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { useCanvasUiStore } from "@/stores/canvas/use-canvas-ui-store";
+import { useUserStore } from "@/stores/use-user-store";
 import { useCanvasExport } from "@/hooks/use-canvas-export";
 import { canvasLibrarySummaries } from "@/lib/canvas/canvas-project-summary";
 import { importCanvasArchive } from "./import-canvas";
@@ -30,6 +31,8 @@ export default function CanvasPage() {
     const importLockRef = useRef(false);
     const [importing, setImporting] = useState(false);
     const [clearingCache, setClearingCache] = useState(false);
+    const [creatingExample, setCreatingExample] = useState(false);
+    const exampleLockRef = useRef(false);
     const [sort, setSort] = useState<CanvasLibrarySort>("updated");
     const hydrated = useCanvasStore((state) => state.hydrated);
     const localProjects = useCanvasStore((state) => state.projects);
@@ -53,6 +56,18 @@ export default function CanvasPage() {
     const createAndEnter = () => {
         const state = useCanvasStore.getState();
         if (state.hydrated) enterProject(createProject(nextProjectTitle(canvasLibrarySummaries(state.projects, state.unloadedProjects))));
+    };
+    const createExample = async () => {
+        if (!useCanvasStore.getState().hydrated || exampleLockRef.current) return;
+        const ownerId = useUserStore.getState().user?.id;
+        exampleLockRef.current = true;
+        setCreatingExample(true);
+        try {
+            const { createCanvasExampleProject } = await import("@/lib/canvas/canvas-example-graph");
+            if (!useCanvasStore.getState().hydrated || ownerId !== useUserStore.getState().user?.id) return;
+            navigate(`/canvas/${createCanvasExampleProject()}`);
+        } catch (error) { message.error(error instanceof Error ? error.message : t("教学画布创建失败，请重试。")); }
+        finally { exampleLockRef.current = false; setCreatingExample(false); }
     };
     const clearCache = () => modal.confirm({
         title: t("清理已验证的本机缓存？"),
@@ -116,6 +131,7 @@ export default function CanvasPage() {
                         {chatMode ? <p className="mt-3 max-w-2xl text-sm leading-6 text-stone-500 dark:text-stone-400">{t("选择或新建一个画布后，助手会围绕当前项目内容进行对话、拆解提示词和生成建议，后台会把相关任务归入画布项目历史。")}</p> : null}
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
+                        <Button disabled={!hydrated} loading={creatingExample} icon={<BookOpen className="size-4" />} title={t("每次新建一张独立教学画布，包含十类图文案例；不改旧项目、不自动生成。 ")} onClick={() => void createExample()}>{t("新建教学画布")}</Button>
                         {selectedIds.length ? (
                             <>
                                 <Button disabled={!hydrated} loading={exporting} icon={<Download className="size-4" />} onClick={() => void exportProjects(selectedIds, t("无限画布-{count}个项目", { count: selectedIds.length }))}>

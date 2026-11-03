@@ -148,6 +148,7 @@ const CanvasDialogsHost = lazy(() => import("@/components/canvas/canvas-dialogs-
 const CanvasAssistantPanel = lazy(loadCanvasAssistantPanel);
 const CanvasCommandPalette = lazy(() => import("@/components/canvas/canvas-command-palette").then(module => ({ default: module.CanvasCommandPalette })));
 const CanvasOnboarding = lazy(() => import("@/components/canvas/canvas-onboarding").then(module => ({ default: module.CanvasOnboarding })));
+const CanvasExampleNavigator = lazy(() => import("@/components/canvas/canvas-example-navigator").then(module => ({ default: module.CanvasExampleNavigator })));
 const CanvasTaskFeedbackRuntime = lazy(() => import("@/components/canvas/canvas-task-feedback").then(module => ({ default: module.CanvasTaskFeedbackRuntime })));
 const CanvasSaveFailureNotice = lazy(() => import("@/components/canvas/canvas-save-failure-notice").then(module => ({ default: module.CanvasSaveFailureNotice })));
 const loadExperienceMetrics = () => import("@/lib/canvas/canvas-experience-metrics");
@@ -2987,9 +2988,22 @@ function WirelessCanvasPage({ sessionFlushRef, writable }: { sessionFlushRef: Ca
         setNodes(current => nodesRef.current = current.map(item => ids.has(item.id) && !item.metadata?.locked ? { ...item, position: { x: item.position.x + action.x / viewportRef.current.k, y: item.position.y + action.y / viewportRef.current.k } } : item));
     }, [editNodeFromToolbar, flushPendingHistory, openTextEditor]);
     const openExampleCanvas = useCallback(async () => {
+        const ownerId = useUserStore.getState().user?.id;
         const { createCanvasExampleProject } = await import("@/lib/canvas/canvas-example-graph");
+        if (!useCanvasStore.getState().hydrated || ownerId !== useUserStore.getState().user?.id) return;
         navigate(`/canvas/${createCanvasExampleProject()}`);
     }, [navigate]);
+    const isExampleCanvas = useMemo(() => nodes.some(node => node.id.startsWith("canvas-example-overview-")), [nodes]);
+    const navigateExampleNodes = useCallback((ids: string[]) => {
+        const targets = new Set(ids);
+        const matches = nodesRef.current.filter(node => targets.has(node.id));
+        if (!matches.length) return;
+        const next = fitCanvasNodes(matches, canvasUsableArea(containerRef.current, size));
+        wirelessCanvasRef.current?.previewViewport(next);
+        viewportRef.current = next;
+        setViewport(next);
+        setContextMenu(null);
+    }, [size]);
     const commandBindings: CanvasCommandBindings = {
         upload: { run: uploadFromToolbar }, text: { run: addTextNodeFromToolbar }, image: { run: addImageNodeFromToolbar },
         video: { run: addVideoNodeFromToolbar }, audio: { run: addAudioNodeFromToolbar }, config: { run: addConfigNodeFromToolbar },
@@ -3095,6 +3109,7 @@ function WirelessCanvasPage({ sessionFlushRef, writable }: { sessionFlushRef: Ca
                     onHome={goHomeFromTopBar}
                     onProjects={goProjectsFromTopBar}
                     onCreateProject={createAndOpenProject}
+                    onOpenExamples={openExampleCanvas}
                     onDeleteProject={deleteCurrentProject}
                     onImportImage={uploadFromToolbar}
                     onUndo={undoCanvas}
@@ -3205,6 +3220,7 @@ function WirelessCanvasPage({ sessionFlushRef, writable }: { sessionFlushRef: Ca
                     {pendingConnectionCreate ? <Suspense fallback={null}><ConnectionCreateMenu pending={pendingConnectionCreate} onCreate={(type) => createConnectedNode(type, pendingConnectionCreate)} onClose={cancelPendingConnectionCreate} /></Suspense> : null}
                 </WirelessCanvas>
                 <Suspense fallback={null}><CanvasOnboarding ref={onboardingRef} empty={nodes.length === 0} onImportImage={uploadFromToolbar} onUseTemplate={() => setTemplateSourceId(null)} onOpenExample={() => void openExampleCanvas()} onOpenCreation={openQuickGenerateFromToolbar} onCloseCreation={closeQuickGeneratePanel} onDrop={handleDrop} /></Suspense>
+                {isExampleCanvas ? <Suspense fallback={null}><CanvasExampleNavigator nodes={nodes} onNavigate={navigateExampleNodes} /></Suspense> : null}
                 <div className="cw-feedback-strip"><Suspense fallback={null}><CanvasTaskFeedbackRuntime projectId={projectId} enabled={projectLoaded} nodes={nodes} connections={connections} onLocate={locateNodes} onHighlightChange={setTaskHighlightIds} /></Suspense></div>
                 <Suspense fallback={null}><CanvasSaveFailureNotice onExport={exportCurrentCanvas} /></Suspense>
                 <Suspense fallback={null}><CanvasConflictNotice projectId={projectId} /></Suspense>

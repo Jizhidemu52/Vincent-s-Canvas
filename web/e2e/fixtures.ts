@@ -107,6 +107,7 @@ export class MockCanvasApi {
             return this.session(route);
         }
         if (path === "/api/modules") return json({ modules: moduleDefinitions.map(item => ({ moduleKey: item.moduleKey, enabled: true })) });
+        if (path === "/api/release-notes") return json({ notes: [], hasMore: false });
         if (path === "/api/models") return json({ models: [MODEL], prices: [], tools: toolDefinitions.map(tool => ({ ...tool, enabled: true, modelConfigId: MODEL.id, configurationVersion: 1 })) });
         if (path === "/api/canvas-documents") return json({ documents: [...this.documents.values()].map(({ document, ...record }) => ({ ...record, summary: document ? { id: document.id, title: document.title, createdAt: document.createdAt, updatedAt: document.updatedAt, nodeCount: document.nodes.length, connectionCount: document.connections.length, cover: null } : null })) });
         if (path.startsWith("/api/canvas-documents/")) {

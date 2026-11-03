@@ -10,6 +10,8 @@ import { GenerationQueueProgress } from "@/components/generation-queue-progress"
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ModuleGate } from "@/components/auth/module-gate";
+import { DesignExampleArticle } from "@/components/design-examples";
+import { designExampleForScene } from "@/lib/design-examples";
 import { GenerationElapsed } from "@/components/generation-elapsed";
 import { ImageSettingsPanel, imageQualityLabel, imageSizeLabel } from "@/components/image-settings-panel";
 import { ModelPicker } from "@/components/model-picker";
@@ -66,6 +68,7 @@ function CreativeSceneWorkspace({ preset }: { preset: CreativePreset }) {
     const [promptOpen, setPromptOpen] = useState(false);
     useEffect(() => { if (ws.recoveredRequestId) setView("results"); }, [ws.recoveredRequestId]);
     const summary = sceneSummaries[preset.id]!;
+    const example = designExampleForScene(preset.id);
     const slots = getSceneSlots(preset.id, ws.form);
     const available = creativePresets.filter(item => isModuleAvailable(flags, tools, `creative-${item.id}` as ModuleKey));
     const submit = () => { setView("results"); void ws.generate(); };
@@ -117,9 +120,7 @@ function CreativeSceneWorkspace({ preset }: { preset: CreativePreset }) {
                     <button type="button" className="cs-history-tab" aria-pressed={view === "history"} onClick={() => setView("history")}><History size={15} />{uiText("最近任务")}{ws.historyTotal ? <span>{ws.historyTotal}</span> : null}</button>
                 </nav>
                 {view === "example" ? <div className="cs-example">
-                    <div className="cs-example-heading"><span className="cs-eyebrow">{uiText("功能示例")}</span><h2>{uiText(summary.input || "")}<ArrowRight size={21} />{uiText(summary.output || "")}</h2><p>{uiText(summary.example || "")}</p></div>
-                    <figure className="cs-example-image"><img src={`/creative-scenes/v2/${preset.id}.preview.webp`} alt={uiText("{title}：{input}转为{output}的概念示意", { title: uiText(preset.title), input: uiText(summary.input), output: uiText(summary.output) })} loading="lazy" decoding="async" /><figcaption><span>{uiText(summary.input || "")}</span><ArrowRight size={17} /><span>{uiText(summary.output || "")}</span></figcaption></figure>
-                    <div className="cs-example-foot"><span>{uiText("AI 功能示意 · 非模型实测")}</span><p>{uiText(summary.limit || "")}</p></div>
+                    {example ? <DesignExampleArticle example={example} /> : <><div className="cs-example-heading"><span className="cs-eyebrow">{uiText("功能示例")}</span><h2>{uiText(summary.input || "")}<ArrowRight size={21} />{uiText(summary.output || "")}</h2><p>{uiText(summary.example || "")}</p></div><p className="cs-help">{uiText(summary.limit || "")}</p></>}
                 </div> : view === "history" ? <div className="cs-history">
                     <h2>{uiText("最近任务")}</h2><p className="cs-help">{uiText("显示当前账号在「")}{uiText(preset.title || "")}{uiText("」中的任务与待查询原请求，保存在本机浏览器。")}</p>
                     {ws.logs.length ? ws.logs.map(log => <div key={log.id} className="flex items-center gap-3"><button type="button" className="cs-history-item" disabled={ws.running} onClick={() => { void ws.previewLog(log); setPromptOpen(true); setView("results"); }}>

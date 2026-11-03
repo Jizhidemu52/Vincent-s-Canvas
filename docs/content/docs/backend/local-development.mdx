@@ -61,6 +61,23 @@ curl http://localhost:3000/api/health
 
 若容器前还有宝塔、Nginx 或其他网关，必须在每一层对同一路径对齐读取／发送超时、关闭响应缓冲和自动重试；只更新容器不能覆盖外层仍为 60 秒的限制。优先使用站点级精确路径配置，不修改影响其他站点的全局代理文件；保留该层已有的转发目标、请求头、安全头和日志脱敏。修改后在对应层执行 `nginx -t` 并重载，通过 `nginx -T` 检查生效配置，再用无收费的延迟首包和 SSE 测试确认。关闭缓冲不会缩短模型推理耗时；遇到 504 时原供应商请求仍可能正在执行，不能据此自动重发。
 
+## 产品动态接口与教学内容
+
+正式 API 的产品动态接口沿用现有会话、账号状态及管理员认证中间件；成功响应均为 `Cache-Control: no-store`：
+
+| 方法与路径 | 契约 |
+| --- | --- |
+| `GET /api/release-notes` | 登录读取已发布条目；`limit` 默认20、最多100，`offset` 默认0，返回 `{ notes, hasMore }`，单条仅含 `version/title/content/publishedAt` |
+| `GET /api/admin/release-notes` | 仅超级管理员；`limit` 默认50、最多100，返回草稿及已发布条目，另含 revision 与创建／修改时间 |
+| `PUT /api/admin/release-notes/:version/draft` | `{ title, content, expectedRevision }`；首次保存 `expectedRevision` 为 `null`，后续必须匹配；返回 `{ note }` |
+| `POST /api/admin/release-notes/:version/publish` | `{ expectedRevision }`；必须先保存非空标题与正文，发布后只读；返回 `{ note }` |
+
+版本路径只接受 `v数字.数字.数字`。标题最多80字符、正文最多4000字符，服务端去掉首尾空白并拒绝空字符；前端按纯文本显示，不将正文作为 HTML 或 Markdown 执行。草稿保存／发布冲突返回409；客户端保留当前文字，发布回执不明时先只读查询原版本。当前版本由前端构建的 `__APP_VERSION__` 带入，不由迁移自动发公告。表与事务边界见 [数据库结构与迁移](/docs/backend/backend-database)。
+
+普通板块的静态案例由 `web/src/lib/design-examples.ts` 按真实路由映射，组件在 `AuthGate/ModuleGate` 内展示；原图与效果图位于 `web/public/design-examples/`。创意场景复用自己的案例正文。查看、复制和下载没有表单 setter、任务或历史写入；案例内容不进入用户的生成记录。教学画布另由 `canvas-example-graph.ts` 与 `canvas-example-lessons.ts` 建立一个新项目，十个主题区内的配置均为空闲态，教材对照图不接入执行链。
+
+针对性检查位于 `server/tests/integration/release-notes-sql.integration.test.ts`、`web/tests/release-notes-state.test.ts`、`web/tests/canvas-example-graph.test.ts`，隔离浏览器配置分别为 `release-notes-browser.config.ts`、`design-examples-browser.config.ts`、`canvas-example-browser.config.ts`。这些夹具检查不等于正式 PostgreSQL／真实员工部署或供应商付费效果验收。
+
 ## 网页参考图采集
 
 `POST /api/reference-import/scan` 接收 `{ url }`，`POST /api/reference-import/image` 仅接收扫描返回的 `{ scanId, imageId }`，均要求现有会话、同源请求和匹配的 `X-Canvas-Owner-Id`；正式服务受 `assets` 模块开关保护。预览不创建素材，确认入库复用既有素材上传接口。

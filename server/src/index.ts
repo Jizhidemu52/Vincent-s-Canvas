@@ -65,6 +65,7 @@ import { createPostgresPromptCompiler } from "./prompt-runtime";
 import { createPromptCompilationsRouter, createAdminPromptRecipesRouter } from "./routes/prompt-recipes";
 import { PromptOptimizationError } from "./prompt-safety";
 import { writeAudit } from "./audit";
+import { createAdminReleaseNotesRouter, createReleaseNotesRouter } from "./routes/release-notes";
 
 const config = loadConfig();
 const features = deploymentFeatures(config);
@@ -111,6 +112,8 @@ app.get("/api/health", async (_request, response, next) => {
 app.use("/api/auth", createAuthRouter(db, cache, config));
 const requireSession = sessionMiddleware(db, cache, config, { allowPersonalWorkspace: true });
 const requireAdminSession = sessionMiddleware(db, cache, config, { allowGuest: false });
+app.use("/api/release-notes", requireSession, requireAccountReady, createReleaseNotesRouter(db));
+app.use("/api/admin/release-notes", requireAdminSession, requireAccountReady, createAdminReleaseNotesRouter(db));
 app.use("/api/prompt-compilations", requireSession, requireAccountReady, createPromptCompilationsRouter(promptCompiler));
 app.use("/api/admin/prompt-recipes", requireAdminSession, requireAccountReady, createAdminPromptRecipesRouter(promptCompiler,
   async () => (await db.query(`SELECT m.id,m.name,m.model_id AS "modelId",m.capabilities,m.enabled FROM model_configs m JOIN providers p ON p.id=m.provider_id WHERE m.enabled=true AND p.enabled=true ORDER BY m.name`)).rows,

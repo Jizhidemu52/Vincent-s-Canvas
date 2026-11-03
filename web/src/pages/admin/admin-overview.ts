@@ -3,7 +3,7 @@ import { listAdminHistory } from "@/services/api/task-history";
 
 export const markPlatformAdminTabLabel = "APIMart 平台";
 
-const adminTabs = ["accounts", "groups", "performance", "modules", "pricing", "api", "usage-analysis", "mark-images", "history", "projects", "batch", "audit", "integrations"];
+const adminTabs = ["accounts", "groups", "performance", "modules", "pricing", "api", "usage-analysis", "mark-images", "history", "projects", "batch", "audit", "integrations", "release-notes"];
 
 export function resolveAdminTab(value: string | null, isSuperAdmin: boolean, performanceEnabled: boolean) {
     const tab = ["providers", "workflows", "models"].includes(value || "") ? "api" : value || "accounts";

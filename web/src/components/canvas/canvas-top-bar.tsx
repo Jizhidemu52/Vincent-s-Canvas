@@ -1,7 +1,7 @@
 import { uiText, useUiLocale } from "@/lib/i18n";
 import { lazy, Suspense, memo, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ChevronDown, Download, Globe, Home, Images, Info, LayoutGrid, Plus, Redo2, Trash2, Undo2, Upload } from "lucide-react";
+import { BookOpen, ChevronDown, Download, Globe, Home, Images, Info, LayoutGrid, Plus, Redo2, Trash2, Undo2, Upload } from "lucide-react";
 import { Dropdown, Popover } from "antd";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { deploymentFeatures } from "@/lib/deployment-features";
@@ -31,6 +31,7 @@ export const CanvasTopBar = memo(function CanvasTopBar({
     onHome,
     onProjects,
     onCreateProject,
+    onOpenExamples,
     onDeleteProject,
     onImportImage,
     onUndo,
@@ -69,6 +70,7 @@ export const CanvasTopBar = memo(function CanvasTopBar({
                         canvasActionMenuItem("home", onHome, <Home className="size-4" />),
                         canvasActionMenuItem("projects", onProjects, <Images className="size-4" />),
                         canvasActionMenuItem("newProject", onCreateProject, <Plus className="size-4" />),
+                        ...(onOpenExamples ? [canvasActionMenuItem("examples", onOpenExamples, <BookOpen className="size-4" />)] : []),
                         canvasActionMenuItem("renameProject", onStartTitleEditing),
                         canvasActionMenuItem("tools", onOpenTools, <LayoutGrid className="size-4" />),
                         { type: "divider" },

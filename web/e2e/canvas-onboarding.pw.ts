@@ -115,21 +115,24 @@ test("空画布三入口真实可用，模板和示例均不自动提交生成",
     await templates.locator(".ant-modal-close").click();
     await empty.getByRole("button", { name: /打开示例画布/ }).click();
     await expect(page).not.toHaveURL(new RegExp(`/canvas/${originalId}$`));
-    await expect(page.locator(".node-element")).toHaveCount(4);
+    await expect(page.getByTestId("canvas-example-navigator")).toBeVisible();
     const id = new URL(page.url()).pathname.split("/").at(-1)!;
-    await expect.poll(() => api.document(id)?.nodes.length).toBe(4);
+    await expect.poll(() => api.document(id)?.nodes.length ?? 0).toBeGreaterThan(60);
     const graph = api.document(id)!;
-    const source = graph.nodes.find((node: any) => node.type === "image");
-    const config = graph.nodes.find((node: any) => node.type === "config");
+    const source = graph.nodes.find((node: any) => node.type === "image" && node.id.startsWith("canvas-example-config-practice-"));
+    const config = graph.nodes.find((node: any) => node.type === "config" && node.id.startsWith("canvas-example-config-practice-"));
     expect(config.metadata.composerContent).toContain(`@[node:${source.id}]`);
     expect(config.metadata.status).toBe("idle");
-    expect(graph.connections).toHaveLength(1);
+    expect(graph.connections.some((edge: any) => edge.fromNodeId === source.id && edge.toNodeId === config.id)).toBe(true);
+    await page.getByRole("button", { name: "教学目录", exact: true }).click();
+    await page.getByRole("button", { name: "03 配置节点与参考角色：到练习", exact: true }).click();
     const image = page.locator(`[data-node-id="${source.id}"] img`).first();
-    await expect.poll(() => image.evaluate((element: HTMLImageElement) => element.complete && element.naturalWidth)).toBe(1024);
+    await expect.poll(() => image.evaluate((element: HTMLImageElement) => element.complete && element.naturalWidth)).toBe(1536);
     expect(api.submissions).toHaveLength(0);
     expect(api.batchSubmissions).toHaveLength(0);
     await page.reload();
-    await expect(page.locator(".node-element")).toHaveCount(4);
+    await expect(page.getByTestId("canvas-example-navigator")).toBeVisible();
+    expect(api.document(id)?.nodes.length).toBe(graph.nodes.length);
 });
 
 test("默认不自动引导，关闭后可编辑节点；手动重开后不会被自动收起", async ({ page, api }) => {
