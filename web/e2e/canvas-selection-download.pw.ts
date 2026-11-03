@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { unzipSync } from "fflate";
 import type { Locator, Page } from "@playwright/test";
 import { test, expect, newCanvas } from "./fixtures";
+import { readCanvasViewState } from "./canvas-view-state";
 
 async function moveNode(page: Page, node: Locator, x: number, y: number) {
     const box = (await node.boundingBox())!;
@@ -52,7 +53,7 @@ test("框选混合节点后从工具栏和右键下载原图 ZIP，排除未选�
     const text = page.locator(`[data-node-id="${textId}"]`);
     await moveNode(page, text, 220, 700);
     await boxSelect(page, [nodes[0], nodes[1], text]);
-    await expect.poll(() => api.document(id)?.selectedNodeIds.length).toBe(3);
+    await expect.poll(async () => (await readCanvasViewState(page, id))?.selectedNodeIds?.length).toBe(3);
     const before = JSON.parse(JSON.stringify(api.document(id)));
     const downloadButton = page.getByRole("button", { name: "下载所选图片（2 张）", exact: true });
     await expect(downloadButton).toBeVisible();
@@ -104,7 +105,7 @@ test("框选混合节点后从工具栏和右键下载原图 ZIP，排除未选�
     // Clicking an already-selected node intentionally preserves a multi-selection for group dragging.
     await page.mouse.click(1200, 1000);
     await text.click({ position: { x: 30, y: 15 } });
-    await expect.poll(() => api.document(id)?.selectedNodeIds).toEqual([textId]);
+    await expect.poll(async () => (await readCanvasViewState(page, id))?.selectedNodeIds).toEqual([textId]);
     await expect(downloadButton).toBeHidden();
     await text.click({ button: "right", position: { x: 30, y: 15 } });
     await expect(page.getByRole("menuitem", { name: /下载所选图片/ })).toHaveCount(0);

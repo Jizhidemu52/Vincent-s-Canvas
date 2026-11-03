@@ -27,8 +27,42 @@ async function prepareAssistant(context: BrowserContext) {
     await context.route("**/api/generation-capabilities?*", route => route.fulfill({ json: { models: [] } }));
 }
 
-async function originalBytes(image: Locator) {
-    return Buffer.from(await image.evaluate(async element => [...new Uint8Array(await (await fetch((element as HTMLImageElement).src)).arrayBuffer())]));
+async function originalBytes(page: Page) {
+    // The mounted img intentionally uses a WebP preview. Source fidelity belongs
+    // to the original Blob store, not that derivative URL. This context contains
+    // only the isolated fixture employee and this test's dropped files.
+    const originals = await page.evaluate(async () => {
+        const blobs = await new Promise<Blob[]>((resolve, reject) => {
+            const opening = indexedDB.open("wireless-canvas:oa:user:00000000-0000-4000-8000-000000000099");
+            opening.onupgradeneeded = () => { opening.transaction?.abort(); reject(new Error("Image storage is not initialized")); };
+            opening.onerror = () => reject(opening.error);
+            opening.onblocked = () => reject(new Error("Image storage is blocked"));
+            opening.onsuccess = () => {
+                const database = opening.result;
+                database.onversionchange = () => database.close();
+                let transaction: IDBTransaction;
+                try { transaction = database.transaction("image_files", "readonly"); }
+                catch (error) { database.close(); reject(error); return; }
+                let values: Blob[] = [];
+                transaction.oncomplete = () => { database.close(); resolve(values); };
+                transaction.onabort = () => { database.close(); reject(transaction.error || new Error("Image read aborted")); };
+                transaction.onerror = () => { database.close(); reject(transaction.error); };
+                const request = transaction.objectStore("image_files").getAll();
+                request.onsuccess = () => { values = request.result; };
+            };
+        });
+        return Promise.all(blobs.map(async blob => [...new Uint8Array(await blob.arrayBuffer())]));
+    });
+    return originals.map(bytes => Buffer.from(bytes));
+}
+
+async function expectOriginals(page: Page, count: number) {
+    const originals = await originalBytes(page);
+    expect(originals).toHaveLength(count);
+    for (const bytes of originals) {
+        expect(bytes.length).toBe(IMAGE.length);
+        expect(bytes.equals(IMAGE), "Stored original remains byte-identical to the dropped PNG").toBe(true);
+    }
 }
 
 async function heldImage(page: Page, url: string) {
@@ -45,12 +79,13 @@ test("creation reference drops preserve original bytes without creating nodes or
     expect(await drop(panel.getByRole("button", { name: "添加参考图", exact: true }), "创建企业微信原图")).toBe(true);
     const first = panel.getByRole("img", { name: "创建企业微信原图", exact: true });
     await expect(first).toBeVisible();
-    expect(await originalBytes(first)).toEqual(IMAGE);
+    await expectOriginals(page, 1);
     expect(await drop(first, "创建桌面第二张.png")).toBe(true);
     await expect(panel.getByRole("img")).toHaveCount(2);
     expect(await drop(panel, "普通文字", "text/plain")).toBe(false);
     await expect.poll(() => api.document(id)?.nodes.length).toBe(0);
-    expect(await originalBytes(panel.getByRole("img", { name: "创建桌面第二张.png", exact: true }))).toEqual(IMAGE);
+    await expect(panel.getByRole("img", { name: "创建桌面第二张.png", exact: true })).toBeVisible();
+    await expectOriginals(page, 2);
     expect(api.submissions).toHaveLength(0);
 });
 
@@ -63,9 +98,10 @@ test("desktop assistant reference drops stay attachments and retain originals wi
     expect(await drop(panel.locator("textarea"), "助手企业微信原图")).toBe(true);
     const first = panel.getByRole("img", { name: "助手企业微信原图", exact: true });
     await expect(first).toBeVisible();
-    expect(await originalBytes(first)).toEqual(IMAGE);
+    await expectOriginals(page, 1);
     expect(await drop(first, `<img src="data:image/png;base64,${IMAGE.toString("base64")}">`, "text/html")).toBe(true);
     await expect(panel.getByRole("img")).toHaveCount(2);
+    await expectOriginals(page, 2);
     await expect.poll(() => api.document(id)?.nodes.length).toBe(0);
     expect(api.assetBytes.size).toBe(0);
     expect(api.submissions).toHaveLength(0);

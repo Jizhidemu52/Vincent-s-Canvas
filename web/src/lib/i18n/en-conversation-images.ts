@@ -8,6 +8,7 @@ export default {
     "编辑目标尚未完成，请重新选择图片": "The editing target is not ready. Choose another image.",
     "本任务没有保存可用原图，请补充原图后重做": "No usable original was saved. Add the original before restarting.",
     "继续修改": "Continue editing", "回原图重做": "Restart from original", "设为参考": "Use as reference", "和原图对比": "Compare with original",
+    "在此基础上改": "Edit from here", "作为参考": "Use as reference", "更多图片操作": "More image actions",
     "{label} 图片操作": "{label} image actions", "基于：{label}": "Based on: {label}", "基于：{label} 的原图": "Based on: {label}'s original",
     "取消编辑目标": "Clear editing target", "编辑目标：自动判断": "Editing target: automatic",
     "选择对话图片": "Choose a conversation image", "选择编辑目标 · ↑↓ 选择 · Enter 确定 · Esc 关闭": "Choose an editing target · ↑↓ Select · Enter Confirm · Esc Close",

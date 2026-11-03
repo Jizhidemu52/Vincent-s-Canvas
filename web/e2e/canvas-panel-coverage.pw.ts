@@ -1,5 +1,6 @@
 import type { Locator, Page } from "@playwright/test";
 import { test, expect, newCanvas, uploadImage } from "./fixtures";
+import { readCanvasViewState } from "./canvas-view-state";
 
 async function start(page: Page, width = 1366) {
     await page.setViewportSize({ width, height: 768 });
@@ -10,7 +11,9 @@ async function start(page: Page, width = 1366) {
     return id;
 }
 
-async function panExposedCanvas(page: Page, x = 1100, y = 580) {
+// At 1366x768 the empty-start card occupies y200-600. Pan the exposed strip
+// beneath it and above the bottom toolbar, not the card's interactive surface.
+async function panExposedCanvas(page: Page, x = 1100, y = 650) {
     await expect.poll(() => page.evaluate(({ x, y }) => Boolean(document.elementFromPoint(x, y)?.closest("[data-canvas-viewport]")), { x, y })).toBe(true);
     const canvas = page.locator("[data-canvas-viewport]");
     const content = canvas.locator(":scope > .origin-top-left");
@@ -142,17 +145,21 @@ test("1366节点内联编辑高缩放不因最小逻辑宽度突破半屏", asyn
     await zoom.press("End");
     await zoom.press("PageDown");
     await zoom.press("PageDown");
-    await expect.poll(() => api.document(id)?.viewport.k ?? 0).toBeGreaterThan(4.2);
+    await expect.poll(async () => (await readCanvasViewState(page, id))?.viewport.k ?? 0).toBeGreaterThan(4.2);
     await page.getByRole("button", { name: "画布缩放与视图", exact: true }).click();
     for (let attempt = 0; attempt < 12; attempt++) {
         const box = (await panel.boundingBox())!;
-        if (box.y <= 150) break;
+        if (box.x >= 80 && box.x + box.width <= 900 && box.y >= 100 && box.y <= 150) break;
+        // High zoom moves both axes around the viewport center. Bring the
+        // complete editor back on-screen with real panning before clicking it.
+        const dx = Math.max(-450, Math.min(200, 100 - box.x));
+        const dy = Math.max(-450, Math.min(100, 130 - box.y));
         await page.mouse.move(1100, 600);
         await page.mouse.down({ button: "middle" });
-        await page.mouse.move(1100, 600 - Math.min(450, box.y - 130), { steps: 5 });
+        await page.mouse.move(1100 + dx, 600 + dy, { steps: 5 });
         await page.mouse.up({ button: "middle" });
     }
-    await expect(panel).toBeInViewport();
+    await expect(panel).toBeInViewport({ ratio: 1 });
     await expect.poll(async () => (await panel.boundingBox())?.width ?? Infinity).toBeLessThanOrEqual(683);
     await panel.locator("textarea").fill("高倍率仍可编辑提示词");
     await expect.poll(() => api.document(id)?.nodes[0].metadata.draftPrompt).toBe("高倍率仍可编辑提示词");

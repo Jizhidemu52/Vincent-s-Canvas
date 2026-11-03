@@ -3,6 +3,7 @@ import { writeFile } from "node:fs/promises";
 import { test, expect, MockCanvasApi } from "./fixtures";
 import { performanceRaster } from "./canvas-performance-fixture";
 import { BUDGET, summarizeFrames } from "../scripts/canvas-performance-budget.mjs";
+import { readCanvasViewState } from "./canvas-view-state";
 
 const PROJECT = "60000000-0000-4000-8000-000000000001";
 async function scene(page: Page, api: MockCanvasApi, count = 1, grouped = false) {
@@ -72,7 +73,7 @@ test("Alt click is inert; five independent copies follow the pointer and each un
         expect(result.nodes[index].position).toEqual({ x: index * 80, y: index * 16 });
         expect(result.nodes[index].metadata.generationOrigin).toEqual(original.nodes[0]!.metadata.generationOrigin);
     }
-    expect(result.history.past).toHaveLength(5);
+    await expect.poll(async () => (await readCanvasViewState(page, PROJECT))?.history?.past).toHaveLength(5);
     for (let count = 5; count >= 1; count--) { await page.keyboard.press("Control+z"); await expect(page.locator("[data-node-id]")).toHaveCount(count); }
     for (let count = 2; count <= 6; count++) { await page.keyboard.press("Control+Shift+z"); await expect(page.locator("[data-node-id]")).toHaveCount(count); }
     await expect.poll(() => api.document(PROJECT)!.nodes).toEqual(result.nodes);
@@ -82,8 +83,8 @@ test("Alt click is inert; five independent copies follow the pointer and each un
 test("repeat duplicate uses the last world offset, selection changes reset it, and cancelled copies leave no history", async ({ page, api }) => {
     await scene(page, api);
     await page.keyboard.press("Control+-");
-    await expect.poll(() => api.document(PROJECT)!.viewport.k).toBeLessThan(1);
-    const k = api.document(PROJECT)!.viewport.k;
+    await expect.poll(async () => (await readCanvasViewState(page, PROJECT))?.viewport.k).toBeLessThan(1);
+    const k = (await readCanvasViewState(page, PROJECT))!.viewport.k;
     let start = await startDrag(page, "alt-source-0");
     await page.mouse.move(start.x + 60, start.y + 30, { steps: 5 }); await endDrag(page);
     await expect.poll(() => api.document(PROJECT)!.nodes.length).toBe(2);

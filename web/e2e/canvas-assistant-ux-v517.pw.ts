@@ -140,7 +140,10 @@ test("常规确认收起后仍须明确批准删除；刷新使旧确认过期�
     await expect.poll(() => api.document(id)?.chatSessions?.flatMap((s: any) => s.messages).some((m: any) => m.detail?.status === "pending")).toBe(true);
     await page.reload();
     await page.getByRole("tab", { name: "对话", exact: true }).first().click();
-    await expect(panel.getByText("确认已过期", { exact: true }).first()).toBeVisible();
+    // The clean conversation view hides internal tool titles, but must keep
+    // the expiration explanation and recovery action visible.
+    await expect(panel.getByText("该操作的执行上下文已失效，尚未重新提交。请恢复原问题到输入框，核对后再发送。", { exact: true })).toBeVisible();
+    await expect.poll(() => api.document(id)?.chatSessions?.flatMap((s: any) => s.messages).some((m: any) => m.role === "tool" && m.detail?.status === "expired")).toBe(true);
     await expect(panel.getByRole("button", { name: "批准执行", exact: true })).toBeHidden();
     await panel.getByRole("button", { name: "恢复原问题，核对后重发", exact: true }).click();
     await expect(panel.getByPlaceholder(promptPlaceholder)).toHaveValue("删除刚才的文字节点");

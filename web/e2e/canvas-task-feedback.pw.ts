@@ -67,16 +67,18 @@ test("切换画布清理旧标题与完成反馈，旧任务不能串入新画�
 
 test("模拟后台可见性时唯一SSE及时更新标题，不申请系统通知", async ({ page, context, api }, testInfo) => {
     const streams = new Set<ServerResponse>();
+    const streamOwners: Array<string | null> = [];
     let connections = 0;
     const server = createServer((request, response) => {
         const url = new URL(request.url!, "http://fixture");
         if (url.pathname !== "/api/tasks/events") { response.writeHead(404).end(); return; }
         connections++;
+        streamOwners.push(url.searchParams.get("ownerId"));
         streams.add(response);
         response.once("close", () => streams.delete(response));
         response.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-store",
             "Access-Control-Allow-Origin": new URL(testInfo.project.use.baseURL!).origin, "Access-Control-Allow-Credentials": "true" });
-        response.write(`event: tasks-changed\ndata: ${JSON.stringify({ ids: url.searchParams.get("ids")!.split(",") })}\n\n`);
+        response.write(`event: tasks-changed\ndata: ${JSON.stringify({ ids: [...api.tasks.keys()] })}\n\n`);
     });
     await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(59999, "127.0.0.1", resolve); });
     try {
@@ -92,6 +94,7 @@ test("模拟后台可见性时唯一SSE及时更新标题，不申请系统通�
         const feedback = page.getByTestId("canvas-task-feedback");
         await startImage(page);
         await expect.poll(() => streams.size).toBe(1);
+        expect(streamOwners).toEqual([[...api.tasks.values()][0]!.userId]);
         await expect(page).toHaveTitle(`(0/1) ${originalTitle}`);
         // Test the application's visibility policy deterministically. This is
         // not a claim that a frozen/minimized OS browser will run within 3s.

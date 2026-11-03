@@ -80,21 +80,23 @@ test("IndexedDB atomic claims, expiration, ownership-checked renew/release and t
     await expect(state(page)).toHaveAttribute("data-state", "readonly");
 });
 
-test("real insecure HTTP origin has no Web Locks and still enforces exclusive editing", async ({ context, page }) => {
+test("real insecure HTTP origin has no Web Locks and still enforces exclusive editing", async ({ context, page }, testInfo) => {
     // Route test-only HTTP hostname through the local fixture server. This is
     // genuinely a non-trustworthy browser origin, not a navigator.locks stub.
-    await context.route("http://canvas-lock.test:5207/**", async route => {
+    const upstream = new URL(testInfo.project.use.baseURL!);
+    const insecureOrigin = `http://canvas-lock.test:${upstream.port}`;
+    await context.route(`${insecureOrigin}/**`, async route => {
         const url = new URL(route.request().url());
         if (url.pathname === "/__lock") return route.fulfill({ contentType: "text/html", body: fixture });
-        const response = await route.fetch({ url: `http://127.0.0.1:5207${url.pathname}${url.search}` });
+        const response = await route.fetch({ url: new URL(`${url.pathname}${url.search}`, upstream).href });
         return route.fulfill({ response });
     });
-    await context.routeWebSocket("ws://canvas-lock.test:5207/**", socket => socket.close());
-    await page.goto("http://canvas-lock.test:5207/__lock?project=insecure");
+    await context.routeWebSocket(`${insecureOrigin.replace("http:", "ws:")}/**`, socket => socket.close());
+    await page.goto(`${insecureOrigin}/__lock?project=insecure`);
     expect(await page.evaluate(() => ({ secure: isSecureContext, locks: typeof navigator.locks, randomUUID: typeof crypto.randomUUID, idb: typeof indexedDB }))).toEqual({ secure: false, locks: "undefined", randomUUID: "undefined", idb: "object" });
     await expect(state(page)).toHaveAttribute("data-state", "editing");
     const second = await context.newPage();
-    await second.goto("http://canvas-lock.test:5207/__lock?project=insecure");
+    await second.goto(`${insecureOrigin}/__lock?project=insecure`);
     await expect(state(second)).toHaveAttribute("data-state", "readonly");
     await second.getByRole("button", { name: "request", exact: true }).click();
     await expect(state(second)).toHaveAttribute("data-state", "editing");

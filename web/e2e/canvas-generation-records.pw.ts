@@ -2,6 +2,7 @@ import type { Page } from "@playwright/test";
 import { writeFile } from "node:fs/promises";
 import { test, expect, MockCanvasApi } from "./fixtures";
 import { performanceRaster } from "./canvas-performance-fixture";
+import { readCanvasViewState } from "./canvas-view-state";
 
 const PROJECT = "70000000-0000-4000-8000-000000000001";
 const ASSETS = { source: "71000000-0000-4000-8000-000000000001", a: "71000000-0000-4000-8000-000000000002", b: "71000000-0000-4000-8000-000000000003" };
@@ -11,7 +12,13 @@ const assetUrl = (key: keyof typeof ASSETS) => `/api/assets/${ASSETS[key]}/conte
 const panel = (page: Page) => page.getByTestId("canvas-quick-generate-panel");
 const editor = (page: Page) => panel(page).locator("textarea.cw-prompt");
 const node = (api: MockCanvasApi, id: string) => api.document(PROJECT)!.nodes.find((item: any) => item.id === id);
-async function select(page: Page, id: string) { await page.locator(`[data-node-id="${id}"]`).click({ position: { x: 30, y: 18 } }); }
+async function select(page: Page, id: string, force = false) {
+    await page.locator(`[data-node-id="${id}"]`).click({ force, position: { x: 30, y: 18 } });
+    if (id === "original-reference") return;
+    // Selection adds references; the toolbar explicitly restores archived inputs.
+    await page.getByRole("toolbar", { name: "图片工具栏", exact: true }).getByRole("button", { name: "AI 编辑", exact: true }).click();
+    await editor(page).blur();
+}
 async function scene(page: Page, api: MockCanvasApi) {
     for (const [index, id] of Object.values(ASSETS).entries()) api.assetBytes.set(id, performanceRaster(index, 256, 256));
     const record = (id: string, prompt: string, inputPrompt: string) => ({ version: 1, id: `run-${id}`, sourceNodeId: "original-reference", createdAt: "2026-10-01T00:00:00.000Z", prompt, inputPrompt,
@@ -28,9 +35,36 @@ async function scene(page: Page, api: MockCanvasApi) {
     api.documents.set(PROJECT, { id: PROJECT, revision: 1, document, deleted: false, updatedAt: document.updatedAt });
     await page.goto(`/canvas/${PROJECT}`);
     await expect(page.locator('[data-node-id="result-a"]')).toBeVisible();
+    await page.getByRole("button", { name: "展开创建面板", exact: true }).click();
+    await expect(panel(page)).toBeVisible();
     return structuredClone(document);
 }
 async function assertNoGeneration(api: MockCanvasApi) { expect(api.submissions).toEqual([]); expect(api.batchSubmissions).toEqual([]); }
+async function assertReferencePreview(page: Page, key: keyof typeof ASSETS) {
+    const preview = panel(page).locator("img.cw-reference-preview");
+    await expect(preview).toHaveCount(1);
+    await expect.poll(() => preview.evaluate(image => (image as HTMLImageElement).complete && (image as HTMLImageElement).naturalWidth > 0)).toBe(true);
+    // Previews may be cached WebP blob URLs. Verify their image identity, not
+    // that a thumbnail still uses the archive's original content URL.
+    const errors = await preview.evaluate(async (image, candidates) => {
+        const pixels = async (url: string) => {
+            const bitmap = await createImageBitmap(await (await fetch(url)).blob());
+            const canvas = document.createElement("canvas"); canvas.width = canvas.height = 32;
+            const context = canvas.getContext("2d")!;
+            context.drawImage(bitmap, 0, 0, 32, 32); bitmap.close();
+            return context.getImageData(0, 0, 32, 32).data;
+        };
+        const actual = await pixels((image as HTMLImageElement).currentSrc);
+        return await Promise.all(candidates.map(async candidate => {
+            const expected = await pixels(candidate.url);
+            const error = actual.reduce((sum, value, index) => sum + (index % 4 === 3 ? 0 : Math.abs(value - expected[index]!)), 0) / (32 * 32 * 3);
+            return { key: candidate.key, error };
+        }));
+    }, (Object.keys(ASSETS) as Array<keyof typeof ASSETS>).map(key => ({ key, url: assetUrl(key) })));
+    errors.sort((a, b) => a.error - b.error);
+    expect(errors[0]!.key).toBe(key);
+    expect(errors[0]!.error).toBeLessThan(8);
+}
 function assertSubmittedReference(api: MockCanvasApi, key: keyof typeof ASSETS) {
     const urls = api.submissions[0]!.sourceUrls;
     expect(urls).toHaveLength(1);
@@ -49,25 +83,24 @@ async function completeDelayedTask(page: Page, api: MockCanvasApi) {
     return task;
 }
 
-test("selection restores archived inputs, rapid A/B draft switches are scoped and saved across reload", async ({ page, api }) => {
+test("explicit editing restores archived inputs, rapid A/B draft switches are scoped and saved across reload", async ({ page, api }) => {
     const original = await scene(page, api);
     await select(page, "result-a");
     await expect(editor(page)).toHaveValue(INPUT);
     await expect(panel(page).getByRole("button", { name: "复制生成时提示词", exact: true })).toHaveText(FINAL);
-    await expect(panel(page).locator(".cw-reference-preview")).toHaveAttribute("src", assetUrl("source"));
+    await assertReferencePreview(page, "source");
     await panel(page).locator(".cw-reference-preview").scrollIntoViewIfNeeded();
     await expect(panel(page).locator(".cw-reference-preview")).toBeInViewport();
-    expect(await panel(page).locator(".cw-reference-preview").getAttribute("src")).not.toBe(assetUrl("a"));
     await page.evaluate(() => {
         const samples: { input: number; selection: number }[] = []; (window as any).__draftSwitchSamples = samples;
         document.addEventListener("input", event => { if ((event.target as Element).matches("textarea.cw-prompt")) samples.push({ input: performance.now(), selection: 0 }); }, true);
         document.addEventListener("pointerdown", event => { if ((event.target as Element).closest("[data-node-id]") && samples.at(-1) && !samples.at(-1)!.selection) samples.at(-1)!.selection = performance.now(); }, true);
     });
     await editor(page).fill("A 独立快速草稿");
-    await page.locator('[data-node-id="result-b"]').click({ force: true, position: { x: 30, y: 18 } });
+    await select(page, "result-b", true);
     await expect(editor(page)).toHaveValue("B 原始用户输入");
     await editor(page).fill("B 独立快速草稿");
-    await page.locator('[data-node-id="result-a"]').click({ force: true, position: { x: 30, y: 18 } });
+    await select(page, "result-a", true);
     await expect(editor(page)).toHaveValue("A 独立快速草稿");
     const elapsed = await page.evaluate(() => (window as any).__draftSwitchSamples.map((sample: any) => sample.selection - sample.input));
     expect(elapsed).toHaveLength(2); for (const duration of elapsed) { expect(duration).toBeGreaterThan(0); expect(duration).toBeLessThan(180); }
@@ -75,7 +108,7 @@ test("selection restores archived inputs, rapid A/B draft switches are scoped an
     await expect.poll(() => node(api, "result-a").metadata.draftPrompt).toBe("A 独立快速草稿");
     await expect.poll(() => node(api, "result-b").metadata.draftPrompt).toBe("B 独立快速草稿");
     expect(node(api, "result-a").metadata.generationRecord).toEqual(original.nodes[1]!.metadata.generationRecord);
-    await page.reload(); await expect(editor(page)).toHaveValue("A 独立快速草稿");
+    await page.reload(); await select(page, "result-a"); await expect(editor(page)).toHaveValue("A 独立快速草稿");
     await select(page, "result-b"); await expect(editor(page)).toHaveValue("B 独立快速草稿");
     await assertNoGeneration(api);
 });
@@ -95,7 +128,7 @@ test("viewing and normalizing settings leaves source metadata untouched; intenti
     await expect(editor(page)).toHaveValue("B 原始用户输入");
     await select(page, "result-a");
     await expect(editor(page)).toHaveValue(INPUT);
-    await expect.poll(() => api.document(PROJECT)!.selectedNodeIds).toEqual(["result-a"]);
+    await expect.poll(async () => (await readCanvasViewState(page, PROJECT))?.selectedNodeIds).toEqual(["result-a"]);
     expect(api.document(PROJECT)!.nodes).toEqual(original.nodes);
 
     await ratio.click();
@@ -104,6 +137,7 @@ test("viewing and normalizing settings leaves source metadata untouched; intenti
     expect(node(api, "result-a").metadata.generationRecord).toEqual(original.nodes[1]!.metadata.generationRecord);
     expect(node(api, "result-b")).toEqual(original.nodes[2]);
     await page.reload();
+    await select(page, "result-a");
     await expect(editor(page)).toHaveValue(INPUT);
     await expect(ratio).toHaveAttribute("title", "宽高比：3:2");
     await assertNoGeneration(api);
@@ -145,10 +179,10 @@ test("deleted source only hides the reference; replay uses exact archived input 
     expect(after.connections).toHaveLength(before.connections.length + 1);
     expect(after.connections.some((edge: any) => edge.fromNodeId === "result-a" && edge.toNodeId === created.id)).toBe(true);
     await page.screenshot({ path: info.outputPath("archived-replay-appends.png") });
-    await page.keyboard.press("Control+z");
+    await page.getByTestId("canvas-top-tool-rail").getByRole("button", { name: "撤销", exact: true }).click();
     await expect.poll(() => api.document(PROJECT)!.nodes).toEqual(before.nodes);
     expect(api.document(PROJECT)!.connections).toEqual(before.connections);
-    await page.keyboard.press("Control+Shift+z");
+    await page.getByTestId("canvas-top-tool-rail").getByRole("button", { name: "重做", exact: true }).click();
     await expect.poll(() => api.document(PROJECT)!.nodes).toEqual(after.nodes);
     expect(api.document(PROJECT)!.connections).toEqual(after.connections);
     expect(node(api, "result-a").metadata.generationRecord).toEqual(original.nodes[1]!.metadata.generationRecord);
@@ -160,13 +194,13 @@ test("continue and E only prepare A as a draft reference; delayed quick generati
     await select(page, "result-a");
     await panel(page).getByRole("button", { name: "基于此图继续", exact: true }).click();
     await expect(editor(page)).toHaveValue("");
-    await expect(panel(page).locator(".cw-reference-preview")).toHaveAttribute("src", assetUrl("a"));
+    await assertReferencePreview(page, "a");
     await assertNoGeneration(api);
     await editor(page).fill("这个草稿会被 E 清空");
     await select(page, "result-b"); await select(page, "result-a");
     await page.keyboard.press("e");
     await expect(editor(page)).toHaveValue("");
-    await expect(panel(page).locator(".cw-reference-preview")).toHaveAttribute("src", assetUrl("a"));
+    await assertReferencePreview(page, "a");
     await assertNoGeneration(api);
     await editor(page).fill("基于 A 的新草稿");
     await select(page, "result-b"); await select(page, "result-a");
@@ -186,6 +220,7 @@ test("continue and E only prepare A as a draft reference; delayed quick generati
     expect(created.metadata.generationRecord.prompt).toBe(api.submissions[0]!.prompt);
     expect(created.metadata.generationRecord.inputPrompt).toBe("基于 A 的新草稿");
     expect(after.connections).toHaveLength(before.connections.length + 1);
+    await editor(page).blur();
     await page.keyboard.press("Control+z");
     await expect.poll(() => api.document(PROJECT)!.nodes).toEqual(before.nodes);
     expect(api.document(PROJECT)!.connections).toEqual(before.connections);
@@ -216,7 +251,7 @@ test("record controls remain usable in both languages and themes without changin
             await page.screenshot({ path: info.outputPath(`record-${locale}-${dark ? "dark" : "light"}.png`), animations: "disabled" });
             await panel(page).locator(".cw-reference-preview").scrollIntoViewIfNeeded();
             await expect(panel(page).locator(".cw-reference-preview")).toBeInViewport();
-            await expect(panel(page).locator(".cw-reference-preview")).toHaveAttribute("src", assetUrl("source"));
+            await assertReferencePreview(page, "source");
             await panel(page).getByTestId("canvas-generation-record").scrollIntoViewIfNeeded();
         }
     }
@@ -241,13 +276,15 @@ test("toolbar undo flushes a sub-180ms draft before undoing and preserves the pr
     const undo = page.getByTestId("canvas-top-tool-rail").getByRole("button", { name: "撤销", exact: true });
     const redo = page.getByTestId("canvas-top-tool-rail").getByRole("button", { name: "重做", exact: true });
     await expect(undo).toBeEnabled();
+    const undoBox = await undo.boundingBox();
+    if (!undoBox) throw new Error("Undo button is missing");
     await page.evaluate(() => {
         const sample = { input: 0, undo: 0 }; (window as any).__draftUndoSample = sample;
         document.addEventListener("input", event => { if ((event.target as Element).matches("textarea.cw-prompt")) sample.input = performance.now(); }, true);
         document.addEventListener("click", event => { if ((event.target as Element).closest('[data-usage-control="undo"]')) sample.undo = performance.now(); }, true);
     });
     await editor(page).fill("不到180毫秒就撤销的新草稿");
-    await undo.click({ force: true });
+    await page.mouse.click(undoBox.x + undoBox.width / 2, undoBox.y + undoBox.height / 2);
     const elapsed = await page.evaluate(() => { const sample = (window as any).__draftUndoSample; return sample.undo - sample.input; });
     expect(elapsed).toBeGreaterThan(0); expect(elapsed).toBeLessThan(180);
     // Allow the old draft/history timer to settle; DOM checks do not depend on the longer cloud-save debounce.

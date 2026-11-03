@@ -1,5 +1,6 @@
 import type { Locator, Page } from "@playwright/test";
 import { test, expect, newCanvas, uploadImage, IMAGE } from "./fixtures";
+import { readCanvasViewState } from "./canvas-view-state";
 
 async function moveNode(page: Page, node: Locator, x: number, y: number) {
     const box = (await node.boundingBox())!;
@@ -70,17 +71,17 @@ test("不同原图在低缩放失选、多选、单选焦点和AI编辑后仍真
     await page.getByRole("button", { name: "画布缩放与视图", exact: true }).click();
     await page.getByRole("button", { name: "25%", exact: true }).click();
     await page.getByRole("button", { name: "画布缩放与视图", exact: true }).click();
-    await expect.poll(() => api.document(id)?.viewport.k).toBe(.25);
+    await expect.poll(async () => (await readCanvasViewState(page, id))?.viewport.k).toBe(.25);
 
     await test.step("失去选择后两张图都不是空概览", async () => {
         await page.mouse.click(1100, 550);
-        await expect.poll(() => api.document(id)?.selectedNodeIds).toEqual([]);
+        await expect.poll(async () => (await readCanvasViewState(page, id))?.selectedNodeIds).toEqual([]);
         await decodedImages(nodes);
         for (const node of nodes) await expect(node.locator("[data-canvas-resize-handle]")).toHaveCount(0);
     });
     await test.step("多选保留两张解码图且不挂载逐节点缩放控件", async () => {
         await page.keyboard.press("Control+a");
-        await expect.poll(() => api.document(id)?.selectedNodeIds.length).toBe(2);
+        await expect.poll(async () => (await readCanvasViewState(page, id))?.selectedNodeIds?.length).toBe(2);
         await decodedImages(nodes);
         for (const node of nodes) await expect(node.locator("[data-canvas-resize-handle]")).toHaveCount(0);
         await page.screenshot({ path: testInfo.outputPath("two-images-low-zoom-multiselect.png") });
@@ -90,7 +91,7 @@ test("不同原图在低缩放失选、多选、单选焦点和AI编辑后仍真
         // the group selected for dragging; clear it before selecting one node.
         await page.mouse.click(1100, 550);
         await first.click();
-        await expect.poll(() => api.document(id)?.selectedNodeIds).toEqual([originalSources[0].id]);
+        await expect.poll(async () => (await readCanvasViewState(page, id))?.selectedNodeIds).toEqual([originalSources[0].id]);
         await decodedImages(nodes);
         await first.focus();
         await expect(first).toBeFocused();

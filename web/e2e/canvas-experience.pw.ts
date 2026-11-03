@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { strFromU8, unzipSync } from "fflate";
 import { test, expect, newCanvas } from "./fixtures";
 import type { Page } from "@playwright/test";
+import { readCanvasViewState } from "./canvas-view-state";
 
 async function skipGuide(page: Page) {
     await expect(page.getByTestId("canvas-onboarding-tour")).toBeHidden();
@@ -46,8 +47,8 @@ test("命令搜索、节点键盘编辑与微移、历史提示和刷新视图�
     await page.getByRole("button", { name: "画布缩放与视图", exact: true }).click();
     await page.getByRole("button", { name: "50%", exact: true }).click();
     await page.keyboard.press("Escape");
-    await expect.poll(() => api.document(id)?.viewport.k).toBe(.5);
-    await expect.poll(() => api.document(id)?.selectedNodeIds).toEqual([nodeId]);
+    await expect.poll(async () => (await readCanvasViewState(page, id))?.viewport.k).toBe(.5);
+    await expect.poll(async () => (await readCanvasViewState(page, id))?.selectedNodeIds).toEqual([nodeId]);
     await page.reload();
     await expect(node).toHaveAttribute("aria-label", /已选择/);
     await expect(page.getByRole("button", { name: "画布缩放与视图" })).toContainText("50%");
@@ -138,7 +139,8 @@ test("两处快捷键入口共用真实说明，命令可从菜单打开", async
     await page.getByRole("menuitem", { name: "快捷键", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "快捷键与画布操作", exact: true });
     const first = await dialog.locator(".cw-shortcuts-list").innerText();
-    expect(first).toContain("Ctrl / Cmd + K");
+    const modifier = await page.evaluate(() => /Mac|iPhone|iPad|iPod/i.test(navigator.platform) ? "⌘" : "Ctrl");
+    expect(first).toContain(`${modifier} + K`);
     expect(first).toContain("选择工具 + 空白处拖动");
     await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "画布缩放与视图", exact: true }).click();
@@ -161,7 +163,7 @@ test("搜索切换主题真实生效并保存，菜单与命令使用相同节�
     const command = async (query: string) => {
         await page.keyboard.press("Control+k");
         await search.fill(query);
-        await expect(page.getByRole("option")).toHaveCount(1);
+        await expect(page.getByRole("listbox", { name: "搜索结果", exact: true }).getByRole("option")).toHaveCount(1);
         await search.press("Enter");
     };
     await command("切换主题");
@@ -173,10 +175,11 @@ test("搜索切换主题真实生效并保存，菜单与命令使用相同节�
     await command("添加文本");
     await expect.poll(() => api.document(id)?.nodes.length).toBe(1);
     const node = page.locator("[data-node-id]").first();
-    await node.click({ button: "right" });
+    await node.click({ button: "right", position: { x: 30, y: 15 } });
     const context = page.getByRole("menu", { name: "节点操作" });
-    await expect(context.getByRole("menuitem", { name: /复制/ })).toContainText("Ctrl / Cmd + D");
-    await context.getByRole("menuitem", { name: /复制/ }).click();
+    const duplicate = context.getByRole("menuitem", { name: /^创建副本/ });
+    await expect(duplicate).toContainText("Ctrl / Cmd + D");
+    await duplicate.click();
     await expect.poll(() => api.document(id)?.nodes.length).toBe(2);
     await command("快速复制选中节点");
     await expect.poll(() => api.document(id)?.nodes.length).toBe(3);

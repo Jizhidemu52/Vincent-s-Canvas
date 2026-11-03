@@ -1,5 +1,6 @@
 import { test, expect, newCanvas } from "./fixtures";
 import type { Locator, Page } from "@playwright/test";
+import { readCanvasViewState } from "./canvas-view-state";
 
 async function uploadSizedImage(page: Page, width: number, height: number) {
     const png = await page.evaluate(({ width, height }) => {
@@ -100,15 +101,15 @@ test("大图蒙版笔刷按显示像素绘制，小预览不扫描原图，关�
     expect(exported).toEqual({ width: 3840, height: 2160, center: 0, corner: 255 });
 });
 
-test("图片缩略图失败回退原图，原图失败显示重试且不改动节点", async ({ page, browser, api }) => {
+test("云端缩略图失败不隐式下载原图，主动放大后原图可重试且不改动节点", async ({ page, browser, api }) => {
     const id = await newCanvas(page);
     await expect(page.getByRole("button", { name: "展开创建面板", exact: true })).toBeVisible();
     await uploadSizedImage(page, 1600, 1200);
     await expect.poll(() => api.document(id)?.nodes.length).toBe(1);
-    // Isolate the node preview's one fallback from the independent reference
-    // preview now shown when a saved image selection opens the creation panel.
+    // Isolate node preview requests from the independent reference preview
+    // shown when a saved image selection opens the creation panel.
     await page.mouse.click(1600, 1000);
-    await expect.poll(() => api.document(id)?.selectedNodeIds).toEqual([]);
+    await expect.poll(async () => (await readCanvasViewState(page, id))?.selectedNodeIds).toEqual([]);
     const original = structuredClone(api.document(id)!.nodes[0]);
     let failing = true, thumbnailReads = 0, originalReads = 0;
     // A fresh device has no IndexedDB original to mask a failed server read.
@@ -128,6 +129,17 @@ test("图片缩略图失败回退原图，原图失败显示重试且不改动�
     const retry = node.getByRole("button", { name: "重新加载图片", exact: true });
     await expect(retry).toBeVisible();
     expect(thumbnailReads).toBeGreaterThan(0);
+    expect(originalReads).toBe(0);
+    // A failed cloud derivative must not silently download the original.
+    // An explicit near-native zoom is a deliberate original-quality request.
+    await remotePage.getByRole("button", { name: "画布缩放与视图", exact: true }).click();
+    const zoom = remotePage.getByRole("spinbutton", { name: "画布缩放百分比", exact: true });
+    await zoom.fill("400");
+    await zoom.press("Enter");
+    await remotePage.getByRole("button", { name: "画布缩放与视图", exact: true }).click();
+    await expect.poll(async () => (await readCanvasViewState(remotePage, id))?.viewport.k).toBe(4);
+    await expect.poll(() => originalReads).toBe(1);
+    await expect(retry).toBeVisible();
     expect(originalReads).toBe(1);
     failing = false;
     await retry.click();

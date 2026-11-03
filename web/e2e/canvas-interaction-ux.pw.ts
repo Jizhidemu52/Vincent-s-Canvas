@@ -1,5 +1,6 @@
 import { test, expect, newCanvas, uploadImage, IMAGE } from "./fixtures";
 import type { Locator } from "@playwright/test";
+import { readCanvasViewState } from "./canvas-view-state";
 
 async function dropCanvasFiles(target: Locator, names: string[], itemsOnly = false) {
     return target.evaluate((element, input) => {
@@ -49,11 +50,11 @@ test("desktop: collapsed remembered panel, grid import, pan/zoom shortcuts and r
     await expect(page.getByTestId("canvas-quick-generate-panel")).toBeHidden();
     const canvas = page.locator("[data-canvas-viewport]");
     await page.mouse.move(1200, 400); await page.mouse.wheel(100, 80);
-    await expect.poll(() => api.document(id)?.viewport.k).toBe(1);
+    await expect.poll(async () => (await readCanvasViewState(page, id))?.viewport.k).toBe(1);
     await page.keyboard.press("Control++");
-    await expect.poll(() => api.document(id)?.viewport.k).toBeGreaterThan(1);
+    await expect.poll(async () => (await readCanvasViewState(page, id))?.viewport.k).toBeGreaterThan(1);
     await page.keyboard.press("Control+0");
-    await expect.poll(() => api.document(id)?.viewport.k).toBe(1);
+    await expect.poll(async () => (await readCanvasViewState(page, id))?.viewport.k).toBe(1);
     await page.keyboard.press("Shift+1");
     await expect(page.locator(`[data-node-id="${imported[0].id}"]`)).toBeVisible();
     await expect(page.locator(`[data-node-id="${imported[1].id}"]`)).toBeVisible();

@@ -75,8 +75,10 @@ function readDocuments(store: IDBObjectStore, name: string, ids: string[], done:
                 if (!project || project.id !== id) throw new Error("画布项目 ID 与索引不一致");
                 const view = store.get(viewKey(name, id));
                 view.onsuccess = () => {
-                    projects[index] = withView(project, view.result);
-                    if (--remaining === 0) done(projects);
+                    try {
+                        projects[index] = withView(project, view.result);
+                        if (--remaining === 0) done(projects);
+                    } catch (error) { fail(error); }
                 };
             } catch (error) { fail(error); }
         };
@@ -128,14 +130,16 @@ export async function readCanvasLibrary(name: string): Promise<{ projects: Canva
                 for (const id of ids) {
                     const summary = store.get(summaryKey(name, id));
                     summary.onsuccess = () => {
-                        const value = summary.result as CanvasProjectSummary | undefined;
-                        if (value?.id === id && typeof value.title === "string" && typeof value.updatedAt === "string") summaries.push(value);
-                        else missing.push(id);
-                        if (--remaining === 0) readDocuments(store, name, missing, projects => {
-                            // Populate only the rebuildable index, never rewrite the source document.
-                            for (const project of projects) store.put(canvasProjectSummary(project), summaryKey(name, project.id));
-                            result({ projects, summaries });
-                        }, fail);
+                        try {
+                            const value = summary.result as CanvasProjectSummary | undefined;
+                            if (value?.id === id && typeof value.title === "string" && typeof value.updatedAt === "string") summaries.push(value);
+                            else missing.push(id);
+                            if (--remaining === 0) readDocuments(store, name, missing, projects => {
+                                // Populate only the rebuildable index, never rewrite the source document.
+                                for (const project of projects) store.put(canvasProjectSummary(project), summaryKey(name, project.id));
+                                result({ projects, summaries });
+                            }, fail);
+                        } catch (error) { fail(error); }
                     };
                 }
             } catch (error) { fail(error); }

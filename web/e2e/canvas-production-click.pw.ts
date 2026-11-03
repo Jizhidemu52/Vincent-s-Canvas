@@ -1,4 +1,5 @@
 import { test, expect, newCanvas, uploadImage } from "./fixtures";
+import { randomUUID } from "node:crypto";
 
 test("线上正式包：连续点击上传图片、打开工具栏、刷新后再点击均不白屏", async ({ page, api }, testInfo) => {
     test.setTimeout(120000);
@@ -73,7 +74,12 @@ for (const preference of ["legacy", "malformed"]) {
         await expect.poll(() => api.document(id)?.nodes.length).toBe(1);
         await page.goto("/canvas");
         await expect(page.getByRole("button", { name: "新建画布", exact: true }).first()).toBeVisible();
-        const record = api.documents.get(id)!;
+        // Seed an existing cloud document before its first local hydration. A
+        // remote-only mutation must not overwrite this browser's cached edits.
+        const existingId = randomUUID();
+        const record = structuredClone(api.documents.get(id)!);
+        record.id = existingId;
+        record.document!.id = existingId;
         const node = record.document!.nodes[0];
         node.metadata.references = ["/api/assets/previous-input/content"];
         node.metadata.compareSources = [{ type: "image", content: "/api/assets/previous-input/content", label: "已移出画布的来源图" }];
@@ -81,7 +87,8 @@ for (const preference of ["legacy", "malformed"]) {
         node.metadata.imageVersion = 2;
         record.revision++;
         record.updatedAt = new Date().toISOString();
-        await page.goto(`/canvas/${id}`);
+        api.documents.set(existingId, record);
+        await page.goto(`/canvas/${existingId}`);
         await page.locator(`[data-node-id="${node.id}"]`).click({ position: { x: 35, y: 15 } });
         await expect(page.getByRole("toolbar", { name: "图片工具栏", exact: true })).toBeVisible();
         await expect(page.getByRole("slider", { name: "原图与修改后对比", exact: true })).toBeEnabled();

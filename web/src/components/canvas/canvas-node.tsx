@@ -961,7 +961,13 @@ function ResizeHandle({ corner, theme, onMouseDown }: { corner: ResizeCorner; th
     }[corner];
 
     const edge = !corner.includes("-");
-    return <div data-canvas-resize-handle={corner} className={`absolute z-50 grid size-7 place-items-center ${edge ? "" : positionClass}`} style={{ ...(edge ? { left: corner === "right" ? "100%" : corner === "left" ? "0%" : "50%", top: corner === "bottom" ? "100%" : corner === "top" ? "0%" : "50%", cursor: corner === "left" || corner === "right" ? "ew-resize" : "ns-resize" } : {}), touchAction: "none", transform: `translate(${edge ? "-50%" : corner.endsWith("right") ? "50%" : "-50%"}, ${edge ? "-50%" : corner.startsWith("bottom") ? "50%" : "-50%"}) scale(var(--canvas-node-ui-scale, 1))` }} onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); onMouseDown(event, corner); }}>
+    const side = corner === "left" || corner === "right";
+    // The side midpoint belongs to the connection port. A resize handle there
+    // steals its pointer events whenever a text/config node is selected.
+    // In screen pixels, leave 14px between a side hit area and the nearest
+    // corner/port center. Tiny nodes lose only this redundant side handle;
+    // inherited zoom CSS updates it without rerendering every node.
+    return <div data-canvas-resize-handle={corner} className={`absolute z-50 grid size-7 place-items-center ${edge ? "" : positionClass}`} style={{ ...(edge ? { left: corner === "right" ? "100%" : corner === "left" ? "0%" : "50%", top: corner === "bottom" ? "100%" : corner === "top" ? "0%" : "25%", cursor: side ? "ew-resize" : "ns-resize" } : {}), ...(side ? { height: "clamp(0px, calc(50% / var(--canvas-node-ui-scale, 1) - 28px), 28px)", overflow: "hidden" } : {}), touchAction: "none", transform: `translate(${edge ? "-50%" : corner.endsWith("right") ? "50%" : "-50%"}, ${edge ? "-50%" : corner.startsWith("bottom") ? "50%" : "-50%"}) scale(var(--canvas-node-ui-scale, 1))` }} onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); onMouseDown(event, corner); }}>
         <span className="pointer-events-none block size-[7px] border" style={{ background: theme.node.panel, borderColor: theme.canvas.selectionStroke }} />
     </div>;
 }

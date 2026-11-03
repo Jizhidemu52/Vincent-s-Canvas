@@ -66,3 +66,27 @@ test("malformed compact history aborts fallback writes without overwriting origi
     await expect(io.writeCanvasProjects("canvas", new Map())).rejects.toThrow("历史数据损坏");
     expect(io.value()).toBe(original);
 });
+
+test("a write failure in the deferred view-read callback reaches the transaction failure handler", () => {
+    const project = { id: "p", title: "original", nodes: [], viewport: { x: 0, y: 0, k: 1 }, selectedNodeIds: [] };
+    const view = { viewport: { x: 20, y: 30, k: .5 }, selectedNodeIds: ["selected"] };
+    const requests: Array<{ result: unknown; onsuccess?: () => void }> = [];
+    const failures: unknown[] = [];
+    const quota = new DOMException("write rejected after reading the local view", "QuotaExceededError");
+    const bindings = { parseCanvasProject };
+    const exports = {} as { readDocuments: (store: unknown, name: string, ids: string[], done: (projects: unknown[]) => void, fail: (error: unknown) => void) => void };
+    new Function(...Object.keys(bindings), "exports", `${code}\nexports.readDocuments = readDocuments;`)(...Object.values(bindings), exports);
+    const store = { get: (key: string) => {
+        const request = { result: key.includes(":project-view:v1") ? view : JSON.stringify(project) };
+        requests.push(request);
+        return request;
+    } };
+    let merged: unknown[] | undefined;
+    exports.readDocuments(store, "canvas", ["p"], projects => { merged = projects; throw quota; }, error => failures.push(error));
+    // IndexedDB invokes these in different tasks: the outer handler cannot
+    // catch an exception raised by the later view callback's write operation.
+    requests.shift()!.onsuccess!();
+    expect(() => requests.shift()!.onsuccess!()).not.toThrow();
+    expect(merged).toEqual([{ ...project, ...view }]);
+    expect(failures).toEqual([quota]);
+});

@@ -3,15 +3,17 @@ import { test, expect } from "./fixtures";
 
 test("共享原生任务通知减少轮询，完成推送更新图片且不重新生成", async ({ page, context, api }) => {
     const streams = new Set<ServerResponse>();
+    const streamOwners: Array<string | null> = [];
     let connections = 0;
     const server = createServer((request, response) => {
         const url = new URL(request.url!, "http://fixture");
         if (url.pathname !== "/api/tasks/events") { response.writeHead(404).end(); return; }
         connections++;
+        streamOwners.push(url.searchParams.get("ownerId"));
         streams.add(response);
         response.once("close", () => streams.delete(response));
         response.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-store", "X-Accel-Buffering": "no" });
-        response.write(`event: tasks-changed\ndata: ${JSON.stringify({ ids: url.searchParams.get("ids")!.split(",") })}\n\n`);
+        response.write(`event: tasks-changed\ndata: ${JSON.stringify({ ids: [...api.tasks.keys()] })}\n\n`);
     });
     await new Promise<void>((resolve, reject) => {
         server.once("error", reject);
@@ -27,6 +29,7 @@ test("共享原生任务通知减少轮询，完成推送更新图片且不重�
         await page.getByRole("button", { name: "开始生成", exact: true }).click();
         await expect.poll(() => api.submissions.length).toBe(1);
         await expect.poll(() => streams.size).toBe(1);
+        expect(streamOwners).toEqual([[...api.tasks.values()][0]!.userId]);
         await expect.poll(() => api.taskReads.length).toBeGreaterThan(0);
         // Allow the initial stream snapshot to settle, then cross two legacy
         // 2.5-second poll intervals. Healthy streams should issue no GET here.

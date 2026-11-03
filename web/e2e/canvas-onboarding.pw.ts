@@ -148,7 +148,14 @@ test("默认不自动引导，关闭后可编辑节点；手动重开后不会�
     await expect(tour).toBeHidden();
     await expect(page.getByTestId("canvas-onboarding-highlight")).toBeHidden();
     await expect(page.getByTestId("canvas-quick-generate-panel")).toBeVisible();
-    await expect(page.getByRole("button", { name: "新手引导", exact: true })).toBeVisible();
+    await page.keyboard.press("Control+k");
+    const commands = page.getByRole("dialog", { name: "命令与搜索", exact: true });
+    await commands.getByRole("combobox", { name: "搜索命令、节点和素材", exact: true }).fill("新手引导");
+    await commands.getByRole("option", { name: /新手引导/ }).click();
+    await expect(commands).toBeHidden();
+    await expect(tour).toContainText("1 / 4");
+    await tour.getByRole("button", { name: "关闭引导，以后再看", exact: true }).click();
+    await expect(tour).toBeHidden();
 
     // The tour must yield to the real reference editor, not merely stop
     // covering the bottom toolbar. Exercise its previously blocked Clear action.
