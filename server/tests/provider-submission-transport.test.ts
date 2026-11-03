@@ -56,6 +56,7 @@ type DeadlineFixtureResult = {
   connects: number;
   baselineHello?: ClientHello;
   clientHellos: ClientHello[];
+  helloRetryRequests: number;
   tlsProtocols: string[];
   receivedBodyBytes: number;
   receivedBodySha256?: string;
@@ -80,11 +81,11 @@ async function runConnectionDeadlineFixture(mode: string, connectTimeoutMs?: unk
     const counts = { connections: 0, endedConnections: 0, closedConnections: 0, closedBeforeRequest: 0, requests: 0, posts: 0, connects: 0 };
     const clientHellos = [], tlsProtocols = [];
     let receivedBodyBytes = 0, receivedBodySha256, contentLength;
-    let baselineHello, resolveBaselineHello;
+    let baselineHello, resolveBaselineHello, helloRetryRequests = 0;
     const sockets = new Set();
     const listen = server => new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve(server.address().port)));
-    const compactHello = config.mode === 'compact-client-hello';
-    const backend = createHttpsServer({ cert: config.cert, key: config.key, ...(compactHello ? { minVersion: 'TLSv1.3' } : {}) }, (request, response) => {
+    const nativeClientHello = config.mode === 'native-client-hello';
+    const backend = createHttpsServer({ cert: config.cert, key: config.key, ...(nativeClientHello ? { minVersion: 'TLSv1.3' } : {}) }, (request, response) => {
       counts.requests++;
       if (request.method === 'POST') counts.posts++;
       tlsProtocols.push(request.socket.getProtocol());
@@ -105,12 +106,33 @@ async function runConnectionDeadlineFixture(mode: string, connectTimeoutMs?: unk
       });
     });
     const backendPort = await listen(backend);
+    const observeHandshakes = onHandshake => {
+      let records = Buffer.alloc(0), handshakes = Buffer.alloc(0);
+      return chunk => {
+        records = Buffer.concat([records, chunk]);
+        while (records.length >= 5 && records.length >= 5 + records.readUInt16BE(3)) {
+          const recordBytes = 5 + records.readUInt16BE(3);
+          if (records[0] === 22) handshakes = Buffer.concat([handshakes, records.subarray(5, recordBytes)]);
+          records = records.subarray(recordBytes);
+          while (handshakes.length >= 4 && handshakes.length >= 4 + handshakes.readUIntBE(1, 3)) {
+            const messageBytes = 4 + handshakes.readUIntBE(1, 3);
+            onHandshake(handshakes[0], handshakes.subarray(4, messageBytes), recordBytes);
+            handshakes = handshakes.subarray(messageBytes);
+          }
+        }
+      };
+    };
     function pipeToBackend(socket, established = false, head = Buffer.alloc(0)) {
       const upstream = createConnection({ host: '127.0.0.1', port: backendPort }, () => {
         if (established) socket.write('HTTP/1.1 200 Connection Established\\r\\n\\r\\n');
         if (head.length) upstream.write(head);
         socket.pipe(upstream); upstream.pipe(socket);
       });
+      if (nativeClientHello) upstream.on('data', observeHandshakes((type, message) => {
+        // TLS 1.3 identifies HRR by its fixed ServerHello random. Observe the
+        // real server handshake; do not force groups or manufacture an HRR.
+        if (type === 2 && message.subarray(2, 34).toString('hex') === 'cf21ad74e59a6111be1d8c021e65b891c2a211167abb8c5e079e09e2c8a8339c') helloRetryRequests++;
+      }));
       sockets.add(upstream);
       upstream.on('close', () => sockets.delete(upstream));
       upstream.on('error', () => socket.destroy());
@@ -119,18 +141,17 @@ async function runConnectionDeadlineFixture(mode: string, connectTimeoutMs?: unk
     }
     const isProxy = config.mode.startsWith('proxy-');
     const front = isProxy ? createHttpServer() : createTcpServer(socket => {
-      if (compactHello) {
-        // Model a path that drops a large first TLS record, without making any
-        // claim about which real network component caused the production stall.
-        let hello = Buffer.alloc(0);
-        const readHello = chunk => {
-          hello = Buffer.concat([hello, chunk]);
-          if (hello.length < 5 || hello.length < 5 + hello.readUInt16BE(3)) return;
-          socket.pause(); socket.removeListener('data', readHello);
-          const observed = { recordBytes: 5 + hello.readUInt16BE(3), supportedGroups: [], keyShareGroups: [] };
+      if (nativeClientHello) {
+        const captureBaseline = !!resolveBaselineHello;
+        // Do not let the observer consume bytes before the upstream pipe is
+        // connected; pipeToBackend resumes the paused socket when ready.
+        if (!captureBaseline) socket.pause();
+        socket.on('data', observeHandshakes((type, hello, recordBytes) => {
+          if (type !== 1) return;
+          const observed = { recordBytes, supportedGroups: [], keyShareGroups: [] };
           // Inspect the real ClientHello's supported_groups and key_share
           // extensions; no TLS encryption or handshake is implemented here.
-          let offset = 5 + 4 + 2 + 32;
+          let offset = 2 + 32;
           offset += 1 + hello[offset];
           offset += 2 + hello.readUInt16BE(offset);
           offset += 1 + hello[offset];
@@ -144,15 +165,13 @@ async function runConnectionDeadlineFixture(mode: string, connectTimeoutMs?: unk
               index += 4 + extension.readUInt16BE(index + 2);
             }
           }
-          if (resolveBaselineHello) {
+          if (captureBaseline && resolveBaselineHello) {
             const resolve = resolveBaselineHello; resolveBaselineHello = undefined;
-            resolve(observed); socket.resume(); return;
+            resolve(observed); return;
           }
           clientHellos.push(observed);
-          if (observed.recordBytes > 1200) { socket.resume(); return; }
-          pipeToBackend(socket, false, hello);
-        };
-        socket.on('data', readHello);
+        }));
+        if (!captureBaseline) pipeToBackend(socket);
       }
       else if (['slow-close', 'large-body'].includes(config.mode) || (['recover', 'late-tls'].includes(config.mode) && counts.connections > 1)) pipeToBackend(socket);
       else if (config.mode === 'late-tls') {
@@ -185,9 +204,9 @@ async function runConnectionDeadlineFixture(mode: string, connectTimeoutMs?: unk
       }
     });
     const frontPort = await listen(front);
-    if (compactHello) {
-      // Independently capture native OpenSSL's unmodified defaults so removing
-      // any supported group in the worker cannot satisfy the size regression.
+    if (nativeClientHello) {
+      // Capture this runtime's unmodified group AND predicted key-share lists.
+      // A custom deferral that preserves supported groups must still fail.
       let captureDeadline;
       const captured = new Promise((resolve, reject) => {
         resolveBaselineHello = resolve;
@@ -215,7 +234,7 @@ async function runConnectionDeadlineFixture(mode: string, connectTimeoutMs?: unk
     // Observe TCP closure before cleanup can satisfy any closure assertion.
     await new Promise(resolve => setTimeout(resolve, 50));
     const separator = output.indexOf('\\n');
-    const result = { finished, exitCode, ...counts, baselineHello, clientHellos, tlsProtocols, receivedBodyBytes, receivedBodySha256, contentLength, head: separator < 0 ? null : JSON.parse(output.slice(0, separator)), body: separator < 0 ? '' : output.slice(separator + 1) };
+    const result = { finished, exitCode, ...counts, baselineHello, clientHellos, helloRetryRequests, tlsProtocols, receivedBodyBytes, receivedBodySha256, contentLength, head: separator < 0 ? null : JSON.parse(output.slice(0, separator)), body: separator < 0 ? '' : output.slice(separator + 1) };
     for (const socket of sockets) socket.destroy();
     backend.closeAllConnections(); backend.close(); front.close();
     process.stdout.end(JSON.stringify(result) + '\\n');
@@ -246,22 +265,24 @@ describe("provider submission transport", () => {
     expect(result.tlsProtocols).toEqual(["TLSv1.3"]);
   });
 
-  test("a compact ClientHello crosses a size-sensitive path without removing PQC groups or downgrading TLS", async () => {
-    const result = await runConnectionDeadlineFixture("compact-client-hello", 500);
-    expect(result.baselineHello!.recordBytes).toBeGreaterThan(1200);
-    expect(result.baselineHello!.keyShareGroups).toContain(4588); // X25519MLKEM768
+  test("the native default ClientHello preserves supported groups and predicted key shares without an unnecessary HRR", async () => {
+    const result = await runConnectionDeadlineFixture("native-client-hello", 500);
+    expect(result.baselineHello!.supportedGroups.length).toBeGreaterThan(0);
+    expect(result.baselineHello!.keyShareGroups.length).toBeGreaterThan(0);
     expect(result.finished).toBe(true);
+    expect(result.exitCode).toBe(0);
     expect(result.head?.error).toBeUndefined();
     expect(result.head?.status).toBe(200);
     expect(result.body).toBe("slow response");
     expect(result.requests).toBe(1);
     expect(result.posts).toBe(1);
+    expect(result.connections).toBe(2); // One capture-only baseline, one worker.
     expect(result.head!.connectionAttempts).toHaveLength(1);
+    expect(result.head!.connectionAttempts![0]).toMatchObject({ attempt: 1, phase: "http_started" });
     expect(result.clientHellos).toHaveLength(1);
-    expect(result.clientHellos[0]!.recordBytes).toBeLessThanOrEqual(1200);
     expect(result.clientHellos[0]!.supportedGroups).toEqual(result.baselineHello!.supportedGroups);
-    expect(result.clientHellos[0]!.supportedGroups).toContain(4588);
-    expect(result.clientHellos[0]!.keyShareGroups).not.toContain(4588);
+    expect(result.clientHellos[0]!.keyShareGroups).toEqual(result.baselineHello!.keyShareGroups);
+    expect(result.helloRetryRequests).toBe(0);
     expect(result.tlsProtocols).toEqual(["TLSv1.3"]);
   });
 

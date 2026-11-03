@@ -73,9 +73,9 @@ API、Worker 和本机演示服务仍运行于 Bun；对话及已接入的图片
 
 该传输每次尝试使用独立连接，显式继承服务进程的 `HTTP_PROXY` / `HTTPS_PROXY`、对应小写变量以及 `NO_PROXY` / `no_proxy`；同名大小写变量同时设置时，小写优先。HTTPS 模型地址使用 `HTTPS_PROXY` / `https_proxy`，代理 URL 支持 `http://` 和 `https://`。未配置适用代理或地址匹配 `NO_PROXY` 时直连；显式代理连接失败时直接报错，绝不自动回退直连，也不跟随提交重定向。
 
-代理转发 HTTPS 模型请求时，`CONNECT` 只建立到目标地址的隧道，不携带模型业务 API Key、`Authorization` 或请求体；如代理 URL 自带凭据，只用于代理认证。目标 TLS 证书和身份验证通过后才发送模型业务 POST。只有明确的初始 TLS 证书错误或 `ECONNRESET`，且已确认模型业务HTTP请求尚未发送时，才允许重试一次。模型业务 HTTP 已发出、阶段未知、超时、响应解析或下载失败均不重放生成提交；不要关闭证书校验。
+代理转发 HTTPS 模型请求时，`CONNECT` 只建立到目标地址的隧道，不携带模型业务 API Key、`Authorization` 或请求体；如代理 URL 自带凭据，只用于代理认证。目标 TLS 证书和身份验证通过后才发送模型业务 POST。只有允许的初始 TLS 证书错误、`ECONNRESET` 或10秒建连期限到达，且原生发送门确认模型业务 HTTP 请求尚未发送时，才允许重连一次。模型业务 HTTP 已发出或阶段未知的超时、响应解析或下载失败均不重放生成提交；不要关闭证书校验。
 
-原生 Node 提交传输使用 OpenSSL 的 `?X25519MLKEM768:DEFAULT` 分组配置：只延后首次 ClientHello 的推测性 ML-KEM keyshare，仍保留全部默认 supported groups、TLS 1.3 与证书验证；需要该分组的服务端仍可通过 HelloRetryRequest 协商。用于处理目标网络上默认大握手首包停滞的问题，不修改全局 TLS／代理设置，也不增加业务重提次数。说明见 [OpenSSL 分组文档](https://docs.openssl.org/3.5/man3/SSL_CTX_set1_curves/)。
+原生 Node 提交传输沿用 Node/OpenSSL 默认支持组与初始 keyshare，不再通过自定义 `ecdhCurve` 延后 ML-KEM keyshare。本机单变量实测中，延后设置会让目标端请求 HelloRetryRequest，并在第二次 ClientHello 后间歇性停滞；默认握手在相同条件下完成。该修正不定位具体代理或目标边缘设备，也不承诺消除所有网络故障；证书验证、TLS 版本、禁重协商、10秒连接上限及业务请求单次发送门均不变。分组语义见 [OpenSSL 分组文档](https://docs.openssl.org/3.5/man3/SSL_CTX_set1_curves/)。
 
 非视频任务执行报错后不再自动重试整个任务；若服务重启时发现已在执行但结果不明的任务，则暂停并保留待核查状态，普通恢复按钮不能直接重新提交。已发出请求但遇网络故障时，上游仍可能已经执行，请先核查结果，避免重复计费。视频仍沿用原上游任务 ID 恢复查询。
 
