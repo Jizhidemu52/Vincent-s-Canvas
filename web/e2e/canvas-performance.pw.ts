@@ -7,36 +7,22 @@ import { decodePerformanceThumbnails, inspectRenderedPerformanceImages, openPerf
 import { summarizeFrames, memoryBudgetFailures } from "../scripts/canvas-performance-budget.mjs";
 import { analyzeCanvasHeap } from "../scripts/canvas-performance-heap.mjs";
 import { parseCanvasProject } from "../src/lib/canvas/canvas-project-codec";
+import { startPerformanceFrameProbe } from "./canvas-performance-frame-probe";
 
 const variant = process.env.CANVAS_PERF_VARIANT;
 const output = resolve(import.meta.dirname, `../../output/canvas-performance/${variant || "not-run"}`);
 test.skip(!variant, "Use the isolated canvas-performance.config.ts and a production build");
 
 async function startFrames(page: Page, busyMs: number) {
-    await page.evaluate(ms => {
-        const state = { frames: [] as number[], hiddenCount: document.hidden ? 1 : 0, active: true, last: undefined as number | undefined };
-        const visibility = () => { if (document.hidden) state.hiddenCount++; };
-        document.addEventListener("visibilitychange", visibility);
-        (window as any).__performanceFrames = { state, stop: () => { state.active = false; document.removeEventListener("visibilitychange", visibility); } };
-        const sample = (now: number) => {
-            if (!state.active) return;
-            // RAF timestamps denote frame start and can precede the evaluate
-            // call's performance.now(). Only compare consecutive RAF stamps.
-            if (state.last !== undefined) state.frames.push(now - state.last);
-            state.last = now;
-            // Test-only negative control. Fixed work, never derived from the
-            // candidate's timings and never included in any production build.
-            const end = performance.now() + ms;
-            while (performance.now() < end) Math.sqrt(Math.random());
-            requestAnimationFrame(sample);
-        };
-        requestAnimationFrame(sample);
-    }, busyMs);
+    // Await readiness BEFORE gesture(), rather than racing its first pointer
+    // event against the browser's initial animation-frame scheduling.
+    await page.evaluate(startPerformanceFrameProbe, busyMs);
 }
 async function finishFrames(page: Page) {
     return page.evaluate(() => {
         const probe = (window as any).__performanceFrames; probe.stop();
-        const result = { frames: probe.state.frames as number[], hiddenCount: probe.state.hiddenCount as number };
+        const result = { frames: probe.state.frames as number[], hiddenCount: probe.state.hiddenCount as number,
+            timestamps: probe.state.timestamps as number[], startupTimestamps: probe.state.startupTimestamps as number[] };
         delete (window as any).__performanceFrames; return result;
     });
 }
@@ -151,7 +137,8 @@ test("500节点100栅格图：对照帧率、真实堆曲线与200步历史边�
         // has its own 120ms end debounce). Read that existing sample, not the
         // previous gesture, without adding idle frames to the raw recording.
         await page.waitForTimeout(400);
-        interactions.push({ label, repetition, frames: summarizeFrames(raw.frames, raw.hiddenCount), rawFramesMs: raw.frames, productMetrics: await experienceMetrics(page) });
+        interactions.push({ label, repetition, frames: summarizeFrames(raw.frames, raw.hiddenCount), rawFramesMs: raw.frames,
+            rawFrameTimestampsMs: raw.timestamps, startupFrameTimestampsMs: raw.startupTimestamps, productMetrics: await experienceMetrics(page) });
         console.log(`${variant} ${label} #${repetition + 1}: ${raw.frames.length} frames`);
         expect(raw.hiddenCount).toBe(0);
     }
