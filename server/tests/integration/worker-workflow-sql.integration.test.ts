@@ -10,6 +10,9 @@ import { VideoProviderFailure, VideoSubmissionClaimLost, VideoTaskPending } from
 import { ApiMartImageProviderFailure, ApiMartImageTaskPending } from "../../src/apimart-image";
 import { ProviderSubmissionRejected, isDefinitiveSubmissionRejection, submissionWasNotSent } from "../../src/provider-submission-policy";
 import { disposeProviderResults } from "../../src/media-result-file";
+import { imageAgentProviderPrompt } from "../../src/image-agent-profile";
+import { postgresPromptRecipeStore } from "../../src/prompt-recipe-postgres";
+import { PromptOptimizationError } from "../../src/prompt-safety";
 import { normalizeWorkflowOutputs, parsePromptVariables, readPath, renderTemplate } from "../../src/workflow-runtime";
 import { assertWorkflowTaskContext, workflowTaskContext, WorkflowTaskPending } from "../../src/workflow-task-context";
 import { createIsolatedPostgres } from "../helpers/isolated-postgres";
@@ -41,6 +44,7 @@ async function fixture(providerFetch: (url: string, init?: RequestInit) => Promi
     VideoSubmissionClaimLost, VideoProviderFailure, ApiMartImageProviderFailure, ProviderSubmissionRejected, isDefinitiveSubmissionRejection, submissionWasNotSent,
     createGenerationTiming: () => ({ measure: async (_stage: string, action: () => unknown) => action(), finish() {} }),
     readProviderSubmissionDiagnostics: () => undefined, disposeProviderResults, decryptSecret: () => '{"apiKey":"fixture-only"}',
+    imageAgentProviderPrompt, postgresPromptRecipeStore, PromptOptimizationError,
     assertImageEditMaskSupport: () => {}, assertWorkflowTaskContext, workflowTaskContext,
     normalizeWorkflowOutputs, parsePromptVariables, readPath, renderTemplate,
     loadSourceAssets: async () => { sourceLoads++; return []; },

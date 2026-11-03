@@ -13,6 +13,7 @@ import { createIsolatedPostgres } from "../helpers/isolated-postgres";
 import { createIsolatedQueueCache } from "../helpers/isolated-queue-cache";
 import { disposeProviderResults, downloadVideoResult } from "../../src/media-result-file";
 import { WorkflowTaskPending } from "../../src/workflow-task-context";
+import { PromptOptimizationError } from "../../src/prompt-safety";
 
 const integration = process.env.PGLITE_RUNTIME_PATH && process.env.QUEUE_TEST_REDIS_URL ? test : test.skip;
 const redisTest = process.env.QUEUE_TEST_REDIS_URL ? test : test.skip;
@@ -50,7 +51,7 @@ async function databaseFixture(kind: "image" | "video" = "video") {
 }
 
 async function productionWorker(dependencies: Record<string, unknown>) {
-  dependencies = { disposeProviderResults, WorkflowTaskPending, ApiMartImageQueryRetryable, ...dependencies };
+  dependencies = { disposeProviderResults, WorkflowTaskPending, ApiMartImageQueryRetryable, PromptOptimizationError, ...dependencies };
   // Exercise the real orchestration/provider functions without importing the
   // worker entrypoint (which intentionally starts configured production services).
   const file = await Bun.file(new URL("../../src/worker.ts", import.meta.url)).text();
@@ -64,7 +65,7 @@ async function productionWorker(dependencies: Record<string, unknown>) {
   const js = ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText;
   return new Function(...Object.keys(dependencies), `${js};
     async function executeProvider(task) { return task.operation_type === 'video_generation'
-      ? executeApiMartVideo(task,{apiKey:'fixture-only'}) : executeApiMartImage(task,{apiKey:'fixture-only'}); }
+      ? executeApiMartVideo(task,{apiKey:'fixture-only'}) : executeApiMartImage(task,{apiKey:'fixture-only'},task.prompt); }
     return {runTask};`)(...Object.values(dependencies)) as { runTask(id: string): Promise<void> };
 }
 

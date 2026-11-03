@@ -20,6 +20,7 @@ import type { BusinessConfig } from "@/services/api/business-config";
 import * as toolRuntime from "@/services/api/tool-runtime";
 import { createAgentMediaWorkflow } from "@/lib/canvas/agent-media-workflow";
 import * as onlineTaskRecovery from "@/lib/canvas/canvas-online-task-recovery";
+import * as agentGeneration from "@/lib/agent-direct-generation";
 
 const requireModule = createRequire(new URL("../src/components/canvas/canvas-assistant-panel.tsx", import.meta.url));
 const requireToolConfigModule = createRequire(new URL("../src/hooks/use-tool-config.ts", import.meta.url));
@@ -45,6 +46,7 @@ function panelHarness(options: { replies: ToolResponseResult[]; stream?: string;
     const requests: Array<{ type: string; args: any[] }> = [];
     const assets: AssetInput[] = [];
     const imageUploads: string[] = [];
+    const imageSizeReads: string[] = [];
     const videoStores: unknown[] = [];
     const config = { ...configModule.defaultConfig, model: "text-model", textModel: "text-model", imageModel: "gpt-image-2", videoModel: "MiniMax-H3", size: "3:4", quality: "2k", canvasImageCount: "2", videoSeconds: "6", vquality: "1080P", videoGenerateAudio: "true", ...options.config };
     const flags = { ...Object.fromEntries(moduleKeys.map(key => [key, true])), ...options.flags } as Record<ModuleKey, boolean>;
@@ -180,6 +182,20 @@ function panelHarness(options: { replies: ToolResponseResult[]; stream?: string;
             storeGeneratedAudio: async () => ({ url: "/api/assets/audio/content", storageKey: "", mimeType: "audio/mpeg" }),
         },
         "@/services/image-storage": { uploadImage: async (url: string) => { imageUploads.push(url); return options.storeImage ? options.storeImage() : options.storedImage || { url, storageKey: "", width: 1024, height: 1024, bytes: 100, mimeType: "image/png" }; }, imageToDataUrl: async (reference: any) => reference.dataUrl || reference.url },
+        "@/lib/agent-direct-generation": {
+            ...agentGeneration,
+            // These placeholder bytes represent 1024-square fixtures, not
+            // decodable browser images. Keep the real size preflight and mock
+            // only its source decoder instead of bypassing generation rules.
+            resolveAgentImageGenerationSettings: (...args: Parameters<typeof agentGeneration.resolveAgentImageGenerationSettings>) => {
+                args[5] = async (source, assertCurrent) => {
+                    assertCurrent();
+                    imageSizeReads.push(source.id);
+                    return { width: 1024, height: 1024 };
+                };
+                return agentGeneration.resolveAgentImageGenerationSettings(...args);
+            },
+        },
     };
     // Execute the real hook against this harness's React dispatcher and scoped stores.
     // No global Zustand state or network configuration leaks into manual renders.
@@ -205,7 +221,7 @@ function panelHarness(options: { replies: ToolResponseResult[]; stream?: string;
     const composer = () => findElements(render()).find((element) => typeof element.props.onSubmit === "function")!;
     const messages = (): CanvasAssistantMessage[] => states.flatMap((value) => Array.isArray(value) ? value.flatMap((item) => item?.messages || []) : []);
     return {
-        requests, config, snapshotRef, composer, messages, assets, imageUploads, videoStores, capabilityRequests, sessionCommits, sessionUpdates,
+        requests, config, snapshotRef, composer, messages, assets, imageUploads, imageSizeReads, videoStores, capabilityRequests, sessionCommits, sessionUpdates,
         stop() { composer().props.onStop(); },
         close() { panelState.closing = true; render(); },
         unmount() { effects.forEach(effect => effect.cleanup?.()); },
@@ -295,6 +311,7 @@ describe("canvas conversation image controls", () => {
         await harness.submit("再亮一点");
         const request = harness.requests.find(item => item.type === "edit")!;
         expect(request.args[2].map((image: any) => image.storageKey)).toEqual(["image:old"]);
+        expect(harness.imageSizeReads).toEqual([oldId]);
         expect(request.args[1]).toContain("保留白色背景");
         expect(request.args[1]).not.toContain("蓝色");
         const saved = harness.messages().filter(message => message.attachments?.length).at(-1)!;
@@ -831,6 +848,7 @@ describe("canvas assistant submission", () => {
         expect(previews).toEqual(["data:image/png;base64,cHJpbnQ=", "data:image/png;base64,c2VsZWN0ZWQ="]);
         const edit = harness.requests.find(request => request.type === "edit")!;
         expect(edit.args[2].map((reference: any) => reference.dataUrl)).toEqual(["data:image/png;base64,c2VsZWN0ZWQ=", "data:image/png;base64,cHJpbnQ="]);
+        expect(harness.imageSizeReads).toEqual([edit.args[2][0].id]);
         expect(edit.args[1]).toContain("输入图1对应图2（修改底图）");
         expect(edit.args[1]).toContain("输入图2对应图1（参考图）");
     });

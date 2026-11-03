@@ -75,7 +75,7 @@ test("4MP真实对比和导出：不冻结、精确差异、PNG透明、JPG白�
     console.log(JSON.stringify({ maxFrameMs, ...diagnostics }));
     const pixels = await preview.evaluate((canvas: HTMLCanvasElement) => { const ctx = canvas.getContext("2d")!; return { changed: [...ctx.getImageData(4, 4, 1, 1).data], same: [...ctx.getImageData(100, 100, 1, 1).data], clear: [...ctx.getImageData(1999, 1999, 1, 1).data] }; });
     expect(pixels).toEqual({ changed: [50, 50, 50, 255], same: [0, 0, 0, 255], clear: [0, 0, 0, 255] });
-    const diffDownload = page.waitForEvent("download"); await dialog.getByRole("button", { name: "导出当前对比 PNG", exact: true }).click();
+    const diffDownload = page.waitForEvent("download"); await dialog.getByRole("button", { name: "导出预览 PNG", exact: true }).click();
     const diff = await diffDownload; await diff.saveAs(info.outputPath("4mp-difference.png"));
     expect((await inspect(page, await readFile(info.outputPath("4mp-difference.png")), "image/png")).width).toBe(2000);
     await dialog.screenshot({ path: info.outputPath("difference-worker.png") });

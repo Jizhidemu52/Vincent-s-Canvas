@@ -9,9 +9,12 @@ import { useUserStore, type LocalUser } from "@/stores/use-user-store";
 const initialAgent = useCanvasAgentStore.getInitialState();
 const initialUser = useUserStore.getInitialState();
 const savedAgent = { ...initialAgent }, savedUser = { ...initialUser };
-afterEach(() => { Object.assign(initialAgent, savedAgent); Object.assign(initialUser, savedUser); });
+const savedCurrentUser = useUserStore.getState().user;
+afterEach(() => { Object.assign(initialAgent, savedAgent); Object.assign(initialUser, savedUser); useUserStore.setState({ user: savedCurrentUser }); });
 function enableDetails(role: LocalUser["role"] = "super_admin", enabled = true) {
     initialUser.user = { role } as LocalUser;
+    // SSR hooks read the initial snapshot; metadata helpers read getState().
+    useUserStore.setState({ user: initialUser.user });
     initialAgent.showToolDetails = enabled;
 }
 
