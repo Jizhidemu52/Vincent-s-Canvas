@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { assertFallback, buildTestImage, buildTestPromptInput, jsonObject, parseVersion } from "../src/pages/admin/prompt-recipes/model";
+import { assertFallback, buildTestImage, buildTestPromptInput, emptyVersion, jsonObject, parseVersion } from "../src/pages/admin/prompt-recipes/model";
 
 test("editor rejects malformed/object-shape input and nontext model overrides before posting", () => {
     expect(() => jsonObject("{broken", "字段")).toThrow("有效 JSON");
@@ -24,6 +24,32 @@ test("test input uses explicit scene, object fields, image roles and language wi
         outputLanguage: "zh",
         hasMask: false,
     });
+});
+
+test("empty recipes start without bundled rules and can save a first Chinese draft", () => {
+    const draft = emptyVersion("zh");
+    expect(draft).toEqual({ systemPrompt: "", fieldTemplate: "", overridesJson: "{}", fallbackPrompt: "", outputLanguage: "zh", changeNote: "" });
+    expect(() => parseVersion(draft)).toThrow();
+    expect(parseVersion({ ...draft, systemPrompt: "Administrator supplied private rules" })).toMatchObject({ outputLanguage: "zh", modelOverrides: {} });
+});
+
+test("video recipe test includes video parameters, Chinese output and image roles without admitting image generation", () => {
+    const base = { scene: "video-motion", fieldsJson: "{}", userText: "自然转身", rolesText: "", mode: "video" as const, outputLanguage: "en" as const };
+    const promptInput = buildTestPromptInput({ ...base, referenceCount: 2 });
+    expect(promptInput).toMatchObject({
+        mode: "video",
+        outputLanguage: "zh",
+        referenceRoles: ["首帧", "尾帧"],
+        fields: { duration: 5, ratio: "adaptive", resolution: "720p", video_mode: "first-last-frame", generate_audio: false, audio: "none", keep: ["shape", "color", "pattern", "face"] },
+    });
+    expect(buildTestPromptInput(base).fields.video_mode).toBe("text");
+    expect(buildTestPromptInput({ ...base, referenceCount: 1 }).referenceRoles).toEqual(["首帧"]);
+    const changed = buildTestPromptInput({ ...base, referenceCount: 3, rolesText: "主图\n细节\n背景", fieldsJson: '{"duration":8,"ratio":"9:16","resolution":"1080p","video_mode":"reference","audio":"ambient","generate_audio":false}' });
+    expect(changed.fields).toMatchObject({ duration: 8, ratio: "9:16", resolution: "1080p", video_mode: "reference", audio: "ambient", generate_audio: true });
+    expect(changed.referenceRoles).toEqual(["主图", "细节", "背景"]);
+    expect(() =>
+        buildTestImage({ requestId: "video-test", modelConfigId: "video", versionId: "v1", sourceUrls: [], promptInput }, { id: "result", requestId: "video-test", status: "success", optimized: true, prompt: "video plan" }, "image-test", "{}"),
+    ).toThrow("仅规划提示词");
 });
 
 test("test image uses frozen compilation snapshot, one image, and the normal route for each mode", () => {

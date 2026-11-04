@@ -24,6 +24,10 @@ test('video duration uses readable minute/hour labels and never renders invalid 
 test('full videos keep manual controls but never preload original bytes; low quality mounts no video decoder', () => {
     const full = renderToStaticMarkup(<CanvasVideoNodeContent node={node} theme={canvasThemes.light} renderQuality="full" />);
     expect(full).toContain('preload="none"'); expect(full).toContain('controls=""'); expect(full).toContain('muted=""'); expect(full).toContain('1:05');
+    expect(full).toContain('data-canvas-video-drag-surface');
+    expect(full).toMatch(/<video[^>]+data-canvas-no-zoom/);
+    expect(full).not.toMatch(/<div[^>]+data-canvas-video-content[^>]+data-canvas-no-zoom/);
+    expect(full).toContain('calc(56px * var(--canvas-node-ui-scale, 1))');
     for (const renderQuality of ['moving', 'overview'] as const) {
         const lightweight = renderToStaticMarkup(<CanvasVideoNodeContent node={node} theme={canvasThemes.dark} renderQuality={renderQuality} />);
         expect(lightweight).not.toContain('<video'); expect(lightweight).toContain('1:05');

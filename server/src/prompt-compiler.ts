@@ -1,10 +1,13 @@
 import { createHash } from "node:crypto";
 import { promptCompilationRequestSchema, type PromptCompilationRequest, type PromptInput, type AdminPromptCompilation } from "../../shared/prompt-contracts";
 import { PromptRecipeStore, promptHash } from "./prompt-recipe-store";
-import { parseOptimizedPrompt, assertNoPromptRuleLeak, PromptOptimizationError, specifiedPromptText } from "./prompt-safety";
+import { parseOptimizedPrompt, assertNoPromptRuleLeak, assertVideoMotionTimeline, PromptOptimizationError, specifiedPromptText } from "./prompt-safety";
 import { readProviderSubmissionDiagnostics } from "./provider-submission-transport";
 import { prepareImageEditInput, ImageEditInputError } from "./image-edit-input";
 import { isDefinitiveSubmissionRejection } from "./provider-submission-policy";
+import { videoMotionLabels } from "../../shared/video-motion-options";
+import { ChatProtocolError } from "./routes/chat";
+import { chatUpstreamFailureReasons } from "./chat-upstream-failure";
 
 export type PromptActor = { id: string; role: string; departmentId?: string | null; groupId?: string | null; groupRole?: string | null };
 export type PromptSource = { bytes: Uint8Array; mimeType: string; previewDataUrl: string };
@@ -28,6 +31,11 @@ export function normalizePromptFields(input: PromptInput) {
     if (Array.isArray(fields.palette)) fields.palette = fields.palette[index] ?? fields.palette[0];
     if (Array.isArray(fields.positions)) fields.positions = fields.positions[index] ?? fields.positions[0];
   }
+  if (input.scene === "video-motion") {
+    Object.assign(fields, videoMotionLabels(fields));
+    // Non-image asset identities invalidate the cache, but only role descriptions go to the LLM.
+    delete fields.media_source_ids;
+  }
   return fields;
 }
 function sourceHash(source: PromptSource) { return createHash("sha256").update(source.bytes).digest("hex"); }
@@ -50,7 +58,8 @@ export class PromptCompiler {
     const optimizerId = options.optimizerModelConfigId ?? prior?.modelConfigId ?? active.recipe.modelConfigId;
     if (!optimizerId) throw new PromptOptimizationError("PROMPT_MODEL_NOT_CONFIGURED", "管理员尚未绑定此配方的扩写模型，未提交生成", 503);
     const optimizer = await this.runtime.resolveOptimizer(optimizerId);
-    if (request.sourceUrls.length > 8) throw new PromptOptimizationError("PROMPT_REFERENCE_LIMIT", "提示词优化最多支持 8 张输入图片（含蒙版），未提交生成");
+    const isVideo = request.promptInput.scene === "video-motion";
+    if (request.sourceUrls.length > (isVideo ? 30 : 8)) throw new PromptOptimizationError("PROMPT_REFERENCE_LIMIT", `提示词优化最多支持 ${isVideo ? 30 : 8} 张输入图片（含蒙版），未提交生成`);
     const sources: PromptSource[] = [];
     for (const url of request.sourceUrls) sources.push(await this.runtime.readSource(actor, url));
     const maskIndex = request.promptInput.maskReferenceIndex;
@@ -67,30 +76,36 @@ export class PromptCompiler {
     const roles = request.promptInput.referenceRoles.length === sources.length && maskIndex !== undefined
       ? request.promptInput.referenceRoles.filter((_, index) => index !== maskIndex) : request.promptInput.referenceRoles;
     if (roles.length && roles.length !== references.length) throw new PromptOptimizationError("PROMPT_REFERENCE_INVALID", "参考图分工数量与实际图片不一致，未提交生成");
-    if (request.promptInput.scene !== "text-to-style" && !["free-optimize", "batch-optimize"].includes(request.promptInput.scene) && !references.length) {
+    if (request.promptInput.scene !== "text-to-style" && !["free-optimize", "batch-optimize", "video-motion"].includes(request.promptInput.scene) && !references.length) {
       throw new PromptOptimizationError("PROMPT_REFERENCE_REQUIRED", "此场景需要参考图，未提交生成");
     }
     const fields = normalizePromptFields(request.promptInput);
     const userText = request.promptInput.userText || (typeof fields.instruction === "string" ? fields.instruction : "");
     const requiredText = specifiedPromptText(userText, fields);
-    const language = request.promptInput.outputLanguage ?? active.version.outputLanguage;
+    const language = isVideo ? "zh" : request.promptInput.outputLanguage ?? active.version.outputLanguage;
     const inputHash = promptHash({ version: active.version.id, target: target.fingerprint, optimizer: optimizer.fingerprint, adminTest,
       input: { ...normalInput(request.promptInput), outputLanguage: language }, references: references.map((source, index) => ({ hash: sourceHash(source), role: roles[index] ?? "" })),
       mask: mask ? sourceHash(mask) : null });
+    const checkedResult = (result: AdminPromptCompilation) => {
+      // Stored success is not a bypass: older or concurrently reused results
+      // must satisfy the same timeline contract as a new planner response.
+      if (isVideo && result.status === "success") assertVideoMotionTimeline(result.prompt ?? "", fields.duration);
+      return result;
+    };
     if (prior) {
       if (prior.inputHash !== inputHash) throw new PromptOptimizationError("PROMPT_REQUEST_CHANGED", "输入、图片或模型配置已改变，请重新优化后生成", 409);
-      return this.waitForResult(prior.id, actor.id);
+      return checkedResult(await this.waitForResult(prior.id, actor.id));
     }
     const claim = await this.store.claim({ userId: actor.id, requestId: request.requestId, inputHash, recipeKey: active.recipe.key, recipeVersionId: active.version.id,
       details: { adminTest, modelConfigId: optimizer.id, targetModelConfigId: target.id, inputSnapshot: { promptInput: request.promptInput, sourceUrls: request.sourceUrls },
         optimized: false, rawResponse: null, latencyMs: null, inputTokens: null, outputTokens: null, actualCost: null, estimatedCost: null, currency: "CNY", completedAt: null },
     });
-    if (!claim.execute) return this.waitForResult(claim.id, actor.id);
+    if (!claim.execute) return checkedResult(await this.waitForResult(claim.id, actor.id));
     const started = performance.now();
     const modelRules = active.version.modelOverrides[target.id] ?? active.version.modelOverrides[target.modelId] ?? "";
     const system = [active.version.systemPrompt, active.version.fieldTemplate, modelRules].filter(Boolean).join("\n\n");
     const payload = { recipe: active.recipe.key, target_model: target.modelId,
-      model_style: request.promptInput.scene === "reverse-prompt" ? "natural" : /midjourney/i.test(target.modelId) ? "tags" : request.promptInput.mode === "edit" ? "edit" : "natural",
+      model_style: isVideo ? "video" : request.promptInput.scene === "reverse-prompt" ? "natural" : /midjourney/i.test(target.modelId) ? "tags" : request.promptInput.mode === "edit" ? "edit" : "natural",
       output_language: language, mode: request.promptInput.mode, fields, user_text: userText,
       images: references.map((_, index) => ({ index: index + 1, role: roles[index] || (index === 0 ? "主体参考图" : "辅助参考图") })), has_mask: Boolean(mask) };
     const content: Array<{ type: "input_text"; text: string } | { type: "input_image"; image_url: string }> = [{ type: "input_text", text: JSON.stringify(payload) }];
@@ -102,7 +117,8 @@ export class PromptCompiler {
       const result = await optimizer.invoke(system, content);
       rawResponse = result.content;
       usage = result.usage;
-      const output = parseOptimizedPrompt(result.content, [system], { reverse: request.promptInput.scene === "reverse-prompt", referenceCount: references.length, userText: `${userText}\n${JSON.stringify(fields)}`, language, requiredText });
+      const output = parseOptimizedPrompt(result.content, [system], { video: isVideo, reverse: request.promptInput.scene === "reverse-prompt", referenceCount: references.length, userText: `${userText}\n${JSON.stringify(fields)}`, language, requiredText });
+      if (isVideo) assertVideoMotionTimeline(output.prompt, fields.duration);
       await this.store.finish(claim.id, "success", { ...output, optimized: true, rawResponse, latencyMs: Math.round(performance.now() - started), ...usageFields(usage, optimizer.estimatedRmbCost) });
     } catch (error) {
       const diagnostics = readProviderSubmissionDiagnostics(error);
@@ -111,20 +127,27 @@ export class PromptCompiler {
         || (upstreamStatus !== undefined && isDefinitiveSubmissionRejection(upstreamStatus));
       const uncertain = !knownFailure;
       const failure = error instanceof PromptOptimizationError ? error : new PromptOptimizationError(uncertain ? "PROMPT_SUBMISSION_UNCERTAIN" : "PROMPT_OPTIMIZATION_FAILED",
-        uncertain ? "提示词优化状态待核查，未提交生图；不会自动重新提交" : "提示词优化失败，未提交生成", 502);
-      const metrics = { rawResponse, latencyMs: Math.round(performance.now() - started), ...usageFields(usage, rawResponse === null ? null : optimizer.estimatedRmbCost) };
+        uncertain ? `${isVideo ? "动效规划" : "提示词优化"}状态待核查，未提交生成；不会自动重新提交` : isVideo ? "动效规划失败，未提交生成" : "提示词优化失败，未提交生成", 502);
+      const upstreamDiagnostics = error instanceof ChatProtocolError ? {
+        ...(typeof error.upstreamStatus === "number" && Number.isInteger(error.upstreamStatus) && error.upstreamStatus >= 100 && error.upstreamStatus <= 599 ? { upstreamStatus: error.upstreamStatus } : {}),
+        ...(error.upstreamReason && chatUpstreamFailureReasons.includes(error.upstreamReason) ? { upstreamReason: error.upstreamReason } : {}),
+      } : {};
+      const metrics = { rawResponse, latencyMs: Math.round(performance.now() - started), ...usageFields(usage, rawResponse === null ? null : optimizer.estimatedRmbCost), ...upstreamDiagnostics };
       if (!uncertain && active.recipe.failurePolicy === "fallback" && active.version.fallbackPrompt.trim() && failure.code !== "PROMPT_OUTPUT_REJECTED") {
         const prompt = active.version.fallbackPrompt.replaceAll("{{user_text}}", userText).replaceAll("{{fields}}", JSON.stringify(fields));
         try {
           assertNoPromptRuleLeak(prompt, [system]);
           if (prompt.length > 20_000) throw failure;
-          await this.store.finish(claim.id, "success", { ...metrics, prompt, optimized: false, message: "未优化：管理员已显式启用基础模板" });
-        } catch {
-          await this.store.finish(claim.id, "failed", { ...metrics, errorCode: "PROMPT_OUTPUT_REJECTED", message: "备用提示词未通过检查，未提交生成" });
+          const fallback = isVideo ? parseOptimizedPrompt(prompt, [system], { video: true, referenceCount: references.length, userText, language, requiredText }) : { prompt };
+          if (isVideo) assertVideoMotionTimeline(fallback.prompt, fields.duration);
+          await this.store.finish(claim.id, "success", { ...metrics, ...fallback, optimized: false, message: "未优化：管理员已显式启用基础模板" });
+        } catch (fallbackError) {
+          const timelineFailure = fallbackError instanceof PromptOptimizationError && fallbackError.code === "PROMPT_VIDEO_TIMELINE_INVALID" ? fallbackError : null;
+          await this.store.finish(claim.id, "failed", { ...metrics, errorCode: timelineFailure?.code ?? "PROMPT_OUTPUT_REJECTED", message: timelineFailure?.message ?? "备用提示词未通过检查，未提交生成" });
         }
       } else await this.store.finish(claim.id, uncertain ? "uncertain" : "failed", { ...metrics, errorCode: failure.code, message: failure.message });
     }
-    return (await this.store.getCompilation(claim.id, actor.id))!;
+    return checkedResult((await this.store.getCompilation(claim.id, actor.id))!);
   }
 
   async waitForResult(id: string, userId: string) {

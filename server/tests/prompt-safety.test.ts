@@ -1,5 +1,50 @@
 import { describe, expect, test } from "bun:test";
-import { parseOptimizedPrompt, specifiedPromptText } from "../src/prompt-safety";
+import { assertVideoMotionTimeline, parseOptimizedPrompt, specifiedPromptText } from "../src/prompt-safety";
+
+describe("video motion timeline safety", () => {
+  test.each([
+    "0-2秒：调整镜头角度。2-5秒：改为固定特写。",
+    "0 - 2 秒 缓慢推进；2 - 5 秒保持。",
+    "0秒至2秒：推进；2秒到5秒：保持。",
+    "0–2s: push in; 2—5 seconds: hold.",
+    "０～５秒：保持产品不变。",
+  ])("accepts a complete integer timeline without broad wording bans: %s", prompt => {
+    expect(() => assertVideoMotionTimeline(prompt, 5)).not.toThrow();
+  });
+
+  test.each([
+    "镜头缓慢推近，保持产品不变。",
+    "0-2.5秒缓慢推进，2.5-5秒保持。",
+    "0.0-2秒：推进；2-5秒：保持。",
+    "0-2.5秒不可用，改为整数秒：0-3秒：推进；3-5秒：保持。",
+    "改为整数秒：0-2秒推进，2-5秒保持。",
+    "0-2秒推进，2-5秒保持，0.5-1.5秒额外移动。",
+    "0-5秒保持；00:01-00:02秒缓慢推进。",
+    "0-2e0秒推进，2-5秒保持。",
+    "1-5秒：缓慢推近。",
+    "0-2秒：推进；3-5秒：保持。",
+    "0-3秒：推进；2-5秒：保持。",
+    "0-2秒：推进；2-2秒：停顿；2-5秒：保持。",
+    "0-3秒：推进；3-2秒：回退；2-5秒：保持。",
+    "0-4秒：缓慢推近。",
+    "0-6秒：缓慢推近。",
+  ])("rejects the whole malformed timeline with a safe 422 error: %s", prompt => {
+    try {
+      assertVideoMotionTimeline(prompt, 5);
+      throw new Error("Expected invalid timeline to be rejected");
+    } catch (error) {
+      expect(error).toMatchObject({ code: "PROMPT_VIDEO_TIMELINE_INVALID", status: 422 });
+      expect((error as Error).message).not.toContain(prompt);
+    }
+  });
+
+  test("automatic duration does not invent an endpoint or require a complete timeline", () => {
+    for (const prompt of ["镜头缓慢推近并自然结束。", "3-8秒继续原有动作。", "0-5秒保持。"])
+      expect(() => assertVideoMotionTimeline(prompt, -1)).not.toThrow();
+    expect(() => assertVideoMotionTimeline("0-2.5秒推进。", -1)).toThrow("时间轴检查");
+    expect(() => assertVideoMotionTimeline("改为整数秒：0-5秒推进。", -1)).toThrow("时间轴检查");
+  });
+});
 
 describe("explicit printed text preservation", () => {
   test.each([

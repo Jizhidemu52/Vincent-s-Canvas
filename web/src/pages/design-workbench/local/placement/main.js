@@ -153,7 +153,8 @@ export async function mountPlacement(root, services) {
           <div><div data-controls></div><div class="placement-note"><span data-ui-text="坐标以服装底图左上角为原点，表示图案中心位置。底图始终锁定，图案等比缩放。正片叠底可保留部分底色明暗，但不产生真实褶皱变形。">坐标以服装底图左上角为原点，表示图案中心位置。底图始终锁定，图案等比缩放。正片叠底可保留部分底色明暗，但不产生真实褶皱变形。</span></div></div>
           <div class="placement-divider"></div>
           <div class="placement-delivery"><div class="section-title"><span data-ui-text="保存与交付">保存与交付</span></div>
-            <button class="btn primary placement-export" data-action="export-png"><span data-ui-text="导出合成 PNG">导出合成 PNG</span></button>
+            ${services.openAiEffect ? "<button class=\"btn primary placement-export\" data-action=\"generate-ai\"><span data-ui-text=\"生成 AI 效果图\">生成 AI 效果图</span></button><p class=\"hint\"><span data-ui-text=\"带入定位合成图、服装原图与图案原稿，选择模型后点击开始编辑。此处不自动生成、不扣费；原图片编辑草稿保留。\">带入定位合成图、服装原图与图案原稿，选择模型后点击开始编辑。此处不自动生成、不扣费；原图片编辑草稿保留。</span></p>" : ""}
+            <button class="btn placement-export" data-action="export-png"><span data-ui-text="导出合成 PNG">导出合成 PNG</span></button>
             ${services.saveAsset ? "<button class=\"btn placement-export\" data-action=\"save-asset\"><span data-ui-text=\"保存合成图到素材库\">保存合成图到素材库</span></button>" : ""}
             <div class="placement-save-actions"><button class="btn" data-action="save"><span data-ui-text="本地保存">本地保存</span></button><button class="btn" data-action="open"><span data-ui-text="打开本地工程">打开本地工程</span></button><button class="btn ghost" data-action="export-json"><span data-ui-text="导出工程 JSON">导出工程 JSON</span></button><button class="btn ghost" data-action="import-json"><span data-ui-text="导入工程 JSON">导入工程 JSON</span></button></div>
             <p class="placement-save-state" aria-live="polite"></p>
@@ -283,6 +284,11 @@ export async function mountPlacement(root, services) {
         query("[data-action=down]").disabled = !layer || index <= 0;
         query("[data-action=export-png]").disabled = exporting;
         if (query("[data-action=save-asset]")) query("[data-action=save-asset]").disabled = exporting;
+        const aiButton = query("[data-action=generate-ai]");
+        if (aiButton) {
+            aiButton.disabled = exporting || !state.layers.some(layer => layer.visible && layer.opacity > 0);
+            setWorkbenchText(aiButton, exporting ? "正在准备图片…" : "生成 AI 效果图");
+        }
         setWorkbenchText(query(".placement-save-state"), () => uiText("工程自动保存在当前账号的本机浏览器；可导出 JSON 备份。"));
         setWorkbenchText(query("[data-selection-status]"), () => layer ? uiText("选中：{value1}{value2}", { value1: layer.name, value2: layer.visible ? "" : uiText("（已隐藏）") }) : uiText("未选中图案"));
     }
@@ -473,7 +479,7 @@ export async function mountPlacement(root, services) {
             notify("工程 JSON 已导出，包含上传的图片数据。");
             return;
         }
-        if (name === "export-png" || name === "save-asset") {
+        if (name === "export-png" || name === "save-asset" || name === "generate-ai") {
             if (exporting) return;
             exporting = true;
             updateToolbar();
@@ -487,7 +493,34 @@ export async function mountPlacement(root, services) {
                 if (!blob) throw new Error("图片导出失败，请尝试使用较小的底图。");
                 if (!live) return;
                 const filename = `服装定位-${snapshot.base.width}x${snapshot.base.height}.png`;
-                if (name === "save-asset") await services.saveAsset(blob, filename);
+                if (name === "generate-ai") {
+                    await projects.save();
+                    if (!live) return;
+                    const sources = [...new Set(snapshot.layers.filter(layer => layer.visible && layer.opacity > 0).map(layer => layer.src))];
+                    const sheet = document.createElement("canvas");
+                    const columns = Math.min(5, sources.length);
+                    sheet.width = Math.max(1, columns) * 512;
+                    sheet.height = Math.max(1, Math.ceil(sources.length / columns)) * 552;
+                    try {
+                        const ctx = sheet.getContext("2d");
+                        ctx.fillStyle = "#f5f5f5";
+                        ctx.fillRect(0, 0, sheet.width, sheet.height);
+                        sources.forEach((source, index) => {
+                            const image = images.get(source);
+                            const scale = Math.min(480 / image.naturalWidth, 480 / image.naturalHeight, 1);
+                            const width = image.naturalWidth * scale, height = image.naturalHeight * scale;
+                            const x = (index % columns) * 512, y = Math.floor(index / columns) * 552;
+                            ctx.drawImage(image, x + (512 - width) / 2, y + 16 + (480 - height) / 2, width, height);
+                            ctx.fillStyle = "#252525";
+                            ctx.font = "24px sans-serif";
+                            ctx.textAlign = "center";
+                            ctx.fillText(String(index + 1), x + 256, y + 530);
+                        });
+                        const artwork = await new Promise(resolve => sheet.toBlob(resolve, "image/png"));
+                        if (!artwork) throw new Error("图案参考图准备失败，请重试。");
+                        if (live) await services.openAiEffect(snapshot, blob, artwork);
+                    } finally { sheet.width = 1; sheet.height = 1; }
+                } else if (name === "save-asset") await services.saveAsset(blob, filename);
                 else {
                     downloadBlob(blob, filename);
                     notify("PNG 已导出，不包含选择框，原始图片未修改。");

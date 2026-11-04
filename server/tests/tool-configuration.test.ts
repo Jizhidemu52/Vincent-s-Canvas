@@ -45,8 +45,8 @@ function fixture() {
       if (sql.includes("FROM model_presentation_settings")) return { rows: [] };
       if (sql.includes("FROM module_flags")) return { rows: [{ enabled: flags.get(String(values[0])) }] };
       if (sql.startsWith("INSERT INTO tool_api_configurations")) {
-        const [key, modelConfigId, enabled, , creditCostOverride, rmbCostOverride] = values as [ToolConfiguration["toolKey"], string | null, boolean, unknown, number | null, number | null];
-        const row = { toolKey: key, modelConfigId, enabled, creditCostOverride, rmbCostOverride, configurationVersion: (configurations.get(key)?.configurationVersion ?? 0) + 1 };
+        const [key, modelConfigId, enabled, , creditCostOverride, rmbCostOverride, allowRawPrompt] = values as [ToolConfiguration["toolKey"], string | null, boolean, unknown, number | null, number | null, boolean];
+        const row = { toolKey: key, modelConfigId, enabled, creditCostOverride, rmbCostOverride, allowRawPrompt, configurationVersion: (configurations.get(key)?.configurationVersion ?? 0) + 1 };
         configurations.set(key, row);
         return { rows: [row] };
       }
@@ -118,6 +118,17 @@ async function serve(state = fixture(), role = "super_admin") {
 const post = (url: string, body: unknown, method = "POST") => fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
 describe("formal catalog configuration", () => {
+  test("raw video prompts default off and only the standalone video tool may opt in", async () => {
+    const { url } = await serve();
+    const config = { modelConfigId: modelId, enabled: true, creditCostOverride: null, rmbCostOverride: null };
+    const initial = await (await fetch(url + "/models")).json();
+    expect(initial.tools.find((tool: { toolKey: string }) => tool.toolKey === "video").allowRawPrompt).toBe(false);
+    const blocked = await post(url + "/tasks", { requestId: "video-raw-blocked", projectId: "video", operationType: "video_generation", modelConfigId: modelId, toolKey: "video", prompt: "raw", sourceUrls: [], parameters: {} });
+    expect(blocked.status).toBe(403); expect((await blocked.json()).error).toBe("VIDEO_MOTION_REQUIRED");
+    expect((await (await post(url + "/admin/tool-configurations/video", { ...config, allowRawPrompt: true }, "PUT")).json()).tool.allowRawPrompt).toBe(true);
+    expect((await (await fetch(url + "/models")).json()).tools.find((tool: { toolKey: string }) => tool.toolKey === "video").allowRawPrompt).toBe(true);
+    expect((await (await post(url + "/admin/tool-configurations/canvas-video", { ...config, allowRawPrompt: true }, "PUT")).json()).tool.allowRawPrompt).toBe(false);
+  });
   test("chat model belongs only to gpt-chat while canvas switches and prices remain independent", async () => {
     const state = fixture();
     state.bind("gpt-chat");

@@ -35,6 +35,7 @@ export type PublicToolConfiguration = {
     toolKey: string;
     modelConfigId: string | null;
     enabled: boolean;
+    allowRawPrompt?: boolean;
     creditCostOverride: number | null;
     rmbCostOverride: number | null;
     configurationVersion: number;

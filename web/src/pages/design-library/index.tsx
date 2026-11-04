@@ -1,4 +1,5 @@
 import { getUiLocale, useUiText } from "@/lib/i18n";
+import { PracticeExampleRecord } from "@/components/design-examples";
 import { useDeferredValue, useEffect, useRef, useState } from "react";
 import { Alert, App, Button, Empty, Input, Modal, Pagination, Segmented, Skeleton, Tag } from "antd";
 import { ArrowLeft, BookOpen, Plus, RefreshCw, Search } from "lucide-react";
@@ -111,6 +112,7 @@ export default function DesignLibraryPage() {
                     <div className="flex min-w-0 flex-wrap items-center gap-2"><Input className="!w-64 max-w-full" prefix={<Search size={15} />} placeholder={t("搜索标题、思路、提示词")} value={query} onChange={event => { setQuery(event.target.value); setPage(1); }} allowClear /><Button aria-label={t("刷新共享库")} icon={<RefreshCw size={16} />} loading={loading} onClick={() => setRevision(value => value + 1)} /></div>
                 </section>
                 {tag && <div className="text-sm">{t("标签筛选：")}<Tag closable onClose={() => { setTag(""); setPage(1); }}>{tag}</Tag></div>}
+                {!admin ? <div className="max-w-2xl"><PracticeExampleRecord /></div> : null}
                 {error && <Alert type="error" showIcon title={t("设计灵感库暂未更新")} description={error} action={<Button onClick={() => setRevision(value => value + 1)}>{t("重试")}</Button>} />}
                 {loading && !data ? <div role="status" aria-label={t("正在加载灵感")} className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{Array.from({ length: 8 }, (_, index) => <div key={index} className="wb-surface p-4"><Skeleton.Image active className="!h-40 !w-full" /><Skeleton active title={{ width: "70%" }} paragraph={{ rows: 2 }} /></div>)}</div> : data?.items.length ? <>
                     <div className="flex items-center justify-between text-xs text-muted-foreground"><span>{data.total} {t("份")}{scope === "mine" && !admin ? t("自主发布的") : t("设计")}{t("分享")}</span><span>{t("最新发布优先 · 原画布始终私有")}</span></div>

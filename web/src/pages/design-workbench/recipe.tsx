@@ -2,6 +2,7 @@ import { uiText, useUiText } from "@/lib/i18n";
 import { handleSubmitShortcut } from "@/lib/submit-shortcut";
 import { GenerationInputList } from "@/components/generation-input-list";
 import { GenerationDiagnostic } from "@/components/generation-diagnostic";
+import { PracticeExampleRecord } from "@/components/design-examples";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowLeft, Download, ImagePlus, LoaderCircle, Palette, Pause, Play, RefreshCw, Save, Square, Upload, X } from "lucide-react";
@@ -678,6 +679,7 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
                         <p className="sr-help">{uiText("每个分支独立提交；失败重试可能再次计费。预估不等于实付，最终以服务端任务与账单为准。")}</p>
                         <hr />
                         <h3>{uiText("保存与导出")}</h3>
+                        <div className="my-3"><PracticeExampleRecord /></div>
                         <button
                             type="button"
                             className="sr-button sr-wide"

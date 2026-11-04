@@ -26,6 +26,7 @@ export function buildToolConfigurationInput(tool: ToolApiConfiguration, values: 
         modelConfigId: tool.toolKey === "canvas-chat" ? null : values.modelConfigId || null, enabled: values.enabled ?? true,
         creditCostOverride: values.creditCostOverride ?? null,
         rmbCostOverride: values.rmbCostOverride ?? null,
+        ...(tool.toolKey === "video" ? { allowRawPrompt: values.allowRawPrompt === true } : {}),
     };
 }
 

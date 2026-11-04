@@ -64,6 +64,7 @@ description: 正式数据存储边界、员工画布文档、公司设计灵感�
 | `credit_cost_override` | 可空非负整数；本板块每次输出的总积分价覆盖，0 是有效覆盖，NULL 沿用操作价加模型价 |
 | `rmb_cost_override` | 可空 `numeric(16,6)`；本板块每次输出的总成本覆盖，0 是有效覆盖，NULL 沿用操作价加模型价；APIMart 固定图片单价模型不应用此人民币覆盖 |
 | `configuration_version` | 正整数，每次保存独立配置递增，不修改共享模型或全局操作价格 |
+| `allow_raw_prompt` | `047_video_motion_setting.sql` 新增布尔值，默认 `false`；仅独立视频创作板块可开启原文直发，关闭时任务必须先通过动效规划 |
 | `tasks.tool_key` / `batch_tasks.tool_key` | 可空文本外键，保存正式来源板块；历史任务保留原数据 |
 
 管理员工具列表始终返回全部 27 项，公开模型接口同样保留禁用和未绑定项，但不公开 Provider 凭据。显式绑定的启用模型不会被默认精选列表过滤；已禁用模型或 Provider、工作流不能执行。任务、批量任务、视频预检及聊天入口先校验来源与操作匹配、自身和父模块开关，再校验绑定。客户端携带旧模型时返回 `TOOL_MODEL_CHANGED`，要求刷新模型参数，不静默换模型。MJ 多图融合仅可绑定、执行 Blend；画布生图仍可选择其余生成模型。未提供工具配置的旧调用只规范化已知来源名；显式未知键拒绝。
@@ -200,6 +201,8 @@ SQLite 适配器在同一事务保存快照、分享、收据及接收人的 `de
 | `prompt_compilations` | 账号／请求编号唯一；保存配方版本、输入哈希、状态、原始响应和用量；`reused_from_id` 关联同账号缓存的主记录 |
 
 `tasks` 增加 `user_input`、`prompt_compilation_id` 和 `prompt_optimized`。原有 `prompt` 继续作为最终发送指令，不另设可能不一致的 `final_prompt`。公开任务和历史只返回结构化用户输入、最终提示词和是否优化；版本正文、原始扩写响应及模型规则只通过超级管理员接口读取。
+
+启动时仅补建 `video-motion`（图生视频动效）空配方：启用、未绑定扩写模型、失败策略 `stop`，不创建或激活规则正文。管理员在配方管理中写入规则并绑定视觉扩写模型后使用；已有配方配置不会被覆盖。视频素材在扩写前完成预检，只有图片的 1024px 预览发送给扩写模型，原图仍供视频服务使用。动效摘要保存在 `tasks.parameters.promptOptimization.summaryZh`，公开任务映射为 `summaryZh`；规则、原始响应和费用不进入公开任务。Demo 的原文直发开关复用 `demo_state_metadata` 持久保存，不新增数据表。
 
 `batch_tasks` 增加 `admission_input_hash`、`admission_status`、`admission_token`、`admission_lease_expires_at` 和 `admission_failures`。批次受理使用 30 秒租约，每个任务在原入队事务内核验令牌，过期的旧受理进程不能追加任务。恢复查询只关闭过期受理并展示缺项，不重放扩写或生图；已关闭批次的缺项计为失败，不把仅完成 1/3 的批次误报为全部成功。
 

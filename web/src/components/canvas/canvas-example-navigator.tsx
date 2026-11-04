@@ -4,6 +4,7 @@ import { useUiText } from "@/lib/i18n";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { CANVAS_EXAMPLE_OVERVIEW_PREFIX, canvasExampleExtraPractices, canvasExampleLessons, canvasExampleNodePrefix } from "@/lib/canvas/canvas-example-lessons";
 import { canvasExampleControlGuides, canvasExampleControlSteps } from "@/lib/canvas/canvas-example-controls";
+import { canvasExampleControlProof } from "@/lib/canvas/canvas-example-practices";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { CanvasNodeData } from "@/types/canvas";
 
@@ -52,7 +53,7 @@ export function CanvasExampleNavigator({ nodes, onNavigate }: { nodes: CanvasNod
                 <button type="button" className="min-h-9 text-sm font-medium hover:underline" onClick={() => navigate(nodes.filter(node => node.id.startsWith(CANVAS_EXAMPLE_OVERVIEW_PREFIX) || node.id.startsWith("canvas-example-intro-")).map(node => node.id))}>{t("回到使用说明")}</button>
                 <button type="button" className="cw-icon" aria-label={t("关闭教学目录")} onClick={() => { setOpen(false); trigger.current?.focus(); }}><X className="size-4" /></button>
             </div>
-            <p className="mb-3 text-xs leading-5" style={{ color: theme.node.muted }}>{t("看案例读步骤，到练习操作节点。按钮详解逐个讲小功能；这里只移动视野，不会生成或修改素材。")}</p>
+            <p className="mb-3 text-xs leading-5" style={{ color: theme.node.muted }}>{t("看实际操作画面，到练习区动手。标注“实操截图”的按钮已有对应画面；其余为用法说明，未逐项实测。")}</p>
             <div className="mb-3 grid grid-cols-2 gap-1" aria-label={t("教学目录类型")}>
                 <button type="button" aria-pressed={mode === "lessons"} onClick={() => setMode("lessons")} className="min-h-9 rounded px-2 text-xs" style={{ background: mode === "lessons" ? theme.toolbar.itemHover : undefined }}>{t("设计案例")}</button>
                 <button type="button" aria-pressed={mode === "controls"} onClick={() => setMode("controls")} className="min-h-9 rounded px-2 text-xs" style={{ background: mode === "controls" ? theme.toolbar.itemHover : undefined }}>{t("按钮详解")}（{canvasExampleControlSteps.length}）</button>
@@ -72,7 +73,7 @@ export function CanvasExampleNavigator({ nodes, onNavigate }: { nodes: CanvasNod
                 {!filteredGuides.length ? <p className="py-4 text-sm">{t("未找到对应按钮，请试试简短关键词。")}</p> : filteredGuides.map(guide => <details key={`${guide.id}:${Boolean(query.trim())}`} data-guide-id={guide.id} open={query.trim() ? true : undefined} className="mb-1 rounded border px-2 py-1" style={{ borderColor: theme.node.stroke }}>
                     <summary className="cursor-pointer py-2 text-xs font-medium leading-5">{t(guide.title)}（{guide.matchingSteps.length}）</summary>
                     <div className="space-y-1 pb-2">
-                        {guide.matchingSteps.map(step => <button key={step.key} data-control-key={step.key} type="button" aria-label={t("查看按钮详解：{control}", { control: step.control })} disabled={!controlIds.get(step.key)?.length} onClick={() => navigate(controlIds.get(step.key) || [])} className="block min-h-9 w-full rounded px-2 py-2 text-left text-xs leading-5 hover:underline disabled:opacity-40" style={{ background: theme.toolbar.itemHover }}>{t(step.control)}</button>)}
+                        {guide.matchingSteps.map(step => <button key={step.key} data-control-key={step.key} type="button" aria-label={t("查看按钮详解：{control}", { control: step.control })} disabled={!controlIds.get(step.key)?.length} onClick={() => navigate(controlIds.get(step.key) || [])} className="block min-h-9 w-full rounded px-2 py-2 text-left text-xs leading-5 hover:underline disabled:opacity-40" style={{ background: theme.toolbar.itemHover }}>{t(step.control)}<span className="ml-2 opacity-55">{t(canvasExampleControlProof[step.key] ? "实操截图" : "用法说明")}</span></button>)}
                         <button type="button" className="min-h-9 w-full px-2 text-left text-xs hover:underline" style={{ color: theme.node.muted }} onClick={() => navigate(nodes.filter(node => node.id.startsWith(canvasExampleNodePrefix(guide.lessonId, guide.practiceArea || "practice"))).map(node => node.id))}>{t("到对应练习区")}</button>
                     </div>
                 </details>)}

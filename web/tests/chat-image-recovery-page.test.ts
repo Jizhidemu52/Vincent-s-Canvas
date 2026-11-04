@@ -21,7 +21,7 @@ const pendingMessage = (id: string, extra: Partial<ChatMessage> = {}): ChatMessa
 const session = (messages: ChatMessage[]): ChatSession => ({ id: "session-a", title: "A", focusImageId: "original", focusRevision: 1, messages, updatedAt: "" });
 const serverTask = (id: string, status = "success", extra = {}) => ({ id: "task-" + id, requestId: id + ":0", status, resultUrls: ["/api/assets/" + id + "/content"], failureReason: null, ...extra });
 
-function recoveryHarness(initial: ChatSession, activeIds = new Set<string>(), persistGate?: Promise<void>) {
+function recoveryHarness(initial: ChatSession, activeIds = new Set<string>(), persistGate?: Promise<void>, restore: (pending: PendingChatImageTask, url: string) => Promise<string> = async (_pending, url) => url) {
     const sessionsRef = { current: [initial] };
     const writes: ChatSession[][] = [], watches: Array<Parameters<typeof watchTaskReconciliation>[0]> = [], media: string[] = [];
     let storageKey = "owner-a", selectedId = initial.id, alive = true;
@@ -40,7 +40,7 @@ function recoveryHarness(initial: ChatSession, activeIds = new Set<string>(), pe
             queuedEffects.push(() => { previous?.cleanup?.(); effects[index]!.cleanup = callback() || undefined; });
         },
         recoverChatImageTask, completeChatImageTask,
-        restoreChatMaskResult: async (_pending: unknown, url: string) => url,
+        restoreChatMaskResult: restore,
         chatMedia: { async persist(image: any, assertCurrent: () => void) { assertCurrent(); media.push(image.dataUrl); await persistGate; assertCurrent(); return { ...image, storageKey: "image:" + image.id }; } },
         async watchTaskReconciliation(options: Parameters<typeof watchTaskReconciliation>[0]) {
             watches.push(options);
@@ -80,6 +80,45 @@ test("each restored pending message has an independent exact-ID observer", async
     expect(page.sessionsRef.current[0]!.messages.map(item => item.generatedImages?.[0]?.id)).toEqual(["task-a:0", "task-b:0"]);
     expect(page.writes.length).toBeGreaterThanOrEqual(2);
     expect(page.sessionsRef.current[0]?.focusImageId).toBe("task-a:0");
+    page.cleanup();
+});
+
+test("a recovered composite persists only its protected PNG and keeps its raw task provenance", async () => {
+    const regionComposite = { mode: "selection-composite" as const, source: { imageId: "original", storageKey: "image:original", width: 64, height: 64 }, selection: { storageKey: "image:selection", width: 64, height: 64 } };
+    const item = pendingMessage("a", { pendingImageTask: pending("a", { regionComposite }) });
+    const restores: unknown[] = [], requests: string[] = [];
+    globalThis.fetch = (async (url, init) => { expect(init?.method || "GET").toBe("GET"); requests.push(String(url)); return Response.json({ task: serverTask("a") }); }) as typeof fetch;
+    const page = recoveryHarness(session([item]), new Set(), undefined, async (record, url) => { restores.push([record.regionComposite, url]); return "data:image/png;base64,cHJvdGVjdGVk"; });
+    await until(() => Boolean(page.sessionsRef.current[0]!.messages[0]?.generatedImages));
+    expect(restores).toEqual([[regionComposite, "/api/assets/a/content"]]);
+    expect(page.media).toEqual(["data:image/png;base64,cHJvdGVjdGVk"]);
+    expect(page.sessionsRef.current[0]!.messages[0]?.generatedImages?.[0]).toMatchObject({ regionComposite, sourceTaskId: "task-a", sourceResultUrl: "/api/assets/a/content" });
+    expect(requests).toEqual(["/api/tasks/task-a"]);
+    page.cleanup();
+});
+
+test("a failed composite retains the pending task and pauses automatic retries while manual re-query remains possible", async () => {
+    const regionComposite = { mode: "selection-composite" as const, source: { imageId: "original", storageKey: "image:original", width: 64, height: 64 }, selection: { storageKey: "image:selection", width: 64, height: 64 } };
+    const item = pendingMessage("a", { pendingImageTask: pending("a", { regionComposite }) });
+    let status = "processing", reads = 0, composites = 0, repaired = false;
+    globalThis.fetch = (async (_url, init) => { expect(init?.method || "GET").toBe("GET"); reads++; return Response.json({ task: serverTask("a", status) }); }) as typeof fetch;
+    const page = recoveryHarness(session([item]), new Set(), undefined, async () => {
+        composites++;
+        if (!repaired) throw new Error("模型返回图的比例与原图不一致");
+        return "data:image/png;base64,cHJvdGVjdGVk";
+    });
+    await until(() => page.watches.length === 1);
+    status = "success";
+    await page.wake();
+    expect(composites).toBe(1); expect(reads).toBe(2); expect(page.media).toEqual([]);
+    expect(page.sessionsRef.current[0]).toMatchObject({ focusImageId: "original", messages: [{ pendingImageTask: { requestId: "a", taskId: "task-a", regionComposite, recovery: "investigate" } }] });
+    expect(page.sessionsRef.current[0]!.messages[0]?.content).toContain("原始 AI 结果仍保留");
+    await page.wake();
+    expect(composites).toBe(1); expect(reads).toBe(2);
+    repaired = true; page.query("a");
+    await until(() => Boolean(page.sessionsRef.current[0]!.messages[0]?.generatedImages));
+    expect(composites).toBe(2); expect(reads).toBe(3);
+    expect(page.media).toEqual(["data:image/png;base64,cHJvdGVjdGVk"]);
     page.cleanup();
 });
 

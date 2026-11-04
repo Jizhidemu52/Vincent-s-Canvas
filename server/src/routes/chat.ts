@@ -16,6 +16,7 @@ import { DuplicateJsonKeyError, parseStrictJson } from "../strict-json";
 import { chatPromptProfiles, prepareChatProfileInput, validateChatProfileOutput, type ChatPromptProfile } from "../prompt-chat-profiles";
 import { PromptOptimizationError } from "../prompt-safety";
 import { imageAgentClaudeStream } from "../image-agent-stream";
+import { chatUpstreamFailureMessage, readChatUpstreamFailure, type ChatUpstreamFailureReason } from "../chat-upstream-failure";
 
 type ResponseContent = { type: "input_text"; text: string } | { type: "input_image"; image_url: string };
 export type ResponseInput =
@@ -244,6 +245,8 @@ export function createChatRouter(db: Database, config: AppConfig, options: ChatR
                 name: metadata.name,
                 phase: diagnostics?.phase || (response.headersSent ? "response" : "request"),
                 elapsedMs: Math.max(0, Math.round(performance.now() - startedAt)),
+                ...(error instanceof ChatProtocolError && error.upstreamStatus !== undefined ? { upstreamStatus: error.upstreamStatus } : {}),
+                ...(error instanceof ChatProtocolError && error.upstreamReason ? { upstreamReason: error.upstreamReason } : {}),
             });
             if (disconnected()) return;
             if (response.headersSent) {
@@ -835,15 +838,15 @@ async function upstreamError(label: string, upstream: Response, suppressProvider
     // Mark can echo request headers in an error body. Retain its HTTP status,
     // never expose that body to clients, and never submit a fallback request.
     if (suppressProviderBody) {
-        await upstream.body?.cancel().catch(() => {});
-        return new ChatProtocolError("UPSTREAM_REQUEST_FAILED", `${label} ${upstream.status}: 上游服务拒绝了请求；本次请求不会重新提交。`, upstream.status);
+        const reason = await readChatUpstreamFailure(upstream);
+        return new ChatProtocolError("UPSTREAM_REQUEST_FAILED", chatUpstreamFailureMessage(label, upstream.status, reason), upstream.status, reason);
     }
     const detail = (await upstream.text()).slice(0, 500);
     return new ChatProtocolError("UPSTREAM_REQUEST_FAILED", `${label} ${upstream.status}: ${detail}`, upstream.status);
 }
 
 export class ChatProtocolError extends Error {
-    constructor(readonly code: string, message: string, readonly upstreamStatus?: number) {
+    constructor(readonly code: string, message: string, readonly upstreamStatus?: number, readonly upstreamReason?: ChatUpstreamFailureReason) {
         super(message);
     }
 }

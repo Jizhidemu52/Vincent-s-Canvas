@@ -31,18 +31,30 @@ export function validateImageReferences(modelId: string, references: ReferenceIm
         const range = policy.minimum === policy.maximum ? `${policy.maximum}` : `${policy.minimum} 至 ${policy.maximum}`;
         return { ...policy, valid: false, message: `${policy.label} 需要 ${range} 张参考图。` };
     }
-    const kind = (profile || imageModelProfile(modelId)).kind;
-    if (kind === "grok-image" || kind === "gemini" || kind === "midjourney-blend") {
-        const maximumBytes = (kind === "midjourney-blend" ? 12 : 10) * 1024 * 1024;
-        for (const reference of references) {
-            const dataMatch = /^data:([^;,]+);base64,(.*)$/s.exec(reference.dataUrl || "");
-            const bytes = reference.bytes ?? (dataMatch ? Math.floor(dataMatch[2]!.length * 3 / 4) - (dataMatch[2]!.endsWith("==") ? 2 : dataMatch[2]!.endsWith("=") ? 1 : 0) : undefined);
-            if (bytes !== undefined && bytes > maximumBytes) return { ...policy, valid: false, message: `参考图 ${reference.name} 超过单张 ${maximumBytes / 1024 / 1024} MiB 上限。` };
-            const mime = reference.type || dataMatch?.[1];
-            if (kind !== "midjourney-blend" && mime && !["image/jpeg", "image/png", "image/webp"].includes(mime.toLowerCase())) return { ...policy, valid: false, message: `参考图 ${reference.name} 格式不支持，请使用 JPEG、PNG 或 WebP。` };
-        }
+    const actualProfile = profile || imageModelProfile(modelId);
+    for (const reference of references) {
+        const dataMatch = /^data:([^;,]+);base64,(.*)$/s.exec(reference.dataUrl || "");
+        const bytes = reference.bytes ?? (dataMatch ? Math.floor(dataMatch[2]!.length * 3 / 4) - (dataMatch[2]!.endsWith("==") ? 2 : dataMatch[2]!.endsWith("=") ? 1 : 0) : undefined);
+        const message = imageReferenceFileError({ name: reference.name, size: bytes, type: reference.type || dataMatch?.[1] }, actualProfile);
+        if (message) return { ...policy, valid: false, message };
     }
     return { ...policy, valid: true };
+}
+
+/** Recheck the resolved original File before upload; URL references may lack byte metadata. */
+export function imageReferenceFileError(file: { name?: string; size?: number; type?: string }, profile: Pick<ReturnType<typeof imageModelProfile>, "kind">) {
+    const kind = profile.kind;
+    if (kind !== "grok-image" && kind !== "gemini" && kind !== "midjourney-blend") return undefined;
+    const maximumMiB = kind === "midjourney-blend" ? 12 : 10;
+    const label = file.name ? `参考图 ${file.name}` : "参考图";
+    if (file.size !== undefined && (!Number.isFinite(file.size) || file.size <= 0)) return `${label}为空或大小无效，请重新添加原图；尚未提交生成。`;
+    if (file.size !== undefined && file.size > maximumMiB * 1024 * 1024) {
+        return `${label}（${(file.size / 1024 / 1024).toFixed(2)} MiB）超过当前模型单张 ${maximumMiB} MiB 上限。请另存较小副本或切换模型；原图未修改，尚未提交生成。`;
+    }
+    if (kind !== "midjourney-blend" && file.type && !["image/jpeg", "image/png", "image/webp"].includes(file.type.toLowerCase())) {
+        return `${label}格式不支持，请使用 JPEG、PNG 或 WebP；原图未修改，尚未提交生成。`;
+    }
+    return undefined;
 }
 
 export function dedupeImageReferences(references: ImageReferenceItem[]) {

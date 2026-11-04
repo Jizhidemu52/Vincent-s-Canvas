@@ -27,7 +27,7 @@ const modelInput = z.object({ providerId: z.string().uuid(), workflowConfigId: z
 const modelUpdate = modelInput.partial();
 const priceInput = z.object({ operationType: z.enum(["image_generation", "video_generation", "audio_generation", "upscale", "remove_background", "inpaint", "batch_image", "seamless_stitch"]), label: z.string().trim().min(1).max(100), credits: z.number().int().nonnegative(), rmbCost: z.number().nonnegative() });
 const toolKey = z.enum(toolDefinitions.map((item) => item.toolKey) as [typeof toolDefinitions[number]["toolKey"], ...Array<typeof toolDefinitions[number]["toolKey"]>]);
-const toolConfigurationInput = z.object({ modelConfigId: z.string().uuid().nullable(), enabled: z.boolean(), creditCostOverride: z.number().int().nonnegative().nullable(), rmbCostOverride: z.number().finite().nonnegative().nullable() });
+const toolConfigurationInput = z.object({ modelConfigId: z.string().uuid().nullable(), enabled: z.boolean(), creditCostOverride: z.number().int().nonnegative().nullable(), rmbCostOverride: z.number().finite().nonnegative().nullable(), allowRawPrompt: z.boolean().default(false) });
 
 const providerSelect = `id,name,protocol,base_url AS "baseUrl",enabled,(encrypted_credentials IS NOT NULL) AS "hasCredentials",created_at AS "createdAt",updated_at AS "updatedAt"`;
 const modelSelect = `m.id,m.public_number AS "publicNumber",m.provider_id AS "providerId",p.name AS "providerName",p.protocol,p.enabled AS "providerEnabled",m.workflow_config_id AS "workflowConfigId",w.name AS "workflowName",m.replacement_model_config_id AS "replacementModelConfigId",m.name,m.model_id AS "modelId",m.capabilities,m.credit_cost AS "creditCost",m.rmb_cost::float8 AS "rmbCost",m.concurrency_limit AS "concurrencyLimit",m.enabled,m.created_at AS "createdAt",m.updated_at AS "updatedAt"`;
@@ -135,7 +135,7 @@ export function createModelConfigurationRouter(db: Database, config: AppConfig) 
     router.get("/tool-configurations", async (_request, response, next) => {
         try {
             const rows = (await db.query(`SELECT t.tool_key AS "toolKey",t.model_config_id AS "modelConfigId",t.enabled,
-                t.credit_cost_override AS "creditCostOverride",t.rmb_cost_override::float8 AS "rmbCostOverride",t.configuration_version AS "configurationVersion",
+                t.credit_cost_override AS "creditCostOverride",t.rmb_cost_override::float8 AS "rmbCostOverride",t.configuration_version AS "configurationVersion",t.allow_raw_prompt AS "allowRawPrompt",
                 m.name AS "modelName",m.model_id AS "modelId",m.capabilities,m.credit_cost AS "modelCreditCost",
                 m.rmb_cost::float8 AS "modelRmbCost",m.enabled AS "modelEnabled",p.id AS "providerId",p.name AS "providerName",
                 p.protocol,p.base_url AS "baseUrl",p.enabled AS "providerEnabled",(p.encrypted_credentials IS NOT NULL) AS "hasCredentials",
@@ -146,7 +146,7 @@ export function createModelConfigurationRouter(db: Database, config: AppConfig) 
                 FROM pricing_rule_versions WHERE status='published'`)).rows as Array<Record<string, unknown>>;
             response.json({ tools: applyDefaultChatModel(toolDefinitions.map((definition) => ({
                 ...definition,
-                ...(rows.find((row) => row.toolKey === definition.toolKey) || { modelConfigId: null, enabled: true, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 0 }),
+                ...(rows.find((row) => row.toolKey === definition.toolKey) || { modelConfigId: null, enabled: true, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 0, allowRawPrompt: false }),
                 capabilities: definition.capabilities,
                 price: prices.find((price) => price.operationType === definition.operationType) || null,
             }))).map(tool => {
@@ -160,6 +160,7 @@ export function createModelConfigurationRouter(db: Database, config: AppConfig) 
         try {
             const selectedTool = toolKey.parse(request.params.toolKey);
             const input = toolConfigurationInput.parse(request.body);
+            if (selectedTool !== "video") input.allowRawPrompt = false;
             // The canvas slot owns its price and switch, never a second LLM selection.
             if (selectedTool === "canvas-chat") input.modelConfigId = null;
             const definition = toolDefinitions.find((item) => item.toolKey === selectedTool)!;
@@ -175,13 +176,13 @@ export function createModelConfigurationRouter(db: Database, config: AppConfig) 
             }
             const actor = (request as unknown as AuthenticatedRequest).auth;
             const saved = await withTransaction(db, async client => {
-                const result = await client.query(`INSERT INTO tool_api_configurations(tool_key,model_config_id,enabled,updated_by,credit_cost_override,rmb_cost_override)
-                    VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(tool_key) DO UPDATE SET model_config_id=EXCLUDED.model_config_id,
-                    enabled=EXCLUDED.enabled,credit_cost_override=EXCLUDED.credit_cost_override,rmb_cost_override=EXCLUDED.rmb_cost_override,
+                const result = await client.query(`INSERT INTO tool_api_configurations(tool_key,model_config_id,enabled,updated_by,credit_cost_override,rmb_cost_override,allow_raw_prompt)
+                    VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(tool_key) DO UPDATE SET model_config_id=EXCLUDED.model_config_id,
+                    enabled=EXCLUDED.enabled,credit_cost_override=EXCLUDED.credit_cost_override,rmb_cost_override=EXCLUDED.rmb_cost_override,allow_raw_prompt=EXCLUDED.allow_raw_prompt,
                     configuration_version=tool_api_configurations.configuration_version+1,updated_by=EXCLUDED.updated_by,updated_at=now()
                     RETURNING tool_key AS "toolKey",model_config_id AS "modelConfigId",enabled,credit_cost_override AS "creditCostOverride",
-                    rmb_cost_override::float8 AS "rmbCostOverride",configuration_version AS "configurationVersion",updated_at AS "updatedAt"`,
-                    [selectedTool, input.modelConfigId, input.enabled, actor.id, input.creditCostOverride, input.rmbCostOverride]);
+                    rmb_cost_override::float8 AS "rmbCostOverride",configuration_version AS "configurationVersion",updated_at AS "updatedAt",allow_raw_prompt AS "allowRawPrompt"`,
+                    [selectedTool, input.modelConfigId, input.enabled, actor.id, input.creditCostOverride, input.rmbCostOverride, input.allowRawPrompt]);
                 await writeAudit(client, { actor, action: "tool_api_configuration.updated", targetType: "tool", targetId: selectedTool, result: "success", detail: input, ip: request.ip });
                 return selectedTool === "canvas-chat"
                     ? { ...result.rows[0], modelConfigId: (await readToolConfiguration(client, DEFAULT_CHAT_MODEL_TOOL_KEY)).modelConfigId }
@@ -249,14 +250,14 @@ export function createPublicModelRouter(db: Database, creditPolicy: boolean | ((
                 db.query(`SELECT m.id,m.public_number AS "publicNumber",m.name,m.model_id AS "modelId",m.capabilities,m.credit_cost AS "creditCost",m.rmb_cost::float8 AS "rmbCost",p.id AS "providerId",p.protocol,p.name AS "providerName",p.base_url AS "providerBaseUrl" FROM model_configs m JOIN providers p ON p.id=m.provider_id LEFT JOIN workflow_configs w ON w.id=m.workflow_config_id WHERE m.enabled=true AND p.enabled=true AND (m.workflow_config_id IS NULL OR w.enabled=true) ORDER BY m.public_number NULLS LAST,m.name`),
                 db.query(`SELECT operation_type AS "operationType",label,credits,rmb_cost::float8 AS "rmbCost",version FROM pricing_rule_versions WHERE status='published' ORDER BY operation_type`),
                 db.query(`SELECT t.tool_key AS "toolKey",t.model_config_id AS "modelConfigId",t.enabled,
-                    t.credit_cost_override AS "creditCostOverride",t.rmb_cost_override::float8 AS "rmbCostOverride",t.configuration_version AS "configurationVersion"
+                    t.credit_cost_override AS "creditCostOverride",t.rmb_cost_override::float8 AS "rmbCostOverride",t.configuration_version AS "configurationVersion",t.allow_raw_prompt AS "allowRawPrompt"
                     FROM tool_api_configurations t`),
                 readFeaturedModelIds(db),
             ]);
             const role = (request as AuthenticatedRequest).auth?.role;
             const effectiveTools = applyDefaultChatModel(toolDefinitions.map(definition => ({
                 ...definition,
-                ...(tools.rows.find(tool => tool.toolKey === definition.toolKey) ?? { modelConfigId: null, enabled: true, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 0 }),
+                ...(tools.rows.find(tool => tool.toolKey === definition.toolKey) ?? { modelConfigId: null, enabled: true, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 0, allowRawPrompt: false }),
                 ...(!creditsEnabled ? { creditCostOverride: 0 } : {}),
             })));
             const presentedModels = applyModelPresentation(models.rows, featuredIds);

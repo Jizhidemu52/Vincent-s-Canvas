@@ -60,7 +60,7 @@ export function useChatTaskRecovery(options: {
                         const images: ChatGeneratedImage[] = [];
                         for (const [index, url] of result.resultUrls.entries()) {
                             const dataUrl = await restoreChatMaskResult(pending, url); assertCurrent();
-                            images.push(await chatMedia.persist({ id: `${result.task.id}:${index}`, dataUrl, prompt: pending.prompt, modelId: pending.modelId, quality: pending.quality, resolution: pending.resolution, parentId: pending.parentId, workId: pending.workId, workNote: pending.workNote, lineage: pending.lineage }, assertCurrent));
+                            images.push(await chatMedia.persist({ id: `${result.task.id}:${index}`, dataUrl, prompt: pending.prompt, modelId: pending.modelId, quality: pending.quality, resolution: pending.resolution, parentId: pending.parentId, workId: pending.workId, workNote: pending.workNote, lineage: pending.lineage, sourceTaskId: result.task.id, ...(url.startsWith("/api/assets/") ? { sourceResultUrl: url } : {}), ...(pending.regionComposite ? { regionComposite: pending.regionComposite } : {}) }, assertCurrent));
                         }
                         await save(session => completeChatImageTask(session, message.id, pending, images, true));
                         settled = true;
@@ -72,7 +72,12 @@ export function useChatTaskRecovery(options: {
                         await updateMessage(item => ({ ...item, pendingImageTask: savedPending, content: result.content }));
                     }
                 } catch (error) {
-                    if (stillPending()) await updateMessage(item => ({ ...item, content: `原任务状态暂未读取完成：${error instanceof Error ? error.message : "读取失败"}。可以继续聊天或发送不同的新要求；请勿重复提交这条原任务。` }));
+                    if (stillPending()) {
+                        if (savedPending.taskStatus === "success" && (pending.regionComposite || pending.maskAdaptation)) {
+                            savedPending = { ...savedPending, recovery: "investigate" };
+                            await updateMessage(item => ({ ...item, pendingImageTask: savedPending, content: `原任务已出图，但局部结果处理未完成：${error instanceof Error ? error.message : "处理失败"}。原始 AI 结果仍保留在原任务中；恢复原图和选区后查询，不会重新生成。` }));
+                        } else await updateMessage(item => ({ ...item, content: `原任务状态暂未读取完成：${error instanceof Error ? error.message : "读取失败"}。可以继续聊天或发送不同的新要求；请勿重复提交这条原任务。` }));
+                    }
                 } finally {
                     querying = false;
                     if (current()) setChecking(previous => { const next = new Set(previous); next.delete(message.id); return next; });
@@ -83,7 +88,8 @@ export function useChatTaskRecovery(options: {
                 await query(resumePaused);
                 if (watching || !stillPending() || settled || savedPending.recovery === "investigate" || savedPending.recovery === "resume") return;
                 watching = true;
-                await watchTaskReconciliation({ taskIds: savedPending.taskId ? [savedPending.taskId] : [], signal, reconcile: () => query(false) });
+                await watchTaskReconciliation({ taskIds: savedPending.taskId ? [savedPending.taskId] : [], signal,
+                    reconcile: () => savedPending.recovery === "investigate" || savedPending.recovery === "resume" ? Promise.resolve() : query(false) });
             };
             jobs.current.set(message.id, { controller, query: resumePaused => observe(resumePaused).catch(() => undefined) });
             if (!message.stopped) void observe(false).catch(() => undefined);

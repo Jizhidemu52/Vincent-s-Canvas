@@ -133,6 +133,16 @@ export class DemoStateStore<A extends DemoStoredAsset = DemoStoredAsset, T exten
     return this.access("读取初始化状态", () => this.initialized());
   }
 
+  readVideoRawPromptAllowance(): boolean {
+    return this.access("读取视频原文直发设置", () => this.db.query<{ value: string }, []>("SELECT value FROM demo_state_metadata WHERE key='video.allowRawPrompt'").get()?.value === "true");
+  }
+
+  saveVideoRawPromptAllowance(allowed: boolean): void {
+    this.access("保存视频原文直发设置", () => {
+      this.db.query("INSERT INTO demo_state_metadata(key,value) VALUES('video.allowRawPrompt',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(allowed ? "true" : "false");
+    });
+  }
+
   /** Atomically imports only the first snapshot, including an intentionally empty snapshot. */
   initialize(snapshot: { assets: readonly A[]; tasks: readonly T[] }): boolean {
     return this.access("初始化状态", () => this.db.transaction(() => {

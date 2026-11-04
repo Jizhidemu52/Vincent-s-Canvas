@@ -4,11 +4,12 @@ import { test, expect, newCanvas, uploadImage, type MockCanvasApi } from "./fixt
 import { moduleDefinitions, toolDefinitions } from "../../shared/feature-catalog";
 import { readCanvasViewState } from "./canvas-view-state";
 import { canvasExampleControlSteps, canvasExampleControlPrefix } from "../src/lib/canvas/canvas-example-controls";
+import { canvasExampleControlProof, canvasExamplePractices } from "../src/lib/canvas/canvas-example-practices";
 
 const lessons = [
     ["view", "01", "导航与视图"], ["nodes", "02", "节点与素材"], ["config", "03", "配置节点与参考角色"],
-    ["connections", "04", "连线与串行工作流"], ["batch", "05", "三种批量不要混用"], ["versions", "06", "原图、版本与任务记录"],
-    ["local", "07", "本地编辑与 AI 工具"], ["compare", "08", "对比、分组与排版"], ["assistant", "09", "助手与当前图"], ["delivery", "10", "交付与画布管理"],
+    ["connections", "04", "连线与串行工作流"], ["batch", "05", "批量处理围巾"], ["versions", "06", "原图、版本与任务记录"],
+    ["local", "07", "图片编辑与局部改色"], ["compare", "08", "对比、分组与排版"], ["assistant", "09", "助手与当前图"], ["delivery", "10", "交付与画布管理"],
 ] as const;
 const graphOnly = (document: any) => JSON.stringify({ nodes: document.nodes, connections: document.connections, groups: document.groups, history: document.history, chatSessions: document.chatSessions });
 const assetHashes = (api: MockCanvasApi) => [...api.assetBytes.entries()].map(([id, bytes]) => [id, createHash("sha256").update(bytes).digest("hex")]);
@@ -56,12 +57,13 @@ test("独立教学画布可定位十类图文案例，旧项目与原图字节�
     for (const [key, number, title] of lessons) {
         await lessonArea(page, number, title, "看案例");
         const cases = page.locator(`[data-node-id^="canvas-example-${key}-case-"]`);
-        await expect(cases).toHaveCount(4);
-        const explanationId = graph.nodes.find((node: any) => node.id.startsWith(`canvas-example-${key}-case-`) && node.title.includes("准备 / 操作 / 得到 / 注意")).id;
-        for (const word of ["准备", "操作", "得到", "注意"]) await expect(page.locator(`[data-node-id="${explanationId}"]`)).toContainText(word);
+        const practice = canvasExamplePractices[key];
+        await expect(cases).toHaveCount(practice.resultImage ? 6 : 4);
+        const explanationId = graph.nodes.find((node: any) => node.id.startsWith(`canvas-example-${key}-case-`) && node.title.includes("实操简注")).id;
+        await expect(page.locator(`[data-node-id="${explanationId}"]`)).toContainText(practice.evidence);
         const images = cases.locator("img");
-        await expect(images).toHaveCount(2);
-        for (const image of await images.all()) await expect.poll(() => image.evaluate((element: HTMLImageElement) => element.complete && element.naturalWidth)).toBe(1536);
+        await expect(images).toHaveCount(practice.resultImage ? 3 : 2);
+        for (const image of graph.nodes.filter((node: any) => node.id.startsWith(`canvas-example-${key}-case-`) && node.type === "image")) await expect.poll(() => page.locator(`[data-node-id="${image.id}"] img`).first().evaluate((element: HTMLImageElement) => element.complete && element.naturalWidth)).toBe(image.metadata.naturalWidth);
         const text = cases.locator("div.whitespace-pre-wrap");
         for (const node of await text.all()) {
             const size = await node.evaluate(element => ({ overflow: element.scrollHeight - element.clientHeight, text: element.textContent?.slice(0, 60) }));
@@ -69,7 +71,7 @@ test("独立教学画布可定位十类图文案例，旧项目与原图字节�
         }
         if (key === "config") await page.screenshot({ path: testInfo.outputPath("03-configuration-case.png") });
     }
-    await lessonArea(page, "05", "三种批量不要混用", "到练习");
+    await lessonArea(page, "05", "批量处理围巾", "到练习");
     const batch = page.locator('[data-node-id^="canvas-example-batch-practice-"]').filter({ has: page.getByRole("button", { name: "执行 3 个任务", exact: true }) });
     await expect(batch).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath("05-batch-practice.png") });
@@ -166,7 +168,7 @@ test("身份变化后教学目录随工作区暂停，不继续创建或修改�
     expect(api.batchSubmissions).toHaveLength(0);
 });
 
-test("每个小功能均可搜索定位，长文卡完整显示，配置和对比保留独立步骤", async ({ page, api }, testInfo) => {
+test("每个小功能可搜索定位，实操截图与未实测说明清楚区分且不截字", async ({ page, api }, testInfo) => {
     test.setTimeout(150_000);
     const id = await createTeachingCanvas(page, api);
     const graph = api.document(id)!;
@@ -193,7 +195,7 @@ test("每个小功能均可搜索定位，长文卡完整显示，配置和对�
         const height = (key: string) => graph.nodes.find((node: any) => node.type === "text" && node.id.startsWith(canvasExampleControlPrefix(key)))?.height || 0;
         return height(b.key) - height(a.key);
     })[0]!);
-    const important = ["detail-config-model--1", "detail-image-custom-size--1", "detail-compare-picker--2", "detail-compare-modes--3", "detail-compare-modes--4"].map(key => canvasExampleControlSteps.find(item => item.key === key)!);
+    const important = ["detail-config-composer--0", "detail-crop-confirm--1", "detail-compare-picker--2", "detail-compare-modes--3", "detail-compare-modes--4", ...Array.from({ length: 7 }, (_, index) => `shell-copy-history--${index}`), "shell-delete--0"].map(key => canvasExampleControlSteps.find(item => item.key === key)!);
     const sample = [...new Map([...longest, ...important].map(item => [item.key, item])).values()];
     for (const { key, guide, step } of sample) {
         await openControls();
@@ -202,14 +204,16 @@ test("每个小功能均可搜索定位，长文卡完整显示，配置和对�
         await expect(item).toBeVisible();
         await item.click();
         const card = page.locator(`[data-node-id^="${canvasExampleControlPrefix(key)}"]`);
-        await expect(card).toHaveCount(2);
+        const proof = canvasExampleControlProof[key];
+        await expect(card).toHaveCount(proof ? 2 : 1);
         const text = card.locator("div.whitespace-pre-wrap");
         await expect(text).toContainText(step.action);
-        await expect(text).toContainText(guide.caution);
+        await expect(text).toContainText(proof?.evidence || "用法说明 · 未逐项实测");
+        if (proof?.annotation) await expect(text).toContainText(proof.annotation);
         const size = await text.evaluate(element => ({ overflow: element.scrollHeight - element.clientHeight, width: element.scrollWidth - element.clientWidth }));
         expect(size, `${key}: ${step.control}`).toEqual({ overflow: 0, width: 0 });
-        await expect.poll(() => card.locator("img").evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth)).toBe(1536);
-        if (key === "detail-config-model--1" || key === "detail-compare-modes--3") {
+        if (proof) await expect.poll(() => card.locator("img").evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth)).toBe(1366);
+        if (["detail-config-composer--0", "detail-compare-modes--3", "shell-copy-history--0", "shell-delete--0"].includes(key)) {
             await page.mouse.move(20, 130);
             await page.screenshot({ path: testInfo.outputPath(`${key}.png`) });
         }

@@ -14,7 +14,7 @@ export function CompilationResult({ compilation }: { compilation: AdminPromptCom
             </div>
             {compilation.message && <Alert type={compilation.status === "failed" ? "error" : "warning"} title={compilation.message} />}
             <div>
-                <h4 className="mb-1 text-xs text-muted-foreground">中文说明</h4>
+                <h4 className="mb-1 text-xs text-muted-foreground">{compilation.inputSnapshot.promptInput.scene === "video-motion" ? "动效方案摘要" : "中文说明"}</h4>
                 <pre className="whitespace-pre-wrap break-words text-sm">{compilation.summaryZh || "—"}</pre>
             </div>
             <div>
@@ -22,6 +22,8 @@ export function CompilationResult({ compilation }: { compilation: AdminPromptCom
                 <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border bg-muted/30 p-3 text-xs">{compilation.prompt || "—"}</pre>
             </div>
             <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
+                {compilation.upstreamStatus !== undefined && <><dt>上游 HTTP 状态</dt><dd>{compilation.upstreamStatus}</dd></>}
+                {compilation.upstreamReason && <><dt>上游安全分类</dt><dd className="break-all">{compilation.upstreamReason}</dd></>}
                 <dt>延迟</dt>
                 <dd>{compilation.latencyMs == null ? "未知" : `${compilation.latencyMs} ms`}</dd>
                 <dt>输入 / 输出 Token</dt>

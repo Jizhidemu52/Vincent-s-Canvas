@@ -23,6 +23,8 @@ export type TaskInput = {
   toolKey?: string;
   /** Trusted, server-resolved batch snapshot; never parsed from a request body. */
   toolConfiguration?: ToolConfiguration & { modelConfigId: string };
+  /** Trusted source preflight completed before prompt compilation; never accepted from HTTP. */
+  videoPreflightResult?: Awaited<ReturnType<typeof preflightStoredVideoTask>>;
   priceSnapshot?: PriceSnapshot;
   modelConfigId?: string | null;
   prompt: string;
@@ -100,7 +102,8 @@ export async function enqueueTask(
 ) {
   input.parameters = singleImageTaskParameters(input.operationType, input.parameters);
   const taskId = randomUUID();
-  let preparedVideo: { execution: ToolConfiguration & { modelConfigId: string }; checked: Awaited<ReturnType<typeof preflightStoredVideoTask>> } | undefined;
+  let preparedVideo: { execution: ToolConfiguration & { modelConfigId: string }; checked: Awaited<ReturnType<typeof preflightStoredVideoTask>> } | undefined = input.videoPreflightResult && input.toolConfiguration
+    ? { execution: input.toolConfiguration, checked: input.videoPreflightResult } : undefined;
   const admit = () => withTransaction(db, async (client) => {
     if (input.batchAdmission) {
       if (!input.batchId) throw new Error("Batch admission token requires a batch ID");

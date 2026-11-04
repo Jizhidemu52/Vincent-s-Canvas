@@ -3,6 +3,7 @@ import { classifyTaskRecovery } from "@/services/api/task-result-reconciliation"
 import type { CreativeImageLineage } from "@/lib/creative-chat";
 import type { ImageAgentWorkNote } from "@/lib/image-agent/work-note";
 import type { CanvasMaskAdaptation } from "@/lib/canvas/canvas-mask-adaptation";
+import type { ChatRegionComposite } from "@/lib/image-agent/mask";
 
 export type ChatImageRecoveryMode = "observe" | "resume" | "investigate";
 
@@ -24,6 +25,7 @@ export type PendingChatImageTask = {
     focusRevision?: number;
     signature?: string;
     maskAdaptation?: CanvasMaskAdaptation;
+    regionComposite?: ChatRegionComposite;
     explanation?: string;
     recovery?: ChatImageRecoveryMode;
     taskStatus?: string;

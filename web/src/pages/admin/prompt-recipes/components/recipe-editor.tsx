@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Alert, App, Button, Form, Input, Select, Switch, Tag } from "antd";
 import { activateAdminPromptVersion, createAdminPromptVersion, requirePromptAdmin, updateAdminPromptRecipe, type PromptAdminModel, type PromptRecipeDetail } from "@/services/api/admin-prompt-recipes";
 import type { PromptRecipeSettings } from "../../../../../../shared/prompt-contracts";
-import { assertFallback, editVersion, messageOf, parseVersion, type VersionEditorValue } from "../model";
+import { assertFallback, editVersion, emptyVersion, messageOf, parseVersion, type VersionEditorValue } from "../model";
 
 const fields: Array<{ key: keyof VersionEditorValue; label: string; rows?: number }> = [
     { key: "systemPrompt", label: "系统提示词", rows: 14 },
@@ -22,7 +22,9 @@ export function RecipeEditor({ detail, models, refresh, onDirty }: { detail: Pro
     const [settings, setSettings] = useState<PromptRecipeSettings>(detail.recipe);
     const [selectedId, setSelectedId] = useState(detail.recipe.currentVersionId || detail.versions[0]?.id || "");
     const selected = detail.versions.find((version) => version.id === selectedId);
-    const [editor, setEditor] = useState<VersionEditorValue | null>(selected ? editVersion(selected) : null);
+    const isVideo = detail.recipe.key === "video-motion";
+    const blank = emptyVersion(isVideo ? "zh" : "en");
+    const [editor, setEditor] = useState<VersionEditorValue>(selected ? editVersion(selected) : blank);
     const [compareId, setCompareId] = useState("");
     const [busy, setBusy] = useState("");
     const [error, setError] = useState("");
@@ -33,7 +35,7 @@ export function RecipeEditor({ detail, models, refresh, onDirty }: { detail: Pro
         if (selected) setEditor(editVersion(selected));
     }, [selected?.id]);
     const settingsDirty = ["name", "enabled", "modelConfigId", "failurePolicy"].some((key) => settings[key as keyof PromptRecipeSettings] !== detail.recipe[key as keyof PromptRecipeSettings]);
-    const versionDirty = Boolean(editor && selected && JSON.stringify(editor) !== JSON.stringify(editVersion(selected)));
+    const versionDirty = JSON.stringify(editor) !== JSON.stringify(selected ? editVersion(selected) : blank);
     useEffect(() => {
         onDirty(settingsDirty || versionDirty);
     }, [settingsDirty, versionDirty, onDirty]);
@@ -135,99 +137,100 @@ export function RecipeEditor({ detail, models, refresh, onDirty }: { detail: Pro
                     </div>
                 </div>
                 <Alert type="info" showIcon className="!mb-4" title="保存只创建新草稿，不会改变线上版本。" description="激活旧版本即回滚。测试也只使用已保存的版本；未保存编辑不会发送给模型。" />
-                {editor && selected ? (
-                    <Form layout="vertical" disabled={Boolean(busy)}>
-                        {base && (
-                            <div className="mb-3 grid grid-cols-2 gap-3 text-xs text-muted-foreground">
-                                <span>对照 v{compare?.version}（只读）</span>
-                                <span>
-                                    当前编辑 v{selected.version} {versionDirty ? "· 未保存" : ""}
-                                </span>
-                            </div>
-                        )}
-                        {fields.map(({ key, label, rows }) => (
-                            <Form.Item
-                                key={key}
-                                label={
-                                    <span>
-                                        {label} {base && base[key] !== editor[key] && <Tag color="orange">有差异</Tag>}
-                                    </span>
-                                }
-                            >
-                                <div className={base ? "grid min-w-0 gap-3 xl:grid-cols-2" : "min-w-0"}>
-                                    {base && <pre className="max-h-[420px] min-w-0 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border bg-muted/30 p-3 text-xs">{base[key] || "（空）"}</pre>}
-                                    <Input.TextArea aria-label={label} className="!font-mono !text-xs" rows={rows} value={editor[key]} onChange={(event) => setEditor({ ...editor, [key]: event.target.value })} />
-                                </div>
-                            </Form.Item>
-                        ))}
-                        <Form.Item label="输出语言">
-                            <Select
-                                aria-label="输出语言"
-                                className="max-w-64"
-                                value={editor.outputLanguage}
-                                onChange={(outputLanguage) => setEditor({ ...editor, outputLanguage })}
-                                options={[
-                                    { value: "en", label: "英文" },
-                                    { value: "zh", label: "中文" },
-                                ]}
-                            />
-                            {base && base.outputLanguage !== editor.outputLanguage && (
-                                <Tag color="orange" className="ml-2">
-                                    对照版本：{base.outputLanguage}
-                                </Tag>
-                            )}
-                        </Form.Item>
-                        <div className="flex flex-wrap gap-3">
-                            <Button
-                                type="primary"
-                                loading={busy === "version"}
-                                disabled={!versionDirty || Boolean(busy)}
-                                onClick={() =>
-                                    void run("version", async () => {
-                                        const content = parseVersion(editor);
-                                        const { version } = await createAdminPromptVersion(detail.recipe.key, content, options());
-                                        await refresh();
-                                        setSelectedId(version.id);
-                                        message.success(`v${version.version} 草稿已保存，尚未激活`);
-                                    })
-                                }
-                            >
-                                保存为新版本草稿
-                            </Button>
-                            <Button
-                                disabled={Boolean(busy) || versionDirty || settingsDirty || selected.id === detail.recipe.currentVersionId}
-                                loading={busy === "activate"}
-                                onClick={() => {
-                                    try {
-                                        assertFallback(detail.recipe.failurePolicy, selected);
-                                    } catch (reason) {
-                                        setError(messageOf(reason));
-                                        return;
-                                    }
-                                    modal.confirm({
-                                        title: `激活 v${selected.version}？`,
-                                        content: "此操作将切换线上配方；选择旧版本可完成回滚。已提交任务不变。",
-                                        okText: "确认激活",
-                                        cancelText: "取消",
-                                        onOk: () =>
-                                            run("activate", async () => {
-                                                await activateAdminPromptVersion(detail.recipe.key, selected.id, options());
-                                                await refresh();
-                                                message.success(`已激活 v${selected.version}`);
-                                            }),
-                                    });
-                                }}
-                            >
-                                {selected.id === detail.recipe.currentVersionId ? "当前线上版本" : "激活此版本 / 回滚"}
-                            </Button>
+                <Form layout="vertical" disabled={Boolean(busy)}>
+                    {!selected && <Alert className="!mb-4" type="info" showIcon title="尚无版本，请填写规则并保存首个草稿。" description="规则正文仅由管理员保存到服务端；保存不会自动激活，也不会调用模型。" />}
+                    {base && (
+                        <div className="mb-3 grid grid-cols-2 gap-3 text-xs text-muted-foreground">
+                            <span>对照 v{compare?.version}（只读）</span>
+                            <span>
+                                当前编辑 {selected ? `v${selected.version}` : "首个草稿"} {versionDirty ? "· 未保存" : ""}
+                            </span>
                         </div>
+                    )}
+                    {fields.map(({ key, label, rows }) => (
+                        <Form.Item
+                            key={key}
+                            label={
+                                <span>
+                                    {label} {base && base[key] !== editor[key] && <Tag color="orange">有差异</Tag>}
+                                </span>
+                            }
+                        >
+                            <div className={base ? "grid min-w-0 gap-3 xl:grid-cols-2" : "min-w-0"}>
+                                {base && <pre className="max-h-[420px] min-w-0 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border bg-muted/30 p-3 text-xs">{base[key] || "（空）"}</pre>}
+                                <Input.TextArea aria-label={label} className="!font-mono !text-xs" rows={rows} value={editor[key]} onChange={(event) => setEditor({ ...editor, [key]: event.target.value })} />
+                            </div>
+                        </Form.Item>
+                    ))}
+                    <Form.Item label="输出语言" extra={isVideo ? "视频动效规划固定使用中文提示词与中文摘要。" : undefined}>
+                        <Select
+                            aria-label="输出语言"
+                            className="max-w-64"
+                            value={isVideo ? "zh" : editor.outputLanguage}
+                            disabled={isVideo || Boolean(busy)}
+                            onChange={(outputLanguage) => setEditor({ ...editor, outputLanguage })}
+                            options={[
+                                { value: "en", label: "英文" },
+                                { value: "zh", label: "中文" },
+                            ]}
+                        />
+                        {base && base.outputLanguage !== editor.outputLanguage && (
+                            <Tag color="orange" className="ml-2">
+                                对照版本：{base.outputLanguage}
+                            </Tag>
+                        )}
+                    </Form.Item>
+                    <div className="flex flex-wrap gap-3">
+                        <Button
+                            type="primary"
+                            loading={busy === "version"}
+                            disabled={!versionDirty || Boolean(busy)}
+                            onClick={() =>
+                                void run("version", async () => {
+                                    const content = parseVersion(isVideo ? { ...editor, outputLanguage: "zh" } : editor);
+                                    const { version } = await createAdminPromptVersion(detail.recipe.key, content, options());
+                                    await refresh();
+                                    setSelectedId(version.id);
+                                    message.success(`v${version.version} 草稿已保存，尚未激活`);
+                                })
+                            }
+                        >
+                            保存为新版本草稿
+                        </Button>
+                        <Button
+                            disabled={!selected || Boolean(busy) || versionDirty || settingsDirty || selected.id === detail.recipe.currentVersionId}
+                            loading={busy === "activate"}
+                            onClick={() => {
+                                if (!selected) return;
+                                try {
+                                    assertFallback(detail.recipe.failurePolicy, selected);
+                                } catch (reason) {
+                                    setError(messageOf(reason));
+                                    return;
+                                }
+                                modal.confirm({
+                                    title: `激活 v${selected.version}？`,
+                                    content: "此操作将切换线上配方；选择旧版本可完成回滚。已提交任务不变。",
+                                    okText: "确认激活",
+                                    cancelText: "取消",
+                                    onOk: () =>
+                                        run("activate", async () => {
+                                            await activateAdminPromptVersion(detail.recipe.key, selected.id, options());
+                                            await refresh();
+                                            message.success(`已激活 v${selected.version}`);
+                                        }),
+                                });
+                            }}
+                        >
+                            {selected && selected.id === detail.recipe.currentVersionId ? "当前线上版本" : "激活此版本 / 回滚"}
+                        </Button>
+                    </div>
+                    {selected && (
                         <p className="mt-4 break-all text-xs text-muted-foreground">
                             保存时间：{new Date(selected.createdAt).toLocaleString()} · 内容指纹：{selected.contentHash}
                         </p>
-                    </Form>
-                ) : (
-                    <Alert type="warning" title="此配方尚无可编辑版本，请检查服务端种子数据。" />
-                )}
+                    )}
+                </Form>
             </section>
         </div>
     );

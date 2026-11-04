@@ -67,6 +67,7 @@ import { prepareChatProfileInput, validateChatProfileOutput, type ChatPromptProf
 import { imageAgentProviderPrompt } from "./image-agent-profile";
 import { imageAgentClaudeStream } from "./image-agent-stream";
 import { PromptOptimizationError } from "./prompt-safety";
+import { assertVideoMotionPolicy, ensureVideoMotionRecipe, videoMotionParameters, videoPreflightPrompt } from "./video-motion-input";
 
 const sessions = new Map<string, string>();
 const modules = moduleKeys;
@@ -389,7 +390,7 @@ const demoPrices: Array<Record<string, unknown>> = Array.from(
   status: "published",
   publishedAt: new Date().toISOString(),
 }));
-const demoToolConfigurations: Array<{ toolKey: ToolKey; modelConfigId: string | null; enabled: boolean; creditCostOverride: number | null; rmbCostOverride: number | null; configurationVersion: number }> = toolDefinitions.map((tool) => ({
+const demoToolConfigurations: Array<{ toolKey: ToolKey; modelConfigId: string | null; enabled: boolean; creditCostOverride: number | null; rmbCostOverride: number | null; configurationVersion: number; allowRawPrompt: boolean }> = toolDefinitions.map((tool) => ({
   toolKey: tool.toolKey,
   // Only chat has a mandatory shared default; image choices remain independent.
   modelConfigId: tool.toolKey === "gpt-chat"
@@ -399,6 +400,7 @@ const demoToolConfigurations: Array<{ toolKey: ToolKey; modelConfigId: string | 
   creditCostOverride: null,
   rmbCostOverride: null,
   configurationVersion: 0,
+  allowRawPrompt: false,
 }));
 type DemoAsset = {
   contentSha256?: string;
@@ -420,6 +422,7 @@ type DemoAsset = {
 };
 type DemoTask = {
   prompt?: string;
+  summaryZh?: string;
   userInput?: PromptInput | null;
   optimized?: boolean;
   promptCompilationId?: string;
@@ -465,10 +468,12 @@ const demoPublicVideoAssetAccess = new Map<string, { assetId: string; expiresAt:
 const demoTasks = new Map<string, DemoTask>();
 const demoStatePath = process.env.DEMO_STATE_PATH?.trim() || fileURLToPath(new URL("../.data/local-demo.sqlite", import.meta.url));
 const demoState = new DemoStateStore<DemoAsset, DemoTask>(demoStatePath);
+demoToolConfigurations.find(tool => tool.toolKey === "video")!.allowRawPrompt = demoState.readVideoRawPromptAllowance();
 const assetProjects = new DemoAssetProjectStore(demoStatePath);
 const canvasDocuments = new DemoCanvasDocumentStore(demoStatePath);
 const promptTemplates = new DemoPromptTemplateStore(demoStatePath);
 const demoPromptDatabase = sqlitePromptRecipeStore(demoStatePath);
+await ensureVideoMotionRecipe(demoPromptDatabase.store);
 const demoPromptCompiler = createDemoPromptCompiler(demoPromptDatabase.store, {
   models: demoModels, providers: demoProviders, tools: demoToolConfigurations, flags: demoModuleFlags,
   credential: demoChatProviderApiKey, asset: id => demoAssets.get(id),
@@ -476,7 +481,7 @@ const demoPromptCompiler = createDemoPromptCompiler(demoPromptDatabase.store, {
 const demoPromptBatches = new DemoPromptBatchStore(demoPromptDatabase.store.database);
 await demoPromptBatches.initialize();
 const demoAdmissionGate = new DemoAdmissionGate();
-type PreparedDemoTask = TaskSubmission & { userInput?: PromptInput; promptCompilationId?: string; optimized: boolean };
+type PreparedDemoTask = TaskSubmission & { userInput?: PromptInput; promptCompilationId?: string; summaryZh?: string; optimized: boolean };
 type TrustedDemoBatchInput = { prepared: PreparedDemoTask; batchId: string; itemIndex: number };
 const oaStore = features.oaLoginEnabled ? new DemoOaStore(demoStatePath) : null;
 const demoDesignLibrary = oaStore ? new DemoDesignLibraryStore(demoStatePath, (asset) => { cacheStoredDemoAsset(asset.id); }) : null;
@@ -1264,13 +1269,15 @@ Bun.serve({
           ? json({ task: existingTask })
           : json({ error: "DUPLICATE_REQUEST", message: "任务请求标识已被使用" }, 400);
       const taskTool = resolveDemoToolConfiguration({ ...input, operationType: input.operationType || "" }, demoToolConfigurations, demoModels, demoProviders, demoModuleFlags);
+      assertVideoMotionPolicy({ ...input, toolKey: taskTool.toolKey }, taskTool.allowRawPrompt);
       validateImagePromptExclusions(input);
       input.modelConfigId = taskTool.modelConfigId;
       input.parameters = singleImageTaskParameters(input.operationType || "", { ...input.parameters, tool: taskTool.toolKey });
       // This argument is supplied only by the in-process batch coordinator, never parsed from HTTP.
-      const prepared: PreparedDemoTask = trustedBatch
+      let prepared: PreparedDemoTask = trustedBatch
         ? { ...input, prompt: trustedBatch.prepared.prompt, parameters: structuredClone(trustedBatch.prepared.parameters), promptInput: trustedBatch.prepared.promptInput,
             userInput: trustedBatch.prepared.userInput, promptCompilationId: trustedBatch.prepared.promptCompilationId, optimized: trustedBatch.prepared.optimized }
+        : input.operationType === "video_generation" ? { ...input, optimized: false }
         : applyImagePromptExclusions(await preparePromptTaskInput(demoPromptCompiler, user, { ...input, toolKey: taskTool.toolKey }), (() => {
             const model = demoModels.find(item => item.id === taskTool.modelConfigId);
             const provider = demoProviders.find(item => item.id === model?.providerId);
@@ -1316,12 +1323,13 @@ Bun.serve({
         const sources = resolveOwnedVideoSources(input.sourceUrls || [], user);
         if (sources instanceof Response) return sources;
         const modelId = model.modelId as SupportedVideoModelId;
-        const parameters = (input.parameters || {}) as VideoProviderParameters;
+        const parameters = videoMotionParameters(input.parameters || {}, input.promptInput, sources.map(source => source.mimeType), modelId);
+        input.parameters = parameters;
         let accessTokens: string[] = [];
         try {
           const providerSources = await createProviderVideoSources(modelId, sources);
           accessTokens = providerSources.accessTokens;
-          const checked = preflightVideoSources(modelId, input.prompt || "", parameters, providerSources.sources);
+          const checked = preflightVideoSources(modelId, videoPreflightPrompt(input), parameters, providerSources.sources);
           Object.assign(parameters, checked.normalized);
         } catch (error) {
           return json(
@@ -1334,6 +1342,13 @@ Bun.serve({
         } finally {
           revokeProviderVideoSources(accessTokens);
         }
+        // No optimizer or video request is sent until every source has passed media preflight.
+        prepared = await preparePromptTaskInput(demoPromptCompiler, user, { ...input, toolKey: taskTool.toolKey }, { videoSourceMimeTypes: sources.map(source => source.mimeType) });
+        input = prepared;
+        Object.assign(parameters, prepared.parameters);
+        Object.assign(promptMetadata, { userInput: prepared.userInput ?? null, optimized: prepared.optimized,
+          ...(prepared.promptCompilationId ? { promptCompilationId: prepared.promptCompilationId } : {}),
+          ...(prepared.summaryZh ? { summaryZh: prepared.summaryZh } : {}) });
         // Preflight awaits media inspection; another request may have reserved this ID meanwhile.
         const concurrentTask = input.requestId
           ? [...demoTasks.values()].find((task) => task.requestId === input.requestId) : undefined;
@@ -1662,6 +1677,7 @@ Bun.serve({
       if (input.operationType !== "video_generation")
         return json({ error: "UNSUPPORTED_OPERATION", message: "Only video preflight is supported" }, 400);
       const preflightTool = resolveDemoToolConfiguration({ ...input, operationType: input.operationType }, demoToolConfigurations, demoModels, demoProviders, demoModuleFlags);
+      assertVideoMotionPolicy({ ...input, toolKey: preflightTool.toolKey }, preflightTool.allowRawPrompt);
       input.modelConfigId = preflightTool.modelConfigId;
       const model = demoModels.find(
         (item) => item.id === input.modelConfigId && isSupportedVideoModelId(item.modelId) && item.enabled,
@@ -1677,8 +1693,9 @@ Bun.serve({
       try {
         const providerSources = await createProviderVideoSources(modelId, sources);
         accessTokens = providerSources.accessTokens;
-        const preflight = preflightVideoSources(modelId, input.prompt || "", input.parameters || {}, providerSources.sources);
-        return json({ ok: true, requestId: input.requestId || crypto.randomUUID(), normalized: preflight.normalized });
+        const parameters = videoMotionParameters(input.parameters || {}, input.promptInput, sources.map(source => source.mimeType), modelId);
+        const preflight = preflightVideoSources(modelId, videoPreflightPrompt(input), parameters, providerSources.sources);
+        return json({ ok: true, requestId: input.requestId || crypto.randomUUID(), normalized: { ...preflight.normalized, ...(input.promptInput?.scene === "video-motion" ? { generateAudio: parameters.generateAudio !== false } : {}) } });
       } catch (error) {
         return json({ error: "INVALID_VIDEO_INPUT", message: error instanceof Error ? error.message : "Invalid video parameters" }, 400);
       } finally {
@@ -2208,7 +2225,12 @@ Bun.serve({
         enabled: boolean;
         creditCostOverride: number | null;
         rmbCostOverride: number | null;
+        allowRawPrompt?: boolean;
       };
+      if (input.allowRawPrompt !== undefined && typeof input.allowRawPrompt !== "boolean") return json({ error: "INVALID_SETTINGS", message: "原文直发开关必须为布尔值" }, 400);
+      const allowRawPrompt = selectedTool === "video" && input.allowRawPrompt === true;
+      if (selectedTool === "video") demoState.saveVideoRawPromptAllowance(allowRawPrompt);
+      input.allowRawPrompt = allowRawPrompt;
       if (selectedTool === "canvas-chat") input.modelConfigId = null;
       const existing = demoToolConfigurations.find(
         (item) => item.toolKey === selectedTool,
@@ -2218,7 +2240,7 @@ Bun.serve({
         demoToolConfigurations.push({
           toolKey:
             selectedTool as (typeof demoToolConfigurations)[number]["toolKey"],
-          ...input,
+          ...input, allowRawPrompt,
           configurationVersion: 1,
         });
       return json({
@@ -2284,13 +2306,14 @@ async function runApiMartImageTaskForDemo(
       const paused = Boolean(task.submissionStartedAt || task.upstreamTaskId) && !(error instanceof ApiMartImageProviderFailure);
       if (phase === "submission") phase = task.stage === "downloading" ? "download"
         : task.upstreamTaskId ? "polling" : task.submissionStartedAt ? "submission" : "preflight";
+      const promptFailure = !paused && phase === "preflight" && error instanceof PromptOptimizationError ? error : undefined;
       finishDemoTaskFailure(task, error, {
         status: paused ? "paused" : "failed", stage: "failed",
-        errorCode: paused ? "MARK_IMAGE_STATUS_UNCERTAIN" : "MARK_IMAGE_FAILED",
-        lastFailure: imageTaskFailureDetail(error, phase),
+        errorCode: promptFailure?.code ?? (paused ? "MARK_IMAGE_STATUS_UNCERTAIN" : "MARK_IMAGE_FAILED"),
+        lastFailure: promptFailure ? { phase, code: promptFailure.code } : imageTaskFailureDetail(error, phase),
         failureReason: paused
           ? imageTaskPauseReason(phase)
-          : error instanceof ApiMartImageProviderFailure
+          : promptFailure ? promptFailure.message : error instanceof ApiMartImageProviderFailure
             ? "Mark 图片服务明确返回任务失败；本次积分已退还。"
             : "Mark 图片参数、参考图或上传准备失败；尚未提交生成，请检查输入与服务端配置。",
       }, user);

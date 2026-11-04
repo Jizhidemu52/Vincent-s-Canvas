@@ -3,6 +3,7 @@ import { useUserStore } from "@/stores/use-user-store";
 
 type Preferences = { pinned: string[]; collapsed: string[] };
 const empty: Preferences = { pinned: [], collapsed: ["image-tools"] };
+const preferenceLimit = 64;
 const cache = new Map<string, Preferences>();
 const listeners = new Set<() => void>();
 const subscribe = (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; };
@@ -12,7 +13,7 @@ function read(key: string): Preferences {
     try {
         const parsed = JSON.parse(localStorage.getItem(key) || "null");
         if (parsed && Array.isArray(parsed.pinned) && Array.isArray(parsed.collapsed)) value = {
-            pinned: [...new Set<string>(parsed.pinned.filter((item: unknown) => typeof item === "string"))].slice(0, 12),
+            pinned: [...new Set<string>(parsed.pinned.filter((item: unknown) => typeof item === "string"))].slice(0, preferenceLimit),
             collapsed: parsed.collapsed.filter((item: unknown) => typeof item === "string"),
         };
     } catch { /* A blocked setting store must not block navigation. */ }
@@ -26,7 +27,7 @@ export function useNavigationPreferences() {
     const toggle = (field: keyof Preferences, item: string) => {
         if ((useUserStore.getState().user?.id || "trial") !== owner) return;
         const previous = read(key);
-        const next = { ...previous, [field]: previous[field].includes(item) ? previous[field].filter(entry => entry !== item) : [...previous[field], item].slice(0, 12) };
+        const next = { ...previous, [field]: previous[field].includes(item) ? previous[field].filter(entry => entry !== item) : [...previous[field], item].slice(0, preferenceLimit) };
         cache.set(key, next);
         try { localStorage.setItem(key, JSON.stringify(next)); } catch { /* Keep the current tab preference. */ }
         listeners.forEach(listener => listener());

@@ -1,6 +1,8 @@
 import { uiText, useUiText } from "@/lib/i18n";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
+import { PracticeExampleRecord } from "@/components/design-examples";
 import { useUnsavedGuard } from "@/hooks/use-unsaved-guard";
 import { useUserStore } from "@/stores/use-user-store";
 import { isModuleAvailable, useModuleEnabled, useModuleStore } from "@/stores/use-module-store";
@@ -22,6 +24,7 @@ export function LocalDesignWorkbench({ moduleKey, title, description, mount }: {
     const [dirty, setDirty] = useState(false);
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
     const [assetPickerError, setAssetPickerError] = useState("");
+    const [exampleHost, setExampleHost] = useState<HTMLElement | null>(null);
     const assetSelection = useRef<((asset: InsertAssetPayload | null) => void) | null>(null);
     useUnsavedGuard(dirty, uiText("有未保存更改。请等待自动保存，或返回工程重试保存/导出。"));
     const isManagementAccount = useUserStore((state) => state.status === "authenticated" && Boolean(state.user) && !isWorkspaceRole(state.user?.role));
@@ -34,6 +37,7 @@ export function LocalDesignWorkbench({ moduleKey, title, description, mount }: {
         if (!root || !enabled || !identityReady) return;
         const controller = new AbortController();
         setDirty(false);
+        setExampleHost(null);
         let cleanup: (() => void) | undefined;
         const dispose = () => {
             if (controller.signal.aborted) return;
@@ -41,6 +45,7 @@ export function LocalDesignWorkbench({ moduleKey, title, description, mount }: {
             assetSelection.current?.(null);
             assetSelection.current = null;
             setAssetPickerOpen(false);
+            setExampleHost(null);
             cleanup?.();
             root.replaceChildren();
         };
@@ -68,7 +73,16 @@ export function LocalDesignWorkbench({ moduleKey, title, description, mount }: {
         Promise.resolve(mount(root, services))
             .then((stop) => {
                 if (controller.signal.aborted) stop();
-                else cleanup = stop;
+                else {
+                    cleanup = stop;
+                    const saveArea = root.querySelector(moduleKey === "pattern-placement" ? ".placement-delivery" : ".repeat-save-group");
+                    if (saveArea) {
+                        const target = document.createElement("div");
+                        target.className = "mb-4";
+                        saveArea.prepend(target);
+                        setExampleHost(target);
+                    }
+                }
             })
             .catch((error) => {
                 if (!controller.signal.aborted) {
@@ -125,6 +139,7 @@ export function LocalDesignWorkbench({ moduleKey, title, description, mount }: {
             ) : (
                 <div ref={host} className="local-workbench-host" />
             )}
+            {enabled && identityReady && exampleHost ? createPortal(<div onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}><PracticeExampleRecord /></div>, exampleHost) : null}
         </main>
     );
 }

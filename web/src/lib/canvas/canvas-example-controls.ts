@@ -10,7 +10,7 @@ export type CanvasControlGuide = {
     scenario: string;
     prepare: string;
     steps: Array<{ control: string; action: string; result: string }>;
-    caution: string;
+    location: string;
     practiceArea?: "practice" | "branches" | "shared";
 };
 

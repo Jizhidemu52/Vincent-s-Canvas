@@ -4,6 +4,18 @@ export function publicGenerationFailure(reason: unknown, status?: string): strin
     if (status === "paused" || /待核查|勿重复|不要重复|submission.{0,20}(unknown|uncertain)|query.{0,12}paused/i.test(raw))
         return "原任务结果待核查，请查询原任务或联系管理员；不要重复生成。";
     if (status === "cancelled") return "任务已取消。";
+    // These bounded local size limits are actionable, not raw provider diagnostics.
+    const referenceLimit = /^单张参考图超过 (10|12|20) MB，请压缩后重试$/.exec(raw);
+    if (referenceLimit) return `参考图超过当前模型单张 ${referenceLimit[1]} MiB 上限，请另存较小副本或切换模型；原图未修改，尚未提交生成。`;
+    // Exact locally-authored recipe failures are safe and identify a setup issue,
+    // not unsupported image parameters. Never echo arbitrary matching fragments.
+    if ([
+        "管理员尚未配置此场景的优化配方，未提交生成",
+        "管理员尚未启用此场景的配方版本，未提交生成",
+        "此场景的提示词优化已停用，未提交生成",
+        "图片助手配方暂不可用，未提交生成。",
+        "图片助手配方过长，未提交生成，请管理员精简配方。",
+    ].includes(raw)) return raw;
     if (/content.?policy|moderation|safety|nsfw|内容审核|敏感内容|违规/i.test(raw))
         return "内容未通过审核，请调整提示词或参考素材后重试。";
     if (/insufficient|balance|quota.?exceeded|额度不足|余额不足|积分不足/i.test(raw))

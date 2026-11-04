@@ -158,6 +158,7 @@ export function ApiConfigurationHub({ isAdmin }: { isAdmin: boolean }) {
                             <Form.Item name="rmbCostOverride" label="人民币成本总额 / 次（可选）"><InputNumber className="w-full" min={0} precision={6} placeholder="留空继承" /></Form.Item>
                         </div>
                     </>
+                    {selectedTool?.toolKey === "video" ? <Form.Item name="allowRawPrompt" label="允许原文直发" valuePropName="checked" extra="默认关闭。开启后，视频创作页可选择跳过 AI 动效规划，直接发送使用者输入的提示词。"><Switch /></Form.Item> : null}
                     <Form.Item name="enabled" label="本板块 API 启用" valuePropName="checked" extra="与模块入口开关独立；关闭后禁止本板块调用，不回退到其他模型。"><Switch /></Form.Item>
                     <Button className="!h-10" type="primary" htmlType="submit" loading={saving} block>{selectedTool?.toolKey === "gpt-chat" ? "保存并同步统一对话模型" : "仅保存当前板块并同步"}</Button>
                 </Form>

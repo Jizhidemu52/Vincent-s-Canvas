@@ -96,6 +96,17 @@ function expectSafeFailureLog(result: Awaited<ReturnType<typeof failedChat>>, co
 }
 
 describe("chat route transport failure classification", () => {
+    test("HTTP rejection keeps safe status/category in logs, refunds once and never resubmits", async () => {
+        const result = await failedChat(undefined, false, "claude-sonnet-5-5", () => Response.json({ error: { type: "invalid_request_error", message: `tool_choice not supported ${privateDetail}` } }, { status: 400 }));
+        expect(result.status).toBe(502);
+        expect(result.upstreamCalls).toBe(1);
+        expect(result.settlements).toEqual([{ reservationId: "held-chat-fixture", success: false }]);
+        expect(JSON.parse(result.text)).toMatchObject({ error: "UPSTREAM_REQUEST_FAILED", message: expect.stringContaining("工具选择参数") });
+        expect(result.logs).toEqual([["Chat request failed", { code: "UPSTREAM_REQUEST_FAILED", name: "ChatProtocolError", phase: "request", elapsedMs: expect.any(Number), upstreamStatus: 400, upstreamReason: "tool_choice_unsupported" }]]);
+        expect(result.text + JSON.stringify(result.logs)).not.toContain(privateDetail);
+        expect(JSON.stringify(result.logs)).not.toContain("private-source-prompt");
+    });
+
     for (const phase of ["initial_tls", "preflight", "http_started", "response"] as const) {
         test(`${phase} returns a safe upstream error without losing submission state or refunding twice`, async () => {
             const code = phase === "preflight" ? "UNSUPPORTED_NODE_RUNTIME" : "ECONNRESET";

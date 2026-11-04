@@ -1,8 +1,9 @@
 import type { PendingChatImageTask } from "@/services/api/chat-image-recovery";
 import type { ChatGeneratedImage, ChatSession } from "./chat-types";
 
-export function chatImageTaskSignature(task: Pick<PendingChatImageTask, "prompt" | "modelId" | "quality" | "resolution" | "size" | "action" | "parentId" | "referenceImageIds" | "maskAdaptation">) {
-    return JSON.stringify([task.action, task.prompt.trim(), task.modelId, task.quality || "", task.resolution || "", task.size || "", task.parentId || "", task.referenceImageIds || [], task.maskAdaptation?.maskStorageKey || ""]);
+export function chatImageTaskSignature(task: Pick<PendingChatImageTask, "prompt" | "modelId" | "quality" | "resolution" | "size" | "action" | "parentId" | "referenceImageIds" | "maskAdaptation" | "regionComposite">) {
+    return JSON.stringify([task.action, task.prompt.trim(), task.modelId, task.quality || "", task.resolution || "", task.size || "", task.parentId || "", task.referenceImageIds || [],
+        task.regionComposite ? [task.regionComposite.mode, task.regionComposite.source, task.regionComposite.selection] : task.maskAdaptation?.maskStorageKey || ""]);
 }
 
 /** An old uncertain request may be queried, never replayed by a fresh send. */

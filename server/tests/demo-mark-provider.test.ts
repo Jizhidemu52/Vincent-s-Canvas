@@ -9,6 +9,7 @@ import { ImageResultPersistenceError } from "../src/image-result-storage";
 import { imageTaskApiReplacer, imageTaskFailureDetail, imageTaskPauseReason, type ImageTaskFailureDetail } from "../src/image-task-diagnostics";
 import { isPublicHttpUrl } from "../src/apimart-upload";
 import { imageAgentProviderPrompt } from "../src/image-agent-profile";
+import { PromptOptimizationError } from "../src/prompt-safety";
 
 const stores: DemoStateStore[] = [];
 afterEach(() => { for (const store of stores.splice(0)) store.close(); });
@@ -21,16 +22,20 @@ const productionCode = ts.transpileModule(names.map(name => {
   return declaration.getText(source);
 }).join("\n"), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText;
 
-type Task = { id: string; requestId: string; ownerUserId: string; status: string; operationType: string; credits: number; parameters: Record<string, unknown>; upstreamTaskId?: string; upstreamResultUrl?: string; submissionStartedAt?: string; failureReason?: string; lastFailure?: ImageTaskFailureDetail };
+type Task = { id: string; requestId: string; ownerUserId: string; status: string; operationType: string; credits: number; parameters: Record<string, unknown>; upstreamTaskId?: string; upstreamResultUrl?: string; submissionStartedAt?: string; errorCode?: string; failureReason?: string; lastFailure?: ImageTaskFailureDetail };
 type Input = { baseUrl: string; apiKey: string; sourceDataUrls: string[]; maskDataUrl?: string; upstreamTaskId?: string; submissionStarted?: boolean; beforeSubmit?: () => void; onSubmitted?: (id: string) => void };
-function harness(failure?: "prepare" | "preflight" | "submission" | "polling" | "download" | "store" | "terminal") {
+function harness(failure?: "prepare" | "preflight" | "submission" | "polling" | "download" | "store" | "terminal", recipeFailure?: Error) {
   const demoState = new DemoStateStore(":memory:"); stores.push(demoState);
   const inputs: Input[] = [];
   const completed: unknown[][] = [];
   let paid = 0;
   let downloads = 0;
   const dependencies = {
-    imageAgentProviderPrompt,
+    imageAgentProviderPrompt, PromptOptimizationError,
+    demoPromptCompiler: { store: { active: async () => {
+      if (recipeFailure) throw recipeFailure;
+      return { version: { systemPrompt: "PRIVATE_IMAGE_RECIPE_FIXTURE" } };
+    } } },
     demoState, DemoStorageError, materializeDemoAsset, ImageResultPersistenceError, ApiMartImageProviderFailure, MARK_IMAGE_PROVIDER_ID,
     imageTaskFailureDetail, imageTaskPauseReason, isPublicHttpUrl,
     demoAssets: new Map(), demoTasks: new Map(), now: () => new Date().toISOString(),
@@ -123,6 +128,31 @@ describe("read-only demo Mark catalog", () => {
     const h = harness("preflight"); await h.run();
     expect(h.task.status).toBe("failed"); expect(h.task.submissionStartedAt).toBeUndefined();
     expect(h.paid()).toBe(0); expect(h.user.creditBalance).toBe(13);
+  });
+
+  test.each([
+    ["PROMPT_RECIPE_UNAVAILABLE", "管理员尚未配置此场景的优化配方，未提交生成"],
+    ["PROMPT_RECIPE_UNAVAILABLE", "管理员尚未启用此场景的配方版本，未提交生成"],
+    ["PROMPT_RECIPE_DISABLED", "此场景的提示词优化已停用，未提交生成"],
+  ])("recipe preflight preserves %s without creating an upstream request", async (code, message) => {
+    const h = harness(undefined, new PromptOptimizationError(code, message, 503));
+    h.task.operationType = "inpaint";
+    h.task.parameters.imageAgentProfile = "creative-chat";
+    await h.run();
+    expect(h.task).toMatchObject({ status: "failed", errorCode: code, failureReason: message, lastFailure: { phase: "preflight", code } });
+    expect(h.demoState.load().tasks[0]).toMatchObject({ errorCode: code, failureReason: message, lastFailure: { phase: "preflight", code } });
+    expect(h.task.submissionStartedAt).toBeUndefined(); expect(h.task.upstreamTaskId).toBeUndefined();
+    expect(h.inputs).toHaveLength(0); expect(h.paid()).toBe(0); expect(h.downloads()).toBe(0);
+    expect(h.completed).toHaveLength(0); expect(h.user.creditBalance).toBe(13);
+  });
+
+  test("unknown recipe loader failures still hide private details before submission", async () => {
+    const h = harness(undefined, new Error("PRIVATE_IMAGE_RECIPE_FIXTURE fake-mark-key"));
+    h.task.parameters.imageAgentProfile = "creative-chat";
+    await h.run();
+    expect(h.task).toMatchObject({ status: "failed", errorCode: "MARK_IMAGE_FAILED", lastFailure: { phase: "preflight", code: "PROVIDER_OPERATION_FAILED" } });
+    expect(h.task.failureReason).not.toMatch(/PRIVATE_IMAGE_RECIPE_FIXTURE|fake-mark-key/);
+    expect(h.inputs).toHaveLength(0); expect(h.paid()).toBe(0);
   });
 
   test("recovery preflight and result-store failures retain their real phases and never refund or replay", async () => {

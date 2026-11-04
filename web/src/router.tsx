@@ -4,7 +4,6 @@ import { createBrowserRouter, Navigate, Outlet } from "react-router-dom";
 import UserLayout from "@/layouts/user-layout";
 import { AuthGate } from "@/components/auth/auth-gate";
 import { ModuleGate } from "@/components/auth/module-gate";
-import { FeatureExamples } from "@/components/design-examples";
 import { standaloneEdition } from "@/lib/standalone-edition";
 import { deploymentFeatures } from "@/lib/deployment-features";
 import type { ModuleKey } from "@/services/api/modules";
@@ -56,7 +55,7 @@ function protectedRoute(Page: RoutePage, admin = false) {
 }
 
 function moduleRoute(Page: RoutePage, moduleKey: ModuleKey | ((search: string) => ModuleKey)) {
-    return <AuthGate><ModuleGate moduleKey={moduleKey}><FeatureExamples>{routeElement(Page)}</FeatureExamples></ModuleGate></AuthGate>;
+    return <AuthGate><ModuleGate moduleKey={moduleKey}>{routeElement(Page)}</ModuleGate></AuthGate>;
 }
 
 function imageModule(search: string): ModuleKey {

@@ -32,12 +32,13 @@ import { applyImagePromptExclusions, isImagePromptOperation, validateImagePrompt
 import { PromptOptimizationError } from "../prompt-safety";
 import { promptHash } from "../prompt-recipe-store";
 import { withTransaction } from "../db-transaction";
+import { assertVideoMotionPolicy } from "../video-motion-input";
 import { claimBatchAdmission, fenceBatchAdmission, findBatchForSubmission, finishBatchAdmission, readBatchAdmission, recordBatchAdmissionFailure, type BatchAdmissionToken } from "../batch-admission";
 
 const actionSchema = z.enum(["pause", "resume", "cancel"]);
 
-const taskSelect = `t.id,t.tool_key AS "toolKey",t.model_config_id AS "modelConfigId",t.request_id AS "requestId",t.batch_id AS "batchId",t.user_id AS "userId",u.display_name AS "userName",t.project_id AS "projectId",t.operation_type AS "operationType",t.prompt,t.parameters,t.source_urls AS "sourceUrls",t.result_urls AS "resultUrls",t.priority,t.status,t.credits,t.rmb_cost::float8 AS "rmbCost",t.failure_reason AS "failureReason",t.attempts,t.upstream_task_id AS "upstreamTaskId",t.upstream_submission_started_at AS "submissionStartedAt",t.queued_at AS "queuedAt",t.started_at AS "startedAt",t.completed_at AS "completedAt",t.user_input AS "userInput",t.prompt_optimized AS optimized`;
-const taskSummarySelect = `t.id,t.tool_key AS "toolKey",t.model_config_id AS "modelConfigId",t.request_id AS "requestId",t.batch_id AS "batchId",t.user_id AS "userId",u.display_name AS "userName",t.project_id AS "projectId",t.operation_type AS "operationType",left(t.prompt,240) AS prompt,t.result_urls AS "resultUrls",t.priority,t.status,t.credits,t.rmb_cost::float8 AS "rmbCost",t.failure_reason AS "failureReason",t.attempts,t.upstream_task_id AS "upstreamTaskId",t.upstream_submission_started_at AS "submissionStartedAt",t.queued_at AS "queuedAt",t.started_at AS "startedAt",t.completed_at AS "completedAt"`;
+const taskSelect = `t.id,t.tool_key AS "toolKey",t.model_config_id AS "modelConfigId",t.request_id AS "requestId",t.batch_id AS "batchId",t.user_id AS "userId",u.display_name AS "userName",t.project_id AS "projectId",t.operation_type AS "operationType",t.prompt,t.parameters,t.source_urls AS "sourceUrls",t.result_urls AS "resultUrls",t.priority,t.status,t.credits,t.rmb_cost::float8 AS "rmbCost",t.failure_reason AS "failureReason",t.attempts,t.upstream_task_id AS "upstreamTaskId",t.upstream_submission_started_at AS "submissionStartedAt",t.queued_at AS "queuedAt",t.started_at AS "startedAt",t.completed_at AS "completedAt",t.user_input AS "userInput",t.prompt_optimized AS optimized,t.parameters->'promptOptimization'->>'summaryZh' AS "summaryZh"`;
+const taskSummarySelect = `t.id,t.tool_key AS "toolKey",t.model_config_id AS "modelConfigId",t.request_id AS "requestId",t.batch_id AS "batchId",t.user_id AS "userId",u.display_name AS "userName",t.project_id AS "projectId",t.operation_type AS "operationType",left(t.prompt,240) AS prompt,t.result_urls AS "resultUrls",t.priority,t.status,t.credits,t.rmb_cost::float8 AS "rmbCost",t.failure_reason AS "failureReason",t.attempts,t.upstream_task_id AS "upstreamTaskId",t.upstream_submission_started_at AS "submissionStartedAt",t.queued_at AS "queuedAt",t.started_at AS "startedAt",t.completed_at AS "completedAt",t.parameters->'promptOptimization'->>'summaryZh' AS "summaryZh"`;
 const batchSelect = `b.id,b.tool_key AS "toolKey",b.model_config_id AS "modelConfigId",b.request_id AS "requestId",b.user_id AS "userId",u.display_name AS "userName",b.department_id AS "departmentId",b.project_id AS "projectId",b.operation_type AS "operationType",m.name AS "modelName",b.priority,b.status,b.total_items AS "totalItems",b.completed_items AS "completedItems",b.failed_items AS "failedItems",stats.waiting_items AS "waitingItems",stats.processing_items AS "processingItems",stats.paused_items AS "pausedItems",stats.cancelled_items AS "cancelledItems",stats.planned_credits AS "plannedCredits",stats.consumed_credits AS "consumedCredits",stats.consumed_rmb_cost AS "consumedRmbCost",b.created_at AS "createdAt",b.updated_at AS "updatedAt"`;
 const batchStatsJoin = `LEFT JOIN LATERAL (SELECT
   COUNT(*) FILTER (WHERE t.status='waiting')::int AS waiting_items,
@@ -66,12 +67,28 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
       const target = (await db.query<{ modelId: string; protocol: string }>(`SELECT m.model_id AS "modelId",p.protocol FROM model_configs m JOIN providers p ON p.id=m.provider_id WHERE m.id=$1`, [execution.modelConfigId])).rows[0];
       return applyImagePromptExclusions(prepared, target);
     };
-    if (!input.promptInput && !requiredPromptScene(input.toolKey ?? String(input.parameters.tool ?? ""))) return finish({ ...input, optimized: false });
+    if (!input.promptInput && !requiredPromptScene(input.toolKey ?? String(input.parameters.tool ?? ""))) {
+      if (input.operationType === "video_generation") {
+        const execution = await resolveToolExecution(db, input);
+        assertVideoMotionPolicy({ ...input, toolKey: execution.toolKey }, execution.allowRawPrompt);
+        const parameters = { ...input.parameters };
+        delete parameters.promptOptimization;
+        return finish({ ...input, parameters, toolKey: execution.toolKey, modelConfigId: execution.modelConfigId, toolConfiguration: execution, optimized: false });
+      }
+      return finish({ ...input, optimized: false });
+    }
     if (!options.promptCompiler) throw new PromptOptimizationError("PROMPT_UNAVAILABLE", "提示词优化尚未配置，未提交生成", 503);
     const active = await db.query<{ count: number }>("SELECT count(*)::int AS count FROM tasks WHERE user_id=$1 AND status IN ('waiting','processing','paused')", [actor.id]);
     if (Number(active.rows[0]?.count) >= (options.maxInflightTasks ?? 100)) throw new BillingError("USER_TASK_LIMIT_REACHED", "在途任务已达到上限，请等待任务完成或取消未提交的任务");
     const prior = actor.role === "super_admin" && input.promptInput?.compilationId ? await options.promptCompiler.store.getCompilation(input.promptInput.compilationId, actor.id) : null;
     const execution = await resolveToolExecution(db, input, { allowModelOverride: prior?.adminTest === true });
+    if (input.operationType === "video_generation") {
+      assertVideoMotionPolicy({ ...input, toolKey: execution.toolKey }, execution.allowRawPrompt);
+      // Source ownership, bytes, dimensions, duration and provider parameters are checked before any paid LLM call.
+      const checked = await videoPreflight(db, { ...input, modelConfigId: execution.modelConfigId, userId: actor.id });
+      const prepared = await preparePromptTaskInput(options.promptCompiler, actor, { ...input, parameters: { ...input.parameters, ...checked.normalized }, modelConfigId: execution.modelConfigId, toolKey: execution.toolKey, toolConfiguration: execution }, { videoSourceMimeTypes: checked.snapshot.assets.map(asset => asset.mimeType) });
+      return { ...prepared, videoPreflightResult: checked };
+    }
     return finish(await preparePromptTaskInput(options.promptCompiler, actor, { ...input, modelConfigId: execution.modelConfigId, toolKey: execution.toolKey, toolConfiguration: execution }));
   };
   const existingBatchResult = async (requestId: string, userId: string) => {
@@ -98,6 +115,7 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
         return;
       }
       const execution = await resolveToolExecution(db, input);
+      assertVideoMotionPolicy({ ...input, toolKey: execution.toolKey }, execution.allowRawPrompt);
       const actor = (request as unknown as AuthenticatedRequest).auth;
       const preflight = await videoPreflight(db, { ...input, modelConfigId: execution.modelConfigId, userId: actor.id });
       response.json({ ok: true, requestId: input.requestId, normalized: preflight.normalized });
@@ -161,8 +179,8 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
           maxInflightTasks: options.maxInflightTasks,
           userId: actor.id,
           departmentId: actor.departmentId,
-        });
-      response.status(201).json({ task: { ...task, prompt: prepared.prompt, parameters: prepared.parameters, userInput: "userInput" in prepared ? prepared.userInput : null, optimized: prepared.optimized } });
+        }, videoPreflight);
+      response.status(201).json({ task: { ...task, prompt: prepared.prompt, parameters: prepared.parameters, userInput: "userInput" in prepared ? prepared.userInput : null, optimized: prepared.optimized, ...("summaryZh" in prepared ? { summaryZh: prepared.summaryZh } : {}) } });
     } catch (error) {
       if (error instanceof BillingError) {
         response

@@ -4,6 +4,28 @@ export class PromptOptimizationError extends Error {
   constructor(public readonly code: string, message: string, public readonly status = 400) { super(message); }
 }
 
+/** Validate the final prompt even when it came from a cached compilation or fallback. */
+export function assertVideoMotionTimeline(prompt: string, expectedDuration: unknown) {
+  const text = prompt.normalize("NFKC");
+  const reject = () => { throw new PromptOptimizationError("PROMPT_VIDEO_TIMELINE_INVALID", "动效规划未通过时间轴检查，未提交生成", 422); };
+  if (/(?:改为|改成|改用|调整为|修正为|更正为)\s*整数秒/.test(text)) reject();
+  // Capture decimal/clock/exponent endpoints too, so invalid ranges cannot be
+  // skipped while a later integer range is mistaken for the complete timeline.
+  const ranges = [...text.matchAll(/(?<![\d.:])([+-]?(?:\d+(?:[.:]\d+)*\.?|\.\d+)(?:e[+-]?\d+)?)\s*(?:秒|s(?:ec(?:ond)?s?)?\b)?\s*(?:[-–—~～]|至|到|to)\s*([+-]?(?:\d+(?:[.:]\d+)*\.?|\.\d+)(?:e[+-]?\d+)?)\s*(?:秒|s(?:ec(?:ond)?s?)?\b)/gi)];
+  if (ranges.some(range => !/^\d+$/.test(range[1]!) || !/^\d+$/.test(range[2]!))) reject();
+  // Automatic duration has no authoritative endpoint yet. Do not require a
+  // timeline or force it to begin at zero for automatic/edit/continuation jobs.
+  if (typeof expectedDuration !== "number" || !Number.isInteger(expectedDuration) || expectedDuration <= 0) return;
+  if (!ranges.length) reject();
+  let end = 0;
+  for (const range of ranges) {
+    const start = Number(range[1]), next = Number(range[2]);
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(next) || start !== end || next <= start) reject();
+    end = next;
+  }
+  if (end !== expectedDuration) reject();
+}
+
 function normalized(value: string) { return value.normalize("NFKC").replace(/[\s\p{P}\p{S}]+/gu, "").toLowerCase(); }
 
 /** The check inspects output, not instructions inside user input. Never include matched text in errors. */
@@ -64,19 +86,24 @@ function allowRequiredText(avoid: string, language: "en" | "zh") {
   }).join("");
 }
 
-export function parseOptimizedPrompt(raw: string, rules: readonly string[], options: { reverse?: boolean; referenceCount: number; userText: string; language: "en" | "zh"; requiredText?: string[] }) {
+export function parseOptimizedPrompt(raw: string, rules: readonly string[], options: { video?: boolean; reverse?: boolean; referenceCount: number; userText: string; language: "en" | "zh"; requiredText?: string[] }) {
   if (raw.length > 30_000) throw new PromptOptimizationError("PROMPT_OUTPUT_INVALID", "提示词优化输出过长，未提交生成", 422);
   let result: unknown;
   try { result = parseStrictJson(raw); } catch { throw new PromptOptimizationError("PROMPT_OUTPUT_INVALID", "提示词优化未返回有效 JSON，未提交生成", 422); }
   if (!result || typeof result !== "object" || Array.isArray(result)) throw new PromptOptimizationError("PROMPT_OUTPUT_INVALID", "提示词优化输出格式无效，未提交生成", 422);
   const value = result as Record<string, unknown>;
-  const allowed = options.reverse ? ["prompt", "summary_zh"] : ["prompt", "avoid", "keep_text"];
-  if (Object.keys(value).some(key => !allowed.includes(key)) || typeof value.prompt !== "string" || !value.prompt.trim() || value.prompt.length > 20_000) {
+  const allowed = options.reverse || options.video ? ["prompt", "summary_zh"] : ["prompt", "avoid", "keep_text"];
+  if (Object.keys(value).some(key => !allowed.includes(key)) || typeof value.prompt !== "string" || !value.prompt.trim() || value.prompt.length > (options.video ? 1500 : 20_000)) {
     throw new PromptOptimizationError("PROMPT_OUTPUT_INVALID", "提示词优化输出字段无效，未提交生成", 422);
   }
   assertNoPromptRuleLeak(result, rules);
-  for (const reference of value.prompt.matchAll(/\bImage\s+(\d+)\b/gi)) {
+  for (const reference of value.prompt.matchAll(/(?:\bImage\s*|图片\s*)(\d+)/gi)) {
     if (Number(reference[1]) < 1 || Number(reference[1]) > options.referenceCount) throw new PromptOptimizationError("PROMPT_REFERENCE_INVALID", "优化结果引用了不存在的参考图，未提交生成", 422);
+  }
+  if (options.video) {
+    if (typeof value.summary_zh !== "string" || !value.summary_zh.trim() || value.summary_zh.length > 60 || /[\r\n]/.test(value.summary_zh)) throw new PromptOptimizationError("PROMPT_OUTPUT_INVALID", "动效说明必须为不超过 60 字的一句话", 422);
+    if (options.requiredText?.some(text => !(value.prompt as string).includes(text))) throw new PromptOptimizationError("PROMPT_TEXT_NOT_PRESERVED", "动效规划未原样保留指定文字，未提交生成", 422);
+    return { prompt: value.prompt.trim(), summaryZh: value.summary_zh.trim(), keepText: [] as string[] };
   }
   if (options.reverse) {
     if (typeof value.summary_zh !== "string" || value.summary_zh.length > 1_000) throw new PromptOptimizationError("PROMPT_OUTPUT_INVALID", "反推摘要格式无效", 422);

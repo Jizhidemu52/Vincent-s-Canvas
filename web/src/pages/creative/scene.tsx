@@ -1,6 +1,6 @@
 import { uiText, useUiText } from "@/lib/i18n";
 import { formatBeijingDateTime } from "@/lib/beijing-time";
-import { ArrowLeft, ArrowRight, ChevronDown, Download, History, ImageIcon, LoaderCircle, Plus, RotateCcw, Sparkles } from "lucide-react";
+import { ArrowLeft, ArrowRight, ChevronDown, Download, History, LoaderCircle, Plus, RotateCcw, Sparkles } from "lucide-react";
 import { App, Image } from "antd";
 import { handleSubmitShortcut } from "@/lib/submit-shortcut";
 import { GenerationInputList } from "@/components/generation-input-list";
@@ -10,7 +10,7 @@ import { GenerationQueueProgress } from "@/components/generation-queue-progress"
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ModuleGate } from "@/components/auth/module-gate";
-import { DesignExampleArticle } from "@/components/design-examples";
+import { PracticeExampleRecord } from "@/components/design-examples";
 import { designExampleForScene } from "@/lib/design-examples";
 import { GenerationElapsed } from "@/components/generation-elapsed";
 import { ImageSettingsPanel, imageQualityLabel, imageSizeLabel } from "@/components/image-settings-panel";
@@ -62,7 +62,7 @@ function CreativeSceneWorkspace({ preset }: { preset: CreativePreset }) {
     const flags = useModuleStore(state => state.flags);
     const tools = useBusinessConfigStore(state => state.tools);
     const theme = canvasThemes[useThemeStore(state => state.theme)];
-    const [view, setView] = useState<"example" | "results" | "history">("example");
+    const [view, setView] = useState<"results" | "history">("history");
     const [tool, setTool] = useState<"selection" | "recolor" | null>(null);
     const [traceImage, setTraceImage] = useState<SceneImage | null>(null);
     const [promptOpen, setPromptOpen] = useState(false);
@@ -73,7 +73,7 @@ function CreativeSceneWorkspace({ preset }: { preset: CreativePreset }) {
     const available = creativePresets.filter(item => isModuleAvailable(flags, tools, `creative-${item.id}` as ModuleKey));
     const submit = () => { setView("results"); void ws.generate(); };
 
-    return <main className="wb-page cs-page" onKeyDown={event => handleSubmitShortcut(event, !ws.loading && !ws.running && !ws.validation && !ws.quotaBlocked && !ws.uploading, submit)}>
+    return <main className="wb-page cs-page">
         <header className="cs-header">
             <Link to="/creative" className="cs-back"><ArrowLeft size={16} /><span>{uiText("创意设计")}</span></Link>
             <span className="cs-header-divider" />
@@ -82,10 +82,13 @@ function CreativeSceneWorkspace({ preset }: { preset: CreativePreset }) {
                     {available.map(item => <option key={item.id} value={item.id}>{uiText(item.title || "")}</option>)}
                 </select><ChevronDown size={14} />
             </div>
-            <button className="cs-new" type="button" disabled={ws.running || ws.loading} onClick={() => { ws.reset(); setView("example"); }}><Plus size={15} />{uiText("新建任务")}</button>
+            <button className="cs-new" type="button" disabled={ws.running || ws.loading} onClick={() => { ws.reset(); setView("history"); }}><Plus size={15} />{uiText("新建任务")}</button>
         </header>
         <div className="cs-layout">
-            <aside className="cs-form-panel" aria-label={uiText("{title}设计参数", { title: uiText(preset.title) })}>
+            <aside className="cs-form-panel" aria-label={uiText("{title}设计参数", { title: uiText(preset.title) })} onKeyDown={event => {
+                if ((event.target as HTMLElement).closest?.("button, a, summary, [role='button']")) return;
+                handleSubmitShortcut(event, !ws.loading && !ws.running && !ws.validation && !ws.quotaBlocked && !ws.uploading, submit);
+            }}>
                 <div className="cs-form-heading"><span className="cs-eyebrow">{uiText("设计工作台")}</span><h1>{uiText(preset.title || "")}</h1><p>{uiText(preset.description || "")}</p></div>
                 {ws.loading ? <div className="cs-loading"><LoaderCircle size={18} className="animate-spin" />{uiText("正在恢复场景草稿…")}</div> : <fieldset disabled={ws.running} className="cs-form-body">
                     {!!slots.length && <section className="cs-upload-section"><h2 className="cs-section-label"><span>01</span>{preset.id === "accessory-design" ? uiText("上传辅料与图案") : preset.id.startsWith("pattern-") ? uiText("上传图案素材") : uiText("上传款式图")}</h2><SceneUploads slots={slots} images={ws.images} onImage={(id, file) => ws.setImage(id, file)} disabled={ws.running || ws.uploading || ws.loading} scopeKey={`creative:${preset.id}`} />
@@ -115,23 +118,21 @@ function CreativeSceneWorkspace({ preset }: { preset: CreativePreset }) {
             </aside>
             <section className="cs-stage" aria-label={uiText("设计预览与结果")}>
                 <nav className="cs-stage-tabs" aria-label={uiText("预览内容")}>
-                    <button type="button" aria-pressed={view === "example"} onClick={() => setView("example")}><ImageIcon size={15} />{uiText("功能示例")}</button>
                     <button type="button" aria-pressed={view === "results"} onClick={() => setView("results")}>{uiText("当前结果")}{ws.results.length ? <span>{ws.results.length}</span> : null}</button>
                     <button type="button" className="cs-history-tab" aria-pressed={view === "history"} onClick={() => setView("history")}><History size={15} />{uiText("最近任务")}{ws.historyTotal ? <span>{ws.historyTotal}</span> : null}</button>
                 </nav>
-                {view === "example" ? <div className="cs-example">
-                    {example ? <DesignExampleArticle example={example} /> : <><div className="cs-example-heading"><span className="cs-eyebrow">{uiText("功能示例")}</span><h2>{uiText(summary.input || "")}<ArrowRight size={21} />{uiText(summary.output || "")}</h2><p>{uiText(summary.example || "")}</p></div><p className="cs-help">{uiText(summary.limit || "")}</p></>}
-                </div> : view === "history" ? <div className="cs-history">
+                {view === "history" ? <div className="cs-history">
+                    {example ? <PracticeExampleRecord example={example} /> : null}
                     <h2>{uiText("最近任务")}</h2><p className="cs-help">{uiText("显示当前账号在「")}{uiText(preset.title || "")}{uiText("」中的任务与待查询原请求，保存在本机浏览器。")}</p>
                     {ws.logs.length ? ws.logs.map(log => <div key={log.id} className="flex items-center gap-3"><button type="button" className="cs-history-item" disabled={ws.running} onClick={() => { void ws.previewLog(log); setPromptOpen(true); setView("results"); }}>
                         <span className="cs-history-icon"><History size={18} /></span><span><strong>{formatBeijingDateTime(log.createdAt)} {uiText("北京时间")}</strong><small>{log.operation === "recolor" ? uiText("本地精确换色 · ") : log.hasSelection ? uiText("选区合成 · ") : ""}{log.successCount} {uiText(" 张成功")}{log.failCount ? uiText(" · {failCount} 张失败", { failCount: log.failCount }) : ""}{log.unresolvedCount ? uiText(" · {unresolvedCount} 张待查询", { unresolvedCount: log.unresolvedCount }) : ""} {uiText(" · 查看结果与提示词")}</small></span><ArrowRight size={15} />
-                    </button><button type="button" className="shrink-0 text-xs text-muted-foreground" disabled={ws.running || ws.loading || ws.historyLoading || Boolean(log.unresolvedCount)} onClick={() => modal.confirm({ title: uiText("删除这条历史记录？"), content: uiText("仅从本机历史列表移除已结束的记录；原图与服务端任务仍保留，不会取消任务。"), okText: uiText("删除记录"), cancelText: uiText("保留记录"), onOk: () => ws.deleteLog(log) })}>{uiText("删除")}</button></div>) : <div className="cs-empty"><History size={26} /><h3>{uiText("还没有生成记录")}</h3><p>{uiText("完成一次设计后，会在这里保存参数和结果。")}</p></div>}
+                    </button><button type="button" className="shrink-0 text-xs text-muted-foreground" disabled={ws.running || ws.loading || ws.historyLoading || Boolean(log.unresolvedCount)} onClick={() => modal.confirm({ title: uiText("删除这条历史记录？"), content: uiText("仅从本机历史列表移除已结束的记录；原图与服务端任务仍保留，不会取消任务。"), okText: uiText("删除记录"), cancelText: uiText("保留记录"), onOk: () => ws.deleteLog(log) })}>{uiText("删除")}</button></div>) : <p className="cs-help">{uiText("还没有生成记录。完成一次设计后，会在这里保存参数和结果。")}</p>}
                     {ws.historyHasMore && <button type="button" className="cs-tool-entry" disabled={ws.historyLoading} onClick={() => void ws.loadMoreHistory()}>{ws.historyLoading ? uiText("正在加载…") : uiText("加载更多（已显示 {length} / {historyTotal}）", { length: ws.logs.length, historyTotal: ws.historyTotal })}</button>}
                 </div> : <div className="cs-results">
                     <div className="cs-results-heading"><h2>{ws.optimizing ? uiText("正在优化提示词…") : ws.running ? uiText("正在创作") : uiText("设计结果")}</h2>{ws.activeLog && <><span>{formatBeijingDateTime(ws.activeLog.createdAt)} {uiText("北京时间")}</span><button type="button" className="cs-tool-entry" disabled={ws.running || ws.loading || ws.previewing} onClick={() => modal.confirm({ title: uiText("恢复为草稿？"), content: uiText("将替换当前设计要求、模型与参考素材，不会提交生成任务。"), okText: uiText("确认恢复"), cancelText: uiText("保留草稿"), onOk: async () => { await ws.restoreLog(ws.activeLog!); setPromptOpen(true); } })}>{uiText("恢复为草稿继续改")}</button></>}</div>
                     {ws.previewing && <p className="cs-help" role="status">{uiText("正在读取所选结果…")}</p>}
                     {ws.activeLog?.operation === "recolor" && <p className="cs-help cs-operation-note">{ws.activeLog.prompt}</p>}
-                    {!ws.results.length ? <div className="cs-empty"><Sparkles size={28} /><h3>{uiText("让设计从这里开始")}</h3><p>{uiText("在左侧完成")}{slots.length ? uiText("素材和") : ""}{uiText("设计要求，点击生成。")}</p><button type="button" onClick={() => setView("example")}><RotateCcw size={14} />{uiText("看看功能示例")}</button></div> : <div className="cs-result-grid">{ws.results.map((result, index) => <article key={result.id} className="cs-result-card">
+                    {!ws.results.length ? <div className="cs-empty"><Sparkles size={28} /><h3>{uiText("让设计从这里开始")}</h3><p>{uiText("在左侧完成")}{slots.length ? uiText("素材和") : ""}{uiText("设计要求，点击生成。")}</p><button type="button" onClick={() => setView("history")}><RotateCcw size={14} />{uiText("看看实操案例")}</button></div> : <div className="cs-result-grid">{ws.results.map((result, index) => <article key={result.id} className="cs-result-card">
                         {result.status === "success" && result.image ? <><Image src={result.image.dataUrl} alt={uiText("{title}结果 {value2}", { title: uiText(preset.title), value2: index + 1 })} onClick={() => { ws.selectResultPrompt(result); setPromptOpen(true); }} /><div className="cs-result-meta"><span>{uiText("方案 ")}{String(index + 1).padStart(2, "0")}</span><button type="button" onClick={() => { void ws.download(result.image!, index); }}><Download size={14} />{uiText("下载原图")}</button>{traceEnabled && preset.id === "style-to-sketch" && <button type="button" onClick={() => setTraceImage(result.image!)}>{uiText("导出 SVG")}</button>}</div>
                             <div className="cs-result-actions">
                                 <button type="button" disabled={ws.running || ws.resultActionBusy || !ws.activeLog} onClick={() => void ws.resultAction("saveAsset", result.image!)}>{uiText("保存到素材库")}</button>

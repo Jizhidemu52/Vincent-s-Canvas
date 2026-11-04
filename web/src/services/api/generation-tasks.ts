@@ -6,6 +6,8 @@ import { getPromptCompilation } from "./prompt-compilations";
 import type { TaskSubmission } from "../../../../shared/task-contracts";
 
 import { dataUrlToFile } from "@/lib/image-utils";
+import { imageReferenceFileError } from "@/lib/image-reference-policy";
+import { imageModelProfile } from "@/lib/image-model-settings";
 import { createClientId } from "@/lib/client-id";
 import { fetchServerAsset, uploadServerAsset } from "@/services/api/server-assets";
 import { observeTask } from "./task-observation";
@@ -35,7 +37,7 @@ export type QueuedTaskProgress = {
     estimateReason: string | null;
     retryAfterSeconds: number | null;
 };
-export type QueuedTask = { prompt?: string; userInput?: PromptInputData; optimized?: boolean; id: string; requestId: string; operationType?: string; attempts?: number; status: string; stage?: string; errorCode?: string | null; upstreamTaskId?: string | null; submissionStartedAt?: string | null; resultUrls: string[]; failureReason: string | null; createdAt?: string; updatedAt?: string; userId?: string; ownerUserId?: string; parameters?: Record<string, unknown> };
+export type QueuedTask = { prompt?: string; summaryZh?: string; userInput?: PromptInputData; optimized?: boolean; id: string; requestId: string; operationType?: string; attempts?: number; status: string; stage?: string; errorCode?: string | null; upstreamTaskId?: string | null; submissionStartedAt?: string | null; resultUrls: string[]; failureReason: string | null; createdAt?: string; updatedAt?: string; userId?: string; ownerUserId?: string; parameters?: Record<string, unknown> };
 
 /** The server snapshot keeps exclusion text out of the editable/replay prompt. */
 export function imageTaskPrompts(task: Pick<QueuedTask, "prompt" | "parameters">, fallback = ""): { prompt: string; submittedPrompt?: string } {
@@ -78,7 +80,7 @@ export class QueuedTaskHttpError extends Error {
 }
 export type GenerationVideoCapability = { seconds: readonly [number, number]; resolutions: readonly string[]; sizes: readonly string[]; minImages: number; maxImages: number; firstFrameRequired: boolean; supportsAudio: boolean };
 export type GenerationCapabilityModel = { id: string; name: string; modelId: string; capability: GenerationVideoCapability };
-export type QueuedMediaInput = { modelId: string; resolvedModel?: PublicModel; prompt: string; operationType: string; toolKey?: string; parameters?: Record<string, unknown>; sourceFiles?: File[]; sourceUrls?: string[]; sourceMetadata?: Record<string, unknown>[]; sourceOrder?: Array<{ kind: "file" | "url"; index: number }>; signal?: AbortSignal; cancelOnAbort?: () => boolean; onSubmissionStarted?: (requestId: string) => void | Promise<void>; onSubmitted?: (task: QueuedTask) => void | Promise<void> };
+export type QueuedMediaInput = { modelId: string; resolvedModel?: PublicModel; prompt: string; promptInput?: PromptInputData; operationType: string; toolKey?: string; parameters?: Record<string, unknown>; sourceFiles?: File[]; sourceUrls?: string[]; sourceMetadata?: Record<string, unknown>[]; sourceOrder?: Array<{ kind: "file" | "url"; index: number }>; signal?: AbortSignal; cancelOnAbort?: () => boolean; onSubmissionStarted?: (requestId: string) => void | Promise<void>; onSubmitted?: (task: QueuedTask) => void | Promise<void> };
 export type QueuedBatchItem = QueuedTask & { itemIndex: number };
 export type QueuedBatchFailure = { index: number; reason: string };
 export type QueuedBatchAction = "pause" | "resume" | "cancel";
@@ -149,6 +151,7 @@ export async function requestQueuedImages(input: { modelId: string; resolvedMode
     const model = input.resolvedModel || await resolvePublicModel(input.modelId, input.operationType, toolKey);
     assertOwner();
     input.signal?.throwIfAborted();
+    const referenceProfile = imageModelProfile(model.id, [model]);
     const sourceUrls: string[] = [];
     const archivedReferences: ArchivedReference[] = [];
     for (const reference of input.references || []) {
@@ -157,6 +160,8 @@ export async function requestQueuedImages(input: { modelId: string; resolvedMode
         input.signal?.throwIfAborted();
         const file = dataUrlToFile({ ...reference, dataUrl });
         input.signal?.throwIfAborted();
+        const referenceError = imageReferenceFileError(file, referenceProfile);
+        if (referenceError) throw new Error(referenceError);
         const hash = await fingerprintImage(file);
         assertOwner();
         const assetId = await uploadImageReference(reference, file, hash, ownerId, input.signal);
@@ -239,11 +244,14 @@ export async function requestQueuedImageBatch(input: { modelId: string; resolved
     assertOwner();
     const model = input.resolvedModel || await resolvePublicModel(input.modelId, "batch_image", "canvas-batch");
     assertOwner();
+    const referenceProfile = imageModelProfile(model.id, [model]);
     const uploadedItems: Array<{ itemIndex: number; sourceUrl: string }> = [];
     const uploadFailures: QueuedBatchFailure[] = [];
     for (const [itemIndex, item] of input.files.entries()) {
         try {
             assertOwner();
+            const referenceError = imageReferenceFileError(item.file, referenceProfile);
+            if (referenceError) throw new Error(referenceError);
             const assetId = await uploadServerAsset(item.file, { title: item.title, source: "canvas-batch-reference" }, { signal: input.signal, expectedOwnerId: ownerId });
             assertOwner();
             uploadedItems.push({ itemIndex, sourceUrl: `/api/assets/${assetId}/content` });
@@ -336,6 +344,7 @@ export function createQueuedMediaTaskPayloads(input: {
     operationType: string;
     modelConfigId: string;
     prompt: string;
+    promptInput?: PromptInputData;
     parameters?: Record<string, unknown>;
     sourceUrls: string[];
 }) {
@@ -346,6 +355,7 @@ export function createQueuedMediaTaskPayloads(input: {
         toolKey: requireToolKey(input.operationType, input.toolKey),
         modelConfigId: input.modelConfigId,
         prompt: input.prompt,
+        ...(input.promptInput ? { promptInput: input.promptInput } : {}),
         parameters: input.parameters || {},
         sourceUrls: input.sourceUrls,
         priority: "normal" as const,
@@ -374,6 +384,7 @@ export async function submitQueuedMediaTask(input: QueuedMediaInput) {
         operationType: input.operationType,
         modelConfigId: model.id,
         prompt: input.prompt,
+        promptInput: input.promptInput,
         parameters: { ...input.parameters, tool: toolKey },
         sourceUrls: input.sourceOrder ? input.sourceOrder.map((source) => source.kind === "file" ? uploadedUrls[source.index] : input.sourceUrls![source.index]) : sourceUrls,
     });
@@ -403,6 +414,9 @@ export async function submitQueuedMediaTask(input: QueuedMediaInput) {
     } catch (error) {
         // An explicit client rejection is known not to have created a new task.
         if (error instanceof QueuedTaskHttpError && error.submissionRejected) throw error;
+        // A slow planner or lost acknowledgement must never replay the paid POST.
+        const original = await getQueuedTaskByRequestId(submitPayload.requestId).catch(() => null);
+        if (original?.id) return original;
         throw new QueuedTaskSubmissionUncertainError(submitPayload.requestId, undefined, error);
     }
     // Once acknowledged, keep the ID available to onSubmitted and cancellation;

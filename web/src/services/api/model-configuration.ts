@@ -15,6 +15,7 @@ export type ToolApiConfiguration = {
     capabilities: ServerModel["capabilities"];
     modelConfigId: string | null;
     enabled: boolean;
+    allowRawPrompt?: boolean;
     creditCostOverride: number | null;
     rmbCostOverride: number | null;
     configurationVersion: number;
@@ -49,7 +50,7 @@ export const listServerModels = () => request<{ models: ServerModel[] }>(`${root
 export const createServerModel = (input: Omit<ServerModel, "id" | "providerName" | "workflowName">) => request<{ model: ServerModel }>(`${root}/models`, { method: "POST", body: JSON.stringify(input) });
 export const updateServerModel = (id: string, input: Partial<Omit<ServerModel, "id" | "providerName" | "workflowName">>) => request<{ model: ServerModel }>(`${root}/models/${id}`, { method: "PATCH", body: JSON.stringify(input) });
 export const listToolApiConfigurations = () => request<{ tools: ToolApiConfiguration[] }>(`${root}/tool-configurations`);
-export type ToolApiConfigurationInput = Pick<ToolApiConfiguration, "modelConfigId" | "enabled" | "creditCostOverride" | "rmbCostOverride">;
+export type ToolApiConfigurationInput = Pick<ToolApiConfiguration, "modelConfigId" | "enabled" | "creditCostOverride" | "rmbCostOverride" | "allowRawPrompt">;
 export const updateToolApiConfiguration = (toolKey: ToolApiConfiguration["toolKey"], input: ToolApiConfigurationInput) => request<{ tool: ToolApiConfigurationInput & { toolKey: string; configurationVersion: number; updatedAt: string } }>(`${root}/tool-configurations/${toolKey}`, { method: "PUT", body: JSON.stringify(input) });
 export const listPriceVersions = () => request<{ prices: PriceVersion[] }>(`${root}/prices`);
 export const createPriceDraft = (input: Pick<PriceVersion, "operationType" | "label" | "credits" | "rmbCost">) => request<{ price: PriceVersion }>(`${root}/prices`, { method: "POST", body: JSON.stringify(input) });

@@ -67,6 +67,8 @@ const CanvasImageEditorDialog = lazy(() => import("@/components/canvas/canvas-im
 import { hydratePromptReuse, savePromptFromTask } from "@/services/api/prompts";
 import { promptImageSettings } from "@/lib/prompt-editor-parameters";
 import { useDesignLibraryShare } from "@/pages/design-library/use-design-library-share";
+import { consumePlacementAiHandoff, placementDraftScope, placementHandoffToken } from "@/pages/design-workbench/local/placement/ai-handoff";
+import { PracticeExampleRecord } from "@/components/design-examples";
 
 type GeneratedImage = {
     id: string;
@@ -200,7 +202,8 @@ export function ImageGenerationPage({ creativePreset }: { creativePreset?: Creat
     const [searchParams] = useSearchParams();
     const ownerId = useUserStore(state => state.user?.id);
     const historyTool = creativePreset ? `creative-${creativePreset.id}` : resolveImageToolMode(searchParams.get("tool"));
-    return <ImageGenerationWorkspace key={JSON.stringify([ownerId, historyTool])} creativePreset={creativePreset} historyTool={historyTool} />;
+    const placementToken = placementHandoffToken(searchParams, historyTool);
+    return <ImageGenerationWorkspace key={JSON.stringify([ownerId, historyTool, placementToken])} creativePreset={creativePreset} historyTool={historyTool} />;
 }
 
 function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePreset?: CreativePreset; historyTool: string }) {
@@ -209,6 +212,11 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const libraryShare = useDesignLibraryShare();
     const resultCanvas = useResultCanvas();
     const [searchParams] = useSearchParams();
+    const placementToken = placementHandoffToken(searchParams, historyTool);
+    const inputDraftScope = placementToken ? placementDraftScope(placementToken) : historyTool;
+    const [placementStatus, setPlacementStatus] = useState<"loading" | "ready" | "error">(placementToken ? "loading" : "ready");
+    const [placementError, setPlacementError] = useState("");
+    const [placementAttempt, setPlacementAttempt] = useState(0);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const loadedRecreateAssetsRef = useRef(new Set<string>());
     const loadedReuseTokenRef = useRef(new Set<string>());
@@ -230,10 +238,10 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const restoreBusy = useRef(false);
     const [restoringHistory, setRestoringHistory] = useState(false);
     const defaults = useEffectiveConfig();
-    const [draftConfig, setDraftConfig, configReady] = useGenerationDraft<Partial<AiConfig>>(`${historyTool}:settings`, {});
+    const [draftConfig, setDraftConfig, configReady] = useGenerationDraft<Partial<AiConfig>>(`${inputDraftScope}:settings`, {});
     const baseConfig = { ...defaults, ...draftConfig };
     const config = baseConfig;
-    const [references, setReferences, referencesReady] = useGenerationDraft<ImageReferenceItem[]>(`${historyTool}:references`, [], async items => Promise.all(items.map(async item => ({ ...item, dataUrl: await resolveImageUrl(item.storageKey, item.dataUrl) }))));
+    const [references, setReferences, referencesReady] = useGenerationDraft<ImageReferenceItem[]>(`${inputDraftScope}:references`, [], async items => Promise.all(items.map(async item => ({ ...item, dataUrl: await resolveImageUrl(item.storageKey, item.dataUrl) }))));
     const toolKey = requireToolKey(historyTool === "detail-enhance" ? "upscale" : historyTool === "image-generation" || historyTool === "midjourney-blend" || historyTool === "creative-text-to-style" ? "image_generation" : "inpaint", historyTool);
     const businessModels = useBusinessConfigStore(state => state.models);
     const blendModels = businessModels.filter(item => item.imageParameterProfile === "blend" || item.imageParameterProfile === "midjourney-blend" || item.modelId === "midjourney-blend");
@@ -251,7 +259,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const addAsset = useAssetStore((state) => state.addAsset);
     const [optimizingPrompt, setOptimizingPrompt] = useState(false);
     const [optimizedDraft, setOptimizedDraft] = useState<{ prompt: string; input: PromptInputData; references: ReferenceImage[] }>();
-    const [prompt, setPrompt, promptReady] = useGenerationDraft(`${historyTool}:prompt`, creativePreset?.prompt || "");
+    const [prompt, setPrompt, promptReady] = useGenerationDraft(`${inputDraftScope}:prompt`, creativePreset?.prompt || "");
     const historyStore = creativePreset ? creativeLogStore : logStore;
     const [results, setResults] = useState<GenerationResult[]>([]);
     const imageEditor = useImageCopyEditor((copy, image) => {
@@ -325,7 +333,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const missingReference = !isBlend && toolModeConfig.requiresReference && references.length === 0;
     const invalidBlendReferences = isBlend && (references.length < 2 || references.length > 4);
     const draftReady = configReady && referencesReady && promptReady;
-    const canGenerate = draftReady && !readingReferences && !optimizingPrompt && Boolean(model) && Boolean(user && user.status === "active") && (!requiresPrompt || Boolean(prompt.trim())) && !quotaBlocked && !missingReference && !invalidBlendReferences && referenceValidation.valid && !garmentNeedsApply && !incompleteCreativePrompt;
+    const canGenerate = draftReady && placementStatus === "ready" && !(placementToken && isBlend) && !readingReferences && !optimizingPrompt && Boolean(model) && Boolean(user && user.status === "active") && (!requiresPrompt || Boolean(prompt.trim())) && !quotaBlocked && !missingReference && !invalidBlendReferences && referenceValidation.valid && !garmentNeedsApply && !incompleteCreativePrompt;
 
     const appendReferences = (items: ReferenceImage[], origin: ImageReferenceOrigin) => { inputRevision.current += 1; setReferences((value) => dedupeImageReferences([...value, ...items.map((item) => createImageReferenceItem(item, origin))])); };
     const restoreReferences = (items: ReferenceImage[], origin: ImageReferenceOrigin = "template") => { inputRevision.current += 1; setReferences(dedupeImageReferences(items.map((item) => createImageReferenceItem(item, origin)))); };
@@ -406,6 +414,26 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     useEffect(() => { resetGarment(); }, [toolMode, user?.id, initialGarmentScenario, resetGarment]);
 
     useEffect(() => {
+        if (!placementToken) return;
+        let active = true;
+        setPlacementStatus("loading");
+        setPlacementError("");
+        void consumePlacementAiHandoff(placementToken).then(payload => {
+            if (!active) return;
+            replacePrompt(payload.prompt);
+            restoreReferences(payload.references, "upload");
+            setDraftConfig(payload.settings);
+            setPlacementStatus("ready");
+        }).catch(error => {
+            if (!active) return;
+            setPlacementError(error instanceof Error ? error.message : "定位参考图带入失败，请重试。");
+            setPlacementStatus("error");
+        });
+        return () => { active = false; };
+    }, [placementToken, placementAttempt]);
+
+    useEffect(() => {
+        if (placementToken) return;
         const presetPrompt = searchParams.get("prompt");
         const presetModel = searchParams.get("model");
         if (presetPrompt) replacePrompt(presetPrompt);
@@ -413,6 +441,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     }, [searchParams, updateConfig]);
 
     useEffect(() => {
+        if (placementToken) return;
         const sourceAssetId = searchParams.get("sourceAssetId");
         if (!sourceAssetId || loadedRecreateAssetsRef.current.has(sourceAssetId)) return;
         loadedRecreateAssetsRef.current.add(sourceAssetId);
@@ -438,6 +467,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     }, [message, searchParams, toolMode, user?.id]);
 
     useEffect(() => {
+        if (placementToken) return;
         const token = searchParams.get("reuseToken");
         if (!token || loadedReuseTokenRef.current.has(token)) return;
         loadedReuseTokenRef.current.add(token);
@@ -511,6 +541,14 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     };
 
     const generate = async () => {
+        if (placementStatus !== "ready") {
+            message.warning(uiText("请先完成定位参考图带入，再提交生成。"));
+            return;
+        }
+        if (placementToken && isBlend) {
+            message.warning(uiText("定位效果需要位置保持提示词，请选择支持文字要求的图片编辑模型。"));
+            return;
+        }
         const text = prompt.trim();
         if (!text && requiresPrompt) {
             message.error(uiText("请输入生图提示词"));
@@ -998,7 +1036,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const imageDrop = useImageDrop({
         onFiles: addReferences,
         scopeKey: `${historyTool}:${referenceScope}`,
-        disabled: !draftReady || readingReferences || running || restoringHistory || user?.status !== "active",
+        disabled: !draftReady || placementStatus !== "ready" || readingReferences || running || restoringHistory || user?.status !== "active",
     });
 
     return (
@@ -1030,13 +1068,22 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                                 <div className="flex shrink-0 gap-2 lg:hidden">
                                     <Button icon={<History className="size-4" />} onClick={() => setLogsOpen(true)}>
                                         {uiText("记录")}</Button>
-                                    <Button icon={<SlidersHorizontal className="size-4" />} onClick={() => setSettingsOpen(true)}>
+                                    <Button disabled={placementStatus !== "ready"} icon={<SlidersHorizontal className="size-4" />} onClick={() => setSettingsOpen(true)}>
                                         {uiText("参数")}</Button>
                                 </div>
                             </div>
                         </div>
 
-                        <div className="mt-6 space-y-5">
+                        {placementToken ? <div className="mt-4 rounded-lg border border-primary/20 bg-primary/5 p-3 text-sm leading-6" role={placementStatus === "error" ? "alert" : "status"}>
+                            <strong>{uiText("服装定位 · AI 效果图")}</strong>
+                            <p className="!mb-1">{placementStatus === "loading" ? uiText("正在带入定位合成图、服装原图和图案原稿…") : placementStatus === "error" ? uiText(placementError) : uiText("参考图与位置保持要求已带入独立草稿。检查模型与输出比例后点“开始编辑”提交；原图片编辑草稿未改动。AI 结果仍需核对定位。")}</p>
+                            <div className="flex flex-wrap gap-3">
+                                <Link to="/creative/pattern-placement">{uiText("返回调整定位")}</Link>
+                                <Link to="/image?tool=image-edit">{uiText("打开原图片编辑草稿")}</Link>
+                                {placementStatus === "error" ? <Button size="small" onClick={() => setPlacementAttempt(value => value + 1)}>{uiText("重试带入")}</Button> : null}
+                            </div>
+                        </div> : null}
+                        <fieldset disabled={placementStatus !== "ready"} className="mt-6 min-w-0 space-y-5 border-0 p-0">
                             {initialGarmentScenario ? <GarmentRecipePanel key={garmentScope} references={references} disabled={running || !requiresPrompt} initialScenario={initialGarmentScenario} onApply={applyGarmentRecipe} onDraftChange={handleGarmentDraftChange} /> : null}
                             {requiresPrompt ? <div>
                                 <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
@@ -1062,14 +1109,14 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                                 onRequestClipboard={() => void addReferencesFromClipboard()}
                             />
 
-                        </div>
+                        </fieldset>
                         </div>
                         <div ref={submitToolbarRef} className="generation-submit shrink-0 pt-4">
                             <div className="mb-2 flex items-center justify-between rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-sm dark:border-stone-800 dark:bg-stone-900">
                                 <span className="truncate text-stone-500 dark:text-stone-400">
                                     {modelOptionLabel(effectiveConfig, model)} · {imageSizeLabel(effectiveConfig.size)} · {imageQualityLabel(effectiveConfig.quality)}
                                 </span>
-                                <Button size="small" type="text" icon={<SlidersHorizontal className="size-4" />} onClick={() => setSettingsOpen(true)}>
+                                <Button size="small" type="text" disabled={placementStatus !== "ready"} icon={<SlidersHorizontal className="size-4" />} onClick={() => setSettingsOpen(true)}>
                                     {uiText("调整")}</Button>
                             </div>
 
@@ -1081,6 +1128,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                                 {missingReference ? <div className="mt-1 text-amber-600 dark:text-amber-300">{uiText(toolModeConfig.title || "")}{uiText("需要先添加至少一张参考图。")}</div> : null}
                                 {!referenceValidation.valid ? <div className="mt-1 text-red-500">{referenceValidation.message}</div> : null}
                                 {quotaBlocked ? <div className="mt-1 text-red-500">{uiText("额度不足，无法提交生成任务。")}</div> : null}
+                                {placementToken && isBlend ? <div className="mt-1 text-red-500">{uiText("定位效果需要位置保持提示词，请选择支持文字要求的图片编辑模型。")}</div> : null}
                                 {garmentNeedsApply ? <div className="mt-1" role="status">{uiText("服装要求或参考图已改变，请重新套用。")}<Button size="small" type="link" className="!h-auto !p-0" onClick={resetGarment}>{uiText("改用当前提示词")}</Button></div> : null}
                                 {incompleteCreativePrompt ? <div className="mt-1" role="status">{uiText("请把「")}{CREATIVE_REQUIREMENT_PLACEHOLDER}{uiText("」替换成你的设计要求。")}</div> : null}
                                 {!draftReady || readingReferences || optimizingPrompt || !model || (requiresPrompt && !prompt.trim()) || invalidBlendReferences || !user || user.status !== "active" ? <div role="status">{!draftReady ? uiText("正在恢复草稿…") : readingReferences ? uiText("正在读取参考图，请稍候") : optimizingPrompt ? uiText("正在优化提示词，请稍候") : !model ? uiText("还差：选择模型") : requiresPrompt && !prompt.trim() ? uiText("还差：填写提示词") : invalidBlendReferences ? uiText("还差：添加 2–4 张参考图") : uiText("当前设计师账号不可用")}</div> : null}
@@ -1355,6 +1403,7 @@ function LogPanel({
                     {uiText("删除")}</Button>
             </div>
             <div className="space-y-3">
+                <PracticeExampleRecord />
                 {logs.map((log) => (
                     <LogCard
                         key={log.id}

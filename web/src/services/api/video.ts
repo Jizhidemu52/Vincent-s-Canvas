@@ -8,11 +8,12 @@ import type { HappyHorseMode } from "@/lib/happyhorse-video";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 import { resolveToolConfig } from "./tool-runtime";
+import type { PromptInputData } from "../../../../shared/prompt-contracts";
 
-type RequestOptions = { signal?: AbortSignal; cancelOnAbort?: () => boolean; toolKey?: "video" | "canvas-video"; onSubmissionStarted?: (requestId: string) => void | Promise<void>; onSubmitted?: (task: VideoGenerationTask) => void | Promise<void> };
+type RequestOptions = { promptInput?: PromptInputData; signal?: AbortSignal; cancelOnAbort?: () => boolean; toolKey?: "video" | "canvas-video"; onSubmissionStarted?: (requestId: string) => void | Promise<void>; onSubmitted?: (task: VideoGenerationTask) => void | Promise<void> };
 
 export type VideoGenerationResult = { blob?: Blob; url?: string; mimeType?: string };
-export type VideoGenerationTask = { id: string; requestId?: string; provider: "server"; model: string };
+export type VideoGenerationTask = { id: string; requestId?: string; provider: "server"; model: string; prompt?: string; summaryZh?: string };
 export type VideoGenerationTaskState = { status: "pending" } | { status: "completed"; result: VideoGenerationResult } | { status: "failed"; error: string };
 
 export async function requestVideoGeneration(config: AiConfig, prompt: string, references: ReferenceImage[] = [], videoReferences: ReferenceVideo[] = [], audioReferences: ReferenceAudio[] = [], options?: RequestOptions): Promise<VideoGenerationResult> {
@@ -25,7 +26,7 @@ export async function requestVideoGeneration(config: AiConfig, prompt: string, r
 export async function createVideoGenerationTask(config: AiConfig, prompt: string, references: ReferenceImage[] = [], videoReferences: ReferenceVideo[] = [], audioReferences: ReferenceAudio[] = [], options?: RequestOptions, happyHorseMode?: HappyHorseMode): Promise<VideoGenerationTask> {
     const input = await queuedVideoInput(config, prompt, references, videoReferences, audioReferences, options, happyHorseMode);
     const task = await submitQueuedMediaTask(input);
-    return { id: task.id, requestId: task.requestId, provider: "server", model: input.modelId };
+    return { id: task.id, requestId: task.requestId, provider: "server", model: input.modelId, prompt: task.prompt, summaryZh: task.summaryZh };
 }
 
 export async function recoverVideoGenerationTask(task: VideoGenerationTask, options?: RequestOptions): Promise<VideoGenerationResult> {
@@ -106,6 +107,7 @@ async function queuedVideoInput(config: AiConfig, prompt: string, references: Re
         resolvedModel: resolved.model,
         toolKey: resolved.toolKey,
         prompt,
+        promptInput: options?.promptInput,
         operationType: "video_generation",
         parameters,
         sourceFiles,

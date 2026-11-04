@@ -4,20 +4,22 @@ import { z } from "zod";
 export const promptScenes = [
   "text-to-style", "style-to-sketch", "local-restyle", "garment-colorway", "back-design",
   "pattern-extract", "pattern-colorway", "accessory-design", "pattern-craft", "series-recipe",
-  "workflow-step", "print-placement", "garment-presentation", "free-optimize", "batch-optimize", "reverse-prompt",
+  "workflow-step", "print-placement", "garment-presentation", "free-optimize", "batch-optimize", "reverse-prompt", "video-motion",
 ] as const;
 export const promptInputSchema = z.object({
   scene: z.enum(promptScenes),
   fields: z.record(z.string().max(100), z.unknown()).default({}),
   userText: z.string().max(20_000).default(""),
   referenceRoles: z.array(z.string().trim().min(1).max(200)).max(50).default([]),
-  mode: z.enum(["generate", "edit"]).default("edit"),
+  mode: z.enum(["generate", "edit", "video"]).default("edit"),
   outputLanguage: z.enum(["en", "zh"]).optional(),
   hasMask: z.boolean().default(false),
   maskReferenceIndex: z.number().int().min(1).max(49).optional(),
   compilationId: z.string().uuid().optional(),
 }).strict().superRefine((input, context) => {
   if (JSON.stringify(input.fields).length > 30_000) context.addIssue({ code: "custom", message: "场景设置超过 30 KB" });
+  if ((input.scene === "video-motion") !== (input.mode === "video")) context.addIssue({ code: "custom", message: "视频动效场景必须使用视频模式" });
+  if (input.mode === "video" && (input.hasMask || input.maskReferenceIndex !== undefined)) context.addIssue({ code: "custom", message: "视频动效不支持图片编辑蒙版" });
 });
 export type PromptInput = z.infer<typeof promptInputSchema>;
 export type PromptScene = typeof promptScenes[number];
@@ -77,6 +79,8 @@ export type AdminPromptCompilation = PublicPromptCompilation & {
   modelConfigId: string; targetModelConfigId: string;
   inputSnapshot: { promptInput: PromptInput; sourceUrls: string[] };
   inputHash: string; reusedFromId: string | null; cacheHit: boolean;
+  /** Admin-only diagnostics: the compiler accepts a trusted HTTP status and fixed reason category, never provider error text. */
+  upstreamStatus?: number; upstreamReason?: string;
   rawResponse: string | null; latencyMs: number | null;
   inputTokens: number | null; outputTokens: number | null;
   actualCost: number | null; estimatedCost: number | null; currency: string;

@@ -23,7 +23,7 @@ test('authorized poster resolves pending state without loading original video; h
     await expect(video).toHaveAttribute('poster', /^blob:/);
     await expect(page.getByText('0:01', { exact: true })).toBeVisible();
     expect(posterRequests).toBe(2); expect(originalRequests).toBe(0);
-    await video.hover();
+    await page.locator("[data-canvas-video-drag-surface]").hover();
     await expect.poll(() => video.evaluate(element => ({ paused: (element as HTMLVideoElement).paused, muted: (element as HTMLVideoElement).muted }))).toEqual({ paused: false, muted: true });
     expect(originalRequests).toBeGreaterThan(0);
     await page.getByRole('button', { name: 'full', exact: true }).hover();

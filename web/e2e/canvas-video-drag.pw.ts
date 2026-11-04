@@ -1,0 +1,70 @@
+import { resolve } from "node:path";
+import { readFile } from "node:fs/promises";
+import { test, expect, IMAGE } from "./fixtures";
+
+test("视频画面可直接拖动并撤销，底部仍可播放暂停和定位进度", async ({ page, context, api }, info) => {
+    const id = "video-body-drag", now = new Date().toISOString();
+    const assetId = "33333333-3333-4333-8333-333333333333";
+    const content = `/api/assets/${assetId}/content`;
+    const node = { id: "video", type: "video", title: "画面拖动测试", width: 480, height: 270, position: { x: 420, y: 260 }, metadata: { content, serverAssetId: assetId, status: "success", durationMs: 8000, naturalWidth: 320, naturalHeight: 180 } };
+    const document = { id, title: "独立视频拖动回归", createdAt: now, updatedAt: now, nodes: [node], connections: [], groups: [], viewport: { x: 0, y: 0, k: 1 }, backgroundMode: "dots", showImageInfo: false, chatSessions: [], activeChatId: null };
+    api.documents.set(id, { id, revision: 1, deleted: false, document, updatedAt: now });
+    const bytes = await readFile(resolve(import.meta.dirname, "media/video-control.mp4"));
+    await context.route(`**${content}`, route => {
+        const range = /^bytes=(\d+)-(\d*)$/.exec(route.request().headers().range || "");
+        const start = range ? Number(range[1]) : 0, end = range?.[2] ? Number(range[2]) : bytes.length - 1;
+        return route.fulfill({ status: range ? 206 : 200, contentType: "video/mp4", body: bytes.subarray(start, end + 1), headers: { "Accept-Ranges": "bytes", ...(range ? { "Content-Range": `bytes ${start}-${end}/${bytes.length}` } : {}) } });
+    });
+    await context.route(`**/api/assets/${assetId}/thumb*`, route => route.fulfill({ contentType: "image/png", body: IMAGE, headers: { "X-Canvas-Media-Duration-Ms": "8000" } }));
+    await page.goto(`/canvas/${id}`);
+    const videoNode = page.locator('[data-node-id="video"]');
+    const dragSurface = videoNode.locator("[data-canvas-video-drag-surface]");
+    await expect(dragSurface).toBeVisible();
+    const before = (await dragSurface.boundingBox())!;
+    await page.mouse.move(before.x + before.width / 2, before.y + before.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(before.x + before.width / 2 + 110, before.y + before.height / 2 + 65, { steps: 8 });
+    await page.mouse.up();
+    await expect.poll(() => api.document(id)?.nodes[0].position).toEqual({ x: 530, y: 325 });
+    await page.screenshot({ path: info.outputPath("video-picture-dragged.png") });
+    await page.keyboard.press("Control+z");
+    await expect.poll(() => api.document(id)?.nodes[0].position).toEqual({ x: 420, y: 260 });
+    const video = videoNode.locator("video");
+    await expect(video).toHaveAttribute("controls", "");
+    const bounds = (await video.boundingBox())!;
+    const surfaceBounds = (await dragSurface.boundingBox())!;
+    expect(bounds.y + bounds.height - surfaceBounds.y - surfaceBounds.height).toBeGreaterThanOrEqual(55);
+    // Loop only the isolated fixture to keep native-control clicks deterministic.
+    await video.evaluate(element => { (element as HTMLVideoElement).loop = true; });
+    await page.mouse.move(20, 150);
+    await page.mouse.move(bounds.x + 22, bounds.y + bounds.height - 38);
+    await expect.poll(() => video.evaluate(element => (element as HTMLVideoElement).paused)).toBe(false);
+    await page.mouse.click(bounds.x + 22, bounds.y + bounds.height - 38);
+    await expect.poll(() => video.evaluate(element => (element as HTMLVideoElement).paused)).toBe(true);
+    await page.mouse.click(bounds.x + 22, bounds.y + bounds.height - 38);
+    await expect.poll(() => video.evaluate(element => (element as HTMLVideoElement).paused)).toBe(false);
+    await page.mouse.click(bounds.x + 22, bounds.y + bounds.height - 38);
+    await expect.poll(() => video.evaluate(element => (element as HTMLVideoElement).paused)).toBe(true);
+    await expect.poll(() => video.evaluate(element => { const player = element as HTMLVideoElement; return player.seekable.length ? player.seekable.end(0) : 0; })).toBeGreaterThan(7);
+    await page.mouse.click(bounds.x + bounds.width * .65, bounds.y + bounds.height - 22);
+    await expect.poll(() => video.evaluate(element => (element as HTMLVideoElement).currentTime)).toBeGreaterThan(3);
+    expect(api.document(id)?.nodes[0].position).toEqual({ x: 420, y: 260 });
+    await page.screenshot({ path: info.outputPath("video-native-controls-after-drag.png") });
+    for (const [scale, distance, expected] of [[50, 40, { x: 500, y: 300 }], [25, 20, { x: 580, y: 340 }]] as const) {
+        await page.getByRole("button", { name: "画布缩放与视图", exact: true }).click();
+        const percentage = page.getByRole("spinbutton", { name: "画布缩放百分比", exact: true });
+        await percentage.fill(String(scale)); await percentage.press("Enter");
+        await page.getByRole("button", { name: "画布缩放与视图", exact: true }).click();
+        const target = scale === 50 ? dragSurface : videoNode.getByAltText("视频封面", { exact: true });
+        await expect(target).toBeVisible();
+        const box = (await target.boundingBox())!;
+        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 3);
+        await page.mouse.down();
+        await page.mouse.move(box.x + box.width / 2 + distance, box.y + box.height / 3 + distance / 2, { steps: 6 });
+        await page.mouse.up();
+        await expect.poll(() => api.document(id)?.nodes[0].position).toEqual(expected);
+    }
+    await expect(video).toHaveCount(0);
+    expect(api.submissions).toHaveLength(0);
+    expect(api.batchSubmissions).toHaveLength(0);
+});

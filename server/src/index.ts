@@ -64,6 +64,7 @@ import { startAssetThumbnailMaintenance } from "./asset-thumbnails";
 import { createPostgresPromptCompiler } from "./prompt-runtime";
 import { createPromptCompilationsRouter, createAdminPromptRecipesRouter } from "./routes/prompt-recipes";
 import { PromptOptimizationError } from "./prompt-safety";
+import { ensureVideoMotionRecipe } from "./video-motion-input";
 import { writeAudit } from "./audit";
 import { createAdminReleaseNotesRouter, createReleaseNotesRouter } from "./routes/release-notes";
 
@@ -73,6 +74,7 @@ const db = createDatabase(config.DATABASE_URL);
 const cache = await createCache(config.REDIS_URL);
 const storage = new ObjectStorage(config);
 const promptCompiler = createPostgresPromptCompiler(db, config, storage);
+await ensureVideoMotionRecipe(promptCompiler.store);
 const taskEvents = new TaskEventsService(db);
 void taskEvents.start();
 const app = express();

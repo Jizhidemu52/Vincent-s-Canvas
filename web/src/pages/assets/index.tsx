@@ -1,4 +1,5 @@
 import { useUiText, uiText } from "@/lib/i18n";
+import { PracticeExampleRecord } from "@/components/design-examples";
 import { BookmarkPlus, Check, Copy, Download, Ellipsis, LoaderCircle, PencilLine, Plus, RotateCcw, Search, Share2, Trash2, Upload } from "lucide-react";
 import { lazy, Suspense, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { App, Button, Card, DatePicker, Drawer, Dropdown, Empty, Form, Image, Input, Modal, Segmented, Select, Skeleton, Space, Tag, Typography } from "antd";
@@ -633,6 +634,7 @@ export default function AssetsPage() {
                 </div>
 
                 <div className="mx-auto flex max-w-7xl flex-col gap-5">
+                    {libraryView === "active" ? <div className="max-w-2xl"><PracticeExampleRecord /></div> : null}
                     {serverLoading && !serverAssets.length && !visibleAssets.length ? <div role="status" aria-label={t("正在加载素材")} className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{Array.from({ length: 8 }, (_, index) => <div key={index} className="wb-surface p-4"><Skeleton active paragraph={{ rows: 4 }} /></div>)}</div> : null}
                     <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                         {libraryView === "trash" ? serverAssets.map(asset => <Card key={asset.id} className="h-full" title={typeof asset.metadata.title === "string" ? asset.metadata.title : asset.filename}>

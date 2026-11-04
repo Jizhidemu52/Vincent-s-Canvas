@@ -81,5 +81,5 @@ test("example graph is editable, source-preserving and idle without dispatching 
     expect(config.metadata?.composerContent).toContain(`@[node:${image.id}]`);
     expect(result.connections.some(edge => edge.fromNodeId === image.id && edge.toNodeId === config.id)).toBe(true);
     expect(result.nodes.every(node => !node.metadata?.sourceTaskId && node.metadata?.status !== "loading")).toBe(true);
-    expect(result.nodes.find(node => node.title === "教材属性与使用边界")?.metadata?.content).toContain("未调用本项目模型");
+    expect(result.nodes.find(node => node.title === "怎么使用这张教学板")?.metadata?.content).toContain("不是本次生成记录");
 });

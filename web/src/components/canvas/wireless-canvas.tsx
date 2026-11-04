@@ -220,6 +220,8 @@ export const WirelessCanvas = forwardRef<WirelessCanvasHandle, WirelessCanvasPro
 
     const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
         const target = event.target instanceof Element ? event.target : null;
+        // React portals bubble through this component without belonging to the canvas DOM.
+        if (target && !event.currentTarget.contains(target)) return;
         if (target?.closest("[data-canvas-no-zoom]")) return;
         if (target?.closest("[data-connection-create-menu]")) return;
         // Flush the last input frame before starting a grab/selection.
@@ -424,6 +426,7 @@ export const WirelessCanvas = forwardRef<WirelessCanvasHandle, WirelessCanvasPro
             }}
             onScroll={event => { event.currentTarget.scrollLeft = 0; event.currentTarget.scrollTop = 0; }}
             onPointerDownCapture={(event) => {
+                if (event.target instanceof Node && !event.currentTarget.contains(event.target)) return;
                 if (event.button !== 0 && event.button !== 1) return;
                 if (interactionMode !== "hand" && !(interactionMode && isSpacePressed) && event.button !== 1) return;
                 const target = event.target instanceof Element ? event.target : null;

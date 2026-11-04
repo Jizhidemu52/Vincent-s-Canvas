@@ -15,7 +15,7 @@ import {
 import { uploadServerAsset } from "@/services/api/server-assets";
 import type { QueuedTask } from "@/services/api/generation-tasks";
 import { promptScenes, type AdminPromptCompilation, type PublicPromptCompilation } from "../../../../../../shared/prompt-contracts";
-import { buildTestImage, buildTestPromptInput, jsonObject, messageOf } from "../model";
+import { buildTestImage, buildTestPromptInput, defaultVideoTestFields, jsonObject, messageOf } from "../model";
 import { CompilationResult, compilationStatus } from "./compilation-history";
 
 type Reference = { id: string; file: File; preview: string; serverUrl?: string };
@@ -43,11 +43,12 @@ export function RecipeTestPanel({ detail, models, refresh, editorDirty }: { deta
     const [files, setFiles] = useState<Reference[]>([]);
     const [versionId, setVersionId] = useState(detail.recipe.currentVersionId || detail.versions[0]?.id || "");
     const scene = (promptScenes as readonly string[]).includes(detail.recipe.key) ? detail.recipe.key : "free-optimize";
-    const [fieldsJson, setFieldsJson] = useState("{}");
+    const isVideo = scene === "video-motion";
+    const [fieldsJson, setFieldsJson] = useState(() => (isVideo ? JSON.stringify(defaultVideoTestFields, null, 2) : "{}"));
     const [userText, setUserText] = useState("");
     const [rolesText, setRolesText] = useState("");
-    const [mode, setMode] = useState<"generate" | "edit">("edit");
-    const [language, setLanguage] = useState<"en" | "zh">("en");
+    const [mode, setMode] = useState<"generate" | "edit" | "video">(isVideo ? "video" : "edit");
+    const [language, setLanguage] = useState<"en" | "zh">(isVideo ? "zh" : "en");
     const [targetId, setTargetId] = useState("");
     const [optimizerId, setOptimizerId] = useState<string | undefined>();
     const [parametersJson, setParametersJson] = useState('{\n  "size": "1024x1024"\n}');
@@ -119,9 +120,9 @@ export function RecipeTestPanel({ detail, models, refresh, editorDirty }: { deta
             const version = detail.versions.find((entry) => entry.id === versionId);
             if (!version) throw new Error("请选择已保存的配方版本");
             const target = models.find((model) => model.id === targetId);
-            if (!target || !target.capabilities.includes(mode === "edit" ? "edit" : "generate")) throw new Error("请选择支持当前模式的目标图像模型");
+            if (!target || !target.capabilities.includes(isVideo ? "video" : mode === "edit" ? "edit" : "generate")) throw new Error(`请选择支持当前模式的目标${isVideo ? "视频" : "图像"}模型`);
             if (!optimizerId && !detail.recipe.modelConfigId) throw new Error("请绑定配方优化模型，或选择本次测试模型");
-            const promptInput = buildTestPromptInput({ scene, fieldsJson, userText, rolesText, mode, outputLanguage: language });
+            const promptInput = buildTestPromptInput({ scene, fieldsJson, userText, rolesText, mode, outputLanguage: language, referenceCount: filesRef.current.length });
             const sourceUrls: string[] = [];
             for (const reference of filesRef.current) {
                 lifetime.current.signal.throwIfAborted();
@@ -135,7 +136,7 @@ export function RecipeTestPanel({ detail, models, refresh, editorDirty }: { deta
                 sourceUrls.push(reference.serverUrl);
             }
             const id = createClientId();
-            const input: AdminPromptTestInput = { requestId: id, modelConfigId: targetId, versionId, optimizerModelConfigId: optimizerId, promptInput, sourceUrls };
+            const input: AdminPromptTestInput = { requestId: id, modelConfigId: targetId, versionId, optimizerModelConfigId: optimizerId, promptInput, sourceUrls, ...(isVideo ? { toolKey: "video" } : {}) };
             const run: TestRun = { id, input, version: version.version };
             setRuns((items) => [run, ...items]);
             setCompareIds((ids) => [id, ...ids].slice(0, 2));
@@ -164,7 +165,7 @@ export function RecipeTestPanel({ detail, models, refresh, editorDirty }: { deta
         patchRun(run.id, { taskNotice: "任务仍在运行；自动查询已暂停，可继续查询原任务。" });
     };
     const createImage = (run: TestRun) => {
-        if (run.taskRequestId || imageRequestIds.current.has(run.id) || !run.compilation) return;
+        if (run.input.promptInput.mode === "video" || run.taskRequestId || imageRequestIds.current.has(run.id) || !run.compilation) return;
         try {
             jsonObject(parametersJson, "出图参数");
         } catch (reason) {
@@ -201,8 +202,8 @@ export function RecipeTestPanel({ detail, models, refresh, editorDirty }: { deta
                 setError("仅支持非空 PNG / JPEG / WebP，每张不超过 20 MB");
                 continue;
             }
-            if (filesRef.current.length + accepted.length >= 8) {
-                setError("提示词优化最多接受 8 张参考图，仍须遵守目标模型的参考图上限");
+            if (filesRef.current.length + accepted.length >= (isVideo ? 30 : 8)) {
+                setError(`提示词优化最多接受 ${isVideo ? 30 : 8} 张参考图，仍须遵守目标模型的参考图上限`);
                 break;
             }
             accepted.push({ id: createClientId(), file, preview: URL.createObjectURL(file) });
@@ -214,7 +215,16 @@ export function RecipeTestPanel({ detail, models, refresh, editorDirty }: { deta
     return (
         <div className="flex min-w-0 flex-col gap-5">
             {error && <Alert type="error" showIcon title={error} />}
-            <Alert type="warning" showIcon title="仅优化测试也可能产生文本模型费用；不会自动出图。" description="保存版本后测试。参考图只在点击测试时上传；此页不测试蒙版区域编辑。离开页面停止本地查询，不会取消已提交任务。" />
+            <Alert
+                type="warning"
+                showIcon
+                title={isVideo ? "仅动效规划测试也可能产生文本模型费用；此页不生成视频。" : "仅优化测试也可能产生文本模型费用；不会自动出图。"}
+                description={
+                    isVideo
+                        ? "保存版本后测试。仅上传参考图片给规划模型；视频 / 音频素材请在视频创作页使用。离开页面停止本地查询，不会取消已提交请求。"
+                        : "保存版本后测试。参考图只在点击测试时上传；此页不测试蒙版区域编辑。离开页面停止本地查询，不会取消已提交任务。"
+                }
+            />
             {editorDirty && <Alert type="info" title="编辑页有未保存的修改，请先保存后再测试。" />}
             <section className="wb-surface p-4 sm:p-5">
                 <Form layout="vertical" disabled={Boolean(busy)}>
@@ -234,23 +244,28 @@ export function RecipeTestPanel({ detail, models, refresh, editorDirty }: { deta
                             <Select
                                 aria-label="生成模式"
                                 value={mode}
+                                disabled={isVideo || Boolean(busy)}
                                 onChange={(value) => {
                                     setMode(value);
                                     setTargetId("");
                                 }}
-                                options={[
-                                    { value: "edit", label: "编辑 / 参考图" },
-                                    { value: "generate", label: "纯生成" },
-                                ]}
+                                options={
+                                    isVideo
+                                        ? [{ value: "video", label: "视频动效" }]
+                                        : [
+                                              { value: "edit", label: "编辑 / 参考图" },
+                                              { value: "generate", label: "纯生成" },
+                                          ]
+                                }
                             />
                         </Form.Item>
-                        <Form.Item label="目标图像模型">
+                        <Form.Item label={isVideo ? "目标视频模型" : "目标图像模型"}>
                             <Select
-                                aria-label="目标图像模型"
+                                aria-label={isVideo ? "目标视频模型" : "目标图像模型"}
                                 placeholder="请选择"
                                 value={targetId || undefined}
                                 onChange={setTargetId}
-                                options={models.filter((model) => model.capabilities.includes(mode === "edit" ? "edit" : "generate")).map((model) => ({ value: model.id, label: `${model.name} · ${model.modelId}` }))}
+                                options={models.filter((model) => model.capabilities.includes(isVideo ? "video" : mode === "edit" ? "edit" : "generate")).map((model) => ({ value: model.id, label: `${model.name} · ${model.modelId}` }))}
                             />
                         </Form.Item>
                         <Form.Item label="本次优化模型（可选）" extra="留空使用配方独立绑定模型；不修改线上设置。">
@@ -267,6 +282,7 @@ export function RecipeTestPanel({ detail, models, refresh, editorDirty }: { deta
                             <Select
                                 aria-label="测试输出语言"
                                 value={language}
+                                disabled={isVideo || Boolean(busy)}
                                 onChange={setLanguage}
                                 options={[
                                     { value: "en", label: "英文" },
@@ -275,7 +291,10 @@ export function RecipeTestPanel({ detail, models, refresh, editorDirty }: { deta
                             />
                         </Form.Item>
                     </div>
-                    <Form.Item label="场景字段（JSON 对象）">
+                    <Form.Item
+                        label="场景字段（JSON 对象）"
+                        extra={isVideo ? "包含动效选项以及 duration（秒）、ratio、resolution、video_mode；auto 按图片数量选择纯文本、首帧、首尾帧或参考图模式。generate_audio 由 audio 选项同步，无声为 false。" : undefined}
+                    >
                         <Input.TextArea aria-label="场景字段 JSON" rows={5} className="!font-mono" value={fieldsJson} onChange={(event) => setFieldsJson(event.target.value)} />
                     </Form.Item>
                     <Form.Item label="用户要求">
@@ -324,7 +343,7 @@ export function RecipeTestPanel({ detail, models, refresh, editorDirty }: { deta
                 </Form>
             </section>
             <section className="wb-surface p-4 sm:p-5">
-                <h3 className="mb-3 font-semibold">测试结果与图片对比</h3>
+                <h3 className="mb-3 font-semibold">{isVideo ? "动效规划结果对比" : "测试结果与图片对比"}</h3>
                 <Select
                     aria-label="选择测试结果"
                     mode="multiple"
@@ -334,11 +353,13 @@ export function RecipeTestPanel({ detail, models, refresh, editorDirty }: { deta
                     onChange={(ids) => setCompareIds(ids.slice(-2))}
                     options={runs.map((run) => ({ value: run.id, label: `v${run.version} · ${run.compilation ? compilationStatus[run.compilation.status] : "待核查"} · ${run.id.slice(-8)}` }))}
                 />
-                <Form layout="vertical" className="mt-4">
-                    <Form.Item label="出图参数（仅点击单条结果的“测试出图”时使用）" extra="按目标图像模型填写参数；count 固定为 1。测试结果与图片只保留在当前页面，任务本身由服务端保存。">
-                        <Input.TextArea aria-label="出图参数 JSON" rows={3} className="!font-mono" value={parametersJson} disabled={Boolean(busy)} onChange={(event) => setParametersJson(event.target.value)} />
-                    </Form.Item>
-                </Form>
+                {!isVideo && (
+                    <Form layout="vertical" className="mt-4">
+                        <Form.Item label="出图参数（仅点击单条结果的“测试出图”时使用）" extra="按目标图像模型填写参数；count 固定为 1。测试结果与图片只保留在当前页面，任务本身由服务端保存。">
+                            <Input.TextArea aria-label="出图参数 JSON" rows={3} className="!font-mono" value={parametersJson} disabled={Boolean(busy)} onChange={(event) => setParametersJson(event.target.value)} />
+                        </Form.Item>
+                    </Form>
+                )}
             </section>
             <div className="grid min-w-0 gap-4 xl:grid-cols-2">
                 {chosen.map((run) => (
@@ -362,9 +383,11 @@ export function RecipeTestPanel({ detail, models, refresh, editorDirty }: { deta
                             <Button aria-label="查询原优化请求" disabled={Boolean(busy)} loading={busy === `query:${run.id}`} onClick={() => void start(`query:${run.id}`, () => observeCompilation(run))}>
                                 查询原优化请求
                             </Button>
-                            <Button aria-label="测试出图（1 张）" type="primary" disabled={Boolean(busy) || run.compilation?.status !== "success" || Boolean(run.taskRequestId)} loading={busy === `image:${run.id}`} onClick={() => createImage(run)}>
-                                测试出图（1 张）
-                            </Button>
+                            {run.input.promptInput.mode !== "video" && (
+                                <Button aria-label="测试出图（1 张）" type="primary" disabled={Boolean(busy) || run.compilation?.status !== "success" || Boolean(run.taskRequestId)} loading={busy === `image:${run.id}`} onClick={() => createImage(run)}>
+                                    测试出图（1 张）
+                                </Button>
+                            )}
                         </div>
                         {run.taskRequestId && (
                             <div className="mt-4 border-t border-border pt-4">

@@ -2,6 +2,7 @@ import { getUiLocale, uiText, useUiText } from "@/lib/i18n";
 import { handleSubmitShortcut } from "@/lib/submit-shortcut";
 import { GenerationDiagnostic } from "@/components/generation-diagnostic";
 import { GenerationTaskCancel } from "@/components/generation-task-cancel";
+import { PracticeExampleRecord } from "@/components/design-examples";
 import { App, Button, Checkbox, Popover, Select, Tooltip } from "antd";
 import { Bot, Brush, CircleHelp, Copy, FileText, ImagePlus, LoaderCircle, MessageSquarePlus, Paperclip, PanelLeftClose, PanelLeftOpen, Pencil, RotateCcw, Send, Settings2, Square, Trash2, WandSparkles, X } from "lucide-react";
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type SetStateAction } from "react";
@@ -31,12 +32,12 @@ import { chatSourceTurn, createChatBranch } from "./chat-message-actions";
 import { chatFocusImage, chatImageDisplayLabel, chatImageOriginal } from "./chat-image-selection";
 import { chatImageTaskSignature, completeChatImageTask, duplicateChatImageTask } from "./chat-image-tasks";
 import { useChatTaskRecovery } from "./use-chat-task-recovery";
-import { prepareChatMask, restoreChatMaskResult, saveChatRegionSelection } from "@/lib/image-agent/mask";
+import { prepareChatRegionEdit, restoreChatMaskResult, saveChatRegionSelection } from "@/lib/image-agent/mask";
 import type { ChatAttachment, ChatGeneratedImage, ChatMessage, ChatRegionSelection, ChatSession } from "./chat-types";
 import type { SceneImage } from "@/pages/creative/use-scene-workspace";
 import { chatImageQualitySettings, chatImageRequestOptions, filterChatImageModels, preferredChatImageModel, resolveChatImageQuality } from "./image-quality";
 import { CHAT_FOLLOW_IMAGE_SIZE, chatImageSizeOptions, resolveChatImageSize } from "./image-size";
-import { useImageModelProfile } from "@/lib/image-model-settings";
+import { imageModelProfile, useImageModelProfile } from "@/lib/image-model-settings";
 import { modelLabelWithUsage } from "@/lib/model-picker-options";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { useModuleEnabled } from "@/stores/use-module-store";
@@ -478,7 +479,8 @@ export default function ChatPage() {
             newCreation: requestSession.newCreation,
         };
         const turnFocus = chatFocusImage(buildCreativeImageCatalog(requestSession.messages, { role: "user", content: text, attachments: turnAttachments }), requestSession);
-        const turnRegion = !resend && regionSelection?.imageId === turnFocus?.id ? regionSelection : null;
+        const turnRegion = resend ? branch!.source.regionSelection || null : regionSelection?.imageId === turnFocus?.id ? regionSelection : null;
+        if (turnRegion && turnRegion.imageId !== turnFocus?.id) { message.warning(uiText("原局部选区与当前底图不一致，未重新调用模型。请选择原底图并重新圈选后发送。")); return; }
         const selectedInputIds = buildCreativeImageCatalog([], { role: "user", content: "", attachments: turnAttachments }).map((item) => item.id);
         if (new Set([...selectedInputIds, ...(imageSelection.explicitTargetImageId ? [imageSelection.explicitTargetImageId] : [])]).size > 5) { message.warning(uiText("编辑目标与参考图片合计最多 5 张，请先移除一张图片")); return; }
         const sessionId = requestSession.id;
@@ -489,7 +491,7 @@ export default function ChatPage() {
             signal.throwIfAborted();
             if (!isCurrentScope() || (!sendLifetime.detached && activeSendRef.current !== sendLifetime)) throw new DOMException("登录会话已变化", "AbortError");
         };
-        const userMessage: ChatMessage = { id: createClientId(), parentMessageId: requestSession.messages.at(-1)?.id, editTargetImageId: turnFocus?.id, focusImageId: turnFocus?.id, focusLocked: Boolean(imageSelection.explicitTargetImageId), newCreation: imageSelection.newCreation, role: "user", content: text, attachments: turnAttachments, createdAt: new Date().toISOString() };
+        const userMessage: ChatMessage = { id: createClientId(), parentMessageId: requestSession.messages.at(-1)?.id, editTargetImageId: turnFocus?.id, focusImageId: turnFocus?.id, focusLocked: Boolean(imageSelection.explicitTargetImageId), newCreation: imageSelection.newCreation, role: "user", content: text, attachments: turnAttachments, ...(turnRegion ? { regionSelection: { ...turnRegion, mask: { ...turnRegion.mask, dataUrl: "", url: undefined }, selection: { ...turnRegion.selection, dataUrl: "", url: undefined } } } : {}), createdAt: new Date().toISOString() };
         const assistantId = createClientId();
         const requestedImageQuality = requestSession.imageQuality;
         const requestedImageResolution = requestSession.imageResolution;
@@ -560,7 +562,6 @@ export default function ChatPage() {
                 return;
             }
             const { references, action, content: explanation, parentId, workId, workNote } = plan;
-            const imagePrompt = turnRegion ? `只修改蒙版透明区域，选区外保持不变。\n${plan.prompt}` : plan.prompt;
             assertSendCurrent();
             const imageModel = preferredChatImageModel(imageModels, [requestSession.imageModelId, config.imageModel, config.model], action);
             if (!imageModel) throw new Error(`当前尚未配置可用的图片${action === "edit" ? "编辑" : "生成"}服务。可以继续讨论，图片处理需管理员启用。`);
@@ -574,11 +575,12 @@ export default function ChatPage() {
             const resolution = qualitySettings.resolution;
             setSendPhase(action === "edit" ? "正在按你的要求修改图片…" : "正在生成图片…");
             let imageConfig: AiConfig = { ...config, model: imageModelId, imageModel: imageModelId, quality, imageOptions: chatImageRequestOptions(config.imageOptions, resolution), systemPrompt: "", count: "1" };
-            if (!turnRegion) imageConfig.size = await resolveChatImageSize(imageConfig, requestedImageSize, action, references[0], assertSendCurrent);
-            const maskInput = turnRegion ? await prepareChatMask(imageConfig, references, turnRegion, assertSendCurrent) : undefined;
+            if (!turnRegion || !imageModelProfile(imageModelId).supportsMask) imageConfig.size = await resolveChatImageSize(imageConfig, requestedImageSize, action, references[0], assertSendCurrent);
+            const maskInput = turnRegion ? await prepareChatRegionEdit(imageConfig, references, turnRegion, assertSendCurrent) : undefined;
             if (maskInput) imageConfig = maskInput.config;
+            const imagePrompt = maskInput ? `${maskInput.promptPrefix}\n${plan.prompt}` : plan.prompt;
             const currentSession = sessionsRef.current.find(session => session.id === sessionId)!;
-            const pendingImageTask: PendingChatImageTask = { requestId: createClientId(), prompt: imagePrompt, modelId: imageModelId, quality, size: imageConfig.size, ...(resolution ? { resolution } : {}), action, parentMessageId: userMessage.id, parentId, workId, workNote, referenceImageIds: references.map(image => image.id), focusRevision: (currentSession.focusRevision || 0) + 1, ...(maskInput ? { maskAdaptation: maskInput.adaptation } : {}), explanation };
+            const pendingImageTask: PendingChatImageTask = { requestId: createClientId(), prompt: imagePrompt, modelId: imageModelId, quality, size: imageConfig.size, ...(resolution ? { resolution } : {}), action, parentMessageId: userMessage.id, parentId, workId, workNote, referenceImageIds: references.map(image => image.id), focusRevision: (currentSession.focusRevision || 0) + 1, ...(maskInput?.adaptation ? { maskAdaptation: maskInput.adaptation } : {}), ...(maskInput?.regionComposite ? { regionComposite: maskInput.regionComposite } : {}), explanation };
             pendingImageTask.signature = chatImageTaskSignature(pendingImageTask);
             if (duplicateChatImageTask(currentSession, pendingImageTask)) throw new Error("已有相同要求的图片任务等待核实，未重复提交。请查询那条原任务；可以继续聊天或发送不同的新要求。");
             imageRequestId = pendingImageTask.requestId;
@@ -613,7 +615,7 @@ export default function ChatPage() {
             const savedImages: ChatGeneratedImage[] = [];
             for (const [index, item] of generated.entries()) {
                 const dataUrl = await restoreChatMaskResult(pendingImageTask, item.dataUrl); assertSendCurrent();
-                savedImages.push(await chatMedia.persist({ id: item.sourceTaskId ? `${item.sourceTaskId}:${index}` : item.id, dataUrl, prompt: imagePrompt, modelId: imageModelId, quality, size: imageConfig.size, ...(resolution ? { resolution } : {}), parentId, workId, workNote }, assertSendCurrent));
+                savedImages.push(await chatMedia.persist({ id: item.sourceTaskId ? `${item.sourceTaskId}:${index}` : item.id, dataUrl, prompt: imagePrompt, modelId: imageModelId, quality, size: imageConfig.size, ...(resolution ? { resolution } : {}), parentId, workId, workNote, sourceTaskId: item.sourceTaskId, ...(item.dataUrl.startsWith("/api/assets/") ? { sourceResultUrl: item.dataUrl } : {}), ...(pendingImageTask.regionComposite ? { regionComposite: pendingImageTask.regionComposite } : {}) }, assertSendCurrent));
             }
             updateSession(sessionId, session => completeChatImageTask(session, assistantId, pendingImageTask, savedImages));
             if (activeSessionIdRef.current === sessionId) setRegionSelection(selection => selection === turnRegion ? null : selection);
@@ -739,6 +741,7 @@ export default function ChatPage() {
                     </div>
                     <div className="px-3"><Button type="primary" block disabled={!sessionsReady || isSending || placingImage || readingAttachments} icon={<MessageSquarePlus className="size-4" />} onClick={() => startSession()} className="!h-10">{uiText("新对话")}</Button></div>
                     <div className="mt-4 min-h-0 flex-1 space-y-1 overflow-y-auto px-3 pb-3">
+                        <PracticeExampleRecord />
                         {sessions.map((session) => <div key={session.id} className={cn("group flex w-full items-center gap-1 rounded-xl pr-1 transition-colors", session.id === activeSession?.id ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted")}>
                             <button type="button" disabled={isSending || placingImage || readingAttachments} onClick={() => selectSession(session.id)} className="flex min-w-0 flex-1 items-center gap-2 px-3 py-3 text-left disabled:opacity-60">
                                 <span className="grid size-7 shrink-0 place-items-center rounded-lg opacity-75"><Bot className="size-4" /></span>
@@ -779,6 +782,7 @@ export default function ChatPage() {
                             <div className="relative rounded-2xl border border-input bg-background p-3 focus-within:border-orange-400">
                                 {!editing ? <ImageAgentFocus images={composerImageCatalog} focusId={selectedImage?.id} locked={activeSession?.focusLocked} newCreation={activeSession?.newCreation} referenceCount={composerAttachments.filter(item => item.kind !== "text" && item.id !== selectedImage?.id).length} disabled={imageActionsDisabled} onSelect={id => { const image = composerImageCatalog.find(item => item.id === id); if (image) selectImageTarget(image); }} onNewCreation={startNewCreation} /> : null}
                                 {regionSelection && selectedImage?.id === regionSelection.imageId ? <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground"><Brush className="size-3.5" /><span>{uiText("已圈选局部区域，仅修改选区内")}</span><button type="button" onClick={() => void openRegionSelection(regionSelection.imageId)} className="underline">{uiText("调整选区")}</button><button type="button" aria-label={uiText("清除局部选区")} onClick={() => setRegionSelection(null)}><X className="size-3.5" /></button></div> : null}
+                                {selectedImage ? <p className="mb-2 text-xs leading-relaxed text-muted-foreground">{uiText("涂选后只合入选区，区域外保留原图；未涂选时仅靠文字约束。选区内结构、接缝与光影仍需核对。")}</p> : null}
                                 {composerAttachments.length ? <div className="flex flex-wrap gap-2 pb-3">{composerAttachments.map((item) => <div key={item.id} className="group relative flex h-14 max-w-[180px] items-center gap-2 rounded-xl border border-border bg-card p-1.5">{item.dataUrl ? <img src={item.dataUrl} alt="" className="size-10 rounded-lg object-cover" /> : <span className="grid size-10 place-items-center rounded-lg bg-muted text-muted-foreground"><FileText className="size-5" /></span>}<span className="min-w-0 flex-1 truncate text-xs font-medium">{!editing && referenceImageIds.includes(item.id) ? uiText("参考 · {value1}", { value1: conversationImageLabel(imageLabels.get(item.id) || "") || item.name }) : item.name}</span>{!editing ? <button type="button" aria-label={uiText("移除 ") + item.name} onClick={() => { setAttachments((current) => current.filter((attachment) => attachment.id !== item.id)); setReferenceImageIds((ids) => ids.filter((id) => id !== item.id)); if (imageTarget?.id === item.id && !imageCatalog.some((image) => image.id === item.id)) setImageTarget(null); }} className="absolute -right-1.5 -top-1.5 grid size-6 place-items-center rounded-full border border-border bg-card text-muted-foreground hover:text-red-600"><X className="size-3.5" /></button> : null}</div>)}</div> : null}
                                 {readingAttachments || imageDrop.reading ? <div role="status" className="mb-2 flex items-center gap-2 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />{uiText("正在读取附件，请稍候…")}</div> : null}
                                 {mentions.menu}
@@ -810,7 +814,7 @@ export default function ChatPage() {
                 </section>
             </div>
             {imageTools.compareDialog}
-            {regionImage ? <Suspense fallback={<div role="status">{uiText("正在打开局部选区…")}</div>}><RegionSelectionDialog source={regionImage} initialMask={regionSelection?.imageId === regionImage.id ? regionSelection.selection.dataUrl : undefined} nativeMask onClose={() => setRegionImage(null)} onSave={async blob => {
+            {regionImage ? <Suspense fallback={<div role="status">{uiText("正在打开局部选区…")}</div>}><RegionSelectionDialog source={regionImage} initialMask={regionSelection?.imageId === regionImage.id ? regionSelection.selection.dataUrl : undefined} nativeMask={qualityProfile.supportsMask} onClose={() => setRegionImage(null)} onSave={async blob => {
                 const imageId = regionImage.id, sessionId = activeSession?.id;
                 const selection = await saveChatRegionSelection(imageId, blob, () => { if (!isCurrentScope() || activeSessionIdRef.current !== sessionId) throw new DOMException("会话已切换", "AbortError"); });
                 setRegionSelection(selection); composerRef.current?.focus();

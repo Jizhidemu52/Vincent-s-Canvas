@@ -7,8 +7,9 @@ import { canvasSelectionBounds } from "@/lib/canvas/canvas-selection-geometry";
 import { canvasArrangeOptions, type CanvasArrangeMode } from "@/lib/canvas/canvas-node-arrange-options";
 import { useUiText } from "@/lib/i18n";
 
-export const CanvasMultiSelection = memo(function CanvasMultiSelection({ nodes, scale, theme, hidden, screenToCanvas, onBegin, onPreview, onEnd, onArrange }: {
+export const CanvasMultiSelection = memo(function CanvasMultiSelection({ nodes, scale, theme, hidden, toolbarTop, screenToCanvas, onBegin, onPreview, onEnd, onArrange }: {
     nodes: CanvasNodeData[]; scale: number; theme: CanvasTheme; hidden: boolean;
+    toolbarTop?: number;
     screenToCanvas: (x: number, y: number) => Position; onBegin: () => void;
     onPreview: (preview: CanvasResizePreview) => void; onEnd: (preview: CanvasResizePreview | null) => void;
     onArrange: (mode: CanvasArrangeMode) => void;
@@ -51,7 +52,7 @@ export const CanvasMultiSelection = memo(function CanvasMultiSelection({ nodes, 
         cleanup.current = () => { if (raf) cancelAnimationFrame(raf); window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); window.removeEventListener("pointercancel", cancel); window.removeEventListener("blur", cancel); window.removeEventListener("keydown", key, true); };
     };
     return <div ref={frame} data-testid="canvas-multi-selection" className="pointer-events-none absolute z-[70]" style={{ left: bounds.x, top: bounds.y, width: bounds.width, height: bounds.height, border: `${1 / scale}px solid ${theme.canvas.selectionStroke}`, visibility: hidden ? "hidden" : undefined }}>
-        <div data-canvas-no-zoom className="pointer-events-auto absolute left-0 bottom-full mb-2 flex origin-bottom-left items-center gap-2 whitespace-nowrap rounded px-2 py-1 text-xs shadow" style={{ transform: `scale(${1 / scale})`, background: theme.toolbar.panel, color: theme.node.text }} onPointerDown={event => event.stopPropagation()}>
+        <div data-canvas-no-zoom className="pointer-events-auto absolute left-0 flex origin-bottom-left items-center gap-2 whitespace-nowrap rounded px-2 py-1 text-xs shadow" style={{ bottom: bounds.height + Math.max(0, bounds.y - (toolbarTop ?? bounds.y)) + 8 / scale, transform: `scale(${1 / scale})`, background: theme.toolbar.panel, color: theme.node.text }} onPointerDown={event => event.stopPropagation()}>
             <span>{t("已选 {count} 项", { count: nodes.length })}</span>
             <select aria-label={t("对齐与排列所选节点")} value="" style={{ background: theme.node.panel, color: theme.node.text }} onChange={event => onArrange(event.target.value as CanvasArrangeMode)}>
                 <option value="" disabled>{t("对齐 / 排列")}</option>

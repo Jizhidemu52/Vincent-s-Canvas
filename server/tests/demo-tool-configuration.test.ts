@@ -31,7 +31,7 @@ describe("demo formal tool configuration", () => {
     expect(moduleKeys).not.toContain("canvas-ai-upscale");
   });
   test("configured model is resolved and unknown keys cannot fall back", () => {
-    expect(resolveDemoToolConfiguration({ operationType: "inpaint", toolKey: binding.toolKey, modelConfigId: "image-a" }, [binding], models, providers, flags)).toEqual({ toolKey: binding.toolKey, modelConfigId: "model-a" });
+    expect(resolveDemoToolConfiguration({ operationType: "inpaint", toolKey: binding.toolKey, modelConfigId: "image-a" }, [binding], models, providers, flags)).toEqual({ toolKey: binding.toolKey, modelConfigId: "model-a", allowRawPrompt: false });
     expect(() => resolveDemoToolConfiguration({ operationType: "inpaint", toolKey: "creative-typo", modelConfigId: "model-a" }, [], models, providers, flags)).toThrow("板块标识无效");
   });
   test("changed binding, disabled slot and parent reject before provider submission", () => {

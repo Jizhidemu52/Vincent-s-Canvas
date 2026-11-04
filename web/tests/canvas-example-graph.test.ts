@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 import { createCanvasExampleGraph } from "@/lib/canvas/canvas-example-graph";
 import { canvasExampleLessons, canvasExampleNodePrefix } from "@/lib/canvas/canvas-example-lessons";
 import { resolveImageWorkflow } from "@/lib/canvas/canvas-image-workflow";
@@ -6,8 +8,13 @@ import { getSharedConfigTargets } from "@/lib/canvas/canvas-shared-connections";
 import { resolveSharedGenerationPlan } from "@/lib/canvas/canvas-shared-generation";
 import { canvasExampleControlGuides, canvasExampleControlPrefix, canvasExampleControlSteps } from "@/lib/canvas/canvas-example-controls";
 import { CANVAS_DOCUMENT_MAX_BYTES, parseCanvasDocumentWrite } from "../../server/src/canvas-document";
+import { canvasExampleControlProof, canvasExamplePractices, canvasPracticeImage } from "@/lib/canvas/canvas-example-practices";
 
 describe("independent design teaching canvas", () => {
+    test("all practice screenshots and actual local outputs ship as static assets", () => {
+        const files = [...Object.values(canvasExamplePractices).flatMap(item => [canvasPracticeImage(item.image), ...(item.resultImage ? [item.resultImage] : [])]), ...Object.values(canvasExampleControlProof).map(item => canvasPracticeImage(item.image))];
+        for (const file of new Set(files)) expect(existsSync(resolve(import.meta.dirname, "../public", file.slice(1)))).toBe(true);
+    });
     test("complete teaching board passes the real server persistence contract and size limit", () => {
         const document = { id: "teaching-contract", title: "教学画布", createdAt: "2026-11-03T00:00:00Z", updatedAt: "2026-11-03T00:00:00Z", ...createCanvasExampleGraph(), viewport: { x: 0, y: 0, k: 1 }, backgroundMode: "dots", showImageInfo: false, chatSessions: [], activeChatId: null };
         const body = { baseRevision: 0, document };
@@ -23,10 +30,14 @@ describe("independent design teaching canvas", () => {
         for (const lesson of canvasExampleLessons) {
             const cases = graph.nodes.filter(node => node.id.startsWith(canvasExampleNodePrefix(lesson.id, "case")));
             const practice = graph.nodes.filter(node => node.id.startsWith(canvasExampleNodePrefix(lesson.id, "practice")));
-            expect(cases).toHaveLength(4);
+            const recorded = canvasExamplePractices[lesson.id];
+            expect(cases).toHaveLength(recorded.resultImage ? 6 : 4);
             expect(practice.length).toBeGreaterThanOrEqual(3);
-            const explanation = cases.find(node => node.title.includes("准备 / 操作 / 得到 / 注意"))!;
-            for (const label of ["准备\n", "操作\n", "得到\n", "注意\n"]) expect(explanation.metadata?.content).toContain(label);
+            const explanation = cases.find(node => node.title.includes("实操简注"))!;
+            expect(explanation.metadata?.content).toContain(recorded.annotation);
+            expect(explanation.metadata?.content).toContain(recorded.evidence);
+            expect(explanation.metadata?.content).toContain(lesson.location);
+            expect(cases.some(node => node.metadata?.content === canvasPracticeImage(recorded.image))).toBe(true);
         }
         expect(JSON.stringify(graph)).not.toContain("蝴蝶结");
         expect(JSON.stringify(graph)).not.toContain("design-workbench/assets/garment.png");
@@ -35,10 +46,9 @@ describe("independent design teaching canvas", () => {
     test("comparison boards are locked, unwired teaching images, not generation inputs or recorded results", () => {
         const graph = createCanvasExampleGraph();
         const boards = graph.nodes.filter(node => node.type === "image" && node.id.includes("-case-"));
-        expect(boards).toHaveLength(20);
+        expect(boards).toHaveLength(25);
         for (const board of boards) {
             expect(board.metadata?.locked).toBe(true);
-            expect(board.title).toContain("AI示意");
             expect(graph.connections.some(edge => edge.fromNodeId === board.id || edge.toNodeId === board.id)).toBe(false);
         }
         const connectedImages = graph.nodes.filter(node => node.type === "image" && graph.connections.some(edge => edge.fromNodeId === node.id));
@@ -94,7 +104,7 @@ describe("independent design teaching canvas", () => {
         expect(second.nodes[0]!.metadata!.content).toBe(previous);
     });
 
-    test("every indexed small control has its own complete illustrated card and valid practice destination", () => {
+    test("every indexed control has honest proof status, matched screenshots only when verified, and a valid practice destination", () => {
         const graph = createCanvasExampleGraph();
         expect(new Set(canvasExampleControlGuides.map(guide => guide.id)).size).toBe(canvasExampleControlGuides.length);
         expect(new Set(canvasExampleControlSteps.map(item => item.key)).size).toBe(canvasExampleControlSteps.length);
@@ -107,17 +117,54 @@ describe("independent design teaching canvas", () => {
         }
         for (const { key, guide, step } of canvasExampleControlSteps) {
             const card = graph.nodes.filter(node => node.id.startsWith(canvasExampleControlPrefix(key)));
-            expect(card).toHaveLength(2);
+            const proof = canvasExampleControlProof[key];
+            expect(card).toHaveLength(proof ? 2 : 1);
             const picture = card.find(node => node.type === "image")!;
             const text = card.find(node => node.type === "text")!;
-            expect(picture.metadata?.locked).toBe(true);
-            expect(picture.metadata?.content).toMatch(/^\/design-examples\/[a-z]+-source\.webp$/);
-            for (const value of [step.control, guide.scenario, guide.prepare, step.action, step.result, guide.caution]) {
+            if (proof) {
+                expect(picture.metadata?.locked).toBe(true);
+                expect(picture.metadata?.content).toBe(canvasPracticeImage(proof.image));
+                expect(text.metadata?.content).toContain(proof.evidence);
+                if (proof.annotation) expect(text.metadata?.content).toContain(proof.annotation);
+            } else {
+                expect(picture).toBeUndefined();
+                expect(text.metadata?.content).toContain("用法说明 · 未逐项实测");
+            }
+            for (const value of [step.control, guide.prepare, step.action, step.result]) {
                 expect(value.trim().length).toBeGreaterThan(0);
                 expect(text.metadata?.content).toContain(value);
             }
             expect(graph.connections.some(edge => card.some(node => node.id === edge.fromNodeId || node.id === edge.toNodeId))).toBe(false);
         }
+        for (const key of Object.keys(canvasExampleControlProof)) expect(canvasExampleControlSteps.some(item => item.key === key)).toBe(true);
+    });
+
+    test("all seven copy-history controls and single-node deletion have distinct operation captures and matching notes", () => {
+        const keys = [...canvasExampleControlSteps.filter(item => item.guide.id === "shell-copy-history").map(item => item.key), "shell-delete--0"];
+        expect(keys).toHaveLength(8);
+        expect(new Set(keys.map(key => canvasExampleControlProof[key]?.image)).size).toBe(8);
+        for (const key of keys) {
+            expect(canvasExampleControlProof[key]?.image).toMatch(/^copy-history-/);
+            expect(canvasExampleControlProof[key]?.annotation?.length).toBeGreaterThan(20);
+        }
+        expect(Object.keys(canvasExampleControlProof)).toHaveLength(50);
+        expect(canvasExampleControlSteps.filter(item => !canvasExampleControlProof[item.key])).toHaveLength(650);
+    });
+
+    test("group operations and arrangement controls have 23 matching local-operation captures", () => {
+        const keys = [
+            ...[0, 1, 2, 4, 5].map(index => `shell-group-create--${index}`),
+            ...Array.from({ length: 7 }, (_, index) => `shell-group-manage--${index}`),
+            ...Array.from({ length: 6 }, (_, index) => `shell-arrange-align--${index}`),
+            ...Array.from({ length: 5 }, (_, index) => `shell-arrange-spacing--${index}`),
+        ];
+        expect(keys).toHaveLength(23);
+        expect(new Set(keys.map(key => canvasExampleControlProof[key]?.image)).size).toBe(23);
+        for (const key of keys) {
+            expect(canvasExampleControlProof[key]?.image).toMatch(/^(group|arrange)-/);
+            expect(canvasExampleControlProof[key]?.annotation?.length).toBeGreaterThan(20);
+        }
+        expect(canvasExampleControlProof["shell-arrange-spacing--0"]?.annotation).toContain("未覆盖保留组内部布局分支");
     });
 
     test("comparison practice uses two distinct static images without fake lineage or a pre-existing group", () => {

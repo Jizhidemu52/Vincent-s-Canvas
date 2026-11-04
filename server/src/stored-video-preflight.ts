@@ -7,13 +7,15 @@ import { probeMediaStream } from "./media-probe";
 import type { MediaStream } from "./media-file";
 import { ObjectStorage } from "./object-storage";
 import { loadConfig } from "./config";
+import type { PromptInput } from "../../shared/prompt-contracts";
+import { videoMotionParameters, videoPreflightPrompt } from "./video-motion-input";
 
 export type StoredVideoProbeRuntime = {
   readSource?: (key: string) => Promise<MediaStream>;
   probe?: typeof probeMediaStream;
 };
 
-type StoredVideoInput = { userId: string; modelConfigId?: string | null; prompt: string; parameters?: Record<string, unknown>; sourceUrls: string[] };
+type StoredVideoInput = { userId: string; modelConfigId?: string | null; prompt: string; promptInput?: PromptInput; parameters?: Record<string, unknown>; sourceUrls: string[] };
 type StoredVideoAsset = { id: string; objectKey: string; mimeType: string; byteSize: number; metadata?: Record<string, unknown> };
 export type StoredVideoSnapshot = { modelId: string; assets: Array<Pick<StoredVideoAsset, "id" | "objectKey" | "mimeType" | "byteSize">> };
 
@@ -57,6 +59,7 @@ export async function validateStoredVideoPreflightSnapshot(db: Pick<Database, "q
 
 export async function preflightStoredVideoTask(db: Pick<Database, "query">, input: StoredVideoInput, publicEndpoint = process.env.S3_PUBLIC_ENDPOINT || process.env.S3_ENDPOINT || "", runtime: StoredVideoProbeRuntime = {}) {
   const snapshot = await readStoredVideoSnapshot(db, input);
+  const prompt = videoPreflightPrompt(input);
   const sources: ProviderVideoSource[] = [];
   for (const asset of snapshot.assets) {
     const image = asset.mimeType.startsWith("image/");
@@ -64,8 +67,9 @@ export async function preflightStoredVideoTask(db: Pick<Database, "query">, inpu
     sources.push({ mimeType: asset.mimeType, bytes: new Uint8Array(), byteSize: Number(asset.byteSize), ...videoSourceMetadata(asset.metadata), publicUrl: image ? "asset://pending-image-upload" : "https://pending-owned-storage.example/reference" });
   }
   try {
+    const parameters = videoMotionParameters(input.parameters || {}, input.promptInput, snapshot.assets.map(asset => asset.mimeType), snapshot.modelId);
     // Cheap size/count/mode checks happen before reading any stored bytes.
-    preflightVideoSources(snapshot.modelId, input.prompt, input.parameters || {}, sources);
+    preflightVideoSources(snapshot.modelId, prompt, parameters, sources);
     const verified: ProviderVideoSource[] = [];
     for (const [index, source] of sources.entries()) {
       const key = snapshot.assets[index]!.objectKey;
@@ -74,7 +78,8 @@ export async function preflightStoredVideoTask(db: Pick<Database, "query">, inpu
       const metadata = await (runtime.probe || probeMediaStream)(stream, source.mimeType, source.byteSize);
       verified.push({ ...source, ...metadata });
     }
-    return { ...preflightVideoSources(snapshot.modelId, input.prompt, input.parameters || {}, verified), snapshot };
+    const result = preflightVideoSources(snapshot.modelId, prompt, parameters, verified);
+    return { ...result, normalized: { ...result.normalized, ...(input.promptInput?.scene === "video-motion" ? { generateAudio: parameters.generateAudio !== false } : {}) }, snapshot };
   } catch (error) {
     throw new BillingError("INVALID_VIDEO_INPUT", error instanceof Error ? error.message : "视频参数不正确");
   }

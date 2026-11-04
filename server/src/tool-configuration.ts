@@ -11,6 +11,7 @@ export type ToolConfiguration = {
   creditCostOverride: number | null;
   rmbCostOverride: number | null;
   configurationVersion: number;
+  allowRawPrompt?: boolean;
 };
 
 export class ToolConfigurationError extends Error {
@@ -32,9 +33,9 @@ export async function readToolConfiguration(db: Pick<Database, "query">, toolKey
   const result = await db.query<ToolConfiguration>(
     `SELECT tool_key AS "toolKey",model_config_id AS "modelConfigId",enabled,
       credit_cost_override AS "creditCostOverride",rmb_cost_override::float8 AS "rmbCostOverride",
-      configuration_version AS "configurationVersion" FROM tool_api_configurations WHERE tool_key=$1`, [toolKey],
+      configuration_version AS "configurationVersion",allow_raw_prompt AS "allowRawPrompt" FROM tool_api_configurations WHERE tool_key=$1`, [toolKey],
   );
-  return result.rows[0] ?? { toolKey, modelConfigId: null, enabled: true, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 0 };
+  return result.rows[0] ?? { toolKey, modelConfigId: null, enabled: true, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 0, allowRawPrompt: false };
 }
 
 /** Chat always uses the administrator's shared model; image bindings still reject stale parameters. */

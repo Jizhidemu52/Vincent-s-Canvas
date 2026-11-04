@@ -7,18 +7,21 @@ const owner = "71000000-0000-4000-8000-000000000001";
 const imageId = "10000000-0000-4000-8000-000000000001",
     otherImageId = "10000000-0000-4000-8000-000000000002",
     chatId = "10000000-0000-4000-8000-000000000003",
-    otherChatId = "10000000-0000-4000-8000-000000000004";
+    otherChatId = "10000000-0000-4000-8000-000000000004",
+    videoId = "10000000-0000-4000-8000-000000000005";
 const models = [
     { id: imageId, name: "图像模型 A", modelId: "fixture-image-a", capabilities: ["edit", "generate"], creditCost: 0, rmbCost: 0 },
     { id: otherImageId, name: "图像模型 B", modelId: "fixture-image-b", capabilities: ["edit", "generate"], creditCost: 0, rmbCost: 0 },
     { id: chatId, name: "配方优化模型", modelId: "fixture-chat-a", capabilities: ["chat"] },
     { id: otherChatId, name: "独立模型 B", modelId: "fixture-chat-b", capabilities: ["chat"] },
+    { id: videoId, name: "视频模型", modelId: "doubao-seedance-2.5", capabilities: ["video"] },
 ];
-async function fixture(context: BrowserContext, baseURL: string, role = "super_admin") {
+async function fixture(context: BrowserContext, baseURL: string, role = "super_admin", config: { key?: string; empty?: boolean } = {}) {
+    const recipeKey = config.key ?? "free-optimize";
     const versions = [
         {
             id: randomUUID(),
-            recipeKey: "free-optimize",
+            recipeKey,
             version: 1,
             systemPrompt: "PRIVATE RECIPE RULE - fixture only",
             fieldTemplate: "{{fields}}",
@@ -31,7 +34,9 @@ async function fixture(context: BrowserContext, baseURL: string, role = "super_a
             createdAt: "2026-10-01T00:00:00Z",
         },
     ];
-    const recipe = { key: "free-optimize", name: "自由优化", enabled: true, modelConfigId: chatId, failurePolicy: "stop", currentVersionId: versions[0].id, updatedAt: "2026-10-01T00:00:00Z" };
+    const seedVersion = versions[0];
+    if (config.empty) versions.splice(0);
+    const recipe = { key: recipeKey, name: recipeKey === "video-motion" ? "图生视频动效" : "自由优化", enabled: true, modelConfigId: chatId, failurePolicy: "stop", currentVersionId: versions[0]?.id ?? null, updatedAt: "2026-10-01T00:00:00Z" };
     const records = new Map<string, any>(),
         tasks = new Map<string, any>();
     const requests: string[] = [],
@@ -72,7 +77,7 @@ async function fixture(context: BrowserContext, baseURL: string, role = "super_a
         if (path === "/api/assets" || path === "/api/assets/summary") return json({ assets: [], nextCursor: null, hasMore: false });
         if (path === "/api/tasks" && method === "GET") return json({ tasks: [...tasks.values()] });
         if (path === "/api/admin/prompt-recipes") return json({ recipes: [recipe], models });
-        if (path === "/api/admin/prompt-recipes/free-optimize" && method === "GET")
+        if (path === `/api/admin/prompt-recipes/${recipeKey}` && method === "GET")
             return json({
                 recipe,
                 versions: [...versions].reverse(),
@@ -94,24 +99,24 @@ async function fixture(context: BrowserContext, baseURL: string, role = "super_a
                     ],
                 },
             });
-        if (path === "/api/admin/prompt-recipes/free-optimize" && method === "PATCH") {
+        if (path === `/api/admin/prompt-recipes/${recipeKey}` && method === "PATCH") {
             const input = request.postDataJSON();
             settings.push(input);
             Object.assign(recipe, input, { updatedAt: new Date().toISOString() });
             return json({ recipe });
         }
-        if (path === "/api/admin/prompt-recipes/free-optimize/versions") {
-            const version = { ...versions[0], ...request.postDataJSON(), id: randomUUID(), version: versions.length + 1, contentHash: `fixture-hash-${versions.length + 1}`, createdAt: new Date().toISOString() };
+        if (path === `/api/admin/prompt-recipes/${recipeKey}/versions`) {
+            const version = { ...seedVersion, ...request.postDataJSON(), id: randomUUID(), version: versions.length + 1, contentHash: `fixture-hash-${versions.length + 1}`, createdAt: new Date().toISOString() };
             versions.push(version);
             return json({ version });
         }
-        if (path === "/api/admin/prompt-recipes/free-optimize/activate") {
+        if (path === `/api/admin/prompt-recipes/${recipeKey}/activate`) {
             recipe.currentVersionId = request.postDataJSON().versionId;
             recipe.updatedAt = new Date().toISOString();
             activations.push(recipe.currentVersionId);
             return json({ recipe });
         }
-        if (path === "/api/admin/prompt-recipes/free-optimize/test") {
+        if (path === `/api/admin/prompt-recipes/${recipeKey}/test`) {
             const input = request.postDataJSON();
             tests.push(input);
             const compilation = {
@@ -145,7 +150,7 @@ async function fixture(context: BrowserContext, baseURL: string, role = "super_a
             if (flags.abortTest) return route.abort("connectionclosed");
             return json({ compilation });
         }
-        if (path.startsWith("/api/admin/prompt-recipes/free-optimize/compilations/")) return json({ compilation: [...records.values()].find((record) => record.id === path.split("/").at(-1)) });
+        if (path.startsWith(`/api/admin/prompt-recipes/${recipeKey}/compilations/`)) return json({ compilation: [...records.values()].find((record) => record.id === path.split("/").at(-1)) });
         if (path.startsWith("/api/prompt-compilations/by-request/")) {
             const compilation = records.get(path.split("/").at(-1)!);
             return compilation ? json({ compilation }) : json({ message: "not found" }, 404);
@@ -334,7 +339,7 @@ for (const role of ["department_admin", "designer"])
 test("privilege change purges recipe content and requires an explicit reload into the reduced-role guard", async ({ page, context, baseURL }, info) => {
     const f = await fixture(context, baseURL!);
     const documents: string[] = [];
-    page.on("request", request => {
+    page.on("request", (request) => {
         if (request.isNavigationRequest() && request.resourceType() === "document" && request.frame() === page.mainFrame()) documents.push(request.url());
     });
     await page.goto("/admin/prompt-recipes");
@@ -364,13 +369,22 @@ test("privilege change purges recipe content and requires an explicit reload int
     await expect(page.getByRole("textbox", { name: "系统提示词", exact: true })).toHaveCount(0);
     expect(f.requests.filter((path) => path.includes("prompt-recipes"))).toHaveLength(count);
     expect(await page.evaluate(() => JSON.stringify({ ...localStorage }))).not.toContain("PRIVATE RECIPE RULE");
-    expect(f.tests).toEqual([]); expect(f.submissions).toEqual([]);
+    expect(f.tests).toEqual([]);
+    expect(f.submissions).toEqual([]);
     expect(f.unexpected).toEqual([]);
     expect(f.errors).toEqual([]);
-    await info.attach("identity-navigation", { contentType: "application/json", body: Buffer.from(JSON.stringify({
-        documentsBeforeExplicitReload: 1, documentsAfterExplicitReload: documents.length, privateRecipeRequestsBeforeAndAfter: count,
-        reducedRoleDeniedAfterReload: true, recipeTextNotPersisted: true,
-    })) });
+    await info.attach("identity-navigation", {
+        contentType: "application/json",
+        body: Buffer.from(
+            JSON.stringify({
+                documentsBeforeExplicitReload: 1,
+                documentsAfterExplicitReload: documents.length,
+                privateRecipeRequestsBeforeAndAfter: count,
+                reducedRoleDeniedAfterReload: true,
+                recipeTextNotPersisted: true,
+            }),
+        ),
+    });
 });
 
 test("390px dark layout keeps editor controls reachable without horizontal page overflow", async ({ page, context, baseURL }, info) => {
@@ -402,4 +416,64 @@ test("test scene is bound to the recipe and reference selection stops at the com
     expect(f.submissions).toEqual([]);
     expect(f.unexpected).toEqual([]);
     expect(f.errors).toEqual([]);
+});
+
+test("empty video recipe accepts the first admin-authored draft without seeding or activating private rules", async ({ page, context, baseURL }) => {
+    const f = await fixture(context, baseURL!, "super_admin", { key: "video-motion", empty: true });
+    await page.goto("/admin/prompt-recipes");
+    const rules = page.getByRole("textbox", { name: "系统提示词", exact: true });
+    await expect(rules).toHaveValue("");
+    await expect(page.getByRole("combobox", { name: "输出语言", exact: true })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "激活此版本 / 回滚", exact: true })).toBeDisabled();
+    await rules.fill("管理员输入的隔离测试规则，不是产品内置规则");
+    await page.getByRole("button", { name: "保存为新版本草稿", exact: true }).click();
+    await expect.poll(() => f.versions.length).toBe(1);
+    await expect(page.getByRole("button", { name: "激活此版本 / 回滚", exact: true })).toBeEnabled();
+    expect(f.versions[0]).toMatchObject({ outputLanguage: "zh", systemPrompt: "管理员输入的隔离测试规则，不是产品内置规则" });
+    expect(f.recipe.currentVersionId).toBeNull();
+    expect(f.activations).toEqual([]);
+    expect(f.tests).toEqual([]);
+    expect(f.submissions).toEqual([]);
+    expect(f.errors).toEqual([]);
+    expect(f.unexpected).toEqual([]);
+});
+
+test("video recipe test uses video targets and Chinese fields, shows the summary and never offers image creation", async ({ page, context, baseURL }, info) => {
+    const f = await fixture(context, baseURL!, "super_admin", { key: "video-motion" });
+    await page.goto("/admin/prompt-recipes");
+    await page.getByRole("tab", { name: "测试与对比" }).click();
+    await expect(page.getByRole("combobox", { name: "生成模式", exact: true })).toBeDisabled();
+    await expect(page.getByRole("combobox", { name: "测试输出语言", exact: true })).toBeDisabled();
+    await page.getByRole("combobox", { name: "目标视频模型", exact: true }).click();
+    const dropdown = page.locator(".ant-select-dropdown:visible");
+    await expect(dropdown.getByText("图像模型 A · fixture-image-a", { exact: true })).toHaveCount(0);
+    await dropdown.getByText("视频模型 · doubao-seedance-2.5", { exact: true }).click();
+    await page.getByLabel("上传参考图片").setInputFiles([
+        { name: "first.png", mimeType: "image/png", buffer: IMAGE },
+        { name: "last.png", mimeType: "image/png", buffer: IMAGE },
+    ]);
+    await page.getByRole("textbox", { name: "用户要求", exact: true }).fill("自然转身展示服装");
+    await page.getByRole("button", { name: "仅优化测试", exact: true }).click();
+    await expect(page.getByText("optimized: 自然转身展示服装", { exact: true })).toBeVisible();
+    await expect(page.getByText("动效方案摘要", { exact: true })).toBeVisible();
+    await expect(page.getByText("明确参考图分工，保留结构", { exact: true })).toBeVisible();
+    expect(f.tests).toHaveLength(1);
+    expect(f.tests[0]).toMatchObject({
+        toolKey: "video",
+        modelConfigId: videoId,
+        promptInput: { scene: "video-motion", mode: "video", outputLanguage: "zh", referenceRoles: ["首帧", "尾帧"], fields: { duration: 5, ratio: "adaptive", resolution: "720p", video_mode: "first-last-frame", generate_audio: false } },
+    });
+    expect(f.uploads).toHaveLength(2);
+    expect(f.uploadBytes.every((bytes) => bytes.equals(IMAGE))).toBe(true);
+    await expect(page.getByRole("textbox", { name: "出图参数 JSON", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "测试出图（1 张）", exact: true })).toHaveCount(0);
+    expect(f.submissions).toEqual([]);
+    await page.screenshot({ path: info.outputPath("video-motion-admin-desktop.png"), fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByText("动效方案摘要", { exact: true }).scrollIntoViewIfNeeded();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    expect(await page.locator(".wb-page").evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+    await page.screenshot({ path: info.outputPath("video-motion-admin-390.png"), fullPage: true });
+    expect(f.errors).toEqual([]);
+    expect(f.unexpected).toEqual([]);
 });

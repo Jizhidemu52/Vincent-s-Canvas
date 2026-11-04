@@ -66,7 +66,7 @@ export function CanvasVideoNodeContent({ node, theme, renderQuality }: CanvasVid
     }, [interactive, source]);
 
     if (!content && !storageKey) return <div className="flex h-full w-full flex-col items-center justify-center gap-3" style={{ color: theme.node.placeholder }}><Video className="size-7 opacity-35" /><span className="text-sm">{t("空视频节点")}</span></div>;
-    return <div className="relative h-full w-full overflow-hidden rounded-[inherit]" style={{ background: theme.node.fill }} data-canvas-video-content data-canvas-no-zoom
+    return <div className="relative h-full w-full overflow-hidden rounded-[inherit]" style={{ background: theme.node.fill }} data-canvas-video-content
         onPointerEnter={event => {
             const video = videoRef.current;
             if (!interactive || event.pointerType !== "mouse" || !video?.paused) return;
@@ -79,11 +79,16 @@ export function CanvasVideoNodeContent({ node, theme, renderQuality }: CanvasVid
             const video = videoRef.current;
             if (video) { video.pause(); video.currentTime = 0; }
         }}>
-        {interactive && previewUrl ? <video ref={videoRef} src={previewUrl} poster={posterUrl || undefined} preload="none" controls muted playsInline className="h-full w-full object-contain" aria-label={t("播放视频")}
+        {interactive && previewUrl ? <video ref={videoRef} src={previewUrl} poster={posterUrl || undefined} preload="none" controls muted playsInline className="h-full w-full object-contain" aria-label={t("播放视频")} data-canvas-no-zoom
             onPointerDown={() => { hoverPreview.current = false; }} onKeyDown={() => { hoverPreview.current = false; }}
             onLoadedMetadata={event => { const seconds = event.currentTarget.duration; if (Number.isFinite(seconds) && seconds > 0) setLoadedDuration({ source, value: Math.round(seconds * 1000) }); }} />
             : posterUrl ? <img src={posterUrl} alt={t("视频封面")} className="pointer-events-none h-full w-full object-contain" draggable={false} />
                 : <div className="flex h-full w-full items-center justify-center" style={{ color: theme.node.muted }}><Video className="size-8" /></div>}
+        {interactive && previewUrl ? <div data-canvas-video-drag-surface className="absolute inset-x-0 top-0 cursor-grab active:cursor-grabbing" title={t("拖动移动，底部控制播放")}
+            // Native controls live in the bottom strip. Keep that strip in screen
+            // pixels when zoomed, so dragging the picture never steals seeking.
+            style={{ bottom: "min(100%, calc(56px * var(--canvas-node-ui-scale, 1)))", touchAction: "none" }}
+            onPointerDown={() => { hoverPreview.current = false; }} /> : null}
         {duration ? <span className="pointer-events-none absolute right-2 top-2 rounded px-1.5 py-0.5 text-xs tabular-nums" style={{ color: theme.node.text, background: theme.toolbar.panel }}>{duration}</span> : null}
         {!interactive && posterUrl ? <span className="pointer-events-none absolute left-2 top-2 rounded p-1" style={{ color: theme.node.text, background: theme.toolbar.panel }}><Play className="size-3" /></span> : null}
     </div>;

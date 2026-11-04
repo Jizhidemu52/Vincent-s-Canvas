@@ -27,7 +27,7 @@ export function createPostgresPromptCompiler(db: Database, config: AppConfig, st
   const store = postgresPromptRecipeStore(db);
   const runtime: PromptCompilerRuntime = {
     resolveTarget: async (actor, request, options) => {
-      const operationType = request.promptInput.scene === "batch-optimize" ? "batch_image" : request.promptInput.mode === "generate" ? "image_generation" : "inpaint";
+      const operationType = request.promptInput.scene === "video-motion" ? "video_generation" : request.promptInput.scene === "batch-optimize" ? "batch_image" : request.promptInput.mode === "generate" ? "image_generation" : "inpaint";
       const execution = await resolveToolExecution(db, { operationType, toolKey: request.toolKey, modelConfigId: request.modelConfigId }, { allowModelOverride: actor.role === "super_admin" && options?.adminTest === true });
       const row = (await db.query<{ id: string; modelId: string; protocol: string; providerId: string; updatedAt: string; workflowConfigId: string | null; providerUpdatedAt: string }>(
         `SELECT m.id,m.model_id AS "modelId",p.protocol,p.id AS "providerId",m.updated_at::text AS "updatedAt",p.updated_at::text AS "providerUpdatedAt",m.workflow_config_id AS "workflowConfigId"

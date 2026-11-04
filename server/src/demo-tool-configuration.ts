@@ -7,7 +7,7 @@ export class DemoToolConfigurationError extends Error {
 
 export function resolveDemoToolConfiguration(
   input: { operationType: string; toolKey?: string; modelConfigId?: string | null; parameters?: Record<string, unknown> },
-  bindings: Array<{ toolKey: string; modelConfigId: string | null; enabled: boolean }>,
+  bindings: Array<{ toolKey: string; modelConfigId: string | null; enabled: boolean; allowRawPrompt?: boolean }>,
   models: Array<Record<string, unknown>>,
   providers: Array<Record<string, unknown>>,
   flags: Partial<Record<ModuleKey, boolean>>,
@@ -31,5 +31,5 @@ export function resolveDemoToolConfiguration(
   if (toolKey === "midjourney-blend" && model.modelId !== "midjourney-blend") throw new DemoToolConfigurationError("TOOL_MODEL_MISMATCH", "MJ 多图融合板块仅支持 Midjourney Blend 模型");
   const required: Record<string, string[]> = { image_generation: ["generate"], inpaint: ["edit"], upscale: ["upscale", "edit"], seamless_stitch: ["edit"], batch_image: ["batch", "edit"], video_generation: ["video"], audio_generation: ["audio"], chat: ["chat"] };
   if (!(required[input.operationType] || []).some(capability => (model.capabilities as string[]).includes(capability))) throw new DemoToolConfigurationError("MODEL_CAPABILITY_MISMATCH", "所选模型不支持该板块的操作类型");
-  return { toolKey, modelConfigId: String(model.id) };
+  return { toolKey, modelConfigId: String(model.id), allowRawPrompt: binding?.allowRawPrompt === true };
 }

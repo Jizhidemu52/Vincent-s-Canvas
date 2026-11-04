@@ -1,6 +1,9 @@
 import { promptInputSchema, promptRecipeVersionSchema, type AdminPromptRecipeVersion, type PromptInput, type PromptRecipeVersionContent, type PublicPromptCompilation } from "../../../../../shared/prompt-contracts";
 import type { AdminPromptTestInput } from "@/services/api/admin-prompt-recipes";
 import type { TaskSubmission } from "../../../../../shared/task-contracts";
+import { defaultVideoMotionSettings, normalizeVideoMotionSettings } from "../../../../../shared/video-motion-options";
+
+export const defaultVideoTestFields = { ...defaultVideoMotionSettings, duration: 5, ratio: "adaptive", resolution: "720p", video_mode: "auto", generate_audio: false };
 
 export function jsonObject(text: string, label: string): Record<string, unknown> {
     let value: unknown;
@@ -14,6 +17,9 @@ export function jsonObject(text: string, label: string): Record<string, unknown>
 }
 
 export type VersionEditorValue = Omit<PromptRecipeVersionContent, "modelOverrides"> & { overridesJson: string };
+export function emptyVersion(outputLanguage: "en" | "zh"): VersionEditorValue {
+    return { systemPrompt: "", fieldTemplate: "", overridesJson: "{}", fallbackPrompt: "", outputLanguage, changeNote: "" };
+}
 export function editVersion(version: AdminPromptRecipeVersion): VersionEditorValue {
     return {
         systemPrompt: version.systemPrompt,
@@ -32,21 +38,28 @@ export function parseVersion(value: VersionEditorValue): PromptRecipeVersionCont
 export function assertFallback(policy: "stop" | "fallback", version?: Pick<PromptRecipeVersionContent, "fallbackPrompt">) {
     if (policy === "fallback" && !version?.fallbackPrompt.trim()) throw new Error("选择回退策略前，目标版本必须保存非空回退提示词");
 }
-export function buildTestPromptInput(value: { scene: string; fieldsJson: string; userText: string; rolesText: string; mode: "generate" | "edit"; outputLanguage: "en" | "zh" }): PromptInput {
+export function buildTestPromptInput(value: { scene: string; fieldsJson: string; userText: string; rolesText: string; mode: PromptInput["mode"]; outputLanguage: "en" | "zh"; referenceCount?: number }): PromptInput {
+    const isVideo = value.scene === "video-motion";
+    const fields = jsonObject(value.fieldsJson, "场景字段");
+    const motion = normalizeVideoMotionSettings(fields);
+    const count = value.referenceCount ?? 0;
+    const videoMode = fields.video_mode && fields.video_mode !== "auto" ? fields.video_mode : count === 1 ? "first-frame" : count === 2 ? "first-last-frame" : count ? "reference" : "text";
+    const roles = value.rolesText
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
     return promptInputSchema.parse({
         scene: value.scene,
-        fields: jsonObject(value.fieldsJson, "场景字段"),
+        fields: isVideo ? { ...defaultVideoTestFields, ...fields, ...motion, video_mode: videoMode, generate_audio: motion.audio !== "none" } : fields,
         userText: value.userText,
-        referenceRoles: value.rolesText
-            .split(/\r?\n/)
-            .map((line) => line.trim())
-            .filter(Boolean),
+        referenceRoles: isVideo && !roles.length ? Array.from({ length: count }, (_, index) => (videoMode === "first-frame" ? "首帧" : videoMode === "first-last-frame" ? (index ? "尾帧" : "首帧") : `参考图片${index + 1}`)) : roles,
         mode: value.mode,
-        outputLanguage: value.outputLanguage,
+        outputLanguage: isVideo ? "zh" : value.outputLanguage,
         hasMask: false,
     });
 }
 export function buildTestImage(input: AdminPromptTestInput, compilation: PublicPromptCompilation, requestId: string, parametersJson: string): TaskSubmission {
+    if (input.promptInput.mode === "video") throw new Error("视频动效测试仅规划提示词，请到视频创作页生成视频");
     if (compilation.status !== "success" || !compilation.prompt?.trim()) throw new Error("请先完成提示词优化测试");
     const edit = input.promptInput.mode === "edit";
     return {

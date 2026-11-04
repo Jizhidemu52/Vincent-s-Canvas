@@ -22,7 +22,7 @@ type Configuration = {
 export function createDemoPromptCompiler(store: PromptRecipeStore, config: Configuration) {
   return new PromptCompiler(store, {
     resolveTarget: async (_actor, request) => {
-      const operationType = request.promptInput.scene === "batch-optimize" ? "batch_image" : request.promptInput.mode === "generate" ? "image_generation" : "inpaint";
+      const operationType = request.promptInput.scene === "video-motion" ? "video_generation" : request.promptInput.scene === "batch-optimize" ? "batch_image" : request.promptInput.mode === "generate" ? "image_generation" : "inpaint";
       const execution = resolveDemoToolConfiguration({ operationType, toolKey: request.toolKey, modelConfigId: request.modelConfigId }, config.tools, config.models, config.providers, config.flags);
       const model = config.models.find(item => item.id === execution.modelConfigId)!;
       const provider = config.providers.find(item => item.id === model.providerId)!;

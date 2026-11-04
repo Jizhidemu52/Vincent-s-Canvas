@@ -66,6 +66,19 @@ test("persists an empty upload reservation and later bytes/metadata updates with
   expect(open(path).load().assets).toEqual([completed, asset("unrelated")]);
 });
 
+test("video raw prompt permission and public motion summary survive a restart", () => {
+  const path = databasePath(), first = open(path);
+  expect(first.readVideoRawPromptAllowance()).toBe(false);
+  first.saveVideoRawPromptAllowance(true);
+  const planned = { ...task(), summaryZh: "镜头缓慢推近针织纹理", parameters: { promptOptimization: { summaryZh: "镜头缓慢推近针织纹理", optimized: true } } };
+  first.save({ tasks: [planned] }); first.close();
+  const second = open(path);
+  expect(second.readVideoRawPromptAllowance()).toBe(true);
+  expect(second.load().tasks[0]).toEqual(planned);
+  second.saveVideoRawPromptAllowance(false); second.close();
+  expect(open(path).readVideoRawPromptAllowance()).toBe(false);
+});
+
 test("requestId uniqueness rolls back the entire asset/task update and retains earlier rows", () => {
   const store = open();
   store.save({ assets: [asset()], tasks: [task()] });
