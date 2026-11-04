@@ -306,6 +306,10 @@ def stable_container(row):
     # Do not reduce mounts, network membership, environment or HostConfig to a
     # few convenient fields. Ignore only changing process health observations.
     result = {key: copy.deepcopy(row.get(key)) for key in ["Id", "Name", "Image", "Config", "HostConfig", "Mounts"]}
+    # Docker may reorder Mounts between inspections. Sort complete copied
+    # objects, preserving every field and duplicate without changing other arrays.
+    if isinstance(result["Mounts"], list):
+        result["Mounts"].sort(key=canonical)
     result["networks"] = {key: {field: value.get(field) for field in ["NetworkID", "IPAddress", "GlobalIPv6Address", "Aliases", "DNSNames"]}
                           for key, value in row.get("NetworkSettings", {}).get("Networks", {}).items()}
     result["startedAt"] = row.get("State", {}).get("StartedAt")

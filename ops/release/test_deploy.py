@@ -11,7 +11,7 @@ import uuid
 from unittest.mock import patch
 
 import deploy
-from test_contract import compose, inspect, instance
+from test_contract import compose, inspect, instance, mounts
 
 
 def idle_activity():
@@ -80,6 +80,36 @@ class DeploymentContracts(unittest.TestCase):
             deploy.assert_rollback_source(model, model, changed, rows, instance())
         changed = copy.deepcopy(rows); changed[0]["State"]["StartedAt"] = "restarted"; changed[0]["RestartCount"] = 1
         deploy.assert_rollback_source(model, model, changed, rows, instance())
+
+    def test_rollback_accepts_only_mount_reordering_not_changed_fields_or_duplicate_mounts(self):
+        model = compose()
+        rows = [inspect(name, "same-image", role) for role, name in instance()["containers"].items()]
+        for row in rows: row["Mounts"] = mounts()
+        reordered = copy.deepcopy(rows)
+        for row in reordered: row["Mounts"].reverse()
+        deploy.assert_rollback_source(model, model, reordered, rows, instance())
+        for values in [[dict(rows[0]["Mounts"][0], Source="/changed"), rows[0]["Mounts"][1]],
+                       rows[0]["Mounts"][:-1], rows[0]["Mounts"] + [rows[0]["Mounts"][0]]]:
+            with self.subTest(mounts=values):
+                changed = copy.deepcopy(reordered); changed[0]["Mounts"] = copy.deepcopy(values)
+                with self.assertRaisesRegex(deploy.Rejected, "ROLLBACK_RUNNING_APPLICATION_DRIFT"):
+                    deploy.assert_rollback_source(model, model, changed, rows, instance())
+
+    def test_preparation_accepts_mount_reordering_but_refuses_actual_drift(self):
+        runner = deploy.Deployment.__new__(deploy.Deployment)
+        rows = [inspect(name, "same-image", role) for role, name in instance()["containers"].items()]
+        rows.append(inspect("newvcan-api-1", "same-image", "api"))
+        for row in rows: row["Mounts"] = mounts()
+        baseline = {"containers": rows, "database": database_state()}
+        current = copy.deepcopy(rows)
+        for row in current: row["Mounts"].reverse()
+        runner.application_configuration_unchanged = lambda baseline: None
+        runner.inventory = lambda label: copy.deepcopy(current)
+        runner.sql = lambda name, label: database_state()
+        runner.preparation_unchanged(baseline)
+        current[-1]["Mounts"][0]["Source"] = "/changed"
+        with self.assertRaisesRegex(deploy.Rejected, "CONTAINER_DRIFT_DURING_PREPARATION"):
+            runner.preparation_unchanged(baseline)
 
     @unittest.skipUnless(os.environ.get("RUN_DOCKER_COMPOSE_CONTRACT_TESTS") == "true", "requires CI Docker Compose CLI, never starts containers")
     def test_compose_cli_roundtrips_resolved_literal_environment(self):

@@ -43,6 +43,13 @@ def inspect(name, image, service):
             "RestartCount": 0}
 
 
+def mounts():
+    return [{"Type": "volume", "Name": "fixture-data", "Source": "/var/lib/docker/volumes/fixture-data/_data",
+             "Destination": "/data", "Driver": "local", "Mode": "z", "RW": True, "Propagation": ""},
+            {"Type": "bind", "Source": "/srv/canvas/config", "Destination": "/config",
+             "Mode": "ro", "RW": False, "Propagation": "rprivate"}]
+
+
 def instance():
     return {"schema": 1, "kind": "canvas-deployment-instance", "name": "canvas-prod",
             "project": "canvas-prod", "root": "/srv/canvas",
@@ -105,6 +112,59 @@ class ManifestTests(unittest.TestCase):
 
 
 class DeploymentTests(unittest.TestCase):
+    def test_stable_container_sorts_full_mount_copies_without_deduplicating_or_mutating_input(self):
+        row = inspect("newvcan-api-1", "old", "api")
+        row["Mounts"] = mounts()
+        row["Mounts"][0]["Extra"] = {"options": ["z", "a"]}
+        row["Mounts"].append(copy.deepcopy(row["Mounts"][0]))
+        row["HostConfig"]["Binds"] = ["z:/z", "a:/a"]
+        row["NetworkSettings"]["Networks"]["canvas-prod_default"]["Aliases"] = ["z", "a"]
+        original = copy.deepcopy(row)
+        reordered = copy.deepcopy(row)
+        reordered["Mounts"] = reordered["Mounts"][1:] + reordered["Mounts"][:1]
+        result = contract.stable_container(row)
+        self.assertEqual(result, contract.stable_container(reordered))
+        self.assertEqual(result["Mounts"], sorted(original["Mounts"], key=contract.canonical))
+        self.assertEqual(len(result["Mounts"]), 3)
+        self.assertEqual(result["Mounts"].count(original["Mounts"][0]), 2)
+        self.assertEqual(result["Config"]["Env"], original["Config"]["Env"])
+        self.assertEqual(result["HostConfig"]["Binds"], original["HostConfig"]["Binds"])
+        self.assertEqual(result["networks"]["canvas-prod_default"]["Aliases"], ["z", "a"])
+        self.assertEqual(row, original)
+        result["Mounts"][1]["Extra"]["options"].append("copy-only")
+        self.assertEqual(row, original)
+
+    def test_mount_normalization_does_not_normalize_other_array_order(self):
+        row = inspect("newvcan-api-1", "old", "api")
+        row["Mounts"] = mounts()
+        row["HostConfig"]["Binds"] = ["z:/z", "a:/a"]
+        row["NetworkSettings"]["Networks"]["canvas-prod_default"]["Aliases"] = ["z", "a"]
+        for path in [("Config", "Env"), ("HostConfig", "Binds"),
+                     ("NetworkSettings", "Networks", "canvas-prod_default", "Aliases")]:
+            with self.subTest(path=path):
+                changed = copy.deepcopy(row); values = changed
+                for key in path: values = values[key]
+                values.reverse()
+                self.assertNotEqual(contract.stable_container(row), contract.stable_container(changed))
+
+    def test_protected_mount_reordering_passes_but_every_field_and_multiplicity_remain_guarded(self):
+        row = inspect("newvcan-api-1", "old", "api"); row["Mounts"] = mounts()
+        reordered = copy.deepcopy(row); reordered["Mounts"].reverse()
+        contract.assert_protected([row], [reordered], instance())
+        for field, value in [("Type", "bind"), ("Name", "changed"), ("Source", "/other"),
+                             ("Destination", "/other"), ("Driver", "other"), ("Mode", "ro"),
+                             ("RW", False), ("Propagation", "rprivate"), ("Extra", {"changed": True})]:
+            with self.subTest(field=field):
+                changed = copy.deepcopy(row); changed["Mounts"][0][field] = value
+                with self.assertRaisesRegex(contract.Rejected, "PROTECTED_INFRASTRUCTURE_CHANGED"):
+                    contract.assert_protected([row], [changed], instance())
+        for values in [row["Mounts"][:-1], row["Mounts"] + [row["Mounts"][0]],
+                       row["Mounts"] + [{"Type": "bind", "Source": "/new", "Destination": "/new", "RW": False}]]:
+            with self.subTest(mounts=values):
+                changed = copy.deepcopy(row); changed["Mounts"] = copy.deepcopy(values)
+                with self.assertRaisesRegex(contract.Rejected, "PROTECTED_INFRASTRUCTURE_CHANGED"):
+                    contract.assert_protected([row], [changed], instance())
+
     def test_project_directory_defaults_to_root_but_may_explicitly_select_inner_compose_base(self):
         contract.validate_instance(instance())
         for directory in ["/srv/canvas", "/srv/canvas/current"]:

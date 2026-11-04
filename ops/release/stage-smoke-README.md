@@ -2,7 +2,7 @@
 
 这套工具只运行一次性的隔离测试项目。API/Web/Worker 使用已经通过 CI 的原始 image ID，不在服务器构建应用，也不借用生产数据库、卷、账号、Provider 或密钥。staging 结果写入独立 `stage-verification.json`，不能替代、修改或伪造 CI 发布清单。
 
-宿主要求：Linux/amd64、Python 3.7+、Docker Engine、本机 `/var/run/docker.sock`、Docker Compose v2（已知目标为 2.28.1）、可单独安装配置的宝塔 Nginx。宿主不需要 Bun、Node 或浏览器。此工具不接触现有 Nginx 站点配置，不自动重载 Nginx。
+宿主要求：Linux/amd64、Python 3.7+、Docker Engine、本机 `/var/run/docker.sock`、Docker Compose v2 ≥ 2.32.2（需要 `compose run --pull`；2.28.1 不满足该要求）、可单独安装配置的宝塔 Nginx。宿主不需要 Bun、Node 或浏览器。此工具不接触现有 Nginx 站点配置，不自动重载 Nginx。
 
 ## 两个独立包
 

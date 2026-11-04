@@ -1,6 +1,25 @@
 // Offline image-runtime probe; no website, credentials or model is contacted.
 const { chromium } = require("playwright");
+const { spawnSync } = require("node:child_process");
+const { dirname, resolve } = require("node:path");
 (async () => {
+    // Loading the real suite catches missing ESM/package metadata that a bare
+    // Chromium launch cannot detect. --list executes no test or website call.
+    const discovered = spawnSync(process.execPath, [
+        resolve(dirname(require.resolve("@playwright/test/package.json")), "cli.js"),
+        "test", "--config", resolve(__dirname, "web/e2e/production-smoke.config.ts"), "--list",
+    ], {
+        encoding: "utf8", timeout: 30_000, windowsHide: true,
+        env: { ...process.env,
+            CANVAS_SMOKE_MODE: "staging", CANVAS_SMOKE_COMMIT: "0".repeat(40),
+            CANVAS_SMOKE_PROJECT: "canvas-staging-000000000000-000000000000",
+            CANVAS_SMOKE_BASE_URL: "http://127.0.0.1:18080",
+            CANVAS_SMOKE_OUTPUT_DIR: resolve(require("node:os").tmpdir(), "canvas-stage-runner-discovery"),
+        },
+    });
+    if (discovered.error || discovered.status !== 0 || !/Total: 1 test in 1 file/.test(discovered.stdout)) {
+        throw new Error("Packaged smoke suite discovery failed: " + (discovered.stderr || discovered.stdout || discovered.error?.message));
+    }
     const browser = await chromium.launch({ headless: true });
     try {
         const context = await browser.newContext({ serviceWorkers: "block" });
