@@ -78,10 +78,11 @@ export default function RollupActions({ actorId, filters, disabled, refreshRequi
             if (failure instanceof Error && failure.name === "AbortError") {
                 setProblem("本机等待已停止，不能据此判断后台是否完成。请查询同一任务或找回同一次回执。");
             } else {
-                const rejected = !latest.job && failure instanceof UsageAnalyticsError && failure.status !== undefined && [400, 401, 403, 404, 409, 422].includes(failure.status);
+                const notEnabled = !latest.job && failure instanceof UsageAnalyticsError && failure.status === 503 && failure.code === "USAGE_ROLLUP_NOT_ENABLED";
+                const rejected = notEnabled || (!latest.job && failure instanceof UsageAnalyticsError && failure.status !== undefined && [400, 401, 403, 404, 409, 422].includes(failure.status));
                 if (rejected) save({ ...latest, rejected: true });
                 setProblem(
-                    `${failure instanceof Error ? failure.message : "刷新状态读取失败。"}${rejected ? " 本次请求被拒绝，可核对日期后明确发起新刷新。" : latest.job ? " 后台任务不会因此自动重启；请继续查询同一任务。" : " 尚未获得可靠回执；找回时会复用原日期与 idempotencyKey，不创建新的逻辑请求。"}`,
+                    `${failure instanceof Error ? failure.message : "刷新状态读取失败。"}${notEnabled ? "" : rejected ? " 本次请求被拒绝，可核对日期后明确发起新刷新。" : latest.job ? " 后台任务不会因此自动重启；请继续查询同一任务。" : " 尚未获得可靠回执；找回时会复用原日期与 idempotencyKey，不创建新的逻辑请求。"}`,
                 );
             }
         } finally {

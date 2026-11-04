@@ -233,6 +233,28 @@ test("409 recovery explicitly enqueues once, shows real progress and only reload
     expect(state.errors).toEqual([]);
 });
 
+test("disabled analytics explicitly rejects new refresh without an uncertain receipt or automatic resubmission", async ({ page, context }) => {
+    const state = await setup(context, async (route, url) => {
+        if (!url.pathname.endsWith("/recompute")) return false;
+        await route.fulfill({ status: 503, json: { code: "USAGE_ROLLUP_NOT_ENABLED", msg: "PRIVATE_CONTROL_MESSAGE" } });
+        return true;
+    });
+    await page.goto(base);
+    await loaded(page);
+    await page.getByRole("button", { name: "刷新所选日期", exact: true }).click();
+    await expect(page.getByText(/请求被拒绝/).first()).toBeVisible();
+    await expect(page.getByText(/统计刷新尚未启用；未创建刷新任务。请等待运维启用后，再明确发起刷新。/)).toBeVisible();
+    await expect(page.getByRole("button", { name: "找回本次刷新回执", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "刷新今天", exact: true })).toBeEnabled();
+    await expect(page.getByText("PRIVATE_CONTROL_MESSAGE", { exact: false })).toHaveCount(0);
+    await page.reload();
+    await loaded(page);
+    await expect(page.getByText(/请求被拒绝/).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: "找回本次刷新回执", exact: true })).toHaveCount(0);
+    expect(state.calls.filter((call) => call.method === "POST")).toHaveLength(1);
+    expect(state.errors).toEqual([]);
+});
+
 test("uncertain receipt survives reload, resumes with original key and failed jobs never auto-restart", async ({ page, context }) => {
     let submitted = 0;
     const state = await setup(context, async (route, url) => {

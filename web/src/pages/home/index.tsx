@@ -26,11 +26,13 @@ export default function IndexPage() {
     const navigate = useNavigate();
     const hydrated = useCanvasStore(state => state.hydrated);
     const projects = useCanvasStore(state => state.projects);
+    const unloadedProjects = useCanvasStore(state => state.unloadedProjects);
     const createProject = useCanvasStore(state => state.createProject);
     const flags = useModuleStore(state => state.flags);
     const tools = useBusinessConfigStore(state => state.tools);
     const canvasAvailable = isModuleAvailable(flags, tools, "canvas");
-    const recent = useMemo(() => [...projects].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt)).slice(0, 8), [projects]);
+    const summaries = useMemo(() => canvasLibrarySummaries(projects, unloadedProjects), [projects, unloadedProjects]);
+    const recent = summaries.slice(0, 8);
     const createAndEnter = () => {
         const current = useCanvasStore.getState();
         if (!current.hydrated || !isModuleAvailable(flags, tools, "canvas")) return;
@@ -52,13 +54,13 @@ export default function IndexPage() {
                 </section>
                 <section className="my-8" aria-label={uiText("全部工具")}><h2 className="mb-4 text-lg font-semibold">{uiText("全部工具")}</h2><div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">{navigationTools.filter(tool => tool.group !== "admin" && isModuleAvailable(flags, tools, navigationModuleKey(tool.slug) as ModuleKey)).map(tool => <Link key={tool.slug} to={tool.path} className="wb-surface flex items-center gap-2 px-4 py-3 text-sm"><tool.icon className="size-4 shrink-0" />{uiText(tool.label)}</Link>)}</div></section>
                 {canvasAvailable ? <section className="home-projects">
-                    <div className="wb-header"><div><p className="wb-eyebrow">{uiText("继续创作")}</p><h2 className="wb-title">{uiText("最近的画布")}</h2></div><Link to="/canvas" className="home-all-link">{uiText("查看全部 ")}{projects.length ? "(" + projects.length + ")" : ""}<ArrowRight size={16} /></Link></div>
+                    <div className="wb-header"><div><p className="wb-eyebrow">{uiText("继续创作")}</p><h2 className="wb-title">{uiText("最近的画布")}</h2></div><Link to="/canvas" className="home-all-link">{uiText("查看全部 ")}{summaries.length ? "(" + summaries.length + ")" : ""}<ArrowRight size={16} /></Link></div>
                     {!hydrated ? <div className="wb-grid" role="status" aria-label={uiText("正在读取画布")}>{Array.from({ length: 4 }, (_, index) => <div className="home-skeleton animate-pulse" key={index} />)}</div> : recent.length ? <div className="home-project-grid">
                         {recent.map(project => {
-                            const preview = project.nodes.find(node => node.type === "image" && (node.metadata?.storageKey || node.metadata?.content));
+                            const preview = project.cover;
                             return <Link to={"/canvas/" + project.id} className="wb-surface home-project" key={project.id}>
-                                <div className="home-project-preview">{preview ? <CanvasPersistedMediaPreview kind="image" url={preview.metadata?.content} storageKey={preview.metadata?.storageKey} alt={project.title} className="h-full w-full object-cover" /> : <LayoutGrid size={32} strokeWidth={1} />}</div>
-                                <div className="home-project-info"><h3>{project.title || uiText("未命名画布")}</h3><p>{project.nodes.length} {uiText(" 个内容 · ")}{new Date(project.updatedAt).toLocaleDateString(getUiLocale(), { month: "long", day: "numeric" })} {uiText(" 更新")}</p></div>
+                                <div className="home-project-preview">{preview ? <CanvasPersistedMediaPreview kind="image" url={preview.content} storageKey={preview.storageKey} alt={project.title} className="h-full w-full object-cover" /> : <LayoutGrid size={32} strokeWidth={1} />}</div>
+                                <div className="home-project-info"><h3>{project.title || uiText("未命名画布")}</h3><p>{project.nodeCount} {uiText(" 个内容 · ")}{new Date(project.updatedAt).toLocaleDateString(getUiLocale(), { month: "long", day: "numeric" })} {uiText(" 更新")}</p></div>
                             </Link>;
                         })}
                     </div> : <div className="wb-surface wb-empty"><LayoutGrid size={36} strokeWidth={1.2} /><strong>{uiText("这里将保存你的创作")}</strong><p>{uiText("新建画布后，把图片拖进来，输入你想修改的地方，就可以开始。")}</p><button className="wb-primary-link" onClick={createAndEnter}><Plus size={16} />{uiText("创建第一个画布")}</button></div>}

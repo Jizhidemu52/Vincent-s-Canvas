@@ -78,6 +78,7 @@ async function request<T>(
                 typeof error?.code === "string" &&
                 [
                     "USAGE_ROLLUP_REFRESH_REQUIRED",
+                    "USAGE_ROLLUP_NOT_ENABLED",
                     "USAGE_ROLLUP_KEY_CONFLICT",
                     "USAGE_INVALID",
                     "USAGE_REPORT_PERIOD_MISMATCH",
@@ -90,7 +91,9 @@ async function request<T>(
                     ? error.code
                     : "V2_REQUEST_FAILED";
             throw new UsageAnalyticsError(
-                code === "USAGE_ROLLUP_REFRESH_REQUIRED"
+                code === "USAGE_ROLLUP_NOT_ENABLED"
+                    ? "统计刷新尚未启用；未创建刷新任务。请等待运维启用后，再明确发起刷新。"
+                    : code === "USAGE_ROLLUP_REFRESH_REQUIRED"
                     ? "本期或对比期的日事实待回填 / 变更后待补算。请明确刷新相应日期并等待任务完成，再刷新读取；当前未返回过期统计。"
                     : code === "USAGE_ROLLUP_KEY_CONFLICT"
                       ? "本次刷新标识已对应其他日期，未重新启动任务。请核查已有回执后明确发起新刷新。"

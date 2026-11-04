@@ -18,6 +18,34 @@ async function seed(api: MockCanvasApi, context: BrowserContext, count = 12) {
     await context.route("**/api/canvas-documents", route => route.fulfill({ json: { documents: [...api.documents.values()].map(({ document, ...entry }) => ({ ...entry, summary: document ? canvasProjectSummary(document as CanvasProject) : null })) } }));
 }
 
+test("home recent canvases include unloaded cloud summaries without loading every document", async ({ page, context, api }) => {
+    await seed(api, context);
+    await context.route("**/api/prompt-templates?*", route => route.fulfill({ json: { templates: [], total: 0 } }));
+    const documentReads: string[] = [];
+    page.on("request", request => {
+        const path = new URL(request.url()).pathname;
+        if (request.method() === "GET" && /^\/api\/canvas-documents\/[^/]+$/.test(path)) documentReads.push(path);
+    });
+    await page.goto("/");
+    const cards = page.locator(".home-project");
+    await expect(cards).toHaveCount(8);
+    await expect(cards.first()).toContainText("测试画布 12");
+    await expect(cards.first()).toContainText("3 个内容");
+    await expect(cards.first().getByRole("img")).toBeVisible();
+    await expect(page.locator(".home-all-link")).toHaveText(/查看全部\s*\(12\)/);
+    await expect(page.getByText("这里将保存你的创作", { exact: true })).toHaveCount(0);
+    await page.reload();
+    await expect(cards).toHaveCount(8);
+    await expect(cards.first()).toContainText("测试画布 12");
+    expect(documentReads).toEqual([]);
+    await cards.first().click();
+    await expect(page).toHaveURL(/\/canvas\/library-12$/);
+    await expect(page.getByRole("button", { name: "测试画布 12", exact: true })).toBeVisible();
+    expect(documentReads.length).toBeGreaterThan(0);
+    expect(documentReads.every(path => path === "/api/canvas-documents/library-12")).toBe(true);
+    expect(api.submissions).toHaveLength(0);
+});
+
 test("library rename supports Escape and blur without changing recency; selection has clear feedback", async ({ page, context, api }) => {
     await seed(api, context);
     await page.goto("/canvas");

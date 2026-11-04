@@ -184,6 +184,14 @@ test("missing daily facts retain the typed 409 code without exposing arbitrary s
     await expect(getUsageV2Overview({})).rejects.toMatchObject({ code: "USAGE_ROLLUP_REFRESH_REQUIRED", status: 409 });
     await expect(getUsageV2Overview({})).rejects.toThrow("待回填");
 });
+
+test("disabled rollup keeps its explicit no-new-job code without exposing server text", async () => {
+    const request = { fromDay: job.fromDay, toDay: job.toDay, idempotencyKey: "00000000-0000-4000-8000-000000000011" };
+    globalThis.fetch = (async () => Response.json({ code: "USAGE_ROLLUP_NOT_ENABLED", msg: "PRIVATE_SECRET" }, { status: 503 })) as typeof fetch;
+    await expect(recomputeUsageRollups(request)).rejects.toMatchObject({ code: "USAGE_ROLLUP_NOT_ENABLED", status: 503, message: "统计刷新尚未启用；未创建刷新任务。请等待运维启用后，再明确发起刷新。" });
+    globalThis.fetch = (async () => Response.json({ code: "UNKNOWN_503", msg: "PRIVATE_SECRET" }, { status: 503 })) as typeof fetch;
+    await expect(recomputeUsageRollups(request)).rejects.toMatchObject({ code: "V2_REQUEST_FAILED", status: 503 });
+});
 test("person comparison fetches exact IDs once, retains scope, rejects absent people and never fills zero", async () => {
     const query = { from: "2026-09-30T16:00:00.000Z", to: "2026-10-07T16:00:00.000Z", compare: "none" as const, departmentBasis: "at_event" as const, boardKeys: ["canvas"] };
     const ids = ["00000000-0000-4000-8000-000000000001", "00000000-0000-4000-8000-000000000004"];
