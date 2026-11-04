@@ -81,7 +81,7 @@ test("graceful shutdown is idempotent, stops reconciliation and enforces a bound
   const cleared: unknown[] = [], exits: number[] = [];
   let healthStops = 0;
   const worker = productionFunctions(["shutdown"], {
-    stopping: false, queueReconciliationTimer: "reconcile-timer", shutdownTimer: undefined,
+    stopping: false, queueReconciliationTimer: "reconcile-timer", usageRollupTimer: "usage-rollup-timer", shutdownTimer: undefined,
     workerHealth: { stop: async () => { healthStops++; } },
     activeTaskIds: new Set(["active"]), config: { WORKER_SHUTDOWN_GRACE_SECONDS: 1200 },
     console: { log() {}, error() {} }, process: { exit: (code: number) => exits.push(code) },
@@ -90,7 +90,7 @@ test("graceful shutdown is idempotent, stops reconciliation and enforces a bound
   });
   worker.shutdown("SIGTERM"); worker.shutdown("SIGINT");
   expect(healthStops).toBe(1);
-  expect(cleared).toEqual(["reconcile-timer"]);
+  expect(cleared).toEqual(["reconcile-timer", "usage-rollup-timer"]);
   expect(scheduled).toHaveLength(1);
   expect(scheduled[0]!.milliseconds).toBe(1_200_000);
   expect(exits).toEqual([]);
@@ -107,6 +107,23 @@ test("startup reconciliation errors stay recoverable and do not prevent the next
   await worker.reconcileTaskQueue();
   await worker.reconcileTaskQueue();
   expect(calls).toBe(2);
+});
+
+test("daily usage maintenance does not overlap ticks and stops taking new days during shutdown", async () => {
+  let schedules = 0, processed = 0, release!: () => void;
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  const worker = productionFunctions(["runUsageRollups"], {
+    stopping: false, usageRollupWork: null, db: {}, console: { error() {} },
+    scheduleUsageRollupMaintenance: async () => { schedules++; },
+    processUsageRollups: async () => { processed++; await pending; return [{ status: "processed" }]; },
+  }, ", stop() { stopping = true; }");
+  const first = worker.runUsageRollups();
+  await Promise.resolve();
+  await worker.runUsageRollups();
+  expect(schedules).toBe(1);
+  expect(processed).toBe(1);
+  worker.stop(); release(); await first;
+  expect(processed).toBe(1);
 });
 
 test("deferred tasks retain original queued_at priority while available_at controls eligibility", async () => {

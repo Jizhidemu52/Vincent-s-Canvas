@@ -50,3 +50,26 @@ test("a validated build replaces the old artifact set and removes only its own s
         expect((await readdir(root)).sort()).toEqual(["dist", "keep.txt"]);
     } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+test("canvas dynamic preloads omit only its own already imported JS, keeping targets, CSS and other hosts", () => {
+    const config = viteConfig({ command: "build", mode: "production", isSsrBuild: false, isPreview: false });
+    const modulePreload = config.build?.modulePreload;
+    expect(typeof modulePreload).toBe("object");
+    if (!modulePreload || typeof modulePreload !== "object") throw new Error("Missing preload resolver");
+    const resolveDependencies = modulePreload.resolveDependencies!;
+    const target = "assets/dialog-11111111.js", hostId = "assets/project-11111111.js";
+    const deps = [target, "assets/shared-11111111.js", "assets/shared-22222222.js", "assets/view.css", "assets/only-dynamic.js"];
+    const context = { hostId, hostType: "js" as const };
+    expect(resolveDependencies(target, deps, context)).toEqual(deps);
+    const plugin = config.plugins?.flat().find((item: any) => item?.name === "canvas-static-preload") as any;
+    plugin.generateBundle({}, {
+        [hostId]: { type: "chunk", fileName: hostId, facadeModuleId: null, modules: { "D:\\web\\src\\pages\\canvas\\project.tsx": {} }, imports: [target, "assets/shared-11111111.js", "assets/view.css"] },
+        "assets/admin.js": { type: "chunk", fileName: "assets/admin.js", facadeModuleId: null, modules: { "/web/src/pages/admin/index.tsx": {} }, imports: ["assets/shared-22222222.js"] },
+    });
+    expect(resolveDependencies(target, deps, context)).toEqual([target, "assets/shared-22222222.js", "assets/view.css", "assets/only-dynamic.js"]);
+    expect(resolveDependencies(target, deps, { hostId: "assets/admin.js", hostType: "js" })).toEqual(deps);
+    expect(resolveDependencies(target, deps, { hostId, hostType: "html" })).toEqual(deps);
+    expect(deps).toEqual([target, "assets/shared-11111111.js", "assets/shared-22222222.js", "assets/view.css", "assets/only-dynamic.js"]);
+    plugin.generateBundle({}, {});
+    expect(resolveDependencies(target, deps, context)).toEqual(deps);
+});

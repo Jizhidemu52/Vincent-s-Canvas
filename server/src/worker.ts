@@ -41,6 +41,7 @@ import { imageAgentProviderPrompt } from "./image-agent-profile";
 import { postgresPromptRecipeStore } from "./prompt-recipe-postgres";
 import { PromptOptimizationError } from "./prompt-safety";
 import { AssetObjectError, readSourceAssetObject } from "./asset-object-error";
+import { processUsageRollups, scheduleUsageRollupMaintenance } from "./usage-rollups";
 
 type WorkRow = {
   id: string;
@@ -90,6 +91,8 @@ const storage = new ObjectStorage(config);
 let stopping = false;
 let queueReconciliation: Promise<void> | null = null;
 let queueReconciliationTimer: ReturnType<typeof setInterval> | undefined;
+let usageRollupTimer: ReturnType<typeof setInterval> | undefined;
+let usageRollupWork: Promise<void> | null = null;
 let shutdownTimer: ReturnType<typeof setTimeout> | undefined;
 const activeTaskIds = new Set<string>();
 
@@ -935,6 +938,7 @@ function shutdown(signal: string) {
   if (stopping) return;
   stopping = true;
   clearInterval(queueReconciliationTimer);
+  clearInterval(usageRollupTimer);
   void workerHealth?.stop();
   console.log(JSON.stringify({ event: "worker.draining", signal, activeTasks: activeTaskIds.size, graceSeconds: config.WORKER_SHUTDOWN_GRACE_SECONDS }));
   // Do not clear leases, refund, or abort submitted work. Active tasks retain
@@ -961,11 +965,33 @@ if (!stopping) workerHealth = startWorkerHealth({
   isRunning: () => !stopping,
 });
 if (!stopping) queueReconciliationTimer = setInterval(() => void reconcileTaskQueue(), 60_000);
+async function runUsageRollups() {
+  if (stopping || usageRollupWork) return;
+  usageRollupWork = (async () => {
+    try {
+      await scheduleUsageRollupMaintenance(db);
+      // At most three independent daily transactions; no model calls, billing
+      // changes or raw business data are involved in this maintenance task.
+      for (let day = 0; day < 3 && !stopping; day++) {
+        const results = await processUsageRollups(db, 1);
+        const result = results[0];
+        if (result?.status === "failed") console.error(JSON.stringify({ event: "worker.usage_rollup_failed", failureCode: result.failureCode, jobId: result.jobId }));
+        if (!result || result.status === "idle" || result.status === "deferred") break;
+      }
+    } catch { console.error(JSON.stringify({ event: "worker.usage_rollup_unavailable" })); }
+  })();
+  try { await usageRollupWork; } finally { usageRollupWork = null; }
+}
+if (!stopping) {
+  void runUsageRollups();
+  usageRollupTimer = setInterval(() => void runUsageRollups(), 60_000);
+}
 const workers = Array.from({ length: config.WORKER_CONCURRENCY }, () =>
   workerLoop(),
 );
 await Promise.all(workers);
 await queueReconciliation;
+await usageRollupWork;
 await workerHealth?.stop();
 await Promise.allSettled([db.end(), cache.quit()]);
 clearTimeout(shutdownTimer);

@@ -110,7 +110,8 @@ function assetRange(request: Request, size: number, etag?: string, modified?: Da
 
 /** Call only AFTER current-employee authorization, including conditional requests. */
 export async function streamAssetContent(request: Request, response: Response, storage: ObjectStorage,
-  asset: { object_key: string; mime_type: string; filename: string }) {
+  asset: { object_key: string; mime_type: string; filename: string }, options: { cacheControl?: "no-store" } = {}) {
+  const headers = (mime: string) => ({ ...assetResponseHeaders(mime, asset.filename, request.query.download === "1"), ...(options.cacheControl ? { "cache-control": options.cacheControl } : {}) });
   const controller = new AbortController();
   let body: Readable | undefined;
   const cancel = () => { if (!response.writableFinished) controller.abort(); body?.destroy(); };
@@ -124,7 +125,7 @@ export async function streamAssetContent(request: Request, response: Response, s
       throw new AssetObjectError(isMissingAssetObject(error));
     });
     controller.signal.throwIfAborted();
-    response.set(assetResponseHeaders(asset.mime_type, asset.filename, request.query.download === "1"));
+    response.set(headers(asset.mime_type));
     response.vary("Cookie");
     if (objectInfo.ETag) response.setHeader("ETag", objectInfo.ETag);
     if (objectInfo.LastModified) response.setHeader("Last-Modified", objectInfo.LastModified.toUTCString());
@@ -164,12 +165,12 @@ export async function streamAssetContent(request: Request, response: Response, s
       }
     }
     if (request.method === "HEAD") {
-      response.set(assetResponseHeaders(mimeType!, asset.filename, request.query.download === "1"));
+      response.set(headers(mimeType!));
       response.setHeader("Content-Length", String(size)); response.end(); return;
     }
     const { object, stream } = await read(range);
     const inspected = mimeType ? { stream, mimeType } : await inspectAssetStream(stream, asset.mime_type);
-    response.set(assetResponseHeaders(inspected.mimeType, asset.filename, request.query.download === "1"));
+    response.set(headers(inspected.mimeType));
     if (object.ETag) response.setHeader("ETag", object.ETag);
     if (object.ContentLength !== undefined) response.setHeader("Content-Length", String(object.ContentLength));
     if (range) { response.status(206); response.setHeader("Content-Range", object.ContentRange!); }

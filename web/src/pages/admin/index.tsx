@@ -19,7 +19,7 @@ import { creditChangeError, filterAdminAccounts } from "./account-ux";
 
 const ApiConfigurationHub = lazy(() => import("./components/api-configuration-hub").then((module) => ({ default: module.ApiConfigurationHub })));
 const MarkImageProviderPanel = lazy(() => import("./components/mark-image-provider-panel").then((module) => ({ default: module.MarkImageProviderPanel })));
-const UsageAnalyticsPanel = lazy(() => import("./components/usage-analytics-panel").then((module) => ({ default: module.UsageAnalyticsPanel })));
+const UsageAnalyticsPanel = lazy(() => import("./usage"));
 const ModelPricingPanel = lazy(() => import("./components/model-pricing-panel").then((module) => ({ default: module.ModelPricingPanel })));
 const HistoryManagementPanel = lazy(() => import("./components/task-history-panels").then((module) => ({ default: module.HistoryManagementPanel })));
 const TaskManagementPanel = lazy(() => import("./components/task-history-panels").then((module) => ({ default: module.TaskManagementPanel })));

@@ -447,16 +447,27 @@ export function createAssetsRouter(db: Database, storage: ObjectStorage) {
   router.get('/:id/thumb', async (request, response, next) => {
     try {
       const width = z.enum(['256','1024']).default('256').parse(request.query.w);
+      const scoped = request.query.usageUserId !== undefined || request.query.usageTaskId !== undefined;
+      const binding = scoped ? z.object({ usageUserId: z.string().uuid(), usageTaskId: z.string().uuid() }).parse(request.query) : null;
       const actor = (request as unknown as AuthenticatedRequest).auth;
       const access = accessClause(actor);
       const shifted = access.sql.replace(/\$(\d+)/g, (_, number) => `$${Number(number) + 1}`);
+      const values: unknown[] = [request.params.id, ...access.values];
+      let taskScope = '';
+      if (binding) {
+        values.push(binding.usageUserId, binding.usageTaskId);
+        taskScope = ` AND a.owner_user_id=$${values.length - 1} AND a.task_id=$${values.length} AND EXISTS(SELECT 1 FROM tasks usage_task WHERE usage_task.id=a.task_id AND usage_task.user_id=a.owner_user_id)`;
+        response.set('Cache-Control', 'no-store');
+      }
       const result = await db.query<{ object_key: string; thumbnail_key: string | null; mime_type: string; filename: string; kind: string; metadata: Record<string, unknown>; thumbnail_attempts: number; thumbnail_lease_token: string | null }>(
-        `SELECT object_key,thumbnail_${width}_key AS thumbnail_key,mime_type,filename,kind,metadata,thumbnail_attempts,thumbnail_lease_token FROM assets a WHERE a.id=$1 AND a.kind IN ('image','video') AND a.status='ready' AND a.deleted_at IS NULL AND ${shifted}`, [request.params.id, ...access.values]);
+        `SELECT object_key,thumbnail_${width}_key AS thumbnail_key,mime_type,filename,kind,metadata,thumbnail_attempts,thumbnail_lease_token FROM assets a WHERE a.id=$1 AND a.kind IN ('image','video') AND a.status='ready' AND a.deleted_at IS NULL AND ${shifted}${taskScope}`, values);
       const asset = result.rows[0];
       if (!asset) { response.status(404).end(); return; }
       if (!asset.thumbnail_key) {
-        scheduleAssetThumbnails(db, storage, request.params.id);
-        if (asset.kind === 'video' || request.query.pending === '1') {
+        // Usage inspection is read-only: a missing derivative is not permission
+        // to read the original or start a thumbnail-generation job.
+        if (!binding) scheduleAssetThumbnails(db, storage, request.params.id);
+        if (binding || asset.kind === 'video' || request.query.pending === '1') {
           // Opt-in image consumers understand pending responses and must not
           // decode an original while its display derivative is being generated.
           // Keep legacy direct <img> consumers on their existing fallback.
@@ -467,7 +478,7 @@ export function createAssetsRouter(db: Database, storage: ObjectStorage) {
       }
       const durationMs = Number(asset.metadata?.durationMs);
       if (asset.kind === 'video' && Number.isFinite(durationMs) && durationMs > 0) response.set('X-Canvas-Media-Duration-Ms', String(durationMs));
-      await streamAssetContent(request, response, storage, asset.thumbnail_key ? { object_key: asset.thumbnail_key, mime_type: 'image/webp', filename: `${asset.filename}.thumb-${width}.webp` } : asset);
+      await streamAssetContent(request, response, storage, asset.thumbnail_key ? { object_key: asset.thumbnail_key, mime_type: 'image/webp', filename: `${asset.filename}.thumb-${width}.webp` } : asset, binding ? { cacheControl: 'no-store' } : {});
     } catch (error) { next(error); }
   });
 
