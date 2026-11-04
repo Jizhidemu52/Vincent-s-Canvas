@@ -105,12 +105,19 @@ test("exact formal stack: login, large upload, canvas generation/recovery, origi
 
     const panel = page.getByTestId("canvas-quick-generate-panel");
     if (!await panel.isVisible()) await page.getByRole("button", { name: "展开创建面板", exact: true }).click();
+    // Toolbar imports also become edit references. This path deliberately tests
+    // text-to-image; clear the reference through the UI, not the canvas node.
+    const references = panel.getByRole("region", { name: "已选参考图", exact: true });
+    await expect(references.getByRole("button", { name: /^移除参考图 / })).toHaveCount(1);
+    await references.getByRole("button", { name: "清空", exact: true }).click();
+    await expect(references).toHaveCount(0);
     await expect(panel.getByRole("combobox", { name: "选择模型", exact: true })).toContainText("GPT Image 2");
     await panel.getByRole("textbox", { name: "描述图像", exact: true }).fill("Draw a simple blue fabric square. Formal isolated release smoke.");
-    const imageResponse = page.waitForResponse(response => new URL(response.url()).pathname === "/api/tasks" && response.request().method() === "POST" && response.request().postDataJSON()?.operationType === "image_generation");
+    const imageResponse = page.waitForResponse(response => new URL(response.url()).pathname === "/api/tasks" && response.request().method() === "POST");
     await expect(panel.locator("button.cw-generate-button")).toBeEnabled();
     await panel.locator("button.cw-generate-button").click();
     const submittedImage = await imageResponse;
+    expect(submittedImage.request().postDataJSON()).toMatchObject({ operationType: "image_generation", sourceUrls: [] });
     expect(submittedImage.status()).toBe(201);
     const imageTask = (await submittedImage.json()).task as Task;
     await expect.poll(async () => (await readCanvas()).document?.nodes.some(node => node.metadata?.sourceTaskId === imageTask.id || node.metadata?.imageTask?.taskId === imageTask.id)).toBe(true);
