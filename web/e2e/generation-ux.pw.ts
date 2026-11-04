@@ -90,8 +90,14 @@ test("mobile: image and video primary actions remain visible and video draft sur
     await page.screenshot({ path: info.outputPath("image-mobile.png") });
     await page.goto("/video");
     await inViewport(page.getByRole("button", { name: "生成视频", exact: true }), 844);
-    await expect(page.getByText("还差：填写提示词", { exact: true })).toBeVisible();
     const prompt = page.getByRole("textbox", { name: "视频提示词", exact: true });
+    // Motion planning accepts an optional description; image generation above
+    // still requires one. Keep the mobile footer and blank-draft contract explicit.
+    await expect(prompt).toHaveValue("");
+    await expect(prompt).toHaveAttribute("placeholder", /可不填/);
+    await expect(page.getByTestId("video-motion-panel")).toBeVisible();
+    await expect(page.getByRole("button", { name: "生成视频", exact: true })).toBeEnabled();
+    await expect(page.getByText("还差：填写提示词", { exact: true })).toHaveCount(0);
     await prompt.fill("移动端视频草稿");
     await pasteReference(page, "视频提示词");
     await expect(page.getByRole("button", { name: "移除参考图", exact: true })).toBeVisible();

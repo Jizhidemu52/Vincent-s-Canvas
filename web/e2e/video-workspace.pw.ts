@@ -13,12 +13,14 @@ const reference = readFileSync(new URL("./media/reference.png", import.meta.url)
 test("视频可并行提交且刷新恢复各自结果，手动入库不重复上传", async ({ page, context, api }) => {
     api.taskStatus = "queued";
     let failAcknowledgement = false;
-    let lookupCount = 0;
+    let originalLookupUnavailable = false;
+    const lookedUpRequestIds: string[] = [];
     await context.route("**/api/models", route => route.fulfill({ json: { models: [model], tools: toolDefinitions.map(tool => ({ ...tool, enabled: true, modelConfigId: model.id, configurationVersion: 1 })), prices: [] } }));
     await context.route("**/api/tasks/preflight", route => route.fulfill({ json: { ok: true, normalized: {} } }));
     await context.route("**/api/tasks/by-request/*", route => {
-        lookupCount++;
         const requestId = decodeURIComponent(new URL(route.request().url()).pathname.split("/").at(-1)!);
+        lookedUpRequestIds.push(requestId);
+        if (originalLookupUnavailable) return route.fulfill({ status: 503, json: { error: "FIXTURE_TASK_LOOKUP_UNAVAILABLE" } });
         return route.fulfill({ json: { task: [...api.tasks.values()].find(task => task.requestId === requestId) } });
     });
     await context.route("**/api/tasks", async route => {
@@ -28,6 +30,7 @@ test("视频可并行提交且刷新恢复各自结果，手动入库不重复�
         const id = "80000000-0000-4000-8000-000000000003";
         api.tasks.set(id, { ...input, id, status: "queued", resultUrls: [], createdAt: new Date().toISOString() });
         failAcknowledgement = false;
+        originalLookupUnavailable = true;
         await route.abort("connectionreset");
     });
     await context.route("**/api/assets/*/content", route => route.fulfill({ contentType: "video/mp4", body: video }));
@@ -41,16 +44,22 @@ test("视频可并行提交且刷新恢复各自结果，手动入库不重复�
     await page.getByRole("button", { name: "继续生成新视频", exact: true }).click();
     await expect.poll(() => api.submissions.length).toBe(2);
     await expect(page.getByRole("status", { name: "视频生成中" })).toHaveCount(2);
-    // The server accepted a third POST, but its HTTP acknowledgement was lost.
+    // The third POST was accepted, but both its acknowledgement and initial
+    // read-only lookup are unavailable. A successful lookup would keep polling.
     failAcknowledgement = true;
     await prompt.fill("第三条视频：提交响应中断");
     await page.getByRole("button", { name: "继续生成新视频", exact: true }).click();
     await expect.poll(() => api.submissions.length).toBe(3);
     await expect(page.getByText("原任务查询暂停", { exact: true })).toBeVisible();
+    expect(lookedUpRequestIds).toEqual([api.submissions[2]!.requestId]);
+    expect(api.submissions).toHaveLength(3);
+    const lookupsBeforeReload = lookedUpRequestIds.length;
+    originalLookupUnavailable = false;
     for (const task of api.tasks.values()) { task.status = "success"; task.resultUrls = [`/api/assets/${task.id}/content`]; }
     await page.reload();
     await expect(page.locator("video")).toHaveCount(3);
-    await expect.poll(() => lookupCount).toBeGreaterThan(0);
+    await expect.poll(() => lookedUpRequestIds.length).toBeGreaterThan(lookupsBeforeReload);
+    expect(lookedUpRequestIds.every(requestId => requestId === api.submissions[2]!.requestId)).toBe(true);
     expect(api.submissions).toHaveLength(3);
     await page.getByRole("button", { name: "保存到素材库", exact: true }).first().click();
     await expect(page.getByText("该视频已在我的素材中，无需重复添加")).toBeVisible();

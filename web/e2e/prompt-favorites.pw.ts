@@ -63,7 +63,10 @@ async function loaded(page: Page) { await expect(page.locator('section[aria-busy
 
 test("shared favorites use the API value without refetching templates or the review queue", async ({ page, context, baseURL }, info) => {
     const f = await fixture(context, baseURL!, 3);
-    await page.goto("/prompts"); await loaded(page);
+    await page.goto("/prompts");
+    await expect(page.getByRole("radio", { name: "通用提示词", exact: true })).toBeChecked();
+    await expect(page.getByRole("region", { name: "通用提示词", exact: true })).toBeVisible();
+    expect(f.lists).toHaveLength(0); expect(f.reviews()).toBe(0);
     await page.getByText("团队提示词", { exact: true }).click(); await loaded(page);
     const target = card(page, "团队模板 01"), requests = f.lists.length, reviews = f.reviews();
     f.returnFavorite(false);
