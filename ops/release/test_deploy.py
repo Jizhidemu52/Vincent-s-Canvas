@@ -1,11 +1,13 @@
 """Deployment failure-path tests use no Docker or remote resources."""
 import copy
+import base64
 import json
 import os
 from pathlib import Path
 import tempfile
 import subprocess
 import unittest
+import uuid
 from unittest.mock import patch
 
 import deploy
@@ -85,10 +87,44 @@ class DeploymentContracts(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "compose.json"
             path.write_text(json.dumps(deploy.compose_literals(raw)), encoding="utf-8")
-            result = subprocess.run(["docker", "compose", "-p", "canvas-contract", "--project-directory", temporary, "-f", str(path), "config", "--format", "json"], capture_output=True, text=True, check=True)
-            rendered = json.loads(result.stdout)
-            self.assertEqual(rendered["services"]["api"]["environment"], raw["services"]["api"]["environment"])
-            self.assertEqual(rendered["services"]["api"]["command"], raw["services"]["api"]["command"])
+            executable = [os.environ["DOCKER_COMPOSE_TEST_BINARY"]] if os.environ.get("DOCKER_COMPOSE_TEST_BINARY") else ["docker", "compose"]
+            for _ in range(3):
+                result = subprocess.run(executable + ["-p", "canvas-contract", "--project-directory", temporary, "-f", str(path), "config", "--format", "json"], capture_output=True, text=True, check=True)
+                rendered = deploy.parse_compose_config(result.stdout)
+                self.assertEqual(rendered["services"]["api"]["environment"], raw["services"]["api"]["environment"])
+                self.assertEqual(rendered["services"]["api"]["command"], raw["services"]["api"]["command"])
+                path.write_text(json.dumps(deploy.compose_literals(rendered)), encoding="utf-8")
+
+    def test_compose_config_output_is_reescaped_and_decoded_once(self):
+        raw = {"services": {"api": {"environment": {"LITERAL": "$one-${TWO}-$$-$$$-$$$$-end$"}, "command": ["echo $RUNTIME"]}}}
+        rendered = json.dumps(raw).replace("$", "$$")
+        self.assertEqual(deploy.parse_compose_config(rendered), raw)
+        self.assertEqual(deploy.parse_compose_config(rendered.encode()), raw)
+        with self.assertRaisesRegex(deploy.Rejected, "UNEXPECTED_COMPOSE_DOLLAR_ENCODING"):
+            deploy.parse_compose_config(json.dumps(raw))
+
+    @unittest.skipUnless(os.environ.get("COMPOSE_RUNTIME_TEST_IMAGE"), "requires exact CI-built API image and isolated Docker container")
+    def test_compose_literal_environment_reaches_exact_isolated_runtime(self):
+        literal = "literal-$secret-${OTHER}-$$-$$$-end$"
+        argument = "printf '%s' $RUNTIME ${NOT_FROM_HOST} $$"
+        encoded_literal = base64.b64encode(literal.encode()).decode()
+        encoded_argument = base64.b64encode(argument.encode()).decode()
+        script = ("const decode=s=>Buffer.from(s,'base64').toString();"
+                  "if(process.env.LITERAL!==decode('%s'))throw Error('literal environment changed');"
+                  "if(process.argv.at(-1)!==decode('%s'))throw Error('literal command changed');"
+                  "console.log('COMPOSE_LITERAL_RUNTIME_OK')") % (encoded_literal, encoded_argument)
+        raw = {"services": {"probe": {"image": os.environ["COMPOSE_RUNTIME_TEST_IMAGE"], "pull_policy": "never",
+                "entrypoint": ["bun", "--no-env-file", "-e"], "command": [script, "--", argument],
+                "environment": {"LITERAL": literal}, "network_mode": "none", "read_only": True,
+                "cap_drop": ["ALL"], "security_opt": ["no-new-privileges:true"], "mem_limit": "512m", "pids_limit": 64}}}
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "compose.json"
+            path.write_text(json.dumps(deploy.compose_literals(raw)), encoding="utf-8")
+            project = "canvas-literal-" + uuid.uuid4().hex[:12]
+            result = subprocess.run(["docker", "compose", "-p", project, "--project-directory", temporary,
+                                     "-f", str(path), "run", "--rm", "--no-deps", "--pull", "never", "probe"],
+                                    capture_output=True, text=True, check=True, timeout=90)
+            self.assertIn("COMPOSE_LITERAL_RUNTIME_OK", result.stdout)
 
     def test_resolved_secret_and_command_dollars_are_literal_not_reexpanded(self):
         value = {"environment": {"KEY": "literal-$secret-${OTHER}"}, "command": ["sh", "-c", "echo $RUNTIME"]}

@@ -75,6 +75,19 @@ def compose_literals(value):
     return value
 
 
+def parse_compose_config(raw):
+    """Decode Compose's canonical-file escaping, not shell interpolation.
+
+    Compose 2.28.1 and 2.38.2 re-escape every dollar in `config` output so
+    that output can itself be loaded as a Compose file. Our in-memory model
+    must contain actual runtime strings before comparison or re-serialization.
+    Never apply this to raw configuration files or Docker inspect output.
+    """
+    text = raw.decode("utf-8") if isinstance(raw, bytes) else raw
+    require(isinstance(text, str) and "$" not in text.replace("$$", ""), "UNEXPECTED_COMPOSE_DOLLAR_ENCODING")
+    return json.loads(text.replace("$$", "$"))
+
+
 def assert_rollback_source(current_model, expected_model, current_rows, expected_rows, instance):
     # The exact deployment is the rollback source, not merely an image with the
     # same credentials. Include mounts, ports, networks, commands and all other
@@ -190,7 +203,7 @@ class Deployment:
         return self.audit
 
     def capture(self, label):
-        model = json.loads(self.compose("config", "--format", "json", output=self.audit / f"compose-{label}.private.json"))
+        model = parse_compose_config(self.compose("config", "--format", "json", output=self.audit / f"compose-{label}.private.json"))
         rows = self.inventory(label)
         assert_live_inventory(rows, model, self.instance)
         for role, target in self.instance["containers"].items():
@@ -335,7 +348,7 @@ class Deployment:
             self.command(["docker", "exec", self.instance["containers"]["worker"], "bun", "src/worker-healthcheck.ts"])
             after = self.inventory("started")
             if release:
-                running_model = json.loads(self.compose("config", "--format", "json", model=target))
+                running_model = parse_compose_config(self.compose("config", "--format", "json", model=target))
                 assert_application_runtime(baseline["containers"], after, running_model, images, release, self.instance)
             else:
                 for role, container in self.instance["containers"].items():
@@ -413,7 +426,7 @@ class Deployment:
         target = read_json(old / "rollback-model.private.json")
         self.new_audit("rollback")
         current = self.capture("rollback")
-        expected_model = json.loads(self.compose("config", "--format", "json", model=old / "candidate.private.json"))
+        expected_model = parse_compose_config(self.compose("config", "--format", "json", model=old / "candidate.private.json"))
         assert_rollback_source(current["model"], expected_model, current["containers"], read_json(old / "containers-started.private.json"), self.instance)
         for role, container in self.instance["containers"].items():
             require(container_map(current["containers"])[container]["Image"] == receipt["imageIds"]["web" if role == "web" else "api"], "ROLLBACK_SOURCE_IMAGE_CHANGED")

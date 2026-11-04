@@ -112,6 +112,8 @@ jobs:
           bunx playwright install --with-deps chromium
       - name: Verify contracts and the exact formal application stack
         shell: bash
+        env:
+          COMPOSE_RUNTIME_TEST_IMAGE: canvas-release-api:${{ github.sha }}-${{ matrix.arch }}
         run: |
           set -euo pipefail
           RUN_DOCKER_COMPOSE_CONTRACT_TESTS=true python3 -m unittest discover -s ops/release -p 'test_*.py'
