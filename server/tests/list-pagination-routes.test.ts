@@ -43,6 +43,8 @@ test.each(["tasks", "tasks/batches", "history"])("personal %s uses stable keyset
     expect(body[key]).toHaveLength(2);
     expect(body.hasMore).toBe(true);
     expect(body[key][0]).not.toHaveProperty("cursorCreatedAt");
+    expect(body[key][0]).not.toHaveProperty("parameters");
+    expect(body[key][0]).not.toHaveProperty("sourceUrls");
     expect(parseCursorPage({ cursor: body.nextCursor }).cursor).toEqual({ createdAt: time, id: ids[1] });
     const call = calls.at(-1)!;
     expect(call.values).toEqual([actorId, time, ids[2], 3]);
@@ -51,7 +53,8 @@ test.each(["tasks", "tasks/batches", "history"])("personal %s uses stable keyset
     expect(call.sql).toContain("DESC,");
     expect(call.sql).not.toContain("OFFSET");
     expect(call.sql).not.toContain("h.parameters");
-    expect(call.sql).not.toContain("t.parameters");
+    expect(call.sql).not.toMatch(/\bt\.parameters\s*(?:,|\bAS\b|\bFROM\b)/i);
+    if (endpoint === "tasks") expect(call.sql).toContain(`t.parameters->'promptOptimization'->>'summaryZh' AS "summaryZh"`);
   });
 });
 

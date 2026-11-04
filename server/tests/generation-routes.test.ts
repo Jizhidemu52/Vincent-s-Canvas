@@ -8,6 +8,7 @@ const actorId = "10000000-0000-4000-8000-000000000001";
 const modelId = "20000000-0000-4000-8000-000000000001";
 const assetId = "30000000-0000-4000-8000-000000000001";
 const taskId = "40000000-0000-4000-8000-000000000001";
+const rawVideoBinding = { toolKey: "video", modelConfigId: null, enabled: true, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 1, allowRawPrompt: true };
 const servers: Server[] = [];
 afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => new Promise<void>((resolve, reject) => {
@@ -154,7 +155,7 @@ describe("production generation routes", () => {
   });
 
   test("preflight normalizes video settings without creating or charging a task", async () => {
-    const deps = dependencies();
+    const deps = dependencies({ toolBinding: rawVideoBinding });
     const url = await serve(createTasksRouter(deps.database as never, deps.cache as never));
     const response = await post(`${url}/preflight`, videoInput());
     expect(response.status).toBe(200);
@@ -175,7 +176,7 @@ describe("production generation routes", () => {
 
   test("preflight enforces owned ready references and per-image size", async () => {
     for (const fixture of [{ asset: null }, { asset: { id: assetId, mimeType: "image/png", byteSize: 10 * 1024 * 1024 + 1 } }]) {
-      const deps = dependencies(fixture);
+      const deps = dependencies({ ...fixture, toolBinding: rawVideoBinding });
       const url = await serve(createTasksRouter(deps.database as never, deps.cache as never));
       const response = await post(`${url}/preflight`, videoInput({ sourceUrls: [`/api/assets/${assetId}/content`] }));
       expect(response.status).toBe(400);
@@ -188,11 +189,11 @@ describe("production generation routes", () => {
   });
 
   test("preflight rejects unsupported image formats, non-images and excess model references", async () => {
-    const deps = dependencies({ model: { id: modelId, modelId: "MiniMax-H3", name: "MiniMax" } });
+    const deps = dependencies({ toolBinding: rawVideoBinding, model: { id: modelId, modelId: "MiniMax-H3", name: "MiniMax" } });
     const url = await serve(createTasksRouter(deps.database as never, deps.cache as never));
     expect((await post(`${url}/preflight`, videoInput({ sourceUrls: Array(10).fill(`/api/assets/${assetId}/content`) }))).status).toBe(400);
     for (const mimeType of ["audio/mpeg", "image/svg+xml", "image/bmp"]) {
-      const nonImage = dependencies({ asset: { id: assetId, mimeType, byteSize: 256 } });
+      const nonImage = dependencies({ toolBinding: rawVideoBinding, asset: { id: assetId, mimeType, byteSize: 256 } });
       const secondUrl = await serve(createTasksRouter(nonImage.database as never, nonImage.cache as never));
       expect((await post(`${secondUrl}/preflight`, videoInput({ sourceUrls: [`/api/assets/${assetId}/content`] }))).status).toBe(400);
       expect(nonImage.writes).toEqual([]);
@@ -201,7 +202,7 @@ describe("production generation routes", () => {
   });
 
   test("preflight accepts a local owned image without a public URL or upstream work", async () => {
-    const deps = dependencies({ asset: { id: assetId, objectKey: "owned/image.png", mimeType: "image/png", byteSize: 512 } });
+    const deps = dependencies({ toolBinding: rawVideoBinding, asset: { id: assetId, objectKey: "owned/image.png", mimeType: "image/png", byteSize: 512 } });
     const url = await serve(createTasksRouter(deps.database as never, deps.cache as never, true, (db, input) => preflightStoredVideoTask(db, input, "", {
       readSource: async () => (async function* () { yield new Uint8Array(512); })(), probe: async () => ({ width: 768, height: 768 }),
     })));

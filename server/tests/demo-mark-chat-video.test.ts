@@ -1,10 +1,19 @@
 import { expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { DemoStateStore } from "../src/demo-state-store";
 
 type PublicModel = { id: string; modelId: string; capabilities: string[]; parameterModelId?: string };
 
 test.each([false, true])("demo Mark chat and video isolate credentials and resume without paid replay (legacy credentials: %s)", async (withLegacyCredentials) => {
+  const directory = mkdtempSync(join(tmpdir(), "canvas-mark-video-"));
+  const statePath = join(directory, "state.sqlite");
+  const state = new DemoStateStore(statePath);
+  // This adapter fixture intentionally sends a raw prompt, with the explicit allowance enabled.
+  state.saveVideoRawPromptAllowance(true); state.close();
   const calls: Array<{ path: string; method: string; authorization: string | null; body?: any }> = [];
   let polls = 0;
   let providerPort = 0;
@@ -41,7 +50,7 @@ test.each([false, true])("demo Mark chat and video isolate credentials and resum
   reservation.stop(true);
   const child = Bun.spawn([process.execPath, "src/demo-server.ts"], {
     cwd: fileURLToPath(new URL("..", import.meta.url)), stdout: "ignore", stderr: "pipe",
-    env: { ...process.env, DEMO_STATE_PATH: ":memory:", DEMO_RECOVERY_FILE: "", DEMO_PORT: String(port), DEMO_HOST: "127.0.0.1",
+    env: { ...process.env, DEMO_STATE_PATH: statePath, DEMO_RECOVERY_FILE: "", DEMO_PORT: String(port), DEMO_HOST: "127.0.0.1",
       OA_LOGIN_ENABLED: "false", AUTH_ENABLED: "true", CREDITS_ENABLED: "false", LOCAL_STANDALONE: "false", ROLE_PORTALS_ENABLED: "true", STANDALONE_WEB_DIR: "", DEMO_PUBLIC_ASSET_ORIGIN: "",
       OPENTOKEN_API_KEY: withLegacyCredentials ? "wrong-opentoken-key" : "", APIMART_API_KEY: withLegacyCredentials ? "wrong-legacy-apimart-key" : "", GPT_IMAGE_2_API_KEY: "",
       OPENTOKEN_BASE_URL: `http://127.0.0.1:${provider.port}/opentoken/v1`, APIMART_BASE_URL: `http://127.0.0.1:${provider.port}/legacy/v1`,
@@ -68,6 +77,7 @@ test.each([false, true])("demo Mark chat and video isolate credentials and resum
     }
     expect(ready).toBe(true);
     const catalog = await request("/api/models").then(response => response.json());
+    expect(catalog.tools.find((tool: { toolKey: string }) => tool.toolKey === "video").allowRawPrompt).toBe(true);
     const models = catalog.models as PublicModel[];
     const markModels = models.filter(model => model.id.startsWith("d5000000-"));
     const chat = markModels.find(model => model.capabilities.includes("chat"));
@@ -121,5 +131,6 @@ test.each([false, true])("demo Mark chat and video isolate credentials and resum
     ]);
   } finally {
     child.kill(); await child.exited; provider.stop(true);
+    rmSync(directory, { recursive: true, force: true });
   }
 }, 30_000);

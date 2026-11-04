@@ -114,7 +114,7 @@ test("leaving a group falls back from the remembered team scope to the accessibl
     const fields = new Map<string, [unknown, (next: unknown) => void]>(); const reads: string[] = [];
     const h = page("../src/pages/prompts/index.tsx", "default", {
         "react-router-dom": { useNavigate: () => () => {} },
-        "@/hooks/use-workbench-field": { useWorkbenchField(key: string, initial: unknown) { if (!fields.has(key)) fields.set(key, [initial, (next: any) => { const current = fields.get(key)!; current[0] = typeof next === "function" ? next(current[0]) : next; }]); return fields.get(key); } },
+        "@/hooks/use-workbench-field": { useWorkbenchField(key: string, initial: unknown) { if (!fields.has(key)) fields.set(key, [key === "prompts:scope" ? "team" : initial, (next: any) => { const current = fields.get(key)!; current[0] = typeof next === "function" ? next(current[0]) : next; }]); return fields.get(key); } },
         "@/components/prompts/prompt-template-card": { PromptTemplateCard: "PromptTemplateCard" },
         "@/components/prompts/prompt-template-editor": { PromptTemplateEditor: "PromptTemplateEditor" },
         "@/stores/use-user-store": { useUserStore: Object.assign((selector: any) => selector({ user }), { getState: () => ({ user }) }), isAdminRole: () => false },

@@ -89,7 +89,7 @@ function harness(kind: "video" | "creative", resolveImage?: (key?: string, fallb
         },
         "@/stores/use-module-store": { useModuleEnabled: (key: string) => key === "creative-selection" },
         "@/stores/use-config-store": { ...requireModule("@/stores/use-config-store"), useEffectiveConfig: () => currentConfig, useConfigStore: (select: Function) => select({ config: currentConfig, updateConfig: (key: string, value: unknown) => { (currentConfig as any)[key] = value; } }) },
-        "@/stores/use-business-config-store": { useBusinessConfigStore: (select: Function) => select({ status: "ready", models: [{ id: "gpt-image-2", modelId: "gpt-image-2", capabilities: ["generate", "edit"] }], estimate: () => ({ credits: 0, configured: true }) }) },
+        "@/stores/use-business-config-store": { useBusinessConfigStore: (select: Function) => select({ status: "ready", tools: [], prices: [], models: [{ id: "gpt-image-2", modelId: "gpt-image-2", capabilities: ["generate", "edit"] }], estimate: () => ({ credits: 0, configured: true }) }) },
         "@/stores/use-user-store": { useUserStore: (select: Function) => select({ user: { id: "owner", status: "active", creditBalance: 100 } }) },
         "@/stores/use-asset-store": { useAssetStore: (select: Function) => select({ addAsset: () => undefined }) },
         "@/stores/use-theme-store": { useThemeStore: (select: Function) => select({ theme: "light" }) },

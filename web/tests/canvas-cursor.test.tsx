@@ -17,7 +17,8 @@ class Surface extends EventTarget {
     clientWidth = 800;
     clientHeight = 600;
     captures: number[] = [];
-    constructor(private match = "") { super(); }
+    constructor(private match = "", private parent?: Surface) { super(); }
+    contains(node: Surface): boolean { return node === this || Boolean(node.parent && this.contains(node.parent)); }
     closest(selector: string) { return this.match && selector.includes(this.match) ? this : null; }
     getBoundingClientRect() { return { left: 0, top: 0, width: 800, height: 600 }; }
     setPointerCapture(id: number) { this.captures.push(id); }
@@ -80,9 +81,9 @@ function canvasHarness(mode: "select" | "hand" = "select", theme: "light" | "dar
         "@/stores/use-theme-store": { useThemeStore: (select: (state: { theme: string }) => unknown) => select({ theme }) },
     };
     const module = { exports: {} as { WirelessCanvas: (next: object) => ReactElement<any> } };
-    new Function("require", "module", "exports", "window", "document", "Element", "requestAnimationFrame", "cancelAnimationFrame", code)(
+    new Function("require", "module", "exports", "window", "document", "Element", "Node", "requestAnimationFrame", "cancelAnimationFrame", code)(
         (id: string) => id === "@/lib/i18n" ? i18nHarness : ((name: string) => name.endsWith(".css") ? {} : Object.hasOwn(dependencies, name) ? dependencies[name] : requireModule(name))(id),
-        module, module.exports, canvasWindow, canvasDocument, Surface,
+        module, module.exports, canvasWindow, canvasDocument, Surface, Surface,
         (callback: FrameRequestCallback) => { const id = ++timerId; frames.set(id, callback); return id; },
         (id: number) => frames.delete(id),
     );
@@ -175,7 +176,7 @@ describe("canvas cursor interactions", () => {
         canvas.dispatch("pointerup");
         expect(canvas.render()).toMatchObject({ "data-cursor-mode": "select", "data-cursor-panning": false });
         canvas.setMode("hand");
-        canvas.down(0, new Surface("[data-canvas-no-zoom]"));
+        canvas.down(0, new Surface("[data-canvas-no-zoom]", canvas.surface));
         expect(canvas.render()["data-cursor-panning"]).toBe(false);
         expect(canvas.interactions).toEqual([true, false]);
     });

@@ -10,6 +10,8 @@ import { createPersonalWorkspaceServer, workspaceFixtureUsers as users, workspac
     const document = { id: "same-project", title: "个人画布", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
         nodes: [], connections: [], chatSessions: [], activeChatId: null, backgroundMode: "dots", showImageInfo: true, viewport: { x: 0, y: 0, k: 1 } };
     try {
+        // Exercise workspace ownership with an explicitly permitted raw-video preflight.
+        await h.db.query("UPDATE tool_api_configurations SET allow_raw_prompt=true WHERE tool_key='video'");
         for (const name of ["admin", "designer"] as const) {
             expect((await request(name, "/api/canvas-documents/same-project", "PUT", { baseRevision: 0, document: { ...document, title: name } })).status).toBe(200);
             expect((await request(name, "/api/projects/sync", "POST", { externalId: "same-project", name })).status).toBe(200);

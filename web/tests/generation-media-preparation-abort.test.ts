@@ -96,18 +96,25 @@ describe("queued media preparation cancellation", () => {
         expect(taskRequests[1]!.body.parameters).toMatchObject({ seconds: 5 });
     });
 
-    test("abort during the audio task POST stops the request without another POST or poll", async () => {
+    test("abort during the audio task POST checks the same request once without another POST or poll", async () => {
         const controller = new AbortController();
         const started = Promise.withResolvers<void>();
         const requests: string[] = [];
+        let requestId = "";
         globalThis.fetch = (async (url, init) => {
             const path = String(url);
-            requests.push(path);
+            requests.push(`${init?.method || "GET"} ${path}`);
             if (path === "/api/models") return Response.json({ tools: [], prices: [], models: [model] });
             if (path === "/api/tasks") {
+                expect(init?.method).toBe("POST");
                 expect(init?.signal).toBe(controller.signal);
+                requestId = JSON.parse(String(init?.body)).requestId;
                 started.resolve();
                 return new Promise<Response>((_resolve, reject) => init?.signal?.addEventListener("abort", () => reject(new DOMException("cancelled", "AbortError")), { once: true }));
+            }
+            if (path === `/api/tasks/by-request/${encodeURIComponent(requestId)}`) {
+                expect(init?.signal).toBeUndefined();
+                return new Response(null, { status: 404 });
             }
             throw new Error(`unexpected request ${path}`);
         }) as typeof fetch;
@@ -115,7 +122,8 @@ describe("queued media preparation cancellation", () => {
         await started.promise;
         controller.abort();
         await expect(result).rejects.toBeInstanceOf(QueuedTaskSubmissionUncertainError);
-        expect(requests).toEqual(["/api/models", "/api/tasks"]);
+        expect(requestId).not.toBe("");
+        expect(requests).toEqual(["GET /api/models", "POST /api/tasks", `GET /api/tasks/by-request/${encodeURIComponent(requestId)}`]);
     });
 
     test("an abort after acknowledgement still reports and cancels the original task ID", async () => {
