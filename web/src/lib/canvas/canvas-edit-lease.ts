@@ -17,10 +17,17 @@ export function createCanvasEditLease(databaseName = "wireless-canvas-editor-loc
     let database: Promise<IDBDatabase> | undefined;
     const open = () => database ??= new Promise<IDBDatabase>((resolve, reject) => {
         const request = indexedDB.open(databaseName, 1);
+        let failed = false;
+        const fail = (error: Error) => { failed = true; reject(error); };
         request.onupgradeneeded = () => request.result.createObjectStore("leases");
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error ?? new Error("无法打开编辑保护存储"));
-        request.onblocked = () => reject(new Error("编辑保护存储被其他标签页阻塞"));
+        request.onsuccess = () => { if (failed) request.result.close(); else resolve(request.result); };
+        request.onerror = () => fail(request.error ?? new Error("无法打开编辑保护存储"));
+        request.onblocked = () => fail(new Error("编辑保护存储被其他标签页阻塞"));
+    }).catch(error => {
+        // A transient open/blocked failure must not poison this editor forever.
+        // A late success from a blocked request is closed instead of leaked.
+        database = undefined;
+        throw error;
     });
     const update = async (key: string, change: (record: CanvasEditLeaseRecord | undefined) => CanvasEditLeaseRecord | null | false) => {
         const db = await open();

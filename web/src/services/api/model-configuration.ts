@@ -43,6 +43,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 const root = "/api/admin/model-configuration";
+export async function exportConfigurationSnapshot(): Promise<Blob> {
+    const response = await fetch(`${root}/export`, { credentials: "include", cache: "no-store" });
+    if (!response.ok) throw new Error(response.status === 401 ? "登录已失效，请重新登录后导出。"
+        : response.status === 403 ? "仅超级管理员可导出配置快照。" : `配置导出失败（${response.status}），请稍后重试。`);
+    const snapshot = await response.json() as Record<string, unknown>;
+    if (snapshot?.schemaVersion !== 1 || !["providers", "models", "toolConfigurations", "modules", "promptRecipes"].every(key => Array.isArray(snapshot[key]))) {
+        throw new Error("配置快照格式无效，未生成下载文件。");
+    }
+    return new Blob([`${JSON.stringify(snapshot, null, 2)}\n`], { type: "application/json;charset=utf-8" });
+}
 export const listServerProviders = () => request<{ providers: ServerProvider[] }>(`${root}/providers`);
 export const createServerProvider = (input: Omit<ServerProvider, "id" | "hasCredentials" | "createdAt" | "updatedAt"> & { credentials?: Record<string, string> }) => request<{ provider: ServerProvider }>(`${root}/providers`, { method: "POST", body: JSON.stringify(input) });
 export const updateServerProvider = (id: string, input: Partial<Omit<ServerProvider, "id" | "hasCredentials" | "createdAt" | "updatedAt">> & { credentials?: Record<string, string> }) => request<{ provider: ServerProvider }>(`${root}/providers/${id}`, { method: "PATCH", body: JSON.stringify(input) });

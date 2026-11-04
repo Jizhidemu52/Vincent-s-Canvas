@@ -141,11 +141,14 @@ cd ..
 
 | 用途 | 入口 | 边界 |
 | --- | --- | --- |
-| 源码热更新 | 根目录 `bun install --frozen-lockfile` 后 `bun dev` | 本机 Vite `3000` + API `3100`，独立 `dev-local.sqlite`；仍可能调用真实收费模型 |
+| 默认源码开发 | 根目录 `bun install --frozen-lockfile` 后 `bun dev` / `bun run dev:prod-like` | 本机 Vite `13000` + 正式 API `13100` + Worker；本地 Docker 中独立 PostgreSQL / Redis / MinIO，不读取生产环境文件 |
+| 单机演示开发 | `bun run dev:demo` | 原 Vite `3000` + 演示 API `3100`、独立 `dev-local.sqlite`；可能调用真实收费模型，不作为正式后端验收 |
 | 本机成品试用 | 构建后 `Start-Local.bat` | 仅 `127.0.0.1:5188`，现有本机数据不变 |
 | 局域网 / 正式环境 | `Start-LAN.bat` / `docker compose up -d --build` | 按对应部署文档配置身份、存储、网络与备份 |
 
-首次开发还需在 `web/`、`server/` 分别执行 `bun install --frozen-lockfile`。根目录 `bun check` 执行高置信度 lint、两端类型检查、前端正式构建（含包体预算）与测试，会重建 `web/dist`；正在使用成品服务时应安排维护窗口。通过 `DEV_API_PORT` / `DEV_WEB_PORT` 可更换开发端口，开发启动器不会杀掉已有服务。
+首次开发还需在 `web/`、`server/` 分别执行 `bun install --frozen-lockfile`；默认开发需要本机 Linux-container Docker 与支持 `--wait` 的 Compose。`bun run dev:prod-like --print-config` 查看隔离目标，`--check` 只预检，`--stop` 仅停止本开发实例依赖、保留卷。正式栈使用 `PRODLIKE_API_PORT` / `PRODLIKE_WEB_PORT` 等独立端口变量；演示入口保留 `DEV_API_PORT` / `DEV_WEB_PORT`。详情和模拟边界见[本地开发](docs/content/docs/backend/local-development.mdx)。
+
+根目录 `bun check` 执行高置信度 lint、两端类型检查、前端正式构建（含包体预算）与测试，会重建 `web/dist`；正在使用成品服务时应安排维护窗口。单元测试通过不代表正式栈或宝塔代理通过；发布使用[同一镜像验证与部署链](ops/release/README.md)。
 
 `bun run format <文件路径>` / `bun run format:check <文件路径>` 分别定向格式化或检查前后端文件；不要求为局部修改重排整个仓库。
 

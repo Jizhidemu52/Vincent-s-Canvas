@@ -398,7 +398,7 @@ const errorHandler: ErrorRequestHandler = (
 app.use(errorHandler);
 
 const thumbnailMaintenance = startAssetThumbnailMaintenance(db, storage);
-const server = app.listen(config.PORT, () =>
+const server = app.listen({ port: config.PORT, host: config.HOST }, () =>
   console.log(`Wireless Canvas API listening on ${config.PORT}`),
 );
 const shutdown = createApiShutdown({

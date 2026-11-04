@@ -259,6 +259,55 @@ for (const failProvider of [false, true]) {
     });
 }
 
+test("HTTP same-page retry reloads a failed provider request after the network recovers", async ({ context, page }) => {
+    await prepare(context, true);
+    let unavailable = true, requests = 0;
+    await page.route("**/src/lib/canvas/canvas-edit-lease.ts", route => {
+        requests++;
+        return unavailable ? route.abort("failed") : route.continue();
+    });
+    await page.goto("/__lock?project=provider-network-retry");
+    await expect(state(page)).toHaveAttribute("data-state", "error");
+    expect(requests).toBe(1);
+    expect(await page.evaluate(async () => ({ write: window.__lockFixture.write(), ready: await window.__lockFixture.ensureWritable() }))).toEqual({ write: false, ready: false });
+    await expect(page.getByTestId("loads")).toHaveText("0");
+    unavailable = false;
+    await page.getByRole("button", { name: "request", exact: true }).click();
+    await expect(state(page)).toHaveAttribute("data-state", "editing");
+    expect(requests).toBe(2);
+    await expect(page.getByTestId("loads")).toHaveText("1");
+    expect(await page.evaluate(() => window.__lockFixture.canWrite())).toBe(true);
+});
+
+test("HTTP same-page retry reopens IndexedDB after an initial open error", async ({ context, page }) => {
+    await prepare(context, true);
+    await page.addInitScript(() => {
+        const probe = (window as any).__leaseOpenProbe = { unavailable: true, attempts: 0 };
+        const original = IDBFactory.prototype.open;
+        IDBFactory.prototype.open = function (name, version) {
+            if (name === "wireless-canvas-editor-locks") {
+                probe.attempts++;
+                if (probe.unavailable) {
+                    const request = { error: new DOMException("fixture initial open unavailable", "UnknownError"), onerror: null as (() => void) | null };
+                    queueMicrotask(() => request.onerror?.());
+                    return request as unknown as IDBOpenDBRequest;
+                }
+            }
+            return original.call(this, name, version);
+        };
+    });
+    await page.goto("/__lock?project=idb-open-retry");
+    await expect(state(page)).toHaveAttribute("data-state", "error");
+    expect(await page.evaluate(async () => ({ attempts: (window as any).__leaseOpenProbe.attempts, write: window.__lockFixture.write(), ready: await window.__lockFixture.ensureWritable() }))).toEqual({ attempts: 1, write: false, ready: false });
+    await expect(page.getByTestId("loads")).toHaveText("0");
+    await page.evaluate(() => { (window as any).__leaseOpenProbe.unavailable = false; });
+    await page.getByRole("button", { name: "request", exact: true }).click();
+    await expect(state(page)).toHaveAttribute("data-state", "editing");
+    expect(await page.evaluate(() => (window as any).__leaseOpenProbe.attempts)).toBe(2);
+    await expect(page.getByTestId("loads")).toHaveText("1");
+    expect(await page.evaluate(() => window.__lockFixture.canWrite())).toBe(true);
+});
+
 test("Web Locks does not load the HTTP fallback provider", async ({ context, page }) => {
     await prepare(context, false);
     let providerRequests = 0;

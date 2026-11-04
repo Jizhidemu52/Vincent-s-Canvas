@@ -1,3 +1,5 @@
+name: ${CANVAS_PROJECT_NAME:-vincent-s-canvas}
+
 x-logging: &default-logging
   driver: json-file
   options:
@@ -10,10 +12,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: wireless-canvas-web:local
-    container_name: wireless-canvas-web
+    image: ${CANVAS_WEB_IMAGE:-wireless-canvas-web:local}
     ports:
-      - "3000:3000"
+      - "${CANVAS_WEB_BIND:-127.0.0.1}:${CANVAS_WEB_PORT:-3000}:3000"
     depends_on:
       api:
         condition: service_healthy
@@ -27,8 +28,6 @@ services:
       dockerfile: server/Dockerfile
     env_file: .env
     environment:
-      # Override older .env files that still enable OA employee identification.
-      OA_LOGIN_ENABLED: "false"
       DATABASE_URL: postgres://wireless_canvas:${POSTGRES_PASSWORD}@postgres:5432/wireless_canvas
       REDIS_URL: redis://redis:6379
       S3_ENDPOINT: http://minio:9000
@@ -62,7 +61,6 @@ services:
     stop_grace_period: 21m
     env_file: .env
     environment:
-      OA_LOGIN_ENABLED: "false"
       WORKER_SHUTDOWN_GRACE_SECONDS: ${WORKER_SHUTDOWN_GRACE_SECONDS:-1200}
       DATABASE_URL: postgres://wireless_canvas:${POSTGRES_PASSWORD}@postgres:5432/wireless_canvas
       REDIS_URL: redis://redis:6379

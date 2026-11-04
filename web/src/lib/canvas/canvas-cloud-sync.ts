@@ -61,7 +61,7 @@ export function createCanvasCloudSync(baseline: CanvasCloudBaseline, io: Depende
         // Another tab can make a deferred document durable before this tab opens
         // it. Adopt its revision only after proving the complete content matches;
         // local Blob/cache fields alone are not a competing edit.
-        if (sameDocument(local, remote.document) || sameDocument(await io.portable(structuredClone(local)), remote.document)) {
+        if (sameDocument(local, remote.document) || sameDocument(await io.portable(canvasCloudDocument(structuredClone(local))), remote.document)) {
             hydrated.set(local.id, { revision: remote.revision, local: snapshot(local) });
         }
     }

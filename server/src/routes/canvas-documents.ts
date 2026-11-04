@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { CanvasDocumentError, assertCanvasOwner, canvasDocumentMetadata, missingCanvasDocument, parseCanvasDocumentWrite } from "../canvas-document";
+import { CanvasDocumentError, assertCanvasOwner, canvasDocumentMetadata, missingCanvasDocument, parseCanvasDocumentWrite, type CanvasDocumentEnvelope } from "../canvas-document";
 import type { Database } from "../db";
 import type { AuthenticatedRequest } from "../types";
 import { accessClause } from "./assets";
@@ -55,7 +55,20 @@ export function createCanvasDocumentsRouter(db: Database) {
                 const access = accessClause(actor);
                 const shifted = access.sql.replace(/\$(\d+)/g, (_, number) => `$${Number(number) + 1}`);
                 const accessible = await db.query<{ id: string }>(`SELECT a.id FROM assets a WHERE a.id=ANY($1::uuid[]) AND a.status='ready' AND a.deleted_at IS NULL AND ${shifted}`, [assetIds, ...access.values]);
-                if (new Set(accessible.rows.map(row => row.id)).size !== assetIds.length) throw new CanvasDocumentError("CANVAS_ASSET_FORBIDDEN", "画布包含不存在或无权读取的素材", 403);
+                const accessibleIds = new Set(accessible.rows.map(row => row.id));
+                const unavailableIds = assetIds.filter(assetId => !accessibleIds.has(assetId));
+                if (unavailableIds.length) {
+                    const current = (await db.query<CanvasDocumentEnvelope>(`SELECT ${columns} FROM canvas_documents WHERE owner_user_id=$1 AND external_id=$2`, [actor.id, id])).rows[0];
+                    if ((current?.revision ?? 0) !== baseRevision || current?.deleted) {
+                        response.status(409).json({ error: "CANVAS_REVISION_CONFLICT", message: "云端画布已有更新，请保留本地改动并重新同步", document: current ?? missingCanvasDocument(id) });
+                        return;
+                    }
+                    // Deletion or revoked sharing must not freeze an existing canvas.
+                    // Only this owner's exact base document can retain stale IDs; the
+                    // final CAS still prevents races, and media reads keep their ACL.
+                    const retainedIds = new Set(current ? parseCanvasDocumentWrite(id, { baseRevision, document: current.document }).assetIds : []);
+                    if (unavailableIds.some(assetId => !retainedIds.has(assetId))) throw new CanvasDocumentError("CANVAS_ASSET_FORBIDDEN", "画布包含不存在或无权读取的素材", 403);
+                }
             }
             const json = document === null ? null : JSON.stringify(document);
             const metadata = canvasDocumentMetadata(document);

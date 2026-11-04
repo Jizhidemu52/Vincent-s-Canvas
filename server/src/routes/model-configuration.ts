@@ -18,6 +18,7 @@ import { applyDefaultChatModel, DEFAULT_CHAT_MODEL_TOOL_KEY } from "../chat-mode
 import { readToolConfiguration } from "../tool-configuration";
 import { getApimartImageCost } from "../../../shared/apimart-image-costs";
 import { configurationErrorHandler } from "./admin-configuration-errors";
+import { readConfigurationExport } from "./configuration-export";
 
 const protocol = z.enum(["openai", "openai-chat", "anthropic", "gemini", "apimart", "volcengine", "runninghub", "comfyui", "custom"]);
 const capabilities = z.array(z.enum(["generate", "edit", "upscale", "remove_background", "batch", "chat", "video", "audio"])).min(1);
@@ -49,6 +50,14 @@ export function createModelConfigurationRouter(db: Database, config: AppConfig) 
     });
     router.use("/mark-images", createMarkImageProviderRouter(db, config));
     router.use("/featured-models", createFeaturedModelsRouter(db));
+
+    router.get("/export", async (_request, response, next) => {
+        try {
+            const snapshot = await readConfigurationExport(db);
+            response.set({ "Cache-Control": "no-store", "Content-Disposition": 'attachment; filename="canvas-configuration.json"' });
+            response.type("application/json").send(`${JSON.stringify(snapshot, null, 2)}\n`);
+        } catch (error) { next(error); }
+    });
 
     router.get("/providers", async (_request, response, next) => {
         try { response.json({ providers: (await db.query(`SELECT ${providerSelect} FROM providers ORDER BY name`)).rows }); }

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { canvasContinueFromImagePatch, canvasGenerationDerivatives, canvasGenerationEditorState, storeCanvasEditorReferences, visibleCanvasEditorReferences } from "@/lib/canvas/canvas-generation-editor";
+import { canvasContinueFromImagePatch, canvasGenerationDerivatives, canvasGenerationEditorState, storeCanvasEditorReferences } from "@/lib/canvas/canvas-generation-editor";
 import { CanvasNodeType, type CanvasGenerationRecord, type CanvasNodeData } from "@/types/canvas";
 import { defaultConfig } from "@/stores/use-config-store";
 
@@ -21,9 +21,9 @@ describe("node-owned generation editor", () => {
         expect(state.references[0].storageKey).toBe("purple.png");
         expect(state.model).toBe("m");
     });
-    test("hidden removed reference remains in request snapshot and survives an editor roundtrip", () => {
+    test("removed-source reference remains an editable input and survives an editor roundtrip", () => {
         const state = canvasGenerationEditorState(result, [result], [], defaultConfig);
-        expect(visibleCanvasEditorReferences(state.references, [result])).toEqual([]);
+        expect(state.references).toHaveLength(1);
         expect(state.references[0].storageKey).toBe("purple.png");
         expect(storeCanvasEditorReferences(state.references)[0].sourceNodeId).toBe("purple");
         expect(archive.references).toHaveLength(1);

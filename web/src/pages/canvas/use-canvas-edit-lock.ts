@@ -28,9 +28,14 @@ export function useCanvasEditLock(owner: string, projectId: string, flush: () =>
         // randomUUID, like Web Locks, is unavailable on HTTP intranet origins.
         const tab = nanoid();
         const channel = new BroadcastChannel(key);
-        const lease = navigator.locks ? undefined : import("@/lib/canvas/canvas-edit-lease").then(module => ({
+        const usesLease = !navigator.locks;
+        let lease: Promise<ReturnType<typeof import("@/lib/canvas/canvas-edit-lease").createCanvasEditLease> & { renewInterval: number }> | undefined;
+        const loadLease = () => lease ??= import("@/lib/canvas/canvas-edit-lease").then(module => ({
             ...module.createCanvasEditLease(), renewInterval: module.CANVAS_EDIT_LEASE_RENEW_MS,
-        }));
+        })).catch(error => {
+            lease = undefined;
+            throw error;
+        });
         let closed = false, release: (() => void) | undefined, transferring = false, waiting = false;
         let pendingRequest: AbortController | undefined;
         let leaseExpiresAt = 0, editorReady = false, writeAllowed = false;
@@ -88,9 +93,9 @@ export function useCanvasEditLock(owner: string, projectId: string, flush: () =>
             return canWriteRef.current();
         };
         const acquireLease = async (wait: boolean) => {
-            if (!lease || closed || !waiting) return;
+            if (!usesLease || closed || !waiting) return;
             try {
-                const client = await lease;
+                const client = await loadLease();
                 if (closed || !waiting) return;
                 const record = await client.claim(key, tab);
                 if (closed || !waiting) { if (record) await client.release(key, tab); return; }
@@ -142,7 +147,7 @@ export function useCanvasEditLock(owner: string, projectId: string, flush: () =>
             const abort = wait ? new AbortController() : undefined;
             pendingRequest = abort;
             setState({ status: "checking" });
-            if (lease) { void acquireLease(wait); return; }
+            if (usesLease) { void acquireLease(wait); return; }
             void navigator.locks.request(key, wait ? { signal: abort!.signal } : { ifAvailable: true }, async lock => {
                 if (closed) return;
                 waiting = false;

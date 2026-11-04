@@ -83,7 +83,7 @@ import { createResizePreview, type CanvasResizePreview } from "@/lib/canvas/canv
 import { createCanvasMentionReferenceIndex, createCanvasResourceReferenceIndex } from "@/lib/canvas/canvas-resource-references";
 import { createCanvasSelectedNodeCache } from "@/lib/canvas/canvas-selected-node-cache";
 import { selectCanvasNodeIdsInBounds } from "@/lib/canvas/canvas-selection";
-import { canvasContinueFromImagePatch, canvasGenerationDerivatives, visibleCanvasEditorReferences } from "@/lib/canvas/canvas-generation-editor";
+import { canvasContinueFromImagePatch, canvasGenerationDerivatives } from "@/lib/canvas/canvas-generation-editor";
 import { canvasGenerationStackCover, reconcileCanvasGenerationStackNodes } from "@/lib/canvas/canvas-generation-stack";
 import { syncCanvasSelectionReferences } from "@/lib/canvas/canvas-selection-references";
 import { snapCanvasDrag, transferCanvasGroupMembers } from "@/lib/canvas/canvas-selection-geometry";
@@ -1071,7 +1071,6 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
         });
         return true;
     }, [quickGenerateRunning, setQuickGenerateReferences]);
-    const quickVisibleReferences = useMemo(() => visibleCanvasEditorReferences(quickGenerateReferences, nodes), [quickGenerateReferences, nodes]);
     const quickDerivatives = useMemo(() => quickGenerateNodeId ? canvasGenerationDerivatives(quickGenerateNodeId, nodes) : [], [quickGenerateNodeId, nodes]);
     const batchChildCountById = batchIndexes.childCountByRootId;
     const batchMotionForNode = batchIndexes.getMotion;
@@ -3052,7 +3051,6 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
                         count={quickGenerateCount}
                         imageOptions={quickGenerateImageOptions}
                         references={quickGenerateReferences}
-                        visibleReferences={quickVisibleReferences}
                         mentionImages={quickMentionImages}
                         onAddMentionReference={addQuickMentionReference}
                         sourceNode={quickGenerateSourceNode}

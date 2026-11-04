@@ -35,13 +35,36 @@ description: 启动 Web、API、Worker、PostgreSQL、Redis 和对象存储
 - 脚本进程的全局 `fetch` 一律拒绝请求；不挂载聊天／生成提交接口，不启动生成 Worker，后台任务只允许读取。真实模型、网页采集和未纳入接口均不可用于此环境验收；保存 Provider 配置不等于已联通供应商。
 - 本地素材适配器不验证正式 S3 签名地址、对象删除、存储权限与跨设备原图访问。进程异常退出后的对话冻结恢复、真实供应商计费和生产故障恢复仍须单独验收，见 [待验收](/docs/progress/pending-test)。
 
-## 推荐：Docker Compose
+## 默认开发：隔离正式后端
+
+根目录 `bun dev` / `bun run dev:prod-like` 启动正式 `index.ts`、`worker.ts` 和 Vite；数据库、队列和对象存储由本机 `docker-compose.dev.yml` 提供。先安装根目录、`shared/`、`server/` 和 `web/` 的锁定依赖，并准备 Linux-container Docker 与支持 `up --wait --wait-timeout` 的 Compose。
+
+```bash
+bun run dev:prod-like --print-config # 仅显示目标，无需 Docker
+bun run dev:prod-like --check        # 检查 Docker、端口与依赖，不启动或写库
+bun dev                             # 显式迁移、初始化隔离账号，然后启动正式 API/Worker/Vite
+```
+
+默认 Web/API 为 `127.0.0.1:13000/13100`；PostgreSQL/Redis/MinIO 为 `15432/16379/19000`，MinIO 控制台 `19001`。项目名 `canvas-prodlike`、库 `canvas_prodlike`、桶 `canvas-prodlike` 固定独立；端口可用 `PRODLIKE_<API|WEB|POSTGRES|REDIS|S3|S3_CONSOLE>_PORT` 设置。启动器拒绝远端 Docker，不读取仓库 `.env`、`server/.env`、生产凭据或继承的连接地址。
+
+仅使用启动日志给出的本地测试账号，首次登录须改密码；重复启动不会覆盖已改密码和管理员维护的绑定。`Ctrl+C` 只停止本次 API/Worker/Vite；`bun run dev:prod-like --stop` 只停止本实例依赖，数据卷保留。不导入员工资料和真实 Provider Key。
+
+`TASK_MOCK_MODE=true` 当前只让图片任务完整走正式队列、Worker、存储和历史后产出模拟 SVG；视频/音频被拒绝，聊天和提示词优化**不会被此开关模拟**。默认隔离环境不配置真实供应商。发布的完整图/视频/对话链路由独立合成 Provider 验证，不能用图片 mock 冒充。Vite 热更新也不覆盖两层 Nginx；正式镜像测试与目标宝塔验收另行执行。
+
+原单机开发保留为 `bun run dev:demo` / `bun run dev:demo:api`，使用演示后端与 `dev-local.sqlite`，可能消耗真实模型额度；Windows 成品试用入口不变。演示路由向正式路由的整合按模块渐进，不宣称已全量合并。
+
+## 容器正式栈
 
 ```bash
 cp .env.example .env
-# 替换 .env 中所有 replace-with 值；保持 OA_LOGIN_ENABLED=false
-# Compose 在 API / Worker 中明确关闭 OA，覆盖旧 .env 的开启值
-docker compose up -d --build
+# 替换 .env 中所有 replace-with 值，按需要配置身份模式
+# OA_LOGIN_ENABLED 仅由 .env 决定，Compose 不再强制覆盖为 false
+docker compose build
+docker compose up -d postgres redis minio
+docker compose run --rm minio-init
+docker compose run --rm --no-deps api bun src/migrate.ts
+docker compose run --rm --no-deps api bun src/bootstrap.ts
+docker compose up -d
 docker compose ps
 curl http://localhost:3000/api/health
 ```
@@ -53,7 +76,9 @@ curl http://localhost:3000/api/health
 维护入口：通过配置的 HTTPS 域名访问 /admin/login
 ```
 
-首次管理员登录后必须修改初始密码；这只用于维护，不是用户创作的前置步骤。开发环境需要模拟生成时可暂时设置 `TASK_MOCK_MODE=true`，它仍会走 Redis 队列、Worker、对象存储和历史，只是不调用外部模型。真实调用仍可能收费，入口应限制在受信网络。
+首次管理员登录后必须修改初始密码；这只用于维护，不是用户创作的前置步骤。API/Worker 重启不再自动执行迁移或 bootstrap，首次安装须显式运行上述步骤，已有环境按发布手册处理。`TASK_MOCK_MODE` 的图片/视频/聊天边界见上一节，不能作为所有外部调用的禁费开关。真实调用仍可能收费，入口应限制在受信网络。
+
+超级管理员在“板块 API 配置 → 导出配置快照”下载 `GET /api/admin/model-configuration/export` 的只读 JSON。快照含模型、板块绑定、模块开关、配方版本及供应商 HTTP(S) origin；不含密钥、URL 路径/查询、配方正文。导出为同一数据库快照、固定排序，可对比环境差异；它不是备份或可直接导入的配置包，也不包含未保存的页面编辑。
 
 ### 聊天反向代理
 

@@ -17,7 +17,6 @@ export type CanvasQuickGeneratePanelRenderState = {
     count: number;
     imageOptions: string;
     references: readonly unknown[];
-    visibleReferences?: readonly unknown[];
     mentionImages?: import("@/components/conversation-image-controls").ConversationImageItem[];
     onAddMentionReference?: (image: import("@/components/conversation-image-controls").ConversationImageItem) => boolean | Promise<boolean>;
     sourceNode?: import("@/types/canvas").CanvasNodeData;
@@ -72,7 +71,6 @@ export function canvasQuickGeneratePanelPropsEqual(previous: CanvasQuickGenerate
         previous.imageOptions === next.imageOptions &&
         previous.references === next.references &&
         previous.mentionImages === next.mentionImages && previous.onAddMentionReference === next.onAddMentionReference &&
-        (previous.visibleReferences === next.visibleReferences || (previous.visibleReferences?.length === next.visibleReferences?.length && (previous.visibleReferences || []).every((item, index) => item === next.visibleReferences?.[index]))) &&
         previous.sourceNode?.id === next.sourceNode?.id && previous.sourceNode?.metadata === next.sourceNode?.metadata &&
         previous.sourceNode?.title === next.sourceNode?.title &&
         (previous.derivatives === next.derivatives || (previous.derivatives?.length === next.derivatives?.length && (previous.derivatives || []).every((item, index) => item.id === next.derivatives?.[index].id && item.title === next.derivatives[index].title && item.metadata === next.derivatives[index].metadata))) &&

@@ -23,10 +23,17 @@ async function select(page: Page, id: string, force = false) {
     // A plain image click must restore that image's own inputs, without AI Edit.
     await editor(page).blur();
 }
-async function scene(page: Page, api: MockCanvasApi, legacy = false) {
+async function scene(page: Page, api: MockCanvasApi, legacy = false, referenceCount = 1) {
     for (const [index, id] of Object.values(ASSETS).entries()) api.assetBytes.set(id, performanceRaster(index, 256, 256));
+    const references = Array.from({ length: referenceCount }, (_, index) => {
+        const retained = index === referenceCount - 1, id = retained ? "original-reference" : `removed-reference-${index + 1}`;
+        const assetId = retained ? ASSETS.source : `72000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`;
+        if (!retained) api.assetBytes.set(assetId, performanceRaster(index + 3, 256, 256));
+        return { id, referenceKey: `node:${id}`, name: retained ? "原始参考.png" : `已离画布参考${index + 1}.png`, type: "image/png",
+            content: `/api/assets/${assetId}/content`, sourceNodeId: id, origin: "canvas", order: index };
+    });
     const record = (id: string, prompt: string, inputPrompt: string) => ({ version: 1, id: `run-${id}`, sourceNodeId: "original-reference", createdAt: "2026-10-01T00:00:00.000Z", prompt, inputPrompt,
-        references: [{ id: "original-reference", referenceKey: "node:original-reference", name: "原始参考.png", type: "image/png", content: assetUrl("source"), sourceNodeId: "original-reference", origin: "canvas", order: 0 }],
+        references,
         parameters: { model: "gpt-image-2", size: "1:1", quality: "medium", imageOptions: "", systemPrompt: "", count: 1, generationType: "edit" } });
     const image = (id: string, key: keyof typeof ASSETS, x: number, y: number) => ({ id, type: "image", title: id, position: { x, y }, width: 160, height: 160,
         metadata: { content: assetUrl(key), status: "success", naturalWidth: 256, naturalHeight: 256, mimeType: "image/png" } as Record<string, any> });
@@ -87,6 +94,86 @@ async function completeDelayedTask(page: Page, api: MockCanvasApi) {
     task.status = "success"; task.resultUrls = [`/api/assets/${task.id}/content`];
     return task;
 }
+
+test("creation reference count includes 18 removed sources and recovers only after explicit removal", async ({ page, api }, info) => {
+    const original = await scene(page, api, false, 19);
+    const archived = structuredClone(original.nodes[1]!.metadata.generationRecord);
+    await select(page, "result-a");
+    const form = panel(page), action = form.getByRole("button", { name: /^生成修改图/ });
+    await expect(editor(page)).toHaveValue(INPUT);
+    await expect(form.locator(".cw-reference-heading")).toContainText("参考图 ·19");
+    await expect(form.locator(".cw-reference-preview")).toHaveCount(19);
+    expect(await form.locator(".cw-reference-number").allTextContents()).toEqual(Array.from({ length: 19 }, (_, index) => String(index + 1)));
+    await expect(action).toBeDisabled();
+    await expect(form.getByRole("alert")).toContainText("0 至 16 张参考图");
+    await assertNoGeneration(api);
+    await form.screenshot({ path: info.outputPath("all-19-request-references-visible.png") });
+    const lastReference = form.getByRole("button", { name: "参考图 19：原始参考.png，点击调整顺序", exact: true });
+    await lastReference.scrollIntoViewIfNeeded();
+    await expect(lastReference).toBeVisible();
+    await expect(lastReference.locator(".cw-reference-number")).toHaveText("19");
+    await form.screenshot({ path: info.outputPath("last-reference-19-is-scrollable.png") });
+
+    for (let removed = 0; removed < 3; removed++) await form.getByRole("button", { name: "移除参考图 1", exact: true }).click();
+    await expect(form.locator(".cw-reference-heading")).toContainText("参考图 ·16");
+    await expect(form.locator(".cw-reference-preview")).toHaveCount(16);
+    await expect(form.getByRole("alert")).toHaveCount(0);
+    await expect(action).toBeEnabled();
+    await expect(editor(page)).toHaveValue(INPUT);
+    await expect.poll(() => node(api, "result-a").metadata.draftImageReferences?.length).toBe(16);
+    expect(node(api, "result-a").metadata.generationRecord).toEqual(archived);
+    expect(node(api, "result-a").metadata.draftImageReferences.map((reference: any) => reference.content)).toEqual(archived.references.slice(3).map((reference: any) => reference.content));
+    await action.click();
+    await expect.poll(() => api.submissions.length).toBe(1);
+    expect(api.submissions[0]!.sourceUrls).toHaveLength(16);
+    for (const [index, url] of api.submissions[0]!.sourceUrls.entries()) {
+        const submitted = api.assetBytes.get(url.split("/")[3]);
+        const expected = api.assetBytes.get(archived.references[index + 3].content.split("/")[3]);
+        expect(submitted?.equals(expected!), `Reference ${index + 1} keeps its displayed order and original bytes`).toBe(true);
+    }
+    expect(api.submissions[0]!.modelConfigId).toBe("10000000-0000-4000-8000-000000000001");
+    expect(api.submissions[0]!.prompt).toContain(INPUT);
+    expect(node(api, "result-a").metadata.generationRecord).toEqual(archived);
+    expect(node(api, "original-reference")).toEqual(original.nodes[0]);
+});
+
+test("one retained reference remains valid and submits exactly the displayed image", async ({ page, api }) => {
+    const original = await scene(page, api);
+    await select(page, "original-reference"); await page.keyboard.press("Delete");
+    await expect.poll(() => api.document(PROJECT)!.nodes.length).toBe(2);
+    await select(page, "result-a");
+    const form = panel(page), action = form.getByRole("button", { name: /^生成修改图/ });
+    await expect(form.locator(".cw-reference-heading")).toContainText("参考图 ·1");
+    await expect(form.locator(".cw-reference-preview")).toHaveCount(1);
+    await expect(form.getByRole("alert")).toHaveCount(0);
+    await expect(action).toBeEnabled();
+    await action.click();
+    await expect.poll(() => api.submissions.length).toBe(1);
+    assertSubmittedReference(api, "source");
+    expect(node(api, "result-a").metadata.generationRecord).toEqual(original.nodes[1]!.metadata.generationRecord);
+});
+
+test("clearing retained references persists an empty draft and submits no hidden images", async ({ page, api }) => {
+    const original = await scene(page, api, false, 19);
+    await select(page, "result-a");
+    await panel(page).getByRole("button", { name: "清空", exact: true }).click();
+    await expect(panel(page).locator(".cw-reference-preview")).toHaveCount(0);
+    await expect(panel(page).getByRole("alert")).toHaveCount(0);
+    await expect(editor(page)).toHaveValue(INPUT);
+    await expect.poll(() => node(api, "result-a").metadata.draftImageReferences).toEqual([]);
+    await assertNoGeneration(api);
+
+    await page.reload();
+    await select(page, "result-a");
+    await expect(panel(page).locator(".cw-reference-preview")).toHaveCount(0);
+    const action = panel(page).getByRole("button", { name: /^生成(?:\s|$)/ });
+    await expect(action).toBeEnabled();
+    await action.click();
+    await expect.poll(() => api.submissions.length).toBe(1);
+    expect(api.submissions[0]!.sourceUrls || []).toEqual([]);
+    expect(node(api, "result-a").metadata.generationRecord).toEqual(original.nodes[1]!.metadata.generationRecord);
+    expect(node(api, "original-reference")).toEqual(original.nodes[0]);
+});
 
 test("three concurrent models keep their own prompt/model through out-of-order completion, plain selection and reload", async ({ page, context, api }) => {
     const models = provenanceModels;
@@ -292,13 +379,13 @@ test("viewing and normalizing settings leaves source metadata untouched; intenti
     await assertNoGeneration(api);
 });
 
-test("deleted source only hides the reference; replay uses exact archived input and one undo/redo includes result and edge", async ({ page, api }, info) => {
+test("deleted source remains an editable reference; replay uses exact archived input and one undo/redo includes result and edge", async ({ page, api }, info) => {
     const original = await scene(page, api);
     await select(page, "original-reference"); await page.keyboard.press("Delete");
     await expect.poll(() => api.document(PROJECT)!.nodes.length).toBe(2);
     await select(page, "result-a");
     await expect(editor(page)).toHaveValue(INPUT);
-    await expect(panel(page).locator(".cw-reference-preview")).toHaveCount(0);
+    await expect(panel(page).locator(".cw-reference-preview")).toHaveCount(1);
     // Display normalization must not turn viewing the archived input into a node edit.
     await expect(panel(page).getByRole("button", { name: "宽高比", exact: true })).toHaveAttribute("title", "宽高比：1:1");
     expect(node(api, "result-a").metadata.size).toBeUndefined();

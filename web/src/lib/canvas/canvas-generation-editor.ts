@@ -32,12 +32,6 @@ export function storeCanvasEditorReferences(references: readonly CanvasSelection
     }));
 }
 
-export function visibleCanvasEditorReferences(references: CanvasSelectionReference[], nodes: readonly CanvasNodeData[]) {
-    const ids = new Set(nodes.map(node => node.id));
-    const visible = references.filter(reference => !reference.canvasNodeId || ids.has(reference.canvasNodeId));
-    return visible.length === references.length ? references : visible;
-}
-
 export function canvasContinueFromImagePatch(node: CanvasNodeData): Partial<CanvasNodeMetadata> {
     return { draftPrompt: "", draftImageReferences: [{
         id: node.id, referenceKey: `source:${node.id}`, sourceNodeId: node.id, origin: "canvas",
