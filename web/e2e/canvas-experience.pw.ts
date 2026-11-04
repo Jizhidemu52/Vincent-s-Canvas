@@ -170,6 +170,9 @@ test("搜索切换主题真实生效并保存，菜单与命令使用相同节�
     await expect(workspace).toHaveAttribute("data-theme", otherTheme);
     await page.reload();
     await expect(workspace).toHaveAttribute("data-theme", otherTheme);
+    // The refresh shell already carries the saved theme, but has no command
+    // handler yet. Wait for the real editor before sending a keyboard shortcut.
+    await expect(page.getByRole("button", { name: "上传素材", exact: true })).toBeEnabled();
     await command("切换主题");
     await expect(workspace).toHaveAttribute("data-theme", initialTheme!);
     await command("添加文本");
