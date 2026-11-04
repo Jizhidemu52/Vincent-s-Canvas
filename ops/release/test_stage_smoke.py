@@ -71,6 +71,9 @@ class StageIsolationTests(unittest.TestCase):
             self.assertEqual(environment["AUTH_ENABLED"], "true")
             self.assertEqual(environment["CANVAS_SMOKE_MODE"], "staging")
             self.assertIn("@postgres:5432/wireless_canvas", environment["DATABASE_URL"])
+        self.assertEqual(config["services"]["api"]["environment"]["HOST"], "0.0.0.0")
+        self.assertEqual(config["services"]["api"]["healthcheck"]["test"],
+                         ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:3100/api/health"])
 
     def test_production_names_reserved_ports_and_mismatched_commit_are_refused(self):
         for change in ({"project": "vincent-s-canvas"}, {"project": "newvcan-testing"}, {"project": "canvas-staging-" + "d" * 12 + "-" + "b" * 12},

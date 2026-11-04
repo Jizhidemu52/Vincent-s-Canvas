@@ -118,7 +118,7 @@ jobs:
           set -euo pipefail
           RUN_DOCKER_COMPOSE_CONTRACT_TESTS=true python3 -m unittest discover -s ops/release -p 'test_*.py'
           python3 -m unittest discover -s ops/baota -p 'test_*.py'
-          bun test ops/release/ci-compose.test.ts
+          RUN_DOCKER_COMPOSE_CONTRACT_TESTS=true bun test ops/release/ci-compose.test.ts
           bash ops/release/stack-smoke.sh "$RUNNER_TEMP/release-identity/candidate.json" "$RUNNER_TEMP/release-smoke"
       - name: Export the same verified images without rebuilding
         shell: bash
