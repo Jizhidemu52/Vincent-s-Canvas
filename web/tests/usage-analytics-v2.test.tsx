@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import React from "react";
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderToReadableStream, renderToStaticMarkup } from "react-dom/server";
 import { readUsageLocation, writeUsageLocation, usageQuery, legacyUsageScope, datePreset } from "../src/pages/admin/usage/filters";
 import { comparisonText, excelSafeCell, metricText, alignDailyTrend, perActivePersonCost, snapshotText, pairOptimizationGroups } from "../src/pages/admin/usage/format";
 import { MetricCards, Trend } from "../src/pages/admin/usage/components";
@@ -89,12 +89,17 @@ test("Excel strings are formula-injection safe without altering numeric values",
     expect(excelSafeCell("设计一部")).toBe("设计一部");
     expect(excelSafeCell(null)).toBe("不可用");
 });
-test("a comparison-only period still renders the trend instead of discarding historical data", () => {
-    const html = renderToStaticMarkup(
-        <Trend daily={[]} comparisonDaily={[{ day: "2026-10-31", metrics: { generatedImages: metric } as UsageV2Metrics }]} from="2026-10-31T16:00:00Z" to="2026-11-01T16:00:00Z" comparisonFrom="2026-10-30T16:00:00Z" onDrilldown={() => undefined} />,
-    );
-    expect(html).not.toContain("当前筛选没有可展示记录");
-    expect(html).toContain("data-usage-chart-loading");
+test("a comparison-only period still renders the trend instead of discarding historical data", async () => {
+    const trend = <Trend daily={[]} comparisonDaily={[{ day: "2026-10-31", metrics: { generatedImages: metric } as UsageV2Metrics }]} from="2026-10-31T16:00:00Z" to="2026-11-01T16:00:00Z" comparisonFrom="2026-10-30T16:00:00Z" onDrilldown={() => undefined} />;
+    // Other tests may already have resolved the shared React.lazy Chart. Wait
+    // for its real output, then also verify the cached static-render path.
+    const stream = await renderToReadableStream(trend);
+    await stream.allReady;
+    for (const html of [await new Response(stream).text(), renderToStaticMarkup(trend)]) {
+        expect(html).not.toContain("当前筛选没有可展示记录");
+        expect(html).toContain('data-usage-chart="每日出图趋势"');
+        expect(html).not.toContain("data-usage-chart-loading");
+    }
 });
 test("metric component displays missing coverage and keeps formal adoption separate", () => {
     const html = renderToStaticMarkup(
