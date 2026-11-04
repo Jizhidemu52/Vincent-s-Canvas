@@ -47,7 +47,7 @@ function normalizeConnection(firstNodeId: string, secondNodeId: string, nodes: C
 
 export function useCanvasConnections({ nodesRef, connectionsRef, viewportRef, generationDispatchLocksRef, screenToCanvas, setDialogNodeId, setContextMenu, flushPendingHistory, geometry }: CanvasConnectionsOptions) {
     const { message } = App.useApp();
-    const effectiveConfig = useEffectiveConfig();
+    const effectiveConfig = useEffectiveConfig("canvas");
     const setNodes = useCanvasGraphSetter("nodes");
     const setConnections = useCanvasGraphSetter("connections");
     const setSelectedNodeIds = useCanvasGraphSetter("selectedNodeIds");

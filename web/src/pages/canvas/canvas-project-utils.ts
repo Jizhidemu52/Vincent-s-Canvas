@@ -49,14 +49,7 @@ export function createCanvasNode(type: CanvasNodeType, position: Position, metad
     };
 }
 
-export function audioExtension(mimeType?: string) {
-    if (mimeType?.includes("wav")) return "wav";
-    if (mimeType?.includes("opus")) return "opus";
-    if (mimeType?.includes("aac")) return "aac";
-    if (mimeType?.includes("flac")) return "flac";
-    if (mimeType?.includes("pcm")) return "pcm";
-    return "mp3";
-}
+export { audioExtension } from "@/lib/canvas/canvas-export-loader";
 
 export function imageMetadata(image: UploadedImage): CanvasNodeMetadata {
     return { imageTask: undefined, errorDetails: undefined, content: image.url, storageKey: image.storageKey, status: "success", naturalWidth: image.width, naturalHeight: image.height, bytes: image.bytes, mimeType: image.mimeType, ...(image.originalFileName ? { originalFileName: image.originalFileName, imageName: image.originalFileName.replace(/\.[^.]+$/, ""), imageVersion: 1 } : {}) };

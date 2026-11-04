@@ -47,7 +47,7 @@ async function createUploadHarness(storage: ObjectStorage, prechecked: (id: stri
     connect: () => fixture.db.connect(),
     query: async (sql: string, values: unknown[] = []) => {
       const result = await fixture.db.query(sql, values);
-      if (sql.startsWith("SELECT object_key,mime_type,byte_size,metadata FROM assets") && !sql.includes("FOR UPDATE")) prechecked(String(values[0]));
+      if ((sql.startsWith("SELECT object_key,mime_type,byte_size,metadata FROM assets") || sql.startsWith("SELECT id,status,object_key,mime_type,byte_size,content_sha256,metadata FROM assets WHERE id=")) && !sql.includes("FOR UPDATE")) prechecked(String(values[0]));
       return result;
     },
   } as unknown as Database;
@@ -67,10 +67,10 @@ async function createUploadHarness(storage: ObjectStorage, prechecked: (id: stri
   };
 }
 
-function delayedUpload(base: string, id: string, body: Buffer) {
+function delayedUpload(base: string, id: string, body: Buffer, query = "") {
   let resolve!: (status: number) => void, reject!: (error: Error) => void;
   const response = new Promise<number>((done, fail) => { resolve = done; reject = fail; });
-  const request = httpRequest(`${base}/api/assets/${id}/upload`, {
+  const request = httpRequest(`${base}/api/assets/${id}/upload${query}`, {
     method: "PUT", headers: { "content-type": "application/octet-stream", "content-length": body.length },
   }, incoming => { incoming.resume(); incoming.once("end", () => resolve(incoming.statusCode!)); });
   request.once("error", reject);
@@ -96,7 +96,7 @@ function precheckBarrier(participants: number) {
 integration("content-hash reuse requires verified bytes, owner identity and a live ready image", async () => {
   const fixture = await createAssetDatabase();
   let writes = 0;
-  const storage = { configured: true, put: async () => { writes++; }, get: async () => ({}) } as unknown as ObjectStorage;
+  const storage = { configured: true, put: async () => { writes++; }, head: async () => ({}), get: async () => ({}) } as unknown as ObjectStorage;
   await fixture.db.query("INSERT INTO users(id,username,display_name,role) VALUES($1,'hash-a','Hash A','designer'),($2,'hash-b','Hash B','designer')", [a, b]);
   const app = express(); app.use(express.json());
   app.use((req, _res, next) => { (req as AuthenticatedRequest).auth = { id: req.header("x-test-owner") || a, role: "designer", departmentId: null } as AuthenticatedRequest["auth"]; next(); });
@@ -187,6 +187,154 @@ integration("an object-store error rolls back the upload claim and a later attem
     expect((await fixture.db.query("SELECT status,content_sha256 FROM assets WHERE id=$1", [asset.id])).rows[0]).toEqual({ status: "ready", content_sha256: hashAssetContent(bytes) });
     expect(writes).toBe(2);
   } finally { await fixture.close(); }
+}, 30_000);
+
+const missingObject = () => Object.assign(new Error("synthetic private object key"), { name: "NoSuchKey", $metadata: { httpStatusCode: 404 } });
+
+integration("missing ready originals reuse their historical ID and only accept verified exact repair bytes", async () => {
+  const objects = new Map<string, Buffer>(), writes: Array<{ key: string; condition?: string }> = [];
+  const storage = { configured: true,
+    head: async (key: string) => { if (!objects.has(key)) throw missingObject(); return { ContentLength: objects.get(key)!.length }; },
+    put: async (key: string, bytes: Buffer, _mime: string, options?: { ifNoneMatch?: string }) => {
+      if (options?.ifNoneMatch === "*" && objects.has(key)) throw Object.assign(new Error("exists"), { $metadata: { httpStatusCode: 412 } });
+      writes.push({ key, condition: options?.ifNoneMatch }); objects.set(key, Buffer.from(bytes));
+    },
+  } as unknown as ObjectStorage;
+  const fixture = await createUploadHarness(storage);
+  const bytes = Buffer.from("verified original"), asset = await fixture.reserve(bytes), hash = hashAssetContent(bytes);
+  await fixture.db.query("UPDATE assets SET status='ready',content_sha256=$2,client_reference_id='stable-original-ref' WHERE id=$1", [asset.id, hash]);
+  const input = { filename: "upload.txt", mimeType: "text/plain", byteSize: bytes.length, kind: "text", repairAssetId: asset.id, metadata: { contentSha256: hash } };
+  const reserve = (body: unknown) => fetch(`${fixture.base}/api/assets/upload-request`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const put = (body: Buffer, path = `/api/assets/${asset.id}/upload?repair=1`) => fetch(fixture.base + path, { method: "PUT", headers: { "content-type": "application/octet-stream" }, body: new Uint8Array(body) });
+  try {
+    const reserved = await reserve(input);
+    expect(reserved.status).toBe(201);
+    expect(await reserved.json()).toEqual({ assetId: asset.id, uploadUrl: `/api/assets/${asset.id}/upload?repair=1`, reused: true });
+    expect((await reserve({ ...input, metadata: { contentSha256: "0".repeat(64) } })).status).toBe(409);
+    expect((await reserve({ ...input, mimeType: "application/json" })).status).toBe(409);
+    expect((await reserve({ ...input, byteSize: bytes.length + 1 })).status).toBe(409);
+    const { repairAssetId: _explicit, ...referenceInput } = input;
+    expect(await (await reserve({ ...referenceInput, clientReferenceId: "stable-original-ref" })).json())
+      .toEqual({ assetId: asset.id, uploadUrl: `/api/assets/${asset.id}/upload?repair=1`, reused: true });
+    expect((await put(Buffer.alloc(bytes.length, 0x61))).status).toBe(400);
+    expect(writes).toHaveLength(0);
+    expect((await put(bytes)).status).toBe(204);
+    expect(writes).toEqual([{ key: asset.key, condition: "*" }]);
+    expect(objects.get(asset.key)).toEqual(bytes);
+    expect((await fixture.db.query("SELECT status,content_sha256,object_key FROM assets WHERE id=$1", [asset.id])).rows[0])
+      .toEqual({ status: "ready", content_sha256: hash, object_key: asset.key });
+    // Idempotent stale repair URLs cannot overwrite an original that is now present.
+    expect((await put(bytes)).status).toBe(204); expect(writes).toHaveLength(1);
+    expect(await (await reserve(input)).json()).toEqual({ assetId: asset.id, uploadUrl: null, reused: true });
+    await fixture.db.query("UPDATE assets SET owner_user_id=$2 WHERE id=$1", [asset.id, b]);
+    expect((await reserve(input)).status).toBe(404);
+    expect((await put(bytes)).status).toBe(404);
+    expect((await fixture.db.query("SELECT count(*)::int AS count FROM assets")).rows[0]).toEqual({ count: 1 });
+  } finally { await fixture.close(); }
+}, 30_000);
+
+integration("ready hash dedupe verifies S3 and never treats storage permission or network failures as missing", async () => {
+  let storageError: unknown = missingObject(), heads = 0, writes = 0;
+  const fixture = await createUploadHarness({ configured: true,
+    head: async () => { heads++; if (storageError) throw storageError; return {}; }, put: async () => { writes++; },
+  } as unknown as ObjectStorage);
+  const asset = await fixture.reserve(png), hash = hashAssetContent(png);
+  await fixture.db.query("UPDATE assets SET status='ready',kind='image',mime_type='image/png',content_sha256=$2 WHERE id=$1", [asset.id, hash]);
+  const input = { filename: "original.png", mimeType: "image/png", byteSize: png.length, kind: "image", metadata: { contentSha256: hash } };
+  const reserve = () => fetch(`${fixture.base}/api/assets/upload-request`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input) });
+  try {
+    expect(await (await reserve()).json()).toEqual({ assetId: asset.id, uploadUrl: `/api/assets/${asset.id}/upload?repair=1`, reused: true });
+    for (const error of [Object.assign(new Error("forbidden private-key"), { name: "NotFound", $metadata: { httpStatusCode: 403 } }), Object.assign(new Error("timed out private-endpoint"), { name: "TimeoutError" })]) {
+      storageError = error;
+      const response = await reserve(); expect(response.status).toBe(503);
+      expect(response.headers.get("X-Canvas-Asset-Error")).toBe("ASSET_STORAGE_UNAVAILABLE");
+      const body = await response.json(); expect(body.error).toBe("ASSET_STORAGE_UNAVAILABLE"); expect(JSON.stringify(body)).not.toContain("private");
+    }
+    storageError = undefined;
+    expect(await (await reserve()).json()).toEqual({ assetId: asset.id, uploadUrl: null, reused: true });
+    expect(heads).toBe(4); expect(writes).toBe(0);
+    expect((await fixture.db.query("SELECT count(*)::int AS count FROM assets")).rows[0]).toEqual({ count: 1 });
+  } finally { await fixture.close(); }
+}, 30_000);
+
+integration("repair refuses unverified historical hashes and a conditional-write race never changes the row", async () => {
+  let writes = 0;
+  const fixture = await createUploadHarness({ configured: true, head: async () => { throw missingObject(); },
+    put: async (_key: string, _body: Buffer, _mime: string, options?: { ifNoneMatch?: string }) => {
+      expect(options?.ifNoneMatch).toBe("*"); writes++;
+      throw Object.assign(new Error("restored concurrently"), { $metadata: { httpStatusCode: 412 } });
+    },
+  } as unknown as ObjectStorage);
+  const bytes = Buffer.from("verified original"), asset = await fixture.reserve(bytes), hash = hashAssetContent(bytes);
+  await fixture.db.query("UPDATE assets SET status='ready',metadata=$2::jsonb WHERE id=$1", [asset.id, JSON.stringify({ contentSha256: hash })]);
+  const reserve = () => fetch(`${fixture.base}/api/assets/upload-request`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ filename: "upload.txt", mimeType: "text/plain", byteSize: bytes.length, repairAssetId: asset.id, metadata: { contentSha256: hash } }) });
+  const put = () => fetch(`${fixture.base}/api/assets/${asset.id}/upload?repair=1`, { method: "PUT", headers: { "content-type": "application/octet-stream" }, body: bytes });
+  try {
+    expect((await reserve()).status).toBe(409); expect((await put()).status).toBe(404); expect(writes).toBe(0);
+    await fixture.db.query("UPDATE assets SET content_sha256=$2 WHERE id=$1", [asset.id, hash]);
+    const before = (await fixture.db.query("SELECT * FROM assets WHERE id=$1", [asset.id])).rows[0];
+    const raced = await put(); expect(raced.status).toBe(409); expect((await raced.json()).error).toBe("ASSET_REPAIR_CHANGED");
+    expect((await fixture.db.query("SELECT * FROM assets WHERE id=$1", [asset.id])).rows[0]).toEqual(before);
+    expect(writes).toBe(1);
+  } finally { await fixture.close(); }
+}, 30_000);
+
+integration("repair rechecks owner, readiness, deletion, size, MIME and server hash after the body arrives", async () => {
+  let barrier = precheckBarrier(1), heads = 0, writes = 0;
+  const fixture = await createUploadHarness({ configured: true,
+    head: async () => { heads++; throw missingObject(); }, put: async () => { writes++; },
+  } as unknown as ObjectStorage, () => barrier.observe());
+  const bytes = Buffer.from("verified original"), hash = hashAssetContent(bytes);
+  const changes = [
+    { sql: "owner_user_id=$2", value: b, status: 404 },
+    { sql: "status=$2", value: "pending", status: 404 },
+    { sql: "deleted_at=$2", value: new Date().toISOString(), status: 404 },
+    { sql: "byte_size=$2", value: bytes.length + 1, status: 400 },
+    { sql: "mime_type=$2", value: "application/json", status: 415 },
+    { sql: "content_sha256=$2", value: "0".repeat(64), status: 400 },
+    { sql: "content_sha256=$2", value: null, status: 404 },
+  ];
+  try {
+    for (const change of changes) {
+      barrier = precheckBarrier(1);
+      const asset = await fixture.reserve(bytes);
+      await fixture.db.query("UPDATE assets SET status='ready',content_sha256=$2 WHERE id=$1", [asset.id, hash]);
+      const upload = delayedUpload(fixture.base, asset.id, bytes, "?repair=1");
+      try {
+        await barrier.wait();
+        await fixture.db.query(`UPDATE assets SET ${change.sql} WHERE id=$1`, [asset.id, change.value]);
+        const changed = (await fixture.db.query("SELECT * FROM assets WHERE id=$1", [asset.id])).rows[0];
+        upload.finish();
+        expect(await upload.response).toBe(change.status);
+        expect(heads).toBe(0); expect(writes).toBe(0);
+        expect((await fixture.db.query("SELECT * FROM assets WHERE id=$1", [asset.id])).rows[0]).toEqual(changed);
+      } finally { upload.abort(); }
+    }
+  } finally { await fixture.close(); }
+}, 30_000);
+
+integration("overlapping same-ID repairs both complete but only one writes the missing original", async () => {
+  const barrier = precheckBarrier(2), objects = new Map<string, Buffer>();
+  let writes = 0;
+  const fixture = await createUploadHarness({ configured: true,
+    head: async (key: string) => { if (!objects.has(key)) throw missingObject(); return {}; },
+    put: async (key: string, body: Buffer, _mime: string, options?: { ifNoneMatch?: string }) => {
+      expect(options?.ifNoneMatch).toBe("*");
+      expect(objects.has(key)).toBe(false);
+      writes++; objects.set(key, Buffer.from(body));
+    },
+  } as unknown as ObjectStorage, barrier.observe);
+  const bytes = Buffer.from("verified original"), hash = hashAssetContent(bytes), asset = await fixture.reserve(bytes);
+  await fixture.db.query("UPDATE assets SET status='ready',content_sha256=$2 WHERE id=$1", [asset.id, hash]);
+  const first = delayedUpload(fixture.base, asset.id, bytes, "?repair=1"), second = delayedUpload(fixture.base, asset.id, bytes, "?repair=1");
+  try {
+    await barrier.wait();
+    first.finish(); second.finish();
+    expect(await Promise.all([first.response, second.response])).toEqual([204, 204]);
+    expect(writes).toBe(1); expect(objects.get(asset.key)).toEqual(bytes);
+    expect((await fixture.db.query("SELECT status,content_sha256,object_key FROM assets WHERE id=$1", [asset.id])).rows[0])
+      .toEqual({ status: "ready", content_sha256: hash, object_key: asset.key });
+  } finally { first.abort(); second.abort(); await fixture.close(); }
 }, 30_000);
 
 integration("demo rechecks readiness after two uploads overlap in asynchronous MIME validation", async () => {

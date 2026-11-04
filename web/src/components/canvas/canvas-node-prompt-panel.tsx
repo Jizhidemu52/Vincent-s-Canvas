@@ -63,7 +63,7 @@ type CanvasNodePromptPanelProps = {
 export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, onStop, mentionReferences = [], onImageSettingsOpenChange, canvasNodes = [], canvasConnections = [], sharedConfig, onOpenSharedConfig, onRestoreGeneration, onRegisterDraftFlush }: CanvasNodePromptPanelProps) {
     const t = useUiText();
     const { message } = App.useApp();
-    const globalConfig = useEffectiveConfig();
+    const globalConfig = useEffectiveConfig("canvas");
     const estimate = useBusinessConfigStore((state) => state.estimate);
     const models = useBusinessConfigStore((state) => state.models);
     const tools = useBusinessConfigStore(state => state.tools);

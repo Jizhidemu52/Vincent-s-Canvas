@@ -7,6 +7,11 @@ export function nextCanvasEditLease(current: CanvasEditLeaseRecord | undefined, 
     return { tab, expiresAt: now + CANVAS_EDIT_LEASE_MS };
 }
 
+/** An expired owner may resume ONLY if nobody has acquired/released its record. */
+export function resumeCanvasEditLease(current: CanvasEditLeaseRecord | undefined, tab: string, now: number): CanvasEditLeaseRecord | null {
+    return current?.tab === tab ? { tab, expiresAt: now + CANVAS_EDIT_LEASE_MS } : null;
+}
+
 /** HTTP intranet fallback. Read/check/write runs inside ONE serialized IDB transaction. */
 export function createCanvasEditLease(databaseName = "wireless-canvas-editor-locks") {
     let database: Promise<IDBDatabase> | undefined;
@@ -36,8 +41,10 @@ export function createCanvasEditLease(databaseName = "wireless-canvas-editor-loc
         });
     };
     return {
-        claim: (key: string, tab: string, now = Date.now()) => update(key, current => nextCanvasEditLease(current, tab, now, false) || false),
-        renew: (key: string, tab: string, now = Date.now()) => update(key, current => nextCanvasEditLease(current, tab, now, true) || false),
+        // Read the clock in the transaction, not before waiting for IDB to open.
+        claim: (key: string, tab: string, now?: number) => update(key, current => nextCanvasEditLease(current, tab, now ?? Date.now(), false) || false),
+        renew: (key: string, tab: string, now?: number) => update(key, current => nextCanvasEditLease(current, tab, now ?? Date.now(), true) || false),
+        resume: (key: string, tab: string, now?: number) => update(key, current => resumeCanvasEditLease(current, tab, now ?? Date.now()) || false),
         release: (key: string, tab: string) => update(key, current => current?.tab === tab ? null : false),
         close: () => { void database?.then(db => db.close()).catch(() => undefined); },
     };

@@ -14,7 +14,7 @@ import { imageModelProfile } from "@/lib/image-model-settings";
 import { compiledCanvasGenerationRecord } from "@/lib/canvas/canvas-generation-record";
 import { shouldCancelCanvasGeneration } from "@/lib/canvas/canvas-project-async-lifecycle";
 
-export type CanvasImageTaskScope = { projectId: string; mounted: boolean; recoveries: Map<string, AbortController> };
+export type CanvasImageTaskScope = { projectId: string; mounted: boolean; recoveries: Map<string, AbortController>; waitForWriteAccess?: () => Promise<boolean>; isObservationCurrent?: () => boolean };
 type RecoveryOutput = { nodeId: string; status: "success" | "failed"; url?: string; storageKey?: string; error?: string };
 
 type Context = {
@@ -29,13 +29,17 @@ type Context = {
 /** Loaded only when a generation is about to submit or an existing task needs observation. */
 export default function createCanvasImageTaskRuntime({ nodes, setNodes, saveQueue, scope, ownerId, generating }: Context) {
     const flushPendingSave = () => saveQueue.current?.flush();
-    const inScope = () => scope.mounted && Boolean(ownerId) && useUserStore.getState().user?.id === ownerId;
+    const inScope = () => scope.mounted && (scope.isObservationCurrent?.() ?? true) && Boolean(ownerId) && useUserStore.getState().user?.id === ownerId;
+    const waitForWriteAccess = async () => {
+        if (!inScope() || (scope.waitForWriteAccess && !await scope.waitForWriteAccess()) || !inScope()) throw new DOMException("画布编辑权已变化", "AbortError");
+    };
     const current = (nodeId: string, binding: CanvasImageTaskBinding, requireBinding = true) => {
         const node = nodes.current.find(item => item.id === nodeId);
         return inScope() && binding.ownerId === ownerId && binding.projectId === scope.projectId
             && Boolean(node) && (!requireBinding || node?.metadata?.imageTask?.requestId === binding.requestId);
     };
     const patch = async (nodeId: string, binding: CanvasImageTaskBinding, metadata: Partial<CanvasNodeMetadata>, requireBinding = true) => {
+        await waitForWriteAccess();
         if (!current(nodeId, binding, requireBinding)) throw new DOMException("画布或任务已变化", "AbortError");
         flushSync(() => setNodes(previous => {
             const target = previous.find(node => node.id === nodeId);
@@ -74,6 +78,7 @@ export default function createCanvasImageTaskRuntime({ nodes, setNodes, saveQueu
             }
             throw error;
         }
+        await waitForWriteAccess();
         if (!current(nodeId, binding, metadata.imageTask === undefined && "imageTask" in metadata ? false : true)) throw new DOMException("画布或任务已变化", "AbortError");
     };
 
@@ -93,6 +98,7 @@ export default function createCanvasImageTaskRuntime({ nodes, setNodes, saveQueu
                 cancelOnAbort: () => shouldCancelCanvasGeneration(controller.signal) && current(nodeId, binding, prepared),
                 assertCurrent,
                 async generate(config: Parameters<typeof requestGeneration>[0], prompt: string, references?: Parameters<typeof requestEdit>[2], mask?: Parameters<typeof requestEdit>[3], edit = Boolean(references?.length || mask), promptInput?: import("../../../../shared/prompt-contracts").PromptInputData, exactPrompt = false) {
+                    await waitForWriteAccess();
                     assertCurrent();
                     if (!mask && imageModelProfile(config.model || config.imageModel).kind === "midjourney-blend") { edit = false; prompt = ""; }
                     config = { ...config, count: "1", canvasImageCount: "1" };
@@ -104,10 +110,12 @@ export default function createCanvasImageTaskRuntime({ nodes, setNodes, saveQueu
                 async receiveResult<T extends { dataUrl: string; sourceTaskId?: string; prompt?: string; submittedPrompt?: string; optimized?: boolean; userInput?: import("../../../../shared/prompt-contracts").PromptInputData }>(request: Promise<T[]>) {
                     try {
                         const image = (await request)[0];
+                        await waitForWriteAccess();
                         assertCurrent();
                         if (!image) throw new Error("接口没有返回图片");
                         const target = nodes.current.find(node => node.id === nodeId)!;
                         const uploaded = await uploadImage(await restoreCanvasMaskResult(target, image.dataUrl));
+                        await waitForWriteAccess();
                         assertCurrent();
                         const metadata: CanvasNodeMetadata = {
                             imageTask: undefined, errorDetails: undefined, sourceTaskId: image.sourceTaskId,
@@ -119,6 +127,7 @@ export default function createCanvasImageTaskRuntime({ nodes, setNodes, saveQueu
                         };
                         return { image, uploaded, metadata };
                     } catch (error) {
+                        await waitForWriteAccess();
                         assertCurrent();
                         if (error instanceof QueuedTaskFailedError || (error as { submissionRejected?: boolean })?.submissionRejected) {
                             setNodes(previous => previous.map(node => node.id === nodeId ? {
@@ -129,12 +138,14 @@ export default function createCanvasImageTaskRuntime({ nodes, setNodes, saveQueu
                     }
                 },
                 onSubmissionStarted: async () => {
+                    await waitForWriteAccess();
                     assertCurrent();
                     await runtime.prepare(nodeId, binding, controller.signal);
                     prepared = true;
                     assertCurrent();
                 },
                 onSubmitted: async (ids: string[]) => {
+                    await waitForWriteAccess();
                     assertCurrent();
                     await runtime.submitted(nodeId, binding, ids);
                     onSubmitted?.();
@@ -144,6 +155,7 @@ export default function createCanvasImageTaskRuntime({ nodes, setNodes, saveQueu
         },
         async recoverPending(nodeId?: string): Promise<RecoveryOutput[] | null> {
             if (!inScope()) return [];
+            await waitForWriteAccess();
             const source = nodes.current.find(node => node.id === nodeId);
             if (nodeId && !source) return [];
             const pending = nodes.current.filter(node => node.type === CanvasNodeType.Image && node.metadata?.imageTask
@@ -207,6 +219,7 @@ export default function createCanvasImageTaskRuntime({ nodes, setNodes, saveQueu
                         }
                     },
                 });
+                await waitForWriteAccess();
                 if (!valid()) return;
                 if (!task) throw new Error("未找到原图片任务，提交状态待核查；再次点击仅查询原任务，不会重新生成。");
                 if (task.status !== "success") {
@@ -222,6 +235,7 @@ export default function createCanvasImageTaskRuntime({ nodes, setNodes, saveQueu
                 if (!url) throw new Error("原图片任务已完成，但结果暂不可用；再次点击仅查询原任务。");
                 const target = nodes.current.find(node => node.id === nodeId)!;
                 const image = await uploadImage(await restoreCanvasMaskResult(target, url));
+                await waitForWriteAccess();
                 if (!valid()) return;
                 // Refill the original node at its existing position, respecting the image ratio.
                 await patch(nodeId, binding, {

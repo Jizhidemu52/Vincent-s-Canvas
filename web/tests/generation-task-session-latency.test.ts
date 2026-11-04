@@ -48,6 +48,10 @@ function controlledNetwork(phase: "initial" | "final", options: { task?: QueuedT
         const method = init?.method || "GET";
         if (path === "/api/models") return Response.json({ tools: [], prices: [], models: [model] });
         if (path === "/api/assets/upload-request") return Response.json({ assetId: "reference-1", uploadUrl: null });
+        if (path === "/api/assets/reference-1/content" && method === "HEAD") {
+            expect(init).toMatchObject({ credentials: "include", cache: "no-store" });
+            return new Response(null, { status: 200, headers: { "content-type": "image/png" } });
+        }
         if (path === "/api/tasks" && method === "POST") {
             submissions.push({ path, body: JSON.parse(String(init?.body)) });
             return Response.json({ task: { id: task.id } });

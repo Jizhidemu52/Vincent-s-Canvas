@@ -4,7 +4,7 @@ import type { CSSProperties, ChangeEvent as ReactChangeEvent, MouseEvent as Reac
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { hasPendingImageTask, INTERRUPTED_IMAGE_TASK_ERROR } from "./canvas-project-utils";
-import { applyNodeConfigPatch, audioExtension, audioMetadata, createCanvasNode, getInputSummary, imageMetadata, videoMetadata, type CanvasGenerationResult } from "./canvas-project-utils";
+import { applyNodeConfigPatch, audioMetadata, createCanvasNode, getInputSummary, imageMetadata, videoMetadata, type CanvasGenerationResult } from "./canvas-project-utils";
 import { useCanvasBatchEdit } from "./use-canvas-batch-edit";
 import { useCanvasConnections } from "./use-canvas-connections";
 import { useCanvasGeneration } from "./use-canvas-generation";
@@ -12,7 +12,7 @@ import { useCanvasImageActions } from "./use-canvas-image-actions";
 import { useCanvasMediaWorkflow } from "./use-canvas-media-workflow";
 import { useCanvasProjectHydration } from "./use-canvas-project-hydration";
 import { useCanvasQuickGeneration } from "./use-canvas-quick-generation";
-import { CanvasEditorSession, type CanvasEditorFlushRef } from "./canvas-editor-session";
+import { CanvasEditorSession, type CanvasEditorFlushRef, type CanvasEditorRecoveryRef, type CanvasEditorWriteCapability } from "./canvas-editor-session";
 
 import type { InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
 import type { CanvasAgentMode } from "@/components/canvas/canvas-agent-chat-ui";
@@ -56,7 +56,6 @@ import { createDragPreview, createLivePreviewNodeResolver, type CanvasDragPrevie
 import { collectCanvasDragNodes } from "@/lib/canvas/canvas-drag-selection";
 import { canvasEdgeAutoPanDelta } from "@/lib/canvas/canvas-edge-auto-pan";
 import { collectAffectedConnectionIds, refreshVisibleConnectionsForDrag, sameCanvasIdSet } from "@/lib/canvas/canvas-drag-visible-connections";
-import { loadCanvasExport } from "@/lib/canvas/canvas-export-loader";
 import { beginCanvasHover, commitCanvasHover, endCanvasHover, resetCanvasHover, type CanvasHoverState } from "@/lib/canvas/canvas-hover-stability";
 import { canvasImageExportSelection } from "@/lib/canvas/canvas-image-export-selection";
 import { canvasImageBaseName } from "@/lib/canvas/canvas-image-filename";
@@ -152,6 +151,7 @@ const CanvasExampleNavigator = lazy(() => import("@/components/canvas/canvas-exa
 const CanvasTaskFeedbackRuntime = lazy(() => import("@/components/canvas/canvas-task-feedback").then(module => ({ default: module.CanvasTaskFeedbackRuntime })));
 const CanvasSaveFailureNotice = lazy(() => import("@/components/canvas/canvas-save-failure-notice").then(module => ({ default: module.CanvasSaveFailureNotice })));
 const loadExperienceMetrics = () => import("@/lib/canvas/canvas-experience-metrics");
+const loadCanvasFileActions = () => import("./canvas-editor-file-actions");
 const CanvasNodeContextMenu = lazy(() => import("@/components/canvas/canvas-context-menu").then(module => ({ default: module.CanvasNodeContextMenu })));
 const CanvasWorkspaceTools = lazy(() => import("@/components/canvas/canvas-workspace-tools").then(module => ({ default: module.CanvasWorkspaceTools })));
 const CanvasBatchEditDialog = lazy(() => import("@/components/canvas/canvas-batch-edit-dialog"));
@@ -204,7 +204,7 @@ export default function CanvasPage() {
 
     if (!mounted || !hydrated) return <CanvasRefreshShell />;
 
-    return <ConfigProvider theme={canvasAntTheme}><App className="h-full"><CanvasGraphProvider key={`${editorOwner}:${graphScopeId}`}><CanvasEditorSession key={`${editorOwner}:${graphScopeId}`} owner={editorOwner} projectId={graphScopeId || ""} enabled={!performanceFixture}>{(flushRef, writable) => <WirelessCanvasPage sessionFlushRef={flushRef} writable={writable} />}</CanvasEditorSession></CanvasGraphProvider></App></ConfigProvider>;
+    return <ConfigProvider theme={canvasAntTheme}><App className="h-full"><CanvasGraphProvider key={`${editorOwner}:${graphScopeId}`}><CanvasEditorSession key={`${editorOwner}:${graphScopeId}`} owner={editorOwner} projectId={graphScopeId || ""} enabled={!performanceFixture}>{(flushRef, writable, recoveryRef) => <WirelessCanvasPage sessionFlushRef={flushRef} sessionRecoveryRef={recoveryRef} writable={writable} />}</CanvasEditorSession></CanvasGraphProvider></App></ConfigProvider>;
 }
 
 function CanvasRefreshShell() {
@@ -231,7 +231,7 @@ function CanvasRefreshShell() {
     );
 }
 
-function WirelessCanvasPage({ sessionFlushRef, writable }: { sessionFlushRef: CanvasEditorFlushRef; writable: RefObject<boolean> }) {
+function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: { sessionFlushRef: CanvasEditorFlushRef; sessionRecoveryRef: CanvasEditorRecoveryRef; writable: CanvasEditorWriteCapability }) {
     const t = useUiText();
     const { message, modal } = App.useApp();
     const copyText = useCopyText();
@@ -336,7 +336,7 @@ function WirelessCanvasPage({ sessionFlushRef, writable }: { sessionFlushRef: Ca
     const pendingResizePreviewRef = useRef<CanvasResizePreview | null>(null);
     const textStreamPublishingEnabledRef = useRef(true);
 
-    const effectiveConfig = useEffectiveConfig();
+    const effectiveConfig = useEffectiveConfig("canvas");
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const canManageConfig = useCanManageConfig();
     const remainingCredits = useUserStore((state) => state.user?.creditBalance);
@@ -348,7 +348,7 @@ function WirelessCanvasPage({ sessionFlushRef, writable }: { sessionFlushRef: Ca
     const renameProject = useCanvasStore((state) => state.renameProject);
     const deleteProjects = useCanvasStore((state) => state.deleteProjects);
     const projectTitle = useCanvasStore((state) => state.projects.find((project) => project.id === projectId)?.title);
-    const projectSaveQueueRef = useCanvasPersistenceQueue(updateProject);
+    const projectSaveQueueRef = useCanvasPersistenceQueue(updateProject, writable);
     const canvasThemeKey = useThemeStore((state) => state.theme);
     const theme = canvasThemes[canvasThemeKey];
     const [nodes, setNodes] = useCanvasGraphField("nodes");
@@ -438,7 +438,7 @@ function WirelessCanvasPage({ sessionFlushRef, writable }: { sessionFlushRef: Ca
     const selectionBoxRef = useRef<SelectionBox | null>(null);
     const agentCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    const generationRuntime = useCanvasGenerationRuntime({ projectId, nodesRef, setNodes, projectSaveQueueRef, textStreamPublishingEnabledRef });
+    const generationRuntime = useCanvasGenerationRuntime({ projectId, nodesRef, setNodes, projectSaveQueueRef, textStreamPublishingEnabledRef, editLeaseRef: writable });
     const {
         runningNodeId, runningNodeIds, setRunningNodeId, generationRequestsRef, generationDispatchLocksRef,
         textStreamBufferRef, clearStreamedText, stopGenerationByRunningId,
@@ -2370,22 +2370,10 @@ function WirelessCanvasPage({ sessionFlushRef, writable }: { sessionFlushRef: Ca
     }, []);
 
     const downloadNodeImage = useCallback(async (node: CanvasNodeData) => {
-        if ((node.type !== CanvasNodeType.Image && node.type !== CanvasNodeType.Video && node.type !== CanvasNodeType.Audio) || !node.metadata?.content) return;
-        const done = message.loading({ content: uiText("正在准备下载…"), duration: 0 });
         try {
-            const { downloadCanvasContent, loadCanvasImageVariants } = await loadCanvasExport();
-            if (node.type === CanvasNodeType.Image) {
-                const variants = await loadCanvasImageVariants(node);
-                const current = nodesRef.current.find(item => item.id === node.id);
-                if (savedProjectIdRef.current !== projectId || !current || current.metadata?.content !== node.metadata.content || current.metadata?.storageKey !== node.metadata.storageKey) return;
-                setImageDownload({ projectId, node: current, variants });
-            }
-            else {
-                const title = (node.title || (node.type === CanvasNodeType.Video ? uiText("画布视频") : uiText("画布音频"))).replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").trim().replace(/[. ]+$/, "");
-                downloadCanvasContent(node.metadata.content, `${title || uiText("画布素材")}.${node.type === CanvasNodeType.Video ? "mp4" : audioExtension(node.metadata.mimeType)}`);
-            }
+            const { downloadCanvasEditorNode } = await loadCanvasFileActions();
+            await downloadCanvasEditorNode(node, { projectId, nodesRef, savedProjectIdRef, message, setImageDownload });
         } catch (error) { message.error(error instanceof Error ? error.message : uiText("图片下载失败")); }
-        finally { done(); }
     }, [message, projectId]);
 
     const saveNodeAsset = useCallback(
@@ -2805,6 +2793,18 @@ function WirelessCanvasPage({ sessionFlushRef, writable }: { sessionFlushRef: Ca
         const latest = { ...stored, nodes: nodesRef.current, connections: connectionsRef.current, groups: groupsRef.current, viewport: viewportRef.current, selectedNodeIds: normalizeCanvasSelectedNodeIds(selectedNodeIdsRef.current, nodesRef.current, groupsRef.current) };
         await exportProjects([latest.id], latest.title || t("无限画布"), [latest]);
     }, [projectId, exportProjects, t]);
+
+    useLayoutEffect(() => {
+        const recovery = {
+            backup: async () => {
+                const { backupCanvasEditorDraft } = await loadCanvasFileActions();
+                await backupCanvasEditorDraft({ projectId, defaultTitle: t("无限画布"), flushEditorDrafts, flushPendingHistory, createHistoryEntry, historyRef, viewportRef, exportProjects });
+            },
+            discardPending: () => projectSaveQueueRef.current?.discard(),
+        };
+        sessionRecoveryRef.current = recovery;
+        return () => { if (sessionRecoveryRef.current === recovery) sessionRecoveryRef.current = null; };
+    }, [createHistoryEntry, exportProjects, flushEditorDrafts, flushPendingHistory, projectId, sessionRecoveryRef, t]);
 
     const openImageExport = useCallback(() => {
         setImageExport({ nodes: nodesRef.current, ids: Array.from(selectedNodeIdsRef.current) });

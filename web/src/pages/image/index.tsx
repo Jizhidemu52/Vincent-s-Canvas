@@ -99,6 +99,7 @@ type GenerationResult = {
     snapshot?: ImageRequestSnapshot;
     createdAt?: number;
     taskId?: string;
+    requestId?: string;
 };
 
 type GenerationLog = {
@@ -260,7 +261,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const estimate = useBusinessConfigStore((state) => state.estimate);
     const addAsset = useAssetStore((state) => state.addAsset);
     const [optimizingPrompt, setOptimizingPrompt] = useState(false);
-    const [optimizedDraft, setOptimizedDraft] = useState<{ prompt: string; input: PromptInputData; references: ReferenceImage[] }>();
+    const [optimizedDraft, setOptimizedDraft] = useState<{ prompt: string; input: PromptInputData; references: ReferenceImage[]; context?: string }>();
     const [prompt, setPrompt, promptReady] = useGenerationDraft(`${inputDraftScope}:prompt`, creativePreset?.prompt || "");
     const historyStore = creativePreset ? creativeLogStore : logStore;
     const [results, setResults] = useState<GenerationResult[]>([]);
@@ -323,6 +324,11 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const toolModeConfig = creativePreset ? { ...imageToolModes[toolMode], title: creativePreset.title, description: creativePreset.description, projectId: `creative-${creativePreset.id}` } : imageToolModes[toolMode];
     const operationType = toolModeOperation(toolMode) as "image_generation" | "inpaint" | "upscale";
     const model = effectiveConfig.imageModel || effectiveConfig.model;
+    const optimizationContext = JSON.stringify([model, operationType, toolKey]);
+    useEffect(() => {
+        setOptimizedDraft(current => !current?.input.compilationId || current.context === optimizationContext ? current
+            : current.input.scene === "free-optimize" ? undefined : { ...current, input: { ...current.input, compilationId: undefined } });
+    }, [optimizationContext]);
     const adminModelId = modelOptionName(model);
     const selectedModelProfile = useImageModelProfile(adminModelId);
     // The dedicated entry keeps its input contract even before a model is configured.
@@ -820,7 +826,14 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
             message.error(uiText(referenceValidation.message || ""));
             return null;
         }
-        return { text: text || "Blend reference images", promptInput: optimizedDraft?.prompt === text && garmentReferencesMatch(optimizedDraft.references, references) ? optimizedDraft.input : creativePreset ? { scene: creativePreset.id as PromptScene, userText: text, fields: {}, mode: references.length ? "edit" : "generate", referenceRoles: references.map(image => image.name) } : undefined, config: { ...effectiveConfig, model, count: "1" }, references: [...references] };
+        let promptInput = optimizedDraft?.prompt === text && garmentReferencesMatch(optimizedDraft.references, references) ? optimizedDraft.input
+            : creativePreset ? { scene: creativePreset.id as PromptScene, userText: text, fields: {}, mode: operationType === "image_generation" ? "generate" as const : "edit" as const, referenceRoles: references.map(image => image.name) } : undefined;
+        if (promptInput?.compilationId && optimizedDraft?.context !== optimizationContext) {
+            promptInput = promptInput.scene === "free-optimize" ? undefined : { ...promptInput, compilationId: undefined };
+        }
+        // Upscaling accepts plain instructions, not the image compiler contract.
+        if (operationType === "upscale" || isBlend) promptInput = undefined;
+        return { text: text || "Blend reference images", promptInput, config: { ...effectiveConfig, model, count: "1" }, references: [...references] };
     };
 
     const persistPending = async (record: PendingImage) => {
@@ -884,14 +897,17 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                 onSubmissionStarted: async () => { if (mountedRef.current) setResults(value => updateResultAt(value, index, { id: record.id })); await persistPending(record); submissionStarted = true; },
                 onSubmitted: async (taskIds: string[]) => { record.taskId = taskIds[0]; await persistPending(record); if (mountedRef.current) { setActiveTaskId(record.taskId || null); setResults(current => updateResultAt(current, index, { taskId: record.taskId, createdAt: record.createdAt })); } },
             };
-            const result = snapshotIsBlend
+            const result = snapshotIsBlend || operationType === "image_generation"
                 ? await requestGeneration(snapshot.config, snapshot.text, requestOptions, snapshot.references)
-                : snapshot.references.length ? await requestEdit(snapshot.config, snapshot.text, snapshot.references, undefined, requestOptions) : await requestGeneration(snapshot.config, snapshot.text, requestOptions);
+                : await requestEdit(snapshot.config, snapshot.text, snapshot.references, undefined, requestOptions);
             const image = result[0];
             if (!image) throw new Error("接口没有返回图片");
             return await finishImage(record, image);
         } catch (error) {
             if (mountedRef.current) setOptimizingPrompt(false);
+            const taskId = error instanceof QueuedTaskFailedError || error instanceof QueuedTaskPausedError || error instanceof QueuedTaskSubmissionUncertainError ? error.taskId || record.taskId : record.taskId;
+            const requestId = error instanceof QueuedTaskFailedError || error instanceof QueuedTaskPausedError || error instanceof QueuedTaskSubmissionUncertainError ? error.requestId || `${record.requestId}:0` : `${record.requestId}:0`;
+            record.diagnostic = generationErrorDiagnostic(error);
             const uncertain = submissionStarted && !(error instanceof QueuedTaskFailedError) && (Boolean(record.taskId) || error instanceof QueuedTaskSubmissionUncertainError || controller.signal.aborted || error instanceof TaskObservationStoppedError || error instanceof QueuedTaskPausedError);
             if (!uncertain && submissionStarted) await removePending(record);
             if (uncertain) {
@@ -899,7 +915,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                 record.stopped = record.stopped || manuallyStoppedIds.current.has(record.id) || observationStopRequested.current;
                 await persistPending(record);
             }
-            if (mountedRef.current) setResults((value) => updateResultAt(value, index, { status: uncertain ? "paused" : "failed", error: record.recovery === "investigate" ? submissionInvestigationMessage : controller.signal.aborted ? "已停止本页查询；服务端任务可能继续，可查询原任务。" : error instanceof Error ? error.message : "生成失败", diagnostic: generationErrorDiagnostic(error), recovery: uncertain ? record : undefined, snapshot }));
+            if (mountedRef.current) setResults((value) => updateResultAt(value, index, { status: uncertain ? "paused" : "failed", error: record.recovery === "investigate" ? submissionInvestigationMessage : controller.signal.aborted ? "已停止本页查询；服务端任务可能继续，可查询原任务。" : error instanceof Error ? error.message : "生成失败", diagnostic: record.diagnostic, taskId, requestId, recovery: uncertain ? record : undefined, snapshot }));
             throw error;
         } finally { observationControllers.current.delete(controller); }
     };
@@ -913,7 +929,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         activeSubmissionRef.current = true;
         resultViewPinnedRef.current = false;
         setRunning(true); setStartedAt(performance.now());
-        setResults(records.map(record => ({ id: record.id, status: "pending", snapshot: record.snapshot })));
+        setResults(records.map(record => ({ id: record.id, status: "pending", snapshot: record.snapshot, diagnostic: record.diagnostic, taskId: record.taskId, requestId: `${record.requestId}:0` })));
         try {
             await Promise.allSettled(records.map(async record => {
                 const controller = new AbortController();
@@ -936,12 +952,13 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                     await finishImage(record, { id: record.id, dataUrl: completed.resultUrls[0], sourceTaskId: completed.id, prompt: completed.prompt, optimized: completed.optimized, userInput: completed.userInput });
                 } catch (error) {
                     const terminal = error instanceof QueuedTaskFailedError;
+                    const diagnostic = terminal ? generationErrorDiagnostic(error) : record.diagnostic || generationErrorDiagnostic(error);
                     if (terminal) await removePending(record);
                     else {
-                        record = { ...record, recovery: error instanceof QueuedTaskPausedError ? error.recovery : "observe", stopped: record.stopped || manuallyStoppedIds.current.has(record.id) || observationStopRequested.current };
+                        record = { ...record, diagnostic, recovery: error instanceof QueuedTaskPausedError ? error.recovery : "observe", stopped: record.stopped || manuallyStoppedIds.current.has(record.id) || observationStopRequested.current };
                         await persistPending(record);
                     }
-                    if (mountedRef.current) setResults(value => updateImageResultForRecord(value, record, { status: terminal ? "failed" : "paused", error: record.recovery === "investigate" ? submissionInvestigationMessage : controller.signal.aborted ? "已停止本页查询；可手动刷新原任务状态。" : error instanceof Error ? error.message : "原任务查询暂不可用", diagnostic: generationErrorDiagnostic(error), recovery: terminal ? undefined : record, snapshot: record.snapshot }));
+                    if (mountedRef.current) setResults(value => updateImageResultForRecord(value, record, { status: terminal ? "failed" : "paused", error: record.recovery === "investigate" ? submissionInvestigationMessage : controller.signal.aborted ? "已停止本页查询；可手动刷新原任务状态。" : error instanceof Error ? error.message : "原任务查询暂不可用", diagnostic, taskId: record.taskId, requestId: `${record.requestId}:0`, recovery: terminal ? undefined : record, snapshot: record.snapshot }));
                 } finally { observationControllers.current.delete(controller); }
             }));
         } finally { release(); activeSubmissionRef.current = false; if (mountedRef.current) setRunning(false); }
@@ -990,7 +1007,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
             }
             if (task.status === "failed" || task.status === "cancelled") {
                 assertCurrent();
-                setResults(value => updateImageResultForRecord(value, record, { status: "failed", recovery: undefined, error: task.failureReason || "原任务已结束，未生成图片", snapshot: record.snapshot }));
+                setResults(value => updateImageResultForRecord(value, record, { status: "failed", recovery: undefined, error: task.failureReason || "原任务已结束，未生成图片", diagnostic: generationErrorDiagnostic(new QueuedTaskFailedError(task)), taskId: task.id, requestId: task.requestId, snapshot: record.snapshot }));
                 await removePending(record);
                 return;
             }
@@ -1001,10 +1018,10 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
             if (record.taskId !== original.taskId || record.recovery !== original.recovery) await persistPending(record);
             assertCurrent();
             const error = record.recovery === "investigate" ? submissionInvestigationMessage : record.recovery === "resume" ? "原任务的上游查询已暂停；可明确恢复查询，不会重新生成。" : "原任务仍在处理中，完成后会自动取回结果；也可刷新状态。";
-            setResults(value => updateImageResultForRecord(value, record, { status: "paused", recovery: record, error, diagnostic: task.failureReason || undefined, taskId: task.id, snapshot: record.snapshot }));
+            setResults(value => updateImageResultForRecord(value, record, { status: "paused", recovery: record, error, diagnostic: record.diagnostic || task.failureReason || undefined, taskId: task.id, requestId: task.requestId, snapshot: record.snapshot }));
         } catch (error) {
             if (signal.aborted || !mountedRef.current || activeSubmissionRef.current || manuallyStoppedIds.current.has(record.id) || useUserStore.getState().user?.id !== record.ownerId) return;
-            setResults(value => updateImageResultForRecord(value, record, { status: "paused", recovery: record, error: record.recovery === "investigate" ? submissionInvestigationMessage : error instanceof Error ? error.message : "暂时无法核对原任务，稍后将自动刷新", diagnostic: generationErrorDiagnostic(error), snapshot: record.snapshot }));
+            setResults(value => updateImageResultForRecord(value, record, { status: "paused", recovery: record, error: record.recovery === "investigate" ? submissionInvestigationMessage : error instanceof Error ? error.message : "暂时无法核对原任务，稍后将自动刷新", diagnostic: record.diagnostic || generationErrorDiagnostic(error), taskId: record.taskId, requestId: `${record.requestId}:0`, snapshot: record.snapshot }));
         }
     };
 
@@ -1115,7 +1132,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                                 <Input.TextArea aria-label={uiText("图像提示词")} showCount value={prompt} onPaste={event => { const files = pastedImageFiles(event.clipboardData); if (files.length) { event.preventDefault(); void addReferences(files); } }} onChange={(event) => { inputRevision.current += 1; setPrompt(event.target.value); }} onKeyDown={(event) => handleSubmitShortcut(event, canGenerate && !running, () => void generate())} rows={5} disabled={!requiresPrompt} placeholder={requiresPrompt ? uiText("{placeholder}（Ctrl/⌘ + Enter 提交）", { placeholder: uiText(toolModeConfig.placeholder) }) : uiText("这个模型直接合成参考图，不需要填写文字")} />
                             </div> : <p className="rounded-lg bg-stone-50 p-3 text-sm text-stone-600 dark:bg-stone-900 dark:text-stone-300">{uiText("请选择 2–4 张参考图。此模型不会提交提示词；生成结果取决于图片内容及下方融合参数。")}</p>}
 
-                            {requiresPrompt ? <PromptOptimizeButton config={effectiveConfig} prompt={prompt} references={references} toolKey={toolKey} disabled={running} onBusyChange={setOptimizingPrompt} onApply={(value, _compilation, input) => { replacePrompt(value); setOptimizedDraft({ prompt: value, input, references: [...references] }); }} /> : null}
+                            {requiresPrompt ? <PromptOptimizeButton config={effectiveConfig} prompt={prompt} references={references} operationType={operationType} scene={creativePreset?.id as PromptScene | undefined} toolKey={toolKey} disabled={running} onBusyChange={setOptimizingPrompt} onApply={(value, _compilation, input) => { replacePrompt(value); setOptimizedDraft({ prompt: value, input, references: [...references], context: optimizationContext }); }} /> : null}
                             <ReferenceImageTray
                                 references={references}
                                 loading={readingReferences}
@@ -1173,7 +1190,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                                     result.status === "success" && result.image ? (
                                         <ResultImageCard key={result.id} image={result.image} index={index} onSelect={selectResultPrompt} onEdit={addResultToReferences} onEditOriginal={openResultEditor} onDownload={downloadImage} onSaveAsset={saveResultToAssets} onSavePrompt={saveResultPrompt} onPlaceCanvas={resultCanvas.enabled ? image => { const source = logs.find(log => log.images.some(item => item.id === image.id)); void resultCanvas.place({ id: image.id, kind: "image", url: image.dataUrl, storageKey: image.storageKey, title: image.imageName || "图像生成结果", width: image.width, height: image.height, prompt: image.prompt || source?.prompt, model: source?.model, sourceTaskId: image.sourceTaskId }); } : undefined} placingCanvas={resultCanvas.busy} onShareDesign={libraryShare.canShare ? shareResultDesign : undefined} sharingDesign={libraryShare.busy} />
                                     ) : result.status === "failed" || result.status === "paused" ? (
-                                        <FailedImageCard key={result.id} error={result.error || uiText("生成失败")} diagnostic={result.diagnostic} recovery={result.recovery} taskId={result.recovery?.taskId} disabled={running || (!result.recovery && !result.snapshot)} onRetry={() => retryResult(index)} />
+                                        <FailedImageCard key={result.id} error={result.error || uiText("生成失败")} diagnostic={result.diagnostic} recovery={result.recovery} taskId={result.taskId || result.recovery?.taskId} requestId={result.requestId || (result.recovery ? `${result.recovery.requestId}:0` : undefined)} disabled={running || (!result.recovery && !result.snapshot)} onRetry={() => retryResult(index)} />
                                     ) : (
                                         <PendingImageCard key={result.id} createdAt={result.createdAt || result.recovery?.createdAt} taskId={result.taskId || result.recovery?.taskId} />
                                     ),
@@ -1360,13 +1377,13 @@ function PendingImageCard({ createdAt, taskId }: { createdAt?: number; taskId?: 
     );
 }
 
-function FailedImageCard({ error, diagnostic, recovery, taskId, disabled, onRetry }: { error: string; diagnostic?: string; recovery?: PendingImage; taskId?: string; disabled?: boolean; onRetry: () => void }) {
+function FailedImageCard({ error, diagnostic, recovery, taskId, requestId, disabled, onRetry }: { error: string; diagnostic?: string; recovery?: PendingImage; taskId?: string; requestId?: string; disabled?: boolean; onRetry: () => void }) {
     useUiText();
     return (
         <div className="overflow-hidden rounded-lg border border-red-200 bg-red-50 dark:border-red-950 dark:bg-red-950/20">
             <div className="flex aspect-square flex-col items-center justify-center gap-3 p-5 text-center">
                 <div className="text-sm font-medium text-red-600 dark:text-red-300">{recovery?.recovery === "investigate" ? uiText("提交结果待核查") : recovery?.recovery === "resume" ? uiText("原任务查询暂停") : recovery ? uiText("原任务状态核对") : uiText("生成失败")}</div>
-                <GenerationDiagnostic error={error} details={diagnostic} />
+                <GenerationDiagnostic error={error} details={[diagnostic, taskId ? `taskId: ${taskId}` : "", requestId ? `requestId: ${requestId}` : ""].filter(Boolean).join("\n")} />
                 {recovery && !recovery.stopped && recovery.recovery !== "investigate" && <GenerationTaskCancel taskId={taskId} />}
             </div>
             <div className="flex justify-end border-t border-red-200 p-3 dark:border-red-950">

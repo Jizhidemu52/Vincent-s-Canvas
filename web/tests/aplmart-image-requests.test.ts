@@ -24,6 +24,7 @@ beforeEach(() => {
     requests = [];
     let batchTasks: Array<{ id: string; itemIndex: number; status: string; resultUrls: string[] }> = [];
     let uploadedAssetCount = 0;
+    const uploadedAssetIds = new Set<string>();
     globals.window = { location: { pathname: "/canvas/aplmart-request-test" } };
     useUserStore.setState({ user: { id: "qa-user", status: "active", role: "designer" } as never, status: "authenticated" });
     // Empty UI cache: request profile and mask policy must come from the fresh server snapshot.
@@ -36,7 +37,14 @@ beforeEach(() => {
         if (path === "/api/assets/upload-request") {
             if (body?.filename === "fail.png") return Response.json({ message: "mock upload failed" }, { status: 400 });
             uploadedAssetCount++;
-            return Response.json({ assetId: body?.metadata?.source === "canvas-batch-reference" ? `reference-${uploadedAssetCount}` : "reference", uploadUrl: null });
+            const assetId = body?.metadata?.source === "canvas-batch-reference" ? `reference-${uploadedAssetCount}` : "reference";
+            uploadedAssetIds.add(assetId);
+            return Response.json({ assetId, uploadUrl: null });
+        }
+        if (init?.method === "HEAD" && /^\/api\/assets\/reference(?:-\d+)?\/content$/.test(path)) {
+            expect(uploadedAssetIds.has(path.split("/")[3]!)).toBe(true);
+            expect(init).toMatchObject({ credentials: "include", cache: "no-store" });
+            return new Response(null, { status: 200, headers: { "content-type": "image/png" } });
         }
         if (path === "/api/assets/reference") return Response.json({ asset: { id: "reference", kind: "image", status: "ready" } });
         if (path === "/api/tasks/batch") {

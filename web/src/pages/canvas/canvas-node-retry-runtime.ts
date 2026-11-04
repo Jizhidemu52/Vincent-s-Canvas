@@ -34,6 +34,7 @@ type Context = Pick<Runtime, "createOptions" | "recoverPending" | "setRunningNod
     modal: Feedback["modal"];
     flushSave: () => void;
     isCurrent: () => boolean;
+    waitForWriteAccess?: () => Promise<boolean>;
     buildGenerationConfig: (config: AiConfig, node: CanvasNodeData | undefined, mode: CanvasNodeGenerationMode) => AiConfig;
     buildImageGenerationMetadata: (type: CanvasImageGenerationType, config: AiConfig, count: number, references: ReferenceImage[]) => CanvasNodeMetadata;
     buildAudioGenerationMetadata: (config: AiConfig) => CanvasNodeMetadata;
@@ -49,20 +50,20 @@ const VIDEO_NODE_MAX_WIDTH = 420, VIDEO_NODE_MAX_HEIGHT = 420;
 export async function retryCanvasNode(node: CanvasNodeData, action: Context) {
     const { createOptions, recoverPending, setRunningNodeId, startGenerationRequest, finishGenerationRequest, generationDispatchLocksRef, textStreamBufferRef,
         projectId, nodesRef, connectionsRef, setNodes, effectiveConfig, handleGenerateNode, handleMissingModelConfig, isAiConfigReady, message, modal,
-        flushSave, isCurrent, buildGenerationConfig, buildImageGenerationMetadata, buildAudioGenerationMetadata, videoMetadata, audioMetadata, videoTaskErrorMetadata, isGenerationCanceled } = action;
-    if (!isCurrent()) return;
+        flushSave, isCurrent, waitForWriteAccess = async () => true, buildGenerationConfig, buildImageGenerationMetadata, buildAudioGenerationMetadata, videoMetadata, audioMetadata, videoTaskErrorMetadata, isGenerationCanceled } = action;
+    if (!await waitForWriteAccess() || !isCurrent()) return;
     if (node.type === CanvasNodeType.Image && await recoverPending(node.id)) return;
-    if (!isCurrent()) return;
+    if (!await waitForWriteAccess() || !isCurrent()) return;
     if (node.type === CanvasNodeType.Text && node.metadata?.generationSubmissionUncertain) {
         const { confirmCanvasTextRetry } = await import("./canvas-media-generation-runtime");
-        if (!isCurrent()) return;
+        if (!await waitForWriteAccess() || !isCurrent()) return;
         confirmCanvasTextRetry(node, { nodes: nodesRef, setNodes, locks: generationDispatchLocksRef.current, generate: handleGenerateNode, message, modal });
         return;
     }
     if (node.metadata?.mediaTask || node.metadata?.generationSubmissionUncertain) {
         const { retryCanvasMediaNode } = await import("./canvas-media-generation-runtime");
-        if (!isCurrent()) return;
-        await retryCanvasMediaNode(node.id, { projectId, nodes: nodesRef, setNodes, flushSave, isCurrent,
+        if (!await waitForWriteAccess() || !isCurrent()) return;
+        await retryCanvasMediaNode(node.id, { projectId, nodes: nodesRef, setNodes, flushSave, isCurrent, waitForWriteAccess,
             locks: generationDispatchLocksRef.current, start: startGenerationRequest, finish: finishGenerationRequest, setRunning: setRunningNodeId, message });
         return;
     }
@@ -73,7 +74,7 @@ export async function retryCanvasNode(node: CanvasNodeData, action: Context) {
         setNodes((prev) => prev.map((item) => item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_LOADING, errorDetails: undefined } } : item));
         try {
             const video = await storeGeneratedVideo(await recoverVideoGenerationTask({ id: node.metadata.videoTaskId, provider: "server", model: node.metadata.model || "" }, { signal: controller.signal }));
-            if (!isCurrent()) return;
+            if (!await waitForWriteAccess() || !isCurrent()) return;
             const size = fitNodeSize(video.width || node.width, video.height || node.height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
             setNodes((prev) => prev.map((item) => item.id === node.id ? { ...item, width: size.width, height: size.height, metadata: { ...item.metadata, ...videoMetadata(video), errorDetails: undefined, videoTaskCanRecover: undefined } } : item));
             message.success(uiText("已取回原视频任务结果"));
@@ -131,7 +132,7 @@ export async function retryCanvasNode(node: CanvasNodeData, action: Context) {
     const useReferenceImages = blend || (generationType ? generationType === "edit" : Boolean(context?.referenceImages.length));
     const retryReferenceImages =
         hasSavedImageMetadata && savedImageMetadata ? await resolveMetadataReferences(savedImageMetadata) : useReferenceImages ? (context?.referenceImages.length ? context.referenceImages : sourceNodeReferenceImages(batchRoot || sourceNode)) : [];
-    if (!isCurrent()) return;
+    if (!await waitForWriteAccess() || !isCurrent()) return;
     if (useReferenceImages && !retryReferenceImages) {
         message.error(uiText("参考图片已丢失，无法继续重试"));
         setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails: "参考图片已丢失，无法继续重试" } } : item)));
@@ -158,7 +159,7 @@ export async function retryCanvasNode(node: CanvasNodeData, action: Context) {
                 },
                 { signal: controller.signal, tool: "canvas-chat" },
             );
-            if (!isCurrent()) return;
+            if (!await waitForWriteAccess() || !isCurrent()) return;
             textStreamBufferRef.current?.clear(node.id);
             setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, type: CanvasNodeType.Text, metadata: { ...item.metadata, content: answer || streamed, prompt, status: NODE_STATUS_SUCCESS } } : item)));
             return;
@@ -170,7 +171,7 @@ export async function retryCanvasNode(node: CanvasNodeData, action: Context) {
                 cancelOnAbort: () => shouldCancelCanvasGeneration(controller.signal),
                 onSubmitted: (task) => { if (isCurrent()) setNodes((prev) => prev.map((item) => item.id === node.id ? { ...item, metadata: { ...item.metadata, videoTaskId: task.id, videoTaskCanRecover: true } } : item)); },
             }));
-            if (!isCurrent()) return;
+            if (!await waitForWriteAccess() || !isCurrent()) return;
             const videoSize = fitNodeSize(video.width || node.width, video.height || node.height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
             setNodes((prev) =>
                 prev.map((item) =>
@@ -200,14 +201,14 @@ export async function retryCanvasNode(node: CanvasNodeData, action: Context) {
         }
         if (node.type === CanvasNodeType.Audio) {
             const audio = await storeGeneratedAudio(await requestAudioGeneration(generationConfig, prompt, { signal: controller.signal, cancelOnAbort: () => shouldCancelCanvasGeneration(controller.signal) }), generationConfig.audioFormat);
-            if (!isCurrent()) return;
+            if (!await waitForWriteAccess() || !isCurrent()) return;
             setNodes((prev) => prev.map((item) => (item.id === node.id ? { ...item, metadata: { ...item.metadata, ...audioMetadata(audio), prompt, ...buildAudioGenerationMetadata(generationConfig) } } : item)));
             return;
         }
 
         const imageTask = await createOptions(node.id, controller);
         const { metadata, uploaded: uploadedImage } = await imageTask.generate(generationConfig, prompt, useReferenceImages ? retryImages : undefined, undefined, useReferenceImages && !blend);
-        if (!isCurrent()) return;
+        if (!await waitForWriteAccess() || !isCurrent()) return;
         const imageConfig = NODE_DEFAULT_SIZE[CanvasNodeType.Image];
         const imageSize = fitNodeSize(uploadedImage.width, uploadedImage.height, imageConfig.width, imageConfig.height);
         const generationMetadata = savedImageMetadata?.generationType

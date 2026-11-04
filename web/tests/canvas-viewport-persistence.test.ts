@@ -25,20 +25,20 @@ function editor() {
     const dependencies: Record<string, unknown> = {
         react: {
             useRef: (value: unknown) => refs[cursor++] ||= { current: value },
-            useEffect: (effect: () => void | (() => void), values: unknown[]) => {
+            useEffect: (effect: () => void | (() => void), values?: unknown[]) => {
                 const index = effectCursor++, previous = effects[index];
-                if (previous && values.length === previous.dependencies.length && values.every((value, i) => Object.is(value, previous.dependencies[i]))) return;
+                if (previous && values && values.length === previous.dependencies.length && values.every((value, i) => Object.is(value, previous.dependencies[i]))) return;
                 pending.push(() => {
                     previous?.cleanup?.();
-                    effects[index] = { dependencies: values, cleanup: effect() || undefined };
+                    effects[index] = { dependencies: values || [], cleanup: effect() || undefined };
                 });
             },
         },
         "@/lib/canvas/canvas-project-save-queue": {
-            createCanvasProjectSaveQueue: (delay: number, flush: (value: unknown) => void) => createCanvasProjectSaveQueue(delay, flush, {
+            createCanvasProjectSaveQueue: (delay: number, flush: (value: unknown) => void, _scheduler: unknown, shouldFlush?: () => boolean) => createCanvasProjectSaveQueue(delay, flush, {
                 set: (callback) => { timers.set(++timerId, callback); return timerId; },
                 clear: id => { timers.delete(id as number); },
-            }),
+            }, shouldFlush),
         },
         "@/stores/canvas/use-canvas-store": { flushCanvasPersistence: () => Promise.resolve(), hasPendingCanvasPersistence: () => false },
         "./use-canvas-history": { canvasHistoryForSave: () => ({ past: [], future: [] }) },
@@ -48,13 +48,14 @@ function editor() {
     new Function("require", "module", "exports", "window", "document", code)((name: string) => dependencies[name], module, module.exports, surface, surface);
     const options = {
         projectId: "first", projectLoaded: true, usePerformanceScenario: false,
-        projectSaveQueueRef: { current: { schedule() {}, flush() {}, hasPending: () => false } },
+        projectSaveQueueRef: { current: { schedule() {}, flush() {}, resume: () => false, discard() {}, hasPending: () => false } },
         history: { historyRef: { current: {} }, lastHistoryRef: { current: {} }, historyPausedRef: { current: false }, applyingHistoryRef: { current: false }, historyState: {} },
         current: { nodes: [] as CanvasNodeData[], connections: [], groups: [] as CanvasNodeGroup[], chatSessions: [], activeChatId: null, backgroundMode: "dots", showImageInfo: false },
         updateProject: (id: string, patch: { viewport: ViewportTransform; selectedNodeIds?: string[] }) => writes.push({ id, ...patch }),
         batchEditRunning: false, runningNodeId: null,
         viewport: { x: 0, y: 0, k: 1 },
         selectedNodeIds: undefined as ReadonlySet<string> | undefined,
+        writable: { current: true },
     };
     const render = (patch: Partial<typeof options> = {}) => {
         Object.assign(options, patch);
@@ -130,4 +131,19 @@ test("switching project flushes its own selection; collapsing or deleting nodes 
     app.render({ current: { ...app.options.current, groups: [{ id: "g", title: "折叠组", nodeIds: ["two"], collapsed: true }] } });
     app.unmount();
     expect(app.writes[1]).toEqual({ id: "second", viewport: { x: 0, y: 0, k: 1 }, selectedNodeIds: [] });
+});
+
+test("viewport saves wait through lease recovery and resume without losing the pending viewport", () => {
+    const app = editor();
+    app.render({ viewport: { x: 92, y: 41, k: 2 } });
+    app.options.writable.current = false;
+    // Recovery may finish before React ever renders the intermediate pause.
+    for (const callback of [...app.timers.values()]) callback();
+    expect(app.writes).toEqual([]);
+    expect(app.timers.size).toBe(0);
+    app.options.writable.current = true;
+    app.render();
+    expect(app.writes).toEqual([{ id: "first", viewport: { x: 92, y: 41, k: 2 } }]);
+    app.unmount();
+    expect(app.writes).toHaveLength(1);
 });

@@ -39,7 +39,7 @@ export default function CanvasBatchEditDialog({
     const t = useUiText();
     const theme = canvasThemes[useThemeStore(state => state.theme)];
     const { token } = antdTheme.useToken();
-    const effectiveConfig = useEffectiveConfig();
+    const effectiveConfig = useEffectiveConfig("canvas");
     const config = useToolConfig({ ...effectiveConfig, ...imageSettings, model: imageSettings.model || effectiveConfig.imageModel || effectiveConfig.model, count: "1" }, "canvas-batch");
     return (
         <Modal

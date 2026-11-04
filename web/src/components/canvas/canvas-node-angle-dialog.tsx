@@ -33,7 +33,7 @@ export function CanvasNodeAngleDialog({ dataUrl, open, onClose, onConfirm }: { d
     const [params, setParams] = useState(defaultParams);
     const [imageSettings, setImageSettings] = useState<Partial<AiConfig>>({});
     const theme = canvasThemes[useThemeStore(state => state.theme)];
-    const baseConfig = useEffectiveConfig();
+    const baseConfig = useEffectiveConfig("canvas");
     const business = useBusinessConfigStore();
     const rawConfig = useToolConfig({ ...baseConfig, ...imageSettings, count: "1", model: params.model || baseConfig.imageModel || baseConfig.model }, "canvas-angle");
     let config = rawConfig;

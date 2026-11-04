@@ -62,7 +62,7 @@ export const CanvasDialogsHost = memo(function CanvasDialogsHost({ projectId, st
     const localToolsEnabled = useModuleEnabled("canvas-local-tools");
     const maskEditEnabled = useModuleEnabled("canvas-mask-edit");
     const angleEditEnabled = useModuleEnabled("canvas-angle");
-    const effectiveConfig = useEffectiveConfig();
+    const effectiveConfig = useEffectiveConfig("canvas");
     const estimateUsage = useBusinessConfigStore(store => store.estimate);
     const selectedMaskEditModel = useToolConfig({ ...effectiveConfig, model: maskEditModel || effectiveConfig.imageModel || effectiveConfig.model }, "canvas-mask-edit").model;
     const maskEditEstimate = useMemo(() => estimateUsage({ operationType: "inpaint", toolKey: "canvas-mask-edit", modelId: modelOptionName(selectedMaskEditModel), quantity: 1 }), [estimateUsage, selectedMaskEditModel]);

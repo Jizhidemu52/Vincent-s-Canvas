@@ -5,7 +5,7 @@ import { nanoid } from "nanoid";
 import { imageModelDisplayName, imageModelIdentityHidden } from "@/lib/model-display";
 import { deploymentFeatures } from "@/lib/deployment-features";
 import { createWorkspaceStorage } from "@/lib/workspace-storage";
-import { DEFAULT_IMAGE_MODEL, preferredImageModel } from "@/lib/default-image-model";
+import { DEFAULT_CANVAS_IMAGE_MODEL, DEFAULT_IMAGE_MODEL, preferredImageModel } from "@/lib/default-image-model";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { resolveToolModel } from "@/services/api/business-config";
 
@@ -281,18 +281,21 @@ export function stripClientProviderSecrets(config: Partial<AiConfig>): AiConfig 
     };
 }
 
-export function useEffectiveConfig() {
+export function useEffectiveConfig(scope?: "canvas") {
     const config = useConfigStore((state) => state.config);
     const models = useBusinessConfigStore((state) => state.models);
     const tools = useBusinessConfigStore((state) => state.tools);
     const status = useBusinessConfigStore((state) => state.status);
     return useMemo(() => {
         const available = models.filter(model => !model.modelId.startsWith("demo-") && model.capabilities.some(capability => capability === "generate" || capability === "edit"));
-        const imageModel = status === "ready" ? preferredImageModel(available, [config.imageModel, config.model])?.modelId || config.imageModel : config.imageModel;
+        // Canvas defaults seed new work only; existing node/draft models are applied by their callers.
+        const preferred = scope === "canvas" ? [DEFAULT_CANVAS_IMAGE_MODEL] : [config.imageModel, config.model];
+        const fallback = scope === "canvas" ? DEFAULT_CANVAS_IMAGE_MODEL : config.imageModel;
+        const imageModel = status === "ready" ? preferredImageModel(available, preferred)?.modelId || fallback : fallback;
         const textModel = status === "ready" ? resolveToolModel({ models, tools, prices: [] }, "canvas-chat")?.modelId || "" : "";
         return { ...config, channelMode: "local" as const, imageModel, textModel,
-            model: config.model === config.imageModel || config.model === DEFAULT_IMAGE_MODEL ? imageModel : config.model };
-    }, [config, models, tools, status]);
+            model: scope === "canvas" || config.model === config.imageModel || config.model === DEFAULT_IMAGE_MODEL ? imageModel : config.model };
+    }, [config, models, tools, status, scope]);
 }
 
 export function createModelChannel(channel?: Partial<ModelChannel>): ModelChannel {

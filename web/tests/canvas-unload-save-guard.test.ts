@@ -20,7 +20,11 @@ function harness(editorPending: boolean, storagePending: boolean, fail = false) 
         removeEventListener: (name: string) => listeners.delete(name),
         visibilityState: "visible",
     };
-    const queue = { hasPending: () => editorPending, flush: () => { calls.push("editor"); editorPending = false; } };
+    const queue = {
+        hasPending: () => editorPending,
+        flush: () => { calls.push("editor"); editorPending = false; },
+        discard: () => { calls.push("discard"); editorPending = false; },
+    };
     const cleanup = new Function("window", "document", "options", "projectSaveQueueRef", "viewportSaveQueueRef", "hasPendingCanvasPersistence", "flushCanvasPersistence", `${code}\nreturn install();`)(
         target, target, { writable: { current: true } }, { current: queue }, { current: null }, () => storagePending,
         () => { calls.push("store"); return fail ? Promise.reject(new Error("disk unavailable")) : Promise.resolve(); },
@@ -41,6 +45,7 @@ test("a refresh with an editor draft flushes both queues and requests an unload 
     expect(event.returnValue).toBe("");
     run.cleanup();
     expect(run.listeners.size).toBe(0);
+    expect(run.calls).toEqual(["editor", "store", "editor", "store", "discard"]);
 });
 
 test("an in-flight or failed storage write remains protected after the editor queue empties", async () => {

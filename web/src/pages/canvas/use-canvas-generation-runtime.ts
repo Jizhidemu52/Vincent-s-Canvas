@@ -1,10 +1,11 @@
-import { useCallback, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
 import { useCanvasGraphSetter } from "@/stores/canvas/canvas-graph-store";
 import { createCanvasTextStreamBuffer } from "@/lib/canvas/canvas-text-stream-buffer";
 import { applyCanvasStreamedTextUpdates, clearCanvasStreamedText } from "@/lib/canvas/canvas-streamed-text-state";
 import { useCanvasImageTasks } from "./use-canvas-image-tasks";
-import { stopCanvasObservation } from "@/lib/canvas/canvas-project-async-lifecycle";
+import { abortPendingCanvasRequests, stopCanvasObservation } from "@/lib/canvas/canvas-project-async-lifecycle";
 import type { CanvasNodeData } from "@/types/canvas";
+import type { CanvasEditorWriteCapability } from "./canvas-editor-session";
 
 type CanvasGenerationRequest = {
     targetNodeId: string;
@@ -13,17 +14,37 @@ type CanvasGenerationRequest = {
     controller: AbortController;
 };
 
-export function useCanvasGenerationRuntime({ projectId, nodesRef, setNodes, projectSaveQueueRef, textStreamPublishingEnabledRef }: {
+export function useCanvasGenerationRuntime({ projectId, nodesRef, setNodes, projectSaveQueueRef, textStreamPublishingEnabledRef, editLeaseRef }: {
     projectId: string; nodesRef: RefObject<CanvasNodeData[]>;
     setNodes: Dispatch<SetStateAction<CanvasNodeData[]>>;
     projectSaveQueueRef: RefObject<{ flush(): void } | null>;
     textStreamPublishingEnabledRef: RefObject<boolean>;
+    editLeaseRef: CanvasEditorWriteCapability;
 }) {
     const NODE_STATUS_LOADING = "loading", NODE_STATUS_IDLE = "idle";
     const [runningNodeIds, setRunningNodeIds] = useState<Set<string>>(new Set());
     const runningNodeId = runningNodeIds.values().next().value || null;
     const setStreamedTextById = useCanvasGraphSetter("streamedTextById");
     const generationRequestsRef = useRef(new Map<string, CanvasGenerationRequest>());
+    const writeScope = useMemo(() => ({ active: true, revoked: false }), [projectId, editLeaseRef]);
+    const waitForWriteAccess = useCallback(async () => {
+        if (!writeScope.active || writeScope.revoked) return false;
+        const writable = editLeaseRef.current || await editLeaseRef.ensureWritable();
+        if (!writeScope.active || writeScope.revoked) return false;
+        if (!writable) {
+            writeScope.revoked = true;
+            abortPendingCanvasRequests(generationRequestsRef.current);
+        }
+        return writable;
+    }, [editLeaseRef, writeScope]);
+    // A same-tab lease renewal is not a departed canvas: keep its buffers and
+    // accepted requests alive until the authority check has actually completed.
+    const isObservationCurrent = useCallback(() => writeScope.active && !writeScope.revoked, [writeScope]);
+    useLayoutEffect(() => {
+        writeScope.active = true;
+        return () => { writeScope.active = false; };
+    }, [writeScope]);
+    useLayoutEffect(() => { void waitForWriteAccess(); });
     // Compatibility for existing callers; completed runs are removed by finish(), not by a global null.
     const setRunningNodeId = useCallback((value: SetStateAction<string | null>) => {
         const next = typeof value === "function" ? value(null) : value;
@@ -42,7 +63,7 @@ export function useCanvasGenerationRuntime({ projectId, nodesRef, setNodes, proj
             setStreamedTextById((current) => applyCanvasStreamedTextUpdates(current, updates));
         });
     }
-    const { createOptions, recoverPending } = useCanvasImageTasks({ projectId, nodes: nodesRef, setNodes, saveQueue: projectSaveQueueRef, generating: generationRequestsRef });
+    const { createOptions, recoverPending } = useCanvasImageTasks({ projectId, nodes: nodesRef, setNodes, saveQueue: projectSaveQueueRef, generating: generationRequestsRef, waitForWriteAccess, isObservationCurrent });
     const startGenerationRequest = useCallback((targetNodeId: string, originNodeId: string, runningId = originNodeId, controller = new AbortController()) => {
         const previous = generationRequestsRef.current.get(targetNodeId);
         if (previous?.controller !== controller) previous?.controller.abort();
@@ -80,5 +101,5 @@ export function useCanvasGenerationRuntime({ projectId, nodesRef, setNodes, proj
         setNodes((prev) => prev.map((node) => (affectedNodeIds.has(node.id) && node.metadata?.status === NODE_STATUS_LOADING ? { ...node, metadata: { ...node.metadata, ...(partial.get(node.id) ? { content: partial.get(node.id) } : {}), status: NODE_STATUS_IDLE, errorDetails: partial.get(node.id) ? "生成已停止，已保留当前文字，可继续编辑或生成。" : undefined } } : node)));
     }, [clearStreamedText]);
     return { createOptions, recoverPending, runningNodeId, runningNodeIds, setRunningNodeId, generationRequestsRef, generationDispatchLocksRef,
-        textStreamBufferRef, clearStreamedText, startGenerationRequest, finishGenerationRequest, stopGenerationByRunningId };
+        textStreamBufferRef, clearStreamedText, startGenerationRequest, finishGenerationRequest, stopGenerationByRunningId, waitForWriteAccess, isObservationCurrent };
 }

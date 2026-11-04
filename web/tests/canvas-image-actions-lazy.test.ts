@@ -5,8 +5,8 @@ import ts from "typescript";
 function harness() {
     const pending = Promise.withResolvers<any>();
     const cleanups: Array<() => void> = [], calls: Array<{ action: string; args: unknown[]; context?: any }> = [], errors: string[] = [];
-    let loads = 0, ownerId = "employee-a";
-    const options = { projectId: "canvas-a", designProjectIdRef: { current: "canvas-a" }, runtime: {}, dialogs: {} };
+    let loads = 0, ownerId = "employee-a", writable = true;
+    const options = { projectId: "canvas-a", designProjectIdRef: { current: "canvas-a" }, runtime: { waitForWriteAccess: async () => writable, isObservationCurrent: () => writable }, dialogs: {} };
     const message = { error: (text: string) => errors.push(text) };
     const dependencies: Record<string, unknown> = {
         react: { useCallback: (fn: Function) => fn, useMemo: (fn: Function) => fn(), useRef: (current: unknown) => ({ current }), useEffect: (fn: Function) => { const cleanup = fn(); if (cleanup) cleanups.push(cleanup); } },
@@ -26,7 +26,7 @@ function harness() {
         createCanvasImageActionsRuntime: (context: unknown) => new Proxy({}, { get: (_target, action) => async (...args: unknown[]) => { calls.push({ action: String(action), args, context }); } }),
         runCanvasLocalImageOperation: async ({ task }: { task: (signal: AbortSignal) => Promise<void> }) => { calls.push({ action: "local", args: [] }); await task(new AbortController().signal); return true; },
     });
-    return { actions, calls, errors, pending, resolve, loads: () => loads, switchOwner: () => { ownerId = "employee-b"; }, switchProject: () => { options.designProjectIdRef.current = "canvas-b"; }, unmount: () => cleanups.forEach(cleanup => cleanup()) };
+    return { actions, calls, errors, pending, resolve, loads: () => loads, revokeEditLease: () => { writable = false; }, switchOwner: () => { ownerId = "employee-b"; }, switchProject: () => { options.designProjectIdRef.current = "canvas-b"; }, unmount: () => cleanups.forEach(cleanup => cleanup()) };
 }
 
 test("image actions do not load on first render and dispatch only the clicked operation after loading", async () => {
@@ -42,7 +42,7 @@ test("image actions do not load on first render and dispatch only the clicked op
 });
 
 test("a delayed image-action load cannot edit or submit after a project, employee or mounted scope changes", async () => {
-    for (const change of ["switchProject", "switchOwner", "unmount"] as const) {
+    for (const change of ["switchProject", "switchOwner", "unmount", "revokeEditLease"] as const) {
         const app = harness(); const operation = app.actions.generateAngleNode({ id: "source" }, { yaw: 90 });
         app[change](); app.resolve(); await operation;
         expect(app.calls).toEqual([]); expect(app.errors).toEqual([]);

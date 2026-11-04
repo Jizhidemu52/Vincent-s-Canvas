@@ -7,6 +7,10 @@ export function publicGenerationFailure(reason: unknown, status?: string): strin
     // These bounded local size limits are actionable, not raw provider diagnostics.
     const referenceLimit = /^单张参考图超过 (10|12|20) MB，请压缩后重试$/.exec(raw);
     if (referenceLimit) return `参考图超过当前模型单张 ${referenceLimit[1]} MiB 上限，请另存较小副本或切换模型；原图未修改，尚未提交生成。`;
+    if ([
+        "参考素材的原始文件缺失，请重新上传原图后再生成。",
+        "暂时无法读取参考素材，请稍后重试或联系管理员检查对象存储。",
+    ].includes(raw)) return raw;
     // Exact locally-authored recipe failures are safe and identify a setup issue,
     // not unsupported image parameters. Never echo arbitrary matching fragments.
     if ([

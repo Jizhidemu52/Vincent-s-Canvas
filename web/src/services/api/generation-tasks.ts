@@ -1,5 +1,5 @@
 import { nanoid } from "nanoid";
-import { generationErrorMessage } from "@/lib/generation-feedback";
+import { generationErrorMessage, generationSubmissionRejected } from "@/lib/generation-feedback";
 import { cancelOriginalTask } from "@/lib/generation-task-cancel";
 import type { PromptInputData } from "../../../../shared/prompt-contracts";
 import { getPromptCompilation } from "./prompt-compilations";
@@ -9,7 +9,7 @@ import { dataUrlToFile } from "@/lib/image-utils";
 import { imageReferenceFileError } from "@/lib/image-reference-policy";
 import { imageModelProfile } from "@/lib/image-model-settings";
 import { createClientId } from "@/lib/client-id";
-import { fetchServerAsset, uploadServerAsset } from "@/services/api/server-assets";
+import { assertServerAssetContent, fetchServerAsset, ServerAssetContentError, uploadServerAsset } from "@/services/api/server-assets";
 import { observeTask } from "./task-observation";
 import { classifyTaskRecovery, submissionInvestigationMessage } from "./task-result-reconciliation";
 import { watchTaskEvents } from "./task-events";
@@ -50,6 +50,7 @@ export function imageTaskPrompts(task: Pick<QueuedTask, "prompt" | "parameters">
 }
 export class QueuedTaskPausedError extends Error {
     readonly taskId: string;
+    readonly requestId: string;
     readonly canRecover: boolean;
     readonly recovery: "resume" | "investigate";
     constructor(readonly task: QueuedTask, message?: string) {
@@ -57,14 +58,19 @@ export class QueuedTaskPausedError extends Error {
         super(`${message || task.failureReason || "任务查询已暂停"}（任务 ${task.id}）。${canRecover ? "可恢复查询原任务，不会重新生成。" : submissionInvestigationMessage}`);
         this.name = "QueuedTaskPausedError";
         this.taskId = task.id;
+        this.requestId = task.requestId;
         this.canRecover = canRecover;
         this.recovery = canRecover ? "resume" : "investigate";
     }
 }
 export class QueuedTaskFailedError extends Error {
+    readonly taskId: string;
+    readonly requestId: string;
     constructor(readonly task: QueuedTask) {
         super(task.failureReason || "生成任务已失败或取消");
         this.name = "QueuedTaskFailedError";
+        this.taskId = task.id;
+        this.requestId = task.requestId;
     }
 }
 /** A POST may have been accepted, or an accepted task could not be settled locally. Never generate again to recover it. */
@@ -75,8 +81,8 @@ export class QueuedTaskSubmissionUncertainError extends Error {
     }
 }
 export class QueuedTaskHttpError extends Error {
-    get submissionRejected() { return this.status >= 400 && this.status < 500 && this.status !== 408 && !["PROMPT_OPTIMIZING", "PROMPT_SUBMISSION_UNCERTAIN"].includes(this.code || ""); }
-    constructor(readonly status: number, readonly diagnostic: string, readonly code?: string) { super(generationErrorMessage(diagnostic, status)); }
+    get submissionRejected() { return generationSubmissionRejected(this.status, this.code); }
+    constructor(readonly status: number, readonly diagnostic: string, readonly code?: string) { super(generationErrorMessage(diagnostic, status, code)); this.name = "QueuedTaskHttpError"; }
 }
 export type GenerationVideoCapability = { seconds: readonly [number, number]; resolutions: readonly string[]; sizes: readonly string[]; minImages: number; maxImages: number; firstFrameRequired: boolean; supportsAudio: boolean };
 export type GenerationCapabilityModel = { id: string; name: string; modelId: string; capability: GenerationVideoCapability };
@@ -156,7 +162,7 @@ export async function requestQueuedImages(input: { modelId: string; resolvedMode
     const archivedReferences: ArchivedReference[] = [];
     for (const reference of input.references || []) {
         input.signal?.throwIfAborted();
-        const dataUrl = await imageToDataUrl(reference);
+        const dataUrl = await readGenerationReferenceDataUrl(reference, input.signal);
         input.signal?.throwIfAborted();
         const file = dataUrlToFile({ ...reference, dataUrl });
         input.signal?.throwIfAborted();
@@ -369,6 +375,10 @@ export async function submitQueuedMediaTask(input: QueuedMediaInput) {
     const model = input.resolvedModel || await resolvePublicModel(input.modelId, input.operationType, toolKey);
     input.signal?.throwIfAborted();
     const sourceUrls = [...(input.sourceUrls || [])];
+    for (const sourceUrl of sourceUrls) {
+        const assetId = sourceUrl.match(/^\/api\/assets\/([\w-]+)\/content(?:\?[^#]*)?$/)?.[1];
+        if (assetId) await assertServerAssetContent(assetId, input.signal);
+    }
     const uploadedUrls: string[] = [];
     for (const [index, file] of (input.sourceFiles || []).entries()) {
         input.signal?.throwIfAborted();
@@ -582,7 +592,12 @@ export async function uploadImageReference(reference: ReferenceImage, file: File
         const { asset } = await fetchServerAsset(reference.sourceAssetId, signal);
         assertOwner();
         if (asset.kind !== "image" || asset.status !== "ready") throw new Error("原参考图不可用，请重新选择素材");
-        return asset.id;
+        try { await assertServerAssetContent(asset.id, signal); assertOwner(); return asset.id; }
+        catch (error) {
+            assertOwner();
+            if (!(error instanceof ServerAssetContentError) || error.code !== "ASSET_OBJECT_MISSING") throw error;
+            return uploadReferenceBytes(reference, file, hash, ownerId, assertOwner, asset.id);
+        }
     }
     const key = `${ownerId}:${hash}`;
     const existing = referenceUploads.get(key);
@@ -590,13 +605,49 @@ export async function uploadImageReference(reference: ReferenceImage, file: File
         const assetId = await existing;
         assertOwner();
         // Permissions/deletion may change during this browser session.
-        await fetchServerAsset(assetId, signal);
+        const { asset } = await fetchServerAsset(assetId, signal);
         assertOwner();
-        return assetId;
+        if (asset.kind !== "image" || asset.status !== "ready") throw new Error("原参考图不可用，请重新选择素材");
+        try { await assertServerAssetContent(assetId, signal); assertOwner(); return assetId; }
+        catch (error) {
+            assertOwner();
+            if (!(error instanceof ServerAssetContentError) || error.code !== "ASSET_OBJECT_MISSING") throw error;
+            const repaired = await uploadReferenceBytes(reference, file, hash, ownerId, assertOwner, assetId);
+            if (referenceUploads.get(key) === existing) referenceUploads.set(key, Promise.resolve(repaired));
+            return repaired;
+        }
     }
-    const pending = uploadServerAsset(file, { title: reference.name, source: "task-reference", contentSha256: hash }, { expectedOwnerId: ownerId });
+    return uploadReferenceBytes(reference, file, hash, ownerId, assertOwner);
+}
+
+async function uploadReferenceBytes(reference: ReferenceImage, file: File, hash: string, ownerId: string, assertOwner: () => void, repairAssetId?: string) {
+    assertOwner();
+    const key = `${ownerId}:${repairAssetId ? `repair:${repairAssetId}:` : ""}${hash}`;
+    const existing = referenceUploads.get(key);
+    if (existing) { const id = await existing; assertOwner(); return id; }
+    const pending = uploadServerAsset(file, { title: reference.name, source: "task-reference", contentSha256: hash }, { expectedOwnerId: ownerId, ...(repairAssetId ? { repairAssetId } : {}) });
     referenceUploads.set(key, pending);
     try { const id = await pending; assertOwner(); return id; }
-    catch (error) { if (referenceUploads.get(key) === pending) referenceUploads.delete(key); throw error; }
-    finally { if (referenceUploads.size > 128) referenceUploads.delete(referenceUploads.keys().next().value!); }
+    catch (error) { if (referenceUploads.get(key) === pending) referenceUploads.delete(key); assertOwner(); throw error; }
+    finally {
+        // Repair deduplication is in-flight only: a later missing object must be checked again.
+        if (repairAssetId && referenceUploads.get(key) === pending) referenceUploads.delete(key);
+        if (referenceUploads.size > 128) referenceUploads.delete(referenceUploads.keys().next().value!);
+    }
+}
+
+/** Missing local bytes must not turn a broken server reference into a successful reuse. */
+export async function readGenerationReferenceDataUrl(reference: ReferenceImage, signal?: AbortSignal) {
+    signal?.throwIfAborted();
+    try {
+        const dataUrl = await imageToDataUrl(reference);
+        signal?.throwIfAborted();
+        if (!dataUrl) throw new Error("原参考图没有可读取的原始文件，请重新导入原文件；尚未提交生成。");
+        return dataUrl;
+    } catch (error) {
+        signal?.throwIfAborted();
+        const assetId = reference.sourceAssetId || (reference.dataUrl || reference.url || "").match(/^\/api\/assets\/([\w-]+)\/content(?:\?[^#]*)?$/)?.[1];
+        if (assetId) await assertServerAssetContent(assetId, signal);
+        throw error;
+    }
 }

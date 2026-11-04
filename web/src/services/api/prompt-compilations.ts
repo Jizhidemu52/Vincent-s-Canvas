@@ -1,9 +1,10 @@
 import type { PromptInputData, PublicPromptCompilation } from "../../../../shared/prompt-contracts";
 import { workspaceOwnerHeaders } from "./workspace-owner";
+import { generationPreSubmissionMessage, generationSubmissionRejected } from "@/lib/generation-feedback";
 
 export type { PromptInputData, PublicPromptCompilation };
 export class PromptCompilationUncertainError extends Error {
-    constructor(readonly requestId: string, readonly compilation?: PublicPromptCompilation | null) {
+    constructor(readonly requestId: string, readonly compilation?: PublicPromptCompilation | null, readonly cause?: unknown) {
         super(compilation?.message || "提示词优化状态待核查，请查询原请求，不要重复提交。");
         this.name = "PromptCompilationUncertainError";
     }
@@ -17,26 +18,29 @@ export async function getPromptCompilation(requestId: string, signal?: AbortSign
     return (body.data || body).compilation;
 }
 
-export function completedPromptCompilation(compilation: PublicPromptCompilation | null, requestId: string): PublicPromptCompilation & { prompt: string } {
+export function completedPromptCompilation(compilation: PublicPromptCompilation | null, requestId: string, cause?: unknown): PublicPromptCompilation & { prompt: string } {
     if (compilation?.status === "failed") throw new Error(compilation.message || "提示词优化失败，未提交图片生成");
-    if (compilation?.status !== "success" || !compilation.prompt?.trim()) throw new PromptCompilationUncertainError(requestId, compilation);
+    if (compilation?.status !== "success" || !compilation.prompt?.trim()) throw new PromptCompilationUncertainError(requestId, compilation, cause);
     return compilation as PublicPromptCompilation & { prompt: string };
 }
 
 /** One POST only. A lost response is reconciled by the same request ID, never replayed. */
 export async function createPromptCompilation(input: { requestId: string; modelConfigId: string; toolKey?: string; promptInput: PromptInputData; sourceUrls: string[] }, signal?: AbortSignal) {
     let compilation: PublicPromptCompilation | null;
+    let originalError: unknown;
     try {
         const response = await fetch("/api/prompt-compilations", { method: "POST", credentials: "include", headers: { "content-type": "application/json", ...workspaceOwnerHeaders() }, body: JSON.stringify(input), signal });
         const body = await response.json();
         if (!response.ok) {
-            if (response.status >= 400 && response.status < 500 && response.status !== 408 && !["PROMPT_OPTIMIZING", "PROMPT_SUBMISSION_UNCERTAIN"].includes(body.error || body.code)) throw Object.assign(new Error(body.message || body.msg || "提示词优化请求被拒绝"), { definitive: true });
-            throw new Error(body.message || body.msg || "提示词优化响应异常");
+            const code = body.error || body.code;
+            const diagnostic = body.message || body.msg || "提示词优化响应异常";
+            throw Object.assign(new Error(generationPreSubmissionMessage(code) || diagnostic), { definitive: generationSubmissionRejected(response.status, code), status: response.status, code, diagnostic, requestId: input.requestId });
         }
         compilation = (body.data || body).compilation;
     } catch (error) {
         if ((error as { definitive?: boolean })?.definitive) throw error;
+        originalError = error;
         compilation = await getPromptCompilation(input.requestId).catch(() => null);
     }
-    return completedPromptCompilation(compilation, input.requestId);
+    return completedPromptCompilation(compilation, input.requestId, originalError);
 }

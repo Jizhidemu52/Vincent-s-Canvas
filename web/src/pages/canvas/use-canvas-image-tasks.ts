@@ -11,11 +11,13 @@ type Input = {
     setNodes: Dispatch<SetStateAction<CanvasNodeData[]>>;
     saveQueue: RefObject<{ flush(): void } | null>;
     generating: RefObject<{ has(nodeId: string): boolean }>;
+    waitForWriteAccess?: () => Promise<boolean>;
+    isObservationCurrent?: () => boolean;
 };
 
 /** Capture the originating identity before loading any task implementation. */
-export function useCanvasImageTasks({ projectId, nodes, setNodes, saveQueue, generating }: Input) {
-    const activeScope = useMemo<CanvasImageTaskScope>(() => ({ projectId, mounted: true, recoveries: new Map() }), [projectId]);
+export function useCanvasImageTasks({ projectId, nodes, setNodes, saveQueue, generating, waitForWriteAccess, isObservationCurrent }: Input) {
+    const activeScope = useMemo<CanvasImageTaskScope>(() => ({ projectId, mounted: true, recoveries: new Map(), waitForWriteAccess, isObservationCurrent }), [projectId, waitForWriteAccess, isObservationCurrent]);
     useLayoutEffect(() => {
         activeScope.mounted = true;
         return () => {

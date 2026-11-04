@@ -258,7 +258,8 @@ test("S3 If-Match pins prefix and range reads to the HEAD representation", async
     response.end("<Error><Code>PreconditionFailed</Code><Message>Object changed</Message></Error>"); return true;
   } }, async (url, observed) => {
     const response = await fetch(url, { headers: { Range: "bytes=16000-16127" } });
-    expect(response.status).toBe(500);
+    expect(response.status).toBe(503);
+    expect(response.headers.get("X-Canvas-Asset-Error")).toBe("ASSET_STORAGE_UNAVAILABLE");
     expect(response.headers.get("content-range")).toBeNull();
     await response.arrayBuffer();
     expect(observed.filter(call => call.method === "GET").map(call => call.ifMatch)).toEqual([etag, etag]);

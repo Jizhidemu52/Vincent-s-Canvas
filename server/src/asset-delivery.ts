@@ -4,6 +4,7 @@ import { create as contentDisposition } from "content-disposition";
 import { fileTypeFromBuffer } from "file-type";
 import type { Request, Response } from "express";
 import type { ObjectStorage } from "./object-storage";
+import { AssetObjectError, isMissingAssetObject } from "./asset-object-error";
 
 export const allowedAssetMimeTypes = new Set([
   "image/png", "image/jpeg", "image/webp", "image/gif", "image/avif",
@@ -118,7 +119,10 @@ export async function streamAssetContent(request: Request, response: Response, s
   try {
     if (response.destroyed || request.aborted) cancel();
     controller.signal.throwIfAborted();
-    const objectInfo = await storage.head(asset.object_key, { abortSignal: controller.signal });
+    const objectInfo = await storage.head(asset.object_key, { abortSignal: controller.signal }).catch(error => {
+      if (controller.signal.aborted) throw error;
+      throw new AssetObjectError(isMissingAssetObject(error));
+    });
     controller.signal.throwIfAborted();
     response.set(assetResponseHeaders(asset.mime_type, asset.filename, request.query.download === "1"));
     response.vary("Cookie");
@@ -135,6 +139,9 @@ export async function streamAssetContent(request: Request, response: Response, s
       const object = await storage.get(asset.object_key, {
         range: part ? `bytes=${part.start}-${part.end}` : undefined,
         ifMatch: objectInfo.ETag, abortSignal: controller.signal,
+      }).catch(error => {
+        if (controller.signal.aborted) throw error;
+        throw new AssetObjectError(isMissingAssetObject(error));
       });
       if (!object.Body) throw new Error("素材对象没有内容流");
       body = object.Body as Readable;

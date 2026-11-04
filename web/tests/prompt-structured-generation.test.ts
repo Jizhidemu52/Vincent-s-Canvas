@@ -75,6 +75,7 @@ test("batch transports one common compilation input, never one per item", async 
     globalThis.fetch = (async (url, init) => {
         const path = String(url);
         if (path === "/api/assets/upload-request") return Response.json({ assetId: `upload-${++uploads}`, uploadUrl: null });
+        if (/^\/api\/assets\/upload-\d+\/content$/.test(path) && init?.method === "HEAD") return new Response(null, { status: 200 });
         if (path === "/api/tasks/batch") { posts++; payload = JSON.parse(String(init?.body)); return Response.json({ batchId: "batch-id", tasks: [{ id: "batch-0", itemIndex: 0 }, { id: "batch-1", itemIndex: 1 }], failures: [], prompt: "Batch final prompt", optimized: true }); }
         if (path.startsWith("/api/tasks?")) return Response.json({ tasks: [0, 1].map(index => ({ ...task, id: `batch-${index}`, prompt: "Batch final prompt" })) });
         throw new Error(`Unexpected ${path}`);

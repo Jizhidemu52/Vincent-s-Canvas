@@ -38,7 +38,7 @@ describe("page-private generation dispatch", () => {
         });
         const run = evaluateCallback("use-canvas-generation.ts", "handleGenerateNode", {
             generationDispatchLocksRef: { current: locks }, nodesRef: { current: [] }, connectionsRef, acquireDispatch,
-            runtime: { generationRequestsRef: { current: new Map() } },
+            runtime: { generationRequestsRef: { current: new Map() } }, waitForWriteAccess: async () => true,
             effectiveConfig: {}, buildGenerationConfig: () => ({}), isAiConfigReady: () => true,
             executeGenerateNode: execute, recoverPending: () => null, startGenerationRequest: () => {}, finishGenerationRequest: () => {},
             setRunningNodeId: () => {}, setNodes: () => {}, message: { info: (text: string) => messages.push(text), error: (text: string) => messages.push(text) },
@@ -186,7 +186,7 @@ describe("page-private project hydration lifecycle", () => {
         const historyRef = { current: { past: [], future: [] } };
         const lastHistoryRef = { current: null };
         const scope: Record<string, unknown> = {
-            uiText,
+            uiText, waitForWriteAccess: async () => true,
             ...hydration, loadHydrationRuntime: async () => ({ ...hydration, ...overrides }), boundedCanvasHistory, hydrated: true, projectId: "project", projectAsyncLifecycleRef: { current: createCanvasProjectAsyncLifecycle() },
             historyRef, lastHistoryRef, pendingHistoryEntryRef: { current: null }, applyingHistoryRef: { current: false },
             historyPausedRef: { current: false }, historyCommitTimerRef: { current: null },
@@ -230,6 +230,26 @@ describe("page-private project hydration lifecycle", () => {
         expect(state.writes.find(write => write.key === "setViewport")?.value).toBe(original.viewport);
         expect(state.lastHistoryRef.current).toMatchObject({ nodes: original.nodes, connections: original.connections });
         expect(state.writes.filter(write => write.key === "error" || write.key === "warning")).toEqual([]);
+    });
+
+    test("restoration waits for a same-tab renewal instead of dropping the loaded graph", async () => {
+        const renewal = Promise.withResolvers<boolean>();
+        const original = project();
+        const state = hydrationHarness(async () => original, { waitForWriteAccess: () => renewal.promise });
+        state.run();
+        await nextTurn();
+        expect(state.writes.some(write => write.key === "setNodes")).toBe(false);
+        renewal.resolve(true);
+        await nextTurn();
+        expect(state.writes.find(write => write.key === "setNodes")?.value).toBe(original.nodes);
+    });
+
+    test("a confirmed takeover blocks a late hydration commit", async () => {
+        const state = hydrationHarness(async () => project(), { waitForWriteAccess: async () => false });
+        state.run();
+        await nextTurn();
+        expect(state.writes.some(write => write.key === "setNodes")).toBe(false);
+        expect(state.writes.some(write => write.key === "setProjectLoaded" && write.value === true)).toBe(false);
     });
 
     test("an unavailable hydration chunk leaves original project data untouched", async () => {

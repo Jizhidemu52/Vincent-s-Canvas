@@ -49,6 +49,10 @@ function mockServer(models: PublicModel[], tools: PublicToolConfiguration[] = []
         calls.push({ path, body });
         if (path === "/api/models") return Response.json(business);
         if (path === "/api/assets/upload-request") return Response.json({ assetId: "source-asset", uploadUrl: null });
+        if (path === "/api/assets/source-asset/content" && init?.method === "HEAD") {
+            expect(init).toMatchObject({ credentials: "include", cache: "no-store" });
+            return new Response(null, { status: 200, headers: { "content-type": "image/png" } });
+        }
         if (path === "/api/tasks" && init?.method === "POST") return Response.json({ task: { id: "task-1", status: "queued" } });
         const task = { id: "task-1", status: "success", resultUrls: ["/api/assets/result/content"] };
         if (path === "/api/tasks/task-1") return Response.json({ task });

@@ -51,7 +51,7 @@ export function useCanvasProjectHydration({ projectId, projectLoaded, setProject
     const setSelectedNodeIds = useCanvasGraphSetter("selectedNodeIds");
     const setStreamedTextById = useCanvasGraphSetter("streamedTextById");
     const { historyRef, lastHistoryRef, historyCommitTimerRef, applyingHistoryRef, pendingHistoryEntryRef, historyPausedRef, setHistoryState } = history;
-    const { generationRequestsRef, textStreamBufferRef, setRunningNodeId, recoverPending } = runtime;
+    const { generationRequestsRef, textStreamBufferRef, setRunningNodeId, recoverPending, waitForWriteAccess, isObservationCurrent } = runtime;
     const { setQuickGeneratePosition, setQuickGenerateRunning, setQuickGenerateOpen } = quickGeneration;
     const { usePerformanceScenario, performanceFixtureSize, performanceScenarioIncludesImages } = scenario;
     const { setGroups, setChatSessions, setActiveChatId, setBackgroundMode, setShowImageInfo, setViewport } = view;
@@ -84,8 +84,8 @@ export function useCanvasProjectHydration({ projectId, projectLoaded, setProject
         setRunningNodeId(null);
         setQuickGenerateRunning(false);
         if (usePerformanceScenario && performanceFixtureSize !== null) {
-            void import("@/lib/canvas/canvas-performance-scenario").then(({ createCanvasPerformanceScenario }) => {
-            if (!lifecycle.isCurrent(restoreToken)) return;
+            void import("@/lib/canvas/canvas-performance-scenario").then(async ({ createCanvasPerformanceScenario }) => {
+            if (!await waitForWriteAccess() || !lifecycle.isCurrent(restoreToken)) return;
             const scenario = createCanvasPerformanceScenario(performanceFixtureSize, { includeImageContent: performanceScenarioIncludesImages });
             historyPausedRef.current = true;
             setNodes(scenario.nodes);
@@ -131,8 +131,8 @@ export function useCanvasProjectHydration({ projectId, projectLoaded, setProject
         }
 
         const restoredGroups = project.groups || [];
-        const commitRestoredProject = (restoredNodes: CanvasNodeData[], restoredSessions: CanvasAssistantSession[], restoredHistory = boundedCanvasHistory(project.history)) => {
-            if (!lifecycle.isCurrent(restoreToken)) return;
+        const commitRestoredProject = async (restoredNodes: CanvasNodeData[], restoredSessions: CanvasAssistantSession[], restoredHistory = boundedCanvasHistory(project.history)) => {
+            if (!await waitForWriteAccess() || !lifecycle.isCurrent(restoreToken)) return;
             setNodes(restoredNodes);
             // Creation visibility is a small remembered layout preference, not a project default.
             setConnections(project.connections);
@@ -175,33 +175,34 @@ export function useCanvasProjectHydration({ projectId, projectLoaded, setProject
                 if (!lifecycle.isCurrent(restoreToken)) return;
                 const restoredSessions = await hydrateAssistantImages(project.chatSessions || [], restoredNodes, hydration);
                 const restoredHistory = await hydrateCanvasHistory(project.history, hydration);
-                commitRestoredProject(restoredNodes, restoredSessions, restoredHistory);
+                await commitRestoredProject(restoredNodes, restoredSessions, restoredHistory);
             } catch (error) {
                 if (!lifecycle.isCurrent(restoreToken)) return;
                 const reason = error instanceof Error ? error.message : "素材恢复失败";
                 message.warning(uiText("部分素材恢复失败，已保留原始项目内容：{value1}", { value1: reason }));
-                commitRestoredProject(resetInterruptedGeneration(project.nodes, hydration), project.chatSessions || []);
+                await commitRestoredProject(resetInterruptedGeneration(project.nodes, hydration), project.chatSessions || []);
             }
         };
         void restore();
         return invalidateRestore;
-    }, [hydrated, message, navigate, openProject, performanceFixtureSize, performanceScenarioIncludesImages, projectId, releaseStaleCanvasObjectUrls, resetEditor, usePerformanceScenario]);
+    }, [hydrated, message, navigate, openProject, performanceFixtureSize, performanceScenarioIncludesImages, projectId, releaseStaleCanvasObjectUrls, resetEditor, usePerformanceScenario, waitForWriteAccess]);
 
     useEffect(() => {
         // Only the live restored graph is observed; history hydration stays side-effect free.
         if (!projectLoaded || usePerformanceScenario) return;
         let active = true;
         const mediaRecoveries = new Map<string, AbortController>();
-        const reconnect = () => {
+        const reconnect = async () => {
             if (document.visibilityState === "hidden" || !navigator.onLine) return;
+            if (!await waitForWriteAccess() || !active) return;
             if (nodesRef.current.some(node => node.metadata?.imageTask)) void recoverPending();
             for (const node of nodesRef.current) {
                 if (!node.metadata?.mediaTask || generationRequestsRef.current.has(node.id) || mediaRecoveries.has(node.id)) continue;
                 const controller = new AbortController();
                 mediaRecoveries.set(node.id, controller);
                 void import("./canvas-media-generation-runtime").then(({ recoverCanvasMediaTask }) => {
-                    if (!active) return;
-                    return recoverCanvasMediaTask(node.id, { projectId, nodes: nodesRef, setNodes, flushSave: () => flushSaveRef.current?.(), isCurrent: () => active }, controller.signal, true);
+                    if (!active || !isObservationCurrent()) return;
+                    return recoverCanvasMediaTask(node.id, { projectId, nodes: nodesRef, setNodes, flushSave: () => flushSaveRef.current?.(), isCurrent: () => active && isObservationCurrent(), waitForWriteAccess }, controller.signal, true);
                 }).catch(() => undefined).finally(() => mediaRecoveries.delete(node.id));
             }
         };
@@ -214,5 +215,5 @@ export function useCanvasProjectHydration({ projectId, projectLoaded, setProject
             for (const controller of mediaRecoveries.values()) controller.abort();
             clearInterval(timer); window.removeEventListener("online", reconnect); document.removeEventListener("visibilitychange", reconnect);
         };
-    }, [projectLoaded, projectId, recoverPending, usePerformanceScenario]);
+    }, [projectLoaded, projectId, recoverPending, usePerformanceScenario, waitForWriteAccess, isObservationCurrent]);
 }

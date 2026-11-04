@@ -24,6 +24,7 @@ type MediaCanvas = {
     setNodes: Dispatch<SetStateAction<CanvasNodeData[]>>;
     flushSave: () => void;
     isCurrent?: () => boolean;
+    waitForWriteAccess?: () => Promise<boolean>;
     persist?: (nodes: CanvasNodeData[]) => Promise<void>;
 };
 type Generation = MediaCanvas & {
@@ -53,9 +54,11 @@ export function createCanvasMediaSubmission(nodeId: string, context: MediaCanvas
     let binding: MediaBinding | undefined = findNode(context, nodeId)?.metadata?.mediaTask;
     const current = () => (!context.isCurrent || context.isCurrent()) && Boolean(findNode(context, nodeId)) && useUserStore.getState().user?.id === ownerId;
     const patch = async (metadata: Partial<CanvasNodeMetadata>) => {
+        if (context.waitForWriteAccess && !await context.waitForWriteAccess()) throw new DOMException("画布编辑权已变化", "AbortError");
         if (!current()) throw new DOMException("画布或账号已变化", "AbortError");
         flushSync(() => context.setNodes(previous => previous.map(node => node.id === nodeId ? { ...node, metadata: { ...node.metadata, ...metadata } } : node)));
         await persist(context);
+        if (context.waitForWriteAccess && !await context.waitForWriteAccess()) throw new DOMException("画布编辑权已变化", "AbortError");
         if (!current()) throw new DOMException("画布或账号已变化", "AbortError");
     };
     return {
@@ -125,6 +128,7 @@ export async function runCanvasMediaGeneration(input: Generation): Promise<Canva
             ? await storeGeneratedVideo(await requestVideoGeneration(config, context.prompt, context.referenceImages, context.referenceVideos, context.referenceAudios, { ...options, toolKey: "canvas-video" }))
             : await storeGeneratedAudio(await requestAudioGeneration(config, context.prompt, options), config.audioFormat);
         controller.signal.throwIfAborted();
+        if (input.waitForWriteAccess && !await input.waitForWriteAccess()) throw new DOMException("画布编辑权已变化", "AbortError");
         if (mode === "video") {
             const size = fitNodeSize(file.width || spec.width, file.height || spec.height, 420, 420);
             flushSync(() => input.setNodes(previous => previous.map(node => node.id === outputId ? { ...node, ...size, position: { x: node.position.x + node.width / 2 - size.width / 2, y: node.position.y + node.height / 2 - size.height / 2 } } : node)));
@@ -133,7 +137,7 @@ export async function runCanvasMediaGeneration(input: Generation): Promise<Canva
         return { nodeId: outputId, status: "success", url: file.url, storageKey: file.storageKey };
     } catch (error) {
         const detail = await submission.fail(error, !shouldCancelCanvasGeneration(controller.signal));
-        if (!input.shared && nodeId !== outputId) input.setNodes(previous => previous.map(node => node.id === nodeId ? { ...node, metadata: { ...node.metadata, status: canceled(error) ? "idle" : "error", errorDetails: detail } } : node));
+        if ((!input.waitForWriteAccess || await input.waitForWriteAccess()) && (!input.isCurrent || input.isCurrent()) && !input.shared && nodeId !== outputId) input.setNodes(previous => previous.map(node => node.id === nodeId ? { ...node, metadata: { ...node.metadata, status: canceled(error) ? "idle" : "error", errorDetails: detail } } : node));
         return { nodeId: outputId, status: "failed", error: detail };
     } finally { input.finish(outputId, controller); }
 }
@@ -164,6 +168,7 @@ export async function recoverCanvasMediaTask(nodeId: string, context: MediaCanva
             file = await storeGeneratedAudio(await response.blob(), node.metadata?.audioFormat);
         }
         signal?.throwIfAborted();
+        if (context.waitForWriteAccess && !await context.waitForWriteAccess()) throw new DOMException("画布编辑权已变化", "AbortError");
         if (mode === "video") {
             const size = fitNodeSize(file.width || node.width, file.height || node.height, 420, 420);
             flushSync(() => context.setNodes(previous => previous.map(item => item.id === nodeId ? { ...item, ...size } : item)));

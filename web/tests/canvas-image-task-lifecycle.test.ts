@@ -45,6 +45,8 @@ function harness(options: {
     query?: (query: Query) => Promise<QueuedTask | null>;
     loadImage?: (url: string) => Promise<typeof image>;
     imageRequest?: (toolKey: string | undefined, edit: boolean) => Promise<Array<{ id: string; dataUrl: string }>>;
+    waitForWriteAccess?: () => Promise<boolean>;
+    isObservationCurrent?: () => boolean;
 } = {}) {
     const nodes = { current: options.nodes ? structuredClone(options.nodes) : initialNodes(options.binding) };
     const refs: Array<{ current: unknown }> = [];
@@ -160,7 +162,7 @@ function harness(options: {
         memoIndex = 0;
         queuedEffects = [];
         // biome-ignore lint/correctness/useHookAtTopLevel: This harness supplies its own isolated React hook dispatcher above.
-        value = module.exports.useCanvasImageTasks({ projectId, nodes, setNodes, saveQueue, generating });
+        value = module.exports.useCanvasImageTasks({ projectId, nodes, setNodes, saveQueue, generating, waitForWriteAccess: options.waitForWriteAccess, isObservationCurrent: options.isObservationCurrent });
         for (const run of queuedEffects) run();
         return value;
     }
@@ -479,6 +481,65 @@ describe("canvas image submission persistence", () => {
         controller.abort();
         expect(options.cancelOnAbort()).toBe(false);
         expect(() => options.assertCurrent()).toThrow();
+        h.unmount();
+    });
+});
+
+describe("canvas image tasks across edit-lease recovery", () => {
+    test("a returned image waits for same-tab renewal and is imported exactly once", async () => {
+        const renewal = Promise.withResolvers<boolean>();
+        const entered = Promise.withResolvers<void>();
+        let recovering = false;
+        const h = harness({ waitForWriteAccess: async () => {
+            if (!recovering) return true;
+            entered.resolve();
+            return renewal.promise;
+        } });
+        const controller = new AbortController();
+        const options = await h.action().createOptions("result-node", controller);
+        await options.onSubmissionStarted();
+        await options.onSubmitted(["accepted-task"]);
+        recovering = true;
+        const result = options.receiveResult(Promise.resolve([{ dataUrl: "original-result", sourceTaskId: "accepted-task" }]));
+        await entered.promise;
+        expect(h.uploads).toEqual([]);
+        expect(controller.signal.aborted).toBe(false);
+        expect(h.result()!.metadata?.imageTask?.taskId).toBe("accepted-task");
+        renewal.resolve(true);
+        expect((await result).metadata).toMatchObject({ content: image.url, sourceTaskId: "accepted-task", status: "success" });
+        expect(h.uploads).toEqual(["original-result"]);
+        expect(h.queries).toEqual([]);
+        h.unmount();
+    });
+
+    test("a stale tab cannot submit after losing its edit lease", async () => {
+        let writable = true;
+        const h = harness({ waitForWriteAccess: async () => writable, isObservationCurrent: () => writable });
+        const options = await h.action().createOptions("result-node", new AbortController());
+        writable = false;
+        await expect(options.onSubmissionStarted()).rejects.toMatchObject({ name: "AbortError" });
+        expect(h.saves).toEqual([]);
+        expect(h.result()!.metadata?.imageTask).toBeUndefined();
+        expect(options.cancelOnAbort()).toBe(false);
+        h.unmount();
+    });
+
+    test("takeover during result lookup retains the original binding without result writes or cancellation", async () => {
+        const queried = Promise.withResolvers<void>();
+        const reply = Promise.withResolvers<QueuedTask>();
+        let writable = true;
+        const h = harness({ binding, waitForWriteAccess: async () => writable, isObservationCurrent: () => writable,
+            query: async () => { queried.resolve(); return reply.promise; } });
+        const result = h.action().recoverPending("result-node");
+        await queried.promise;
+        const saves = h.saves.length;
+        writable = false;
+        reply.resolve(completedTask);
+        await result;
+        expect(h.saves).toHaveLength(saves);
+        expect(h.uploads).toEqual([]);
+        expect(h.result()!.metadata?.imageTask).toEqual(binding);
+        expect(h.result()!.metadata?.status).not.toBe("success");
         h.unmount();
     });
 });

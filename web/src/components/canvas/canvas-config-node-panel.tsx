@@ -51,7 +51,7 @@ export function CanvasConfigNodePanel({ node, isRunning, linkedTaskCount = 0, li
     const [optimizing, setOptimizing] = useState(false);
     const composerRef = useRef<CanvasConfigComposerHandle>(null);
     const [inputModeFeedback, setInputModeFeedback] = useState<{ error: boolean; text: string } | null>(null);
-    const globalConfig = useEffectiveConfig();
+    const globalConfig = useEffectiveConfig("canvas");
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const businessModels = useBusinessConfigStore((state) => state.models);
@@ -198,7 +198,7 @@ export function CanvasConfigNodePanel({ node, isRunning, linkedTaskCount = 0, li
 
             <div className="mb-2 shrink-0 space-y-2">
                 {!blend ? <CanvasConfigComposer ref={composerRef} compact value={node.metadata?.composerContent ?? node.metadata?.prompt ?? ""} inputs={referencePresentation.inputs} mentionInputs={mentionInputs} onAddMentionImage={addMentionImage} referenceLabels={referencePresentation.mentionLabels} disabled={isRunning} label={mode === "audio" ? t("朗读文本") : t("提示词")} onChange={composerContent => { setInputModeFeedback(null); onConfigChange(node.id, { composerContent, ...(node.metadata?.promptInput?.scene === "free-optimize" ? { promptInput: undefined, compiledPrompt: undefined } : {}) }); }} /> : <span role="status" className="text-xs">{t("融合 2–4 张参考图，不使用提示词。")}</span>}
-                {mode === "image" && !blend && (!node.metadata?.promptInput || node.metadata.promptInput.scene === "free-optimize") ? <PromptOptimizeButton config={config} prompt={node.metadata?.composerContent ?? node.metadata?.prompt ?? ""} references={references} toolKey={toolKey} disabled={isRunning} onBusyChange={setOptimizing} onApply={(value, _compilation, input) => { composerRef.current?.replace(value); onConfigChange(node.id, { prompt: value, composerContent: value, promptInput: input, compiledPrompt: value }); }} /> : null}
+                {mode === "image" && !blend && (!node.metadata?.promptInput || node.metadata.promptInput.scene === "free-optimize") ? <PromptOptimizeButton scopeKey={node.id} config={config} prompt={node.metadata?.composerContent ?? node.metadata?.prompt ?? ""} references={references} operationType={toolKey === "canvas-image" ? "image_generation" : "inpaint"} toolKey={toolKey} disabled={isRunning} onBusyChange={setOptimizing} onApply={(value, _compilation, input) => { composerRef.current?.replace(value); onConfigChange(node.id, { prompt: value, composerContent: value, promptInput: input, compiledPrompt: value }); }} /> : null}
                 {node.metadata?.optimizingPrompt ? <span role="status" className="text-xs">{t("正在优化提示词…")}</span> : null}
                 {mode !== "audio" ? <CanvasConfigImageReferences node={node} references={references} maximum={referencePolicyForModel(model, profile).maximum} labels={referencePresentation.trayLabels} disabled={isRunning} onChange={onConfigChange} /> : null}
                 {mode === "video" && (inputSummary.videoCount > 0 || inputSummary.audioCount > 0) ? <div className="flex flex-wrap gap-1.5">

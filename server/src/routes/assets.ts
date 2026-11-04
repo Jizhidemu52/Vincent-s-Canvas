@@ -24,6 +24,7 @@ import { allowedAssetMimeTypes, normalizeAssetMime, validateAssetUpload, AssetMe
 import { assetBatchSchema, assetListMetadataFields, assetPage, parseAssetListQuery } from "../asset-query";
 import { scheduleAssetThumbnails } from "../asset-thumbnails";
 import { hashAssetContent, requestedContentHash } from "../asset-content-hash";
+import { AssetObjectError, isMissingAssetObject } from "../asset-object-error";
 
 const createSchema = z.object({
   filename: z.string().trim().min(1).max(255),
@@ -32,6 +33,7 @@ const createSchema = z.object({
   kind: z.enum(["image", "video", "text", "other"]).default("image"),
   projectId: z.string().uuid().nullish(),
   clientReferenceId: z.string().trim().min(8).max(160).optional(),
+  repairAssetId: z.string().uuid().optional(),
   metadata: z.record(z.string(), z.unknown()).default({}),
 });
 const shareSchema = z.object({ scope: z.enum(["department", "project", "user"]), targetId: z.string().uuid() });
@@ -125,6 +127,40 @@ function sendAssetEventError(response: Response, error: unknown) {
   return true;
 }
 
+type UploadAsset = { id: string; status: string; object_key: string; mime_type: string; byte_size: number; content_sha256: string | null; metadata: Record<string, unknown> };
+const uploadAssetFields = "id,status,object_key,mime_type,byte_size,content_sha256,metadata";
+
+function sendAssetObjectError(response: Response, error: AssetObjectError) {
+  response.set("X-Canvas-Asset-Error", error.code);
+  response.status(error.status).json({ error: error.code, message: error.message });
+}
+
+async function assetObjectMissing(storage: ObjectStorage, objectKey: string) {
+  try { await storage.head(objectKey, { abortSignal: AbortSignal.timeout(5_000) }); return false; }
+  catch (error) {
+    if (isMissingAssetObject(error)) return true;
+    throw new AssetObjectError(false);
+  }
+}
+
+async function respondReusedUpload(response: Response, storage: ObjectStorage, asset: UploadAsset, input: z.infer<typeof createSchema>) {
+  if (asset.status !== "ready") {
+    response.status(201).json({ assetId: asset.id, uploadUrl: `/api/assets/${asset.id}/upload`, reused: true });
+    return;
+  }
+  if (!await assetObjectMissing(storage, asset.object_key)) {
+    response.status(201).json({ assetId: asset.id, uploadUrl: null, reused: true });
+    return;
+  }
+  // A client-provided hash alone cannot authorize changing a historical asset.
+  if (!asset.content_sha256 || asset.content_sha256 !== requestedContentHash(input.metadata)
+    || Number(asset.byte_size) !== input.byteSize || normalizeAssetMime(asset.mime_type) !== input.mimeType) {
+    sendAssetObjectError(response, new AssetObjectError(true));
+    return;
+  }
+  response.status(201).json({ assetId: asset.id, uploadUrl: `/api/assets/${asset.id}/upload?repair=1`, reused: true });
+}
+
 export function createAssetsRouter(db: Database, storage: ObjectStorage) {
   const router = Router();
   // Every response must be checked against the current employee, including
@@ -209,25 +245,40 @@ export function createAssetsRouter(db: Database, storage: ObjectStorage) {
           return;
         }
       }
+      if (input.repairAssetId) {
+        const existing = await db.query<UploadAsset>(
+          `SELECT ${uploadAssetFields} FROM assets WHERE id=$1 AND owner_user_id=$2 AND status='ready' AND deleted_at IS NULL`,
+          [input.repairAssetId, actor.id],
+        );
+        const asset = existing.rows[0];
+        if (!asset) { response.status(404).json({ error: "NOT_FOUND", message: "素材不存在或无权补传" }); return; }
+        if (!asset.content_sha256 || asset.content_sha256 !== requestedContentHash(input.metadata)
+          || Number(asset.byte_size) !== input.byteSize || normalizeAssetMime(asset.mime_type) !== input.mimeType) {
+          response.status(409).json({ error: "ASSET_REPAIR_MISMATCH", message: "本地文件与原素材的大小、类型或已验证 SHA256 不一致，不能补传" });
+          return;
+        }
+        await respondReusedUpload(response, storage, asset, input);
+        return;
+      }
       if (input.clientReferenceId) {
-        const existing = await db.query<{ id: string; status: string }>(
-          "SELECT id,status FROM assets WHERE owner_user_id=$1 AND client_reference_id=$2 AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1",
+        const existing = await db.query<UploadAsset>(
+          `SELECT ${uploadAssetFields} FROM assets WHERE owner_user_id=$1 AND client_reference_id=$2 AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1`,
           [actor.id, input.clientReferenceId],
         );
         const asset = existing.rows[0];
         if (asset) {
-          response.status(201).json({ assetId: asset.id, uploadUrl: asset.status === "ready" ? null : `/api/assets/${asset.id}/upload`, reused: true });
+          await respondReusedUpload(response, storage, asset, input);
           return;
         }
       }
       const contentHash = requestedContentHash(input.metadata);
       if (contentHash && input.kind === "image" && !input.projectId) {
-        const existing = await db.query<{ id: string }>(
-          "SELECT id FROM assets WHERE owner_user_id=$1 AND content_sha256=$2 AND byte_size=$3 AND kind='image' AND status='ready' AND deleted_at IS NULL ORDER BY created_at,id LIMIT 1",
+        const existing = await db.query<UploadAsset>(
+          `SELECT ${uploadAssetFields} FROM assets WHERE owner_user_id=$1 AND content_sha256=$2 AND byte_size=$3 AND kind='image' AND status='ready' AND deleted_at IS NULL ORDER BY created_at,id LIMIT 1`,
           [actor.id, contentHash, input.byteSize],
         );
         if (existing.rows[0]) {
-          response.status(201).json({ assetId: existing.rows[0].id, uploadUrl: null, reused: true });
+          await respondReusedUpload(response, storage, existing.rows[0], input);
           return;
         }
       }
@@ -241,6 +292,7 @@ export function createAssetsRouter(db: Database, storage: ObjectStorage) {
       response.status(201).json({ assetId: id, uploadUrl: `/api/assets/${id}/upload` });
     } catch (error) {
       if (error instanceof CanvasDocumentError) response.status(error.status).json({ error: error.code, message: error.message });
+      else if (error instanceof AssetObjectError) sendAssetObjectError(response, error);
       else next(error);
     }
   });
@@ -250,8 +302,10 @@ export function createAssetsRouter(db: Database, storage: ObjectStorage) {
       const actor = (request as unknown as AuthenticatedRequest).auth;
       if (request.get("X-Canvas-Owner-Id") !== undefined) assertCanvasOwner(request.get("X-Canvas-Owner-Id"), actor.id);
       const id = z.string().uuid().parse(request.params.id);
-      const result = await db.query<{ object_key: string; mime_type: string; byte_size: number; metadata: Record<string, unknown> }>(
-        "SELECT object_key,mime_type,byte_size,metadata FROM assets WHERE id=$1 AND owner_user_id=$2 AND status='pending' AND deleted_at IS NULL",
+      const repair = request.query.repair === "1";
+      const result = await db.query<UploadAsset>(
+        repair ? `SELECT ${uploadAssetFields} FROM assets WHERE id=$1 AND owner_user_id=$2 AND status='ready' AND content_sha256 IS NOT NULL AND deleted_at IS NULL`
+          : "SELECT object_key,mime_type,byte_size,metadata FROM assets WHERE id=$1 AND owner_user_id=$2 AND status='pending' AND deleted_at IS NULL",
         [id, actor.id],
       );
       const asset = result.rows[0];
@@ -260,6 +314,7 @@ export function createAssetsRouter(db: Database, storage: ObjectStorage) {
         return;
       }
       response.locals.uploadAsset = asset;
+      response.locals.repairUpload = repair;
       next();
     } catch (error) {
       if (error instanceof CanvasDocumentError) response.status(error.status).json({ error: error.code, message: error.message });
@@ -268,7 +323,8 @@ export function createAssetsRouter(db: Database, storage: ObjectStorage) {
   }, express.raw({ type: "*/*", limit: "200mb" }), async (request, response, next) => {
     let client: PoolClient | undefined;
     try {
-      const asset = response.locals.uploadAsset as { object_key: string; mime_type: string; byte_size: number; metadata?: Record<string, unknown> };
+      const asset = response.locals.uploadAsset as UploadAsset;
+      const repair = response.locals.repairUpload === true;
       const actor = (request as unknown as AuthenticatedRequest).auth;
       const body = request.body as Buffer;
       if (!Buffer.isBuffer(body) || body.length !== Number(asset.byte_size)) {
@@ -283,8 +339,9 @@ export function createAssetsRouter(db: Database, storage: ObjectStorage) {
       // Do not use transaction retries around the external object-store write.
       client = await db.connect();
       await client.query("BEGIN");
-      const locked = await client.query<{ object_key: string; mime_type: string; byte_size: number; metadata: Record<string, unknown> }>(
-        "SELECT object_key,mime_type,byte_size,metadata FROM assets WHERE id=$1 AND owner_user_id=$2 AND status='pending' AND deleted_at IS NULL FOR UPDATE",
+      const locked = await client.query<UploadAsset>(
+        repair ? `SELECT ${uploadAssetFields} FROM assets WHERE id=$1 AND owner_user_id=$2 AND status='ready' AND content_sha256 IS NOT NULL AND deleted_at IS NULL FOR UPDATE`
+          : "SELECT object_key,mime_type,byte_size,metadata FROM assets WHERE id=$1 AND owner_user_id=$2 AND status='pending' AND deleted_at IS NULL FOR UPDATE",
         [request.params.id, actor.id],
       );
       const currentAsset = locked.rows[0];
@@ -299,15 +356,38 @@ export function createAssetsRouter(db: Database, storage: ObjectStorage) {
         return;
       }
       if (currentAsset.mime_type !== asset.mime_type) actualMime = await validateAssetUpload(body, currentAsset.mime_type);
-      const expectedHash = requestedContentHash(currentAsset.metadata);
+      if (repair && actualMime !== normalizeAssetMime(currentAsset.mime_type)) {
+        await client.query("ROLLBACK");
+        response.status(415).json({ error: "ASSET_REPAIR_MISMATCH", message: "补传文件的真实媒体类型与原素材不一致" });
+        return;
+      }
+      const expectedHash = repair ? currentAsset.content_sha256 : requestedContentHash(currentAsset.metadata);
       if (expectedHash && expectedHash !== contentHash) {
         await client.query("ROLLBACK");
         response.status(400).json({ error: "HASH_MISMATCH", message: "上传文件内容与申请的 SHA256 不一致" });
         return;
       }
       const kind = actualMime.startsWith('image/') ? 'image' : actualMime.startsWith('video/') ? 'video' : actualMime.startsWith('text/') || actualMime === 'application/json' ? 'text' : 'other';
-      await storage.put(currentAsset.object_key, body, actualMime);
-      await client.query("UPDATE assets SET status='ready',mime_type=$2,kind=$3,content_sha256=$4,updated_at=now() WHERE id=$1 AND owner_user_id=$5 AND status='pending' AND deleted_at IS NULL", [request.params.id, actualMime, kind, contentHash, actor.id]);
+      if (repair) {
+        if (!await assetObjectMissing(storage, currentAsset.object_key)) {
+          await client.query("COMMIT");
+          response.status(204).end();
+          return;
+        }
+        // No read/check race can overwrite an original restored by another writer.
+        try { await storage.put(currentAsset.object_key, body, actualMime, { ifNoneMatch: "*", abortSignal: AbortSignal.timeout(30_000) }); }
+        catch (error) {
+          const status = (error as { $metadata?: { httpStatusCode?: number } })?.$metadata?.httpStatusCode;
+          if (status !== 412) throw new AssetObjectError(false);
+          await client.query("ROLLBACK");
+          response.status(409).json({ error: "ASSET_REPAIR_CHANGED", message: "原文件状态已变化，请重新验证素材后重试" });
+          return;
+        }
+        await client.query("UPDATE assets SET updated_at=now() WHERE id=$1 AND owner_user_id=$2 AND status='ready' AND deleted_at IS NULL", [request.params.id, actor.id]);
+      } else {
+        await storage.put(currentAsset.object_key, body, actualMime);
+        await client.query("UPDATE assets SET status='ready',mime_type=$2,kind=$3,content_sha256=$4,updated_at=now() WHERE id=$1 AND owner_user_id=$5 AND status='pending' AND deleted_at IS NULL", [request.params.id, actualMime, kind, contentHash, actor.id]);
+      }
       await client.query("COMMIT");
       client.release(); client = undefined;
       if (kind === 'image') scheduleAssetThumbnails(db, storage, request.params.id);
@@ -315,6 +395,7 @@ export function createAssetsRouter(db: Database, storage: ObjectStorage) {
     } catch (error) {
       if (client) await client.query("ROLLBACK").catch(() => undefined);
       if (error instanceof CanvasDocumentError || error instanceof AssetMediaError) response.status(error.status).json({ error: error.code, message: error.message });
+      else if (error instanceof AssetObjectError) sendAssetObjectError(response, error);
       else next(error);
     } finally { client?.release(); }
   });
@@ -357,7 +438,10 @@ export function createAssetsRouter(db: Database, storage: ObjectStorage) {
       const asset = result.rows[0];
       if (!asset) { response.status(404).end(); return; }
       await streamAssetContent(request, response, storage, asset);
-    } catch (error) { next(error); }
+    } catch (error) {
+      if (error instanceof AssetObjectError && !response.headersSent) sendAssetObjectError(response, error);
+      else next(error);
+    }
   });
 
   router.get('/:id/thumb', async (request, response, next) => {

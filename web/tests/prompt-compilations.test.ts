@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { createPromptCompilation, getPromptCompilation, PromptCompilationUncertainError } from "../src/services/api/prompt-compilations";
+import { generationErrorDiagnostic } from "../src/lib/generation-feedback";
 
 const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; });
@@ -47,4 +48,32 @@ test("definitive rejection does not query or retry and disabled fallback does no
 test("explicit server fallback remains visibly unoptimized", async () => {
     globalThis.fetch = (async () => Response.json({ code: 0, data: { compilation: { ...compilation, optimized: false } } })) as typeof fetch;
     expect((await createPromptCompilation(input)).optimized).toBe(false);
+});
+
+test("known unavailable recipe is a definitive 503 before admission, not a perpetual query", async () => {
+    const requests: string[] = [];
+    globalThis.fetch = (async (url, init) => {
+        requests.push(`${init?.method || "GET"} ${url}`);
+        return Response.json({ error: "PROMPT_RECIPE_UNAVAILABLE", message: "管理员尚未启用此场景的配方版本，未提交生成" }, { status: 503 });
+    }) as typeof fetch;
+    await expect(createPromptCompilation(input)).rejects.toMatchObject({ definitive: true, status: 503, code: "PROMPT_RECIPE_UNAVAILABLE", requestId: input.requestId });
+    expect(requests).toEqual(["POST /api/prompt-compilations"]);
+});
+
+test("unknown 503 followed by missing lookup retains its original diagnostic and request ID", async () => {
+    const requests: string[] = [];
+    globalThis.fetch = (async (url, init) => {
+        requests.push(`${init?.method || "GET"} ${url}`);
+        return init?.method === "POST"
+            ? Response.json({ error: "UNKNOWN_PROVIDER_STATE", message: "original 503 diagnostic" }, { status: 503 })
+            : Response.json({ error: "NOT_FOUND", message: "lookup 404" }, { status: 404 });
+    }) as typeof fetch;
+    let failure: unknown;
+    try { await createPromptCompilation(input); } catch (error) { failure = error; }
+    expect(failure).toBeInstanceOf(PromptCompilationUncertainError);
+    expect(generationErrorDiagnostic(failure)).toContain("original 503 diagnostic");
+    expect(generationErrorDiagnostic(failure)).toContain("HTTP 503");
+    expect(generationErrorDiagnostic(failure)).toContain(`requestId: ${input.requestId}`);
+    expect(generationErrorDiagnostic(failure)).not.toContain("lookup 404");
+    expect(requests).toEqual(["POST /api/prompt-compilations", "GET /api/prompt-compilations/by-request/compile-original"]);
 });

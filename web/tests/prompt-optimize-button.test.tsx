@@ -13,7 +13,7 @@ const code = ts.transpileModule(readFileSync(new URL("../src/components/prompt-o
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 const compilation = { id: "compilation-id", requestId: "compile-request", status: "success", prompt: "Final optimized prompt", optimized: true, summaryZh: "已优化" };
 
-function harness(compile: () => Promise<unknown>, query: (id: string) => Promise<unknown> = async () => compilation) {
+function harness(compile: (...args: any[]) => Promise<unknown>, query: (id: string) => Promise<unknown> = async () => compilation) {
     const state: any[] = [];
     const applied: unknown[] = [], notices: string[] = [];
     let cursor = 0, ownerId = "employee-a";
@@ -32,9 +32,9 @@ function harness(compile: () => Promise<unknown>, query: (id: string) => Promise
     const module = { exports: {} as { PromptOptimizeButton: (props: any) => ReactElement<any> } };
     new Function("require", "module", "exports", code)((name: string) => dependencies[name] || requireModule(name), module, module.exports);
     return {
-        render: (prompt = "Change blue", references: any[] = [], scopeKey = "") => {
+        render: (prompt = "Change blue", references: any[] = [], scopeKey = "", overrides: Record<string, unknown> = {}) => {
             cursor = 0;
-            return module.exports.PromptOptimizeButton({ config: { model: "image-model" }, prompt, references, scopeKey, onApply: (...args: unknown[]) => applied.push(args) });
+            return module.exports.PromptOptimizeButton({ config: { model: "image-model" }, operationType: "image_generation", prompt, references, scopeKey, onApply: (...args: unknown[]) => applied.push(args), ...overrides });
         },
         applied, notices, changeOwner: () => { ownerId = "employee-b"; },
     };
@@ -49,6 +49,51 @@ test("manual optimization only runs after a click and retains the compilation fo
     await tick();
     expect(calls).toBe(1);
     expect(view.applied).toEqual([[compilation.prompt, compilation, { scene: "free-optimize", userText: "Change blue", fields: {}, mode: "generate", referenceRoles: [], compilationId: compilation.id }]]);
+});
+
+test.each([['image_generation', 'generate'], ['inpaint', 'edit']] as const)("the clicked button uses explicit %s even with the same references", async (operationType, mode) => {
+    const calls: any[][] = [];
+    const references = [{ id: "ref", name: "主图", dataUrl: "image-a" }];
+    const view = harness(async (...args) => { calls.push(args); return compilation; });
+    view.render("Change blue", references, "", { operationType, toolKey: operationType === "image_generation" ? "image" : "image-edit" }).props.onClick();
+    await tick();
+    expect(calls).toHaveLength(1);
+    expect(calls[0]![1]).toMatchObject({ mode, referenceRoles: ["主图"] });
+    expect(calls[0]![3]).toMatchObject({ operationType });
+    expect((view.applied[0] as any[])[2]).toMatchObject({ mode, compilationId: compilation.id });
+});
+
+test("upscaling explains plain-prompt usage and cannot post unsupported compilation", async () => {
+    let calls = 0;
+    const view = harness(async () => { calls++; return compilation; });
+    const button = view.render("Enhance details", [], "", { operationType: "upscale", toolKey: "detail-enhance" });
+    expect(button.props.disabled).toBe(true);
+    expect(button.props.children).toBe("此操作不支持一键优化");
+    expect(button.props.title).toContain("可直接填写要求后生成");
+    button.props.onClick(); await tick();
+    expect(calls).toBe(0);
+});
+
+test.each([
+    { config: { model: "another-model" } },
+    { operationType: "inpaint" },
+    { toolKey: "creative-text-to-style" },
+    { scene: "text-to-style" },
+])("late optimization cannot reuse a changed model, operation, tool or recipe: %j", async changes => {
+    let finish!: (value: unknown) => void;
+    const view = harness(() => new Promise(resolve => { finish = resolve; }));
+    view.render().props.onClick();
+    view.render("Change blue", [], "", changes);
+    finish(compilation); await tick();
+    expect(view.applied).toHaveLength(0);
+    expect(view.notices[0]).toContain("未覆盖当前内容");
+});
+
+test("mandatory creative scenes remain explicit instead of becoming free optimization", async () => {
+    const calls: any[][] = [];
+    const view = harness(async (...args) => { calls.push(args); return compilation; });
+    view.render("A blue dress", [], "", { scene: "text-to-style", toolKey: "creative-text-to-style" }).props.onClick(); await tick();
+    expect(calls[0]![1]).toMatchObject({ scene: "text-to-style", mode: "generate" });
 });
 
 test("an uncertain optimization only queries the original request on the next click", async () => {

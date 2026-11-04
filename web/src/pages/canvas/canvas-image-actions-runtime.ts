@@ -66,7 +66,7 @@ export function createCanvasImageActionsRuntime(context: CanvasImageActionRuntim
     const setConnections = (value: SetStateAction<import("@/types/canvas").CanvasConnection[]>) => setField("connections", value);
     const setSelectedNodeIds = (value: SetStateAction<Set<string>>) => setField("selectedNodeIds", value);
     const setSelectedConnectionId = (value: SetStateAction<string | null>) => setField("selectedConnectionId", value);
-    const { createOptions, generationDispatchLocksRef, startGenerationRequest, finishGenerationRequest, setRunningNodeId } = runtime;
+    const { createOptions, generationDispatchLocksRef, startGenerationRequest, finishGenerationRequest, setRunningNodeId, waitForWriteAccess } = runtime;
     const { manualEditNode, setCropNodeId, setSplitNodeId, setMaskEditNodeId, setUpscaleNodeId, setAngleNodeId } = dialogs;
     const NODE_STATUS_LOADING = "loading" as const;
     const NODE_STATUS_SUCCESS = "success" as const;
@@ -85,26 +85,27 @@ export function createCanvasImageActionsRuntime(context: CanvasImageActionRuntim
             };
             if (!textNode) { generationDispatchLocksRef.current.delete(key); message.error(uiText("原反推结果节点已移除，请先恢复该节点")); return; }
             const ownerId = useUserStore.getState().user?.id;
-            const current = () => designProjectIdRef.current === projectId && useUserStore.getState().user?.id === ownerId;
+            const current = () => isCurrent() && designProjectIdRef.current === projectId && useUserStore.getState().user?.id === ownerId;
             if (!pending) setNodes(prev => [...prev.map(item => item.id === node.id ? { ...item, metadata: { ...item.metadata, reversePrompt: { requestId, outputNodeId: textNode.id } } } : item), textNode]);
             setContextMenu(null); setSelectedNodeIds(new Set([textNode.id]));
             try {
                 const { optimizeImagePrompt } = await import("@/services/api/image");
                 const { completedPromptCompilation, getPromptCompilation } = await import("@/services/api/prompt-compilations");
+                if (!await waitForWriteAccess() || !current()) return;
                 const result = pending ? completedPromptCompilation(await getPromptCompilation(requestId), requestId)
                     : await optimizeImagePrompt({ ...effectiveConfig, model: effectiveConfig.imageModel || effectiveConfig.model }, { scene: "reverse-prompt", fields: {}, userText: "", referenceRoles: ["待反推图片"], mode: "edit" }, [{ id: node.id, name: node.title, dataUrl: node.metadata?.content || "", storageKey: node.metadata?.storageKey, type: node.metadata?.mimeType || "image/png" }], { requestId, toolKey: "canvas-edit" });
-                if (!current()) return;
+                if (!await waitForWriteAccess() || !current()) return;
                 setNodes(prev => prev.map(item => item.id === textNode.id ? { ...item, metadata: { ...item.metadata, content: [result.prompt, result.summaryZh].filter(Boolean).join("\n\n"), prompt: result.prompt, optimized: result.optimized, status: NODE_STATUS_SUCCESS, errorDetails: undefined } } : item));
                 setDialogNodeId(textNode.id);
             } catch (error) {
-                if (current()) { const detail = error instanceof Error ? error.message : "反推提示词失败"; message.error(detail); setNodes(prev => prev.map(item => item.id === textNode.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails: detail, content: detail } } : item)); }
+                if (await waitForWriteAccess() && current()) { const detail = error instanceof Error ? error.message : "反推提示词失败"; message.error(detail); setNodes(prev => prev.map(item => item.id === textNode.id ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails: detail, content: detail } } : item)); }
             } finally { generationDispatchLocksRef.current.delete(key); }
         };
 
     const saveManualImageEdit = async (image: UploadedImage) => {
         if (!manualEditNode || !isCurrent() || savedProjectIdRef.current !== projectId) throw new Error("画布已切换，请重新打开图片编辑");
         const { createCanvasImageEditVersion } = await import("@/lib/canvas/canvas-image-edit");
-        if (!isCurrent() || savedProjectIdRef.current !== projectId) throw new Error("画布已切换，请重新打开图片编辑");
+        if (!await waitForWriteAccess() || !isCurrent() || savedProjectIdRef.current !== projectId) throw new Error("画布已切换，请重新打开图片编辑");
         const before = nodesRef.current;
         const existing = before.find(node => node.metadata?.storageKey === image.storageKey);
         if (existing) return;
@@ -118,7 +119,7 @@ export function createCanvasImageActionsRuntime(context: CanvasImageActionRuntim
         setConnections(previous => { const connections = [...previous, { id: nanoid(), fromNodeId: manualEditNode.id, toNodeId: child.id }]; updateProject(projectId, { connections }); return connections; });
         try { await flushCanvasPersistence(); }
         catch (error) {
-            if (savedProjectIdRef.current === projectId) {
+            if (await waitForWriteAccess() && isCurrent() && savedProjectIdRef.current === projectId) {
                 const restored = nodesRef.current.filter(node => node.id !== child.id || node.metadata?.storageKey !== image.storageKey);
                 projectSaveQueueRef.current?.flush();
                 nodesRef.current = restored;
@@ -128,6 +129,7 @@ export function createCanvasImageActionsRuntime(context: CanvasImageActionRuntim
             }
             throw error;
         }
+        if (!await waitForWriteAccess() || !isCurrent()) return;
         setSelectedNodeIds(new Set([child.id]));
         setDialogNodeId(child.id);
     };
@@ -141,6 +143,7 @@ export function createCanvasImageActionsRuntime(context: CanvasImageActionRuntim
             signal.throwIfAborted();
             const image = await uploadImage(cropped);
             signal.throwIfAborted();
+            if (!await waitForWriteAccess() || !isCurrent()) return;
             const width = Math.min(node.width, Math.max(220, image.width));
             const childId = nanoid();
             const child: CanvasNodeData = {
@@ -203,6 +206,7 @@ export function createCanvasImageActionsRuntime(context: CanvasImageActionRuntim
                     },
                 );
                 signal.throwIfAborted();
+                if (!await waitForWriteAccess() || !isCurrent()) return;
                 setNodes((prev) => [...prev, ...childNodes]);
                 setConnections((prev) => [...prev, ...childNodes.map((child) => ({ id: nanoid(), fromNodeId: node.id, toNodeId: child.id }))]);
                 setSelectedNodeIds(new Set(childNodes.map((child) => child.id)));
@@ -225,7 +229,7 @@ export function createCanvasImageActionsRuntime(context: CanvasImageActionRuntim
             try {
                 const { canvasMaskEditImageSettings, readCanvasMaskImageSize } = await import("@/components/canvas/canvas-node-mask-edit-dialog");
                 const [sourceSize, maskSize] = await Promise.all([readCanvasMaskImageSize(node.metadata.content), readCanvasMaskImageSize(payload.maskDataUrl)]);
-                if (!isCurrent()) return;
+                if (!await waitForWriteAccess() || !isCurrent()) return;
                 if (sourceSize.width !== maskSize.width || sourceSize.height !== maskSize.height) throw new Error("蒙版尺寸与当前原图不一致，请重新绘制；尚未提交生成，不会自动拉伸。");
                 const baseConfig = { ...buildGenerationConfig(effectiveConfig, node, "image"), ...payload.imageSettings };
                 const plan = canvasMaskAdaptationPlan(sourceSize, imageModelProfile(selectedModel));
@@ -233,6 +237,7 @@ export function createCanvasImageActionsRuntime(context: CanvasImageActionRuntim
                 const [original, mask] = await Promise.all([node.metadata.storageKey ? Promise.resolve({ storageKey: node.metadata.storageKey }) : uploadImage(node.metadata.content), uploadImage(payload.maskDataUrl)]);
                 maskAdaptation = { ...plan, sourceStorageKey: original.storageKey, maskStorageKey: mask.storageKey };
                 adapted = await adaptCanvasMaskInputs(node.metadata.content, payload.maskDataUrl, plan);
+                if (!await waitForWriteAccess() || !isCurrent()) return;
             } catch (error) {
                 message.error(error instanceof Error ? error.message : uiText("无法确认原图与蒙版尺寸，尚未提交生成"));
                 return;
@@ -280,6 +285,7 @@ export function createCanvasImageActionsRuntime(context: CanvasImageActionRuntim
             try {
                 const imageTask = await createOptions(childId, controller, undefined, "canvas-mask-edit");
                 const { metadata, uploaded } = await imageTask.generate(generationConfig, prompt, [source], { id: `${node.id}-mask`, name: "mask.png", type: "image/png", dataUrl: adapted.maskDataUrl });
+                if (!await waitForWriteAccess() || !isCurrent()) return;
                 const size = fitNodeSize(uploaded.width, uploaded.height, node.width, node.height);
                 setNodes((prev) => prev.map((item) => (item.id === childId ? { ...item, width: size.width, height: size.height, metadata: { ...item.metadata, ...metadata, prompt, ...generationMetadata } } : item)));
                 addAsset({
@@ -301,7 +307,7 @@ export function createCanvasImageActionsRuntime(context: CanvasImageActionRuntim
                     },
                 });
             } catch (error) {
-                if (isGenerationCanceled(error)) return;
+                if (!await waitForWriteAccess() || !isCurrent() || isGenerationCanceled(error)) return;
                 const errorDetails = error instanceof Error ? error.message : "局部修改失败";
                 message.error(errorDetails);
                 setNodes((prev) => prev.map((item) => (item.id === childId ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails } } : item)));
@@ -320,6 +326,7 @@ export function createCanvasImageActionsRuntime(context: CanvasImageActionRuntim
             signal.throwIfAborted();
             const image = await uploadImage(upscaled);
             signal.throwIfAborted();
+            if (!await waitForWriteAccess() || !isCurrent()) return;
             const size = fitNodeSize(image.width, image.height);
             const childId = nanoid();
             const child: CanvasNodeData = {
@@ -348,6 +355,7 @@ export function createCanvasImageActionsRuntime(context: CanvasImageActionRuntim
     const generateAngleNode = async (node: CanvasNodeData, params: CanvasImageAngleParams) => {
             if (!node.metadata?.content) return;
             const generationConfig = resolveCanvasToolModel("canvas-angle", { ...buildGenerationConfig(effectiveConfig, node, "image"), ...params.imageSettings, ...(params.model ? { model: params.model } : {}), count: "1" }, await ensureCanvasModelsReady());
+            if (!await waitForWriteAccess() || !isCurrent()) return;
             if (!isAiConfigReady(generationConfig, generationConfig.model)) {
                 handleMissingModelConfig();
                 return;
@@ -384,6 +392,7 @@ export function createCanvasImageActionsRuntime(context: CanvasImageActionRuntim
                     prompt,
                     [{ id: node.id, name: `${node.title || node.id}.png`, type: node.metadata.mimeType || "image/png", dataUrl: node.metadata.content, storageKey: node.metadata.storageKey }],
                 );
+                if (!await waitForWriteAccess() || !isCurrent()) return;
                 const size = fitNodeSize(uploaded.width, uploaded.height, imageConfig.width, imageConfig.height);
                 setNodes((prev) => prev.map((item) => (item.id === childId ? { ...item, width: size.width, height: size.height, metadata: { ...item.metadata, ...metadata, prompt, ...generationMetadata } } : item)));
                 addAsset({
@@ -405,7 +414,7 @@ export function createCanvasImageActionsRuntime(context: CanvasImageActionRuntim
                     },
                 });
             } catch (error) {
-                if (isGenerationCanceled(error)) return;
+                if (!await waitForWriteAccess() || !isCurrent() || isGenerationCanceled(error)) return;
                 const errorDetails = error instanceof Error ? error.message : "生成失败";
                 message.error(errorDetails);
                 setNodes((prev) => prev.map((item) => (item.id === childId ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails } } : item)));

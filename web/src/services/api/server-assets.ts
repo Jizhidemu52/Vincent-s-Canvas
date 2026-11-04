@@ -1,3 +1,5 @@
+import { generationPreSubmissionMessage } from "@/lib/generation-feedback";
+
 export type AssetResultStatus = "unused" | "candidate" | "project" | "editing" | "downloaded" | "adopted" | "delivered" | "pending" | "rejected";
 export type AssetEventType = "asset.candidate_added" | "asset.project_added" | "asset.edited" | "asset.reused" | "asset.downloaded" | "asset.exported" | "asset.adopted" | "asset.delivered" | "asset.pending" | "asset.rejected";
 export type AssetProjection = { resultStatus: AssetResultStatus; usabilityScore: number; downloadCount: number; firstDownloadedAt: string | null; eventCount: number };
@@ -52,10 +54,32 @@ export type ServerAssetVariants = {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const response = await fetch(path, { ...init, credentials: "include" });
     if (!response.ok) {
-        const payload = (await response.json().catch(() => ({}))) as { message?: string; msg?: string };
-        throw new Error(payload.msg || payload.message || "素材请求失败");
+        const payload = (await response.json().catch(() => ({}))) as { message?: string; msg?: string; error?: string; code?: string };
+        throw Object.assign(new Error(payload.msg || payload.message || "素材请求失败"), { status: response.status, code: payload.error || payload.code });
     }
     return response.status === 204 ? (undefined as T) : (response.json() as Promise<T>);
+}
+
+export class ServerAssetContentError extends Error {
+    constructor(readonly status: number, readonly code: "ASSET_OBJECT_MISSING" | "ASSET_STORAGE_UNAVAILABLE") {
+        super(generationPreSubmissionMessage(code) || "参考素材原文件暂时无法核验，请稍后重试或联系管理员；尚未提交生成。");
+        this.name = "ServerAssetContentError";
+    }
+}
+
+/** A ready row is not proof of an object. Only the server's exact missing-object code permits repair. */
+export async function assertServerAssetContent(id: string, signal?: AbortSignal) {
+    signal?.throwIfAborted();
+    let response: Response;
+    try {
+        response = await fetch(`/api/assets/${encodeURIComponent(id)}/content`, { method: "HEAD", credentials: "include", cache: "no-store", signal });
+    } catch (error) {
+        signal?.throwIfAborted();
+        throw new ServerAssetContentError(0, "ASSET_STORAGE_UNAVAILABLE");
+    }
+    signal?.throwIfAborted();
+    if (response.ok) return;
+    throw new ServerAssetContentError(response.status, response.status === 404 && response.headers.get("X-Canvas-Asset-Error") === "ASSET_OBJECT_MISSING" ? "ASSET_OBJECT_MISSING" : "ASSET_STORAGE_UNAVAILABLE");
 }
 
 function assetListUrl(path: string, query: AssetListQuery) {
@@ -87,16 +111,21 @@ export async function fetchServerAssetVariants(id: string, signal?: AbortSignal)
     return payload;
 }
 
-export async function uploadServerAsset(file: File, metadata: Record<string, unknown> = {}, options: { projectId?: string; clientReferenceId?: string; expectedOwnerId?: string; signal?: AbortSignal } = {}) {
+export async function uploadServerAsset(file: File, metadata: Record<string, unknown> = {}, options: { projectId?: string; clientReferenceId?: string; repairAssetId?: string; expectedOwnerId?: string; signal?: AbortSignal } = {}) {
     const { expectedOwnerId, signal, ...bodyOptions } = options;
     const ownerHeaders: Record<string, string> = expectedOwnerId ? { "X-Canvas-Owner-Id": expectedOwnerId } : {};
-    const created = await request<{ assetId: string; uploadUrl: string | null }>("/api/assets/upload-request", {
+    signal?.throwIfAborted();
+    const created = await request<{ assetId: string; uploadUrl: string | null; reused?: boolean }>("/api/assets/upload-request", {
         method: "POST",
         signal,
         headers: { "content-type": "application/json", ...ownerHeaders },
         body: JSON.stringify({ filename: file.name, mimeType: file.type || "application/octet-stream", byteSize: file.size, kind: file.type.startsWith("image/") ? "image" : file.type.startsWith("video/") ? "video" : file.type.startsWith("text/") ? "text" : "other", metadata, ...bodyOptions }),
     });
+    signal?.throwIfAborted();
+    if (options.repairAssetId && created.assetId !== options.repairAssetId) throw new ServerAssetContentError(409, "ASSET_OBJECT_MISSING");
     if (created.uploadUrl) await request<void>(created.uploadUrl, { method: "PUT", headers: { "content-type": file.type || "application/octet-stream", ...ownerHeaders }, body: file, signal });
+    signal?.throwIfAborted();
+    if (!created.uploadUrl || created.reused || options.repairAssetId) await assertServerAssetContent(created.assetId, signal);
     return created.assetId;
 }
 

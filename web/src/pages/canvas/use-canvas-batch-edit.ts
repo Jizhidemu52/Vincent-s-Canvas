@@ -23,7 +23,7 @@ export function useCanvasBatchEdit({ projectId, generationDispatchLocksRef, getC
     flushPendingHistory?: () => unknown;
 }) {
     const { message } = App.useApp();
-    const effectiveConfig = useEffectiveConfig();
+    const effectiveConfig = useEffectiveConfig("canvas");
     const estimateUsage = useBusinessConfigStore(state => state.estimate);
     const addAssets = useAssetStore(state => state.addAssets);
     const setNodes = useCanvasGraphSetter("nodes");

@@ -11,6 +11,7 @@ export type PendingImage = {
     createdAt: number;
     requestId: string;
     taskId?: string;
+    diagnostic?: string;
     recovery?: Exclude<TaskRecoveryKind, "terminal">;
     stopped?: boolean;
     snapshot: ImageRequestSnapshot;

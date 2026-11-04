@@ -144,7 +144,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const user = useUserStore((state) => state.user);
     const attachmentOwner = useUserStore(state => `${state.status}:${state.user?.id || ""}`);
-    const baseConfig = useEffectiveConfig();
+    const baseConfig = useEffectiveConfig("canvas");
     const effectiveConfig = useToolConfig({ ...baseConfig, model: baseConfig.textModel || baseConfig.model }, "canvas-chat");
     const businessModels = useBusinessConfigStore((state) => state.models);
     const businessTools = useBusinessConfigStore((state) => state.tools);

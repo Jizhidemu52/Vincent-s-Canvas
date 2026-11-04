@@ -81,6 +81,34 @@ async function rejected(pending: Promise<unknown>): Promise<unknown> {
     throw new Error("Expected the operation to reject");
 }
 
+describe("canvas media edit-lease fence", () => {
+    test.each(modes)("%s completion waits for renewal without losing its accepted task or result", async mode => {
+        const h = harness(mode, { mediaTask: { ...binding, taskId: "accepted" } });
+        const renewal = Promise.withResolvers<boolean>();
+        const submission = createCanvasMediaSubmission("result", { ...h.context, waitForWriteAccess: () => renewal.promise });
+        const completion = submission.complete({ status: "success", content: "original-result" });
+        expect(h.saved).toEqual([]);
+        expect(h.metadata.mediaTask?.taskId).toBe("accepted");
+        renewal.resolve(true);
+        await completion;
+        expect(h.saved).toHaveLength(1);
+        expect(h.metadata).toMatchObject({ status: "success", content: "original-result" });
+        expect(h.metadata.mediaTask).toBeUndefined();
+        expect(requests).toEqual([]);
+    });
+
+    test.each(modes)("%s old editor cannot complete or fail over a new holder's state", async mode => {
+        const h = harness(mode, { mediaTask: { ...binding, taskId: "accepted" } });
+        const submission = createCanvasMediaSubmission("result", { ...h.context, waitForWriteAccess: async () => false });
+        await expect(submission.complete({ status: "success", content: "stale-result" })).rejects.toMatchObject({ name: "AbortError" });
+        await submission.fail(new Error("late observation failure"), true);
+        expect(h.saved).toEqual([]);
+        expect(h.metadata.mediaTask?.taskId).toBe("accepted");
+        expect(h.metadata.content).toBeUndefined();
+        expect(requests).toEqual([]);
+    });
+});
+
 describe("canvas media identity is persisted before submission continues", () => {
     test.each(modes)("%s requestId is durably awaited before the task POST", async mode => {
         const h = harness(mode);

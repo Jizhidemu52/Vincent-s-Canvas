@@ -37,6 +37,29 @@ test('content authorizes before HEAD/304 and streams untouched bytes with safe h
   });
 });
 
+test('authorized missing originals have an explicit repair code; storage failures and denied assets do not', async () => {
+  let reads = 0, error: unknown;
+  const db = { query: async (_sql: string, values: unknown[]) => ({ rows: values[1] === 'employee-a' ? [{ object_key: 'private-original', mime_type: 'image/png', filename: 'original.png' }] : [] }) };
+  const storage = { head: async () => { reads++; throw error; } };
+  await serve(db, storage, async url => {
+    for (const method of ['HEAD', 'GET']) {
+      error = Object.assign(new Error('private bucket and key'), { name: 'NoSuchKey', $metadata: { httpStatusCode: 404 } });
+      const missing = await fetch(`${url}/api/assets/${id}/content`, { method });
+      expect(missing.status).toBe(404); expect(missing.headers.get('X-Canvas-Asset-Error')).toBe('ASSET_OBJECT_MISSING');
+      if (method === 'GET') { const body = await missing.json(); expect(body.error).toBe('ASSET_OBJECT_MISSING'); expect(JSON.stringify(body)).not.toContain('private'); }
+      for (const cause of [Object.assign(new Error('private bucket forbidden'), { name: 'NotFound', $metadata: { httpStatusCode: 403 } }), Object.assign(new Error('private endpoint timed out'), { name: 'TimeoutError' })]) {
+        error = cause;
+        const unavailable = await fetch(`${url}/api/assets/${id}/content`, { method });
+        expect(unavailable.status).toBe(503); expect(unavailable.headers.get('X-Canvas-Asset-Error')).toBe('ASSET_STORAGE_UNAVAILABLE');
+        expect(await unavailable.text()).not.toContain('private');
+      }
+      const before = reads;
+      const denied = await fetch(`${url}/api/assets/${id}/content`, { method, headers: { 'x-test-owner': 'employee-b' } });
+      expect(denied.status).toBe(404); expect(denied.headers.get('X-Canvas-Asset-Error')).toBeNull(); expect(reads).toBe(before);
+    }
+  });
+});
+
 test('batch delete denies an unauthorized member without mutating any authorized item', async () => {
   const deleted = new Set<string>();
   let updates = 0, begins = 0, rollbacks = 0;

@@ -4,6 +4,7 @@ import { disposeProviderResults } from "../src/media-result-file";
 import { VideoTaskPending, VideoSubmissionClaimLost } from "../src/media-runtime";
 import { ApiMartImageTaskPending } from "../src/apimart-image";
 import { WorkflowTaskPending } from "../src/workflow-task-context";
+import { readSourceAssetObject } from "../src/asset-object-error";
 
 const source = ts.createSourceFile("worker.ts", await Bun.file(new URL("../src/worker.ts", import.meta.url)).text(), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
 function functions(names: string[], dependencies: Record<string, unknown>) {
@@ -17,6 +18,7 @@ test("worker video/audio sources use streamed probes and metadata-only provider 
     let fullReads = 0, streamReads = 0, streamedProbes = 0;
     const bytes = new Uint8Array([1, 2, 3]);
     const api = functions(["loadVideoSourceAssets"], {
+      readSourceAssetObject,
       db: { query: async (sql: string, parameters: unknown[]) => {
         expect(parameters).toEqual([id, "owner"]); expect(sql).toContain("owner_user_id=$2"); expect(sql).toContain("deleted_at IS NULL"); expect(sql).toContain("status='ready'");
         return { rows: [{ object_key: "owned/source", mime_type: mime, byte_size: 3 }] };

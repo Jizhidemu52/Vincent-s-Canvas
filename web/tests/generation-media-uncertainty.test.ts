@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
     QueuedTaskFailedError,
+    QueuedTaskHttpError,
     QueuedTaskPausedError,
     QueuedTaskSubmissionUncertainError,
     requestQueuedMedia,
@@ -221,6 +222,27 @@ describe("unacknowledged media submissions retain request identity", () => {
             expect(cancellations()).toEqual([]);
         });
     }
+
+    test.each(["PROMPT_RECIPE_UNAVAILABLE", "ASSET_OBJECT_MISSING"])("explicit pre-submission code %s is not an unknown 503 and never starts recovery polling", async code => {
+        network({ submit: () => Response.json({ error: code, message: "明确的准备阶段错误，未提交生成" }, { status: 503 }) });
+        const error = await rejected(requestQueuedMedia(input("video_generation")));
+        expect(error).toBeInstanceOf(QueuedTaskHttpError);
+        expect(error).not.toBeInstanceOf(QueuedTaskSubmissionUncertainError);
+        expect(error).toMatchObject({ status: 503, code, submissionRejected: true });
+        expect((error as Error).message).toContain("尚未提交生成");
+        expect(generationErrorDiagnostic(error)).toContain(`code: ${code}`);
+        expect(taskPosts()).toHaveLength(1);
+        expect(requests.some(request => request.path.includes("/by-request/"))).toBe(false);
+        expect(polls()).toEqual([]);
+    });
+
+    test.each([undefined, "UNKNOWN", "PROMPT_SUBMISSION_UNCERTAIN"])("HTTP 503 with code %s and optimistic wording remains uncertain", async code => {
+        network({ submit: () => Response.json({ error: code, message: "未提交生成" }, { status: 503 }) });
+        const error = await rejected(requestQueuedMedia(input("video_generation")));
+        expectUncertain(error);
+        expect(generationErrorDiagnostic(error)).toContain("HTTP 503");
+        expect(taskPosts()).toHaveLength(1);
+    });
 });
 
 describe("acknowledged media tasks retain their original taskId", () => {
@@ -281,6 +303,9 @@ describe("acknowledged media tasks retain their original taskId", () => {
             expect(error).toBeInstanceOf(QueuedTaskFailedError);
             expect(error).not.toBeInstanceOf(QueuedTaskSubmissionUncertainError);
             expect((error as QueuedTaskFailedError).task).toMatchObject({ id: "media-task", status, failureReason: `confirmed-${status}` });
+            expect(error).toMatchObject({ taskId: "media-task", requestId: taskPosts()[0]!.body!.requestId });
+            expect(generationErrorDiagnostic(error)).toContain("taskId: media-task");
+            expect(generationErrorDiagnostic(error)).toContain(`requestId: ${taskPosts()[0]!.body!.requestId}`);
             expect(taskPosts()).toHaveLength(1);
             expect(polls()).toHaveLength(1);
             expect(cancellations()).toEqual([]);

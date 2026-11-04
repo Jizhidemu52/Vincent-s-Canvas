@@ -6,6 +6,7 @@ import React, { type DependencyList, type EffectCallback, type ReactElement } fr
 import ts from "typescript";
 import { imageModelProfile, normalizeImageModelSettings } from "@/lib/image-model-settings";
 import * as referencePolicy from "@/lib/image-reference-policy";
+import { QueuedTaskFailedError, QueuedTaskPausedError, QueuedTaskSubmissionUncertainError } from "@/services/api/generation-tasks";
 
 const pageUrl = new URL("../src/pages/image/index.tsx", import.meta.url);
 const requireModule = createRequire(pageUrl);
@@ -179,7 +180,8 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
         "@/lib/image-utils": { readImageMeta: async () => ({ width: 1024, height: 1024, mimeType: "image/png" }), getDataUrlByteSize: () => 100, formatBytes: String, formatDuration: String },
         "@/services/api/server-assets": { fetchServerAssetContent: async () => { throw new Error("Unexpected asset request"); }, recordServerAssetEvent() {} },
         "@/services/api/generation-history": { restoreGenerationDraft: async () => { if (!restoredDraft) throw new Error("Unexpected restore request"); return restoredDraft; } },
-        "@/services/api/generation-tasks": { QueuedTaskFailedError: class extends Error {}, QueuedTaskPausedError: class extends Error {}, QueuedTaskSubmissionUncertainError: class extends Error {}, getQueuedTask: async () => { throw new Error("Unexpected legacy task lookup for explicitly scoped logs"); } },
+        "@/services/api/generation-tasks": { QueuedTaskFailedError, QueuedTaskPausedError, QueuedTaskSubmissionUncertainError, getQueuedTaskByRequestId: async () => null, getQueuedTask: async () => { throw new Error("Unexpected legacy task lookup for explicitly scoped logs"); } },
+        "@/services/api/task-result-reconciliation": { ...requireModule("@/services/api/task-result-reconciliation"), watchTaskReconciliation: async () => undefined },
         "@/services/api/prompts": { hydratePromptReuse: async () => { throw new Error("Unexpected reuse request"); }, savePromptFromTask() {} },
         "file-saver": { saveAs() {} }, nanoid: { nanoid: () => `generated-${++sequence}` },
     };
@@ -250,6 +252,7 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
         references() { return elements(render()).find(item => item.type === "ReferenceImageTray")!.props; },
         queueProgress() { return elements(render()).find(item => item.type === "GenerationQueueProgress")!.props; },
         prompt() { return elements(render()).find(item => item.type === "TextArea")!.props; },
+        optimize() { return elements(render()).find(item => typeof item.type === "function" && item.type.name === "PromptOptimizeButton")!.props; },
         generate() { return elements(render()).find(item => item.type === "Button" && item.props.type === "primary" && item.props.block)!.props; },
     };
 }
@@ -604,6 +607,91 @@ describe("image workspace isolation", () => {
         expect(page.requests).toHaveLength(1);
         expect(page.requests[0]!.args[0].count).toBe("1");
         expect(page.errors).toEqual([]);
+    });
+});
+
+describe("image optimization uses the workspace operation", () => {
+    const references = [{ id: "reference", name: "source.png", type: "image/png", dataUrl: "data:image/png;base64,YQ==" }];
+    const compiled = { scene: "free-optimize", userText: "make it blue", fields: {}, mode: "generate", referenceRoles: ["source.png"], compilationId: "11111111-1111-4111-8111-111111111111" };
+    const makePage = () => pageHarness([], async () => [{ id: "result", dataUrl: "data:image/png;base64,YQ==" }]);
+
+    test("reference-guided image generation keeps generation mode from optimizer to task", async () => {
+        const page = makePage(); await page.settle();
+        page.references().onChange(references);
+        page.prompt().onChange({ target: { value: "make it blue" } });
+        expect(page.optimize().operationType).toBe("image_generation");
+        page.optimize().onApply("optimized blue", {}, compiled);
+        page.generate().onClick(); await page.settle();
+        expect(page.requests).toHaveLength(1);
+        expect(page.requests[0]!.kind).toBe("generate");
+        expect(page.requests[0]!.args[2]).toMatchObject({ operationType: "image_generation", promptInput: compiled });
+        expect(page.requests[0]!.args[3]).toHaveLength(1);
+    });
+
+    test("changing models discards an old manual compilation but preserves the visible prompt", async () => {
+        const page = makePage(); await page.settle();
+        page.optimize().onApply("optimized blue", {}, { ...compiled, referenceRoles: [] });
+        page.config.imageModel = page.config.model = "replacement-model";
+        await page.settle();
+        expect(page.prompt().value).toBe("optimized blue");
+        // Returning to the original model must not resurrect the invalidated binding.
+        page.config.imageModel = page.config.model = "test-model";
+        page.generate().onClick(); await page.settle();
+        expect(page.requests[0]!.args[2].promptInput).toBeUndefined();
+        expect(page.requests[0]!.args[1]).toBe("optimized blue");
+    });
+
+    test("detail enhancement offers plain instructions without a compiler payload", async () => {
+        const page = makePage(); page.navigate("detail-enhance"); await page.settle();
+        page.references().onChange(references);
+        page.prompt().onChange({ target: { value: "preserve fabric and enhance detail" } });
+        expect(page.optimize().operationType).toBe("upscale");
+        expect(page.generate().disabled).toBe(false);
+        page.generate().onClick(); await page.settle();
+        expect(page.requests[0]!.kind).toBe("edit");
+        expect(page.requests[0]!.args[4]).toMatchObject({ operationType: "upscale" });
+        expect(page.requests[0]!.args[4].promptInput).toBeUndefined();
+    });
+
+    test("text-to-style with reference images retains its required generation recipe", async () => {
+        const page = makePage();
+        page.setCreative({ id: "text-to-style", tool: "image-generation", title: "Creative", description: "", group: "new" });
+        await page.settle();
+        page.references().onChange(references);
+        page.prompt().onChange({ target: { value: "a blue dress" } });
+        expect(page.optimize()).toMatchObject({ scene: "text-to-style", operationType: "image_generation" });
+        page.generate().onClick(); await page.settle();
+        expect(page.requests[0]!.kind).toBe("generate");
+        expect(page.requests[0]!.args[2]).toMatchObject({ operationType: "image_generation", promptInput: { scene: "text-to-style", mode: "generate" } });
+    });
+});
+
+describe("image failure diagnostics", () => {
+    test("a confirmed failed task remains identifiable after its recovery record is removed", async () => {
+        const page = pageHarness([], async () => { throw new QueuedTaskFailedError({ id: "failed-task", requestId: "failed-request:0", status: "failed", resultUrls: [], failureReason: "provider rejected the original request" }); });
+        await page.settle();
+        page.prompt().onChange({ target: { value: "a blue dress" } });
+        page.generate().onClick(); await page.settle();
+        const card = page.failedCards()[0]!;
+        expect(card.props).toMatchObject({ taskId: "failed-task", requestId: "failed-request:0" });
+        expect(card.props.recovery).toBeUndefined();
+        const diagnostic = elements((card.type as Function)(card.props)).find(element => typeof element.type === "function" && element.type.name === "GenerationDiagnostic")!;
+        expect(diagnostic.props.details).toContain("taskId: failed-task");
+        expect(diagnostic.props.details).toContain("requestId: failed-request:0");
+    });
+
+    test("refreshing an unknown image submission preserves its original diagnostic and never resubmits", async () => {
+        const page = pageHarness([], async () => { throw new QueuedTaskSubmissionUncertainError(`${page.requests[0]!.args[2].requestId}:0`, undefined, new Error("original optimizer diagnostic")); });
+        await page.settle();
+        page.prompt().onChange({ target: { value: "a blue dress" } });
+        page.generate().onClick(); await page.settle();
+        expect(page.failedCards()[0]!.props.diagnostic).toContain("original optimizer diagnostic");
+        await page.failedCards()[0]!.props.onRetry(); await page.settle();
+        const refreshed = page.failedCards()[0]!;
+        expect(refreshed.props.error).toContain("原任务尚未查到");
+        expect(refreshed.props.diagnostic).toContain("original optimizer diagnostic");
+        expect(refreshed.props.requestId).toBe(`${page.requests[0]!.args[2].requestId}:0`);
+        expect(page.requests).toHaveLength(1);
     });
 });
 

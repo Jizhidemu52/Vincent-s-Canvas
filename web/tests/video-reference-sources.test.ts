@@ -33,6 +33,7 @@ test("uploads and existing asset URLs retain source order through preflight and 
         const path = String(input);
         if (path === "/api/models") return Response.json({ models: [{ id: "seedance", modelId: "doubao-seedance-2.5", name: "Seedance", capabilities: ["video"], creditCost: 0, rmbCost: 0 }], tools: [], prices: [] });
         if (path === "/api/auth/session") return Response.json({ user: null });
+        if (/^\/api\/assets\/[^/]+\/content$/.test(path) && init?.method === "HEAD") return new Response(null, { status: 200 });
         if (path === "/api/assets/upload-request") {
             uploads.push(JSON.parse(String(init?.body)));
             return Response.json({ assetId: `upload-${uploads.length}`, uploadUrl: null });

@@ -44,7 +44,7 @@ import { createLatestVideoPreview, hydrateVideoLogMedia } from "./video-log-medi
 import { deleteStoredMedia, resolveMediaUrl, uploadMediaFile } from "@/services/file-storage";
 import { resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { createVideoGenerationTask, storeGeneratedVideo, type VideoGenerationTask } from "@/services/api/video";
-import { getQueuedTaskByRequestId, QueuedTaskPausedError, QueuedTaskSubmissionUncertainError, recoverQueuedTask, waitForTasks } from "@/services/api/generation-tasks";
+import { getQueuedTaskByRequestId, QueuedTaskFailedError, QueuedTaskPausedError, QueuedTaskSubmissionUncertainError, recoverQueuedTask, waitForTasks } from "@/services/api/generation-tasks";
 import { resolveConfiguredToolModel } from "@/services/api/tool-runtime";
 import type { PublicModel } from "@/services/api/business-config";
 import { fetchServerAssetContent } from "@/services/api/server-assets";
@@ -116,7 +116,6 @@ type UpdateAiConfig = <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => 
 
 const logStore = createWorkspaceStorage("video_generation_logs");
 
-class TerminalVideoTaskError extends Error {}
 
 export function videoModelSummaryLabel(config: AiConfig, model: string, models: readonly Pick<PublicModel, "id" | "modelId" | "name">[]) {
     const selected = models.find(item => item.id === model || item.modelId === modelOptionName(model));
@@ -361,7 +360,7 @@ function VideoGenerationWorkspace() {
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : "生成失败";
             const uncertain = error instanceof QueuedTaskSubmissionUncertainError;
-            const diagnostic = generationErrorDiagnostic(error);
+            const diagnostic = generationErrorDiagnostic(error, { requestId: log.requestId, taskId: log.task?.id });
             setResults(current => current.map(item => item.id === log.id ? { id: log.id, status: uncertain ? "paused" : "failed", error: errorMessage, diagnostic, ...(uncertain ? { recovery: { logId: log.id, canRecover: true } } : {}) } : item));
             await saveLog({ ...log, status: uncertain ? "查询暂停" : "失败", error: errorMessage, diagnostic, durationMs: Date.now() - log.createdAt, canRecover: uncertain ? true : undefined });
             message.error(uiText(errorMessage));
@@ -546,7 +545,8 @@ function VideoGenerationWorkspace() {
             }
             if (recover) await recoverQueuedTask(task.id, controller.signal);
             const [completed] = await waitForTasks([task.id], controller.signal, undefined, true);
-            if (!completed || completed.status !== "success") throw new TerminalVideoTaskError(completed?.failureReason || "原视频任务已失败或取消");
+            if (!completed) throw new Error("原视频任务暂时无法查询，请继续查询原任务，不要重复生成");
+            if (completed.status !== "success") throw new QueuedTaskFailedError(completed);
             log = { ...log, effectivePrompt: completed.prompt || log.effectivePrompt, summaryZh: videoMotionSummary(completed) || log.summaryZh };
             if (!completed.resultUrls[0]) throw new Error("原视频任务暂时没有可读取结果，请继续查询");
             const stored = await storeGeneratedVideo({ url: completed.resultUrls[0], mimeType: "video/mp4" });
@@ -570,8 +570,9 @@ function VideoGenerationWorkspace() {
         } catch (error) {
             if (useUserStore.getState().user?.id !== ownerId) return;
             const errorMessage = controller.signal.aborted ? "已停止本页查询；服务端任务可能继续，可查询原任务。" : error instanceof Error ? error.message : "暂时无法查询原任务";
-            const canRecover = error instanceof QueuedTaskPausedError ? error.canRecover : error instanceof TerminalVideoTaskError ? undefined : true;
-            const diagnostic = generationErrorDiagnostic(error);
+            const canRecover = error instanceof QueuedTaskPausedError ? error.canRecover : error instanceof QueuedTaskFailedError ? undefined : true;
+            // A later missing/read-failed lookup cannot erase the original POST failure.
+            const diagnostic = canRecover !== undefined && log.diagnostic ? log.diagnostic : generationErrorDiagnostic(error, { requestId: log.requestId || task?.requestId, taskId: task?.id });
             displayResult({ id: log.id, status: canRecover === undefined ? "failed" : "paused", error: errorMessage, diagnostic, ...(canRecover !== undefined ? { recovery: { logId: log.id, task, canRecover } } : {}) });
             await saveLog({ ...log, status: canRecover === undefined ? "失败" : "查询暂停", durationMs: Date.now() - log.createdAt, error: errorMessage, diagnostic, canRecover });
             if (isCurrent() && !controller.signal.aborted) message.warning(uiText(errorMessage));
@@ -622,7 +623,7 @@ function VideoGenerationWorkspace() {
                     setVideoReferences(resolved.videoReferences);
                     setAudioReferences(resolved.audioReferences);
                 }
-                setResults(resolved.status === "生成中" ? [{ id: resolved.id, status: "pending" }] : resolved.video ? [{ id: resolved.id, status: "success", video: resolved.video }] : [{ id: resolved.id, status: "failed", error: resolved.error || "生成失败", ...((resolved.task || resolved.requestId) && resolved.canRecover !== undefined ? { recovery: { logId: resolved.id, task: resolved.task, canRecover: resolved.canRecover } } : {}) }]);
+                setResults(resolved.status === "生成中" ? [{ id: resolved.id, status: "pending" }] : resolved.video ? [{ id: resolved.id, status: "success", video: resolved.video }] : [{ id: resolved.id, status: "failed", error: resolved.error || "生成失败", diagnostic: resolved.diagnostic, taskId: resolved.task?.id, ...((resolved.task || resolved.requestId) && resolved.canRecover !== undefined ? { recovery: { logId: resolved.id, task: resolved.task, canRecover: resolved.canRecover } } : {}) }]);
             },
             (error) => { setPreviewLoading(false); setPreviewError(error instanceof Error ? uiText(error.message) : uiText("记录中的媒体暂时无法读取")); },
         );

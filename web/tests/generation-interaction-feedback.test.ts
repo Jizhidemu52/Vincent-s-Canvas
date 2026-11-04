@@ -42,6 +42,20 @@ describe("generation interaction safety", () => {
         expect(error.message).toContain("网络连接失败");
         expect(generationErrorDiagnostic(error)).toContain("Failed to fetch");
     });
+    test("only explicit pre-submission codes override generic HTTP 503 guidance", () => {
+        expect(generationErrorMessage("管理员尚未启用此场景的配方版本，未提交生成", 503, "PROMPT_RECIPE_UNAVAILABLE")).toContain("尚未提交生成");
+        expect(generationErrorMessage("未提交生成", 503, "UNRECOGNIZED_ERROR")).not.toContain("尚未提交生成");
+        expect(generationErrorMessage("connection lost", 503)).toContain("查询原任务");
+    });
+    test("diagnostic context preserves lookup identifiers without serializing task data", () => {
+        const error = Object.assign(new Error("安全失败原因"), { taskId: "actual-task", requestId: "actual-request", task: { prompt: "private input", parameters: { secret: "private-value" } } });
+        const diagnostic = generationErrorDiagnostic(error, { taskId: "fallback-task", requestId: "fallback-request" });
+        expect(diagnostic).toContain("taskId: actual-task");
+        expect(diagnostic).toContain("requestId: actual-request");
+        expect(diagnostic).not.toContain("private");
+        expect(diagnostic).not.toContain("fallback");
+        expect(generationErrorDiagnostic(new Error("尚未提交"), { requestId: "prepared-request" })).toContain("requestId: prepared-request");
+    });
     test("download filenames distinguish versions and times and remove filesystem-unsafe characters", () => {
         const a = generationDownloadName('作品/一:二', "mp4", new Date("2026-01-01T00:00:00Z"));
         const b = generationDownloadName('作品/一:二', "mp4", new Date("2026-01-01T00:00:01Z"));

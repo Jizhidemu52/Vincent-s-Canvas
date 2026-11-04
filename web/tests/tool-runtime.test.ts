@@ -36,6 +36,10 @@ function mockServer(config: BusinessConfig, taskError = false) {
         requests.push({ path, body });
         if (path === "/api/models") return Response.json(config);
         if (path === "/api/assets/upload-request") return Response.json({ assetId: "reference-1", uploadUrl: null });
+        if (path === "/api/assets/reference-1/content" && init?.method === "HEAD") {
+            expect(init).toMatchObject({ credentials: "include", cache: "no-store" });
+            return new Response(null, { status: 200, headers: { "content-type": "image/png" } });
+        }
         if (path === "/api/tasks/preflight") return Response.json({ ok: true, normalized: { seconds: 5 } });
         if (path === "/api/tasks" && init?.method === "POST") return taskError ? Response.json({ message: "板块模型已变化，请刷新后重试", code: "TOOL_MODEL_CHANGED" }, { status: 409 }) : Response.json({ task: { id: "task-1", status: "queued" } });
         if (path === "/api/tasks/batch") return Response.json({ batchId: "batch-1", tasks: [{ id: "task-1", itemIndex: 0 }], failures: [] });

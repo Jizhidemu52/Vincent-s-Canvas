@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { DEFAULT_IMAGE_MODEL, preferredImageModel } from "@/lib/default-image-model";
+import { DEFAULT_CANVAS_IMAGE_MODEL, DEFAULT_IMAGE_MODEL, preferredImageModel } from "@/lib/default-image-model";
 import { resolveCapabilityModel } from "@/lib/model-picker-options";
 import { defaultConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
@@ -65,5 +65,25 @@ describe("APIMart GPT2 default selection", () => {
         Object.assign(businessInitialState, { status: "loading", models: [] });
         renderToStaticMarkup(<ReadConfig />);
         expect(selected.imageModel).toBe("mark-flare");
+    });
+
+    test("canvas starts with Flare while other workspaces and saved node choices remain unchanged", () => {
+        const saved = { ...defaultConfig, model: "mark-gpt2", imageModel: "mark-gpt2" };
+        Object.assign(configInitialState, { config: saved });
+        Object.assign(businessInitialState, { models, status: "ready" });
+        let canvasConfig = defaultConfig;
+        let regularConfig = defaultConfig;
+        function ReadConfig() { canvasConfig = useEffectiveConfig("canvas"); regularConfig = useEffectiveConfig(); return null; }
+        renderToStaticMarkup(<ReadConfig />);
+        expect(canvasConfig).toMatchObject({ model: "mark-flare", imageModel: "mark-flare" });
+        expect(regularConfig).toMatchObject({ model: "mark-gpt2", imageModel: "mark-gpt2" });
+        expect(configInitialState.config).toBe(saved);
+        expect(resolveCapabilityModel(canvasConfig, "image", models, "mark-gpt2")).toBe("mark-gpt2");
+        Object.assign(businessInitialState, { status: "loading", models: [] });
+        renderToStaticMarkup(<ReadConfig />);
+        expect(canvasConfig.imageModel).toBe(DEFAULT_CANVAS_IMAGE_MODEL);
+        Object.assign(businessInitialState, { status: "ready", models: models.filter(model => model.id !== "mark-flare") });
+        renderToStaticMarkup(<ReadConfig />);
+        expect(canvasConfig.imageModel).toBe("mark-gpt2");
     });
 });

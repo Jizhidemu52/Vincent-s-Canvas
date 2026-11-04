@@ -60,6 +60,7 @@ function harness(prepare: () => Promise<void> = async () => undefined) {
         "@/hooks/use-tool-config": { ...requireModule("@/hooks/use-tool-config"), currentToolConfig: (current: AiConfig) => ({ ...current, model: boundModel || current.model }) },
     };
     const runtime = {
+        waitForWriteAccess: async () => true, isObservationCurrent: () => true,
         async createOptions() {
             await prepare();
             return { async generate(config: AiConfig, prompt: string, references: ReferenceImage[], _mask: unknown, _edit: boolean, promptInput?: PromptInputData) {

@@ -129,7 +129,7 @@ async function submitFromProject(sourceSize: { width: number; height: number }, 
         isAiConfigReady: (config: AiConfig) => { seen.push(config); return false; }, handleMissingModelConfig: () => {},
         message: { error: (error: string) => errors.push(error) }, createOptions: () => { paidCalls++; },
         useUserStore: { getState: () => ({ user: null }) },
-        isCurrent: () => true,
+        isCurrent: () => true, waitForWriteAccess: async () => true,
     };
     const submit = new Function(...Object.keys(deps), `${code}\nreturn submit;`)(...Object.values(deps));
     await submit({ metadata: { content: "source", size: "1:1", naturalWidth: 1024, naturalHeight: 1024 }, width: 300, height: 300 }, {

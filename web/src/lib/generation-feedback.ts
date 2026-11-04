@@ -1,7 +1,19 @@
 import { publicGenerationFailure } from "../../../shared/generation-error";
 
+/** Only explicit pre-admission business codes prove that no generation was submitted. */
+export function generationPreSubmissionMessage(code?: string): string | undefined {
+    if (code === "PROMPT_RECIPE_UNAVAILABLE") return "当前场景的优化配方暂不可用，请联系管理员检查配方版本和模型配置；尚未提交生成。";
+    if (code === "ASSET_OBJECT_MISSING") return "参考素材原文件缺失，请重新上传同一份原文件或联系管理员恢复；尚未提交生成。";
+}
+
+export function generationSubmissionRejected(status: number, code?: string): boolean {
+    return Boolean(generationPreSubmissionMessage(code)) || (status >= 400 && status < 500 && status !== 408 && !["PROMPT_OPTIMIZING", "PROMPT_SUBMISSION_UNCERTAIN"].includes(code || ""));
+}
+
 /** Keep human guidance separate from the original diagnostic. Never infer that an unknown paid submission failed. */
-export function generationErrorMessage(error: unknown, status?: number): string {
+export function generationErrorMessage(error: unknown, status?: number, code?: string): string {
+    const notSubmitted = generationPreSubmissionMessage(code);
+    if (notSubmitted) return notSubmitted;
     const raw = error instanceof Error ? error.message : String(error || "");
     if (/暂无法恢复上游查询|提交结果待核查/.test(raw)) return "提交结果待核查，暂无法恢复上游查询。请联系管理员核对原任务；可刷新状态，请勿重复提交。";
     if (/待核查|勿重复|不要重复|查询暂停|停止本页查询|原请求待查询/.test(raw)) return "原任务状态尚未确认，请继续查询原任务，不要重复生成。";
@@ -25,8 +37,9 @@ export function shouldConfirmPromptReuse(current: string, next: string) {
     return Boolean(current.trim()) && current !== next;
 }
 
-export function generationErrorDiagnostic(error: unknown): string {
-    if (!(error instanceof Error)) return String(error || "");
+export function generationErrorDiagnostic(error: unknown, context: { requestId?: string; taskId?: string } = {}): string {
+    if (!(error instanceof Error)) return [String(error || ""), context.requestId ? `requestId: ${context.requestId}` : "", context.taskId ? `taskId: ${context.taskId}` : ""].filter(Boolean).join("\n");
     const info = error as Error & { diagnostic?: string; status?: number; code?: string; requestId?: string; taskId?: string; cause?: unknown };
-    return [info.name, info.diagnostic || info.message, info.status ? `HTTP ${info.status}` : "", info.code ? `code: ${info.code}` : "", info.requestId ? `requestId: ${info.requestId}` : "", info.taskId ? `taskId: ${info.taskId}` : "", info.cause ? generationErrorDiagnostic(info.cause) : ""].filter(Boolean).join("\n");
+    const requestId = info.requestId || context.requestId, taskId = info.taskId || context.taskId;
+    return [info.name, info.diagnostic || info.message, info.status ? `HTTP ${info.status}` : "", info.code ? `code: ${info.code}` : "", requestId ? `requestId: ${requestId}` : "", taskId ? `taskId: ${taskId}` : "", info.cause ? generationErrorDiagnostic(info.cause) : ""].filter(Boolean).join("\n");
 }

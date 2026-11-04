@@ -114,6 +114,10 @@ describe("video model parameter contract", () => {
             if (url === "/api/models") return Response.json(businessConfigFor("happyhorse-1.1"));
             if (url === "/api/auth/session") return Response.json({ user: null });
             if (url === "/api/assets/upload-request") return Response.json({ assetId: "reference-image", uploadUrl: null });
+            if (url === "/api/assets/reference-image/content" && init?.method === "HEAD") {
+                expect(init).toMatchObject({ credentials: "include", cache: "no-store" });
+                return new Response(null, { status: 200, headers: { "content-type": "image/png" } });
+            }
             if (url === "/api/tasks/preflight" || url === "/api/tasks") {
                 payloads.push(JSON.parse(String(init?.body)));
                 return Response.json(url === "/api/tasks/preflight" ? { ok: true, normalized: {} } : { task: { id: "reference-task" } });

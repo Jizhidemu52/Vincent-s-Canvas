@@ -40,6 +40,7 @@ import { resetWorkerHealth, startWorkerHealth } from "./worker-health";
 import { imageAgentProviderPrompt } from "./image-agent-profile";
 import { postgresPromptRecipeStore } from "./prompt-recipe-postgres";
 import { PromptOptimizationError } from "./prompt-safety";
+import { AssetObjectError, readSourceAssetObject } from "./asset-object-error";
 
 type WorkRow = {
   id: string;
@@ -184,7 +185,7 @@ async function runTask(taskId: string) {
       keepModelSlot = true; outcome = "paused"; return;
     }
     const transportDiagnostics = readProviderSubmissionDiagnostics(error);
-    const reason = task.parameters.imageAgentProfile && !(error instanceof PromptOptimizationError)
+    const reason = task.parameters.imageAgentProfile && !(error instanceof PromptOptimizationError) && !(error instanceof AssetObjectError)
       ? "图片助手任务未完成，请查询任务状态；服务端已隐藏上游内部详情。"
       : error instanceof Error ? error.message.slice(0, 2_000) : "任务执行失败";
     if (providerProducedResult) {
@@ -733,7 +734,7 @@ async function loadSourceAsset(url: string, userId: string): Promise<SourceAsset
   );
   const asset = result.rows[0];
   if (!asset) throw new Error("参考图不存在或无权访问");
-  const object = await storage.get(asset.object_key);
+  const object = await readSourceAssetObject(storage, asset.object_key);
   return {
     objectKey: asset.object_key,
     bytes: await object.Body!.transformToByteArray(),
@@ -756,7 +757,7 @@ async function loadVideoSourceAssets(urls: string[], userId: string): Promise<Pr
     const byteSize = Number(asset.byte_size);
     const isImage = asset.mime_type.startsWith("image/");
     if (isImage && byteSize > 10 * 1024 * 1024) throw new Error("视频参考图片不能超过 10MB");
-    const object = await storage.get(asset.object_key);
+    const object = await readSourceAssetObject(storage, asset.object_key);
     if (!object.Body) throw new Error("参考素材内容为空或无法读取");
     // Only images need resident bytes for APIMart upload; video/audio are signed URLs.
     const bytes = isImage ? await object.Body.transformToByteArray() : new Uint8Array();

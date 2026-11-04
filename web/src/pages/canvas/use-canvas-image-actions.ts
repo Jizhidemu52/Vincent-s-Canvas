@@ -28,7 +28,7 @@ type ImageActions = ReturnType<typeof createCanvasImageActionsRuntime>;
 export function useCanvasImageActions(options: CanvasImageActionsOptions) {
     const { projectId } = options;
     const { message } = App.useApp();
-    const effectiveConfig = useEffectiveConfig();
+    const effectiveConfig = useEffectiveConfig("canvas");
     const setField = useCanvasGraphStore(state => state.setField);
     const scope = useMemo(() => ({ active: true, runner: null as ReturnType<typeof createCanvasImageOperationRunner> | null }), [projectId]);
     useEffect(() => {
@@ -37,22 +37,22 @@ export function useCanvasImageActions(options: CanvasImageActionsOptions) {
     }, [scope]);
     const runLocalImageOperation = useCallback(async (key: string, label: string, task: (signal: AbortSignal) => Promise<void>) => {
         const ownerId = useUserStore.getState().user?.id;
-        const isCurrent = () => scope.active && useUserStore.getState().user?.id === ownerId;
+        const isCurrent = () => scope.active && options.runtime.isObservationCurrent() && useUserStore.getState().user?.id === ownerId;
         try {
             const { runCanvasLocalImageOperation } = await import("./canvas-image-actions-runtime");
-            return isCurrent() ? runCanvasLocalImageOperation({ scope, projectId, message, key, label, task }) : false;
+            return await options.runtime.waitForWriteAccess() && isCurrent() ? runCanvasLocalImageOperation({ scope, projectId, message, key, label, task }) : false;
         } catch {
             if (isCurrent()) message.error(uiText("加载失败，请重试"));
             return false;
         }
-    }, [scope, message, projectId]);
+    }, [scope, message, projectId, options.runtime.waitForWriteAccess, options.runtime.isObservationCurrent]);
     const latest = useRef({ ...options, message, effectiveConfig, setField, runLocalImageOperation });
     latest.current = { ...options, message, effectiveConfig, setField, runLocalImageOperation };
 
     const invoke = useCallback(async <K extends keyof ImageActions>(action: K, ...args: Parameters<ImageActions[K]>) => {
         const context = latest.current;
         const ownerId = useUserStore.getState().user?.id;
-        const isCurrent = () => scope.active && context.designProjectIdRef.current === context.projectId && useUserStore.getState().user?.id === ownerId;
+        const isCurrent = () => scope.active && context.runtime.isObservationCurrent() && context.designProjectIdRef.current === context.projectId && useUserStore.getState().user?.id === ownerId;
         let module: typeof import("./canvas-image-actions-runtime");
         try { module = await import("./canvas-image-actions-runtime"); }
         catch (error) {
@@ -60,7 +60,7 @@ export function useCanvasImageActions(options: CanvasImageActionsOptions) {
             if (isCurrent()) message.error(uiText("加载失败，请重试"));
             return;
         }
-        if (!isCurrent()) {
+        if (!await context.runtime.waitForWriteAccess() || !isCurrent()) {
             if (action === "saveManualImageEdit") throw new Error("画布或账号已切换，请重新打开图片编辑");
             return;
         }

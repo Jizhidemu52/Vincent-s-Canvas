@@ -12,12 +12,12 @@ export type CanvasProjectSaveSnapshot = {
 };
 
 type UpdateProject = (id: string, patch: CanvasProjectPatch) => void;
-export function useCanvasPersistenceQueue(updateProject: UpdateProject) {
+export function useCanvasPersistenceQueue(updateProject: UpdateProject, writable?: RefObject<boolean>) {
     const projectSaveQueueRef = useRef<CanvasProjectSaveQueue<CanvasProjectSaveSnapshot> | null>(null);
     const projectSaveHandlerRef = useRef<(snapshot: CanvasProjectSaveSnapshot) => void>(() => undefined);
     projectSaveHandlerRef.current = ({ projectId: id, patch }) => updateProject(id, patch);
     if (!projectSaveQueueRef.current) {
-        projectSaveQueueRef.current = createCanvasProjectSaveQueue(180, (snapshot) => projectSaveHandlerRef.current(snapshot));
+        projectSaveQueueRef.current = createCanvasProjectSaveQueue(180, (snapshot) => projectSaveHandlerRef.current(snapshot), undefined, () => writable?.current !== false);
     }
     return projectSaveQueueRef;
 }
@@ -32,6 +32,7 @@ export function useCanvasPersistence(options: {
     writable?: RefObject<boolean>;
 }) {
     const { projectId, projectLoaded, usePerformanceScenario, projectSaveQueueRef, updateProject, batchEditRunning, runningNodeId, viewport, selectedNodeIds } = options;
+    const canWrite = options.writable?.current !== false;
     const { historyRef, lastHistoryRef, historyPausedRef, applyingHistoryRef, historyState } = options.history;
     const { nodes, connections, groups, chatSessions, activeChatId, backgroundMode, showImageInfo } = options.current;
     const savedProjectIdRef = useRef(projectId);
@@ -39,7 +40,7 @@ export function useCanvasPersistence(options: {
     const viewportSaveHandlerRef = useRef(updateProject);
     viewportSaveHandlerRef.current = updateProject;
     if (!viewportSaveQueueRef.current) {
-        viewportSaveQueueRef.current = createCanvasProjectSaveQueue(500, ({ projectId: id, ...viewState }) => viewportSaveHandlerRef.current(id, viewState));
+        viewportSaveQueueRef.current = createCanvasProjectSaveQueue(500, ({ projectId: id, ...viewState }) => viewportSaveHandlerRef.current(id, viewState), undefined, () => options.writable?.current !== false);
     }
     useEffect(() => {
         if (savedProjectIdRef.current === projectId) return;
@@ -61,6 +62,15 @@ export function useCanvasPersistence(options: {
             batchEditRunning || runningNodeId ? 900 : 180,
         );
     }, [activeChatId, backgroundMode, batchEditRunning, chatSessions, connections, groups, historyState, nodes, projectId, projectLoaded, runningNodeId, showImageInfo, usePerformanceScenario]);
+
+    useEffect(() => {
+        if (!canWrite) return;
+        // A quick renewal can finish before React paints "recovering". Let the
+        // queues remember the blocked flush instead of relying on that render.
+        const resumedProject = projectSaveQueueRef.current?.resume();
+        const resumedViewport = viewportSaveQueueRef.current?.resume();
+        if (resumedProject || resumedViewport) void flushCanvasPersistence().catch(() => undefined);
+    });
 
     useEffect(() => {
         const flushProjectSave = () => {
@@ -90,6 +100,10 @@ export function useCanvasPersistence(options: {
             window.removeEventListener("pagehide", flushProjectSave);
             document.removeEventListener("visibilitychange", onVisibility);
             flushProjectSave();
+            // A lost editor may only be unmounted after its draft was backed
+            // up, or on navigation. Never let its old timers publish later.
+            projectSaveQueueRef.current?.discard();
+            viewportSaveQueueRef.current?.discard();
         };
     }, []);
 

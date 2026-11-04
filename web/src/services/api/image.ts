@@ -1,12 +1,11 @@
 import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
 import { imageModelProfile, imageModelSettingsError, normalizeImageModelSettings } from "@/lib/image-model-settings";
 import { validateImageReferences } from "@/lib/image-reference-policy";
-import { requestQueuedImageBatch, requestQueuedImages, uploadImageReference, type QueuedBatchItem } from "@/services/api/generation-tasks";
+import { readGenerationReferenceDataUrl, requestQueuedImageBatch, requestQueuedImages, uploadImageReference, type QueuedBatchItem } from "@/services/api/generation-tasks";
 import { workspaceOwnerHeaders } from "@/services/api/workspace-owner";
 import { modelOptionName, type AiConfig } from "@/stores/use-config-store";
 import type { ReferenceImage } from "@/types/image";
 import { dataUrlToFile } from "@/lib/image-utils";
-import { imageToDataUrl } from "@/services/image-storage";
 import { useUserStore } from "@/stores/use-user-store";
 import { createPromptCompilation, type PromptInputData } from "./prompt-compilations";
 import { fingerprintImage, generationDraftInput } from "./generation-history";
@@ -359,15 +358,20 @@ function toResponseTool(tool: ResponseFunctionTool): ResponseApiToolDefinition {
 
 
 /** Compile only; this never creates an image task. References keep their exact order. */
-export async function optimizeImagePrompt(config: AiConfig, promptInput: PromptInputData, references: ReferenceImage[] = [], options: { requestId?: string; toolKey?: string; signal?: AbortSignal } = {}) {
+export async function optimizeImagePrompt(config: AiConfig, promptInput: PromptInputData, references: ReferenceImage[] = [], options: { requestId?: string; operationType?: RequestOptions["operationType"]; toolKey?: string; signal?: AbortSignal } = {}) {
+    // A reference can guide generation without turning it into an editing operation.
+    const mode = promptInput.mode ?? "edit";
+    const operationType = options.operationType ?? (mode === "generate" ? "image_generation" : "inpaint");
+    if (operationType === "upscale") throw new Error("细节增强暂不支持提示词优化，请直接填写增强要求后生成。");
+    if (mode !== (operationType === "image_generation" ? "generate" : "edit")) throw new Error("优化模式与实际生成操作不一致，未提交优化。");
     const ownerId = useUserStore.getState().user?.id;
     if (!ownerId) throw new Error("当前账号不可用");
     const assertOwner = () => { options.signal?.throwIfAborted(); if (useUserStore.getState().user?.id !== ownerId) throw new Error("员工会话已变化"); };
-    const resolved = await resolveToolConfig(config, references.length ? "inpaint" : "image_generation", options.toolKey);
+    const resolved = await resolveToolConfig(config, operationType, options.toolKey);
     const sourceUrls: string[] = [];
     for (const reference of references) {
         assertOwner();
-        const file = dataUrlToFile({ ...reference, dataUrl: await imageToDataUrl(reference) });
+        const file = dataUrlToFile({ ...reference, dataUrl: await readGenerationReferenceDataUrl(reference, options.signal) });
         const hash = await fingerprintImage(file);
         const id = await uploadImageReference(reference, file, hash, ownerId, options.signal);
         sourceUrls.push(`/api/assets/${id}/content`);

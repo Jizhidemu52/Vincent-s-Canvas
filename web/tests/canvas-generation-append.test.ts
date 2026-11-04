@@ -43,6 +43,7 @@ function harness(initial: CanvasNodeData[], initialConnections: CanvasConnection
     const exports = {} as { useCanvasGeneration: Hook };
     new Function("require", "module", "exports", code)((key: string) => scope[key] || requireModule(key), { exports }, exports);
     const runtime = {
+        waitForWriteAccess: async () => true, isObservationCurrent: () => true,
         createOptions: async (targetId: string) => ({ generate: async (parameters: typeof config, prompt: string, references?: any[], _mask?: unknown, _edit?: boolean, _input?: unknown, exact = false) => {
             submissions.push({ config: structuredClone(parameters), prompt, references: structuredClone(references || []), promptInput: structuredClone(_input), exact, targetId });
             await options.generate?.();

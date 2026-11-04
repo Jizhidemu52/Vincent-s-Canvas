@@ -1,4 +1,5 @@
 export const DEFAULT_IMAGE_MODEL = "aplmart-gpt2";
+export const DEFAULT_CANVAS_IMAGE_MODEL = "aplmart-gpt2.5-flare";
 
 type ImageModelIdentity = { id?: string; modelId: string; name?: string; publicName?: string };
 

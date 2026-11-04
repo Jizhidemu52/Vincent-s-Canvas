@@ -1,66 +1,78 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
-import { Link } from "react-router-dom";
-import { CanvasPersistedMediaPreview } from "@/components/canvas/canvas-persisted-media-preview";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { canvasThemes } from "@/lib/canvas-theme";
-import { fitCanvasNodes } from "@/lib/canvas/canvas-interaction-ux";
-import { loadCanvasProject, reloadCanvasProject, type CanvasProject } from "@/stores/canvas/use-canvas-store";
+import { reloadCanvasProject } from "@/stores/canvas/use-canvas-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { useCanvasEditLock } from "./use-canvas-edit-lock";
 
 export type CanvasEditorFlushRef = RefObject<(() => Promise<void>) | null>;
+export type CanvasEditorWriteCapability = RefObject<boolean> & { ensureWritable: () => Promise<boolean> };
+export type CanvasEditorRecoveryRef = RefObject<{ backup: () => Promise<void>; discardPending: () => void } | null>;
 
-/** A readonly tab never mounts an editor, save queue, assistant or task observer. */
+/** Initial readonly tabs do not mount editors; interrupted editors retain their drafts. */
 export function CanvasEditorSession({ owner, projectId, enabled = true, children }: {
-    owner: string; projectId: string; enabled?: boolean; children: (flushRef: CanvasEditorFlushRef, writable: RefObject<boolean>) => ReactNode;
+    owner: string; projectId: string; enabled?: boolean; children: (flushRef: CanvasEditorFlushRef, writable: CanvasEditorWriteCapability, recoveryRef: CanvasEditorRecoveryRef) => ReactNode;
 }) {
     const flushRef = useRef<(() => Promise<void>) | null>(null);
-    const writable = useRef(false);
+    const recoveryRef = useRef<CanvasEditorRecoveryRef["current"]>(null);
     const mountedEditor = useRef(false);
-    const flush = useCallback(async () => { await flushRef.current?.(); writable.current = false; }, []);
-    const reload = useCallback(async () => { await reloadCanvasProject(projectId); }, [projectId]);
+    const currentEpoch = useRef(0);
+    const [editorEpoch, setEditorEpoch] = useState(0);
+    const backupReady = useRef(false);
+    const [viewState, setViews] = useState<typeof import("./canvas-editor-session-views") | "error">();
+    const views = viewState === "error" ? undefined : viewState;
+    const canWriteRef = useRef<() => boolean>(() => false);
+    const ensureWritableRef = useRef<() => Promise<boolean>>(async () => false);
+    const writable = useMemo<CanvasEditorWriteCapability>(() => ({
+        get current() { return currentEpoch.current === editorEpoch && mountedEditor.current && canWriteRef.current(); },
+        async ensureWritable() {
+            if (currentEpoch.current !== editorEpoch || !mountedEditor.current) return false;
+            const ready = await ensureWritableRef.current();
+            return ready && currentEpoch.current === editorEpoch && mountedEditor.current && canWriteRef.current();
+        },
+    }), [editorEpoch]);
+    const flush = useCallback(async () => { await flushRef.current?.(); }, []);
+    const reload = useCallback(async () => {
+        if (mountedEditor.current && !backupReady.current) throw new Error("请先备份本页未保存内容，再载入最新画布。");
+        await reloadCanvasProject(projectId);
+        if (mountedEditor.current) {
+            // Reacquisition is a new editing lifetime. Old async work and queues
+            // must never inherit the new holder's write capability.
+            recoveryRef.current?.discardPending();
+            currentEpoch.current += 1;
+        }
+        backupReady.current = false;
+    }, [projectId]);
     const lock = useCanvasEditLock(owner, projectId, flush, enabled, reload);
+    const needsViews = !lock.isEditable && lock.status !== "checking" && lock.status !== "recovering";
+    useEffect(() => {
+        if (!needsViews || viewState) return;
+        // A failed optional recovery chunk must not unmount the retained editor.
+        // Keeping the loaded module never grants writes or changes editor epochs.
+        void import("./canvas-editor-session-views").then(setViews).catch(() => setViews("error"));
+    }, [needsViews, viewState]);
+    canWriteRef.current = lock.canWrite;
+    ensureWritableRef.current = lock.ensureWritable;
+    useLayoutEffect(() => {
+        // onAcquired runs before the hook enables writes. Mount the replacement
+        // only afterwards, so its async observers do not see a false revocation.
+        if (lock.isEditable && editorEpoch !== currentEpoch.current) setEditorEpoch(currentEpoch.current);
+    }, [editorEpoch, lock.isEditable]);
     const theme = canvasThemes[useThemeStore(state => state.theme)];
     const transferring = lock.status === "checking" && Boolean(lock.holder) && mountedEditor.current;
-    if (lock.isEditable) { writable.current = true; mountedEditor.current = true; }
-    else if (!transferring) { writable.current = false; mountedEditor.current = false; }
-    if (lock.isEditable || transferring) return <div className="relative h-full" data-canvas-edit-blocked={transferring ? "true" : undefined}>
-        <div inert={transferring} className="h-full">{children(flushRef, writable)}</div>
-        {transferring ? <div role="status" className="absolute inset-0 z-[100] flex items-center justify-center" style={{ background: `${theme.canvas.background}bb` }}>正在保存并移交编辑权…</div> : null}
-        {lock.error ? <div role="status" className="absolute bottom-16 left-1/2 z-40 max-w-lg -translate-x-1/2 rounded-lg px-4 py-2 text-sm" style={{ background: theme.node.panel, color: theme.node.warning }}>{lock.error}</div> : null}
+    if (lock.isEditable) mountedEditor.current = true;
+    const recovering = lock.status === "recovering";
+    const blocked = !lock.isEditable || editorEpoch !== currentEpoch.current;
+    const waiting = <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-sm" style={{ background: `${theme.canvas.background}bb`, color: theme.node.text }}>
+        <p role="status">{recovering ? "正在恢复本页编辑连接，画布内容已保留…" : transferring ? "正在保存并移交编辑权…" : viewState === "error" ? "恢复界面暂时无法载入，本页内容已保留。" : "正在确认编辑权…"}</p>
+        {viewState === "error" ? <button type="button" className="underline" onClick={() => setViews(undefined)}>重试载入恢复界面</button> : null}
     </div>;
-    return <main data-testid="canvas-readonly-session" className="relative h-full min-h-0 overflow-hidden" style={{ background: theme.canvas.background, color: theme.node.text }}>
-        <ReadonlyCanvasPreview projectId={projectId} />
-        <div className="absolute inset-x-4 top-4 flex flex-wrap items-center gap-3 rounded-lg border px-4 py-3 text-sm" style={{ background: theme.toolbar.panel, borderColor: theme.node.stroke }}>
-            <span className="flex-1" role="status">{lock.status === "checking" ? "正在确认编辑权…" : lock.error || "此画布正在另一标签页编辑。当前为只读快照，不会覆盖那边的修改。"}</span>
-            <Link className="underline" to="/canvas">返回画布库</Link>
-            {lock.status !== "checking" ? <button type="button" className="rounded-md border px-3 py-1.5" style={{ borderColor: theme.canvas.selectionStroke }} onClick={lock.requestEditing}>在此页编辑</button> : null}
-        </div>
-    </main>;
-}
-
-function ReadonlyCanvasPreview({ projectId }: { projectId: string }) {
-    const [project, setProject] = useState<CanvasProject | null>(null);
-    const [size, setSize] = useState({ width: 1200, height: 700 });
-    const container = useRef<HTMLDivElement>(null);
-    const theme = canvasThemes[useThemeStore(state => state.theme)];
-    useEffect(() => {
-        let current = true;
-        void loadCanvasProject(projectId).then(value => { if (current) setProject(value); }).catch(() => undefined);
-        return () => { current = false; };
-    }, [projectId]);
-    useEffect(() => {
-        const element = container.current;
-        if (!element) return;
-        const observer = new ResizeObserver(() => setSize({ width: element.clientWidth, height: element.clientHeight }));
-        observer.observe(element);
-        return () => observer.disconnect();
-    }, []);
-    const viewport = useMemo(() => fitCanvasNodes(project?.nodes || [], { left: 32, top: 100, width: Math.max(1, size.width - 64), height: Math.max(1, size.height - 132) }), [project, size]);
-    return <div ref={container} className="absolute inset-0 overflow-hidden" aria-label="画布最后保存的只读预览">
-        <div className="absolute left-0 top-0 origin-top-left" style={{ transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.k})` }}>
-            {project?.nodes.map(node => <div key={node.id} className="absolute overflow-hidden rounded border" style={{ left: node.position.x, top: node.position.y, width: node.width, height: node.height, color: theme.node.text, background: theme.node.panel, borderColor: theme.node.stroke }}>
-                {node.type === "image" ? <CanvasPersistedMediaPreview kind="image" url={node.metadata?.content} storageKey={node.metadata?.storageKey} alt={node.title} width={node.metadata?.naturalWidth} height={node.metadata?.naturalHeight} className="h-full w-full object-contain" /> : <div className="whitespace-pre-wrap p-3"><strong>{node.title}</strong>{node.type === "text" ? <p>{node.metadata?.content}</p> : null}</div>}
-            </div>)}
-        </div>
+    if (mountedEditor.current) return <div className="relative h-full" data-canvas-edit-blocked={blocked ? "true" : undefined}>
+        <div key={editorEpoch} inert={blocked} className="h-full">{children(flushRef, writable, recoveryRef)}</div>
+        {blocked ? views ? <views.CanvasRecoveryOverlay lock={lock} transferring={transferring} recoveryRef={recoveryRef} onBackedUp={requestEditing => {
+            backupReady.current = true;
+            if (requestEditing) lock.requestEditing();
+        }} /> : <div className="absolute inset-0 z-[100]">{waiting}</div> : null}
+        {!blocked && lock.error ? <div role="status" className="absolute bottom-16 left-1/2 z-40 max-w-lg -translate-x-1/2 rounded-lg px-4 py-2 text-sm" style={{ background: theme.node.panel, color: theme.node.warning }}>{lock.error}</div> : null}
     </div>;
+    return views ? <views.CanvasReadonlySession projectId={projectId} lock={lock} /> : <main data-testid="canvas-readonly-session" className="relative h-full min-h-0 overflow-hidden">{waiting}</main>;
 }

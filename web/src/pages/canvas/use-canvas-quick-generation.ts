@@ -50,14 +50,14 @@ type CanvasQuickGenerationOptions = {
 export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, connectionsRef, flushPendingHistoryRef, runtime, batchEdit, setDialogNodeId, getCanvasCenter, handleMissingModelConfig, isAiConfigReady }: CanvasQuickGenerationOptions) {
     const { message, modal } = App.useApp();
     const [searchParams] = useSearchParams();
-    const effectiveConfig = useEffectiveConfig();
+    const effectiveConfig = useEffectiveConfig("canvas");
     const estimateUsage = useBusinessConfigStore(state => state.estimate);
     const addAsset = useAssetStore(state => state.addAsset);
     const setNodes = useCanvasGraphSetter("nodes");
     const setConnections = useCanvasGraphSetter("connections");
     const setSelectedNodeIds = useCanvasGraphSetter("selectedNodeIds");
     const setSelectedConnectionId = useCanvasGraphSetter("selectedConnectionId");
-    const { createOptions, startGenerationRequest, finishGenerationRequest, setRunningNodeId } = runtime;
+    const { createOptions, startGenerationRequest, finishGenerationRequest, setRunningNodeId, waitForWriteAccess, isObservationCurrent } = runtime;
     const { setBatchEditPrompt, setBatchImageSettings, setBatchEditOpen } = batchEdit;
     const NODE_STATUS_LOADING = "loading" as const;
     const NODE_STATUS_ERROR = "error" as const;
@@ -255,6 +255,7 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, c
 
     const runQuickCanvasGeneration = useCallback(async () => {
         if (quickSubmissionRef.current || referenceRead.current) return;
+        if (!isObservationCurrent()) return;
         const account = useUserStore.getState();
         if (normalizationBinding !== nodeDraftBindingRef.current || draftScope !== currentDraftScopeRef.current
             || draftScope !== `${projectId}:${account.status}:${account.user?.id || ""}`) return;
@@ -383,6 +384,7 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, c
                 try {
                     const options = await createOptions(targetId, controller, () => finishSubmission(targetId), toolKey);
                     const { metadata, uploaded } = await options.generate(generationConfig, prompt, references, undefined, operationType === "inpaint", promptInput);
+                    if (!await waitForWriteAccess()) return;
                     const resultSize = fitNodeSize(uploaded.width, uploaded.height, nodeSize.width, nodeSize.height);
                     setNodes((current) =>
                         current.map((node) =>
@@ -429,7 +431,7 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, c
                     successCount += 1;
                 } catch (error) {
                     const reason = error instanceof Error ? error.message : "画布生图失败";
-                    if (!isGenerationCanceled(error)) {
+                    if (await waitForWriteAccess() && !isGenerationCanceled(error)) {
                         failureCount += 1;
                         setNodes((current) => current.map((node) => (node.id === targetId ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_ERROR, errorDetails: reason } } : node)));
                     }
@@ -440,6 +442,7 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, c
             }),
         );
 
+        if (!await waitForWriteAccess()) return;
         setRunningNodeId((current) => current === targetIds[0] ? null : current);
         if (failureCount) {
             message.warning(uiText("画布生图完成，成功 {value1} 张，失败 {value2} 张", { value1: successCount, value2: failureCount }));
@@ -470,6 +473,8 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, c
         quickGenerateQuality,
         referenceScope,
         startGenerationRequest,
+        waitForWriteAccess,
+        isObservationCurrent,
     ]);
     quickGenerateRef.current = runQuickCanvasGeneration;
 
