@@ -5,6 +5,9 @@ import { defineConfig, devices } from "@playwright/test";
 export default defineConfig({
     testDir: "./e2e",
     testMatch: "**/*.pw.ts",
+    // This smoke serves the built dist on its own preview server, not 5199's
+    // development fixture. CI runs it explicitly with its dedicated config.
+    testIgnore: "**/canvas-production-preload.pw.ts",
     timeout: 60_000,
     expect: { timeout: 15_000 },
     fullyParallel: false,
