@@ -30,7 +30,7 @@ function observedAt(db: Database, getTime: () => string): Database {
   } as unknown as Database;
 }
 async function setup() {
-  const fixture = await createIsolatedPostgres(), db = fixture.db;
+  const fixture = await createIsolatedPostgres({ usageRollupsEnabled: true }), db = fixture.db;
   const user = randomUUID(), department = randomUUID(), model = randomUUID(), provider = randomUUID();
   await db.query("INSERT INTO departments(id,name,code) VALUES($1,'Fixture','fixture')", [department]);
   await db.query("INSERT INTO users(id,username,display_name,role,must_change_password,department_id) VALUES($1,'fixture','Fixture','super_admin',false,$2)", [user, department]);

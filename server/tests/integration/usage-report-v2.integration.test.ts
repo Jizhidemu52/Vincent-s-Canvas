@@ -11,7 +11,7 @@ const sqlTest = process.env.PGLITE_RUNTIME_PATH ? test : test.skip;
 sqlTest(
     "free report HTTP reads real daily facts with exact scope, audits safely and never calls AI or rewrites facts",
     async () => {
-        const fixture = await createIsolatedPostgres(),
+        const fixture = await createIsolatedPostgres({ usageRollupsEnabled: true }),
             db = fixture.db;
         let server: ReturnType<ReturnType<typeof express>["listen"]> | undefined;
         try {

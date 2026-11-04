@@ -28,16 +28,32 @@ function presentJob(row: JobRow): UsageRollupJob {
   return { jobId: row.id, status: row.status, fromDay: dateOnly(row.from_day), toDay: dateOnly(row.to_day), completedDays: row.completed_days.map(dateOnly), createdAt: iso(row.created_at), updatedAt: iso(row.updated_at), completedAt: row.completed_at ? iso(row.completed_at) : null, failureCode: row.failure_code };
 }
 
+/** The release operator takes the exclusive form of this same transaction lock
+ * when enabling/disabling. Source dirty triggers deliberately do not take it. */
+async function processingEnabled(client: UsageQueryClient): Promise<boolean> {
+  await client.query("SELECT pg_advisory_xact_lock_shared(hashtextextended('canvas:usage-rollup-control:v1',0))");
+  // A repeatable-read transaction can acquire its snapshot before waiting for
+  // the control lock. KEY SHARE rejects that stale row version with 40001 after
+  // a concurrent disable, while allowing source history_from updates (NO KEY
+  // UPDATE) to commit without waiting for expensive rollup computation.
+  return (await client.query<{ processing_enabled: boolean }>("SELECT processing_enabled FROM usage_rollup_state WHERE singleton=true FOR KEY SHARE")).rows[0]?.processing_enabled === true;
+}
+
 /** Enqueue only; a timed-out/repeated HTTP request cannot duplicate a job. */
 export async function queueUsageRollup(db: Database, input: UsageRollupRequest, actorUserId: string): Promise<UsageRollupJob> {
   const request = usageRollupRequestSchema.parse(input);
   const client = await db.connect();
   try {
     await client.query("BEGIN");
-    const today = (await client.query<{ today: string }>("SELECT (now() AT TIME ZONE 'Asia/Shanghai')::date::text AS today")).rows[0]!.today;
-    if (request.toDay > today) throw new UsageError("USAGE_ROLLUP_RANGE_INVALID", "只能刷新今天或更早的北京时间日期", 400);
-    await client.query("INSERT INTO usage_rollup_jobs(idempotency_key,from_day,to_day,actor_user_id) VALUES($1,$2,$3,$4) ON CONFLICT(idempotency_key) DO NOTHING", [request.idempotencyKey, request.fromDay, request.toDay, actorUserId]);
-    const row = (await client.query<JobRow>(`SELECT ${jobColumns} FROM usage_rollup_jobs WHERE idempotency_key=$1`, [request.idempotencyKey])).rows[0]!;
+    if (await processingEnabled(client)) {
+      const today = (await client.query<{ today: string }>("SELECT (now() AT TIME ZONE 'Asia/Shanghai')::date::text AS today")).rows[0]!.today;
+      if (request.toDay > today) throw new UsageError("USAGE_ROLLUP_RANGE_INVALID", "只能刷新今天或更早的北京时间日期", 400);
+      await client.query("INSERT INTO usage_rollup_jobs(idempotency_key,from_day,to_day,actor_user_id) VALUES($1,$2,$3,$4) ON CONFLICT(idempotency_key) DO NOTHING", [request.idempotencyKey, request.fromDay, request.toDay, actorUserId]);
+    }
+    // A lost enqueue response remains recoverable after disabling, without
+    // inserting or updating anything. The same key must still bind its range.
+    const row = (await client.query<JobRow>(`SELECT ${jobColumns} FROM usage_rollup_jobs WHERE idempotency_key=$1`, [request.idempotencyKey])).rows[0];
+    if (!row) throw new UsageError("USAGE_ROLLUP_NOT_ENABLED", "统计刷新尚未启用；未创建刷新任务", 503);
     if (dateOnly(row.from_day) !== request.fromDay || dateOnly(row.to_day) !== request.toDay) throw new UsageError("USAGE_ROLLUP_KEY_CONFLICT", "该幂等键已用于不同日期范围；未新建刷新", 409);
     await client.query("COMMIT");
     return presentJob(row);
@@ -108,6 +124,7 @@ export async function scheduleUsageRollupMaintenance(db: Database, now = new Dat
   const client = await db.connect();
   try {
     await client.query("BEGIN");
+    if (!await processingEnabled(client)) { await client.query("COMMIT"); return; }
     // Initial migration seeds existing history; this bounded scan also covers
     // newly discovered older dates and multi-day downtime without GET writes.
     await client.query(`INSERT INTO usage_dirty_days(day)
@@ -152,6 +169,7 @@ async function processOneDay(db: Database): Promise<Step> {
     await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ");
     await client.query("SET LOCAL statement_timeout='15000ms'");
     await client.query("SET LOCAL lock_timeout='1000ms'");
+    if (!await processingEnabled(client)) { await client.query("COMMIT"); return { status: "idle" }; }
     job = (await client.query<JobRow>(`SELECT ${jobColumns} FROM usage_rollup_jobs WHERE status IN('queued','running') ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT 1`)).rows[0];
     if (job) day = usageDays(dateOnly(job.from_day), dateOnly(job.to_day)).find(value => !job!.completed_days.map(dateOnly).includes(value));
     else day = (await client.query<{ day: string }>("SELECT day::text FROM usage_dirty_days WHERE ready_after<=now() AND failure_code IS NULL AND day<=(now() AT TIME ZONE 'Asia/Shanghai')::date ORDER BY day LIMIT 1")).rows[0]?.day;
@@ -179,6 +197,7 @@ async function processOneDay(db: Database): Promise<Step> {
       await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
       await client.query("SET LOCAL statement_timeout='5000ms'");
       await client.query("SET LOCAL lock_timeout='1000ms'");
+      if (!await processingEnabled(client)) { await client.query("ROLLBACK"); return { status: "deferred" }; }
       if (job) {
         const current = (await client.query<JobRow>(`SELECT ${jobColumns} FROM usage_rollup_jobs WHERE id=$1 FOR UPDATE`, [job.id])).rows[0];
         if (!current || !["queued", "running"].includes(current.status) || current.completed_days.map(dateOnly).includes(day)) {

@@ -24,7 +24,7 @@ sqlTest("daily analytics migration provides durable exact facts and dirty-day qu
 const scope: UsageV2Scope = { from: "2026-09-01T00:00:00+08:00", to: "2026-09-03T00:00:00+08:00", timezone: "Asia/Shanghai", compare: "none", departmentBasis: "at_event" };
 const daily = { source: "daily" as const };
 async function setup() {
-  const fixture = await createIsolatedPostgres(), db = fixture.db;
+  const fixture = await createIsolatedPostgres({ usageRollupsEnabled: true }), db = fixture.db;
   const user = randomUUID(), actor = randomUUID(), oldDepartment = randomUUID(), currentDepartment = randomUUID(), provider = randomUUID(), model = randomUUID();
   await db.query("INSERT INTO departments(id,name,code) VALUES($1,'Old','old'),($2,'Current','current')", [oldDepartment, currentDepartment]);
   await db.query("INSERT INTO users(id,username,display_name,role,must_change_password,department_id) VALUES($1,'generator','Generator','super_admin',false,$3),($2,'actor','Actor','designer',false,$3)", [user, actor, currentDepartment]);
@@ -156,6 +156,12 @@ sqlTest("refresh HTTP is super-admin only, bounded, asynchronous, no-store and i
     }
     expect((await db.query("SELECT count(*)::int AS n FROM usage_rollup_jobs")).rows[0].n).toBe(0);
     role = "super_admin";
+    await db.query("UPDATE usage_rollup_state SET processing_enabled=false WHERE singleton=true");
+    const disabled = await post();
+    expect(disabled.status).toBe(503); expect(disabled.headers.get("cache-control")).toBe("no-store");
+    expect((await disabled.json()).code).toBe("USAGE_ROLLUP_NOT_ENABLED");
+    expect((await db.query("SELECT count(*)::int AS n FROM usage_rollup_jobs")).rows[0].n).toBe(0);
+    await db.query("UPDATE usage_rollup_state SET processing_enabled=true WHERE singleton=true");
     const query = new URLSearchParams({ from: scope.from, to: scope.to, compare: "none" });
     const missing = await fetch(`${base}/overview?${query}`);
     expect(missing.status).toBe(409); expect((await missing.json()).code).toBe("USAGE_ROLLUP_REFRESH_REQUIRED");
@@ -226,7 +232,7 @@ sqlTest("a PostgreSQL serialization conflict defers the same job without clearin
 }, 120000);
 
 sqlTest("maintenance starts the seven completed Beijing days at 03:00, is restart-idempotent and retains older dirty days", async () => {
-  const f = await createIsolatedPostgres(), db = f.db;
+  const f = await createIsolatedPostgres({ usageRollupsEnabled: true }), db = f.db;
   try {
     await scheduleUsageRollupMaintenance(db, new Date("2026-09-20T18:59:00Z"));
     expect((await db.query("SELECT last_scheduled_day FROM usage_rollup_state")).rows[0].last_scheduled_day).toBeNull();
@@ -242,7 +248,7 @@ sqlTest("maintenance starts the seven completed Beijing days at 03:00, is restar
 }, 120000);
 
 sqlTest("history over 50000 small facts reads persisted exact samples without the old row cap, but expanded payload still has a 32MiB guard", async () => {
-  const f = await createIsolatedPostgres(), db = f.db;
+  const f = await createIsolatedPostgres({ usageRollupsEnabled: true }), db = f.db;
   try {
     const user = randomUUID();
     await db.query("INSERT INTO users(id,username,display_name,role,must_change_password) VALUES($1,'large','Large','super_admin',false)", [user]);

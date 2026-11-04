@@ -1,6 +1,7 @@
 -- Rebuildable, private analytics projections. No business rows or balances are changed.
 CREATE TABLE usage_rollup_state (
   singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),
+  processing_enabled boolean NOT NULL DEFAULT false,
   history_from date NOT NULL,
   initialized_at timestamptz NOT NULL DEFAULT now(),
   last_scheduled_day date

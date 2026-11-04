@@ -12,7 +12,7 @@ const scope = { from: "2026-09-01T00:00:00+08:00", to: "2026-09-02T00:00:00+08:0
  * interleave only after A's ROLLBACK, where no transaction is active. This is
  * a deterministic legal ordering, not a claim of real concurrent PG coverage. */
 async function fixture() {
-  const f = await createIsolatedPostgres(), raw = await f.db.connect();
+  const f = await createIsolatedPostgres({ usageRollupsEnabled: true }), raw = await f.db.connect();
   const query = (sql: string, values?: unknown[]) => raw.query(sql, values);
   const db = { query, connect: async () => ({ query, release() {} }) } as unknown as Database;
   const user = randomUUID(), event = randomUUID();
@@ -92,5 +92,20 @@ sqlTest("a late explicit refresh failure preserves dirty inserted after a former
     expect((await db.query("SELECT failure_code FROM usage_dirty_days WHERE day='2026-09-01'")).rows).toEqual([{ failure_code: null }]);
     expect((await processUsageRollups(db, 1))[0]?.status).toBe("processed");
     expect((await usageV2Overview(db, scope, { source: "daily" })).metrics.visits.value).toBe(2);
+  } finally { await f.close(); }
+}, 30000);
+
+sqlTest("disabling after computation rollback prevents the late failure transaction from writing any analytics state", async () => {
+  const f = await fixture(), db = f.db;
+  try {
+    const job = await queueUsageRollup(db, { fromDay: "2026-09-01", toDay: "2026-09-01", idempotencyKey: randomUUID() }, f.user);
+    const before = (await db.query("SELECT * FROM usage_dirty_days ORDER BY day")).rows;
+    const interrupted = f.interrupt(async () => {
+      await db.query("UPDATE usage_rollup_state SET processing_enabled=false WHERE singleton=true");
+    });
+    expect(await processUsageRollups(interrupted, 1)).toEqual([{ status: "deferred" }]);
+    expect(await getUsageRollupJob(db, job.jobId)).toEqual(job);
+    expect((await db.query("SELECT * FROM usage_dirty_days ORDER BY day")).rows).toEqual(before);
+    expect((await db.query("SELECT * FROM usage_daily_snapshots")).rows).toEqual([]);
   } finally { await f.close(); }
 }, 30000);

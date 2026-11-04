@@ -82,7 +82,7 @@ sqlSuite("V2 paid analysis frozen-preview HTTP/SQL boundaries", () => {
     };
 
     beforeAll(async () => {
-        fixture = await createIsolatedPostgres();
+        fixture = await createIsolatedPostgres({ usageRollupsEnabled: true });
         const db = fixture.db;
         await db.query("INSERT INTO departments(id,name,code) VALUES($1,'PRIVATE_DEPARTMENT','paid-preview-fixture')", [
             department,

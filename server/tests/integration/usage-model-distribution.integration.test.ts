@@ -7,7 +7,7 @@ import { createIsolatedPostgres } from "../helpers/isolated-postgres";
 const sqlTest = process.env.PGLITE_RUNTIME_PATH ? test : test.skip;
 
 sqlTest("model distribution, cost dimension and failure categories survive daily projection with exact filters", async () => {
-  const f = await createIsolatedPostgres(), db = f.db, user = randomUUID(), provider = randomUUID(), model = randomUUID();
+  const f = await createIsolatedPostgres({ usageRollupsEnabled: true }), db = f.db, user = randomUUID(), provider = randomUUID(), model = randomUUID();
   try {
     await db.query("INSERT INTO users(id,username,display_name,role,must_change_password) VALUES($1,'box-fixture','Fixture','super_admin',false)", [user]);
     await db.query("INSERT INTO providers(id,name,protocol,base_url,encrypted_credentials) VALUES($1,'Fixture','openai','https://never-called.invalid','unused')", [provider]);

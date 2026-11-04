@@ -17,7 +17,7 @@ const scope: UsageV2Scope = {
 sqlTest(
     "overview publishes only global in-range log metadata in the same read transaction and controls use the original filtered daily facts",
     async () => {
-        const f = await createIsolatedPostgres();
+        const f = await createIsolatedPostgres({ usageRollupsEnabled: true });
         try {
             const user = randomUUID(),
                 other = randomUUID();

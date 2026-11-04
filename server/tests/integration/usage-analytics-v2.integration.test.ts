@@ -53,7 +53,7 @@ sqlTest("v2 budgets decompressed PostgreSQL facts and never fetches irrelevant l
 sqlTest(
   "v2 formal SQL: cohort results, exact booked costs, full percentiles, department snapshots, compound filters and private-safe HTTP",
   async () => {
-    const fixture = await createIsolatedPostgres(),
+    const fixture = await createIsolatedPostgres({ usageRollupsEnabled: true }),
       db = fixture.db;
     let server: ReturnType<ReturnType<typeof express>["listen"]> | undefined;
     try {

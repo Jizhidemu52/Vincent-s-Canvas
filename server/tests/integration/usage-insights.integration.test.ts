@@ -9,7 +9,7 @@ const sqlTest = process.env.PGLITE_RUNTIME_PATH ? test : test.skip;
 sqlTest(
     "overview rules read the same filtered daily facts and comparison, never provider errors or prompts",
     async () => {
-        const f = await createIsolatedPostgres(),
+        const f = await createIsolatedPostgres({ usageRollupsEnabled: true }),
             db = f.db;
         try {
             const user = randomUUID(),

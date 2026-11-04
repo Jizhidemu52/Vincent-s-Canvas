@@ -38,7 +38,7 @@ sqlSuite("one-snapshot selected people and original-scope team", () => {
     };
     const send = (body: unknown, role = "super_admin") => fetch(`${base}/people-compare`, { method: "POST", headers: { "content-type": "application/json", "x-role": role }, body: JSON.stringify(body) });
     beforeAll(async () => {
-        fixture = await createIsolatedPostgres();
+        fixture = await createIsolatedPostgres({ usageRollupsEnabled: true });
         await fixture.db.query("INSERT INTO departments(id,name,code) VALUES($1,'Team department','comparison-team'),($2,'Outside department','comparison-outside')", [department, otherDepartment]);
         for (const [id, name, role, departmentId] of [[admin, "Admin", "super_admin", otherDepartment], [a, "Team A", "designer", department], [b, "Team B", "designer", department], [c, "Team C", "designer", department], [idle, "Team Idle", "designer", department], [outside, "Outside", "designer", otherDepartment]])
             await fixture.db.query("INSERT INTO users(id,username,display_name,role,department_id,must_change_password) VALUES($1,$2::text,$2::text,$3,$4,false)", [id, name, role, departmentId]);

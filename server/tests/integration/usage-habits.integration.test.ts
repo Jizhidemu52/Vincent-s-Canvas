@@ -9,7 +9,7 @@ const sqlTest = process.env.PGLITE_RUNTIME_PATH ? test : test.skip;
 const scope: UsageV2Scope = { from: "2026-09-01T00:00:00+08:00", to: "2026-09-02T00:00:00+08:00", timezone: "Asia/Shanghai", compare: "none", departmentBasis: "at_event" };
 const query = usageV2QuerySchema.parse({});
 async function setup(withTasks = true) {
-  const f = await createIsolatedPostgres(), db = f.db, user = randomUUID(), batch = randomUUID();
+  const f = await createIsolatedPostgres({ usageRollupsEnabled: true }), db = f.db, user = randomUUID(), batch = randomUUID();
   await db.query("INSERT INTO users(id,username,display_name,role,must_change_password) VALUES($1,'habit-fixture','Habit fixture','super_admin',false)", [user]);
   await db.query("INSERT INTO batch_tasks(id,request_id,user_id,project_id,operation_type,total_items) VALUES($1,$1::uuid::text,$2,'fixture','image_generation',1)", [batch, user]);
   const ids: string[] = [];

@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
 import { Pool } from "pg";
 import type { Database } from "../../src/db";
-import { getUsageRollupJob, processUsageRollups, queueUsageRollup } from "../../src/usage-rollups";
+import { getUsageRollupJob, processUsageRollups, queueUsageRollup, scheduleUsageRollupMaintenance } from "../../src/usage-rollups";
 import { usageV2Overview } from "../../src/usage-analytics-v2";
 
 // Deliberately not simulated by the single-connection PGlite fixture. Existing
@@ -30,6 +30,7 @@ async function fixture() {
       options: `-c search_path=${schema},public -c statement_timeout=15000 -c lock_timeout=1000` });
     const migrations = new URL("../../src/migrations/", import.meta.url);
     for (const name of (await readdir(migrations)).filter(name => name.endsWith(".sql")).sort()) await db.query(await readFile(new URL(name, migrations), "utf8"));
+    await db.query("UPDATE usage_rollup_state SET processing_enabled=true WHERE singleton=true");
     return { db, close };
   } catch (error) { await close(); throw error; }
 }
@@ -84,4 +85,90 @@ integration("a real concurrent source commit is not blocked by rollup computatio
     const result = await usageV2Overview(db, { from: "2026-09-01T00:00:00+08:00", to: "2026-09-02T00:00:00+08:00", timezone: "Asia/Shanghai", compare: "none", departmentBasis: "at_event" }, { source: "daily" });
     expect(result.metrics.failed.value).toBe(1);
   } finally { resume?.(); await work?.catch(() => undefined); await f.close(); }
+}, 60000);
+
+async function waitForControlLock(db: Pool, pid: number) {
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline) {
+    if ((await db.query("SELECT 1 FROM pg_locks WHERE pid=$1 AND locktype='advisory' AND NOT granted", [pid])).rows.length) return;
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  throw new Error("expected a real blocked analytics control lock");
+}
+
+integration("disable waits for an active daily write, while source history invalidation remains unblocked", async () => {
+  const f = await fixture(), db = f.db, user = randomUUID();
+  const control = await db.connect();
+  let resume: (() => void) | undefined, work: ReturnType<typeof processUsageRollups> | undefined;
+  let disabling: Promise<unknown> | undefined;
+  try {
+    await db.query("INSERT INTO users(id,username,display_name,role,must_change_password) VALUES($1,'disable-wait','Disable wait','super_admin',false)", [user]);
+    await db.query("INSERT INTO usage_events(event_id,user_id,board_key,action,parameters,occurred_at) VALUES($1,$2,'image','visit','{}','2026-09-01T01:00:00Z')", [randomUUID(), user]);
+    const job = await queueUsageRollup(db, { fromDay: "2026-09-01", toDay: "2026-09-01", idempotencyKey: randomUUID() }, user);
+    let paused!: () => void;
+    const reached = new Promise<void>(resolve => { paused = resolve; });
+    const gate = new Promise<void>(resolve => { resume = resolve; });
+    let held = false;
+    const workerDb = { connect: async () => {
+      const client = await db.connect();
+      return { release: () => client.release(), query: async (sql: string, values?: unknown[]) => {
+        const result = await client.query(sql, values);
+        if (!held && sql.includes("SELECT f.*,f.event_department_id AS department_id")) { held = true; paused(); await gate; }
+        return result;
+      } };
+    } } as unknown as Database;
+    work = processUsageRollups(workerDb, 1);
+    await Promise.race([reached, new Promise<never>((_, reject) => setTimeout(() => reject(new Error("rollup did not reach source pause")), 5000))]);
+    const pid = (await control.query("SELECT pg_backend_pid() AS pid")).rows[0].pid;
+    await control.query("BEGIN");
+    await control.query("SET LOCAL lock_timeout='5000ms'");
+    disabling = control.query("SELECT pg_advisory_xact_lock(hashtextextended('canvas:usage-rollup-control:v1',0))");
+    await waitForControlLock(db, pid);
+    // This moves history_from too: KEY SHARE must not block that source-side
+    // non-key UPDATE, even while a disable request is waiting for the worker.
+    await db.query("INSERT INTO usage_events(event_id,user_id,board_key,action,parameters,occurred_at) VALUES($1,$2,'image','visit','{}','2026-08-31T01:00:00Z')", [randomUUID(), user]);
+    expect((await db.query("SELECT history_from::text AS day FROM usage_rollup_state")).rows[0].day).toBe("2026-08-31");
+    resume!();
+    expect((await work)[0]?.status).toBe("processed");
+    await disabling;
+    await control.query("UPDATE usage_rollup_state SET processing_enabled=false WHERE singleton=true");
+    await control.query("COMMIT");
+    expect((await getUsageRollupJob(db, job.jobId)).status).toBe("completed");
+    expect(await processUsageRollups(db, 1)).toEqual([{ status: "idle" }]);
+    expect((await db.query("SELECT day::text FROM usage_dirty_days WHERE day='2026-08-31'")).rows).toEqual([{ day: "2026-08-31" }]);
+  } finally {
+    resume?.(); await work?.catch(() => undefined); await disabling?.catch(() => undefined);
+    await control.query("ROLLBACK"); control.release(); await f.close();
+  }
+}, 60000);
+
+integration("writers waiting behind disable cannot use a repeatable-read snapshot of the former enabled state", async () => {
+  const f = await fixture(), db = f.db, control = await db.connect();
+  let work: ReturnType<typeof processUsageRollups> | undefined;
+  try {
+    const job = await queueUsageRollup(db, { fromDay: "2026-09-01", toDay: "2026-09-01", idempotencyKey: randomUUID() }, randomUUID());
+    const before = (await db.query("SELECT * FROM usage_dirty_days ORDER BY day")).rows;
+    await control.query("BEGIN");
+    await control.query("SELECT pg_advisory_xact_lock(hashtextextended('canvas:usage-rollup-control:v1',0))");
+    await control.query("UPDATE usage_rollup_state SET processing_enabled=false WHERE singleton=true");
+    let connected!: (pid: number) => void;
+    const workerPid = new Promise<number>(resolve => { connected = resolve; });
+    const workerDb = { connect: async () => {
+      const client = await db.connect();
+      connected((await client.query("SELECT pg_backend_pid() AS pid")).rows[0].pid);
+      return client;
+    } } as unknown as Database;
+    work = processUsageRollups(workerDb, 1);
+    await waitForControlLock(db, await workerPid);
+    await control.query("COMMIT");
+    expect((await work)[0]?.status).toBe("deferred");
+    expect(await getUsageRollupJob(db, job.jobId)).toEqual(job);
+    expect((await db.query("SELECT * FROM usage_daily_snapshots")).rows).toEqual([]);
+    expect((await db.query("SELECT * FROM usage_dirty_days ORDER BY day")).rows).toEqual(before);
+    await scheduleUsageRollupMaintenance(db, new Date("2026-09-20T19:00:00Z"));
+    await expect(queueUsageRollup(db, { fromDay: "2026-09-01", toDay: "2026-09-01", idempotencyKey: randomUUID() }, randomUUID())).rejects.toMatchObject({ code: "USAGE_ROLLUP_NOT_ENABLED", status: 503 });
+    expect((await db.query("SELECT * FROM usage_dirty_days ORDER BY day")).rows).toEqual(before);
+  } finally {
+    await control.query("ROLLBACK"); await work?.catch(() => undefined); control.release(); await f.close();
+  }
 }, 60000);

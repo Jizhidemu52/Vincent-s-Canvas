@@ -26,4 +26,35 @@ API 默认命令仅 `bun src/index.ts`，Worker 默认仅 `bun src/worker.ts`。
 
 旧 fingerprinted 静态资源仅从当前 Web 的 `/usr/share/nginx/html/assets` 拷入审计目录，拒绝 symlink、HTML、JSON、map、env 和未带 hash 的文件；新 Web 只读挂载该兼容目录。其他旧源码挂载只删除实例明确列出的只读代码挂载；未知或可写代码挂载直接拒绝。
 
+## 048 使用分析的独立准备与启停
+
+`deploy.py` 的零数据库变更合同不变；它既不执行 048，也不开启统计处理。离线包仅额外携带固定 `048_usage_daily_facts.sql`、专用 operator 和精确结构清单；SQL 文件 SHA256 必须同时匹配包文件清单及迁移清单。没有任意 SQL、迁移目录或版本号参数。
+
+以下命令在 Linux 目标宿主执行，使用同一已验证包内的脚本和真实实例文件，所有路径必须为绝对路径；审计目录由命令输出，不能代用其他实例的回执。
+
+```sh
+python3 -B /absolute/package/ops/release/usage-048.py preflight /absolute/instance.json /absolute/package
+python3 -B /absolute/package/ops/release/usage-048.py migrate /absolute/instance.json /absolute/package /absolute/048-preflight-audit
+
+# migrate 成功且原服务与正常入口恢复后，重新取得当前状态的发布预检。
+bash /absolute/package/ops/deploy.sh preflight /absolute/instance.json /absolute/package
+bash /absolute/package/ops/deploy.sh apply /absolute/instance.json /absolute/package /absolute/new-deploy-preflight-audit
+
+# 只接受上一步成功切换同一 commit / image IDs 的 apply 审计。
+python3 -B /absolute/package/ops/release/usage-048.py enable /absolute/instance.json /absolute/package /absolute/successful-apply-audit
+python3 -B /absolute/package/ops/release/usage-048.py disable /absolute/instance.json /absolute/package
+```
+
+顺序必须是：**停用态 schema 准备 → 原三个应用容器 same-ID 恢复并打开正常入口 → 原零变更发布器切换镜像 → 独立 enable**。不允许在镜像切换中顺带回填。默认 `processing_enabled=false`；应用重启不改变它。普通源业务产生的 dirty 标记保留，关闭只停止统计入队、调度、处理与失败回写，不清空事实表、任务或 dirty 天数。
+
+048 预检有效期 15 分钟，绑定实例、数据库集群身份、容器、配置、包和 SQL SHA。`migrate` 复用现有 `deployment.lock`、维护门和排空检查，停止原应用后保存并验证 `pg_dump`。固定 SQL 与唯一迁移登记在同一事务执行；提交前精确核对全部原业务行/哈希、序列、旧迁移记录，以及 5 张新表、13 个索引（含主键/唯一约束索引）、13 个约束、3 个函数、10 个触发器和停用态种子。PostgreSQL 18 额外暴露的 NOT NULL 约束只从约束列表中排除；同一空值限制仍由列结构逐项精确校验，其他定义不做近似容错。
+
+成功后只 `docker start` 原容器 ID，不创建或替换服务。固定配置、挂载、网络身份、网关及前缀不变；仅已验证的动态 IPv4 同网段租约变化可接受。数据库状态在旧服务启动后再次完整核对，才重新打开维护门。
+
+启停使用与 Worker 一致的事务级 advisory 控制锁：分析事务持共享锁，运维持排他锁。`disable` 等待已经在途的分析事务结束后才返回；它不以“存在超过 30 秒的分析事务”为由提前拒绝。`enable` 另核对成功 apply 回执的封存证据、实际应用镜像、同一数据库身份与精确 048 结构。控制事务只能改 `usage_rollup_state.processing_enabled`，拒绝该表上的额外触发器/规则；启用后 Worker 可立即处理，因此不拿启用前的全库哈希去否定正常统计写入。
+
+SQL 锁等待、语句和宿主命令都有界限。超时或连接中断一律记录“结果未知”，不自动重试、不自动 restore，也不假定迁移回滚。失败默认保留当前维护状态，先核对私有审计的 `phase`、数据库中的 048 登记/结构/开关以及原容器 ID，再决定恢复；不得直接再次运行 migrate，也不能删除表、dirty 记录或清空回执来重试。若 schema 已提交而恢复入口失败，应保留该 schema 和数据，查明服务/入口问题后恢复原应用。
+
+本地 Python 合同与 PGlite SQL 检查不等同目标部署；CI 的 `RUN_DOCKER_COMPOSE_CONTRACT_TESTS=true` 还会在无宿主端口、无持久数据卷的独立 PostgreSQL 17 容器验证真实 catalog 与事务回滚。正式发布仍须等待同一冻结 commit 的完整 CI、目标 048 预检/迁移回执、镜像切换回执和业务页面验收。
+
 “单元/语法检查通过”不是“Docker smoke 通过”，镜像 smoke 也不是“宝塔已部署”。真实交付必须有同一 commit 的成功 CI、包哈希、目标实例预检、维护窗口切换回执、外层代理验证和实际页面验证。当前机器无 Docker 时必须如实记录，不能跳过 CI 证明。
