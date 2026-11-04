@@ -91,8 +91,8 @@ test("reference guidance occupies one accessible icon in the add-reference row a
     const popup = tree.find(element => element.props.className === "cw-reference-hint-popover")!;
     expect(popup.props).toMatchObject({ side: "bottom", align: "end", "aria-label": "参考图说明" });
     const explanation = renderToStaticMarkup(<>{popup.props.children}</>);
-    expect(explanation).toContain("点击或框选画布图片添加参考图");
-    expect(explanation).toContain("原图保留。取消选中不会清空参考图；请用移除或清空按钮调整。");
+    expect(explanation).toContain("可拖入桌面或企业微信原图；框选可添加多张画布参考图。");
+    expect(explanation).toContain("选中单图可查看其生成档案；要继续修改该图，请点击“基于此图继续”。");
     expect(tree.findIndex(element => element.type === CanvasQuickReferenceTray)).toBeGreaterThan(tree.indexOf(row));
     const generate = tree.find(element => element.props.className === "cw-generate-button")!;
     expect(elements(generate.props.children).some(element => element.props.className === "cw-generate-count")).toBe(true);

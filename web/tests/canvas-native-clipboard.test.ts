@@ -16,6 +16,7 @@ import { canvasImportGridPosition } from "@/lib/canvas/canvas-interaction-ux";
 import { mapCanvasAsyncPool } from "@/lib/canvas/canvas-async-pool";
 import { isCanvasBatchChildHidden } from "@/lib/canvas/canvas-batch-visibility";
 import { syncCanvasSelectionReferences } from "@/lib/canvas/canvas-selection-references";
+import { canvasGenerationDraft, createCanvasGenerationRecord } from "@/lib/canvas/canvas-generation-record";
 import { runCanvasGeneration } from "@/pages/canvas/canvas-shared-generation-runtime";
 import { defaultConfig } from "@/stores/use-config-store";
 import { isCanvasAudioFile } from "@/pages/canvas/use-canvas-clipboard-drop";
@@ -77,7 +78,7 @@ function harness(initialNodes: CanvasNodeData[] = [], initialConnections: Canvas
     const lastEditorSelectionRef = { current: "" };
     const editorOwner = "authenticated:clipboard-owner";
     let prompt = "";
-    const loadQuickGenerationNode = (node: CanvasNodeData | null) => { if (node) prompt = node.metadata?.draftPrompt ?? node.metadata?.generationRecord?.inputPrompt ?? node.metadata?.prompt ?? ""; };
+    const loadQuickGenerationNode = (node: CanvasNodeData | null) => { if (node) prompt = canvasGenerationDraft(node); };
     const setQuickGenerateReferences = () => {};
     function runSelectionEffect() {
         const singleSelectedNodeId = selectedNodeIdsRef.current.size === 1 ? selectedNodeIdsRef.current.values().next().value : null;
@@ -501,18 +502,32 @@ describe("native canvas clipboard", () => {
         expect(canvas.nodes()[0]!.type).toBe(CanvasNodeType.Image);
     });
 
-    test("clipboard import preserves the live draft through selection synchronization without forging image provenance", async () => {
-        const original = { ...node("generated"), metadata: { ...node("generated").metadata, prompt: "原图提示词" } };
+    test.each([undefined, "原图独立草稿", ""])("clipboard import preserves the creation draft, then explicit selection loads image-owned inputs without changing provenance (draft=%s)", async draftPrompt => {
+        const record = createCanvasGenerationRecord({ id: "original-run", sourceNodeId: "", prompt: "原图提示词", inputPrompt: "原图原始输入",
+            config: { ...defaultConfig, model: "gpt-image-2" }, references: [], nodes: [], generationType: "generation" });
+        const original = { ...node("generated"), metadata: { ...node("generated").metadata, prompt: record.prompt, model: "gpt-image-2", generationRecord: record, draftPrompt } };
+        const before = structuredClone(original);
         const canvas = harness([original]);
+        canvas.select([]); // The live creation draft is separate from this image's stored inputs.
         canvas.typePrompt("提示词必须保留");
         canvas.emit("paste", data([screenshot(), new File(["second"], "second.png", { type: "image/png" })]), { target: surface("textarea", "[data-canvas-image-paste]") });
         await canvas.flush();
         expect(canvas.prompt()).toBe("提示词必须保留");
-        expect(canvas.nodes().slice(1).every(item => item.metadata?.prompt === undefined)).toBe(true);
+        for (const imported of canvas.nodes().slice(1)) {
+            expect(imported.metadata?.prompt).toBeUndefined();
+            expect(imported.metadata?.draftPrompt).toBeUndefined();
+            expect(imported.metadata?.generationRecord).toBeUndefined();
+            expect(imported.metadata?.model).toBeUndefined();
+        }
+        expect(canvas.nodes()[0]).toEqual(before);
         canvas.select(["generated"]);
-        expect(canvas.prompt()).toBe("提示词必须保留");
+        expect(canvas.prompt()).toBe(draftPrompt ?? record.inputPrompt);
         canvas.select([canvas.nodes()[1]!.id]);
-        expect(canvas.prompt()).toBe("提示词必须保留"); // Selection appends references without replacing the user's creation draft.
+        expect(canvas.prompt()).toBe(""); // A pure upload has no generation input; do not borrow the previous draft.
+        canvas.select(["generated"]);
+        expect(canvas.prompt()).toBe(draftPrompt ?? record.inputPrompt);
+        expect(canvas.nodes()[0]).toEqual(before);
+        expect(canvas.nodes()[0]!.metadata!.generationRecord).toEqual(record);
     });
 
     test("typing during an in-flight screenshot import is not replaced by an earlier draft", async () => {

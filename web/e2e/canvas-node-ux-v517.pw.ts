@@ -87,7 +87,7 @@ test("点选改款图仅显示缩略图，操作对比滑条才读取历史原�
     expect(api.submissions).toHaveLength(0);
 });
 
-test("多图导入一次撤销，选中追加参考不改提示词，Shift取消单项", async ({ page, api }) => {
+test("多图导入一次撤销，单选上传图载入自身空草稿，Shift取消单项", async ({ page, api }) => {
     const id = await newCanvas(page);
     await page.getByRole("button", { name: "展开创建面板", exact: true }).click();
     const prompt = page.getByRole("textbox", { name: "描述图像", exact: true });
@@ -106,7 +106,9 @@ test("多图导入一次撤销，选中追加参考不改提示词，Shift取消
     await page.locator(`[data-node-id="${ids[0]}"]`).click({ modifiers: ["Shift"] });
     await expect(page.locator("[data-node-id].is-selected")).toHaveCount(1);
     await expect(page.locator(`[data-node-id="${ids[1]}"]`)).toHaveClass(/is-selected/);
-    await expect(prompt).toHaveValue("保留当前创作草稿");
+    // A selected upload owns its editor state; it has no generated prompt and
+    // must not inherit the previous global creation draft.
+    await expect(prompt).toHaveValue("");
     await page.keyboard.press("Control+z");
     await expect(page.locator("[data-node-id]")).toHaveCount(0);
     await page.keyboard.press("Control+Shift+z");

@@ -15,6 +15,9 @@ import { mergeCanvasGenerationHistory } from "@/lib/canvas/canvas-generation-his
 import { canvasHistoryContentChanged } from "@/pages/canvas/use-canvas-history";
 import { nanoid } from "nanoid";
 import { normalizeCanvasSelectedNodeIds } from "@/lib/canvas/canvas-view-state";
+import { canvasGenerationDraft, createCanvasGenerationRecord } from "@/lib/canvas/canvas-generation-record";
+import { syncCanvasSelectionReferences } from "@/lib/canvas/canvas-selection-references";
+import { defaultConfig } from "@/stores/use-config-store";
 
 // Run the actual editor callbacks, restore layout effect, and autosave effect.
 // The harness replaces only React setters/timers and unrelated generation/UI services.
@@ -32,6 +35,7 @@ function collect(node: ts.Node) {
         if (node.expression.text === "useEffect" && text.includes("historyCommitTimerRef.current = setTimeout(flushPendingHistory")) effects.set("history", text);
         if (node.expression.text === "useEffect" && text.includes("projectSaveQueueRef.current?.schedule")) effects.set("save", text);
         if (node.expression.text === "useEffect" && text.includes("agentCloseTimerRef.current") && text.includes("abortPendingCanvasRequests")) effects.set("unmount", text);
+        if (node.expression.text === "useEffect" && text.includes("lastEditorSelectionRef.current === editorSelectionKey")) effects.set("selection", text);
     }
     ts.forEachChild(node, collect);
 }
@@ -62,7 +66,9 @@ function editor(initial = project(), previous = frame(initial), loadUndoAction: 
     const historyCommitTimerRef = { current: null as number | null };
     const agentUndoRecordsRef = { current: new Map<string, CanvasAgentUndoRecord[]>() };
     const latestAgentTurnRef = { current: null as string | null };
-    const selectedNodeIdsRef = { current: new Set<string>() };
+    const selectedNodeIdsRef = { current: new Set(initial.selectedNodeIds || []) };
+    const lastEditorSelectionRef = { current: "" };
+    let editorPrompt = "";
     const generationRequestsRef = { current: new Map<string, { targetNodeId: string; originNodeId: string; runningNodeId: string }>() };
     const timers = new Map<number, () => void>();
     let timerId = 0;
@@ -70,7 +76,9 @@ function editor(initial = project(), previous = frame(initial), loadUndoAction: 
     const stopped: unknown[][] = [];
     let queuedSave: { patch: CanvasHistorySnapshot & { history: CanvasProject["history"] } } | null = null;
     const scope = {
-        uiText, nanoid, options: {}, canvasHistoryContentChanged, normalizeCanvasSelectedNodeIds,
+        uiText, nanoid, options: {}, canvasHistoryContentChanged, normalizeCanvasSelectedNodeIds, CanvasNodeType, syncCanvasSelectionReferences,
+        loadQuickGenerationNode: (node: CanvasProject["nodes"][number] | null) => { if (node) editorPrompt = canvasGenerationDraft(node); },
+        setQuickGenerateReferences() {},
         React, useCallback: (callback: unknown) => callback, applyCanvasAgentOps, canvasGenerationRunsForNodes,
         describeCanvasHistoryChange, mergeCanvasGenerationHistory, onHistoryAction: undefined, beforeHistoryAction: undefined,
         stopGenerationByRunningId: (...args: unknown[]) => stopped.push(args),
@@ -79,7 +87,7 @@ function editor(initial = project(), previous = frame(initial), loadUndoAction: 
             return loadUndoAction();
         },
         projectId: initial.id, projectTitle: initial.title, projectLoaded: true, usePerformanceScenario: false, batchEditRunning: false, runningNodeId: null,
-        historyRef, lastHistoryRef, applyingHistoryRef, pendingHistoryEntryRef, historyPausedRef, historyCommitTimerRef, agentUndoRecordsRef, latestAgentTurnRef, selectedNodeIdsRef, generationRequestsRef,
+        historyRef, lastHistoryRef, applyingHistoryRef, pendingHistoryEntryRef, historyPausedRef, historyCommitTimerRef, agentUndoRecordsRef, latestAgentTurnRef, selectedNodeIdsRef, lastEditorSelectionRef, generationRequestsRef,
         nodesRef: { get current() { return live.nodes; }, set current(nodes) { live = { ...live, nodes }; } },
         connectionsRef: { get current() { return live.connections; }, set current(connections) { live = { ...live, connections }; } },
         viewportRef: { get current() { return live.viewport; }, set current(viewport) { live = { ...live, viewport }; } },
@@ -112,11 +120,15 @@ function editor(initial = project(), previous = frame(initial), loadUndoAction: 
         canvasHistoryForSave: unknown;
     };
     const runEffect = (name: string) => {
-        const current = { ...scope, ...actions, ...frame(live) };
+        const current = { ...scope, ...actions, ...frame(live), selectedNodeIds: selectedNodeIdsRef.current,
+            singleSelectedNodeId: selectedNodeIdsRef.current.size === 1 ? selectedNodeIdsRef.current.values().next().value : null,
+            nodeById: new Map(live.nodes.map(node => [node.id, node])),
+            editorSelectionKey: `${initial.id}:test-owner:${[...selectedNodeIdsRef.current].sort().join(",")}` };
         return new Function("scope", `const { ${Object.keys(current).join(", ")} } = scope;\n${effectCode.get(name)}`)(current);
     };
     return {
-        ...actions, historyRef, applyingHistoryRef, generationRequestsRef, warnings, successes, errors, timers, stopped,
+        ...actions, historyRef, applyingHistoryRef, generationRequestsRef, lastEditorSelectionRef, selectedNodeIdsRef, warnings, successes, errors, timers, stopped,
+        prompt: () => editorPrompt, syncSelection: () => runEffect("selection"),
         live: () => live, canUndoAgent: () => canUndoAgent, undoRecord: () => agentUndoRecordsRef.current.get(latestAgentTurnRef.current || "")?.at(-1) || null,
         edit: (patch: Partial<CanvasProject>) => { live = { ...live, ...patch }; },
         clearAgentPatch: () => { agentUndoRecordsRef.current.clear(); latestAgentTurnRef.current = null; canUndoAgent = false; },
@@ -133,6 +145,34 @@ function chat(text: string): CanvasProject["chatSessions"] {
 }
 
 describe("agent inverse and ordinary history integration", () => {
+    test("undo and redo invalidate the same selected image binding and restore its own draft without changing the archive", () => {
+        const base = project();
+        const record = createCanvasGenerationRecord({ id: "run-one", sourceNodeId: "", prompt: "只读生成提示词", inputPrompt: "原始输入",
+            config: { ...defaultConfig, model: "gpt-image-2" }, references: [], nodes: [], generationType: "generation" });
+        base.nodes[0] = { ...base.nodes[0]!, type: CanvasNodeType.Image, metadata: { prompt: record.prompt, generationRecord: record, draftPrompt: "已保存旧草稿" } };
+        base.selectedNodeIds = ["one"];
+        const edited = { ...base, nodes: [{ ...base.nodes[0]!, metadata: { ...base.nodes[0]!.metadata, draftPrompt: "稍后新草稿" } }, base.nodes[1]!] };
+        const app = editor({ ...edited, history: { past: [{ ...frame(base), selectedNodeIds: ["one"] }], future: [] } }, frame(edited));
+        app.syncSelection();
+        const boundKey = app.lastEditorSelectionRef.current;
+        expect(boundKey).not.toBe("");
+        expect(app.prompt()).toBe("稍后新草稿");
+        app.undo();
+        expect([...app.selectedNodeIdsRef.current]).toEqual(["one"]);
+        expect(app.lastEditorSelectionRef.current).toBe("");
+        app.syncSelection();
+        expect(app.lastEditorSelectionRef.current).toBe(boundKey);
+        expect(app.prompt()).toBe("已保存旧草稿");
+        expect(app.live().nodes[0]!.metadata!.generationRecord).toEqual(record);
+        app.redo();
+        expect([...app.selectedNodeIdsRef.current]).toEqual(["one"]);
+        expect(app.lastEditorSelectionRef.current).toBe("");
+        app.syncSelection();
+        expect(app.lastEditorSelectionRef.current).toBe(boundKey);
+        expect(app.prompt()).toBe("稍后新草稿");
+        expect(app.live().nodes[0]!.metadata!.generationRecord).toEqual(record);
+    });
+
     test("agent deletion stops dependent observations and its inverse can restore the graph", async () => {
         const app = editor();
         app.generationRequestsRef.current.set("run", { targetNodeId: "one", originNodeId: "one", runningNodeId: "run" });
