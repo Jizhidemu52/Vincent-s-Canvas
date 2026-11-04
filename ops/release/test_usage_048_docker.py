@@ -158,6 +158,7 @@ class Usage048DockerPostgres17(unittest.TestCase):
             if row["name"] != "schema_migrations":
                 self.assertIn(row, after["tables"], row["name"])
         self.assertEqual(self.psql("SELECT processing_enabled FROM usage_rollup_state;", self.database).stdout.strip(), "f")
+        self.assertEqual(self.psql("SELECT count(*) FROM usage_source_invalidations;", self.database).stdout.strip(), "0")
         self.assertEqual(self.psql("SELECT count(*) FROM schema_migrations WHERE name='048_usage_daily_facts.sql';", self.database).stdout.strip(), "1")
 
     def test_wrong_expected_catalog_rolls_back_ddl_seed_and_registration(self):
@@ -176,6 +177,13 @@ class Usage048DockerPostgres17(unittest.TestCase):
         self.assertIn("048_ORIGINAL_BUSINESS_ROWS_CHANGED", result.stderr)
         self.assertEqual(self.snapshot(), before)
 
+    def test_nonempty_source_invalidation_seed_rolls_back_entire_migration(self):
+        before = self.snapshot()
+        result = self.migrate(before, injected="INSERT INTO usage_source_invalidations(day) VALUES('2026-09-01');")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("048_DISABLED_SEED_DELTA_REJECTED", result.stderr)
+        self.assertEqual(self.snapshot(), before)
+
     def test_control_roundtrip_changes_only_flag_and_preserves_all_data(self):
         result = self.migrate(self.snapshot())
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -188,6 +196,7 @@ INSERT INTO usage_daily_snapshots(day,metric_version,computed_at,fact_count,fact
 VALUES('2026-09-01','retained-version',now(),1,2);
 UPDATE usage_dirty_days SET failure_code='RETAINED_FAILURE',failed_at=now() WHERE day='2026-09-01';
 UPDATE usage_rollup_state SET last_scheduled_day='2026-09-01';
+INSERT INTO usage_source_invalidations(day) VALUES('2026-09-01');
 """, self.database)
         before = self.snapshot()
         state = self.psql("SELECT to_jsonb(s)-'processing_enabled' FROM usage_rollup_state s;", self.database).stdout

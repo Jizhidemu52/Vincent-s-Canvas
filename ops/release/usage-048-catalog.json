@@ -395,6 +395,28 @@
       "column_default": null,
       "ordinal_position": 5,
       "numeric_precision": null
+    },
+    {
+      "udt_name": "date",
+      "data_type": "date",
+      "table_name": "usage_source_invalidations",
+      "column_name": "day",
+      "is_nullable": "NO",
+      "numeric_scale": null,
+      "column_default": null,
+      "ordinal_position": 1,
+      "numeric_precision": null
+    },
+    {
+      "udt_name": "xid8",
+      "data_type": "xid8",
+      "table_name": "usage_source_invalidations",
+      "column_name": "source_xid",
+      "is_nullable": "NO",
+      "numeric_scale": null,
+      "column_default": "pg_current_xact_id()",
+      "ordinal_position": 2,
+      "numeric_precision": null
     }
   ],
   "indexes": [
@@ -462,6 +484,11 @@
       "indexdef": "CREATE UNIQUE INDEX usage_rollup_state_pkey ON public.usage_rollup_state USING btree (singleton)",
       "indexname": "usage_rollup_state_pkey",
       "tablename": "usage_rollup_state"
+    },
+    {
+      "indexdef": "CREATE UNIQUE INDEX usage_source_invalidations_pkey ON public.usage_source_invalidations USING btree (day, source_xid)",
+      "indexname": "usage_source_invalidations_pkey",
+      "tablename": "usage_source_invalidations"
     }
   ],
   "constraints": [
@@ -542,12 +569,18 @@
       "type": "c",
       "relation": "usage_rollup_state",
       "definition": "CHECK (singleton)"
+    },
+    {
+      "name": "usage_source_invalidations_pkey",
+      "type": "p",
+      "relation": "usage_source_invalidations",
+      "definition": "PRIMARY KEY (day, source_xid)"
     }
   ],
   "functions": [
     {
       "identity": "usage_mark_dirty_day(affected_at timestamp with time zone)",
-      "definition": "CREATE OR REPLACE FUNCTION public.usage_mark_dirty_day(affected_at timestamp with time zone)\n RETURNS void\n LANGUAGE plpgsql\nAS $function$\nDECLARE target_day date;\nBEGIN\n  IF affected_at IS NULL THEN RETURN; END IF;\n  target_day := (affected_at AT TIME ZONE 'Asia/Shanghai')::date;\n  INSERT INTO usage_dirty_days(day) VALUES(target_day)\n    ON CONFLICT(day) DO UPDATE SET dirty_at=now(),ready_after=now(),failure_code=NULL,failed_at=NULL;\n  UPDATE usage_rollup_state SET history_from=target_day WHERE singleton=true AND history_from>target_day;\nEND $function$\n"
+      "definition": "CREATE OR REPLACE FUNCTION public.usage_mark_dirty_day(affected_at timestamp with time zone)\n RETURNS void\n LANGUAGE plpgsql\nAS $function$\nDECLARE target_day date;\nBEGIN\n  IF affected_at IS NULL THEN RETURN; END IF;\n  target_day := (affected_at AT TIME ZONE 'Asia/Shanghai')::date;\n  INSERT INTO usage_source_invalidations(day) VALUES(target_day)\n    ON CONFLICT(day,source_xid) DO NOTHING;\nEND $function$\n"
     },
     {
       "identity": "usage_mark_task_dirty(target_id uuid)",

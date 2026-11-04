@@ -14,12 +14,13 @@ sqlTest("migration leaves analytics processing disabled; queue and worker ticks 
     await db.query("INSERT INTO users(id,username,display_name,role,must_change_password) VALUES($1,'control','Control','super_admin',false)", [user]);
     // Source writes must continue invalidating history while processing is off.
     await db.query("INSERT INTO usage_events(event_id,user_id,board_key,action,parameters,occurred_at) VALUES($1,$2,'image','visit','{}','2026-09-01T01:00:00Z')", [randomUUID(), user]);
-    expect((await db.query("SELECT day::text FROM usage_dirty_days WHERE day='2026-09-01'")).rows).toEqual([{ day: "2026-09-01" }]);
-    const before = (await db.query("SELECT (SELECT jsonb_agg(s) FROM usage_rollup_state s) AS state,(SELECT jsonb_agg(d ORDER BY day) FROM usage_dirty_days d) AS dirty")).rows;
+    expect((await db.query("SELECT day::text FROM usage_source_invalidations WHERE day='2026-09-01'")).rows).toEqual([{ day: "2026-09-01" }]);
+    const stateSql = "SELECT (SELECT jsonb_agg(s) FROM usage_rollup_state s) AS state,(SELECT jsonb_agg(d ORDER BY day) FROM usage_dirty_days d) AS dirty,(SELECT jsonb_agg(i ORDER BY day,source_xid) FROM usage_source_invalidations i) AS source";
+    const before = (await db.query(stateSql)).rows;
     await expect(queueUsageRollup(db, request(), user)).rejects.toMatchObject({ code: "USAGE_ROLLUP_NOT_ENABLED", status: 503 });
     await scheduleUsageRollupMaintenance(db, new Date("2026-09-20T19:00:00Z"));
     expect(await processUsageRollups(db, 3)).toEqual([{ status: "idle" }]);
-    expect((await db.query("SELECT (SELECT jsonb_agg(s) FROM usage_rollup_state s) AS state,(SELECT jsonb_agg(d ORDER BY day) FROM usage_dirty_days d) AS dirty")).rows).toEqual(before);
+    expect((await db.query(stateSql)).rows).toEqual(before);
     expect((await db.query("SELECT (SELECT count(*)::int FROM usage_rollup_jobs) AS jobs,(SELECT count(*)::int FROM usage_daily_facts) AS facts,(SELECT count(*)::int FROM usage_daily_snapshots) AS snapshots")).rows[0]).toEqual({ jobs: 0, facts: 0, snapshots: 0 });
   } finally { await f.close(); }
 }, 30000);

@@ -58,6 +58,12 @@ class Usage048Contracts(unittest.TestCase):
                 state = after_state(); state[field][0] = dict(state[field][0], unexpected=True)
                 with self.assertRaises(Rejected): operator.assert_048_delta(before_state(), state, CATALOG)
 
+    def test_initial_source_invalidation_journal_must_be_empty(self):
+        state = after_state()
+        next(row for row in state["tables"] if row["name"] == "usage_source_invalidations")["count"] = 1
+        with self.assertRaisesRegex(Rejected, "048_PROCESSING_STARTED_BEFORE_ENABLE"):
+            operator.assert_048_delta(before_state(), state, CATALOG)
+
     def test_existing_048_or_unexpected_previous_migration_is_rejected(self):
         release = {"migrations": [{"name": "001_schema.sql"}, {"name": operator.MIGRATION}]}
         operator.validate_source_migrations(before_state(), release, {"retainedMigrationNames": []})
@@ -315,28 +321,31 @@ class Usage048IsolatedSql(unittest.TestCase):
 
     def test_exact_migration_commits_disabled_with_zero_business_delta(self):
         result = self.execute([{"kind": "snapshot"}, {"kind": "migration"}, {"kind": "snapshot"},
-                               {"sql": "SELECT processing_enabled FROM usage_rollup_state"}])
+                               {"sql": "SELECT processing_enabled,(SELECT count(*)::int FROM usage_source_invalidations) AS source_invalidations FROM usage_rollup_state"}])
         self.assertTrue(result[1]["ok"], result[1])
         operator.assert_048_delta(result[0]["snapshot"], result[2]["snapshot"], CATALOG)
-        self.assertEqual(result[3]["values"][0]["rows"], [{"processing_enabled": False}])
+        self.assertEqual(result[3]["values"][0]["rows"], [{"processing_enabled": False, "source_invalidations": 0}])
 
     def test_business_or_catalog_mutation_rolls_back_entire_schema_and_registration(self):
         for injected in ["UPDATE schema_migrations SET applied_at=now()", "CREATE TABLE unrelated(id int)",
-                         "ALTER TABLE users ADD COLUMN unrelated text", "CREATE SEQUENCE unwanted_seq"]:
+                         "ALTER TABLE users ADD COLUMN unrelated text", "CREATE SEQUENCE unwanted_seq",
+                         "INSERT INTO usage_source_invalidations(day) VALUES('2026-09-01')"]:
             with self.subTest(injected=injected):
                 result = self.execute([{"kind": "snapshot"}, {"kind": "migration", "inject": injected}, {"kind": "snapshot"}])
                 self.assertFalse(result[1]["ok"], result[1])
                 self.assertEqual(result[0]["snapshot"], result[2]["snapshot"])
 
     def test_control_keeps_all_rows_except_flag_and_refuses_unexpected_state_trigger(self):
-        result = self.execute([{"kind": "migration"}, {"kind": "snapshot"}, {"kind": "control", "enabled": True},
+        result = self.execute([{"kind": "migration"}, {"sql": "INSERT INTO usage_source_invalidations(day) VALUES('2026-09-01')"},
+                               {"kind": "snapshot"}, {"kind": "control", "enabled": True},
                                {"kind": "control", "enabled": False}, {"kind": "snapshot"},
                                {"sql": "CREATE FUNCTION unexpected_state_trigger() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$; CREATE TRIGGER unexpected BEFORE UPDATE ON usage_rollup_state FOR EACH ROW EXECUTE FUNCTION unexpected_state_trigger();"},
                                {"kind": "control", "enabled": True}, {"sql": "SELECT processing_enabled FROM usage_rollup_state"}])
-        for index in [0, 1, 2, 3, 4, 5, 7]: self.assertTrue(result[index]["ok"], result[index])
-        self.assertEqual(result[1]["snapshot"], result[4]["snapshot"])
-        self.assertFalse(result[6]["ok"], result[6])
-        self.assertEqual(result[7]["values"][0]["rows"], [{"processing_enabled": False}])
+        for index in [0, 1, 2, 3, 4, 5, 6, 8]: self.assertTrue(result[index]["ok"], result[index])
+        self.assertEqual(next(row for row in result[2]["snapshot"]["tables"] if row["name"] == "usage_source_invalidations")["count"], 1)
+        self.assertEqual(result[2]["snapshot"], result[5]["snapshot"])
+        self.assertFalse(result[7]["ok"], result[7])
+        self.assertEqual(result[8]["values"][0]["rows"], [{"processing_enabled": False}])
 
 
 if __name__ == "__main__":

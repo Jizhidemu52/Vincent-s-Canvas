@@ -15,16 +15,25 @@ export const usageDailyFactsCte = `WITH facts AS (
   FROM usage_daily_facts p JOIN users u ON u.id=p.user_id WHERE COALESCE(u.is_guest,false)=false
 )`;
 
+// Source transactions must not lock the shared history row. Until a bounded
+// analytics drain advances it, committed source markers establish older days.
+// Retain that coverage after markers become dirty days or completed snapshots.
+const usageHistoryFromSql = `LEAST(state.history_from,
+  (SELECT min(day) FROM usage_source_invalidations),
+  (SELECT min(day) FROM usage_dirty_days),
+  (SELECT min(day) FROM usage_daily_snapshots))`;
+
 /** Reads only projection metadata. No GET-triggered refresh or source-history fallback. */
 export async function readUsageSnapshot(client: UsageQueryClient, scopes: UsageV2Scope[], observedAt: string, metricVersion: string): Promise<NonNullable<UsageV2Meta["snapshot"]>> {
   const today = usageDay(observedAt);
   const days = [...new Set(scopes.flatMap(scope => usageDays(usageDay(scope.from), usageDay(new Date(Date.parse(scope.to) - 1)))))]
     .filter(day => day <= today);
   const rows = (await client.query<{ day: string; computed_at: Date | string | null; metric_version: string | null; dirty: boolean }>(
-    `SELECT r.day::text,s.computed_at,s.metric_version,(d.day IS NOT NULL AND d.ready_after<=$2::timestamptz) AS dirty
+    `SELECT r.day::text,s.computed_at,s.metric_version,((d.day IS NOT NULL AND d.ready_after<=$2::timestamptz)
+       OR EXISTS(SELECT 1 FROM usage_source_invalidations i WHERE i.day=r.day)) AS dirty
      FROM unnest($1::date[]) r(day) CROSS JOIN usage_rollup_state state
      LEFT JOIN usage_daily_snapshots s ON s.day=r.day LEFT JOIN usage_dirty_days d ON d.day=r.day
-     WHERE r.day>=state.history_from ORDER BY r.day`, [days, observedAt],
+     WHERE r.day>=${usageHistoryFromSql} ORDER BY r.day`, [days, observedAt],
   )).rows;
   const invalid = rows.filter(row => !row.computed_at || row.metric_version !== metricVersion || row.dirty);
   if (invalid.length) throw new UsageError("USAGE_ROLLUP_REFRESH_REQUIRED", `所选范围有 ${invalid.length} 天待回填或变更待补算；请刷新所选日期并等待任务完成，未返回过期统计`, 409);

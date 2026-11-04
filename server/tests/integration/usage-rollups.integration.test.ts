@@ -13,10 +13,11 @@ const sqlTest = process.env.PGLITE_RUNTIME_PATH ? test : test.skip;
 sqlTest("daily analytics migration provides durable exact facts and dirty-day queue without enabling telemetry", async () => {
   const fixture = await createIsolatedPostgres();
   try {
-    const tables = (await fixture.db.query("SELECT to_regclass('usage_daily_facts') AS facts,to_regclass('usage_daily_snapshots') AS snapshots,to_regclass('usage_dirty_days') AS dirty,to_regclass('usage_sessions') AS sessions")).rows[0];
+    const tables = (await fixture.db.query("SELECT to_regclass('usage_daily_facts') AS facts,to_regclass('usage_daily_snapshots') AS snapshots,to_regclass('usage_dirty_days') AS dirty,to_regclass('usage_source_invalidations') AS source,to_regclass('usage_sessions') AS sessions")).rows[0];
     expect(tables.facts).toBe("usage_daily_facts");
     expect(tables.snapshots).toBe("usage_daily_snapshots");
     expect(tables.dirty).toBe("usage_dirty_days");
+    expect(tables.source).toBe("usage_source_invalidations");
     expect(tables.sessions).toBeNull();
   } finally { await fixture.close(); }
 }, 120000);
@@ -112,7 +113,7 @@ sqlTest("late use and reversal on an old generated variant dirty the original da
     await f.refresh();
     const receipt = randomUUID();
     await db.query("INSERT INTO asset_events(id,asset_id,designer_user_id,actor_user_id,task_id,event_type,idempotency_key,occurred_at) VALUES($1,$2,$3,$4,$5,'asset.adopted',$1::uuid::text,now())", [receipt, f.original, f.user, f.actor, f.taskIds[0]]);
-    expect((await db.query("SELECT day::text FROM usage_dirty_days WHERE day='2026-09-01'")).rows).toHaveLength(1);
+    expect((await db.query("SELECT day::text FROM usage_source_invalidations WHERE day='2026-09-01'")).rows).toHaveLength(1);
     await expect(usageV2Quality(db, scope, daily)).rejects.toMatchObject({ code: "USAGE_ROLLUP_REFRESH_REQUIRED" });
     await f.refresh("2026-09-01", "2026-09-01");
     let quality = await usageV2Quality(db, scope, daily);
@@ -126,7 +127,7 @@ sqlTest("late use and reversal on an old generated variant dirty the original da
     await db.query("UPDATE generation_history SET rmb_cost=0.900009 WHERE task_id=$1", [f.taskIds[0]]);
     await db.query("UPDATE usage_events SET occurred_at='2026-09-02T02:00:00Z'");
     await db.query("UPDATE prompt_compilations SET details='{\"actualCost\":0.2,\"currency\":\"USD\",\"inputTokens\":100}' WHERE id='original'");
-    expect((await db.query("SELECT day::text FROM usage_dirty_days WHERE day BETWEEN '2026-09-01' AND '2026-09-02' ORDER BY day")).rows).toEqual([{ day: "2026-09-01" }, { day: "2026-09-02" }]);
+    expect((await db.query("SELECT DISTINCT day::text FROM usage_source_invalidations WHERE day BETWEEN '2026-09-01' AND '2026-09-02' ORDER BY day")).rows).toEqual([{ day: "2026-09-01" }, { day: "2026-09-02" }]);
     await f.refresh();
     expect((await usageV2Overview(db, scope, daily)).metrics.generationBookedCny.amount).toBe("1.400014");
     expect((await usageV2Models(db, scope, daily)).optimizationCosts.costs[0]?.providerReportedAmount).toBe("0.200000");

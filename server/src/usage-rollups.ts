@@ -30,13 +30,40 @@ function presentJob(row: JobRow): UsageRollupJob {
 
 /** The release operator takes the exclusive form of this same transaction lock
  * when enabling/disabling. Source dirty triggers deliberately do not take it. */
-async function processingEnabled(client: UsageQueryClient): Promise<boolean> {
+async function processingEnabled(client: UsageQueryClient, repeatableRead = false): Promise<boolean> {
   await client.query("SELECT pg_advisory_xact_lock_shared(hashtextextended('canvas:usage-rollup-control:v1',0))");
   // A repeatable-read transaction can acquire its snapshot before waiting for
-  // the control lock. KEY SHARE rejects that stale row version with 40001 after
-  // a concurrent disable, while allowing source history_from updates (NO KEY
-  // UPDATE) to commit without waiting for expensive rollup computation.
-  return (await client.query<{ processing_enabled: boolean }>("SELECT processing_enabled FROM usage_rollup_state WHERE singleton=true FOR KEY SHARE")).rows[0]?.processing_enabled === true;
+  // the control lock. SHARE conflicts with a non-key flag UPDATE and rejects
+  // that stale row version with 40001; KEY SHARE would still read the old flag.
+  // READ COMMITTED gets a fresh snapshot after the advisory lock, and must not
+  // take SHARE before a later history/scheduling UPDATE (lock upgrade cycle).
+  return (await client.query<{ processing_enabled: boolean }>(`SELECT processing_enabled FROM usage_rollup_state WHERE singleton=true${repeatableRead ? " FOR SHARE" : ""}`)).rows[0]?.processing_enabled === true;
+}
+
+/** Transfer at most 1000 committed transaction/day markers atomically. Source
+ * writers never update these existing keys or any shared analytics row. */
+export async function drainUsageSourceInvalidations(db: Database): Promise<number> {
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+    await client.query("SET LOCAL statement_timeout='5000ms'");
+    await client.query("SET LOCAL lock_timeout='1000ms'");
+    if (!await processingEnabled(client)) { await client.query("COMMIT"); return 0; }
+    const rows = (await client.query<{ day: string; source_xid: string }>(`SELECT i.day::text,i.source_xid::text
+      FROM usage_source_invalidations i ORDER BY i.day,i.source_xid LIMIT 1000 FOR UPDATE SKIP LOCKED`)).rows;
+    if (!rows.length) { await client.query("COMMIT"); return 0; }
+    // Analytics-only lock order is always state -> dirty days (in date order).
+    await client.query("UPDATE usage_rollup_state SET history_from=$1 WHERE singleton=true AND history_from>$1::date", [rows[0]!.day]);
+    await client.query(`INSERT INTO usage_dirty_days(day)
+      SELECT DISTINCT day FROM unnest($1::date[]) AS source(day) ORDER BY day
+      ON CONFLICT(day) DO UPDATE SET dirty_at=now(),ready_after=now(),failure_code=NULL,failed_at=NULL`, [rows.map(row => row.day)]);
+    await client.query(`DELETE FROM usage_source_invalidations i
+      USING unnest($1::date[],$2::xid8[]) AS selected(day,source_xid)
+      WHERE i.day=selected.day AND i.source_xid=selected.source_xid`, [rows.map(row => row.day), rows.map(row => row.source_xid)]);
+    await client.query("COMMIT");
+    return rows.length;
+  } catch (error) { await client.query("ROLLBACK").catch(() => undefined); throw error; }
+  finally { client.release(); }
 }
 
 /** Enqueue only; a timed-out/repeated HTTP request cannot duplicate a job. */
@@ -111,9 +138,11 @@ async function rebuildDay(db: Database, client: UsageQueryClient, day: string) {
     WHERE e.occurred_at>$1::timestamptz AND (e.task_id IN(SELECT id FROM tasks WHERE queued_at>=$2::timestamptz AND queued_at<$3::timestamptz)
       OR e.asset_id IN(SELECT a.id FROM assets a JOIN tasks t ON t.id=a.task_id WHERE t.queued_at>=$2::timestamptz AND t.queued_at<$3::timestamptz))`, [data.asOf, scope.from, scope.to])).rows[0]?.next_at;
   // Do not lock the dirty row during expensive source reads. If a concurrent
-  // source transaction changed the row after this repeatable-read snapshot,
+  // analytics drain changed the row after this repeatable-read snapshot,
   // PostgreSQL rejects this DELETE with 40001; the entire day is deferred.
-  // A concurrently inserted dirty row invisible to this snapshot stays queued.
+  // Concurrent source commits append independent markers; they remain queued
+  // and readUsageSnapshot rejects this projection until the next bounded drain
+  // and rebuild. A dirty row invisible to this snapshot also stays queued.
   await client.query("DELETE FROM usage_dirty_days WHERE day=$1", [day]);
   if (future) await client.query("INSERT INTO usage_dirty_days(day,ready_after) VALUES($1,$2) ON CONFLICT(day) DO UPDATE SET ready_after=LEAST(usage_dirty_days.ready_after,EXCLUDED.ready_after)", [day, future]);
 }
@@ -121,10 +150,14 @@ async function rebuildDay(db: Database, client: UsageQueryClient, day: string) {
 /** Schedule once per Beijing day after 03:00; source triggers cover arbitrarily old days. */
 export async function scheduleUsageRollupMaintenance(db: Database, now = new Date()) {
   const today = usageDay(now), hour = new Date(now.getTime() + 8 * 3600000).getUTCHours();
+  await drainUsageSourceInvalidations(db);
   const client = await db.connect();
   try {
     await client.query("BEGIN");
     if (!await processingEnabled(client)) { await client.query("COMMIT"); return; }
+    // Take the state lock before any dirty-day write, matching the drain and
+    // processor order. No business transaction needs either of these locks.
+    await client.query("SELECT singleton FROM usage_rollup_state WHERE singleton=true FOR NO KEY UPDATE");
     // Initial migration seeds existing history; this bounded scan also covers
     // newly discovered older dates and multi-day downtime without GET writes.
     await client.query(`INSERT INTO usage_dirty_days(day)
@@ -147,11 +180,13 @@ export async function scheduleUsageRollupMaintenance(db: Database, now = new Dat
 }
 
 type Step = { status: "processed" | "idle" | "deferred" | "failed"; day?: string; jobId?: string; failureCode?: string };
-type DayFence = { snapshot_version: string | null; dirty_version: string | null };
-// xmin is an opaque row version, not a wall-clock timestamp. It also detects a
-// source transaction that began earlier but committed while this day was read.
+type DayFence = { snapshot_version: string | null; dirty_version: string | null; source_pending: boolean };
+// xmin fences analytics row versions, not wall-clock time. The journal check
+// independently catches source transactions that committed during computation,
+// including those whose transaction began before the computation snapshot.
 const dayFenceSql = `SELECT (SELECT xmin::text FROM usage_daily_snapshots WHERE day=$1) AS snapshot_version,
-  (SELECT xmin::text FROM usage_dirty_days WHERE day=$1) AS dirty_version`;
+  (SELECT xmin::text FROM usage_dirty_days WHERE day=$1) AS dirty_version,
+  EXISTS(SELECT 1 FROM usage_source_invalidations WHERE day=$1) AS source_pending`;
 /** One day per transaction. Advisory locks serialize workers, not business writes;
  * a conflicting source commit cannot be lost when clearing dirty. */
 async function processOneDay(db: Database): Promise<Step> {
@@ -169,7 +204,7 @@ async function processOneDay(db: Database): Promise<Step> {
     await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ");
     await client.query("SET LOCAL statement_timeout='15000ms'");
     await client.query("SET LOCAL lock_timeout='1000ms'");
-    if (!await processingEnabled(client)) { await client.query("COMMIT"); return { status: "idle" }; }
+    if (!await processingEnabled(client, true)) { await client.query("COMMIT"); return { status: "idle" }; }
     job = (await client.query<JobRow>(`SELECT ${jobColumns} FROM usage_rollup_jobs WHERE status IN('queued','running') ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT 1`)).rows[0];
     if (job) day = usageDays(dateOnly(job.from_day), dateOnly(job.to_day)).find(value => !job!.completed_days.map(dateOnly).includes(value));
     else day = (await client.query<{ day: string }>("SELECT day::text FROM usage_dirty_days WHERE ready_after<=now() AND failure_code IS NULL AND day<=(now() AT TIME ZONE 'Asia/Shanghai')::date ORDER BY day LIMIT 1")).rows[0]?.day;
@@ -207,15 +242,19 @@ async function processOneDay(db: Database): Promise<Step> {
       const lock = (await client.query<{ locked: boolean }>("SELECT pg_try_advisory_xact_lock(hashtext('usage-rollup:'||$1::text)) AS locked", [day])).rows[0]!.locked;
       if (!lock) { await client.query("ROLLBACK"); return { status: "deferred" }; }
       const current = (await client.query<DayFence>(dayFenceSql, [day])).rows[0]!;
-      if (current.snapshot_version !== fence.snapshot_version || current.dirty_version !== fence.dirty_version) {
+      if (current.snapshot_version !== fence.snapshot_version || current.dirty_version !== fence.dirty_version || current.source_pending) {
         await client.query("ROLLBACK"); return { status: "deferred" };
       }
-      // The conditional write also closes a source-write race after the check.
-      // A new/updated dirty row wins, so its automatic retry remains enabled.
+      // Recheck pending markers at the write, too. A source commit racing after
+      // that statement remains in the journal and the next drain clears this
+      // failure; failure recording never consumes source markers.
       const marked = fence.dirty_version === null
-        ? await client.query("INSERT INTO usage_dirty_days(day,failure_code,failed_at) VALUES($1,$2,now()) ON CONFLICT(day) DO NOTHING RETURNING day", [day, failureCode])
-        : await client.query("UPDATE usage_dirty_days SET failure_code=$2,failed_at=now() WHERE day=$1 AND xmin::text=$3 RETURNING day", [day, failureCode, fence.dirty_version]);
+        ? await client.query("INSERT INTO usage_dirty_days(day,failure_code,failed_at) SELECT $1,$2,now() WHERE NOT EXISTS(SELECT 1 FROM usage_source_invalidations WHERE day=$1) ON CONFLICT(day) DO NOTHING RETURNING day", [day, failureCode])
+        : await client.query("UPDATE usage_dirty_days SET failure_code=$2,failed_at=now() WHERE day=$1 AND xmin::text=$3 AND NOT EXISTS(SELECT 1 FROM usage_source_invalidations WHERE day=$1) RETURNING day", [day, failureCode, fence.dirty_version]);
       if (!marked.rows.length) { await client.query("ROLLBACK"); return { status: "deferred" }; }
+      if ((await client.query<{ pending: boolean }>("SELECT EXISTS(SELECT 1 FROM usage_source_invalidations WHERE day=$1) AS pending", [day])).rows[0]!.pending) {
+        await client.query("ROLLBACK"); return { status: "deferred" };
+      }
       if (job) await client.query("UPDATE usage_rollup_jobs SET status='failed',failure_code=$2,updated_at=now() WHERE id=$1", [job.id, failureCode]);
       await client.query("COMMIT");
       return { status: "failed", day, ...(job ? { jobId: job.id } : {}), failureCode };
@@ -233,6 +272,12 @@ export async function processUsageRollups(db: Database, maxDays = 3): Promise<St
   const limit = Math.max(1, Math.min(7, Math.floor(maxDays)));
   const result: Step[] = [];
   for (let index = 0; index < limit; index++) {
+    try { await drainUsageSourceInvalidations(db); }
+    catch (error) {
+      const code = error && typeof error === "object" && "code" in error ? String(error.code) : "";
+      if (!["40001", "40P01", "55P03"].includes(code)) throw error;
+      result.push({ status: "deferred" }); break;
+    }
     const step = await processOneDay(db);
     result.push(step);
     if (step.status === "idle" || step.status === "deferred") break;

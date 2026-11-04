@@ -97,7 +97,6 @@ sqlTest("history and live today keep exact image evidence, compound filters and 
     expect(compared.metrics.visits).toMatchObject({ value: 1, comparison: { value: 1, absoluteDelta: 0 } });
     expect(compared.meta.snapshot?.dayCount).toBe(1);
     await f.event("2026-09-02T02:00:00Z");
-    await f.db.query("UPDATE usage_dirty_days SET ready_after='2026-09-02T00:00:00Z' WHERE day='2026-09-02'");
     await expect(usageV2Overview(db, { ...today, from: scope.from, to: today.from }, daily)).rejects.toMatchObject({ code: "USAGE_ROLLUP_REFRESH_REQUIRED" });
     await expect(usageV2Overview(db, scope, daily)).rejects.toMatchObject({ code: "USAGE_ROLLUP_REFRESH_REQUIRED" });
   } finally { await f.close(); }

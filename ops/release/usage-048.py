@@ -25,7 +25,7 @@ MIGRATION = "048_usage_daily_facts.sql"
 SQL_PATH = "server/src/migrations/" + MIGRATION
 CATALOG_PATH = "ops/release/usage-048-catalog.json"
 CONTROL_LOCK = "pg_catalog.hashtextextended('canvas:usage-rollup-control:v1',0)"
-NEW_TABLES = {"usage_rollup_state", "usage_dirty_days", "usage_daily_snapshots", "usage_daily_facts", "usage_rollup_jobs"}
+NEW_TABLES = {"usage_rollup_state", "usage_dirty_days", "usage_source_invalidations", "usage_daily_snapshots", "usage_daily_facts", "usage_rollup_jobs"}
 SORT_KEYS = {"columns": ("table_name", "ordinal_position"), "indexes": ("tablename", "indexname"),
              "constraints": ("relation", "name"), "functions": ("identity",), "triggers": ("relation", "name")}
 TOOLS = Path(__file__).resolve().parent
@@ -74,7 +74,7 @@ def assert_048_delta(before, after, catalog):
     require_unchanged(before["migrations"], old_migrations, "048_OLD_MIGRATION_ROWS_CHANGED")
     require(sum(row["name"] == MIGRATION for row in after["migrations"]) == 1, "048_MIGRATION_REGISTRATION_REQUIRED")
     require(current["schema_migrations"]["count"] == prior["schema_migrations"]["count"] + 1, "048_MIGRATION_ROW_DELTA_INVALID")
-    for name in ["usage_daily_snapshots", "usage_daily_facts", "usage_rollup_jobs"]:
+    for name in ["usage_daily_snapshots", "usage_daily_facts", "usage_rollup_jobs", "usage_source_invalidations"]:
         require(current[name]["count"] == 0, "048_PROCESSING_STARTED_BEFORE_ENABLE")
     require(current["usage_rollup_state"]["count"] == 1 and current["usage_dirty_days"]["count"] >= 1, "048_SEED_ROWS_MISSING")
 
@@ -179,11 +179,12 @@ BEGIN
  IF (SELECT coalesce(jsonb_agg(v ORDER BY v->>'name'),'[]'::jsonb) FROM jsonb_array_elements(actual->'migrations') v WHERE v->>'name'<>'{MIGRATION}') IS DISTINCT FROM prior->'migrations'
     OR (SELECT count(*) FROM jsonb_array_elements(actual->'migrations') v WHERE v->>'name'='{MIGRATION}')<>1
  THEN RAISE EXCEPTION '048_MIGRATION_DELTA_REJECTED'; END IF;
- IF (SELECT jsonb_agg(v ORDER BY v->>'name') FROM jsonb_array_elements(actual->'tables') v WHERE v->>'name' NOT IN ('schema_migrations','usage_rollup_state','usage_dirty_days','usage_daily_snapshots','usage_daily_facts','usage_rollup_jobs'))
+ IF (SELECT jsonb_agg(v ORDER BY v->>'name') FROM jsonb_array_elements(actual->'tables') v WHERE v->>'name' NOT IN ('schema_migrations','usage_rollup_state','usage_dirty_days','usage_source_invalidations','usage_daily_snapshots','usage_daily_facts','usage_rollup_jobs'))
     IS DISTINCT FROM (SELECT jsonb_agg(v ORDER BY v->>'name') FROM jsonb_array_elements(prior->'tables') v WHERE v->>'name'<>'schema_migrations')
  THEN RAISE EXCEPTION '048_ORIGINAL_BUSINESS_ROWS_CHANGED'; END IF;
  IF (SELECT count(*) FROM usage_rollup_state)<>1 OR NOT EXISTS(SELECT 1 FROM usage_rollup_state WHERE singleton AND NOT processing_enabled AND last_scheduled_day IS NULL)
     OR EXISTS(SELECT 1 FROM usage_daily_facts) OR EXISTS(SELECT 1 FROM usage_daily_snapshots) OR EXISTS(SELECT 1 FROM usage_rollup_jobs)
+    OR EXISTS(SELECT 1 FROM usage_source_invalidations)
     OR EXISTS(SELECT 1 FROM usage_dirty_days WHERE failure_code IS NOT NULL OR failed_at IS NOT NULL OR dirty_at<>now() OR ready_after<>now())
     OR (SELECT count(*) FROM usage_dirty_days)<>(SELECT (now() AT TIME ZONE 'Asia/Shanghai')::date-history_from+1 FROM usage_rollup_state)
     OR EXISTS(SELECT 1 FROM usage_dirty_days d,usage_rollup_state s WHERE d.day<s.history_from OR d.day>(now() AT TIME ZONE 'Asia/Shanghai')::date)

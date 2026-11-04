@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import type { Database } from "../../src/db";
 import { createIsolatedPostgres } from "../helpers/isolated-postgres";
-import { getUsageRollupJob, processUsageRollups, queueUsageRollup } from "../../src/usage-rollups";
+import { drainUsageSourceInvalidations, getUsageRollupJob, processUsageRollups, queueUsageRollup } from "../../src/usage-rollups";
 import { usageV2Overview } from "../../src/usage-analytics-v2";
 
 const sqlTest = process.env.PGLITE_RUNTIME_PATH ? test : test.skip;
@@ -73,6 +73,7 @@ sqlTest("a late failure preserves a newly updated dirty row so changed business 
     });
     expect(await processUsageRollups(interrupted, 1)).toEqual([{ status: "deferred" }]);
     expect((await db.query("SELECT failure_code FROM usage_dirty_days WHERE day='2026-09-01'")).rows).toEqual([{ failure_code: null }]);
+    expect((await db.query("SELECT count(*)::int AS n FROM usage_source_invalidations WHERE day='2026-09-01'")).rows[0].n).toBe(1);
     expect((await processUsageRollups(db, 1))[0]?.status).toBe("processed");
     expect((await db.query("SELECT occurred_at FROM usage_daily_facts WHERE day='2026-09-01'")).rows).toHaveLength(1);
     expect((await usageV2Overview(db, scope, { source: "daily" })).metrics.visits.value).toBe(1);
@@ -89,7 +90,9 @@ sqlTest("a late explicit refresh failure preserves dirty inserted after a former
     });
     expect(await processUsageRollups(interrupted, 1)).toEqual([{ status: "deferred" }]);
     expect(await getUsageRollupJob(db, job.jobId)).toMatchObject({ status: "queued", completedDays: [], failureCode: null });
-    expect((await db.query("SELECT failure_code FROM usage_dirty_days WHERE day='2026-09-01'")).rows).toEqual([{ failure_code: null }]);
+    expect((await db.query("SELECT failure_code FROM usage_dirty_days WHERE day='2026-09-01'")).rows).toEqual([]);
+    expect((await db.query("SELECT count(*)::int AS n FROM usage_source_invalidations WHERE day='2026-09-01'")).rows[0].n).toBe(1);
+    await expect(usageV2Overview(db, scope, { source: "daily" })).rejects.toMatchObject({ code: "USAGE_ROLLUP_REFRESH_REQUIRED" });
     expect((await processUsageRollups(db, 1))[0]?.status).toBe("processed");
     expect((await usageV2Overview(db, scope, { source: "daily" })).metrics.visits.value).toBe(2);
   } finally { await f.close(); }
@@ -99,6 +102,7 @@ sqlTest("disabling after computation rollback prevents the late failure transact
   const f = await fixture(), db = f.db;
   try {
     const job = await queueUsageRollup(db, { fromDay: "2026-09-01", toDay: "2026-09-01", idempotencyKey: randomUUID() }, f.user);
+    await drainUsageSourceInvalidations(db);
     const before = (await db.query("SELECT * FROM usage_dirty_days ORDER BY day")).rows;
     const interrupted = f.interrupt(async () => {
       await db.query("UPDATE usage_rollup_state SET processing_enabled=false WHERE singleton=true");

@@ -45,9 +45,9 @@ python3 -B /absolute/package/ops/release/usage-048.py enable /absolute/instance.
 python3 -B /absolute/package/ops/release/usage-048.py disable /absolute/instance.json /absolute/package
 ```
 
-顺序必须是：**停用态 schema 准备 → 原三个应用容器 same-ID 恢复并打开正常入口 → 原零变更发布器切换镜像 → 独立 enable**。不允许在镜像切换中顺带回填。默认 `processing_enabled=false`；应用重启不改变它。普通源业务产生的 dirty 标记保留，关闭只停止统计入队、调度、处理与失败回写，不清空事实表、任务或 dirty 天数。
+顺序必须是：**停用态 schema 准备 → 原三个应用容器 same-ID 恢复并打开正常入口 → 原零变更发布器切换镜像 → 独立 enable**。不允许在镜像切换中顺带回填。默认 `processing_enabled=false`；应用重启不改变它。普通源业务按日期与自身事务写入 `usage_source_invalidations`，不争用分析队列或控制状态行；关闭只停止统计入队、调度、处理与失败回写，不清空事实表、任务、dirty 天数或源变更标记。
 
-048 预检有效期 15 分钟，绑定实例、数据库集群身份、容器、配置、包和 SQL SHA。`migrate` 复用现有 `deployment.lock`、维护门和排空检查，停止原应用后保存并验证 `pg_dump`。固定 SQL 与唯一迁移登记在同一事务执行；提交前精确核对全部原业务行/哈希、序列、旧迁移记录，以及 5 张新表、13 个索引（含主键/唯一约束索引）、13 个约束、3 个函数、10 个触发器和停用态种子。PostgreSQL 18 额外暴露的 NOT NULL 约束只从约束列表中排除；同一空值限制仍由列结构逐项精确校验，其他定义不做近似容错。
+048 预检有效期 15 分钟，绑定实例、数据库集群身份、容器、配置、包和 SQL SHA。`migrate` 复用现有 `deployment.lock`、维护门和排空检查，停止原应用后保存并验证 `pg_dump`。固定 SQL 与唯一迁移登记在同一事务执行；提交前精确核对全部原业务行/哈希、序列、旧迁移记录，以及 6 张新表、14 个索引（含主键/唯一约束索引）、14 个约束、3 个函数、10 个触发器、停用态种子及初始空的源变更表。PostgreSQL 18 额外暴露的 NOT NULL 约束只从约束列表中排除；同一空值限制仍由列结构逐项精确校验，其他定义不做近似容错。
 
 成功后只 `docker start` 原容器 ID，不创建或替换服务。固定配置、挂载、网络身份、网关及前缀不变；仅已验证的动态 IPv4 同网段租约变化可接受。数据库状态在旧服务启动后再次完整核对，才重新打开维护门。
 

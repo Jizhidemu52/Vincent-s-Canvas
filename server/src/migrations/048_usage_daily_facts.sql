@@ -25,6 +25,15 @@ INSERT INTO usage_dirty_days(day)
 SELECT day::date FROM usage_rollup_state,
   LATERAL generate_series(history_from::timestamp,(now() AT TIME ZONE 'Asia/Shanghai')::date::timestamp,interval '1 day') day;
 
+-- Business transactions only append their own key. Repeated marks in the same
+-- transaction/day coalesce without taking a row lock shared by other writers.
+-- Analytics workers atomically drain bounded batches into usage_dirty_days.
+CREATE TABLE usage_source_invalidations (
+  day date NOT NULL,
+  source_xid xid8 NOT NULL DEFAULT pg_current_xact_id(),
+  PRIMARY KEY(day,source_xid)
+);
+
 CREATE TABLE usage_daily_snapshots (
   day date PRIMARY KEY,
   metric_version text NOT NULL,
@@ -74,9 +83,8 @@ DECLARE target_day date;
 BEGIN
   IF affected_at IS NULL THEN RETURN; END IF;
   target_day := (affected_at AT TIME ZONE 'Asia/Shanghai')::date;
-  INSERT INTO usage_dirty_days(day) VALUES(target_day)
-    ON CONFLICT(day) DO UPDATE SET dirty_at=now(),ready_after=now(),failure_code=NULL,failed_at=NULL;
-  UPDATE usage_rollup_state SET history_from=target_day WHERE singleton=true AND history_from>target_day;
+  INSERT INTO usage_source_invalidations(day) VALUES(target_day)
+    ON CONFLICT(day,source_xid) DO NOTHING;
 END $$;
 CREATE FUNCTION usage_mark_task_dirty(target_id uuid) RETURNS void LANGUAGE plpgsql AS $$
 BEGIN
