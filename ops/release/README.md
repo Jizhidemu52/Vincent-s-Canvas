@@ -4,6 +4,8 @@
 
 ## 操作入口
 
+验收环境中，仅 Web 同时连接内部业务网络和独立入口网络，并只向宿主 `127.0.0.1` 发布端口；API、Worker、合成 Provider 和数据服务仅连接内部网络。Docker 不会为仅连接 `internal` 网络的容器建立宿主端口映射，因此必须验证实际端口和浏览器入口，而不只检查容器健康。
+
 - `ops/release/stack-smoke.sh candidate.json /new/private/evidence`：仅 GitHub 隔离测试项目；正式后端、合成 Provider、无真实付费调用。
 - `ops/release/package-artifact.sh candidate.json verification.json /new/package`：验证同一镜像后导出白名单工具与镜像，不打包环境、数据库或私有配置。
 - `bash ops/deploy.sh preflight /absolute/instance.json /absolute/package`：验证包、实际容器/卷/网络/配置、零待执行迁移，生成私有预检证据；不停止容器、不改数据库、不加载镜像。

@@ -34,7 +34,7 @@ python3 /absolute/stage-tools/stage-smoke.py up \
   --state /absolute/new-private-stage-state
 ```
 
-仅加载两个包内的既定镜像；没有 `build`、`pull`、生产更新或共享卷。只创建本次带随机 run 标签的独立内部网络与三个命名卷，分别运行 PostgreSQL、Redis、MinIO、正式 API、正式 Worker、Web 和本地合成 Provider。迁移和测试账号 seed 是明确的一次性操作，`TASK_MOCK_MODE=false`，不运行生产 bootstrap。
+仅加载两个包内的既定镜像；没有 `build`、`pull`、生产更新或共享卷。只创建本次带随机 run 标签的两个独立网络与三个命名卷：`default` 保持 `internal`，API、Worker、合成 Provider、PostgreSQL、Redis 和 MinIO 仅连接此内部网络且不发布宿主端口；只有 Web 同时连接普通 `ingress` 网络，以建立 `127.0.0.1:<web-port>:3000` 的实际映射。单独内部网络不能保证发布端口生效，容器自身健康不等于宿主入口可达。迁移和测试账号 seed 是明确的一次性操作，`TASK_MOCK_MODE=false`，不运行生产 bootstrap。
 
 失败会保留本次资源和私有恢复记录，不自动删除或重复提交。需要检查后显式 `cleanup`，再用新的状态目录重新准备，不覆盖旧证据。
 
@@ -59,7 +59,7 @@ python3 /absolute/stage-tools/stage-smoke.py cleanup \
   --state /absolute/new-private-stage-state
 ```
 
-清理前先核对资源的本次 run/project 标签、记录的容器/network ID、卷名与创建时间、精确镜像和挂载；任何未知资源、生产名称、外部连接或其他容器占用都使清理停止。随后只按这些精确标识删除本次容器、三个测试卷和内部网络。不使用 `compose down`、`prune`、通配符或前缀删除，不删除应用镜像、证据、生产卷或 `newvcan-*`。
+清理前先核对资源的本次 run/project 标签、记录的容器/network ID、卷名与创建时间、精确镜像和挂载；同时核对网络名称、bridge 类型、内部/入口属性及容器连接的实际 network ID。只有 Web 可以连接本次 `ingress`，且 Web 配置与实际发布端口只能是指定 loopback 端口；后台不能新增发布端口。任何未知网络、生产名称、外部连接或其他容器占用都使清理停止。启动失败时，尚未全部连接预期网络或尚未建立端口映射的本次容器仍可记录并精确清理，但不能通过运行验收。随后只按这些精确标识删除本次容器、三个测试卷和两个测试网络。不使用 `compose down`、`prune`、通配符或前缀删除，不删除应用镜像、证据、生产卷或 `newvcan-*`。
 
 状态目录和独立 Nginx 配置会保留。验收与清理结束后，由操作者再次核对本次文件名和哈希，仅移除本次新增的 staging Nginx 配置，运行 `nginx -t` 并 reload；不要清理生产配置或其他证据目录。
 

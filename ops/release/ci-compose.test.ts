@@ -16,7 +16,16 @@ test('candidate app images never rebuild while all test resources stay in one is
   expect(config.services.worker.image).toBe('api:tested');
   expect(config.services.web.image).toBe('web:tested');
   expect(config.services.worker.environment.TASK_MOCK_MODE).toBe('false');
-  expect(config.networks).toEqual({ default: { name: 'ci-release-123-amd64_default', internal: true } });
+  expect(config.networks).toEqual({
+    default: { name: 'ci-release-123-amd64_default', internal: true },
+    ingress: { name: 'ci-release-123-amd64_ingress', internal: false },
+  });
+  expect(config.services.web.networks).toEqual(['default', 'ingress']);
+  for (const [role, service] of Object.entries(config.services)) {
+    if (role === 'web') continue;
+    expect(service.networks).toEqual(['default']);
+    expect(service.ports).toBeUndefined();
+  }
   expect(config.services.web.ports).toEqual(['127.0.0.1:3301:3000']);
   expect(config.services['mock-provider'].environment.CANVAS_SMOKE_PROJECT).toBe(options.project);
   expect(config.services['mock-provider'].ports).toBeUndefined();

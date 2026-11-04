@@ -154,11 +154,12 @@ def stage_compose(state, credentials, scripts):
         "minio-init": service(images["minio-init"], entrypoint=["/bin/sh", "-ec"], command=['mc alias set local http://minio:9000 "$$S3_ACCESS_KEY_ID" "$$S3_SECRET_ACCESS_KEY" && mc mb local/$$S3_BUCKET && mc version enable local/$$S3_BUCKET'], environment={"S3_ACCESS_KEY_ID": "canvas-ci", "S3_SECRET_ACCESS_KEY": credentials["storage"], "S3_BUCKET": "canvas-ci"}),
         "api": service(images["api"], command=["bun", "src/index.ts"], environment=environment, volumes=[mounted_scripts], healthcheck=health(["wget", "-q", "-O", "-", "http://127.0.0.1:3100/api/health"])),
         "worker": service(images["api"], command=["bun", "src/worker.ts"], environment=environment, volumes=[mounted_scripts], healthcheck=health(["bun", "src/worker-healthcheck.ts"], "10s", 20), stop_grace_period="130s"),
-        "web": service(images["web"], ports=["127.0.0.1:%d:3000" % state["webPort"]]),
+        "web": service(images["web"], networks=["default", "ingress"], ports=["127.0.0.1:%d:3000" % state["webPort"]]),
         "mock-provider": service(images["api"], command=["bun", "/smoke/mock-provider.ts"], environment={"HOST": "0.0.0.0", "PORT": "4180", "CANVAS_SMOKE_PROJECT": state["project"]}, volumes=[mounted_scripts], read_only=True, tmpfs=["/tmp:rw,noexec,nosuid,size=64m"], cap_drop=["ALL"], security_opt=["no-new-privileges:true"], healthcheck=health(["bun", "-e", 'const r=await fetch("http://127.0.0.1:4180/health");if(!r.ok)process.exit(1)'])),
     }
     return {"name": state["project"], "services": services,
-            "networks": {"default": {"name": state["project"] + "_default", "internal": True, "labels": labels}},
+            "networks": {"default": {"name": state["project"] + "_default", "internal": True, "labels": labels},
+                         "ingress": {"name": state["project"] + "_ingress", "internal": False, "labels": labels}},
             "volumes": {name: {"labels": labels} for name in VOLUMES}}
 
 
@@ -239,7 +240,7 @@ def assert_image(image, state, role):
         require(labels.get("io.canvas.stage.kind") == "browser-runner", "BROWSER_TOOL_IMAGE_REQUIRED")
 
 
-def resource_matches(resource, state, kind):
+def resource_matches(resource, state, kind, require_running=False):
     labels = resource.get("Config", {}).get("Labels") if kind == "container" else resource.get("Labels")
     labels = labels or {}
     require(labels.get(LABEL) == state["runId"] and labels.get(PROJECT_LABEL) == state["project"] and labels.get("com.docker.compose.project") == state["project"], "RESOURCE_IDENTITY_MISMATCH")
@@ -247,10 +248,21 @@ def resource_matches(resource, state, kind):
         role = labels.get("com.docker.compose.service")
         require(role in SERVICES and resource["Name"].lstrip("/").startswith(state["project"] + "-"), "UNKNOWN_STAGE_CONTAINER")
         expected = state["images"]["api" if role in ("api", "worker", "mock-provider") else role]
-        network = state["project"] + "_default"
+        expected_networks = {state["project"] + "_default"}
+        if role == "web":
+            expected_networks.add(state["project"] + "_ingress")
         connected = set(resource["NetworkSettings"]["Networks"])
-        unattached_owned = not connected and not resource["State"]["Running"] and resource.get("HostConfig", {}).get("NetworkMode") == network
-        require(resource["Image"] == expected and (connected == {network} or unattached_owned), "STAGE_CONTAINER_IMAGE_OR_NETWORK_MISMATCH")
+        host = resource.get("HostConfig", {})
+        # Recovery accepts only missing expected attachments, never a foreign
+        # network. Strict verification still requires the complete topology.
+        require(resource["Image"] == expected and host.get("NetworkMode") in expected_networks
+                and connected.issubset(expected_networks), "STAGE_CONTAINER_IMAGE_OR_NETWORK_MISMATCH")
+        expected_ports = {"3000/tcp": [{"HostIp": "127.0.0.1", "HostPort": str(state["webPort"])}]} if role == "web" else {}
+        published = {port: bindings for port, bindings in (resource["NetworkSettings"].get("Ports") or {}).items() if bindings}
+        require(not host.get("PublishAllPorts") and (host.get("PortBindings") or {}) == expected_ports
+                and all(port in expected_ports and bindings == expected_ports[port] for port, bindings in published.items()), "STAGE_CONTAINER_PORT_MISMATCH")
+        if require_running:
+            require(resource["State"]["Running"] and connected == expected_networks and published == expected_ports, "INCOMPLETE_RUNNING_STAGE_CONTAINER")
         mounts = resource.get("Mounts", [])
         for mount in mounts:
             if mount["Type"] == "volume":
@@ -270,8 +282,30 @@ def resource_matches(resource, state, kind):
     if kind == "volume":
         require(resource["Name"] in [state["project"] + "_" + name for name in VOLUMES], "UNKNOWN_STAGE_VOLUME")
         return resource["Name"]
-    require(resource["Name"] == state["project"] + "_default" and resource.get("Internal") is True, "NON_INTERNAL_STAGE_NETWORK_REFUSED")
+    expected_networks = {state["project"] + "_default": ("default", True), state["project"] + "_ingress": ("ingress", False)}
+    expected = expected_networks.get(resource["Name"])
+    require(expected and resource.get("Internal") is expected[1] and resource.get("Driver") == "bridge"
+            and labels.get("com.docker.compose.network") == expected[0], "UNKNOWN_STAGE_NETWORK_OR_ISOLATION")
     return resource["Id"]
+
+
+def validate_network_membership(resources, require_running=False):
+    networks = {row["Name"]: row for row in resources["networks"]}
+    containers = {row["Id"]: row for row in resources["containers"]}
+    require(len(networks) == len(resources["networks"]), "DUPLICATE_STAGE_NETWORK_NAME")
+    for container in containers.values():
+        for name, endpoint in container["NetworkSettings"]["Networks"].items():
+            identity = endpoint.get("NetworkID")
+            if not identity and not container["State"]["Running"] and not require_running:
+                continue  # Docker-created but not attached; names/mode were checked above.
+            require(name in networks and identity == networks[name]["Id"], "STAGE_NETWORK_ENDPOINT_ID_MISMATCH")
+            if require_running:
+                require(container["Id"] in networks[name].get("Containers", {}), "STAGE_NETWORK_ATTACHMENT_MISMATCH")
+    for name, network in networks.items():
+        for identity in network.get("Containers", {}):
+            require(identity in containers, "FOREIGN_CONTAINER_ON_STAGE_NETWORK")
+            endpoint = containers[identity]["NetworkSettings"]["Networks"].get(name, {})
+            require(endpoint.get("NetworkID") == network["Id"], "STAGE_NETWORK_ATTACHMENT_MISMATCH")
 
 
 def inventory(state, require_running=False):
@@ -281,12 +315,13 @@ def inventory(state, require_running=False):
         if ids:
             rows = docker_json(*((["inspect"] if singular == "container" else [singular, "inspect"]) + ids))
             for row in rows:
-                resource_matches(row, state, singular)
+                resource_matches(row, state, singular, require_running)
                 result[plural].append(row)
+    validate_network_membership(result, require_running)
     if require_running:
         roles = {row["Config"]["Labels"]["com.docker.compose.service"] for row in result["containers"]}
         require(roles == set(SERVICES) - {"minio-init"} and len(result["containers"]) == len(roles) and all(row["State"]["Running"] for row in result["containers"]), "COMPLETE_RUNNING_STAGE_REQUIRED")
-        require(len(result["volumes"]) == 3 and len(result["networks"]) == 1, "COMPLETE_ISOLATED_DATA_RESOURCES_REQUIRED")
+        require(len(result["volumes"]) == 3 and len(result["networks"]) == 2, "COMPLETE_ISOLATED_DATA_RESOURCES_REQUIRED")
     return result
 
 
@@ -398,6 +433,7 @@ def cleanup_plan(state, resources, recorded):
         require(set(network.get("Containers", {})).issubset(allowed_containers), "FOREIGN_CONTAINER_ON_STAGE_NETWORK")
     for volume in resources["volumes"]:
         resource_matches(volume, state, "volume")
+    validate_network_membership(resources)
     return (["docker", "rm", "-f"] + sorted(allowed_containers) if allowed_containers else None,
             [["docker", "volume", "rm", row["Name"]] for row in resources["volumes"]],
             [["docker", "network", "rm", row["Id"]] for row in resources["networks"]])
@@ -419,7 +455,7 @@ def cleanup(state):
         command(arguments)
     remaining = inventory(state)
     require(not any(remaining.values()), "STAGING_CLEANUP_INCOMPLETE")
-    print("Only this run's containers, volumes and internal network were removed; evidence, images and separate Nginx configuration were retained.")
+    print("Only this run's containers, volumes and two isolated-stage networks were removed; evidence, images and separate Nginx configuration were retained.")
 
 
 def main():

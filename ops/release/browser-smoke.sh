@@ -30,23 +30,31 @@ assert stat.S_IMODE(os.stat(os.environ['CANVAS_SMOKE_OUTPUT_DIR']).st_mode)==0o7
 PY
 
 dc() { docker compose -p "$project" --project-directory "$repo" --env-file "$CANVAS_SMOKE_ENV_FILE" -f "$CANVAS_SMOKE_COMPOSE_FILE" "$@"; }
-docker network inspect "$CANVAS_SMOKE_NETWORK" > "$work/network.private.json"
+docker network inspect "$CANVAS_SMOKE_NETWORK" "${project}_ingress" > "$work/network.private.json"
 python3 - "$work/network.private.json" <<'PY'
 import json,os,sys
-network,=json.load(open(sys.argv[1]))
-assert network['Name']==os.environ['CANVAS_SMOKE_NETWORK'] and network['Internal'] is True
-assert network['Labels']['com.docker.compose.project']==os.environ['CANVAS_SMOKE_PROJECT']
+networks=json.load(open(sys.argv[1])); project=os.environ['CANVAS_SMOKE_PROJECT']
+assert len(networks)==2 and {n['Name'] for n in networks}=={project+'_default',project+'_ingress'}
+for network in networks:
+ assert network['Internal'] is (network['Name']==project+'_default')
+ assert network['Labels']['com.docker.compose.project']==project
 PY
 for service in api worker web mock-provider postgres redis minio; do
   id=$(dc ps -q "$service")
   [[ -n "$id" && "$id" != *$'\n'* ]]
   docker inspect "$id" > "$work/$service-container.private.json"
   python3 - "$work/$service-container.private.json" "$service" <<'PY'
-import json,os,sys
+import json,os,sys,urllib.parse
 container,=json.load(open(sys.argv[1])); service=sys.argv[2]
 labels=container['Config']['Labels']; project=os.environ['CANVAS_SMOKE_PROJECT']
 assert labels['com.docker.compose.project']==project and labels['com.docker.compose.service']==service
-assert container['State']['Running'] is True and set(container['NetworkSettings']['Networks'])=={os.environ['CANVAS_SMOKE_NETWORK']}
+expected_networks={os.environ['CANVAS_SMOKE_NETWORK']}
+if service=='web':expected_networks.add(project+'_ingress')
+assert container['State']['Running'] is True and set(container['NetworkSettings']['Networks'])==expected_networks
+ports={key:value for key,value in container['NetworkSettings']['Ports'].items() if value}
+if service=='web':
+ assert ports=={'3000/tcp':[{'HostIp':'127.0.0.1','HostPort':str(urllib.parse.urlsplit(os.environ['CANVAS_SMOKE_BASE_URL']).port)}]}
+else:assert not ports
 if service in ('api','worker','mock-provider','web'):
  expected=os.environ['CANVAS_SMOKE_WEB_IMAGE_ID' if service=='web' else 'CANVAS_SMOKE_API_IMAGE_ID']
  assert container['Image']==expected
@@ -55,6 +63,17 @@ if service in ('api','worker'):
  env=dict(value.split('=',1) for value in container['Config']['Env'])
  assert env['NODE_ENV']=='production' and env['TASK_MOCK_MODE']=='false' and env['AUTH_ENABLED']=='true' and env['OA_LOGIN_ENABLED']=='false'
 PY
+done
+python3 - "$work/network.private.json" "$work/web-container.private.json" <<'PY'
+import json,sys
+networks=json.load(open(sys.argv[1])); web,=json.load(open(sys.argv[2]))
+ingress=next(n for n in networks if n['Name'].endswith('_ingress'))
+assert set(ingress['Containers'])=={web['Id']}
+PY
+# Verify backend isolation without contacting any real external provider.
+for service in api worker mock-provider; do
+  dc exec -T "$service" bun --no-env-file -e \
+    'const raw=require("node:fs").readFileSync("/proc/net/route","utf8");if(!raw.startsWith("Iface"))throw Error("Cannot verify backend routes");if(raw.trim().split("\n").slice(1).some(row=>row.trim().split(/\s+/)[1]==="00000000"))throw Error("Isolated backend has an external default route");'
 done
 
 # No credentials are sent through command arguments or browser trace files.

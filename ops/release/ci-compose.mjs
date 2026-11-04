@@ -8,7 +8,12 @@ export function releaseTestCompose(source, options) {
   if (!Number.isInteger(options.port) || options.port < 1024 || options.port > 65535) throw Error('Explicit loopback port required');
   const result = structuredClone(source);
   result.name = options.project;
-  result.networks = { default: { name: `${options.project}_default`, internal: true } };
+  // Docker does not publish host ports for internal-only containers. Give
+  // only Web an ingress bridge; backend/provider/data services stay isolated.
+  result.networks = {
+    default: { name: `${options.project}_default`, internal: true },
+    ingress: { name: `${options.project}_ingress`, internal: false },
+  };
   for (const [name, service] of Object.entries(result.services)) {
     delete service.container_name;
     service.networks = ['default'];
@@ -25,6 +30,7 @@ export function releaseTestCompose(source, options) {
     }
   }
   result.services.web.ports = [`127.0.0.1:${options.port}:3000`];
+  result.services.web.networks = ['default', 'ingress'];
   result.services['mock-provider'] = {
     image: options.apiImage, pull_policy: 'never', command: ['bun', '/smoke/mock-provider.ts'],
     environment: { HOST: '0.0.0.0', PORT: '4180', CANVAS_SMOKE_PROJECT: options.project },

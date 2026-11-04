@@ -32,12 +32,31 @@ def resources_fixture(state):
     network_name = state["project"] + "_default"
     container = {"Id": "1" * 64, "Name": "/" + state["project"] + "-mock-provider-1", "Image": state["images"]["api"],
                  "Config": {"Labels": dict(labels, **{"com.docker.compose.service": "mock-provider"})}, "State": {"Running": True},
-                 "NetworkSettings": {"Networks": {network_name: {}}},
+                 "HostConfig": {"NetworkMode": network_name, "PortBindings": {}, "PublishAllPorts": False},
+                 "NetworkSettings": {"Networks": {network_name: {"NetworkID": "2" * 64}}, "Ports": {"3100/tcp": None}},
                  "Mounts": [{"Type": "bind", "Source": str(Path(state["toolsDirectory"]) / "scripts"), "Destination": "/smoke", "RW": False},
                             {"Type": "tmpfs", "Source": "", "Destination": "/tmp", "RW": True}]}
     volume = {"Name": state["project"] + "_postgres-data", "CreatedAt": "2026-01-01T00:00:00Z", "Labels": labels}
-    network = {"Id": "2" * 64, "Name": network_name, "Labels": labels, "Internal": True, "Containers": {container["Id"]: {}}}
+    network = {"Id": "2" * 64, "Name": network_name, "Labels": dict(labels, **{"com.docker.compose.network": "default"}), "Driver": "bridge", "Internal": True, "Containers": {container["Id"]: {}}}
     return {"containers": [container], "volumes": [volume], "networks": [network]}
+
+
+def web_resources_fixture(state):
+    resources = resources_fixture(state)
+    web = copy.deepcopy(resources["containers"][0])
+    web.update(Id="3" * 64, Name="/" + state["project"] + "-web-1", Image=state["images"]["web"], Mounts=[])
+    web["Config"]["Labels"]["com.docker.compose.service"] = "web"
+    binding = {"3000/tcp": [{"HostIp": "127.0.0.1", "HostPort": "13080"}]}
+    web["HostConfig"]["PortBindings"] = copy.deepcopy(binding)
+    web["NetworkSettings"]["Ports"] = copy.deepcopy(binding)
+    web["NetworkSettings"]["Networks"][state["project"] + "_ingress"] = {"NetworkID": "4" * 64}
+    ingress = copy.deepcopy(resources["networks"][0])
+    ingress.update(Id="4" * 64, Name=state["project"] + "_ingress", Internal=False, Containers={web["Id"]: {}})
+    ingress["Labels"]["com.docker.compose.network"] = "ingress"
+    resources["networks"][0]["Containers"][web["Id"]] = {}
+    resources["networks"].append(ingress)
+    resources["containers"].append(web)
+    return resources
 
 
 def release_fixture():
@@ -54,13 +73,15 @@ class StageIsolationTests(unittest.TestCase):
         config = stage.stage_compose(state, {"postgres": "synthetic-password", "storage": "synthetic-storage", "encryption": "synthetic-key"}, Path(state["toolsDirectory"]) / "scripts")
         self.assertTrue(config["networks"]["default"]["internal"])
         self.assertEqual(config["networks"]["default"]["name"], state["project"] + "_default")
+        self.assertEqual(set(config["networks"]), {"default", "ingress"})
+        self.assertEqual(config["networks"]["ingress"], {"name": state["project"] + "_ingress", "internal": False, "labels": {stage.LABEL: state["runId"], stage.PROJECT_LABEL: state["project"]}})
         for name, service in config["services"].items():
             self.assertNotIn("build", service)
             self.assertNotIn("env_file", service)
             self.assertNotIn("container_name", service)
             self.assertEqual(service["pull_policy"], "never")
             self.assertEqual(service["labels"][stage.LABEL], state["runId"])
-            self.assertEqual(service["networks"], ["default"])
+            self.assertEqual(service["networks"], ["default", "ingress"] if name == "web" else ["default"])
             self.assertEqual(service["image"], state["images"]["api" if name in ("api", "worker", "mock-provider") else name])
             self.assertEqual(service.get("ports", []), ["127.0.0.1:13080:3000"] if name == "web" else [])
         for volume in config["volumes"].values():
@@ -152,6 +173,96 @@ class StageIsolationTests(unittest.TestCase):
         self.assertEqual(networks, [["docker", "network", "rm", "2" * 64]])
         self.assertNotIn("prune", str((containers, volumes, networks)))
         self.assertNotIn("compose", str((containers, volumes, networks)))
+
+    def test_web_only_ingress_is_exact_and_both_owned_network_ids_are_cleaned(self):
+        state = state_fixture()
+        resources = web_resources_fixture(state)
+        web = resources["containers"][1]
+        self.assertEqual(stage.resource_matches(web, state, "container", require_running=True), web["Id"])
+        containers, _, networks = stage.cleanup_plan(state, resources, copy.deepcopy(resources))
+        self.assertEqual(containers, ["docker", "rm", "-f", "1" * 64, "3" * 64])
+        self.assertEqual(networks, [["docker", "network", "rm", "2" * 64], ["docker", "network", "rm", "4" * 64]])
+        for change in (lambda row: row["HostConfig"]["PortBindings"]["3000/tcp"][0].update(HostIp="0.0.0.0"),
+                       lambda row: row["NetworkSettings"]["Ports"]["3000/tcp"][0].update(HostPort="3000"),
+                       lambda row: row["HostConfig"].update(PublishAllPorts=True),
+                       lambda row: row["HostConfig"].update(NetworkMode="host"),
+                       lambda row: row["NetworkSettings"]["Networks"].update(production={"NetworkID": "f" * 64})):
+            bad = copy.deepcopy(web)
+            change(bad)
+            with self.subTest(change=change), self.assertRaises(stage.Rejected):
+                stage.resource_matches(bad, state, "container")
+        backend = copy.deepcopy(resources["containers"][0])
+        backend["NetworkSettings"]["Networks"][state["project"] + "_ingress"] = {"NetworkID": "4" * 64}
+        with self.assertRaises(stage.Rejected):
+            stage.resource_matches(backend, state, "container")
+        backend = copy.deepcopy(resources["containers"][0])
+        backend["HostConfig"]["PortBindings"] = {"3100/tcp": [{"HostIp": "127.0.0.1", "HostPort": "13081"}]}
+        with self.assertRaises(stage.Rejected):
+            stage.resource_matches(backend, state, "container")
+
+    def test_partial_web_start_can_be_journaled_and_cleaned_but_never_verified(self):
+        for connected in ([], ["default"], ["ingress"]):
+            with self.subTest(connected=connected), tempfile.TemporaryDirectory() as temporary:
+                state = state_fixture(str(Path(temporary).resolve()))
+                resources = web_resources_fixture(state)
+                web = resources["containers"][1]
+                web["State"]["Running"] = False
+                web["NetworkSettings"]["Networks"] = {name: value for name, value in web["NetworkSettings"]["Networks"].items() if name in {state["project"] + "_" + suffix for suffix in connected}}
+                web["NetworkSettings"]["Ports"] = {"3000/tcp": None}
+                for network in resources["networks"]:
+                    if network["Name"] not in web["NetworkSettings"]["Networks"]:
+                        network["Containers"].pop(web["Id"], None)
+                self.assertEqual(stage.resource_matches(web, state, "container"), web["Id"])
+                with self.assertRaises(stage.Rejected):
+                    stage.resource_matches(web, state, "container", require_running=True)
+                def listed(arguments, output=None):
+                    return b"owned"
+                def inspected(*arguments):
+                    return resources["containers" if arguments[0] == "inspect" else arguments[0] + "s"]
+                with patch.object(stage, "start_stage", side_effect=stage.Rejected("SYNTHETIC_START_FAILURE")), patch.object(stage, "command", side_effect=listed), patch.object(stage, "docker_json", side_effect=inspected):
+                    with self.assertRaisesRegex(stage.Rejected, "SYNTHETIC_START_FAILURE"):
+                        stage.up(state)
+                journal = stage.read_json(Path(temporary) / "created-resources.private.json")
+                self.assertEqual(journal, resources)
+                self.assertEqual(stage.cleanup_plan(state, resources, journal)[0], ["docker", "rm", "-f", "1" * 64, "3" * 64])
+
+    def test_network_kind_identity_and_endpoint_ids_cannot_widen_cleanup(self):
+        state = state_fixture()
+        original = web_resources_fixture(state)
+        changes = [lambda row: row["networks"][1].update(Internal=True),
+                   lambda row: row["networks"][1].update(Name=state["project"] + "_unknown"),
+                   lambda row: row["networks"][1].update(Driver="host"),
+                   lambda row: row["networks"][1]["Labels"].update({"com.docker.compose.network": "default"}),
+                   lambda row: row["networks"][1]["Containers"].update({"f" * 64: {}}),
+                   lambda row: row["containers"][1]["NetworkSettings"]["Networks"][state["project"] + "_ingress"].update(NetworkID="f" * 64)]
+        for change in changes:
+            bad = copy.deepcopy(original)
+            change(bad)
+            with self.subTest(change=change), self.assertRaises(stage.Rejected):
+                stage.cleanup_plan(state, bad, original)
+
+    def test_running_inventory_requires_both_networks_and_actual_loopback_binding(self):
+        state = state_fixture()
+        resources = web_resources_fixture(state)
+        for index, role in enumerate(("postgres", "redis", "minio", "api", "worker"), 5):
+            row = copy.deepcopy(resources["containers"][0])
+            row.update(Id=str(index) * 64, Name="/" + state["project"] + "-" + role + "-1", Image=state["images"]["api" if role == "worker" else role], Mounts=[])
+            row["Config"]["Labels"]["com.docker.compose.service"] = role
+            if role in ("api", "worker"):
+                row["Config"].update(Cmd=["bun", "src/index.ts" if role == "api" else "src/worker.ts"], Env=["NODE_ENV=production", "TASK_MOCK_MODE=false", "AUTH_ENABLED=true", "OA_LOGIN_ENABLED=false", "REDIS_URL=redis://redis:6379", "S3_ENDPOINT=http://minio:9000"])
+            resources["containers"].append(row)
+            resources["networks"][0]["Containers"][row["Id"]] = {}
+        for suffix in ("redis-data", "minio-data"):
+            resources["volumes"].append(dict(resources["volumes"][0], Name=state["project"] + "_" + suffix))
+        def inspect(*arguments):
+            return resources["containers" if arguments[0] == "inspect" else arguments[0] + "s"]
+        with patch.object(stage, "command", return_value=b"owned"), patch.object(stage, "docker_json", side_effect=inspect):
+            self.assertEqual(stage.inventory(state, True), resources)
+            resources["containers"][1]["NetworkSettings"]["Ports"] = {}
+            with self.assertRaisesRegex(stage.Rejected, "INCOMPLETE_RUNNING"):
+                stage.inventory(state, True)
+            # A failed bind is recoverable without pretending the running entry passed.
+            self.assertEqual(stage.inventory(state), resources)
 
     def test_created_but_not_connected_own_container_can_be_journaled_safely(self):
         state = state_fixture()
