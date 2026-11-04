@@ -1,4 +1,5 @@
 import { uiText } from "@/lib/i18n";
+import { deleteHistoryEntries } from "@/lib/history-batch-delete";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createWorkspaceStorage } from "@/lib/workspace-storage";
 import { nanoid } from "nanoid";
@@ -323,19 +324,28 @@ export function useSceneWorkspace(sceneId: string) {
         if (!knownLogIds.current.has(log.id)) { knownLogIds.current.add(log.id); setHistoryTotal(current => current + 1); }
     };
 
-    const deleteLog = async (log: SceneLogSummary) => {
-        if (!history || running || loading || historyLoadingRef.current || log.ownerId !== user?.id || log.sceneId !== sceneId) return;
+    const deleteLogs = async (requested: SceneLogSummary[]) => {
+        if (!history || running || loading || historyLoadingRef.current) return null;
+        const selectedIds = new Set(requested.map(log => log.id));
+        const selected = logs.filter(log => selectedIds.has(log.id) && log.ownerId === user?.id && log.sceneId === sceneId && !log.unresolvedCount);
+        if (!selected.length) return null;
         const revision = epoch.current;
         historyLoadingRef.current = true; setHistoryLoading(true); setError(null);
         try {
-            await history.remove(log.id);
-            const page = await history.page(0, Math.max(logs.length, 20));
-            if (revision !== epoch.current) return;
-            viewEpoch.current += 1; setPreviewing(false);
-            setLogs(page.entries); setHistoryTotal(page.total); setHistoryHasMore(page.hasMore); knownLogIds.current.delete(log.id);
-            if (activeLog?.id === log.id) { setActiveLog(null); setSelectedPrompt(null); setResults([]); }
-            setNotice(uiText("已从本机历史列表移除，原图和服务端记录仍保留。"));
-        } catch (caught) { if (revision === epoch.current) setError(uiText(errorText(caught))); }
+            const receipt = await deleteHistoryEntries(selected, log => history.remove(log.id));
+            if (revision !== epoch.current) return null;
+            const deletedIds = new Set(receipt.deletedIds);
+            if (deletedIds.size) {
+                viewEpoch.current += 1; setPreviewing(false);
+                setLogs(current => current.filter(log => !deletedIds.has(log.id)));
+                setHistoryTotal(current => Math.max(0, current - deletedIds.size));
+                for (const id of deletedIds) knownLogIds.current.delete(id);
+                if (activeLog && deletedIds.has(activeLog.id)) { setActiveLog(null); setSelectedPrompt(null); setResults([]); }
+            }
+            if (receipt.failedIds.length) setError(uiText("已删除 {deleted} 条，{failed} 条删除失败；失败记录仍保留并已选中，可重试。", { deleted: deletedIds.size, failed: receipt.failedIds.length }));
+            else setNotice(uiText("已从本机历史列表移除 {count} 条记录，原图和服务端任务仍保留。", { count: deletedIds.size }));
+            return receipt;
+        } catch (caught) { if (revision === epoch.current) setError(uiText(errorText(caught))); return null; }
         finally { if (revision === epoch.current) { historyLoadingRef.current = false; setHistoryLoading(false); } }
     };
 
@@ -345,7 +355,7 @@ export function useSceneWorkspace(sceneId: string) {
     };
 
     const previewLog = async (log: SceneLogSummary) => {
-        if (running || restoring || log.ownerId !== user?.id || log.sceneId !== sceneId) return;
+        if (running || restoring || historyLoadingRef.current || log.ownerId !== user?.id || log.sceneId !== sceneId) return;
         const revision = epoch.current;
         const viewRevision = ++viewEpoch.current;
         setActiveLog(null); setSelectedPrompt(null);
@@ -665,6 +675,6 @@ export function useSceneWorkspace(sceneId: string) {
 
     const updateForm: typeof setForm = (value) => { viewEpoch.current += 1; setRestoring(false); setPreviewing(false); setSelectedPrompt(null); setForm(value); };
     return { form, setForm: updateForm, images, setImage, selection, saveSelection, clearSelection: () => { if (!running) { viewEpoch.current += 1; setRestoring(false); setPreviewing(false); setSelectedPrompt(null); setSelection(null); setError(null); } }, saveLocalResult, config, updateConfig, model, profile, count, running, optimizing, loading,
-        uploading: uploadCount > 0, logs, historyTotal, historyHasMore, historyLoading, loadMoreHistory, deleteLog, stopObserving, activeLog, selectedPrompt, previewing, previewLog, selectResultPrompt, results, generate, restoreLog, reset, error, validation,
+        uploading: uploadCount > 0, logs, historyTotal, historyHasMore, historyLoading, loadMoreHistory, deleteLogs, stopObserving, activeLog, selectedPrompt, previewing, previewLog, selectResultPrompt, results, generate, restoreLog, reset, error, validation,
         quotaBlocked, estimatedCredits: estimateValue.credits, download, startedAt, notice, resultActionBusy, resultAction, retryResult, queryResult, recoveredRequestId };
 }

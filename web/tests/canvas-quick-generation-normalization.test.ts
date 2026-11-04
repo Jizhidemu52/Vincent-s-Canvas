@@ -116,3 +116,20 @@ test("account and project changes invalidate normalization callbacks before any 
         expect(h.writes).toBe(0);
     }
 });
+
+test("the quick editor writes only a draft model and retains original evidence on generated and uploaded images", () => {
+    const h = harness();
+    const uploaded = { ...image("upload"), metadata: { content: "blob:upload" } };
+    h.nodes.current.push(uploaded);
+    for (const node of [h.nodes.current[0]!, uploaded]) {
+        const before = structuredClone(node.metadata);
+        h.render().loadQuickGenerationNode(node);
+        h.render().setQuickGenerateModel("next-model");
+        const updated = h.nodes.current.find(item => item.id === node.id)!;
+        expect(updated.metadata?.draftModel).toBe("next-model");
+        expect(updated.metadata?.model).toBe(before?.model);
+        expect(updated.metadata?.generationRecord).toEqual(before?.generationRecord);
+        h.render().loadQuickGenerationNode(updated);
+        expect(h.render().quickGenerateModel).toBe("next-model");
+    }
+});

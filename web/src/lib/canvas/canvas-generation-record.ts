@@ -112,10 +112,12 @@ export function createCanvasVariationRecord(node: CanvasNodeData, strength: "sub
 }
 
 export function canvasGenerationPrompt(node: CanvasNodeData) { return node.metadata?.generationRecord?.prompt ?? node.metadata?.prompt ?? ""; }
+/** Historical evidence only: never resolve a missing model against live defaults. */
+export function canvasGenerationModel(node: CanvasNodeData) { return node.metadata?.generationRecord?.parameters.model ?? node.metadata?.model ?? ""; }
 export function canvasGenerationDraft(node: CanvasNodeData) { return node.metadata?.draftPrompt ?? node.metadata?.generationRecord?.inputPrompt ?? node.metadata?.prompt ?? ""; }
 export function canvasGenerationDraftResetPatch(node: CanvasNodeData): Partial<CanvasNodeMetadata> {
     const record = node.metadata?.generationRecord;
-    return { draftPrompt: record?.inputPrompt ?? node.metadata?.prompt ?? "", draftImageReferences: undefined,
+    return { draftPrompt: record?.inputPrompt ?? node.metadata?.prompt ?? "", draftImageReferences: undefined, draftModel: undefined,
         ...(record ? { model: record.parameters.model, size: record.parameters.size, quality: record.parameters.quality, imageOptions: record.parameters.imageOptions, systemPrompt: record.parameters.systemPrompt } : {}) };
 }
 

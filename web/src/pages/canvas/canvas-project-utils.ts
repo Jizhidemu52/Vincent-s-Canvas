@@ -113,8 +113,20 @@ export function getGenerationCount(count: string) {
 }
 
 export function applyNodeConfigPatch(node: CanvasNodeData, patch: Partial<CanvasNodeData["metadata"]>) {
-    const safePatch = patch || {};
+    let safePatch = patch || {};
+    if (node.type === CanvasNodeType.Image && Object.hasOwn(safePatch, "model")) {
+        const { model, ...rest } = safePatch;
+        safePatch = { ...rest, draftModel: model };
+    }
     const next = { ...node, metadata: { ...node.metadata, ...safePatch } };
+    const optimizationContextChanged = (Object.hasOwn(safePatch, "model") && safePatch.model !== node.metadata?.model)
+        || (Object.hasOwn(safePatch, "draftModel") && safePatch.draftModel !== (node.metadata?.draftModel || node.metadata?.model || node.metadata?.generationRecord?.parameters.model))
+        || (Object.hasOwn(safePatch, "generationMode") && (safePatch.generationMode || "image") !== (node.metadata?.generationMode || "image"));
+    if (optimizationContextChanged && node.metadata?.promptInput?.scene === "free-optimize" && !Object.hasOwn(safePatch, "promptInput")) {
+        // Keep the editable optimized text; its compilation belongs to the old model/mode.
+        next.metadata.promptInput = undefined;
+        next.metadata.compiledPrompt = undefined;
+    }
     const spec = node.type === CanvasNodeType.Video ? NODE_DEFAULT_SIZE[CanvasNodeType.Video] : NODE_DEFAULT_SIZE[CanvasNodeType.Image];
     const size = typeof safePatch.size === "string" && !node.metadata?.content ? nodeSizeFromRatio(safePatch.size, spec.width, spec.height) : null;
     return size && (node.type === CanvasNodeType.Image || node.type === CanvasNodeType.Video) ? { ...next, ...size, position: { x: node.position.x + node.width / 2 - size.width / 2, y: node.position.y + node.height / 2 - size.height / 2 } } : next;
@@ -135,7 +147,7 @@ export function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | u
     return {
         ...config,
         systemPrompt: node?.metadata?.systemPrompt ?? recorded?.systemPrompt ?? config.systemPrompt,
-        model: node?.metadata?.model || recorded?.model || defaultModel || (mode === "audio" ? defaultConfig.audioModel : config.model || defaultConfig.model),
+        model: (mode === "image" ? node?.metadata?.draftModel : undefined) || node?.metadata?.model || recorded?.model || defaultModel || (mode === "audio" ? defaultConfig.audioModel : config.model || defaultConfig.model),
         quality: mode === "image" ? node?.metadata?.quality ?? recorded?.quality ?? config.quality ?? defaultConfig.quality : node?.metadata?.quality || config.quality || defaultConfig.quality,
         imageOptions: node?.metadata?.imageOptions ?? recorded?.imageOptions ?? config.imageOptions,
         size: node?.metadata?.size || recorded?.size || config.size || defaultConfig.size,

@@ -2,8 +2,11 @@ import { useState } from "react";
 import { Button } from "antd";
 import { Copy, GitBranch, RotateCcw } from "lucide-react";
 import { useCopyText } from "@/hooks/use-copy-text";
-import { canvasGenerationPrompt, hasIncompleteCanvasGenerationReferences } from "@/lib/canvas/canvas-generation-record";
+import { canvasGenerationModel, canvasGenerationPrompt, hasIncompleteCanvasGenerationReferences } from "@/lib/canvas/canvas-generation-record";
 import { useUiText } from "@/lib/i18n";
+import { imageModelDisplayName } from "@/lib/model-display";
+import { useBusinessConfigStore } from "@/stores/use-business-config-store";
+import { useUserStore } from "@/stores/use-user-store";
 import type { CanvasNodeData } from "@/types/canvas";
 
 export type CanvasGenerationRecordDetailsProps = {
@@ -23,11 +26,18 @@ export function CanvasGenerationRecordDetails({ node, draftPrompt, derivatives =
     const t = useUiText();
     const copyText = useCopyText();
     const [expanded, setExpanded] = useState(false);
+    const models = useBusinessConfigStore(state => state.models);
+    const role = useUserStore(state => state.user?.role);
     const record = node.metadata?.generationRecord;
     const prompt = canvasGenerationPrompt(node);
+    const model = canvasGenerationModel(node);
     const originalInput = record?.inputPrompt ?? node.metadata?.prompt ?? "";
     const modified = draftPrompt !== originalInput;
     return <section data-testid="canvas-generation-record" className="mb-3 min-w-0 space-y-2 text-xs" aria-label={t("图片生成档案")}>
+        <div className="flex items-start justify-between gap-2" data-testid="canvas-generation-model">
+            <span className="shrink-0 font-medium">{t("生成时模型")}</span>
+            <span className="min-w-0 break-words text-right opacity-80">{model ? imageModelDisplayName(model, models, role) : t("未记录，无法确认")}</span>
+        </div>
         {hasIncompleteCanvasGenerationReferences(node) ? <div role="status" className="space-y-1 opacity-80"><p>{t("旧版记录参考信息不完整，可恢复历史输入")}</p>{node.metadata?.sourceTaskId && onRestoreGeneration ? <button type="button" className="hover:underline disabled:opacity-40" disabled={disabled} onClick={onRestoreGeneration}>{t("恢复历史输入")}</button> : null}</div> : null}
         {record || prompt ? <>
             <div className="flex items-center justify-between gap-2">
@@ -40,7 +50,7 @@ export function CanvasGenerationRecordDetails({ node, draftPrompt, derivatives =
             {prompt.length > 160 ? <button type="button" className="hover:underline" onClick={() => setExpanded(value => !value)}>{t(expanded ? "收起原提示词" : "展开原提示词")}</button> : null}
             {record?.submittedPrompt && record.submittedPrompt !== prompt ? <details className="min-w-0"><summary className="cursor-pointer py-1">{t("实际发送提示词（含排除要求）")}</summary><button type="button" className="max-h-48 w-full overflow-y-auto whitespace-pre-wrap break-words text-left leading-5 opacity-80" aria-label={t("复制实际发送提示词")} onClick={() => copyText(record.submittedPrompt!, t("提示词已复制"))}>{record.submittedPrompt}</button></details> : null}
             {modified ? <div className="flex items-center justify-between gap-2" role="status"><span>{t("草稿已修改")}</span>{onRestorePrompt ? <button type="button" className="hover:underline disabled:opacity-40" disabled={disabled} onClick={onRestorePrompt}>{t("恢复原提示词")}</button> : null}</div> : null}
-        </> : null}
+        </> : <p className="opacity-60" data-testid="canvas-generation-prompt-missing">{t("未记录生成提示词")}</p>}
         {onContinue || (record && onRegenerate) ? <div className="flex flex-wrap items-center gap-1">
             {record && onRegenerate ? <Button size="small" type="text" icon={<RotateCcw className="size-3.5" />} disabled={disabled} onClick={onRegenerate} title={t("使用原提示词、原参考图和原参数，新增结果，不覆盖当前图")}>{t("再来一张")}</Button> : null}
             {onContinue && (node.metadata?.content || node.metadata?.storageKey) ? <Button size="small" type="text" icon={<GitBranch className="size-3.5" />} disabled={disabled} onClick={onContinue} title={t("将当前图设为参考，清空草稿，原生成档案不变")}>{t("基于此图继续")}</Button> : null}

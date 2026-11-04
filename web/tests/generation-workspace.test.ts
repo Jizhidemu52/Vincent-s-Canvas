@@ -73,7 +73,7 @@ test("pending deletion preserves confirmation and media preview, suppressing dup
     // A new completion arriving during deletion must not be lost.
     h.render().setLogs(current => [...current, { id: "new", media: "original-c" }]);
     disk.resolve();
-    expect(await deletion).toEqual({ previewRemoved: true });
+    expect(await deletion).toEqual({ previewRemoved: true, deletedIds: ["first"], failedIds: [] });
     expect(h.render().logs.map(log => log.id)).toEqual(["second", "new"]);
     expect(h.render().selectedLogIds).toEqual([]);
     expect(h.render().previewLog).toBeNull();
@@ -124,9 +124,50 @@ test("stale history selection never deletes an absent record or clears a newer p
     h.render().setSelectedLogIds(["first", "second"]);
     h.render();
     disk.resolve();
-    expect(await deletion).toEqual({ previewRemoved: false });
+    expect(await deletion).toEqual({ previewRemoved: false, deletedIds: ["first"], failedIds: [] });
     expect(removed).toEqual([first]);
     expect(h.render().previewLog).toEqual(second);
     expect(h.render().selectedLogIds).toEqual(["second"]);
+    h.unmount();
+});
+
+test("partial deletion removes only confirmed successes and retains failed selection and confirmation", async () => {
+    const h = workspace(); selectHistory(h);
+    h.render().setSelectedLogIds(["first", "second"]);
+    h.render().setPreviewLog(second);
+    const deleted = await h.render().deleteSelectedHistory(async () => ({ deletedIds: ["first"], failedIds: ["second"] }));
+    expect(deleted).toEqual({ previewRemoved: false, deletedIds: ["first"], failedIds: ["second"] });
+    expect(h.render().logs).toEqual([second]);
+    expect(h.render().selectedLogIds).toEqual(["second"]);
+    expect(h.render().previewLog).toEqual(second);
+    expect(h.render().deleteConfirmOpen).toBe(true);
+    expect(h.render().deletingLogs).toBe(false);
+    h.unmount();
+});
+
+test("confirmation uses its selected-id snapshot, not a later selection", async () => {
+    const h = workspace(); selectHistory(h);
+    const confirmed = [...h.render().selectedLogIds];
+    h.render().setSelectedLogIds(["second"]);
+    const removed: Log[][] = [];
+    await h.render().deleteSelectedHistory(async logs => { removed.push(logs); }, confirmed);
+    expect(removed).toEqual([[first]]);
+    expect(h.render().logs).toEqual([second]);
+    expect(h.render().selectedLogIds).toEqual(["second"]);
+    h.unmount();
+});
+
+test("empty selection and running generation never invoke deletion", async () => {
+    const h = workspace();
+    h.render().setLogs([first]);
+    let calls = 0;
+    const remove = async () => { calls++; };
+    expect(await h.render().deleteSelectedHistory(remove)).toBeNull();
+    h.render().setSelectedLogIds(["first"]);
+    h.render().setRunning(true);
+    expect(await h.render().deleteSelectedHistory(remove)).toBeNull();
+    expect(calls).toBe(0);
+    expect(h.render().logs).toEqual([first]);
+    expect(h.render().selectedLogIds).toEqual(["first"]);
     h.unmount();
 });

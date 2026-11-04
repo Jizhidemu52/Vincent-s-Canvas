@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import type { HistoryDeletionResult } from "@/lib/history-batch-delete";
 
 /**
  * Shared workbench interactions. Model rules, reference validation and durable
@@ -32,23 +33,24 @@ export function useGenerationWorkspace<Reference, Log extends { id: string }>() 
 
     // Do not clear selection or dismiss confirmation until persistence succeeds.
     // A synchronous guard also rejects a second click before React rerenders.
-    const deleteSelectedHistory = async (remove: (selected: Log[]) => Promise<void>) => {
-        if (deleting.current || !mounted.current) return null;
-        const selectedIds = new Set(selectedLogIds);
+    const deleteSelectedHistory = async (remove: (selected: Log[]) => Promise<void | HistoryDeletionResult>, requestedIds = selectedLogIds) => {
+        if (running || deleting.current || !mounted.current) return null;
+        const selectedIds = new Set(requestedIds);
         const selected = logs.filter(log => selectedIds.has(log.id));
         if (!selected.length) return null;
-        const deletedIds = new Set(selected.map(log => log.id));
         deleting.current = true;
         setDeletingLogs(true);
         try {
-            await remove(selected);
+            const result = await remove(selected);
             if (!mounted.current) return null;
+            const deletedIds = new Set(result ? result.deletedIds.filter(id => selectedIds.has(id)) : selected.map(log => log.id));
+            const failedIds = selected.filter(log => !deletedIds.has(log.id)).map(log => log.id);
             const previewRemoved = Boolean(latestPreview.current && deletedIds.has(latestPreview.current.id));
             setLogs(current => current.filter(log => !deletedIds.has(log.id)));
-            setSelectedLogIds(current => current.filter(id => !deletedIds.has(id)));
+            setSelectedLogIds(current => [...new Set([...current.filter(id => !deletedIds.has(id)), ...failedIds])]);
             setPreviewLog(current => current && deletedIds.has(current.id) ? null : current);
-            setDeleteConfirmOpen(false);
-            return { previewRemoved };
+            setDeleteConfirmOpen(Boolean(failedIds.length));
+            return { previewRemoved, deletedIds: [...deletedIds], failedIds };
         } finally {
             deleting.current = false;
             if (mounted.current) setDeletingLogs(false);

@@ -505,6 +505,7 @@ function WirelessCanvasPage({ sessionFlushRef, writable }: { sessionFlushRef: Ca
         runQuickCanvasGeneration,
     } = quickGeneration;
     const flushEditorDrafts = useCallback(() => { flushQuickNodeDraft(); flushNodePanelDraftRef.current?.(); }, [flushQuickNodeDraft]);
+    const lastEditorSelectionRef = useRef("");
 
     // Persist current chat normally without making streaming/chat selection
     // changes restart the graph's history debounce or change command identity.
@@ -536,6 +537,8 @@ function WirelessCanvasPage({ sessionFlushRef, writable }: { sessionFlushRef: Ca
             historyCommitTimerRef.current = null;
         }
         applyingHistoryRef.current = true;
+        // Undo/redo may restore the same selected id with different saved inputs.
+        lastEditorSelectionRef.current = "";
         pendingHistoryEntryRef.current = restoredEntry;
         setNodes(restoredNodes);
         setConnections(entry.connections);
@@ -1040,14 +1043,18 @@ function WirelessCanvasPage({ sessionFlushRef, writable }: { sessionFlushRef: Ca
 
     const editorOwner = useUserStore(state => state.user ? `user:${state.user.id}:${state.user.role}` : state.status);
     const editorSelectionKey = `${projectId}:${editorOwner}:${Array.from(selectedNodeIds).sort().join(",")}`;
-    const lastEditorSelectionRef = useRef("");
     useEffect(() => {
         if (!projectLoaded || lastEditorSelectionRef.current === editorSelectionKey) return;
         // Wait for the graph to hydrate before accepting the selection identity.
         if (singleSelectedNodeId && !nodeById.has(singleSelectedNodeId)) return;
         lastEditorSelectionRef.current = editorSelectionKey;
-        // Ordinary selection only changes references. Restoring an old prompt/model
-        // is an explicit toolbar action, never a side effect of clicking a picture.
+        // Each image owns its generation inputs and draft. Never show the last
+        // global creation settings as the selected result's provenance.
+        const selectedImage = singleSelectedNodeId ? nodeById.get(singleSelectedNodeId) : undefined;
+        if (selectedImage?.type === CanvasNodeType.Image) {
+            loadQuickGenerationNode(selectedImage);
+            return;
+        }
         loadQuickGenerationNode(null);
         setQuickGenerateReferences(current => syncCanvasSelectionReferences(current, selectedNodeIds, nodeById));
     }, [editorSelectionKey, loadQuickGenerationNode, nodeById, projectLoaded, selectedNodeIds, setQuickGenerateReferences, singleSelectedNodeId]);

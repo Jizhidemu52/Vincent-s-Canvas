@@ -123,8 +123,8 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
                         <Popover.Portal><Popover.Content className="cw-reference-hint-popover" aria-label={t("参考图说明")} side="bottom" align="end" sideOffset={6} collisionPadding={12}
                             style={{ background: theme.node.panel, color: theme.node.text, borderColor: theme.node.stroke }} data-canvas-no-zoom
                             onPointerDown={event => event.stopPropagation()} onMouseDown={event => event.stopPropagation()} onWheel={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
-                            <p>{t("可拖入桌面或企业微信原图，也可点击或框选画布图片添加参考图。")}</p>
-                            <p>{t("按上方顺序编辑参考图，原图保留。取消选中不会清空参考图；请用移除或清空按钮调整。")}</p>
+                            <p>{t("可拖入桌面或企业微信原图；框选可添加多张画布参考图。")}</p>
+                            <p>{t("选中单图可查看其生成档案；要继续修改该图，请点击“基于此图继续”。")}</p>
                         </Popover.Content></Popover.Portal>
                     </Popover.Root>
                 </div>

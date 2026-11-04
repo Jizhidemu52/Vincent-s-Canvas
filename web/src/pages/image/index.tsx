@@ -14,6 +14,7 @@ import { ImageSettingsPanel, imageQualityLabel, imageSizeLabel } from "@/compone
 import { GenerationElapsed } from "@/components/generation-elapsed";
 import { GenerationQueueProgress } from "@/components/generation-queue-progress";
 import { upsertGenerationLog } from "@/lib/generation-log-update";
+import { deleteHistoryEntries } from "@/lib/history-batch-delete";
 import { useGenerationDraft } from "@/hooks/use-generation-draft";
 import { useImageDrop } from "@/hooks/use-image-drop";
 import { useUnsavedGuard } from "@/hooks/use-unsaved-guard";
@@ -235,6 +236,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         selectedLogIds, setSelectedLogIds, previewLog, setPreviewLog, deleteConfirmOpen, setDeleteConfirmOpen,
         deletingLogs, deleteSelectedHistory,
     } = useGenerationWorkspace<ImageReferenceItem, GenerationLog>();
+    const [deleteLogIds, setDeleteLogIds] = useState<string[]>([]);
     const restoreBusy = useRef(false);
     const [restoringHistory, setRestoringHistory] = useState(false);
     const defaults = useEffectiveConfig();
@@ -704,15 +706,29 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         setPreviewLog(null);
     };
 
+    const confirmDeleteSelected = () => {
+        if (running || deletingLogs) return;
+        const ids = logs.filter(log => selectedLogIds.includes(log.id)).map(log => log.id);
+        if (!ids.length) return;
+        setDeleteLogIds(ids); setLogsOpen(false); setDeleteConfirmOpen(true);
+    };
+
     const deleteSelectedLogs = async () => {
+        if (running) return;
         try {
             const deleted = await deleteSelectedHistory(async (selected) => {
-                const imageKeys = selected.flatMap(log => log.images.map(image => image.storageKey).filter((key): key is string => Boolean(key)));
-                await Promise.all(selected.map(log => historyStore.removeItem(log.id)));
-                await deleteStoredImages(imageKeys);
-            });
+                const receipt = await deleteHistoryEntries(selected, log => historyStore.removeItem(log.id));
+                const imageKeys = selected.filter(log => receipt.deletedIds.includes(log.id)).flatMap(log => log.images.map(image => image.storageKey).filter((key): key is string => Boolean(key)));
+                try { await deleteStoredImages(imageKeys); }
+                catch { message.warning(uiText("记录已移除，但部分本地图片文件未能清理。")); }
+                return receipt;
+            }, deleteLogIds);
             if (deleted?.previewRemoved) setResults([]);
-            if (deleted) await refreshLogs();
+            if (deleted) {
+                setDeleteLogIds(deleted.failedIds);
+                if (deleted.failedIds.length) message.error(uiText("已删除 {deleted} 条，{failed} 条删除失败；失败记录仍保留并已选中，可重试。", { deleted: deleted.deletedIds.length, failed: deleted.failedIds.length }));
+                else message.success(uiText("已删除 {count} 条生成记录", { count: deleted.deletedIds.length }));
+            }
         } catch (error) {
             message.error(error instanceof Error ? uiText(error.message) : uiText("记录删除失败"));
         }
@@ -1048,9 +1064,10 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                         unclassifiedLogs={unclassifiedLogs}
                         selectedLogIds={selectedLogIds}
                         activeLogId={previewLog?.id}
+                        disabled={running || deletingLogs}
                         onSelectedLogIdsChange={setSelectedLogIds}
                         onCreateSession={createSession}
-                        onDeleteSelected={() => setDeleteConfirmOpen(true)}
+                        onDeleteSelected={confirmDeleteSelected}
                         onPreviewLog={(log) => void previewGenerationLog(log)}
                     />
                 </aside>
@@ -1188,9 +1205,10 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                     unclassifiedLogs={unclassifiedLogs}
                     selectedLogIds={selectedLogIds}
                     activeLogId={previewLog?.id}
+                    disabled={running || deletingLogs}
                     onSelectedLogIdsChange={setSelectedLogIds}
                     onCreateSession={createSession}
-                    onDeleteSelected={() => setDeleteConfirmOpen(true)}
+                    onDeleteSelected={confirmDeleteSelected}
                     onPreviewLog={(log) => void previewGenerationLog(log)}
                 />
             </Drawer>
@@ -1215,8 +1233,10 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                 }}
                 onClose={() => setReferenceAssetPickerOpen(false)}
             />
-            <Modal title={uiText("删除生成记录")} open={deleteConfirmOpen} onCancel={() => { if (!deletingLogs) setDeleteConfirmOpen(false); }} onOk={deleteSelectedLogs} confirmLoading={deletingLogs} cancelButtonProps={{ disabled: deletingLogs }} okText={uiText("删除")} okButtonProps={{ danger: true }} cancelText={uiText("取消")}>
-                {uiText("确定删除选中的")}{selectedLogIds.length} {uiText("条生成记录吗？")}</Modal>
+            <Modal title={uiText("批量删除生成记录")} open={deleteConfirmOpen} onCancel={() => { if (!deletingLogs) setDeleteConfirmOpen(false); }} onOk={deleteSelectedLogs} confirmLoading={deletingLogs} cancelButtonProps={{ disabled: deletingLogs }} okText={uiText("确认删除")} okButtonProps={{ danger: true, disabled: running || !deleteLogIds.length }} cancelText={uiText("取消")}>
+                <p>{uiText("确定删除选中的")}{deleteLogIds.length} {uiText("条生成记录吗？")}</p>
+                <p className="mt-2 text-xs text-muted-foreground">{uiText("将移除本机生成记录及其本地结果图片，不会删除服务端任务或取消生成。")}</p>
+            </Modal>
             {imageEditor.node ? <Suspense fallback={<Modal title={uiText("编辑原图")} open footer={null} onCancel={imageEditor.close}><p role="status">{uiText("正在读取图片编辑器…")}</p></Modal>}>
                 <CanvasImageEditorDialog node={imageEditor.node} onClose={imageEditor.close} onConfirm={imageEditor.confirm}
                     saveHint="另存到我的素材 · 原图和生成历史保持不变 · 不调用 AI"
@@ -1367,6 +1387,7 @@ function LogPanel({
     unclassifiedLogs,
     selectedLogIds,
     activeLogId,
+    disabled,
     onSelectedLogIdsChange,
     onCreateSession,
     onDeleteSelected,
@@ -1376,13 +1397,15 @@ function LogPanel({
     unclassifiedLogs: GenerationLog[];
     selectedLogIds: string[];
     activeLogId?: string;
+    disabled?: boolean;
     onSelectedLogIdsChange: (ids: string[]) => void;
     onCreateSession: () => void;
     onDeleteSelected: () => void;
     onPreviewLog: (log: GenerationLog) => void;
 }) {
     useUiText();
-    const allSelected = Boolean(logs.length) && selectedLogIds.length === logs.length;
+    const selectedCount = logs.filter(log => selectedLogIds.includes(log.id)).length;
+    const allSelected = Boolean(logs.length) && selectedCount === logs.length;
     const toggleAll = () => onSelectedLogIdsChange(allSelected ? [] : logs.map((log) => log.id));
 
     return (
@@ -1394,13 +1417,13 @@ function LogPanel({
                 <Tag className="m-0">{logs.length}</Tag>
             </div>
             <div className="mb-4 flex flex-wrap gap-2">
-                <Button size="small" icon={<Plus className="size-3.5" />} onClick={onCreateSession}>
+                <Button size="small" icon={<Plus className="size-3.5" />} disabled={disabled} onClick={onCreateSession}>
                     {uiText("新建")}</Button>
-                <Button size="small" icon={<CheckSquare className="size-3.5" />} disabled={!logs.length} onClick={toggleAll}>
-                    {allSelected ? uiText("取消") : uiText("全选")}
+                <Button size="small" icon={<CheckSquare className="size-3.5" />} disabled={disabled || !logs.length} onClick={toggleAll}>
+                    {allSelected ? uiText("取消全选") : uiText("全选")}
                 </Button>
-                <Button size="small" danger icon={<Trash2 className="size-3.5" />} disabled={!selectedLogIds.length} onClick={onDeleteSelected}>
-                    {uiText("删除")}</Button>
+                <Button size="small" danger icon={<Trash2 className="size-3.5" />} disabled={disabled || !selectedCount} onClick={onDeleteSelected}>
+                    {uiText("批量删除")}{selectedCount ? `（${selectedCount}）` : ""}</Button>
             </div>
             <div className="space-y-3">
                 <PracticeExampleRecord />
@@ -1410,6 +1433,7 @@ function LogPanel({
                         log={log}
                         selected={selectedLogIds.includes(log.id)}
                         active={activeLogId === log.id}
+                        disabled={disabled}
                         onSelectedChange={(checked) => onSelectedLogIdsChange(checked ? [...selectedLogIds, log.id] : selectedLogIds.filter((id) => id !== log.id))}
                         onClick={() => onPreviewLog(log)}
                     />
@@ -1425,19 +1449,20 @@ function LogPanel({
     );
 }
 
-function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: GenerationLog; selected?: boolean; active: boolean; onSelectedChange?: (checked: boolean) => void; onClick: () => void }) {
+function LogCard({ log, selected, active, disabled, onSelectedChange, onClick }: { log: GenerationLog; selected?: boolean; active: boolean; disabled?: boolean; onSelectedChange?: (checked: boolean) => void; onClick: () => void }) {
     useUiText();
     const thumbnails = log.images.slice(0, 4);
 
     return (
         <button
             type="button"
+            disabled={disabled}
             className={`block w-full rounded-lg border p-2 text-left transition ${active ? "border-stone-900 bg-blue-50 dark:border-stone-100 dark:bg-blue-950/20" : "border-stone-200 bg-background hover:bg-stone-50 dark:border-stone-800 dark:hover:bg-stone-900"}`}
             onClick={onClick}
         >
             <div className="grid grid-cols-[minmax(128px,1fr)_auto] gap-2">
                 <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-2">
-                    {onSelectedChange && <Checkbox className="mt-0.5" checked={selected} onClick={(event) => event.stopPropagation()} onChange={(event) => onSelectedChange(event.target.checked)} />}
+                    {onSelectedChange && <Checkbox className="mt-0.5" aria-label={uiText("选择记录：{title}", { title: log.title })} disabled={disabled} checked={selected} onClick={(event) => event.stopPropagation()} onChange={(event) => onSelectedChange(event.target.checked)} />}
                     <div className="min-w-0">
                         <div className="truncate text-sm font-semibold leading-5">{log.title}</div>
                         {thumbnails.length ? (

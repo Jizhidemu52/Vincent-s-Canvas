@@ -173,7 +173,7 @@ test("creative history removal confirms and cannot remove an unresolved tracking
     await page.getByRole("button", { name: "保留记录", exact: true }).click();
     await expect(deletions).toHaveCount(2);
     await deletions.first().click();
-    await page.getByRole("button", { name: "删除记录", exact: true }).click();
+    await page.getByRole("button", { name: "确认删除", exact: true }).click();
     await expect(deletions).toHaveCount(1);
     await expect(deletions).toBeDisabled();
     expect(api.submissions).toHaveLength(0);

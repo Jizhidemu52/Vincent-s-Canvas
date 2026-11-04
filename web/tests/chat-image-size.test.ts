@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import React from "react";
 import ts from "typescript";
 import { imageModelProfile } from "@/lib/image-model-settings";
-import { CHAT_FOLLOW_IMAGE_SIZE, chatImageSizeForSource, chatImageSizeOptions, resolveChatImageSize } from "@/pages/chat/image-size";
+import { CHAT_AUTO_IMAGE_SIZE, chatImageSizeForSource, chatImageSizeOptions, resolveChatImageSize } from "@/pages/chat/image-size";
 import { chatImageTaskSignature, completeChatImageTask, duplicateChatImageTask } from "@/pages/chat/chat-image-tasks";
 import { createChatSessionStorage } from "@/pages/chat/chat-session-storage";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
@@ -25,25 +25,35 @@ const base: ReferenceImage = { id: "source", name: "底图.png", type: "image/pn
 
 test.each([
     [{ width: 1500, height: 2000 }, "3:4"],
+    [{ width: 1280, height: 1707 }, "3:4"],
+    [{ width: 1707, height: 1280 }, "4:3"],
+    [{ width: 1024, height: 1365 }, "3:4"],
     [{ width: 2000, height: 1500 }, "4:3"],
     [{ width: 1254, height: 1254 }, "1:1"],
     [{ width: 1080, height: 1920 }, "9:16"],
-] as const)("follow source reads the actual %j pixels and explicitly submits %s, ignoring global square and stale dimensions", async (dimensions, expected) => {
+] as const)("automatic edit of %j pixels delegates dimensions to the model without strict source matching", async (dimensions) => {
     useBusinessConfigStore.setState({ models });
     const before = structuredClone({ config, base });
     const reads: ReferenceImage[] = [];
     const size = await resolveChatImageSize(config, undefined, "edit", base, () => {}, async source => { reads.push(source); return dimensions; });
-    expect(size).toBe(expected);
-    expect(reads).toEqual([base]);
+    expect(size).toBe("auto");
+    expect(reads).toEqual([]);
     expect({ config, base }).toEqual(before);
 });
 
-test("a fixed pixel preset may preserve an exact source aspect but no arbitrary pixels are synthesized", () => {
+test("automatic-capable profiles do not require an exact source preset", () => {
     const profile = imageModelProfile("fixed", models);
-    expect(chatImageSizeForSource({ width: 600, height: 900 }, profile)).toBe("1024x1536");
-    expect(() => chatImageSizeForSource({ width: 1500, height: 2000 }, profile)).toThrow("不能精确保留底图画幅");
-    expect(() => chatImageSizeForSource({ width: 1500, height: 2000 }, profile)).toThrow("1024x1536");
-    expect(() => chatImageSizeForSource({ width: 1500, height: 2000 }, imageModelProfile("auto-only", models))).toThrow("图片任务尚未提交");
+    expect(chatImageSizeForSource({ width: 600, height: 900 }, profile)).toBe("auto");
+    expect(chatImageSizeForSource({ width: 1500, height: 2000 }, profile)).toBe("auto");
+    expect(chatImageSizeForSource({ width: 1280, height: 1707 }, profile)).toBe("auto");
+    expect(chatImageSizeForSource({ width: 1500, height: 2000 }, imageModelProfile("auto-only", models))).toBe("auto");
+});
+
+test("models without auto choose a supported nearby preset, never send an unsupported auto value", async () => {
+    const profile = imageModelProfile("midjourney-v7", []);
+    expect(chatImageSizeForSource({ width: 1280, height: 1707 }, profile)).toBe("3:4");
+    expect(chatImageSizeForSource({ width: 1707, height: 1280 }, profile)).toBe("4:3");
+    expect(await resolveChatImageSize({ ...config, model: "midjourney-v7" }, "auto", "edit", base, () => {}, async () => ({ width: 1280, height: 1680 }))).toBe("3:4");
 });
 
 test.each(["1:1", "4:3", "auto"])("explicit session selection %s wins without reading or changing the base", async requested => {
@@ -53,10 +63,10 @@ test.each(["1:1", "4:3", "auto"])("explicit session selection %s wins without re
     expect(config.size).toBe("1:1");
 });
 
-test("generation without a base keeps its existing default unless the session explicitly chooses a size", async () => {
+test("new generation defaults to auto unless the session explicitly chooses a size", async () => {
     useBusinessConfigStore.setState({ models });
     const noRead = async () => { throw new Error("New creation must not follow a previous image"); };
-    expect(await resolveChatImageSize({ ...config, size: "16:9" }, undefined, "generate", base, () => {}, noRead)).toBe("16:9");
+    expect(await resolveChatImageSize({ ...config, size: "16:9" }, undefined, "generate", base, () => {}, noRead)).toBe("auto");
     expect(await resolveChatImageSize(config, "3:4", "generate", undefined, () => {}, noRead)).toBe("3:4");
 });
 
@@ -66,12 +76,13 @@ test("model changes never silently replace an explicit aspect with the nearest d
     await expect(resolveChatImageSize({ ...config, model: "fixed" }, "3:4", "edit", base, () => {})).rejects.toThrow("不支持已选择的图片尺寸");
 });
 
-test("unreadable or cancelled base measurement cannot fall back to a square task", async () => {
+test("missing source and cancelled automatic requests cannot be submitted; non-adaptive measurement errors still propagate", async () => {
     useBusinessConfigStore.setState({ models });
     await expect(resolveChatImageSize(config, undefined, "edit", undefined, () => {})).rejects.toThrow("没有可用的编辑底图");
-    await expect(resolveChatImageSize(config, undefined, "edit", base, () => {}, async () => { throw new Error("source unavailable"); })).rejects.toThrow("source unavailable");
+    await expect(resolveChatImageSize({ ...config, model: "midjourney-v7" }, undefined, "edit", base, () => {}, async () => { throw new Error("source unavailable"); })).rejects.toThrow("source unavailable");
     let cancelled = false;
-    await expect(resolveChatImageSize(config, undefined, "edit", base, () => { if (cancelled) throw new DOMException("stopped", "AbortError"); }, async () => { cancelled = true; return { width: 1500, height: 2000 }; })).rejects.toThrow("stopped");
+    await expect(resolveChatImageSize({ ...config, model: "midjourney-v7" }, undefined, "edit", base, () => { if (cancelled) throw new DOMException("stopped", "AbortError"); }, async () => { cancelled = true; return { width: 1500, height: 2000 }; })).rejects.toThrow("stopped");
+    await expect(resolveChatImageSize(config, undefined, "edit", base, () => { throw new DOMException("stopped", "AbortError"); })).rejects.toThrow("stopped");
     expect(() => chatImageSizeForSource({ width: 0, height: 120 }, imageModelProfile("ratio", models))).toThrow("底图尺寸无法读取");
 });
 
@@ -95,16 +106,17 @@ function visit(node: ts.Node) {
 }
 visit(ast);
 
-test("the real size control saves only the active conversation, survives reload, and can return to following", async () => {
+test("the real size control saves only the active conversation, survives reload, and can return to automatic", async () => {
     if (!sizeSelect) throw new Error("Size selector missing");
     const sessions: ChatSession[] = [{ id: "a", title: "A", updatedAt: "now", messages: [] }, { id: "b", title: "B", updatedAt: "now", messages: [], imageSize: "16:9" }];
-    const bindings = { ...i18nHarness, React, Select: "select", activeSession: sessions[0], CHAT_FOLLOW_IMAGE_SIZE, chatImageSizeOptions,
+    const bindings = { ...i18nHarness, React, Select: "select", activeSession: sessions[0], CHAT_AUTO_IMAGE_SIZE, chatImageSizeOptions,
         qualityProfile: imageModelProfile("ratio", models), sessionsReady: true, modelsLoading: false, isSending: false, preferredImageModel: models[0],
         updateSession: (id: string, update: (session: ChatSession) => ChatSession) => { const index = sessions.findIndex(session => session.id === id); sessions[index] = update(sessions[index]); } };
     const code = ts.transpileModule(`exports.select = ${sizeSelect.getText(ast)};`, { compilerOptions: { target: ts.ScriptTarget.ESNext, jsx: ts.JsxEmit.React } }).outputText;
     const exported = {} as { select: React.ReactElement<any> };
     new Function(...Object.keys(bindings), "exports", code)(...Object.values(bindings), exported);
-    expect(exported.select.props.value).toBe(CHAT_FOLLOW_IMAGE_SIZE);
+    expect(exported.select.props.value).toBe(CHAT_AUTO_IMAGE_SIZE);
+    expect(exported.select.props.options.filter((item: any) => item.value === "auto")).toEqual([{ value: "auto", label: "自动（默认）" }]);
     expect(exported.select.props.options.some((item: any) => item.value === "3:4")).toBe(true);
     exported.select.props.onChange("1:1");
     expect(sessions.map(session => session.imageSize)).toEqual(["1:1", "16:9"]);
@@ -112,7 +124,7 @@ test("the real size control saves only the active conversation, survives reload,
     const storage = createChatSessionStorage({ getItem: async key => structuredClone(database.get(key)) ?? null, setItem: async (key, value) => { database.set(key, structuredClone(value)); return value; } });
     await storage.save("owner", sessions);
     expect((await storage.load<ChatSession>("owner", () => null)).map(session => session.imageSize)).toEqual(["1:1", "16:9"]);
-    exported.select.props.onChange(CHAT_FOLLOW_IMAGE_SIZE);
+    exported.select.props.onChange(CHAT_AUTO_IMAGE_SIZE);
     expect(sessions.map(session => session.imageSize)).toEqual([undefined, "16:9"]);
     expect(config.size).toBe("1:1");
 });

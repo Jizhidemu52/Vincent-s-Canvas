@@ -1,5 +1,7 @@
 /** Employee-facing interaction copy. User content and protocol identifiers are not translation keys. */
 export default {
+    "自动（默认）": "Automatic (default)",
+    "默认自动选择画幅，也可手动指定比例。": "The aspect ratio is automatic by default. You can also select a ratio.",
     "大图优先使用轻量预览；原图保留，下载原图不降质": "Large images use lightweight previews where available. Originals are retained and original downloads keep their quality.",
     // Original-task reconciliation never resubmits an uncertain paid request.
     "刷新状态": "Refresh status",
@@ -265,7 +267,8 @@ export default {
     "松开以添加参考图片，不会自动生成。": "Drop to add reference images. Generation will not start automatically.",
     "松开以添加参考图，不会自动生成": "Drop to add reference images. Generation will not start automatically.",
     "松开以添加对话参考图，不会自动发送": "Drop to attach reference images. Nothing will be sent automatically.",
-    "可拖入桌面或企业微信原图，也可点击或框选画布图片添加参考图。": "Drop original images from your desktop or WeCom, or click or box-select canvas images to add references.",
+    "可拖入桌面或企业微信原图；框选可添加多张画布参考图。": "Drop original images from your desktop or WeCom, or box-select multiple canvas images as references.",
+    "选中单图可查看其生成档案；要继续修改该图，请点击“基于此图继续”。": "Select one image to view its generation record. To edit that result, click Continue from this image.",
     "每个参考图位置一次只能拖入一张图片，请分别放入对应位置。": "Drop one image at a time into each reference slot.",
     "松开以添加到{label}，不会自动生成。": "Drop to add to {label}. Generation will not start automatically.",
     "当前暂不能添加图片，请完成正在进行的操作后再拖入。": "Finish the current operation before adding more images.",
@@ -281,6 +284,9 @@ export default {
     "松开以添加到分享草稿，不会自动发布。": "Drop to add to the sharing draft. Nothing will be published automatically.",
     "图片生成档案": "Image generation record",
     "生成时提示词": "Original generation prompt",
+    "生成时模型": "Original generation model",
+    "未记录，无法确认": "Not recorded; cannot determine",
+    "未记录生成提示词": "No generation prompt recorded",
     "只读 · 点击复制": "Read-only · Click to copy",
     "复制生成时提示词": "Copy original generation prompt",
     "点击复制生成时提示词": "Click to copy the original prompt",

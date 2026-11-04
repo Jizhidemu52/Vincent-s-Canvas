@@ -6,6 +6,7 @@ import { defaultConfig } from "@/stores/use-config-store";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "@/types/canvas";
 import { createCanvasGenerationRecord } from "@/lib/canvas/canvas-generation-record";
 import { prepareImageSequenceStep } from "@/lib/canvas/canvas-image-sequence";
+import { applyNodeConfigPatch } from "@/pages/canvas/canvas-project-utils";
 import * as nodeGeneration from "@/components/canvas/canvas-node-generation";
 import { i18nHarness } from "./helpers/i18n-harness";
 
@@ -20,7 +21,7 @@ const original: CanvasNodeData = { id: "original", type: CanvasNodeType.Image, t
 function harness(initial: CanvasNodeData[], initialConnections: CanvasConnection[] = [], options: { hydrate?: typeof nodeGeneration.hydrateNodeGenerationContext; generate?: () => Promise<void> } = {}) {
     const nodes = { current: structuredClone(initial) }, connections = { current: structuredClone(initialConnections) };
     let ownerId = "employee-a", id = 0, historyFlushes = 0;
-    const submissions: Array<{ config: typeof config; prompt: string; references: any[]; exact: boolean; targetId: string }> = [];
+    const submissions: Array<{ config: typeof config; prompt: string; references: any[]; promptInput: unknown; exact: boolean; targetId: string }> = [];
     const feedback: string[] = [];
     const scope = {
         react: { useMemo: (create: Function) => create(), useCallback: (callback: Function) => callback, useRef: (current: unknown) => ({ current }), useEffect: () => {} },
@@ -43,7 +44,7 @@ function harness(initial: CanvasNodeData[], initialConnections: CanvasConnection
     new Function("require", "module", "exports", code)((key: string) => scope[key] || requireModule(key), { exports }, exports);
     const runtime = {
         createOptions: async (targetId: string) => ({ generate: async (parameters: typeof config, prompt: string, references?: any[], _mask?: unknown, _edit?: boolean, _input?: unknown, exact = false) => {
-            submissions.push({ config: structuredClone(parameters), prompt, references: structuredClone(references || []), exact, targetId });
+            submissions.push({ config: structuredClone(parameters), prompt, references: structuredClone(references || []), promptInput: structuredClone(_input), exact, targetId });
             await options.generate?.();
             return { metadata: { content: "blob:result", storageKey: "image:result", status: "success" }, uploaded: { url: "blob:result", storageKey: "image:result", width: 600, height: 400, bytes: 100, mimeType: "image/png" } };
         } }),
@@ -67,6 +68,27 @@ test.each([CanvasNodeType.Config, CanvasNodeType.Image, CanvasNodeType.Text])("i
     expect(h.connections.current).toHaveLength(1);
     expect(h.connections.current[0]).toMatchObject({ fromNodeId: source.id, toNodeId: h.nodes.current[1]!.id, kind: "generation-output" });
     expect(h.historyFlushes()).toBe(1);
+});
+
+test("an optimized config keeps its text after changing models and never submits the old compilation", async () => {
+    const prompt = "提取 Image 1 背心的正面平面图，条纹改用 Image 2 的天蓝色与浅黄色。";
+    const source: CanvasNodeData = { ...original, type: CanvasNodeType.Config, metadata: {
+        model: config.model, prompt, composerContent: prompt, compiledPrompt: prompt,
+        promptInput: { scene: "free-optimize", userText: "提取背心并改条纹颜色", fields: {}, mode: "edit", referenceRoles: ["背心", "配色"], compilationId: "11111111-1111-4111-8111-111111111111" },
+        manualImageReferences: ["shape", "colors"].map(id => ({ id, referenceKey: `upload:${id}`, name: id, type: "image/png", content: `blob:${id}`, storageKey: `image:${id}`, origin: "upload" as const })),
+    } };
+    const patches = [{ model: "gemini-3.1-flash-image-preview" }, { model: config.model }, { size: "1536x1024", quality: "high" }];
+    for (const patch of patches) {
+        const changedModel = patch.model !== undefined && patch.model !== config.model;
+        const h = harness([applyNodeConfigPatch(source, patch)]);
+        await h.action.handleGenerateNode(source.id, "image", prompt);
+        expect(h.feedback).toEqual([]);
+        expect(h.submissions).toHaveLength(1);
+        expect(h.submissions[0]).toMatchObject({ prompt, config: { model: patch.model || config.model } });
+        expect(h.submissions[0]!.references.map(reference => reference.id)).toEqual(["shape", "colors"]);
+        expect(h.submissions[0]!.promptInput).toEqual(changedModel ? undefined : source.metadata!.promptInput);
+        expect(h.nodes.current[0]!.metadata?.composerContent).toBe(prompt);
+    }
 });
 
 test("editing an original image appends a result with the actual input order, without overwriting its prompt or references", async () => {

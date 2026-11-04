@@ -16,6 +16,8 @@ const noRead = async () => { throw new Error("Source must not be measured"); };
 
 test.each([
     [{ width: 1500, height: 2000 }, "3:4"],
+    [{ width: 1280, height: 1707 }, "3:4"],
+    [{ width: 1707, height: 1280 }, "4:3"],
     [{ width: 2000, height: 1500 }, "4:3"],
     [{ width: 1254, height: 1254 }, "1:1"],
     [{ width: 1080, height: 1920 }, "9:16"],

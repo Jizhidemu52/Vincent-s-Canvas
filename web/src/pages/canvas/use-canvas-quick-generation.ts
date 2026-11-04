@@ -106,7 +106,7 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, c
     const [quickGenerateImageOptions, setQuickGenerateImageOptionsState] = useState(effectiveConfig.imageOptions || "");
     const [quickGenerateReferences, setQuickGenerateReferencesState] = useState<CanvasSelectionReference[]>([]);
     const quickReferencesRef = useRef(quickGenerateReferences);
-    const setQuickGenerateModel = useCallback((value: string) => { setQuickGenerateModelState(value); patchNodeDraft({ model: value }); }, [patchNodeDraft]);
+    const setQuickGenerateModel = useCallback((value: string) => { setQuickGenerateModelState(value); patchNodeDraft({ draftModel: value }); }, [patchNodeDraft]);
     const setQuickGenerateSize = useCallback((value: string) => { setQuickGenerateSizeState(value); patchNodeDraft({ size: value }); }, [patchNodeDraft]);
     const setQuickGenerateQuality = useCallback((value: string) => { setQuickGenerateQualityState(value); patchNodeDraft({ quality: value }); }, [patchNodeDraft]);
     const setQuickGenerateCount = useCallback((value: number) => { setQuickGenerateCountState(value); patchNodeDraft({ count: value }); }, [patchNodeDraft]);
@@ -177,8 +177,14 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, c
         return () => { referenceRead.current = null; };
     }, [referenceScope]);
     const quickSubmissionRef = useRef<symbol | null>(null);
-    const quickOptimizedDraft = useRef<{ prompt: string; input: import("../../../../shared/prompt-contracts").PromptInputData; references: ReferenceImage[] } | undefined>(undefined);
-    const onQuickOptimizedPrompt = useCallback((prompt: string, input: import("../../../../shared/prompt-contracts").PromptInputData, references: ReferenceImage[]) => { quickOptimizedDraft.current = { prompt, input, references: [...references] }; }, []);
+    const quickOptimizedDraft = useRef<{ prompt: string; input: import("../../../../shared/prompt-contracts").PromptInputData; references: ReferenceImage[]; model: string; scope: string; binding: typeof normalizationBinding } | undefined>(undefined);
+    const onQuickOptimizedPrompt = useCallback((prompt: string, input: import("../../../../shared/prompt-contracts").PromptInputData, references: ReferenceImage[]) => {
+        const account = useUserStore.getState();
+        if (normalizationBinding !== nodeDraftBindingRef.current || draftScope !== currentDraftScopeRef.current
+            || draftScope !== `${projectId}:${account.status}:${account.user?.id || ""}`) return;
+        quickOptimizedDraft.current = { prompt, input: structuredClone(input), references: structuredClone(references),
+            model: quickGenerateModel || effectiveConfig.imageModel || effectiveConfig.model, scope: referenceScope, binding: normalizationBinding };
+    }, [draftScope, effectiveConfig.imageModel, effectiveConfig.model, normalizationBinding, projectId, quickGenerateModel, referenceScope]);
     const loadedReuseTokenRef = useRef(new Set<string>());
     const quickGenerateRef = useRef<() => Promise<void>>(async () => undefined);
 
@@ -249,8 +255,11 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, c
 
     const runQuickCanvasGeneration = useCallback(async () => {
         if (quickSubmissionRef.current || referenceRead.current) return;
+        const account = useUserStore.getState();
+        if (normalizationBinding !== nodeDraftBindingRef.current || draftScope !== currentDraftScopeRef.current
+            || draftScope !== `${projectId}:${account.status}:${account.user?.id || ""}`) return;
         flushQuickNodeDraft();
-        const user = useUserStore.getState().user;
+        const user = account.user;
         const sourceNode = nodeDraftBindingRef.current?.scope === currentDraftScopeRef.current ? nodesRef.current.find(node => node.id === nodeDraftBindingRef.current?.nodeId) : undefined;
         if (sourceNode && sourceNode.metadata?.draftImageReferences === undefined && hasIncompleteCanvasGenerationReferences(sourceNode)) {
             message.warning(uiText("旧版记录参考信息不完整，请先恢复历史输入或明确设置新的参考图"));
@@ -264,7 +273,17 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, c
         const prompt = profile.requiresPrompt ? quickGeneratePromptRef.current.trim() : "";
         const settings = normalizeImageModelSettings({ size: quickGenerateSize, quality: quickGenerateQuality, count: String(quickGenerateCount) }, profile);
         const count = Number(settings.count);
-        const references = [...quickGenerateReferences];
+        const references = structuredClone(quickGenerateReferences);
+        // Select the compilation before any async preparation. Later edits or
+        // optimization results belong to the next run, never this batch.
+        const optimized = quickOptimizedDraft.current;
+        const sameReferences = optimized?.references.length === references.length && optimized.references.every((image, index) => {
+            const reference = references[index];
+            return reference && image.id === reference.id && image.dataUrl === reference.dataUrl && image.url === reference.url
+                && image.storageKey === reference.storageKey && image.sourceAssetId === reference.sourceAssetId;
+        });
+        const promptInput = optimized?.prompt === prompt && optimized.model === model && optimized.scope === referenceScope
+            && optimized.binding === normalizationBinding && sameReferences ? structuredClone(optimized.input) : undefined;
         const operationType = references.length && profile.kind !== "midjourney-blend" ? "inpaint" : "image_generation";
         const toolMode = operationType === "inpaint" ? "image-edit" : "image-generation";
         const generationConfig: AiConfig = {
@@ -329,7 +348,7 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, c
                 prompt,
                 status: NODE_STATUS_LOADING,
                 ...buildImageGenerationMetadata(generationType, generationConfig, count, references),
-                generationRecord: createCanvasGenerationRecord({ id: `${runId}:${index}`, sourceNodeId: sourceNode?.id || sourceNodes[0]?.id || "", prompt, inputPrompt: prompt, references, nodes: nodesRef.current, config: generationConfig, generationType }),
+                generationRecord: createCanvasGenerationRecord({ id: `${runId}:${index}`, sourceNodeId: sourceNode?.id || sourceNodes[0]?.id || "", prompt, inputPrompt: prompt, references, nodes: nodesRef.current, config: generationConfig, generationType, promptInput }),
                 ...(sourceNode ? { generationOrigin: { sourceNodeId: sourceNode.id, runId, mode: "image" as const } } : {}),
             },
         }));
@@ -363,9 +382,7 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, c
             targetIds.map(async (targetId, index) => {
                 try {
                     const options = await createOptions(targetId, controller, () => finishSubmission(targetId), toolKey);
-                    const optimized = quickOptimizedDraft.current;
-                    const sameReferences = optimized?.references.length === references.length && optimized.references.every((image, index) => image.id === references[index]?.id && image.dataUrl === references[index]?.dataUrl && image.storageKey === references[index]?.storageKey);
-                    const { metadata, uploaded } = await options.generate(generationConfig, prompt, references, undefined, operationType === "inpaint", optimized?.prompt === prompt && sameReferences ? optimized.input : undefined);
+                    const { metadata, uploaded } = await options.generate(generationConfig, prompt, references, undefined, operationType === "inpaint", promptInput);
                     const resultSize = fitNodeSize(uploaded.width, uploaded.height, nodeSize.width, nodeSize.height);
                     setNodes((current) =>
                         current.map((node) =>
@@ -432,6 +449,7 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, c
     }, [
         addAsset,
         createOptions,
+        draftScope,
         effectiveConfig,
         estimateUsage,
         finishGenerationRequest,
@@ -441,6 +459,7 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, c
         handleMissingModelConfig,
         isAiConfigReady,
         message,
+        normalizationBinding,
         projectId,
         quickGenerateCount,
         quickGenerateImageOptions,
@@ -449,6 +468,7 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, c
         quickGenerateReferences,
         quickGenerateSize,
         quickGenerateQuality,
+        referenceScope,
         startGenerationRequest,
     ]);
     quickGenerateRef.current = runQuickCanvasGeneration;

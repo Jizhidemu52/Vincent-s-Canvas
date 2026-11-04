@@ -74,6 +74,26 @@ export function nearestImageSize(size: string, choices: readonly string[]) {
     return valid.length ? valid.reduce((best, value) => Math.abs(Math.log(ratio(value)! / target)) < Math.abs(Math.log(ratio(best)! / target)) ? value : best) : choices[0]!;
 }
 
+/** Match an editing base to a supported size, allowing only whole-pixel rounding. */
+export function imageSizeForSource(source: { width: number; height: number }, profile: ReturnType<typeof imageModelProfile>) {
+    if (!Number.isFinite(source.width) || !Number.isFinite(source.height) || source.width <= 0 || source.height <= 0) throw new Error("底图尺寸无法读取，图片任务尚未提交。请重新添加底图。");
+    const target = source.width / source.height;
+    // Flexible profiles also support these established ratio-to-pixel mappings.
+    const sizes = [...new Set([...profile.sizes, ...(profile.customSize && profile.sizeConstraints ? Object.values(flexibleRatioSizes) : [])])];
+    const candidates = sizes.flatMap(size => {
+        const parts = /^(\d+(?:\.\d+)?)[x:](\d+(?:\.\d+)?)$/.exec(size);
+        const ratio = parts ? Number(parts[1]) / Number(parts[2]) : NaN;
+        if (!Number.isFinite(ratio) || ratio <= 0 || imageModelSettingsError(size, profile)) return [];
+        const difference = Math.abs(Math.log(ratio / target));
+        const pixelDifference = Math.min(Math.abs(source.width - source.height * ratio), Math.abs(source.height - source.width / ratio));
+        return [{ size, difference, matches: difference < 1e-9 || difference <= .005 && pixelDifference <= 1 + 1e-9 }];
+    });
+    const matching = candidates.filter(candidate => candidate.matches).sort((a, b) => a.difference - b.difference)[0];
+    if (matching) return matching.size;
+    const nearest = candidates.length ? nearestImageSize(`${source.width}:${source.height}`, candidates.map(candidate => candidate.size)) : "";
+    throw new Error(`当前模型不能精确保留底图画幅（${source.width} × ${source.height}）。请在出图设置明确选择${nearest ? ` ${nearest} 等支持的尺寸，或更换模型` : "其他模型"}；图片任务尚未提交。`);
+}
+
 export function normalizeImageModelSettings(config: Pick<AiConfig, "size" | "quality" | "count">, profile: ReturnType<typeof imageModelProfile>) {
     const rawSize = String(config.size || "").trim().toLowerCase();
     const size = profile.sizes.includes(rawSize) || (profile.customSize && /^[1-9]\d*x[1-9]\d*$/.test(rawSize)) || (profile.customAspect && /^[1-9]\d*:[1-9]\d*$/.test(rawSize)) ? rawSize

@@ -1,7 +1,7 @@
 import { CanvasNodeType, type CanvasAssistantAttachment, type CanvasNodeMetadata } from "@/types/canvas";
 import type { CanvasAgentOp, CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
 import { fitNodeSize } from "@/lib/canvas/canvas-node-size";
-import { imageModelProfile, imageModelSettingsError, nearestImageSize, normalizeImageModelSettings } from "@/lib/image-model-settings";
+import { imageModelProfile, imageModelSettingsError, imageSizeForSource, normalizeImageModelSettings } from "@/lib/image-model-settings";
 import { imageModelDisplayName } from "@/lib/model-display";
 import { referencePolicyForModel } from "@/lib/image-reference-policy";
 import { getVideoModelParameterSpec } from "@/lib/video-model-parameters";
@@ -82,18 +82,7 @@ export async function resolveAgentImageGenerationSettings(
         if (!base) throw new Error("没有可用的编辑底图，图片任务尚未提交。");
         const source = await readSize(base, assertCurrent);
         assertCurrent();
-        if (!Number.isFinite(source.width) || !Number.isFinite(source.height) || source.width <= 0 || source.height <= 0) throw new Error("底图尺寸无法读取，图片任务尚未提交。请重新添加底图。");
-        const target = source.width / source.height;
-        const exact = profile.sizes.find(value => {
-            const ratio = imageAspect(value);
-            return ratio !== undefined && Math.abs(Math.log(ratio / target)) < 1e-9;
-        });
-        if (!exact) {
-            const choices = profile.sizes.filter(value => imageAspect(value) !== undefined);
-            const nearest = choices.length ? nearestImageSize(`${source.width}:${source.height}`, choices) : "";
-            throw new Error(`当前模型不能精确保留底图画幅（${source.width} × ${source.height}）。请在出图设置明确选择${nearest ? ` ${nearest} 等支持的尺寸，或更换模型` : "其他模型"}；图片任务尚未提交。`);
-        }
-        size = exact;
+        size = imageSizeForSource(source, profile);
     }
     const normalized = normalizeAgentImageSettings({ ...settings, size }, profile);
     const requestedAspect = requested && imageAspect(requested);

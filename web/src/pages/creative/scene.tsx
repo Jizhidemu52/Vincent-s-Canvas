@@ -1,7 +1,7 @@
 import { uiText, useUiText } from "@/lib/i18n";
 import { formatBeijingDateTime } from "@/lib/beijing-time";
 import { ArrowLeft, ArrowRight, ChevronDown, Download, History, LoaderCircle, Plus, RotateCcw, Sparkles } from "lucide-react";
-import { App, Image } from "antd";
+import { App, Button, Checkbox, Image } from "antd";
 import { handleSubmitShortcut } from "@/lib/submit-shortcut";
 import { GenerationInputList } from "@/components/generation-input-list";
 import { GenerationDiagnostic } from "@/components/generation-diagnostic";
@@ -30,6 +30,7 @@ import { RecolorDialog } from "./recolor-dialog";
 import { VectorTraceDialog } from "./vector-trace-dialog";
 import { canRetrySceneResult } from "./scene-retry";
 import { canQuerySceneResult } from "./scene-recovery";
+import type { SceneLogSummary } from "./scene-history";
 import "./scene.css";
 import type { ModuleKey } from "@/services/api/modules";
 import type { ToolKey } from "../../../../shared/feature-catalog";
@@ -66,12 +67,33 @@ function CreativeSceneWorkspace({ preset }: { preset: CreativePreset }) {
     const [tool, setTool] = useState<"selection" | "recolor" | null>(null);
     const [traceImage, setTraceImage] = useState<SceneImage | null>(null);
     const [promptOpen, setPromptOpen] = useState(false);
+    const [historySelection, setHistorySelection] = useState(false);
+    const [selectedLogIds, setSelectedLogIds] = useState<string[]>([]);
     useEffect(() => { if (ws.recoveredRequestId) setView("results"); }, [ws.recoveredRequestId]);
     const summary = sceneSummaries[preset.id]!;
     const example = designExampleForScene(preset.id);
     const slots = getSceneSlots(preset.id, ws.form);
     const available = creativePresets.filter(item => isModuleAvailable(flags, tools, `creative-${item.id}` as ModuleKey));
     const submit = () => { setView("results"); void ws.generate(); };
+    const historyBusy = ws.running || ws.loading || ws.historyLoading;
+    const selectableLogs = ws.logs.filter(log => !log.unresolvedCount);
+    const selectedLogs = selectableLogs.filter(log => selectedLogIds.includes(log.id));
+    const allSelected = Boolean(selectableLogs.length) && selectedLogs.length === selectableLogs.length;
+    const confirmDeleteLogs = (requested: SceneLogSummary[]) => {
+        if (historyBusy || !requested.length) return;
+        const snapshot = [...requested];
+        modal.confirm({
+            title: uiText("删除选中的 {count} 条历史记录？", { count: snapshot.length }),
+            content: uiText("仅从本机历史列表移除已结束的记录；原图与服务端任务仍保留，不会取消任务。"),
+            okText: uiText("确认删除"), okButtonProps: { danger: true }, cancelText: uiText("保留记录"),
+            onOk: async () => {
+                const deleted = await ws.deleteLogs(snapshot);
+                if (!deleted) return;
+                setSelectedLogIds(current => [...new Set([...current.filter(id => !deleted.deletedIds.includes(id)), ...deleted.failedIds])]);
+                if (deleted.failedIds.length) setHistorySelection(true);
+            },
+        });
+    };
 
     return <main className="wb-page cs-page">
         <header className="cs-header">
@@ -123,10 +145,19 @@ function CreativeSceneWorkspace({ preset }: { preset: CreativePreset }) {
                 </nav>
                 {view === "history" ? <div className="cs-history">
                     {example ? <PracticeExampleRecord example={example} /> : null}
-                    <h2>{uiText("最近任务")}</h2><p className="cs-help">{uiText("显示当前账号在「")}{uiText(preset.title || "")}{uiText("」中的任务与待查询原请求，保存在本机浏览器。")}</p>
-                    {ws.logs.length ? ws.logs.map(log => <div key={log.id} className="flex items-center gap-3"><button type="button" className="cs-history-item" disabled={ws.running} onClick={() => { void ws.previewLog(log); setPromptOpen(true); setView("results"); }}>
+                    <div className="flex flex-wrap items-center justify-between gap-2"><h2>{uiText("最近任务")}</h2><Button size="small" disabled={historyBusy || !ws.logs.length} onClick={() => { setHistorySelection(current => !current); setSelectedLogIds([]); }}>{historySelection ? uiText("退出批量管理") : uiText("批量管理")}</Button></div>
+                    <p className="cs-help">{uiText("显示当前账号在「")}{uiText(preset.title || "")}{uiText("」中的任务与待查询原请求，保存在本机浏览器。")}</p>
+                    {historySelection && <div className="mb-3 space-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                            <Checkbox aria-label={uiText("全选已加载的已结束任务")} disabled={historyBusy || !selectableLogs.length} checked={allSelected} indeterminate={selectedLogs.length > 0 && !allSelected} onChange={() => setSelectedLogIds(allSelected ? [] : selectableLogs.map(log => log.id))}>{uiText("全选已加载记录")}</Checkbox>
+                            <span className="text-xs text-muted-foreground">{uiText("已选 {count} 条", { count: selectedLogs.length })}</span>
+                            <Button size="small" danger disabled={historyBusy || !selectedLogs.length} onClick={() => confirmDeleteLogs(selectedLogs)}>{uiText("批量删除")}</Button>
+                        </div>
+                        <p className="cs-help">{uiText("只选择当前已加载且已结束的任务；待查询的原请求不会被删除。")}</p>
+                    </div>}
+                    {ws.logs.length ? ws.logs.map(log => <div key={log.id} className="flex items-center gap-3">{historySelection && <Checkbox aria-label={uiText("选择任务：{time}", { time: formatBeijingDateTime(log.createdAt) })} disabled={historyBusy || Boolean(log.unresolvedCount)} checked={selectedLogIds.includes(log.id)} onChange={event => setSelectedLogIds(current => event.target.checked ? [...new Set([...current, log.id])] : current.filter(id => id !== log.id))} />}<button type="button" className="cs-history-item" disabled={historyBusy} onClick={() => { void ws.previewLog(log); setPromptOpen(true); setView("results"); }}>
                         <span className="cs-history-icon"><History size={18} /></span><span><strong>{formatBeijingDateTime(log.createdAt)} {uiText("北京时间")}</strong><small>{log.operation === "recolor" ? uiText("本地精确换色 · ") : log.hasSelection ? uiText("选区合成 · ") : ""}{log.successCount} {uiText(" 张成功")}{log.failCount ? uiText(" · {failCount} 张失败", { failCount: log.failCount }) : ""}{log.unresolvedCount ? uiText(" · {unresolvedCount} 张待查询", { unresolvedCount: log.unresolvedCount }) : ""} {uiText(" · 查看结果与提示词")}</small></span><ArrowRight size={15} />
-                    </button><button type="button" className="shrink-0 text-xs text-muted-foreground" disabled={ws.running || ws.loading || ws.historyLoading || Boolean(log.unresolvedCount)} onClick={() => modal.confirm({ title: uiText("删除这条历史记录？"), content: uiText("仅从本机历史列表移除已结束的记录；原图与服务端任务仍保留，不会取消任务。"), okText: uiText("删除记录"), cancelText: uiText("保留记录"), onOk: () => ws.deleteLog(log) })}>{uiText("删除")}</button></div>) : <p className="cs-help">{uiText("还没有生成记录。完成一次设计后，会在这里保存参数和结果。")}</p>}
+                    </button>{!historySelection && <button type="button" className="shrink-0 text-xs text-muted-foreground" disabled={historyBusy || Boolean(log.unresolvedCount)} onClick={() => confirmDeleteLogs([log])}>{uiText("删除")}</button>}</div>) : <p className="cs-help">{uiText("还没有生成记录。完成一次设计后，会在这里保存参数和结果。")}</p>}
                     {ws.historyHasMore && <button type="button" className="cs-tool-entry" disabled={ws.historyLoading} onClick={() => void ws.loadMoreHistory()}>{ws.historyLoading ? uiText("正在加载…") : uiText("加载更多（已显示 {length} / {historyTotal}）", { length: ws.logs.length, historyTotal: ws.historyTotal })}</button>}
                 </div> : <div className="cs-results">
                     <div className="cs-results-heading"><h2>{ws.optimizing ? uiText("正在优化提示词…") : ws.running ? uiText("正在创作") : uiText("设计结果")}</h2>{ws.activeLog && <><span>{formatBeijingDateTime(ws.activeLog.createdAt)} {uiText("北京时间")}</span><button type="button" className="cs-tool-entry" disabled={ws.running || ws.loading || ws.previewing} onClick={() => modal.confirm({ title: uiText("恢复为草稿？"), content: uiText("将替换当前设计要求、模型与参考素材，不会提交生成任务。"), okText: uiText("确认恢复"), cancelText: uiText("保留草稿"), onOk: async () => { await ws.restoreLog(ws.activeLog!); setPromptOpen(true); } })}>{uiText("恢复为草稿继续改")}</button></>}</div>

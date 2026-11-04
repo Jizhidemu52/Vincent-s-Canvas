@@ -11,7 +11,7 @@ import { i18nHarness } from "./helpers/i18n-harness";
 const sourcePath = new URL("../src/pages/creative/scene.tsx", import.meta.url);
 const requireModule = createRequire(sourcePath);
 const compiled = ts.transpileModule(readFileSync(sourcePath, "utf8"), {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true },
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ESNext, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true },
 }).outputText;
 
 function PracticeExampleRecord() { return null; }
@@ -20,16 +20,23 @@ function harness(sceneId = "style-to-sketch", recoveredRequestId?: string) {
     const states: unknown[] = [];
     const effectDeps: Array<readonly unknown[] | undefined> = [];
     const pendingEffects: Array<() => void> = [];
-    const calls = { generated: 0, reset: 0, previews: [] as unknown[] };
+    const calls = { generated: 0, reset: 0, previews: [] as unknown[], confirms: [] as any[], deleted: [] as string[][] };
+    let failedIds: string[] = [];
     let stateIndex = 0, effectIndex = 0;
     const ws = {
         form: createSceneForm(sceneId), images: {}, selection: null,
         config: { size: "1024x1024", quality: "auto" }, model: "model", count: 1,
         loading: false, running: false, uploading: false, validation: "", quotaBlocked: false,
-        recoveredRequestId, logs: [] as Array<{ id: string; createdAt: number; successCount: number; failCount: number }>,
+        recoveredRequestId, logs: [] as Array<{ id: string; createdAt: number; successCount: number; failCount: number; unresolvedCount?: number }>,
         results: [], historyTotal: 0, historyHasMore: false, selectedPrompt: null,
         generate: () => { calls.generated++; }, reset: () => { calls.reset++; },
         previewLog: (log: unknown) => { calls.previews.push(log); },
+        deleteLogs: async (logs: Array<{ id: string }>) => {
+            calls.deleted.push(logs.map(log => log.id));
+            const deletedIds = logs.map(log => log.id).filter(id => !failedIds.includes(id));
+            ws.logs = ws.logs.filter(log => !deletedIds.includes(log.id));
+            return { deletedIds, failedIds };
+        },
     };
     const dependencies: Record<string, unknown> = {
         "@/lib/i18n": i18nHarness,
@@ -46,7 +53,7 @@ function harness(sceneId = "style-to-sketch", recoveredRequestId?: string) {
                 pendingEffects.push(effect);
             },
         },
-        antd: { App: { useApp: () => ({ modal: { confirm() {} } }) }, Image: () => null },
+        antd: { App: { useApp: () => ({ modal: { confirm(value: unknown) { calls.confirms.push(value); } } }) }, Button: "button", Checkbox: "input", Image: () => null },
         "react-router-dom": { Link: () => null, useParams: () => ({ presetId: sceneId }), useNavigate: () => () => {} },
         "@/components/design-examples": { PracticeExampleRecord },
         "@/components/auth/module-gate": { ModuleGate: () => null },
@@ -72,7 +79,7 @@ function harness(sceneId = "style-to-sketch", recoveredRequestId?: string) {
         pendingEffects.splice(0).forEach(effect => effect());
         return output;
     };
-    return { render, ws, calls };
+    return { render, ws, calls, failDeletion: (ids: string[]) => { failedIds = ids; } };
 }
 
 function elements(node: unknown): ReactElement<any>[] {
@@ -160,4 +167,54 @@ test("submit shortcut is limited to editable form content, not history or small 
     form.props.onKeyDown({ ...event, target: { closest: () => null } });
     expect(app.calls.generated).toBe(1);
     expect(button(app.render(), "当前结果").props["aria-pressed"]).toBe(true);
+});
+
+test("creative bulk selection excludes unresolved tasks and confirms a stable record snapshot", async () => {
+    const app = harness();
+    app.ws.logs = [
+        { id: "first", createdAt: 1, successCount: 1, failCount: 0 },
+        { id: "second", createdAt: 2, successCount: 1, failCount: 0 },
+        { id: "pending", createdAt: 3, successCount: 0, failCount: 0, unresolvedCount: 1 },
+    ];
+    button(app.render(), "批量管理").props.onClick();
+    let output = app.render();
+    expect(button(output, "批量删除").props.disabled).toBe(true);
+    button(output, "批量删除").props.onClick();
+    expect(app.calls.confirms).toHaveLength(0);
+    const checks = elements(output).filter(item => item.type === "input");
+    expect(checks).toHaveLength(4);
+    expect(checks[3]!.props.disabled).toBe(true);
+    checks[0]!.props.onChange();
+    output = app.render();
+    expect(text(output)).toContain("已选 2 条");
+    button(output, "批量删除").props.onClick();
+    expect(app.calls.deleted).toEqual([]);
+    expect(app.calls.confirms[0].title).toBe("删除选中的 2 条历史记录？");
+    // Selection changes after opening must not broaden the confirmed records.
+    elements(output).find(item => item.props["aria-label"] === "全选已加载的已结束任务")!.props.onChange();
+    app.render();
+    await app.calls.confirms[0].onOk();
+    expect(app.calls.deleted).toEqual([["first", "second"]]);
+    expect(app.ws.logs.map(log => log.id)).toEqual(["pending"]);
+    expect(app.calls.generated).toBe(0);
+});
+
+test("creative failed deletions remain selected and running disables destructive controls", async () => {
+    const app = harness();
+    app.ws.logs = [{ id: "a", createdAt: 1, successCount: 1, failCount: 0 }, { id: "b", createdAt: 2, successCount: 1, failCount: 0 }];
+    button(app.render(), "批量管理").props.onClick();
+    elements(app.render()).find(item => item.props["aria-label"] === "全选已加载的已结束任务")!.props.onChange();
+    button(app.render(), "批量删除").props.onClick();
+    app.failDeletion(["b"]);
+    await app.calls.confirms[0].onOk();
+    let output = app.render();
+    expect(app.ws.logs.map(log => log.id)).toEqual(["b"]);
+    expect(text(output)).toContain("已选 1 条");
+    expect(elements(output).filter(item => item.type === "input").every(item => item.props.checked)).toBe(true);
+    app.ws.running = true;
+    output = app.render();
+    expect(button(output, "批量删除").props.disabled).toBe(true);
+    button(output, "批量删除").props.onClick();
+    expect(app.calls.confirms).toHaveLength(1);
+    expect(app.calls.deleted).toHaveLength(1);
 });

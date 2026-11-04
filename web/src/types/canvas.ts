@@ -119,6 +119,8 @@ export type CanvasNodeMetadata = {
     configImageInputMode?: "per-image" | "combined";
     generationType?: CanvasImageGenerationType;
     model?: string;
+    /** Image editor choice for the next run; never historical generation evidence. */
+    draftModel?: string;
     size?: string;
     quality?: string;
     imageOptions?: string;

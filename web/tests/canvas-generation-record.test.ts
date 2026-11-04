@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { canvasGenerationDraft, canvasGenerationDraftResetPatch, canvasGenerationRecordConfig, canvasGenerationRecordReferences, canvasNodeGenerationReferences, compiledCanvasGenerationRecord, createCanvasGenerationRecord, hasIncompleteCanvasGenerationReferences, visibleCanvasGenerationReferences } from "@/lib/canvas/canvas-generation-record";
+import { canvasGenerationDraft, canvasGenerationDraftResetPatch, canvasGenerationModel, canvasGenerationPrompt, canvasGenerationRecordConfig, canvasGenerationRecordReferences, canvasNodeGenerationReferences, compiledCanvasGenerationRecord, createCanvasGenerationRecord, hasIncompleteCanvasGenerationReferences, visibleCanvasGenerationReferences } from "@/lib/canvas/canvas-generation-record";
 import { portableCanvasMedia } from "@/lib/canvas/canvas-portable-media";
 import { collectImageStorageKeys } from "@/services/image-storage";
 import { defaultConfig } from "@/stores/use-config-store";
@@ -25,6 +25,30 @@ test("generation snapshots preserve reference identity/order/storage independent
     expect(canvasGenerationRecordReferences(saved)).toHaveLength(2);
     expect(saved).toEqual(original);
     expect(collectImageStorageKeys(result)).toEqual(new Set(["image:source", "image:upload"]));
+});
+
+test("three interleaved model results retain their own immutable prompt/model after serialization and draft edits", () => {
+    const inputs = ["model-a", "model-b", "model-c"].map((model, index) => ({ model, prompt: `独立提示词 ${index}` }));
+    const results = inputs.map(({ model, prompt }, index): CanvasNodeData => ({ ...source, id: `result-${index}`, metadata: {
+        prompt, model, generationRecord: createCanvasGenerationRecord({ id: `run-${index}`, sourceNodeId: source.id, prompt,
+            generationType: "generation", config: { ...defaultConfig, model }, nodes: [], references: [] }),
+    } }));
+    // Completion order is unrelated to submission order; updates touch only their target.
+    for (const index of [2, 0, 1]) results[index]!.metadata = { ...results[index]!.metadata, content: `blob:completed-${index}`, status: "success" };
+    results[0]!.metadata = { ...results[0]!.metadata, model: "next-draft-model", draftPrompt: "下一次编辑" };
+    const reopened: CanvasNodeData[] = JSON.parse(JSON.stringify(results));
+    for (const index of [2, 0, 1, 0]) {
+        expect(canvasGenerationModel(reopened[index]!)).toBe(inputs[index]!.model);
+        expect(canvasGenerationPrompt(reopened[index]!)).toBe(inputs[index]!.prompt);
+    }
+    expect(canvasGenerationDraft(reopened[0]!)).toBe("下一次编辑");
+});
+
+test("legacy node model evidence is used without inventing a model for an upload or missing archive field", () => {
+    expect(canvasGenerationModel({ ...source, metadata: { prompt: "旧提示词", model: "legacy-model" } })).toBe("legacy-model");
+    expect(canvasGenerationModel(source)).toBe("");
+    expect(canvasGenerationModel({ ...source, metadata: { ...source.metadata, prompt: "只有提示词" } })).toBe("");
+    expect(canvasGenerationModel({ ...source, metadata: { model: "draft-model", generationRecord: { ...record(), parameters: { ...record().parameters, model: "" } } } })).toBe("");
 });
 
 test("selection references bind explicit canvasNodeId without mistaking a same-id upload for a canvas node", () => {

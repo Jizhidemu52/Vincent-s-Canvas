@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test";
 import { writeFile } from "node:fs/promises";
-import { test, expect, MockCanvasApi } from "./fixtures";
+import { test, expect, MockCanvasApi, newCanvas } from "./fixtures";
+import { toolDefinitions } from "../../shared/feature-catalog";
 import { performanceRaster } from "./canvas-performance-fixture";
 import { readCanvasViewState } from "./canvas-view-state";
 
@@ -8,6 +9,10 @@ const PROJECT = "70000000-0000-4000-8000-000000000001";
 const ASSETS = { source: "71000000-0000-4000-8000-000000000001", a: "71000000-0000-4000-8000-000000000002", b: "71000000-0000-4000-8000-000000000003" };
 const FINAL = "Exact archived prompt A\n保留原图轮廓；最终编译内容 / 100%";
 const INPUT = "A 原始用户输入";
+const provenanceModels = ["gpt-image-2", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst"].map((modelId, index) => ({
+    id: `provenance-model-${index}`, modelId, name: modelId, publicName: `出图模型${index + 1}`, protocol: "openai", capabilities: ["generate", "edit"],
+    isFeatured: true, creditCost: 0, rmbCost: 0,
+}));
 const assetUrl = (key: keyof typeof ASSETS) => `/api/assets/${ASSETS[key]}/content`;
 const panel = (page: Page) => page.getByTestId("canvas-quick-generate-panel");
 const editor = (page: Page) => panel(page).locator("textarea.cw-prompt");
@@ -15,11 +20,10 @@ const node = (api: MockCanvasApi, id: string) => api.document(PROJECT)!.nodes.fi
 async function select(page: Page, id: string, force = false) {
     await page.locator(`[data-node-id="${id}"]`).click({ force, position: { x: 30, y: 18 } });
     if (id === "original-reference") return;
-    // Selection adds references; the toolbar explicitly restores archived inputs.
-    await page.getByRole("toolbar", { name: "图片工具栏", exact: true }).getByRole("button", { name: "AI 编辑", exact: true }).click();
+    // A plain image click must restore that image's own inputs, without AI Edit.
     await editor(page).blur();
 }
-async function scene(page: Page, api: MockCanvasApi) {
+async function scene(page: Page, api: MockCanvasApi, legacy = false) {
     for (const [index, id] of Object.values(ASSETS).entries()) api.assetBytes.set(id, performanceRaster(index, 256, 256));
     const record = (id: string, prompt: string, inputPrompt: string) => ({ version: 1, id: `run-${id}`, sourceNodeId: "original-reference", createdAt: "2026-10-01T00:00:00.000Z", prompt, inputPrompt,
         references: [{ id: "original-reference", referenceKey: "node:original-reference", name: "原始参考.png", type: "image/png", content: assetUrl("source"), sourceNodeId: "original-reference", origin: "canvas", order: 0 }],
@@ -28,6 +32,7 @@ async function scene(page: Page, api: MockCanvasApi) {
         metadata: { content: assetUrl(key), status: "success", naturalWidth: 256, naturalHeight: 256, mimeType: "image/png" } as Record<string, any> });
     const source = image("original-reference", "source", 0, 0), a = image("result-a", "a", 220, 0), b = image("result-b", "b", 440, 0);
     a.metadata = { ...a.metadata, prompt: FINAL, generationType: "edit", generationRecord: record("a", FINAL, INPUT), generationOrigin: { sourceNodeId: source.id, runId: "run-a", mode: "image" } };
+    if (legacy) { delete a.metadata.generationRecord; a.metadata.model = "gpt-image-2"; a.metadata.generationType = "generation"; a.metadata.references = []; }
     b.metadata = { ...b.metadata, prompt: "Exact archived B", generationType: "edit", generationRecord: record("b", "Exact archived B", "B 原始用户输入"), generationOrigin: { sourceNodeId: source.id, runId: "run-b", mode: "image" } };
     const document = { id: PROJECT, title: "生成档案隔离验收", createdAt: "2026-10-01T00:00:00.000Z", updatedAt: "2026-10-01T00:00:00.000Z", nodes: [source, a, b],
         connections: [{ id: "source-a", fromNodeId: source.id, toNodeId: a.id }, { id: "source-b", fromNodeId: source.id, toNodeId: b.id }], groups: [], chatSessions: [], activeChatId: null,
@@ -83,7 +88,151 @@ async function completeDelayedTask(page: Page, api: MockCanvasApi) {
     return task;
 }
 
-test("explicit editing restores archived inputs, rapid A/B draft switches are scoped and saved across reload", async ({ page, api }) => {
+test("three concurrent models keep their own prompt/model through out-of-order completion, plain selection and reload", async ({ page, context, api }) => {
+    const models = provenanceModels;
+    await context.route("**/api/models", route => route.fulfill({ json: { models, prices: [], tools: toolDefinitions.map(tool => ({ ...tool, enabled: true, modelConfigId: null, configurationVersion: 1 })) } }));
+    const projectId = await newCanvas(page);
+    await page.getByRole("button", { name: "展开创建面板", exact: true }).click();
+    api.taskStatus = "queued";
+    const prompts = ["第一张蓝色围巾", "第二张绿色围巾", "第三张紫色围巾"];
+    for (let index = 0; index < models.length; index++) {
+        await panel(page).getByRole("combobox", { name: "选择模型", exact: true }).click();
+        await page.getByTestId("canvas-model-picker-menu").getByRole("option", { name: models[index]!.publicName, exact: true }).click();
+        await editor(page).fill(prompts[index]!);
+        await panel(page).getByRole("button", { name: /^生成(?:\s|$)/ }).click();
+        await expect.poll(() => api.submissions.length).toBe(index + 1);
+        await expect(editor(page)).toBeEnabled();
+    }
+    expect(api.tasks.size).toBe(3);
+    expect([...api.tasks.values()].every(task => task.status === "queued")).toBe(true);
+    const tasks = [...api.tasks.values()];
+    for (const index of [2, 0, 1]) {
+        const task = tasks[index]!;
+        task.status = "success"; task.resultUrls = [`/api/assets/${task.id}/content`];
+        await expect.poll(() => api.document(projectId)?.nodes.some((item: any) => item.metadata?.sourceTaskId === task.id && item.metadata.status === "success")).toBe(true);
+    }
+    const outputs = tasks.map(task => api.document(projectId)!.nodes.find((item: any) => item.metadata?.sourceTaskId === task.id));
+    expect(outputs).toHaveLength(3);
+    for (const [index, output] of outputs.entries()) {
+        expect(output.metadata.generationRecord.parameters.model).toBe(models[index]!.modelId);
+        expect(output.metadata.generationRecord.prompt).toBe(prompts[index]);
+    }
+    // Frame all results so every selection is a real visible-node click.
+    await page.keyboard.press("Shift+1");
+    const check = async () => {
+        for (const index of [1, 0, 2, 1]) {
+            await select(page, outputs[index].id);
+            await expect(panel(page).getByTestId("canvas-generation-model")).toHaveText(`生成时模型${models[index]!.publicName}`);
+            await expect(panel(page).getByRole("button", { name: "复制生成时提示词", exact: true })).toHaveText(prompts[index]!);
+        }
+    };
+    await check();
+    await page.reload();
+    await expect(panel(page)).toBeVisible();
+    await check();
+    expect(api.submissions).toHaveLength(3);
+});
+
+test("a selected new result retains its prompt through delayed completion, cloud acknowledgement and idle time without reselection", async ({ page, api }, info) => {
+    const projectId = await newCanvas(page);
+    await page.getByRole("button", { name: "展开创建面板", exact: true }).click();
+    const input = "等待完成及自动保存后也必须保留的围巾提示词";
+    const finalPrompt = `${input}\n服务器最终记录：保留蓝色条纹。`;
+    api.taskStatus = "queued";
+    await editor(page).fill(input);
+    await panel(page).getByRole("button", { name: /^生成(?:\s|$)/ }).click();
+    await expect.poll(() => api.tasks.size).toBe(1);
+    const task = [...api.tasks.values()][0]!;
+    await expect.poll(() => api.document(projectId)?.nodes.find((item: any) => item.metadata?.sourceTaskId === task.id)?.metadata.prompt).toBe(input);
+    const outputId = api.document(projectId)!.nodes.find((item: any) => item.metadata?.sourceTaskId === task.id).id;
+    // Keep the automatically selected placeholder selected for the entire completion/save lifecycle.
+    await expect(editor(page)).toHaveValue(input);
+    await expect(panel(page).getByRole("button", { name: "复制生成时提示词", exact: true })).toHaveText(input);
+    await expect(panel(page).getByTestId("canvas-generation-model")).toHaveText("生成时模型出图模型");
+    api.holdWrites = true;
+    task.prompt = finalPrompt;
+    task.status = "success";
+    task.resultUrls = [`/api/assets/${task.id}/content`];
+    await expect(page.locator(`[data-node-id="${outputId}"] img`).first()).toBeVisible();
+    await expect(editor(page)).toHaveValue(input);
+    await expect(panel(page).getByRole("button", { name: "复制生成时提示词", exact: true })).toHaveText(finalPrompt);
+    await expect.poll(() => api.pendingWrites()).toBeGreaterThan(0);
+    await api.releaseWrites();
+    await expect.poll(() => api.document(projectId)?.nodes.find((item: any) => item.id === outputId)?.metadata.status).toBe("success");
+    // Sample across multiple autosave/observer ticks rather than hiding a transient clear with a later click.
+    const samples = await page.evaluate(async () => {
+        const rows: Array<{ input: string; original: string; model: string }> = [];
+        const started = performance.now();
+        while (performance.now() - started < 5_000) {
+            const rail = document.querySelector('[data-testid="canvas-quick-generate-panel"]')!;
+            rows.push({ input: (rail.querySelector("textarea.cw-prompt") as HTMLTextAreaElement)?.value || "", original: rail.querySelector('[aria-label="复制生成时提示词"]')?.textContent || "", model: rail.querySelector('[data-testid="canvas-generation-model"]')?.textContent || "" });
+            await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        return rows;
+    });
+    expect(samples.length).toBeGreaterThan(20);
+    expect(samples.every(sample => sample.input === input && sample.original === finalPrompt && sample.model === "生成时模型出图模型")).toBe(true);
+    const saved = structuredClone(api.document(projectId)!.nodes.find((item: any) => item.id === outputId).metadata);
+    expect(saved).toMatchObject({ prompt: finalPrompt, generationRecord: { prompt: finalPrompt, inputPrompt: input, parameters: { model: "gpt-image-2" } } });
+    expect(saved.draftPrompt).not.toBe("");
+    await page.reload();
+    await expect(editor(page)).toHaveValue(input);
+    await expect(panel(page).getByRole("button", { name: "复制生成时提示词", exact: true })).toHaveText(finalPrompt);
+    await expect(panel(page).getByTestId("canvas-generation-model")).toHaveText("生成时模型出图模型");
+    // An intentionally empty continuation draft is not a missing generation record.
+    await panel(page).getByRole("button", { name: "基于此图继续", exact: true }).click();
+    await expect(editor(page)).toHaveValue("");
+    await expect.poll(() => api.document(projectId)!.nodes.find((item: any) => item.id === outputId).metadata.draftPrompt).toBe("");
+    const continued = structuredClone(api.document(projectId)!.nodes.find((item: any) => item.id === outputId).metadata);
+    expect(continued.generationRecord).toEqual(saved.generationRecord);
+    await page.reload();
+    await expect(editor(page)).toHaveValue("");
+    await expect(panel(page).getByRole("button", { name: "复制生成时提示词", exact: true })).toHaveText(finalPrompt);
+    await expect(panel(page).getByTestId("canvas-generation-model")).toHaveText("生成时模型出图模型");
+    const evidence = info.outputPath("delayed-result-prompt-lifecycle.json");
+    await writeFile(evidence, JSON.stringify({ sampleCount: samples.length, samples, saved, continued }, null, 2));
+    await info.attach("delayed-result-prompt-lifecycle", { path: evidence, contentType: "application/json" });
+    expect(api.submissions).toHaveLength(1);
+});
+
+test("selecting a pure upload clears the previous result prompt and labels missing generation evidence", async ({ page, api }) => {
+    const original = await scene(page, api);
+    await select(page, "result-a");
+    await expect(editor(page)).toHaveValue(INPUT);
+    await select(page, "original-reference");
+    await expect(editor(page)).toHaveValue("");
+    await expect(panel(page).getByTestId("canvas-generation-model")).toContainText("未记录，无法确认");
+    await expect(panel(page).getByTestId("canvas-generation-prompt-missing")).toHaveText("未记录生成提示词");
+    expect(api.document(PROJECT)!.nodes).toEqual(original.nodes);
+    await assertNoGeneration(api);
+});
+
+test("changing a legacy or uploaded image draft model never rewrites historical model evidence", async ({ page, context, api }) => {
+    await context.route("**/api/models", route => route.fulfill({ json: { models: provenanceModels, prices: [], tools: toolDefinitions.map(tool => ({ ...tool, enabled: true, modelConfigId: null, configurationVersion: 1 })) } }));
+    await scene(page, api, true);
+    await select(page, "result-a");
+    await expect(editor(page)).toHaveValue(FINAL);
+    await expect(panel(page).getByTestId("canvas-generation-model")).toContainText("出图模型1");
+    await panel(page).getByRole("combobox", { name: "选择模型", exact: true }).click();
+    await page.getByTestId("canvas-model-picker-menu").getByRole("option", { name: "出图模型2", exact: true }).click();
+    await expect.poll(() => node(api, "result-a").metadata.draftModel).toBe("gpt-image-2.5-flare");
+    expect(node(api, "result-a").metadata.model).toBe("gpt-image-2");
+    await expect(panel(page).getByTestId("canvas-generation-model")).toContainText("出图模型1");
+    await select(page, "original-reference");
+    await panel(page).getByRole("combobox", { name: "选择模型", exact: true }).click();
+    await page.getByTestId("canvas-model-picker-menu").getByRole("option", { name: "出图模型3", exact: true }).click();
+    await expect.poll(() => node(api, "original-reference").metadata.draftModel).toBe("gpt-image-2.5-sunburst");
+    expect(node(api, "original-reference").metadata.model).toBeUndefined();
+    await expect(panel(page).getByTestId("canvas-generation-model")).toContainText("未记录，无法确认");
+    await page.reload();
+    await select(page, "result-a");
+    await expect(panel(page).getByRole("combobox", { name: "选择模型", exact: true })).toContainText("出图模型2");
+    await expect(panel(page).getByTestId("canvas-generation-model")).toContainText("出图模型1");
+    await expect(editor(page)).toHaveValue(FINAL);
+    await assertNoGeneration(api);
+});
+
+test("plain image selection restores archived inputs, rapid A/B draft switches are scoped and saved across reload", async ({ page, api }) => {
     const original = await scene(page, api);
     await select(page, "result-a");
     await expect(editor(page)).toHaveValue(INPUT);

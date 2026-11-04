@@ -139,16 +139,18 @@ test("a planning delay cannot change the quality snapshot of the already sent re
 
 test.each([
     [{ width: 1500, height: 2000 }, "3:4"],
+    [{ width: 1280, height: 1707 }, "3:4"],
+    [{ width: 1707, height: 1280 }, "4:3"],
     [{ width: 2000, height: 1500 }, "4:3"],
     [{ width: 1000, height: 1000 }, "1:1"],
-] as const)("the actual send records resolved %s size in config, pending signature and generated history", async (sourceSize, expected) => {
+] as const)("the actual send records automatic size for %s in config, pending signature and generated history", async (sourceSize) => {
     const page = sendHarness({ action: "edit", quality: "1k", sourceSize, imageModels: [models[1]] });
     await page.send();
-    expect(page.calls[0]?.size).toBe(expected);
+    expect(page.calls[0]?.size).toBe("auto");
     const pending = page.snapshots[1][0].messages.at(-1).pendingImageTask;
-    expect(pending.size).toBe(expected);
+    expect(pending.size).toBe("auto");
     expect(pending.signature).toBe(chatImageTaskSignature(pending));
-    expect(page.sessionsRef.current[0].messages.at(-1).generatedImages[0].size).toBe(expected);
+    expect(page.sessionsRef.current[0].messages.at(-1).generatedImages[0].size).toBe("auto");
     expect(page.config.size).toBe("1:1");
     expect(page.sessionsRef.current[0].imageSize).toBeUndefined();
 });

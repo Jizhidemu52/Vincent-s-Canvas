@@ -48,7 +48,7 @@ export function displayModelMetadata<T>(value: T, models: readonly DisplayModel[
     if (isAdminRole(role)) return value;
     const visit = (item: unknown, key = ""): unknown => {
         if (typeof item === "string") {
-            if (["model", "modelId", "modelName", "imageModel", "imageModelId", "models", "imageModels"].includes(key)) {
+            if (["model", "draftModel", "modelId", "modelName", "imageModel", "imageModelId", "models", "imageModels"].includes(key)) {
                 const model = models.find(model => [model.id, model.modelId, model.name, model.publicName].includes(rawName(item)));
                 if (preserveOpaqueIds && key !== "modelName" && model && isImageDisplayModel(model)) return model.id;
                 return imageModelDisplayName(item, models, role);

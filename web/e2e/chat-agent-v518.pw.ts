@@ -53,21 +53,21 @@ async function selectImageSize(page: Page, label: string) {
     await page.getByRole("button", { name: "出图设置", exact: true }).click();
 }
 
-for (const [width, height, size] of [[1500, 2000, "3:4"], [2000, 1500, "4:3"], [1254, 1254, "1:1"]] as const) {
-    test(`默认改图读取实际底图 ${width}x${height} 并提交明确画幅 ${size}`, async ({ page, api }) => {
+for (const [width, height] of [[1280, 1707], [1707, 1280], [1254, 1254]] as const) {
+    test(`默认改图以自动画幅提交 ${width}x${height} 底图且刷新保留`, async ({ page, api }) => {
         const plans: any[] = [];
         await prepare(page, plans, undefined, "pixel");
         await uploadSize(page, width, height);
         await send(page, "只把衣服改成蓝色，完整保留背景");
         await expect(generated(page)).toHaveCount(1);
         expect(api.submissions).toHaveLength(1);
-        expect(api.submissions[0].parameters.size).toBe(size);
-        await expect.poll(async () => (await savedSessions(page))[0]?.messages.findLast((item: any) => item.generatedImages)?.generatedImages[0].size).toBe(size);
+        expect(api.submissions[0].parameters.size).toBe("auto");
+        await expect.poll(async () => (await savedSessions(page))[0]?.messages.findLast((item: any) => item.generatedImages)?.generatedImages[0].size).toBe("auto");
         await page.reload();
         await expect(generated(page)).toHaveCount(1);
         const sessions = await savedSessions(page);
         expect(sessions[0].imageSize).toBeUndefined();
-        expect(sessions[0].messages.findLast((item: any) => item.generatedImages).generatedImages[0].size).toBe(size);
+        expect(sessions[0].messages.findLast((item: any) => item.generatedImages).generatedImages[0].size).toBe("auto");
         expect(sessions[0].messages.find((item: any) => item.attachments?.length).attachments[0]).toMatchObject({ width, height });
         expect(api.submissions).toHaveLength(1);
     });
@@ -86,11 +86,11 @@ test("显式方图优先且刷新保留，恢复默认后的新创作不沿用�
     await expect(page.getByTestId("chat-image-size")).toContainText("1:1");
     await page.screenshot({ path: info.outputPath("chat-image-size-settings.png"), animations: "disabled" });
     await page.getByRole("button", { name: "出图设置", exact: true }).click();
-    await selectImageSize(page, "跟随底图画幅（默认）");
+    await selectImageSize(page, "自动（默认）");
     await page.locator("[data-image-agent-focus]").getByRole("button", { name: "新创作", exact: true }).click();
     await send(page, "新画一顶帽子"); await expect(generated(page)).toHaveCount(2);
     expect(plans.at(-1).profileContext.newCreation).toBe(true);
-    expect(api.submissions[1].parameters.size).toBe("1:1");
+    expect(api.submissions[1].parameters.size).toBe("auto");
     expect(api.submissions[1].sourceUrls || []).toHaveLength(0);
     expect((await savedSessions(page))[0].imageSize).toBeUndefined();
     expect(await page.evaluate(async () => (await import("/src/stores/use-config-store.ts")).useConfigStore.getState().config.size)).toBe(globalSize);

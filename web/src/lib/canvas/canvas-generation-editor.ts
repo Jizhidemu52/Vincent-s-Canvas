@@ -15,7 +15,7 @@ export function canvasGenerationEditorState(node: CanvasNodeData, nodes: CanvasN
     });
     return {
         prompt: canvasGenerationDraft(node), references,
-        model: metadata?.model || record?.parameters.model || config.imageModel || config.model,
+        model: metadata?.draftModel || metadata?.model || record?.parameters.model || config.imageModel || config.model,
         size: metadata?.size || record?.parameters.size || config.size,
         quality: metadata?.quality ?? record?.parameters.quality ?? config.quality,
         imageOptions: metadata?.imageOptions ?? record?.parameters.imageOptions ?? config.imageOptions ?? "",

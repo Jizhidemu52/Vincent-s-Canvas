@@ -39,8 +39,8 @@ test("the four-model catalog preserves complete IDs instead of matching the GPT 
 test("export retains opaque model references and user prompts without disclosing real names", () => {
     useBusinessConfigStore.setState({ models: [real] });
     useUserStore.setState({ user: null });
-    const source = { modelId: real.modelId, modelName: real.name, settings: { imageModels: [real.modelId] }, prompt: "请写 gpt-image-2", meta: `模型 ${real.modelId}` };
-    expect(exportModelMetadata(source)).toEqual({ modelId: real.id, modelName: real.publicName, settings: { imageModels: [real.id] }, prompt: source.prompt, meta: `模型 ${real.publicName}` });
+    const source = { modelId: real.modelId, draftModel: real.modelId, modelName: real.name, settings: { imageModels: [real.modelId] }, prompt: "请写 gpt-image-2", meta: `模型 ${real.modelId}` };
+    expect(exportModelMetadata(source)).toEqual({ modelId: real.id, draftModel: real.id, modelName: real.publicName, settings: { imageModels: [real.id] }, prompt: source.prompt, meta: `模型 ${real.publicName}` });
     expect(source.modelId).toBe(real.modelId);
 });
 afterEach(() => { useBusinessConfigStore.setState({ models: originalModels }); useUserStore.setState({ user: originalUser }); });
