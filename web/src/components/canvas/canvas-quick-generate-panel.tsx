@@ -23,11 +23,10 @@ import { CanvasGenerationRecordDetails } from "./canvas-generation-record-detail
 import { useImageMentions } from "@/hooks/use-image-mentions";
 import { quickMentionImages, quickMentionReferenceIndex } from "@/lib/canvas/canvas-quick-reference-mentions";
 
-type CanvasQuickGeneratePanelProps = Omit<CanvasQuickGeneratePanelRenderState, "embedded" | "config" | "references" | "visibleReferences"> & {
+type CanvasQuickGeneratePanelProps = Omit<CanvasQuickGeneratePanelRenderState, "embedded" | "config" | "references"> & {
     embedded?: boolean;
     config: AiConfig;
     references: ReferenceImage[];
-    visibleReferences?: ReferenceImage[];
 };
 
 export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
@@ -36,7 +35,7 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
     onModelChange, onSizeChange, onQualityChange, onCountChange, onImageOptionsChange, onSettingsNormalize, onPickReferences, onRemoveReference,
     onClearReferences, onMoveReference, onMissingConfig, onGenerate, onOptimizedPrompt, positioned, onClearPosition,
     referenceScopeKey = "", referencesLoading = false, onAddReferenceFiles,
-    sourceNode, derivatives, visibleReferences = references, mentionImages, onAddMentionReference, onPromptChange, onRestorePrompt, onContinue, onRegenerate, onRestoreGeneration, onLocateDerivative,
+    sourceNode, derivatives, mentionImages, onAddMentionReference, onPromptChange, onRestorePrompt, onContinue, onRegenerate, onRestoreGeneration, onLocateDerivative,
 }: CanvasQuickGeneratePanelProps) {
     const t = useUiText();
     const [optimizing, setOptimizing] = useState(false);
@@ -128,7 +127,7 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
                         </Popover.Content></Popover.Portal>
                     </Popover.Root>
                 </div>
-                <CanvasQuickReferenceTray references={visibleReferences} referenceOrder={references.map(reference => reference.id)} disabled={running || referenceBusy} onMove={onMoveReference} onRemove={onRemoveReference} onClear={onClearReferences} />
+                <CanvasQuickReferenceTray references={references} disabled={running || referenceBusy} onMove={onMoveReference} onRemove={onRemoveReference} onClear={onClearReferences} />
                 {!referenceValidation.valid ? <p className="cw-reference-error" role="alert">{referenceValidation.message}</p> : null}
             </div>
             <div className="cw-generator-footer">

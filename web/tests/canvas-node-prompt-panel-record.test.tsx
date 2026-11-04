@@ -36,15 +36,14 @@ function render(node: CanvasNodeData, sharedConfig?: CanvasNodeData) {
     } finally { Object.assign(business, savedBusiness); Object.assign(config, savedConfig); Object.assign(modules, savedModules); }
 }
 
-test("empty result panel renders a read-only archive separately from editable input and retains visible reference numbers", () => {
+test("empty result panel renders a read-only archive separately from editable input and shows every submitted reference", () => {
     const markup = render(result);
     expect(markup).toContain('aria-label="图片生成档案"');
     expect(markup).toContain('aria-label="复制生成时提示词"');
     expect(markup).toContain("compiled prompt");
     expect(markup).toMatch(/<textarea\b[^>]*>editable input<\/textarea>/);
-    expect(markup).toContain('alt="retained upload"');
-    expect(markup).toContain("图片2");
-    expect(markup).not.toContain('alt="deleted input"');
+    expect(markup).toMatch(/alt="deleted input"[\s\S]*>图片1<[\s\S]*alt="retained upload"[\s\S]*>图片2</);
+    expect(markup.match(/<img\b/g)).toHaveLength(2);
     expect(markup).not.toContain('aria-label="移除参考图"');
 });
 

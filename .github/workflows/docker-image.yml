@@ -1,4 +1,4 @@
-name: Docker image
+name: Verified immutable release
 
 on:
   push:
@@ -11,41 +11,17 @@ permissions:
 
 env:
   IMAGE_NAME: ghcr.io/jizhidemu52/vincent-s-canvas
+  PYTHONDONTWRITEBYTECODE: "1"
 
 jobs:
   verify:
     uses: ./.github/workflows/production-ci.yml
-
-  meta:
-    runs-on: ubuntu-latest
-    outputs:
-      tags: ${{ steps.meta.outputs.tags }}
-      api-tags: ${{ steps.api-meta.outputs.tags }}
-      labels: ${{ steps.meta.outputs.labels }}
-    steps:
-      - id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.IMAGE_NAME }}
-          tags: |
-            type=ref,event=tag
-            type=sha,prefix=
-      - id: api-meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.IMAGE_NAME }}-api
-          tags: |
-            type=ref,event=tag
-            type=sha,prefix=
-
-  build:
-    needs: [meta, verify]
+  release:
+    needs: verify
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
-        target: [web, api]
-        arch: [amd64, arm64]
         include:
           - arch: amd64
             platform: linux/amd64
@@ -53,91 +29,154 @@ jobs:
           - arch: arm64
             platform: linux/arm64
             runner: ubuntu-24.04-arm
-          - target: web
-            dockerfile: Dockerfile
-            suffix: ""
-          - target: api
-            dockerfile: server/Dockerfile
-            suffix: "-api"
     steps:
       - uses: actions/checkout@v7
-
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.13
       - uses: docker/setup-buildx-action@v3
-
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - id: build
+      - name: Freeze clean source identity
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(git status --porcelain)"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          version=$(tr -d '\r\n' < VERSION)
+          [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then test "$GITHUB_REF_NAME" = "$version"; fi
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+      - name: Build API once and publish immutable digest
+        id: api
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: ${{ matrix.dockerfile }}
+          file: server/Dockerfile
           platforms: ${{ matrix.platform }}
-          labels: ${{ needs.meta.outputs.labels }}
-          outputs: type=image,name=${{ env.IMAGE_NAME }}${{ matrix.suffix }},push-by-digest=true,name-canonical=true,push=true
-          cache-from: type=gha,scope=${{ matrix.target }}-${{ matrix.arch }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.target }}-${{ matrix.arch }}
-
-      - name: Export digest
-        shell: bash
-        run: |
-          mkdir -p "$RUNNER_TEMP/digests"
-          digest="${{ steps.build.outputs.digest }}"
-          touch "$RUNNER_TEMP/digests/${digest#sha256:}"
-
-      - uses: actions/upload-artifact@v4
+          build-args: |
+            VCS_REF=${{ github.sha }}
+            APP_VERSION=${{ steps.source.outputs.version }}
+          outputs: type=image,name=${{ env.IMAGE_NAME }}-api,push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=release-api-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=release-api-${{ matrix.arch }}
+      - name: Build Web once and publish immutable digest
+        id: web
+        uses: docker/build-push-action@v6
         with:
-          name: digests-${{ matrix.target }}-${{ matrix.arch }}
-          path: ${{ runner.temp }}/digests/*
-          if-no-files-found: error
-          retention-days: 1
-
-  merge:
-    needs:
-      - meta
-      - build
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - target: web
-            suffix: ""
-          - target: api
-            suffix: "-api"
-    steps:
-      - uses: docker/setup-buildx-action@v3
-
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: actions/download-artifact@v4
-        with:
-          path: ${{ runner.temp }}/digests
-          pattern: digests-${{ matrix.target }}-*
-          merge-multiple: true
-
-      - name: Create multi-arch manifest
+          context: .
+          file: Dockerfile
+          platforms: ${{ matrix.platform }}
+          build-args: |
+            VCS_REF=${{ github.sha }}
+            APP_VERSION=${{ steps.source.outputs.version }}
+          outputs: type=image,name=${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=release-web-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=release-web-${{ matrix.arch }}
+      - name: Load exact published images and record identity
         shell: bash
         env:
-          TAGS: ${{ matrix.target == 'api' && needs.meta.outputs.api-tags || needs.meta.outputs.tags }}
-          TARGET_IMAGE: ${{ env.IMAGE_NAME }}${{ matrix.suffix }}
+          API_DIGEST: ${{ steps.api.outputs.digest }}
+          WEB_DIGEST: ${{ steps.web.outputs.digest }}
+          VERSION: ${{ steps.source.outputs.version }}
+          PLATFORM: ${{ matrix.platform }}
+          ARCH: ${{ matrix.arch }}
         run: |
-          tag_args=()
-          while IFS= read -r tag; do
-            if [ -n "$tag" ]; then
-              tag_args+=("-t" "$tag")
-            fi
-          done <<< "$TAGS"
-
-          digest_args=()
-          while IFS= read -r digest_file; do
-            digest_args+=("${TARGET_IMAGE}@sha256:${digest_file}")
-          done < <(find "$RUNNER_TEMP/digests" -type f -printf '%f\n' | sort)
-
-          docker buildx imagetools create "${tag_args[@]}" "${digest_args[@]}"
+          set -euo pipefail
+          umask 077
+          mkdir "$RUNNER_TEMP/release-identity"
+          docker pull --platform "$PLATFORM" "$IMAGE_NAME-api@$API_DIGEST"
+          docker pull --platform "$PLATFORM" "$IMAGE_NAME@$WEB_DIGEST"
+          docker tag "$IMAGE_NAME-api@$API_DIGEST" "canvas-release-api:$GITHUB_SHA-$ARCH"
+          docker tag "$IMAGE_NAME@$WEB_DIGEST" "canvas-release-web:$GITHUB_SHA-$ARCH"
+          docker image inspect "canvas-release-api:$GITHUB_SHA-$ARCH" > "$RUNNER_TEMP/release-identity/api.json"
+          docker image inspect "canvas-release-web:$GITHUB_SHA-$ARCH" > "$RUNNER_TEMP/release-identity/web.json"
+          python3 ops/release/artifact.py candidate --repository "$PWD" --version "$VERSION" --commit "$GITHUB_SHA" --platform "$PLATFORM" --api-inspect "$RUNNER_TEMP/release-identity/api.json" --web-inspect "$RUNNER_TEMP/release-identity/web.json" --api-digest "$IMAGE_NAME-api@$API_DIGEST" --web-digest "$IMAGE_NAME@$WEB_DIGEST" --workflow-run "$GITHUB_RUN_ID" --output "$RUNNER_TEMP/release-identity/candidate.json"
+      - name: Install isolated browser-test dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          bun install --cwd web --frozen-lockfile
+          bun install --cwd server --frozen-lockfile
+          bun install --cwd shared --frozen-lockfile
+          cd web
+          bunx playwright install --with-deps chromium
+      - name: Verify contracts and the exact formal application stack
+        shell: bash
+        env:
+          COMPOSE_RUNTIME_TEST_IMAGE: canvas-release-api:${{ github.sha }}-${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          RUN_DOCKER_COMPOSE_CONTRACT_TESTS=true python3 -m unittest discover -s ops/release -p 'test_*.py'
+          python3 -m unittest discover -s ops/baota -p 'test_*.py'
+          RUN_DOCKER_COMPOSE_CONTRACT_TESTS=true bun test ops/release/ci-compose.test.ts
+          bash ops/release/stack-smoke.sh "$RUNNER_TEMP/release-identity/candidate.json" "$RUNNER_TEMP/release-smoke"
+      - name: Export the same verified images without rebuilding
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash ops/release/package-artifact.sh "$RUNNER_TEMP/release-identity/candidate.json" "$RUNNER_TEMP/release-smoke/verification.json" "$RUNNER_TEMP/canvas-release-${{ github.sha }}-${{ matrix.arch }}"
+      - name: Package exact infrastructure and isolated browser runner for Baota staging
+        if: matrix.arch == 'amd64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker buildx build --load --platform linux/amd64 \
+            --build-arg "VCS_REF=$GITHUB_SHA" \
+            --file ops/release/stage-smoke-runner/Dockerfile \
+            --tag "canvas-stage-browser:$GITHUB_SHA" .
+          runner_id=$(docker image inspect -f '{{.Id}}' "canvas-stage-browser:$GITHUB_SHA")
+          docker run --rm --pull never --network none --init --read-only \
+            --shm-size 1g --tmpfs /tmp:rw,nosuid,size=512m \
+            --cap-drop ALL --security-opt no-new-privileges:true \
+            --entrypoint node "$runner_id" /smoke/check.cjs
+          python3 -B ops/release/stage-smoke-package.py \
+            --repository "$PWD" \
+            --release "$RUNNER_TEMP/canvas-release-${{ github.sha }}-${{ matrix.arch }}" \
+            --infra-receipt "$RUNNER_TEMP/release-smoke/infra-images.json" \
+            --runner-image-id "$runner_id" \
+            --output "$RUNNER_TEMP/canvas-stage-tools-${{ github.sha }}-${{ matrix.arch }}"
+      - name: Upload deployable immutable package
+        uses: actions/upload-artifact@v4
+        with:
+          name: canvas-release-${{ github.sha }}-${{ matrix.arch }}
+          path: |
+            ${{ runner.temp }}/canvas-release-${{ github.sha }}-${{ matrix.arch }}.tar
+            ${{ runner.temp }}/canvas-release-${{ github.sha }}-${{ matrix.arch }}.tar.sha256
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload isolated Baota staging tools
+        if: matrix.arch == 'amd64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: canvas-stage-tools-${{ github.sha }}-${{ matrix.arch }}
+          path: |
+            ${{ runner.temp }}/canvas-stage-tools-${{ github.sha }}-${{ matrix.arch }}.tar
+            ${{ runner.temp }}/canvas-stage-tools-${{ github.sha }}-${{ matrix.arch }}.tar.sha256
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 14
+      - name: Preserve only public verification receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-receipts-${{ github.sha }}-${{ matrix.arch }}
+          path: |
+            ${{ runner.temp }}/release-identity/candidate.json
+            ${{ runner.temp }}/release-smoke/verification.json
+            ${{ runner.temp }}/release-smoke/browser-smoke.json
+            ${{ runner.temp }}/release-smoke/health.json
+            ${{ runner.temp }}/release-smoke/marker.json
+            ${{ runner.temp }}/release-smoke/infra-images.json
+          if-no-files-found: ignore
+          retention-days: 14

@@ -232,7 +232,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          docker compose up -d --build
+          docker compose build
+          docker compose up -d --no-build --wait postgres redis minio
+          docker compose run --rm --no-deps minio-init
+          # Initialization is explicit; restarting API never migrates/bootstrap.
+          docker compose run --rm --no-deps api bun src/migrate.ts
+          docker compose run --rm --no-deps api bun src/bootstrap.ts
+          docker compose up -d --no-build
       - name: Verify web and API health
         shell: bash
         run: |

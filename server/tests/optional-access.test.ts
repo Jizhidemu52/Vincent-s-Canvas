@@ -8,7 +8,7 @@ import { reserveCredits, settleReservation } from "../src/billing";
 const config = (extra: Record<string, string> = {}) => loadConfig({ DATABASE_URL: "postgres://test", REDIS_URL: "redis://test", ...extra });
 
 describe("optional access and billing", () => {
-    test("repository deployment templates disable OA employee identification", () => {
+    test("repository templates default OA off while Compose preserves explicit deployment settings", () => {
         for (const path of ["../../.env.example", "../.env.example"]) {
             const template = readFileSync(new URL(path, import.meta.url), "utf8");
             const flags = template.match(/^OA_LOGIN_ENABLED=(.*)$/gm);
@@ -17,7 +17,8 @@ describe("optional access and billing", () => {
         const compose = readFileSync(new URL("../../docker-compose.yml", import.meta.url), "utf8");
         for (const service of ["api", "worker"]) {
             const block = compose.split(`\n  ${service}:`)[1]?.split(/\n  [a-z][a-z-]*:/)[0];
-            expect(block).toContain('OA_LOGIN_ENABLED: "false"');
+            expect(block).toContain("env_file: .env");
+            expect(block).not.toMatch(/^\s+OA_LOGIN_ENABLED:/m);
         }
     });
 

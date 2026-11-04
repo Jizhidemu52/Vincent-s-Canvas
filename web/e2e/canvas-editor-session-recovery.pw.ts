@@ -106,6 +106,48 @@ test("CanvasEditorSession retains a revoked draft and never requests editing whe
     expect(await second.evaluate(() => window.__editorSessionFixture.flushes)).toBe(0);
 });
 
+test("CanvasEditorSession retries recovered storage only after backup and permanently fences the old draft", async ({ page }) => {
+    await page.goto("/__session?project=session-storage-retry");
+    await expectEditing(page);
+    await draft(page).fill("unsaved draft retained through storage outage");
+    const instance = await editor(page).getAttribute("data-instance");
+    await page.evaluate(() => {
+        const probe = (window as any).__sessionStorageProbe = { unavailable: true };
+        const original = IDBDatabase.prototype.transaction;
+        IDBDatabase.prototype.transaction = function (names, mode, options) {
+            if (this.name === "wireless-canvas-editor-locks" && mode === "readwrite" && probe.unavailable) throw new DOMException("fixture unavailable storage", "UnknownError");
+            return original.call(this, names, mode, options);
+        };
+    });
+    await expireLease(page);
+    const retry = page.getByRole("button", { name: "备份并在此页编辑", exact: true });
+    await expect(retry).toBeVisible();
+    await expect(editor(page)).toHaveAttribute("data-instance", instance!);
+    await expect(draft(page)).toHaveValue("unsaved draft retained through storage outage");
+    expect(await page.evaluate(() => window.__editorSessionFixture.write())).toBe(false);
+    await page.evaluate(() => {
+        (window as any).__sessionStorageProbe.unavailable = false;
+        window.__editorSessionFixture.backupFailure = true;
+    });
+    await retry.click();
+    await expect(page.getByRole("status")).toHaveText("fixture backup failed");
+    await expect(editor(page)).toHaveAttribute("data-instance", instance!);
+    await expect(draft(page)).toHaveValue("unsaved draft retained through storage outage");
+    expect(await page.evaluate(() => window.__editorSessionFixture.discards)).toBe(0);
+    expect(await page.evaluate(() => window.__editorSessionFixture.capabilities[0].ensureWritable())).toBe(false);
+    await page.evaluate(() => { window.__editorSessionFixture.backupFailure = false; });
+    await retry.click();
+    await expectEditing(page);
+    await expect(editor(page)).not.toHaveAttribute("data-instance", instance!);
+    await expect(draft(page)).toHaveValue("durable fixture graph");
+    expect(await page.evaluate(async () => {
+        const probe = window.__editorSessionFixture;
+        return { backups: probe.backups, discards: probe.discards, backedUpDrafts: probe.backedUpDrafts,
+            oldWrite: probe.write(0), oldReady: await probe.capabilities[0].ensureWritable(), newWrite: probe.write(),
+            backupBeforeDiscard: probe.events.indexOf("backup:done") < probe.events.indexOf("discard") };
+    })).toEqual({ backups: 2, discards: 1, backedUpDrafts: ["unsaved draft retained through storage outage"], oldWrite: false, oldReady: false, newWrite: true, backupBeforeDiscard: true });
+});
+
 test("CanvasEditorSession loads recovery views only on a real loss and retains the draft if the chunk fails", async ({ context, page }) => {
     let blocked = true, viewRequests = 0;
     await page.route("**/src/pages/canvas/canvas-editor-session-views.tsx", route => {

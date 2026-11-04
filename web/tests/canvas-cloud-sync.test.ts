@@ -3,7 +3,8 @@ import { createCanvasCloudSync, type CanvasCloudBaseline } from "@/lib/canvas/ca
 import { CanvasRevisionConflict, type CloudCanvasDocument } from "@/services/api/canvas-documents";
 import type { CanvasProject } from "@/stores/canvas/use-canvas-store";
 import { canvasProjectSummary } from "@/lib/canvas/canvas-project-summary";
-import { serializeCanvasProject } from "@/lib/canvas/canvas-project-codec";
+import { decodeCanvasProject, encodeCanvasProject, serializeCanvasProject } from "@/lib/canvas/canvas-project-codec";
+import { portableCanvasMedia } from "@/lib/canvas/canvas-portable-media";
 
 const clone = <T>(value: T): T => structuredClone(value);
 const encoded = (project: CanvasProject | null) => project === null ? null : serializeCanvasProject(project);
@@ -122,6 +123,38 @@ test("new device restores the full project while clean local media cache survive
     const updated = { ...document, title: "另一设备新名字" };
     same.remote.set(document.id, envelope(updated, 2));
     expect(await same.engine.hydrate(same.state.local)).toEqual([updated]);
+});
+
+test.each([false, true])("cached hydration ignores missing undo-only media without hiding current-content differences (%s)", async divergent => {
+    const original = project();
+    const cached = clone(original);
+    if (divergent) cached.title = "本地尚未同步的编辑";
+    cached.nodes[0]!.metadata = { ...cached.nodes[0]!.metadata, content: "blob:current-cache", storageKey: "image:current-cache" };
+    const undo = clone(original);
+    undo.nodes[0]!.metadata = { ...undo.nodes[0]!.metadata, content: "blob:expired-undo", storageKey: "image:missing-undo" };
+    cached.history = { past: [undo], future: [] };
+    const h = harness([cached], [envelope(original, 7)]);
+    const reads: string[] = [];
+    h.dependencies.portable = async input => decodeCanvasProject(await portableCanvasMedia(encodeCanvasProject(input), async media => {
+        reads.push(media.storageKey || media.url);
+        if (media.storageKey === "image:missing-undo") throw new Error("撤销历史媒体已不在本机缓存");
+        return original.nodes[0]!.metadata!.content as string;
+    }));
+
+    const restored = await h.engine.hydrate(h.state.local, { deferUncached: true });
+    expect(restored).toEqual([cached]);
+    expect(reads).toEqual(["image:current-cache"]);
+    expect(restored[0]!.history).toEqual(cached.history);
+    await h.engine.confirmHydrated(restored);
+    expect(h.engine.synchronizedProjectIds(restored)).toEqual(divergent ? [] : [cached.id]);
+    await h.engine.save(restored);
+    if (divergent) {
+        expect(h.remote.get(cached.id)!.document!.title).toBe(cached.title);
+        const copy = [...h.remote.values()].find(item => item.id !== cached.id)!;
+        expect(copy.document!.title).toContain(original.title);
+        expect(copy.document!.nodes).toEqual(original.nodes);
+    } else expect(h.state.putCalls).toEqual([]);
+    expect(reads).not.toContain("image:missing-undo");
 });
 
 test("live hydration only adds unseen remote documents and never changes an already open local editor", async () => {

@@ -24,13 +24,35 @@ describe("empty-result node panel input", () => {
         expect(state.usesSnapshot).toBe(true);
     });
 
-    test("hides deleted sources without removing request inputs or renumbering remaining references", () => {
+    test("keeps removed-source snapshots visible in request order without changing history", () => {
         const before = structuredClone(record);
         const state = canvasNodePromptPanelInput(result, [result], [], defaultConfig);
         expect(state.references).toHaveLength(2);
-        expect(state.visibleReferences.map(({ reference, index }) => [reference.referenceKey, index])).toEqual([["upload:ref", 1]]);
-        expect(state.mentions.map(reference => reference.label)).toEqual(["图片2"]);
+        expect(state.visibleReferences.map(({ reference, index }) => [reference.referenceKey, index])).toEqual([["node:source", 0], ["upload:ref", 1]]);
+        expect(state.mentions.map(reference => reference.label)).toEqual(["图片1", "图片2"]);
+        expect(state.references[0].dataUrl).toBe(record.references[0].content);
         expect(record).toEqual(before);
+    });
+
+    test("shows all 19 actual references and mention numbers when 18 source nodes are absent", () => {
+        const live = image("live-19");
+        const archived: CanvasGenerationRecord = { ...record, references: Array.from({ length: 19 }, (_, index) => {
+            const id = index === 18 ? live.id : `removed-${index + 1}`;
+            return { id, sourceNodeId: id, referenceKey: `node:${id}`, origin: "canvas", name: `${id}.png`,
+                type: "image/png", content: `https://local/${id}`, storageKey: `image:${id}`, order: index };
+        }) };
+        const before = structuredClone(archived);
+        const node: CanvasNodeData = { ...result, metadata: { ...result.metadata, generationRecord: archived } };
+        const state = canvasNodePromptPanelInput(node, [live, node], [], defaultConfig);
+        expect(state.references).toHaveLength(19);
+        expect(state.visibleReferences).toHaveLength(19);
+        expect(state.visibleReferences.map(({ reference }) => reference)).toEqual(state.references);
+        expect(state.visibleReferences.map(({ index }) => index + 1)).toEqual(Array.from({ length: 19 }, (_, index) => index + 1));
+        expect(state.mentions.map(reference => reference.label)).toEqual(Array.from({ length: 19 }, (_, index) => `图片${index + 1}`));
+        expect(state.mentions.map(reference => reference.id)).toEqual(archived.references.map(reference => reference.referenceKey));
+        expect(state.references.map(reference => reference.storageKey)).toEqual(archived.references.map(reference => reference.storageKey));
+        expect(node.metadata?.generationRecord).toBe(archived);
+        expect(archived).toEqual(before);
     });
 
     test("honors an explicit empty draft and reference override", () => {

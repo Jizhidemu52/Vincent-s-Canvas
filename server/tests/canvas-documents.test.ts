@@ -301,6 +301,50 @@ test("canvas API refuses guessed or unreadable server asset ids before writing",
     }); } finally { fixture.sqlite.close(); }
 });
 
+test("canvas API retains inaccessible references only from the matching owner document revision", async () => {
+    const fixture = databaseFixture();
+    fixture.allowAsset(compactHistoryAssetId);
+    const app = express().use(express.json());
+    app.use((req, _res, next) => { (req as AuthenticatedRequest).auth = actor(req.get("test-actor") || "employee-a"); next(); });
+    app.use("/api/canvas-documents", createCanvasDocumentsRouter(fixture.db));
+    try { await serve(app, async origin => {
+        const put = async (id: string, baseRevision: number, document: unknown, employee = "employee-a") => {
+            const response = await fetch(`${origin}/api/canvas-documents/${id}`, {
+                method: "PUT", headers: { "content-type": "application/json", "X-Canvas-Owner-Id": employee, "test-actor": employee },
+                body: JSON.stringify({ baseRevision, document }),
+            });
+            return { status: response.status, body: await response.json() };
+        };
+        const document = largeCanvasDocument("retained-assets", assetId, 12);
+        expect((await put(document.id, 0, document)).status).toBe(200);
+        fixture.denyAssets();
+        const changed = { ...document, title: "素材失效后仍可继续编辑" };
+        const saved = await put(document.id, 1, changed);
+        expect(saved.status).toBe(200);
+        expect(saved.body.document).toMatchObject({ revision: 2, deleted: false });
+        expect(saved.body.document).not.toHaveProperty("document");
+        const loaded = await fetch(`${origin}/api/canvas-documents/${document.id}`, { headers: { "X-Canvas-Owner-Id": "employee-a" } }).then(response => response.json());
+        expect(loaded.document.document).toEqual(changed);
+        const stale = await put(document.id, 1, document);
+        expect(stale.status).toBe(409);
+        expect(stale.body).toMatchObject({ error: "CANVAS_REVISION_CONFLICT", document: { revision: 2, document: changed } });
+
+        const newReference = "88888888-8888-4888-8888-888888888888";
+        const denied = await put(document.id, 2, { ...changed, extra: { assetId: newReference } });
+        expect(denied.status).toBe(403);
+        expect(denied.body.error).toBe("CANVAS_ASSET_FORBIDDEN");
+        const copied = { ...changed, id: "copied-canvas" };
+        expect((await put(copied.id, 0, copied)).status).toBe(403);
+
+        const deleted = await put(document.id, 2, null);
+        expect(deleted.status).toBe(200);
+        expect(deleted.body.document).toMatchObject({ revision: 3, deleted: true });
+        expect((await put(document.id, 3, changed)).status).toBe(409);
+        const tombstone = await fetch(`${origin}/api/canvas-documents/${document.id}`, { headers: { "X-Canvas-Owner-Id": "employee-a" } }).then(response => response.json());
+        expect(tombstone.document).toMatchObject({ revision: 3, deleted: true, document: null });
+    }); } finally { fixture.sqlite.close(); }
+});
+
 test("library summaries carry conflict identity and selected covers without exposing whole documents", async () => {
     const fixture = databaseFixture();
     const app = express().use(express.json());

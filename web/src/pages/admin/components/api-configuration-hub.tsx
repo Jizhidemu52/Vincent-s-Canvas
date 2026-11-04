@@ -1,5 +1,6 @@
 import { Alert, App, Button, Empty, Form, Input, InputNumber, Modal, Select, Switch, Tabs, Tag } from "antd";
-import { Boxes, KeyRound, Search, Settings2, Star, Workflow } from "lucide-react";
+import { Boxes, Download, KeyRound, Search, Settings2, Star, Workflow } from "lucide-react";
+import { saveAs } from "file-saver";
 import { useEffect, useMemo, useState } from "react";
 
 import { ApiProviderPanel } from "@/pages/admin/components/api-provider-panel";
@@ -9,7 +10,7 @@ import { ModelPricingPanel } from "@/pages/admin/components/model-pricing-panel"
 import { WorkflowManagementPanel } from "@/pages/admin/components/workflow-management-panel";
 import { buildToolConfigurationInput, compatibleToolModels, completeToolConfigurations, toolConfigurationState } from "@/pages/admin/components/tool-configuration-state";
 import {
-    listServerModels, listServerProviders, listServerWorkflows, listToolApiConfigurations, updateToolApiConfiguration,
+    exportConfigurationSnapshot, listServerModels, listServerProviders, listServerWorkflows, listToolApiConfigurations, updateToolApiConfiguration,
     type ServerModel, type ServerProvider, type ServerWorkflow, type ToolApiConfiguration, type ToolApiConfigurationInput,
 } from "@/services/api/model-configuration";
 import { moduleIsEnabled, nonAiDefinitions, toolDefinitions } from "@/services/api/modules";
@@ -34,6 +35,7 @@ export function ApiConfigurationHub({ isAdmin }: { isAdmin: boolean }) {
     const [loading, setLoading] = useState(true);
     const [loadError, setLoadError] = useState<string | null>(null);
     const [saving, setSaving] = useState(false);
+    const [exporting, setExporting] = useState(false);
     const refreshBusinessConfig = useBusinessConfigStore((state) => state.refresh);
     const flags = useModuleStore((state) => state.flags);
     const refreshModules = useModuleStore((state) => state.refresh);
@@ -54,6 +56,17 @@ export function ApiConfigurationHub({ isAdmin }: { isAdmin: boolean }) {
         } finally { setLoading(false); }
     };
     useEffect(() => { void refresh(); }, []);
+
+    const exportSnapshot = async () => {
+        if (!isAdmin || exporting) return;
+        setExporting(true);
+        try {
+            saveAs(await exportConfigurationSnapshot(), "canvas-configuration.json");
+            message.success("已导出服务端已保存的配置快照，不含密钥与配方正文。");
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "配置导出失败，请稍后重试。");
+        } finally { setExporting(false); }
+    };
 
     const openTool = async (tool: ToolApiConfiguration) => {
         if (!await confirmDiscard()) return;
@@ -97,6 +110,10 @@ export function ApiConfigurationHub({ isAdmin }: { isAdmin: boolean }) {
 
     return (
         <div className="space-y-4">
+            {isAdmin ? <div className="flex flex-wrap items-center justify-end gap-3">
+                <span className="text-xs text-[var(--muted-foreground)]">仅导出已保存配置，用于环境对比，不含密钥与配方正文。</span>
+                <Button icon={<Download className="size-4" />} loading={exporting} onClick={() => void exportSnapshot()}>导出配置快照</Button>
+            </div> : null}
             <Alert type="info" showIcon title={`${toolDefinitions.length} 个 AI 板块配置`} description={`对话改图与画布对话共用“对话改图”中指定的模型，设计师端不显示 LLM 模型设置；其他板块模型、各板块开关与费用仍独立配置。API 服务、密钥与新增模型请使用高级页；${nonAiDefinitions.length} 个非 AI 模块在“模块开关”中管理。`} />
             <Tabs activeKey={activeTab} destroyOnHidden onChange={async (key) => { if (!await confirmAllUnsaved()) return; setActiveTab(key); if (key === "tools") void refresh(); }} items={[
                 {

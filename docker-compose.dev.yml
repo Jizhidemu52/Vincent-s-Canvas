@@ -1,0 +1,71 @@
+# Local dependencies only. Start through `bun run dev:prod-like` so the launcher
+# validates a local Docker context and never loads the production .env.
+name: canvas-prodlike
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: canvas_prodlike
+      POSTGRES_USER: canvas_prodlike
+      POSTGRES_PASSWORD: prodlike-postgres-only
+    ports:
+      - "127.0.0.1:${PRODLIKE_POSTGRES_PORT:-15432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "canvas_prodlike", "-d", "canvas_prodlike"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:${PRODLIKE_REDIS_PORT:-16379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+  minio:
+    build:
+      context: .
+      dockerfile: ops/minio/Dockerfile
+      target: minio
+    image: canvas-prodlike-minio:RELEASE.2025-04-22T22-12-26Z
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: canvas-prodlike
+      MINIO_ROOT_PASSWORD: prodlike-minio-only
+      MC_HOST_local: http://canvas-prodlike:prodlike-minio-only@127.0.0.1:9000
+    ports:
+      - "127.0.0.1:${PRODLIKE_S3_PORT:-19000}:9000"
+      - "127.0.0.1:${PRODLIKE_S3_CONSOLE_PORT:-19001}:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+  minio-init:
+    build:
+      context: .
+      dockerfile: ops/minio/Dockerfile
+      target: mc
+    image: canvas-prodlike-mc:RELEASE.2025-04-16T18-13-26Z
+    environment:
+      MC_HOST_local: http://canvas-prodlike:prodlike-minio-only@minio:9000
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["mc mb --ignore-existing local/canvas-prodlike && mc version enable local/canvas-prodlike"]
+    depends_on:
+      minio:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:

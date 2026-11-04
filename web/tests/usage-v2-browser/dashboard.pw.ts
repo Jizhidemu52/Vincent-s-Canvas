@@ -167,7 +167,10 @@ test("dark and narrow layouts stay usable and a non-superadmin never queries ana
     const state = await setup(context);
     await page.goto(`${base}&theme=dark&uTab=models`);
     await loaded(page);
-    await expect(page.locator("[data-usage-chart] canvas")).toHaveCount(2);
+    await expect(page.locator("[data-usage-chart] canvas")).toHaveCount(3);
+    for (const name of ["模型成本与结果对比", "成本结构", "模型端到端耗时 · 五数分布"]) {
+        await expect(page.getByRole("img", { name, exact: true }).locator("canvas")).toBeVisible();
+    }
     await page.screenshot({ path: resolve(output, "models-dark.png"), fullPage: true });
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(`${base}&theme=dark&uTab=flows`);
