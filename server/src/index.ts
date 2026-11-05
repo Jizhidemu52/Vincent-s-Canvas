@@ -61,6 +61,7 @@ import { BillingError } from "./billing";
 import { createTasksEventsRouter, TaskEventsService } from "./task-events";
 import { createApiShutdown } from "./api-shutdown";
 import { startAssetThumbnailMaintenance } from "./asset-thumbnails";
+import { createAssetVideoPreviewService } from "./asset-video-preview";
 import { createPostgresPromptCompiler } from "./prompt-runtime";
 import { createPromptCompilationsRouter, createAdminPromptRecipesRouter } from "./routes/prompt-recipes";
 import { PromptOptimizationError } from "./prompt-safety";
@@ -73,6 +74,7 @@ const features = deploymentFeatures(config);
 const db = createDatabase(config.DATABASE_URL);
 const cache = await createCache(config.REDIS_URL);
 const storage = new ObjectStorage(config);
+const videoPlayback = createAssetVideoPreviewService(db, cache, storage);
 const promptCompiler = createPostgresPromptCompiler(db, config, storage);
 await ensureVideoMotionRecipe(promptCompiler.store);
 const taskEvents = new TaskEventsService(db);
@@ -196,7 +198,7 @@ app.use(
   requireSession,
   requireAccountReady,
   protectModelIdentity,
-  createAssetsRouter(db, storage),
+  createAssetsRouter(db, storage, videoPlayback),
 );
 app.use(
   "/api/admin/assets",
@@ -404,7 +406,7 @@ const server = app.listen({ port: config.PORT, host: config.HOST }, () =>
 const shutdown = createApiShutdown({
   server,
   drainSubscriptions: () => taskEvents.drain(),
-  closeBackground: () => thumbnailMaintenance.stop(),
+  closeBackground: () => Promise.all([thumbnailMaintenance.stop(), videoPlayback.stop()]),
   closeEvents: () => taskEvents.close(),
   closeDatabase: () => db.end(),
   closeCache: () => cache.quit(),

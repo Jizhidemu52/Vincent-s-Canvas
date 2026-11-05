@@ -265,6 +265,52 @@ class Deployment:
             marker = json.loads(self.command(["curl", "--disable", "--noproxy", "*", "--retry", "0", "--fail", "--silent", "--show-error", "--max-time", "10", origin.rstrip("/") + "/deployment-release.json"]))
             require(marker == {"schema": 1, "version": release["version"], "commit": release["commit"]}, "DEPLOYED_RELEASE_MARKER_MISMATCH")
 
+    def wait_worker_health(self, expected_image, previous_id, timeout_seconds=120, poll_seconds=2):
+        # Cover the worker's 90s startup period plus one 30s health interval.
+        # Retry only this read-only heartbeat check, never a lifecycle operation.
+        require(0 < timeout_seconds <= 120 and 0 < poll_seconds <= timeout_seconds, "BOUNDED_WORKER_READINESS_REQUIRED")
+        deadline = time.monotonic() + timeout_seconds
+        target = self.instance["containers"]["worker"]
+        identity = None
+
+        def remaining():
+            value = deadline - time.monotonic()
+            require(value > 0, "WORKER_HEALTH_NOT_READY")
+            return value
+
+        def inspect_worker():
+            nonlocal identity
+            rows = json.loads(self.command(["docker", "inspect", target], timeout=min(10, remaining())))
+            require(isinstance(rows, list) and len(rows) == 1 and isinstance(rows[0], dict), "WORKER_INSPECTION_INVALID")
+            row = rows[0]
+            state = row.get("State", {})
+            labels = row.get("Config", {}).get("Labels") or {}
+            require(row.get("Name") == "/" + target and row.get("Image") == expected_image
+                    and labels.get("com.docker.compose.project") == self.instance["project"]
+                    and labels.get("com.docker.compose.service") == "worker", "WORKER_TARGET_MISMATCH")
+            require(state.get("Running") is True and state.get("Restarting") is False
+                    and state.get("Paused") is False and row.get("RestartCount") == 0, "WORKER_RESTARTED_OR_STOPPED")
+            current = (row.get("Id"), state.get("StartedAt"))
+            require(all(isinstance(value, str) and value for value in current)
+                    and current[0] != previous_id, "NEW_WORKER_IDENTITY_REQUIRED")
+            if identity is None: identity = current
+            require(current == identity, "WORKER_IDENTITY_CHANGED")
+            return current[0]
+
+        while True:
+            container_id = inspect_worker()
+            ready = False
+            try:
+                self.command(["docker", "exec", container_id, "bun", "src/worker-healthcheck.ts"], timeout=min(5, remaining()))
+                ready = True
+            except Rejected as error:
+                if str(error) != "COMMAND_FAILED_SEE_PRIVATE_AUDIT": raise
+            # A successful check must not accept a replacement or restarted worker.
+            inspect_worker()
+            budget = remaining()
+            if ready: return container_id
+            time.sleep(min(poll_seconds, budget))
+
     def stop_app(self, model):
         self.compose("stop", "-t", "1300", "web", "api", "worker", model=model, timeout=1350)
         rows = self.inventory("stopped-" + str(self.sequence))
@@ -345,7 +391,8 @@ class Deployment:
             self.protected_and_database(baseline, "backed-up")
             self.start_app(target); launched = True
             self.wait_health(self.instance["localBaseUrl"], release)
-            self.command(["docker", "exec", self.instance["containers"]["worker"], "bun", "src/worker-healthcheck.ts"])
+            worker_image = release["images"]["api"]["id"] if release else read_json(target)["services"]["worker"]["image"]
+            self.wait_worker_health(worker_image, container_map(baseline["containers"])[self.instance["containers"]["worker"]]["Id"])
             after = self.inventory("started")
             if release:
                 running_model = parse_compose_config(self.compose("config", "--format", "json", model=target))

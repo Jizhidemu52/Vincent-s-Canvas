@@ -62,3 +62,58 @@ test("starting a new session or leaving the page drops pending preview errors/re
     expect(accepted).toEqual([]);
     expect(errors).toEqual([]);
 });
+
+test("server asset identity takes priority and preserves original bytes and storage key", async () => {
+    const serverAssetId = "7075c394-1184-44cc-9077-068d78e8b36d";
+    const source = { ...log, task: { id: "old-task" }, video: { ...log.video, serverAssetId } };
+    const resolved = await hydrateVideoLogMedia(source, {
+        media: async () => "", image: async () => "",
+        task: async () => { throw new Error("must not query an already identified asset"); },
+    }, false);
+    expect(resolved.video).toEqual(source.video);
+    expect(source.video.url).toBe("");
+});
+
+test("historical success resolves only the existing task's original result identity", async () => {
+    const serverAssetId = "7075c394-1184-44cc-9077-068d78e8b36d";
+    const reads: string[] = [];
+    const resolved = await hydrateVideoLogMedia({ ...log, task: { id: "paid-original" } }, {
+        media: async () => "", image: async () => "",
+        task: async id => { reads.push(id); return { status: "success", resultUrls: [`/api/assets/${serverAssetId}/content`] }; },
+    }, false);
+    expect(reads).toEqual(["paid-original"]);
+    expect(resolved.video).toEqual({ ...log.video, serverAssetId });
+    expect(log.video.url).toBe("");
+});
+
+test("a local-only log does not request a task or manufacture a server asset", async () => {
+    const resolved = await hydrateVideoLogMedia(log, {
+        media: async () => "blob:original", image: async () => "",
+        task: async () => { throw new Error("must not look up an unrelated task"); },
+    }, false);
+    expect(resolved.video?.url).toBe("blob:original");
+    expect(resolved.video).not.toHaveProperty("serverAssetId");
+});
+
+test("invalid or unrelated task results cannot become a server preview identity", async () => {
+    for (const url of ["/api/assets/not-a-uuid/content", "https://untrusted.test/api/assets/7075c394-1184-44cc-9077-068d78e8b36d/content", "/api/assets/7075c394-1184-44cc-9077-068d78e8b36d/playback"]) {
+        const resolved = await hydrateVideoLogMedia({ ...log, task: { id: "original" } }, { media: async () => "blob:original", image: async () => "", task: async () => ({ status: "success", resultUrls: [url] }) }, false);
+        expect(resolved.video).not.toHaveProperty("serverAssetId");
+    }
+});
+
+test("an invalid saved asset identity is not used as a playback source or written back", async () => {
+    const source = { ...log, video: { ...log.video, serverAssetId: "../unrelated" } };
+    const resolved = await hydrateVideoLogMedia(source, { media: async () => "blob:original", image: async () => "" }, false);
+    expect(resolved.video).not.toHaveProperty("serverAssetId");
+    expect(source.video.serverAssetId).toBe("../unrelated");
+});
+
+test("changing selected logs aborts the previous read", async () => {
+    const loader = createLatestVideoPreview();
+    let priorSignal: AbortSignal | undefined;
+    const first = loader.load(async signal => { priorSignal = signal; await new Promise<void>(resolve => signal.addEventListener("abort", () => resolve(), { once: true })); }, () => {}, () => {});
+    await loader.load(async () => "newer", () => {}, () => {});
+    await first;
+    expect(priorSignal?.aborted).toBe(true);
+});

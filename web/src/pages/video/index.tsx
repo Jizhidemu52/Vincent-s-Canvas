@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { handleSubmitShortcut } from "@/lib/submit-shortcut";
 import { useGenerationDraft } from "@/hooks/use-generation-draft";
 import { useImageDrop } from "@/hooks/use-image-drop";
+import { acquireVideoPlayback, videoPlaybackOwner, type VideoPlaybackView } from "@/hooks/use-video-playback";
 import { useUnsavedGuard } from "@/hooks/use-unsaved-guard";
 import { generationDownloadName, generationErrorMessage, generationErrorDiagnostic, shouldConfirmPromptReuse } from "@/lib/generation-feedback";
 import { GenerationDiagnostic } from "@/components/generation-diagnostic";
@@ -44,7 +45,7 @@ import { createLatestVideoPreview, hydrateVideoLogMedia } from "./video-log-medi
 import { deleteStoredMedia, resolveMediaUrl, uploadMediaFile } from "@/services/file-storage";
 import { resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { createVideoGenerationTask, storeGeneratedVideo, type VideoGenerationTask } from "@/services/api/video";
-import { getQueuedTaskByRequestId, QueuedTaskFailedError, QueuedTaskPausedError, QueuedTaskSubmissionUncertainError, recoverQueuedTask, waitForTasks } from "@/services/api/generation-tasks";
+import { getQueuedTask, getQueuedTaskByRequestId, QueuedTaskFailedError, QueuedTaskPausedError, QueuedTaskSubmissionUncertainError, recoverQueuedTask, waitForTasks } from "@/services/api/generation-tasks";
 import { resolveConfiguredToolModel } from "@/services/api/tool-runtime";
 import type { PublicModel } from "@/services/api/business-config";
 import { fetchServerAssetContent } from "@/services/api/server-assets";
@@ -69,6 +70,7 @@ type GeneratedVideo = {
     mimeType: string;
     serverAssetId?: string;
     localAssetId?: string;
+    playbackSourceError?: string;
 };
 
 type GenerationResult = {
@@ -143,6 +145,8 @@ function VideoGenerationWorkspace() {
     const generateRef = useRef<() => Promise<void>>(async () => undefined);
     const restoredInitialResultRef = useRef(false);
     const previewLoader = useRef(createLatestVideoPreview()).current;
+    const playbackSessions = useRef(new Map<string, { video: GeneratedVideo; owner: string | null; controller: AbortController; release?: () => void }>()).current;
+    const playbackOwner = useUserStore(videoPlaybackOwner);
     const logRefreshRevisionRef = useRef(0);
     const baseConfig = useEffectiveConfig();
     const [draftConfig, setDraftConfig, configReady] = useGenerationDraft<Partial<AiConfig>>("video:settings", {});
@@ -171,6 +175,7 @@ function VideoGenerationWorkspace() {
     const [videoReferences, setVideoReferences, videosReady] = useGenerationDraft<ReferenceVideo[]>("video:videos", [], async items => Promise.all(items.map(async item => ({ ...item, url: await resolveMediaUrl(item.storageKey, item.url) }))));
     const [audioReferences, setAudioReferences, audiosReady] = useGenerationDraft<ReferenceAudio[]>("video:audios", [], async items => Promise.all(items.map(async item => ({ ...item, url: await resolveMediaUrl(item.storageKey, item.url) }))));
     const [results, setResults] = useState<GenerationResult[]>([]);
+    const [playbacks, setPlaybacks] = useState<Record<string, VideoPlaybackView>>({});
     const [previewError, setPreviewError] = useState("");
     const [readingReferences, setReadingReferences] = useState(false);
     const [referenceScope, setReferenceScope] = useState(0);
@@ -220,8 +225,43 @@ function VideoGenerationWorkspace() {
             for (const controller of observationControllers.current.values()) controller.abort();
             logRefreshRevisionRef.current += 1;
             previewLoader.invalidate();
+            for (const session of playbackSessions.values()) {
+                session.controller.abort();
+                session.release?.();
+            }
+            playbackSessions.clear();
         };
     }, []);
+
+    useEffect(() => {
+        const videos = results.flatMap(result => result.status === "success" && result.video ? [result.video] : []);
+        const currentVideos = new Map(videos.map(video => [video.id, video]));
+        for (const [id, session] of playbackSessions) {
+            if (currentVideos.get(id) === session.video && session.owner === playbackOwner) continue;
+            session.controller.abort();
+            session.release?.();
+            playbackSessions.delete(id);
+        }
+        setPlaybacks(current => Object.fromEntries(Object.entries(current).filter(([id]) => currentVideos.has(id))));
+        for (const video of videos) {
+            if (playbackSessions.has(video.id)) continue;
+            const session = { video, owner: playbackOwner, controller: new AbortController(), release: undefined as (() => void) | undefined };
+            playbackSessions.set(video.id, session);
+            if (!video.serverAssetId) {
+                setPlaybacks(current => ({ ...current, [video.id]: { status: "local", error: video.playbackSourceError } }));
+                continue;
+            }
+            setPlaybacks(current => ({ ...current, [video.id]: { status: "preparing" } }));
+            void acquireVideoPlayback(video.serverAssetId, session.controller.signal).then(preview => {
+                if (session.controller.signal.aborted || playbackSessions.get(video.id) !== session) { preview.release(); return; }
+                session.release = preview.release;
+                setPlaybacks(current => ({ ...current, [video.id]: { status: "ready", playbackUrl: preview.playbackUrl, width: preview.width, height: preview.height, durationMs: preview.durationMs } }));
+            }).catch(error => {
+                if (session.controller.signal.aborted || playbackSessions.get(video.id) !== session) return;
+                setPlaybacks(current => ({ ...current, [video.id]: { status: "error", error: error instanceof Error ? error.message : "兼容预览暂不可用；原任务已成功，可下载原件。" } }));
+            });
+        }
+    }, [results, playbackSessions, playbackOwner]);
 
     useEffect(() => {
         if (restoredInitialResultRef.current || running || !logs.length || results.length) return;
@@ -230,7 +270,7 @@ function VideoGenerationWorkspace() {
         if (!latest?.video) return;
         setPreviewLoading(true);
         void previewLoader.load(
-            () => hydrateVideoLogMedia(latest, { image: resolveImageUrl, media: resolveMediaUrl }, false),
+            (signal) => hydrateVideoLogMedia(latest, { image: resolveImageUrl, media: resolveMediaUrl, task: getQueuedTask }, false, signal),
             (resolved) => { setPreviewLoading(false); if (resolved.video) setResults([{ id: resolved.id, status: "success", video: resolved.video }]); },
             () => { setPreviewLoading(false); setPreviewError(uiText("最近视频暂时无法读取，可以从生成记录重新选择。")); },
         );
@@ -415,10 +455,33 @@ function VideoGenerationWorkspace() {
     const downloadVideo = async (video: GeneratedVideo) => {
         try {
             const url = await resolveMediaUrl(video.storageKey, video.url);
-            const response = await fetch(url);
-            if (!response.ok) throw new Error(`视频下载失败（${response.status}）`);
-            saveAs(await response.blob(), generationDownloadName(logs.find(log => log.video?.id === video.id)?.title || "生成视频", "mp4"));
+            let blob: Blob;
+            if (!url && video.serverAssetId) blob = await fetchServerAssetContent(video.serverAssetId);
+            else {
+                if (!url) throw new Error("原视频文件不在当前浏览器中，请重新导入原件。");
+                try {
+                    const response = await fetch(url);
+                    if (!response.ok) throw new Error(`视频下载失败（${response.status}）`);
+                    blob = await response.blob();
+                } catch (error) {
+                    if (!video.serverAssetId) throw error;
+                    // An expired browser URL may fall back only to the same original, never playback.
+                    blob = await fetchServerAssetContent(video.serverAssetId);
+                }
+            }
+            saveAs(blob, generationDownloadName(logs.find(log => log.video?.id === video.id)?.title || "生成视频", "mp4"));
         } catch (error) { message.error(uiText(generationErrorMessage(error))); }
+    };
+
+    const reportPlaybackError = (video: GeneratedVideo) => {
+        setPlaybacks(current => ({ ...current, [video.id]: {
+            ...current[video.id], status: "error",
+            error: video.serverAssetId ? "当前浏览器仍无法播放兼容预览；原任务已成功，可下载原件或稍后重新读取记录。" : "当前浏览器无法解码本地原件；没有可用的服务端兼容预览，原任务状态不变，可下载原件。",
+        } }));
+    };
+
+    const reportPlaybackMetadata = (id: string, metadata: Pick<VideoPlaybackView, "width" | "height" | "durationMs">) => {
+        setPlaybacks(current => ({ ...current, [id]: { ...(current[id] || { status: "local" }), ...metadata } }));
     };
 
     const saveResultToAssets = (video: GeneratedVideo) => {
@@ -554,7 +617,8 @@ function VideoGenerationWorkspace() {
             const nextVideo: GeneratedVideo = {
                 id: nanoid(), url: stored.url, storageKey: stored.storageKey,
                 durationMs: Date.now() - log.createdAt,
-                width: stored.width || 1280, height: stored.height || 720,
+                // Asset dimensions use zero for unknown; the player displays measured metadata only.
+                width: stored.width ?? 0, height: stored.height ?? 0,
                 bytes: stored.bytes, mimeType: stored.mimeType,
                 serverAssetId: stored.serverAssetId,
             };
@@ -615,7 +679,7 @@ function VideoGenerationWorkspace() {
             if (log.config.videoWatermark) updateConfig("videoWatermark", log.config.videoWatermark);
         }
         void previewLoader.load(
-            () => hydrateVideoLogMedia(log, { image: resolveImageUrl, media: resolveMediaUrl }, restoreDraft),
+            (signal) => hydrateVideoLogMedia(log, { image: resolveImageUrl, media: resolveMediaUrl, task: getQueuedTask }, restoreDraft, signal),
             (resolved) => {
                 setPreviewLoading(false);
                 if (restoreDraft) {
@@ -820,7 +884,15 @@ function VideoGenerationWorkspace() {
                             <div className="grid gap-4">
                                 {results.map((result) =>
                                     result.status === "success" && result.video ? (
-                                        <ResultVideoCard key={result.id} video={result.video} summaryZh={logs.find(log => log.id === result.id || log.video?.id === result.video?.id)?.summaryZh} onSelect={selectResultPrompt} onDownload={downloadVideo} onSaveAsset={saveResultToAssets} onPlaceCanvas={resultCanvas.enabled ? video => { const source = logs.find(log => log.video?.id === video.id); void resultCanvas.place({ id: video.id, kind: "video", url: video.url, storageKey: video.storageKey, title: source?.title || "视频生成结果", width: video.width, height: video.height, prompt: source?.effectivePrompt || source?.prompt, model: source?.model, sourceTaskId: source?.task?.id }); } : undefined} placingCanvas={resultCanvas.busy} />
+                                        <ResultVideoCard
+                                            key={result.id} video={result.video} playback={playbackSessions.get(result.video.id)?.owner === playbackOwner ? playbacks[result.video.id] : undefined}
+                                            onPlaybackError={() => reportPlaybackError(result.video!)}
+                                            onMetadata={metadata => reportPlaybackMetadata(result.video!.id, metadata)}
+                                            summaryZh={logs.find(log => log.id === result.id || log.video?.id === result.video?.id)?.summaryZh}
+                                            onSelect={selectResultPrompt} onDownload={downloadVideo} onSaveAsset={saveResultToAssets}
+                                            onPlaceCanvas={resultCanvas.enabled ? video => { const source = logs.find(log => log.video?.id === video.id); void resultCanvas.place({ id: video.id, kind: "video", url: video.url, storageKey: video.storageKey, title: source?.title || "视频生成结果", width: video.width, height: video.height, prompt: source?.effectivePrompt || source?.prompt, model: source?.model, sourceTaskId: source?.task?.id }); } : undefined}
+                                            placingCanvas={resultCanvas.busy}
+                                        />
                                     ) : result.status === "failed" || result.status === "paused" ? (
                                         <FailedVideoCard key={result.id} error={result.error || uiText("生成失败")} diagnostic={result.diagnostic || logs.find(log => log.id === result.id)?.diagnostic} recovery={result.recovery} onRetry={() => void retryResult(result)} />
                                     ) : (
@@ -895,19 +967,27 @@ function GenerationSettings({ config, model, updateConfig, openConfigDialog, ref
     );
 }
 
-function ResultVideoCard({ video, summaryZh, onSelect, onDownload, onSaveAsset, onPlaceCanvas, placingCanvas }: { video: GeneratedVideo; summaryZh?: string; onSelect: (video: GeneratedVideo) => void; onDownload: (video: GeneratedVideo) => void; onSaveAsset: (video: GeneratedVideo) => void; onPlaceCanvas?: (video: GeneratedVideo) => void; placingCanvas?: boolean }) {
+function ResultVideoCard({ video, playback, onPlaybackError, onMetadata, summaryZh, onSelect, onDownload, onSaveAsset, onPlaceCanvas, placingCanvas }: { video: GeneratedVideo; playback?: VideoPlaybackView; onPlaybackError?: () => void; onMetadata?: (metadata: Pick<VideoPlaybackView, "width" | "height" | "durationMs">) => void; summaryZh?: string; onSelect: (video: GeneratedVideo) => void; onDownload: (video: GeneratedVideo) => void; onSaveAsset: (video: GeneratedVideo) => void; onPlaceCanvas?: (video: GeneratedVideo) => void; placingCanvas?: boolean }) {
     useUiText();
+    const preparing = playback?.status === "preparing" || Boolean(video.serverAssetId && !playback);
+    const playbackUrl = video.serverAssetId ? playback?.playbackUrl : video.url;
     return (
         <div className="overflow-hidden rounded-lg border border-stone-200 bg-background dark:border-stone-800">
             {summaryZh ? <div className="border-b border-border bg-muted/30 px-4 py-3 text-sm"><span className="mr-2 font-medium">{uiText("AI 动效规划")}</span><span className="text-muted-foreground">{summaryZh}</span></div> : null}
-            <video src={video.url} controls preload="metadata" className="aspect-video w-full bg-black object-contain" />
+            <video src={playbackUrl} controls preload="metadata" className="aspect-video w-full bg-black object-contain" onError={onPlaybackError} onLoadedMetadata={event => {
+                const media = event.currentTarget;
+                onMetadata?.({ ...(media.videoWidth > 0 ? { width: media.videoWidth } : {}), ...(media.videoHeight > 0 ? { height: media.videoHeight } : {}), ...(Number.isFinite(media.duration) && media.duration > 0 ? { durationMs: Math.round(media.duration * 1000) } : {}) });
+            }} />
+            {preparing ? <div role="status" className="flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />{uiText("视频已生成，正在准备兼容预览（最多等待 150 秒）；下载仍为原件。")}</div> : null}
+            {!video.serverAssetId && !playback?.error ? <p className="px-3 py-2 text-xs text-muted-foreground">{uiText("仅有本地原件，服务端兼容预览不可用；播放能力取决于当前浏览器。")}</p> : null}
+            {playback?.error ? <p role="alert" className="px-3 py-2 text-sm text-destructive">{uiText(playback.error)}</p> : null}
             <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-stone-200 px-3 py-2.5 dark:border-stone-800">
                 <div className="flex min-w-0 flex-wrap gap-x-2 gap-y-1 text-xs text-stone-500 dark:text-stone-400">
                     <span>
-                        {video.width}x{video.height}
+                        {playback?.width && playback.height ? `${playback.width}x${playback.height}` : uiText("尺寸未知")}
                     </span>
                     <span>{formatBytes(video.bytes)}</span>
-                    <span>{formatDuration(video.durationMs)}</span>
+                    <span>{playback?.durationMs ? formatDuration(playback.durationMs) : uiText("视频时长未知")}</span>
                 </div>
                 <div className="flex flex-wrap gap-1">
                     <Button size="small" onClick={() => onSelect(video)}>{uiText("复用提示词")}</Button>

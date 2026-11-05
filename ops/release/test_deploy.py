@@ -222,6 +222,7 @@ class DeploymentContracts(unittest.TestCase):
             return rows
         runner.gate = gate; runner.sql = sql; runner.stop_app = stop; runner.protected_and_database = check
         runner.command = command; runner.start_app = start; runner.wait_health = health; runner.inventory = inventory
+        runner.wait_worker_health = lambda expected_image, previous_id: None
         runner.application_configuration_unchanged = lambda baseline: None
         return runner
 
@@ -245,6 +246,33 @@ class DeploymentContracts(unittest.TestCase):
         self.assertLess(runner.calls.index("check:failed-stopped-check"), runner.calls.index("start:fallback"))
         self.assertNotIn("gate:open", runner.calls)
         self.assertTrue(json.loads((runner.audit / "failure.json").read_text())["fallbackApplicationRestored"])
+
+    def test_worker_readiness_failure_uses_existing_guarded_fallback(self):
+        runner = self.fake_cutover(None)
+        target = runner.audit / "candidate.json"
+        target.write_text(json.dumps({"services": {role: {"image": "old"} for role in instance()["containers"]}}))
+        def worker_health(expected_image, previous_id):
+            self.assertEqual(expected_image, "old")
+            self.assertEqual(previous_id, "1" * 64)
+            raise deploy.Rejected("WORKER_HEALTH_NOT_READY")
+        runner.wait_worker_health = worker_health
+        with self.assertRaisesRegex(deploy.Rejected, "WORKER_HEALTH_NOT_READY"):
+            runner.cutover(runner.prepared, target, "fallback")
+        self.assertLess(runner.calls.index("stop:" + str(target)), runner.calls.index("check:failed-stopped-check"))
+        self.assertLess(runner.calls.index("check:failed-stopped-check"), runner.calls.index("start:fallback"))
+        self.assertNotIn("gate:open", runner.calls)
+        self.assertTrue(json.loads((runner.audit / "failure.json").read_text())["fallbackApplicationRestored"])
+
+    def test_worker_readiness_binds_release_image_id_not_a_compose_tag(self):
+        runner = self.fake_cutover(None)
+        release = {"images": {"api": {"id": "sha256:" + "b" * 64}}}
+        def worker_health(expected_image, previous_id):
+            self.assertEqual(expected_image, "sha256:" + "b" * 64)
+            self.assertEqual(previous_id, "1" * 64)
+            raise deploy.Rejected("WORKER_HEALTH_NOT_READY")
+        runner.wait_worker_health = worker_health
+        with self.assertRaisesRegex(deploy.Rejected, "WORKER_HEALTH_NOT_READY"):
+            runner.cutover(runner.prepared, "candidate", "fallback", release=release)
 
     def test_legal_writes_during_image_load_are_frozen_after_stop_and_cutover_succeeds(self):
         runner = self.fake_cutover(None)
@@ -310,6 +338,117 @@ class DeploymentContracts(unittest.TestCase):
             with self.assertRaisesRegex(deploy.Rejected, "ACTIVITY_COUNT_INVALID"):
                 runner.wait_for_drain(timeout_seconds=20)
         sleep.assert_not_called()
+
+
+class WorkerReadinessTests(unittest.TestCase):
+    image = "sha256:" + "b" * 64
+    old_id = "2" * 64
+
+    def worker(self):
+        row = inspect(instance()["containers"]["worker"], self.image, "worker")
+        # A cached Docker status must not bypass the original heartbeat probe.
+        row["State"]["Health"] = {"Status": "healthy"}
+        return row
+
+    def runner(self, outcomes, snapshots=None, probe_seconds=0):
+        runner = deploy.Deployment.__new__(deploy.Deployment)
+        runner.instance = instance()
+        clock = {"now": 0.0}
+        calls = []
+        snapshots = snapshots or [self.worker()]
+        inspections = 0
+        probes = 0
+        def command(arguments, **options):
+            nonlocal inspections, probes
+            calls.append((arguments, options))
+            self.assertGreater(options["timeout"], 0)
+            if arguments == ["docker", "inspect", runner.instance["containers"]["worker"]]:
+                row = snapshots[min(inspections, len(snapshots) - 1)]
+                inspections += 1
+                return json.dumps([row]).encode()
+            self.assertEqual(arguments, ["docker", "exec", "1" * 64, "bun", "src/worker-healthcheck.ts"])
+            clock["now"] += probe_seconds
+            result = outcomes[min(probes, len(outcomes) - 1)]
+            probes += 1
+            if isinstance(result, str): raise deploy.Rejected(result)
+            if not result: raise deploy.Rejected("COMMAND_FAILED_SEE_PRIVATE_AUDIT")
+            return b""
+        runner.command = command
+        monotonic = patch("deploy.time.monotonic", side_effect=lambda: clock["now"])
+        sleep = patch("deploy.time.sleep", side_effect=lambda seconds: clock.update(now=clock["now"] + seconds))
+        monotonic.start(); sleep.start()
+        self.addCleanup(monotonic.stop); self.addCleanup(sleep.stop)
+        return runner, calls, clock
+
+    def test_initial_missing_heartbeat_waits_then_accepts_same_new_worker(self):
+        runner, calls, clock = self.runner([False, True])
+        result = runner.wait_worker_health(self.image, self.old_id, timeout_seconds=10, poll_seconds=2)
+        self.assertEqual(result, "1" * 64)
+        self.assertEqual(clock["now"], 2)
+        self.assertEqual(len([args for args, _ in calls if args[1] == "exec"]), 2)
+        self.assertTrue(all(args[1] in ("inspect", "exec") for args, _ in calls))
+
+    def test_permanent_not_ready_expires_without_start_stop_or_other_mutation(self):
+        runner, calls, clock = self.runner([False])
+        with self.assertRaisesRegex(deploy.Rejected, "WORKER_HEALTH_NOT_READY"):
+            runner.wait_worker_health(self.image, self.old_id, timeout_seconds=4, poll_seconds=1)
+        self.assertEqual(clock["now"], 4)
+        self.assertEqual(len([args for args, _ in calls if args[1] == "exec"]), 4)
+        self.assertTrue(all(options["timeout"] <= 4 for _, options in calls))
+
+    def test_default_budget_allows_startup_period_before_first_heartbeat(self):
+        runner, _, clock = self.runner([False] * 46 + [True])
+        self.assertEqual(runner.wait_worker_health(self.image, self.old_id), "1" * 64)
+        self.assertEqual(clock["now"], 92)
+
+    def test_recreated_or_restarted_worker_cannot_satisfy_an_existing_probe(self):
+        for mutate in [lambda row: row.update(Id="3" * 64),
+                       lambda row: row.update(Image="sha256:" + "c" * 64),
+                       lambda row: row.update(RestartCount=1),
+                       lambda row: row["State"].update(StartedAt="restarted"),
+                       lambda row: row["State"].update(Running=False),
+                       lambda row: row["State"].update(Restarting=True)]:
+            with self.subTest(mutate=mutate):
+                changed = self.worker(); mutate(changed)
+                runner, calls, clock = self.runner([True], [self.worker(), changed])
+                with self.assertRaises(deploy.Rejected):
+                    runner.wait_worker_health(self.image, self.old_id)
+                self.assertEqual(clock["now"], 0)
+                self.assertEqual(len([args for args, _ in calls if args[1] == "exec"]), 1)
+
+    def test_wrong_image_identity_or_old_container_is_rejected_before_exec(self):
+        for mutate in [lambda row: row.update(Image="sha256:" + "c" * 64),
+                       lambda row: row.update(Id=self.old_id),
+                       lambda row: row.update(Name="/another-worker"),
+                       lambda row: row["Config"]["Labels"].update({"com.docker.compose.project": "another-project"}),
+                       lambda row: row["Config"]["Labels"].update({"com.docker.compose.service": "api"}),
+                       lambda row: row["State"].update(Paused=True)]:
+            with self.subTest(mutate=mutate):
+                changed = self.worker(); mutate(changed)
+                runner, calls, _ = self.runner([True], [changed])
+                with self.assertRaises(deploy.Rejected):
+                    runner.wait_worker_health(self.image, self.old_id)
+                self.assertFalse(any(args[1] == "exec" for args, _ in calls))
+
+    def test_probe_transport_timeout_is_not_retried(self):
+        runner, calls, clock = self.runner(["COMMAND_FAILED_OR_TIMED_OUT_NO_AUTOMATIC_RETRY"])
+        with self.assertRaisesRegex(deploy.Rejected, "COMMAND_FAILED_OR_TIMED_OUT_NO_AUTOMATIC_RETRY"):
+            runner.wait_worker_health(self.image, self.old_id)
+        self.assertEqual(clock["now"], 0)
+        self.assertEqual(len([args for args, _ in calls if args[1] == "exec"]), 1)
+
+    def test_success_after_deadline_is_not_accepted(self):
+        runner, _, _ = self.runner([True], probe_seconds=5)
+        with self.assertRaisesRegex(deploy.Rejected, "WORKER_HEALTH_NOT_READY"):
+            runner.wait_worker_health(self.image, self.old_id, timeout_seconds=4, poll_seconds=1)
+
+    def test_nonpositive_or_unbounded_wait_is_rejected_without_commands(self):
+        runner, calls, _ = self.runner([True])
+        for timeout, poll in [(0, 1), (-1, 1), (float("inf"), 1), (10, 0), (10, -1)]:
+            with self.subTest(timeout=timeout, poll=poll):
+                with self.assertRaisesRegex(deploy.Rejected, "BOUNDED_WORKER_READINESS_REQUIRED"):
+                    runner.wait_worker_health(self.image, self.old_id, timeout_seconds=timeout, poll_seconds=poll)
+        self.assertEqual(calls, [])
 
 
 if __name__ == "__main__": unittest.main()

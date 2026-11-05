@@ -78,12 +78,26 @@ export function collectMediaStorageKeys(value: unknown, keys = new Set<string>()
     return keys;
 }
 
-function readVideoMeta(url: string) {
-    return new Promise<{ width: number; height: number; durationMs?: number }>((resolve) => {
+export function readVideoMeta(url: string) {
+    return new Promise<{ width?: number; height?: number; durationMs?: number }>((resolve) => {
         const video = document.createElement("video");
-        const done = () => resolve({ width: video.videoWidth || 1280, height: video.videoHeight || 720, durationMs: Number.isFinite(video.duration) ? Math.round(video.duration * 1000) : undefined });
-        video.onloadedmetadata = done;
-        video.onerror = done;
+        const done = (readable: boolean) => {
+            clearTimeout(timeout);
+            const meta = readable ? {
+                width: video.videoWidth > 0 ? video.videoWidth : undefined,
+                height: video.videoHeight > 0 ? video.videoHeight : undefined,
+                durationMs: Number.isFinite(video.duration) && video.duration > 0 ? Math.round(video.duration * 1000) : undefined,
+            } : {};
+            video.onloadedmetadata = null;
+            video.onerror = null;
+            video.removeAttribute("src");
+            video.load();
+            resolve(meta);
+        };
+        const timeout = setTimeout(() => done(false), 8000);
+        video.onloadedmetadata = () => done(true);
+        video.onerror = () => done(false);
+        video.preload = "metadata";
         video.src = url;
     });
 }
