@@ -8,6 +8,7 @@ for (const action of ["remove-background", "hd-upscale"] as const) {
         await expect(page.getByRole("link", { name: title, exact: true })).toBeVisible();
         await expect(page.getByRole("textbox", { name: "图像提示词" })).toHaveCount(0);
         await expect(page.getByRole("button", { name: "调整", exact: true })).toHaveCount(0);
+        await expect(page.getByText(/内置配方|Nano 2\.1|MAI|4K|无需填写提示词/)).toHaveCount(0);
         const submit = page.getByRole("button", { name: title, exact: true });
         await expect(submit).toBeDisabled();
         await page.locator('input[type="file"]').setInputFiles({ name: "原图.png", mimeType: "image/png", buffer: IMAGE });
@@ -41,6 +42,7 @@ test("selected canvas images show right-side actions, preserve the original and 
     const original = structuredClone(api.document(id)!.nodes[0]);
     const panel = page.getByTestId("canvas-image-quick-actions");
     await expect(panel).toBeVisible();
+    await expect(panel.getByText(/内置配方|Nano 2\.1|MAI|4K/)).toHaveCount(0);
     const bounds = (await panel.boundingBox())!; expect(bounds.x).toBeGreaterThan(1000);
     await expect(panel.getByRole("button", { name: "高清放大", exact: true })).toHaveCSS("color", "rgb(23, 23, 23)");
     await page.screenshot({ path: testInfo.outputPath("canvas-actions-light.png") });

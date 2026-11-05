@@ -147,8 +147,8 @@ const imageResultCommits = new Map<string, { stopped: boolean; record: PendingIm
 type GenerationToolMode = Exclude<AdminToolMode, "gpt-chat" | "batch-image-edit" | "seamless-stitch">;
 
 const imageToolModes: Record<GenerationToolMode, { title: string; description: string; placeholder: string; button: string; projectId: string; requiresReference: boolean }> = {
-    "remove-background": { title: "一键去背景", description: "上传一张原图，使用 MAI 识别主体并导出透明 PNG，保留原图。", placeholder: "", button: "一键去背景", projectId: "tool-remove-background", requiresReference: true },
-    "hd-upscale": { title: "高清放大", description: "上传一张原图，使用 Nano 2.1 提升清晰度并输出 4K 图片，原图保持不变。", placeholder: "", button: "高清放大", projectId: "tool-hd-upscale", requiresReference: true },
+    "remove-background": { title: "一键去背景", description: "上传一张原图，自动去除背景并导出透明 PNG，保留主体与原图。", placeholder: "", button: "一键去背景", projectId: "tool-remove-background", requiresReference: true },
+    "hd-upscale": { title: "高清放大", description: "上传一张原图，提升图片清晰度，原图保持不变。", placeholder: "", button: "高清放大", projectId: "tool-hd-upscale", requiresReference: true },
     "midjourney-blend": {
         title: "MJ 多图融合",
         description: "上传 2–4 张参考图进行融合，不使用提示词。可独立调整生成速度、布局与自由比例。",
@@ -1139,7 +1139,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                                     </div>
                                 </div>
                                 <Input.TextArea aria-label={uiText("图像提示词")} showCount value={prompt} onPaste={event => { const files = pastedImageFiles(event.clipboardData); if (files.length) { event.preventDefault(); void addReferences(files); } }} onChange={(event) => { inputRevision.current += 1; setPrompt(event.target.value); }} onKeyDown={(event) => handleSubmitShortcut(event, canGenerate && !running, () => void generate())} rows={5} disabled={!requiresPrompt} placeholder={requiresPrompt ? uiText("{placeholder}（Ctrl/⌘ + Enter 提交）", { placeholder: uiText(toolModeConfig.placeholder) }) : uiText("这个模型直接合成参考图，不需要填写文字")} />
-                            </div> : <p className="rounded-lg bg-muted/50 p-3 text-sm text-muted-foreground">{uiText(quickTool ? historyTool === "remove-background" ? "内置配方 · MAI Image 2.6 Flash，无需填写提示词或选择模型。" : "内置配方 · Nano 2.1，输出 4K，无需填写提示词或选择模型。" : "请选择 2–4 张参考图。此模型不会提交提示词；生成结果取决于图片内容及下方融合参数。")}</p>}
+                            </div> : !quickTool ? <p className="rounded-lg bg-muted/50 p-3 text-sm text-muted-foreground">{uiText("请选择 2–4 张参考图。此模型不会提交提示词；生成结果取决于图片内容及下方融合参数。")}</p> : null}
 
                             {requiresPrompt ? <PromptOptimizeButton config={effectiveConfig} prompt={prompt} references={references} operationType={operationType} scene={creativePreset?.id as PromptScene | undefined} toolKey={toolKey} disabled={running} onBusyChange={setOptimizingPrompt} onApply={(value, _compilation, input) => { replacePrompt(value); setOptimizedDraft({ prompt: value, input, references: [...references], context: optimizationContext }); }} /> : null}
                             <ReferenceImageTray
