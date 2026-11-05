@@ -420,7 +420,7 @@ describe("V2 free aggregate reports", () => {
                 .rows.slice(1),
         ).toEqual([
             ["文生图", "aspectRatio", "3:4", 2],
-            ["无线画布总入口", "aspectRatio", "3:4", 7],
+            ["自由画布总入口", "aspectRatio", "3:4", 7],
         ]);
         expect(buildUsageV2Report(inputs[1]!).markdown).toContain("0.120000");
     });

@@ -79,7 +79,7 @@ sqlTest(
             expect(result.controlDaily!.series).toEqual([
                 {
                     boardKey: "canvas",
-                    boardLabel: "无线画布总入口",
+                    boardLabel: "自由画布总入口",
                     controlKey: "submit",
                     label: "提交",
                     total: 2,

@@ -75,7 +75,7 @@ sqlTest("real PostgreSQL SQL preserves featured order and explicit empty selecti
       return response.json();
     };
     const initial = await getFeatured();
-    expect(initial.models).toHaveLength(7);
+    expect(initial.models).toHaveLength(9);
     expect(initial.featuredModelIds).toEqual([
       "gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gemini-nano-banana-2.1", "midjourney-blend", "gpt-image-2",
     ].map(modelId));
