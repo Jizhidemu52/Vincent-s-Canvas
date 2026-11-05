@@ -16,6 +16,7 @@ import { readUsageReleaseContext, usageControlDaily } from "./usage-release-cont
 import type { UsageReleaseContext } from "../../shared/usage-release-context";
 import type { UsagePeopleComparison, UsagePeopleTeamBaseline } from "../../shared/usage-people-comparison";
 import { readImageResultMetadata } from "./image-result-variants";
+import { readUsageDailyEventFacts, readUsageActivityPage, usageFactCount, usageFactWeight, type UsageReadSegment } from "./usage-event-aggregation";
 import { readUsageSnapshot, usageDailyFactsCte, usageDayStart, type UsageQueryClient } from "./usage-rollup-reader";
 import {
   USAGE_V2_PEOPLE_SORTS,
@@ -197,6 +198,8 @@ export type Fact = {
   wait_ms?: number | null;
   run_ms?: number | null;
   outputs?: Output[];
+  /** Internal, query-only count of interchangeable historical event records. */
+  eventWeight?: number;
 };
 type Output = {
   key: string;
@@ -252,8 +255,9 @@ type Data = {
   dataMode: UsageV2Meta["dataMode"];
   liveFrom?: string;
   releaseContext?: UsageReleaseContext;
+  activityPage?: UsageV2Profile["activityPage"];
 };
-export type UsageV2ReadOptions = { source?: "daily" | "live"; includeReleaseNotes?: boolean };
+export type UsageV2ReadOptions = { source?: "daily" | "live"; includeReleaseNotes?: boolean; activityPagination?: { page: number; pageSize: number } };
 const searchPattern = (text: string) => `%${text.replace(/[\\%_]/g, "\\$&")}%`;
 
 // Only these bounded values are consumed by this dashboard. Never transfer
@@ -388,11 +392,11 @@ async function loadData(db: Database, scope: UsageV2Scope, options: UsageV2ReadO
     const fetchFacts = async ({ scope: selected, source }: Segment) => {
       const filter = usageV2SqlFilter(selected);
       if (source === "daily") {
-        const projection = `f.payload || jsonb_build_object('department_id',f.${filter.departmentColumn})`;
-        const budget = (await client.query<{ bytes: string }>(`${usageDailyFactsCte} SELECT COALESCE(sum(octet_length((${projection})::text)),0)::text AS bytes FROM facts f ${filter.where}`, filter.values)).rows[0]!;
-        factBytes += Number(budget.bytes);
-        if (factBytes > MAX_FACT_BYTES) throw new UsageError("USAGE_SCOPE_TOO_LARGE", "当前范围的展开日事实超过32MiB安全预算；请缩短日期或增加筛选，未截断数据", 422);
-        return (await client.query<{ fact: Fact }>(`${usageDailyFactsCte} SELECT ${projection} AS fact FROM facts f ${filter.where}`, filter.values)).rows.map(row => row.fact);
+        const result = await readUsageDailyEventFacts(client,
+          { cte: usageDailyFactsCte, source, where: filter.where, values: filter.values },
+          filter.departmentColumn, MAX_FACT_BYTES - factBytes);
+        factBytes += result.bytes;
+        return result.facts;
       }
       const budget = (
         await client.query<{ count: number; bytes: string }>(
@@ -551,6 +555,17 @@ async function loadData(db: Database, scope: UsageV2Scope, options: UsageV2ReadO
       fact.outputs = [...outputs.values()];
     }
     }
+    let activityPage: UsageV2Profile["activityPage"] | undefined;
+    if (options.source === "daily" && options.activityPagination) {
+      const activitySegments: UsageReadSegment[] = currentSegments.map(segment => {
+        const filter = usageV2SqlFilter(segment.scope);
+        return { cte: segment.source === "daily" ? usageDailyFactsCte : usageV2FactsCte,
+          source: segment.source, where: filter.where, values: filter.values };
+      });
+      const activity = await readUsageActivityPage(client, activitySegments, liveFacts, options.activityPagination, MAX_FACT_BYTES - factBytes);
+      activityPage = activity.page;
+      factBytes += activity.bytes;
+    }
     const peopleRows = (
       await client.query<Person>(
         "SELECT u.id,u.display_name,u.department_id,d.name AS department_name FROM users u LEFT JOIN departments d ON d.id=u.department_id WHERE COALESCE(u.is_guest,false)=false AND ($1::uuid[] IS NULL OR u.id=ANY($1::uuid[])) AND ($2::text IS NULL OR u.display_name ILIKE $2 OR u.username ILIKE $2)",
@@ -618,6 +633,7 @@ async function loadData(db: Database, scope: UsageV2Scope, options: UsageV2ReadO
       dataMode: options.source === "daily" ? (liveFrom ? "daily_history_live_today" : "persisted_daily_facts") : "live_existing_facts",
       liveFrom,
       releaseContext,
+      activityPage,
     };
   } catch (error) {
     if (!transaction) await client.query("ROLLBACK").catch(() => undefined);
@@ -943,14 +959,14 @@ export function usageV2Metrics(facts: Fact[]): UsageV2Metrics {
       missingImageOutputs,
     ),
     visits: count(
-      facts.filter((f) => f.kind === "event" && f.action === "visit").length,
+      usageFactCount(facts.filter((f) => f.kind === "event" && f.action === "visit")),
       "recorded-visits-v1",
       "已记录访问次数，不表示全部真实访问。",
     ),
     interactions: count(
-      facts.filter(
+      usageFactCount(facts.filter(
         (f) => f.kind === "event" && !["visit", "gap"].includes(f.action),
-      ).length,
+      )),
       "recorded-interactions-v1",
       "已记录非访问业务操作；不含 gap。",
     ),
@@ -997,7 +1013,7 @@ export function usageV2Metrics(facts: Fact[]): UsageV2Metrics {
       ...usageUnavailable(
         "active-seconds-unavailable",
         "历史无可信心跳，不能补造软件可见活跃时长。",
-        active.length,
+        usageFactCount(active),
       ),
       unit: "seconds",
     },
@@ -1056,7 +1072,7 @@ function meta(data: Data): UsageV2Meta {
   const metrics = usageV2Metrics(data.facts);
   const reportedDropped = data.facts
     .filter((f) => f.action === "gap")
-    .reduce((sum, f) => sum + Number(f.parameters.droppedEventCount ?? 0), 0);
+    .reduce((sum, f) => sum + Number(f.parameters.droppedEventCount ?? 0) * usageFactWeight(f), 0);
   return {
     schemaVersion: 2,
     metricVersion: METRIC_VERSION,
@@ -1168,7 +1184,7 @@ function heatmap(facts: Fact[]) {
   ]
     .map(([key, rows]) => {
       const [weekday, hour] = key.split(":").map(Number);
-      return { weekday: weekday!, hour: hour!, count: rows.length };
+      return { weekday: weekday!, hour: hour!, count: usageFactCount(rows) };
     })
     .sort((a, b) => a.weekday - b.weekday || a.hour - b.hour);
 }
@@ -1190,7 +1206,7 @@ function person(
         label: model
           ? (data.models.get(key) ?? "未记录模型")
           : (usageBoardLabels[key] ?? "未记录板块"),
-        count: rows.length,
+        count: usageFactCount(rows),
       }))
       .sort((a, b) => b.count - a.count || a.key.localeCompare(b.key))
       .slice(0, 3);
@@ -1238,7 +1254,7 @@ export async function usageV2Overview(
   const reportedGaps = (facts: Fact[]) => facts.filter((fact) => fact.action === "gap")
     .reduce((sum, fact) => {
       const value = Number(fact.parameters.droppedEventCount ?? 0);
-      return sum + (Number.isSafeInteger(value) && value >= 0 ? value : 0);
+      return sum + (Number.isSafeInteger(value) && value >= 0 ? value * usageFactWeight(fact) : 0);
     }, 0);
   return {
     meta: meta(data),
@@ -1411,7 +1427,7 @@ export async function usageV2Profile(
 ): Promise<UsageV2Profile> {
   if (scope.userIds && !scope.userIds.includes(id))
     throw new UsageError("USAGE_PERSON_NOT_FOUND", "员工不在当前筛选中", 404);
-  const data = await loadData(db, { ...scope, userIds: [id] }, options),
+  const data = await loadData(db, { ...scope, userIds: [id] }, { ...options, activityPagination: { page: query.page, pageSize: query.pageSize } }),
     row = data.people[0];
   if (!row)
     throw new UsageError(
@@ -1435,7 +1451,7 @@ export async function usageV2Profile(
     boards: boards(data),
     models: models(data),
     habits: profileHabits(data.facts),
-    activityPage: {
+    activityPage: data.activityPage ?? {
       records: records
         .slice((query.page - 1) * query.pageSize, query.page * query.pageSize)
         .map((f) => ({
@@ -1505,12 +1521,12 @@ export async function usageV2Boards(
     conversion: usageUnavailable(
       "visit-submit-unavailable",
       "无 visit/task 稳定关联，不能用提交次数 / 访问次数伪造转化率。",
-      data.facts.length,
+      usageFactCount(data.facts),
     ),
     abandonment: usageUnavailable(
       "abandonment-unavailable",
       "缺少可靠访问会话和离开事件，不能补造放弃点。",
-      data.facts.length,
+      usageFactCount(data.facts),
     ),
     insights: usageInsights(metricsFor(data)),
   };
@@ -1758,7 +1774,7 @@ export async function usageV2Flows(
     pathCoverage: usageUnavailable(
       "linked-paths-unavailable",
       "历史没有稳定 session/visit/workflow 关系，不根据时间相近推造路径或跨板块流转。",
-      data.facts.length,
+      usageFactCount(data.facts),
     ),
     resultUse: use,
     insights: [],

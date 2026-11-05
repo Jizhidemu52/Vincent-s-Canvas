@@ -265,9 +265,9 @@ sqlTest("history over 50000 small facts reads persisted exact samples without th
     expect(result.metrics.activePeople.value).toBe(1);
     expect(result.metrics.activeDays.value).toBe(2);
     expect(result.daily.map(row => row.metrics.visits.value)).toEqual([25000, 25001]);
-    // Intentionally inject a highly compressible oversized projection into the
-    // disposable DB, proving the read guard counts decoded JSON, not TOAST size.
-    await db.query("UPDATE usage_daily_facts SET payload=payload||jsonb_build_object('fixtureOversized',repeat('x',1000))");
+    // Distinct non-interchangeable payloads cannot be grouped. Highly TOAST-
+    // compressible fields must still count toward the expanded return budget.
+    await db.query("UPDATE usage_daily_facts SET payload=payload||jsonb_build_object('fixtureOversized',repeat('x',1000)||fact_id)");
     await expect(usageV2Overview(db, scope, daily)).rejects.toMatchObject({ code: "USAGE_SCOPE_TOO_LARGE", status: 422 });
   } finally { await f.close(); }
 }, 180000);
