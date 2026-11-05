@@ -135,6 +135,60 @@ export async function fetchServerAssetContent(id: string, signal?: AbortSignal) 
     return response.blob();
 }
 
+export type ServerAssetPlayback = { blob: Blob; width?: number; height?: number; durationMs?: number };
+
+/** Playback bytes are view-only: callers must never persist them over the original asset. */
+export async function fetchServerAssetPlayback(id: string, options: { signal?: AbortSignal; onPending?: () => void; timeoutMs?: number } = {}): Promise<ServerAssetPlayback> {
+    const controller = new AbortController();
+    const abort = () => controller.abort(options.signal?.reason);
+    options.signal?.throwIfAborted();
+    options.signal?.addEventListener("abort", abort, { once: true });
+    let timedOut = false;
+    const timeoutMs = Math.max(1, Math.min(150_000, options.timeoutMs ?? 150_000));
+    const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
+    const signal = controller.signal;
+    try {
+        while (true) {
+            signal.throwIfAborted();
+            const response = await fetch(`/api/assets/${encodeURIComponent(id)}/playback`, { credentials: "include", cache: "no-store", signal });
+            signal.throwIfAborted();
+            if (response.status === 202) {
+                options.onPending?.();
+                signal.throwIfAborted();
+                const seconds = Number(response.headers.get("Retry-After"));
+                const retryAfterMs = Math.max(1000, Math.min(10_000, (Number.isFinite(seconds) && seconds > 0 ? seconds : 3) * 1000));
+                await new Promise<void>((resolve, reject) => {
+                    const onAbort = () => { clearTimeout(timer); signal.removeEventListener("abort", onAbort); reject(signal.reason); };
+                    const timer = setTimeout(() => { signal.removeEventListener("abort", onAbort); resolve(); }, retryAfterMs);
+                    signal.addEventListener("abort", onAbort, { once: true });
+                });
+                continue;
+            }
+            if (!response.ok) {
+                const payload = await response.json().catch(() => ({})) as { message?: string; msg?: string; error?: string; code?: string };
+                const fallback = response.status === 404 ? "视频原件不存在或无权访问" : response.status === 422 ? "该视频暂不支持兼容预览，原件仍保留" : "兼容预览服务暂不可用，请稍后重新读取记录";
+                throw Object.assign(new Error(payload.msg || payload.message || fallback), { status: response.status, code: payload.error || payload.code });
+            }
+            if (!response.headers.get("Content-Type")?.toLowerCase().startsWith("video/mp4")) throw new Error("兼容预览格式无效，原件仍保留");
+            const blob = await response.blob();
+            signal.throwIfAborted();
+            if (!blob.size) throw new Error("兼容预览为空，原件仍保留");
+            const numberHeader = (name: string) => {
+                const value = Number(response.headers.get(name));
+                return Number.isFinite(value) && value > 0 ? value : undefined;
+            };
+            return { blob, width: numberHeader("X-Canvas-Media-Width"), height: numberHeader("X-Canvas-Media-Height"), durationMs: numberHeader("X-Canvas-Media-Duration-Ms") };
+        }
+    } catch (error) {
+        if (timedOut) throw new Error("兼容预览准备超时，已停止等待；原任务已成功，可稍后重新读取记录或下载原件。");
+        options.signal?.throwIfAborted();
+        throw error;
+    } finally {
+        clearTimeout(timeout);
+        options.signal?.removeEventListener("abort", abort);
+    }
+}
+
 export type ServerAssetPoster = { status: "pending"; retryAfterMs: number } | { status: "ready"; blob: Blob; durationMs?: number };
 export type ServerImageThumbnail = { status: "pending"; retryAfterMs: number } | { status: "ready"; blob: Blob };
 export async function fetchServerImageThumbnail(url: string, signal: AbortSignal): Promise<ServerImageThumbnail> {

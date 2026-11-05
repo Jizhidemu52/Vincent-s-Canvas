@@ -1,13 +1,14 @@
-import { test, expect, type BrowserContext, type Page } from "@playwright/test";
+import { test, expect, type BrowserContext, type Locator, type Page, type Response as PlaywrightResponse } from "@playwright/test";
 import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { SMOKE_CHAT_REPLY } from "../../server/tests/production-smoke/mock-provider";
+import { SMOKE_CHAT_REPLY, SMOKE_VIDEO_META, SMOKE_VIDEO_SHA256 } from "../../server/tests/production-smoke/mock-provider";
 
 type Seed = { schema: 1; project: string; userId: string; username: string; password: string; paid: false; models: { image: string; video: string; chat: string } };
 type Node = { id: string; type: string; title: string; metadata?: { content?: string; sourceTaskId?: string; imageTask?: { taskId?: string }; status?: string } };
 type Canvas = { id: string; revision: number; deleted: boolean; document: { nodes: Node[] } | null };
 type Task = { id: string; requestId: string; userId: string; modelConfigId: string; status: string; operationType: string; resultUrls: string[]; failureReason?: string; credits: number };
+type VideoCodecObservation = { sources: Map<string, string>; tracks: Map<string, string> };
 const checks = ["login", "upload", "canvas-image", "refresh-recovery", "original-download", "video-task", "chat"];
 const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
@@ -62,6 +63,73 @@ async function completedTask(page: Page, id: string, seed: Seed, operationType: 
     return task;
 }
 
+async function actualPlayback(page: Page, responses: PlaywrightResponse[], assetId: string, ownerId: string, after = 0) {
+    const path = `/api/assets/${assetId}/playback`;
+    await expect.poll(() => responses.slice(after).some(response => new URL(response.url()).pathname === path && response.status() === 200), { timeout: 150_000, intervals: [100, 500, 1000] }).toBe(true);
+    const response = responses.slice(after).find(value => new URL(value.url()).pathname === path && value.status() === 200)!;
+    expect(response.headers()["content-type"]).toBe("video/mp4");
+    expect(response.headers()["x-canvas-media-width"]).toBe(String(SMOKE_VIDEO_META.width));
+    expect(response.headers()["x-canvas-media-height"]).toBe(String(SMOKE_VIDEO_META.height));
+    expect(await response.finished()).toBeNull();
+    // Chromium can discard the captured body of a media Blob fetch. Verify a
+    // separate read of the same private URL/ETag and bind its hash to the Blob
+    // actually played below; this is not an assertion about Response.body().
+    expect(response.headers()["etag"]).toBeTruthy();
+    const read = await page.request.get(path, { headers: { "X-Canvas-Owner-Id": ownerId, "Cache-Control": "no-cache" } });
+    expect(read.status()).toBe(200);
+    expect(read.headers()["content-type"]).toBe("video/mp4");
+    expect(read.headers()["etag"]).toBe(response.headers()["etag"]);
+    const bytes = await read.body();
+    const digest = sha256(bytes);
+    expect(bytes.byteLength).toBeGreaterThan(1000);
+    expect(digest, "The HEVC original must not be returned as its own compatibility preview").not.toBe(SMOKE_VIDEO_SHA256);
+    return { status: response.status(), etag: response.headers()["etag"], hashSource: "same-private-url-read", bytes: bytes.byteLength, sha256: digest };
+}
+
+async function playVideoToEnd(player: Locator, expectedSha256: string) {
+    await expect(player).toBeVisible();
+    await expect.poll(() => player.evaluate((video: HTMLVideoElement) => video.readyState)).toBeGreaterThanOrEqual(2);
+    await player.evaluate(async (video: HTMLVideoElement) => { video.muted = true; video.loop = false; video.currentTime = 0; await video.play(); });
+    await expect.poll(() => player.evaluate((video: HTMLVideoElement) => ({ ended: video.ended, error: video.error?.code ?? null })), { timeout: 15_000, intervals: [100, 250] }).toEqual({ ended: true, error: null });
+    const played = await player.evaluate(async (video: HTMLVideoElement) => {
+        const currentSource = video.currentSrc;
+        if (!currentSource.startsWith("blob:")) throw new Error("Player must use the compatibility Blob loaded by the UI");
+        const currentBytes = await (await fetch(currentSource)).arrayBuffer();
+        const currentSha256 = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", currentBytes)), byte => byte.toString(16).padStart(2, "0")).join("");
+        const canvas = document.createElement("canvas"); canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+        const context = canvas.getContext("2d")!; context.drawImage(video, 0, 0);
+        const pixel = Array.from(context.getImageData(Math.floor(canvas.width / 2), Math.floor(canvas.height / 2), 1, 1).data);
+        return { ended: video.ended, error: video.error?.code ?? null, currentSrc: currentSource, currentSha256, currentTime: video.currentTime, durationMs: Math.round(video.duration * 1000), width: video.videoWidth, height: video.videoHeight, decodedFrames: video.getVideoPlaybackQuality().totalVideoFrames, pixel };
+    });
+    expect(played).toMatchObject({ ended: true, error: null, width: SMOKE_VIDEO_META.width, height: SMOKE_VIDEO_META.height, durationMs: SMOKE_VIDEO_META.durationMs });
+    expect(played.currentTime).toBeGreaterThanOrEqual(SMOKE_VIDEO_META.durationMs / 1000 - 0.1);
+    expect(played.currentSha256, "The UI must play the exact successful compatibility response").toBe(expectedSha256);
+    expect(played.decodedFrames).toBeGreaterThan(0);
+    // Blue fixture pixels also reject a "playing" video whose decoded surface is black.
+    expect(played.pixel[0]).toBeLessThan(30); expect(played.pixel[1]).toBeLessThan(30); expect(played.pixel[2]).toBeGreaterThan(150); expect(played.pixel[3]).toBe(255);
+    return played;
+}
+
+async function originalVideoHash(page: Page, path: string, ownerId: string) {
+    expect(path).toMatch(/^\/api\/assets\/[a-f0-9-]{36}\/content$/);
+    const response = await page.request.get(path, { headers: { "X-Canvas-Owner-Id": ownerId, "Cache-Control": "no-cache" } });
+    expect(response.status()).toBe(200);
+    const digest = sha256(await response.body());
+    expect(digest).toBe(SMOKE_VIDEO_SHA256);
+    return digest;
+}
+
+async function observedVideoCodec(observation: VideoCodecObservation, currentSrc: string) {
+    // Metadata inspection also creates a temporary player for the HEVC original.
+    // Judge only the native player loaded with the Blob whose hash we verified.
+    const read = () => [...observation.tracks].flatMap(([playerId, value]) => observation.sources.get(playerId) === currentSrc
+        ? (JSON.parse(value) as Array<{ codec: string; profile: string }>).map(track => ({ playerId, ...track })) : []);
+    await expect.poll(() => read().map(track => track.codec), { timeout: 10_000 }).toEqual(["h264"]);
+    // CDP reports the actual decoder codec. Pixel format is independently
+    // checked by the backend's real ffprobe tests, not inferred from this hash.
+    return read().map(({ playerId, codec, profile }) => ({ playerId, codec, profile }));
+}
+
 test("exact formal stack: login, large upload, canvas generation/recovery, original bytes, video Worker and chat", async ({ page, context, browser, baseURL }, testInfo) => {
     const output = process.env.CANVAS_SMOKE_OUTPUT_DIR!;
     const seed = JSON.parse(await readFile(resolve(output, "seed.private.json"), "utf8")) as Seed;
@@ -69,7 +137,9 @@ test("exact formal stack: login, large upload, canvas generation/recovery, origi
     const fixture = await readFile(resolve(output, "upload.png"));
     expect(fixture.byteLength).toBeGreaterThan(1024 * 1024);
     const outside: string[] = [], errors: string[] = [], taskPosts: string[] = [], chatPosts: string[] = [];
+    const playbackResponses: PlaywrightResponse[] = [];
     await restrictBrowser(context, baseURL!, outside, errors);
+    page.on("response", response => { if (/^\/api\/assets\/[a-f0-9-]{36}\/playback$/.test(new URL(response.url()).pathname) && response.request().method() === "GET") playbackResponses.push(response); });
     page.on("request", request => {
         if (request.method() !== "POST") return;
         const path = new URL(request.url()).pathname;
@@ -159,6 +229,18 @@ test("exact formal stack: login, large upload, canvas generation/recovery, origi
     }, fixture.toString("base64"));
     expect(dimensions).toEqual({ width: 1024, height: 1024 });
 
+    const videoMedia = await context.newCDPSession(page);
+    const videoCodecs: VideoCodecObservation = { sources: new Map(), tracks: new Map() };
+    videoMedia.on("Media.playerPropertiesChanged", event => {
+        for (const property of event.properties) if (property.name === "kVideoTracks") videoCodecs.tracks.set(event.playerId, property.value);
+    });
+    videoMedia.on("Media.playerEventsAdded", event => {
+        for (const entry of event.events) {
+            const value = JSON.parse(entry.value) as { event?: string; url?: string };
+            if (value.event === "kLoad" && typeof value.url === "string") videoCodecs.sources.set(event.playerId, value.url);
+        }
+    });
+    await videoMedia.send("Media.enable");
     await page.goto("/video");
     await page.getByRole("checkbox", { name: "不经 AI 整理，直接发送", exact: true }).check();
     await page.getByRole("textbox", { name: "视频提示词", exact: true }).fill("A blue square moves slowly. Formal isolated release smoke.");
@@ -168,11 +250,27 @@ test("exact formal stack: login, large upload, canvas generation/recovery, origi
     expect(submittedVideo.status()).toBe(201);
     const videoTask = (await submittedVideo.json()).task as Task;
     const video = await completedTask(page, videoTask.id, seed, "video_generation", seed.models.video);
+    const videoAssetId = video.resultUrls[0]!.split("/")[3]!;
+    const videoOriginalBefore = await originalVideoHash(page, video.resultUrls[0]!, seed.userId);
+    const firstPlayback = await actualPlayback(page, playbackResponses, videoAssetId, seed.userId);
     const player = page.locator("video").first();
-    await expect(player).toBeVisible();
-    await expect.poll(() => player.evaluate((element: HTMLVideoElement) => element.readyState)).toBeGreaterThanOrEqual(2);
+    const firstPlayed = await playVideoToEnd(player, firstPlayback.sha256);
+    const firstCodecs = await observedVideoCodec(videoCodecs, firstPlayed.currentSrc);
+    const videoDownload = page.waitForEvent("download");
+    await page.getByRole("button", { name: "下载", exact: true }).first().click();
+    const videoOriginalFile = testInfo.outputPath("downloaded-original-hevc.mp4");
+    await (await videoDownload).saveAs(videoOriginalFile);
+    const videoDownloadHash = sha256(await readFile(videoOriginalFile)); expect(videoDownloadHash).toBe(SMOKE_VIDEO_SHA256);
+    const playbackBeforeRefresh = playbackResponses.length;
     await page.reload();
-    await expect(page.locator("video").first()).toBeVisible();
+    const refreshedPlayback = await actualPlayback(page, playbackResponses, videoAssetId, seed.userId, playbackBeforeRefresh);
+    const refreshedPlayed = await playVideoToEnd(page.locator("video").first(), refreshedPlayback.sha256);
+    const refreshedCodecs = await observedVideoCodec(videoCodecs, refreshedPlayed.currentSrc);
+    await videoMedia.detach();
+    const refreshedTask = await completedTask(page, video.id, seed, "video_generation", seed.models.video);
+    expect(refreshedTask.resultUrls).toEqual(video.resultUrls);
+    const videoOriginalAfter = await originalVideoHash(page, video.resultUrls[0]!, seed.userId);
+    expect(refreshedPlayback.sha256).toBe(firstPlayback.sha256);
     expect(taskPosts).toEqual(["image_generation", "video_generation"]);
 
     await page.goto("/chat");
@@ -212,6 +310,7 @@ test("exact formal stack: login, large upload, canvas generation/recovery, origi
         schema: 1, status: "passed", project: seed.project, checks, canvasId, revision: canvas.revision,
         imageTaskId: image.id, videoTaskId: video.id, uploadAssetId: uploadId,
         original: { bytes: originalBytes.byteLength, sha256: sha256(originalBytes), ...dimensions },
+        videoPlayback: { assetId: videoAssetId, originalBefore: videoOriginalBefore, originalAfter: videoOriginalAfter, downloadedOriginal: videoDownloadHash, first: { ...firstPlayback, ...firstPlayed, codecs: firstCodecs }, refreshed: { ...refreshedPlayback, ...refreshedPlayed, codecs: refreshedCodecs } },
         taskPosts, chatPosts: chatPosts.length, refreshStatus, paid: false,
     }, null, 2), { flag: "wx", mode: 0o600 });
 });

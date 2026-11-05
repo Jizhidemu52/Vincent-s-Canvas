@@ -37,6 +37,11 @@ async function motionFixture(context: BrowserContext, api: MockCanvasApi) {
         if (!api.tasks.has(id)) return route.fallback();
         return route.fulfill({ contentType: "video/mp4", body: video });
     });
+    await context.route("**/api/assets/*/playback", route => {
+        const id = new URL(route.request().url()).pathname.split("/")[3];
+        if (!api.tasks.has(id)) return route.fallback();
+        return route.fulfill({ status: 200, contentType: "video/mp4", body: video });
+    });
     return { preflights, flags };
 }
 

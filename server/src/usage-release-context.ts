@@ -2,6 +2,7 @@ import type { UsageControlDaily, UsageReleaseContext } from "../../shared/usage-
 import type { UsageV2Scope } from "../../shared/usage-analytics-v2";
 import type { UsageQueryClient } from "./usage-rollup-reader";
 import { usageBoardLabels, usageControlLabel } from "./usage-analytics";
+import { usageFactWeight } from "./usage-event-aggregation";
 
 const beijingDay = (value: string | Date) =>
     new Date(new Date(value).getTime() + 8 * 3600000).toISOString().slice(0, 10);
@@ -42,6 +43,7 @@ type ControlFact = {
     board_key: string | null;
     control_key: string | null;
     occurred_at: string | Date;
+    eventWeight?: number;
 };
 /** Already-filtered facts; no extra historical read or release-to-feature inference. */
 export function usageControlDaily(facts: readonly ControlFact[]): UsageControlDaily {
@@ -50,7 +52,7 @@ export function usageControlDaily(facts: readonly ControlFact[]): UsageControlDa
     for (const fact of facts) {
         if (fact.kind !== "event" || ["visit", "gap"].includes(fact.action)) continue;
         if (!fact.control_key) {
-            missingControlRecords++;
+            missingControlRecords += usageFactWeight(fact);
             continue;
         }
         const boardKey = fact.board_key ?? "unknown",
@@ -70,8 +72,8 @@ export function usageControlDaily(facts: readonly ControlFact[]): UsageControlDa
             groups.set(key, row);
         }
         const day = beijingDay(fact.occurred_at);
-        row.total++;
-        row.counts.set(day, (row.counts.get(day) ?? 0) + 1);
+        row.total += usageFactWeight(fact);
+        row.counts.set(day, (row.counts.get(day) ?? 0) + usageFactWeight(fact));
     }
     const rows = [...groups.values()].sort(
         (a, b) => b.total - a.total || a.boardKey.localeCompare(b.boardKey) || a.controlKey.localeCompare(b.controlKey),

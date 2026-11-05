@@ -15,6 +15,7 @@ test("视频画面可直接拖动并撤销，底部仍可播放暂停和定位�
         const start = range ? Number(range[1]) : 0, end = range?.[2] ? Number(range[2]) : bytes.length - 1;
         return route.fulfill({ status: range ? 206 : 200, contentType: "video/mp4", body: bytes.subarray(start, end + 1), headers: { "Accept-Ranges": "bytes", ...(range ? { "Content-Range": `bytes ${start}-${end}/${bytes.length}` } : {}) } });
     });
+    await context.route(`**/api/assets/${assetId}/playback`, route => route.fulfill({ status: 200, contentType: "video/mp4", body: bytes }));
     await context.route(`**/api/assets/${assetId}/thumb*`, route => route.fulfill({ contentType: "image/png", body: IMAGE, headers: { "X-Canvas-Media-Duration-Ms": "8000" } }));
     await page.goto(`/canvas/${id}`);
     const videoNode = page.locator('[data-node-id="video"]');

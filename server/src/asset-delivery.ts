@@ -110,7 +110,11 @@ function assetRange(request: Request, size: number, etag?: string, modified?: Da
 
 /** Call only AFTER current-employee authorization, including conditional requests. */
 export async function streamAssetContent(request: Request, response: Response, storage: ObjectStorage,
-  asset: { object_key: string; mime_type: string; filename: string }, options: { cacheControl?: "no-store" } = {}) {
+  asset: { object_key: string; mime_type: string; filename: string }, options: {
+    cacheControl?: "no-store";
+    expectedObject?: { etag: string; length: number };
+    beforeSend?: () => Promise<void>;
+  } = {}) {
   const headers = (mime: string) => ({ ...assetResponseHeaders(mime, asset.filename, request.query.download === "1"), ...(options.cacheControl ? { "cache-control": options.cacheControl } : {}) });
   const controller = new AbortController();
   let body: Readable | undefined;
@@ -124,6 +128,9 @@ export async function streamAssetContent(request: Request, response: Response, s
       if (controller.signal.aborted) throw error;
       throw new AssetObjectError(isMissingAssetObject(error));
     });
+    controller.signal.throwIfAborted();
+    if (options.expectedObject && (objectInfo.ETag !== options.expectedObject.etag || objectInfo.ContentLength !== options.expectedObject.length)) throw new AssetObjectError(false);
+    await options.beforeSend?.();
     controller.signal.throwIfAborted();
     response.set(headers(asset.mime_type));
     response.vary("Cookie");
@@ -147,6 +154,8 @@ export async function streamAssetContent(request: Request, response: Response, s
       if (!object.Body) throw new Error("素材对象没有内容流");
       body = object.Body as Readable;
       controller.signal.throwIfAborted();
+      if (options.expectedObject && (object.ETag !== options.expectedObject.etag
+        || !part && object.ContentLength !== options.expectedObject.length)) throw new AssetObjectError(false);
       if (part && (object.ContentRange !== `bytes ${part.start}-${part.end}/${size}`
         || object.ContentLength !== part.end - part.start + 1)) throw new Error("对象存储未返回请求的素材分段");
       return { object, stream: body };
@@ -165,11 +174,14 @@ export async function streamAssetContent(request: Request, response: Response, s
       }
     }
     if (request.method === "HEAD") {
+      await options.beforeSend?.();
       response.set(headers(mimeType!));
       response.setHeader("Content-Length", String(size)); response.end(); return;
     }
     const { object, stream } = await read(range);
     const inspected = mimeType ? { stream, mimeType } : await inspectAssetStream(stream, asset.mime_type);
+    await options.beforeSend?.();
+    controller.signal.throwIfAborted();
     response.set(headers(inspected.mimeType));
     if (object.ETag) response.setHeader("ETag", object.ETag);
     if (object.ContentLength !== undefined) response.setHeader("Content-Length", String(object.ContentLength));

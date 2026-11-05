@@ -10,6 +10,7 @@ test("画布视频标题可拖动，低缩放保留静态首帧且不加载原�
     api.documents.set(id, { id, revision: 1, deleted: false, document, updatedAt: now });
     let originals = 0;
     await context.route(`**${content}`, route => { originals++; return route.fulfill({ contentType: "video/mp4", path: resolve(import.meta.dirname, "media/video.mp4") }); });
+    await context.route(`**/api/assets/${assetId}/playback`, route => route.fulfill({ status: 200, contentType: "video/mp4", path: resolve(import.meta.dirname, "media/video.mp4") }));
     await context.route(`**/api/assets/${assetId}/thumb*`, route => route.fulfill({ contentType: "image/png", body: IMAGE, headers: { "X-Canvas-Media-Duration-Ms": "280" } }));
     await page.goto(`/canvas/${id}`);
     const videoNode = page.locator('[data-node-id="video"]');

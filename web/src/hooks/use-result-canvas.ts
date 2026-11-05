@@ -47,7 +47,7 @@ export function useResultCanvas() {
                 await rememberMediaSource(stored.storageKey, `/api/assets/${encodeURIComponent(assetId)}/content`);
                 assertOwner();
                 const size = fitNodeSize(media.width || 640, media.height || 640);
-                projectId = useCanvasStore.getState().importProject({ title: media.title, nodes: [{ id: nanoid(), type: media.kind === "image" ? CanvasNodeType.Image : CanvasNodeType.Video, title: media.title, ...size, position: { x: 80, y: 80 }, metadata: { content: stored.url, storageKey: stored.storageKey, status: "success", naturalWidth: media.width, naturalHeight: media.height, mimeType: blob.type, bytes: blob.size, prompt: media.prompt, model: media.model, sourceTaskId: media.sourceTaskId } }] });
+                projectId = useCanvasStore.getState().importProject({ title: media.title, nodes: [{ id: nanoid(), type: media.kind === "image" ? CanvasNodeType.Image : CanvasNodeType.Video, title: media.title, ...size, position: { x: 80, y: 80 }, metadata: { content: stored.url, storageKey: stored.storageKey, ...(media.kind === "video" ? { serverAssetId: assetId } : {}), status: "success", naturalWidth: media.width, naturalHeight: media.height, mimeType: blob.type, bytes: blob.size, prompt: media.prompt, model: media.model, sourceTaskId: media.sourceTaskId } }] });
                 projects.current.set(key, projectId);
             }
             await flushCanvasPersistence(); assertOwner();

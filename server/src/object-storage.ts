@@ -1,4 +1,4 @@
-import { CopyObjectCommand, DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { AbortMultipartUploadCommand, CopyObjectCommand, DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { Upload } from "@aws-sdk/lib-storage";
 import { createReadStream } from "node:fs";
@@ -28,12 +28,24 @@ export class ObjectStorage {
         await this.client.send(new CopyObjectCommand({ Bucket: this.config.S3_BUCKET, Key: destinationKey, CopySource: copySource, CopySourceIfMatch: ifMatch, MetadataDirective: "COPY" }));
     }
     /** Bound upload memory independently of the generated video's total size. */
-    async putFile(key: string, path: string, byteSize: number, contentType: string) {
+    async putFile(key: string, path: string, byteSize: number, contentType: string, options: Pick<ObjectReadOptions, "abortSignal"> = {}) {
         if (!this.configured) throw new Error("公司对象存储尚未配置");
+        options.abortSignal?.throwIfAborted();
         const body = createReadStream(path);
+        const cancel = () => { body.destroy(options.abortSignal?.reason instanceof Error ? options.abortSignal.reason : new Error("媒体上传已取消")); };
+        options.abortSignal?.addEventListener("abort", cancel, { once: true });
         try {
-            await new Upload({ client: this.client, params: { Bucket: this.config.S3_BUCKET, Key: key, Body: body, ContentType: contentType, ContentLength: byteSize }, queueSize: 2, partSize: 5 * 1024 * 1024, leavePartsOnError: false }).done();
-        } finally { body.destroy(); }
+            options.abortSignal?.throwIfAborted();
+            // Upload.abort() only rejects its public promise; it does not pass
+            // cancellation into S3 requests. Scope a send adapter to this upload
+            // and let done() await worker failure + multipart rollback normally.
+            const client = options.abortSignal ? new Proxy(this.client, { get: (target, property, receiver) => property === "send"
+                ? (command: Parameters<S3Client["send"]>[0], requestOptions?: { abortSignal?: AbortSignal }) => target.send(command, { ...requestOptions,
+                    abortSignal: command instanceof AbortMultipartUploadCommand ? AbortSignal.timeout(10_000) : options.abortSignal })
+                : Reflect.get(target, property, receiver) }) : this.client;
+            await new Upload({ client, params: { Bucket: this.config.S3_BUCKET, Key: key, Body: body, ContentType: contentType, ContentLength: byteSize }, queueSize: 2, partSize: 5 * 1024 * 1024, leavePartsOnError: false }).done();
+            options.abortSignal?.throwIfAborted();
+        } finally { options.abortSignal?.removeEventListener("abort", cancel); body.destroy(); }
     }
     async head(key: string, options: Pick<ObjectReadOptions, "abortSignal"> = {}) {
         return this.client.send(new HeadObjectCommand({ Bucket: this.config.S3_BUCKET, Key: key }), { abortSignal: options.abortSignal });
@@ -41,8 +53,12 @@ export class ObjectStorage {
     async get(key: string, options: ObjectReadOptions = {}) {
         return this.client.send(new GetObjectCommand({ Bucket: this.config.S3_BUCKET, Key: key, Range: options.range, IfMatch: options.ifMatch }), { abortSignal: options.abortSignal });
     }
-    /** Used only for newly-created snapshot objects when their database transaction failed. */
-    async remove(key: string) { await this.client.send(new DeleteObjectCommand({ Bucket: this.config.S3_BUCKET, Key: key })); }
+    /** Used for owned rollback objects and precisely-scoped, recomputable previews. */
+    async remove(key: string, options: Pick<ObjectReadOptions, "abortSignal"> = {}) { await this.client.send(new DeleteObjectCommand({ Bucket: this.config.S3_BUCKET, Key: key }), { abortSignal: options.abortSignal }); }
+    async listKeys(prefix: string, options: Pick<ObjectReadOptions, "abortSignal"> & { continuationToken?: string; maxKeys?: number } = {}) {
+        const result = await this.client.send(new ListObjectsV2Command({ Bucket: this.config.S3_BUCKET, Prefix: prefix, ContinuationToken: options.continuationToken, MaxKeys: Math.max(1, Math.min(100, options.maxKeys ?? 100)) }), { abortSignal: options.abortSignal });
+        return { keys: (result.Contents || []).flatMap(object => object.Key ? [object.Key] : []), nextToken: result.IsTruncated ? result.NextContinuationToken : undefined };
+    }
     async signedDownloadUrl(key: string, expiresIn = 3600) {
         if (!this.configured) throw new Error("公司对象存储尚未配置");
         if (!isPublicHttpsUrl(this.config.S3_PUBLIC_ENDPOINT || this.config.S3_ENDPOINT || "")) throw new Error("视频/音频素材需要配置上游可访问的 S3_PUBLIC_ENDPOINT（公开 HTTPS）；内部存储端口无需公开");

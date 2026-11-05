@@ -25,6 +25,7 @@ import { assetBatchSchema, assetListMetadataFields, assetPage, parseAssetListQue
 import { scheduleAssetThumbnails } from "../asset-thumbnails";
 import { hashAssetContent, requestedContentHash } from "../asset-content-hash";
 import { AssetObjectError, isMissingAssetObject } from "../asset-object-error";
+import { VideoPreviewError, type AssetVideoPreviewService, type VideoPlaybackAsset } from "../asset-video-preview";
 
 const createSchema = z.object({
   filename: z.string().trim().min(1).max(255),
@@ -161,7 +162,7 @@ async function respondReusedUpload(response: Response, storage: ObjectStorage, a
   response.status(201).json({ assetId: asset.id, uploadUrl: `/api/assets/${asset.id}/upload?repair=1`, reused: true });
 }
 
-export function createAssetsRouter(db: Database, storage: ObjectStorage) {
+export function createAssetsRouter(db: Database, storage: ObjectStorage, playback?: AssetVideoPreviewService) {
   const router = Router();
   // Every response must be checked against the current employee, including
   // original-media reads immediately after switching identities in a browser.
@@ -391,6 +392,7 @@ export function createAssetsRouter(db: Database, storage: ObjectStorage) {
       await client.query("COMMIT");
       client.release(); client = undefined;
       if (kind === 'image') scheduleAssetThumbnails(db, storage, request.params.id);
+      if (repair && kind === 'video') playback?.invalidate({ id: String(request.params.id), owner_user_id: actor.id, object_key: currentAsset.object_key }, "repaired");
       response.status(204).end();
     } catch (error) {
       if (client) await client.query("ROLLBACK").catch(() => undefined);
@@ -423,6 +425,42 @@ export function createAssetsRouter(db: Database, storage: ObjectStorage) {
       if (error instanceof ImageResultVariantsError) response.status(error.status).json({ error: error.code, message: error.message });
       else next(error);
     }
+  });
+
+  router.get("/:id/playback", async (request, response, next) => {
+    const controller = new AbortController();
+    const cancel = () => { if (!response.writableFinished) controller.abort(); };
+    request.on("aborted", cancel); response.on("close", cancel);
+    try {
+      const id = z.string().uuid().parse(request.params.id);
+      const actor = (request as unknown as AuthenticatedRequest).auth;
+      const access = accessClause(actor);
+      const shifted = access.sql.replace(/\$(\d+)/g, (_, number) => `$${Number(number) + 1}`);
+      const readAllowed = async () => {
+        const result = await db.query<VideoPlaybackAsset>(`SELECT a.id,a.owner_user_id,a.object_key,a.filename,a.byte_size FROM assets a WHERE a.id=$1 AND a.kind='video' AND a.status='ready' AND a.deleted_at IS NULL AND ${shifted}`, [id, ...access.values]);
+        if (!result.rows[0]) throw new VideoPreviewError(404, "NOT_FOUND", "视频素材不存在或无权访问");
+        return result.rows[0];
+      };
+      const asset = await readAllowed();
+      if (!playback) throw new VideoPreviewError(503, "VIDEO_PREVIEW_UNAVAILABLE", "兼容预览暂时不可用，原视频仍可下载。");
+      const result = await playback.read(asset, controller.signal, request.method !== "HEAD");
+      if (result.status === "pending") { response.status(202).set("Retry-After", "3").end(); return; }
+      response.set("X-Canvas-Media-Width", String(result.metadata.width));
+      response.set("X-Canvas-Media-Height", String(result.metadata.height));
+      response.set("X-Canvas-Media-Duration-Ms", String(result.metadata.durationMs));
+      await streamAssetContent(request, response, storage, { object_key: result.objectKey, mime_type: "video/mp4", filename: `${asset.filename}.playback.mp4` }, {
+        cacheControl: "no-store", expectedObject: { etag: result.etag, length: result.length },
+        beforeSend: async () => playback.verify(await readAllowed(), result.source, controller.signal),
+      });
+    } catch (error) {
+      if (controller.signal.aborted || response.destroyed) return;
+      if (!response.headersSent) {
+        for (const header of ["X-Canvas-Media-Width", "X-Canvas-Media-Height", "X-Canvas-Media-Duration-Ms", "ETag", "Last-Modified", "Accept-Ranges", "Content-Range", "Content-Length", "Content-Type", "Content-Disposition"]) response.removeHeader(header);
+      }
+      if (error instanceof VideoPreviewError && !response.headersSent) response.status(error.status).json({ error: error.code, message: error.message });
+      else if (error instanceof AssetObjectError && !response.headersSent) response.status(503).json({ error: "VIDEO_PREVIEW_UNAVAILABLE", message: "视频预览文件暂时不可用，原视频仍可下载。" });
+      else next(error);
+    } finally { request.off("aborted", cancel); response.off("close", cancel); controller.abort(); }
   });
 
   router.get("/:id/content", async (request, response, next) => {
@@ -507,7 +545,7 @@ export function createAssetsRouter(db: Database, storage: ObjectStorage) {
         values: [actor.id, actor.role, actor.departmentId],
       } : accessClause(actor);
       const shifted = access.sql.replace(/\$(\d+)/g, (_, number) => `$${Number(number) + 1}`);
-      const allowed = await client.query<{ id: string }>(`SELECT a.id FROM assets a WHERE a.id=ANY($1::uuid[]) AND a.status='ready' AND a.deleted_at IS NULL AND ${shifted} FOR UPDATE OF a`, [input.assetIds, ...access.values]);
+      const allowed = await client.query<{ id: string; owner_user_id: string; object_key: string; kind: string }>(`SELECT a.id,a.owner_user_id,a.object_key,a.kind FROM assets a WHERE a.id=ANY($1::uuid[]) AND a.status='ready' AND a.deleted_at IS NULL AND ${shifted} FOR UPDATE OF a`, [input.assetIds, ...access.values]);
       if (allowed.rows.length !== input.assetIds.length) {
         await client.query('ROLLBACK');
         response.status(403).json({ error: 'BATCH_FORBIDDEN', message: '部分素材不存在或无权操作，整批未修改' }); return;
@@ -525,6 +563,7 @@ export function createAssetsRouter(db: Database, storage: ObjectStorage) {
       }
       if (mutating) await writeAudit(client, { actor, action: `asset.batch_${input.action}`, targetType: 'asset', result: 'success', detail: { assetIds: input.assetIds, projectId: input.projectId }, ip: request.ip });
       await client.query('COMMIT');
+      if (input.action === 'delete') for (const asset of allowed.rows) if (asset.kind === 'video') playback?.invalidate(asset, "deleted");
       response.json({ action: input.action, assetIds: input.assetIds, assets, count: input.assetIds.length });
     } catch (error) { if (client) await client.query('ROLLBACK').catch(() => undefined); next(error); }
     finally { client?.release(); }
@@ -609,11 +648,12 @@ export function createAssetsRouter(db: Database, storage: ObjectStorage) {
       const actor = (request as unknown as AuthenticatedRequest).auth;
       const scope = actor.role === "super_admin" ? "" : actor.role === "department_admin" ? "AND department_id=$2" : "AND owner_user_id=$2";
       const value = actor.role === "department_admin" ? actor.departmentId : actor.id;
-      const result = await db.query<{ id: string; owner_user_id: string; department_id: string | null }>(
-        `UPDATE assets SET deleted_at=now(),purge_after=now()+interval '30 days',updated_at=now() WHERE id=$1 AND deleted_at IS NULL ${scope} RETURNING id,owner_user_id,department_id`,
+      const result = await db.query<{ id: string; owner_user_id: string; object_key: string; department_id: string | null; kind: string }>(
+        `UPDATE assets SET deleted_at=now(),purge_after=now()+interval '30 days',updated_at=now() WHERE id=$1 AND deleted_at IS NULL ${scope} RETURNING id,owner_user_id,object_key,department_id,kind`,
         scope ? [request.params.id, value] : [request.params.id],
       );
       if (!result.rows[0]) { response.status(404).end(); return; }
+      if (result.rows[0].kind === 'video') playback?.invalidate(result.rows[0], "deleted");
       await writeAudit(db, { actor, action: "asset.deleted", targetType: "asset", targetId: request.params.id, departmentId: result.rows[0].department_id, result: "success", ip: request.ip });
       response.status(204).end();
     } catch (error) { next(error); }

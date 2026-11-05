@@ -11,6 +11,7 @@ import { useModuleEnabled } from "@/stores/use-module-store";
 import { InfiniteLoadMore } from "@/components/infinite-load-more";
 
 import { useCopyText } from "@/hooks/use-copy-text";
+import { useVideoPlayback, validVideoPlaybackAssetId } from "@/hooks/use-video-playback";
 import { useImageDrop } from "@/hooks/use-image-drop";
 import { imageModelDisplayName } from "@/lib/model-display";
 import { useAsyncAction } from "@/hooks/use-async-action";
@@ -275,7 +276,10 @@ export default function AssetsPage() {
             if (targetId && targetId !== "new" && !target) throw new Error(t("目标画布不存在或无权访问"));
             if (useUserStore.getState().user?.id !== requestOwnerId) throw new Error(t("账号已切换，已停止加入画布"));
             const offsetY = target?.nodes.length ? Math.max(...target.nodes.map(node => node.position.y + node.height)) + 60 : 0;
-            const nodes = assetCanvasNodes(detailed, offsetY);
+            const nodes = assetCanvasNodes(detailed, offsetY).map((node, index) => {
+                const serverAssetId = detailed[index]?.kind === "video" ? validVideoPlaybackAssetId(detailed[index]?.metadata?.serverAssetId) : null;
+                return serverAssetId ? { ...node, metadata: { ...node.metadata, serverAssetId } } : node;
+            });
             const store = useCanvasStore.getState();
             const canvasId = target?.id || store.importProject({ title: "素材选集", nodes,
                 viewport: assetCanvasViewport(nodes, { width: window.innerWidth, height: window.innerHeight }) });
@@ -889,8 +893,16 @@ function AssetDetailPreview({ asset }: { asset: Asset }) {
 }
 
 function ResolvedAssetVideo({ asset, className, controls = false }: { asset: Extract<Asset, { kind: "video" }>; className?: string; controls?: boolean }) {
+    const t = useUiText();
     const source = useResolvedAssetMedia(asset);
-    return source ? <video src={source} controls={controls} preload="metadata" className={className} /> : null;
+    const playback = useVideoPlayback({ assetId: asset.metadata?.serverAssetId, originalUrl: source, storageKey: asset.data.storageKey });
+    return <div>
+        {playback.playbackUrl ? <video src={playback.playbackUrl} controls={controls} preload="metadata" className={className} onError={playback.onError} onLoadedMetadata={playback.onLoadedMetadata} /> : null}
+        {playback.status === "preparing" ? <p role="status" className="mt-2 flex items-center gap-2 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />{t("正在准备兼容预览，最多等待 150 秒；下载和导出仍为原件。")}</p> : null}
+        {playback.error ? <div role="alert" className="mt-2 text-sm text-destructive"><p>{t(playback.error)}</p><button type="button" className="mt-1 underline" onClick={playback.retry}>{t("重试预览")}</button></div> : null}
+        {playback.status === "local" ? <p className="mt-2 text-xs text-muted-foreground">{t("仅有本地原件，服务端兼容预览不可用；播放能力取决于当前浏览器。")}</p> : null}
+        <p className="mt-2 text-xs text-muted-foreground">{playback.width && playback.height ? `${playback.width}x${playback.height}` : t("尺寸未知")}{" · "}{playback.durationMs ? `${(playback.durationMs / 1000).toFixed(2)} ${t("秒")}` : t("视频时长未知")}</p>
+    </div>;
 }
 
 function AssetCard({
