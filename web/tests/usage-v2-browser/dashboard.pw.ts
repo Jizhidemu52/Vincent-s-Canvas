@@ -83,6 +83,10 @@ test("six tabs, URL scope, real sorting/pagination requests and profile work wit
     expect(new URL(page.url()).searchParams.get("uDepartments")).toBe(departmentId);
     await expect(page.getByLabel("分析部门筛选")).toBeVisible();
     await page.getByRole("button", { name: "清除维度筛选", exact: true }).click();
+    await expect.poll(() => {
+        const query = state.calls.filter((call) => call.url.pathname.endsWith("people-v2")).at(-1)?.url.searchParams;
+        return { departmentIds: query?.get("departmentIds"), page: query?.get("page") };
+    }).toEqual({ departmentIds: null, page: "1" });
     await loaded(page);
     await page.locator(".ant-pagination-item-3").click();
     await loaded(page);
@@ -155,7 +159,9 @@ test("paid analysis keeps explicit preview, invalidates scope changes and does n
     expect(state.calls.filter((call) => call.url.pathname.endsWith("/analyze"))).toHaveLength(0);
     await page.getByRole("button", { name: "发送已预览汇总 · 可能付费", exact: true }).click();
     await expect(page.getByText(/本次预览不自动重发|本次操作未完成|使用分析服务暂不可用/).first()).toBeVisible();
-    await expect(page.getByRole("button", { name: "发送已预览汇总 · 可能付费", exact: true })).toBeDisabled();
+    await expect(page.getByRole("button", { name: /^(?:loading )?发送已预览汇总 · 可能付费$/ })).toBeDisabled();
+    await expect(page.getByRole("button", { name: /^(?:loading )?发送已预览汇总 · 可能付费$/ })).not.toHaveClass(/ant-btn-loading/);
+    await expect(page.getByRole("button", { name: "取消等待", exact: true })).toHaveCount(0);
     const paid = state.calls.filter((call) => call.url.pathname.endsWith("/analyze"));
     expect(paid).toHaveLength(1);
     expect(paid[0]!.body).toEqual({ previewId: "frozen-id", previewHash: "frozen-hash", modelConfigId: modelId, confirm: true });
