@@ -34,6 +34,11 @@ test("视频可并行提交且刷新恢复各自结果，手动入库不重复�
         await route.abort("connectionreset");
     });
     await context.route("**/api/assets/*/content", route => route.fulfill({ contentType: "video/mp4", body: video }));
+    await context.route("**/api/assets/*/playback", route => {
+        const id = new URL(route.request().url()).pathname.split("/")[3];
+        if (!api.tasks.has(id)) return route.fallback();
+        return route.fulfill({ contentType: "video/mp4", body: video });
+    });
     await page.goto("/video");
     const prompt = page.getByRole("textbox", { name: "视频提示词" });
     await prompt.fill("第一条视频：产品旋转");
@@ -120,6 +125,7 @@ for (const parameterModelId of ["happyhorse-1.1", "wan2.7", "MiniMax-H3", "douba
             return route.fulfill({ status: 201, json: { task } });
         });
         await context.route(`**/api/assets/${resultId}/content`, route => route.fulfill({ contentType: "video/mp4", body: video }));
+        await context.route(`**/api/assets/${resultId}/playback`, route => route.fulfill({ contentType: "video/mp4", body: video }));
         await page.goto("/video");
         await page.getByRole("textbox", { name: "视频提示词" }).fill("保留产品结构，缓慢移动镜头");
         await page.getByRole("button", { name: /^调\s*整$/ }).click();
