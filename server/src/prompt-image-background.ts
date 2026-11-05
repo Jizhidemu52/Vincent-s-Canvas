@@ -8,7 +8,7 @@ export async function promptImageBackground(input: PromptInput, target: PromptTa
   readPrimary: () => Promise<PromptSource>, parameters: Record<string, unknown>) {
   if (input.mode !== "edit" || input.hasMask || !["pattern-extract", "pattern-colorway"].includes(input.scene)) return parameters;
   const supportsBackground = !target.workflowConfigId && (target.protocol === "openai" && /^gpt-image-(?:1|1-mini|1\.5|2|2\.5-flare|2\.5-sunburst)$/.test(target.modelId)
-    || target.protocol === "apimart" && /^gpt-image-2\.5-(?:flare|sunburst)$/.test(target.modelId));
+    || target.protocol === "apimart" && /^gpt-image-2\.[56]-(?:flare|sunburst)$/.test(target.modelId));
   if (input.scene === "pattern-extract" && input.fields.extractBackground === "白底") {
     const result = { ...parameters };
     // Remove stale automatic transparency even on a route without native background parameters.

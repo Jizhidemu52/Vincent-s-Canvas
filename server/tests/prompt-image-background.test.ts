@@ -24,6 +24,12 @@ describe("structured artwork background contract", () => {
     expect(await promptImageBackground(scene(), target, () => source("flower"), {})).toEqual({ background: "transparent", output_format: "png" });
     expect(await promptImageBackground(scene(), target, () => source("knit"), {})).toEqual({ background: "opaque" });
   });
+  test.each(["gpt-image-2.6-flare", "gpt-image-2.6-sunburst"])("%s preserves transparent artwork through its native background parameter", async modelId => {
+    expect(await promptImageBackground(scene(), { ...target, modelId }, () => source("flower"), {}))
+      .toEqual({ background: "transparent", output_format: "png" });
+    expect(await promptImageBackground(scene(), { ...target, modelId }, () => source("knit"), { background: "transparent" }))
+      .toEqual({ background: "opaque" });
+  });
   test("opaque source background wins over stale transparent or auto advanced settings", async () => {
     for (const background of ["transparent", "auto"])
       expect(await promptImageBackground(scene(), target, () => source("knit"), { background })).toEqual({ background: "opaque" });

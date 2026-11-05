@@ -2,6 +2,8 @@ import { expect, test } from "bun:test";
 import ts from "typescript";
 import { assertImageEditMaskSupport, prepareImageEditInput } from "../src/image-edit-input";
 import { ApiMartImageQueryRetryable, ApiMartImageTaskPending } from "../src/apimart-image";
+import { validateQuickImageSource } from "../src/image-result-processing";
+import { prepareQuickImageTask } from "../src/quick-image-tools";
 
 const bytes = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAACXBIWXMAAAABAAAAAQBPJcTWAAAAFUlEQVR4nGP8////fwYGBgYWEAHCAD4KBAICIHhuAAAAAElFTkSuQmCC", "base64");
 const assets = ["original.png", "mask.png", "texture.png"].map(filename => ({ filename, bytes, mimeType: "image/png" }));
@@ -13,14 +15,14 @@ const newTask = () => ({ id: "image-task", execution_token: "execution-one", use
   prompt: "edit", parameters: { inputArchive: { maskReferenceIndex: 1 }, quality: "xhigh", resolution: "4k" }, source_urls: ["original", "mask", "texture"], upstream_task_id: null as string | null, upstream_submission_started_at: null as string | null,
   poll_deadline_at: null as string | null });
 
-function harness(claim = true, failQuery?: () => unknown) {
+function harness(claim = true, failQuery?: () => unknown, sourceAssets = assets) {
   const statements: Array<{ sql: string; values: unknown[] }> = [];
   const calls: Record<string, any>[] = [];
   let loaded = 0;
   let downloaded = 0;
   const deadline = new Date(Date.now() + 15 * 60_000).toISOString();
   const dependencies = {
-    loadSourceAssets: async () => { loaded++; return assets; }, prepareImageEditInput,
+    loadSourceAssets: async () => { loaded++; return sourceAssets; }, prepareImageEditInput, validateQuickImageSource,
     db: { query: async (sql: string, values: unknown[]) => { statements.push({ sql, values }); return { rows: claim ? [{ id: "image-task", poll_deadline_at: deadline }] : [] }; } },
     VideoSubmissionClaimLost: class extends Error {}, ApiMartImageTaskPending, ApiMartImageQueryRetryable,
     stepApiMartImageTask: async (input: Record<string, any>) => {
@@ -61,6 +63,22 @@ test("Worker isolates PNG mask, persists Mark upstream ID and deadline, then yie
   expect(h.statements[0]!.sql).toContain("lease_expires_at>now()");
   expect(h.statements[0]!.values).toEqual(["image-task", "execution-one"]);
   expect(h.statements[1]!.sql).toContain("poll_deadline_at=COALESCE(poll_deadline_at,now()+interval '15 minutes')");
+});
+
+test("quick image validates original bytes before the single submission and recovers by the same upstream ID", async () => {
+  const prepared = prepareQuickImageTask({ operationType: "inpaint", toolKey: "canvas-edit", prompt: "", sourceUrls: ["owned-image"], parameters: { quickImageAction: "remove-background" } as Record<string, unknown> });
+  const task = { ...newTask(), model_id: "gemini-nano-banana-2.1", prompt: prepared.prompt!, parameters: prepared.parameters!, source_urls: prepared.sourceUrls };
+  const valid = harness(true, undefined, [assets[0]!]);
+  await expect(valid.execute(task, { apiKey: "fixture-only" })).rejects.toMatchObject({ nextPollMs: 3_000 });
+  expect(valid.calls).toHaveLength(1); expect(valid.calls[0]!.sourceImages).toHaveLength(1);
+  expect(valid.calls[0]!.parameters).toMatchObject({ quickImageAction: "remove-background", n: 1, size: "auto" });
+  const loadedOnce = valid.loaded();
+  expect(await valid.execute(task, { apiKey: "fixture-only" })).toHaveLength(2);
+  expect(valid.loaded()).toBe(loadedOnce); expect(valid.calls[1]!.upstreamTaskId).toBe("provider-image-task");
+  const invalid = harness(true, undefined, [{ filename: "broken.png", mimeType: "image/png", bytes: Buffer.from("broken") }]);
+  const invalidTask = { ...task, upstream_task_id: null, upstream_submission_started_at: null };
+  await expect(invalid.execute(invalidTask, { apiKey: "fixture-only" })).rejects.toThrow();
+  expect(invalid.calls).toHaveLength(0); expect(invalid.statements).toHaveLength(0);
 });
 
 test("Worker resumes original upstream image without loading or uploading reference assets again", async () => {

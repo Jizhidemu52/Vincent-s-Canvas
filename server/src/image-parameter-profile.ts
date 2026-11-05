@@ -1,9 +1,9 @@
-import { MARK_IMAGE_MODELS, MARK_IMAGE_PROVIDER_ID } from "../../shared/mark-image-models";
+import { MARK_GPT26_IMAGE_MODELS, MARK_IMAGE_MODELS, MARK_IMAGE_PROVIDER_ID } from "../../shared/mark-image-models";
 
 /** Public UI capability hint; never includes provider addresses or credentials. */
 export function imageParameterProfile(protocol: unknown, modelId: unknown, providerId?: unknown) {
   const model = String(modelId).toLowerCase();
-  if (protocol === "apimart" && providerId === MARK_IMAGE_PROVIDER_ID && MARK_IMAGE_MODELS.some(item => item.modelId === model)) {
+  if (protocol === "apimart" && providerId === MARK_IMAGE_PROVIDER_ID && [...MARK_IMAGE_MODELS, ...MARK_GPT26_IMAGE_MODELS].some(item => item.modelId === model)) {
     return model === "gemini-nano-banana-2.1" ? "resolution-1k" : "quality-resolution";
   }
   if (protocol !== "apimart") return model === "gemini-3.1-flash-image" ? "unverified"

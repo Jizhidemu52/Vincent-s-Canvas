@@ -833,7 +833,7 @@ const enCanvas: Record<string, string> = {
   "在线功能": "Online tools",
   "画布库": "Canvas library",
   "对话改图": "Conversational image editing",
-  "无线画布": "Inchoice TruCreate",
+  "无线画布": "TruCreate",
   " 个画布 ·": " canvases ·",
   "选择或新建一个画布后，助手会围绕当前项目内容进行对话、拆解提示词和生成建议，后台会把相关任务归入画布项目历史。": "Choose or create a canvas to discuss project content, develop prompts and get generation suggestions. Related tasks are saved in the canvas project history.",
   "导出选中": "Export selected",

@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { moduleKeys, toolDefinitions } from "../../shared/feature-catalog";
 import { resolveDemoToolConfiguration } from "../src/demo-tool-configuration";
-import { MARK_PLATFORM_MODELS } from "../../shared/mark-image-models";
+import { MARK_IMAGE_PROVIDER_ID, MARK_PLATFORM_MODELS } from "../../shared/mark-image-models";
+import { QUICK_IMAGE_MODEL_ID } from "../../shared/quick-image-tools";
 
 const flags = Object.fromEntries(moduleKeys.map(key => [key, true]));
 const models = [{ id: "model-a", modelId: "image-a", providerId: "provider", enabled: true, capabilities: ["generate", "edit"] }, { id: "model-b", modelId: "image-b", providerId: "provider", enabled: true, capabilities: ["generate", "edit"] }];
@@ -9,6 +10,18 @@ const providers = [{ id: "provider", enabled: true }];
 const binding = { toolKey: "creative-garment-colorway" as const, modelConfigId: "model-a", enabled: true };
 
 describe("demo formal tool configuration", () => {
+  test("quick actions use Nano 2.1 while ordinary requests keep the configured model and flags", () => {
+    const configured = [{ toolKey: "canvas-edit", modelConfigId: "model-a", enabled: true }];
+    const nano = { id: "nano-uuid", modelId: QUICK_IMAGE_MODEL_ID, providerId: MARK_IMAGE_PROVIDER_ID, enabled: true, capabilities: ["generate", "edit"] };
+    const quickProviders = [...providers, { id: MARK_IMAGE_PROVIDER_ID, enabled: true, protocol: "apimart" }];
+    const input = { operationType: "inpaint", toolKey: "canvas-edit", modelConfigId: "model-b", parameters: { quickImageAction: "remove-background" } };
+    expect(resolveDemoToolConfiguration(input, configured, [...models, nano], quickProviders, flags).modelConfigId).toBe(nano.id);
+    expect(resolveDemoToolConfiguration({ ...input, modelConfigId: "model-a", parameters: {} }, configured, [...models, nano], providers, flags).modelConfigId).toBe("model-a");
+    expect(() => resolveDemoToolConfiguration(input, configured, models, providers, flags)).toThrow("未启用");
+    expect(() => resolveDemoToolConfiguration(input, configured, [...models, { ...nano, providerId: "provider" }], quickProviders, flags)).toThrow("未启用");
+    expect(() => resolveDemoToolConfiguration({ ...input, toolKey: "creative-style-to-sketch" }, configured, [...models, nano], quickProviders, flags)).toThrow("不匹配");
+    expect(() => resolveDemoToolConfiguration(input, configured, [...models, nano], providers, { ...flags, canvas: false })).toThrow("关闭");
+  });
   test("chat ignores canvas and client choices, including shared upstream IDs from other providers", () => {
     const chats = [
       { id: "chat-a", modelId: "same-upstream", providerId: "provider", enabled: true, capabilities: ["chat"] },

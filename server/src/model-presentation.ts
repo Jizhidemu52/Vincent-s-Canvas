@@ -157,7 +157,7 @@ export function presentPublicModel(model: Record<string, unknown>, role: unknown
     displayOrder: typeof model.displayOrder === "number" && Number.isFinite(model.displayOrder)
       ? model.displayOrder : 1000 + defaultModelOrder(model),
     imageParameterProfile: hidden ? anonymousProfiles[profile] : profile,
-    ...(image && mark ? { imageSupportsMask: ["gpt-image-2.5-flare", "gpt-image-2.5-sunburst"].includes(mark.modelId) } : {}),
+    ...(image && mark ? { imageSupportsMask: /^gpt-image-2\.[56]-(?:flare|sunburst)$/.test(mark.modelId) } : {}),
     ...(mark?.modelId === "gemini-3.1-flash-image-preview-official" ? { imageSupportsOfficialFallback: false } : {}),
     ...(image ? { publicName: publicModelName(model), modelIdentityHidden: hidden } : {}),
     ...(label ? { publicDescription: label.description } : {}),

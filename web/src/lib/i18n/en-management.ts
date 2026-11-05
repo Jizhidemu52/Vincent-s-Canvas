@@ -553,7 +553,7 @@ const enManagement: Record<string, string> = {
     "不可操作": "No actions available",
     "恢复": "Resume",
     "筛选选项加载失败": "Failed to load filter options",
-    "无线画布历史-{p0}.csv": "Inchoice-TruCreate-history-{p0}.csv",
+    "TruCreate历史-{p0}.csv": "TruCreate-history-{p0}.csv",
     "当前筛选结果已导出并写入审计日志": "Filtered results exported and recorded in the audit log",
     "历史导出失败": "Failed to export history",
     "全部模型": "All models",

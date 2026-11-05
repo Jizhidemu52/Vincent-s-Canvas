@@ -86,7 +86,7 @@ export const CanvasTopBar = memo(function CanvasTopBar({
                         { type: "divider" },
                         canvasActionMenuItem("deleteProject", onDeleteProject, <Trash2 className="size-4" />),
                     ] }}>
-                        <button type="button" className="cw-icon cw-brand" aria-label={uiText("打开画布菜单")} title={uiText("无限画布菜单")}><InchoiceBrand /><ChevronDown className="size-3 shrink-0" /></button>
+                        <button type="button" className="cw-icon cw-brand" aria-label={uiText("打开画布菜单")} title={uiText("自由画布菜单")}><InchoiceBrand /><ChevronDown className="size-3 shrink-0" /></button>
                     </Dropdown>
                     <div ref={titleRef} className="cw-project-title">
                         {isTitleEditing ? (

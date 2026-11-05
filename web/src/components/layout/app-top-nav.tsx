@@ -29,14 +29,14 @@ export function AppTopNav() {
         {!hideShell && <>
             <aside className="wb-sidebar hidden h-dvh w-[216px] shrink-0 flex-col px-4 py-5 md:flex">
                 <div className="flex flex-col gap-3">
-                    <Link to="/" className="flex h-10 shrink-0 items-center justify-center text-foreground transition hover:opacity-80" aria-label={uiText("INCHOICE · 无限画布首页")}><InchoiceBrand /></Link>
+                    <Link to="/" className="flex h-10 shrink-0 items-center justify-center text-foreground transition hover:opacity-80" aria-label={uiText("TruCreate · 首页")}><InchoiceBrand /></Link>
                     {canvasEnabled && <button type="button" disabled={!hydrated} onClick={createAndEnter} className="inchoice-new-project inline-flex h-9 items-center justify-center gap-1.5 rounded-md bg-foreground px-3 text-xs font-bold shadow-sm transition hover:opacity-85 disabled:cursor-wait disabled:opacity-50"><Plus className="size-3.5" />{uiText("新建画布")}</button>}
                 </div>
                 <nav aria-label={uiText("主导航")} className="hide-scrollbar mt-6 min-h-0 flex-1 overflow-y-auto pb-6"><NavigationMenu /></nav>
                 <NavigationFooter />
             </aside>
             <header className="wb-sidebar fixed inset-x-0 top-0 z-20 flex h-14 items-center justify-between border-b px-4 md:hidden">
-                <Link to="/" className="flex min-w-0 items-center text-foreground" aria-label={uiText("INCHOICE · 无限画布首页")}><InchoiceBrand className="!w-[144px]" /></Link>
+                <Link to="/" className="flex min-w-0 items-center text-foreground" aria-label={uiText("TruCreate · 首页")}><InchoiceBrand className="!w-[144px]" /></Link>
                 <div className="flex items-center gap-2">
                     {canvasEnabled && <button type="button" disabled={!hydrated} className="inchoice-new-project inline-flex h-9 items-center gap-1.5 rounded-md bg-foreground px-3 text-xs font-bold disabled:cursor-wait disabled:opacity-50" onClick={createAndEnter}><Plus className="size-4" />{uiText("新建")}</button>}
                     <button type="button" className="inline-flex size-9 items-center justify-center rounded-md border border-border bg-card text-foreground" onClick={() => setMobileNavOpen(true)} aria-label={uiText("打开导航菜单")} title={uiText("导航菜单")}><Menu className="size-5" /></button>

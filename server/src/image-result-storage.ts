@@ -1,4 +1,5 @@
 import { processImageResult } from "./image-result-processing";
+import { quickImageResultAction } from "./quick-image-tools";
 
 type ImageBytes = { bytes: Uint8Array; mimeType: string };
 type AssetReference = { assetId: string; mimeType: string; filename: string };
@@ -23,7 +24,7 @@ export class ImageResultPersistenceError extends Error {
 
 export function hasImageResultProcessing(parameters: Record<string, unknown>) {
   const archive = parameters.inputArchive as Record<string, unknown> | undefined;
-  return parameters.background === "transparent" || archive?.maskReferenceIndex !== undefined || ["png", "jpeg", "webp"].includes(String(parameters.output_format));
+  return Boolean(quickImageResultAction(parameters)) || parameters.background === "transparent" || archive?.maskReferenceIndex !== undefined || ["png", "jpeg", "webp"].includes(String(parameters.output_format));
 }
 
 /** Persist upstream bytes before any fallible local decoding, mask loading or conversion. */
@@ -42,6 +43,7 @@ export async function storeImageResult(input: StoredResultInput): Promise<AssetR
       ...(["png", "jpeg", "webp"].includes(format) ? { requestedOutputFormat: format } : {}),
       ...(["jpeg", "webp"].includes(format) && input.parameters.output_compression !== undefined && input.parameters.output_compression !== "" && Number.isInteger(compression) ? { outputCompression: compression } : {}),
       operations: processed.operations,
+      ...(quickImageResultAction(input.parameters) ? { quickImageAction: quickImageResultAction(input.parameters), recipeVersion: 1 } : {}),
     };
     let warning = processed.warning;
     let exported: AssetReference | undefined;

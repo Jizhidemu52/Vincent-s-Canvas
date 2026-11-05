@@ -10,6 +10,8 @@ import { createTasksRouter } from "../src/routes/tasks";
 import { createChatRouter } from "../src/routes/chat";
 import { normalizeTaskTool, resolveToolExecution, type ToolConfiguration } from "../src/tool-configuration";
 import { resolveCurrentPromptPricing } from "../src/prompt-templates";
+import { QUICK_IMAGE_MODEL_ID, quickImageTaskTarget } from "../../shared/quick-image-tools";
+import { MARK_IMAGE_PROVIDER_ID } from "../../shared/mark-image-models";
 
 const modelId = "10000000-0000-4000-8000-000000000001";
 const secondModelId = "10000000-0000-4000-8000-000000000002";
@@ -24,7 +26,7 @@ function fixture() {
     enabled: true, providerEnabled: true, workflowConfigId: null as string | null, workflowEnabled: true,
     capabilities: ["generate", "edit", "video", "audio", "chat"],
     creditCost: 4, rmbCost: 0.4, credit_cost: 4, rmb_cost: "0.4",
-    providerName: "Other provider", protocol: "openai", providerBaseUrl: "https://provider.invalid",
+    providerId: "ordinary-provider", providerName: "Other provider", protocol: "openai", providerBaseUrl: "https://provider.invalid",
   }));
   const statements: Array<{ sql: string; values: unknown[] }> = [];
   const reservations: unknown[][] = [];
@@ -54,6 +56,7 @@ function fixture() {
       if (sql.includes("FROM pricing_rule_versions")) return { rows: [{ operationType: values[0] ?? "inpaint", credits: 8, rmbCost: 0.8, rmb_cost: "0.8", version: 3 }] };
       if (sql.includes("FROM model_configs")) {
         let selected = values.length ? models.filter(model => model.id === values[0] || model.modelId === values[0]) : models;
+        if (sql.includes("m.provider_id=$2")) selected = selected.filter(model => model.providerId === values[1] && model.protocol === "apimart");
         if (sql.includes("m.enabled=true")) selected = selected.filter(model => model.enabled && model.providerEnabled && (!model.workflowConfigId || model.workflowEnabled));
         return { rows: selected };
       }
@@ -229,6 +232,47 @@ describe("formal catalog configuration", () => {
 });
 
 describe("authoritative scoped execution", () => {
+  test("quick image routes enforce the built-in recipe and fixed Nano model without altering ordinary bindings", async () => {
+    const state = fixture();
+    state.models[1]!.modelId = QUICK_IMAGE_MODEL_ID;
+    state.models[1]!.protocol = "apimart";
+    state.models[1]!.providerId = MARK_IMAGE_PROVIDER_ID;
+    for (const key of ["image-edit", "detail-enhance", "canvas-edit"] as const) state.bind(key, { modelConfigId: modelId, creditCostOverride: 0 });
+    const { url } = await serve(state, "designer");
+    for (const action of ["remove-background", "hd-upscale"] as const) for (const canvas of [false, true]) {
+      const target = quickImageTaskTarget(action, canvas);
+      const response = await post(`${url}/tasks`, { ...target, requestId: `quick-${action}-${canvas}`, projectId: "canvas", modelConfigId: modelId,
+        prompt: "forged prompt", parameters: { quickImageAction: action, size: "1:1", resolution: "1k", n: 9, background: "opaque", output_format: "jpeg" }, sourceUrls: ["owned-image"] });
+      expect(response.status).toBe(201);
+      const { task } = await response.json();
+      expect(task.modelConfigId).toBe(secondModelId); expect(task.toolKey).toBe(target.toolKey);
+      expect(task.prompt).not.toContain("forged prompt");
+      expect(task.parameters).toMatchObject({ quickImageAction: action, resolution: action === "hd-upscale" ? "4k" : "2k", size: "auto", n: 1, count: 1 });
+      expect(task.parameters).not.toHaveProperty("background"); expect(task.parameters).not.toHaveProperty("output_format");
+      expect(task.optimized).toBe(false);
+    }
+    expect(state.queues).toBe(4); expect(state.reservations).toHaveLength(4);
+    expect((await resolveToolExecution(state.db, { toolKey: "image-edit", operationType: "inpaint" })).modelConfigId).toBe(modelId);
+    state.flags.set("canvas", false);
+    await expect(resolveToolExecution(state.db, { toolKey: "canvas-edit", operationType: "inpaint", parameters: { quickImageAction: "hd-upscale" } })).rejects.toMatchObject({ code: "MODULE_DISABLED" });
+    state.models[1]!.enabled = false;
+    const disabled = await post(`${url}/tasks`, { ...quickImageTaskTarget("remove-background"), requestId: "quick-disabled-model", projectId: "canvas", parameters: { quickImageAction: "remove-background" }, sourceUrls: ["owned-image"] });
+    expect(disabled.status).toBe(400); expect((await disabled.json()).error).toBe("MODEL_DISABLED");
+    expect(state.queues).toBe(4); expect(state.reservations).toHaveLength(4);
+    expect(state.statements.some(({ sql }) => /(?:UPDATE|INSERT INTO) (?:model_configs|providers|tool_api_configurations|module_flags)/.test(sql))).toBe(false);
+  });
+
+  test("quick resolver checks the action scope even outside task admission and never picks another provider's Nano alias", async () => {
+    const state = fixture();
+    state.models[0]!.modelId = QUICK_IMAGE_MODEL_ID; state.models[0]!.protocol = "apimart";
+    const input = { toolKey: "image-edit", operationType: "inpaint", parameters: { quickImageAction: "remove-background" } };
+    await expect(resolveToolExecution(state.db, input)).rejects.toMatchObject({ code: "MODEL_DISABLED" });
+    for (const patch of [{ toolKey: "creative-style-to-sketch" }, { toolKey: "image", operationType: "image_generation" }, { parameters: { quickImageAction: "unknown" } }, { parameters: { quickImageAction: "hd-upscale" } }]) {
+      await expect(resolveToolExecution(state.db, { ...input, ...patch }, { allowModelOverride: true })).rejects.toMatchObject({ code: "QUICK_IMAGE_ACTION_INVALID" });
+    }
+    expect(state.statements.filter(({ sql }) => sql.includes("FROM model_configs"))).toHaveLength(1);
+  });
+
   test("all chat requests ignore old or forged model choices and use the shared configuration UUID", async () => {
     const state = fixture();
     state.bind("gpt-chat", { creditCostOverride: 2 });

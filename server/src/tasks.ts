@@ -8,6 +8,7 @@ import { resolveToolExecution, type ToolConfiguration } from "./tool-configurati
 import { removeQueuedTask, scheduleQueuedTask } from "./task-queue";
 import type { PromptInput } from "../../shared/prompt-contracts";
 import { fenceBatchAdmission, type BatchAdmissionToken } from "./batch-admission";
+import { prepareQuickImageTask } from "./quick-image-tools";
 
 export type TaskPriority = "normal" | "priority" | "urgent";
 export type QueueTaskAction = "pause" | "resume" | "cancel";
@@ -100,6 +101,7 @@ export async function enqueueTask(
   input: TaskInput,
   videoPreflight = preflightStoredVideoTask,
 ) {
+  input = prepareQuickImageTask(input);
   input.parameters = singleImageTaskParameters(input.operationType, input.parameters);
   const taskId = randomUUID();
   let preparedVideo: { execution: ToolConfiguration & { modelConfigId: string }; checked: Awaited<ReturnType<typeof preflightStoredVideoTask>> } | undefined = input.videoPreflightResult && input.toolConfiguration

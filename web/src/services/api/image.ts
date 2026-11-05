@@ -13,6 +13,7 @@ import { imageAdvancedParameters, readImageOptions } from "@/lib/image-advanced-
 import { resolveToolConfig } from "./tool-runtime";
 import { createClientId } from "@/lib/client-id";
 import { parseCreateImageArguments, parseStrictJson } from "@/lib/strict-json";
+import { isQuickImageTool, quickImageAction, QUICK_IMAGE_MODEL, type QuickImageAction } from "@/lib/quick-image-tools";
 
 export type AiTextMessage = {
     role: "system" | "user" | "assistant";
@@ -37,7 +38,7 @@ export type ResponseFunctionTool = {
 export type ToolResponseResult = { content: string; toolCalls: ResponseToolCall[]; stopReason?: string; claudeAssistantContent?: ClaudeAssistantContent; responsesOutputItems?: Array<Record<string, unknown>> };
 
 type ToolChoice = "auto" | "required" | { type: "function"; name: string };
-type RequestOptions = { exactPrompt?: boolean; promptInput?: PromptInputData; onOptimizing?: () => void; onCompiled?: (prompt: string, optimized: boolean, submittedPrompt?: string) => void; chatProfile?: "creative-chat" | "canvas-assistant"; imageAgentProfile?: "creative-chat" | "canvas-assistant"; profileContext?: Record<string, unknown>; requestId?: string; chatRequestId?: string; signal?: AbortSignal; operationType?: "image_generation" | "inpaint" | "upscale" | "batch_image"; tool?: string; referencePromptLanguage?: "zh" | "en"; webSearch?: boolean; onToolCallStart?: (name: string) => void; onChatSubmissionStarted?: (requestId: string) => void; cancelOnAbort?: () => boolean; onSubmissionStarted?: () => void | Promise<void>; onSubmitted?: (taskIds: string[]) => void | Promise<void> };
+type RequestOptions = { quickImageAction?: QuickImageAction; exactPrompt?: boolean; promptInput?: PromptInputData; onOptimizing?: () => void; onCompiled?: (prompt: string, optimized: boolean, submittedPrompt?: string) => void; chatProfile?: "creative-chat" | "canvas-assistant"; imageAgentProfile?: "creative-chat" | "canvas-assistant"; profileContext?: Record<string, unknown>; requestId?: string; chatRequestId?: string; signal?: AbortSignal; operationType?: "image_generation" | "inpaint" | "upscale" | "batch_image"; tool?: string; referencePromptLanguage?: "zh" | "en"; webSearch?: boolean; onToolCallStart?: (name: string) => void; onChatSubmissionStarted?: (requestId: string) => void; cancelOnAbort?: () => boolean; onSubmissionStarted?: () => void | Promise<void>; onSubmitted?: (taskIds: string[]) => void | Promise<void> };
 type ResponseInputContent = { type: "input_text"; text: string } | { type: "input_image"; image_url: string };
 type ResponseInputItem = { role: "system" | "user" | "assistant"; content: string | ResponseInputContent[] } | { type: "claude_assistant"; content: ClaudeAssistantContent } | { type: "responses_assistant"; output: Array<Record<string, unknown>> } | { type: "function_call"; call_id: string; name: string; arguments: string; thoughtSignature?: string } | { type: "function_call_output"; call_id: string; output: string };
 type ResponseApiToolDefinition = { type: "function"; name: string; description?: string; parameters: Record<string, unknown>; strict?: boolean };
@@ -85,6 +86,14 @@ function requestResolvedGeneration(resolved: Awaited<ReturnType<typeof resolveTo
 
 export async function requestEdit(config: AiConfig, prompt: string, references: ReferenceImage[], mask?: ReferenceImage, options?: RequestOptions) {
     options?.signal?.throwIfAborted();
+    if (isQuickImageTool(options?.tool) || options?.quickImageAction) {
+        if (mask || references.length !== 1) throw new Error("请只添加一张原图");
+        const action = options!.quickImageAction || quickImageAction(options!.tool!);
+        const tool = options?.tool === "canvas-edit" ? "canvas-edit" : action === "remove-background" ? "image-edit" : "detail-enhance";
+        return requestQueuedImages({ modelId: QUICK_IMAGE_MODEL, prompt: "", count: 1, operationType: tool === "detail-enhance" ? "upscale" : "inpaint", tool, quickImageAction: action,
+            references, requestId: options?.requestId, signal: options?.signal, cancelOnAbort: options?.cancelOnAbort,
+            onSubmissionStarted: options?.onSubmissionStarted, onSubmitted: options?.onSubmitted, onCompiled: options?.onCompiled });
+    }
     if (!mask && imageModelProfile(config.model || config.imageModel).kind === "midjourney-blend") {
         return requestGeneration(config, "", { ...options, operationType: "image_generation", tool: options?.tool === "canvas-edit" ? "canvas-image" : options?.tool }, references);
     }

@@ -77,6 +77,7 @@ export function useCanvasImageActions(options: CanvasImageActionsOptions) {
         maskEditImageNode: (...args: Parameters<ImageActions["maskEditImageNode"]>) => invoke("maskEditImageNode", ...args),
         upscaleImageNode: (...args: Parameters<ImageActions["upscaleImageNode"]>) => invoke("upscaleImageNode", ...args),
         generateAngleNode: (...args: Parameters<ImageActions["generateAngleNode"]>) => invoke("generateAngleNode", ...args),
+        quickImageNode: (...args: Parameters<ImageActions["quickImageNode"]>) => invoke("quickImageNode", ...args),
         runLocalImageOperation,
     }), [invoke, runLocalImageOperation]);
 }

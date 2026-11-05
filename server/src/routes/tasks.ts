@@ -34,6 +34,7 @@ import { promptHash } from "../prompt-recipe-store";
 import { withTransaction } from "../db-transaction";
 import { assertVideoMotionPolicy } from "../video-motion-input";
 import { claimBatchAdmission, fenceBatchAdmission, findBatchForSubmission, finishBatchAdmission, readBatchAdmission, recordBatchAdmissionFailure, type BatchAdmissionToken } from "../batch-admission";
+import { prepareQuickImageTask } from "../quick-image-tools";
 
 const actionSchema = z.enum(["pause", "resume", "cancel"]);
 
@@ -58,6 +59,8 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
     next();
   });
   const prepare = async <T extends ReturnType<typeof singleSchema.parse>>(actor: AuthenticatedRequest["auth"], input: T) => {
+    input = prepareQuickImageTask(input);
+    if (input.parameters.quickImageAction) return { ...input, optimized: false };
     readImageAgentGenerationProfile(input.parameters, input.operationType);
     validateImagePromptExclusions(input);
     const finish = async <P extends T>(prepared: P) => {

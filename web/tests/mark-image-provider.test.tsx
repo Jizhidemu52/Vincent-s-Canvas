@@ -177,11 +177,15 @@ test("first configuration groups every registered image, text, video and blend m
     try {
         const tree = await panel.settle();
         expect(panel.form.values.baseUrl).toBe(MARK_IMAGE_BASE_URL);
-        expect(MARK_PLATFORM_MODELS).toHaveLength(10);
-        expect(tree.some(element => element.type === "Tag" && Array.isArray(element.props.children) && element.props.children.join("") === "6 图片 · 2 文字 · 1 视频 · 1 多图融合")).toBe(true);
+        expect(MARK_PLATFORM_MODELS).toHaveLength(12);
+        expect(tree.some(element => element.type === "Tag" && Array.isArray(element.props.children) && element.props.children.join("") === "8 图片 · 2 文字 · 1 视频 · 1 多图融合")).toBe(true);
         expect(panel.form.values.models).toEqual(MARK_PLATFORM_MODELS.map(model => ({ enabled: model.defaultEnabled, creditCost: 0, rmbCost: imageRmb[model.modelId] ?? 0, concurrencyLimit: 2 })));
         expect(MARK_PLATFORM_MODELS.filter(model => !model.defaultEnabled).map(model => model.modelId)).toEqual(["grok-imagine-image-2.0"]);
-        expect(MARK_PLATFORM_MODELS.at(-1)?.modelId).toBe("claude-sonnet-5-5");
+        expect(MARK_PLATFORM_MODELS[9]?.modelId).toBe("claude-sonnet-5-5");
+        expect(MARK_PLATFORM_MODELS.slice(-2).map(({ modelId, description }) => ({ modelId, description }))).toEqual([
+            { modelId: "gpt-image-2.6-flare", description: "速度优先，适合快速迭代" },
+            { modelId: "gpt-image-2.6-sunburst", description: "细节与编辑一致性优先" },
+        ]);
         expect(tree.filter(element => element.type === "Text" && element.props.strong).map(element => element.props.children).sort()).toEqual(MARK_PLATFORM_MODELS.map(model => model.name).sort());
         expect(tree.filter(element => element.type === "Title" && element.props.id).map(element => element.props.children)).toEqual(["图片模型", "文字模型", "视频模型", "多图融合"]);
         expect(tree.filter(element => element.type === "InputNumber")).toHaveLength(MARK_PLATFORM_MODELS.length * 3);
@@ -262,6 +266,26 @@ test("adding Blend and image models preserves non-cost settings and costs outsid
         expect(panel.writes[0].models.slice(0, 5)).toEqual(previous.map(model => ({ ...model, rmbCost: imageRmb[model.modelId] ?? model.rmbCost })));
         expect(panel.writes[0].models.slice(5)).toEqual(MARK_PLATFORM_MODELS.slice(5).map(({ modelId, defaultEnabled }) => ({ modelId, enabled: defaultEnabled, creditCost: 0, rmbCost: imageRmb[modelId] ?? 0, concurrencyLimit: 2 })));
         expect(panel.writes[0].apiKey).toBeUndefined();
+    } finally { panel.dispose(); }
+});
+
+test("adding GPT 2.6 preserves all ten existing settings and leaves new costs independent of 2.5", async () => {
+    const existing = savedConfiguration();
+    existing.models = existing.models.slice(0, 10).map((model, index) => ({ ...model, enabled: index % 2 === 0, creditCost: index + 1, rmbCost: (index + 1) / 10, concurrencyLimit: index + 2 }));
+    const previous = existing.models.map(({ modelId, enabled, creditCost, rmbCost, concurrencyLimit }) => ({ modelId, enabled, creditCost, rmbCost, concurrencyLimit }));
+    const panel = harness({ load: async () => existing });
+    try {
+        const tree = await panel.settle();
+        await tree.find(element => element.type === panel.Form)!.props.onFinish(panel.form.values);
+        expect(panel.writes[0].models.slice(0, 10)).toEqual(previous.map(model => ({ ...model, rmbCost: imageRmb[model.modelId] ?? model.rmbCost })));
+        expect(panel.writes[0].models.slice(10)).toEqual([
+            { modelId: "gpt-image-2.6-flare", enabled: true, creditCost: 0, rmbCost: 0, concurrencyLimit: 2 },
+            { modelId: "gpt-image-2.6-sunburst", enabled: true, creditCost: 0, rmbCost: 0, concurrencyLimit: 2 },
+        ]);
+        expect(panel.writes[0].apiKey).toBeUndefined();
+        for (const model of MARK_PLATFORM_MODELS.slice(10)) {
+            expect(tree.find(element => element.type === "InputNumber" && element.props["aria-label"] === `${model.name} 内部成本`)?.props.readOnly).toBe(false);
+        }
     } finally { panel.dispose(); }
 });
 

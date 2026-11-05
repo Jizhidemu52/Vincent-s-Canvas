@@ -61,7 +61,7 @@ export function assertImageEditMaskSupport(parameters: Record<string, unknown>, 
   if (typeof index !== "number" || !Number.isInteger(index) || index < 1) throw new ImageEditInputError("蒙版引用索引无效，请重新绘制蒙版；尚未提交生成");
   if (sourceCount !== undefined && index >= sourceCount) throw new ImageEditInputError("蒙版引用索引越界或缺少编辑原图，请重新添加蒙版；尚未提交生成");
   const supportsMask = target.protocol === "openai" && /^gpt-image-(?:1|1-mini|1\.5|2|2\.5-flare|2\.5-sunburst)$/.test(target.modelId)
-    || target.protocol === "apimart" && /^gpt-image-2\.5-(?:flare|sunburst)$/.test(target.modelId);
+    || target.protocol === "apimart" && /^gpt-image-2\.[56]-(?:flare|sunburst)$/.test(target.modelId);
   if (!supportsMask || target.workflow) {
     throw new ImageEditInputError("当前模型或渠道不支持独立 PNG 蒙版，请切换支持蒙版的 GPT Image 编辑渠道；尚未提交生成");
   }

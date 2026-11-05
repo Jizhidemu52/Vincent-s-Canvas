@@ -1,6 +1,6 @@
 const english: Record<string, string> = {
-    "VINCENT'S CANVAS / 创作工作台": "Inchoice TruCreate / Creative workspace",
-    "让想法，开始成形。": "Bring your ideas to life.",
+    "TruCreate / AI 创意设计平台": "TruCreate",
+    "想法成真": "Ideas Come True.",
     "选一个工具开始，或回到上次的画布继续创作。": "Choose a tool or continue where you left off.",
     "新建画布": "New canvas",
     "选择创作工具": "Choose a creative tool",

@@ -4,7 +4,6 @@ export default {
     "登录账号已变化，正在重新准备工作区…": "Your account has changed. Preparing the new workspace…",
     " 本地存储不可用，部分记录可能无法保留。": " Local storage is unavailable; some records may not be retained.",
     "/次": "/request", "0积分": "0 credits", "API 设置": "API settings",
-    "INCHOICE · 无线画布首页": "Inchoice TruCreate · Home", "INCHOICE · 画布菜单": "Inchoice TruCreate · Canvas menu",
     "上传图片": "Upload images", "上传图片、从素材库选择，或在画布中选择图片节点。": "Upload images, choose from your library, or select image nodes on the canvas.",
     "两次输入的新密码不一致": "The new passwords do not match.",
     "个人创作工作台": "Your creative workspace", "个人账号": "Personal account", "从画布选择": "Choose from canvas", "从素材库选择": "Choose from library",

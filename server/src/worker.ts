@@ -34,6 +34,7 @@ import { fetchProviderResult } from "./provider-result";
 import { inlineProviderImageDataUrl } from "./provider-image-result";
 import { assertImageEditMaskSupport, prepareImageEditInput } from "./image-edit-input";
 import { imageResultExtension, storeImageResult } from "./image-result-storage";
+import { validateQuickImageSource } from "./image-result-processing";
 import { scheduleAssetThumbnails } from "./asset-thumbnails";
 import { assertWorkflowTaskContext, workflowTaskContext, WorkflowTaskPending, type WorkflowTaskContext } from "./workflow-task-context";
 import { resetWorkerHealth, startWorkerHealth } from "./worker-health";
@@ -423,6 +424,7 @@ async function executeApiMartImage(
   const editInput = sourceAssets.length ? await prepareImageEditInput(sourceAssets, task.parameters, {
     protocol: "apimart", modelId: task.model_id!, operationType: task.operation_type,
   }) : { references: sourceAssets };
+  if (!task.upstream_task_id && !task.upstream_submission_started_at && task.parameters.quickImageAction) await validateQuickImageSource(editInput.references[0], task.parameters);
   let result: Awaited<ReturnType<typeof stepApiMartImageTask>>;
   try { result = await stepApiMartImageTask({
     baseUrl: task.base_url!,
@@ -786,7 +788,7 @@ async function storeResults(
         result, parameters: task.parameters, resultIndex: index,
         prepareEditInput: async () => {
           const archive = task.parameters.inputArchive as Record<string, unknown> | undefined;
-          if (archive?.maskReferenceIndex === undefined) return { references: [] };
+          if (archive?.maskReferenceIndex === undefined && !task.parameters.quickImageAction) return { references: [] };
           return prepareImageEditInput(await loadSourceAssets(task.source_urls, task.user_id), task.parameters,
             { protocol: task.protocol!, modelId: task.model_id!, operationType: task.operation_type });
         },

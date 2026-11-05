@@ -32,5 +32,6 @@ export function useNavigationPreferences() {
         try { localStorage.setItem(key, JSON.stringify(next)); } catch { /* Keep the current tab preference. */ }
         listeners.forEach(listener => listener());
     };
-    return { ...value, togglePin: (slug: string) => toggle("pinned", slug), toggleGroup: (group: string) => toggle("collapsed", group) };
+    return { ...value, togglePin: (slug: string) => toggle("pinned", slug), toggleGroup: (group: string) => toggle("collapsed", group),
+        openGroup: (group: string) => { if (read(key).collapsed.includes(group)) toggle("collapsed", group); } };
 }

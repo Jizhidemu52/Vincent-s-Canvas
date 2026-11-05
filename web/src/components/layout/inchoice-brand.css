@@ -1,14 +1,14 @@
 .inchoice-brand {
-    display: inline-block;
-    flex-shrink: 0;
+    display: inline-flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: flex-start;
+    flex-shrink: 1;
     width: 180px;
     max-width: 100%;
-    aspect-ratio: 5.2 / 1;
     vertical-align: middle;
-    /* The split falls in the transparent gap after IN. Only CHOICE follows the theme. */
-    background: linear-gradient(to right, #ed8d02 21.5%, currentColor 21.5%);
-    -webkit-mask: url("/branding/inchoice-wordmark-v1.png") center / cover no-repeat;
-    mask: url("/branding/inchoice-wordmark-v1.png") center / cover no-repeat;
+    white-space: nowrap;
+    text-align: left;
     pointer-events: none;
     user-select: none;
 }
@@ -19,17 +19,19 @@
     color: var(--background);
 }
 
-.inchoice-brand-english {
-    display: inline-block;
-    flex-shrink: 1;
-    max-width: 100%;
-    white-space: nowrap;
-    font-size: 16px;
-    font-weight: 650;
+.inchoice-brand-name {
+    font-size: 27px;
+    font-weight: 750;
     letter-spacing: -0.035em;
-    line-height: 1.5;
-    text-align: center;
-    pointer-events: none;
-    user-select: none;
+    line-height: 1;
 }
-.inchoice-brand-english > span { color: #d77e00; }
+.inchoice-brand-caption {
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    line-height: 13px;
+}
+@media (max-width: 720px) {
+    .cw-brand .inchoice-brand-name { font-size: 20px; }
+    .cw-brand .inchoice-brand-caption { display: none; }
+}

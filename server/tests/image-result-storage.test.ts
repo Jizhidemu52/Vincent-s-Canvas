@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { storeImageResult, hasImageResultProcessing, ImageResultPersistenceError } from "../src/image-result-storage";
 import { isAuxiliaryImageResult, resolveImageResultVariants, type ImageResultAsset } from "../src/image-result-variants";
+import { prepareQuickImageTask } from "../src/quick-image-tools";
 
 const result = { bytes: new Uint8Array([1, 2, 3, 4]), mimeType: "image/png" };
 function harness() {
@@ -22,6 +23,17 @@ function harness() {
 }
 
 describe("durable image variants without paid replay", () => {
+  test("quick matte failure archives the exact provider original before loading source and never exposes it as a finished cutout", async () => {
+    const h = harness();
+    const parameters = prepareQuickImageTask({ toolKey: "image-edit", operationType: "inpaint", sourceUrls: ["owned"], parameters: { quickImageAction: "remove-background" } }).parameters;
+    expect(hasImageResultProcessing(parameters)).toBe(true);
+    const error = await storeImageResult({ ...h, result, parameters, resultIndex: 0,
+      prepareEditInput: async () => { expect(h.calls).toEqual(["save:provider-original"]); return { references: [result] }; },
+      process: async () => { throw new Error("invalid matte"); },
+    }).catch(error => error);
+    expect(error).toBeInstanceOf(ImageResultPersistenceError); expect(error.message).toContain("不会自动重新生成");
+    expect(h.calls).toEqual(["save:provider-original"]); expect(h.assets[0]!.bytes).toBe(result.bytes);
+  });
   test("unrequested result is one original asset with no decode or copy", async () => {
     const h = harness();
     const primary = await storeImageResult({ ...h, result, parameters: {}, resultIndex: 0,

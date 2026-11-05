@@ -6,7 +6,7 @@ import { ArrowLeft, ArrowRight, BookmarkPlus, BookOpen, CheckSquare, ClipboardPa
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { handleSubmitShortcut } from "@/lib/submit-shortcut";
 import { App, Button, Checkbox, Drawer, Empty, Image, Input, Modal, Tag, Tooltip, Typography } from "antd";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { createWorkspaceStorage } from "@/lib/workspace-storage";
 import { saveAs } from "file-saver";
 
@@ -70,6 +70,7 @@ import { promptImageSettings } from "@/lib/prompt-editor-parameters";
 import { useDesignLibraryShare } from "@/pages/design-library/use-design-library-share";
 import { consumePlacementAiHandoff, placementDraftScope, placementHandoffToken } from "@/pages/design-workbench/local/placement/ai-handoff";
 import { PracticeExampleRecord } from "@/components/design-examples";
+import { isQuickImageTool, QUICK_IMAGE_MODEL } from "@/lib/quick-image-tools";
 
 type GeneratedImage = {
     id: string;
@@ -146,6 +147,8 @@ const imageResultCommits = new Map<string, { stopped: boolean; record: PendingIm
 type GenerationToolMode = Exclude<AdminToolMode, "gpt-chat" | "batch-image-edit" | "seamless-stitch">;
 
 const imageToolModes: Record<GenerationToolMode, { title: string; description: string; placeholder: string; button: string; projectId: string; requiresReference: boolean }> = {
+    "remove-background": { title: "一键去背景", description: "上传一张原图，自动去除背景并导出透明 PNG，保留主体与原图。", placeholder: "", button: "一键去背景", projectId: "tool-remove-background", requiresReference: true },
+    "hd-upscale": { title: "高清放大", description: "上传一张原图，使用 Nano 2.1 提升清晰度并输出 4K 图片，原图保持不变。", placeholder: "", button: "高清放大", projectId: "tool-hd-upscale", requiresReference: true },
     "midjourney-blend": {
         title: "MJ 多图融合",
         description: "上传 2–4 张参考图进行融合，不使用提示词。可独立调整生成速度、布局与自由比例。",
@@ -189,7 +192,7 @@ const imageToolModes: Record<GenerationToolMode, { title: string; description: s
 };
 
 function resolveImageToolMode(value: string | null): GenerationToolMode {
-    if (value === "detail-enhance" || value === "image-edit" || value === "angle-control" || value === "midjourney-blend") return value;
+    if (value === "detail-enhance" || value === "image-edit" || value === "angle-control" || value === "midjourney-blend" || value === "remove-background" || value === "hd-upscale") return value;
     return "image-generation";
 }
 
@@ -202,14 +205,16 @@ export default function ImagePage() {
 export function ImageGenerationPage({ creativePreset }: { creativePreset?: CreativePreset } = {}) {
     useUiText();
     const [searchParams] = useSearchParams();
+    const { pathname } = useLocation();
     const ownerId = useUserStore(state => state.user?.id);
-    const historyTool = creativePreset ? `creative-${creativePreset.id}` : resolveImageToolMode(searchParams.get("tool"));
+    const historyTool = creativePreset ? `creative-${creativePreset.id}` : resolveImageToolMode(pathname === "/remove-background" ? "remove-background" : pathname === "/hd-upscale" ? "hd-upscale" : searchParams.get("tool"));
     const placementToken = placementHandoffToken(searchParams, historyTool);
     return <ImageGenerationWorkspace key={JSON.stringify([ownerId, historyTool, placementToken])} creativePreset={creativePreset} historyTool={historyTool} />;
 }
 
 function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePreset?: CreativePreset; historyTool: string }) {
     useUiText();
+    const quickTool = isQuickImageTool(historyTool);
     const { message, modal } = App.useApp();
     const libraryShare = useDesignLibraryShare();
     const resultCanvas = useResultCanvas();
@@ -245,14 +250,15 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const baseConfig = { ...defaults, ...draftConfig };
     const config = baseConfig;
     const [references, setReferences, referencesReady] = useGenerationDraft<ImageReferenceItem[]>(`${inputDraftScope}:references`, [], async items => Promise.all(items.map(async item => ({ ...item, dataUrl: await resolveImageUrl(item.storageKey, item.dataUrl) }))));
-    const toolKey = requireToolKey(historyTool === "detail-enhance" ? "upscale" : historyTool === "image-generation" || historyTool === "midjourney-blend" || historyTool === "creative-text-to-style" ? "image_generation" : "inpaint", historyTool);
+    const toolKey = requireToolKey(historyTool === "detail-enhance" || historyTool === "hd-upscale" ? "upscale" : historyTool === "image-generation" || historyTool === "midjourney-blend" || historyTool === "creative-text-to-style" ? "image_generation" : "inpaint", historyTool === "remove-background" ? "image-edit" : historyTool === "hd-upscale" ? "detail-enhance" : historyTool);
     const businessModels = useBusinessConfigStore(state => state.models);
     const blendModels = businessModels.filter(item => item.imageParameterProfile === "blend" || item.imageParameterProfile === "midjourney-blend" || item.modelId === "midjourney-blend");
     const baseImageModel = baseConfig.imageModel || baseConfig.model;
     const selectedImageModel = historyTool === "midjourney-blend"
         ? (blendModels.find(item => item.modelId === baseImageModel || item.id === baseImageModel) || blendModels[0])?.modelId || ""
         : baseImageModel;
-    const effectiveConfig = useToolConfig({ ...baseConfig, model: selectedImageModel, imageModel: selectedImageModel }, toolKey);
+    const managedConfig = useToolConfig({ ...baseConfig, model: selectedImageModel, imageModel: selectedImageModel }, toolKey);
+    const effectiveConfig = quickTool ? { ...baseConfig, model: QUICK_IMAGE_MODEL, imageModel: QUICK_IMAGE_MODEL, count: "1", size: "auto", quality: historyTool === "hd-upscale" ? "4K" : "2K", imageOptions: "", systemPrompt: "" } : managedConfig;
     const updateConfig: UpdateAiConfig = useCallback((key, value) => setDraftConfig(current => current[key] === value ? current : { ...current, [key]: value }), [setDraftConfig]);
     const updateInputConfig: UpdateAiConfig = (key, value) => { inputRevision.current += 1; updateConfig(key, value); };
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
@@ -294,7 +300,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const [garmentEpoch, setGarmentEpoch] = useState(0);
     const [garmentDraft, setGarmentDraft] = useState<{ scope: string; dirty: boolean; appliedReferences: ReferenceImage[] | null } | null>(null);
 
-    const toolMode = creativePreset?.tool || resolveImageToolMode(searchParams.get("tool"));
+    const toolMode = creativePreset?.tool || resolveImageToolMode(historyTool);
     const initialGarmentScenario = creativePreset?.garment;
     const garmentScope = `${user?.id || ""}:${toolMode}:${initialGarmentScenario || ""}:${garmentEpoch}`;
     const activeGarmentDraft = toolMode === "image-edit" && garmentDraft?.scope === garmentScope ? garmentDraft : null;
@@ -332,16 +338,17 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const adminModelId = modelOptionName(model);
     const selectedModelProfile = useImageModelProfile(adminModelId);
     // The dedicated entry keeps its input contract even before a model is configured.
-    const isBlend = historyTool === "midjourney-blend" || selectedModelProfile.kind === "midjourney-blend";
-    const requiresPrompt = !isBlend;
-    const generationCount = Number(normalizeImageModelSettings(config, selectedModelProfile).count);
-    const referenceValidation = validateImageReferences(adminModelId, references, isBlend ? { ...selectedModelProfile, kind: "midjourney-blend" } : selectedModelProfile);
+    const isBlend = !quickTool && (historyTool === "midjourney-blend" || selectedModelProfile.kind === "midjourney-blend");
+    const requiresPrompt = !isBlend && !quickTool;
+    const generationCount = quickTool ? 1 : Number(normalizeImageModelSettings(config, selectedModelProfile).count);
+    const modelReferenceValidation = validateImageReferences(adminModelId, references, isBlend ? { ...selectedModelProfile, kind: "midjourney-blend" } : selectedModelProfile);
+    const referenceValidation = quickTool && references.length > 1 ? { ...modelReferenceValidation, valid: false, message: uiText("请只添加一张原图") } : modelReferenceValidation;
     const estimatedUsage = estimate({ operationType, toolKey, modelId: adminModelId, quantity: generationCount });
     const quotaBlocked = deploymentFeatures.creditsEnabled && Boolean(user && estimatedUsage.configured && user.creditBalance < estimatedUsage.credits);
     const missingReference = !isBlend && toolModeConfig.requiresReference && references.length === 0;
     const invalidBlendReferences = isBlend && (references.length < 2 || references.length > 4);
     const draftReady = configReady && referencesReady && promptReady;
-    const canGenerate = draftReady && placementStatus === "ready" && !(placementToken && isBlend) && !readingReferences && !optimizingPrompt && Boolean(model) && Boolean(user && user.status === "active") && (!requiresPrompt || Boolean(prompt.trim())) && !quotaBlocked && !missingReference && !invalidBlendReferences && referenceValidation.valid && !garmentNeedsApply && !incompleteCreativePrompt;
+    const canGenerate = draftReady && placementStatus === "ready" && !(quickTool && pendingImages.length) && !(placementToken && isBlend) && !readingReferences && !optimizingPrompt && Boolean(model) && Boolean(user && user.status === "active") && (!requiresPrompt || Boolean(prompt.trim())) && !quotaBlocked && !missingReference && !invalidBlendReferences && referenceValidation.valid && !garmentNeedsApply && !incompleteCreativePrompt;
 
     const appendReferences = (items: ReferenceImage[], origin: ImageReferenceOrigin) => { inputRevision.current += 1; setReferences((value) => dedupeImageReferences([...value, ...items.map((item) => createImageReferenceItem(item, origin))])); };
     const restoreReferences = (items: ReferenceImage[], origin: ImageReferenceOrigin = "template") => { inputRevision.current += 1; setReferences(dedupeImageReferences(items.map((item) => createImageReferenceItem(item, origin)))); };
@@ -549,6 +556,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     };
 
     const generate = async () => {
+        if (quickTool && latestPendingImages.current.length) { message.warning(uiText("原任务状态待核查，请先刷新原任务状态")); return; }
         if (placementStatus !== "ready") {
             message.warning(uiText("请先完成定位参考图带入，再提交生成。"));
             return;
@@ -741,6 +749,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     };
 
     const saveLog = async (log: GenerationLog, preserveView = false, assertCurrent = () => {}) => {
+        if (quickTool) log = { ...log, title: `${toolModeConfig.title} · ${log.references[0]?.name || "图片"}` };
         assertCurrent();
         if (!user || useUserStore.getState().user?.id !== user.id) throw new Error("员工会话已变化，未写入其他账号的记录");
         const scopedLog = { ...log, ownerId: user.id, tool: historyTool };
@@ -832,8 +841,8 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
             promptInput = promptInput.scene === "free-optimize" ? undefined : { ...promptInput, compilationId: undefined };
         }
         // Upscaling accepts plain instructions, not the image compiler contract.
-        if (operationType === "upscale" || isBlend) promptInput = undefined;
-        return { text: text || "Blend reference images", promptInput, config: { ...effectiveConfig, model, count: "1" }, references: [...references] };
+        if (operationType === "upscale" || isBlend || quickTool) promptInput = undefined;
+        return { text: quickTool ? "" : text || "Blend reference images", promptInput, config: { ...effectiveConfig, model, count: "1" }, references: [...references] };
     };
 
     const persistPending = async (record: PendingImage) => {
@@ -1102,8 +1111,8 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                                 <div className="flex shrink-0 gap-2 lg:hidden">
                                     <Button icon={<History className="size-4" />} onClick={() => setLogsOpen(true)}>
                                         {uiText("记录")}</Button>
-                                    <Button disabled={placementStatus !== "ready"} icon={<SlidersHorizontal className="size-4" />} onClick={() => setSettingsOpen(true)}>
-                                        {uiText("参数")}</Button>
+                                    {!quickTool && <Button disabled={placementStatus !== "ready"} icon={<SlidersHorizontal className="size-4" />} onClick={() => setSettingsOpen(true)}>
+                                        {uiText("参数")}</Button>}
                                 </div>
                             </div>
                         </div>
@@ -1130,7 +1139,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                                     </div>
                                 </div>
                                 <Input.TextArea aria-label={uiText("图像提示词")} showCount value={prompt} onPaste={event => { const files = pastedImageFiles(event.clipboardData); if (files.length) { event.preventDefault(); void addReferences(files); } }} onChange={(event) => { inputRevision.current += 1; setPrompt(event.target.value); }} onKeyDown={(event) => handleSubmitShortcut(event, canGenerate && !running, () => void generate())} rows={5} disabled={!requiresPrompt} placeholder={requiresPrompt ? uiText("{placeholder}（Ctrl/⌘ + Enter 提交）", { placeholder: uiText(toolModeConfig.placeholder) }) : uiText("这个模型直接合成参考图，不需要填写文字")} />
-                            </div> : <p className="rounded-lg bg-stone-50 p-3 text-sm text-stone-600 dark:bg-stone-900 dark:text-stone-300">{uiText("请选择 2–4 张参考图。此模型不会提交提示词；生成结果取决于图片内容及下方融合参数。")}</p>}
+                            </div> : <p className="rounded-lg bg-muted/50 p-3 text-sm text-muted-foreground">{uiText(quickTool ? "内置配方 · Nano 2.1，无需填写提示词或选择模型。" : "请选择 2–4 张参考图。此模型不会提交提示词；生成结果取决于图片内容及下方融合参数。")}</p>}
 
                             {requiresPrompt ? <PromptOptimizeButton config={effectiveConfig} prompt={prompt} references={references} operationType={operationType} scene={creativePreset?.id as PromptScene | undefined} toolKey={toolKey} disabled={running} onBusyChange={setOptimizingPrompt} onApply={(value, _compilation, input) => { replacePrompt(value); setOptimizedDraft({ prompt: value, input, references: [...references], context: optimizationContext }); }} /> : null}
                             <ReferenceImageTray
@@ -1146,13 +1155,13 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                         </fieldset>
                         </div>
                         <div ref={submitToolbarRef} className="generation-submit shrink-0 pt-4">
-                            <div className="mb-2 flex items-center justify-between rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-sm dark:border-stone-800 dark:bg-stone-900">
+                            {!quickTool && <div className="mb-2 flex items-center justify-between rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-sm dark:border-stone-800 dark:bg-stone-900">
                                 <span className="truncate text-stone-500 dark:text-stone-400">
                                     {modelOptionLabel(effectiveConfig, model)} · {imageSizeLabel(effectiveConfig.size)} · {imageQualityLabel(effectiveConfig.quality)}
                                 </span>
                                 <Button size="small" type="text" disabled={placementStatus !== "ready"} icon={<SlidersHorizontal className="size-4" />} onClick={() => setSettingsOpen(true)}>
                                     {uiText("调整")}</Button>
-                            </div>
+                            </div>}
 
                             <div className="mb-3 rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-xs leading-5 text-stone-600 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-300">
                                 <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1166,7 +1175,8 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                                 {garmentNeedsApply ? <div className="mt-1" role="status">{uiText("服装要求或参考图已改变，请重新套用。")}<Button size="small" type="link" className="!h-auto !p-0" onClick={resetGarment}>{uiText("改用当前提示词")}</Button></div> : null}
                                 {incompleteCreativePrompt ? <div className="mt-1" role="status">{uiText("请把「")}{CREATIVE_REQUIREMENT_PLACEHOLDER}{uiText("」替换成你的设计要求。")}</div> : null}
                                 {!draftReady || readingReferences || optimizingPrompt || !model || (requiresPrompt && !prompt.trim()) || invalidBlendReferences || !user || user.status !== "active" ? <div role="status">{!draftReady ? uiText("正在恢复草稿…") : readingReferences ? uiText("正在读取参考图，请稍候") : optimizingPrompt ? uiText("正在优化提示词，请稍候") : !model ? uiText("还差：选择模型") : requiresPrompt && !prompt.trim() ? uiText("还差：填写提示词") : invalidBlendReferences ? uiText("还差：添加 2–4 张参考图") : uiText("当前设计师账号不可用")}</div> : null}
-                                {running ? <div role="status">{uiText("当前任务正在处理，可先编辑下一条提示词。")}</div> : null}
+                                {running ? <div role="status">{uiText(quickTool ? "当前图片正在处理，结果将另存，原图不会覆盖。" : "当前任务正在处理，可先编辑下一条提示词。")}</div> : null}
+                                {quickTool && !running && pendingImages.length > 0 ? <div role="status">{uiText("原任务状态待核查，请先刷新原任务状态")}</div> : null}
                             </div>
                             <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} loading={running} disabled={!canGenerate || running} onClick={() => void generate()}>
                                 {optimizingPrompt ? uiText("正在优化提示词…") : running ? uiText("正在生成，请稍候…") : uiText(toolModeConfig.button)}
@@ -1180,7 +1190,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                             <div>
                                 <h2 className="text-xl font-semibold">{uiText("生成结果")}</h2>
                             </div>
-                            {previewLog ? <div className="flex flex-wrap gap-2"><Button size="small" disabled={running || previewLoading} loading={restoringHistory} onClick={() => modal.confirm({ title: uiText("恢复为草稿？"), content: uiText("将替换当前提示词、参数与参考图，不会提交生成任务。"), okText: uiText("确认恢复"), cancelText: uiText("保留草稿"), onOk: restoreHistoryDraft })}>{uiText("恢复为草稿继续改")}</Button><Button size="small" onClick={() => reusePrompt(previewLog.prompt)}>{uiText("复用提示词")}</Button></div> : null}
+                            {previewLog && !quickTool ? <div className="flex flex-wrap gap-2"><Button size="small" disabled={running || previewLoading} loading={restoringHistory} onClick={() => modal.confirm({ title: uiText("恢复为草稿？"), content: uiText("将替换当前提示词、参数与参考图，不会提交生成任务。"), okText: uiText("确认恢复"), cancelText: uiText("保留草稿"), onOk: restoreHistoryDraft })}>{uiText("恢复为草稿继续改")}</Button><Button size="small" onClick={() => reusePrompt(previewLog.prompt)}>{uiText("复用提示词")}</Button></div> : null}
                             {previewLoading ? <span role="status" className="text-sm text-muted-foreground">{uiText("正在读取记录…")}</span> : running ? <Tag className="m-0 px-2 py-1">{uiText("等待 ")}<GenerationElapsed startedAt={startedAt} /></Tag> : null}
                         </div>
                         <GenerationQueueProgress taskId={activeTaskId} active={running} />
@@ -1188,7 +1198,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                             <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-3">
                                 {results.map((result, index) =>
                                     result.status === "success" && result.image ? (
-                                        <ResultImageCard key={result.id} image={result.image} index={index} onSelect={selectResultPrompt} onEdit={addResultToReferences} onEditOriginal={openResultEditor} onDownload={downloadImage} onSaveAsset={saveResultToAssets} onSavePrompt={saveResultPrompt} onPlaceCanvas={resultCanvas.enabled ? image => { const source = logs.find(log => log.images.some(item => item.id === image.id)); void resultCanvas.place({ id: image.id, kind: "image", url: image.dataUrl, storageKey: image.storageKey, title: image.imageName || "图像生成结果", width: image.width, height: image.height, prompt: image.prompt || source?.prompt, model: source?.model, sourceTaskId: image.sourceTaskId }); } : undefined} placingCanvas={resultCanvas.busy} onShareDesign={libraryShare.canShare ? shareResultDesign : undefined} sharingDesign={libraryShare.busy} />
+                                        <ResultImageCard key={result.id} image={result.image} index={index} hidePromptActions={quickTool} onSelect={selectResultPrompt} onEdit={addResultToReferences} onEditOriginal={openResultEditor} onDownload={downloadImage} onSaveAsset={saveResultToAssets} onSavePrompt={saveResultPrompt} onPlaceCanvas={resultCanvas.enabled ? image => { const source = logs.find(log => log.images.some(item => item.id === image.id)); void resultCanvas.place({ id: image.id, kind: "image", url: image.dataUrl, storageKey: image.storageKey, title: image.imageName || "图像生成结果", width: image.width, height: image.height, prompt: image.prompt || source?.prompt, model: source?.model, sourceTaskId: image.sourceTaskId }); } : undefined} placingCanvas={resultCanvas.busy} onShareDesign={libraryShare.canShare ? shareResultDesign : undefined} sharingDesign={libraryShare.busy} />
                                     ) : result.status === "failed" || result.status === "paused" ? (
                                         <FailedImageCard key={result.id} error={result.error || uiText("生成失败")} diagnostic={result.diagnostic} recovery={result.recovery} taskId={result.taskId || result.recovery?.taskId} requestId={result.requestId || (result.recovery ? `${result.recovery.requestId}:0` : undefined)} disabled={running || (!result.recovery && !result.snapshot)} onRetry={() => retryResult(index)} />
                                     ) : (
@@ -1199,7 +1209,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                         ) : (
                             <div className="wb-empty lg:min-h-[480px]">
                                 <ImagePlus size={42} strokeWidth={1.2} />
-                                <strong>{requiresPrompt ? uiText("第一张作品，从一句描述开始") : uiText("上传参考图，开始多图融合")}</strong><p>{requiresPrompt ? uiText("在左侧写下画面内容，选择模型和参数") : uiText("在左侧上传 2–4 张参考图，选择融合参数")}{uiText("，点击「")}{uiText(toolModeConfig.button || "")}{uiText("」。结果会出现在这里。")}</p>
+                                <strong>{quickTool ? uiText("上传原图，一键完成处理") : requiresPrompt ? uiText("第一张作品，从一句描述开始") : uiText("上传参考图，开始多图融合")}</strong><p>{quickTool ? uiText("添加一张图片") : requiresPrompt ? uiText("在左侧写下画面内容，选择模型和参数") : uiText("在左侧上传 2–4 张参考图，选择融合参数")}{uiText("，点击「")}{uiText(toolModeConfig.button || "")}{uiText("」。结果会出现在这里。")}</p>
                             </div>
                         )}
                     </div>
@@ -1209,7 +1219,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                 ref={fileInputRef}
                 type="file"
                 accept="image/*"
-                multiple
+                multiple={!quickTool}
                 className="hidden"
                 onChange={(event) => {
                     void addReferences(event.target.files);
@@ -1229,7 +1239,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                     onPreviewLog={(log) => void previewGenerationLog(log)}
                 />
             </Drawer>
-            <Drawer title={uiText("参数")} placement="bottom" size="82vh" open={settingsOpen} onClose={() => setSettingsOpen(false)}>
+            <Drawer title={uiText("参数")} placement="bottom" size="82vh" open={!quickTool && settingsOpen} onClose={() => setSettingsOpen(false)}>
                 <div className="grid grid-cols-2 gap-3 pb-4">
                     <GenerationSettings toolKey={toolKey} config={effectiveConfig} model={model} referenceCount={references.length} updateConfig={updateInputConfig} openConfigDialog={openConfigDialog} />
                 </div>
@@ -1284,6 +1294,7 @@ function GenerationSettings({ config, model, referenceCount, updateConfig, openC
 }
 
 function ResultImageCard({
+    hidePromptActions,
     image,
     index,
     onSelect,
@@ -1297,6 +1308,7 @@ function ResultImageCard({
     onPlaceCanvas,
     placingCanvas,
 }: {
+    hidePromptActions?: boolean;
     image: GeneratedImage;
     index: number;
     onSelect: (image: GeneratedImage) => void;
@@ -1325,7 +1337,7 @@ function ResultImageCard({
                     <span>{formatDuration(image.durationMs)}</span>
                 </div>
                 <div className="grid min-w-0 grid-cols-2 gap-2">
-                    <Button className={RESULT_ACTION_BUTTON_CLASS} size="small" onClick={() => onSelect(image)}>{uiText("复用提示词")}</Button>
+                    {!hidePromptActions && <Button className={RESULT_ACTION_BUTTON_CLASS} size="small" onClick={() => onSelect(image)}>{uiText("复用提示词")}</Button>}
                     {onPlaceCanvas ? <Button className={RESULT_ACTION_BUTTON_CLASS} size="small" loading={placingCanvas} onClick={() => onPlaceCanvas(image)}>{uiText("放入画布")}</Button> : null}
                     <Tooltip title={uiText("直接编辑原始图片，另存为新版本，不调用 AI")}>
                         <Button className={RESULT_ACTION_BUTTON_CLASS} size="small" icon={<PenLine className="size-3.5" />} onClick={() => onEditOriginal(image, index)}>
@@ -1343,10 +1355,10 @@ function ResultImageCard({
                         <Button className={RESULT_ACTION_BUTTON_CLASS} size="small" icon={<Download className="size-3.5" />} onClick={() => onDownload(image, index)}>
                             {uiText("下载")}</Button>
                     </Tooltip>
-                    <Tooltip title={uiText("保存为个人提示词模板")}>
+                    {!hidePromptActions && <Tooltip title={uiText("保存为个人提示词模板")}>
                         <Button className={RESULT_ACTION_BUTTON_CLASS} size="small" icon={<BookmarkPlus className="size-3.5" />} onClick={() => void onSavePrompt(image)}>
                             {uiText("存为提示词")}</Button>
-                    </Tooltip>
+                    </Tooltip>}
                     {onShareDesign && <Tooltip title={uiText("复用或保存本人私有原图，再核对公开内容；不会自动发布")}>
                         <Button className={RESULT_ACTION_BUTTON_CLASS} size="small" icon={<Share2 className="size-3.5" />} loading={sharingDesign} onClick={() => void onShareDesign(image, index)}>{uiText("分享到灵感库")}</Button>
                     </Tooltip>}

@@ -15,7 +15,7 @@ import { useEffect } from "react";
 
 const sections: { key: string; label: string; slugs: NavigationToolSlug[] }[] = [
     { key: "create", label: "创作", slugs: ["canvas", "image", "video", "gpt-chat", "creative"] },
-    { key: "image-tools", label: "图像工具", slugs: ["detail-enhance", "image-edit", "angle-control", "seamless-stitch", "midjourney-blend"] },
+    { key: "image-tools", label: "图像工具", slugs: ["remove-background", "hd-upscale", "detail-enhance", "image-edit", "angle-control", "seamless-stitch", "midjourney-blend"] },
     { key: "resources", label: "资源", slugs: ["assets", "prompts", "my-prompts", "design-library"] },
     { key: "collaborate", label: "协作", slugs: ["team"] },
     { key: "manage", label: "管理", slugs: ["admin"] },
@@ -24,20 +24,21 @@ const sections: { key: string; label: string; slugs: NavigationToolSlug[] }[] = 
 export function NavigationMenu({ onNavigate }: { onNavigate?: () => void }) {
     useUiLocale();
     const { pathname, search } = useLocation();
-    const { pinned, collapsed, togglePin, toggleGroup } = useNavigationPreferences();
+    const { pinned, collapsed, togglePin, toggleGroup, openGroup } = useNavigationPreferences();
     const flags = useModuleStore(state => state.flags);
     const bindings = useBusinessConfigStore(state => state.tools);
     const estimate = useBusinessConfigStore(state => state.estimate);
     const configStatus = useBusinessConfigStore(state => state.status);
     const user = useUserStore(state => state.user);
     const status = useUserStore(state => state.status);
-    const active = pathname.startsWith("/creative/") ? "creative" : pathname === "/admin" ? "admin" : pathname === "/team" ? "team" : pathname === "/my-prompts" ? "my-prompts" : usageBoardForLocation(pathname, search);
+    const quickTool = pathname === "/remove-background" || pathname === "/hd-upscale" ? pathname.slice(1) : pathname === "/image" && ["remove-background", "hd-upscale"].includes(new URLSearchParams(search).get("tool") || "") ? new URLSearchParams(search).get("tool") : null;
+    const active = quickTool || (pathname.startsWith("/creative/") ? "creative" : pathname === "/admin" ? "admin" : pathname === "/team" ? "team" : pathname === "/my-prompts" ? "my-prompts" : usageBoardForLocation(pathname, search));
     const pinsVisible = !deploymentFeatures.authenticationEnabled || (status === "authenticated" && user?.status === "active");
     useEffect(() => {
         const section = sections.find(item => item.slugs.some(slug => slug === active));
-        if (section && collapsed.includes(section.key)) toggleGroup(section.key);
+        if (section) openGroup(section.key);
         // Open the destination only on navigation, not after a manual collapse.
-    }, [pathname, search]);
+    }, [pathname, search, user?.id]);
     const available = (slug: NavigationToolSlug) => slug === "admin" ? isAdminRole(user?.role)
         : (slug !== "team" || (deploymentFeatures.rolePortalsEnabled && Boolean(user?.groupId))) && isModuleAvailable(flags, bindings, navigationModuleKey(slug) as ModuleKey);
     const badge = (slug: NavigationToolSlug) => {
@@ -58,7 +59,7 @@ export function NavigationMenu({ onNavigate }: { onNavigate?: () => void }) {
                 {!closed && <div className="space-y-1">{tools.map(tool => {
                     const Icon = tool.icon, cost = badge(tool.slug);
                     const pinKey = navigationModuleKey(tool.slug);
-                    const pinnable = !["admin", "team", "my-prompts"].includes(tool.slug);
+                    const pinnable = !["admin", "team", "my-prompts", "remove-background", "hd-upscale"].includes(tool.slug);
                     const isPinned = pinnable && pinned.includes(pinKey);
                     return <div key={tool.slug} className="group flex items-center gap-0.5">
                         <Link to={tool.path} onClick={onNavigate} aria-current={tool.slug === active && !(isPinned && pinsVisible) ? "page" : undefined} className="wb-nav-link flex h-10 min-w-0 flex-1 items-center gap-2 rounded-lg px-2"><Icon className="size-4 shrink-0" /><span className="min-w-0 truncate">{uiText(tool.label)}</span>{cost && <span className="ml-auto shrink-0 text-xs">{cost}</span>}</Link>

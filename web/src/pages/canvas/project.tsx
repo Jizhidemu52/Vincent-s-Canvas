@@ -33,6 +33,7 @@ import { CanvasOverviewLayer, type CanvasOverviewLayerHandle } from "@/component
 import { canvasLinkCopiedMessage } from "@/components/canvas/canvas-save-status";
 import { CanvasSelectionOverlay, type CanvasSelectionOverlayHandle } from "@/components/canvas/canvas-selection-overlay";
 import { CanvasToolbar } from "@/components/canvas/canvas-toolbar";
+import { CanvasImageQuickActions } from "@/components/canvas/canvas-image-quick-actions";
 import { CanvasTopBar } from "@/components/canvas/canvas-top-bar";
 import { WirelessCanvas, type WirelessCanvasHandle } from "@/components/canvas/wireless-canvas";
 import { NODE_DEFAULT_SIZE } from "@/constant/canvas";
@@ -1937,7 +1938,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
 
     const {
         createImageReversePromptNodes, saveManualImageEdit, cropImageNode, splitImageNode,
-        maskEditImageNode, upscaleImageNode, generateAngleNode, runLocalImageOperation,
+        maskEditImageNode, upscaleImageNode, generateAngleNode, quickImageNode, runLocalImageOperation,
     } = useCanvasImageActions({
         projectId, nodesRef, designProjectIdRef, savedProjectIdRef, projectSaveQueueRef, runtime: generationRuntime,
         dialogs: canvasDialogs, setDialogNodeId, setContextMenu, handleMissingModelConfig, isAiConfigReady,
@@ -2790,14 +2791,14 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
         const stored = useCanvasStore.getState().projects.find(project => project.id === projectId);
         if (!stored) return;
         const latest = { ...stored, nodes: nodesRef.current, connections: connectionsRef.current, groups: groupsRef.current, viewport: viewportRef.current, selectedNodeIds: normalizeCanvasSelectedNodeIds(selectedNodeIdsRef.current, nodesRef.current, groupsRef.current) };
-        await exportProjects([latest.id], latest.title || t("无限画布"), [latest]);
+        await exportProjects([latest.id], latest.title || t("自由画布"), [latest]);
     }, [projectId, exportProjects, t]);
 
     useLayoutEffect(() => {
         const recovery = {
             backup: async () => {
                 const { backupCanvasEditorDraft } = await loadCanvasFileActions();
-                await backupCanvasEditorDraft({ projectId, defaultTitle: t("无限画布"), flushEditorDrafts, flushPendingHistory, createHistoryEntry, historyRef, viewportRef, exportProjects });
+                await backupCanvasEditorDraft({ projectId, defaultTitle: t("自由画布"), flushEditorDrafts, flushPendingHistory, createHistoryEntry, historyRef, viewportRef, exportProjects });
             },
             discardPending: () => projectSaveQueueRef.current?.discard(),
         };
@@ -3232,6 +3233,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
                 <Suspense fallback={null}><CanvasConflictNotice projectId={projectId} /></Suspense>
                 {commandsOpen ? <Suspense fallback={null}><CanvasCommandPalette nodes={nodes} bindings={commandBindings} onLocate={locateNodes} onAsset={handleAssetInsert} onClose={() => setCommandsOpen(false)} /></Suspense> : null}
                 {performanceModeEnabled ? <Suspense fallback={null}><CanvasPerformancePanel metrics={performanceMetrics} /></Suspense> : null}
+                {singleSelectedNode?.type === CanvasNodeType.Image && !isNodeDragging && !nodeImageSettingsOpen ? <CanvasImageQuickActions key={singleSelectedNode.id} node={singleSelectedNode} onRun={quickImageNode} /> : null}
 
                 {!isNodeDragging && !nodeImageSettingsOpen && !(quickGenerateOpen && !isCanvasDesktopLayout && !assistantOpen) ? (
                     <CanvasHoverToolbarHost selectedNode={singleSelectedNode} multipleSelected={hasMultipleSelectedNodes}>{toolbarNode => <Suspense fallback={null}>

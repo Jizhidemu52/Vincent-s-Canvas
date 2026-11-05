@@ -24,8 +24,13 @@ test("Mark choices require the fixed provider and exact supported IDs, without c
   expect(models).toHaveLength(8);
 });
 
-test("all ten platform models retain distinct UUIDs, exact display prefixes and explicit mask capabilities", () => {
-  expect(MARK_PLATFORM_MODELS).toHaveLength(10);
+test("all platform models retain distinct UUIDs, exact display prefixes and explicit mask capabilities", () => {
+  expect(MARK_PLATFORM_MODELS).toHaveLength(12);
+  expect(MARK_PLATFORM_MODELS.map(model => model.modelId)).toEqual([
+    "gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gemini-nano-banana-2.1", "gpt-6-astra", "happyhorse-1.1",
+    "midjourney-blend", "gpt-image-2", "grok-imagine-image-2.0", "gemini-3.1-flash-image-preview-official", "claude-sonnet-5-5",
+    "gpt-image-2.6-flare", "gpt-image-2.6-sunburst",
+  ]);
   for (const [index, preset] of MARK_PLATFORM_MODELS.entries()) {
     const row = { ...mark, ...preset, id: `mark-model-${index}` };
     for (const role of ["designer", "super_admin"]) {
@@ -34,9 +39,22 @@ test("all ten platform models retain distinct UUIDs, exact display prefixes and 
       expect(shown.name).toBe(preset.name);
       expect(shown.name).toStartWith("aplmart-");
       expect(shown.publicDescription).toBe(preset.description);
-      if ((preset.capabilities as readonly string[]).includes("generate")) expect(shown.imageSupportsMask).toBe(index < 2);
+      if ((preset.capabilities as readonly string[]).includes("generate")) expect(shown.imageSupportsMask).toBe(/^gpt-image-2\.[56]-/.test(preset.modelId));
       else expect(shown.imageSupportsMask).toBeUndefined();
     }
+  }
+});
+
+test("GPT 2.6 exposes separate descriptions and quality-resolution controls without inheriting 2.5 cost", () => {
+  for (const [variant, description] of [["flare", "速度优先，适合快速迭代"], ["sunburst", "细节与编辑一致性优先"]]) {
+    const modelId = `gpt-image-2.6-${variant}`;
+    const row = { ...mark, id: `gpt26-${variant}`, modelId, rmbCost: 0 };
+    const shown = presentPublicModel(row, "designer");
+    expect(shown).toMatchObject({ modelId: row.id, publicDescription: description, imageParameterProfile: "quality-resolution", imageSupportsMask: true, rmbCost: 0 });
+    expect(shown).not.toHaveProperty("imageCost");
+    expect(presentAdminModel(row)).not.toHaveProperty("imageCost");
+    expect(selectCreativeModels([row])).toEqual([row]);
+    expect(imageParameterProfile("apimart", modelId, "other-provider")).toBe("gpt");
   }
 });
 

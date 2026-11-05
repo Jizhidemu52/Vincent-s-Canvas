@@ -18,7 +18,7 @@ function publishLocale() {
     const current = getUiLocale();
     if (typeof document !== "undefined") {
         document.documentElement.lang = current === "en-US" ? "en" : "zh-CN";
-        document.title = current === "en-US" ? "Inchoice TruCreate" : "INCHOICE · 无限画布";
+        document.title = current === "en-US" ? "TruCreate · Ideas Come True." : "TruCreate · AI 创意设计平台";
     }
     for (const listener of listeners) listener();
 }

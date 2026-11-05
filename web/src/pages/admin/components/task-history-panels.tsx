@@ -284,7 +284,7 @@ export function HistoryManagementPanel() {
     const exportCsv = async () => {
         setExporting(true);
         try {
-            saveAs(await exportAdminHistory(filters), `无线画布历史-${Date.now()}.csv`);
+            saveAs(await exportAdminHistory(filters), `TruCreate历史-${Date.now()}.csv`);
             message.success("当前筛选结果已导出并写入审计日志");
         } catch (error) {
             message.error(error instanceof Error ? error.message : "历史导出失败");

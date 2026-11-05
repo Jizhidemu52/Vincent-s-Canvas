@@ -397,7 +397,7 @@ def assert_application_runtime(before, after, model, images, release, deployment
 
 def assert_idle(value):
     require(isinstance(value, dict), "ACTIVITY_SNAPSHOT_INVALID")
-    fields = ["waitingTasks", "processingTasks", "submittedWaitingTasks", "processingChatRequests", "processingAnalysisPreviews", "optimizingPromptCompilations", "admittingBatches"]
+    fields = ["waitingTasks", "processingTasks", "submittedWaitingTasks", "processingChatRequests", "processingAnalysisPreviews", "optimizingPromptCompilations", "admittingBatches", "pendingAssetThumbnails"]
     require(all(type(value.get(field)) is int and value[field] >= 0 for field in fields), "ACTIVITY_COUNT_INVALID")
     require(type(value.get("pausedTasks")) is int and value["pausedTasks"] >= 0, "PAUSED_TASK_COUNT_INVALID")
     require(all(value[field] == 0 for field in fields), "INFLIGHT_WORK_REQUIRES_DRAIN")

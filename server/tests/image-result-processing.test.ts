@@ -3,7 +3,9 @@ import { spawnSync } from "node:child_process";
 import * as childProcess from "node:child_process";
 import { createRequire } from "node:module";
 import ts from "typescript";
-import { hasImageTransparency, processImageResult, ImageResultProcessingError } from "../src/image-result-processing";
+import { hasImageTransparency, processImageResult, ImageResultProcessingError, validateQuickImageSource } from "../src/image-result-processing";
+import { prepareQuickImageTask } from "../src/quick-image-tools";
+import { quickImageTaskTarget } from "../../shared/quick-image-tools";
 import { hasNonIdentityImageOrientation, prepareImageEditInput } from "../src/image-edit-input";
 
 const ffmpeg = process.env.FFMPEG_PATH || "ffmpeg";
@@ -30,6 +32,54 @@ const generated = { mimeType: "image/png", bytes: Buffer.from("iVBORw0KGgoAAAANS
 const mask = { mimeType: "image/png", bytes: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAQAAAABCAYAAAD5PA/NAAAACXBIWXMAAAAAAAAAAQCEeRdzAAAAGklEQVR4nGNkYGD4////f4bUlGTGOXPnNQAAPDIHgiSEJS4AAAAASUVORK5CYII=", "base64") };
 const editInput = { references: [original], mask };
 const expectedComposite = [10, 20, 30, 255, 77, 88, 99, 0, 90, 80, 70, 200, 100, 100, 100, 128];
+
+describe("Nano quick image local result verification", () => {
+  const parameters = (action: "remove-background" | "hd-upscale") => prepareQuickImageTask({ ...quickImageTaskTarget(action), sourceUrls: ["owned"], parameters: { quickImageAction: action } }).parameters;
+  test("matte preserves original RGB, dimensions, holes and soft edges in true PNG alpha", async () => {
+    const pixels = [20, 40, 60, 255, 70, 80, 90, 255, 110, 120, 130, 200, 150, 160, 170, 255];
+    const input = png(pixels);
+    const matte = png([0, 0, 0, 255, 255, 255, 255, 255, 128, 128, 128, 255, 0, 0, 0, 255]);
+    const before = Buffer.from(input.bytes);
+    const output = await processImageResult({ result: matte, parameters: parameters("remove-background"), editInput: { references: [input] } });
+    const expected = [...pixels]; expected[3] = 0; expected[11] = 100; expected[15] = 0;
+    expect([...rgba(output.display)]).toEqual(expected);
+    expect(output.display.mimeType).toBe("image/png"); expect(await hasImageTransparency(output.display)).toBe(true);
+    expect(input.bytes).toEqual(before); expect(output.operations).toContain("original_rgb_preserved");
+    expect(output.warning).toContain("不承诺像素级完美");
+  });
+  test("same-ratio matte resizes its alpha only, retaining original-size RGB", async () => {
+    const input = png(Array.from({ length: 32 }, (_, index) => index % 4 === 3 ? 255 : 60), 8, 1);
+    const matte = png([0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255, 255, 255, 255, 255, 255], 4, 1);
+    // A 4:1 matte cannot be stretched onto an 8:1 source.
+    await expect(processImageResult({ result: matte, parameters: parameters("remove-background"), editInput: { references: [input] } })).rejects.toMatchObject({ code: "IMAGE_RESULT_DIMENSION_MISMATCH" });
+    const larger = png(Array.from({ length: 64 }, (_, index) => index % 4 === 3 ? 255 : 60), 8, 2);
+    const output = await processImageResult({ result: matte, parameters: parameters("remove-background"), editInput: { references: [larger] } });
+    const decoded = [...rgba(output.display)]; expect(decoded).toHaveLength(64);
+    expect(decoded.filter((_, index) => index % 4 !== 3).every(value => value === 60)).toBe(true);
+  });
+  test("rejects empty, opaque, colored and wrongly proportioned mattes instead of returning fake cutouts", async () => {
+    for (const value of [0, 128, 255]) {
+      const matte = png(Array.from({ length: 16 }, (_, index) => index % 4 === 3 ? 255 : value));
+      await expect(processImageResult({ result: matte, parameters: parameters("remove-background"), editInput: { references: [original] } })).rejects.toMatchObject({ code: "IMAGE_RESULT_MATTE_INVALID" });
+    }
+    await expect(processImageResult({ result: generated, parameters: parameters("remove-background"), editInput: { references: [original] } })).rejects.toMatchObject({ code: "IMAGE_RESULT_MATTE_INVALID" });
+    await expect(processImageResult({ result: generated, parameters: parameters("remove-background") })).rejects.toMatchObject({ code: "INVALID_IMAGE_RESULT_INPUT" });
+  });
+  test("4K action verifies actual size and keeps original provider bytes only after validation", async () => {
+    await expect(processImageResult({ result: generated, parameters: parameters("hd-upscale"), editInput: { references: [original] } })).rejects.toMatchObject({ code: "IMAGE_RESULT_DIMENSION_MISMATCH" });
+    const large = png(new Uint8Array(3840 * 960 * 4).fill(255), 3840, 960);
+    const output = await processImageResult({ result: large, parameters: parameters("hd-upscale"), editInput: { references: [original] } });
+    expect(output.display.bytes).toBe(large.bytes); expect(output.operations).toContain("quick_image_4k_dimensions_verified");
+  }, 15_000);
+  test("source codec, depth and oversized HD checks happen before model submission", async () => {
+    await validateQuickImageSource(original, parameters("remove-background"));
+    await expect(validateQuickImageSource(undefined, parameters("remove-background"))).rejects.toThrow("尚未提交生成");
+    const highBit = png(new Uint8Array(32).fill(128), 4, 1, "rgba64be");
+    await expect(validateQuickImageSource(highBit, parameters("remove-background"))).rejects.toThrow("8 位");
+    const tooLarge = png(new Uint8Array(4097 * 513 * 4).fill(255), 4097, 513);
+    await expect(validateQuickImageSource(tooLarge, parameters("hd-upscale"))).rejects.toThrow("超过 4K");
+  });
+});
 
 // Generated once with Pillow Image.Exif()[274]; tests need only the deployed FFmpeg tools.
 const orientedFixtures = [

@@ -3,6 +3,8 @@ import type { Database } from "./db";
 import { modelSupportsOperation } from "./billing";
 import { assertModuleEnabled } from "./module-flags";
 import { DEFAULT_CHAT_MODEL_TOOL_KEY } from "./chat-model-policy";
+import { isQuickImageAction, matchesQuickImageTaskTarget, QUICK_IMAGE_MODEL_ID } from "../../shared/quick-image-tools";
+import { MARK_IMAGE_PROVIDER_ID } from "../../shared/mark-image-models";
 
 export type ToolConfiguration = {
   toolKey: ToolKey;
@@ -44,6 +46,10 @@ export async function resolveToolExecution(db: Pick<Database, "query">, input: {
   modelConfigId?: string | null; modelId?: string | null;
 }, options: { allowModelOverride?: boolean } = {}): Promise<ToolConfiguration & { modelConfigId: string }> {
   const toolKey = normalizeTaskTool(input);
+  const quickAction = input.parameters?.quickImageAction;
+  if (quickAction !== undefined && (!isQuickImageAction(quickAction) || !matchesQuickImageTaskTarget(quickAction, toolKey, input.operationType))) {
+    throw new ToolConfigurationError("QUICK_IMAGE_ACTION_INVALID", "一键图片操作与当前板块不匹配");
+  }
   await assertModuleEnabled(db, toolKey);
   const configuration = await readToolConfiguration(db, toolKey);
   if (!configuration.enabled) throw new ToolConfigurationError("TOOL_DISABLED", "该功能的模型调用已停用", 403);
@@ -55,21 +61,25 @@ export async function resolveToolExecution(db: Pick<Database, "query">, input: {
   const isChat = input.operationType === "chat";
   const modelConfiguration = isChat && toolKey !== DEFAULT_CHAT_MODEL_TOOL_KEY
     ? await readToolConfiguration(db, DEFAULT_CHAT_MODEL_TOOL_KEY) : configuration;
-  const selected = isChat ? modelConfiguration.modelConfigId : options.allowModelOverride && requested ? requested : configuration.modelConfigId ?? requested;
+  const isQuickImage = isQuickImageAction(quickAction);
+  const selected = isQuickImage ? QUICK_IMAGE_MODEL_ID : isChat ? modelConfiguration.modelConfigId : options.allowModelOverride && requested ? requested : configuration.modelConfigId ?? requested;
   if (isChat && !selected) throw new ToolConfigurationError("CHAT_MODEL_NOT_CONFIGURED", "管理员尚未配置统一对话模型", 503);
   if (!selected) throw new ToolConfigurationError("MODEL_REQUIRED", "请先选择一个已启用的模型");
   const result = await db.query<{
-    id: string; modelId: string; enabled: boolean; providerEnabled: boolean;
+    id: string; modelId: string; enabled: boolean; providerEnabled: boolean; protocol: string;
     workflowConfigId: string | null; workflowEnabled: boolean | null; capabilities: string[];
-  }>(`SELECT m.id,m.model_id AS "modelId",m.enabled,p.enabled AS "providerEnabled",m.capabilities,
+  }>(`SELECT m.id,m.model_id AS "modelId",m.enabled,p.enabled AS "providerEnabled",p.protocol,m.capabilities,
       m.workflow_config_id AS "workflowConfigId",w.enabled AS "workflowEnabled"
       FROM model_configs m JOIN providers p ON p.id=m.provider_id
       LEFT JOIN workflow_configs w ON w.id=m.workflow_config_id
-      WHERE m.id::text=$1 OR m.model_id=$1 ORDER BY (m.id::text=$1) DESC LIMIT 1`, [selected]);
+      ${isQuickImage ? "WHERE m.model_id=$1 AND m.provider_id=$2 AND p.protocol='apimart' LIMIT 1"
+        : "WHERE m.id::text=$1 OR m.model_id=$1 ORDER BY (m.id::text=$1) DESC LIMIT 1"}`, isQuickImage ? [selected, MARK_IMAGE_PROVIDER_ID] : [selected]);
   const model = result.rows[0];
   if (!model || !model.enabled || !model.providerEnabled) throw new ToolConfigurationError("MODEL_DISABLED", "模型或 Provider 不存在或未启用");
   if (model.workflowConfigId && !model.workflowEnabled) throw new ToolConfigurationError("WORKFLOW_DISABLED", "模型工作流未启用");
-  if (!isChat && !options.allowModelOverride && configuration.modelConfigId && requested && requested !== model.id && requested !== model.modelId) {
+  if (isQuickImage && model.modelId !== QUICK_IMAGE_MODEL_ID) throw new ToolConfigurationError("TOOL_MODEL_MISMATCH", "一键图片工具必须使用 Nano 2.1 模型");
+  if (isQuickImage && (model.protocol !== "apimart" || model.workflowConfigId)) throw new ToolConfigurationError("TOOL_MODEL_MISMATCH", "一键图片工具需要启用 Nano 2.1 的 APIMart 标准图片渠道");
+  if (!isQuickImage && !isChat && !options.allowModelOverride && configuration.modelConfigId && requested && requested !== model.id && requested !== model.modelId) {
     throw new ToolConfigurationError("TOOL_MODEL_CHANGED", "管理员已更改该板块模型，请刷新模型配置和参数后重试", 409);
   }
   if (toolKey === "midjourney-blend" && model.modelId !== "midjourney-blend") {

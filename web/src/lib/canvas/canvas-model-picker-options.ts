@@ -21,6 +21,8 @@ export function canvasModelPresentation(label: string) {
         "gpt2": "GPT Image 2", "gpt-image-2": "GPT Image 2",
         "gpt2.5-flare": "GPT Image 2.5 Flare", "gpt-image-2.5-flare": "GPT Image 2.5 Flare",
         "gpt2.5-sunburst": "GPT Image 2.5 Sunburst", "gpt-image-2.5-sunburst": "GPT Image 2.5 Sunburst",
+        "gpt2.6-flare": "GPT Image 2.6 Flare", "gpt-image-2.6-flare": "GPT Image 2.6 Flare",
+        "gpt2.6-sunburst": "GPT Image 2.6 Sunburst", "gpt-image-2.6-sunburst": "GPT Image 2.6 Sunburst",
         "nano2.1": "Nano Banana 2.1", "nano2": "Nano Banana 2",
         "gpt6-astra": "GPT-6 Astra", "gpt-6-astra": "GPT-6 Astra",
         "happyhorse1.1": "HappyHorse 1.1", "mj-blend": "Midjourney Blend", "grok2": "Grok Image 2",

@@ -77,7 +77,11 @@ describe("read-only demo Mark catalog", () => {
     expect(mark.models.map(model => [model.id, model.modelId])).toEqual(MARK_PLATFORM_MODELS.map((model, index) => [`d5000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`, model.modelId]));
     expect(listAvailableDemoModels(mark.models, [mark.provider])).toHaveLength(MARK_PLATFORM_MODELS.length - 1);
     expect(mark.models.filter(model => !model.enabled).map(model => model.modelId)).toEqual(["grok-imagine-image-2.0"]);
-    expect(mark.models.at(-1)).toMatchObject({ id: "d5000000-0000-4000-8000-000000000010", modelId: "claude-sonnet-5-5", enabled: true });
+    expect(mark.models.find(model => model.modelId === "claude-sonnet-5-5")).toMatchObject({ id: "d5000000-0000-4000-8000-000000000010", enabled: true });
+    expect(mark.models.slice(-2).map(model => [model.id, model.modelId])).toEqual([
+      ["d5000000-0000-4000-8000-000000000011", "gpt-image-2.6-flare"],
+      ["d5000000-0000-4000-8000-000000000012", "gpt-image-2.6-sunburst"],
+    ]);
     expect(mark.models.find(model => model.modelId === "gemini-3.1-flash-image-preview-official")?.id).toBe("d5000000-0000-4000-8000-000000000009");
     expect(JSON.stringify([mark.provider, mark.models])).not.toContain("fake-mark-key");
     const disabled = createDemoMarkProvider({ apiKey: " " });

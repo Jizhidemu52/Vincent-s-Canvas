@@ -53,6 +53,7 @@ export async function retryCanvasNode(node: CanvasNodeData, action: Context) {
         flushSave, isCurrent, waitForWriteAccess = async () => true, buildGenerationConfig, buildImageGenerationMetadata, buildAudioGenerationMetadata, videoMetadata, audioMetadata, videoTaskErrorMetadata, isGenerationCanceled } = action;
     if (!await waitForWriteAccess() || !isCurrent()) return;
     if (node.type === CanvasNodeType.Image && await recoverPending(node.id)) return;
+    if (node.metadata?.quickImageAction) { message.info(uiText("请选中原图，再次点击对应的图片快捷处理")); return; }
     if (!await waitForWriteAccess() || !isCurrent()) return;
     if (node.type === CanvasNodeType.Text && node.metadata?.generationSubmissionUncertain) {
         const { confirmCanvasTextRetry } = await import("./canvas-media-generation-runtime");

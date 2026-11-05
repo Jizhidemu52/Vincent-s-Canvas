@@ -7,6 +7,30 @@ async function settleTransitions(page: Page) {
     await expect.poll(() => page.evaluate(() => document.getAnimations().filter(animation => animation.playState === "running" && animation.effect?.getComputedTiming().iterations !== Infinity).length)).toBe(0);
 }
 
+test("TruCreate homepage uses the supplied names and slogans in both languages", async ({ page, context, api }, info) => {
+    await context.route("**/api/prompt-templates?*", route => route.fulfill({ json: { templates: [], total: 0, page: 1, pageSize: 4 } }));
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.goto("/");
+    await expect(page).toHaveTitle("TruCreate · AI 创意设计平台");
+    await expect(page.getByRole("heading", { name: "想法成真", exact: true })).toBeVisible();
+    await expect(page.locator(".wb-eyebrow").first()).toHaveText("TruCreate / AI 创意设计平台");
+    await expect(page.locator(".inchoice-brand-caption").filter({ visible: true }).first()).toHaveText("AI 创意设计平台");
+    await expect(page.getByRole("link", { name: "自由画布", exact: true }).first()).toBeVisible();
+    await page.screenshot({ path: info.outputPath("trucreate-home-zh.png") });
+    await changeLanguage(page);
+    await expect(page).toHaveTitle("TruCreate · Ideas Come True.");
+    await expect(page.getByRole("heading", { name: "Ideas Come True.", exact: true })).toBeVisible();
+    await expect(page.locator(".inchoice-brand-caption").filter({ visible: true }).first()).toHaveText("Ideas Come True.");
+    await expect(page.getByRole("link", { name: "Free canvas", exact: true }).first()).toBeVisible();
+    await page.screenshot({ path: info.outputPath("trucreate-home-en.png") });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(page.locator(".inchoice-brand-name").filter({ visible: true }).first()).toHaveText("TruCreate");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+    await page.screenshot({ path: info.outputPath("trucreate-home-mobile.png") });
+    expect(api.documents.size).toBe(0);
+    expect(api.submissions).toHaveLength(0);
+});
+
 test("language switching preserves canvas content and an unsent assistant draft", async ({ page, context, api }, info) => {
     await context.route("**/api/generation-capabilities?*", route => route.fulfill({ json: { models: [] } }));
     const id = await newCanvas(page);
@@ -22,7 +46,7 @@ test("language switching preserves canvas content and an unsent assistant draft"
     await page.evaluate(() => { (window as any).__i18nNoReload = "preserved"; });
     await changeLanguage(page);
     await expect(page.locator("html")).toHaveAttribute("lang", "en");
-    await expect(page.getByText("Inchoice TruCreate", { exact: true }).first()).toBeVisible();
+    await expect(page.locator(".inchoice-brand-name").filter({ visible: true }).first()).toHaveText("TruCreate");
     await expect(composer).toHaveValue("尚未发送的中文草稿：白底印花 / Inchoice");
     await expect(page.getByRole("button", { name: "Open canvas menu", exact: true })).toBeVisible();
     expect(await page.evaluate(() => (window as any).__i18nNoReload)).toBe("preserved");
@@ -41,7 +65,7 @@ test("language switching preserves canvas content and an unsent assistant draft"
     await changeLanguage(page);
     await page.reload();
     await expect(page.locator("html")).toHaveAttribute("lang", "en");
-    await expect(page).toHaveTitle("Inchoice TruCreate");
+    await expect(page).toHaveTitle("TruCreate · Ideas Come True.");
     await expect(page.locator(`[data-node-id="${nodeId}"]`)).toContainText("我的原始中文作品");
 });
 
@@ -129,7 +153,7 @@ test("employee English preference does not translate admin pages or expose an ad
     await expect(page.getByText("保存", { exact: true }).first()).toBeVisible();
     await page.screenshot({ path: info.outputPath("admin-Chinese.png"), fullPage: true });
     expect(await page.evaluate(() => localStorage.getItem("inchoice.ui-locale"))).toBe("en-US");
-    await page.getByRole("link", { name: "无限画布", exact: true }).first().click();
+    await page.getByRole("link", { name: "自由画布", exact: true }).first().click();
     await expect(page.getByRole("dialog")).toContainText("放弃未保存的修改");
     await page.getByRole("button", { name: "放弃修改", exact: true }).click();
     await expect(page.locator("html")).toHaveAttribute("lang", "en");
@@ -190,7 +214,7 @@ test("OA entry can switch languages without authenticating or opening an employe
     await expect(page.getByRole("heading", { name: "请从公司 OA 重新进入" })).toBeVisible();
     await changeLanguage(page);
     await expect(page.getByRole("heading", { name: "Open again from the company OA portal" })).toBeVisible();
-    await expect(page.getByText("Inchoice TruCreate", { exact: true })).toBeVisible();
+    await expect(page.locator(".inchoice-brand-name").filter({ visible: true }).first()).toHaveText("TruCreate");
     await page.screenshot({ path: info.outputPath("oa-English.png") });
     expect(api.documents.size).toBe(0);
     expect(api.submissions).toHaveLength(0);

@@ -51,6 +51,19 @@ function picker(models: PublicModel[], props: Record<string, unknown> = {}, bind
 }
 
 describe("canvas model presentation", () => {
+    test("2.6 choices retain the distinct usage note without changing request identity", () => {
+        for (const [variant, description] of [["flare", "速度优先，适合快速迭代"], ["sunburst", "细节与编辑一致性优先"]] as const) {
+            const model = { ...imageModel(`opaque-2.6-${variant}`, `aplmart-gpt2.6-${variant}`), publicDescription: description };
+            const { root, selected } = picker([model]);
+            const option = root.props.options[0];
+            expect(option.name).toBe(`GPT Image 2.6 ${variant === "flare" ? "Flare" : "Sunburst"}`);
+            expect(option.description).toBe(description);
+            expect(renderToStaticMarkup(CanvasModelRow({ option, selected: false, onSelect() {} }))).toContain(description);
+            root.props.onValueChange(option.value);
+            expect(selected).toEqual([model.id]);
+        }
+    });
+
     test("published APIMart labels get a brand icon and separate channel without changing the identifier", () => {
         expect(canvasModelPresentation("aplmart-gpt2.5-flare")).toEqual({ name: "GPT Image 2.5 Flare", channel: "APIMart", family: "OpenAI", icon: "/icons/openai.svg" });
         expect(canvasModelPresentation("APIMart-nano2")).toEqual({ name: "Nano Banana 2", channel: "APIMart", family: "Google", icon: "/icons/gemini.svg" });

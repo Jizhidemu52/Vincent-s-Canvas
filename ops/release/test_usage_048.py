@@ -176,7 +176,7 @@ class Usage048Contracts(unittest.TestCase):
             runner.calls.append("transaction")
             if failure == "sql": raise Rejected("COMMAND_FAILED_OR_TIMED_OUT_NO_AUTOMATIC_RETRY")
         runner.raw_sql = raw_sql
-        runner.sql = lambda name, label: after_state() if name == "database-state.sql" else {"waitingTasks": 0, "processingTasks": 0, "submittedWaitingTasks": 0, "processingChatRequests": 0, "processingAnalysisPreviews": 0, "optimizingPromptCompilations": 0, "admittingBatches": 0, "pausedTasks": 8}
+        runner.sql = lambda name, label: after_state() if name == "database-state.sql" else {"waitingTasks": 0, "processingTasks": 0, "submittedWaitingTasks": 0, "processingChatRequests": 0, "processingAnalysisPreviews": 0, "optimizingPromptCompilations": 0, "admittingBatches": 0, "pendingAssetThumbnails": 0, "pausedTasks": 8}
         runner.disabled = lambda label: None
         runner.inventory = lambda label: rows
         runner.application_configuration_unchanged = lambda baseline: None

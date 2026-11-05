@@ -4,7 +4,7 @@ import { isDefinitiveSubmissionRejection } from "./provider-submission-policy";
 import { apiMartPollIntervalMs } from "./apimart-poll-interval";
 import { isPublicHttpUrl, normalizeApiMartImageUrl, uploadApiMartImage, validateApiMartGenerationImage } from "./apimart-upload";
 
-type MarkImageModel = "gpt-image-2.5-flare" | "gpt-image-2.5-sunburst" | "gemini-nano-banana-2.1";
+type MarkImageModel = "gpt-image-2.5-flare" | "gpt-image-2.5-sunburst" | "gpt-image-2.6-flare" | "gpt-image-2.6-sunburst" | "gemini-nano-banana-2.1";
 type GrokImageModel = "grok-imagine-image-2.0";
 export type ApiMartImageModel = "gpt-image-2" | "gemini-3.1-flash-image-preview" | "midjourney" | "midjourney-blend" | MarkImageModel | GrokImageModel;
 export type ApiMartImageBytes = { bytes: Uint8Array; mimeType: string; filename?: string };
@@ -37,7 +37,7 @@ const GEMINI_MODELS = new Set([
 ]);
 
 const GPT_MODELS = new Set(["gpt-image-2", "gpt-image-2-ext", "vcen-gpt2"]);
-const MARK_IMAGE_MODELS = new Set<string>(["gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gemini-nano-banana-2.1"]);
+const MARK_IMAGE_MODELS = new Set<string>(["gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gpt-image-2.6-flare", "gpt-image-2.6-sunburst", "gemini-nano-banana-2.1"]);
 
 const IMAGE_STATUSES = new Set(["pending", "submitted", "processing", "queued", "running"]);
 const IMAGE_FAILURE_STATUSES = new Set(["failed", "cancelled", "canceled"]);
@@ -182,15 +182,19 @@ function buildGrokImageRequest(input: ApiMartImageInput, allowInlineReferences =
 function buildMarkImageRequest(input: ApiMartImageInput, model: MarkImageModel, allowInlineGptReferences = false, encodeReferences = true): ApiMartImageRequest {
   if (!input.prompt.trim()) throw new Error("请填写图像生成或编辑描述");
   const gpt = model !== "gemini-nano-banana-2.1";
+  const gpt26 = model.startsWith("gpt-image-2.6-");
+  if (gpt26 && input.prompt.length > 32_000) throw new Error("GPT-Image-2.6 图片描述不能超过 32000 个字符");
   const parameters = input.parameters;
   // Business metadata (count, tool, inputArchive, operationType, etc.) is not forwarded.
   const unsupported = ["official_fallback", "officialFallback", "nsfw_check", "google_search", "googleSearch", "google_image_search", "googleImageSearch", "midjourneySpeed", "midjourneyQuality", "mask_url", "maskUrl", "maskDataUrl"];
+  // This integration intentionally supports static images only; no implicit GIF/SVG or markup requests.
+  if (gpt26) unsupported.push("markup_url", "markup", "frame_count", "frame_duration_ms", "svg", "stream", "partial_images", "input_fidelity", "prompt_rewriter", "response_format");
   if (!gpt) unsupported.push("quality", "background", "output_format", "output_compression", "moderation");
   for (const key of unsupported) if (parameters[key] !== undefined) throw new Error(`${model} 不支持参数 ${key}`);
   if (parameters.n !== undefined && parameters.n !== 1) throw new Error("画布已拆分批量任务，每个 APIMart 图片任务的 n 必须为 1");
 
   const references = imageReferences(input);
-  if (gpt && references.length > 16) throw new Error("GPT-Image-2.5 最多支持 16 张参考图");
+  if (gpt && references.length > 16) throw new Error(`${model} 最多支持 16 张参考图`);
   for (const reference of references) {
     if ((typeof reference !== "string" || reference.startsWith("data:")) && (!gpt || allowInlineGptReferences)) decodeGenerationReference(reference);
     else if (typeof reference !== "string" || !isPublicHttpUrl(reference)) throw new Error("参考图必须为公开 HTTP(S) URL；本地图片请先上传");
@@ -248,9 +252,9 @@ function normalizeMarkSize(value: unknown, gpt: boolean) {
     const width = Number(pixels[1]), height = Number(pixels[2]);
     if (width % 16 === 0 && height % 16 === 0 && Math.max(width, height) <= 3840
       && Math.max(width, height) / Math.min(width, height) <= 3 && width * height >= 655_360 && width * height <= 8_294_400) return size;
-    throw new Error("GPT2.5 像素尺寸须为 16 的倍数，单边不超过 3840，比例不超过 3:1，总像素为 655360–8294400");
+    throw new Error("GPT Image 像素尺寸须为 16 的倍数，单边不超过 3840，比例不超过 3:1，总像素为 655360–8294400");
   }
-  throw new Error(`${gpt ? "GPT2.5" : "Nano 2.1"} 不支持尺寸或比例 ${size}`);
+  throw new Error(`${gpt ? "GPT Image" : "Nano 2.1"} 不支持尺寸或比例 ${size}`);
 }
 
 function imageReferences(input: ApiMartImageInput): ImageReference[] { return input.sourceImages ?? input.sourceDataUrls ?? []; }

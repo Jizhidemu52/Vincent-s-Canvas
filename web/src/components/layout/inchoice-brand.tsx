@@ -4,10 +4,12 @@ import { useThemeStore } from "@/stores/use-theme-store";
 import "./inchoice-brand.css";
 import { useUiLocale } from "@/lib/i18n";
 
-/** One AI-prepared silhouette keeps the brand identical in both color themes. */
+/** Shared product wordmark for navigation, sign-in and the canvas. */
 export function InchoiceBrand({ className }: { className?: string }) {
     const theme = useThemeStore((state) => state.theme);
     const locale = useUiLocale();
-    if (locale === "en-US") return <span className={cn("inchoice-brand-english", className)} style={{ color: canvasThemes[theme].node.text }}><span>Inchoice</span> TruCreate</span>;
-    return <span role="img" aria-label="INCHOICE" className={cn("inchoice-brand", className)} style={{ color: canvasThemes[theme].node.text }} />;
+    return <span className={cn("inchoice-brand", className)} style={{ color: canvasThemes[theme].node.text }}>
+        <span className="inchoice-brand-name">TruCreate</span>
+        <span className="inchoice-brand-caption">{locale === "en-US" ? "Ideas Come True." : "AI 创意设计平台"}</span>
+    </span>;
 }

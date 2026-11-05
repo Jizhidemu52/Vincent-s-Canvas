@@ -122,7 +122,7 @@ export const CanvasProjectCard = memo(function CanvasProjectCard({ project }: { 
                         </>
                     ) : (
                         <>
-                            <Button type="text" size="small" shape="circle" loading={exporting} icon={<Download className="size-4" />} onClick={() => void exportProjects([project.id], project.title || t("无限画布"))} aria-label={t("导出")} />
+                            <Button type="text" size="small" shape="circle" loading={exporting} icon={<Download className="size-4" />} onClick={() => void exportProjects([project.id], project.title || t("自由画布"))} aria-label={t("导出")} />
                             <Button type="text" size="small" shape="circle" disabled={busy} icon={<Copy className="size-4" />} onClick={() => void act(async () => { await loaded(); if (!useCanvasStore.getState().duplicateProject(project.id)) throw new Error(t("画布已不存在，请刷新后重试。")); message.success(t("已创建副本，原画布未修改")); })} aria-label={t("创建副本")} />
                             <Button type="text" size="small" shape="circle" disabled={busy} icon={<Image className="size-4" />} onClick={() => void act(async () => setCoverProject(await loaded()))} aria-label={t("设置封面")} />
                             <Button type="text" size="small" shape="circle" icon={<Pencil className="size-4" />} onClick={() => startEditing(project.id, project.title)} aria-label={t("重命名")} />

@@ -7,7 +7,7 @@ export type AdminProviderProtocol = "openai" | "gemini" | "volcengine" | "runnin
 export type AdminProviderModelType = "image" | "chat" | "video";
 export type AdminWorkflowProviderProtocol = Extract<AdminProviderProtocol, "runninghub" | "custom">;
 export type AdminWorkflowCapability = Extract<AdminModelCapability, "generate" | "edit" | "upscale" | "batch">;
-export type AdminToolMode = "image-generation" | "midjourney-blend" | "detail-enhance" | "image-edit" | "angle-control" | "batch-image-edit" | "seamless-stitch" | "gpt-chat";
+export type AdminToolMode = "image-generation" | "midjourney-blend" | "detail-enhance" | "image-edit" | "angle-control" | "batch-image-edit" | "seamless-stitch" | "gpt-chat" | "remove-background" | "hd-upscale";
 
 export type DesignerAccount = {
     id: string;
@@ -828,8 +828,8 @@ function normalizeWorkflowId(value: string) {
 export function toolModeOperation(mode: AdminToolMode): AdminOperationType {
     if (mode === "batch-image-edit") return "batch_image";
     if (mode === "seamless-stitch") return "seamless_stitch";
-    if (mode === "detail-enhance") return "upscale";
-    if (mode === "image-edit" || mode === "angle-control") return "inpaint";
+    if (mode === "detail-enhance" || mode === "hd-upscale") return "upscale";
+    if (mode === "image-edit" || mode === "angle-control" || mode === "remove-background") return "inpaint";
     if (mode === "gpt-chat") return "image_generation";
     return "image_generation";
 }

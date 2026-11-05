@@ -12,6 +12,11 @@ export const MARK_EXTRA_IMAGE_MODELS = [
   { modelId: "grok-imagine-image-2.0", name: "aplmart-grok2", description: "文生图与简单改图", defaultEnabled: false },
 ] as const;
 
+export const MARK_GPT26_IMAGE_MODELS = [
+  { modelId: "gpt-image-2.6-flare", name: "aplmart-gpt2.6-flare", description: "速度优先，适合快速迭代", defaultEnabled: true },
+  { modelId: "gpt-image-2.6-sunburst", name: "aplmart-gpt2.6-sunburst", description: "细节与编辑一致性优先", defaultEnabled: true },
+] as const;
+
 /** A single isolated Mark credential powers explicitly selected image, text, and video models. */
 export const MARK_PLATFORM_MODELS = [
   ...MARK_IMAGE_MODELS.map(model => ({ ...model, capabilities: ["generate", "edit", "batch"] as const })),
@@ -22,4 +27,5 @@ export const MARK_PLATFORM_MODELS = [
   ...MARK_EXTRA_IMAGE_MODELS.map(model => ({ ...model, capabilities: ["generate", "edit", "batch"] as const })),
   { modelId: "gemini-3.1-flash-image-preview-official", name: "aplmart-nano2", description: "日常改款与多图参考", defaultEnabled: true, capabilities: ["generate", "edit", "batch"] as const },
   { modelId: "claude-sonnet-5-5", name: "aplmart-claude-sonnet-5-5", description: "文字对话与图文理解", defaultEnabled: true, capabilities: ["chat", "vision", "tools"] as const },
+  ...MARK_GPT26_IMAGE_MODELS.map(model => ({ ...model, capabilities: ["generate", "edit", "batch"] as const })),
 ] as const;

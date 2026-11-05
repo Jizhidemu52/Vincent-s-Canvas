@@ -257,7 +257,7 @@ class DeploymentTests(unittest.TestCase):
             with self.assertRaises(contract.Rejected): contract.prepare_compatibility_assets(source, destination)
 
     def test_idle_gate_preserves_paused_tasks_but_rejects_inflight_work(self):
-        snapshot = {"waitingTasks": 0, "processingTasks": 0, "submittedWaitingTasks": 0, "processingChatRequests": 0, "processingAnalysisPreviews": 0, "optimizingPromptCompilations": 0, "admittingBatches": 0, "pausedTasks": 7}
+        snapshot = {"waitingTasks": 0, "processingTasks": 0, "submittedWaitingTasks": 0, "processingChatRequests": 0, "processingAnalysisPreviews": 0, "optimizingPromptCompilations": 0, "admittingBatches": 0, "pendingAssetThumbnails": 0, "pausedTasks": 7}
         contract.assert_idle(snapshot)
         snapshot["processingChatRequests"] = 1
         with self.assertRaises(contract.Rejected): contract.assert_idle(snapshot)

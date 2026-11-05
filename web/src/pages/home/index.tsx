@@ -42,7 +42,7 @@ export default function IndexPage() {
         <main className="wb-page home-page h-full overflow-y-auto">
             <div className="home-content">
                 <header className="wb-header">
-                    <div><p className="wb-eyebrow">{uiText("VINCENT'S CANVAS / 创作工作台")}</p><h1 className="wb-title">{uiText("让想法，开始成形。")}</h1><p className="wb-description">{uiText("选一个工具开始，或回到上次的画布继续创作。")}</p></div>
+                    <div><p className="wb-eyebrow">{uiText("TruCreate / AI 创意设计平台")}</p><h1 className="wb-title">{uiText("想法成真")}</h1><p className="wb-description">{uiText("选一个工具开始，或回到上次的画布继续创作。")}</p></div>
                     {canvasAvailable ? <button type="button" className="wb-primary-link" disabled={!hydrated} onClick={createAndEnter}><Plus size={18} />{uiText("新建画布")}</button> : null}
                 </header>
                 <HomeReleaseNote />

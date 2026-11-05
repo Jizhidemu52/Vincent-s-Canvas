@@ -34,6 +34,8 @@ import { normalizeDemoPublicAssetOrigin } from "./demo-public-assets";
 import { createDemoProviderVideoSources, resolveOwnedDemoVideoSources } from "./demo-video-sources";
 import { decodeInlineImageResult } from "./demo-task-result-assets";
 import { ImageResultPersistenceError, imageResultExtension, storeImageResult } from "./image-result-storage";
+import { prepareQuickImageTask } from "./quick-image-tools";
+import { ImageResultProcessingError, validateQuickImageSource } from "./image-result-processing";
 import { ImageResultVariantsError, imageResultVariantIds, isAuxiliaryImageResult, resolveImageResultVariants, type ImageResultAsset } from "./image-result-variants";
 import { DemoAssetProjectStore } from "./demo-asset-projects";
 import { canRestoreDemoAsset, demoAssetPurgeAfter, demoAssetContentResponse, demoAssetPage, demoAssetThumbnail, scheduleDemoAssetThumbnails } from "./demo-asset-library";
@@ -1268,6 +1270,7 @@ Bun.serve({
         return existingTask.ownerUserId === user.id
           ? json({ task: existingTask })
           : json({ error: "DUPLICATE_REQUEST", message: "任务请求标识已被使用" }, 400);
+      input = prepareQuickImageTask(input);
       const taskTool = resolveDemoToolConfiguration({ ...input, operationType: input.operationType || "" }, demoToolConfigurations, demoModels, demoProviders, demoModuleFlags);
       assertVideoMotionPolicy({ ...input, toolKey: taskTool.toolKey }, taskTool.allowRawPrompt);
       validateImagePromptExclusions(input);
@@ -1277,7 +1280,7 @@ Bun.serve({
       let prepared: PreparedDemoTask = trustedBatch
         ? { ...input, prompt: trustedBatch.prepared.prompt, parameters: structuredClone(trustedBatch.prepared.parameters), promptInput: trustedBatch.prepared.promptInput,
             userInput: trustedBatch.prepared.userInput, promptCompilationId: trustedBatch.prepared.promptCompilationId, optimized: trustedBatch.prepared.optimized }
-        : input.operationType === "video_generation" ? { ...input, optimized: false }
+        : input.operationType === "video_generation" || input.parameters.quickImageAction ? { ...input, optimized: false }
         : applyImagePromptExclusions(await preparePromptTaskInput(demoPromptCompiler, user, { ...input, toolKey: taskTool.toolKey }), (() => {
             const model = demoModels.find(item => item.id === taskTool.modelConfigId);
             const provider = demoProviders.find(item => item.id === model?.providerId);
@@ -1470,8 +1473,9 @@ Bun.serve({
         let editInput: ImageEditInput<DemoAsset>;
         try {
           editInput = await prepareImageEditInput(sources, input.parameters || {}, { protocol: model.providerId === openTokenProviderId ? "openai" : "apimart", modelId: imageModelId, operationType: input.operationType! });
+          await validateQuickImageSource(editInput.references[0], input.parameters || {});
         } catch (error) {
-          if (error instanceof ImageEditInputError) return json({ error: error.code, message: error.message }, 400);
+          if (error instanceof ImageEditInputError || error instanceof ImageResultProcessingError) return json({ error: error.code, message: error.message }, 400);
           throw error;
         }
         if ((imageModelId === "midjourney" || imageModelId === "midjourney-blend") && input.operationType !== "image_generation")

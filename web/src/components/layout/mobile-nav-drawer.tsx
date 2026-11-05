@@ -10,7 +10,7 @@ export function MobileNavDrawer({ open, onClose }: { open: boolean; activeToolSl
     useUiLocale();
     return <Drawer title={uiText("功能模块")} placement="left" size={300} open={open} onClose={onClose} className="md:hidden">
         <div className="wb-app space-y-6">
-            <Link to="/" onClick={onClose} className="block text-foreground" aria-label={uiText("INCHOICE · 无限画布首页")}><InchoiceBrand /></Link>
+            <Link to="/" onClick={onClose} className="block text-foreground" aria-label={uiText("TruCreate · 首页")}><InchoiceBrand /></Link>
             <nav aria-label={uiText("主导航")}><NavigationMenu onNavigate={onClose} /></nav>
             <NavigationFooter onNavigate={onClose} />
         </div>

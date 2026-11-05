@@ -145,7 +145,7 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
             App: { useApp: () => app }, Button: "Button", Checkbox: "Checkbox", Drawer: "Drawer", Empty: "Empty", Image: "Image", Modal: "Modal", Tag: "Tag", Tooltip: "Tooltip",
             Input: { TextArea: "TextArea" }, Typography: { Text: "Typography.Text" },
         },
-        "react-router-dom": { Link: "Link", useSearchParams: () => [params] },
+        "react-router-dom": { Link: "Link", useLocation: () => ({ pathname: "/image", search: `?${params.toString()}`, hash: "", state: null, key: "image-workspace" }), useSearchParams: () => [params] },
         "@/lib/workspace-storage": { createWorkspaceStorage: (name: string) => name === "image_pending_tasks" ? pendingStorage : storage },
         "@/stores/use-config-store": {
             useConfigStore: Object.assign((select: Function) => select(configState), { getState: () => configState }),

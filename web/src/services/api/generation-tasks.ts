@@ -21,6 +21,7 @@ import type { ReferenceImage } from "@/types/image";
 import { fingerprintImage, type ArchivedReference, type GenerationDraftInput, type GenerationInputArchive } from "./generation-history";
 import { getBusinessConfig } from "./business-config";
 import { requireToolKey, resolveConfiguredToolModel } from "./tool-runtime";
+import { QUICK_IMAGE_MODEL, type QuickImageAction } from "@/lib/quick-image-tools";
 
 type ImageOperationType = "image_generation" | "inpaint" | "upscale" | "batch_image" | "seamless_stitch";
 type PublicModel = { id: string; name: string; modelId: string; capabilities: string[]; creditCost: number; rmbCost: number };
@@ -120,6 +121,7 @@ export function cancelQueuedTask(id: string) {
 }
 
 export function createImageTaskRequests(input: {
+    quickImageAction?: QuickImageAction;
     toolKey?: string;
     requestId: string;
     projectId: string;
@@ -136,16 +138,14 @@ export function createImageTaskRequests(input: {
         projectId: input.projectId,
         operationType: input.operationType,
         toolKey: requireToolKey(input.operationType, input.toolKey),
-        modelConfigId: input.modelConfigId,
-        prompt: input.prompt,
-        ...(input.promptInput ? { promptInput: input.promptInput } : {}),
-        parameters: { ...input.parameters, count: 1, n: 1 },
+        ...(!input.quickImageAction ? { modelConfigId: input.modelConfigId, prompt: input.prompt, ...(input.promptInput ? { promptInput: input.promptInput } : {}) } : {}),
+        parameters: input.quickImageAction ? { quickImageAction: input.quickImageAction } : { ...input.parameters, count: 1, n: 1 },
         sourceUrls: input.sourceUrls,
         priority: "normal" as const,
-    } satisfies Omit<TaskSubmission, "promptInput"> & { promptInput?: PromptInputData }));
+    } satisfies Omit<TaskSubmission, "promptInput" | "prompt"> & { prompt?: string; promptInput?: PromptInputData }));
 }
 
-export async function requestQueuedImages(input: { modelId: string; resolvedModel?: PublicModel; prompt: string; promptInput?: PromptInputData; onOptimizing?: () => void; onCompiled?: (prompt: string, optimized: boolean, submittedPrompt?: string) => void; count: number; operationType: ImageOperationType; tool?: string; parameters?: Record<string, unknown>; draft?: GenerationDraftInput; references?: ReferenceImage[]; requestId?: string; signal?: AbortSignal; cancelOnAbort?: () => boolean; onSubmissionStarted?: () => void | Promise<void>; onSubmitted?: (taskIds: string[]) => void | Promise<void> }) {
+export async function requestQueuedImages(input: { quickImageAction?: QuickImageAction; modelId: string; resolvedModel?: PublicModel; prompt: string; promptInput?: PromptInputData; onOptimizing?: () => void; onCompiled?: (prompt: string, optimized: boolean, submittedPrompt?: string) => void; count: number; operationType: ImageOperationType; tool?: string; parameters?: Record<string, unknown>; draft?: GenerationDraftInput; references?: ReferenceImage[]; requestId?: string; signal?: AbortSignal; cancelOnAbort?: () => boolean; onSubmissionStarted?: () => void | Promise<void>; onSubmitted?: (taskIds: string[]) => void | Promise<void> }) {
     input.signal?.throwIfAborted();
     const ownerId = useUserStore.getState().user?.id;
     if (!ownerId) throw new Error("当前账号不可用");
@@ -154,10 +154,12 @@ export async function requestQueuedImages(input: { modelId: string; resolvedMode
     const toolKey = requireToolKey(input.operationType, input.tool);
     // Keep the exact model snapshot used to normalize parameters. A concurrent
     // admin rebind is rejected by the server, never silently renormalized here.
-    const model = input.resolvedModel || await resolvePublicModel(input.modelId, input.operationType, toolKey);
+    const preset = Boolean(input.quickImageAction);
+    if (preset && input.references?.length !== 1) throw new Error("请只添加一张原图");
+    const model = preset ? undefined : input.resolvedModel || await resolvePublicModel(input.modelId, input.operationType, toolKey);
     assertOwner();
     input.signal?.throwIfAborted();
-    const referenceProfile = imageModelProfile(model.id, [model]);
+    const referenceProfile = model ? imageModelProfile(model.id, [model]) : imageModelProfile(QUICK_IMAGE_MODEL);
     const sourceUrls: string[] = [];
     const archivedReferences: ArchivedReference[] = [];
     for (const reference of input.references || []) {
@@ -179,17 +181,18 @@ export async function requestQueuedImages(input: { modelId: string; resolvedMode
 
     const rootRequestId = input.requestId || createClientId();
     const projectId = currentProjectId("image-workbench");
-    const archive: GenerationInputArchive | undefined = input.draft ? {
+    const archive: GenerationInputArchive | undefined = input.draft && model ? {
         version: 1, ownerId, modelConfigId: model.id, modelId: model.modelId,
         prompt: input.draft.prompt, userInput: input.promptInput, effectivePrompt: input.prompt, config: { ...input.draft.config, model: model.id, imageModel: model.id, count: "1" },
         parameters: { ...input.parameters }, references: archivedReferences, maskReferenceIndex: input.draft.maskReferenceIndex,
     } : undefined;
     const taskRequests = createImageTaskRequests({
+        quickImageAction: input.quickImageAction,
         toolKey,
         requestId: rootRequestId,
         projectId,
         operationType: input.operationType,
-        modelConfigId: model.id,
+        modelConfigId: model?.id || "",
         prompt: input.prompt,
         promptInput: input.promptInput,
         parameters: { ...input.parameters, ...(input.tool ? { tool: input.tool } : {}), ...(archive ? { inputArchive: archive } : {}) },

@@ -58,7 +58,7 @@ test("library rename supports Escape and blur without changing recency; selectio
     await expect(card.getByRole("heading", { name: "测试画布 12", exact: true })).toBeVisible();
     await card.getByRole("button", { name: "重命名", exact: true }).click();
     await card.getByRole("textbox", { name: "画布名称" }).fill("改名不改变位置");
-    await page.getByRole("heading", { name: "无限画布", exact: true }).click();
+    await page.getByRole("heading", { name: "自由画布", exact: true }).click();
     await expect(card.getByRole("heading", { name: "改名不改变位置", exact: true })).toBeVisible();
     await expect.poll(() => api.document("library-12")?.title).toBe("改名不改变位置");
     expect(api.document("library-12")?.updatedAt).toBe(project("library-12", 12).updatedAt);

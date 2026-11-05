@@ -140,7 +140,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
 }: CanvasAssistantPanelRenderState) {
     const t = useUiText();
     const locale = useUiLocale();
-    const brandName = locale === "en-US" ? "Inchoice TruCreate" : "无限画布";
+    const brandName = locale === "en-US" ? "TruCreate" : "AI 创意设计平台";
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const user = useUserStore((state) => state.user);
     const attachmentOwner = useUserStore(state => `${state.status}:${state.user?.id || ""}`);
@@ -1599,7 +1599,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                                 <span>{brandName}</span>
                                 <DiaTextReveal className="absolute inset-0" colors={["#A97CF8", "#F38CB8", "#FDCC92"]} textColor="transparent" duration={1.8} startOnView={false} text={brandName} />
                             </div>
-                            <div className="mt-3 font-serif text-base italic tracking-wide opacity-60">One canvas, infinite ideas</div>
+                            <div className="mt-3 font-serif text-base italic tracking-wide opacity-60">{t("想法成真")}</div>
                         </div>
                     */}</>}
                 </div>
@@ -2069,7 +2069,7 @@ function stringifyLog(value: unknown) {
 
 function formatOnlineLogText(logs: OnlineAgentLog[], context: OnlineAgentLogContext) {
     const head = [
-        "无限画布 网站 Agent 诊断日志",
+        "TruCreate 网站 Agent 诊断日志",
         `model: ${context.model || "none"}`,
         `running: ${context.running}`,
         `confirmTools: ${context.confirmTools}`,
