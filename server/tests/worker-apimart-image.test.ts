@@ -67,11 +67,12 @@ test("Worker isolates PNG mask, persists Mark upstream ID and deadline, then yie
 
 test("quick image validates original bytes before the single submission and recovers by the same upstream ID", async () => {
   const prepared = prepareQuickImageTask({ operationType: "inpaint", toolKey: "canvas-edit", prompt: "", sourceUrls: ["owned-image"], parameters: { quickImageAction: "remove-background" } as Record<string, unknown> });
-  const task = { ...newTask(), model_id: "gemini-nano-banana-2.1", prompt: prepared.prompt!, parameters: prepared.parameters!, source_urls: prepared.sourceUrls };
+  const task = { ...newTask(), model_id: "mai-image-2.6-flash", prompt: prepared.prompt!, parameters: prepared.parameters!, source_urls: prepared.sourceUrls };
   const valid = harness(true, undefined, [assets[0]!]);
   await expect(valid.execute(task, { apiKey: "fixture-only" })).rejects.toMatchObject({ nextPollMs: 3_000 });
   expect(valid.calls).toHaveLength(1); expect(valid.calls[0]!.sourceImages).toHaveLength(1);
-  expect(valid.calls[0]!.parameters).toMatchObject({ quickImageAction: "remove-background", n: 1, size: "auto" });
+  expect(valid.calls[0]!.parameters).toMatchObject({ quickImageAction: "remove-background", n: 1 });
+  expect(valid.calls[0]!.parameters).not.toHaveProperty("size"); expect(valid.calls[0]!.parameters).not.toHaveProperty("resolution");
   const loadedOnce = valid.loaded();
   expect(await valid.execute(task, { apiKey: "fixture-only" })).toHaveLength(2);
   expect(valid.loaded()).toBe(loadedOnce); expect(valid.calls[1]!.upstreamTaskId).toBe("provider-image-task");

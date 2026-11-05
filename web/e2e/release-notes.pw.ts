@@ -147,14 +147,14 @@ test("department administrator and designer cannot see the publishing panel", as
 
 test("empty publication list has no home banner; explicit details can show empty or transient failure", async ({ page, context, api }, info) => {
     const { state } = await releaseFixture(context);
-    await page.goto("/"); await expect(page.getByRole("heading", { name: "让想法，开始成形。", exact: true })).toBeVisible();
+    await page.goto("/"); await expect(page.getByRole("heading", { name: "想法成真", exact: true })).toBeVisible();
     await expect.poll(() => state.reads).toBe(1); await expect(page.getByTestId("home-release-note")).toHaveCount(0);
     await page.getByRole("button", { name: "版本更新", exact: true }).first().click();
     await expect(page.getByRole("dialog")).toContainText("暂时没有已发布的版本更新");
     await page.screenshot({ path: info.outputPath("empty-state.png"), fullPage: true });
     await page.getByRole("dialog").getByRole("button", { name: "关闭", exact: true }).click();
     state.publicFailure = 503; await page.reload();
-    await expect(page.getByRole("heading", { name: "让想法，开始成形。", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "想法成真", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "版本更新", exact: true }).first().click();
     await expect(page.getByRole("dialog")).toContainText("不影响继续创作");
     expect(api.submissions).toHaveLength(0);
@@ -180,7 +180,7 @@ test("new publication reaches an already-open canvas once without navigation, re
 test("trial deployment makes no release-note request and does not advertise publishing", async ({ page, context, api }) => {
     const { state } = await releaseFixture(context);
     await context.route("**/api/deployment", route => json(route, { authenticationEnabled: false, creditsEnabled: false, rolePortalsEnabled: false, oaLoginEnabled: false }));
-    await page.goto("/"); await expect(page.getByRole("heading", { name: "让想法，开始成形。", exact: true })).toBeVisible();
+    await page.goto("/"); await expect(page.getByRole("heading", { name: "想法成真", exact: true })).toBeVisible();
     expect(state.reads).toBe(0); await expect(page.getByRole("button", { name: "版本更新", exact: true })).toHaveCount(0);
     expect(api.submissions).toHaveLength(0);
 });

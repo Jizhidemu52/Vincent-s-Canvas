@@ -132,6 +132,7 @@ const anonymousProfiles = {
   "midjourney-blend": "blend", unverified: "unverified",
   "quality-resolution": "quality-resolution", "resolution-1k": "resolution-1k",
   "grok-image": "grok-image",
+  "mai-image": "mai-image",
 } as const;
 
 /** Explicit allowlist: never expose extra provider/configuration fields from a row. */

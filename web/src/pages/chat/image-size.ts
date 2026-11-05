@@ -40,6 +40,7 @@ export async function resolveChatImageSize(config: AiConfig, requested: string |
     assertCurrent();
     const profile = imageModelProfile(config.model || config.imageModel);
     if (action === "edit" && !source) throw new Error("没有可用的编辑底图，图片任务尚未提交。");
+    if (profile.kind === "mai-image" && source) return "auto";
     const automatic = !requested || requested === CHAT_AUTO_IMAGE_SIZE || requested === "follow-source";
     let size = automatic ? (profile.sizes.includes("auto") ? "auto" : config.size) : requested || config.size;
     if (automatic && action === "edit" && !profile.sizes.includes("auto")) {

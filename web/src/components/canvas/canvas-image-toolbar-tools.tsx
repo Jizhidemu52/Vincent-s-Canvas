@@ -1,10 +1,10 @@
 import type { ReactNode } from "react";
 import { uiText } from "@/lib/i18n";
-import { Brush, Camera, Columns2, Copy, FileText, Grid2x2, History, Lock, LockOpen, Maximize2, PanelsTopLeft, PencilRuler, Scissors, Sparkles, Upload, ZoomIn, Workflow } from "lucide-react";
+import { Brush, Camera, Columns2, Copy, Eraser, FileText, Grid2x2, History, Lock, LockOpen, Maximize2, PanelsTopLeft, PencilRuler, Scissors, Sparkles, Upload, ZoomIn, Workflow } from "lucide-react";
 
 import type { CanvasNodeData } from "@/types/canvas";
 
-export type ImageNodeActionToolId = "compare" | "designTemplate" | "imageSequence" | "restoreGeneration" | "manualEdit" | "copyPrompt" | "reversePrompt" | "replace" | "resize" | "maskEdit" | "crop" | "split" | "upscale" | "superResolve" | "angle" | "view";
+export type ImageNodeActionToolId = "compare" | "designTemplate" | "imageSequence" | "restoreGeneration" | "manualEdit" | "eraser" | "copyPrompt" | "reversePrompt" | "replace" | "resize" | "maskEdit" | "crop" | "split" | "upscale" | "superResolve" | "angle" | "view";
 export type ImageQuickToolId = "info" | "delete" | "saveAsset" | "download" | "edit" | ImageNodeActionToolId;
 
 export type ImageToolHandlers = {
@@ -12,7 +12,7 @@ export type ImageToolHandlers = {
     onDesignTemplate?: (node: CanvasNodeData) => void;
     onImageSequence?: (node: CanvasNodeData) => void;
     onRestoreGeneration?: (node: CanvasNodeData) => void;
-    onManualEdit: (node: CanvasNodeData) => void;
+    onManualEdit: (node: CanvasNodeData, initialTool?: "select" | "erase") => void;
     onUpload: (node: CanvasNodeData) => void;
     onToggleFreeResize: (node: CanvasNodeData) => void;
     onMaskEdit: (node: CanvasNodeData) => void;
@@ -55,6 +55,11 @@ export const imageToolDefinitions: ImageToolDefinition[] = [
         id: "manualEdit", defaultVisible: true, panelLabel: "编辑图片", label: "编辑图片", title: "编辑图片",
         icon: () => <PencilRuler className="size-[18px]" />,
         run: (node, handlers) => handlers.onManualEdit(node),
+    },
+    {
+        id: "eraser", defaultVisible: true, panelLabel: "橡皮擦", label: "橡皮擦", title: "擦除像素并另存透明 PNG，原图保留",
+        icon: () => <Eraser className="size-[18px]" />,
+        run: (node, handlers) => handlers.onManualEdit(node, "erase"),
     },
     {
         id: "copyPrompt",
@@ -149,7 +154,7 @@ export const imageToolDefinitions: ImageToolDefinition[] = [
     },
 ];
 
-export const defaultImageQuickToolIds: ImageQuickToolId[] = ["manualEdit", "edit", "download"];
+export const defaultImageQuickToolIds: ImageQuickToolId[] = ["manualEdit", "eraser", "edit", "download"];
 
 /** Keep old preferences intact while preventing a legacy full-width toolbar. */
 export function compactImageQuickToolIds(ids: ImageQuickToolId[]) {

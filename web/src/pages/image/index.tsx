@@ -70,7 +70,7 @@ import { promptImageSettings } from "@/lib/prompt-editor-parameters";
 import { useDesignLibraryShare } from "@/pages/design-library/use-design-library-share";
 import { consumePlacementAiHandoff, placementDraftScope, placementHandoffToken } from "@/pages/design-workbench/local/placement/ai-handoff";
 import { PracticeExampleRecord } from "@/components/design-examples";
-import { isQuickImageTool, QUICK_IMAGE_MODEL } from "@/lib/quick-image-tools";
+import { isQuickImageTool, quickImageModelId } from "@/lib/quick-image-tools";
 
 type GeneratedImage = {
     id: string;
@@ -131,7 +131,7 @@ type GenerationLogConfig = Pick<AiConfig, "model" | "imageModel" | "quality" | "
 
 type UpdateAiConfig = <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
 
-import { imageModelProfile, normalizeImageModelSettings, useImageModelProfile } from "@/lib/image-model-settings";
+import { adaptImageModelSettings, imageModelProfile, imageReferenceSizeIsAutomatic, normalizeImageModelSettings, useImageModelProfile } from "@/lib/image-model-settings";
 
 const LOG_STORE_KEY = "wireless-canvas:image_generation_logs";
 const RESULT_ACTION_BUTTON_CLASS = "min-w-0 px-1.5 [&_.ant-btn-icon]:shrink-0 [&>span:last-child]:min-w-0 [&>span:last-child]:truncate";
@@ -147,7 +147,7 @@ const imageResultCommits = new Map<string, { stopped: boolean; record: PendingIm
 type GenerationToolMode = Exclude<AdminToolMode, "gpt-chat" | "batch-image-edit" | "seamless-stitch">;
 
 const imageToolModes: Record<GenerationToolMode, { title: string; description: string; placeholder: string; button: string; projectId: string; requiresReference: boolean }> = {
-    "remove-background": { title: "一键去背景", description: "上传一张原图，自动去除背景并导出透明 PNG，保留主体与原图。", placeholder: "", button: "一键去背景", projectId: "tool-remove-background", requiresReference: true },
+    "remove-background": { title: "一键去背景", description: "上传一张原图，使用 MAI 识别主体并导出透明 PNG，保留原图。", placeholder: "", button: "一键去背景", projectId: "tool-remove-background", requiresReference: true },
     "hd-upscale": { title: "高清放大", description: "上传一张原图，使用 Nano 2.1 提升清晰度并输出 4K 图片，原图保持不变。", placeholder: "", button: "高清放大", projectId: "tool-hd-upscale", requiresReference: true },
     "midjourney-blend": {
         title: "MJ 多图融合",
@@ -258,7 +258,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         ? (blendModels.find(item => item.modelId === baseImageModel || item.id === baseImageModel) || blendModels[0])?.modelId || ""
         : baseImageModel;
     const managedConfig = useToolConfig({ ...baseConfig, model: selectedImageModel, imageModel: selectedImageModel }, toolKey);
-    const effectiveConfig = quickTool ? { ...baseConfig, model: QUICK_IMAGE_MODEL, imageModel: QUICK_IMAGE_MODEL, count: "1", size: "auto", quality: historyTool === "hd-upscale" ? "4K" : "2K", imageOptions: "", systemPrompt: "" } : managedConfig;
+    const effectiveConfig = quickTool ? { ...baseConfig, model: quickImageModelId(historyTool as "remove-background" | "hd-upscale"), imageModel: quickImageModelId(historyTool as "remove-background" | "hd-upscale"), count: "1", size: "auto", quality: historyTool === "hd-upscale" ? "4K" : "auto", imageOptions: "", systemPrompt: "" } : managedConfig;
     const updateConfig: UpdateAiConfig = useCallback((key, value) => setDraftConfig(current => current[key] === value ? current : { ...current, [key]: value }), [setDraftConfig]);
     const updateInputConfig: UpdateAiConfig = (key, value) => { inputRevision.current += 1; updateConfig(key, value); };
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
@@ -1139,7 +1139,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                                     </div>
                                 </div>
                                 <Input.TextArea aria-label={uiText("图像提示词")} showCount value={prompt} onPaste={event => { const files = pastedImageFiles(event.clipboardData); if (files.length) { event.preventDefault(); void addReferences(files); } }} onChange={(event) => { inputRevision.current += 1; setPrompt(event.target.value); }} onKeyDown={(event) => handleSubmitShortcut(event, canGenerate && !running, () => void generate())} rows={5} disabled={!requiresPrompt} placeholder={requiresPrompt ? uiText("{placeholder}（Ctrl/⌘ + Enter 提交）", { placeholder: uiText(toolModeConfig.placeholder) }) : uiText("这个模型直接合成参考图，不需要填写文字")} />
-                            </div> : <p className="rounded-lg bg-muted/50 p-3 text-sm text-muted-foreground">{uiText(quickTool ? "内置配方 · Nano 2.1，无需填写提示词或选择模型。" : "请选择 2–4 张参考图。此模型不会提交提示词；生成结果取决于图片内容及下方融合参数。")}</p>}
+                            </div> : <p className="rounded-lg bg-muted/50 p-3 text-sm text-muted-foreground">{uiText(quickTool ? historyTool === "remove-background" ? "内置配方 · MAI Image 2.6 Flash，无需填写提示词或选择模型。" : "内置配方 · Nano 2.1，输出 4K，无需填写提示词或选择模型。" : "请选择 2–4 张参考图。此模型不会提交提示词；生成结果取决于图片内容及下方融合参数。")}</p>}
 
                             {requiresPrompt ? <PromptOptimizeButton config={effectiveConfig} prompt={prompt} references={references} operationType={operationType} scene={creativePreset?.id as PromptScene | undefined} toolKey={toolKey} disabled={running} onBusyChange={setOptimizingPrompt} onApply={(value, _compilation, input) => { replacePrompt(value); setOptimizedDraft({ prompt: value, input, references: [...references], context: optimizationContext }); }} /> : null}
                             <ReferenceImageTray
@@ -1157,7 +1157,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                         <div ref={submitToolbarRef} className="generation-submit shrink-0 pt-4">
                             {!quickTool && <div className="mb-2 flex items-center justify-between rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-sm dark:border-stone-800 dark:bg-stone-900">
                                 <span className="truncate text-stone-500 dark:text-stone-400">
-                                    {modelOptionLabel(effectiveConfig, model)} · {imageSizeLabel(effectiveConfig.size)} · {imageQualityLabel(effectiveConfig.quality)}
+                                    {modelOptionLabel(effectiveConfig, model)} · {imageReferenceSizeIsAutomatic(selectedModelProfile, references.length) ? uiText("模型决定尺寸 · 约 100 万像素") : <>{imageSizeLabel(effectiveConfig.size)} · {imageQualityLabel(effectiveConfig.quality)}</>}
                                 </span>
                                 <Button size="small" type="text" disabled={placementStatus !== "ready"} icon={<SlidersHorizontal className="size-4" />} onClick={() => setSettingsOpen(true)}>
                                     {uiText("调整")}</Button>
@@ -1283,7 +1283,11 @@ function GenerationSettings({ config, model, referenceCount, updateConfig, openC
         <>
             <label className="col-span-2 block min-w-0">
                 <span className="mb-1.5 block text-sm font-semibold sm:mb-2 sm:text-base">{uiText("模型")}</span>
-                <ModelPicker toolKey={toolKey} config={config} value={model} onChange={(value) => updateConfig("imageModel", value)} capability="image" modelsSource="server" fullWidth className="h-10 rounded-lg" onMissingConfig={() => openConfigDialog(false)} />
+                <ModelPicker toolKey={toolKey} config={config} value={model} onChange={(value) => {
+                    const settings = adaptImageModelSettings(config, imageModelProfile(value));
+                    updateConfig("imageModel", value);
+                    for (const key of ["size", "quality", "count", "imageOptions"] as const) updateConfig(key, settings[key]);
+                }} capability="image" modelsSource="server" fullWidth className="h-10 rounded-lg" onMissingConfig={() => openConfigDialog(false)} />
                 {profile.verified ? <span className="mt-2 block text-xs leading-5" style={{ color: "var(--wb-muted)" }}>{uiText(profile.tip || "")}</span> : null}
             </label>
             <div className="col-span-2">

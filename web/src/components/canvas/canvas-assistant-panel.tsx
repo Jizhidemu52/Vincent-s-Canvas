@@ -46,7 +46,7 @@ import { useCanvasAgentStore } from "@/stores/canvas/use-canvas-agent-store";
 import { summarizeCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
 import { classifyAgentMediaIntent, resolveAgentMediaToolDispatch } from "@/lib/canvas/agent-media-workflow";
 import { agentQuickstartPreset, buildAgentGeneratedMediaOps, buildAgentGenerationBrief, buildAgentGenerationPlan, buildAgentReferenceImageContent, buildAgentVideoPrompt, createAgentVideoConfirmation, normalizeAgentImageSettings, normalizeAgentVideoSettings, resolveAgentGeneratedMediaPosition, resolveAgentImageGenerationSettings, selectAgentVideoReferences, type AgentGenerationSettings, type AgentVideoConfirmation } from "@/lib/agent-direct-generation";
-import { imageModelProfile, useImageModelProfile } from "@/lib/image-model-settings";
+import { adaptImageModelSettings, imageModelProfile, imageModelSettingsError, useImageModelProfile } from "@/lib/image-model-settings";
 import { getVideoModelParameterSpec } from "@/lib/video-model-parameters";
 import { getGenerationCapabilities, getImageGenerationModels, QueuedTaskFailedError, QueuedTaskPausedError, type GenerationCapabilityModel, type ImageGenerationModel } from "@/services/api/generation-tasks";
 import type { ReferenceImage } from "@/types/image";
@@ -1806,7 +1806,15 @@ function AgentGenerationControls({ settings: savedSettings, config: baseConfig, 
         if (settings.size !== imageSettings.size || settings.quality !== imageSettings.quality || settings.imageCount !== imageSettings.imageCount) onChange({ size: imageSettings.size, quality: imageSettings.quality, imageCount: imageSettings.imageCount });
     }, [isImage, loading, imageCapabilities, settings, imageSettings.size, imageSettings.quality, imageSettings.imageCount, onChange]);
     const changeModel = (model: string) => {
-        if (isImage) { onChange(normalizeAgentImageSettings({ ...settings, imageModel: model }, imageModelProfile(model))); return; }
+        if (isImage) {
+            const profile = imageModelProfile(model);
+            const requested = settings.requestedImageSize;
+            const adapted = adaptImageModelSettings({ ...settings, size: requested || settings.size, count: settings.imageCount }, profile);
+            const aspect = (size: string) => { const dimensions = /^(\d+(?:\.\d+)?)[x:](\d+(?:\.\d+)?)$/.exec(size); return dimensions ? Number(dimensions[1]) / Number(dimensions[2]) : NaN; };
+            const keepRequested = requested && !imageModelSettingsError(requested, profile) && (requested === adapted.size || Math.abs(aspect(requested) - aspect(adapted.size)) < 1e-9);
+            onChange(normalizeAgentImageSettings({ ...settings, ...adapted, imageModel: model, imageCount: adapted.count, requestedImageSize: requested ? keepRequested ? requested : adapted.size : undefined }, profile));
+            return;
+        }
         const capability = videoCapabilities.find((item) => item.modelId === model)?.capability;
         onChange(capability ? normalizeAgentVideoSettings({ ...settings, videoModel: model }, capability) : { videoModel: model });
     };

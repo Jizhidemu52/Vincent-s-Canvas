@@ -1,6 +1,7 @@
 export const ALL_PROMPTS_OPTION = "全部";
 
 export type PromptScope = "personal" | "team" | "public";
+export type PromptLibraryScope = "all" | "general" | PromptScope;
 export type PromptTargetTool = "image-generation" | "detail-enhance" | "image-edit" | "angle-control" | "batch-edit" | "seamless-stitch" | "video" | "canvas";
 export const promptTargetLabels: Record<PromptTargetTool, string> = {
     "image-generation": "图像生成", "detail-enhance": "细节增强", "image-edit": "图片编辑", "angle-control": "角度控制",
@@ -79,6 +80,8 @@ export type PromptReusePayload = {
 
 export type Prompt = {
     id: string;
+    scope: Exclude<PromptLibraryScope, "all">;
+    templateId: string | null;
     title: string;
     coverUrl: string;
     prompt: string;
@@ -102,14 +105,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     return response.status === 204 ? (undefined as T) : (response.json() as Promise<T>);
 }
 
-export function listPromptTemplates(input: { scope: PromptScope; query?: string; category?: string; tag?: string; favorite?: boolean; sort?: "updated" | "recent" | "used"; page?: number; pageSize?: number } ) {
+export function listPromptTemplates(input: { scope: PromptScope; query?: string; category?: string; tag?: string; favorite?: boolean; sort?: "updated" | "recent" | "used"; page?: number; pageSize?: number }, signal?: AbortSignal) {
     const params = new URLSearchParams({ scope: input.scope, page: String(input.page ?? 1), pageSize: String(input.pageSize ?? 24) });
     if (input.query) params.set("query", input.query);
     if (input.category) params.set("category", input.category);
     if (input.tag) params.set("tag", input.tag);
     if (input.favorite !== undefined) params.set("favorite", String(input.favorite));
     if (input.sort) params.set("sort", input.sort);
-    return request<{ templates: PromptTemplate[]; total: number; page: number; pageSize: number }>(`/api/prompt-templates?${params}`);
+    return request<{ templates: PromptTemplate[]; total: number; page: number; pageSize: number }>(`/api/prompt-templates?${params}`, { signal, cache: "no-store" });
 }
 
 export const createPromptTemplate = (input: PromptSnapshotInput) => request<{ template: { id: string; currentVersionId: string } }>("/api/prompt-templates", { method: "POST", body: JSON.stringify(input) });
@@ -131,31 +134,32 @@ export const resolvePromptReuse = (id: string, mode: "fill" | "fill_and_generate
     request<{ reuseToken: string; expiresInSeconds: number; mode: "fill" | "fill_and_generate"; pricing: PromptPricingResolution }>(`/api/prompt-templates/${id}/resolve`, { method: "POST", body: JSON.stringify({ mode, requestId: `prompt-reuse:${requestId}` }) });
 export const hydratePromptReuse = (token: string) => request<PromptReusePayload>(`/api/prompt-templates/reuse/${encodeURIComponent(token)}`);
 
-export async function fetchPrompts({ keyword = "", tag = [], category = ALL_PROMPTS_OPTION, page = 1, pageSize = 20 }: { keyword?: string; tag?: string[]; category?: string; page?: number; pageSize?: number } = {}) {
+export async function fetchPrompts({ keyword = "", tag = [], category = ALL_PROMPTS_OPTION, page = 1, pageSize = 20, scope = "all" }: { keyword?: string; tag?: string[]; category?: string; page?: number; pageSize?: number; scope?: "all" | PromptScope } = {}, signal?: AbortSignal) {
     const activeCategory = category && category !== ALL_PROMPTS_OPTION ? category : undefined;
-    const [team, publicItems] = await Promise.all([
-        listPromptTemplates({ scope: "team", query: keyword, category: activeCategory, tag: tag[0], page: 1, pageSize: 100 }),
-        listPromptTemplates({ scope: "public", query: keyword, category: activeCategory, tag: tag[0], page: 1, pageSize: 100 }),
-    ]);
-    const templates = [...team.templates, ...publicItems.templates];
+    const scopes: PromptScope[] = scope === "all" ? ["personal", "team", "public"] : [scope];
+    // Each source keeps its own server pagination and access checks. Never cap
+    // a user's library at the first 100 rows or enumerate another owner's data.
+    const pages = await Promise.all(scopes.map(source => listPromptTemplates({ scope: source, query: keyword, category: activeCategory, tag: tag[0], page, pageSize }, signal)));
+    const templates = pages.flatMap(result => result.templates);
     const items = templates.map(toLegacyPrompt);
-    const start = (Math.max(1, page) - 1) * pageSize;
     return {
-        items: items.slice(start, start + pageSize),
+        items,
         tags: Array.from(new Set(templates.flatMap((item) => item.tags))),
         categories: Array.from(new Set(templates.map((item) => item.category).filter(Boolean))),
-        total: items.length,
+        total: pages.reduce((total, result) => total + result.total, 0),
     };
 }
 
 function toLegacyPrompt(template: PromptTemplate): Prompt {
     return {
         id: template.id,
+        scope: template.scope,
+        templateId: template.id,
         title: template.title,
         coverUrl: "",
         prompt: template.prompt,
         tags: template.tags,
-        category: template.category || (template.scope === "team" ? "团队提示词" : "公共提示词"),
+        category: template.category,
         preview: template.notes,
         createdAt: template.createdAt,
         updatedAt: template.updatedAt,

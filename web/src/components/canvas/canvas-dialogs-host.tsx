@@ -94,7 +94,7 @@ export const CanvasDialogsHost = memo(function CanvasDialogsHost({ projectId, st
 
                 {localToolsEnabled && manualEditNode?.metadata?.content ? (
                     <Suspense fallback={null}>
-                        <CanvasImageEditorDialog key={`${projectId}:${manualEditNode.id}`} node={manualEditNode} onClose={() => setManualEditNode(null)} onConfirm={saveManualImageEdit} />
+                        <CanvasImageEditorDialog key={`${projectId}:${manualEditNode.id}`} node={manualEditNode} initialTool={state.manualEditInitialTool} onClose={() => setManualEditNode(null)} onConfirm={saveManualImageEdit} />
                     </Suspense>
                 ) : null}
 

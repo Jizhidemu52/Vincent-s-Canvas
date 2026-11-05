@@ -220,7 +220,7 @@ test("opening advanced settings normalizes only form state while actual user cho
     expect(changes).toEqual([]);
     expect(value).toEqual(original);
     tree.find(item => item.props["aria-label"] === "输出格式")!.props.onChange({ target: { value: "png" } });
-    expect(changes).toEqual([["imageOptions", '{"output_format":"png"}']]);
+    expect(changes).toEqual([["imageOptions", '{"output_format":"png","resolution":"1k"}']]);
 });
 
 test("non-canvas image settings retain their existing normalization callback behavior", () => {

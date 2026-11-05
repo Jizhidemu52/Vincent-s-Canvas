@@ -25,6 +25,6 @@ export function CanvasImageQuickActions({ node, onRun }: { node: CanvasNodeData;
                 {running === action ? <LoaderCircle className="size-4 shrink-0 animate-spin" /> : <Icon className="size-4 shrink-0" />}<span>{uiText(quickImageTitle(action))}</span>
             </button>; })}
         </div>
-        <p className="mb-0 mt-3 text-[11px] leading-5" style={{ color: theme.node.muted }}>{uiText(!enabled ? "当前图片编辑功能已停用" : busy ? "已有图片任务待完成，请先查看原任务" : "Nano 2.1 · 内置配方，结果另存新图片")}</p>
+        <p className="mb-0 mt-3 text-[11px] leading-5" style={{ color: theme.node.muted }}>{uiText(!enabled ? "当前图片编辑功能已停用" : busy ? "已有图片任务待完成，请先查看原任务" : "去背景：MAI · 放大：Nano 2.1（4K），结果另存新图片")}</p>
     </aside>;
 }

@@ -3,7 +3,7 @@ import type { Database } from "./db";
 import { modelSupportsOperation } from "./billing";
 import { assertModuleEnabled } from "./module-flags";
 import { DEFAULT_CHAT_MODEL_TOOL_KEY } from "./chat-model-policy";
-import { isQuickImageAction, matchesQuickImageTaskTarget, QUICK_IMAGE_MODEL_ID } from "../../shared/quick-image-tools";
+import { isQuickImageAction, matchesQuickImageTaskTarget, quickImageModelId } from "../../shared/quick-image-tools";
 import { MARK_IMAGE_PROVIDER_ID } from "../../shared/mark-image-models";
 
 export type ToolConfiguration = {
@@ -62,7 +62,7 @@ export async function resolveToolExecution(db: Pick<Database, "query">, input: {
   const modelConfiguration = isChat && toolKey !== DEFAULT_CHAT_MODEL_TOOL_KEY
     ? await readToolConfiguration(db, DEFAULT_CHAT_MODEL_TOOL_KEY) : configuration;
   const isQuickImage = isQuickImageAction(quickAction);
-  const selected = isQuickImage ? QUICK_IMAGE_MODEL_ID : isChat ? modelConfiguration.modelConfigId : options.allowModelOverride && requested ? requested : configuration.modelConfigId ?? requested;
+  const selected = isQuickImage ? quickImageModelId(quickAction) : isChat ? modelConfiguration.modelConfigId : options.allowModelOverride && requested ? requested : configuration.modelConfigId ?? requested;
   if (isChat && !selected) throw new ToolConfigurationError("CHAT_MODEL_NOT_CONFIGURED", "管理员尚未配置统一对话模型", 503);
   if (!selected) throw new ToolConfigurationError("MODEL_REQUIRED", "请先选择一个已启用的模型");
   const result = await db.query<{
@@ -77,8 +77,8 @@ export async function resolveToolExecution(db: Pick<Database, "query">, input: {
   const model = result.rows[0];
   if (!model || !model.enabled || !model.providerEnabled) throw new ToolConfigurationError("MODEL_DISABLED", "模型或 Provider 不存在或未启用");
   if (model.workflowConfigId && !model.workflowEnabled) throw new ToolConfigurationError("WORKFLOW_DISABLED", "模型工作流未启用");
-  if (isQuickImage && model.modelId !== QUICK_IMAGE_MODEL_ID) throw new ToolConfigurationError("TOOL_MODEL_MISMATCH", "一键图片工具必须使用 Nano 2.1 模型");
-  if (isQuickImage && (model.protocol !== "apimart" || model.workflowConfigId)) throw new ToolConfigurationError("TOOL_MODEL_MISMATCH", "一键图片工具需要启用 Nano 2.1 的 APIMart 标准图片渠道");
+  if (isQuickImage && model.modelId !== selected) throw new ToolConfigurationError("TOOL_MODEL_MISMATCH", "一键图片工具必须使用该操作指定的模型");
+  if (isQuickImage && (model.protocol !== "apimart" || model.workflowConfigId)) throw new ToolConfigurationError("TOOL_MODEL_MISMATCH", "一键图片工具需要启用指定模型的 APIMart 标准图片渠道");
   if (!isQuickImage && !isChat && !options.allowModelOverride && configuration.modelConfigId && requested && requested !== model.id && requested !== model.modelId) {
     throw new ToolConfigurationError("TOOL_MODEL_CHANGED", "管理员已更改该板块模型，请刷新模型配置和参数后重试", 409);
   }

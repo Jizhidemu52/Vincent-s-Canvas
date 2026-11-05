@@ -33,7 +33,7 @@ import { uploadImage } from "@/services/image-storage";
 import { CanvasNodeType, type CanvasConnection, type CanvasGenerationMode, type CanvasNodeData } from "@/types/canvas";
 import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import { canvasToolKey, useToolConfig, useToolEnabled } from "@/hooks/use-tool-config";
-import { useImageModelProfile } from "@/lib/image-model-settings";
+import { adaptImageModelSettings, imageModelProfile, useImageModelProfile } from "@/lib/image-model-settings";
 import { resolveCanvasImageConfig } from "@/lib/canvas/canvas-generation-model";
 import { getRecentCanvasPrompts, rememberCanvasPrompt } from "@/lib/canvas/canvas-prompt-history";
 import { loadCanvasPromptTemplate } from "@/lib/canvas/canvas-prompt-template";
@@ -262,7 +262,10 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                     {requiresPrompt ? <CanvasPromptLibrary onSelect={updatePrompt} onSelectTemplate={applyPromptTemplate} /> : null}
                     {mode === "image" ? (
                         <>
-                            <ModelPicker toolKey={toolKey} config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="image" onMissingConfig={() => openConfigDialog(true)} />
+                            <ModelPicker toolKey={toolKey} config={config} value={config.model} onChange={(model) => {
+                                const settings = adaptImageModelSettings(config, imageModelProfile(model, models));
+                                onConfigChange(node.id, { model, ...settings, count: Number(settings.count) });
+                            }} capability="image" onMissingConfig={() => openConfigDialog(true)} />
                             <CanvasImageSettingsPopover
                                 config={config}
                                 referenceCount={imageReferences.length}

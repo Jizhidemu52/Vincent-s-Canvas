@@ -1,11 +1,11 @@
 import { CanvasNodeType, type CanvasAssistantAttachment, type CanvasNodeMetadata } from "@/types/canvas";
 import type { CanvasAgentOp, CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
 import { fitNodeSize } from "@/lib/canvas/canvas-node-size";
-import { imageModelProfile, imageModelSettingsError, imageSizeForSource, normalizeImageModelSettings } from "@/lib/image-model-settings";
+import { imageModelProfile, imageModelSettingsError, imageReferenceSizeIsAutomatic, imageSizeForSource, normalizeImageModelSettings } from "@/lib/image-model-settings";
 import { imageModelDisplayName } from "@/lib/model-display";
 import { referencePolicyForModel } from "@/lib/image-reference-policy";
 import { getVideoModelParameterSpec } from "@/lib/video-model-parameters";
-import { readImageOptions } from "@/lib/image-advanced-settings";
+import { normalizeImageOptions, readImageOptions } from "@/lib/image-advanced-settings";
 import { readImageMeta } from "@/lib/image-utils";
 import { imageToDataUrl } from "@/services/image-storage";
 import type { ReferenceImage } from "@/types/image";
@@ -46,10 +46,8 @@ type ReferenceLike = { id: string };
 
 export function normalizeAgentImageSettings(settings: AgentGenerationSettings, profile = imageModelProfile(settings.imageModel)): AgentGenerationSettings {
     const normalized = normalizeImageModelSettings({ size: settings.size, quality: settings.quality, count: settings.imageCount }, profile);
-    const options = readImageOptions(settings.imageOptions);
-    const resolution = profile.resolutions.includes(options.resolution || "") ? options.resolution : "1k";
     return { ...settings, size: normalized.size, quality: normalized.quality, imageCount: normalized.count,
-        ...(profile.resolutions.length ? { imageOptions: JSON.stringify({ ...options, resolution }) } : {}) };
+        imageOptions: normalizeImageOptions(settings.imageOptions, profile) };
 }
 
 function imageAspect(value: string) {
@@ -75,6 +73,7 @@ export async function resolveAgentImageGenerationSettings(
 ) {
     assertCurrent();
     if (settings.mode !== "image") return settings;
+    if (imageReferenceSizeIsAutomatic(profile, references.length)) return normalizeAgentImageSettings(settings, profile);
     const requested = settings.requestedImageSize;
     let size = requested || settings.size;
     if (!requested && baseImageId) {

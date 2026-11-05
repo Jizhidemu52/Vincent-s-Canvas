@@ -7,6 +7,7 @@ const fallback = boolean("official_fallback", "允许官方渠道回退", "由�
 
 /** Only documented fields for the selected adapter are exposed or submitted. */
 function nativeImageOptionFields(profile: Profile): ImageOptionField[] {
+    if (profile.kind === "mai-image") return [{ key: "resolution", label: "清晰度 / 分辨率", options: ["1k", "2k"] }, boolean("web_grounding", "联网参考", "默认关闭；开启后模型可使用联网信息辅助生成。")];
     if (profile.kind === "grok-image") return [{ key: "resolution", label: "清晰度 / 分辨率", options: ["1k", "2k"] }, moderation];
     if (profile.kind === "standard" || profile.kind === "quality-resolution") return profile.outputFormats?.length ? [
         ...(profile.kind === "quality-resolution" ? [{ key: "resolution", label: "清晰度 / 分辨率", options: ["1k", "2k", "4k"] }] : []),
@@ -43,6 +44,26 @@ export function readImageOptions(value?: string): Record<string, string> {
     const parsed = JSON.parse(value);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || Object.values(parsed).some(value => typeof value !== "string")) throw new Error("图像高级参数格式无效，请重新设置");
     return parsed;
+}
+
+/** Remove controls unsupported by a newly selected model; keep valid explicit choices. */
+export function normalizeImageOptions(value: string | undefined, profile: Profile) {
+    const original = readImageOptions(value);
+    const normalized: Record<string, string> = {};
+    const fields = imageOptionFields(profile);
+    for (const [key, raw] of Object.entries(original)) {
+        const field = fields.find(field => field.key === key);
+        if (!field) continue;
+        if (field.options && raw && !field.options.includes(raw)) {
+            if (key === "resolution") normalized[key] = field.options[0]!;
+            continue;
+        }
+        if (field.type === "boolean" && raw && !["true", "false"].includes(raw)) continue;
+        normalized[field.key] = raw;
+    }
+    const resolution = fields.find(field => field.key === "resolution");
+    if (resolution && !normalized.resolution) normalized.resolution = resolution.options![0]!;
+    return JSON.stringify(normalized);
 }
 
 export function imageAdvancedParameters(value: string | undefined, profile: Profile): Record<string, unknown> {

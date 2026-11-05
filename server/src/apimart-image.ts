@@ -6,7 +6,7 @@ import { isPublicHttpUrl, normalizeApiMartImageUrl, uploadApiMartImage, validate
 
 type MarkImageModel = "gpt-image-2.5-flare" | "gpt-image-2.5-sunburst" | "gpt-image-2.6-flare" | "gpt-image-2.6-sunburst" | "gemini-nano-banana-2.1";
 type GrokImageModel = "grok-imagine-image-2.0";
-export type ApiMartImageModel = "gpt-image-2" | "gemini-3.1-flash-image-preview" | "midjourney" | "midjourney-blend" | MarkImageModel | GrokImageModel;
+export type ApiMartImageModel = "gpt-image-2" | "gemini-3.1-flash-image-preview" | "midjourney" | "midjourney-blend" | "mai-image-2.6-flash" | MarkImageModel | GrokImageModel;
 export type ApiMartImageBytes = { bytes: Uint8Array; mimeType: string; filename?: string };
 type ImageReference = string | ApiMartImageBytes;
 
@@ -49,6 +49,7 @@ const GROK_RESPONSE_VERSION = "2026-07-27";
 
 export function apiMartImageModel(modelId: string): ApiMartImageModel | null {
   const normalized = modelId.trim().toLowerCase();
+  if (normalized === "mai-image-2.6-flash") return normalized;
   if (normalized === "grok-imagine-image-2.0") return normalized;
   if (MARK_IMAGE_MODELS.has(normalized)) return normalized as MarkImageModel;
   if (GPT_MODELS.has(normalized)) return "gpt-image-2";
@@ -65,6 +66,7 @@ export function buildApiMartImageRequest(input: ApiMartImageInput): ApiMartImage
 function buildImageRequest(input: ApiMartImageInput, encodeReferences: boolean): ApiMartImageRequest {
   const kind = apiMartImageModel(input.modelId);
   if (!kind) throw new Error(`不支持的 APIMart 图片模型：${input.modelId}`);
+  if (kind === "mai-image-2.6-flash") return buildMaiImageRequest(input, false, encodeReferences);
   if (isMarkImageModel(kind)) return buildMarkImageRequest(input, kind, false, encodeReferences);
   if (kind === "grok-imagine-image-2.0") return buildGrokImageRequest(input);
 
@@ -144,6 +146,52 @@ function buildImageRequest(input: ApiMartImageInput, encodeReferences: boolean):
 
 function isMarkImageModel(kind: ApiMartImageModel): kind is MarkImageModel {
   return MARK_IMAGE_MODELS.has(kind);
+}
+
+/** MAI is not GPT or Nano: image editing has model-controlled ~1MP PNG output. */
+function buildMaiImageRequest(input: ApiMartImageInput, allowInlineReferences = false, encodeReferences = true): ApiMartImageRequest {
+  if (!input.prompt.trim()) throw new Error("请填写图像生成或编辑描述");
+  const parameters = input.parameters;
+  for (const key of ["quality", "style", "background", "output_format", "output_compression", "response_format", "mask_url", "maskUrl", "maskDataUrl", "moderation", "official_fallback", "officialFallback", "google_search", "googleSearch", "google_image_search", "googleImageSearch", "nsfw_check"]) {
+    if (parameters[key] !== undefined) throw new Error(`MAI Image 2.6 Flash 不支持参数 ${key}`);
+  }
+  if (input.maskDataUrl !== undefined || input.maskImage !== undefined) throw new Error("MAI Image 2.6 Flash 不支持独立蒙版");
+  if (parameters.n !== undefined && parameters.n !== 1) throw new Error("每个 MAI 图片任务的 n 必须为 1");
+  if (parameters.web_grounding !== undefined && typeof parameters.web_grounding !== "boolean") throw new Error("web_grounding 必须为布尔值");
+  const references = imageReferences(input);
+  if (references.length > 5) throw new Error("MAI Image 2.6 Flash 最多支持 5 张参考图");
+  for (const reference of references) {
+    if (allowInlineReferences && (typeof reference !== "string" || reference.startsWith("data:"))) decodeGenerationReference(reference);
+    else if (typeof reference !== "string" || !isPublicHttpUrl(reference)) throw new Error("MAI 参考图必须为公开 HTTP(S) URL；本地图片请先上传");
+  }
+  const payload: Record<string, unknown> = { model: "mai-image-2.6-flash", prompt: input.prompt, n: 1, web_grounding: parameters.web_grounding ?? false };
+  if (references.length) payload.image_urls = referencePayload(references, encodeReferences);
+  else {
+    payload.resolution = enumParameter(typeof parameters.resolution === "string" ? parameters.resolution.toUpperCase() : parameters.resolution, ["1K", "2K"], "resolution", "1K");
+    if (parameters.width !== undefined || parameters.height !== undefined) {
+      assertMaiPixelSize(parameters.width, parameters.height);
+      payload.width = parameters.width; payload.height = parameters.height;
+    } else payload.size = normalizeMaiSize(parameters.size);
+  }
+  return { path: "/images/generations", payload, pollIntervalMs: 2_000, timeoutMs: 15 * 60_000 };
+}
+
+function assertMaiPixelSize(width: unknown, height: unknown) {
+  if (typeof width !== "number" || typeof height !== "number" || !Number.isSafeInteger(width) || !Number.isSafeInteger(height)
+    || width < 768 || height < 768 || width * height > 2_359_296) throw new Error("MAI 像素尺寸每边至少 768，总像素不能超过 2359296");
+}
+
+function normalizeMaiSize(value: unknown) {
+  if (value === undefined || value === "auto") return "auto";
+  if (typeof value !== "string") throw new Error("MAI size 必须为 auto、宽高比或像素尺寸");
+  const pixels = /^([1-9]\d*)x([1-9]\d*)$/.exec(value);
+  if (pixels) { assertMaiPixelSize(Number(pixels[1]), Number(pixels[2])); return value; }
+  const ratio = /^([1-9]\d*):([1-9]\d*)$/.exec(value);
+  if (ratio && Number.isSafeInteger(Number(ratio[1])) && Number.isSafeInteger(Number(ratio[2]))) {
+    const aspect = Number(ratio[1]) / Number(ratio[2]);
+    if (aspect >= 0.25 && aspect <= 4) return value;
+  }
+  throw new Error("MAI 比例必须在 1:4 到 4:1 之间");
 }
 
 /** Official Grok 2.0 is distinct from the text-only Ext endpoint contract. */
@@ -409,10 +457,11 @@ export async function stepApiMartImageTask(input: ApiMartImageTaskInput, runtime
       headers["idempotency-key"] = input.submissionKey;
     }
     // Validate ALL parameters and local reference bytes before the first upload.
-    const uploadsReferences = isMarkImageModel(kind) || kind === "midjourney-blend" || kind === "grok-imagine-image-2.0";
+    const uploadsReferences = isMarkImageModel(kind) || kind === "mai-image-2.6-flash" || kind === "midjourney-blend" || kind === "grok-imagine-image-2.0";
     const sources = imageReferences(input).map(reference => uploadsReferences && typeof reference === 'string' && reference.startsWith('data:') ? decodeGenerationReference(reference) : reference);
     const preparedInput = { ...input, sourceImages: sources };
     const request = isMarkImageModel(kind) ? buildMarkImageRequest(preparedInput, kind, true, false)
+      : kind === "mai-image-2.6-flash" ? buildMaiImageRequest(preparedInput, true, false)
       : kind === "grok-imagine-image-2.0" ? buildGrokImageRequest(preparedInput, true, false) : buildImageRequest(preparedInput, !uploadsReferences);
     if (uploadsReferences && sources.length) {
       request.payload.image_urls = await uploadApiMartImageReferences(sources, baseUrl, input.apiKey, runtime);
@@ -468,7 +517,7 @@ export async function stepApiMartImageTask(input: ApiMartImageTaskInput, runtime
   if (status === "completed") {
     const outputs = readOutputUrls(statusPayload);
     if (!outputs.length) throw new ApiMartImageQueryRetryable("APIMart 图片任务完成但暂时没有结果图片；将查询原任务，不会重新生成", "PROVIDER_RESULT_MISSING", nextQueryMs);
-    if ((isMarkImageModel(kind) || kind === "midjourney-blend" || kind === "grok-imagine-image-2.0") && outputs.some(url => !isPublicHttpUrl(url))) throw Object.assign(new Error("APIMart 图片任务返回了无效结果地址；可恢复查询原任务，不会重新生成"), { code: "PROVIDER_RESULT_URL_INVALID" });
+    if ((isMarkImageModel(kind) || kind === "mai-image-2.6-flash" || kind === "midjourney-blend" || kind === "grok-imagine-image-2.0") && outputs.some(url => !isPublicHttpUrl(url))) throw Object.assign(new Error("APIMart 图片任务返回了无效结果地址；可恢复查询原任务，不会重新生成"), { code: "PROVIDER_RESULT_URL_INVALID" });
     return { status: "completed", upstreamTaskId: taskId, urls: outputs };
   }
   if (!IMAGE_STATUSES.has(status)) throw new ApiMartImageQueryRetryable("APIMart 返回了暂时无法识别的任务状态；将继续查询原任务", "PROVIDER_STATUS_INVALID", nextQueryMs);

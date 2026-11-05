@@ -1,4 +1,4 @@
-export const QUICK_IMAGE_MODEL = "gemini-nano-banana-2.1";
+export { quickImageModelId } from "../../../shared/quick-image-tools";
 export const quickImageToolKeys = ["remove-background", "hd-upscale"] as const;
 export type QuickImageToolKey = (typeof quickImageToolKeys)[number];
 export type QuickImageAction = "remove-background" | "hd-upscale";

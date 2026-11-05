@@ -18,7 +18,7 @@ import { CanvasAudioSettingsPopover, type CanvasAudioSettingKey } from "./canvas
 import { CanvasVideoSettingsPopover } from "./canvas-video-settings-popover";
 import type { CanvasGenerationMode, CanvasNodeData, CanvasNodeMetadata } from "@/types/canvas";
 import { canvasToolKey, useToolConfig, useToolEnabled } from "@/hooks/use-tool-config";
-import { imageModelProfile, useImageModelProfile } from "@/lib/image-model-settings";
+import { adaptImageModelSettings, imageModelProfile, useImageModelProfile } from "@/lib/image-model-settings";
 import { configUsesSeparateImageInputs } from "@/lib/canvas/canvas-shared-connections";
 import { CanvasConfigComposer, CONFIG_REFERENCE_PATTERN, type CanvasConfigComposerHandle } from "./canvas-config-composer";
 import { CanvasConfigImageReferences, configImageReferencePatch } from "./canvas-config-image-references";
@@ -208,7 +208,10 @@ export function CanvasConfigNodePanel({ node, isRunning, linkedTaskCount = 0, li
             </div>
 
             {mode !== "text" ? <div className={`mb-2 grid min-w-0 cursor-default items-center gap-2 ${hasAvailableModel ? "grid-cols-[minmax(0,1fr)_148px]" : "grid-cols-1"}`} onMouseDown={(event) => event.stopPropagation()}>
-                <ModelPicker toolKey={pickerToolKey} className="canvas-compact-control h-10" config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability={mode} modelsSource="server" disabled={isRunning} onMissingConfig={() => openConfigDialog(true)} fullWidth />
+                <ModelPicker toolKey={pickerToolKey} className="canvas-compact-control h-10" config={config} value={config.model} onChange={(model) => {
+                    const settings = mode === "image" ? adaptImageModelSettings(config, imageModelProfile(model, businessModels)) : undefined;
+                    onConfigChange(node.id, { model, ...(settings ? { ...settings, count: Number(settings.count) } : {}) });
+                }} capability={mode} modelsSource="server" disabled={isRunning} onMissingConfig={() => openConfigDialog(true)} fullWidth />
                 {hasAvailableModel && mode === "video" ? (
                     <CanvasVideoSettingsPopover config={config} referenceCount={imageCount} imageMode={config.videoMode} placement="topRight" buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))} />
                 ) : hasAvailableModel && mode === "image" ? (

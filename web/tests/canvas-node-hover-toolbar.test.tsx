@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import React, { type ReactElement } from "react";
 import ts from "typescript";
 
-import { defaultImageQuickToolIds, readImageQuickToolsConfig } from "@/components/canvas/canvas-image-toolbar-tools";
+import { defaultImageQuickToolIds, imageToolDefinitions, readImageQuickToolsConfig, type ImageToolHandlers } from "@/components/canvas/canvas-image-toolbar-tools";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import { moduleKeys, type ModuleKey } from "@/services/api/modules";
@@ -58,15 +58,15 @@ function elements(value: unknown): ReactElement<any>[] {
 }
 
 describe("compact image toolbar", () => {
-    test("defaults to three common actions while preserving stored customization data", () => {
-        expect(defaultImageQuickToolIds).toEqual(["manualEdit", "edit", "download"]);
+    test("defaults to four common actions including the eraser while preserving stored customization data", () => {
+        expect(defaultImageQuickToolIds).toEqual(["manualEdit", "eraser", "edit", "download"]);
         const saved = { ids: ["info", "delete", "saveAsset", "download", "edit", "copyPrompt", "upscale"], showLabels: false };
         expect(readImageQuickToolsConfig(saved)).toEqual(saved);
     });
 
-    test("shows only the three common image actions on the first surface", () => {
+    test("shows the eraser alongside the common image actions on the first surface", () => {
         const view = elements(toolbarHarness().render());
-        expect(view.filter((element) => typeof element.props.id === "string" && typeof element.props.onClick === "function").map((element) => element.props.id)).toEqual(["manualEdit", "edit", "download"]);
+        expect(view.filter((element) => typeof element.props.id === "string" && typeof element.props.onClick === "function").map((element) => element.props.id)).toEqual(["manualEdit", "eraser", "edit", "download"]);
         const more = view.find((element) => element.props["aria-label"] === "更多图片工具");
         expect(more?.props["aria-haspopup"]).toBe("menu");
     });
@@ -100,13 +100,20 @@ describe("compact image toolbar", () => {
         expect(mainActions.map(element => element.props.id)).toEqual(["download"]);
         const dropdown = view.find(element => element.props.menu?.items)!;
         const menuKeys = dropdown.props.menu.items.flatMap((item: any) => item.children || [item]).map((item: any) => item.key);
-        for (const key of ["manualEdit", "edit", "maskEdit", "crop", "split", "upscale", "compare", "designTemplate", "resize"]) {
+        for (const key of ["manualEdit", "eraser", "edit", "maskEdit", "crop", "split", "upscale", "compare", "designTemplate", "resize"]) {
             expect(menuKeys).not.toContain(key);
             dropdown.props.menu.onClick({ key, domEvent: { stopPropagation() {} } });
         }
         expect(harness.calls).toEqual([]);
         mainActions[0]!.props.onClick();
         expect(harness.calls).toEqual([{ name: "onDownload", node: harness.node }]);
+    });
+
+    test("the eraser shortcut opens the same guarded local editor directly in erase mode", () => {
+        const node = toolbarHarness().node;
+        const calls: unknown[] = [];
+        imageToolDefinitions.find(tool => tool.id === "eraser")!.run(node, { onManualEdit: (...args: unknown[]) => calls.push(args) } as ImageToolHandlers);
+        expect(calls).toEqual([[node, "erase"]]);
     });
 
     test("keeps the toolbar available while its More menu is open", () => {

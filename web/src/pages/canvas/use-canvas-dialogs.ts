@@ -11,6 +11,7 @@ export function useCanvasDialogs() {
     const [infoNodeId, setInfoNodeId] = useState<string | null>(null);
     const [cropNodeId, setCropNodeId] = useState<string | null>(null);
     const [manualEditNode, setManualEditNode] = useState<CanvasNodeData | null>(null);
+    const [manualEditInitialTool, setManualEditInitialTool] = useState<"select" | "erase">("select");
     const [imageExport, setImageExport] = useState<{ nodes: CanvasNodeData[]; ids: string[]; mode?: CanvasImagePdfMode } | null>(null);
     const [imageDownload, setImageDownload] = useState<{ projectId: string; node: CanvasNodeData; variants: ServerAssetVariants | null } | null>(null);
     const [renameNode, setRenameNode] = useState<{ id: string; name: string } | null>(null);
@@ -23,5 +24,5 @@ export function useCanvasDialogs() {
     const [angleNodeId, setAngleNodeId] = useState<string | null>(null);
     const [previewNodeId, setPreviewNodeId] = useState<string | null>(null);
     const isOpen = Boolean(compareImageIds || templateSourceId !== undefined || clearConfirmOpen || assetPickerOpen || infoNodeId || cropNodeId || manualEditNode || imageExport || imageDownload || renameNode || renameGroup || maskEditNodeId || splitNodeId || upscaleNodeId || superResolveNodeId || angleNodeId || previewNodeId);
-    return { isOpen, compareImageIds, setCompareImageIds, templateSourceId, setTemplateSourceId, clearConfirmOpen, setClearConfirmOpen, assetPickerOpen, setAssetPickerOpen, infoNodeId, setInfoNodeId, cropNodeId, setCropNodeId, manualEditNode, setManualEditNode, imageExport, setImageExport, imageDownload, setImageDownload, renameNode, setRenameNode, renameGroup, setRenameGroup, maskEditNodeId, setMaskEditNodeId, maskEditModel, setMaskEditModel, splitNodeId, setSplitNodeId, upscaleNodeId, setUpscaleNodeId, superResolveNodeId, setSuperResolveNodeId, angleNodeId, setAngleNodeId, previewNodeId, setPreviewNodeId };
+    return { isOpen, compareImageIds, setCompareImageIds, templateSourceId, setTemplateSourceId, clearConfirmOpen, setClearConfirmOpen, assetPickerOpen, setAssetPickerOpen, infoNodeId, setInfoNodeId, cropNodeId, setCropNodeId, manualEditNode, setManualEditNode, manualEditInitialTool, setManualEditInitialTool, imageExport, setImageExport, imageDownload, setImageDownload, renameNode, setRenameNode, renameGroup, setRenameGroup, maskEditNodeId, setMaskEditNodeId, maskEditModel, setMaskEditModel, splitNodeId, setSplitNodeId, upscaleNodeId, setUpscaleNodeId, superResolveNodeId, setSuperResolveNodeId, angleNodeId, setAngleNodeId, previewNodeId, setPreviewNodeId };
 }

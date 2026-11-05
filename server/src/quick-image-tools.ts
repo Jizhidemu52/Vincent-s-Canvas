@@ -41,7 +41,7 @@ export function prepareQuickImageTask<T extends QuickImageInput>(input: T): T {
   const action = requested;
   return {
     ...input, toolKey: tool, modelConfigId: undefined, promptInput: undefined, prompt: recipes[action],
-    parameters: { tool, n: 1, count: 1, size: "auto", resolution: action === "hd-upscale" ? "4k" : "2k", quickImageAction: action,
+    parameters: { tool, n: 1, count: 1, ...(action === "hd-upscale" ? { size: "auto", resolution: "4k" } : {}), quickImageAction: action,
       quickImage: { action, recipeVersion: QUICK_IMAGE_RECIPE_VERSION } },
   };
 }

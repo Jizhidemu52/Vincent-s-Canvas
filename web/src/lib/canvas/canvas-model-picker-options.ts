@@ -23,6 +23,7 @@ export function canvasModelPresentation(label: string) {
         "gpt2.5-sunburst": "GPT Image 2.5 Sunburst", "gpt-image-2.5-sunburst": "GPT Image 2.5 Sunburst",
         "gpt2.6-flare": "GPT Image 2.6 Flare", "gpt-image-2.6-flare": "GPT Image 2.6 Flare",
         "gpt2.6-sunburst": "GPT Image 2.6 Sunburst", "gpt-image-2.6-sunburst": "GPT Image 2.6 Sunburst",
+        "mai2.6-flash": "MAI Image 2.6 Flash", "mai-image-2.6-flash": "MAI Image 2.6 Flash",
         "nano2.1": "Nano Banana 2.1", "nano2": "Nano Banana 2",
         "gpt6-astra": "GPT-6 Astra", "gpt-6-astra": "GPT-6 Astra",
         "happyhorse1.1": "HappyHorse 1.1", "mj-blend": "Midjourney Blend", "grok2": "Grok Image 2",
@@ -33,6 +34,7 @@ export function canvasModelPresentation(label: string) {
         [/gemini|google|nano[ -]?banana/i, "Google", "/icons/gemini.svg"],
         [/gpt|openai/i, "OpenAI", "/icons/openai.svg"],
         [/grok|\bxai\b/i, "xAI", "/icons/grok.svg"],
+        [/\bmai\b/i, "Microsoft"],
         [/deepseek/i, "DeepSeek", "/icons/deepseek.svg"],
         [/\bglm\b|智谱/i, "智谱", "/icons/glm.svg"],
         [/midjourney|\bmj\b/i, "Midjourney"],
@@ -47,6 +49,7 @@ export function canvasImageModelDetails(profile: ReturnType<typeof imageModelPro
     const details: string[] = [];
     const resolutions = profile.resolutions.length ? profile.resolutions : profile.qualities.filter(value => /^\d+(?:\.\d+)?k$/i.test(value));
     if (resolutions.length) details.push(resolutions.map(value => value.toUpperCase()).join(" / "));
+    if (profile.kind === "mai-image") details.push("图生图约 100 万像素 · PNG");
     if (references.supportsReferences) {
         const count = references.minimum > 0 ? `${references.minimum}–${references.maximum}` : `最多 ${references.maximum}`;
         details.push(`${count} 张参考图${profile.kind === "resolution-1k" ? "（工作台上限）" : ""}`);

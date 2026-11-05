@@ -1483,6 +1483,7 @@ Bun.serve({
         const apiMartModel = model.providerId === openTokenProviderId ? null : apiMartImageModel(imageModelId);
         const isGptImage2 = imageModelId.startsWith("gpt-image-2") || apiMartModel === "gpt-image-2";
         const maximumReferences = imageModelId === "midjourney-blend" ? 4
+          : imageModelId === "mai-image-2.6-flash" ? 5
           : imageModelId === "grok-imagine-image-2.0" ? 3
           : apiMartModel === "gpt-image-2" ? 15
           : isGptImage2 || imageModelId === "gemini-nano-banana-2.1" ? 16

@@ -1,6 +1,6 @@
 import { getToolDefinition, moduleIsEnabled, resolveToolKey, type ModuleKey } from "../../shared/feature-catalog";
 import { DEFAULT_CHAT_MODEL_TOOL_KEY } from "./chat-model-policy";
-import { isQuickImageAction, matchesQuickImageTaskTarget, QUICK_IMAGE_MODEL_ID } from "../../shared/quick-image-tools";
+import { isQuickImageAction, matchesQuickImageTaskTarget, quickImageModelId } from "../../shared/quick-image-tools";
 import { MARK_IMAGE_PROVIDER_ID } from "../../shared/mark-image-models";
 
 export class DemoToolConfigurationError extends Error {
@@ -32,7 +32,7 @@ export function resolveDemoToolConfiguration(
   const modelBinding = isChat ? bindings.find(item => item.toolKey === DEFAULT_CHAT_MODEL_TOOL_KEY) : binding;
   if (isChat && !modelBinding?.modelConfigId) throw new DemoToolConfigurationError("CHAT_MODEL_NOT_CONFIGURED", "管理员尚未配置统一对话模型", 503);
   if (!isQuickImage && !isChat && binding?.modelConfigId && input.modelConfigId && requested?.id !== binding.modelConfigId) throw new DemoToolConfigurationError("TOOL_MODEL_CHANGED", "板块模型配置已更新，请刷新后重试");
-  const model = isQuickImage ? models.find(item => item.modelId === QUICK_IMAGE_MODEL_ID && item.providerId === MARK_IMAGE_PROVIDER_ID && item.enabled === true
+  const model = isQuickImage ? models.find(item => item.modelId === quickImageModelId(quickAction) && item.providerId === MARK_IMAGE_PROVIDER_ID && item.enabled === true
       && providers.some(provider => provider.id === item.providerId && provider.enabled === true && provider.protocol === "apimart"))
     : modelBinding?.modelConfigId ? models.find(item => item.id === modelBinding.modelConfigId) : requested;
   const provider = model && providers.find(item => item.id === model.providerId);

@@ -5,7 +5,7 @@ import ts from "typescript";
 import { i18nHarness } from "./helpers/i18n-harness";
 import { imageModelProfile } from "@/lib/image-model-settings";
 import { modelLabelWithUsage } from "@/lib/model-picker-options";
-import { chatImageQualitySettings, chatImageRequestOptions, preferredChatImageModel, resolveChatImageQuality } from "@/pages/chat/image-quality";
+import { chatImageQualitySettings, chatImageRequestOptions, preferredChatImageModel, resolveChatImageQuality, selectChatImageModel } from "@/pages/chat/image-quality";
 import { resolveChatImageSize } from "@/pages/chat/image-size";
 import { createChatSessionStorage } from "@/pages/chat/chat-session-storage";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
@@ -199,7 +199,7 @@ function qualitySelect({ ready = true, sending = false, modelsLoading = false, m
     const bindings = {
         ...i18nHarness,
         React, Select: "select", imageQualitySettings: chatImageQualitySettings(imageModelProfile(model?.modelId || "", models), sessions[0]!.imageQuality, sessions[0]!.imageResolution),
-        imageModels: models, imageBinding: bound ? { modelConfigId: model?.id } : undefined, resolveChatImageQuality, modelLabelWithUsage,
+        imageModels: models, imageBinding: bound ? { modelConfigId: model?.id } : undefined, resolveChatImageQuality, selectChatImageModel, modelLabelWithUsage, imageReferenceParametersAutomatic: false,
         sessionsReady: ready, modelsLoading, isSending: sending, pendingImageMessage: pending, preferredImageModel: model,
         activeSession: sessions[0], updateSession: (id: string, update: (value: any) => any) => { const index = sessions.findIndex(value => value.id === id); sessions[index] = update(sessions[index]); },
     };

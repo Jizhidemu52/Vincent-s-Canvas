@@ -10,6 +10,7 @@ const models = [
     { id: "open-gpt2", modelId: "open-gpt2", name: "gpt-image-2", capabilities: ["generate", "edit"], creditCost: 0, rmbCost: 0 },
     { id: "mark-flare", modelId: "mark-flare", name: "aplmart-gpt2.5-flare", capabilities: ["generate", "edit"], creditCost: 0, rmbCost: 0 },
     { id: "mark-gpt2", modelId: "mark-gpt2", name: "aplmart-gpt2", capabilities: ["generate", "edit"], creditCost: 0, rmbCost: 0 },
+    { id: "mark-flare26", modelId: "mark-flare26", name: "aplmart-gpt2.6-flare", capabilities: ["generate", "edit"], creditCost: 0, rmbCost: 0 },
 ];
 const originalConfig = useConfigStore.getState();
 const originalBusiness = useBusinessConfigStore.getState();
@@ -24,14 +25,14 @@ afterEach(() => {
     Object.assign(businessInitialState, originalBusinessInitial);
 });
 
-describe("APIMart GPT2 default selection", () => {
+describe("APIMart GPT2.6 Flare default selection", () => {
     test("new and stale selections prefer APIMart rather than another provider's GPT2 or the first row", () => {
         expect(defaultConfig.imageModel).toBe(DEFAULT_IMAGE_MODEL);
         expect(defaultConfig.model).toBe(DEFAULT_IMAGE_MODEL);
-        expect(preferredImageModel(models)?.id).toBe("mark-gpt2");
-        expect(preferredImageModel(models, ["removed"])?.id).toBe("mark-gpt2");
-        expect(resolveCapabilityModel({ ...defaultConfig, imageModel: "removed" }, "image", models)).toBe("mark-gpt2");
-        expect(preferredChatImageModel(models, [])?.id).toBe("mark-gpt2");
+        expect(preferredImageModel(models)?.id).toBe("mark-flare26");
+        expect(preferredImageModel(models, ["removed"])?.id).toBe("mark-flare26");
+        expect(resolveCapabilityModel({ ...defaultConfig, imageModel: "removed" }, "image", models)).toBe("mark-flare26");
+        expect(preferredChatImageModel(models, [])?.id).toBe("mark-flare26");
     });
 
     test("valid explicit selections and provider-specific public aliases remain authoritative", () => {
@@ -43,10 +44,10 @@ describe("APIMart GPT2 default selection", () => {
 
     test("publicName resolves opaque IDs and unavailable defaults fall back only to supplied compatible models", () => {
         const hidden = models.map(model => ({ ...model, publicName: model.name, name: model.id }));
-        expect(preferredImageModel(hidden)?.modelId).toBe("mark-gpt2");
+        expect(preferredImageModel(hidden)?.modelId).toBe("mark-flare26");
         expect(preferredImageModel(models.slice(0, 2))?.modelId).toBe("open-gpt2");
         expect(preferredImageModel([])).toBeUndefined();
-        const editOnly = models.map(model => ({ ...model, capabilities: model.id === "mark-gpt2" ? ["generate"] : ["edit"] }));
+        const editOnly = models.map(model => ({ ...model, capabilities: ["mark-gpt2", "mark-flare26"].includes(model.id) ? ["generate"] : ["edit"] }));
         expect(preferredChatImageModel(editOnly, [], "edit")?.id).toBe("open-gpt2");
     });
 
@@ -57,7 +58,7 @@ describe("APIMart GPT2 default selection", () => {
         let selected = defaultConfig;
         function ReadConfig() { selected = useEffectiveConfig(); return null; }
         renderToStaticMarkup(<ReadConfig />);
-        expect(selected).toMatchObject({ model: "mark-gpt2", imageModel: "mark-gpt2" });
+        expect(selected).toMatchObject({ model: "mark-flare26", imageModel: "mark-flare26" });
         expect(useConfigStore.getState().config.imageModel).toBe(DEFAULT_IMAGE_MODEL);
         Object.assign(configInitialState, { config: { ...defaultConfig, imageModel: "mark-flare" } });
         renderToStaticMarkup(<ReadConfig />);
@@ -75,14 +76,14 @@ describe("APIMart GPT2 default selection", () => {
         let regularConfig = defaultConfig;
         function ReadConfig() { canvasConfig = useEffectiveConfig("canvas"); regularConfig = useEffectiveConfig(); return null; }
         renderToStaticMarkup(<ReadConfig />);
-        expect(canvasConfig).toMatchObject({ model: "mark-flare", imageModel: "mark-flare" });
+        expect(canvasConfig).toMatchObject({ model: "mark-flare26", imageModel: "mark-flare26" });
         expect(regularConfig).toMatchObject({ model: "mark-gpt2", imageModel: "mark-gpt2" });
         expect(configInitialState.config).toBe(saved);
         expect(resolveCapabilityModel(canvasConfig, "image", models, "mark-gpt2")).toBe("mark-gpt2");
         Object.assign(businessInitialState, { status: "loading", models: [] });
         renderToStaticMarkup(<ReadConfig />);
         expect(canvasConfig.imageModel).toBe(DEFAULT_CANVAS_IMAGE_MODEL);
-        Object.assign(businessInitialState, { status: "ready", models: models.filter(model => model.id !== "mark-flare") });
+        Object.assign(businessInitialState, { status: "ready", models: models.filter(model => model.id !== "mark-flare26") });
         renderToStaticMarkup(<ReadConfig />);
         expect(canvasConfig.imageModel).toBe("mark-gpt2");
     });

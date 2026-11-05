@@ -33,7 +33,7 @@ const mask = { mimeType: "image/png", bytes: Buffer.from("iVBORw0KGgoAAAANSUhEUg
 const editInput = { references: [original], mask };
 const expectedComposite = [10, 20, 30, 255, 77, 88, 99, 0, 90, 80, 70, 200, 100, 100, 100, 128];
 
-describe("Nano quick image local result verification", () => {
+describe("quick image local result verification", () => {
   const parameters = (action: "remove-background" | "hd-upscale") => prepareQuickImageTask({ ...quickImageTaskTarget(action), sourceUrls: ["owned"], parameters: { quickImageAction: action } }).parameters;
   test("matte preserves original RGB, dimensions, holes and soft edges in true PNG alpha", async () => {
     const pixels = [20, 40, 60, 255, 70, 80, 90, 255, 110, 120, 130, 200, 150, 160, 170, 255];
@@ -74,6 +74,8 @@ describe("Nano quick image local result verification", () => {
   test("source codec, depth and oversized HD checks happen before model submission", async () => {
     await validateQuickImageSource(original, parameters("remove-background"));
     await expect(validateQuickImageSource(undefined, parameters("remove-background"))).rejects.toThrow("尚未提交生成");
+    const extremeRatio = png(new Uint8Array(9 * 4).fill(255), 9, 1);
+    await expect(validateQuickImageSource(extremeRatio, parameters("remove-background"))).rejects.toThrow("本工具可处理范围");
     const highBit = png(new Uint8Array(32).fill(128), 4, 1, "rgba64be");
     await expect(validateQuickImageSource(highBit, parameters("remove-background"))).rejects.toThrow("8 位");
     const tooLarge = png(new Uint8Array(4097 * 513 * 4).fill(255), 4097, 513);

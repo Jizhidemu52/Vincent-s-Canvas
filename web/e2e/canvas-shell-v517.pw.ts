@@ -37,13 +37,13 @@ test("全部工具方向键选择与回车打开；Esc先清空再关闭", async
     await page.getByRole("button", { name: "全部工具", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "全部工具", exact: true });
     const input = dialog.getByRole("combobox", { name: "搜索工具或工作台", exact: true });
-    await input.fill("无限画布");
+    await input.fill("自由画布");
     await input.press("Escape");
     await expect(input).toHaveValue(""); await expect(dialog).toBeVisible();
     const options = dialog.getByRole("option");
     await input.press("ArrowDown");
     await expect(options.nth(1)).toHaveAttribute("aria-selected", "true");
-    await input.fill("无限画布");
+    await input.fill("自由画布");
     await expect(options).toHaveCount(1);
     await input.press("Enter");
     await expect(dialog).toBeHidden(); await expect(page).toHaveURL(new RegExp(`/canvas/${id}$`));

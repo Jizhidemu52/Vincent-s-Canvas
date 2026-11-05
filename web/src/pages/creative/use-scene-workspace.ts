@@ -7,7 +7,7 @@ import { saveAs } from "file-saver";
 import { canvasImageDownloadFileName, canvasImageReferenceIdentity } from "@/lib/canvas/canvas-image-filename";
 import { imageCopyEditorNode } from "@/lib/image-edit-copy";
 import { deploymentFeatures } from "@/lib/deployment-features";
-import { normalizeImageModelSettings, useImageModelProfile } from "@/lib/image-model-settings";
+import { adaptImageModelSettings, imageModelProfile, normalizeImageModelSettings, useImageModelProfile } from "@/lib/image-model-settings";
 import { validateImageReferences } from "@/lib/image-reference-policy";
 import { getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
 import { workbenchSubmissions } from "@/lib/submission-gate";
@@ -280,7 +280,7 @@ export function useSceneWorkspace(sceneId: string) {
 
     const updateConfig = (key: keyof SceneParameters, value: string) => {
         viewEpoch.current += 1; setRestoring(false); setPreviewing(false);
-        setParameters(current => key === "model" || key === "imageModel" ? { ...current, model: value, imageModel: value } : { ...current, [key]: value });
+        setParameters(current => key === "model" || key === "imageModel" ? { ...current, ...adaptImageModelSettings(current, imageModelProfile(value, models)), model: value, imageModel: value } : { ...current, [key]: value });
     };
 
     const setImage = async (slot: SceneSlotId, file: File | null) => {

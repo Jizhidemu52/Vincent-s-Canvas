@@ -14,7 +14,7 @@ import { useImageDrop } from "@/hooks/use-image-drop";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { deploymentFeatures } from "@/lib/deployment-features";
 import { validateImageReferences } from "@/lib/image-reference-policy";
-import { useImageModelProfile } from "@/lib/image-model-settings";
+import { adaptImageModelSettings, imageModelProfile, useImageModelProfile } from "@/lib/image-model-settings";
 import { readFileAsDataUrl } from "@/lib/image-utils";
 import { createWorkspaceStorage } from "@/lib/workspace-storage";
 import { createClientUuid } from "@/lib/client-uuid";
@@ -229,7 +229,7 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
             if (busy.current || runner.current?.active || key === "count") return;
             const old = projectRef.current;
             if (old.settings[key] === value) return;
-            const settings: RecipeSettings = key === "model" || key === "imageModel" ? { ...old.settings, model: value, imageModel: value } : { ...old.settings, [key]: value };
+            const settings: RecipeSettings = key === "model" || key === "imageModel" ? { ...old.settings, ...adaptImageModelSettings(old.settings, imageModelProfile(value, business.models)), model: value, imageModel: value } : { ...old.settings, [key]: value };
             commit({ ...old, settings });
         },
         [commit],

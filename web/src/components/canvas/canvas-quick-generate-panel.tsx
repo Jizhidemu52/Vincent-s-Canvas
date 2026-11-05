@@ -15,7 +15,7 @@ import { useThemeStore } from "@/stores/use-theme-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { resolveCapabilityModel } from "@/lib/model-picker-options";
-import { imageModelProfile, imageModelSettingsError, normalizeImageModelSettings } from "@/lib/image-model-settings";
+import { adaptImageModelSettings, imageModelProfile, imageModelSettingsError, imageReferenceSizeIsAutomatic, normalizeImageModelSettings } from "@/lib/image-model-settings";
 import type { ReferenceImage } from "@/types/image";
 import { canvasToolKey, useToolConfig, useToolEnabled } from "@/hooks/use-tool-config";
 import { useImageDrop } from "@/hooks/use-image-drop";
@@ -61,6 +61,7 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
     const imageDrop = useImageDrop({ scopeKey: referenceScopeKey, disabled: !open || running || referencesLoading || !onAddReferenceFiles, onFiles: files => onAddReferenceFiles?.(files) });
     const referenceBusy = referencesLoading || imageDrop.reading;
     const referenceValidation = validateImageReferences(modelOptionName(availableModel || model), references, profile);
+    const sizeError = imageReferenceSizeIsAutomatic(profile, references.length) ? "" : imageModelSettingsError(settings.size, profile);
     const updatePrompt = (value: string) => { promptRef.current = value; setPrompt(value); onPromptChange?.(value); };
     const candidates = useMemo(() => quickMentionImages(references, mentionImages), [references, mentionImages]);
     useEffect(() => setMentionError(""), [referenceScopeKey, references, model]);
@@ -84,8 +85,8 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
         if (Object.keys(normalized).length) onSettingsNormalize?.(normalized);
     }, [availableModel, model, running, size, quality, count, settings.size, activeQuality, settings.count, onSettingsNormalize]);
     if (!open) return null;
-    const disabled = !toolEnabled || optimizing || running || referenceBusy || !availableModel || model !== availableModel || (profile.requiresPrompt && !prompt.trim()) || !referenceValidation.valid || Boolean(imageModelSettingsError(settings.size, profile));
-    const disabledReason = !toolEnabled ? t("当前图片功能已停用，请联系管理员。") : optimizing ? t("正在优化提示词，请稍候。") : running ? t("本次任务正在提交，请稍候。") : referenceBusy ? t("正在读取参考图，完成后即可生成。") : !availableModel ? t("暂未配置可用模型，请联系管理员。") : model !== availableModel ? t("原模型与当前功能绑定不匹配，已保留草稿和参数；请明确选择使用可用模型。") : profile.requiresPrompt && !prompt.trim() ? t("先填写提示词；输入 @ 可添加参考图。") : !referenceValidation.valid ? referenceValidation.message : imageModelSettingsError(settings.size, profile);
+    const disabled = !toolEnabled || optimizing || running || referenceBusy || !availableModel || model !== availableModel || (profile.requiresPrompt && !prompt.trim()) || !referenceValidation.valid || Boolean(sizeError);
+    const disabledReason = !toolEnabled ? t("当前图片功能已停用，请联系管理员。") : optimizing ? t("正在优化提示词，请稍候。") : running ? t("本次任务正在提交，请稍候。") : referenceBusy ? t("正在读取参考图，完成后即可生成。") : !availableModel ? t("暂未配置可用模型，请联系管理员。") : model !== availableModel ? t("原模型与当前功能绑定不匹配，已保留草稿和参数；请明确选择使用可用模型。") : profile.requiresPrompt && !prompt.trim() ? t("先填写提示词；输入 @ 可添加参考图。") : !referenceValidation.valid ? referenceValidation.message : sizeError;
     return (
         <div {...imageDrop.dropProps} data-testid="canvas-quick-generate-panel" data-canvas-no-zoom
             className={embedded ? "cw-generator" : "cw-generator cw-generator-mobile cw-surface max-h-[calc(100dvh-144px)] overflow-y-auto"}
@@ -99,7 +100,11 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
                 {positioned ? <div className="mb-3 flex items-center justify-between gap-2 text-xs" style={{ color: theme.node.muted }}><span>{t("下一次生成放在右键位置")}</span><button type="button" className="shrink-0 hover:underline" onClick={onClearPosition}>{t("取消定位")}</button></div> : null}
                 <div className="cw-media-kind"><ImageIcon size={15} /><span>{!profile.requiresPrompt ? t("多图融合") : references.length ? t("编辑图像") : t("图像")}</span>{profile.documentationUrl ? <a className="cw-model-info" href={profile.documentationUrl} target="_blank" rel="noreferrer" title={t("{value1} 点击查看接口文档", { value1: profile.tip })} aria-label={t("查看当前模型接口文档")}><Info size={14} /></a> : <span className="cw-model-info" title={profile.tip}><Info size={14} /></span>}</div>
                 <div className="cw-model-row">
-                <ModelPicker toolKey={toolKey} config={boundConfig} value={availableModel} capability="image" modelsSource="server" disabled={running} fullWidth onChange={onModelChange}
+                <ModelPicker toolKey={toolKey} config={boundConfig} value={availableModel} capability="image" modelsSource="server" disabled={running} fullWidth onChange={value => {
+                    const next = adaptImageModelSettings({ size, quality, count: String(count), imageOptions }, imageModelProfile(value, models, role));
+                    onModelChange(value);
+                    onSizeChange(next.size); onQualityChange(next.quality); onCountChange(Number(next.count)); onImageOptionsChange(next.imageOptions);
+                }}
                     onMissingConfig={onMissingConfig} className="cw-model-picker" />
                 </div>
                 {profile.requiresPrompt ? <div className="relative">{mentions.menu}<textarea {...mentions.inputProps} className="cw-prompt" data-canvas-image-paste aria-label={t("描述图像")} placeholder={references.length ? t("描述想如何修改，输入 @ 引用图片…") : t("描述你想创作的图像，输入 @ 引用图片…")}

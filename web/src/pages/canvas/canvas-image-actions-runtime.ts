@@ -30,7 +30,7 @@ import type { App } from "antd";
 import type { createCanvasGraphStore } from "@/stores/canvas/canvas-graph-store";
 import type { CanvasImageActionsOptions } from "./use-canvas-image-actions";
 import { createCanvasImageOperationRunner } from "@/lib/canvas/canvas-image-operation";
-import { QUICK_IMAGE_MODEL, quickImageTitle, type QuickImageAction } from "@/lib/quick-image-tools";
+import { quickImageModelId, quickImageTitle, type QuickImageAction } from "@/lib/quick-image-tools";
 import { createCanvasGenerationRecord } from "@/lib/canvas/canvas-generation-record";
 import { isModuleAvailable, useModuleStore } from "@/stores/use-module-store";
 import { requestEdit } from "@/services/api/image";
@@ -443,7 +443,7 @@ export function createCanvasImageActionsRuntime(context: CanvasImageActionRuntim
             if (!isModuleAvailable(useModuleStore.getState().flags, useBusinessConfigStore.getState().tools, "canvas-edit")) { message.warning(uiText("当前图片编辑功能已停用")); return; }
             if (useUserStore.getState().user?.status !== "active" || !await waitForWriteAccess() || !isCurrent()) return;
             const title = quickImageTitle(action);
-            const config = { ...effectiveConfig, model: QUICK_IMAGE_MODEL, imageModel: QUICK_IMAGE_MODEL, count: "1", size: "auto", quality: action === "hd-upscale" ? "4K" : "2K", imageOptions: "", systemPrompt: "" };
+            const config = { ...effectiveConfig, model: quickImageModelId(action), imageModel: quickImageModelId(action), count: "1", size: "auto", quality: action === "hd-upscale" ? "4K" : "auto", imageOptions: "", systemPrompt: "" };
             const references = [{ id: node.id, name: node.title || "原图", type: node.metadata?.mimeType || "image/png", dataUrl: node.metadata?.content || "", storageKey: node.metadata?.storageKey }];
             const size = fitNodeSize(node.metadata?.naturalWidth || node.width, node.metadata?.naturalHeight || node.height, 320, 320);
             childId = nanoid();

@@ -3,6 +3,8 @@ import { randomUUID } from "node:crypto";
 import express, { type ErrorRequestHandler } from "express";
 import { ZodError } from "zod";
 import { writeAudit } from "../../src/audit";
+import { stepApiMartImageTask } from "../../src/apimart-image";
+import { MARK_IMAGE_PROVIDER_ID } from "../../../shared/mark-image-models";
 import type { Cache } from "../../src/db";
 import {
   PromptCompiler,
@@ -232,14 +234,14 @@ integration(
             },
           );
           const model = (
-            await query("SELECT model_id FROM model_configs WHERE id=$1", [
+            await query("SELECT m.model_id,p.protocol FROM model_configs m JOIN providers p ON p.id=m.provider_id WHERE m.id=$1", [
               resolved.modelConfigId,
             ])
           ).rows[0]!;
           return {
             id: resolved.modelConfigId,
             modelId: model.model_id,
-            protocol: "openai",
+            protocol: model.protocol,
             fingerprint: promptHash(resolved),
           };
         },
@@ -445,6 +447,51 @@ integration(
       });
     });
 
+    test("optimized preview reuses its compilation and submits each selected 2.6 image model, never the optimizer", async () => {
+      const actor = await user();
+      await query("INSERT INTO providers(id,name,protocol,base_url,enabled) VALUES($1,'Image model contract fixture','apimart','https://no-network.invalid/v1',true) ON CONFLICT(id) DO UPDATE SET protocol='apimart',enabled=true", [MARK_IMAGE_PROVIDER_ID]);
+      await query("UPDATE tool_api_configurations SET model_config_id=NULL WHERE tool_key=ANY($1::text[])", [["image", "image-edit"]]);
+      try {
+        for (const modelId of ["gpt-image-2.6-flare", "gpt-image-2.6-sunburst", "mai-image-2.6-flash"]) {
+          const selectedId = randomUUID();
+          await query("INSERT INTO model_configs(id,provider_id,name,model_id,capabilities,enabled,credit_cost,rmb_cost) VALUES($1,$2,$3,$3,ARRAY['generate','edit','batch'],true,2,0)", [selectedId, MARK_IMAGE_PROVIDER_ID, modelId]);
+          for (const edit of [false, true]) {
+            const before = calls.length, toolKey = edit ? "image-edit" : "image";
+            const authored = { ...promptInput(`preserve this jacket using ${modelId} ${edit ? "edit" : "generate"}`, "free-optimize"), mode: edit ? "edit" as const : "generate" as const };
+            const sourceUrls = edit ? [sourceA] : [];
+            const preview = await request(actor, "/api/prompt-compilations", "POST", { requestId: randomUUID(), modelConfigId: selectedId, toolKey, sourceUrls, promptInput: authored });
+            const previewBody = await preview.json();
+            expect({ status: preview.status, body: previewBody }).toMatchObject({ status: 200, body: { compilation: { status: "success", optimized: true } } });
+            const compilation = previewBody.compilation;
+            expect(calls.length - before).toBe(1); expect(calls.at(-1)!.modelId).toBe(chatId);
+            expect(calls.at(-1)!.payload.target_model).toBe(modelId);
+            expect(await store.getCompilation(compilation.id, actor)).toMatchObject({ modelConfigId: chatId, targetModelConfigId: selectedId });
+            const value = input(authored.userText, { toolKey, modelConfigId: selectedId, operationType: edit ? "inpaint" : "image_generation", sourceUrls,
+              promptInput: { ...authored, compilationId: compilation.id }, parameters: { size: "16:9", resolution: "2k", ...(modelId.startsWith("gpt-") ? { quality: "high" } : { web_grounding: false }) } });
+            const response = await request(actor, "/api/tasks", "POST", value);
+            const body = await response.json();
+            expect({ status: response.status, body }).toMatchObject({ status: 201, body: { task: { modelConfigId: selectedId, optimized: true } } });
+            const stored = (await query("SELECT model_config_id,prompt,parameters,source_urls,prompt_compilation_id FROM tasks WHERE id=$1", [body.task.id])).rows[0]!;
+            expect(stored).toMatchObject({ model_config_id: selectedId, prompt: compilation.prompt, source_urls: sourceUrls, prompt_compilation_id: compilation.id });
+            expect(stored.model_config_id).not.toBe(chatId); expect(calls.length - before).toBe(1);
+            const sequence: string[] = [], submissions: Record<string, unknown>[] = [];
+            const step = await stepApiMartImageTask({ modelId, baseUrl: "https://no-network.invalid/v1", apiKey: "fixture-no-paid-io", prompt: stored.prompt, parameters: stored.parameters,
+              sourceDataUrls: edit ? ["https://images.example/authorized-reference.png"] : [], beforeSubmit: () => { sequence.push("intent"); }, onSubmitted: id => { sequence.push(id); } }, {
+              fetch: async (url, init) => { expect(url).toBe("https://no-network.invalid/v1/images/generations"); expect(init?.method).toBe("POST"); sequence.push("submit"); submissions.push(JSON.parse(String(init?.body))); return Response.json({ data: [{ task_id: "mock-image-task" }] }); },
+            });
+            expect(step).toMatchObject({ status: "pending", upstreamTaskId: "mock-image-task" });
+            expect(sequence).toEqual(["intent", "submit", "mock-image-task"]); expect(submissions).toHaveLength(1);
+            expect(submissions[0]).toMatchObject({ model: modelId, prompt: compilation.prompt, n: 1 });
+            expect(submissions[0]).not.toHaveProperty("promptOptimization");
+            if (modelId === "mai-image-2.6-flash" && edit) { expect(submissions[0]).not.toHaveProperty("size"); expect(submissions[0]).not.toHaveProperty("resolution"); }
+            const duplicate = await request(actor, "/api/tasks", "POST", value);
+            expect(duplicate.status).toBe(200); expect((await duplicate.json()).task.id).toBe(body.task.id); expect(calls.length - before).toBe(1);
+          }
+        }
+        expect(await count("tasks", actor)).toBe(6); expect(await count("credit_reservations", actor)).toBe(6);
+      } finally { await query("UPDATE tool_api_configurations SET model_config_id=$1 WHERE tool_key=ANY($2::text[])", [imageId, ["image", "image-edit"]]); }
+    });
+
     test("uncertain optimizer transport, invalid output and private-rule leak never create tasks or reservations", async () => {
       for (const fixtureOutcome of ["throw", "invalid", "leak"]) {
         const actor = await user(),
@@ -639,6 +686,7 @@ integration(
     });
 
     test("public compilation is a strict allowlist and private recipe/raw endpoints enforce super-admin role", async () => {
+      const priorCost = (await store.stats("free-optimize")).costs.find(cost => cost.currency === "USD")?.actual ?? 0;
       const actor = await user(),
         other = await user(),
         department = await user("department_admin");
@@ -725,7 +773,7 @@ integration(
       );
       const body = await details.json();
       expect(body.stats.costs).toEqual([
-        { currency: "USD", actual: 0.004, estimated: 0, unknownCount: 0 },
+        { currency: "USD", actual: priorCost + 0.004, estimated: 0, unknownCount: 0 },
       ]);
     });
 

@@ -1,5 +1,5 @@
 import { modelOptionName, selectableModelsByCapability, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
-import { preferredImageModel } from "@/lib/default-image-model";
+import { DEFAULT_IMAGE_MODEL, preferredImageModel } from "@/lib/default-image-model";
 
 export type ModelPickerSource = "server" | "local";
 type CapabilityModel = { id?: string; modelId: string; name?: string; publicName?: string; capabilities: readonly string[] };
@@ -22,7 +22,11 @@ export function filterServerModelsByCapability<T extends CapabilityModel>(models
 }
 
 export function getModelPickerOptions(config: AiConfig, capability: ModelCapability | undefined, models: readonly CapabilityModel[], source: ModelPickerSource, current?: string) {
-    if (capability && source === "server") return Array.from(new Set(filterServerModelsByCapability(models, capability).map((model) => model.modelId)));
+    if (capability && source === "server") {
+        const compatible = filterServerModelsByCapability(models, capability);
+        const preferred = capability === "image" ? compatible.find(model => [model.id, model.modelId, model.name, model.publicName].includes(DEFAULT_IMAGE_MODEL)) : undefined;
+        return Array.from(new Set([...(preferred ? [preferred.modelId] : []), ...compatible.map(model => model.modelId)]));
+    }
     return Array.from(new Set([...(config.channelMode === "local" && !capability ? [current] : []), ...selectableModelsByCapability(config, capability)].filter((model): model is string => Boolean(model))));
 }
 

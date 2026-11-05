@@ -9,6 +9,7 @@ export const EDITOR_MAX_PIXELS = 25_000_000;
 type PaintStyle = { color: string; width: number; clip?: EditorRect };
 export type ImageEditorMark =
     | ({ kind: "brush"; points: EditorPoint[] } & PaintStyle)
+    | ({ kind: "erase"; points: EditorPoint[] } & PaintStyle)
     | ({ kind: "rectangle" | "arrow"; start: EditorPoint; end: EditorPoint } & PaintStyle)
     | ({ kind: "text"; at: EditorPoint; text: string; fontSize: number } & PaintStyle);
 export type ImageEditorOperation = ImageEditorMark
@@ -138,13 +139,18 @@ export function paintEditorMark(context: CanvasRenderingContext2D, mark: ImageEd
     context.lineWidth = mark.width;
     context.lineCap = "round";
     context.lineJoin = "round";
-    if (mark.kind === "brush") {
+    if (mark.kind === "erase") {
+        context.globalCompositeOperation = "destination-out";
+        context.globalAlpha = 1;
+        context.strokeStyle = context.fillStyle = "#000";
+    }
+    if (mark.kind === "brush" || mark.kind === "erase") {
         const first = mark.points[0];
         if (first) {
             context.beginPath();
             context.moveTo(first.x, first.y);
             for (const point of mark.points.slice(1)) context.lineTo(point.x, point.y);
-            if (mark.points.length > 1) context.stroke();
+            if (mark.points.some(point => point.x !== first.x || point.y !== first.y)) context.stroke();
             else { context.arc(first.x, first.y, mark.width / 2, 0, Math.PI * 2); context.fill(); }
         }
     } else if (mark.kind === "text") {

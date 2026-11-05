@@ -3255,7 +3255,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
                             onDownload={downloadNodeImage}
                             onSaveAsset={(node) => void saveNodeAsset(node)}
                             onMaskEdit={(node) => setMaskEditNodeId(node.id)}
-                            onManualEdit={(node) => { if (node.metadata?.status === "loading") { message.info(t("请等待这张图片生成完成后再编辑")); return; } setDialogNodeId(null); setManualEditNode(node); }}
+                            onManualEdit={(node, initialTool = "select") => { if (node.metadata?.status === "loading") { message.info(t("请等待这张图片生成完成后再编辑")); return; } setDialogNodeId(null); canvasDialogs.setManualEditInitialTool(initialTool); setManualEditNode(node); }}
                             onCrop={(node) => setCropNodeId(node.id)}
                             onSplit={(node) => setSplitNodeId(node.id)}
                             onUpscale={(node) => setUpscaleNodeId(node.id)}

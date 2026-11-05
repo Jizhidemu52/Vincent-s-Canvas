@@ -167,7 +167,10 @@ test("1366节点内联编辑高缩放不因最小逻辑宽度突破半屏", asyn
     const picker = page.getByRole("dialog", { name: "从画布选择参考图", exact: true });
     await expect(picker).toBeVisible();
     await picker.locator(".ant-modal-close").click();
-    await panExposedCanvas(page, 1200, 180);
+    await expect(picker).toBeHidden();
+    // The editor is fully left of x900 above; the fixed image-actions card
+    // starts at x1122. Keep this real drag in the exposed gap, not on that card.
+    await panExposedCanvas(page, 1000, 180);
     await expect(panel).toBeInViewport();
     await expect.poll(() => ({ width: api.document(id)?.nodes[0].width, height: api.document(id)?.nodes[0].height })).toEqual({ width: original.width, height: original.height });
     await page.screenshot({ path: testInfo.outputPath("high-zoom-editor.png") });

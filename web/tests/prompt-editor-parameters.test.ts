@@ -57,3 +57,17 @@ test("missing image fields clear stale options and use selected model defaults",
     expect(promptImageSettings({}, "mark-gpt-uuid", markModels)).toEqual({ size: "auto", quality: "auto", count: "1", imageOptions: '{"resolution":"1k"}' });
     expect(promptImageSettings({}, "mark-nano-uuid", markModels)).toMatchObject({ quality: "1k", imageOptions: "{}" });
 });
+
+test("MAI templates never retain quality or stale pixel dimensions, and reference edits omit explicit sizes", () => {
+    const profile = imageModelProfile("mai-image-2.6-flash");
+    const values = { size: "16:9", quality: "max", imageOptions: '{"resolution":"2k","output_format":"webp"}' };
+    const original = { width: 2048, height: 1152, quality: "max", resolution: "4k" };
+    const text = mergePromptEditorParameters(original, values, profile);
+    expect(text).toMatchObject({ size: "16:9", resolution: "2k", imageOptions: '{"resolution":"2k"}', quantity: 1 });
+    for (const key of ["quality", "width", "height"]) expect(text).not.toHaveProperty(key);
+    const edit = mergePromptEditorParameters(original, { ...values, referenceAssetIds: ["image-a"] }, profile);
+    for (const key of ["quality", "size", "resolution", "width", "height"]) expect(edit).not.toHaveProperty(key);
+    expect(edit.imageOptions).toBe("{}");
+    expect(original).toEqual({ width: 2048, height: 1152, quality: "max", resolution: "4k" });
+    expect(promptImageSettings(edit, "mai-image-2.6-flash")).toMatchObject({ size: "auto", quality: "auto", count: "1" });
+});

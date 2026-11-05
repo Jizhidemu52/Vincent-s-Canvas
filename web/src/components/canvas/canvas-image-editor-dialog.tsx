@@ -1,7 +1,7 @@
 import { useUiText, uiText } from "@/lib/i18n";
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { Alert, App, Button, Input, InputNumber, Modal, Select, Slider, Spin, Tooltip } from "antd";
-import { ArrowUpRight, Brush, Check, Crop, Grid2x2, Redo2, RotateCw, Scan, Square, Type, Undo2, ZoomIn, ZoomOut } from "lucide-react";
+import { ArrowUpRight, Brush, Check, Crop, Eraser, Grid2x2, Redo2, RotateCw, Scan, Square, Type, Undo2, ZoomIn, ZoomOut } from "lucide-react";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { useAsyncAction } from "@/hooks/use-async-action";
@@ -10,20 +10,22 @@ import { EDITOR_MAX_DIMENSION, editorDocumentSize, editorImageBlob, editorPoint,
 import type { CanvasNodeData } from "@/types/canvas";
 import { editorRectangles, editorRectangleMove } from "@/lib/canvas/image-editor-document";
 
-type Tool = "select" | "brush" | "rectangle" | "arrow" | "text" | "mosaic";
+type Tool = "select" | "brush" | "erase" | "rectangle" | "arrow" | "text" | "mosaic";
 type Gesture = { pointerId: number; tool: Tool; start: EditorPoint; end: EditorPoint; points: EditorPoint[]; movingIndex?: number };
 const tools = [
     { id: "select", label: "框选", icon: Scan }, { id: "brush", label: "画笔", icon: Brush },
+    { id: "erase", label: "橡皮擦", icon: Eraser },
     { id: "rectangle", label: "矩形", icon: Square }, { id: "arrow", label: "箭头", icon: ArrowUpRight },
     { id: "text", label: "文字", icon: Type }, { id: "mosaic", label: "马赛克", icon: Grid2x2 },
 ] as const;
 const hints: Record<Tool, string> = {
     select: "拖动框选区域，再点“应用裁剪”；切换画笔后仅在选区内涂画。",
     brush: "按住并拖动涂画；每一笔都可以撤销。", rectangle: "拖动已有矩形的框内或边框即可移动；空白处画新框，按住 Shift 可在旧框内新建。", arrow: "从起点拖到终点画箭头。",
+    erase: "按住并拖动擦除为透明；每一笔都可以撤销，保存后原图保留。",
     text: "先输入文字，再点击图片放置；可以撤销后重新放置。", mosaic: "拖动框选要打码的区域。马赛克用于视觉遮挡，敏感信息请用不透明涂画完全覆盖。",
 };
 
-export function CanvasImageEditorDialog({ node, onClose, onConfirm, saveHint = "另存为新版本节点 · 原图保留 · 不调用 AI", successMessage = "编辑结果已另存为新版本，原图保留", cancelDescription = "画布上的图片不会改变，面板内未保存的修改将丢弃。" }: { node: CanvasNodeData; onClose: () => void; onConfirm: (image: UploadedImage) => Promise<void>; saveHint?: string; successMessage?: string; cancelDescription?: string }) {
+export function CanvasImageEditorDialog({ node, onClose, onConfirm, initialTool = "select", saveHint = "另存为新版本节点 · 原图保留 · 不调用 AI", successMessage = "编辑结果已另存为新版本，原图保留", cancelDescription = "画布上的图片不会改变，面板内未保存的修改将丢弃。" }: { node: CanvasNodeData; onClose: () => void; onConfirm: (image: UploadedImage) => Promise<void>; initialTool?: "select" | "erase"; saveHint?: string; successMessage?: string; cancelDescription?: string }) {
     const t = useUiText();
     const theme = canvasThemes[useThemeStore(state => state.theme)];
     const { message, modal } = App.useApp();
@@ -31,7 +33,7 @@ export function CanvasImageEditorDialog({ node, onClose, onConfirm, saveHint = "
     const [image, setImage] = useState<HTMLImageElement | null>(null);
     const [loadError, setLoadError] = useState("");
     const [reload, setReload] = useState(0);
-    const [tool, setTool] = useState<Tool>("select");
+    const [tool, setTool] = useState<Tool>(initialTool);
     const [color, setColor] = useState("#ef4444");
     const [lineWidth, setLineWidth] = useState(12);
     const [fontSize, setFontSize] = useState(36);
@@ -62,6 +64,11 @@ export function CanvasImageEditorDialog({ node, onClose, onConfirm, saveHint = "
     const canResize = Boolean(image) && !saving && !resizeError && (resizeWidth !== size.width || resizeHeight !== size.height);
     const scale = Math.max(.01, Math.min((stageSize.width - 32) / size.width, (stageSize.height - 32) / size.height, 1)) * zoom;
     const dirty = history.cursor > 0;
+    const eraserCursor = useMemo(() => {
+        const edge = lineWidth + 4, center = edge / 2;
+        const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${edge}" height="${edge}"><circle cx="${center}" cy="${center}" r="${lineWidth / 2}" fill="none" stroke="white" stroke-width="3"/><circle cx="${center}" cy="${center}" r="${lineWidth / 2}" fill="none" stroke="black" stroke-width="1"/></svg>`;
+        return `url("data:image/svg+xml,${encodeURIComponent(svg)}") ${center} ${center}, crosshair`;
+    }, [lineWidth]);
 
     useEffect(() => {
         let active = true;
@@ -107,6 +114,7 @@ export function CanvasImageEditorDialog({ node, onClose, onConfirm, saveHint = "
         previewFrameRef.current = null;
         const canvas = overlayRef.current;
         canvas?.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
+        if (canvasRef.current) canvasRef.current.style.visibility = "";
         if (gestureRef.current?.movingIndex !== undefined && image && canvasRef.current) renderEditorDocument(canvasRef.current, image, committedOperations);
         gestureRef.current = null;
         setMovingPreview(null);
@@ -128,7 +136,7 @@ export function CanvasImageEditorDialog({ node, onClose, onConfirm, saveHint = "
     };
     const markFor = (gesture: Gesture): ImageEditorMark => {
         const style = { color, width: lineWidth / scale, ...(selection ? { clip: selection } : {}) };
-        if (gesture.tool === "brush") return { kind: "brush", points: gesture.points, ...style };
+        if (gesture.tool === "brush" || gesture.tool === "erase") return { kind: gesture.tool, points: gesture.points, ...style };
         return { kind: gesture.tool === "arrow" ? "arrow" : "rectangle", start: gesture.start, end: gesture.end, ...style };
     };
     const position = (event: PointerEvent<HTMLCanvasElement>) => editorPoint({ x: event.clientX, y: event.clientY }, event.currentTarget.getBoundingClientRect(), size);
@@ -162,7 +170,7 @@ export function CanvasImageEditorDialog({ node, onClose, onConfirm, saveHint = "
         if (!gesture) { if (tool === "rectangle") setOverRectangle(Boolean(hitRectangle(position(event)))); return; }
         if (!gesture || gesture.pointerId !== event.pointerId) return;
         gesture.end = position(event);
-        if (gesture.tool === "brush") gesture.points.push(gesture.end);
+        if (gesture.tool === "brush" || gesture.tool === "erase") gesture.points.push(gesture.end);
         if (previewFrameRef.current !== null) return;
         previewFrameRef.current = requestAnimationFrame(() => {
             previewFrameRef.current = null;
@@ -170,6 +178,14 @@ export function CanvasImageEditorDialog({ node, onClose, onConfirm, saveHint = "
             const context = canvas?.getContext("2d");
             if (!canvas || !context || !current) return;
             context.clearRect(0, 0, canvas.width, canvas.height);
+            if (current.tool === "erase" && canvasRef.current) {
+                // The preview owns its copy of the pixels. Never erase the committed
+                // canvas until pointer-up, so cancellation cannot alter the image.
+                context.drawImage(canvasRef.current, 0, 0);
+                paintEditorMark(context, markFor(current));
+                canvasRef.current.style.visibility = "hidden";
+                return;
+            }
             if (current.movingIndex !== undefined) {
                 const move = movingOperation(current);
                 setMovingPreview(move);
@@ -203,7 +219,7 @@ export function CanvasImageEditorDialog({ node, onClose, onConfirm, saveHint = "
                 else commit({ kind: "mosaic", rect, blockSize: Math.max(1, lineWidth / scale) });
             }
         } else {
-            if (gesture.tool === "brush") gesture.points.push(gesture.end);
+            if (gesture.tool === "brush" || gesture.tool === "erase") gesture.points.push(gesture.end);
             commit(markFor(gesture));
             if (gesture.tool === "rectangle") setSelectedRectangle(history.cursor);
         }
@@ -217,7 +233,7 @@ export function CanvasImageEditorDialog({ node, onClose, onConfirm, saveHint = "
     };
     const save = () => run(async () => {
         if (!canvasRef.current || !dirty || gestureRef.current) return;
-        if (!uploadedRef.current) uploadedRef.current = await uploadImage(await editorImageBlob(canvasRef.current, node.metadata?.mimeType));
+        if (!uploadedRef.current) uploadedRef.current = await uploadImage(await editorImageBlob(canvasRef.current, committedOperations.some(operation => operation.kind === "erase") ? "image/png" : node.metadata?.mimeType));
         await onConfirm(uploadedRef.current);
         onClose();
         message.success(t(successMessage));
@@ -241,7 +257,7 @@ export function CanvasImageEditorDialog({ node, onClose, onConfirm, saveHint = "
                 <Tooltip title={t("重做 Ctrl+Shift+Z")}><Button disabled={history.cursor >= history.operations.length || saving} type="text" aria-label={t("重做图片编辑")} icon={<Redo2 className="size-4" />} onClick={() => travel(1)} /></Tooltip>
             </div>
             <div className="mb-3 flex min-h-8 flex-wrap items-center gap-x-4 gap-y-2 text-xs">
-                {tool !== "select" && tool !== "mosaic" ? <label className="flex items-center gap-2">{t("颜色")}<input type="color" aria-label={t("绘制颜色")} value={color} disabled={saving} onChange={event => setColor(event.target.value)} className="h-7 w-9 cursor-pointer border-0 bg-transparent" /></label> : null}
+                {tool !== "select" && tool !== "mosaic" && tool !== "erase" ? <label className="flex items-center gap-2">{t("颜色")}<input type="color" aria-label={t("绘制颜色")} value={color} disabled={saving} onChange={event => setColor(event.target.value)} className="h-7 w-9 cursor-pointer border-0 bg-transparent" /></label> : null}
                 {tool !== "select" && tool !== "text" ? <label className="flex items-center gap-2">{tool === "mosaic" ? t("色块") : t("笔宽")}<Slider disabled={saving} className="!m-0 w-28" min={1} max={80} value={lineWidth} onChange={setLineWidth} /><span className="w-10 tabular-nums">{lineWidth}px</span></label> : null}
                 {tool === "text" ? <><Input.TextArea aria-label={t("标注文字")} autoSize={{ minRows: 1, maxRows: 3 }} maxLength={500} value={text} disabled={saving} onChange={event => setText(event.target.value)} placeholder={t("输入文字，再点击图片放置")} className="!w-64 max-w-full" /><label className="flex items-center gap-2">{t("字号")}<InputNumber aria-label={t("标注字号")} disabled={saving} min={8} max={240} value={fontSize} onChange={value => setFontSize(value || 36)} /></label></> : null}
                 {selection ? <><span>{t("选区")}{selection.width} × {selection.height}px</span><Button size="small" disabled={saving} icon={<Crop className="size-3.5" />} onClick={() => { commit({ kind: "crop", rect: selection }); setResizeDraft(null); setSelection(null); setZoom(1); }}>{t("应用裁剪")}</Button><Button size="small" type="text" disabled={saving} onClick={() => setSelection(null)}>{t("取消选区")}</Button></> : null}
@@ -264,7 +280,7 @@ export function CanvasImageEditorDialog({ node, onClose, onConfirm, saveHint = "
                 {!image ? <div className="grid h-full place-items-center">{!loadError ? <Spin tip={t("读取原图")} /> : <span style={{ color: theme.node.muted }}>{t("暂时无法编辑此图片")}</span>}</div> : <div className="grid place-items-center" style={{ minWidth: "100%", minHeight: "100%", width: size.width * scale + 32, height: size.height * scale + 32 }}>
                     <div className="relative shrink-0" style={{ width: size.width * scale, height: size.height * scale, background: `repeating-conic-gradient(${theme.node.panel} 0% 25%, ${theme.node.stroke} 0% 50%) 0 / 16px 16px` }}>
                         <canvas ref={attachCanvas} aria-label={t("编辑图片预览")} className="block size-full" />
-                        <canvas ref={overlayRef} width={size.width} height={size.height} aria-label={t("图片编辑画布")} tabIndex={0} className="absolute inset-0 size-full touch-none outline-none" style={{ cursor: tool === "text" ? "text" : tool === "rectangle" && overRectangle ? "move" : "crosshair", pointerEvents: saving ? "none" : "auto" }} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={clearPreview} onLostPointerCapture={clearPreview} />
+                        <canvas ref={overlayRef} width={size.width} height={size.height} aria-label={t("图片编辑画布")} tabIndex={0} className="absolute inset-0 size-full touch-none outline-none" style={{ cursor: tool === "text" ? "text" : tool === "erase" ? eraserCursor : tool === "rectangle" && overRectangle ? "move" : "crosshair", pointerEvents: saving ? "none" : "auto" }} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={clearPreview} onLostPointerCapture={clearPreview} />
                         {selectedBounds ? <div aria-label={t("选中的矩形标注")} className="pointer-events-none absolute border border-dashed" style={{ left: selectedBounds.x / size.width * 100 + "%", top: selectedBounds.y / size.height * 100 + "%", width: selectedBounds.width / size.width * 100 + "%", height: selectedBounds.height / size.height * 100 + "%", borderColor: theme.canvas.selectionStroke }} /> : null}
                         {selection ? <div className="pointer-events-none absolute border-2 border-dashed" style={{ left: selection.x / size.width * 100 + "%", top: selection.y / size.height * 100 + "%", width: selection.width / size.width * 100 + "%", height: selection.height / size.height * 100 + "%", borderColor: theme.canvas.selectionStroke }} /> : null}
                     </div>

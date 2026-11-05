@@ -5,7 +5,7 @@ import { ImageSettingsPanel } from "@/components/image-settings-panel";
 import { useAsyncAction } from "@/hooks/use-async-action";
 import { getBusinessConfig, type PublicModel } from "@/services/api/business-config";
 import { mergePromptEditorParameters, promptImageSettings } from "@/lib/prompt-editor-parameters";
-import { imageModelProfile, imageModelSettingsError } from "@/lib/image-model-settings";
+import { adaptImageModelSettings, imageModelProfile, imageModelSettingsError, imageReferenceSizeIsAutomatic } from "@/lib/image-model-settings";
 import { modelLabelWithUsage } from "@/lib/model-picker-options";
 import { emitModelUsage } from "@/lib/usage-control-events";
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -45,6 +45,14 @@ export function PromptTemplateEditor({ open, initial, title, onCancel, onSubmit 
     const updateImageSetting = useCallback((key: "size" | "quality" | "count" | "imageOptions", value: string) => {
         form.setFieldValue(key === "count" ? "quantity" : key, key === "count" ? Number(value) : value);
     }, [form]);
+    const changeModel = (value: string | undefined) => {
+        emitModelUsage("change", value);
+        const model = models.find(item => item.id === value);
+        if (targetTool === "video" || !model?.capabilities.some(capability => ["generate", "edit", "upscale"].includes(capability))) return;
+        const current = form.getFieldsValue();
+        const adapted = adaptImageModelSettings({ size: current.size || "auto", quality: current.quality || "auto", count: "1", imageOptions: current.imageOptions || "{}" }, imageModelProfile(model.modelId, models));
+        form.setFieldsValue({ size: adapted.size, quality: adapted.quality, quantity: 1, imageOptions: adapted.imageOptions });
+    };
 
     useEffect(() => {
         if (!open) return;
@@ -91,7 +99,7 @@ export function PromptTemplateEditor({ open, initial, title, onCancel, onSubmit 
 
     const save = () => run(async () => {
         const values = await form.validateFields();
-            const sizeError = imageProfile && values.size ? imageModelSettingsError(values.size, imageProfile) : "";
+            const sizeError = imageProfile && values.size && !imageReferenceSizeIsAutomatic(imageProfile, values.referenceAssetIds?.length || 0) ? imageModelSettingsError(values.size, imageProfile) : "";
             if (sizeError) throw new Error(sizeError);
             await onSubmit({
                 title: values.title, prompt: values.prompt, targetTool: values.targetTool, modelConfigId: values.modelConfigId ?? null,
@@ -112,7 +120,7 @@ export function PromptTemplateEditor({ open, initial, title, onCancel, onSubmit 
                 </div>
                 <Form.Item name="prompt" label={t("完整提示词")} rules={[{ required: true, whitespace: true, max: 20_000 }]}><Input.TextArea rows={7} maxLength={20_000} showCount placeholder={t("保存可以直接复用的完整提示词")} /></Form.Item>
                 <div className="grid gap-x-4 md:grid-cols-2">
-                    <Form.Item name="modelConfigId" label={t("模型快照")}><Select allowClear showSearch optionFilterProp="label" placeholder={t("可不指定，由复用时选择")} onChange={value => emitModelUsage("change", value)} options={models.map((model) => ({ value: model.id, label: `${modelLabelWithUsage(model.name, model.publicDescription)}${deploymentFeatures.creditsEnabled ? t(" · {p0} 模型积分", { p0: String(model.creditCost) }) : ""}` }))} /></Form.Item>
+                    <Form.Item name="modelConfigId" label={t("模型快照")}><Select allowClear showSearch optionFilterProp="label" placeholder={t("可不指定，由复用时选择")} onChange={changeModel} options={models.map((model) => ({ value: model.id, label: `${modelLabelWithUsage(model.name, model.publicDescription)}${deploymentFeatures.creditsEnabled ? t(" · {p0} 模型积分", { p0: String(model.creditCost) }) : ""}` }))} /></Form.Item>
                     <Form.Item name="referenceAssetIds" label={t("参考图")}><Select mode="multiple" allowClear maxTagCount="responsive" placeholder={t("从我的素材选择")} options={assets.map((asset) => ({ value: asset.id, label: asset.filename }))} /></Form.Item>
                 </div>
                 {assetCursor ? <Button className="mb-4" loading={loadingMoreAssets} disabled={saving} onClick={() => void loadMoreAssets()}>{t("加载更多参考图")}</Button> : null}

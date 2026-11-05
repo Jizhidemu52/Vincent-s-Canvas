@@ -78,9 +78,10 @@ describe("read-only demo Mark catalog", () => {
     expect(listAvailableDemoModels(mark.models, [mark.provider])).toHaveLength(MARK_PLATFORM_MODELS.length - 1);
     expect(mark.models.filter(model => !model.enabled).map(model => model.modelId)).toEqual(["grok-imagine-image-2.0"]);
     expect(mark.models.find(model => model.modelId === "claude-sonnet-5-5")).toMatchObject({ id: "d5000000-0000-4000-8000-000000000010", enabled: true });
-    expect(mark.models.slice(-2).map(model => [model.id, model.modelId])).toEqual([
+    expect(mark.models.slice(-3).map(model => [model.id, model.modelId])).toEqual([
       ["d5000000-0000-4000-8000-000000000011", "gpt-image-2.6-flare"],
       ["d5000000-0000-4000-8000-000000000012", "gpt-image-2.6-sunburst"],
+      ["d5000000-0000-4000-8000-000000000013", "mai-image-2.6-flash"],
     ]);
     expect(mark.models.find(model => model.modelId === "gemini-3.1-flash-image-preview-official")?.id).toBe("d5000000-0000-4000-8000-000000000009");
     expect(JSON.stringify([mark.provider, mark.models])).not.toContain("fake-mark-key");

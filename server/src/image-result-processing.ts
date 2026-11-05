@@ -173,7 +173,7 @@ export async function validateQuickImageSource(image: ProcessedResultImage | und
     const source = await load("quick-source", image);
     if (HIGH_BIT_DEPTH.test(source.metadata.pixelFormat)) throw new ImageResultProcessingError("INVALID_IMAGE_RESULT_INPUT", "一键图片工具暂仅支持 8 位 PNG、JPEG、WebP 原图；尚未提交生成");
     const ratio = source.metadata.width / source.metadata.height;
-    if (ratio < 1 / 8 || ratio > 8) throw new ImageResultProcessingError("INVALID_IMAGE_RESULT_INPUT", "原图宽高比超出 Nano 2.1 支持范围（1:8 至 8:1）；尚未提交生成");
+    if (ratio < 1 / 8 || ratio > 8) throw new ImageResultProcessingError("INVALID_IMAGE_RESULT_INPUT", "原图宽高比超出本工具可处理范围（1:8 至 8:1）；尚未提交生成");
     if (action === "hd-upscale" && Math.max(source.metadata.width, source.metadata.height) > 4096) {
       throw new ImageResultProcessingError("INVALID_IMAGE_RESULT_INPUT", "原图已超过 4K，无需使用此高清放大功能；尚未提交生成");
     }

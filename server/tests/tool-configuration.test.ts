@@ -10,7 +10,7 @@ import { createTasksRouter } from "../src/routes/tasks";
 import { createChatRouter } from "../src/routes/chat";
 import { normalizeTaskTool, resolveToolExecution, type ToolConfiguration } from "../src/tool-configuration";
 import { resolveCurrentPromptPricing } from "../src/prompt-templates";
-import { QUICK_IMAGE_MODEL_ID, quickImageTaskTarget } from "../../shared/quick-image-tools";
+import { quickImageModelId, quickImageTaskTarget } from "../../shared/quick-image-tools";
 import { MARK_IMAGE_PROVIDER_ID } from "../../shared/mark-image-models";
 
 const modelId = "10000000-0000-4000-8000-000000000001";
@@ -232,14 +232,15 @@ describe("formal catalog configuration", () => {
 });
 
 describe("authoritative scoped execution", () => {
-  test("quick image routes enforce the built-in recipe and fixed Nano model without altering ordinary bindings", async () => {
+  test("quick image routes enforce each built-in recipe and action model without altering ordinary bindings", async () => {
     const state = fixture();
-    state.models[1]!.modelId = QUICK_IMAGE_MODEL_ID;
+    state.models[1]!.modelId = quickImageModelId("remove-background");
     state.models[1]!.protocol = "apimart";
     state.models[1]!.providerId = MARK_IMAGE_PROVIDER_ID;
     for (const key of ["image-edit", "detail-enhance", "canvas-edit"] as const) state.bind(key, { modelConfigId: modelId, creditCostOverride: 0 });
     const { url } = await serve(state, "designer");
     for (const action of ["remove-background", "hd-upscale"] as const) for (const canvas of [false, true]) {
+      state.models[1]!.modelId = quickImageModelId(action);
       const target = quickImageTaskTarget(action, canvas);
       const response = await post(`${url}/tasks`, { ...target, requestId: `quick-${action}-${canvas}`, projectId: "canvas", modelConfigId: modelId,
         prompt: "forged prompt", parameters: { quickImageAction: action, size: "1:1", resolution: "1k", n: 9, background: "opaque", output_format: "jpeg" }, sourceUrls: ["owned-image"] });
@@ -247,7 +248,8 @@ describe("authoritative scoped execution", () => {
       const { task } = await response.json();
       expect(task.modelConfigId).toBe(secondModelId); expect(task.toolKey).toBe(target.toolKey);
       expect(task.prompt).not.toContain("forged prompt");
-      expect(task.parameters).toMatchObject({ quickImageAction: action, resolution: action === "hd-upscale" ? "4k" : "2k", size: "auto", n: 1, count: 1 });
+      expect(task.parameters).toMatchObject({ quickImageAction: action, ...(action === "hd-upscale" ? { resolution: "4k", size: "auto" } : {}), n: 1, count: 1 });
+      if (action === "remove-background") { expect(task.parameters).not.toHaveProperty("size"); expect(task.parameters).not.toHaveProperty("resolution"); }
       expect(task.parameters).not.toHaveProperty("background"); expect(task.parameters).not.toHaveProperty("output_format");
       expect(task.optimized).toBe(false);
     }
@@ -264,7 +266,7 @@ describe("authoritative scoped execution", () => {
 
   test("quick resolver checks the action scope even outside task admission and never picks another provider's Nano alias", async () => {
     const state = fixture();
-    state.models[0]!.modelId = QUICK_IMAGE_MODEL_ID; state.models[0]!.protocol = "apimart";
+    state.models[0]!.modelId = quickImageModelId("remove-background"); state.models[0]!.protocol = "apimart";
     const input = { toolKey: "image-edit", operationType: "inpaint", parameters: { quickImageAction: "remove-background" } };
     await expect(resolveToolExecution(state.db, input)).rejects.toMatchObject({ code: "MODEL_DISABLED" });
     for (const patch of [{ toolKey: "creative-style-to-sketch" }, { toolKey: "image", operationType: "image_generation" }, { parameters: { quickImageAction: "unknown" } }, { parameters: { quickImageAction: "hd-upscale" } }]) {

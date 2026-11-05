@@ -21,7 +21,7 @@ import type { ReferenceImage } from "@/types/image";
 import { fingerprintImage, type ArchivedReference, type GenerationDraftInput, type GenerationInputArchive } from "./generation-history";
 import { getBusinessConfig } from "./business-config";
 import { requireToolKey, resolveConfiguredToolModel } from "./tool-runtime";
-import { QUICK_IMAGE_MODEL, type QuickImageAction } from "@/lib/quick-image-tools";
+import { quickImageModelId, type QuickImageAction } from "@/lib/quick-image-tools";
 
 type ImageOperationType = "image_generation" | "inpaint" | "upscale" | "batch_image" | "seamless_stitch";
 type PublicModel = { id: string; name: string; modelId: string; capabilities: string[]; creditCost: number; rmbCost: number };
@@ -159,7 +159,7 @@ export async function requestQueuedImages(input: { quickImageAction?: QuickImage
     const model = preset ? undefined : input.resolvedModel || await resolvePublicModel(input.modelId, input.operationType, toolKey);
     assertOwner();
     input.signal?.throwIfAborted();
-    const referenceProfile = model ? imageModelProfile(model.id, [model]) : imageModelProfile(QUICK_IMAGE_MODEL);
+    const referenceProfile = model ? imageModelProfile(model.id, [model]) : imageModelProfile(quickImageModelId(input.quickImageAction!));
     const sourceUrls: string[] = [];
     const archivedReferences: ArchivedReference[] = [];
     for (const reference of input.references || []) {

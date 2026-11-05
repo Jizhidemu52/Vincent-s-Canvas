@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { quickImageTaskTarget } from "../../shared/quick-image-tools";
+import { quickImageModelId, quickImageTaskTarget } from "../../shared/quick-image-tools";
 import { prepareQuickImageTask, quickImageResultAction } from "../src/quick-image-tools";
 import { buildApiMartImageRequest } from "../src/apimart-image";
 
@@ -12,11 +12,12 @@ describe("server-owned quick image recipes", () => {
         parameters: { quickImageAction: action, n: 8, count: 8, size: "1:1", resolution: "1k", background: "opaque", output_format: "jpeg", imageAgentProfile: "creative-chat", inputArchive: { maskReferenceIndex: 1 }, quickImage: { action: "forged", recipeVersion: 99 } } as Record<string, unknown> });
       expect(prepared.modelConfigId).toBeUndefined(); expect(prepared.promptInput).toBeUndefined();
       expect(prepared.prompt).not.toContain("ignore recipe");
-      expect(prepared.parameters).toEqual({ tool: quickImageTaskTarget(action, canvas).toolKey, n: 1, count: 1, size: "auto", resolution: action === "hd-upscale" ? "4k" : "2k", quickImageAction: action, quickImage: { action, recipeVersion: 1 } });
+      expect(prepared.parameters).toEqual({ tool: quickImageTaskTarget(action, canvas).toolKey, n: 1, count: 1, ...(action === "hd-upscale" ? { size: "auto", resolution: "4k" } : {}), quickImageAction: action, quickImage: { action, recipeVersion: 1 } });
       expect(quickImageResultAction(prepared.parameters)).toBe(action);
       expect(prepareQuickImageTask(prepared)).toEqual(prepared);
-      const request = buildApiMartImageRequest({ modelId: "gemini-nano-banana-2.1", prompt: prepared.prompt!, parameters: prepared.parameters, sourceDataUrls: ["https://example.com/original.png"] });
-      expect(request.payload).toMatchObject({ model: "gemini-nano-banana-2.1", n: 1, size: "auto", resolution: action === "hd-upscale" ? "4K" : "2K" });
+      const request = buildApiMartImageRequest({ modelId: quickImageModelId(action), prompt: prepared.prompt!, parameters: prepared.parameters, sourceDataUrls: ["https://example.com/original.png"] });
+      expect(request.payload).toMatchObject({ model: quickImageModelId(action), n: 1, ...(action === "hd-upscale" ? { size: "auto", resolution: "4K" } : {}) });
+      if (action === "remove-background") { expect(request.payload).not.toHaveProperty("size"); expect(request.payload).not.toHaveProperty("resolution"); }
       expect(request.payload).not.toHaveProperty("quickImageAction"); expect(request.payload).not.toHaveProperty("quickImage");
     });
   }

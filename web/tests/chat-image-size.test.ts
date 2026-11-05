@@ -110,7 +110,7 @@ test("the real size control saves only the active conversation, survives reload,
     if (!sizeSelect) throw new Error("Size selector missing");
     const sessions: ChatSession[] = [{ id: "a", title: "A", updatedAt: "now", messages: [] }, { id: "b", title: "B", updatedAt: "now", messages: [], imageSize: "16:9" }];
     const bindings = { ...i18nHarness, React, Select: "select", activeSession: sessions[0], CHAT_AUTO_IMAGE_SIZE, chatImageSizeOptions,
-        qualityProfile: imageModelProfile("ratio", models), sessionsReady: true, modelsLoading: false, isSending: false, preferredImageModel: models[0],
+        qualityProfile: imageModelProfile("ratio", models), sessionsReady: true, modelsLoading: false, isSending: false, preferredImageModel: models[0], imageReferenceParametersAutomatic: false,
         updateSession: (id: string, update: (session: ChatSession) => ChatSession) => { const index = sessions.findIndex(session => session.id === id); sessions[index] = update(sessions[index]); } };
     const code = ts.transpileModule(`exports.select = ${sizeSelect.getText(ast)};`, { compilerOptions: { target: ts.ScriptTarget.ESNext, jsx: ts.JsxEmit.React } }).outputText;
     const exported = {} as { select: React.ReactElement<any> };

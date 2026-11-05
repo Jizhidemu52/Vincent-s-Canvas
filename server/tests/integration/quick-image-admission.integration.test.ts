@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import express, { type ErrorRequestHandler } from "express";
 import { ZodError } from "zod";
 import { MARK_IMAGE_PROVIDER_ID } from "../../../shared/mark-image-models";
-import { QUICK_IMAGE_MODEL_ID, quickImageTaskTarget, type QuickImageAction } from "../../../shared/quick-image-tools";
+import { quickImageModelId, quickImageTaskTarget, type QuickImageAction } from "../../../shared/quick-image-tools";
 import type { Cache } from "../../src/db";
 import type { PromptCompiler } from "../../src/prompt-compiler";
 import { createTasksRouter } from "../../src/routes/tasks";
@@ -16,7 +16,7 @@ integration("quick image HTTP admission through real schema, recipes, SQL and re
   let server: ReturnType<ReturnType<typeof express>["listen"]>, base = "";
   let fetchGuard: { mockRestore(): void };
   const realFetch = globalThis.fetch.bind(globalThis);
-  const ordinaryProvider = randomUUID(), ordinaryModel = randomUUID(), nanoModel = randomUUID(), decoyNano = randomUUID();
+  const ordinaryProvider = randomUUID(), ordinaryModel = randomUUID(), nanoModel = randomUUID(), maiModel = randomUUID(), decoyNano = randomUUID();
   const users = new Map<string, SessionUser>(), queued = new Set<string>();
   let optimizerCalls = 0, externalCalls = 0;
   const cache = { eval: async (_script: string, options: { arguments: string[] }) => { queued.add(options.arguments[0]!); return 1; } } as unknown as Cache;
@@ -47,7 +47,7 @@ integration("quick image HTTP admission through real schema, recipes, SQL and re
     for (const [id, name] of [[MARK_IMAGE_PROVIDER_ID, "Quick fixed provider"], [ordinaryProvider, "Quick ordinary provider"]]) {
       await query("INSERT INTO providers(id,name,protocol,base_url,enabled) VALUES($1,$2,'apimart','https://no-network.invalid/v1',true) ON CONFLICT(id) DO UPDATE SET enabled=true,protocol='apimart'", [id, name]);
     }
-    for (const [id, provider, model] of [[nanoModel, MARK_IMAGE_PROVIDER_ID, QUICK_IMAGE_MODEL_ID], [ordinaryModel, ordinaryProvider, "ordinary-model"], [decoyNano, ordinaryProvider, QUICK_IMAGE_MODEL_ID]]) {
+    for (const [id, provider, model] of [[nanoModel, MARK_IMAGE_PROVIDER_ID, quickImageModelId("hd-upscale")], [maiModel, MARK_IMAGE_PROVIDER_ID, quickImageModelId("remove-background")], [ordinaryModel, ordinaryProvider, "ordinary-model"], [decoyNano, ordinaryProvider, quickImageModelId("remove-background")]]) {
       await query("INSERT INTO model_configs(id,provider_id,name,model_id,capabilities,enabled,credit_cost,rmb_cost) VALUES($1,$2,$3,$3,ARRAY['generate','edit'],true,2,0)", [id, provider, model]);
     }
     await query("UPDATE module_flags SET enabled=true");
@@ -75,12 +75,14 @@ integration("quick image HTTP admission through real schema, recipes, SQL and re
   for (const action of ["remove-background", "hd-upscale"] as const) for (const canvas of [false, true]) {
     test(`${action} ${canvas ? "canvas" : "standalone"} accepts no prompt/model and persists only the fixed recipe`, async () => {
       const actor = await user(), value = input(action, canvas);
+      const expectedModel = action === "remove-background" ? maiModel : nanoModel;
       expect(value).not.toHaveProperty("prompt"); expect(value).not.toHaveProperty("modelConfigId");
       const response = await send(actor, value), body = await response.json();
-      expect({ status: response.status, body }).toMatchObject({ status: 201, body: { task: { modelConfigId: nanoModel, toolKey: value.toolKey, credits: 7, optimized: false } } });
+      expect({ status: response.status, body }).toMatchObject({ status: 201, body: { task: { modelConfigId: expectedModel, toolKey: value.toolKey, credits: 7, optimized: false } } });
       const stored = (await query("SELECT model_config_id,prompt,parameters,source_urls,user_input,prompt_optimized FROM tasks WHERE id=$1", [body.task.id])).rows[0]!;
-      expect(stored).toMatchObject({ model_config_id: nanoModel, source_urls: value.sourceUrls, user_input: null, prompt_optimized: false,
-        parameters: { quickImageAction: action, resolution: action === "hd-upscale" ? "4k" : "2k", size: "auto", n: 1, count: 1, quickImage: { action, recipeVersion: 1 } } });
+      expect(stored).toMatchObject({ model_config_id: expectedModel, source_urls: value.sourceUrls, user_input: null, prompt_optimized: false,
+        parameters: { quickImageAction: action, ...(action === "hd-upscale" ? { resolution: "4k", size: "auto" } : {}), n: 1, count: 1, quickImage: { action, recipeVersion: 1 } } });
+      if (action === "remove-background") { expect(stored.parameters).not.toHaveProperty("size"); expect(stored.parameters).not.toHaveProperty("resolution"); }
       expect(stored.prompt).toContain(action === "hd-upscale" ? "4K resolution" : "foreground alpha matte");
       expect(stored.prompt).toBe(body.task.prompt); expect(queued.has(body.task.id)).toBe(true);
       const duplicate = await send(actor, value);
@@ -108,7 +110,7 @@ integration("quick image HTTP admission through real schema, recipes, SQL and re
       ["UPDATE module_flags SET enabled=false WHERE module_key='image-edit'", "UPDATE module_flags SET enabled=true WHERE module_key='image-edit'", input("remove-background"), 403, "MODULE_DISABLED"],
       ["UPDATE module_flags SET enabled=false WHERE module_key='canvas'", "UPDATE module_flags SET enabled=true WHERE module_key='canvas'", input("hd-upscale", true), 403, "MODULE_DISABLED"],
       ["UPDATE tool_api_configurations SET enabled=false WHERE tool_key='detail-enhance'", "UPDATE tool_api_configurations SET enabled=true WHERE tool_key='detail-enhance'", input("hd-upscale"), 403, "TOOL_DISABLED"],
-      [`UPDATE model_configs SET enabled=false WHERE id='${nanoModel}'`, `UPDATE model_configs SET enabled=true WHERE id='${nanoModel}'`, input("remove-background"), 400, "MODEL_DISABLED"],
+      [`UPDATE model_configs SET enabled=false WHERE id='${maiModel}'`, `UPDATE model_configs SET enabled=true WHERE id='${maiModel}'`, input("remove-background"), 400, "MODEL_DISABLED"],
     ] as const;
     for (const [disable, restore, value, status, code] of gates) {
       await query(disable);

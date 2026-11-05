@@ -28,4 +28,5 @@ export const MARK_PLATFORM_MODELS = [
   { modelId: "gemini-3.1-flash-image-preview-official", name: "aplmart-nano2", description: "日常改款与多图参考", defaultEnabled: true, capabilities: ["generate", "edit", "batch"] as const },
   { modelId: "claude-sonnet-5-5", name: "aplmart-claude-sonnet-5-5", description: "文字对话与图文理解", defaultEnabled: true, capabilities: ["chat", "vision", "tools"] as const },
   ...MARK_GPT26_IMAGE_MODELS.map(model => ({ ...model, capabilities: ["generate", "edit", "batch"] as const })),
+  { modelId: "mai-image-2.6-flash", name: "aplmart-mai2.6-flash", description: "快速出图与参考图编辑；编辑约 1MP，不支持 4K", defaultEnabled: true, capabilities: ["generate", "edit", "batch"] as const },
 ] as const;

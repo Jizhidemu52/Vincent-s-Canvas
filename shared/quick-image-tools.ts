@@ -1,6 +1,8 @@
 /** Public board contract only. Prompts and processing rules live exclusively on the server. */
-export const QUICK_IMAGE_MODEL_ID = "gemini-nano-banana-2.1";
 export type QuickImageAction = "remove-background" | "hd-upscale";
+export function quickImageModelId(action: QuickImageAction) {
+  return action === "remove-background" ? "mai-image-2.6-flash" : "gemini-nano-banana-2.1";
+}
 export function isQuickImageAction(value: unknown): value is QuickImageAction {
   return value === "remove-background" || value === "hd-upscale";
 }

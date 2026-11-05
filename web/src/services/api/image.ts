@@ -1,5 +1,5 @@
 import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
-import { imageModelProfile, imageModelSettingsError, normalizeImageModelSettings } from "@/lib/image-model-settings";
+import { imageModelProfile, imageModelSettingsError, imageReferenceSizeIsAutomatic, normalizeImageModelSettings } from "@/lib/image-model-settings";
 import { validateImageReferences } from "@/lib/image-reference-policy";
 import { readGenerationReferenceDataUrl, requestQueuedImageBatch, requestQueuedImages, uploadImageReference, type QueuedBatchItem } from "@/services/api/generation-tasks";
 import { workspaceOwnerHeaders } from "@/services/api/workspace-owner";
@@ -13,7 +13,7 @@ import { imageAdvancedParameters, readImageOptions } from "@/lib/image-advanced-
 import { resolveToolConfig } from "./tool-runtime";
 import { createClientId } from "@/lib/client-id";
 import { parseCreateImageArguments, parseStrictJson } from "@/lib/strict-json";
-import { isQuickImageTool, quickImageAction, QUICK_IMAGE_MODEL, type QuickImageAction } from "@/lib/quick-image-tools";
+import { isQuickImageTool, quickImageAction, quickImageModelId, type QuickImageAction } from "@/lib/quick-image-tools";
 
 export type AiTextMessage = {
     role: "system" | "user" | "assistant";
@@ -90,7 +90,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
         if (mask || references.length !== 1) throw new Error("请只添加一张原图");
         const action = options!.quickImageAction || quickImageAction(options!.tool!);
         const tool = options?.tool === "canvas-edit" ? "canvas-edit" : action === "remove-background" ? "image-edit" : "detail-enhance";
-        return requestQueuedImages({ modelId: QUICK_IMAGE_MODEL, prompt: "", count: 1, operationType: tool === "detail-enhance" ? "upscale" : "inpaint", tool, quickImageAction: action,
+        return requestQueuedImages({ modelId: quickImageModelId(action), prompt: "", count: 1, operationType: tool === "detail-enhance" ? "upscale" : "inpaint", tool, quickImageAction: action,
             references, requestId: options?.requestId, signal: options?.signal, cancelOnAbort: options?.cancelOnAbort,
             onSubmissionStarted: options?.onSubmissionStarted, onSubmitted: options?.onSubmitted, onCompiled: options?.onCompiled });
     }
@@ -147,10 +147,22 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
 
 export function imageTaskParameters(config: AiConfig, profile = imageModelProfile(config.model || config.imageModel), options: { mask?: boolean; referenceCount?: number } = {}) {
     if (!profile.verified) return imageAdvancedParameters(config.imageOptions, { kind: "unverified" });
-    const error = imageModelSettingsError(config.size, profile);
+    const automaticReferenceSize = imageReferenceSizeIsAutomatic(profile, options.referenceCount || 0);
+    const error = automaticReferenceSize ? "" : imageModelSettingsError(config.size, profile);
     if (error) throw new Error(error);
     const { size, quality } = normalizeImageModelSettings(config, profile);
-    const advanced = imageAdvancedParameters(config.imageOptions, profile);
+    const optionValues = readImageOptions(config.imageOptions);
+    // MAI editing ignores dimensions. Every other supported value remains strict:
+    // only an explicit UI model change may adapt invalid old selections.
+    if (automaticReferenceSize) for (const key of ["size", "resolution", "width", "height"]) delete optionValues[key];
+    const advanced = imageAdvancedParameters(JSON.stringify(optionValues), profile);
+    if (profile.kind === "mai-image") {
+        if (automaticReferenceSize) {
+            delete advanced.resolution;
+            return advanced;
+        }
+        return { size, resolution: "1k", ...advanced };
+    }
     if (profile.kind === "grok-image") return { size, resolution: "1k", ...advanced, ...(options.referenceCount ? {} : { quality }) };
     if (profile.kind === "quality-resolution") {
         const parameters: Record<string, unknown> = { size, quality, resolution: "1k", ...advanced };

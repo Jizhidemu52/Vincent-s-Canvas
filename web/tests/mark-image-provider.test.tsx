@@ -177,12 +177,12 @@ test("first configuration groups every registered image, text, video and blend m
     try {
         const tree = await panel.settle();
         expect(panel.form.values.baseUrl).toBe(MARK_IMAGE_BASE_URL);
-        expect(MARK_PLATFORM_MODELS).toHaveLength(12);
-        expect(tree.some(element => element.type === "Tag" && Array.isArray(element.props.children) && element.props.children.join("") === "8 图片 · 2 文字 · 1 视频 · 1 多图融合")).toBe(true);
+        expect(MARK_PLATFORM_MODELS).toHaveLength(13);
+        expect(tree.some(element => element.type === "Tag" && Array.isArray(element.props.children) && element.props.children.join("") === "9 图片 · 2 文字 · 1 视频 · 1 多图融合")).toBe(true);
         expect(panel.form.values.models).toEqual(MARK_PLATFORM_MODELS.map(model => ({ enabled: model.defaultEnabled, creditCost: 0, rmbCost: imageRmb[model.modelId] ?? 0, concurrencyLimit: 2 })));
         expect(MARK_PLATFORM_MODELS.filter(model => !model.defaultEnabled).map(model => model.modelId)).toEqual(["grok-imagine-image-2.0"]);
         expect(MARK_PLATFORM_MODELS[9]?.modelId).toBe("claude-sonnet-5-5");
-        expect(MARK_PLATFORM_MODELS.slice(-2).map(({ modelId, description }) => ({ modelId, description }))).toEqual([
+        expect(MARK_PLATFORM_MODELS.slice(10, 12).map(({ modelId, description }) => ({ modelId, description }))).toEqual([
             { modelId: "gpt-image-2.6-flare", description: "速度优先，适合快速迭代" },
             { modelId: "gpt-image-2.6-sunburst", description: "细节与编辑一致性优先" },
         ]);
@@ -281,6 +281,7 @@ test("adding GPT 2.6 preserves all ten existing settings and leaves new costs in
         expect(panel.writes[0].models.slice(10)).toEqual([
             { modelId: "gpt-image-2.6-flare", enabled: true, creditCost: 0, rmbCost: 0, concurrencyLimit: 2 },
             { modelId: "gpt-image-2.6-sunburst", enabled: true, creditCost: 0, rmbCost: 0, concurrencyLimit: 2 },
+            { modelId: "mai-image-2.6-flash", enabled: true, creditCost: 0, rmbCost: 0, concurrencyLimit: 2 },
         ]);
         expect(panel.writes[0].apiKey).toBeUndefined();
         for (const model of MARK_PLATFORM_MODELS.slice(10)) {

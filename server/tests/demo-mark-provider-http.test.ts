@@ -66,7 +66,7 @@ test("demo exposes the expanded Mark catalog, enforces reference limits, and sub
     const disabled = await request("/api/tasks", "POST", { requestId: crypto.randomUUID(), projectId: "mark-fixture", operationType: "image_generation", modelConfigId: "d5000000-0000-4000-8000-000000000008", prompt: "disabled Grok cannot submit", parameters: { size: "1:1", resolution: "1k" } });
     expect(disabled.status).toBe(400);
     expect((await disabled.json()).error).toBe("MODEL_DISABLED");
-    for (const [index, maximum] of [[6, 4], [7, 15], [9, 14], [1, 16], [2, 16], [3, 16]]) {
+    for (const [index, maximum] of [[6, 4], [7, 15], [9, 14], [1, 16], [2, 16], [3, 16], [13, 5]]) {
       const rejected = await request("/api/tasks", "POST", { requestId: crypto.randomUUID(), projectId: "mark-fixture", operationType: "image_generation", modelConfigId: `d5000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
         prompt: "local reference count rejection", sourceUrls: Array(maximum! + 1).fill(sourceUrl), parameters: { size: "1:1", resolution: "1k" } });
       expect(rejected.status).toBe(400);
@@ -105,6 +105,20 @@ test("demo exposes the expanded Mark catalog, enforces reference limits, and sub
     for (let attempt = 0; attempt < 100 && submissions.length < 5; attempt++) await Bun.sleep(50);
     expect(submissions).toHaveLength(5);
     expect(submissions.slice(3).every(item => item.n === 1 && item.prompt === "batch independent edit")).toBe(true);
+    const mai = models.find(model => model.name === "aplmart-mai2.6-flash")!;
+    expect(mai).toMatchObject({ modelId: "d5000000-0000-4000-8000-000000000013", imageParameterProfile: "mai-image", imageSupportsMask: false });
+    const quickInput = { requestId: crypto.randomUUID(), projectId: "mark-fixture", toolKey: "canvas-edit", operationType: "inpaint", sourceUrls: [sourceUrl], parameters: { quickImageAction: "remove-background", size: "4:1", resolution: "4k", quality: "high" } };
+    const quickResponse = await request("/api/tasks", "POST", quickInput);
+    expect(quickResponse.status).toBe(201);
+    const quick = (await quickResponse.json()).task;
+    expect(quick.modelConfigId).toBe(mai.id);
+    expect(quick.parameters).not.toHaveProperty("size"); expect(quick.parameters).not.toHaveProperty("resolution");
+    expect((await request("/api/tasks", "POST", quickInput).then(response => response.json())).task.id).toBe(quick.id);
+    for (let attempt = 0; attempt < 100 && submissions.length < 6; attempt++) await Bun.sleep(50);
+    expect(submissions).toHaveLength(6);
+    expect(submissions[5]).toMatchObject({ model: "mai-image-2.6-flash", n: 1, web_grounding: false });
+    expect(submissions[5]!.prompt).toContain("foreground alpha matte");
+    expect(submissions[5]).not.toHaveProperty("size"); expect(submissions[5]).not.toHaveProperty("resolution"); expect(submissions[5]).not.toHaveProperty("quality");
   } finally {
     child.kill(); await child.exited; provider.stop(true);
   }

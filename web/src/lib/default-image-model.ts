@@ -1,5 +1,5 @@
-export const DEFAULT_IMAGE_MODEL = "aplmart-gpt2";
-export const DEFAULT_CANVAS_IMAGE_MODEL = "aplmart-gpt2.5-flare";
+export const DEFAULT_IMAGE_MODEL = "aplmart-gpt2.6-flare";
+export const DEFAULT_CANVAS_IMAGE_MODEL = "aplmart-gpt2.6-flare";
 
 type ImageModelIdentity = { id?: string; modelId: string; name?: string; publicName?: string };
 
@@ -11,5 +11,5 @@ export function preferredImageModel<T extends ImageModelIdentity>(models: readon
         const normalized = separator < 0 ? value : value.slice(separator + 2);
         return models.find(model => [model.id, model.modelId, model.name, model.publicName].includes(normalized));
     };
-    return preferred.map(find).find(Boolean) || find(DEFAULT_IMAGE_MODEL) || models[0];
+    return preferred.map(find).find(Boolean) || find(DEFAULT_IMAGE_MODEL) || find("aplmart-gpt2") || models[0];
 }

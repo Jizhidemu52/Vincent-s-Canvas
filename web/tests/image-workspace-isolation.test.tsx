@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import React, { type DependencyList, type EffectCallback, type ReactElement } from "react";
 import ts from "typescript";
-import { imageModelProfile, normalizeImageModelSettings } from "@/lib/image-model-settings";
+import { adaptImageModelSettings, imageModelProfile, imageReferenceSizeIsAutomatic, normalizeImageModelSettings } from "@/lib/image-model-settings";
 import * as referencePolicy from "@/lib/image-reference-policy";
 import { QueuedTaskFailedError, QueuedTaskPausedError, QueuedTaskSubmissionUncertainError } from "@/services/api/generation-tasks";
 
@@ -168,7 +168,7 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
         "@/hooks/use-image-preview": { useImagePreview: (image: { dataUrl: string }) => image.dataUrl },
         "@/lib/deployment-features": { deploymentFeatures: { creditsEnabled: false, oaLoginEnabled: false } },
         "@/lib/canvas-theme": { canvasThemes: { light: {} } },
-        "@/lib/image-model-settings": { imageModelProfile, useImageModelProfile: (model: string) => imageModelProfile(model, models, "designer"), normalizeImageModelSettings },
+        "@/lib/image-model-settings": { adaptImageModelSettings, imageModelProfile, imageReferenceSizeIsAutomatic, useImageModelProfile: (model: string) => imageModelProfile(model, models, "designer"), normalizeImageModelSettings },
         "@/lib/image-reference-policy": { ...referencePolicy, validateImageReferences: (model: string, references: Parameters<typeof referencePolicy.validateImageReferences>[1], profile?: Parameters<typeof referencePolicy.validateImageReferences>[2]) => referencePolicy.validateImageReferences(model, references, profile ?? imageModelProfile(model, models, "designer")) },
         "@/lib/submission-gate": { workbenchSubmissions: { acquire: () => () => undefined } },
         "@/services/api/image": { requestGeneration: (...args: any[]) => request("generate", args), requestEdit: (...args: any[]) => request("edit", args) },

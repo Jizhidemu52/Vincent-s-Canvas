@@ -1,10 +1,10 @@
 import { imageAdvancedParameters, imageOptionFields, readImageOptions } from "@/lib/image-advanced-settings";
-import { imageModelProfile, normalizeImageModelSettings } from "@/lib/image-model-settings";
+import { imageModelProfile, imageReferenceSizeIsAutomatic, normalizeImageModelSettings } from "@/lib/image-model-settings";
 import type { PublicModel } from "@/services/api/business-config";
 
 type ImageProfile = ReturnType<typeof imageModelProfile>;
 
-export function mergePromptEditorParameters(original: Record<string, unknown> | undefined, values: { size?: string; quality?: string; quantity?: number; imageOptions?: string }, profile?: ImageProfile) {
+export function mergePromptEditorParameters(original: Record<string, unknown> | undefined, values: { size?: string; quality?: string; quantity?: number; imageOptions?: string; referenceAssetIds?: readonly string[] }, profile?: ImageProfile) {
     const parameters = { ...original };
     // Preserve parameters not represented by this editor (video mode, duration, resolution, etc.).
     if (values.size?.trim()) parameters.size = values.size.trim(); else delete parameters.size;
@@ -22,6 +22,18 @@ export function mergePromptEditorParameters(original: Record<string, unknown> | 
         if (profile.kind === "resolution-1k" || profile.kind === "gemini" || profile.kind === "gpt") {
             parameters.resolution = values.quality || "1k";
             delete parameters.quality;
+        }
+    }
+    if (profile?.kind === "mai-image") {
+        delete parameters.quality;
+        delete parameters.width;
+        delete parameters.height;
+        if (imageReferenceSizeIsAutomatic(profile, values.referenceAssetIds?.length || 0)) {
+            delete parameters.size;
+            delete parameters.resolution;
+            const options = readImageOptions(String(parameters.imageOptions || "{}"));
+            delete options.resolution;
+            parameters.imageOptions = JSON.stringify(options);
         }
     }
     return parameters;

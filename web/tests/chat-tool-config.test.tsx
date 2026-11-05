@@ -70,7 +70,7 @@ function chatPageHarness(initial: BusinessConfig, savedImageModelId?: string) {
         "@/stores/use-config-store": { useConfigStore: (select: Function) => select({ updateConfig() {} }), useEffectiveConfig: () => config },
         "@/stores/use-business-config-store": { useBusinessConfigStore: (select?: Function) => select ? select(business) : business },
         "@/stores/use-module-store": { useModuleEnabled: () => true },
-        "@/lib/image-model-settings": { useImageModelProfile: (model: string) => imageModelProfile(model, business.models, "designer") },
+        "@/lib/image-model-settings": { ...requireModule("@/lib/image-model-settings"), useImageModelProfile: (model: string) => imageModelProfile(model, business.models, "designer") },
         "@/stores/canvas/use-canvas-store": { useCanvasStore: { getState: () => ({ hydrated: true, projects: [] }) }, flushCanvasPersistence: async () => undefined },
     };
     const module = { exports: {} as { default: () => ReactElement<any> } };

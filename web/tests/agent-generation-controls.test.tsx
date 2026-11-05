@@ -25,7 +25,7 @@ function controls(patch: Partial<AgentGenerationSettings> = {}) {
         // External image drops are not part of these generation-parameter controls.
         "@/hooks/use-image-drop": { useImageDrop: () => ({ dropProps: {}, dragging: false, reading: false }) },
         react: { ...React, useEffect: (effect: () => void) => effects.push(effect) },
-        "@/lib/image-model-settings": { imageModelProfile, useImageModelProfile: (model: string) => imageModelProfile(model, []) },
+        "@/lib/image-model-settings": { ...requireModule("@/lib/image-model-settings"), imageModelProfile, useImageModelProfile: (model: string) => imageModelProfile(model, []) },
         "@/hooks/use-tool-config": { canvasToolKey, useToolConfig: (config: unknown) => config },
     };
     const module = { exports: {} as any };

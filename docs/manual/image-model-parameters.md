@@ -9,6 +9,8 @@
 | `gpt-image-2` | OpenToken Images | 画质 `auto/low/medium/high`；1K/2K/4K 像素预设、自适应和合规自定义尺寸；背景、PNG/JPEG/WebP、输出压缩质量。 |
 | `gpt-image-2.5-flare` / `gpt-image-2.5-sunburst` | OpenToken Images | 同上，另有 `xhigh/max`；Flare 速度优先，Sunburst 质量优先；不是当前新建配置的默认模型。 |
 | `aplmart-gpt2.5-flare` / `aplmart-gpt2.5-sunburst` | Mark 独立 APIMart 通道 | 上游同名 GPT2.5；独立的分辨率 `1k/2k/4k` 与画质 `auto/low/medium/high/xhigh/max`；15 种比例、`auto` 或合规像素尺寸；最多 16 张参考图，PNG 独立蒙版；背景、输出格式和压缩质量。 |
+| `aplmart-gpt2.6-flare` / `aplmart-gpt2.6-sunburst` | Mark 独立 APIMart 通道 | 上游同名 GPT2.6；静态图片生成／编辑，支持独立分辨率与质量、16 张参考图及独立 PNG 蒙版。Flare 是通用图片入口的新默认，Sunburst 侧重细节和编辑一致性；不沿用 2.5 的费用假设。 |
+| `aplmart-mai2.6-flash` | Mark 独立 APIMart 通道 | 上游 `mai-image-2.6-flash`；文生图 1K／2K、1:4–4:1 或合规像素尺寸，最多 5 张参考图；编辑约 100 万像素、尺寸由模型决定。不提交编辑尺寸、独立质量、4K、蒙版或输出格式字段，固定 PNG。 |
 | `aplmart-nano2.1` | Mark 独立 APIMart 通道 | 上游 `gemini-nano-banana-2.1` 官方版，不是旧 Gemini 别名；仅 `1K/2K/4K`，无独立画质、0.5K、蒙版或 GPT 格式参数；参考图工作台上限 16 张，不宣称这是平台限制。 |
 | `aplmart-nano2` | 独立 APIMart 通道 | 上游 `gemini-3.1-flash-image-preview-official`，与 Nano2.1 独立；0.5K/1K/2K/4K、14 种比例及 auto，最多 14 张 JPEG/PNG/WebP 参考图、单张 10 MiB；支持 Google 搜索设置，不提供独立 quality、蒙版或 official_fallback。 |
 | `aplmart-gpt2` | 独立 APIMart 通道 | 普通 `gpt-image-2`，不是 Ext；1K/2K/4K 分辨率、15 种比例、auto 或精确像素，最多 15 张参考图。不提供 GPT2.5 的独立 quality、输出格式或蒙版选项。 |
@@ -19,7 +21,9 @@
 | Midjourney / `midjourney` | APIMart Imagine | 自由比例、`relax/fast/turbo`；高级面板提供 quality、version、style、seed、negative_prompt、stylize、chaos、weird、tile、niji、iw/cw/sw、cref/sref/dref/dw、raw、draft、hd、stop、extra、metadata、nsfw_check。重复生成字段及命令被禁止；其余字段按渠道契约透传，具体版本支持仍以上游为准，不强制版本。 |
 | `aplmart-mj-blend` / `midjourney-blend` | APIMart Blend | 独立“MJ 多图融合”入口与画布配置；2–4 张参考图，单张 12 MiB；自由比例或三种 dimensions 预设；`relax/fast/turbo`；metadata、nsfw_check。不接受提示词，不提供 Imagine 专属字段；每次一个任务。 |
 
-新配置的默认选择为 APIMart 公共别名 `aplmart-gpt2`，加载服务端目录后解析到该通道的独立配置 UUID；有效的已保存选择优先，不覆盖历史参数。该模型不可用时只从当前入口兼容的可用模型回退，不按同名上游 ID 混用 OpenToken 通道。参数按所选模型归一：普通 APIMart GPT2 使用 1K／2K／4K 分辨率，没有 GPT2.5 的独立 `high` 画质选项。
+通用图片入口的新默认选择为 APIMart 公共别名 `aplmart-gpt2.6-flare`，加载服务端目录后解析到该通道的独立配置 UUID；有效的已保存手选优先，不改写历史档案。该模型不可用时只从当前入口兼容的可用模型回退，不按同名上游 ID 混用 OpenToken 通道。去背景固定 MAI，4K 高清放大固定 Nano2.1；文字、视频和 MJ 专用接口保持各自模型。每次切换图片模型时归一可编辑草稿中的参数，移除不支持的旧选项；MAI 带图请求不传尺寸或分辨率。
+
+GPT2.6 的 SVG 是文生图能力：渠道禁止同时传参考图、蒙版或标注，因此不能直接实现“上传图片转 SVG”。本轮普通图片适配仍只接受 PNG／JPEG／WebP，不将 SVG 文件冒充已支持的位图。接口来源：[GPT2.6](https://docs.apib.ai/cn/api-reference/images/gpt-image-2.6/generation)、[MAI2.6](https://docs.apib.ai/cn/api-reference/images/mai-image-2.6/generation)。
 
 对应来源：[OpenToken 文生图](https://docs.opentoken.io/api/openai/image-generation/)、[OpenToken 图片编辑](https://docs.opentoken.io/api/openai/image-edit/)、[APIMart GPT](https://docs.apimart.ai/en/api-reference/images/gpt-image-2/generation)、[APIMart Gemini](https://docs.apimart.ai/en/api-reference/images/gemini-3.1-flash/generation)、[Imagine](https://docs.apimart.ai/en/api-reference/images/midjourney/imagine)、[Blend](https://docs.apimart.ai/en/api-reference/images/midjourney/blend)。
 
@@ -44,8 +48,8 @@
 
 1. 正式服务以超级管理员登录 `/admin?tab=mark-images`，打开“APIMart 平台”。单机演示服务不开放真实管理员凭据写入；本机由服务端环境变量 `MARK_IMAGE_API_KEY` 和 `MARK_IMAGE_BASE_URL` 配置，不在浏览器保存密钥。
 2. 默认 API Base URL 为 `https://api.apimart.ai/v1`。用户提供的 APIB 文档页使用这个调用地址；并不是把 `docs.apib.ai` 当作 API 主机。
-3. 首次填写 API Key，设置通道与 10 款模型启用状态后保存：6 款普通图片、1 款 MJ Blend、2 款文字 `aplmart-gpt6-astra`／`aplmart-claude-sonnet-5-5`、1 款视频 `aplmart-happyhorse1.1`。图片／视频费用与并发按界面配置；文字模型此处只配置接入与开关，对话积分在“板块 API 配置”设置并受积分总开关控制，文字并发限制尚未执行。Grok2 新配置默认关闭，其他预置模型默认开启；逐个开关可单独保存，已保存的人工选择不会被默认值覆盖。显示名前缀按用户要求为 `aplmart-`，上游 API 模型 ID 不改写。密钥在服务端加密，浏览器不持久化、不回显。之后留空保留；更换地址须重新填写对应密钥。内部成本为 0 不代表供应商免费。
-4. 这 10 款仅属于本次独立平台，不包括另一 API 原有模型；全部使用独立配置 UUID 路由，不覆盖 OpenToken 或旧 APIMart 的同名模型、密钥或历史。可在“板块 API 配置”为相应工具绑定；未绑定的工具由用户选择。保存通道不会解除现有后台指定模型或自动切换它们。MJ 多图融合的后台绑定和服务端执行只接受 Blend。
+3. 首次填写 API Key，设置通道与 13 款模型启用状态后保存：9 款普通图片、1 款 MJ Blend、2 款文字 `aplmart-gpt6-astra`／`aplmart-claude-sonnet-5-5`、1 款视频 `aplmart-happyhorse1.1`。图片／视频费用与并发按界面配置；文字模型此处只配置接入与开关，对话积分在“板块 API 配置”设置并受积分总开关控制，文字并发限制尚未执行。Grok2 新配置默认关闭，其他预置模型默认开启；逐个开关可单独保存，已保存的人工选择不会被默认值覆盖。显示名前缀按用户要求为 `aplmart-`，上游 API 模型 ID 不改写。密钥在服务端加密，浏览器不持久化、不回显。之后留空保留；更换地址须重新填写对应密钥。内部成本为 0 不代表供应商免费。
+4. 这 13 款仅属于本次独立平台，不包括另一 API 原有模型；全部使用独立配置 UUID 路由，不覆盖 OpenToken 或旧 APIMart 的同名模型、密钥或历史。可在“板块 API 配置”为相应工具绑定；未绑定的工具由用户选择。保存通道不会解除现有后台指定模型或自动切换它们。MJ 多图融合的后台绑定和服务端执行只接受 Blend。
 5. 切到 Mark GPT2.5 时，分别选择“清晰度 / 分辨率”和“图片质量”；Nano2.1 只显示支持的分辨率。公共工作台、画布与独立聊天的出图设置均按模型切换，不将 GPT 专属字段带给 Nano。
 6. 模型后显示简短用途，普通 GPT2 为“日常最通用模型”；Nano2 为“日常改款与多图参考”，Nano2.1 为“复杂材质与多参考改图”。用途仅帮助选择，不是效果保证。
 

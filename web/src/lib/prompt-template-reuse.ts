@@ -4,7 +4,7 @@ import { hydratePromptReuse, resolvePromptReuse } from "@/services/api/prompts";
 import { useUserStore } from "@/stores/use-user-store";
 
 export function promptActionIdentity(state = useUserStore.getState()) {
-    return `${state.status}:${state.user?.id || ""}:${state.user?.role || ""}`;
+    return `${state.status}:${state.user?.id || ""}:${state.user?.role || ""}:${state.user?.departmentId || ""}:${state.user?.groupId || ""}`;
 }
 
 /** An interrupted action stays invalid even if the original account signs in again. */
