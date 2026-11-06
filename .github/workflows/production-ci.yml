@@ -116,7 +116,11 @@ jobs:
           printf '{"private":true,"type":"module"}\n' > "$fixture_dir/package.json"
           bun add --cwd "$fixture_dir" --exact @electric-sql/pglite@0.5.10
       - name: Enable AOF on the disposable Redis service for durable receipt tests
-        run: docker exec "${{ job.services.redis.id }}" redis-cli --raw CONFIG SET appendonly yes | rg '^OK$'
+        shell: bash
+        run: |
+          set -euo pipefail
+          redis_aof_reply=$(docker exec "${{ job.services.redis.id }}" redis-cli --raw CONFIG SET appendonly yes)
+          test "$redis_aof_reply" = "OK"
       - name: Test backend, SQL migrations and 30 image plus 30 video tasks
         run: bun --no-env-file test
         env:
