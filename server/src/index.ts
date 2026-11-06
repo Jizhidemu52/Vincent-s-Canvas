@@ -29,6 +29,7 @@ import {
 } from "./routes/projects";
 import { createWorkflowsRouter } from "./routes/workflows";
 import { ChatProtocolError, createChatRouter } from "./routes/chat";
+import { openProductCandidatesReceiptConnection } from "./product-candidates-redis";
 import { requireSameOrigin } from "./http-security";
 import { requireAccountReady, sessionMiddleware } from "./session";
 import { createIntegrationsRouter } from "./routes/integrations";
@@ -229,7 +230,7 @@ app.use(
   "/api/chat",
   requireSession,
   requireAccountReady,
-  createChatRouter(db, config, { loadProfileRules: async profile => (await promptCompiler.store.active(profile)).version.systemPrompt }),
+  createChatRouter(db, config, { productCandidates: { cache, openReceiptConnection: () => openProductCandidatesReceiptConnection(cache) }, loadProfileRules: async profile => (await promptCompiler.store.active(profile)).version.systemPrompt }),
 );
 app.use(
   "/api/admin/credit-policy",

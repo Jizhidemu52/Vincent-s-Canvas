@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { sqlitePromptRecipeStore } from "../src/demo-prompt-recipes";
-import { PromptCompiler, type PromptCompilerRuntime, type PromptOptimizer } from "../src/prompt-compiler";
+import { PromptCompiler, normalizePromptFields, type PromptCompilerRuntime, type PromptOptimizer } from "../src/prompt-compiler";
 import { importPromptRecipes } from "../src/prompt-recipe-import";
 import { publicPromptCompilation } from "../src/prompt-recipe-store";
 import { preparePromptTaskInput } from "../src/prompt-task-input";
@@ -32,6 +32,29 @@ async function fixture(invoke: PromptOptimizer["invoke"] = async () => ({ conten
 }
 
 describe("prompt compiler lifecycle", () => {
+  test("product and carried constraints stay complete user data, never system instructions", async () => {
+    const f = await fixture();
+    const fields = { targetProduct: "  左侧红色毛衫  ", keepDetails: "  保留领口和五粒扣  ", carryoverRequirements: [" 保留原图商标位置 ", "不要改袖长"], unrelated: { preserved: true } };
+    const input = request(); input.promptInput.fields = fields;
+    expect((await f.compiler.compile(actor, input)).status).toBe("success");
+    const [system, sent] = f.calls[0] as Parameters<PromptOptimizer["invoke"]>;
+    expect(system).not.toContain("左侧红色毛衫"); expect(system).not.toContain("保留原图商标位置");
+    expect(JSON.parse((sent[0] as { text: string }).text).fields).toEqual({ targetProduct: "左侧红色毛衫", keepDetails: "保留领口和五粒扣", carryoverRequirements: ["保留原图商标位置", "不要改袖长"], unrelated: { preserved: true } });
+    expect(fields.targetProduct).toBe("  左侧红色毛衫  ");
+  });
+  test.each([
+    { targetProduct: {} }, { targetProduct: "x".repeat(501) }, { keepDetails: ["a"] }, { keepDetails: "x".repeat(2001) },
+    { carryoverRequirements: "a" }, { carryoverRequirements: [null] }, { carryoverRequirements: [{}] },
+    { carryoverRequirements: [" "] }, { carryoverRequirements: ["x".repeat(801)] },
+    { carryoverRequirements: Array(13).fill("a") }, { carryoverRequirements: Array(8).fill("x".repeat(800)) },
+  ])("invalid design fields are rejected before source reads or provider calls: %j", async fields => {
+    const f = await fixture(); let reads = 0;
+    f.runtime.readSource = async () => { reads++; throw new Error("must not read"); };
+    const input = request({ sourceUrls: ["original"] }); input.promptInput.fields = fields;
+    expect(() => normalizePromptFields(input.promptInput)).toThrow("格式无效或超过长度限制");
+    await expect(f.compiler.compile(actor, input)).rejects.toMatchObject({ code: "PROMPT_FIELDS_INVALID", status: 400 });
+    expect(reads).toBe(0); expect(f.calls).toHaveLength(0);
+  });
   test.each([
     ["gpt-image-2.6-flare", 16], ["gpt-image-2.6-sunburst", 16], ["gpt-image-2.5-flare", 16],
     ["gpt-image-2", 15], ["gemini-3.1-flash-image-preview", 14], ["gemini-nano-banana-2.1", 16],

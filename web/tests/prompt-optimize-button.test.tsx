@@ -193,3 +193,17 @@ test("a changed URL-only reference prevents a late compilation from replacing th
     expect(view.applied).toEqual([]);
     expect(view.notices[0]).toContain("未覆盖当前内容");
 });
+
+test("carryover fields are frozen and changed requirements cannot receive a stale compilation", async () => {
+    let finish!: (value: unknown) => void;
+    let submitted: any;
+    const view = harness(async (_config, input) => { submitted = input; return new Promise(resolve => { finish = resolve; }); });
+    const fields = { carryoverRequirements: ["保留六颗纽扣"] };
+    view.render("Change blue", [], "design-token", { fields }).props.onClick();
+    fields.carryoverRequirements[0] = "改成四颗纽扣";
+    view.render("Change blue", [], "design-token", { fields });
+    expect(submitted.fields.carryoverRequirements).toEqual(["保留六颗纽扣"]);
+    finish(compilation); await tick();
+    expect(view.applied).toEqual([]);
+    expect(view.notices[0]).toContain("未覆盖当前内容");
+});

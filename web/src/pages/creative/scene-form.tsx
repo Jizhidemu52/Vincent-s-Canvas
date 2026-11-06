@@ -1,10 +1,10 @@
 import { uiText, useUiText } from "@/lib/i18n";
 import { ImagePlus, Palette, Plus, Trash2, Upload } from "lucide-react";
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useState, type ReactNode } from "react";
 import { useImageDrop } from "@/hooks/use-image-drop";
 import type { ReferenceImage } from "@/types/image";
 import { useModuleEnabled } from "@/stores/use-module-store";
-import { addSceneColor, getSceneColorSelection, isSceneHexColor, removeSceneColor, setSceneColor, type SceneForm, type SceneSlot, type SceneSlotId } from "./scene-form-model";
+import { addSceneColor, getSceneColorSelection, isSceneHexColor, removeSceneColor, setSceneColor, supportsSceneProductTarget, type SceneForm, type SceneSlot, type SceneSlotId } from "./scene-form-model";
 
 const StandardColorDialog = lazy(() => import("./standard-color-dialog"));
 
@@ -14,6 +14,7 @@ type SceneFieldsProps = {
     onChange: (next: SceneForm) => void;
     disabled?: boolean;
     sourceImage?: string;
+    productPicker?: ReactNode;
 };
 
 function Choices({ id, label, value, options, onChange, disabled }: {
@@ -45,7 +46,7 @@ function colorPickerValue(color: string): string {
     return value.length === 4 ? `#${value.slice(1).split("").map((part) => part + part).join("")}` : value;
 }
 
-export function SceneFields({ sceneId, form, onChange, disabled = false, sourceImage }: SceneFieldsProps) {
+export function SceneFields({ sceneId, form, onChange, disabled = false, sourceImage, productPicker }: SceneFieldsProps) {
     useUiText();
     const [colorSlot, setColorSlot] = useState<number | null>(null);
     const colorLibraryEnabled = useModuleEnabled("standard-colors");
@@ -184,7 +185,26 @@ export function SceneFields({ sceneId, form, onChange, disabled = false, sourceI
         default:
             return null;
     }
-    return <div className={`cs-fields cs-fields-${sceneId}`}>{fields}
+    return <div className={`cs-fields cs-fields-${sceneId}`}>
+        {supportsSceneProductTarget(sceneId) && <>
+            <div className="cs-field">
+                <label className="cs-label" htmlFor={id("targetProduct")}>{uiText("要处理的产品")} <span className="cs-help">{uiText("可手动填写")}</span></label>
+                <input id={id("targetProduct")} className="cs-input" value={form.targetProduct} onChange={event => update("targetProduct", event.target.value)} maxLength={500} disabled={disabled} placeholder={uiText("如：左侧蓝色衬衫，不处理裤子与包")} />
+                <p className="cs-help">{uiText("用名称和位置说明目标；这不是像素选区，也不会自动生成蒙版。")}</p>
+                {productPicker}
+            </div>
+            <div className="cs-field">
+                <label className="cs-label" htmlFor={id("keepDetails")}>{uiText("关键特征保持")} <span className="cs-help">{uiText("可选")}</span></label>
+                <textarea id={id("keepDetails")} className="cs-textarea" value={form.keepDetails} onChange={event => update("keepDetails", event.target.value)} rows={2} maxLength={2000} disabled={disabled} placeholder={uiText("如：保持领型、纽扣数量、图案位置与面料纹理")} />
+                <p className="cs-help">{uiText("作为生成约束保存，结果仍需逐项核对；不能保证像素级一致。")}</p>
+            </div>
+        </>}
+        {!!form.carryoverRequirements?.length && <div className="cs-field">
+            <label className="cs-label" htmlFor={id("carryoverRequirements")}>{uiText("沿用设计要求")}</label>
+            <textarea id={id("carryoverRequirements")} className="cs-textarea" value={form.carryoverRequirements.join("\n")} onChange={event => update("carryoverRequirements", event.target.value.split("\n"))} rows={4} maxLength={6000} disabled={disabled} />
+            <p className="cs-help">{uiText("来自上一步的设计要求；每行一项，可编辑或清空，不会自动提交。")}</p>
+        </div>}
+        {fields}
         {colorLibraryEnabled && colorSlot !== null && sceneId === "garment-colorway" && form.colorMode === "specific" && !disabled && form.colors[colorSlot] !== undefined && <Suspense fallback={<p className="cs-help" role="status">{uiText("正在打开标准色库…")}</p>}>
             <StandardColorDialog key={colorSlot} initialHex={form.colors[colorSlot]!} selection={getSceneColorSelection(form, colorSlot)} source={sourceImage} slotLabel={uiText("颜色 {value1}", { value1: colorSlot + 1 })} onClose={() => setColorSlot(null)} onSelect={selection => { onChange(setSceneColor(form, colorSlot, selection.hex, selection)); setColorSlot(null); }} />
         </Suspense>}

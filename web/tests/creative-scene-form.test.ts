@@ -155,6 +155,35 @@ describe("creative scene input roles", () => {
 });
 
 describe("structured creative controls", () => {
+    test("carryover requirements stay editable, bounded and independently frozen for every scene", () => {
+        const form = formFor("style-to-sketch", { carryoverRequirements: ["保留领型", "仅处理蓝色上衣"] });
+        const input = scenePromptInput("style-to-sketch", form);
+        const frozen = cloneSceneForm(form);
+        form.carryoverRequirements[0] = "changed";
+        expect(input.fields?.carryoverRequirements).toEqual(["保留领型", "仅处理蓝色上衣"]);
+        expect(frozen.carryoverRequirements).toEqual(["保留领型", "仅处理蓝色上衣"]);
+        expect(fields("style-to-sketch", frozen)).toContain("沿用设计要求");
+        expect(validateSceneForm("style-to-sketch", { ...frozen, carryoverRequirements: Array(13).fill("要求") }, images)).toContain("最多 12");
+        expect(validateSceneForm("style-to-sketch", { ...frozen, carryoverRequirements: ["x".repeat(801)] }, images)).toContain("800");
+        for (const scene of sceneIds) expect(scenePromptInput(scene, frozen).fields?.carryoverRequirements).toEqual(frozen.carryoverRequirements);
+    });
+    test("target product and keep details are frozen only for the five product-focused scenes", () => {
+        const supported = ["style-to-sketch", "garment-colorway", "local-restyle", "back-design", "pattern-extract"];
+        for (const scene of sceneIds) {
+            const form = formFor(scene, { targetProduct: "左侧蓝色衬衫", keepDetails: "保留六颗纽扣与领型" });
+            const input = scenePromptInput(scene, form);
+            if (supported.includes(scene)) {
+                expect(input.fields).toMatchObject({ targetProduct: "左侧蓝色衬衫", keepDetails: "保留六颗纽扣与领型" });
+                form.targetProduct = "更换目标";
+                form.keepDetails = "另一要求";
+                expect(input.fields?.targetProduct).toBe("左侧蓝色衬衫");
+                expect(input.fields?.keepDetails).toBe("保留六颗纽扣与领型");
+            } else {
+                expect(input.fields).not.toHaveProperty("targetProduct");
+                expect(input.fields).not.toHaveProperty("keepDetails");
+            }
+        }
+    });
     test.each(sceneIds)("%s is a public input scene without authored prompt paragraphs", scene => {
         const form = formFor(scene, { description: "我的方向", change: "荷叶袖", preserve: "衣身保持" });
         const input = scenePromptInput(scene, form);
@@ -192,6 +221,17 @@ describe("structured creative controls", () => {
 });
 
 describe("specialized form presentation", () => {
+    test("product targeting stays editable and makes no mask or pixel-lock claim", () => {
+        for (const scene of ["style-to-sketch", "garment-colorway", "local-restyle", "back-design", "pattern-extract"]) {
+            const markup = fields(scene, { targetProduct: "蓝色衬衫", keepDetails: "领型" });
+            expect(markup).toContain(`id="cs-${scene}-targetProduct"`);
+            expect(markup).toContain(`id="cs-${scene}-keepDetails"`);
+            expect(markup).toContain("这不是像素选区");
+            expect(markup).toContain("不能保证像素级一致");
+        }
+        expect(fields("text-to-style")).not.toContain("targetProduct");
+        expect(fields("pattern-colorway")).not.toContain("targetProduct");
+    });
     test("every scene exposes its own labeled controls and not a generic prompt editor", () => {
         const labels = [
             ["text-to-style", "款式描述", "服装品类", "面料方向", "廓形", "展示方式"],

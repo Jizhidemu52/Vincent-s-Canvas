@@ -1,6 +1,7 @@
 import { uiText, useUiText } from "@/lib/i18n";
 
 const fieldLabels: Record<string, string> = {
+    targetProduct: "目标产品", keepDetails: "关键特征保持", carryoverRequirements: "沿用设计要求",
     description: "具体要求", category: "品类", silhouette: "廓形", fabric: "面料", presentation: "展示方式", sketchStyle: "线稿风格", sketchDetail: "细节程度",
     restyleArea: "修改部位", change: "修改要求", preserve: "保留内容", colorMode: "配色方式", colors: "目标颜色", colorSelections: "标准色", colorRegion: "配色区域", colorMood: "配色方向",
     backStructure: "背面结构", backMotif: "背面图案", extractMode: "提取方式", extractBackground: "背景", craft: "工艺", craftFabric: "工艺面料", accessoryType: "辅料类型", accessoryApply: "应用方式",

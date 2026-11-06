@@ -17,6 +17,7 @@ import { chatPromptProfiles, prepareChatProfileInput, validateChatProfileOutput,
 import { PromptOptimizationError } from "../prompt-safety";
 import { imageAgentClaudeStream } from "../image-agent-stream";
 import { chatUpstreamFailureMessage, readChatUpstreamFailure, type ChatUpstreamFailureReason } from "../chat-upstream-failure";
+import { createProductCandidatesRouter, type ProductCandidatesRouterOptions } from "./product-candidates";
 
 type ResponseContent = { type: "input_text"; text: string } | { type: "input_image"; image_url: string };
 export type ResponseInput =
@@ -100,11 +101,13 @@ function chatErrorMetadata(error: unknown) {
 export type ChatRouterOptions = {
     loadProfileRules?: (profile: ChatPromptProfile, actor: AuthenticatedRequest["auth"]) => Promise<string>;
     validateProfileOutput?: (result: ChatCompletionResult, privateRules: readonly string[]) => void | Promise<void>;
+    productCandidates?: ProductCandidatesRouterOptions;
 };
 
 export function createChatRouter(db: Database, config: AppConfig, options: ChatRouterOptions = {}) {
     const router = Router();
     const features = deploymentFeatures(config);
+    router.use(createProductCandidatesRouter(db, config, requestChatCompletion, options.productCandidates ?? {}));
 
     router.post("/responses", async (request, response, next) => {
         const startedAt = performance.now();

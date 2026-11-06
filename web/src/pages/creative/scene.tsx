@@ -7,8 +7,10 @@ import { GenerationInputList } from "@/components/generation-input-list";
 import { GenerationDiagnostic } from "@/components/generation-diagnostic";
 import { GenerationTaskCancel } from "@/components/generation-task-cancel";
 import { GenerationQueueProgress } from "@/components/generation-queue-progress";
+import { DesignResultReview } from "@/components/design-result-review";
+import { designHandoffToken } from "@/lib/design-handoff";
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ModuleGate } from "@/components/auth/module-gate";
 import { PracticeExampleRecord } from "@/components/design-examples";
 import { designExampleForScene } from "@/lib/design-examples";
@@ -23,7 +25,8 @@ import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { SceneFields, SceneUploads } from "./scene-form";
-import { scenePromptInput, getSceneSlots, sceneSummaries } from "./scene-form-model";
+import { scenePromptInput, getSceneSlots, sceneSummaries, supportsSceneProductTarget } from "./scene-form-model";
+import { SceneProductPicker } from "./scene-product-picker";
 import { useSceneWorkspace, type SceneImage } from "./use-scene-workspace";
 import { RegionSelectionDialog } from "./region-selection-dialog";
 import { RecolorDialog } from "./recolor-dialog";
@@ -39,6 +42,8 @@ export default function CreativeScenePage() {
     useUiText();
     const { presetId } = useParams<{ presetId: string }>();
     const preset = getCreativePreset(presetId ?? null);
+    const [searchParams] = useSearchParams();
+    const handoffToken = designHandoffToken(searchParams, `creative-${preset?.id || ""}`);
     const ownerId = useUserStore(state => state.user?.id);
     if (!preset) return <main className="wb-page wb-empty h-full">
         <h1 className="wb-title">{uiText("设计场景不存在")}</h1>
@@ -46,14 +51,14 @@ export default function CreativeScenePage() {
         <Link to="/creative" className="wb-primary-link">{uiText("返回创意设计")}</Link>
     </main>;
     return <ModuleGate moduleKey={`creative-${preset.id}` as ModuleKey}>
-        <CreativeSceneWorkspace key={`${ownerId}:${preset.id}`} preset={preset} />
+        <CreativeSceneWorkspace key={`${ownerId}:${preset.id}:${handoffToken || "default"}`} preset={preset} handoffToken={handoffToken} />
     </ModuleGate>;
 }
 
-function CreativeSceneWorkspace({ preset }: { preset: CreativePreset }) {
+function CreativeSceneWorkspace({ preset, handoffToken }: { preset: CreativePreset; handoffToken: string | null }) {
     useUiText();
     const { modal } = App.useApp();
-    const ws = useSceneWorkspace(preset.id);
+    const ws = useSceneWorkspace(preset.id, handoffToken);
     const selectionEnabled = useModuleEnabled("creative-selection");
     const recolorEnabled = useModuleEnabled("pattern-recolor");
     const traceEnabled = useModuleEnabled("svg-trace");
@@ -120,7 +125,8 @@ function CreativeSceneWorkspace({ preset }: { preset: CreativePreset }) {
                         {recolorEnabled && preset.id === "pattern-colorway" && <div className="cs-local-tool"><button type="button" className="cs-tool-entry" disabled={!ws.images.primary || ws.uploading} onClick={() => setTool("recolor")}>{uiText("精确换色")}<small>{uiText("本地 · 不调用 AI")}</small><ArrowRight size={14} /></button><p className="cs-help">{uiText("平面花型可按原色→目标色直接替换；下方保留 AI 配色拓展。")}</p></div>}
                         {traceEnabled && preset.id === "style-to-sketch" && <div className="cs-local-tool"><button type="button" className="cs-tool-entry" disabled={!ws.images.primary || ws.uploading} onClick={() => setTraceImage(ws.images.primary!)}>{uiText("已有线稿转 SVG")}<ArrowRight size={14} /></button><p className="cs-help">{uiText("也可先生成线稿，再从结果卡导出矢量路径。")}</p></div>}
                     </section>}
-                    <section className="cs-business-section"><h2 className="cs-section-label"><span>{slots.length ? "02" : "01"}</span>{preset.id.includes("colorway") ? uiText("选择配色方式") : preset.id === "pattern-craft" ? uiText("选择工艺效果") : preset.id === "text-to-style" ? uiText("描述你的设计") : preset.id === "style-to-sketch" ? uiText("线稿要求") : preset.id === "local-restyle" ? uiText("指定修改部位") : preset.id === "back-design" ? uiText("构思背面结构") : preset.id === "accessory-design" ? uiText("定义辅料外观") : uiText("提取要求")}</h2><SceneFields sceneId={preset.id} form={ws.form} onChange={ws.setForm} disabled={ws.running} sourceImage={ws.images.primary?.dataUrl} /></section>
+                    <section className="cs-business-section"><h2 className="cs-section-label"><span>{slots.length ? "02" : "01"}</span>{preset.id.includes("colorway") ? uiText("选择配色方式") : preset.id === "pattern-craft" ? uiText("选择工艺效果") : preset.id === "text-to-style" ? uiText("描述你的设计") : preset.id === "style-to-sketch" ? uiText("线稿要求") : preset.id === "local-restyle" ? uiText("指定修改部位") : preset.id === "back-design" ? uiText("构思背面结构") : preset.id === "accessory-design" ? uiText("定义辅料外观") : uiText("提取要求")}</h2><SceneFields sceneId={preset.id} form={ws.form} onChange={ws.setForm} disabled={ws.running} sourceImage={ws.images.primary?.dataUrl}
+                        productPicker={supportsSceneProductTarget(preset.id) ? <SceneProductPicker key={ws.images.primary?.id || "empty"} sceneId={preset.id} source={ws.images.primary} disabled={ws.running || ws.uploading || ws.loading} onConfirm={targetProduct => ws.setForm(current => ({ ...current, targetProduct }))} /> : undefined} /></section>
                     <details className="cs-output-settings"><summary><span>{uiText("出图设置")}</span><span>{uiText(imageSizeLabel(ws.config.size))} · {uiText(imageQualityLabel(ws.config.quality))} · {ws.count} {uiText(" 张")}<ChevronDown size={13} /></span></summary>
                         <label className="cs-label">{uiText("生成模型")}</label><ModelPicker toolKey={`creative-${preset.id}` as ToolKey} config={ws.config} value={ws.model} onChange={value => ws.updateConfig("imageModel", value)} capability="image" fullWidth disabled={ws.running} />
                         <ImageSettingsPanel config={ws.config} referenceCount={Object.values(ws.images).filter(Boolean).length} onConfigChange={ws.updateConfig} theme={theme} showTitle={false} />
@@ -169,7 +175,7 @@ function CreativeSceneWorkspace({ preset }: { preset: CreativePreset }) {
                                 <button type="button" disabled={ws.running || ws.resultActionBusy || !ws.activeLog} onClick={() => void ws.resultAction("saveAsset", result.image!)}>{uiText("保存到素材库")}</button>
                                 {canvasEnabled && <button type="button" disabled={ws.running || ws.resultActionBusy || !ws.activeLog} onClick={() => void ws.resultAction("canvas", result.image!).then(url => { if (url) navigate(url); })}>{uiText("放入画布")}</button>}
                                 {imageEditEnabled && <button type="button" disabled={ws.running || ws.resultActionBusy || !ws.activeLog} onClick={() => void ws.resultAction("reference", result.image!).then(url => { if (url) navigate(url); })}>{uiText("作为参考继续改")}</button>}
-                            </div></> : result.status === "failed" ? <div className="cs-result-message"><span>{uiText("方案 ")}{index + 1} {result.uncompositedImage ? uiText("合成未完成") : result.failureKind === "uncertain" ? uiText("状态待核查") : uiText("生成失败")}</span><GenerationDiagnostic error={result.error || "生成失败"} details={[result.taskId, result.requestId].filter(Boolean).join("\n")} />{result.uncompositedImage && <button type="button" className="cs-tool-entry" onClick={() => void ws.download(result.uncompositedImage!, index)}><Download size={14} />{uiText("下载未合成图")}</button>}
+                            </div>{ws.activeLog && <DesignResultReview sceneId={ws.activeLog.sceneId} fields={ws.activeLog.userInput?.fields || scenePromptInput(ws.activeLog.sceneId, ws.activeLog.form).fields || {}} image={result.image} disabled={ws.running || ws.resultActionBusy} />}</> : result.status === "failed" ? <div className="cs-result-message"><span>{uiText("方案 ")}{index + 1} {result.uncompositedImage ? uiText("合成未完成") : result.failureKind === "uncertain" ? uiText("状态待核查") : uiText("生成失败")}</span><GenerationDiagnostic error={result.error || "生成失败"} details={[result.taskId, result.requestId].filter(Boolean).join("\n")} />{result.uncompositedImage && <button type="button" className="cs-tool-entry" onClick={() => void ws.download(result.uncompositedImage!, index)}><Download size={14} />{uiText("下载未合成图")}</button>}
                             {canRetrySceneResult(result) && <><button type="button" className="cs-tool-entry" disabled={ws.running || ws.loading || !ws.activeLog} onClick={() => void ws.retryResult(result)}>{uiText("按原参数重试")}</button><small>{uiText("会提交 1 个新任务，按当前计费规则收费。")}</small></>}
                             {result.retryLogId && <small>{uiText("此失败项已发起过重试，请查看对应的新记录。")}</small>}
                             {canQuerySceneResult(result) && <button type="button" className="cs-tool-entry" disabled={ws.running || ws.loading || !ws.activeLog} onClick={() => void ws.queryResult(result)}>{uiText("查询原请求")}</button>}

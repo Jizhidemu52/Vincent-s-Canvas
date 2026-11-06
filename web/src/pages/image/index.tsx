@@ -2,6 +2,7 @@ import { uiText, useUiText, getUiLocale } from "@/lib/i18n";
 import { formatBeijingDateTime } from "@/lib/beijing-time";
 import { PromptOptimizeButton } from "@/components/prompt-optimize-button";
 import type { PromptInputData, PromptScene } from "../../../../shared/prompt-contracts";
+import { carryoverRequirementsSchema } from "../../../../shared/design-brief";
 import { ArrowLeft, ArrowRight, BookmarkPlus, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, ImagePlus, LoaderCircle, PenLine, Plus, Share2, SlidersHorizontal, Sparkles, Trash2, Upload } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { handleSubmitShortcut } from "@/lib/submit-shortcut";
@@ -68,6 +69,7 @@ import { hydratePromptReuse, savePromptFromTask } from "@/services/api/prompts";
 import { promptImageSettings } from "@/lib/prompt-editor-parameters";
 import { useDesignLibraryShare } from "@/pages/design-library/use-design-library-share";
 import { consumePlacementAiHandoff, placementDraftScope, placementHandoffToken } from "@/pages/design-workbench/local/placement/ai-handoff";
+import { consumeDesignHandoff, designDraftScope, designHandoffToken } from "@/lib/design-handoff";
 import { PracticeExampleRecord } from "@/components/design-examples";
 import { isQuickImageTool, quickImageReferenceFileError } from "@/lib/quick-image-tools";
 
@@ -208,7 +210,8 @@ export function ImageGenerationPage({ creativePreset }: { creativePreset?: Creat
     const ownerId = useUserStore(state => state.user?.id);
     const historyTool = creativePreset ? `creative-${creativePreset.id}` : resolveImageToolMode(pathname === "/remove-background" ? "remove-background" : pathname === "/hd-upscale" ? "hd-upscale" : searchParams.get("tool"));
     const placementToken = placementHandoffToken(searchParams, historyTool);
-    return <ImageGenerationWorkspace key={JSON.stringify([ownerId, historyTool, placementToken])} creativePreset={creativePreset} historyTool={historyTool} />;
+    const designToken = historyTool === "image-edit" ? searchParams.get("designToken") : null;
+    return <ImageGenerationWorkspace key={JSON.stringify([ownerId, historyTool, placementToken, designToken])} creativePreset={creativePreset} historyTool={historyTool} />;
 }
 
 function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePreset?: CreativePreset; historyTool: string }) {
@@ -218,11 +221,16 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const libraryShare = useDesignLibraryShare();
     const resultCanvas = useResultCanvas();
     const [searchParams] = useSearchParams();
-    const placementToken = placementHandoffToken(searchParams, historyTool);
-    const inputDraftScope = placementToken ? placementDraftScope(placementToken) : historyTool;
+    const designRequested = historyTool === "image-edit" && searchParams.has("designToken");
+    const designToken = designRequested ? designHandoffToken(searchParams, "image-edit") : null;
+    const placementToken = designRequested ? null : placementHandoffToken(searchParams, historyTool);
+    const inputDraftScope = designToken ? designDraftScope(designToken, "image-edit") : designRequested ? "image-edit:design:invalid" : placementToken ? placementDraftScope(placementToken) : historyTool;
     const [placementStatus, setPlacementStatus] = useState<"loading" | "ready" | "error">(placementToken ? "loading" : "ready");
     const [placementError, setPlacementError] = useState("");
     const [placementAttempt, setPlacementAttempt] = useState(0);
+    const [designStatus, setDesignStatus] = useState<"loading" | "ready" | "error">(designRequested ? "loading" : "ready");
+    const [designError, setDesignError] = useState("");
+    const [designAttempt, setDesignAttempt] = useState(0);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const loadedRecreateAssetsRef = useRef(new Set<string>());
     const loadedReuseTokenRef = useRef(new Set<string>());
@@ -267,7 +275,17 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const addAsset = useAssetStore((state) => state.addAsset);
     const [optimizingPrompt, setOptimizingPrompt] = useState(false);
     const [optimizedDraft, setOptimizedDraft] = useState<{ prompt: string; input: PromptInputData; references: ReferenceImage[]; context?: string }>();
-    const [prompt, setPrompt, promptReady] = useGenerationDraft(`${inputDraftScope}:prompt`, creativePreset?.prompt || "");
+    const [prompt, setPrompt, promptReady] = useGenerationDraft(`${inputDraftScope}:prompt`, creativePreset?.prompt || "", designRequested ? async value => {
+        if (typeof value !== "string") throw new Error("设计草稿提示词无法读取");
+        return value;
+    } : undefined);
+    const [carryoverRequirements, setCarryoverRequirements, carryoverReady] = useGenerationDraft<string[]>(`${inputDraftScope}:carryoverRequirements`, [], async value => {
+        if (!Array.isArray(value) || value.some(item => typeof item !== "string")) throw new Error("设计草稿要求无法读取");
+        return value;
+    });
+    const normalizedCarryover = carryoverRequirements.map(value => value.trim()).filter(Boolean);
+    const carryoverValidation = carryoverRequirementsSchema.safeParse(normalizedCarryover);
+    const carryoverError = designRequested && !carryoverValidation.success ? uiText("沿用设计要求最多 12 条，每条 800 字符，总计 6000 字符。请调整后再提交。") : "";
     const historyStore = creativePreset ? creativeLogStore : logStore;
     const [results, setResults] = useState<GenerationResult[]>([]);
     const imageEditor = useImageCopyEditor((copy, image) => {
@@ -335,7 +353,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const toolModeConfig = creativePreset ? { ...imageToolModes[toolMode], title: creativePreset.title, description: creativePreset.description, projectId: `creative-${creativePreset.id}` } : imageToolModes[toolMode];
     const operationType = toolModeOperation(toolMode) as "image_generation" | "inpaint" | "upscale";
     const model = effectiveConfig.imageModel || effectiveConfig.model;
-    const optimizationContext = JSON.stringify([model, operationType, toolKey]);
+    const optimizationContext = JSON.stringify([model, operationType, toolKey, ...(designRequested ? [normalizedCarryover] : [])]);
     useEffect(() => {
         setOptimizedDraft(current => !current?.input.compilationId || current.context === optimizationContext ? current
             : current.input.scene === "free-optimize" ? undefined : { ...current, input: { ...current.input, compilationId: undefined } });
@@ -354,8 +372,9 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const quotaBlocked = !quickTool && deploymentFeatures.creditsEnabled && Boolean(user && estimatedUsage.configured && user.creditBalance < estimatedUsage.credits);
     const missingReference = !isBlend && toolModeConfig.requiresReference && references.length === 0;
     const invalidBlendReferences = isBlend && (references.length < 2 || references.length > 4);
-    const draftReady = configReady && referencesReady && promptReady;
-    const canGenerate = draftReady && placementStatus === "ready" && !(quickTool && pendingImages.length) && !(placementToken && isBlend) && !readingReferences && !optimizingPrompt && (quickTool || Boolean(model)) && Boolean(user && user.status === "active") && (!requiresPrompt || Boolean(prompt.trim())) && !quotaBlocked && !missingReference && !invalidBlendReferences && referenceValidation.valid && !garmentNeedsApply && !incompleteCreativePrompt;
+    const draftReady = configReady && referencesReady && promptReady && (!designRequested || carryoverReady);
+    const handoffReady = placementStatus === "ready" && designStatus === "ready";
+    const canGenerate = draftReady && handoffReady && !carryoverError && !(quickTool && pendingImages.length) && !((placementToken || designRequested) && isBlend) && !readingReferences && !optimizingPrompt && (quickTool || Boolean(model)) && Boolean(user && user.status === "active") && (!requiresPrompt || Boolean(prompt.trim())) && !quotaBlocked && !missingReference && !invalidBlendReferences && referenceValidation.valid && !garmentNeedsApply && !incompleteCreativePrompt;
 
     const appendReferences = (items: ReferenceImage[], origin: ImageReferenceOrigin) => { inputRevision.current += 1; setReferences((value) => dedupeImageReferences([...value, ...items.map((item) => createImageReferenceItem(item, origin))])); };
     const restoreReferences = (items: ReferenceImage[], origin: ImageReferenceOrigin = "template") => { inputRevision.current += 1; setReferences(dedupeImageReferences(items.map((item) => createImageReferenceItem(item, origin)))); };
@@ -455,7 +474,72 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     }, [placementToken, placementAttempt]);
 
     useEffect(() => {
-        if (placementToken) return;
+        if (!designRequested) return;
+        let active = true;
+        const storage = createWorkspaceStorage("generation_drafts");
+        const assertCurrent = () => {
+            if (!active) throw new DOMException("设计交接读取已停止", "AbortError");
+            storage.assertIdentity();
+        };
+        setDesignStatus("loading");
+        setDesignError("");
+        void (async () => {
+            if (!designToken) throw new Error("设计交接链接无效，请从原结果重新打开。");
+            const readyKey = `${inputDraftScope}:designReady`;
+            let ready = await storage.getItem<boolean>(readyKey);
+            assertCurrent();
+            if (!ready) {
+                const payload = await consumeDesignHandoff(designToken, "image-edit");
+                assertCurrent();
+                // Another mount may have completed initialization during media hydration.
+                ready = await storage.getItem<boolean>(readyKey);
+                assertCurrent();
+                if (!ready) {
+                    const source = createImageReferenceItem(payload.source, "generated");
+                    await storage.setItem(`${inputDraftScope}:prompt`, "");
+                    assertCurrent();
+                    await storage.setItem(`${inputDraftScope}:references`, [{ ...source, dataUrl: "" }]);
+                    assertCurrent();
+                    await storage.setItem(`${inputDraftScope}:carryoverRequirements`, payload.brief.requirements);
+                    assertCurrent();
+                    // Only a complete destination is considered initialized. Keep the source immutable.
+                    await storage.setItem(readyKey, true);
+                    assertCurrent();
+                }
+            }
+            const [savedPrompt, savedReferences, savedRequirements] = await Promise.all([
+                storage.getItem<string>(`${inputDraftScope}:prompt`),
+                storage.getItem<ImageReferenceItem[]>(`${inputDraftScope}:references`),
+                storage.getItem<string[]>(`${inputDraftScope}:carryoverRequirements`),
+            ]);
+            assertCurrent();
+            if (typeof savedPrompt !== "string" || !Array.isArray(savedReferences) || !Array.isArray(savedRequirements) || savedRequirements.some(value => typeof value !== "string")) throw new Error("设计草稿暂时无法完整读取，请重试；不会重新覆盖已保存的编辑。");
+            const restored = await Promise.all(savedReferences.map(async reference => {
+                const dataUrl = await resolveImageUrl(reference.storageKey, reference.storageKey ? "" : reference.dataUrl);
+                assertCurrent();
+                if (!dataUrl) throw new Error("交接参考图暂时无法读取，请重试；不会自动生成或扣费。");
+                const image = document.createElement("img");
+                image.src = dataUrl;
+                try { await image.decode(); } catch { throw new Error("交接参考图暂时无法读取，请重试；不会自动生成或扣费。"); }
+                assertCurrent();
+                return { ...reference, dataUrl };
+            }));
+            assertCurrent();
+            replacePrompt(savedPrompt);
+            setReferences(restored);
+            setCarryoverRequirements(savedRequirements);
+            setOptimizedDraft(undefined);
+            setDesignStatus("ready");
+        })().catch(error => {
+            if (!active) return;
+            setDesignError(error instanceof Error ? error.message : "设计交接读取失败，请重试。");
+            setDesignStatus("error");
+        });
+        return () => { active = false; };
+    }, [designRequested, designToken, designAttempt]);
+
+    useEffect(() => {
+        if (placementToken || designRequested) return;
         const presetPrompt = searchParams.get("prompt");
         const presetModel = searchParams.get("model");
         if (presetPrompt) replacePrompt(presetPrompt);
@@ -463,7 +547,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     }, [searchParams, updateConfig]);
 
     useEffect(() => {
-        if (placementToken) return;
+        if (placementToken || designRequested) return;
         const sourceAssetId = searchParams.get("sourceAssetId");
         if (!sourceAssetId || loadedRecreateAssetsRef.current.has(sourceAssetId)) return;
         loadedRecreateAssetsRef.current.add(sourceAssetId);
@@ -489,7 +573,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     }, [message, searchParams, toolMode, user?.id]);
 
     useEffect(() => {
-        if (placementToken) return;
+        if (placementToken || designRequested) return;
         const token = searchParams.get("reuseToken");
         if (!token || loadedReuseTokenRef.current.has(token)) return;
         loadedReuseTokenRef.current.add(token);
@@ -524,7 +608,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     }, [message, modal, searchParams, updateConfig, user?.id]);
 
     const addReferences = async (files?: FileList | File[] | null) => {
-        if (readingReferences || !files?.length) return;
+        if (!draftReady || !handoffReady || readingReferences || !files?.length) return;
         const scope = referenceScopeRef.current;
         const stillCurrent = () => isCurrentReferenceScope(scope);
         setReadingReferences(true);
@@ -550,7 +634,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     };
 
     const addReferencesFromClipboard = async () => {
-        if (readingReferences) return;
+        if (!draftReady || !handoffReady || readingReferences) return;
         const scope = referenceScopeRef.current;
         setReadingReferences(true);
         try {
@@ -576,12 +660,13 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
 
     const generate = async () => {
         if (quickTool && latestPendingImages.current.length) { message.warning(uiText("原任务状态待核查，请先刷新原任务状态")); return; }
+        if (!draftReady || designStatus !== "ready") { message.warning(uiText("请先完成设计草稿读取，再提交生成。")); return; }
         if (placementStatus !== "ready") {
             message.warning(uiText("请先完成定位参考图带入，再提交生成。"));
             return;
         }
-        if (placementToken && isBlend) {
-            message.warning(uiText("定位效果需要位置保持提示词，请选择支持文字要求的图片编辑模型。"));
+        if ((placementToken || designRequested) && isBlend) {
+            message.warning(uiText(designRequested ? "沿用设计要求需要文字提示词，请选择支持文字要求的图片编辑模型。" : "定位效果需要位置保持提示词，请选择支持文字要求的图片编辑模型。"));
             return;
         }
         const text = prompt.trim();
@@ -663,6 +748,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     };
 
     const addResultToReferences = async (image: GeneratedImage, index: number) => {
+        if (!draftReady || !handoffReady || readingReferences) return;
         const scope = referenceScopeRef.current;
         setReadingReferences(true);
         try {
@@ -716,6 +802,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     };
 
     const insertPickedAsset = async (payload: InsertAssetPayload) => {
+        if (!draftReady || !handoffReady || readingReferences) return;
         const scope = referenceScopeRef.current;
         setReadingReferences(true);
         try {
@@ -734,6 +821,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     };
 
     const createSession = () => {
+        if (!handoffReady) return;
         resetReferenceScope();
         resultViewPinnedRef.current = true;
         restoredInitialResultRef.current = true;
@@ -741,6 +829,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         setPreviewLoading(false);
         replacePrompt(creativePreset?.prompt || "");
         setReferences([]);
+        if (designRequested) { setCarryoverRequirements([]); setOptimizedDraft(undefined); }
         setResults([]);
         setStartedAt(0);
         setSelectedLogIds([]);
@@ -814,7 +903,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     };
 
     const restoreHistoryDraft = async () => {
-        if (!previewLog || running || restoreBusy.current) return;
+        if (!handoffReady || !previewLog || running || restoreBusy.current) return;
         const taskId = previewLog.images.find(image => image.sourceTaskId)?.sourceTaskId;
         if (!taskId) { message.warning(uiText("这条旧记录没有完整输入归档，无法完整恢复；可复制提示词后新建草稿")); return; }
         resetReferenceScope();
@@ -826,8 +915,10 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
             const draft = await restoreGenerationDraft(taskId);
             if (draft.maskReferenceIndex !== undefined) throw new Error("历史包含蒙版，请在支持蒙版的原编辑入口恢复；未套用任何输入");
             if (draft.tool && requireToolKey(draft.operationType, draft.tool) !== toolKey) throw new Error(`请先切换到历史原工具“${imageToolModes[draft.tool as GenerationToolMode]?.title || draft.tool}”再恢复，当前草稿未改变`);
+            const restoredCarryover = designRequested ? carryoverRequirementsSchema.parse(draft.userInput?.fields?.carryoverRequirements ?? []) : null;
             if (revision !== inputRevision.current || preview !== previewRevision.current || settingsBeforeRestore !== draftConfig) throw new Error("草稿或所选记录已改变，已取消恢复");
             replacePrompt(draft.prompt);
+            if (restoredCarryover) setCarryoverRequirements(restoredCarryover);
             setOptimizedDraft(draft.userInput ? { prompt: draft.prompt, input: { ...draft.userInput, compilationId: undefined }, references: draft.references } : undefined);
             setReferences(draft.references.map(item => createImageReferenceItem(item, "template")));
             updateConfig("imageModel", draft.config.imageModel);
@@ -840,6 +931,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     };
 
     const buildRequestSnapshot = (): ImageRequestSnapshot | null => {
+        if (carryoverError) { message.warning(carryoverError); return null; }
         previewRevision.current += 1;
         setPreviewLoading(false);
         if (!quickTool && !model) {
@@ -868,6 +960,10 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         if (promptInput?.compilationId && optimizedDraft?.context !== optimizationContext) {
             promptInput = promptInput.scene === "free-optimize" ? undefined : { ...promptInput, compilationId: undefined };
         }
+        if (designRequested) promptInput = {
+            ...(promptInput || { scene: "free-optimize", userText: text, mode: "edit", referenceRoles: references.map(image => image.name) }),
+            fields: { ...promptInput?.fields, carryoverRequirements: [...normalizedCarryover] },
+        };
         // Upscaling accepts plain instructions, not the image compiler contract.
         if (operationType === "upscale" || isBlend || quickTool) promptInput = undefined;
         return { text: quickTool ? "" : text || "Blend reference images", promptInput, config: { ...effectiveConfig, model, count: "1" }, references: [...references] };
@@ -1004,6 +1100,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const retryResult = async (index: number) => {
         const previous = results[index];
         if (previous?.recovery) { await resumePendingImages([previous.recovery], previous.recovery.recovery === "resume"); return; }
+        if (!handoffReady) { message.warning(uiText("请先完成参考图带入，再提交新任务。")); return; }
         const snapshot = previous?.snapshot;
         if (!snapshot) return;
         const release = workbenchSubmissions.acquire(`image:${user?.id}`);
@@ -1106,7 +1203,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const imageDrop = useImageDrop({
         onFiles: addReferences,
         scopeKey: `${historyTool}:${referenceScope}`,
-        disabled: !draftReady || placementStatus !== "ready" || readingReferences || running || restoringHistory || user?.status !== "active",
+        disabled: !draftReady || !handoffReady || readingReferences || running || restoringHistory || user?.status !== "active",
     });
 
     return (
@@ -1119,7 +1216,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                         unclassifiedLogs={unclassifiedLogs}
                         selectedLogIds={selectedLogIds}
                         activeLogId={previewLog?.id}
-                        disabled={running || deletingLogs}
+                        disabled={running || deletingLogs || !handoffReady}
                         onSelectedLogIdsChange={setSelectedLogIds}
                         onCreateSession={createSession}
                         onDeleteSelected={confirmDeleteSelected}
@@ -1153,7 +1250,15 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                                 {placementStatus === "error" ? <Button size="small" onClick={() => setPlacementAttempt(value => value + 1)}>{uiText("重试带入")}</Button> : null}
                             </div>
                         </div> : null}
-                        <fieldset disabled={placementStatus !== "ready"} className="mt-6 min-w-0 space-y-5 border-0 p-0">
+                        {designRequested ? <div className="mt-4 rounded-lg border border-primary/20 bg-primary/5 p-3 text-sm leading-6" role={designStatus === "error" ? "alert" : "status"}>
+                            <strong>{uiText("设计结果 · 继续编辑")}</strong>
+                            <p className="!mb-1">{designStatus === "loading" ? uiText("正在读取设计原图与独立草稿…") : designStatus === "error" ? uiText(designError) : uiText("原图与设计要求已带入独立草稿。填写本次修改后再提交；原图及原图片编辑草稿不会改动。")}</p>
+                            <div className="flex flex-wrap gap-3">
+                                <Link to="/image?tool=image-edit">{uiText("打开原图片编辑草稿")}</Link>
+                                {designStatus === "error" ? <Button size="small" onClick={() => setDesignAttempt(value => value + 1)}>{uiText("重新读取设计交接")}</Button> : null}
+                            </div>
+                        </div> : null}
+                        <fieldset disabled={!handoffReady} className="mt-6 min-w-0 space-y-5 border-0 p-0">
                             {initialGarmentScenario ? <GarmentRecipePanel key={garmentScope} references={references} disabled={running || !requiresPrompt} initialScenario={initialGarmentScenario} onApply={applyGarmentRecipe} onDraftChange={handleGarmentDraftChange} /> : null}
                             {requiresPrompt ? <div>
                                 <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
@@ -1168,12 +1273,18 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                                 <Input.TextArea aria-label={uiText("图像提示词")} showCount value={prompt} onPaste={event => { const files = pastedImageFiles(event.clipboardData); if (files.length) { event.preventDefault(); void addReferences(files); } }} onChange={(event) => { inputRevision.current += 1; setPrompt(event.target.value); }} onKeyDown={(event) => handleSubmitShortcut(event, canGenerate && !running, () => void generate())} rows={5} disabled={!requiresPrompt} placeholder={requiresPrompt ? uiText("{placeholder}（Ctrl/⌘ + Enter 提交）", { placeholder: uiText(toolModeConfig.placeholder) }) : uiText("这个模型直接合成参考图，不需要填写文字")} />
                             </div> : !quickTool ? <p className="rounded-lg bg-muted/50 p-3 text-sm text-muted-foreground">{uiText("请选择 2–4 张参考图。此模型不会提交提示词；生成结果取决于图片内容及下方融合参数。")}</p> : null}
 
-                            {requiresPrompt ? <PromptOptimizeButton config={effectiveConfig} prompt={prompt} references={references} operationType={operationType} scene={creativePreset?.id as PromptScene | undefined} toolKey={toolKey} disabled={running} onBusyChange={setOptimizingPrompt} onApply={(value, _compilation, input) => { replacePrompt(value); setOptimizedDraft({ prompt: value, input, references: [...references], context: optimizationContext }); }} /> : null}
+                            {designRequested ? <div>
+                                <label htmlFor="image-carryover-requirements" className="mb-2 block text-base font-semibold">{uiText("沿用设计要求")}</label>
+                                <Input.TextArea id="image-carryover-requirements" aria-label={uiText("沿用设计要求")} value={carryoverRequirements.join("\n")} rows={3} onChange={event => { inputRevision.current += 1; setCarryoverRequirements(event.target.value.split("\n")); setOptimizedDraft(undefined); }} />
+                                <p className="mt-1 text-xs text-muted-foreground">{uiText("每行一条，可修改或清空；与本次提示词一起提交，不会自动生成。")}</p>
+                                {carryoverError ? <p role="alert" className="mt-1 text-xs text-destructive">{carryoverError}</p> : null}
+                            </div> : null}
+                            {requiresPrompt ? <PromptOptimizeButton config={effectiveConfig} prompt={prompt} references={references} operationType={operationType} scene={creativePreset?.id as PromptScene | undefined} fields={designRequested ? { carryoverRequirements: normalizedCarryover } : undefined} scopeKey={inputDraftScope} toolKey={toolKey} disabled={running || !draftReady || !handoffReady || Boolean(carryoverError)} onBusyChange={setOptimizingPrompt} onApply={(value, _compilation, input) => { replacePrompt(value); setOptimizedDraft({ prompt: value, input, references: [...references], context: optimizationContext }); }} /> : null}
                             <ReferenceImageTray
                                 references={references}
                                 loading={readingReferences}
                                 validation={referenceValidation}
-                                onChange={(next) => { inputRevision.current += 1; setReferences(dedupeImageReferences(next)); }}
+                                onChange={(next) => { if (!handoffReady) return; inputRevision.current += 1; setReferences(dedupeImageReferences(next)); }}
                                 onRequestUpload={() => fileInputRef.current?.click()}
                                 onRequestAssets={() => setReferenceAssetPickerOpen(true)}
                                 onRequestClipboard={() => void addReferencesFromClipboard()}
@@ -1186,7 +1297,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                                 <span className="min-w-0 flex-1 truncate text-stone-500 dark:text-stone-400">
                                     {imageModelDisplayName(modelOptionLabel(effectiveConfig, model), businessModels, user?.role)} · {imageReferenceSizeIsAutomatic(selectedModelProfile, references.length) ? uiText("模型决定尺寸 · 约 100 万像素") : <>{imageSizeLabel(effectiveConfig.size)} · {imageQualityLabel(effectiveConfig.quality)}</>}
                                 </span>
-                                <Button className="shrink-0" size="small" type="text" disabled={placementStatus !== "ready"} icon={<SlidersHorizontal className="size-4" />} onClick={() => setSettingsOpen(true)}>
+                                <Button className="shrink-0" size="small" type="text" disabled={!handoffReady} icon={<SlidersHorizontal className="size-4" />} onClick={() => setSettingsOpen(true)}>
                                     {uiText("切换生成图片模型")}</Button>
                             </div>}
 
@@ -1199,6 +1310,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                                 {!referenceValidation.valid ? <div className="mt-1 text-red-500">{referenceValidation.message}</div> : null}
                                 {quotaBlocked ? <div className="mt-1 text-red-500">{uiText("额度不足，无法提交生成任务。")}</div> : null}
                                 {placementToken && isBlend ? <div className="mt-1 text-red-500">{uiText("定位效果需要位置保持提示词，请选择支持文字要求的图片编辑模型。")}</div> : null}
+                                {designRequested && isBlend ? <div className="mt-1 text-red-500">{uiText("沿用设计要求需要文字提示词，请选择支持文字要求的图片编辑模型。")}</div> : null}
                                 {garmentNeedsApply ? <div className="mt-1" role="status">{uiText("服装要求或参考图已改变，请重新套用。")}<Button size="small" type="link" className="!h-auto !p-0" onClick={resetGarment}>{uiText("改用当前提示词")}</Button></div> : null}
                                 {incompleteCreativePrompt ? <div className="mt-1" role="status">{uiText("请把「")}{CREATIVE_REQUIREMENT_PLACEHOLDER}{uiText("」替换成你的设计要求。")}</div> : null}
                                 {!draftReady || readingReferences || optimizingPrompt || (!quickTool && !model) || (requiresPrompt && !prompt.trim()) || invalidBlendReferences || !user || user.status !== "active" ? <div role="status">{!draftReady ? uiText("正在恢复草稿…") : readingReferences ? uiText("正在读取参考图，请稍候") : optimizingPrompt ? uiText("正在优化提示词，请稍候") : !quickTool && !model ? uiText("还差：选择模型") : requiresPrompt && !prompt.trim() ? uiText("还差：填写提示词") : invalidBlendReferences ? uiText("还差：添加 2–4 张参考图") : uiText("当前设计师账号不可用")}</div> : null}
@@ -1260,7 +1372,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                     unclassifiedLogs={unclassifiedLogs}
                     selectedLogIds={selectedLogIds}
                     activeLogId={previewLog?.id}
-                    disabled={running || deletingLogs}
+                    disabled={running || deletingLogs || !handoffReady}
                     onSelectedLogIdsChange={setSelectedLogIds}
                     onCreateSession={createSession}
                     onDeleteSelected={confirmDeleteSelected}
@@ -1278,6 +1390,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                 defaultTab="my-assets"
                 selectionMode="multiple-images"
                 onInsertMany={(payloads) => {
+                    if (!draftReady || !handoffReady || readingReferences) return;
                     const scope = referenceScopeRef.current;
                     setReadingReferences(true);
                     void Promise.all(payloads.filter((payload): payload is Extract<InsertAssetPayload, { kind: "image" }> => payload.kind === "image").map(async (payload) => {

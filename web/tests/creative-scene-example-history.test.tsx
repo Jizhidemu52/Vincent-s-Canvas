@@ -54,7 +54,7 @@ function harness(sceneId = "style-to-sketch", recoveredRequestId?: string) {
             },
         },
         antd: { App: { useApp: () => ({ modal: { confirm(value: unknown) { calls.confirms.push(value); } } }) }, Button: "button", Checkbox: "input", Image: () => null },
-        "react-router-dom": { Link: () => null, useParams: () => ({ presetId: sceneId }), useNavigate: () => () => {} },
+        "react-router-dom": { Link: () => null, useParams: () => ({ presetId: sceneId }), useNavigate: () => () => {}, useSearchParams: () => [new URLSearchParams()] },
         "@/components/design-examples": { PracticeExampleRecord },
         "@/components/auth/module-gate": { ModuleGate: () => null },
         "@/components/image-settings-panel": { ImageSettingsPanel: () => null, imageQualityLabel: (value: string) => value, imageSizeLabel: (value: string) => value },

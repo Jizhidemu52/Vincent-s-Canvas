@@ -11,8 +11,9 @@ import type { ReferenceImage } from "@/types/image";
 import type { PromptScene } from "../../../shared/prompt-contracts";
 
 /** Optional manual action. Never changes a prompt unless the user presses this button. */
-export function PromptOptimizeButton({ config, prompt, references = [], operationType, scene = "free-optimize", toolKey, scopeKey = "", disabled, onApply, onBusyChange }: {
+export function PromptOptimizeButton({ config, prompt, references = [], operationType, scene = "free-optimize", fields = {}, toolKey, scopeKey = "", disabled, onApply, onBusyChange }: {
     config: AiConfig; prompt: string; references?: ReferenceImage[]; operationType: "image_generation" | "inpaint" | "upscale" | "batch_image"; scene?: PromptScene; toolKey?: string; scopeKey?: string; disabled?: boolean;
+    fields?: PromptInputData["fields"];
     onApply: (prompt: string, compilation: PublicPromptCompilation, input: PromptInputData) => void; onBusyChange?: (busy: boolean) => void;
 }) {
     useUiLocale();
@@ -29,16 +30,17 @@ export function PromptOptimizeButton({ config, prompt, references = [], operatio
     }, []);
     const pendingInput = useRef<PromptInputData | undefined>(undefined);
     const supported = operationType !== "upscale";
-    const pendingContext = useRef<{ ownerId?: string; scopeKey: string; model: string; operationType: string; scene: PromptScene; toolKey?: string; prompt: string; references: ReferenceImage[] } | undefined>(undefined);
-    const current = useRef({ scopeKey, model: config.model, operationType, scene, toolKey, prompt, references });
-    current.current = { scopeKey, model: config.model, operationType, scene, toolKey, prompt, references };
+    const fieldsKey = JSON.stringify(fields);
+    const pendingContext = useRef<{ ownerId?: string; scopeKey: string; model: string; operationType: string; scene: PromptScene; toolKey?: string; prompt: string; fieldsKey: string; references: ReferenceImage[] } | undefined>(undefined);
+    const current = useRef({ scopeKey, model: config.model, operationType, scene, toolKey, prompt, fieldsKey, references });
+    current.current = { scopeKey, model: config.model, operationType, scene, toolKey, prompt, fieldsKey, references };
     const run = async () => {
         if (!mounted.current || lock.current || (!pending && !supported)) return;
         lock.current = true; setBusy(true); onBusyChange?.(true);
         const requestId = pending || createClientId();
-        const input: PromptInputData = pendingInput.current || { scene, userText: prompt, fields: {}, mode: operationType === "image_generation" ? "generate" : "edit", referenceRoles: references.map((image, index) => image.name || `图片${index + 1}`) };
+        const input: PromptInputData = pendingInput.current || { scene, userText: prompt, fields: JSON.parse(fieldsKey), mode: operationType === "image_generation" ? "generate" : "edit", referenceRoles: references.map((image, index) => image.name || `图片${index + 1}`) };
         pendingInput.current = input;
-        const context = pendingContext.current || { ownerId: useUserStore.getState().user?.id, scopeKey, model: config.model, operationType, scene, toolKey, prompt, references: references.map(image => ({ ...image })) };
+        const context = pendingContext.current || { ownerId: useUserStore.getState().user?.id, scopeKey, model: config.model, operationType, scene, toolKey, prompt, fieldsKey, references: references.map(image => ({ ...image })) };
         pendingContext.current = context;
         try {
             const result = pending
@@ -50,7 +52,7 @@ export function PromptOptimizeButton({ config, prompt, references = [], operatio
             pendingContext.current = undefined;
             const latest = current.current;
             if (context.ownerId !== useUserStore.getState().user?.id) return;
-            if (context.scopeKey !== latest.scopeKey || context.model !== latest.model || context.operationType !== latest.operationType || context.scene !== latest.scene || context.toolKey !== latest.toolKey || context.prompt !== latest.prompt || context.references.length !== latest.references.length || context.references.some((image, index) => {
+            if (context.scopeKey !== latest.scopeKey || context.model !== latest.model || context.operationType !== latest.operationType || context.scene !== latest.scene || context.toolKey !== latest.toolKey || context.prompt !== latest.prompt || context.fieldsKey !== latest.fieldsKey || context.references.length !== latest.references.length || context.references.some((image, index) => {
                 const other = latest.references[index];
                 return !other || image.id !== other.id || image.name !== other.name || image.dataUrl !== other.dataUrl || image.url !== other.url || image.storageKey !== other.storageKey || image.sourceAssetId !== other.sourceAssetId;
             })) {

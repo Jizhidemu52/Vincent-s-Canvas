@@ -2,6 +2,7 @@ import { uiText } from "@/lib/i18n";
 import { deleteHistoryEntries } from "@/lib/history-batch-delete";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createWorkspaceStorage } from "@/lib/workspace-storage";
+import { consumeDesignHandoff, designDraftScope } from "@/lib/design-handoff";
 import { nanoid } from "nanoid";
 import { saveAs } from "file-saver";
 import { canvasImageDownloadFileName, canvasImageReferenceIdentity } from "@/lib/canvas/canvas-image-filename";
@@ -12,7 +13,7 @@ import { validateImageReferences } from "@/lib/image-reference-policy";
 import { getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
 import { workbenchSubmissions } from "@/lib/submission-gate";
 import { requestEdit, requestGeneration } from "@/services/api/image";
-import { resolveImageUrl, uploadImage } from "@/services/image-storage";
+import { getImageBlob, resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { freezeLocalInput, restoreLocalInput } from "@/services/generation-local-inputs";
 import { restoreGenerationDraft } from "@/services/api/generation-history";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
@@ -141,7 +142,7 @@ async function storeSceneResult(item: SceneResult, source: Awaited<ReturnType<ty
 }
 
 /** Dedicated scene state; never mutates the original image workbench's settings. */
-export function useSceneWorkspace(sceneId: string) {
+export function useSceneWorkspace(sceneId: string, handoffToken: string | null = null) {
     const effectiveConfig = useEffectiveConfig("image");
     const configRef = useRef(effectiveConfig);
     configRef.current = effectiveConfig;
@@ -150,7 +151,8 @@ export function useSceneWorkspace(sceneId: string) {
     const businessStatus = useBusinessConfigStore(state => state.status);
     const refreshBusinessConfig = useBusinessConfigStore(state => state.refresh);
     const estimate = useBusinessConfigStore(state => state.estimate);
-    const scope = user ? `${encodeURIComponent(user.id)}:${encodeURIComponent(sceneId)}` : null;
+    const destination = `creative-${sceneId}`;
+    const scope = user ? `${encodeURIComponent(user.id)}:${encodeURIComponent(sceneId)}${handoffToken ? `:${designDraftScope(handoffToken, destination)}` : ""}` : null;
     const history = useMemo(() => user ? createSceneHistory(storage, user.id, sceneId) : null, [user?.id, sceneId]);
     const resultActions = useMemo(() => user ? createSceneResultActions(user.id) : null, [user?.id, sceneId]);
     const scopeRef = useRef(scope);
@@ -206,6 +208,7 @@ export function useSceneWorkspace(sceneId: string) {
     const quotaBlocked = deploymentFeatures.creditsEnabled && Boolean(user && estimateValue.configured && user.creditBalance < estimateValue.credits);
     const referenceValidation = validateImageReferences(model, references);
     const validation = loading ? "正在读取当前板块的数据"
+        : handoffToken && !draftReady ? "设计交接草稿尚未准备好，请从原结果重新打开。"
         : !toolEnabled ? "当前创意场景已停用，原有草稿和结果仍保留"
         : selection && !selectionEnabled ? "选区绘制已停用，请清除选区后再生成"
         : uploadCount ? "图片正在保存，请稍候"
@@ -239,8 +242,26 @@ export function useSceneWorkspace(sceneId: string) {
         void (async () => {
             try {
                 await draftWrites.get(scope);
-                const [draft, page, pendingLogs] = await Promise.all([storage.getItem<SceneDraft>(`draft:${scope}`), history!.page(), history!.pending()]);
+                const [storedDraft, page, pendingLogs] = await Promise.all([storage.getItem<SceneDraft>(`draft:${scope}`), history!.page(), history!.pending()]);
                 if (revision !== epoch.current) return;
+                let draft = storedDraft;
+                if (!draft && handoffToken) {
+                    const handoff = await consumeDesignHandoff(handoffToken, destination);
+                    if (revision !== epoch.current) return;
+                    const meta = await readImageMeta(handoff.source.dataUrl);
+                    const blob = handoff.source.storageKey ? await getImageBlob(handoff.source.storageKey) : null;
+                    if (revision !== epoch.current) return;
+                    const source: SceneImage = { ...handoff.source, width: meta.width, height: meta.height,
+                        mimeType: handoff.source.type || blob?.type || meta.mimeType, bytes: blob?.size || handoff.source.bytes || getDataUrlByteSize(handoff.source.dataUrl) };
+                    const fresh = serializeSceneDraft({ form: { ...createSceneForm(sceneId), carryoverRequirements: [...handoff.brief.requirements] },
+                        images: { primary: source }, config: sceneParameters(configRef.current), selection: null });
+                    // A token owns a separate draft. Never replace the ordinary scene draft or replay over token edits.
+                    draft = await storage.getItem<SceneDraft>(`draft:${scope}`) || fresh;
+                    if (revision !== epoch.current) return;
+                    if (draft === fresh) await storage.setItem(`draft:${scope}`, fresh);
+                    if (revision !== epoch.current) return;
+                    setNotice(uiText("已带入结果原图和可编辑要求，保留原任务与普通草稿，未自动生成。"));
+                }
                 setLogs(page.entries); setHistoryTotal(page.total); setHistoryHasMore(page.hasMore);
                 knownLogIds.current = new Set([...page.entries, ...pendingLogs].map(entry => entry.id));
                 if (draft) {
@@ -266,7 +287,7 @@ export function useSceneWorkspace(sceneId: string) {
             } finally { if (revision === epoch.current) setLoadedScope(scope); }
         })();
         return () => { epoch.current += 1; for (const controller of observationControllers.current) controller.abort(); };
-    }, [scope, sceneId]);
+    }, [scope, sceneId, handoffToken]);
 
     useEffect(() => {
         if (!scope || loadedScope !== scope || !draftReady) return;
@@ -287,13 +308,19 @@ export function useSceneWorkspace(sceneId: string) {
         if (loading || running) return;
         const revision = epoch.current;
         const uploadRevision = ++inputEpoch.current[slot];
-        if (!file) { if (slot === "primary") setSelection(null); setImages(current => { const next = { ...current }; delete next[slot]; return next; }); return; }
+        if (!file) { if (slot === "primary") { setSelection(null); setForm(current => ({ ...current, targetProduct: "" })); } setImages(current => { const next = { ...current }; delete next[slot]; return next; }); return; }
         if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) { setError(uiText("请上传 PNG、JPG 或 WebP 图片")); return; }
         setError(null); setUploadCount(value => value + 1);
         try {
             const stored = await uploadImage(file);
             if (revision !== epoch.current || uploadRevision !== inputEpoch.current[slot]) return;
-            if (slot === "primary") setSelection(null);
+            if (slot === "primary") {
+                setSelection(null);
+                if (imagesRef.current.primary) {
+                    setForm(current => ({ ...current, targetProduct: "" }));
+                    setNotice(uiText("参考图已更新，请重新确认要处理的产品。关键特征要求仍保留。"));
+                }
+            }
             setImages(current => ({ ...current, [slot]: { id: nanoid(), name: file.name, originalFileName: file.name, type: stored.mimeType,
                 mimeType: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey, width: stored.width, height: stored.height, bytes: stored.bytes } }));
         } catch (caught) { if (revision === epoch.current) setError(uiText("图片保存失败：{value1}", { value1: errorText(caught) })); }

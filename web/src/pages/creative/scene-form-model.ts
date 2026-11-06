@@ -6,6 +6,9 @@ export type SceneSlot = { id: SceneSlotId; label: string; hint: string; required
 
 export type SceneForm = {
     description: string;
+    targetProduct: string;
+    keepDetails: string;
+    carryoverRequirements: string[];
     category: string;
     silhouette: string;
     fabric: string;
@@ -33,6 +36,9 @@ export type SceneForm = {
 export function createSceneForm(_sceneId: string): SceneForm {
     return {
         description: "",
+        targetProduct: "",
+        keepDetails: "",
+        carryoverRequirements: [],
         category: "按描述判断",
         silhouette: "按描述判断",
         fabric: "",
@@ -114,6 +120,10 @@ export const sceneSummaries: Record<string, { input: string; output: string; exa
     },
 };
 
+export function supportsSceneProductTarget(sceneId: string): boolean {
+    return ["style-to-sketch", "garment-colorway", "local-restyle", "back-design", "pattern-extract"].includes(sceneId);
+}
+
 export function getSceneSlots(sceneId: string, form: SceneForm): SceneSlot[] {
     if (sceneId === "text-to-style" || !Object.hasOwn(sceneSummaries, sceneId)) return [];
     if (sceneId === "accessory-design") return [
@@ -181,7 +191,7 @@ export function addSceneColor(form: SceneForm, hex = "#808080"): SceneForm {
 
 /** Capture the palette and source labels independently for queued writes and generation history. */
 export function cloneSceneForm(form: SceneForm): SceneForm {
-    return { ...form, colors: [...form.colors], ...(form.colorSelections ? {
+    return { ...form, carryoverRequirements: [...form.carryoverRequirements || []], colors: [...form.colors], ...(form.colorSelections ? {
         colorSelections: form.colors.map((_, index) => {
             const selection = getSceneColorSelection(form, index);
             return selection ? { ...selection } : null;
@@ -191,6 +201,7 @@ export function cloneSceneForm(form: SceneForm): SceneForm {
 
 export function validateSceneForm(sceneId: string, form: SceneForm, images: Partial<Record<SceneSlotId, ReferenceImage>>): string | null {
     if (!Object.hasOwn(sceneSummaries, sceneId)) return "暂不支持这个设计场景。";
+    if (form.carryoverRequirements?.length > 12 || form.carryoverRequirements?.some(value => value.length > 800) || form.carryoverRequirements?.join("\n").length > 6000) return "沿用设计要求最多 12 项，每项 800 字，总共不超过 6000 字。";
     for (const slot of getSceneSlots(sceneId, form)) {
         if (slot.required && !images[slot.id]) return `请上传${slot.label}。`;
     }
@@ -224,7 +235,8 @@ export function scenePromptInput(sceneId: string, form: SceneForm): import("../.
         "accessory-design": ["accessoryType", "accessoryApply"],
     };
     const frozen = cloneSceneForm(form);
-    const fields = Object.fromEntries(["description", ...keys[sceneId]!].map(key => [key, frozen[key as keyof SceneForm]]));
+    frozen.carryoverRequirements = frozen.carryoverRequirements.map(value => value.trim()).filter(Boolean);
+    const fields = Object.fromEntries(["description", ...(frozen.carryoverRequirements.length ? ["carryoverRequirements"] : []), ...(supportsSceneProductTarget(sceneId) ? ["targetProduct", "keepDetails"] : []), ...keys[sceneId]!].map(key => [key, frozen[key as keyof SceneForm]]));
     return { scene: sceneId as import("../../../../shared/prompt-contracts").PromptScene, fields,
         userText: [form.description.trim(), sceneId === "local-restyle" ? form.change.trim() : ""].filter(Boolean).join("\n"),
         referenceRoles: getSceneSlots(sceneId, form).map(slot => slot.label), mode: sceneId === "text-to-style" ? "generate" : "edit" };

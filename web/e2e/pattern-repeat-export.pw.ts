@@ -14,18 +14,21 @@ async function exportedPng(page: Page, kind: "unit" | "preview") {
     return { src: `data:image/png;base64,${bytes.toString("base64")}`, name: download.suggestedFilename() };
 }
 
-test("downloaded repeat periods tile on all four edges like an uninterrupted field", async ({ page, api }) => {
-    await page.goto("/creative/pattern-repeat");
-    await expect(page.getByRole("combobox", { name: "本地工程" })).toBeEnabled();
-    const src = await page.evaluate(() => {
-        const canvas = document.createElement("canvas"); canvas.width = canvas.height = 32;
-        const ctx = canvas.getContext("2d")!;
-        ctx.fillStyle = "#e86040"; ctx.fillRect(0, 0, 32, 18);
-        ctx.fillStyle = "#346b90"; ctx.fillRect(0, 18, 14, 14);
-        return canvas.toDataURL("image/png");
-    });
-    for (const mode of ["straight", "half", "mirror"] as const) {
-        for (const transparent of [false, true]) {
+// Keep each mode/background pair in its own browser context. A single loop can
+// complete 10 downloads in less than a second and hit Chromium's per-frame
+// burst limit on the 11th, before Playwright receives a download event.
+for (const mode of ["straight", "half", "mirror"] as const) {
+    for (const transparent of [false, true]) {
+        test(`downloaded ${mode} repeat (transparent=${transparent}) tiles on all four edges like an uninterrupted field`, async ({ page, api }) => {
+            await page.goto("/creative/pattern-repeat");
+            await expect(page.getByRole("combobox", { name: "本地工程" })).toBeEnabled();
+            const src = await page.evaluate(() => {
+                const canvas = document.createElement("canvas"); canvas.width = canvas.height = 32;
+                const ctx = canvas.getContext("2d")!;
+                ctx.fillStyle = "#e86040"; ctx.fillRect(0, 0, 32, 18);
+                ctx.fillStyle = "#346b90"; ctx.fillRect(0, 18, 14, 14);
+                return canvas.toDataURL("image/png");
+            });
             const project = { version: 1, widthCm: 2.54, heightCm: 2.54, dpi: 128, mode, background: "#f6f0df", transparent,
                 elements: [
                     { src, name: "Four-edge marker", x: 0, y: 0, size: 0.5, angle: 0 },
@@ -51,8 +54,8 @@ test("downloaded repeat periods tile on all four edges like an uninterrupted fie
             }, { tile, preview });
             expect(result, `${mode}, transparent=${transparent}`).toEqual({ width: mode === "straight" ? 128 : 256, height: mode === "mirror" ? 256 : 128, fieldWidth: 384, fieldHeight: 384, differences: 0, alphaMin: transparent ? 0 : 255 });
             expect(tile.name).toContain("无缝周期");
-        }
+            expect(api.submissions).toHaveLength(0);
+            expect(api.assetBytes.size).toBe(0);
+        });
     }
-    expect(api.submissions).toHaveLength(0);
-    expect(api.assetBytes.size).toBe(0);
-});
+}

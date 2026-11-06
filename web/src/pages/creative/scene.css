@@ -191,3 +191,13 @@
 .cs-result-actions button:hover:not(:disabled) { background: var(--muted); }
 .cs-result-actions button:focus-visible { outline: 2px solid var(--wb-accent); outline-offset: 2px; }
 .cs-result-actions button:disabled { opacity: .45; cursor: not-allowed; }
+.cs-product-picker { display: grid; gap: 8px; }
+.cs-product-candidates { min-width: 0; border: 0; margin: 0; padding: 0; display: grid; gap: 8px; }
+.cs-product-candidates legend { margin-bottom: 8px; }
+.cs-product-candidate { display: flex; align-items: flex-start; gap: 8px; border: 1px solid var(--border); border-radius: 7px; padding: 9px; cursor: pointer; font-size: 12px; }
+.cs-product-candidate input { margin-top: 3px; flex-shrink: 0; accent-color: var(--foreground); }
+.cs-product-candidate > span { display: grid; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
+.cs-product-candidate strong { font-weight: 500; }
+.cs-product-candidate small { color: var(--muted-foreground); line-height: 1.6; }
+.cs-product-candidate.is-active { border-color: var(--foreground); background: var(--muted); }
+.cs-product-candidate:focus-within { outline: 2px solid var(--wb-accent); outline-offset: 2px; }

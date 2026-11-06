@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { z } from "zod";
+import { carryoverRequirementsSchema } from "../../shared/design-brief";
 import { promptCompilationRequestSchema, type PromptCompilationRequest, type PromptInput, type AdminPromptCompilation } from "../../shared/prompt-contracts";
 import { PromptRecipeStore, promptHash } from "./prompt-recipe-store";
 import { parseOptimizedPrompt, assertPromptOutputContent, assertVideoMotionTimeline, PromptOptimizationError, specifiedPromptText } from "./prompt-safety";
@@ -22,10 +24,17 @@ export type PromptCompilerRuntime = {
   readSource(actor: PromptActor, url: string): Promise<PromptSource>;
 };
 export type PromptCompileOptions = { versionId?: string; optimizerModelConfigId?: string };
+const designFieldsSchema = z.object({
+  targetProduct: z.string().trim().max(500).optional(),
+  keepDetails: z.string().trim().max(2000).optional(),
+  carryoverRequirements: carryoverRequirementsSchema.optional(),
+}).passthrough();
 
 /** Public form fields remain data. Shape adaptation does not contain recipe prose. */
 export function normalizePromptFields(input: PromptInput) {
-  const fields = structuredClone(input.fields);
+  const checked = designFieldsSchema.safeParse(input.fields);
+  if (!checked.success) throw new PromptOptimizationError("PROMPT_FIELDS_INVALID", "目标产品、关键特征或沿用要求格式无效或超过长度限制，未提交优化。", 400);
+  const fields = structuredClone(checked.data);
   if (input.scene === "series-recipe") {
     const index = Number(fields.variantIndex ?? fields.branch_index ?? 0);
     fields.branch_index = index;
@@ -47,6 +56,7 @@ export class PromptCompiler {
 
   async compile(actor: PromptActor, data: PromptCompilationRequest, options: PromptCompileOptions = {}): Promise<AdminPromptCompilation> {
     const request = promptCompilationRequestSchema.parse(data);
+    const fields = normalizePromptFields(request.promptInput);
     if ((options.versionId || options.optimizerModelConfigId) && actor.role !== "super_admin") throw new PromptOptimizationError("FORBIDDEN", "仅超级管理员可选择测试版本", 403);
     const byRequest = await this.store.byRequest(actor.id, request.requestId);
     const reused = request.promptInput.compilationId ? await this.store.getCompilation(request.promptInput.compilationId, actor.id) : null;
@@ -81,7 +91,6 @@ export class PromptCompiler {
     if (request.promptInput.scene !== "text-to-style" && !["free-optimize", "batch-optimize", "video-motion"].includes(request.promptInput.scene) && !references.length) {
       throw new PromptOptimizationError("PROMPT_REFERENCE_REQUIRED", "此场景需要参考图，未提交生成");
     }
-    const fields = normalizePromptFields(request.promptInput);
     const userText = request.promptInput.userText || (typeof fields.instruction === "string" ? fields.instruction : "");
     const requiredText = specifiedPromptText(userText, fields);
     const language = isVideo ? "zh" : request.promptInput.outputLanguage ?? active.version.outputLanguage;
