@@ -40,7 +40,7 @@ test("explicit image and seamless model choices persist separately and do not re
     await setup(page);
     let picker = await imageSettings(page, "/image");
     await selectOld(page, picker);
-    await page.getByRole("dialog").getByRole("button", { name: "完成", exact: true }).click();
+    await page.getByRole("dialog").getByRole("button", { name: /^完\s*成$/ }).click();
     await page.getByRole("textbox", { name: "图像提示词", exact: true }).fill("保留明确选择的旧模型");
     await page.getByRole("button", { name: "开始生成", exact: true }).click();
     await expect.poll(() => api.submissions.length).toBe(1);

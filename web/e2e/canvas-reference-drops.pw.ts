@@ -94,7 +94,7 @@ test("desktop assistant reference drops stay attachments and retain originals wi
     const id = await newCanvas(page);
     await page.getByRole("tab", { name: "对话", exact: true }).click();
     const panel = page.getByTestId("canvas-agent-attachment-drop");
-    await expect(panel.getByRole("button", { name: "添加参考图", exact: true })).toBeEnabled();
+    await expect(panel.getByRole("button", { name: "上传设计文件或参考图", exact: true })).toBeEnabled();
     expect(await drop(panel.locator("textarea"), "助手企业微信原图")).toBe(true);
     const first = panel.getByRole("img", { name: "助手企业微信原图", exact: true });
     await expect(first).toBeVisible();
@@ -139,7 +139,7 @@ for (const target of ["creation", "assistant"] as const) test(`late ${target} re
         }
         await page.getByRole("tab", { name: "对话", exact: true }).click();
         const panel = page.getByTestId("canvas-agent-attachment-drop");
-        await expect(panel.getByRole("button", { name: "添加参考图", exact: true })).toBeEnabled();
+        await expect(panel.getByRole("button", { name: "上传设计文件或参考图", exact: true })).toBeEnabled();
         return panel;
     };
     expect(await drop(await open(), url, "text/uri-list")).toBe(true);
