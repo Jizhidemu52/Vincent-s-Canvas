@@ -4,6 +4,7 @@ import { assertVideoMotionTimeline, PromptOptimizationError } from "./prompt-saf
 import { promptImageBackground } from "./prompt-image-background";
 import { readImageAgentGenerationProfile } from "./image-agent-profile";
 import { normalizeVideoMotionSettings } from "../../shared/video-motion-options";
+import { assertImageEditMarkupSupport } from "./image-edit-input";
 
 export type PromptTaskInput = {
   requestId: string; operationType: string; toolKey?: string; modelConfigId?: string | null;
@@ -47,6 +48,14 @@ export async function preparePromptTaskInput<T extends PromptTaskInput>(compiler
     promptInput.outputLanguage = "zh";
   }
   const archive = parameters.inputArchive && typeof parameters.inputArchive === "object" ? parameters.inputArchive as Record<string, unknown> : undefined;
+  const markupIndex = archive?.markupReferenceIndex;
+  if (markupIndex !== undefined) {
+    const target = await compiler.runtime.resolveTarget(actor, { requestId: input.requestId, modelConfigId: input.modelConfigId,
+      toolKey: input.toolKey, promptInput, sourceUrls: input.sourceUrls });
+    assertImageEditMarkupSupport(parameters, { ...target, operationType: input.operationType, workflow: Boolean(target.workflowConfigId) }, input.sourceUrls.length);
+    // The optimizer saw ordinary references only; the independently validated overlay remains in the task archive.
+    sourceUrls = input.sourceUrls.filter((_, index) => index !== markupIndex);
+  }
   const archiveMask = archive?.maskReferenceIndex;
   if (archiveMask !== undefined) {
     if (typeof archiveMask !== "number" || (promptInput.maskReferenceIndex !== undefined && promptInput.maskReferenceIndex !== archiveMask)) throw new PromptOptimizationError("PROMPT_MASK_INVALID", "优化蒙版与生成蒙版索引不一致");

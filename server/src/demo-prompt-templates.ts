@@ -6,13 +6,13 @@ import { z } from "zod";
 import { DemoStorageError } from "./demo-state-store";
 import { presentPublicModel, isSelectableCreativeModel } from "./model-presentation";
 import { isAuxiliaryImageResult } from "./image-result-variants";
-import { operationForPromptTool, pricePromptModel, promptSnapshotSchema, PromptTemplateError, quantityFromParameters, resolvePromptModel, type PromptModelCandidate, type PromptSnapshot } from "./prompt-templates";
+import { operationForPromptTool, pricePromptModel, promptSnapshotSchema, promptMarkupSourceAssetIds, assertPromptMarkupReferencesAvailable, PromptTemplateError, quantityFromParameters, resolvePromptModel, type PromptModelCandidate, type PromptSnapshot } from "./prompt-templates";
 import { getToolDefinition, resolveToolKey } from "../../shared/feature-catalog";
 import type { ToolConfiguration } from "./tool-configuration";
 
 export type DemoPromptActor = { id: string; role: string; departmentId?: string | null };
 type SourceAsset = { id: string; ownerUserId: string; mimeType: string; bytes: Uint8Array; taskId?: string; metadata?: Record<string, unknown>; createdAt: string };
-type SourceTask = { id: string; ownerUserId: string; status: string; operationType: string; prompt?: string; parameters?: Record<string, unknown>; modelConfigId?: string };
+type SourceTask = { id: string; ownerUserId: string; status: string; operationType: string; prompt?: string; parameters?: Record<string, unknown>; modelConfigId?: string; sourceUrls?: string[] };
 export type DemoPromptContext = {
   models: readonly Record<string, unknown>[];
   providers: readonly Record<string, unknown>[];
@@ -172,6 +172,7 @@ export class DemoPromptTemplateStore {
       if (!row) throw new PromptTemplateError("REUSE_TOKEN_INVALID", "复用链接已失效，请重新点击模板", 404);
       const template = this.get(actor, row.template_id, row.version_id);
       const accessible = template.referenceAssetIds.filter(id => ownedAsset(context, actor.id, id));
+      assertPromptMarkupReferencesAvailable(template.parameters, template.referenceAssetIds, accessible);
       return { template: { ...template, referenceAssetIds: accessible }, mode: row.mode, pricing: JSON.parse(row.pricing_json), warnings: accessible.length === template.referenceAssetIds.length ? [] : ["部分参考图已删除或当前无权访问"] };
     });
   }
@@ -180,7 +181,7 @@ export class DemoPromptTemplateStore {
     const task = context.task(id);
     if (!task || task.ownerUserId !== actor.id || task.status !== "success") throw notFound();
     if (!task.prompt?.trim()) throw new PromptTemplateError("PROMPT_UNAVAILABLE", "该任务没有可保存的提示词", 400);
-    const refs = context.assets().filter(asset => asset.taskId === task.id && ownedAsset(context, actor.id, asset.id) && !isAuxiliaryImageResult(asset.metadata)).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).slice(0, 20).map(asset => asset.id);
+    const refs = promptMarkupSourceAssetIds(task.parameters || {}, task.sourceUrls) ?? context.assets().filter(asset => asset.taskId === task.id && ownedAsset(context, actor.id, asset.id) && !isAuxiliaryImageResult(asset.metadata)).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).slice(0, 20).map(asset => asset.id);
     return this.create(actor, { title: titleFromPrompt(task.prompt), prompt: task.prompt, targetTool: toolFromOperation(task.operationType, task.parameters || {}), modelConfigId: task.modelConfigId || null, parameters: task.parameters || {}, referenceAssetIds: refs, sourceTaskId: task.id }, context);
   }
 
@@ -193,7 +194,8 @@ export class DemoPromptTemplateStore {
     const prompt = task?.prompt || (typeof metadata.prompt === "string" ? metadata.prompt : "");
     if (!prompt.trim()) throw new PromptTemplateError("PROMPT_UNAVAILABLE", "该素材没有可保存的提示词", 400);
     const parameters = task?.parameters || metadata;
-    return this.create(actor, { title: titleFromPrompt(prompt), prompt, targetTool: toolFromOperation(task?.operationType || String(metadata.operationType || "image_generation"), parameters), modelConfigId: task?.modelConfigId || null, parameters, referenceAssetIds: asset.mimeType.startsWith("image/") ? [id] : [], sourceAssetId: id }, context);
+    const references = promptMarkupSourceAssetIds(parameters, task?.sourceUrls) ?? (asset.mimeType.startsWith("image/") ? [id] : []);
+    return this.create(actor, { title: titleFromPrompt(prompt), prompt, targetTool: toolFromOperation(task?.operationType || String(metadata.operationType || "image_generation"), parameters), modelConfigId: task?.modelConfigId || null, parameters, referenceAssetIds: references, sourceAssetId: id }, context);
   }
 
   close() { this.access("关闭个人提示词数据库", () => this.db.close(true)); }

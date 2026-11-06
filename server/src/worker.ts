@@ -1,4 +1,5 @@
 import { loadConfig } from "./config";
+import { videoFileExtension } from "../../shared/video-output";
 import { randomUUID } from "node:crypto";
 import { createCache, createDatabase, type Cache, type Database } from "./db";
 import { decryptSecret } from "./security";
@@ -435,6 +436,7 @@ async function executeApiMartImage(
     parameters: task.parameters,
     sourceImages: editInput.references,
     ...(editInput.mask ? { maskImage: editInput.mask } : {}),
+    ...(editInput.markup ? { markupImage: editInput.markup } : {}),
     upstreamTaskId: task.upstream_task_id,
     submissionStarted: Boolean(task.upstream_submission_started_at),
     submissionStartedAt: task.upstream_submission_started_at || task.started_at,
@@ -783,7 +785,7 @@ async function storeResults(
     throw new Error("公司对象存储尚未配置，不能保存生成结果");
   const urls: string[] = [];
   for (const [index, result] of results.entries()) {
-    if ("bytes" in result && ["image/png", "image/jpeg", "image/webp"].includes(result.mimeType)) {
+    if ("bytes" in result && ["image/png", "image/jpeg", "image/webp", "image/gif"].includes(result.mimeType)) {
       const primary = await storeImageResult({
         result, parameters: task.parameters, resultIndex: index,
         prepareEditInput: async () => {
@@ -827,7 +829,7 @@ async function saveResultAsset(task: WorkRow, index: number, result: ProviderRes
           : result.mimeType.includes("webm")
             ? "webm"
             : result.mimeType.startsWith("video/")
-              ? "mp4"
+              ? videoFileExtension(result.mimeType)
               : result.mimeType.includes("wav")
                 ? "wav"
                 : result.mimeType.includes("aac")

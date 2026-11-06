@@ -1,5 +1,5 @@
 import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
-import { imageModelProfile, imageModelSettingsError, imageReferenceSizeIsAutomatic, normalizeImageModelSettings } from "@/lib/image-model-settings";
+import { imageModelProfile, imageModelSettingsError, imageOutputIsGif, imageReferenceSizeIsAutomatic, normalizeImageModelSettings } from "@/lib/image-model-settings";
 import { validateImageReferences } from "@/lib/image-reference-policy";
 import { readGenerationReferenceDataUrl, requestQueuedImageBatch, requestQueuedImages, uploadImageReference, type QueuedBatchItem } from "@/services/api/generation-tasks";
 import { workspaceOwnerHeaders } from "@/services/api/workspace-owner";
@@ -9,7 +9,7 @@ import { dataUrlToFile } from "@/lib/image-utils";
 import { useUserStore } from "@/stores/use-user-store";
 import { createPromptCompilation, type PromptInputData } from "./prompt-compilations";
 import { fingerprintImage, generationDraftInput } from "./generation-history";
-import { imageAdvancedParameters, readImageOptions } from "@/lib/image-advanced-settings";
+import { imageAdvancedParameters, imageMarkupReference, readImageOptions } from "@/lib/image-advanced-settings";
 import { resolveToolConfig } from "./tool-runtime";
 import { createClientId } from "@/lib/client-id";
 import { parseCreateImageArguments, parseStrictJson } from "@/lib/strict-json";
@@ -61,6 +61,7 @@ function requestResolvedGeneration(resolved: Awaited<ReturnType<typeof resolveTo
     const count = Number(normalized.count);
     const validation = validateImageReferences(resolved.model.modelId, references || [], profile);
     if (!validation.valid) throw new Error(validation.message);
+    const markup = profile.supportsMarkup ? imageMarkupReference(config.imageOptions) : undefined;
     const actualPrompt = profile.requiresPrompt ? options?.promptInput || options?.exactPrompt ? prompt : withSystemPrompt(config, prompt) : "";
     if (!options?.promptInput) validateImagePrompt(actualPrompt, profile);
     return requestQueuedImages({
@@ -74,8 +75,8 @@ function requestResolvedGeneration(resolved: Awaited<ReturnType<typeof resolveTo
         operationType: options?.operationType || "image_generation",
         tool: options?.tool,
         parameters: { ...imageTaskParameters(config, profile, { referenceCount: references?.length || 0 }), ...(options?.imageAgentProfile ? { imageAgentProfile: options.imageAgentProfile } : {}) },
-        draft: generationDraftInput({ ...config, ...normalized }, profile.requiresPrompt ? options?.promptInput?.userText ?? prompt : ""),
-        references,
+        draft: { ...generationDraftInput({ ...config, ...normalized }, profile.requiresPrompt ? options?.promptInput?.userText ?? prompt : ""), ...(markup ? { markupReferenceIndex: references?.length || 0 } : {}) },
+        references: markup ? [...(references || []), markup] : references,
         requestId: options?.requestId,
         signal: options?.signal,
         cancelOnAbort: options?.cancelOnAbort,
@@ -118,9 +119,10 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     if (!options?.promptInput) validateImagePrompt(actualPrompt, profile);
     const count = Number(normalizeImageModelSettings(config, profile).count);
     const imageOptions = readImageOptions(config.imageOptions);
+    const markup = profile.supportsMarkup ? imageMarkupReference(config.imageOptions) : undefined;
     // Structured artwork scenes resolve their background on the server, including direct API callers.
     const serverBackground = options?.promptInput && ["pattern-extract", "pattern-colorway"].includes(options.promptInput.scene);
-    const transparent = !serverBackground && (profile.kind === "standard" || profile.kind === "quality-resolution") && references.length === 1 && !mask
+    const transparent = !serverBackground && !markup && (profile.kind === "standard" || profile.kind === "quality-resolution") && references.length === 1 && !mask
         && !imageOptions.background && !imageOptions.output_format
         && await import("@/lib/image-alpha").then(module => module.imageHasTransparency(references[0]!));
     options?.signal?.throwIfAborted();
@@ -135,8 +137,8 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
         operationType: options?.operationType || "inpaint",
         tool: options?.tool,
         parameters: { ...imageTaskParameters(config, profile, { mask: Boolean(mask), referenceCount: references.length }), ...(transparent ? { background: "transparent", output_format: "png" } : {}), ...(options?.imageAgentProfile ? { imageAgentProfile: options.imageAgentProfile } : {}) },
-        draft: { ...generationDraftInput({ ...config, ...normalizeImageModelSettings(config, profile) }, options?.promptInput?.userText ?? prompt), ...(mask ? { maskReferenceIndex: references.length } : {}) },
-        references: [...references, ...(mask ? [mask] : [])],
+        draft: { ...generationDraftInput({ ...config, ...normalizeImageModelSettings(config, profile) }, options?.promptInput?.userText ?? prompt), ...(mask ? { maskReferenceIndex: references.length } : {}), ...(markup ? { markupReferenceIndex: references.length } : {}) },
+        references: [...references, ...(mask ? [mask] : []), ...(markup ? [markup] : [])],
         requestId: options?.requestId,
         signal: options?.signal,
         cancelOnAbort: options?.cancelOnAbort,
@@ -148,10 +150,16 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
 export function imageTaskParameters(config: AiConfig, profile = imageModelProfile(config.model || config.imageModel), options: { mask?: boolean; referenceCount?: number } = {}) {
     if (!profile.verified) return imageAdvancedParameters(config.imageOptions, { kind: "unverified" });
     const automaticReferenceSize = imageReferenceSizeIsAutomatic(profile, options.referenceCount || 0);
-    const error = automaticReferenceSize ? "" : imageModelSettingsError(config.size, profile);
+    const error = automaticReferenceSize ? "" : imageModelSettingsError(config.size, profile, config.imageOptions);
     if (error) throw new Error(error);
     const { size, quality } = normalizeImageModelSettings(config, profile);
     const optionValues = readImageOptions(config.imageOptions);
+    const markup = profile.supportsMarkup ? imageMarkupReference(config.imageOptions) : undefined;
+    if (markup && (!options.referenceCount || options.mask)) throw new Error(options.mask ? "标注层与蒙版不能同时使用" : "标注层需要至少一张参考图");
+    if (imageOutputIsGif(config.imageOptions, profile)) {
+        if (options.referenceCount || options.mask || markup) throw new Error("GIF 仅支持文生图，不能使用参考图、蒙版或标注层");
+        if (optionValues.background === "transparent") throw new Error("透明背景只能使用 PNG 或 WebP 输出格式");
+    }
     // MAI editing ignores dimensions. Every other supported value remains strict:
     // only an explicit UI model change may adapt invalid old selections.
     if (automaticReferenceSize) for (const key of ["size", "resolution", "width", "height"]) delete optionValues[key];
@@ -165,6 +173,7 @@ export function imageTaskParameters(config: AiConfig, profile = imageModelProfil
     }
     if (profile.kind === "grok-image") return { size, resolution: "1k", ...advanced, ...(options.referenceCount ? {} : { quality }) };
     if (profile.kind === "quality-resolution") {
+        if (imageOutputIsGif(config.imageOptions, profile)) return { size, quality, ...advanced };
         const parameters: Record<string, unknown> = { size, quality, resolution: "1k", ...advanced };
         // A mask is defined in the source image's pixel grid; do not reintroduce a global/default resolution.
         if (options.mask && /^[1-9]\d*x[1-9]\d*$/.test(size)) delete parameters.resolution;

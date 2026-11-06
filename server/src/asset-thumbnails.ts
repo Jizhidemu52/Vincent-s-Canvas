@@ -21,16 +21,18 @@ function run(tool: "ffmpeg" | "ffprobe", args: string[], maxBuffer = 8 * 1024 * 
 }
 const limits = ["-v", "error", "-max_alloc", "134217728", "-threads", "1", "-protocol_whitelist", "file,pipe", "-format_whitelist", formats];
 async function thumbnailsFromFile(file: string, signal?: AbortSignal, sizes: readonly (256 | 1024)[] = [256, 1024]) {
-  const info = JSON.parse((await run("ffprobe", [...limits, "-select_streams", "v:0", "-show_entries", "stream=width,height,duration:format=duration", "-of", "json", file], 64 * 1024, signal)).toString());
+  const info = JSON.parse((await run("ffprobe", [...limits, "-select_streams", "v:0", "-show_entries", "stream=width,height,duration:format=duration,format_name", "-of", "json", file], 64 * 1024, signal)).toString());
   const { width, height } = info.streams?.[0] || {};
   if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 || width > 16384 || height > 16384 || width * height > 67_108_864) {
     throw new Error("缩略图媒体尺寸无效或超出安全限制");
   }
   const result = {} as Record<256 | 1024, Buffer>;
+  const animated = info.format?.format_name === "gif";
   for (const size of sizes) {
-    result[size] = await run("ffmpeg", ["-nostdin", ...limits, "-i", file, "-map", "0:v:0", "-frames:v", "1",
+    result[size] = await run("ffmpeg", ["-nostdin", ...limits, "-i", file, "-map", "0:v:0", "-frames:v", animated ? "128" : "1",
       "-vf", `scale=w='min(${size},iw)':h='min(${size},ih)':force_original_aspect_ratio=decrease`,
-      "-threads", "1", "-c:v", "libwebp", "-quality", "82", "-f", "image2pipe", "pipe:1"], undefined, signal);
+      "-threads", "1", "-c:v", animated ? "libwebp_anim" : "libwebp", "-quality", "82",
+      ...(animated ? ["-loop", "0", "-f", "webp"] : ["-f", "image2pipe"]), "pipe:1"], undefined, signal);
     if ((await fileTypeFromBuffer(result[size]))?.mime !== "image/webp") throw new Error("缩略图编码器未返回 WebP");
   }
   const streamDuration = Number(info.streams?.[0]?.duration);

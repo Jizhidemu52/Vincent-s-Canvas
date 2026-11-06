@@ -32,6 +32,33 @@ async function fixture(invoke: PromptOptimizer["invoke"] = async () => ({ conten
 }
 
 describe("prompt compiler lifecycle", () => {
+  test("optimized GPT2.6 markup submission reuses the same compilation without sending the overlay to the optimizer", async () => {
+    const f = await fixture();
+    f.runtime.resolveTarget = async () => ({ id: "target", modelId: "gpt-image-2.6-flare", protocol: "apimart", fingerprint: "target" });
+    const first = request({ sourceUrls: ["original", "style"], promptInput: { ...request().promptInput, referenceRoles: ["subject", "style"] } });
+    const compiled = await f.compiler.compile(actor, first);
+    const sources = ["original", "overlay", "style"];
+    const input = { ...first, requestId: randomUUID(), operationType: "image_generation", prompt: "ignored", sourceUrls: sources,
+      parameters: { inputArchive: { markupReferenceIndex: 1 } }, promptInput: { ...first.promptInput, compilationId: compiled.id } };
+    const prepared = await preparePromptTaskInput(f.compiler, actor, input);
+    expect(prepared.promptCompilationId).toBe(compiled.id);
+    expect(prepared.sourceUrls).toEqual(sources);
+    expect(prepared.parameters.inputArchive).toMatchObject({ markupReferenceIndex: 1 });
+    expect(f.calls).toHaveLength(1);
+  });
+  test("invalid markup routes and indexes stop before any optimizer invocation", async () => {
+    for (const index of [0, -1, 2, 1.5, "1", null]) {
+      const f = await fixture();
+      f.runtime.resolveTarget = async () => ({ id: "target", modelId: "gpt-image-2.6-flare", protocol: "apimart", fingerprint: "target" });
+      await expect(preparePromptTaskInput(f.compiler, actor, { ...request(), operationType: "image_generation", prompt: "x",
+        parameters: { inputArchive: { markupReferenceIndex: index } }, sourceUrls: ["original", "overlay"] })).rejects.toThrow("标注");
+      expect(f.calls).toHaveLength(0);
+    }
+    const f = await fixture();
+    await expect(preparePromptTaskInput(f.compiler, actor, { ...request(), operationType: "image_generation", prompt: "x",
+      parameters: { inputArchive: { markupReferenceIndex: 1 } }, sourceUrls: ["original", "overlay"] })).rejects.toThrow("标注");
+    expect(f.calls).toHaveLength(0);
+  });
   test("invalid explicit lettering stops before paid optimizer or compilation claim", async () => {
     const f = await fixture();
     const input = request(); input.promptInput.fields.keep_text = [null];

@@ -24,6 +24,7 @@ export function canvasPromptTemplateMetadata(payload: PromptReusePayload, refere
             videoMode: value("videoMode", "mode"), vquality: value("vquality", "resolution"),
             generateAudio: value("videoGenerateAudio", "generateAudio", "generate_audio"),
             watermark: value("videoWatermark", "watermark"),
+            videoSeed: value("videoSeed", "seed"), videoOutputFormat: value("videoOutputFormat", "outputFormat", "output_format"),
         }),
         systemPrompt: value("systemPrompt", "system_prompt"),
         configImageInputMode: "combined", manualImageReferences: references,

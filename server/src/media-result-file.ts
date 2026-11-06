@@ -1,4 +1,6 @@
 import { createTemporaryMediaFile } from "./media-file";
+import { open } from "node:fs/promises";
+import { videoResultMimeType } from "./video-result-type";
 
 export type BufferedProviderResult = { bytes: Uint8Array; mimeType: string };
 export type FileProviderResult = { filePath: string; byteSize: number; mimeType: string; dispose: () => Promise<void> };
@@ -15,7 +17,16 @@ export async function downloadVideoResult(url: string, fetcher: (url: string, in
   }
   if (!response.body) throw new Error("视频结果为空");
   const file = await createTemporaryMediaFile(response.body, { signal, prefix: "canvas-video-result-" });
-  return { filePath: file.path, byteSize: file.byteSize, mimeType, dispose: file.dispose };
+  try {
+    const handle = await open(file.path, "r");
+    let actualMime: string;
+    try {
+      const head = Buffer.alloc(8192);
+      const { bytesRead } = await handle.read(head, 0, head.length, 0);
+      actualMime = await videoResultMimeType(head.subarray(0, bytesRead), contentType);
+    } finally { await handle.close(); }
+    return { filePath: file.path, byteSize: file.byteSize, mimeType: actualMime, dispose: file.dispose };
+  } catch (error) { await file.dispose(); throw error; }
 }
 
 /** Cleanup must never turn a successfully paid task into an automatic retry. */

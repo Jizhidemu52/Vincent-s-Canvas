@@ -1,6 +1,6 @@
 import { uiText, useUiLocale } from "@/lib/i18n";
 import { useEffect, type ReactNode } from "react";
-import { Select, Switch } from "antd";
+import { Input, Select, Switch } from "antd";
 
 import { ImageSettingsTheme } from "@/components/image-settings-panel";
 import { type CanvasTheme } from "@/lib/canvas-theme";
@@ -71,6 +71,11 @@ export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = 
                             {spec.supportsAudio ? <SwitchRow label={uiText("生成声音")} checked={normalized.videoGenerateAudio === "true"} theme={theme} onChange={(checked) => onConfigChange("videoGenerateAudio", String(checked))} /> : null}
                             {spec.supportsWatermark ? <SwitchRow label={uiText("添加水印")} checked={normalized.videoWatermark === "true"} theme={theme} onChange={(checked) => onConfigChange("videoWatermark", String(checked))} /> : null}
                         </div>
+                        {spec.outputFormats ? <Select aria-label={uiText("视频输出格式")} className="w-full" value={normalized.videoOutputFormat} onChange={value => onConfigChange("videoOutputFormat", value)} options={spec.outputFormats.map(value => ({ value, label: value.toUpperCase() }))} /> : null}
+                    </SettingGroup> : null}
+                    {spec.supportsSeed ? <SettingGroup title={uiText("随机种子")} color={theme.node.muted}>
+                        <Input aria-label={uiText("视频随机种子")} inputMode="numeric" value={normalized.videoSeed} onChange={event => onConfigChange("videoSeed", event.target.value)} placeholder={uiText("留空则随机")} />
+                        {spec.seedMaximum !== undefined ? <p className="text-xs" style={{ color: theme.node.muted }}>0–{spec.seedMaximum}</p> : null}
                     </SettingGroup> : null}
                     <div className="space-y-1 text-xs leading-4" style={{ color: theme.node.muted }}><p>{uiText(spec.imageInputHint)}</p>{spec.mediaHint ? <p>{uiText(spec.mediaHint)}</p> : null}{spec.audioHint ? <p>{uiText(spec.audioHint)}</p> : null}</div>
                 </>}

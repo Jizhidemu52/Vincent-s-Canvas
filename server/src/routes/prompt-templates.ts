@@ -10,6 +10,8 @@ import { canManageGroup, isGroupLeader } from "../group-scope";
 import { assertModuleEnabled } from "../module-flags";
 import {
   promptSnapshotSchema,
+  promptMarkupSourceAssetIds,
+  assertPromptMarkupReferencesAvailable,
   PromptTemplateError,
   resolveCurrentPromptPricing,
   type PromptSnapshot,
@@ -90,13 +92,14 @@ export function createPromptTemplatesRouter(db: Database) {
   router.post("/from-task/:taskId", async (request, response, next) => {
     try {
       const actor = auth(request);
-      const result = await db.query<{ id: string; prompt: string; operationType: string; modelConfigId: string | null; parameters: Record<string, unknown> }>(
-        `SELECT id,prompt,operation_type AS "operationType",model_config_id AS "modelConfigId",parameters FROM tasks WHERE id=$1 AND user_id=$2 AND status='success'`, [request.params.taskId, actor.id],
+      const result = await db.query<{ id: string; prompt: string; operationType: string; modelConfigId: string | null; parameters: Record<string, unknown>; sourceUrls: string[] }>(
+        `SELECT id,prompt,operation_type AS "operationType",model_config_id AS "modelConfigId",parameters,source_urls AS "sourceUrls" FROM tasks WHERE id=$1 AND user_id=$2 AND status='success'`, [request.params.taskId, actor.id],
       );
       const task = result.rows[0];
       if (!task) throw notFound();
       const assets = await db.query<{ id: string }>("SELECT id FROM assets WHERE task_id=$1 AND owner_user_id=$2 AND deleted_at IS NULL AND NOT (COALESCE(metadata->'imageResult'->>'version','')='1' AND COALESCE(metadata->'imageResult'->>'role','') IN ('provider-original','export')) ORDER BY created_at LIMIT 20", [task.id, actor.id]);
-      const snapshot = promptSnapshotSchema.parse({ title: titleFromPrompt(task.prompt), prompt: task.prompt, targetTool: toolFromOperation(task.operationType, task.parameters), modelConfigId: task.modelConfigId, parameters: task.parameters, referenceAssetIds: assets.rows.map((item) => item.id), sourceTaskId: task.id });
+      const referenceAssetIds = promptMarkupSourceAssetIds(task.parameters, task.sourceUrls) ?? assets.rows.map((item) => item.id);
+      const snapshot = promptSnapshotSchema.parse({ title: titleFromPrompt(task.prompt), prompt: task.prompt, targetTool: toolFromOperation(task.operationType, task.parameters), modelConfigId: task.modelConfigId, parameters: task.parameters, referenceAssetIds, sourceTaskId: task.id });
       const template = await createPersonalTemplate(db, actor, snapshot);
       await writeAudit(db, { actor, action: "prompt.saved_from_task", targetType: "prompt_template", targetId: template.id, departmentId: actor.departmentId, result: "success", detail: { taskId: task.id }, ip: request.ip });
       response.status(201).json({ template });
@@ -106,12 +109,14 @@ export function createPromptTemplatesRouter(db: Database) {
   router.post("/from-asset/:assetId", async (request, response, next) => {
     try {
       const actor = auth(request);
-      const result = await db.query<{ id: string; prompt: string; operationType: string | null; modelConfigId: string | null; metadata: Record<string, unknown> }>(
-        `SELECT id,coalesce(prompt,'') AS prompt,operation_type AS "operationType",model_config_id AS "modelConfigId",metadata FROM assets WHERE id=$1 AND owner_user_id=$2 AND deleted_at IS NULL AND status='ready'`, [request.params.assetId, actor.id],
+      const result = await db.query<{ id: string; prompt: string; operationType: string | null; modelConfigId: string | null; metadata: Record<string, unknown>; taskParameters: Record<string, unknown> | null; sourceUrls: string[] | null }>(
+        `SELECT a.id,coalesce(a.prompt,'') AS prompt,a.operation_type AS "operationType",a.model_config_id AS "modelConfigId",a.metadata,t.parameters AS "taskParameters",t.source_urls AS "sourceUrls" FROM assets a LEFT JOIN tasks t ON t.id=a.task_id AND t.user_id=$2 WHERE a.id=$1 AND a.owner_user_id=$2 AND a.deleted_at IS NULL AND a.status='ready'`, [request.params.assetId, actor.id],
       );
       const asset = result.rows[0];
       if (!asset?.prompt.trim()) throw new PromptTemplateError("PROMPT_UNAVAILABLE", "该素材没有可保存的提示词", 400);
-      const snapshot = promptSnapshotSchema.parse({ title: titleFromPrompt(asset.prompt), prompt: asset.prompt, targetTool: toolFromOperation(asset.operationType ?? "image_generation", asset.metadata), modelConfigId: asset.modelConfigId, parameters: asset.metadata, referenceAssetIds: [asset.id], sourceAssetId: asset.id });
+      const markupRefs = promptMarkupSourceAssetIds(asset.taskParameters ?? asset.metadata, asset.sourceUrls ?? undefined);
+      const parameters = markupRefs ? asset.taskParameters ?? asset.metadata : asset.metadata;
+      const snapshot = promptSnapshotSchema.parse({ title: titleFromPrompt(asset.prompt), prompt: asset.prompt, targetTool: toolFromOperation(asset.operationType ?? "image_generation", parameters), modelConfigId: asset.modelConfigId, parameters, referenceAssetIds: markupRefs ?? [asset.id], sourceAssetId: asset.id });
       const template = await createPersonalTemplate(db, actor, snapshot);
       await writeAudit(db, { actor, action: "prompt.saved_from_asset", targetType: "prompt_template", targetId: template.id, departmentId: actor.departmentId, result: "success", detail: { assetId: asset.id }, ip: request.ip });
       response.status(201).json({ template });
@@ -266,6 +271,7 @@ export function createPromptTemplatesRouter(db: Database) {
       if (!token.rows[0]) throw new PromptTemplateError("REUSE_TOKEN_INVALID", "复用链接已失效，请重新点击模板", 404);
       const template = await loadTemplate(db, actor, token.rows[0].templateId, token.rows[0].versionId);
       const accessible = await accessibleReferences(db, actor, template.referenceAssetIds);
+      assertPromptMarkupReferencesAvailable(template.parameters, template.referenceAssetIds, accessible);
       response.json({ template: { ...template, referenceAssetIds: accessible }, mode: token.rows[0].mode, pricing: token.rows[0].resolution, warnings: accessible.length === template.referenceAssetIds.length ? [] : ["部分参考图已删除或当前无权访问"] });
     } catch (error) { next(error); }
   });
@@ -420,7 +426,8 @@ async function accessibleReferences(db: Queryable, actor: SessionUser, ids: stri
   else if (actor.role === "department_admin") access += " OR a.department_id=$3";
   else if (isGroupLeader(actor)) { values.push(actor.groupId); access += ` OR EXISTS(SELECT 1 FROM group_memberships gm WHERE gm.group_id=$4 AND gm.user_id=a.owner_user_id AND gm.effective_at<=a.created_at AND (gm.ended_at IS NULL OR gm.ended_at>a.created_at))`; }
   const result = await db.query<{ id: string }>(`SELECT a.id FROM assets a WHERE a.id=ANY($1::uuid[]) AND a.deleted_at IS NULL AND a.status='ready' AND (${access})`, values);
-  return result.rows.map((item) => item.id);
+  const available = new Set(result.rows.map((item) => item.id));
+  return ids.filter(id => available.has(id));
 }
 
 async function assertPublishableReferences(db: Queryable, versionId: string, scope: "team" | "public", departmentId: string | null) {

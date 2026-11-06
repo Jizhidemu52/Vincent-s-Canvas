@@ -3,6 +3,15 @@ import { describe, expect, test } from "bun:test";
 import { apiMartImageModel, buildApiMartImageRequest } from "../src/apimart-image";
 
 describe("APIMart image protocol adapter", () => {
+  test("GPT2 edits preserve source sizing when unspecified and invalid resolution/count never silently fall back", () => {
+    const input = { modelId: "gpt-image-2", prompt: "keep source dimensions", parameters: {}, sourceDataUrls: ["data:image/png;base64,AA=="] };
+    expect(buildApiMartImageRequest(input).payload).not.toHaveProperty("size");
+    expect(buildApiMartImageRequest({ ...input, sourceDataUrls: [] }).payload.size).toBe("1:1");
+    for (const modelId of ["gpt-image-2", "gemini-3.1-flash-image-preview-official"]) {
+      for (const resolution of ["8k", 4, null]) expect(() => buildApiMartImageRequest({ ...input, modelId, parameters: { resolution } })).toThrow("resolution");
+      expect(() => buildApiMartImageRequest({ ...input, modelId, parameters: { n: 2 } })).toThrow("n 必须为 1");
+    }
+  });
   test("recognizes the configured image model aliases", () => {
     expect(apiMartImageModel("gpt-image-2-ext")).toBe("gpt-image-2");
     expect(apiMartImageModel("vcen-gpt2")).toBe("gpt-image-2");

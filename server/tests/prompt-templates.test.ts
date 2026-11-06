@@ -4,6 +4,8 @@ import {
   operationForPromptTool,
   pricePromptModel,
   promptSnapshotSchema,
+  promptMarkupSourceAssetIds,
+  assertPromptMarkupReferencesAvailable,
   quantityFromParameters,
   resolvePromptModel,
   validateReplacementSelection,
@@ -23,6 +25,20 @@ const model = (input: Partial<PromptModelCandidate> & Pick<PromptModelCandidate,
 });
 
 describe("prompt template snapshots", () => {
+  test("markup keeps an ordered source index and rejects deduplication or missing-layer ambiguity", () => {
+    const refs = [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()];
+    const parameters = { inputArchive: { markupReferenceIndex: 1 } };
+    const base = { title: "annotated", prompt: "keep shape", targetTool: "image-edit", parameters, referenceAssetIds: refs };
+    expect(promptSnapshotSchema.parse(base).referenceAssetIds).toEqual(refs);
+    expect(promptMarkupSourceAssetIds(parameters, refs.map(id => `/api/assets/${id}/content`))).toEqual(refs);
+    expect(() => promptSnapshotSchema.parse({ ...base, referenceAssetIds: [refs[0], refs[0], refs[1]] })).toThrow("标注模板");
+    for (const index of [0, -1, 3, 1.5, "1", null]) expect(() => promptSnapshotSchema.parse({ ...base, parameters: { inputArchive: { markupReferenceIndex: index } } })).toThrow("标注模板");
+    expect(() => promptMarkupSourceAssetIds(parameters, ["https://outside.example/a.png"])).toThrow("公司素材");
+    expect(() => promptMarkupSourceAssetIds(parameters, undefined)).toThrow("原始参考图");
+    expect(() => assertPromptMarkupReferencesAvailable(parameters, refs, [refs[0]!, refs[2]!])).toThrow("不能省略");
+    expect(() => assertPromptMarkupReferencesAvailable(parameters, refs, [...refs].reverse())).toThrow("不能省略");
+    expect(() => assertPromptMarkupReferencesAvailable(parameters, refs, refs)).not.toThrow();
+  });
   test("normalizes reproducible inputs without retaining duplicate tags or references", () => {
     const result = promptSnapshotSchema.parse({
       title: "  白底商品图  ", prompt: "  保持服装结构，生成白底商品图  ", targetTool: "image-edit",

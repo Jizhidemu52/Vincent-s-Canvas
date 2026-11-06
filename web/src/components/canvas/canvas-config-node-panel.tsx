@@ -215,7 +215,7 @@ export function CanvasConfigNodePanel({ node, isRunning, linkedTaskCount = 0, li
                 {hasAvailableModel && mode === "video" ? (
                     <CanvasVideoSettingsPopover config={config} referenceCount={imageCount} imageMode={config.videoMode} placement="topRight" buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))} />
                 ) : hasAvailableModel && mode === "image" ? (
-                    <CanvasImageSettingsPopover config={config} taskCount={Math.max(1, taskCount)} referenceCount={separateImages ? 1 + (node.metadata?.manualImageReferences?.length || 0) : imageCount} placement="topRight" autoAdjustOverflow={false} buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, key === "count" ? { count: Number(value) || 1 } : { [key]: value })} />
+                    <CanvasImageSettingsPopover config={config} taskCount={Math.max(1, taskCount)} referenceCount={separateImages ? 1 + (node.metadata?.manualImageReferences?.length || 0) : imageCount} uploadContextKey={mentionCatalog.scopeKey ? JSON.stringify([mentionCatalog.scopeKey, node.id, node.metadata?.composerContent ?? node.metadata?.prompt, references.map(reference => [reference.id, reference.storageKey, reference.dataUrl, reference.url])]) : undefined} placement="topRight" autoAdjustOverflow={false} buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, key === "count" ? { count: Number(value) || 1 } : { [key]: value })} />
                 ) : hasAvailableModel && mode === "audio" ? (
                     <CanvasAudioSettingsPopover config={config} placement="topRight" buttonClassName="canvas-compact-control !h-10 !w-full !justify-start !rounded-lg !px-2" onConfigChange={(key, value) => onConfigChange(node.id, audioConfigPatch(key, value))} />
                 ) : null}
@@ -315,6 +315,8 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: Can
         vquality: node.metadata?.vquality || globalConfig.vquality || defaultConfig.vquality,
         videoGenerateAudio: node.metadata?.generateAudio || globalConfig.videoGenerateAudio || defaultConfig.videoGenerateAudio,
         videoWatermark: node.metadata?.watermark || globalConfig.videoWatermark || defaultConfig.videoWatermark,
+        videoSeed: node.metadata?.videoSeed ?? globalConfig.videoSeed ?? "",
+        videoOutputFormat: node.metadata?.videoOutputFormat || globalConfig.videoOutputFormat || "mp4",
         audioVoice: node.metadata?.audioVoice || globalConfig.audioVoice || defaultConfig.audioVoice,
         audioFormat: node.metadata?.audioFormat || globalConfig.audioFormat || defaultConfig.audioFormat,
         audioSpeed: node.metadata?.audioSpeed || globalConfig.audioSpeed || defaultConfig.audioSpeed,

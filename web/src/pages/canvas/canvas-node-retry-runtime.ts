@@ -193,6 +193,8 @@ export async function retryCanvasNode(node: CanvasNodeData, action: Context) {
                                   vquality: generationConfig.vquality,
                                   generateAudio: generationConfig.videoGenerateAudio,
                                   watermark: generationConfig.videoWatermark,
+                                  videoSeed: generationConfig.videoSeed,
+                                  videoOutputFormat: generationConfig.videoOutputFormat,
                               },
                           }
                         : item,

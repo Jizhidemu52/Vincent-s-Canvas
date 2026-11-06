@@ -41,6 +41,13 @@ export const promptSnapshotSchema = z.object({
   notes: z.string().trim().max(2_000).default(""),
   sourceTaskId: z.string().uuid().nullable().optional(),
   sourceAssetId: z.string().uuid().nullable().optional(),
+}).superRefine((value, context) => {
+  const index = promptMarkupIndex(value.parameters);
+  if (index === undefined) return;
+  if (typeof index !== "number" || !Number.isInteger(index) || index < 1 || index >= value.referenceAssetIds.length
+    || new Set(value.referenceAssetIds).size !== value.referenceAssetIds.length || value.targetTool === "video") {
+    context.addIssue({ code: "custom", path: ["referenceAssetIds"], message: "标注模板必须保留完整有序且不重复的原图与标注层" });
+  }
 }).transform((value) => ({
   ...value,
   tags: [...new Set(value.tags)],
@@ -49,6 +56,28 @@ export const promptSnapshotSchema = z.object({
 
 export type PromptSnapshotInput = z.input<typeof promptSnapshotSchema>;
 export type PromptSnapshot = z.output<typeof promptSnapshotSchema>;
+
+function promptMarkupIndex(parameters: Record<string, unknown>) {
+  const archive = parameters.inputArchive;
+  return archive && typeof archive === "object" && !Array.isArray(archive) ? (archive as Record<string, unknown>).markupReferenceIndex : undefined;
+}
+
+/** Indexed annotation templates reproduce task inputs, never replace them with generated outputs. */
+export function promptMarkupSourceAssetIds(parameters: Record<string, unknown>, sourceUrls: readonly string[] | undefined) {
+  if (promptMarkupIndex(parameters) === undefined) return undefined;
+  if (!sourceUrls?.length) throw new PromptTemplateError("MARKUP_REFERENCE_UNAVAILABLE", "标注模板缺少原始参考图或标注层，不能保存为完整模板");
+  return sourceUrls.map(url => {
+    const id = /^\/api\/assets\/([0-9a-f-]{36})\/content$/i.exec(url)?.[1];
+    if (!id || !z.string().uuid().safeParse(id).success) throw new PromptTemplateError("MARKUP_REFERENCE_UNAVAILABLE", "标注模板必须使用可验证归属的公司素材");
+    return id;
+  });
+}
+
+export function assertPromptMarkupReferencesAvailable(parameters: Record<string, unknown>, expected: readonly string[], accessible: readonly string[]) {
+  if (promptMarkupIndex(parameters) !== undefined && (expected.length !== accessible.length || expected.some((id, index) => id !== accessible[index]))) {
+    throw new PromptTemplateError("MARKUP_REFERENCE_UNAVAILABLE", "标注模板的原图或标注层已不可用，不能省略后继续生成");
+  }
+}
 
 export type PromptModelCandidate = {
   id: string;

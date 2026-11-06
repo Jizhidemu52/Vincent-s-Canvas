@@ -40,6 +40,8 @@ export type AiConfig = {
     vquality: string;
     videoGenerateAudio: string;
     videoWatermark: string;
+    videoSeed: string;
+    videoOutputFormat: string;
     claudeStream: string;
     claudeThinking: string;
     claudeMaxTokens: string;
@@ -93,6 +95,8 @@ export const defaultConfig: AiConfig = {
     vquality: "720p",
     videoGenerateAudio: "false",
     videoWatermark: "false",
+    videoSeed: "",
+    videoOutputFormat: "mp4",
     claudeStream: "true",
     claudeThinking: "false",
     claudeMaxTokens: "2048",
@@ -237,6 +241,8 @@ export const useConfigStore = create<ConfigStore>()(
                         vquality: config.vquality || "1080P",
                         videoGenerateAudio: config.videoGenerateAudio || "true",
                         videoWatermark: config.videoWatermark || "false",
+                        videoSeed: config.videoSeed || "",
+                        videoOutputFormat: config.videoOutputFormat || "mp4",
                         claudeStream: config.claudeStream === "false" ? "false" : "true",
                         claudeThinking: config.claudeThinking === "true" ? "true" : "false",
                         claudeMaxTokens: config.claudeMaxTokens || "2048",

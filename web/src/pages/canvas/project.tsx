@@ -33,7 +33,6 @@ import { CanvasOverviewLayer, type CanvasOverviewLayerHandle } from "@/component
 import { canvasLinkCopiedMessage } from "@/components/canvas/canvas-save-status";
 import { CanvasSelectionOverlay, type CanvasSelectionOverlayHandle } from "@/components/canvas/canvas-selection-overlay";
 import { CanvasToolbar } from "@/components/canvas/canvas-toolbar";
-import { CanvasImageQuickActions } from "@/components/canvas/canvas-image-quick-actions";
 import { CanvasTopBar } from "@/components/canvas/canvas-top-bar";
 import { WirelessCanvas, type WirelessCanvasHandle } from "@/components/canvas/wireless-canvas";
 import { NODE_DEFAULT_SIZE } from "@/constant/canvas";
@@ -177,6 +176,7 @@ const loadCanvasPanelControls = () => import("@/components/canvas/canvas-panel-s
 const CanvasPanelResizeHandle = lazy(() => loadCanvasPanelControls().then(module => ({ default: module.CanvasPanelResizeHandle })));
 const CanvasPanelSizeControl = lazy(() => loadCanvasPanelControls().then(module => ({ default: module.CanvasPanelSizeControl })));
 const CanvasNodeHoverToolbar = lazy(loadCanvasNodeHoverToolbar);
+const CanvasImageQuickActions = lazy(() => import("@/components/canvas/canvas-image-quick-actions").then(module => ({ default: module.CanvasImageQuickActions })));
 
 const VIDEO_NODE_MAX_WIDTH = 420;
 const VIDEO_NODE_MAX_HEIGHT = 420;
@@ -497,7 +497,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
     });
     const {
         quickGenerateOpen, setQuickGenerateOpen, quickGeneratePromptRef, quickGeneratePromptRevision,
-        quickGenerateNodeId, loadQuickGenerationNode, onQuickPromptChange, flushQuickNodeDraft, normalizeQuickGenerateSettings,
+        quickGenerateNodeId, loadQuickGenerationNode, syncQuickGenerationNode, onQuickPromptChange, flushQuickNodeDraft, normalizeQuickGenerateSettings,
         setQuickGeneratePrompt, quickGeneratePosition, setQuickGeneratePosition, quickGenerateModel,
         setQuickGenerateModel, quickGenerateSize, setQuickGenerateSize, quickGenerateQuality,
         setQuickGenerateQuality, quickGenerateCount, setQuickGenerateCount, quickGenerateImageOptions,
@@ -578,11 +578,15 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
         } });
     }, [flushEditorDrafts, flushPendingHistory, message, modal, undoCanvasNow]);
     const beginHistoryEditing = useCallback((target: EventTarget) => {
-        if (!(target instanceof Element) || !target.matches("input,textarea,[contenteditable='true']") || target.closest(".cw-agent-panel,[role='dialog']") || editTransactionRef.current) return;
+        if (!(target instanceof Element) || !target.matches("input,textarea,[contenteditable='true']") || target.closest(".cw-agent-panel,[role='dialog']")) return;
+        // Commit the previous editor before the other textarea starts a newer
+        // draft; its delayed commit must not overwrite the next editor's input.
+        flushEditorDrafts();
+        if (editTransactionRef.current) return;
         flushPendingHistory();
         if (historyCommitTimerRef.current) { clearTimeout(historyCommitTimerRef.current); historyCommitTimerRef.current = null; }
         editTransactionRef.current = true;
-    }, [flushPendingHistory]);
+    }, [flushEditorDrafts, flushPendingHistory]);
     const finishHistoryEditing = useCallback(() => {
         queueMicrotask(() => {
             if (!editTransactionRef.current) return;
@@ -1045,20 +1049,24 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
     const editorOwner = useUserStore(state => state.user ? `user:${state.user.id}:${state.user.role}` : state.status);
     const editorSelectionKey = `${projectId}:${editorOwner}:${Array.from(selectedNodeIds).sort().join(",")}`;
     useEffect(() => {
-        if (!projectLoaded || lastEditorSelectionRef.current === editorSelectionKey) return;
+        if (!projectLoaded) return;
         // Wait for the graph to hydrate before accepting the selection identity.
         if (singleSelectedNodeId && !nodeById.has(singleSelectedNodeId)) return;
+        const selectedImage = singleSelectedNodeId ? nodeById.get(singleSelectedNodeId) : undefined;
+        if (lastEditorSelectionRef.current === editorSelectionKey) {
+            if (selectedImage?.type === CanvasNodeType.Image) syncQuickGenerationNode(selectedImage);
+            return;
+        }
         lastEditorSelectionRef.current = editorSelectionKey;
         // Each image owns its generation inputs and draft. Never show the last
         // global creation settings as the selected result's provenance.
-        const selectedImage = singleSelectedNodeId ? nodeById.get(singleSelectedNodeId) : undefined;
         if (selectedImage?.type === CanvasNodeType.Image) {
             loadQuickGenerationNode(selectedImage);
             return;
         }
         loadQuickGenerationNode(null);
         setQuickGenerateReferences(current => syncCanvasSelectionReferences(current, selectedNodeIds, nodeById));
-    }, [editorSelectionKey, loadQuickGenerationNode, nodeById, projectLoaded, selectedNodeIds, setQuickGenerateReferences, singleSelectedNodeId]);
+    }, [editorSelectionKey, loadQuickGenerationNode, nodeById, projectLoaded, selectedNodeIds, setQuickGenerateReferences, singleSelectedNodeId, syncQuickGenerationNode]);
     const quickGenerateSourceNode = quickGenerateNodeId ? nodeById.get(quickGenerateNodeId) : undefined;
     const quickMentionImages = useMemo<ConversationImageItem[]>(() => [
         ...nodes.filter(node => node.type === CanvasNodeType.Image && (node.metadata?.content || node.metadata?.storageKey)).map((node, index) => ({ id: `canvas:${node.id}`, label: `图${index + 1}`, name: node.title, dataUrl: node.metadata?.content, storageKey: node.metadata?.storageKey, source: "canvas" as const })),
@@ -2230,7 +2238,15 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
             resizePreviewRafRef.current = null;
         }
         pendingResizePreviewRef.current = null;
-        setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, width, height, position } : node)));
+        setNodes((prev) => {
+            let changed = false;
+            const next = prev.map(node => {
+                if (node.id !== nodeId || (node.width === width && node.height === height && node.position.x === position.x && node.position.y === position.y)) return node;
+                changed = true;
+                return { ...node, width, height, position };
+            });
+            return changed ? next : prev;
+        });
         resizePreviewRef.current = new Map();
         setResizePreviewById(resizePreviewRef.current);
         resizeConnectionIdsRef.current = new Set();
@@ -2357,17 +2373,21 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
         setNodes((prev) => {
             const next = prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, ...canvasNodePromptDraftPatch(prompt) } } : node));
             nodesRef.current = next;
+            const node = next.find(item => item.id === nodeId);
+            if (node) syncQuickGenerationNode(node);
             return next;
         });
-    }, []);
+    }, [syncQuickGenerationNode]);
 
     const handleConfigNodeChange = useCallback((nodeId: string, patch: Partial<CanvasNodeData["metadata"]>) => {
         setNodes((prev) => {
             const next = prev.map((node) => (node.id === nodeId ? applyNodeConfigPatch(node, patch) : node));
             nodesRef.current = next;
+            const node = next.find(item => item.id === nodeId);
+            if (node) syncQuickGenerationNode(node);
             return next;
         });
-    }, []);
+    }, [syncQuickGenerationNode]);
 
     const downloadNodeImage = useCallback(async (node: CanvasNodeData) => {
         try {
@@ -2847,6 +2867,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
                 <Suspense fallback={<CanvasNodePanelLoading />}>
                     <CanvasNodePromptPanel
                         node={panelNode}
+                        uploadContextKey={`${editorOwner}:${projectId}`}
                         sharedConfig={connections.find((edge) => edge.kind === "config-target" && edge.toNodeId === panelNode.id) ? nodes.find((node) => node.id === connections.find((edge) => edge.kind === "config-target" && edge.toNodeId === panelNode.id)?.fromNodeId) : undefined}
                         onOpenSharedConfig={(configId) => { setSelectedNodeIds(new Set([configId])); setDialogNodeId(configId); }}
                         isRunning={runningNodeIds.has(panelNode.id) || generationRequestsRef.current.has(panelNode.id) || connections.some((edge) => edge.kind === "config-target" && edge.toNodeId === panelNode.id && runningNodeIds.has(edge.fromNodeId))}
@@ -2866,7 +2887,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
                     />
                 </Suspense>
             ),
-        [connections, handleConfigNodeChange, handleGenerateNode, handleNodePromptChange, mentionReferenceIndex, nodes, registerNodePanelDraftFlush, restorePanelGenerationInput, runningNodeIds, stopNodeObservation],
+        [connections, editorOwner, handleConfigNodeChange, handleGenerateNode, handleNodePromptChange, mentionReferenceIndex, nodes, projectId, registerNodePanelDraftFlush, restorePanelGenerationInput, runningNodeIds, stopNodeObservation],
     );
 
     const configNodeActionsRef = useRef<CanvasConfigContentActions>(null!);
@@ -3077,7 +3098,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
                         onImageOptionsChange={setQuickGenerateImageOptions}
                         onSettingsNormalize={normalizeQuickGenerateSettings}
                         onPickReferences={pickQuickGenerateReferences}
-                        referenceScopeKey={`${projectId}:${quickGenerateNodeId || "creation"}`}
+                        referenceScopeKey={`${editorOwner}:${projectId}:${quickGenerateNodeId || "creation"}`}
                         referencesLoading={quickReferencesLoading}
                         onAddReferenceFiles={addQuickReferenceFiles}
                         onRemoveReference={removeQuickGenerateReference}
@@ -3233,7 +3254,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
                 <Suspense fallback={null}><CanvasConflictNotice projectId={projectId} /></Suspense>
                 {commandsOpen ? <Suspense fallback={null}><CanvasCommandPalette nodes={nodes} bindings={commandBindings} onLocate={locateNodes} onAsset={handleAssetInsert} onClose={() => setCommandsOpen(false)} /></Suspense> : null}
                 {performanceModeEnabled ? <Suspense fallback={null}><CanvasPerformancePanel metrics={performanceMetrics} /></Suspense> : null}
-                {singleSelectedNode?.type === CanvasNodeType.Image && !isNodeDragging && !nodeImageSettingsOpen ? <CanvasImageQuickActions key={singleSelectedNode.id} node={singleSelectedNode} onRun={quickImageNode} /> : null}
+                {singleSelectedNode?.type === CanvasNodeType.Image && !isNodeDragging && !nodeImageSettingsOpen ? <Suspense fallback={null}><CanvasImageQuickActions key={singleSelectedNode.id} node={singleSelectedNode} onRun={quickImageNode} /></Suspense> : null}
 
                 {!isNodeDragging && !nodeImageSettingsOpen && !(quickGenerateOpen && !isCanvasDesktopLayout && !assistantOpen) ? (
                     <CanvasHoverToolbarHost selectedNode={singleSelectedNode} multipleSelected={hasMultipleSelectedNodes}>{toolbarNode => <Suspense fallback={null}>

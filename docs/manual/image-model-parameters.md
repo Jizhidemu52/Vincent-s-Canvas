@@ -9,7 +9,7 @@
 | `gpt-image-2` | OpenToken Images | 画质 `auto/low/medium/high`；1K/2K/4K 像素预设、自适应和合规自定义尺寸；背景、PNG/JPEG/WebP、输出压缩质量。 |
 | `gpt-image-2.5-flare` / `gpt-image-2.5-sunburst` | OpenToken Images | 同上，另有 `xhigh/max`；Flare 速度优先，Sunburst 质量优先；不是当前新建配置的默认模型。 |
 | `aplmart-gpt2.5-flare` / `aplmart-gpt2.5-sunburst` | Mark 独立 APIMart 通道 | 上游同名 GPT2.5；独立的分辨率 `1k/2k/4k` 与画质 `auto/low/medium/high/xhigh/max`；15 种比例、`auto` 或合规像素尺寸；最多 16 张参考图，PNG 独立蒙版；背景、输出格式和压缩质量。 |
-| `aplmart-gpt2.6-flare` / `aplmart-gpt2.6-sunburst` | Mark 独立 APIMart 通道 | 上游同名 GPT2.6；静态图片生成／编辑，支持独立分辨率与质量、16 张参考图及独立 PNG 蒙版。Flare 是通用图片入口的新默认，Sunburst 侧重细节和编辑一致性；不沿用 2.5 的费用假设。 |
+| `aplmart-gpt2.6-flare` / `aplmart-gpt2.6-sunburst` | Mark 独立 APIMart 通道 | 上游同名 GPT2.6；独立分辨率与质量、16 张参考图、独立 PNG 蒙版或标注层、复杂度、审核选项，以及纯文字 GIF。Flare 是通用图片入口的新默认，Sunburst 侧重细节和编辑一致性；不沿用 2.5 的费用假设。 |
 | `aplmart-mai2.6-flash` | Mark 独立 APIMart 通道 | 上游 `mai-image-2.6-flash`；文生图 1K／2K、1:4–4:1 或合规像素尺寸，最多 5 张参考图；编辑约 100 万像素、尺寸由模型决定。不提交编辑尺寸、独立质量、4K、蒙版或输出格式字段，固定 PNG。 |
 | `aplmart-nano2.1` | Mark 独立 APIMart 通道 | 上游 `gemini-nano-banana-2.1` 官方版，不是旧 Gemini 别名；仅 `1K/2K/4K`，无独立画质、0.5K、蒙版或 GPT 格式参数；参考图工作台上限 16 张，不宣称这是平台限制。 |
 | `aplmart-nano2` | 独立 APIMart 通道 | 上游 `gemini-3.1-flash-image-preview-official`，与 Nano2.1 独立；0.5K/1K/2K/4K、14 种比例及 auto，最多 14 张 JPEG/PNG/WebP 参考图、单张 10 MiB；支持 Google 搜索设置，不提供独立 quality、蒙版或 official_fallback。 |
@@ -23,7 +23,17 @@
 
 通用图片入口的新默认选择为 APIMart 公共别名 `aplmart-gpt2.6-flare`，加载服务端目录后解析到该通道的独立配置 UUID；有效的已保存手选优先，不改写历史档案。该模型不可用时只从当前入口兼容的可用模型回退，不按同名上游 ID 混用 OpenToken 通道。去背景固定 MAI，4K 高清放大固定 Nano2.1；文字、视频和 MJ 专用接口保持各自模型。每次切换图片模型时归一可编辑草稿中的参数，移除不支持的旧选项；MAI 带图请求不传尺寸或分辨率。
 
-GPT2.6 的 SVG 是文生图能力：渠道禁止同时传参考图、蒙版或标注，因此不能直接实现“上传图片转 SVG”。本轮普通图片适配仍只接受 PNG／JPEG／WebP，不将 SVG 文件冒充已支持的位图。接口来源：[GPT2.6](https://docs.apib.ai/cn/api-reference/images/gpt-image-2.6/generation)、[MAI2.6](https://docs.apib.ai/cn/api-reference/images/mai-image-2.6/generation)。
+GPT2.6 的 SVG 是文生图能力：渠道禁止同时传参考图、蒙版或标注，因此不能直接实现“上传图片转 SVG”；按当前要求仍不开放。静态格式为 PNG／JPEG／WebP，GPT2.6 另提供受约束的 GIF，不将 SVG 文件冒充已支持的位图。接口来源：[GPT2.6](https://docs.apib.ai/cn/api-reference/images/gpt-image-2.6/generation)、[MAI2.6](https://docs.apib.ai/cn/api-reference/images/mai-image-2.6/generation)。
+
+## GPT2.6 的新增输出与标注
+
+- Flare／Sunburst 2.6 使用独立公开能力标识，不因名称相近把新字段提供给 2.5。2.5 与 2.6 均提供 `moderation=auto/low`；2.6 另支持 `complexity=low/medium/high`。质量仍与分辨率分开，`auto` 不能解释为固定 `low`。
+- GIF 仅支持纯文字生成，不能同时提供参考图、蒙版或标注层；不能选择透明背景或 JPEG／WebP 压缩质量。帧数为 2–16，默认 9；单帧时长默认 200 ms，至少 20 ms 且为 10 ms 的整数倍。
+- GIF 的尺寸是单帧像素，不套用静态图片最小像素限制。可选 `auto`（默认单帧 512×512）或宽高均为 16 倍数的像素；按帧数布局的整张帧拼图须满足单边不超过 3840、总像素不超过 8294400、长短比不超过 3:1。前后端均校验，不把不合法输入悄悄改成另一尺寸。
+- 标注层单独上传透明 PNG，尺寸须与第一张参考图相同，不能同时使用蒙版。服务端从已授权原始资产读取字节，验证 PNG、alpha 和尺寸后提交 `markup_url`，不接受客户端任意外部链接；标注不混入普通 `image_urls`。标注是模型引导，不承诺如严格蒙版一样逐像素保护非标注区域。
+- GIF 原件先保存并保留原字节，格式或动画解码失败时暂停结果处理，不重新生成。云端列表与画布使用有界动画 WebP 预览（最多 128 帧、处理进程限时 30 秒），保留帧间隔；处理超时不是把动画裁为 30 秒。原件下载不裁帧、不转码。
+
+MAI 文生图允许 1:4–4:1 范围内的自定义整数比例，以及符合模型限制的像素尺寸；带参考图编辑时仍不提交尺寸、分辨率或自动比例字段。
 
 对应来源：[OpenToken 文生图](https://docs.opentoken.io/api/openai/image-generation/)、[OpenToken 图片编辑](https://docs.opentoken.io/api/openai/image-edit/)、[APIMart GPT](https://docs.apimart.ai/en/api-reference/images/gpt-image-2/generation)、[APIMart Gemini](https://docs.apimart.ai/en/api-reference/images/gemini-3.1-flash/generation)、[Imagine](https://docs.apimart.ai/en/api-reference/images/midjourney/imagine)、[Blend](https://docs.apimart.ai/en/api-reference/images/midjourney/blend)。
 
@@ -70,7 +80,7 @@ HappyHorse 1.1 支持 3–15 秒、720P／1080P、文生视频、首帧和多图
 - 应用现在另外执行服务端严格合成：原件先存档，再按蒙版 alpha 将结果合回第一张原图，保存无损 PNG 主图。保护区保留原图解码 RGBA，选区使用模型结果，半透明边缘混合。严格路径限定 8 位、单边 8192 以内且总像素不超过 16777216；返回尺寸不符不拉伸，任务暂停且原件可取。该后处理不是渠道原生蒙版能力通过，也不承诺选区内结构或接缝质量。
 - 原图/蒙版若含 EXIF 旋转或镜像方向，提交前提示先另存为正常方向 PNG；返回图或普通跨格式转换同样拒绝方向异常，避免删除方向信息后画面翻转。匹配格式且无需重编码时保留原字节和 EXIF。方向探针在本机 ffprobe 8.1.1 验证，目标服务器仍需核对 FFmpeg/ffprobe 版本与运行结果。
 - 节点改图将当前原图固定为图片1，附加图从图片2起。托盘、@提及、画布编号和实际提交共用同一有序列表；原图不可删除或移动，数量上限包含原图。底部创建面板保持自行选择的完整参考顺序。
-- 高级参数与基础参数一起保存到生成输入归档、节点元数据和草稿；恢复不替换模型或发起生成。批量编辑同样提交当前参数。
+- 高级参数与基础参数一起保存到生成输入归档、节点元数据和草稿；恢复不替换模型或发起生成。标注层按独立引用归档和恢复，不重新成为普通参考图；画布备份同时保留这份原始媒体。批量编辑同样提交当前参数。
 
 ## 未接入或未确认的范围
 
@@ -80,6 +90,12 @@ HappyHorse 1.1 支持 3–15 秒、720P／1080P、文生视频、首帧和多图
 - Imagine 的 16 张限制是当前工作台的参考图处理上限，官方该页未列数量上限；不能把软件限制说成模型限制。
 
 ## 验证边界
+
+### 当前目录核对与本轮回归
+
+实际后台目录共 23 条配置：12 条启用、11 条停用；同名上游在不同 Provider 或自定义工作流中仍是独立配置。本轮检查不修改开关、价格、凭据或板块绑定，不为测试重新启用旧模型。缺少正式契约的 OpenToken 非 preview Gemini 与旧自定义工作流继续明确保留能力边界，不按其他渠道文档补造参数。
+
+本轮 20 元预算内只新增两次线上提交：一次 GPT2.5 Flare 红／蓝帽提示词同步回归、一次 Seedance2.5 新建工作区隔离回归；两次均已返回，分别证实旧线上版本确实提交旧提示词和把旧视频结果回填到新工作区。保守预留合计 12 元，不等于供应商账单，也不代表 23 条配置逐一付费通过。新增参数、GIF／标注媒体处理及其他模型契约的离线回归，与正式供应商生成质量分别记录；原有真实模型样本见下文，不重复计入本轮。
 
 ### 独立 APIMart 平台
 

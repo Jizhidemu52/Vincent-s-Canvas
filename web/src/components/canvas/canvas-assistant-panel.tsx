@@ -864,6 +864,8 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
             videoSeconds: metadata.seconds || turn.config.videoSeconds, vquality: metadata.vquality || turn.config.vquality,
             videoGenerateAudio: metadata.generateAudio ?? turn.config.videoGenerateAudio,
             videoWatermark: metadata.watermark ?? turn.config.videoWatermark,
+            videoSeed: metadata.videoSeed ?? turn.config.videoSeed,
+            videoOutputFormat: metadata.videoOutputFormat ?? turn.config.videoOutputFormat,
             audioVoice: metadata.audioVoice || turn.config.audioVoice, audioFormat: metadata.audioFormat || turn.config.audioFormat,
             audioSpeed: metadata.audioSpeed || turn.config.audioSpeed, audioInstructions: metadata.audioInstructions || turn.config.audioInstructions,
         };

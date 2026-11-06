@@ -86,7 +86,7 @@ function harness(initialNodes: CanvasNodeData[] = [], initialConnections: Canvas
         const state = { useEffect: (effect: () => void) => effect(), lastEditorSelectionRef, selectedNodeIds: selectedNodeIdsRef.current,
             editorSelectionKey: `clipboard-test:${editorOwner}:${Array.from(selectedNodeIdsRef.current).sort().join(",")}`,
             singleSelectedNodeId, singleSelectedNode: singleSelectedNodeId ? nodeById.get(singleSelectedNodeId) : null, nodeById,
-            projectLoaded: true, assistantOpen: false, loadQuickGenerationNode, setQuickGenerateReferences, syncCanvasSelectionReferences, CanvasNodeType,
+            projectLoaded: true, assistantOpen: false, loadQuickGenerationNode, syncQuickGenerationNode: () => {}, setQuickGenerateReferences, syncCanvasSelectionReferences, CanvasNodeType,
             setDialogNodeId: () => {}, setQuickGenerateOpen: () => {},
             setQuickGeneratePrompt: (value: string) => { prompt = value; },
             setQuickGenerateModel: () => {}, setQuickGenerateSize: () => {}, setQuickGenerateQuality: () => {},

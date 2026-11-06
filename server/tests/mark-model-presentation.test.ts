@@ -50,7 +50,7 @@ test("GPT 2.6 exposes separate descriptions and quality-resolution controls with
     const modelId = `gpt-image-2.6-${variant}`;
     const row = { ...mark, id: `gpt26-${variant}`, modelId, rmbCost: 0 };
     const shown = presentPublicModel(row, "designer");
-    expect(shown).toMatchObject({ modelId: row.id, publicDescription: description, imageParameterProfile: "quality-resolution", imageSupportsMask: true, rmbCost: 0 });
+    expect(shown).toMatchObject({ modelId: row.id, publicDescription: description, imageParameterProfile: "quality-resolution-v2", imageSupportsMask: true, rmbCost: 0 });
     expect(shown).not.toHaveProperty("imageCost");
     expect(presentAdminModel(row)).not.toHaveProperty("imageCost");
     expect(selectCreativeModels([row])).toEqual([row]);

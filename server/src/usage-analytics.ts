@@ -32,7 +32,8 @@ export const usageParametersSchema = z.object({
   strength: z.number().min(0).max(1).optional(), guidanceScale: z.number().min(0).max(100).optional(), creativity: z.number().min(0).max(100).optional(), redrawStrength: z.number().min(0).max(1).optional(),
   cutWidth: z.number().int().min(0).max(32768).optional(), redrawWidth: z.number().int().min(0).max(32768).optional(), blurAmount: z.number().min(0).max(1000).optional(),
   watermark: z.boolean().optional(), googleSearch: z.boolean().optional(), googleImageSearch: z.boolean().optional(), officialFallback: z.boolean().optional(), nsfw_check: z.boolean().optional(),
-  background: z.enum(["auto", "transparent", "opaque"]).optional(), output_format: z.enum(["png", "jpeg", "webp"]).optional(), output_compression: z.number().int().min(0).max(100).optional(), moderation: z.enum(["auto", "low"]).optional(),
+  background: z.enum(["auto", "transparent", "opaque"]).optional(), output_format: z.enum(["png", "jpeg", "webp", "gif"]).optional(), output_compression: z.number().int().min(0).max(100).optional(), moderation: z.enum(["auto", "low"]).optional(),
+  complexity: z.enum(["low", "medium", "high"]).optional(), frame_count: z.number().int().min(2).max(16).optional(), frame_duration_ms: z.number().int().min(20).multipleOf(10).optional(),
   midjourneySpeed: z.enum(["relax", "fast", "turbo"]).optional(), midjourneyQuality: z.number().min(.25).max(4).optional(),
   stylize: z.number().min(0).max(1000).optional(), chaos: z.number().min(0).max(100).optional(), weird: z.number().min(0).max(3000).optional(), stop: z.number().min(1).max(100).optional(), tile: z.boolean().optional(), raw: z.boolean().optional(),
 }).strict();

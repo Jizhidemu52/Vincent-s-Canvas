@@ -55,6 +55,15 @@ export function cloneCanvasNodeGraph(graph: CanvasNodeGraph, offset: Position, o
         if (node.metadata.batchRootId) node.metadata.batchRootId = idMap.get(node.metadata.batchRootId);
         if (node.metadata.batchChildIds) node.metadata.batchChildIds = node.metadata.batchChildIds.flatMap(id => idMap.has(id) ? [idMap.get(id)!] : []);
         if (node.metadata.primaryImageId) node.metadata.primaryImageId = idMap.get(node.metadata.primaryImageId);
+        // Copying only a stack's cover creates an independent image, not an empty stack.
+        if (node.metadata.generationResultStack && !node.metadata.batchChildIds?.length) {
+            delete node.metadata.generationResultStack;
+            delete node.metadata.isBatchRoot;
+            delete node.metadata.batchChildIds;
+            delete node.metadata.primaryImageId;
+            delete node.metadata.imageBatchExpanded;
+            delete node.metadata.batchUsesReferenceImages;
+        }
         const origin = node.metadata.generationOrigin;
         if (origin) {
             const sourceNodeId = idMap.get(origin.sourceNodeId) || origin.sourceNodeId;

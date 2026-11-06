@@ -132,7 +132,37 @@ export const archiveSharedPrompt = (id: string) => request<{ status: string }>(`
 
 export const resolvePromptReuse = (id: string, mode: "fill" | "fill_and_generate", requestId = createClientId()) =>
     request<{ reuseToken: string; expiresInSeconds: number; mode: "fill" | "fill_and_generate"; pricing: PromptPricingResolution }>(`/api/prompt-templates/${id}/resolve`, { method: "POST", body: JSON.stringify({ mode, requestId: `prompt-reuse:${requestId}` }) });
-export const hydratePromptReuse = (token: string) => request<PromptReusePayload>(`/api/prompt-templates/reuse/${encodeURIComponent(token)}`);
+export async function hydratePromptReuse(token: string): Promise<PromptReusePayload> {
+    const payload = await request<PromptReusePayload>(`/api/prompt-templates/reuse/${encodeURIComponent(token)}`);
+    const archive = payload.template.parameters.inputArchive as import("./generation-history").GenerationInputArchive | undefined;
+    const index = archive?.markupReferenceIndex;
+    if (index === undefined) return payload;
+    const { imageModelProfile } = await import("@/lib/image-model-settings");
+    const { readImageOptions } = await import("@/lib/image-advanced-settings");
+    const { fingerprintImage } = await import("./generation-history");
+    const model = payload.pricing.selectedModel;
+    if (!model || !imageModelProfile(model.modelId).supportsMarkup) throw new Error("原标注层模型已不可用，不能把标注层降级为普通参考图；当前草稿未修改");
+    if (!["image-generation", "image-edit", "canvas"].includes(payload.template.targetTool)) throw new Error("当前工具不支持独立标注层复用；当前草稿未修改");
+    if (!Number.isInteger(index) || index < 1 || index >= payload.template.referenceAssetIds.length || archive?.maskReferenceIndex !== undefined
+        || !Array.isArray(archive?.references) || archive.references.length !== payload.template.referenceAssetIds.length) throw new Error("模板标注层顺序不完整，未套用任何内容");
+    const original = archive.references[index]!;
+    const assetId = payload.template.referenceAssetIds[index]!;
+    if (original.type !== "image/png" || !/^[a-f0-9]{64}$/.test(original.sha256) || !Number.isSafeInteger(original.bytes) || original.bytes <= 0 || original.bytes > 50 * 1024 * 1024
+        || !/^[a-zA-Z0-9_-]+$/.test(assetId)) throw new Error("模板标注层原件记录无效，未套用任何内容");
+    const dataUrl = `/api/assets/${assetId}/content`;
+    const response = await fetch(dataUrl, { credentials: "include" });
+    if (!response.ok) throw new Error("模板标注层原件不可用，未套用任何内容");
+    const blob = await response.blob();
+    if (blob.size !== original.bytes || await fingerprintImage(blob) !== original.sha256) throw new Error("模板标注层不是原始 PNG 字节，未套用任何内容");
+    const options = readImageOptions(typeof payload.template.parameters.imageOptions === "string" ? payload.template.parameters.imageOptions : archive.config?.imageOptions);
+    const markup = { id: `template:${payload.template.id}:markup`, name: original.name, originalFileName: original.originalFileName, type: "image/png", bytes: original.bytes, dataUrl, sourceAssetId: assetId };
+    // Keep the original archive and its source roles intact for provenance. Only
+    // the UI reference list is split; the image request adds markup back last.
+    return { ...payload, template: { ...payload.template,
+        referenceAssetIds: payload.template.referenceAssetIds.filter((_, referenceIndex) => referenceIndex !== index),
+        parameters: { ...payload.template.parameters, imageOptions: JSON.stringify({ ...options, markup_reference: JSON.stringify(markup) }) },
+    } };
+}
 
 export async function fetchPrompts({ keyword = "", tag = [], category = ALL_PROMPTS_OPTION, page = 1, pageSize = 20, scope = "all" }: { keyword?: string; tag?: string[]; category?: string; page?: number; pageSize?: number; scope?: "all" | PromptScope } = {}, signal?: AbortSignal) {
     const activeCategory = category && category !== ALL_PROMPTS_OPTION ? category : undefined;

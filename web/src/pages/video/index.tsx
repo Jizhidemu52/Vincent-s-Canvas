@@ -57,6 +57,7 @@ import { modelOptionLabel, modelOptionName, useConfigStore, useEffectiveConfig, 
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
+import { videoFileExtension } from "../../../../shared/video-output";
 import "../image/image-workbench.css";
 
 type GeneratedVideo = {
@@ -112,7 +113,7 @@ type GenerationLog = {
     diagnostic?: string;
 };
 
-type GenerationLogConfig = Pick<AiConfig, "model" | "videoModel" | "size" | "vquality" | "videoSeconds" | "videoMode" | "videoGenerateAudio" | "videoWatermark">;
+type GenerationLogConfig = Pick<AiConfig, "model" | "videoModel" | "size" | "vquality" | "videoSeconds" | "videoMode" | "videoGenerateAudio" | "videoWatermark" | "videoSeed" | "videoOutputFormat">;
 
 type UpdateAiConfig = <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
 
@@ -148,6 +149,8 @@ function VideoGenerationWorkspace() {
     const playbackSessions = useRef(new Map<string, { video: GeneratedVideo; owner: string | null; controller: AbortController; release?: () => void }>()).current;
     const playbackOwner = useUserStore(videoPlaybackOwner);
     const logRefreshRevisionRef = useRef(0);
+    const resultViewScopeRef = useRef(0);
+    const visibleResultLogIdsRef = useRef(new Set<string>());
     const baseConfig = useEffectiveConfig();
     const [draftConfig, setDraftConfig, configReady] = useGenerationDraft<Partial<AiConfig>>("video:settings", {});
     const config = { ...baseConfig, ...draftConfig };
@@ -181,6 +184,12 @@ function VideoGenerationWorkspace() {
     const [referenceScope, setReferenceScope] = useState(0);
     const referenceScopeRef = useRef(referenceScope);
     referenceScopeRef.current = referenceScope;
+    const isCurrentReferenceScope = (scope: number) => mountedRef.current && referenceScopeRef.current === scope;
+    const resetReferenceScope = () => {
+        referenceScopeRef.current += 1;
+        setReferenceScope(referenceScopeRef.current);
+        setReadingReferences(false);
+    };
     const [referenceError, setReferenceError] = useState("");
     const [referencesOpen, setReferencesOpen] = useState(false);
     const [submitting, setSubmitting] = useState(false);
@@ -219,7 +228,7 @@ function VideoGenerationWorkspace() {
 
     useEffect(() => {
         mountedRef.current = true;
-        void refreshLogs();
+        void refreshLogs(true);
         return () => {
             mountedRef.current = false;
             for (const controller of observationControllers.current.values()) controller.abort();
@@ -287,19 +296,31 @@ function VideoGenerationWorkspace() {
         const token = searchParams.get("reuseToken");
         if (!token || loadedReuseTokenRef.current.has(token)) return;
         loadedReuseTokenRef.current.add(token);
+        const scope = referenceScopeRef.current;
+        let active = true;
+        let restored = false;
+        const stillCurrent = () => active && isCurrentReferenceScope(scope);
         void hydratePromptReuse(token).then(async (payload) => {
+            if (!stillCurrent()) return;
+            const nextReferences = await Promise.all(payload.template.referenceAssetIds.map(async (assetId) => {
+                const blob = await fetchServerAssetContent(assetId);
+                if (!stillCurrent()) return null;
+                const image = await uploadImage(blob);
+                return { id: nanoid(), name: "模板参考图.png", type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey, sourceAssetId: assetId };
+            }));
+            if (!stillCurrent()) return;
+            restored = true;
             setPrompt(payload.template.prompt);
             const parameters = payload.template.parameters;
             if (payload.pricing.selectedModel?.modelId) updateConfig("videoModel", payload.pricing.selectedModel.modelId);
             if (typeof parameters.size === "string") updateConfig("size", parameters.size);
             if (typeof parameters.resolution === "string") updateConfig("vquality", parameters.resolution);
             if (typeof parameters.seconds === "string") updateConfig("videoSeconds", parameters.seconds);
-            const nextReferences = await Promise.all(payload.template.referenceAssetIds.map(async (assetId) => {
-                const blob = await fetchServerAssetContent(assetId);
-                const image = await uploadImage(blob);
-                return { id: nanoid(), name: "模板参考图.png", type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey, sourceAssetId: assetId };
-            }));
-            setReferences(nextReferences);
+            const seed = parameters.videoSeed ?? parameters.seed;
+            if (typeof seed === "string" || typeof seed === "number") updateConfig("videoSeed", String(seed));
+            const format = parameters.videoOutputFormat ?? parameters.outputFormat ?? parameters.output_format;
+            if (format === "mp4" || format === "mov") updateConfig("videoOutputFormat", format);
+            setReferences(nextReferences.filter((item): item is NonNullable<typeof item> => item !== null));
             payload.warnings.forEach((warning) => message.warning(uiText(warning)));
             if (payload.pricing.modelChanged) message.warning(payload.pricing.selectedModel ? uiText("模型已变更，当前使用 {name}", { name: payload.pricing.selectedModel.name }) : uiText("模型已变更，请先选择管理员当前启用的视频模型"));
             const cost = !deploymentFeatures.creditsEnabled ? "不计积分" : (payload.pricing.estimate ? `${payload.pricing.estimate.totalCredits} 积分` : "以当前选择为准");
@@ -308,8 +329,9 @@ function VideoGenerationWorkspace() {
             } else message.success(uiText("模板已填入，当前预计 {cost}", { cost: cost }));
         }).catch((error) => {
             loadedReuseTokenRef.current.delete(token);
-            message.error(error instanceof Error ? uiText(error.message) : uiText("模板复用失败"));
+            if (stillCurrent()) message.error(error instanceof Error ? uiText(error.message) : uiText("模板复用失败"));
         });
+        return () => { active = false; if (!restored) loadedReuseTokenRef.current.delete(token); };
     }, [message, modal, searchParams, updateConfig]);
 
     const addReferences = async (files?: FileList | File[] | null) => {
@@ -323,13 +345,14 @@ function VideoGenerationWorkspace() {
                 return { id: nanoid(), name: file.name, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey, bytes: image.bytes, width: image.width, height: image.height };
             }),
         );
-        if (!mountedRef.current || referenceScopeRef.current !== scope) return;
+        if (!isCurrentReferenceScope(scope)) return;
         setReferences((value) => [...value, ...nextReferences]);
     };
 
     const addMediaReferences = async (files: FileList | null, kind: "video" | "audio") => {
         const selected = Array.from(files || []);
         if (!selected.length) return;
+        const scope = referenceScopeRef.current;
         setReadingReferences(true);
         setReferenceError("");
         try {
@@ -337,18 +360,21 @@ function VideoGenerationWorkspace() {
             const preliminary = videoReferenceError(videoConfig, references, kind === "video" ? [...videoReferences, ...shallow] : videoReferences, kind === "audio" ? [...audioReferences, ...shallow] : audioReferences, undefined, true);
             if (preliminary) throw new Error(preliminary);
             const prepared = await Promise.all(selected.map(readReferenceMediaFile));
+            if (!isCurrentReferenceScope(scope)) return;
             const error = videoReferenceError(videoConfig, references, kind === "video" ? [...videoReferences, ...prepared] : videoReferences, kind === "audio" ? [...audioReferences, ...prepared] : audioReferences, undefined, true);
             if (error) throw new Error(error);
             const stored = await Promise.all(prepared.map(async (item, index) => ({ ...item, ...await uploadMediaFile(selected[index], kind) })));
+            if (!isCurrentReferenceScope(scope)) return;
             if (kind === "video") setVideoReferences((current) => [...current, ...stored]);
             else setAudioReferences((current) => [...current, ...stored]);
         } catch (error) {
-            setReferenceError(error instanceof Error ? error.message : "读取参考素材失败");
-        } finally { setReadingReferences(false); }
+            if (isCurrentReferenceScope(scope)) setReferenceError(error instanceof Error ? error.message : "读取参考素材失败");
+        } finally { if (isCurrentReferenceScope(scope)) setReadingReferences(false); }
     };
 
     const addReferencesFromClipboard = async () => {
         if (readingReferences) return;
+        const scope = referenceScopeRef.current;
         setReadingReferences(true);
         try {
             const blobs = await readClipboardImages(navigator.clipboard);
@@ -360,11 +386,12 @@ function VideoGenerationWorkspace() {
                     return { id: nanoid(), name: `clipboard-${index + 1}.png`, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey };
                 }),
             );
+            if (!isCurrentReferenceScope(scope)) return;
             setReferences((value) => [...value, ...nextReferences]);
             message.success(uiText("已读取 {length} 张参考图", { length: nextReferences.length }));
         } catch (error) {
-            message.error(error instanceof Error ? uiText(error.message) : uiText("剪切板里没有可读取的图片"));
-        } finally { setReadingReferences(false); }
+            if (isCurrentReferenceScope(scope)) message.error(error instanceof Error ? uiText(error.message) : uiText("剪切板里没有可读取的图片"));
+        } finally { if (isCurrentReferenceScope(scope)) setReadingReferences(false); }
     };
     const generate = async (original?: VideoRequestSnapshot) => {
         previewLoader.invalidate();
@@ -382,6 +409,7 @@ function VideoGenerationWorkspace() {
         setSubmitting(true);
         setPreviewLog(null);
         let log = { ...buildLog({ prompt: snapshot.text, model: snapshot.config.model, config: snapshot.config, references: snapshot.references, videoReferences: snapshot.videoReferences, audioReferences: snapshot.audioReferences, durationMs: 0, status: "生成中" }), promptInput: snapshot.promptInput };
+        visibleResultLogIdsRef.current.add(log.id);
         setResults(current => [...current, { id: log.id, status: "pending", createdAt: log.createdAt }]);
         try {
             const task = await createVideoGenerationTask(snapshot.config, snapshot.text, snapshot.references, snapshot.videoReferences, snapshot.audioReferences, {
@@ -396,7 +424,7 @@ function VideoGenerationWorkspace() {
             });
             log = { ...log, task, requestId: task.requestId || log.requestId, effectivePrompt: task.prompt, summaryZh: task.summaryZh };
             await saveLog(log);
-            void pollGenerationLog(log);
+            void pollGenerationLog(log, false, false);
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : "生成失败";
             const uncertain = error instanceof QueuedTaskSubmissionUncertainError;
@@ -469,7 +497,7 @@ function VideoGenerationWorkspace() {
                     blob = await fetchServerAssetContent(video.serverAssetId);
                 }
             }
-            saveAs(blob, generationDownloadName(logs.find(log => log.video?.id === video.id)?.title || "生成视频", "mp4"));
+            saveAs(blob, generationDownloadName(logs.find(log => log.video?.id === video.id)?.title || "生成视频", videoFileExtension(blob.type || video.mimeType)));
         } catch (error) { message.error(uiText(generationErrorMessage(error))); }
     };
 
@@ -501,6 +529,7 @@ function VideoGenerationWorkspace() {
     };
 
     const insertPickedAsset = async (payload: InsertAssetPayload) => {
+        const scope = referenceScopeRef.current;
         setReadingReferences(true);
         try {
         if (payload.kind === "text") {
@@ -508,6 +537,7 @@ function VideoGenerationWorkspace() {
         } else if (payload.kind === "image") {
             if (references.length >= maxImageReferences) { message.warning(uiText("当前模型或模式最多使用 {maxImageReferences} 张图片，请先移除多余参考图。", { maxImageReferences: maxImageReferences })); return; }
             const stored = await uploadImage(payload.dataUrl);
+            if (!isCurrentReferenceScope(scope)) return;
             setReferences((value) => [...value, { id: nanoid(), name: payload.title, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }]);
         } else if (payload.kind === "video") {
             const reference = { id: nanoid(), name: payload.title, type: "video/mp4", url: payload.url, storageKey: payload.storageKey, width: payload.width, height: payload.height };
@@ -516,13 +546,14 @@ function VideoGenerationWorkspace() {
             setVideoReferences((value) => [...value, reference]);
         }
         setAssetPickerOpen(false);
-        } catch (error) { message.error(uiText(generationErrorMessage(error))); }
-        finally { setReadingReferences(false); }
+        } catch (error) { if (isCurrentReferenceScope(scope)) message.error(uiText(generationErrorMessage(error))); }
+        finally { if (isCurrentReferenceScope(scope)) setReadingReferences(false); }
     };
 
     const createSession = () => {
-        referenceScopeRef.current += 1;
-        setReferenceScope(referenceScopeRef.current);
+        resetReferenceScope();
+        resultViewScopeRef.current += 1;
+        visibleResultLogIdsRef.current.clear();
         restoredInitialResultRef.current = true;
         previewLoader.invalidate();
         setPreviewLoading(false);
@@ -564,33 +595,38 @@ function VideoGenerationWorkspace() {
         }
     };
 
-    const refreshLogs = async () => {
+    const refreshLogs = async (restoreInitialResults = false) => {
         const revision = ++logRefreshRevisionRef.current;
+        const resultScope = resultViewScopeRef.current;
         try {
             const nextLogs = await readStoredLogs();
             if (revision !== logRefreshRevisionRef.current) return;
             setLogs(nextLogs);
-            resumePendingLogs(nextLogs);
+            resumePendingLogs(nextLogs, restoreInitialResults && resultScope === 0 && resultViewScopeRef.current === 0);
         } catch (error) {
             if (revision === logRefreshRevisionRef.current) message.error(error instanceof Error ? uiText(error.message) : uiText("视频历史读取失败"));
         }
     };
 
-    const resumePendingLogs = (items: GenerationLog[]) => {
+    const resumePendingLogs = (items: GenerationLog[], showResults = true) => {
         for (const log of items) {
-            if ((log.status === "生成中" || log.status === "查询暂停") && (log.task || log.requestId)) void pollGenerationLog(log);
+            if ((log.status === "生成中" || log.status === "查询暂停") && (log.task || log.requestId)) void pollGenerationLog(log, false, showResults);
         }
     };
 
-    const pollGenerationLog = async (log: GenerationLog, recover = false) => {
+    const pollGenerationLog = async (log: GenerationLog, recover = false, showResult = true) => {
         if ((!log.task && !log.requestId) || activeLogIdsRef.current.has(log.id)) return;
+        if (showResult) visibleResultLogIdsRef.current.add(log.id);
         let task = log.task;
         const ownerId = user?.id;
         const controller = new AbortController();
         observationControllers.current.set(log.id, controller);
         const isCurrent = () => mountedRef.current && useUserStore.getState().user?.id === ownerId;
         const displayResult = (result: GenerationResult) => {
-            if (isCurrent()) setResults(current => [...current.filter(item => item.id !== log.id), { ...result, id: log.id, createdAt: log.createdAt, taskId: task?.id }]);
+            if (!isCurrent() || !visibleResultLogIdsRef.current.has(log.id)) return;
+            // A terminal task update wins over an older preview read of the same visible task.
+            if (result.status !== "pending") { previewLoader.invalidate(); setPreviewLoading(false); }
+            setResults(current => [...current.filter(item => item.id !== log.id), { ...result, id: log.id, createdAt: log.createdAt, taskId: task?.id }]);
         };
         activeLogIdsRef.current.add(log.id);
         setRunning(true);
@@ -657,6 +693,8 @@ function VideoGenerationWorkspace() {
     };
 
     const previewGenerationLog = (log: GenerationLog, restoreDraft = false) => {
+        resultViewScopeRef.current += 1;
+        visibleResultLogIdsRef.current = new Set([log.id]);
         restoredInitialResultRef.current = true;
         setPreviewLog(log);
         setLogsOpen(false);
@@ -664,6 +702,7 @@ function VideoGenerationWorkspace() {
         setPreviewLoading(true);
         setPreviewError("");
         if (restoreDraft) {
+            resetReferenceScope();
             setPrompt(log.prompt);
             setMotion(normalizeVideoMotionSettings(log.promptInput?.fields ?? defaultVideoMotionSettings));
             setRawPrompt(!log.promptInput && allowRawPrompt);
@@ -677,6 +716,8 @@ function VideoGenerationWorkspace() {
             if (log.config.videoSeconds) updateConfig("videoSeconds", log.config.videoSeconds);
             if (log.config.videoGenerateAudio) updateConfig("videoGenerateAudio", log.config.videoGenerateAudio);
             if (log.config.videoWatermark) updateConfig("videoWatermark", log.config.videoWatermark);
+            updateConfig("videoSeed", log.config.videoSeed || "");
+            updateConfig("videoOutputFormat", log.config.videoOutputFormat || "mp4");
         }
         void previewLoader.load(
             (signal) => hydrateVideoLogMedia(log, { image: resolveImageUrl, media: resolveMediaUrl, task: getQueuedTask }, restoreDraft, signal),
@@ -699,8 +740,8 @@ function VideoGenerationWorkspace() {
         setReadingReferences(true);
         setReferenceError("");
         try { await addReferences(files); }
-        catch (error) { if (mountedRef.current && referenceScopeRef.current === scope) setReferenceError(error instanceof Error ? error.message : "参考素材读取失败，请重新选择文件"); }
-        finally { if (mountedRef.current) setReadingReferences(false); }
+        catch (error) { if (isCurrentReferenceScope(scope)) setReferenceError(error instanceof Error ? error.message : "参考素材读取失败，请重新选择文件"); }
+        finally { if (isCurrentReferenceScope(scope)) setReadingReferences(false); }
     };
 
     const imageDrop = useImageDrop({
@@ -1212,6 +1253,8 @@ function normalizeLogConfig(log: Partial<GenerationLog>): GenerationLogConfig {
         videoMode: log.config?.videoMode || log.happyHorseMode || "auto",
         videoGenerateAudio: log.config?.videoGenerateAudio || "true",
         videoWatermark: log.config?.videoWatermark || "false",
+        videoSeed: log.config?.videoSeed || "",
+        videoOutputFormat: log.config?.videoOutputFormat || "mp4",
     };
 }
 
@@ -1251,6 +1294,8 @@ function buildLog({
         videoMode: config.videoMode,
         videoGenerateAudio: config.videoGenerateAudio,
         videoWatermark: config.videoWatermark,
+        videoSeed: config.videoSeed,
+        videoOutputFormat: config.videoOutputFormat,
     };
     return {
         id: nanoid(),

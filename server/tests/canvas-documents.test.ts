@@ -68,6 +68,24 @@ test("media validation rejects nested local resources but not textual prompts", 
     expect(() => parseCanvasDocumentWrite("canvas-1", { baseRevision: 0, document: localNode })).toThrow(CanvasDocumentError);
 });
 
+test("known imageOptions markup references are collected without interpreting arbitrary JSON text", () => {
+    const markupId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+    const imageOptions = JSON.stringify({ complexity: "high", markup_reference: JSON.stringify({ type: "image/png", dataUrl: `/api/assets/${markupId}/content`, name: "独立标注.png" }) });
+    const document = { ...project(), extra: { config: { imageOptions } }, prompt: JSON.stringify({ storageKey: "image:text-only" }) };
+    const parsed = parseCanvasDocumentWrite(document.id, { baseRevision: 0, document });
+    expect(parsed.document).toEqual(document);
+    expect(parsed.assetIds).toEqual([assetId, markupId]);
+    for (const markup of [
+        { type: "image/png", dataUrl: "blob:local" },
+        { type: "image/png", dataUrl: "data:image/png;base64,AAA" },
+        { type: "image/png", dataUrl: `/api/assets/${markupId}/content`, storageKey: "image:local" },
+        { type: "image/png", dataUrl: "https://external.invalid/markup.png" },
+        { type: "image/png", dataUrl: "/api/assets/not-a-uuid/content" },
+        { type: "image/jpeg", dataUrl: `/api/assets/${markupId}/content` },
+    ]) expect(() => parseCanvasDocumentWrite(document.id, { baseRevision: 0, document: { ...project(), config: { imageOptions: JSON.stringify({ markup_reference: JSON.stringify(markup) }) } } })).toThrow(CanvasDocumentError);
+    expect(() => parseCanvasDocumentWrite(document.id, { baseRevision: 0, document: { ...project(), config: { imageOptions: "legacy-non-json-value" } } })).not.toThrow();
+});
+
 test("compact history retains complete media elements and validates media inside sparse, splice and set deltas", () => {
     const source = largeCanvasDocument("compact-history", assetId, 12);
     const parsed = parseCanvasDocumentWrite(source.id, { baseRevision: 0, document: source });
@@ -298,6 +316,28 @@ test("canvas API refuses guessed or unreadable server asset ids before writing",
         expect(response.status).toBe(403);
         expect((await response.json()).error).toBe("CANVAS_ASSET_FORBIDDEN");
         expect(fixture.sqlite.query("SELECT count(*) AS n FROM canvas_documents").get()).toEqual({ n: 0 });
+    }); } finally { fixture.sqlite.close(); }
+});
+
+test("markup-only canvas assets require ownership and can be retained only in the same document revision", async () => {
+    const fixture = databaseFixture();
+    const app = express().use(express.json());
+    app.use((req, _res, next) => { (req as AuthenticatedRequest).auth = actor("employee-a"); next(); });
+    app.use("/api/canvas-documents", createCanvasDocumentsRouter(fixture.db));
+    const markupId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+    const options = (id: string) => JSON.stringify({ markup_reference: JSON.stringify({ type: "image/png", dataUrl: `/api/assets/${id}/content` }) });
+    const document = { ...project(), extra: { draft: { imageOptions: options(markupId) } } };
+    try { await serve(app, async origin => {
+        const headers = { "content-type": "application/json", "X-Canvas-Owner-Id": "employee-a" };
+        const put = (baseRevision: number, next: typeof document) => fetch(`${origin}/api/canvas-documents/${next.id}`, { method: "PUT", headers, body: JSON.stringify({ baseRevision, document: next }) });
+        expect((await put(0, document)).status).toBe(403);
+        expect(fixture.sqlite.query("SELECT count(*) AS n FROM canvas_documents").get()).toEqual({ n: 0 });
+        fixture.allowAsset(markupId);
+        expect((await put(0, document)).status).toBe(200);
+        fixture.denyAssets();
+        expect((await put(1, { ...document, title: "保留原标注引用" })).status).toBe(200);
+        expect((await put(2, { ...document, extra: { draft: { imageOptions: options("bbbbbbbb-bbbb-4ccc-8ddd-eeeeeeeeeeee") } } })).status).toBe(403);
+        expect((await put(0, { ...document, id: "different-canvas" })).status).toBe(403);
     }); } finally { fixture.sqlite.close(); }
 });
 

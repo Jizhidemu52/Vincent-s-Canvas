@@ -19,6 +19,7 @@ import { imageToDataUrl } from "@/services/image-storage";
 import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
 import { fingerprintImage, type ArchivedReference, type GenerationDraftInput, type GenerationInputArchive } from "./generation-history";
+import { readImageOptions } from "@/lib/image-advanced-settings";
 import { getBusinessConfig } from "./business-config";
 import { requireToolKey, resolveConfiguredToolModel } from "./tool-runtime";
 import { quickImageModelId, type QuickImageAction } from "@/lib/quick-image-tools";
@@ -162,13 +163,14 @@ export async function requestQueuedImages(input: { quickImageAction?: QuickImage
     const referenceProfile = model ? imageModelProfile(model.id, [model]) : imageModelProfile(quickImageModelId(input.quickImageAction!));
     const sourceUrls: string[] = [];
     const archivedReferences: ArchivedReference[] = [];
-    for (const reference of input.references || []) {
+    for (const [referenceIndex, reference] of (input.references || []).entries()) {
         input.signal?.throwIfAborted();
         const dataUrl = await readGenerationReferenceDataUrl(reference, input.signal);
         input.signal?.throwIfAborted();
         const file = dataUrlToFile({ ...reference, dataUrl });
         input.signal?.throwIfAborted();
-        const referenceError = imageReferenceFileError(file, referenceProfile);
+        const isMarkup = referenceProfile.supportsMarkup && input.draft?.markupReferenceIndex === referenceIndex;
+        const referenceError = isMarkup ? file.type !== "image/png" ? "标注层必须为独立透明 PNG" : file.size > 50 * 1024 * 1024 ? "标注层不能超过 50 MB" : "" : imageReferenceFileError(file, referenceProfile);
         if (referenceError) throw new Error(referenceError);
         const hash = await fingerprintImage(file);
         assertOwner();
@@ -181,10 +183,17 @@ export async function requestQueuedImages(input: { quickImageAction?: QuickImage
 
     const rootRequestId = input.requestId || createClientId();
     const projectId = currentProjectId("image-workbench");
+    const archivedConfig = input.draft ? { ...input.draft.config } : undefined;
+    if (archivedConfig && input.draft?.markupReferenceIndex !== undefined) {
+        const options = readImageOptions(archivedConfig.imageOptions);
+        delete options.markup_reference;
+        archivedConfig.imageOptions = JSON.stringify(options);
+    }
     const archive: GenerationInputArchive | undefined = input.draft && model ? {
         version: 1, ownerId, modelConfigId: model.id, modelId: model.modelId,
-        prompt: input.draft.prompt, userInput: input.promptInput, effectivePrompt: input.prompt, config: { ...input.draft.config, model: model.id, imageModel: model.id, count: "1" },
+        prompt: input.draft.prompt, userInput: input.promptInput, effectivePrompt: input.prompt, config: { ...archivedConfig!, model: model.id, imageModel: model.id, count: "1" },
         parameters: { ...input.parameters }, references: archivedReferences, maskReferenceIndex: input.draft.maskReferenceIndex,
+        ...(input.draft.markupReferenceIndex !== undefined ? { markupReferenceIndex: input.draft.markupReferenceIndex } : {}),
     } : undefined;
     const taskRequests = createImageTaskRequests({
         quickImageAction: input.quickImageAction,

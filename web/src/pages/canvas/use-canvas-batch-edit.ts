@@ -8,8 +8,8 @@ import { type AiConfig, useEffectiveConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { type Position } from "@/types/canvas";
 import { App } from "antd";
-import type { ChangeEvent as ReactChangeEvent, RefObject } from "react";
-import { useCallback, useState } from "react";
+import type { ChangeEvent as ReactChangeEvent, RefObject, SetStateAction } from "react";
+import { useCallback, useRef, useState } from "react";
 import type { BatchEditFileItem } from "./canvas-batch-edit-runtime";
 import { imageMetadata } from "./canvas-project-utils";
 const loadBatchEditRuntime = () => import("./canvas-batch-edit-runtime");
@@ -30,10 +30,19 @@ export function useCanvasBatchEdit({ projectId, generationDispatchLocksRef, getC
     const setConnections = useCanvasGraphSetter("connections");
     const setSelectedNodeIds = useCanvasGraphSetter("selectedNodeIds");
     const [batchEditOpen, setBatchEditOpen] = useState(false);
-    const [batchEditPrompt, setBatchEditPrompt] = useState("");
+    const batchInputVersionRef = useRef(0);
+    const [batchEditPrompt, setBatchEditPromptState] = useState("");
     const [batchOptimizePrompt, setBatchOptimizePrompt] = useState(false);
     const [batchOptimizing, setBatchOptimizing] = useState(false);
-    const [batchImageSettings, setBatchImageSettings] = useState<Partial<AiConfig>>({});
+    const [batchImageSettings, setBatchImageSettingsState] = useState<Partial<AiConfig>>({});
+    const setBatchEditPrompt = useCallback((value: SetStateAction<string>) => {
+        batchInputVersionRef.current += 1;
+        setBatchEditPromptState(value);
+    }, []);
+    const setBatchImageSettings = useCallback((value: SetStateAction<Partial<AiConfig>>) => {
+        batchInputVersionRef.current += 1;
+        setBatchImageSettingsState(value);
+    }, []);
     const [batchEditItems, setBatchEditItems] = useState<BatchEditFileItem[]>([]);
     const [batchEditRunning, setBatchEditRunning] = useState(false);
     const [batchEditServerId, setBatchEditServerId] = useState<string | null>(null);
@@ -93,7 +102,7 @@ export function useCanvasBatchEdit({ projectId, generationDispatchLocksRef, getC
     }, [batchEditServerId, message]);
 
     return {
-        batchEditOpen, setBatchEditOpen, batchEditPrompt, setBatchEditPrompt, batchOptimizePrompt, setBatchOptimizePrompt,
+        batchEditOpen, setBatchEditOpen, batchEditPrompt, setBatchEditPrompt, batchInputVersionRef, batchOptimizePrompt, setBatchOptimizePrompt,
         batchOptimizing, batchImageSettings, setBatchImageSettings, batchEditItems, setBatchEditItems,
         batchEditRunning, batchEditServerId, batchEditAction, applyBatchEditFiles, handleBatchFolderInputChange, runBatchImageEdit, controlActiveBatchEdit,
     };

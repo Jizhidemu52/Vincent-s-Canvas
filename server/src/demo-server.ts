@@ -1,4 +1,6 @@
 import { authenticateDemoAccount, demoAccounts } from "./demo-accounts";
+import { videoResultMimeType } from "./video-result-type";
+import { videoFileExtension } from "../../shared/video-output";
 import { publicTaskFailurePayload } from "../../shared/generation-error";
 import { readDemoTaskProgress } from "./task-progress";
 import { logDemoRequest } from "./request-logging";
@@ -2383,6 +2385,7 @@ async function callApiMartImage(
     parameters,
     sourceDataUrls: references.map(toDataUrl),
     ...(isMarkImage && preparedInput?.mask ? { maskDataUrl: toDataUrl(preparedInput.mask) } : {}),
+    ...(isMarkImage && preparedInput?.markup ? { markupImage: preparedInput.markup } : {}),
     ...(isMarkImage && task ? {
       submissionKey: task.id,
       upstreamTaskId: task.upstreamTaskId,
@@ -2529,7 +2532,8 @@ async function downloadDemoVideoResult(task: DemoTask, url: string): Promise<Dem
   const bytes = new Uint8Array(await response.arrayBuffer());
   if (!bytes.byteLength) throw new Error("视频结果为空，可恢复查询原任务");
   const id = crypto.randomUUID();
-  return { id, ownerUserId: task.ownerUserId, filename: `video-${task.id}.mp4`, mimeType: "video/mp4", bytes, createdAt: now(), projectId: task.projectId, taskId: task.id, upstreamUrl: isPublicHttpsUrl(url) ? url : undefined };
+  const mimeType = await videoResultMimeType(bytes.subarray(0, 8192), response.headers.get("content-type"));
+  return { id, ownerUserId: task.ownerUserId, filename: `video-${task.id}.${videoFileExtension(mimeType)}`, mimeType, bytes, createdAt: now(), projectId: task.projectId, taskId: task.id, upstreamUrl: isPublicHttpsUrl(url) ? url : undefined };
 }
 
 async function pollVideoProviderTask(model: SupportedVideoModelId, taskId: string, provider: DemoVideoProvider) {

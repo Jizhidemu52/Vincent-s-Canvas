@@ -102,6 +102,7 @@ function outputMetadata(file: UploadedFile, mode: "video" | "audio"): CanvasNode
 function configMetadata(config: AiConfig, mode: "video" | "audio", context: NodeGenerationContext): CanvasNodeMetadata {
     return mode === "audio" ? { model: config.model, audioVoice: config.audioVoice, audioFormat: config.audioFormat, audioSpeed: config.audioSpeed, audioInstructions: config.audioInstructions }
         : { model: config.model, size: config.size, seconds: config.videoSeconds, videoMode: config.videoMode, vquality: config.vquality, generateAudio: config.videoGenerateAudio, watermark: config.videoWatermark,
+            videoSeed: config.videoSeed, videoOutputFormat: config.videoOutputFormat,
             references: [...context.referenceImages.map(image => image.storageKey || image.url || (!image.dataUrl.startsWith("data:") ? image.dataUrl : undefined)), ...context.referenceVideos.map(video => video.storageKey || video.url), ...context.referenceAudios.map(audio => audio.storageKey || audio.url)].filter((url): url is string => Boolean(url)) };
 }
 

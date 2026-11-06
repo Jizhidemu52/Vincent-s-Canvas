@@ -136,7 +136,7 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
                 {!referenceValidation.valid ? <p className="cw-reference-error" role="alert">{referenceValidation.message}</p> : null}
             </div>
             <div className="cw-generator-footer">
-                        <CanvasQuickSettingsPopovers config={{ ...config, model: model || availableModel, imageModel: model || availableModel, ...settings, quality: activeQuality, imageOptions }} profile={profile} referenceCount={references.length} theme={theme} disabled={running || !availableModel || model !== availableModel} onConfigChange={(key, value) => {
+                        <CanvasQuickSettingsPopovers config={{ ...config, model: model || availableModel, imageModel: model || availableModel, ...settings, quality: activeQuality, imageOptions }} profile={profile} referenceCount={references.length} uploadContextKey={referenceScopeKey ? JSON.stringify([referenceScopeKey, sourceNode?.id, prompt, references.map(reference => [reference.id, reference.storageKey, reference.dataUrl, reference.url])]) : undefined} theme={theme} disabled={running || !availableModel || model !== availableModel} onConfigChange={(key, value) => {
                             if (key === "size") onSizeChange(value);
                             if (key === "quality") onQualityChange(value);
                             if (key === "count") onCountChange(Number(value));

@@ -1,11 +1,12 @@
 import { uiText, useUiLocale } from "@/lib/i18n";
-import { type CSSProperties, type ReactNode, useEffect, useId, useState } from "react";
+import { type CSSProperties, type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { ConfigProvider } from "antd";
 import { ChevronDown, Ratio, Layers2, SlidersHorizontal } from "lucide-react";
 import type { CanvasTheme } from "@/lib/canvas-theme";
 import type { AiConfig } from "@/stores/use-config-store";
-import { automaticReferenceSizeNotice, imageModelSettingsError, imageReferenceSizeIsAutomatic, normalizeImageModelSettings, useImageModelProfile } from "@/lib/image-model-settings";
-import { imageOptionFields, normalizeImageOptions, readImageOptions } from "@/lib/image-advanced-settings";
+import { automaticReferenceSizeNotice, gifSizeNotice, imageModelSettingsError, imageOutputIsGif, imageReferenceSizeIsAutomatic, normalizeImageModelSettings, useImageModelProfile } from "@/lib/image-model-settings";
+import { imageMarkupReference, imageOptionFields, normalizeImageOptions, readImageOptions } from "@/lib/image-advanced-settings";
+import { uploadImage } from "@/services/image-storage";
 import "./image-settings-panel.css";
 
 type ImageSettingsPanelProps = {
@@ -18,40 +19,54 @@ type ImageSettingsPanelProps = {
     maxCount?: number;
     profile?: ReturnType<typeof useImageModelProfile>;
     referenceCount?: number;
+    /** Stable draft/node identity plus reference identities; invalidates pending markup reads on target changes. */
+    uploadContextKey?: string;
     /** Canvas side popover: base controls live in the compact parameter row. */
     compact?: boolean;
     /** Wide canvas dialog: readable cards while preserving the legacy compact layout. */
     spacious?: boolean;
 };
 
-export function ImageSettingsPanel({ config, onConfigChange, onConfigNormalize = onConfigChange, theme, showTitle = true, className = "", maxCount: maximum, profile: suppliedProfile, referenceCount = 0, compact = false, spacious = false }: ImageSettingsPanelProps) {
+export function ImageSettingsPanel({ config, onConfigChange, onConfigNormalize = onConfigChange, theme, showTitle = true, className = "", maxCount: maximum, profile: suppliedProfile, referenceCount = 0, uploadContextKey = "", compact = false, spacious = false }: ImageSettingsPanelProps) {
     useUiLocale();
     const [snapToStep, setSnapToStep] = useState(false);
     const [sizeNotice, setSizeNotice] = useState("");
     const cachedProfile = useImageModelProfile(config.model || config.imageModel);
     const profile = suppliedProfile || cachedProfile;
+    const markupContext = `${uploadContextKey}|${config.model || config.imageModel}|${referenceCount}`;
     const normalized = normalizeImageModelSettings(config, profile);
+    const gif = imageOutputIsGif(config.imageOptions, profile);
+    const sizeChoices = gif ? ["auto", "512x512", "768x768"] : profile.sizes;
     const maxCount = Math.min(maximum || profile.maxCount, profile.maxCount);
     const count = Math.min(maxCount, Number(normalized.count));
-    const custom = !profile.sizes.includes(normalized.size);
-    const dimensions = /^\d+x\d+$/.test(normalized.size) ? normalized.size.split("x").map(Number) : [1024, 1024];
+    const custom = !sizeChoices.includes(normalized.size);
+    const dimensions = /^\d+x\d+$/.test(normalized.size) ? normalized.size.split("x").map(Number) : gif ? [512, 512] : [1024, 1024];
     const automaticReferenceSize = imageReferenceSizeIsAutomatic(profile, referenceCount);
     const snapStep = profile.kind === "mai-image" ? 32 : profile.sizeConstraints?.multiple || 16;
-    const sizeError = automaticReferenceSize ? "" : imageModelSettingsError(normalized.size, profile);
-    const fields = imageOptionFields(profile).filter(field => field.key !== "resolution" && !(profile.kind === "midjourney-blend" && field.key === "dimensions"));
+    const sizeError = automaticReferenceSize ? "" : imageModelSettingsError(normalized.size, profile, config.imageOptions);
+    const fields = imageOptionFields(profile).filter(field => field.key !== "resolution" && !(profile.kind === "midjourney-blend" && field.key === "dimensions")
+        && (gif || !["frame_count", "frame_duration_ms"].includes(field.key)) && !((gif || !uploadContextKey) && field.key === "markup_reference"))
+        .map(field => gif && field.key === "background" ? { ...field, options: field.options?.filter(value => value !== "transparent") }
+            : gif && field.key === "output_format" ? { ...field, tip: "保留渠道原始 GIF 动画，不转码为静态图片。" } : field);
     const referenceQualityDisabled = profile.kind === "grok-image" && referenceCount > 0;
     const normalizedOptions = normalizeImageOptions(config.imageOptions, profile);
     const options = readImageOptions(normalizedOptions);
     const resolution = profile.resolutions.includes(options.resolution || "") ? options.resolution! : "1k";
     // Preserve intentional pixel sizes (including saved values inherited from another model).
     // The provider gives exact pixels precedence, so do not imply its resolution tier is active.
-    const exactPixelsOverrideResolution = profile.resolutions.length > 0 && /^[1-9]\d*x[1-9]\d*$/.test(normalized.size);
+    const exactPixelsOverrideResolution = !gif && profile.resolutions.length > 0 && /^[1-9]\d*x[1-9]\d*$/.test(normalized.size);
     const resolutionNoticeId = useId();
     const updateOption = (key: string, value: string) => {
         const next = { ...options, [key]: value };
         if (!value) delete next[key];
         if (key === "background" && value === "transparent" && options.output_format === "jpeg") next.output_format = "png";
         if (key === "output_format" && value === "jpeg" && options.background === "transparent") next.background = "opaque";
+        if (key === "output_format" && value === "gif") {
+            delete next.output_compression;
+            delete next.markup_reference;
+            if (next.background === "transparent") next.background = "opaque";
+            if (imageModelSettingsError(config.size, profile, JSON.stringify(next))) onConfigChange("size", "auto");
+        }
         if (key === "dimensions" && value) onConfigChange("size", ({ SQUARE: "1:1", PORTRAIT: "2:3", LANDSCAPE: "3:2" } as Record<string, string>)[value]!);
         onConfigChange("imageOptions", JSON.stringify(next));
     };
@@ -97,14 +112,14 @@ export function ImageSettingsPanel({ config, onConfigChange, onConfigNormalize =
                 <span className="ip-label"><Ratio size={15} />{uiText("宽高比")}</span>
                 <label className="ip-select">
                     <select data-usage-control="size" aria-label={uiText("宽高比")} value={normalized.size} onChange={event => onConfigChange("size", event.target.value)}>
-                        {profile.sizes.map(value => <option key={value} value={value}>{imageSizeLabel(value)}{value.includes("x") ? ` · ${value.replace("x", " × ")}` : ""}</option>)}
+                        {sizeChoices.map(value => <option key={value} value={value}>{imageSizeLabel(value)}{value.includes("x") ? ` · ${value.replace("x", " × ")}` : ""}</option>)}
                         {custom ? <option value={normalized.size}>{uiText("自定义 ·")}{normalized.size.replace("x", " × ")}</option> : null}
                     </select>
                     <ChevronDown size={13} aria-hidden />
                 </label>
             </div>
-            <p className="text-xs leading-5" style={{ color: theme.node.muted }}>{uiText("仅影响下次 AI 生成，不改变已有图片。")}{uiText(profile.tip)} {uiText("高画质、大尺寸可能增加费用与耗时。")}</p>
-            {profile.resolutions.length ? <div className="ip-row">
+            <p className="text-xs leading-5" style={{ color: theme.node.muted }}>{uiText("仅影响下次 AI 生成，不改变已有图片。")}{gif ? null : uiText(profile.tip)} {uiText("高画质、大尺寸可能增加费用与耗时。")}</p>
+            {profile.resolutions.length && !gif ? <div className="ip-row">
                 <span className="ip-label">{uiText("清晰度 / 分辨率")}</span>
                 <label className="ip-select">
                     <select data-usage-control="resolution" aria-label={uiText("清晰度 / 分辨率")} disabled={exactPixelsOverrideResolution} aria-describedby={exactPixelsOverrideResolution ? resolutionNoticeId : undefined} className={exactPixelsOverrideResolution ? "cursor-not-allowed opacity-60" : undefined} value={resolution} onChange={event => updateOption("resolution", event.target.value)}>
@@ -114,6 +129,7 @@ export function ImageSettingsPanel({ config, onConfigChange, onConfigNormalize =
                 </label>
             </div> : null}
             {exactPixelsOverrideResolution ? <p id={resolutionNoticeId} role="status" className="text-xs leading-5" style={{ color: theme.node.muted }}>{uiText("当前精确像素 {size} 优先，分辨率档位暂不生效；改选上方宽高比或自适应后启用。图片质量仍独立生效。", { size: normalized.size.replace("x", " × ") })}</p> : null}
+            {gif ? <p role="status" className="text-xs leading-5" style={{ color: theme.node.muted }}>{uiText(gifSizeNotice)}{uiText("仅支持文生图，不能添加参考图、蒙版或标注层。")}</p> : null}
             {profile.kind === "mai-image" ? null : referenceQualityDisabled ? <p role="status" className="text-xs leading-5" style={{ color: theme.node.muted }}>{uiText("参考图模式不提交 quality；移除全部参考图后可设置图片质量。")}</p> : <div className="ip-row">
                 <span className="ip-label">{uiText(profile.qualityLabel)}</span>
                 {profile.kind === "quality-resolution" || profile.kind === "resolution-1k" || profile.kind === "grok-image" ? <label className="ip-select">
@@ -132,24 +148,25 @@ export function ImageSettingsPanel({ config, onConfigChange, onConfigNormalize =
                     <div><h3 id={`${resolutionNoticeId}-size-title`}>{uiText("自定义像素")}</h3><p>{uiText("精确设置下一次生成图片的宽度和高度。")}</p></div>
                     <span className="ip-section-badge">PX</span>
                 </div>
-                {profile.sizeConstraintMessage ? <p className="ip-section-notice">{uiText(profile.sizeConstraintMessage)}</p> : null}
+                {profile.sizeConstraintMessage ? <p className="ip-section-notice">{uiText(gif ? gifSizeNotice : profile.sizeConstraintMessage)}</p> : null}
                 <div className="ip-size-grid">
                     {["宽度", "高度"].map((label, index) => <label key={`${label}-${dimensions[index]}`} className="ip-size-field">
                         <span>{uiText(label)}</span>
-                        <span className="ip-dimension-input"><input aria-label={uiText("自定义{label}", { label: uiText(label) })} type="number" min={profile.sizeConstraints?.minEdge || 1} step={snapToStep ? snapStep : 1} defaultValue={dimensions[index]} onBlur={event => commitDimension(index, event.currentTarget)} onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); }} /><span aria-hidden>px</span></span>
+                        <span className="ip-dimension-input"><input aria-label={uiText("自定义{label}", { label: uiText(label) })} type="number" min={gif ? 16 : profile.sizeConstraints?.minEdge || 1} step={snapToStep ? snapStep : 1} defaultValue={dimensions[index]} onBlur={event => commitDimension(index, event.currentTarget)} onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); }} /><span aria-hidden>px</span></span>
                     </label>)}
                 </div>
                 <label className="ip-snap-control"><input type="checkbox" checked={snapToStep} onChange={event => setSnapToStep(event.target.checked)} /><span><strong>{uiText(profile.kind === "mai-image" ? "32 倍数对齐" : "16 倍数对齐")}</strong><span>{uiText(profile.kind === "mai-image" ? "调整尺寸时向上对齐到最近的 32 像素倍数。" : "调整尺寸时向上对齐到最近的 16 像素倍数。")}</span></span></label>
             </section> : !automaticReferenceSize && profile.customSize ? <details className="ip-details" open={compact || undefined}>
                 <summary>{uiText("自定义像素")}<ChevronDown size={13} /></summary>
-                {profile.sizeConstraintMessage ? <p className="text-xs leading-5" style={{ color: theme.node.muted }}>{uiText(profile.sizeConstraintMessage)}</p> : null}
+                {profile.sizeConstraintMessage ? <p className="text-xs leading-5" style={{ color: theme.node.muted }}>{uiText(gif ? gifSizeNotice : profile.sizeConstraintMessage)}</p> : null}
                 <div className="ip-dimensions">
-                    {["宽度", "高度"].map((label, index) => <label key={`${label}-${dimensions[index]}`}><span>{uiText(label)}</span><input aria-label={uiText("自定义{label}", { label: uiText(label) })} type="number" min={profile.sizeConstraints?.minEdge || 1} step={snapToStep ? snapStep : 1} defaultValue={dimensions[index]} onBlur={event => commitDimension(index, event.currentTarget)} onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); }} /></label>)}
+                    {["宽度", "高度"].map((label, index) => <label key={`${label}-${dimensions[index]}`}><span>{uiText(label)}</span><input aria-label={uiText("自定义{label}", { label: uiText(label) })} type="number" min={gif ? 16 : profile.sizeConstraints?.minEdge || 1} step={snapToStep ? snapStep : 1} defaultValue={dimensions[index]} onBlur={event => commitDimension(index, event.currentTarget)} onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); }} /></label>)}
                 </div>
                 <label className="ip-align"><input type="checkbox" checked={snapToStep} onChange={event => setSnapToStep(event.target.checked)} />{uiText(profile.kind === "mai-image" ? "32 倍数对齐" : "16倍数对齐")}</label>
             </details> : null}
-            {profile.customAspect ? <label className="ip-row"><span className="ip-label">{uiText("自由比例")}</span><input key={normalized.size} aria-label={uiText("自定义宽高比")} defaultValue={normalized.size} placeholder={uiText("例如 7:5")} className="min-w-0 rounded border px-2 py-1.5" style={{ background: theme.node.fill, borderColor: theme.node.stroke }} onBlur={event => { if (/^[1-9]\d*:[1-9]\d*$/.test(event.currentTarget.value)) onConfigChange("size", event.currentTarget.value); else event.currentTarget.value = normalized.size; }} /></label> : null}
+            {profile.customAspect && !automaticReferenceSize ? <label className="ip-row"><span className="ip-label">{uiText("自由比例")}</span><input key={normalized.size} aria-label={uiText("自定义宽高比")} defaultValue={normalized.size} placeholder={uiText("例如 7:5")} className="min-w-0 rounded border px-2 py-1.5" style={{ background: theme.node.fill, borderColor: theme.node.stroke }} onBlur={event => { if (/^[1-9]\d*:[1-9]\d*$/.test(event.currentTarget.value)) onConfigChange("size", event.currentTarget.value); else event.currentTarget.value = normalized.size; }} /></label> : null}
             {sizeError ? <p role="alert" className="text-xs text-destructive">{sizeError}</p> : null}
+            {gif && referenceCount > 0 ? <p role="alert" className="text-xs text-destructive">{uiText("GIF 仅支持文生图，请先移除全部参考图。")}</p> : null}
             {fields.length && spacious ? <section className="ip-section ip-advanced-section" aria-labelledby={`${resolutionNoticeId}-advanced-title`}>
                 <div className="ip-section-heading">
                     <span className="ip-section-icon"><SlidersHorizontal size={19} aria-hidden /></span>
@@ -163,10 +180,10 @@ export function ImageSettingsPanel({ config, onConfigChange, onConfigNormalize =
                         const disabled = field.key === "output_compression" && !["jpeg", "webp"].includes(options.output_format || "png");
                         const isLongText = field.type === "json" || ["negative_prompt", "extra"].includes(field.key);
                         const helpId = `${resolutionNoticeId}-${field.key}-help`;
-                        const range = field.type === "number" ? uiText("范围 {min}–{max}{step}", { min: field.min ?? "", max: field.max ?? "", step: field.step !== undefined && field.step !== 1 ? uiText("，步长 {step}", { step: field.step }) : "" }) : "";
+                        const range = field.type === "number" ? field.max === undefined ? uiText("最小 {min}，步长 {step}", { min: field.min ?? "", step: field.step ?? 1 }) : uiText("范围 {min}–{max}{step}", { min: field.min ?? "", max: field.max, step: field.step !== undefined && field.step !== 1 ? uiText("，步长 {step}", { step: field.step }) : "" }) : "";
                         return <fieldset key={field.key} data-image-field={field.key} className={`ip-option-card${isLongText ? " ip-option-card-wide" : ""}${disabled ? " is-inactive" : ""}`}>
                             <legend>{uiText(field.label)}</legend>
-                            {choices && choices.length <= 4 ? <div className="ip-option-choices" role="radiogroup" aria-label={uiText(field.label)} aria-describedby={field.tip ? helpId : undefined}>
+                            {field.type === "image" ? <ImageMarkupInput key={`${markupContext}|${value}`} contextKey={markupContext} value={value} referenceCount={referenceCount} onChange={value => updateOption(field.key, value)} /> : choices && choices.length <= 4 ? <div className="ip-option-choices" role="radiogroup" aria-label={uiText(field.label)} aria-describedby={field.tip ? helpId : undefined}>
                                 {["", ...choices].map(choice => <label className="ip-option-choice" key={choice || "default"}>
                                     <input type="radio" name={`${resolutionNoticeId}-${field.key}`} data-image-option={field.key} value={choice} checked={value === choice} onChange={event => { if (event.target.checked) updateOption(field.key, choice); }} />
                                     <span>{imageOptionLabel(choice)}</span>
@@ -184,7 +201,7 @@ export function ImageSettingsPanel({ config, onConfigChange, onConfigNormalize =
                 <div className="flex flex-col gap-3 py-2">
                     {fields.map(field => <label key={field.key} className="flex flex-col gap-1 text-xs">
                         <span>{uiText(field.label)}</span>
-                        {field.options || field.type === "boolean" ? <select aria-label={uiText(field.label)} value={options[field.key] || ""} className="w-full rounded border px-2 py-1.5" style={{ background: theme.node.fill, color: theme.node.text, borderColor: theme.node.stroke }} onChange={event => updateOption(field.key, event.target.value)}>
+                        {field.type === "image" ? <ImageMarkupInput key={`${markupContext}|${options[field.key] || ""}`} contextKey={markupContext} value={options[field.key] || ""} referenceCount={referenceCount} onChange={value => updateOption(field.key, value)} /> : field.options || field.type === "boolean" ? <select aria-label={uiText(field.label)} value={options[field.key] || ""} className="w-full rounded border px-2 py-1.5" style={{ background: theme.node.fill, color: theme.node.text, borderColor: theme.node.stroke }} onChange={event => updateOption(field.key, event.target.value)}>
                             <option value="">{uiText("渠道默认")}</option>
                             {(field.options || ["true", "false"]).map(value => <option key={value} value={value}>{({ true: uiText("开启"), false: uiText("关闭"), auto: uiText("自动 (auto)"), opaque: uiText("不透明 (opaque)"), transparent: uiText("透明 (transparent)") } as Record<string, string>)[value] || value}</option>)}
                         </select> : <input aria-label={uiText(field.label)} type={field.type === "number" ? "number" : "text"} min={field.min} max={field.max} step={field.step} value={options[field.key] || ""} placeholder={uiText("渠道默认")} disabled={field.key === "output_compression" && !["jpeg", "webp"].includes(options.output_format || "png")} className="w-full rounded border px-2 py-1.5 disabled:opacity-40" style={{ background: theme.node.fill, color: theme.node.text, borderColor: theme.node.stroke }} onChange={event => updateOption(field.key, event.target.value)} />}
@@ -197,7 +214,43 @@ export function ImageSettingsPanel({ config, onConfigChange, onConfigNormalize =
 }
 
 function imageOptionLabel(value: string) {
-    return ({ "": uiText("渠道默认"), true: uiText("开启"), false: uiText("关闭"), auto: uiText("自动"), opaque: uiText("不透明"), transparent: uiText("透明"), png: "PNG", jpeg: "JPEG", webp: "WebP" } as Record<string, string>)[value] || value;
+    return ({ "": uiText("渠道默认"), true: uiText("开启"), false: uiText("关闭"), auto: uiText("自动"), opaque: uiText("不透明"), transparent: uiText("透明"), png: "PNG", jpeg: "JPEG", webp: "WebP", gif: "GIF", low: uiText("低"), medium: uiText("中"), high: uiText("高") } as Record<string, string>)[value] || value;
+}
+
+function ImageMarkupInput({ value, referenceCount, contextKey, onChange }: { value: string; referenceCount: number; contextKey: string; onChange: (value: string) => void }) {
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState("");
+    const mounted = useRef(true);
+    const change = useRef(onChange);
+    const context = useRef({ key: contextKey, value });
+    change.current = onChange;
+    context.current = { key: contextKey, value };
+    useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+    let name = "";
+    try { name = imageMarkupReference(JSON.stringify({ markup_reference: value }))?.name || ""; } catch { name = uiText("标注层记录无效，请重新上传"); }
+    const pick = async (file?: File) => {
+        if (!file || busy) return;
+        const start = context.current;
+        const stillCurrent = () => mounted.current && context.current.key === start.key && context.current.value === start.value;
+        setBusy(true); setError("");
+        try {
+            if (file.size > 50 * 1024 * 1024) throw new Error("标注层不能超过 50 MB");
+            const signature = new Uint8Array(await file.slice(0, 8).arrayBuffer());
+            if (![137, 80, 78, 71, 13, 10, 26, 10].every((byte, index) => signature[index] === byte)) throw new Error("请上传独立透明 PNG 标注层");
+            const stored = await uploadImage(file);
+            if (stored.width * stored.height > 16_777_216) throw new Error("标注层总像素不能超过 16,777,216");
+            if (!stillCurrent()) return;
+            change.current(JSON.stringify({ id: `markup:${stored.storageKey}`, name: file.name, originalFileName: file.name, type: "image/png", dataUrl: stored.url, storageKey: stored.storageKey, bytes: stored.bytes, width: stored.width, height: stored.height }));
+        } catch (error) { if (stillCurrent()) setError(error instanceof Error ? error.message : "标注层读取失败"); }
+        finally { if (stillCurrent()) setBusy(false); }
+    };
+    return <div className="flex flex-col gap-2">
+        <input aria-label={uiText("上传独立透明 PNG 标注层")} type="file" accept="image/png,.png" disabled={busy || referenceCount === 0} onChange={event => { const file = event.target.files?.[0]; event.target.value = ""; void pick(file); }} />
+        {busy ? <span role="status">{uiText("正在读取标注层")}</span> : null}
+        {name ? <div>{name} <button type="button" onClick={() => onChange("")}>{uiText("移除标注层")}</button></div> : null}
+        {referenceCount === 0 ? <span>{uiText("先添加至少一张参考图；标注层须与第一张参考图同尺寸。")}</span> : null}
+        {error ? <span role="alert" className="text-destructive">{error}</span> : null}
+    </div>;
 }
 
 export function ImageSettingsTheme({ theme, children }: { theme: CanvasTheme; children: ReactNode }) {

@@ -58,9 +58,10 @@ type CanvasNodePromptPanelProps = {
     onOpenSharedConfig?: (id: string) => void;
     onRestoreGeneration?: (nodeId: string) => void;
     onRegisterDraftFlush?: (flush: (() => void) | null) => void;
+    uploadContextKey?: string;
 };
 
-export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, onStop, mentionReferences = [], onImageSettingsOpenChange, canvasNodes = [], canvasConnections = [], sharedConfig, onOpenSharedConfig, onRestoreGeneration, onRegisterDraftFlush }: CanvasNodePromptPanelProps) {
+export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, onStop, mentionReferences = [], onImageSettingsOpenChange, canvasNodes = [], canvasConnections = [], sharedConfig, onOpenSharedConfig, onRestoreGeneration, onRegisterDraftFlush, uploadContextKey }: CanvasNodePromptPanelProps) {
     const t = useUiText();
     const { message } = App.useApp();
     const globalConfig = useEffectiveConfig("canvas");
@@ -269,6 +270,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                             <CanvasImageSettingsPopover
                                 config={config}
                                 referenceCount={imageReferences.length}
+                                uploadContextKey={uploadContextKey ? JSON.stringify([uploadContextKey, node.id, prompt, imageReferences.map(reference => [reference.id, reference.storageKey, reference.dataUrl, reference.url])]) : undefined}
                                 placement="topLeft"
                                 buttonClassName="!h-10 !max-w-[170px] !justify-start !rounded-full !px-3"
                                 onConfigChange={(key, value) => onConfigChange(node.id, key === "count" ? { count: Number(value) || 1 } : { [key]: value })}
@@ -351,6 +353,8 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: Can
         vquality: node.metadata?.vquality || globalConfig.vquality || defaultConfig.vquality,
         videoGenerateAudio: node.metadata?.generateAudio || globalConfig.videoGenerateAudio || defaultConfig.videoGenerateAudio,
         videoWatermark: node.metadata?.watermark || globalConfig.videoWatermark || defaultConfig.videoWatermark,
+        videoSeed: node.metadata?.videoSeed ?? globalConfig.videoSeed ?? "",
+        videoOutputFormat: node.metadata?.videoOutputFormat || globalConfig.videoOutputFormat || "mp4",
         audioVoice: node.metadata?.audioVoice || globalConfig.audioVoice || defaultConfig.audioVoice,
         audioFormat: node.metadata?.audioFormat || globalConfig.audioFormat || defaultConfig.audioFormat,
         audioSpeed: node.metadata?.audioSpeed || globalConfig.audioSpeed || defaultConfig.audioSpeed,

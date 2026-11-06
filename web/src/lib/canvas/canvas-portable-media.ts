@@ -8,6 +8,21 @@ export async function portableCanvasMedia<T>(document: T, resolve: PortableMedia
     const resolved = new Map<string, Promise<string>>();
     async function visit(value: unknown, mediaContext = false, field = ""): Promise<unknown> {
         if (Array.isArray(value)) return Promise.all(value.map(item => visit(item, mediaContext, field)));
+        if (field === "imageOptions" && typeof value === "string") {
+            let options: Record<string, unknown> | undefined, markup: MediaObject | undefined;
+            try {
+                options = JSON.parse(value);
+                const candidate = typeof options?.markup_reference === "string" ? JSON.parse(options.markup_reference) : undefined;
+                if (candidate && typeof candidate === "object" && !Array.isArray(candidate) && candidate.type === "image/png") markup = candidate;
+            } catch { /* Do not interpret unrelated or invalid JSON settings as media. */ }
+            if (markup) {
+                const uploaded = await visit(markup, true) as MediaObject;
+                // The resolver owns the durable URL. Do not preserve an old
+                // employee's source id as an independent reuse shortcut.
+                delete uploaded.sourceAssetId;
+                return JSON.stringify({ ...options, markup_reference: JSON.stringify(uploaded) });
+            }
+        }
         if (!value || typeof value !== "object") {
             if (typeof value === "string" && mediaContext && field === "references" && /^(image|video|audio|file|media):/.test(value)) return resolveOnce({ storageKey: value, url: "" });
             if (typeof value === "string" && (mediaFields.has(field) || (mediaContext && ["content", "references"].includes(field))) && needsUpload(value)) return resolveOnce({ url: value });

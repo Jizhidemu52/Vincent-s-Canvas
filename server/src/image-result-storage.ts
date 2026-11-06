@@ -1,5 +1,6 @@
 import { processImageResult } from "./image-result-processing";
 import { quickImageResultAction } from "./quick-image-tools";
+import { inspectGifFrames } from "./gif-image";
 
 type ImageBytes = { bytes: Uint8Array; mimeType: string };
 type AssetReference = { assetId: string; mimeType: string; filename: string };
@@ -24,7 +25,7 @@ export class ImageResultPersistenceError extends Error {
 
 export function hasImageResultProcessing(parameters: Record<string, unknown>) {
   const archive = parameters.inputArchive as Record<string, unknown> | undefined;
-  return Boolean(quickImageResultAction(parameters)) || parameters.background === "transparent" || archive?.maskReferenceIndex !== undefined || ["png", "jpeg", "webp"].includes(String(parameters.output_format));
+  return Boolean(quickImageResultAction(parameters)) || parameters.background === "transparent" || archive?.maskReferenceIndex !== undefined || ["png", "jpeg", "webp", "gif"].includes(String(parameters.output_format));
 }
 
 /** Persist upstream bytes before any fallible local decoding, mask loading or conversion. */
@@ -33,6 +34,14 @@ export async function storeImageResult(input: StoredResultInput): Promise<AssetR
   // Initially visible: if processing is interrupted this original remains recoverable in the library.
   const original = await input.save("provider-original", input.result, {});
   try {
+    if (input.parameters.output_format === "gif") {
+      const gif = await inspectGifFrames(input.result.bytes);
+      if (input.result.mimeType !== "image/gif" || input.parameters.background === "transparent" || input.parameters.output_compression !== undefined) throw new Error("GIF 结果格式或参数不一致；原件已保留");
+      if (gif.frames !== (input.parameters.frame_count ?? 9)) throw new Error("GIF 实际帧数与请求不一致；原件已保留，不会自动重新生成");
+      await input.updateMetadata(original, { imageResult: { version: 1, resultIndex: input.resultIndex, original, role: "primary",
+        maskComposited: false, requestedOutputFormat: "gif", operations: ["original_gif_animation_preserved"], animated: true, frameCount: gif.frames } });
+      return original;
+    }
     const editInput = await input.prepareEditInput?.();
     const processed = await (input.process ?? processImageResult)({ result: input.result, parameters: input.parameters, editInput });
     const format = String(input.parameters.output_format || "");
@@ -69,5 +78,5 @@ export async function storeImageResult(input: StoredResultInput): Promise<AssetR
 }
 
 export function imageResultExtension(mimeType: string) {
-  return ({ "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/svg+xml": "svg" } as Record<string, string>)[mimeType] || "png";
+  return ({ "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif", "image/svg+xml": "svg" } as Record<string, string>)[mimeType] || "png";
 }

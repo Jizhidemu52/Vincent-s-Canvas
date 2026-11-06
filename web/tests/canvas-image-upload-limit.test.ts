@@ -27,6 +27,22 @@ function prepareMedia(scope: Record<string, unknown>) {
     return module.exports.prepareCanvasMediaNode;
 }
 
+function quickReferenceUpload(scope: Record<string, unknown>) {
+    const code = ts.transpileModule(readFileSync(new URL("../src/pages/canvas/canvas-quick-reference-upload.ts", import.meta.url), "utf8"), {
+        compilerOptions: { target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.CommonJS },
+    }).outputText;
+    const dependencies: Record<string, unknown> = {
+        "@/lib/i18n": { uiText }, nanoid: { nanoid: () => "quick-reference" },
+        "@/lib/canvas/canvas-image-upload-limit": { assertCanvasImageUploadSize },
+        "@/lib/image-reference-policy": { validateImageReferences: scope.validateImageReferences },
+        "@/stores/use-config-store": { modelOptionName: scope.modelOptionName },
+        "@/services/image-storage": { uploadImage: scope.uploadImage },
+    };
+    const module = { exports: {} };
+    new Function("require", "module", "exports", code)((name: string) => dependencies[name], module, module.exports);
+    return module.exports;
+}
+
 const pageSource = ["project.tsx", "use-canvas-quick-generation.ts"]
     .map(file => readFileSync(new URL(`../src/pages/canvas/${file}`, import.meta.url), "utf8")).join("\n");
 const source = ts.createSourceFile("project.tsx", pageSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
@@ -38,6 +54,7 @@ function callback(name: string, scope: Record<string, unknown>): (...args: any[]
         loadQuickGenerationNode() {}, lastEditorSelectionRef: { current: "" }, editorOwner: "owner", setQuickGenerateReferences() {}, setDialogNodeId() {},
         ...scope, message: { open() {}, info() {}, destroy() {}, ...(scope.message as object || {}) } };
     scope.prepareCanvasMediaNode ||= prepareMedia(scope);
+    scope.quickReferenceUpload ||= quickReferenceUpload(scope);
     if (name === "handleDrop" || name === "handleImageInputChange") {
         scope.createImageFileNode ||= callback("createImageFileNode", scope);
         scope.importFiles = callback("importFiles", scope);
@@ -70,8 +87,9 @@ function callback(name: string, scope: Record<string, unknown>): (...args: any[]
     };
     visit(source);
     if (!expression) throw new Error(`Missing callback: ${name}`);
-    const code = ts.transpileModule(`const run = ${expression.getText(source)};`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
-    return new Function("scope", `with (scope) { ${code} return run; }`)(new Proxy({ uiText, Error, Array, Math, Boolean, Set, CanvasNodeType, CANVAS_LARGE_IMAGE_NOTICE, isLargeCanvasImage, assertCanvasImageUploadSize, ...scope }, { has: () => true }));
+    const code = ts.transpileModule(`const run = ${expression.getText(source)};`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
+        .replace('import("./canvas-quick-reference-upload")', "Promise.resolve(quickReferenceUpload)");
+    return new Function("scope", `with (scope) { ${code} return run; }`)(new Proxy({ uiText, Error, Array, Math, Boolean, Set, Promise, CanvasNodeType, CANVAS_LARGE_IMAGE_NOTICE, isLargeCanvasImage, assertCanvasImageUploadSize, ...scope }, { has: () => true }));
 }
 const large = { name: "too-large.png", type: "image/png", size: CANVAS_IMAGE_MAX_BYTES + 1 };
 const small = { name: "normal.png", type: "image/png", size: 100 };
@@ -193,6 +211,7 @@ test("creation-panel references reject oversized files before starting any uploa
     });
     const input = { files: [small, large], value: "selection" };
     await change({ target: input });
+    await new Promise(resolve => setTimeout(resolve, 0));
     expect(errors[0]).toContain("超过 20 MB");
     expect(uploads).toBe(0);
     expect(changes).toBe(0);

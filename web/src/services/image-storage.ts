@@ -132,6 +132,15 @@ export function releaseUnusedImageObjectUrls(usedData: unknown) {
 export function collectImageStorageKeys(value: unknown, keys = new Set<string>()) {
     if (!value || typeof value !== "object") return keys;
     if ("storageKey" in value && typeof value.storageKey === "string" && value.storageKey.startsWith("image:")) keys.add(value.storageKey);
+    if ("imageOptions" in value && typeof value.imageOptions === "string") {
+        try {
+            const options = JSON.parse(value.imageOptions);
+            if (typeof options?.markup_reference === "string") {
+                const markup = JSON.parse(options.markup_reference);
+                if (markup?.type === "image/png" && typeof markup.storageKey === "string" && markup.storageKey.startsWith("image:")) keys.add(markup.storageKey);
+            }
+        } catch { /* Invalid settings are reported by the parameter validator, never widen cache cleanup. */ }
+    }
     Object.values(value).forEach((item) => (Array.isArray(item) ? item.forEach((child) => collectImageStorageKeys(child, keys)) : collectImageStorageKeys(item, keys)));
     return keys;
 }

@@ -29,12 +29,12 @@ describe.each(models.map(modelId => [modelId] as const))("APIMart %s static imag
       expect(buildApiMartImageRequest({ ...base, parameters: { quality, size: "1600x1200" } }).payload).toMatchObject({ quality, size: "1600x1200" });
   });
 
-  test("rejects invalid or non-static requests before sending credentials or creating a paid task", async () => {
+  test("rejects invalid and excluded requests before sending credentials or creating a paid task", async () => {
     const invalid = [
       { sourceDataUrls: Array(17).fill(reference) }, { prompt: "x".repeat(32_001) },
       { parameters: { quality: "ultra" } }, { parameters: { resolution: "3k" } }, { parameters: { n: 2 } },
       { parameters: { size: "4000x2048" } }, { parameters: { background: "transparent", output_format: "jpeg" } },
-      { parameters: { output_format: "gif" } }, { parameters: { output_format: "svg" } },
+      { parameters: { output_format: "gif", size: "1:1" } }, { parameters: { output_format: "svg" } },
       { parameters: { markup_url: reference } }, { parameters: { frame_count: 9 } }, { parameters: { stream: true } },
       { sourceDataUrls: [], maskDataUrl: mask },
     ];

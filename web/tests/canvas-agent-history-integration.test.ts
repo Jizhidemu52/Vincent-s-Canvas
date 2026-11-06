@@ -78,6 +78,7 @@ function editor(initial = project(), previous = frame(initial), loadUndoAction: 
     const scope = {
         uiText, nanoid, options: {}, canvasHistoryContentChanged, normalizeCanvasSelectedNodeIds, CanvasNodeType, syncCanvasSelectionReferences,
         loadQuickGenerationNode: (node: CanvasProject["nodes"][number] | null) => { if (node) editorPrompt = canvasGenerationDraft(node); },
+        syncQuickGenerationNode() {},
         setQuickGenerateReferences() {},
         React, useCallback: (callback: unknown) => callback, applyCanvasAgentOps, canvasGenerationRunsForNodes,
         describeCanvasHistoryChange, mergeCanvasGenerationHistory, onHistoryAction: undefined, beforeHistoryAction: undefined,

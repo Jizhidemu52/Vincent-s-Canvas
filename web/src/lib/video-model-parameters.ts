@@ -2,10 +2,11 @@ import { modelOptionName, type AiConfig } from "@/stores/use-config-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
+import { parseVideoSeed } from "../../../shared/video-output";
 
 export type VideoMode = "auto" | "text" | "first-frame" | "last-frame" | "first-last-frame" | "reference" | "edit" | "extend";
 export const videoModeLabels: Record<VideoMode, string> = { auto: "自动判断", text: "文生视频", "first-frame": "首帧", "last-frame": "尾帧", "first-last-frame": "首尾帧", reference: "多素材参考", edit: "视频编辑", extend: "视频延长 / 续写" };
-export type VideoModelParameterKey = "size" | "vquality" | "videoSeconds" | "videoMode" | "videoGenerateAudio" | "videoWatermark";
+export type VideoModelParameterKey = "size" | "vquality" | "videoSeconds" | "videoMode" | "videoGenerateAudio" | "videoWatermark" | "videoSeed" | "videoOutputFormat";
 type VideoConfig = Pick<AiConfig, "model" | "videoModel" | VideoModelParameterKey>;
 
 export type VideoModelParameterSpec = {
@@ -16,6 +17,9 @@ export type VideoModelParameterSpec = {
     supportsAudio: boolean;
     supportsWatermark: boolean;
     supportsAutoDuration: boolean;
+    supportsSeed?: boolean;
+    seedMaximum?: number;
+    outputFormats?: readonly string[];
     defaultResolution: string;
     defaultSize: string;
     maxImages: number;
@@ -51,6 +55,7 @@ const specifications: Record<string, VideoModelParameterSpec> = {
         audioHint: "模型原生输出带音轨；渠道未提供关闭声音的参数。",
     },
     "doubao-seedance-2.5": {
+        supportsSeed: true, outputFormats: ["mp4", "mov"],
         seconds: [4, 30], resolutions: ["480p", "720p", "1080p"], sizes: ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"],
         supportsAudio: true, supportsWatermark: true, supportsAutoDuration: true,
         defaultResolution: "720p", defaultSize: "adaptive",
@@ -71,6 +76,7 @@ const specifications: Record<string, VideoModelParameterSpec> = {
         audioHint: "渠道未提供生成声音开关；可使用自定义音频输入。",
     },
     "happyhorse-1.1": {
+        supportsSeed: true, seedMaximum: 2147483647,
         seconds: [3, 15], resolutions: ["720P", "1080P"], sizes: standardRatios,
         supportsAudio: false, supportsWatermark: true, supportsAutoDuration: false,
         defaultResolution: "1080P", defaultSize: "16:9",
@@ -103,7 +109,7 @@ export function videoAspectRatioFollowsImage(config: Pick<AiConfig, "model" | "v
 }
 
 export function normalizeVideoModelConfig(config: VideoConfig, freshParameterModelId?: string | null): Pick<AiConfig, VideoModelParameterKey> {
-    const current = { size: config.size, vquality: config.vquality, videoSeconds: config.videoSeconds, videoMode: config.videoMode || "auto", videoGenerateAudio: config.videoGenerateAudio, videoWatermark: config.videoWatermark };
+    const current = { size: config.size, vquality: config.vquality, videoSeconds: config.videoSeconds, videoMode: config.videoMode || "auto", videoGenerateAudio: config.videoGenerateAudio, videoWatermark: config.videoWatermark, videoSeed: config.videoSeed || "", videoOutputFormat: config.videoOutputFormat || "mp4" };
     const spec = getVideoModelParameterSpec(config, freshParameterModelId);
     if (!spec) return current;
 
@@ -121,6 +127,8 @@ export function normalizeVideoModelConfig(config: VideoConfig, freshParameterMod
         videoSeconds: edit ? "-1" : String(validSeconds ? seconds : 5),
         videoGenerateAudio: String(spec.supportsAudio && config.videoGenerateAudio !== "false"),
         videoWatermark: String(spec.supportsWatermark && config.videoWatermark === "true"),
+        videoSeed: spec.supportsSeed ? config.videoSeed || "" : "",
+        videoOutputFormat: spec.outputFormats?.includes(config.videoOutputFormat) ? config.videoOutputFormat : "mp4",
     };
 }
 
@@ -128,6 +136,7 @@ export function videoModelRequestParameters(config: VideoConfig, freshParameterM
     const spec = getVideoModelParameterSpec(config, freshParameterModelId);
     if (!spec) throw new Error("当前视频模型尚未提供参数规格，请选择已配置的视频模型");
     const normalized = normalizeVideoModelConfig(config, freshParameterModelId);
+    const seed = spec.supportsSeed ? parseVideoSeed(normalized.videoSeed, spec.seedMaximum) : undefined;
     return {
         videoMode: normalized.videoMode,
         seconds: Number(normalized.videoSeconds),
@@ -135,6 +144,8 @@ export function videoModelRequestParameters(config: VideoConfig, freshParameterM
         resolution: normalized.vquality,
         ...(spec.supportsAudio ? { generateAudio: normalized.videoGenerateAudio === "true" } : {}),
         ...(spec.supportsWatermark ? { watermark: normalized.videoWatermark === "true" } : {}),
+        ...(seed !== undefined ? { seed } : {}),
+        ...(spec.outputFormats ? { outputFormat: normalized.videoOutputFormat } : {}),
     };
 }
 
@@ -181,6 +192,7 @@ export function videoReferenceError(config: Pick<AiConfig, "model" | "videoModel
         if (image.bytes !== undefined && (image.bytes <= 0 || image.bytes > 10 * 1024 * 1024)) return `图片${index + 1} 需为非空文件且不超过当前上传入口的 10MB 限制`;
         if (["MiniMax-H3", "doubao-seedance-2.5"].includes(model) && image.width && image.height && !validDimensions(image.width, image.height, sizeBounds)) return `图片${index + 1} 的宽高或比例不符合模型要求（边长 ${sizeBounds[0]}–${sizeBounds[1]}px，比例 ${sizeBounds[2]}–${sizeBounds[3]}）`;
         if (model === "happyhorse-1.1" && mode === "first-frame" && image.width && image.height && (Math.min(image.width, image.height) < 300 || image.width / image.height < 0.4 || image.width / image.height > 2.5)) return "HappyHorse 首帧短边至少 300px，宽高比需在 0.4–2.5 之间";
+        if (model === "happyhorse-1.1" && mode === "reference" && image.width && image.height && (image.width / image.height < 0.4 || image.width / image.height > 2.5)) return "HappyHorse 参考图宽高比需在 0.4–2.5 之间";
     }
     for (const [kind, items, maxMB, duration, total] of [["视频", videos, spec.videoMaxMB, spec.videoDuration, spec.videoTotalSeconds], ["音频", audios, 15, spec.audioDuration, spec.audioTotalSeconds]] as const) {
         let sum = 0;

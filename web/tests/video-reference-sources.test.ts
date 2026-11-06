@@ -64,3 +64,15 @@ test("HappyHorse rejects undersized first frames but keeps valid reference image
     expect(videoReferenceError(config, [image])).toContain("首帧短边至少 300px");
     expect(videoReferenceError({ ...config, videoMode: "reference" }, [{ ...image, width: 500 }])).toBe("");
 });
+
+test("HappyHorse reference mode rejects extreme ratios but accepts both boundaries below 720p", () => {
+    const config = { ...defaultConfig, model: "happyhorse-1.1", videoMode: "reference" };
+    const image = { id: "reference", name: "reference.png", type: "image/png", dataUrl: "data:image/png;base64,AQ==", width: 200, height: 500 };
+    for (const dimensions of [{ width: 199, height: 500 }, { width: 501, height: 200 }]) {
+        expect(videoReferenceError(config, [{ ...image, ...dimensions }])).toContain("参考图宽高比需在 0.4–2.5");
+        expect(videoReferenceError({ ...config, videoMode: "auto" }, [image, { ...image, ...dimensions }])).toContain("参考图宽高比需在 0.4–2.5");
+    }
+    for (const dimensions of [{ width: 200, height: 500 }, { width: 500, height: 200 }]) {
+        expect(videoReferenceError(config, [{ ...image, ...dimensions }])).toBe("");
+    }
+});

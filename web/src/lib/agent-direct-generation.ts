@@ -45,7 +45,7 @@ export type AgentVideoConfirmation = {
 type ReferenceLike = { id: string };
 
 export function normalizeAgentImageSettings(settings: AgentGenerationSettings, profile = imageModelProfile(settings.imageModel)): AgentGenerationSettings {
-    const normalized = normalizeImageModelSettings({ size: settings.size, quality: settings.quality, count: settings.imageCount }, profile);
+    const normalized = normalizeImageModelSettings({ size: settings.size, quality: settings.quality, count: settings.imageCount, imageOptions: settings.imageOptions }, profile);
     return { ...settings, size: normalized.size, quality: normalized.quality, imageCount: normalized.count,
         imageOptions: normalizeImageOptions(settings.imageOptions, profile) };
 }
@@ -89,7 +89,7 @@ export async function resolveAgentImageGenerationSettings(
     if (requested && (requested === "auto" && normalized.size !== "auto" || requestedAspect && (!normalizedAspect || Math.abs(Math.log(requestedAspect / normalizedAspect)) >= 1e-9))) {
         throw new Error("当前模型不支持已选择的图片尺寸，请在出图设置重新选择；图片任务尚未提交。");
     }
-    const error = imageModelSettingsError(normalized.size, profile);
+    const error = imageModelSettingsError(normalized.size, profile, normalized.imageOptions);
     if (error) throw new Error(error);
     return normalized;
 }

@@ -204,6 +204,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     if (!textDraftRef.current) textDraftRef.current = createCanvasTextDraft(data.metadata?.content || "", (content) => onContentChange(data.id, content));
     const resizeRef = useRef({
         isResizing: false,
+        hasPreview: false,
         corner: "bottom-right" as ResizeCorner,
         startX: 0,
         startY: 0,
@@ -321,6 +322,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                     if (preview) setLocalResizePreview(preview);
                 });
             }
+            resizeRef.current.hasPreview = true;
             onResize(id, width, height, position);
         },
         [],
@@ -334,13 +336,14 @@ export const CanvasNode = React.memo(function CanvasNode({
             resize.currentWidth = resize.startWidth;
             resize.currentHeight = resize.startHeight;
             resize.currentPosition = { x: resize.startLeft, y: resize.startTop };
-            resizeCallbacksRef.current.onResizeEnd(resizeCallbacksRef.current.id, resize.startWidth, resize.startHeight, resize.currentPosition);
         }
-        if (resize.isResizing && (resize.currentWidth !== resize.startWidth || resize.currentHeight !== resize.startHeight || resize.currentPosition.x !== resize.startLeft || resize.currentPosition.y !== resize.startTop)) {
+        // Every published preview must end, including clamped or return-to-start gestures.
+        if (resize.isResizing && resize.hasPreview) {
             const { id, onResizeEnd } = resizeCallbacksRef.current;
             onResizeEnd(id, resize.currentWidth, resize.currentHeight, resize.currentPosition);
         }
         resizeRef.current.isResizing = false;
+        resizeRef.current.hasPreview = false;
         if (resizePreviewFrameRef.current !== null) {
             cancelAnimationFrame(resizePreviewFrameRef.current);
             resizePreviewFrameRef.current = null;
@@ -360,6 +363,7 @@ export const CanvasNode = React.memo(function CanvasNode({
         event.preventDefault();
         resizeRef.current = {
             isResizing: true,
+            hasPreview: false,
             corner,
             startX: event.clientX,
             startY: event.clientY,
@@ -392,6 +396,7 @@ export const CanvasNode = React.memo(function CanvasNode({
             resizePreviewFrameRef.current = null;
             pendingResizePreviewRef.current = null;
             resizeRef.current.isResizing = false;
+            resizeRef.current.hasPreview = false;
         };
     }, [handleResizeMove, handleResizeUp]);
 

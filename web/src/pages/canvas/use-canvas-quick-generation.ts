@@ -3,7 +3,6 @@ import { NODE_DEFAULT_SIZE } from "@/constant/canvas";
 import { canvasToolKey, currentToolConfig } from "@/hooks/use-tool-config";
 import { canvasImageReferenceIdentity } from "@/lib/canvas/canvas-image-filename";
 import { placeCanvasImageOutputs } from "@/lib/canvas/canvas-image-output-placement";
-import { assertCanvasImageUploadSize } from "@/lib/canvas/canvas-image-upload-limit";
 import { canvasImageUsageInput } from "@/lib/canvas/canvas-image-usage";
 import { canvasGenerationEditorState, storeCanvasEditorReferences } from "@/lib/canvas/canvas-generation-editor";
 import type { CanvasQuickGenerateSettings } from "@/lib/canvas/canvas-quick-generate-render-stability";
@@ -13,10 +12,6 @@ import { type CanvasSelectionReference } from "@/lib/canvas/canvas-selection-ref
 import { deploymentFeatures } from "@/lib/deployment-features";
 import { imageModelProfile, normalizeImageModelSettings } from "@/lib/image-model-settings";
 import { validateImageReferences } from "@/lib/image-reference-policy";
-import { promptImageSettings } from "@/lib/prompt-editor-parameters";
-import { hydratePromptReuse } from "@/services/api/prompts";
-import { fetchServerAssetContent } from "@/services/api/server-assets";
-import { uploadImage } from "@/services/image-storage";
 import { useCanvasGraphSetter } from "@/stores/canvas/canvas-graph-store";
 import { useCanvasPanelStore } from "@/stores/canvas/use-canvas-panel-store";
 import { useAssetStore } from "@/stores/use-asset-store";
@@ -40,7 +35,7 @@ type CanvasQuickGenerationOptions = {
     connectionsRef?: RefObject<CanvasConnection[]>;
     flushPendingHistoryRef?: RefObject<(() => void) | null>;
     runtime: ReturnType<typeof useCanvasGenerationRuntime>;
-    batchEdit: Pick<ReturnType<typeof useCanvasBatchEdit>, "setBatchEditPrompt" | "setBatchImageSettings" | "setBatchEditOpen">;
+    batchEdit: Pick<ReturnType<typeof useCanvasBatchEdit>, "setBatchEditPrompt" | "setBatchImageSettings" | "setBatchEditOpen" | "batchInputVersionRef">;
     setDialogNodeId: Dispatch<SetStateAction<string | null>>;
     getCanvasCenter: () => Position;
     handleMissingModelConfig: () => void;
@@ -58,7 +53,7 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, c
     const setSelectedNodeIds = useCanvasGraphSetter("selectedNodeIds");
     const setSelectedConnectionId = useCanvasGraphSetter("selectedConnectionId");
     const { createOptions, startGenerationRequest, finishGenerationRequest, setRunningNodeId, waitForWriteAccess, isObservationCurrent } = runtime;
-    const { setBatchEditPrompt, setBatchImageSettings, setBatchEditOpen } = batchEdit;
+    const { setBatchEditPrompt, setBatchImageSettings, setBatchEditOpen, batchInputVersionRef } = batchEdit;
     const NODE_STATUS_LOADING = "loading" as const;
     const NODE_STATUS_ERROR = "error" as const;
     const quickGenerateOpen = useCanvasPanelStore(state => state.creationOpen);
@@ -68,9 +63,12 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, c
     const currentDraftScopeRef = useRef(draftScope);
     currentDraftScopeRef.current = draftScope;
     const nodeDraftBindingRef = useRef<{ nodeId: string; scope: string } | null>(null);
+    const nodeInputSnapshotRef = useRef<ReturnType<typeof canvasGenerationEditorState> | null>(null);
+    const quickInputVersionRef = useRef(0);
     const pendingNodePromptRef = useRef<{ nodeId: string; scope: string; prompt: string; timer: ReturnType<typeof setTimeout> } | null>(null);
     const [quickGenerateNodeId, setQuickGenerateNodeId] = useState<string | null>(null);
     const patchNodeDraft = useCallback((patch: Partial<CanvasNodeMetadata>, binding = nodeDraftBindingRef.current) => {
+        quickInputVersionRef.current += 1;
         if (!binding || binding.scope !== currentDraftScopeRef.current) return;
         const account = useUserStore.getState();
         if (binding.scope !== `${projectId}:${account.status}:${account.user?.id || ""}`) return;
@@ -81,10 +79,20 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, c
                 changed = true;
                 return { ...node, metadata: { ...node.metadata, ...patch } };
             });
-            if (changed) nodesRef.current = next;
+            if (changed) {
+                nodesRef.current = next;
+                if (nodeInputSnapshotRef.current && binding.nodeId === nodeDraftBindingRef.current?.nodeId) {
+                    const input = canvasGenerationEditorState(next.find(node => node.id === binding.nodeId)!, next, connectionsRef?.current || [], effectiveConfig);
+                    // Consume only our own writes. An independent node-panel edit
+                    // may still be awaiting synchronization in the same render.
+                    for (const [field, key] of [["prompt", "draftPrompt"], ["model", "draftModel"], ["size", "size"], ["quality", "quality"], ["count", "count"], ["imageOptions", "imageOptions"], ["references", "draftImageReferences"]] as const) {
+                        if (Object.hasOwn(patch, key)) nodeInputSnapshotRef.current = { ...nodeInputSnapshotRef.current, [field]: input[field] };
+                    }
+                }
+            }
             return changed ? next : current;
         });
-    }, [nodesRef, projectId, setNodes]);
+    }, [connectionsRef, effectiveConfig, nodesRef, projectId, setNodes]);
     const flushQuickNodeDraft = useCallback(() => {
         const pending = pendingNodePromptRef.current;
         if (!pending) return;
@@ -95,6 +103,7 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, c
     const quickGeneratePromptRef = useRef("");
     const [quickGeneratePromptRevision, setQuickGeneratePromptRevision] = useState(0);
     const setQuickGeneratePrompt = useCallback((value: string) => {
+        quickInputVersionRef.current += 1;
         quickGeneratePromptRef.current = value;
         setQuickGeneratePromptRevision((revision) => revision + 1);
     }, []);
@@ -133,6 +142,7 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, c
         patchNodeDraft({ draftImageReferences: storeCanvasEditorReferences(next) });
     }, [patchNodeDraft]);
     const onQuickPromptChange = useCallback((prompt: string) => {
+        quickInputVersionRef.current += 1;
         quickGeneratePromptRef.current = prompt;
         const binding = nodeDraftBindingRef.current;
         const pending = pendingNodePromptRef.current;
@@ -145,10 +155,13 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, c
         flushQuickNodeDraft();
         referenceRead.current = null;
         setQuickReferencesLoading(false);
+        if (node || nodeDraftBindingRef.current) quickInputVersionRef.current += 1;
         nodeDraftBindingRef.current = node ? { nodeId: node.id, scope: currentDraftScopeRef.current } : null;
+        nodeInputSnapshotRef.current = null;
         setQuickGenerateNodeId(node?.id || null);
         if (!node) return;
         const state = canvasGenerationEditorState(node, nodesRef.current, connectionsRef?.current || [], effectiveConfig);
+        nodeInputSnapshotRef.current = state;
         setQuickGeneratePrompt(pending?.nodeId === node.id && pending.scope === currentDraftScopeRef.current ? pending.prompt : state.prompt);
         setQuickGenerateModelState(state.model);
         setQuickGenerateSizeState(state.size);
@@ -158,9 +171,37 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, c
         quickReferencesRef.current = state.references;
         setQuickGenerateReferencesState(state.references);
     }, [connectionsRef, effectiveConfig, flushQuickNodeDraft, nodesRef, setQuickGeneratePrompt]);
+    const syncQuickGenerationNode = useCallback((node: CanvasNodeData) => {
+        const binding = nodeDraftBindingRef.current;
+        const previous = nodeInputSnapshotRef.current;
+        const account = useUserStore.getState();
+        if (!previous || binding?.nodeId !== node.id || binding.scope !== currentDraftScopeRef.current
+            || binding.scope !== `${projectId}:${account.status}:${account.user?.id || ""}`) return;
+        const next = canvasGenerationEditorState(node, nodesRef.current, connectionsRef?.current || [], effectiveConfig);
+        const referencesChanged = previous.references.length !== next.references.length || previous.references.some((reference, index) => {
+            const other = next.references[index];
+            return !other || reference.id !== other.id || reference.canvasNodeId !== other.canvasNodeId || reference.storageKey !== other.storageKey
+                || (reference.dataUrl || reference.url) !== (other.dataUrl || other.url) || reference.name !== other.name || reference.type !== other.type
+                || reference.originalFileName !== other.originalFileName || reference.imageName !== other.imageName || reference.imageVersion !== other.imageVersion;
+        });
+        nodeInputSnapshotRef.current = next;
+        if (next.prompt !== previous.prompt || next.model !== previous.model || next.size !== previous.size || next.quality !== previous.quality
+            || next.count !== previous.count || next.imageOptions !== previous.imageOptions || referencesChanged) quickInputVersionRef.current += 1;
+        // Only changed persisted inputs refresh the form: node movement, progress
+        // and normalization must not reset an in-progress textarea or its settings.
+        if (next.prompt !== previous.prompt && !pendingNodePromptRef.current) setQuickGeneratePrompt(next.prompt);
+        if (next.model !== previous.model) setQuickGenerateModelState(next.model);
+        if (next.size !== previous.size) setQuickGenerateSizeState(next.size);
+        if (next.quality !== previous.quality) setQuickGenerateQualityState(next.quality);
+        if (next.count !== previous.count) setQuickGenerateCountState(next.count);
+        if (next.imageOptions !== previous.imageOptions) setQuickGenerateImageOptionsState(next.imageOptions);
+        if (referencesChanged) { quickReferencesRef.current = next.references; setQuickGenerateReferencesState(next.references); }
+    }, [connectionsRef, effectiveConfig, nodesRef, projectId, setQuickGeneratePrompt]);
     useEffect(() => () => flushQuickNodeDraft(), [flushQuickNodeDraft]);
     useLayoutEffect(() => {
         nodeDraftBindingRef.current = null;
+        nodeInputSnapshotRef.current = null;
+        quickInputVersionRef.current += 1;
         if (pendingNodePromptRef.current) clearTimeout(pendingNodePromptRef.current.timer);
         pendingNodePromptRef.current = null;
         setQuickGenerateNodeId(null);
@@ -201,16 +242,6 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, c
     const addQuickReferenceFiles = useCallback(
         async (input: File[]) => {
             if (quickGenerateRunning || referenceRead.current) return;
-            const maximum = validateImageReferences(modelOptionName(quickGenerateModel), quickGenerateReferences).maximum;
-            const remaining = Math.max(0, maximum - quickGenerateReferences.length);
-            const files = input
-                .filter((file) => file.type.startsWith("image/"))
-                .slice(0, remaining);
-            if (!files.length) {
-                message.warning(remaining ? uiText("请选择图片文件") : maximum ? uiText("当前模型最多添加 {value1} 张参考图", { value1: maximum }) : uiText("当前模型不支持参考图"));
-                return;
-            }
-
             const token = Symbol();
             referenceRead.current = token;
             setQuickReferencesLoading(true);
@@ -220,25 +251,9 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, c
                     && `${account.status}:${account.user?.id || ""}` === referenceOwner;
             };
             try {
-                files.forEach(assertCanvasImageUploadSize);
-                const uploaded = await Promise.all(
-                    files.map(async (file) => {
-                        const image = await uploadImage(file);
-                        return {
-                            id: nanoid(),
-                            name: file.name,
-                            originalFileName: file.name,
-                            type: image.mimeType,
-                            dataUrl: image.url,
-                            url: image.url,
-                            storageKey: image.storageKey,
-                        } satisfies ReferenceImage;
-                    }),
-                );
-                if (!current()) return;
-                const latest = referenceContext.current;
-                const slots = Math.max(0, validateImageReferences(modelOptionName(latest.model), latest.references).maximum - latest.references.length);
-                setQuickGenerateReferences((references) => [...references, ...uploaded.slice(0, slots)]);
+                const { uploadCanvasQuickReferences } = await import("./canvas-quick-reference-upload");
+                await uploadCanvasQuickReferences(input, { model: quickGenerateModel, references: quickGenerateReferences, current,
+                    latest: () => referenceContext.current, append: setQuickGenerateReferences, message });
             } catch (error) {
                 if (current()) message.error(error instanceof Error ? error.message : uiText("参考图上传失败"));
             } finally {
@@ -482,52 +497,51 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, c
         const token = searchParams.get("reuseToken");
         if (!projectLoaded || !token || loadedReuseTokenRef.current.has(token)) return;
         loadedReuseTokenRef.current.add(token);
-        void hydratePromptReuse(token)
-            .then(async (payload) => {
-                const parameters = payload.template.parameters;
-                const isBatch = payload.template.targetTool === "batch-edit" || searchParams.get("promptTool") === "batch-edit";
-                const selectedModel = payload.pricing.selectedModel?.modelId || effectiveConfig.imageModel || effectiveConfig.model;
-                const settings = promptImageSettings(parameters, selectedModel);
-                if (isBatch) {
-                    setBatchEditPrompt(payload.template.prompt);
-                    setBatchImageSettings({ model: selectedModel, imageModel: selectedModel, ...settings });
+        let active = true;
+        let consumed = false;
+        const ownerCurrent = () => {
+            const account = useUserStore.getState();
+            return active && isObservationCurrent() && draftScope === currentDraftScopeRef.current
+                && draftScope === `${projectId}:${account.status}:${account.user?.id || ""}`;
+        };
+        const captureInput = () => {
+            const version = quickInputVersionRef.current, binding = nodeDraftBindingRef.current, batchVersion = batchInputVersionRef.current;
+            return () => ownerCurrent() && quickInputVersionRef.current === version && nodeDraftBindingRef.current === binding && batchInputVersionRef.current === batchVersion;
+        };
+        const inputCurrent = captureInput();
+        void import("./canvas-quick-template-reuse").then(({ fillCanvasQuickTemplate }) => fillCanvasQuickTemplate({
+            token, batch: searchParams.get("promptTool") === "batch-edit", fallbackModel: effectiveConfig.imageModel || effectiveConfig.model,
+            current: ownerCurrent, inputCurrent, captureInput, consume: () => { consumed = true; }, message, modal,
+            generate: () => quickGenerateRef.current(),
+            apply: (prompt, settings, references, batch) => {
+                if (batch) {
+                    setBatchEditPrompt(prompt);
+                    setBatchImageSettings({ ...settings, imageModel: settings.model });
                     setBatchEditOpen(true);
                 } else {
                     loadQuickGenerationNode(null);
-                    setQuickGeneratePrompt(payload.template.prompt);
-                    setQuickGenerateModel(selectedModel);
+                    setQuickGeneratePrompt(prompt);
+                    setQuickGenerateModel(settings.model);
                     setQuickGenerateSize(settings.size);
                     setQuickGenerateQuality(settings.quality);
                     setQuickGenerateImageOptions(settings.imageOptions);
                     setQuickGenerateCount(Math.min(4, Number(settings.count)));
-                    const nextReferences = await Promise.all(
-                        payload.template.referenceAssetIds.map(async (assetId) => {
-                            const blob = await fetchServerAssetContent(assetId);
-                            const image = await uploadImage(blob);
-                            return { id: nanoid(), name: "模板参考图.png", type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey, sourceAssetId: assetId };
-                        }),
-                    );
-                    setQuickGenerateReferences(nextReferences);
+                    setQuickGenerateReferences(references);
                     setQuickGenerateOpen(true);
                 }
-                payload.warnings.forEach((warning) => message.warning(warning));
-                if (payload.pricing.modelChanged) message.warning(payload.pricing.selectedModel ? uiText("模型已变更，当前使用 {value1}", { value1: payload.pricing.selectedModel.name }) : uiText("模型已变更，请选择管理员当前启用的模型"));
-                const cost = !deploymentFeatures.creditsEnabled ? "不计积分" : (payload.pricing.estimate ? `${payload.pricing.estimate.totalCredits} 积分` : "以当前选择为准");
-                if (payload.mode === "fill_and_generate" && !isBatch) {
-                    modal.confirm({ title: uiText("确认在画布生成？"), content: uiText("当前实际预计消耗 {value1}。确认后才会提交任务并扣费。", { value1: cost }), okText: uiText("确认生成"), cancelText: uiText("仅保留填入"), onOk: () => quickGenerateRef.current() });
-                } else if (payload.mode === "fill_and_generate" && isBatch) {
-                    message.info(uiText("模板已填入，当前预计 {value1}。请先选择文件夹，再确认批量生成。", { value1: cost }));
-                } else message.success(uiText("模板已填入，当前预计 {value1}", { value1: cost }));
-            })
+            },
+        }))
             .catch((error) => {
+                if (!ownerCurrent()) return;
                 loadedReuseTokenRef.current.delete(token);
                 message.error(error instanceof Error ? error.message : uiText("模板复用失败"));
             });
+        return () => { active = false; if (!consumed) loadedReuseTokenRef.current.delete(token); };
     }, [message, modal, projectLoaded, searchParams]);
 
     return {
         quickGenerateOpen, setQuickGenerateOpen, quickGeneratePromptRef, quickGeneratePromptRevision,
-        quickGenerateNodeId, loadQuickGenerationNode, onQuickPromptChange, flushQuickNodeDraft,
+        quickGenerateNodeId, loadQuickGenerationNode, syncQuickGenerationNode, onQuickPromptChange, flushQuickNodeDraft,
         setQuickGeneratePrompt, quickGeneratePosition, setQuickGeneratePosition, quickGenerateModel,
         setQuickGenerateModel, quickGenerateSize, setQuickGenerateSize, quickGenerateQuality,
         setQuickGenerateQuality, quickGenerateCount, setQuickGenerateCount, quickGenerateImageOptions,

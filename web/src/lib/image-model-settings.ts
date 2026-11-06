@@ -3,11 +3,12 @@ import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import type { PublicModel } from "@/services/api/business-config";
 import type { ApiUserRole } from "@/services/api/auth";
 import { isAdminRole, useUserStore } from "@/stores/use-user-store";
-import { normalizeImageOptions } from "./image-advanced-settings";
+import { normalizeImageOptions, readImageOptions } from "./image-advanced-settings";
+import { validateGpt26GifParameters } from "../../../shared/gpt26-image-options";
 
 type InternalImageParameterProfile = "standard" | "gpt" | "gemini" | "midjourney" | "midjourney-blend" | "unverified" | "quality-resolution" | "resolution-1k" | "grok-image" | "mai-image";
-export type ImageParameterProfile = InternalImageParameterProfile | "standard-flex" | "standard-flex-plus" | "pixel" | "resolution" | "speed" | "blend";
-const publicProfileKinds: Partial<Record<ImageParameterProfile, InternalImageParameterProfile>> = { "standard-flex": "standard", "standard-flex-plus": "standard", pixel: "gpt", resolution: "gemini", speed: "midjourney", blend: "midjourney-blend" };
+export type ImageParameterProfile = InternalImageParameterProfile | "standard-flex" | "standard-flex-plus" | "quality-resolution-v2" | "pixel" | "resolution" | "speed" | "blend";
+const publicProfileKinds: Partial<Record<ImageParameterProfile, InternalImageParameterProfile>> = { "standard-flex": "standard", "standard-flex-plus": "standard", "quality-resolution-v2": "quality-resolution", pixel: "gpt", resolution: "gemini", speed: "midjourney", blend: "midjourney-blend" };
 const flexibleSizes = ["1024x1024", "1536x1024", "1024x1536", "2048x2048", "2048x1152", "1152x2048", "3840x2160", "2160x3840", "2880x2880", "auto"];
 const flexibleRatioSizes: Record<string, string> = { "1:1": "1024x1024", "3:2": "1536x1024", "2:3": "1024x1536", "16:9": "1536x864", "9:16": "864x1536", "4:3": "1536x1152", "3:4": "1152x1536" };
 const gptRatios = ["1:1", "3:2", "2:3", "4:3", "3:4", "5:4", "4:5", "16:9", "9:16", "2:1", "1:2", "3:1", "1:3", "21:9", "9:21"];
@@ -22,11 +23,12 @@ export function imageModelProfile(model: string, models: readonly PublicModel[] 
     const actual = (configured?.modelId || id).toLowerCase();
     const configuredKind = configured?.imageParameterProfile;
     const kind: InternalImageParameterProfile = (configuredKind && (publicProfileKinds[configuredKind] || configuredKind) as InternalImageParameterProfile)
-        || (actual === "mai-image-2.6-flash" ? "mai-image" : actual.includes("midjourney-blend") ? "midjourney-blend" : actual.includes("midjourney") ? "midjourney"
+        || (actual === "gpt-image-2.6-flare" || actual === "gpt-image-2.6-sunburst" ? "quality-resolution" : actual === "mai-image-2.6-flash" ? "mai-image" : actual.includes("midjourney-blend") ? "midjourney-blend" : actual.includes("midjourney") ? "midjourney"
             : actual.includes("vcen-gpt2") || actual.includes("gpt-image-2-extend") ? "gpt"
                 : actual.includes("gemini-3.1-flash-image-preview") || actual.includes("nano-banana-2") ? "gemini" : actual === "gemini-3.1-flash-image" ? "unverified" : "standard");
     const midjourney = kind === "midjourney" || kind === "midjourney-blend";
     const independentResolution = kind === "quality-resolution";
+    const gpt26 = configuredKind === "quality-resolution-v2" || (!configuredKind && ["gpt-image-2.6-flare", "gpt-image-2.6-sunburst"].includes(actual));
     const resolutionOnly = kind === "resolution-1k";
     const grok = kind === "grok-image";
     const mai = kind === "mai-image";
@@ -37,11 +39,12 @@ export function imageModelProfile(model: string, models: readonly PublicModel[] 
     const canSeeIdentity = isAdminRole(role);
     return {
         // Ordinary image actions submit exactly one task; file batches are a separate workflow.
-        kind, verified, maxCount: 1, customSize: mai || kind === "gpt" || constrainedPixels, customAspect: midjourney, upstreamCount: 1,
+        kind, verified, maxCount: 1, customSize: mai || kind === "gpt" || constrainedPixels, customAspect: midjourney || mai, upstreamCount: 1,
+        supportsGif: gpt26, supportsMarkup: gpt26, supportsComplexity: gpt26,
         sizeConstraints: mai ? { multiple: 1, minEdge: 768, maxEdge: 3072, maxAspectRatio: 4, minPixels: 589824, maxPixels: 2359296 } : constrainedPixels ? { multiple: 16, minEdge: 0, maxEdge: 3840, maxAspectRatio: 3, minPixels: 655360, maxPixels: 8294400 } : undefined,
         sizeConstraintMessage: mai ? "宽高须为不少于 768 的正整数，比例在 1:4 至 4:1 内，总像素不超过 2359296。建议使用 32 的倍数；否则模型会将实际输出宽高各向下取整到 32 的倍数。" : constrainedPixels ? "宽高须为 16 的倍数，单边不超过 3840，长短边比例不超过 3:1，总像素为 655360–8294400。超过 2560 × 1440 的输出为实验尺寸。" : "",
         backgrounds: constrainedPixels ? ["auto", "opaque", "transparent"] : [],
-        outputFormats: constrainedPixels ? ["png", "jpeg", "webp"] : [],
+        outputFormats: constrainedPixels ? ["png", "jpeg", "webp", ...(gpt26 ? ["gif"] : [])] : [],
         outputCompression: constrainedPixels,
         resolutions: independentResolution ? ["1k", "2k", "4k"] : grok || mai ? ["1k", "2k"] : [],
         supportsMask: !mai && (configured?.imageSupportsMask ?? (!resolutionOnly && !midjourney && !grok)),
@@ -98,9 +101,10 @@ export function imageSizeForSource(source: { width: number; height: number }, pr
     throw new Error(`当前模型不能精确保留底图画幅（${source.width} × ${source.height}）。请在出图设置明确选择${nearest ? ` ${nearest} 等支持的尺寸，或更换模型` : "其他模型"}；图片任务尚未提交。`);
 }
 
-export function normalizeImageModelSettings(config: Pick<AiConfig, "size" | "quality" | "count">, profile: ReturnType<typeof imageModelProfile>) {
+export function normalizeImageModelSettings(config: Pick<AiConfig, "size" | "quality" | "count"> & { imageOptions?: string }, profile: ReturnType<typeof imageModelProfile>) {
     const rawSize = String(config.size || "").trim().toLowerCase();
-    const size = profile.sizes.includes(rawSize) || (profile.customSize && /^[1-9]\d*x[1-9]\d*$/.test(rawSize)) || (profile.customAspect && /^[1-9]\d*:[1-9]\d*$/.test(rawSize)) ? rawSize
+    const size = imageOutputIsGif(config.imageOptions, profile) ? rawSize === "auto" || /^[1-9]\d*x[1-9]\d*$/.test(rawSize) ? rawSize : "auto"
+        : profile.sizes.includes(rawSize) || (profile.customSize && /^[1-9]\d*x[1-9]\d*$/.test(rawSize)) || (profile.customAspect && /^[1-9]\d*:[1-9]\d*$/.test(rawSize)) ? rawSize
         : profile.sizeConstraints ? (flexibleRatioSizes[rawSize] || nearestImageSize(rawSize, profile.sizes)) : nearestImageSize(rawSize, profile.sizes);
     const rawQuality = String(config.quality || "").toLowerCase();
     const quality = profile.qualities.includes(rawQuality) ? rawQuality : profile.kind === "grok-image" ? "medium" : profile.kind === "gemini" ? "1k" : profile.qualities[0]!;
@@ -111,7 +115,7 @@ export function normalizeImageModelSettings(config: Pick<AiConfig, "size" | "qua
 /** Apply only to an editable draft after an explicit model selection, never a task snapshot. */
 export function adaptImageModelSettings(config: Pick<AiConfig, "size" | "quality" | "count"> & { imageOptions?: string }, profile: ReturnType<typeof imageModelProfile>) {
     const settings = normalizeImageModelSettings(config, profile);
-    if (imageModelSettingsError(settings.size, profile)) settings.size = nearestImageSize(settings.size, profile.sizes.filter(size => !imageModelSettingsError(size, profile)));
+    if (imageModelSettingsError(settings.size, profile, config.imageOptions)) settings.size = imageOutputIsGif(config.imageOptions, profile) ? "auto" : nearestImageSize(settings.size, profile.sizes.filter(size => !imageModelSettingsError(size, profile)));
     return { ...settings, imageOptions: normalizeImageOptions(config.imageOptions, profile) };
 }
 
@@ -122,10 +126,25 @@ export function imageReferenceSizeIsAutomatic(profile: Pick<ReturnType<typeof im
 export const automaticReferenceSizeNotice = "图生图尺寸由模型决定，约 100 万像素；尺寸与分辨率设置不参与本次请求。移除全部参考图后恢复文生图设置。";
 
 /** Validation is separate from normalization so typing a custom size never mutates it. */
-export function imageModelSettingsError(size: string, profile: ReturnType<typeof imageModelProfile>) {
+export function imageOutputIsGif(imageOptions: string | undefined, profile: Pick<ReturnType<typeof imageModelProfile>, "supportsGif">) {
+    return profile.supportsGif && readImageOptions(imageOptions).output_format === "gif";
+}
+
+export const gifSizeNotice = "GIF 使用单帧像素尺寸，不使用比例或分辨率档位。自适应为 512 × 512；512 × 512 支持全部 2–16 帧，768 × 768 最多 12 帧。";
+
+export function imageModelSettingsError(size: string, profile: ReturnType<typeof imageModelProfile>, imageOptions?: string) {
+    if (imageOutputIsGif(imageOptions, profile)) {
+        const options = readImageOptions(imageOptions);
+        try { validateGpt26GifParameters({ size, frame_count: options.frame_count ? Number(options.frame_count) : undefined, frame_duration_ms: options.frame_duration_ms ? Number(options.frame_duration_ms) : undefined }); return ""; }
+        catch (error) { return error instanceof Error ? error.message : "GIF 单帧尺寸或帧参数无效"; }
+    }
     const constraints = profile.sizeConstraints;
     if (!constraints) return "";
     const raw = size.trim().toLowerCase();
+    if (profile.kind === "mai-image" && /^[1-9]\d*:[1-9]\d*$/.test(raw)) {
+        const [width, height] = raw.split(":").map(Number);
+        return Math.max(width!, height!) / Math.min(width!, height!) <= 4 ? "" : "宽高比须在 1:4 至 4:1 范围内";
+    }
     if ((profile.kind === "quality-resolution" || profile.kind === "mai-image") && profile.sizes.includes(raw)) return "";
     const value = flexibleRatioSizes[raw] || raw;
     if (value === "auto") return "";

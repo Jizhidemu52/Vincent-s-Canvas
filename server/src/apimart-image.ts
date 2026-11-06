@@ -2,6 +2,7 @@ import { fetchProviderSubmission } from "./provider-submission-transport";
 import { queryProviderTaskStatus } from "./provider-status-query";
 import { isDefinitiveSubmissionRejection } from "./provider-submission-policy";
 import { apiMartPollIntervalMs } from "./apimart-poll-interval";
+import { validateGpt26GifParameters } from "../../shared/gpt26-image-options";
 import { isPublicHttpUrl, normalizeApiMartImageUrl, uploadApiMartImage, validateApiMartGenerationImage } from "./apimart-upload";
 
 type MarkImageModel = "gpt-image-2.5-flare" | "gpt-image-2.5-sunburst" | "gpt-image-2.6-flare" | "gpt-image-2.6-sunburst" | "gemini-nano-banana-2.1";
@@ -20,6 +21,8 @@ export type ApiMartImageInput = {
   /** Already-authorized PNG mask; the caller verifies alpha and source dimensions. */
   maskDataUrl?: string;
   maskImage?: ApiMartImageBytes;
+  /** Owned, separately validated transparent PNG annotation layer; never a client URL. */
+  markupImage?: ApiMartImageBytes;
 };
 
 export type ApiMartImageRequest = {
@@ -66,6 +69,9 @@ export function buildApiMartImageRequest(input: ApiMartImageInput): ApiMartImage
 function buildImageRequest(input: ApiMartImageInput, encodeReferences: boolean): ApiMartImageRequest {
   const kind = apiMartImageModel(input.modelId);
   if (!kind) throw new Error(`不支持的 APIMart 图片模型：${input.modelId}`);
+  if (input.markupImage && !kind.startsWith("gpt-image-2.6-")) throw new Error("当前模型不支持独立标注图层");
+  if (kind !== "midjourney-blend" && !input.prompt.trim()) throw new Error("请填写图像生成或编辑描述");
+  if (input.parameters.n !== undefined && input.parameters.n !== 1) throw new Error("画布已拆分批量任务，每个图片任务的 n 必须为 1");
   if (kind === "mai-image-2.6-flash") return buildMaiImageRequest(input, false, encodeReferences);
   if (isMarkImageModel(kind)) return buildMarkImageRequest(input, kind, false, encodeReferences);
   if (kind === "grok-imagine-image-2.0") return buildGrokImageRequest(input);
@@ -131,6 +137,8 @@ function buildImageRequest(input: ApiMartImageInput, encodeReferences: boolean):
     ...apiMartImageOptions(input.parameters, kind),
   };
   if (references.length) payload.image_urls = referencePayload(references, encodeReferences);
+  // GPT2 preserves the source dimensions only when size is omitted, not when forced to 1:1.
+  if (kind === "gpt-image-2" && references.length && input.parameters.size === undefined) delete payload.size;
   if (kind === "gemini-3.1-flash-image-preview") {
     if (String(payload.model).endsWith("-official")) delete payload.official_fallback;
     if (input.parameters.officialFallback === true && !String(payload.model).endsWith("-official")) payload.official_fallback = true;
@@ -158,6 +166,7 @@ function buildMaiImageRequest(input: ApiMartImageInput, allowInlineReferences = 
   if (input.maskDataUrl !== undefined || input.maskImage !== undefined) throw new Error("MAI Image 2.6 Flash 不支持独立蒙版");
   if (parameters.n !== undefined && parameters.n !== 1) throw new Error("每个 MAI 图片任务的 n 必须为 1");
   if (parameters.web_grounding !== undefined && typeof parameters.web_grounding !== "boolean") throw new Error("web_grounding 必须为布尔值");
+  if (parameters.auto_aspect_ratio !== undefined && typeof parameters.auto_aspect_ratio !== "boolean") throw new Error("auto_aspect_ratio 必须为布尔值");
   const references = imageReferences(input);
   if (references.length > 5) throw new Error("MAI Image 2.6 Flash 最多支持 5 张参考图");
   for (const reference of references) {
@@ -171,7 +180,8 @@ function buildMaiImageRequest(input: ApiMartImageInput, allowInlineReferences = 
     if (parameters.width !== undefined || parameters.height !== undefined) {
       assertMaiPixelSize(parameters.width, parameters.height);
       payload.width = parameters.width; payload.height = parameters.height;
-    } else payload.size = normalizeMaiSize(parameters.size);
+    } else payload.size = parameters.auto_aspect_ratio === true ? "auto" : normalizeMaiSize(parameters.size);
+    if (parameters.auto_aspect_ratio !== undefined) payload.auto_aspect_ratio = parameters.auto_aspect_ratio;
   }
   return { path: "/images/generations", payload, pollIntervalMs: 2_000, timeoutMs: 15 * 60_000 };
 }
@@ -182,10 +192,11 @@ function assertMaiPixelSize(width: unknown, height: unknown) {
 }
 
 function normalizeMaiSize(value: unknown) {
-  if (value === undefined || value === "auto") return "auto";
+  if (value === undefined) return "1:1";
+  if (value === "auto") return "auto";
   if (typeof value !== "string") throw new Error("MAI size 必须为 auto、宽高比或像素尺寸");
-  const pixels = /^([1-9]\d*)x([1-9]\d*)$/.exec(value);
-  if (pixels) { assertMaiPixelSize(Number(pixels[1]), Number(pixels[2])); return value; }
+  const pixels = /^([1-9]\d*)[x*×]([1-9]\d*)$/.exec(value);
+  if (pixels) { assertMaiPixelSize(Number(pixels[1]), Number(pixels[2])); return `${pixels[1]}x${pixels[2]}`; }
   const ratio = /^([1-9]\d*):([1-9]\d*)$/.exec(value);
   if (ratio && Number.isSafeInteger(Number(ratio[1])) && Number.isSafeInteger(Number(ratio[2]))) {
     const aspect = Number(ratio[1]) / Number(ratio[2]);
@@ -235,8 +246,9 @@ function buildMarkImageRequest(input: ApiMartImageInput, model: MarkImageModel, 
   const parameters = input.parameters;
   // Business metadata (count, tool, inputArchive, operationType, etc.) is not forwarded.
   const unsupported = ["official_fallback", "officialFallback", "nsfw_check", "google_search", "googleSearch", "google_image_search", "googleImageSearch", "midjourneySpeed", "midjourneyQuality", "mask_url", "maskUrl", "maskDataUrl"];
-  // This integration intentionally supports static images only; no implicit GIF/SVG or markup requests.
-  if (gpt26) unsupported.push("markup_url", "markup", "frame_count", "frame_duration_ms", "svg", "stream", "partial_images", "input_fidelity", "prompt_rewriter", "response_format");
+  // Only authorized asset bytes may create a markup_url. SVG remains deliberately excluded.
+  unsupported.push("markup_url", "markup", "svg", "stream", "partial_images", "input_fidelity", "prompt_rewriter", "response_format");
+  if (!gpt26) unsupported.push("complexity", "safety_identifier", "frame_count", "frame_duration_ms");
   if (!gpt) unsupported.push("quality", "background", "output_format", "output_compression", "moderation");
   for (const key of unsupported) if (parameters[key] !== undefined) throw new Error(`${model} 不支持参数 ${key}`);
   if (parameters.n !== undefined && parameters.n !== 1) throw new Error("画布已拆分批量任务，每个 APIMart 图片任务的 n 必须为 1");
@@ -252,20 +264,32 @@ function buildMarkImageRequest(input: ApiMartImageInput, model: MarkImageModel, 
     model, prompt: input.prompt, n: 1,
     resolution: normalizeMarkResolution(parameters.resolution, gpt),
   };
-  if (parameters.size !== undefined) payload.size = normalizeMarkSize(parameters.size, gpt);
+  const gif = gpt26 && parameters.output_format === "gif";
+  if (gif) {
+    if (references.length || input.maskImage !== undefined || input.maskDataUrl !== undefined || input.markupImage !== undefined) throw new Error("GIF 仅支持文生图，不能同时使用参考图、蒙版或标注图层");
+    Object.assign(payload, validateGpt26GifParameters(parameters));
+  } else {
+    if (parameters.frame_count !== undefined || parameters.frame_duration_ms !== undefined) throw new Error("frame_count 和 frame_duration_ms 仅适用于 GIF");
+    if (parameters.size !== undefined) payload.size = normalizeMarkSize(parameters.size, gpt);
+  }
   if (references.length) payload.image_urls = referencePayload(references, encodeReferences);
   if (gpt) {
     payload.quality = enumParameter(parameters.quality, ["auto", "low", "medium", "high", "xhigh", "max"], "quality", "auto");
-    for (const [key, allowed] of Object.entries({ output_format: ["png", "jpeg", "webp"], background: ["auto", "opaque", "transparent"], moderation: ["auto", "low"] })) {
+    for (const [key, allowed] of Object.entries({ output_format: gpt26 ? ["png", "jpeg", "webp", "gif"] : ["png", "jpeg", "webp"], background: ["auto", "opaque", "transparent"], moderation: ["auto", "low"] })) {
       if (parameters[key] !== undefined) payload[key] = enumParameter(parameters[key], allowed, key);
     }
     const format = payload.output_format || "png";
-    if (payload.background === "transparent" && format === "jpeg") throw new Error("透明背景仅支持 PNG 或 WebP，不能使用 JPEG");
+    if (payload.background === "transparent" && format !== "png" && format !== "webp") throw new Error("透明背景仅支持 PNG 或 WebP，不能使用 JPEG 或 GIF");
     if (parameters.output_compression !== undefined) {
       const compression = parameters.output_compression;
       if (typeof compression !== "number" || !Number.isInteger(compression) || compression < 0 || compression > 100) throw new Error("output_compression 必须为 0–100 的整数");
       if (format !== "jpeg" && format !== "webp") throw new Error("output_compression 仅支持 JPEG 或 WebP");
       payload.output_compression = compression;
+    }
+    if (gpt26 && parameters.complexity !== undefined) payload.complexity = enumParameter(parameters.complexity, ["low", "medium", "high"], "complexity");
+    if (gpt26 && parameters.safety_identifier !== undefined) {
+      if (typeof parameters.safety_identifier !== "string" || parameters.safety_identifier.length > 128) throw new Error("safety_identifier 必须为最多 128 字符的文本");
+      payload.safety_identifier = parameters.safety_identifier;
     }
   }
   const maskInput = input.maskImage ?? input.maskDataUrl;
@@ -275,6 +299,12 @@ function buildMarkImageRequest(input: ApiMartImageInput, model: MarkImageModel, 
     const mask = decodeGenerationReference(maskInput);
     if (mask.mimeType !== "image/png" || mask.bytes.byteLength >= 4 * 1024 * 1024) throw new Error("蒙版必须为小于 4MB 的 PNG Data URL");
     payload.mask_url = typeof maskInput === 'string' ? maskInput : imageDataUrl(maskInput);
+  }
+  if (input.markupImage !== undefined) {
+    if (!gpt26) throw new Error("当前模型不支持独立标注图层");
+    if (!references.length || maskInput !== undefined) throw new Error("标注编辑必须提供第一张原图，且不能同时使用蒙版");
+    if (input.markupImage.mimeType !== "image/png" || !input.markupImage.bytes.byteLength || input.markupImage.bytes.byteLength > 50 * 1024 * 1024) throw new Error("标注层必须为不超过 50 MiB 的透明 PNG");
+    payload.markup_url = imageDataUrl(input.markupImage);
   }
   return { path: "/images/generations", payload, pollIntervalMs: gpt ? 2_000 : 3_000, timeoutMs: 15 * 60_000 };
 }
@@ -437,6 +467,7 @@ export async function stepApiMartImageTask(input: ApiMartImageTaskInput, runtime
   if (!input.apiKey.trim()) throw new Error("APIMart 服务端 API Key 未配置");
   const kind = apiMartImageModel(input.modelId);
   if (!kind) throw new Error(`不支持的 APIMart 图片模型：${input.modelId}`);
+  if (input.markupImage && !kind.startsWith("gpt-image-2.6-")) throw new Error("当前模型不支持独立标注图层");
   const baseUrl = input.baseUrl.replace(/\/+$/, "");
   const queryHeaders: Record<string, string> = { authorization: `Bearer ${input.apiKey}` };
   if (kind === "grok-imagine-image-2.0") {
@@ -600,12 +631,14 @@ function normalizeMidjourneySpeed(value: unknown) {
 }
 
 function normalizeGptResolution(value: unknown) {
-  const resolution = String(value || "1k").toLowerCase();
-  return resolution === "2k" || resolution === "4k" ? resolution : "1k";
+  const resolution = value === undefined ? "1k" : typeof value === "string" ? value.toLowerCase() : "";
+  if (!["1k", "2k", "4k"].includes(resolution)) throw new Error("GPT Image 2 resolution 仅支持 1K/2K/4K");
+  return resolution;
 }
 
 function normalizeGeminiResolution(value: unknown) {
-  const resolution = String(value || "1k").toLowerCase();
+  const resolution = value === undefined ? "1k" : typeof value === "string" ? value.toLowerCase() : "";
+  if (!["0.5k", "1k", "2k", "4k"].includes(resolution)) throw new Error("Gemini resolution 仅支持 0.5K/1K/2K/4K");
   if (resolution === "0.5k") return "0.5K";
   if (resolution === "2k") return "2K";
   if (resolution === "4k") return "4K";

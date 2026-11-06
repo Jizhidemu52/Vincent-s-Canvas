@@ -131,7 +131,7 @@ type GenerationLogConfig = Pick<AiConfig, "model" | "imageModel" | "quality" | "
 
 type UpdateAiConfig = <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
 
-import { adaptImageModelSettings, imageModelProfile, imageReferenceSizeIsAutomatic, normalizeImageModelSettings, useImageModelProfile } from "@/lib/image-model-settings";
+import { adaptImageModelSettings, gifSizeNotice, imageModelProfile, imageOutputIsGif, imageReferenceSizeIsAutomatic, normalizeImageModelSettings, useImageModelProfile } from "@/lib/image-model-settings";
 
 const LOG_STORE_KEY = "wireless-canvas:image_generation_logs";
 const RESULT_ACTION_BUTTON_CLASS = "min-w-0 px-1.5 [&_.ant-btn-icon]:shrink-0 [&>span:last-child]:min-w-0 [&>span:last-child]:truncate";
@@ -296,6 +296,12 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const [referenceScope, setReferenceScope] = useState(0);
     const referenceScopeRef = useRef(referenceScope);
     referenceScopeRef.current = referenceScope;
+    const isCurrentReferenceScope = (scope: number) => mountedRef.current && referenceScopeRef.current === scope;
+    const resetReferenceScope = () => {
+        referenceScopeRef.current += 1;
+        setReferenceScope(referenceScopeRef.current);
+        setReadingReferences(false);
+    };
     useUnsavedGuard(readingReferences, uiText("参考图正在读取，离开可能中断上传。"));
     const [garmentEpoch, setGarmentEpoch] = useState(0);
     const [garmentDraft, setGarmentDraft] = useState<{ scope: string; dirty: boolean; appliedReferences: ReferenceImage[] | null } | null>(null);
@@ -519,7 +525,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const addReferences = async (files?: FileList | File[] | null) => {
         if (readingReferences || !files?.length) return;
         const scope = referenceScopeRef.current;
-        const stillCurrent = () => mountedRef.current && referenceScopeRef.current === scope;
+        const stillCurrent = () => isCurrentReferenceScope(scope);
         setReadingReferences(true);
         try {
         const imageFiles = Array.from(files || []);
@@ -534,11 +540,12 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         appendReferences(nextReferences, "upload");
         message.success(uiText("参考图已添加"));
         } catch (error) { if (stillCurrent()) message.error(uiText(generationErrorMessage(error))); }
-        finally { if (mountedRef.current) setReadingReferences(false); }
+        finally { if (stillCurrent()) setReadingReferences(false); }
     };
 
     const addReferencesFromClipboard = async () => {
         if (readingReferences) return;
+        const scope = referenceScopeRef.current;
         setReadingReferences(true);
         try {
             const blobs = await readClipboardImages(navigator.clipboard);
@@ -548,11 +555,12 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                     return { id: nanoid(), name: `clipboard-${index + 1}.png`, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey };
                 }),
             );
+            if (!isCurrentReferenceScope(scope)) return;
             appendReferences(nextReferences, "clipboard");
             message.success(uiText("已读取 {length} 张参考图", { length: nextReferences.length }));
         } catch (error) {
-            message.error(error instanceof Error ? uiText(error.message) : uiText("剪贴板图片读取失败"));
-        } finally { setReadingReferences(false); }
+            if (isCurrentReferenceScope(scope)) message.error(error instanceof Error ? uiText(error.message) : uiText("剪贴板图片读取失败"));
+        } finally { if (isCurrentReferenceScope(scope)) setReadingReferences(false); }
     };
 
     const generate = async () => {
@@ -639,13 +647,15 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     };
 
     const addResultToReferences = async (image: GeneratedImage, index: number) => {
+        const scope = referenceScopeRef.current;
         setReadingReferences(true);
         try {
         const stored = await uploadImage(image.dataUrl);
+        if (!isCurrentReferenceScope(scope)) return;
         appendReferences([{ id: nanoid(), name: image.imageName || `result-${index + 1}.png`, imageName: image.imageName, imageVersion: image.imageVersion, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey }], "generated");
         message.success(uiText("已加入参考图"));
-        } catch (error) { message.error(uiText(generationErrorMessage(error))); }
-        finally { setReadingReferences(false); }
+        } catch (error) { if (isCurrentReferenceScope(scope)) message.error(uiText(generationErrorMessage(error))); }
+        finally { if (isCurrentReferenceScope(scope)) setReadingReferences(false); }
     };
 
     const saveResultToAssets = async (image: GeneratedImage, index: number) => {
@@ -690,24 +700,25 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     };
 
     const insertPickedAsset = async (payload: InsertAssetPayload) => {
+        const scope = referenceScopeRef.current;
         setReadingReferences(true);
         try {
         if (payload.kind === "text") {
             reusePrompt(payload.content);
         } else if (payload.kind === "image") {
             const stored = await uploadImage(payload.dataUrl);
+            if (!isCurrentReferenceScope(scope)) return;
             appendReferences([{ id: nanoid(), name: payload.title, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey, imageName: payload.imageName, imageVersion: payload.imageVersion }], "asset");
         } else {
             message.warning(uiText("生图工作台只能使用文本或图片素材"));
         }
         setAssetPickerOpen(false);
-        } catch (error) { message.error(uiText(generationErrorMessage(error))); }
-        finally { setReadingReferences(false); }
+        } catch (error) { if (isCurrentReferenceScope(scope)) message.error(uiText(generationErrorMessage(error))); }
+        finally { if (isCurrentReferenceScope(scope)) setReadingReferences(false); }
     };
 
     const createSession = () => {
-        referenceScopeRef.current += 1;
-        setReferenceScope(referenceScopeRef.current);
+        resetReferenceScope();
         resultViewPinnedRef.current = true;
         restoredInitialResultRef.current = true;
         previewRevision.current += 1;
@@ -790,6 +801,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         if (!previewLog || running || restoreBusy.current) return;
         const taskId = previewLog.images.find(image => image.sourceTaskId)?.sourceTaskId;
         if (!taskId) { message.warning(uiText("这条旧记录没有完整输入归档，无法完整恢复；可复制提示词后新建草稿")); return; }
+        resetReferenceScope();
         const settingsBeforeRestore = draftConfig;
         const revision = inputRevision.current;
         const preview = previewRevision.current;
@@ -1241,7 +1253,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
             </Drawer>
             <Drawer title={uiText("参数")} placement="bottom" size="82vh" open={!quickTool && settingsOpen} onClose={() => setSettingsOpen(false)}>
                 <div className="grid grid-cols-2 gap-3 pb-4">
-                    <GenerationSettings toolKey={toolKey} config={effectiveConfig} model={model} referenceCount={references.length} updateConfig={updateInputConfig} openConfigDialog={openConfigDialog} />
+                    <GenerationSettings toolKey={toolKey} config={effectiveConfig} model={model} referenceCount={references.length} uploadContextKey={JSON.stringify([historyTool, inputDraftScope, referenceScope, references.map(reference => [reference.id, reference.storageKey || reference.dataUrl])])} updateConfig={updateInputConfig} openConfigDialog={openConfigDialog} />
                 </div>
             </Drawer>
             <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={reusePrompt} />
@@ -1251,11 +1263,12 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                 defaultTab="my-assets"
                 selectionMode="multiple-images"
                 onInsertMany={(payloads) => {
+                    const scope = referenceScopeRef.current;
                     setReadingReferences(true);
                     void Promise.all(payloads.filter((payload): payload is Extract<InsertAssetPayload, { kind: "image" }> => payload.kind === "image").map(async (payload) => {
                         const stored = await uploadImage(payload.dataUrl);
                         return { id: nanoid(), name: payload.title, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey, imageName: payload.imageName, imageVersion: payload.imageVersion };
-                    })).then((items) => appendReferences(items, "asset")).catch(error => message.error(uiText(generationErrorMessage(error)))).finally(() => setReadingReferences(false));
+                    })).then((items) => { if (isCurrentReferenceScope(scope)) appendReferences(items, "asset"); }).catch(error => { if (isCurrentReferenceScope(scope)) message.error(uiText(generationErrorMessage(error))); }).finally(() => { if (isCurrentReferenceScope(scope)) setReadingReferences(false); });
                     setReferenceAssetPickerOpen(false);
                 }}
                 onClose={() => setReferenceAssetPickerOpen(false)}
@@ -1274,7 +1287,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     );
 }
 
-function GenerationSettings({ config, model, referenceCount, updateConfig, openConfigDialog, toolKey }: { config: AiConfig; model: string; referenceCount: number; updateConfig: UpdateAiConfig; openConfigDialog: (shouldPromptContinue?: boolean) => void; toolKey: ReturnType<typeof requireToolKey> }) {
+function GenerationSettings({ config, model, referenceCount, uploadContextKey, updateConfig, openConfigDialog, toolKey }: { config: AiConfig; model: string; referenceCount: number; uploadContextKey: string; updateConfig: UpdateAiConfig; openConfigDialog: (shouldPromptContinue?: boolean) => void; toolKey: ReturnType<typeof requireToolKey> }) {
     useUiText();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const profile = useImageModelProfile(model);
@@ -1288,10 +1301,10 @@ function GenerationSettings({ config, model, referenceCount, updateConfig, openC
                     updateConfig("imageModel", value);
                     for (const key of ["size", "quality", "count", "imageOptions"] as const) updateConfig(key, settings[key]);
                 }} capability="image" modelsSource="server" fullWidth className="h-10 rounded-lg" onMissingConfig={() => openConfigDialog(false)} />
-                {profile.verified ? <span className="mt-2 block text-xs leading-5" style={{ color: "var(--wb-muted)" }}>{uiText(profile.tip || "")}</span> : null}
+                {profile.verified ? <span className="mt-2 block text-xs leading-5" style={{ color: "var(--wb-muted)" }}>{uiText(imageOutputIsGif(config.imageOptions, profile) ? gifSizeNotice : profile.tip || "")}</span> : null}
             </label>
             <div className="col-span-2">
-                <ImageSettingsPanel config={{ ...config, model, imageModel: model }} referenceCount={referenceCount} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-4" />
+                <ImageSettingsPanel config={{ ...config, model, imageModel: model }} referenceCount={referenceCount} uploadContextKey={uploadContextKey} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-4" />
             </div>
         </>
     );

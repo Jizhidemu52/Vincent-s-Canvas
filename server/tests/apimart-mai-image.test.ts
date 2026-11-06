@@ -23,7 +23,10 @@ describe("MAI Image 2.6 Flash independent contract", () => {
   });
 
   test("text-to-image permits only documented 1K/2K, ratios and exact pixels", () => {
-    expect(buildApiMartImageRequest(base).payload).toEqual({ model: base.modelId, prompt: base.prompt, n: 1, size: "auto", resolution: "1K", web_grounding: false });
+    expect(buildApiMartImageRequest(base).payload).toEqual({ model: base.modelId, prompt: base.prompt, n: 1, size: "1:1", resolution: "1K", web_grounding: false });
+    expect(buildApiMartImageRequest({ ...base, parameters: { auto_aspect_ratio: true } }).payload).toMatchObject({ size: "auto", auto_aspect_ratio: true });
+    for (const size of ["1536*1024", "1536×1024"]) expect(buildApiMartImageRequest({ ...base, parameters: { size } }).payload.size).toBe("1536x1024");
+    expect(() => buildApiMartImageRequest({ ...base, parameters: { auto_aspect_ratio: "yes" } })).toThrow("auto_aspect_ratio");
     for (const size of ["1:4", "4:1", "16:9", "9:16", "1536x1536", "768x3072", "1025x1024"]) {
       expect(buildApiMartImageRequest({ ...base, parameters: { size, resolution: "2k", web_grounding: true } }).payload).toMatchObject({ size, resolution: "2K", web_grounding: true });
     }

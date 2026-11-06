@@ -5,13 +5,13 @@ import { ChevronDown, SlidersHorizontal, X } from "lucide-react";
 import { ImageSettingsPanel, imageSizeLabel } from "@/components/image-settings-panel";
 import type { CanvasTheme } from "@/lib/canvas-theme";
 import { imageOptionFields, normalizeImageOptions, readImageOptions } from "@/lib/image-advanced-settings";
-import { automaticReferenceSizeNotice, imageReferenceSizeIsAutomatic, normalizeImageModelSettings, type imageModelProfile } from "@/lib/image-model-settings";
+import { automaticReferenceSizeNotice, gifSizeNotice, imageOutputIsGif, imageReferenceSizeIsAutomatic, normalizeImageModelSettings, type imageModelProfile } from "@/lib/image-model-settings";
 import type { AiConfig } from "@/stores/use-config-store";
 import "./canvas-quick-settings-popovers.css";
 
 type Profile = ReturnType<typeof imageModelProfile>;
 type SettingChange = (key: "quality" | "size" | "count" | "imageOptions", value: string) => void;
-type Props = { config: AiConfig; profile: Profile; theme: CanvasTheme; referenceCount: number; disabled: boolean; onConfigChange: SettingChange; onConfigNormalize?: SettingChange };
+type Props = { config: AiConfig; profile: Profile; theme: CanvasTheme; referenceCount: number; uploadContextKey?: string; disabled: boolean; onConfigChange: SettingChange; onConfigNormalize?: SettingChange };
 const ignoreConfigNormalization: SettingChange = () => undefined;
 type Parameter = "size" | "quality" | "advanced";
 
@@ -51,12 +51,13 @@ export function CanvasQuickQualityOptions({ config, profile, referenceCount, onC
     const t = useUiText();
     const settings = normalizeImageModelSettings(config, profile);
     const options = readImageOptions(normalizeImageOptions(config.imageOptions, profile));
+    const gif = imageOutputIsGif(config.imageOptions, profile);
     const resolution = profile.resolutions.includes(options.resolution || "") ? options.resolution! : "1k";
     const exactPixels = profile.resolutions.length > 0 && /^[1-9]\d*x[1-9]\d*$/.test(settings.size);
     const referenceQualityDisabled = profile.kind === "grok-image" && referenceCount > 0;
     if (imageReferenceSizeIsAutomatic(profile, referenceCount)) return <p role="status">{t(automaticReferenceSizeNotice)}</p>;
     return <div className="cw-quality-options">
-        {profile.resolutions.length > 0 ? <section>
+        {profile.resolutions.length > 0 && !gif ? <section>
             <h4>{t("清晰度 / 分辨率")}</h4>
             <div className="cw-parameter-choices" role="group" aria-label={t("清晰度 / 分辨率")}>
                 {profile.resolutions.map(value => <button key={value} type="button" aria-pressed={resolution === value} disabled={exactPixels}
@@ -100,7 +101,7 @@ function ParameterPopover({ id, label, summary, icon, disabled, active, onActive
     </Popover.Root>;
 }
 
-function AdvancedSettingsDialog({ active, onActiveChange, disabled, style, config, profile, theme, referenceCount, onConfigChange, onConfigNormalize }: Props & {
+function AdvancedSettingsDialog({ active, onActiveChange, disabled, style, config, profile, theme, referenceCount, uploadContextKey, onConfigChange, onConfigNormalize }: Props & {
     id: "advanced"; active: Parameter | null; onActiveChange: (value: Parameter | null) => void; style: CSSProperties;
 }) {
     const t = useUiText();
@@ -116,7 +117,7 @@ function AdvancedSettingsDialog({ active, onActiveChange, disabled, style, confi
                 </header>
                 <div className="cw-settings-dialog-body">
                     <div className="cw-settings-overview"><span>{t("当前输出")}</span><strong>{imageReferenceSizeIsAutomatic(profile, referenceCount) ? t("模型决定尺寸") : sizeLabel(config.size)}</strong><span>{profile.kind === "mai-image" ? "PNG" : qualityLabel(config.quality)}</span><span>{t("每次 1 张")}</span></div>
-                    <fieldset disabled={disabled} className="cw-advanced-fields"><ImageSettingsPanel spacious compact showTitle={false} config={config} profile={profile} referenceCount={referenceCount}
+                    <fieldset disabled={disabled} className="cw-advanced-fields"><ImageSettingsPanel spacious compact showTitle={false} config={config} profile={profile} referenceCount={referenceCount} uploadContextKey={uploadContextKey}
                         theme={theme} onConfigChange={onConfigChange} onConfigNormalize={onConfigNormalize} /></fieldset>
                 </div>
                 <footer className="cw-settings-dialog-footer"><span>{t("设置自动应用于下一次生成，不改变已有图片。")}</span><Dialog.Close asChild><button type="button" className="cw-settings-done">{t("完成设置")}</button></Dialog.Close></footer>
@@ -125,18 +126,20 @@ function AdvancedSettingsDialog({ active, onActiveChange, disabled, style, confi
     </Dialog.Root>;
 }
 
-export function CanvasQuickSettingsPopovers({ config, profile, theme, referenceCount, disabled, onConfigChange, onConfigNormalize = ignoreConfigNormalization }: Props) {
+export function CanvasQuickSettingsPopovers({ config, profile, theme, referenceCount, uploadContextKey, disabled, onConfigChange, onConfigNormalize = ignoreConfigNormalization }: Props) {
     const t = useUiText();
     const [active, setActive] = useState<Parameter | null>(null);
     const parameterRow = useRef<HTMLDivElement>(null!);
     const settings = normalizeImageModelSettings(config, profile);
     const normalizedOptions = normalizeImageOptions(config.imageOptions, profile);
     const options = readImageOptions(normalizedOptions);
+    const gif = imageOutputIsGif(config.imageOptions, profile);
+    const ratioProfile = gif ? { ...profile, sizes: ["auto", "512x512", "768x768"] } : profile;
     const resolution = profile.resolutions.includes(options.resolution || "") ? options.resolution! : "1k";
     const referenceQualityDisabled = profile.kind === "grok-image" && referenceCount > 0;
     const automaticReferenceSize = imageReferenceSizeIsAutomatic(profile, referenceCount);
     const exactPixels = profile.resolutions.length > 0 && /^[1-9]\d*x[1-9]\d*$/.test(settings.size);
-    const qualitySummary = automaticReferenceSize ? t("约 100 万像素") : !profile.verified ? t("渠道默认") : profile.resolutions.length
+    const qualitySummary = gif ? qualityLabel(settings.quality) : automaticReferenceSize ? t("约 100 万像素") : !profile.verified ? t("渠道默认") : profile.resolutions.length
         ? `${exactPixels ? t("像素") : resolution.toUpperCase()}${referenceQualityDisabled || profile.kind === "mai-image" ? "" : ` · ${qualityLabel(settings.quality)}`}` : qualityLabel(settings.quality);
     const hasAdvanced = profile.customSize || profile.customAspect || imageOptionFields(profile).some(field => field.key !== "resolution");
     const style = { "--cw-parameter-text": theme.node.text, "--cw-parameter-muted": theme.node.muted, "--cw-parameter-border": theme.node.stroke,
@@ -148,13 +151,14 @@ export function CanvasQuickSettingsPopovers({ config, profile, theme, referenceC
     const common = { active, onActiveChange: setActive, style };
     return <div ref={parameterRow} className="cw-parameter-row" data-open={active || undefined} aria-label={t("生成参数")} style={style}>
         <ParameterPopover {...common} anchor={parameterRow} id="size" label={t("宽高比")} summary={automaticReferenceSize ? t("模型决定尺寸") : sizeLabel(settings.size)} icon={<RatioOutline value={settings.size} />} disabled={disabled || !profile.verified || automaticReferenceSize}>
-            <CanvasQuickRatioOptions profile={profile} value={settings.size} onChange={value => { onConfigChange("size", value); setActive(null); }}
+            <CanvasQuickRatioOptions profile={ratioProfile} value={settings.size} onChange={value => { onConfigChange("size", value); setActive(null); }}
                 onAdvanced={profile.customSize || profile.customAspect ? () => setActive("advanced") : undefined} />
+            {gif ? <p role="status">{t(gifSizeNotice)}</p> : null}
         </ParameterPopover>
-        <ParameterPopover {...common} anchor={parameterRow} id="quality" label={profile.kind === "mai-image" ? t("清晰度 / 分辨率") : profile.resolutions.length ? t("分辨率与质量") : t(profile.qualityLabel)} summary={qualitySummary} disabled={disabled || !profile.verified || automaticReferenceSize}>
+        <ParameterPopover {...common} anchor={parameterRow} id="quality" label={profile.kind === "mai-image" ? t("清晰度 / 分辨率") : !gif && profile.resolutions.length ? t("分辨率与质量") : t(profile.qualityLabel)} summary={qualitySummary} disabled={disabled || !profile.verified || automaticReferenceSize}>
             <CanvasQuickQualityOptions config={config} profile={profile} referenceCount={referenceCount} onConfigChange={onConfigChange} />
         </ParameterPopover>
-        <AdvancedSettingsDialog {...common} id="advanced" config={config} profile={profile} theme={theme} referenceCount={referenceCount} onConfigChange={onConfigChange} onConfigNormalize={onConfigNormalize} disabled={disabled || !hasAdvanced} />
+        <AdvancedSettingsDialog {...common} id="advanced" config={config} profile={profile} theme={theme} referenceCount={referenceCount} uploadContextKey={uploadContextKey} onConfigChange={onConfigChange} onConfigNormalize={onConfigNormalize} disabled={disabled || !hasAdvanced} />
         {automaticReferenceSize ? <span className="sr-only" role="status">{t(automaticReferenceSizeNotice)}</span> : null}
     </div>;
 }

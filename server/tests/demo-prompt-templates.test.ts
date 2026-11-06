@@ -17,7 +17,7 @@ function close(store: DemoPromptTemplateStore) { stores.splice(stores.indexOf(st
 function diskPath() { const directory = mkdtempSync(join(tmpdir(), "mark-prompt-templates-")); temporaryDirectories.push(directory); return join(directory, "nested", "demo.sqlite"); }
 function context() {
   const assets = new Map<string, { id: string; ownerUserId: string; mimeType: string; bytes: Uint8Array; createdAt: string; taskId?: string; metadata?: Record<string, unknown> }>();
-  const tasks = new Map<string, { id: string; ownerUserId: string; status: string; operationType: string; prompt?: string; parameters?: Record<string, unknown>; modelConfigId?: string }>();
+  const tasks = new Map<string, { id: string; ownerUserId: string; status: string; operationType: string; prompt?: string; parameters?: Record<string, unknown>; modelConfigId?: string; sourceUrls?: string[] }>();
   const value: DemoPromptContext = { models: [{ ...model }], providers: [{ id: MARK_IMAGE_PROVIDER_ID, protocol: "apimart", enabled: true, hasCredentials: true }], prices: [{ operationType: "image_generation", status: "published", credits: 2, rmbCost: .1, version: 3 }], tools: [], creditsEnabled: false, asset: id => assets.get(id), task: id => tasks.get(id), assets: () => [...assets.values()] };
   return { value, assets, tasks };
 }
@@ -27,6 +27,23 @@ afterEach(() => {
 });
 
 describe("durable local personal prompt templates", () => {
+  test("markup task and result templates preserve exact source layer order; missing layer blocks reuse", () => {
+    const ctx = context(), store = open(), refs = [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()];
+    for (const id of [...refs, assetId]) ctx.assets.set(id, { id, ownerUserId: owner.id, mimeType: "image/png", bytes: new Uint8Array([1]), createdAt: new Date().toISOString(), ...(id === assetId ? { taskId } : {}) });
+    const parameters = { ...snapshot.parameters, inputArchive: { markupReferenceIndex: 1 } };
+    ctx.tasks.set(taskId, { id: taskId, ownerUserId: owner.id, status: "success", operationType: "image_generation", prompt: snapshot.prompt, modelConfigId: modelId, parameters, sourceUrls: refs.map(id => `/api/assets/${id}/content`) });
+    for (const template of [store.fromTask(owner, taskId, ctx.value), store.fromAsset(owner, assetId, ctx.value)]) {
+      expect(template.referenceAssetIds).toEqual(refs);
+      expect(template.parameters).toEqual(parameters);
+      const token = store.resolve(owner, template.id, { requestId: crypto.randomUUID(), mode: "fill" }, ctx.value);
+      expect(store.reuse(owner, token.reuseToken, ctx.value).template.referenceAssetIds).toEqual(refs);
+      const overlay = ctx.assets.get(refs[1]!)!;
+      ctx.assets.delete(refs[1]!);
+      expect(() => store.reuse(owner, token.reuseToken, ctx.value)).toThrow("不能省略");
+      ctx.assets.set(overlay.id, overlay);
+    }
+    expect(() => store.create(owner, { ...snapshot, parameters, referenceAssetIds: [refs[0], refs[0], refs[1]] }, ctx.value)).toThrow("标注模板");
+  });
   test("CRUD and favorite/copy persist across restart while every snapshot retains Mark UUID and image parameters", () => {
     const file = diskPath(), ctx = context(), store = open(file);
     const created = store.create(owner, snapshot, ctx.value);

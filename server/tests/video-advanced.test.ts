@@ -84,6 +84,16 @@ describe("advanced video provider contracts", () => {
     expect(buildVideoProviderRequest("happyhorse-1.1", "move", { videoMode: "first-frame" }, [{ ...image, width: 300, height: 750 }]).body.first_frame_image).toBe(image.publicUrl);
     expect(buildVideoProviderRequest("happyhorse-1.1", "move", { videoMode: "reference" }, [{ ...image, width: 500, height: 500 }]).body.image_urls).toEqual([image.publicUrl]);
   });
+
+  test("HappyHorse reference ratio is mandatory while the recommended resolution is not", () => {
+    for (const dimensions of [{ width: 199, height: 500 }, { width: 501, height: 200 }]) {
+      expect(() => buildVideoProviderRequest("happyhorse-1.1", "move", { videoMode: "reference" }, [{ ...image, ...dimensions }])).toThrow("参考图宽高比需在 0.4–2.5");
+      expect(() => buildVideoProviderRequest("happyhorse-1.1", "move", { videoMode: "auto" }, [image, { ...last, ...dimensions }])).toThrow("参考图宽高比需在 0.4–2.5");
+    }
+    for (const dimensions of [{ width: 200, height: 500 }, { width: 500, height: 200 }]) {
+      expect(buildVideoProviderRequest("happyhorse-1.1", "move", { videoMode: "reference" }, [{ ...image, ...dimensions }]).body.image_urls).toEqual([image.publicUrl]);
+    }
+  });
 });
 
 describe("advanced video preflight safety", () => {
@@ -106,6 +116,7 @@ describe("advanced video preflight safety", () => {
       { model: "doubao-seedance-2.5", mode: "first-last-frame", sources: [image, last, audio] },
       { model: "doubao-seedance-2.5", mode: "edit", sources: [image] },
       { model: "happyhorse-1.1", sources: [image, video] },
+      { model: "happyhorse-1.1", sources: [{ ...image, width: 1000, height: 300 }] },
     ];
     for (const scenario of cases) {
       let calls = 0;

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { cloneCanvasNodeGraph, copyCanvasNodeGraph } from "@/lib/canvas/canvas-node-copy";
+import { reconcileCanvasGenerationStackNodes } from "@/lib/canvas/canvas-generation-stack";
 import { CanvasNodeType, type CanvasConnection, type CanvasGenerationRecord, type CanvasNodeData, type CanvasNodeGroup } from "@/types/canvas";
 
 function node(id: string, x = 0): CanvasNodeData {
@@ -108,6 +109,43 @@ describe("canvas node graph copy", () => {
         expect(rootOnly.nodes).toHaveLength(1);
         expect(rootOnly.nodes[0]!.metadata?.batchChildIds).toEqual([]);
         expect(rootOnly.nodes[0]!.metadata?.primaryImageId).toBeUndefined();
+    });
+
+    test.each([false, true])("a copied result-stack cover survives deleting an unrelated node (external inputs: %s)", preserveExternalInputs => {
+        const root: CanvasNodeData = { ...node("stack"), metadata: { ...node("stack").metadata,
+            isBatchRoot: true, generationResultStack: true, batchChildIds: ["first", "second"], primaryImageId: "first", imageBatchExpanded: false,
+            draftPrompt: "继续改款", sourceTaskId: "original-task",
+        } };
+        const original = [root, ...["first", "second"].map(id => ({ ...node(id), metadata: { ...node(id).metadata, batchRootId: "stack" } })), node("unrelated")];
+        const before = structuredClone(original);
+        const copy = cloneCanvasNodeGraph(copyCanvasNodeGraph(original, [], [], new Set(["stack"]), { preserveExternalInputs }), { x: 36, y: 36 }, { preserveExternalInputs });
+        expect(copy.nodes).toHaveLength(1);
+        const cover = copy.nodes[0]!;
+        const remaining = reconcileCanvasGenerationStackNodes([...original, cover].filter(item => item.id !== "unrelated"));
+        expect(remaining.map(item => item.id)).toEqual(["stack", "first", "second", cover.id]);
+        expect(cover.metadata).toMatchObject({ content: "blob:stack", storageKey: "image:stack", draftPrompt: "继续改款", status: "success" });
+        expect(cover.metadata?.sourceTaskId).toBeUndefined();
+        expect(cover.metadata?.generationResultStack).toBeUndefined();
+        expect(cover.metadata?.isBatchRoot).toBeUndefined();
+        expect(cover.metadata?.batchChildIds).toBeUndefined();
+        expect(cover.metadata?.primaryImageId).toBeUndefined();
+        expect(original).toEqual(before);
+        expect(remaining.slice(0, 3)).toEqual(original.slice(0, 3));
+    });
+
+    test("copying a complete result stack keeps its copied children and survives reconciliation", () => {
+        const original: CanvasNodeData[] = [
+            { ...node("stack"), metadata: { ...node("stack").metadata, isBatchRoot: true, generationResultStack: true, batchChildIds: ["first", "second"], primaryImageId: "first" } },
+            ...["first", "second"].map(id => ({ ...node(id), metadata: { ...node(id).metadata, batchRootId: "stack" } })),
+        ];
+        const before = structuredClone(original);
+        const copy = cloneCanvasNodeGraph(copyCanvasNodeGraph(original, [], [], new Set(original.map(item => item.id))), { x: 36, y: 36 });
+        const [root, first, second] = copy.nodes;
+        expect(root!.metadata).toMatchObject({ generationResultStack: true, isBatchRoot: true, batchChildIds: [first!.id, second!.id], primaryImageId: first!.id });
+        expect(first!.metadata?.batchRootId).toBe(root!.id);
+        expect(second!.metadata?.batchRootId).toBe(root!.id);
+        expect(reconcileCanvasGenerationStackNodes(copy.nodes)).toBe(copy.nodes);
+        expect(original).toEqual(before);
     });
 
     test("an empty or stale selection produces no graph and repeated copies do not append the copy suffix again", () => {

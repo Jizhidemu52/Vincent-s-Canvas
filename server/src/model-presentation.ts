@@ -131,6 +131,7 @@ const anonymousProfiles = {
   standard: "standard", gpt: "pixel", gemini: "resolution", midjourney: "speed",
   "midjourney-blend": "blend", unverified: "unverified",
   "quality-resolution": "quality-resolution", "resolution-1k": "resolution-1k",
+  "quality-resolution-v2": "quality-resolution-v2",
   "grok-image": "grok-image",
   "mai-image": "mai-image",
 } as const;

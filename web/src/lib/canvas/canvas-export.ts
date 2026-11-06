@@ -128,6 +128,13 @@ export async function prepareCanvasImageDownload(blob: Blob, fileName: string, e
 function collectStorageKeys(value: unknown, keys = new Set<string>(), field = "") {
     if (typeof value === "string" && value.startsWith("canvas-archive:")) keys.add(value.slice("canvas-archive:".length));
     if (typeof value === "string" && ["references", "referenceUrls", "sourceUrls", "resultUrls"].includes(field) && /^(image|video|audio|file|media):/.test(value)) keys.add(value);
+    if (field === "imageOptions" && typeof value === "string") {
+        try {
+            const options = JSON.parse(value);
+            const markup = typeof options?.markup_reference === "string" ? JSON.parse(options.markup_reference) : null;
+            if (markup?.type === "image/png") collectStorageKeys(markup, keys);
+        } catch { /* Only the explicit markup media setting is traversed. */ }
+    }
     if (!value || typeof value !== "object") return [...keys];
     if (Array.isArray(value)) { value.forEach(item => collectStorageKeys(item, keys, field)); return [...keys]; }
     if ("storageKey" in value && typeof value.storageKey === "string" && value.storageKey.includes(":")) keys.add(value.storageKey);
@@ -145,6 +152,7 @@ function fileExtension(mimeType: string, storageKey: string) {
     if (mimeType.includes("webp")) return "webp";
     if (mimeType.includes("gif")) return "gif";
     if (mimeType.includes("mp4")) return "mp4";
+    if (mimeType.includes("quicktime")) return "mov";
     if (mimeType.includes("webm")) return "webm";
     return storageKey.startsWith("image:") ? "png" : "bin";
 }

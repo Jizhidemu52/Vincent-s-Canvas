@@ -3,6 +3,16 @@ const mediaFields = new Set(["url", "dataUrl", "src", "poster", "thumbnail", "co
 const referenceFields = new Set(["references", "referenceUrls", "manualImageReferences", "resultUrls", "sourceUrls"]);
 type MediaRecord = Record<string, unknown>;
 
+/** The one media-bearing JSON setting; never interpret arbitrary prompt/metadata strings. */
+function markupOptions(value: unknown, field: string) {
+    if (field !== "imageOptions" || typeof value !== "string") return null;
+    try {
+        const options = JSON.parse(value);
+        const markup = typeof options?.markup_reference === "string" ? JSON.parse(options.markup_reference) : null;
+        return markup && typeof markup === "object" && !Array.isArray(markup) && markup.type === "image/png" ? { options, markup } : null;
+    } catch { return null; }
+}
+
 /** Only exact same-origin asset endpoints are files, never arbitrary prompt text or external URLs. */
 function serverAssetPath(value: string, origin?: string) {
     let path = value;
@@ -46,6 +56,8 @@ export async function collectCanvasExportMedia<T>(document: T, options: {
     }
     async function visit(value: unknown, mediaContext = false, field = ""): Promise<unknown> {
         if (Array.isArray(value)) return Promise.all(value.map(item => visit(item, mediaContext, field)));
+        const markup = markupOptions(value, field);
+        if (markup) return JSON.stringify({ ...markup.options, markup_reference: JSON.stringify(await visit(markup.markup, true)) });
         if (!value || typeof value !== "object") {
             if (typeof value !== "string" || !(mediaFields.has(field) || (mediaContext && (field === "content" || referenceFields.has(field))))) return value;
             const downloaded = download(value);
@@ -69,6 +81,15 @@ export async function collectCanvasExportMedia<T>(document: T, options: {
 export function restoreCanvasExportMedia<T>(document: T, urls: ReadonlyMap<string, string>): T {
     function visit(value: unknown, mediaContext = false, field = ""): unknown {
         if (Array.isArray(value)) return value.map(item => visit(item, mediaContext, field));
+        const markup = markupOptions(value, field);
+        if (markup) {
+            const restored = visit(markup.markup, true) as MediaRecord;
+            if (typeof restored.storageKey === "string" && urls.has(restored.storageKey)) {
+                restored.dataUrl = urls.get(restored.storageKey)!;
+                delete restored.sourceAssetId;
+            }
+            return JSON.stringify({ ...markup.options, markup_reference: JSON.stringify(restored) });
+        }
         if (typeof value === "string" && value.startsWith(archivePrefix) && (mediaFields.has(field) || (mediaContext && (field === "content" || referenceFields.has(field))))) {
             const key = value.slice(archivePrefix.length);
             if (!urls.has(key)) throw new Error("画布备份缺少媒体文件，无法完整导入");

@@ -20,10 +20,11 @@ type CanvasImageSettingsPopoverProps = {
     placement?: "topLeft" | "top" | "topRight" | "bottomLeft" | "bottom" | "bottomRight";
     autoAdjustOverflow?: boolean;
     referenceCount?: number;
+    uploadContextKey?: string;
     taskCount?: number;
 };
 
-export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChange, buttonClassName, placement = "topLeft", referenceCount = 0, taskCount = 1 }: CanvasImageSettingsPopoverProps) {
+export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChange, buttonClassName, placement = "topLeft", referenceCount = 0, uploadContextKey, taskCount = 1 }: CanvasImageSettingsPopoverProps) {
     const t = useUiText();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const buttonRef = useRef<HTMLSpanElement>(null);
@@ -60,7 +61,7 @@ export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChang
         };
     }, [onOpenChange, open]);
 
-    const panel = open && buttonRect ? <ImageSettingsPortal buttonRect={buttonRect} panelRef={panelRef} placement={placement} theme={theme} config={config} referenceCount={referenceCount} onConfigChange={onConfigChange} /> : null;
+    const panel = open && buttonRect ? <ImageSettingsPortal buttonRect={buttonRect} panelRef={panelRef} placement={placement} theme={theme} config={config} referenceCount={referenceCount} uploadContextKey={uploadContextKey} onConfigChange={onConfigChange} /> : null;
 
     return (
         <>
@@ -83,6 +84,7 @@ function ImageSettingsPortal({
     config,
     onConfigChange,
     referenceCount,
+    uploadContextKey,
 }: {
     buttonRect: DOMRect;
     panelRef: RefObject<HTMLDivElement | null>;
@@ -91,6 +93,7 @@ function ImageSettingsPortal({
     config: AiConfig;
     onConfigChange: (key: keyof AiConfig, value: string) => void;
     referenceCount: number;
+    uploadContextKey?: string;
 }) {
     const t = useUiText();
     const width = 356;
@@ -125,7 +128,7 @@ function ImageSettingsPortal({
             onMouseDown={(event) => event.stopPropagation()}
             onClick={(event) => event.stopPropagation()}
         >
-            <ImageSettingsPanel config={config} referenceCount={referenceCount} onConfigChange={(key, value) => onConfigChange(key, value)} theme={theme} className="space-y-4" />
+            <ImageSettingsPanel config={config} referenceCount={referenceCount} uploadContextKey={uploadContextKey} onConfigChange={(key, value) => onConfigChange(key, value)} theme={theme} className="space-y-4" />
         </div>,
         document.body,
     );

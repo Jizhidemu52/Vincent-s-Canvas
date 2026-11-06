@@ -22,7 +22,8 @@ export type UsageParameters = {
   cutWidth?: number; redrawWidth?: number; blurAmount?: number;
   watermark?: boolean; googleSearch?: boolean; googleImageSearch?: boolean; officialFallback?: boolean; nsfw_check?: boolean;
   background?: "auto" | "transparent" | "opaque";
-  output_format?: "png" | "jpeg" | "webp"; output_compression?: number;
+  output_format?: "png" | "jpeg" | "webp" | "gif"; output_compression?: number;
+  complexity?: "low" | "medium" | "high"; frame_count?: number; frame_duration_ms?: number;
   moderation?: "auto" | "low";
   midjourneySpeed?: "relax" | "fast" | "turbo"; midjourneyQuality?: number;
   stylize?: number; chaos?: number; weird?: number; stop?: number; tile?: boolean; raw?: boolean;

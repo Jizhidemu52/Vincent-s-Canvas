@@ -43,7 +43,7 @@ describe("video model parameter contract", () => {
 
     test("switching models resets unsupported choices instead of submitting stale settings", () => {
         const previous = { ...configFor("default::MiniMax-H3"), size: "adaptive", vquality: "720p", videoSeconds: "30", videoGenerateAudio: "true", videoWatermark: "true" };
-        expect(normalizeVideoModelConfig(previous)).toEqual({ size: "16:9", vquality: "2K", videoSeconds: "5", videoMode: "auto", videoGenerateAudio: "false", videoWatermark: "true" });
+        expect(normalizeVideoModelConfig(previous)).toEqual({ size: "16:9", vquality: "2K", videoSeconds: "5", videoMode: "auto", videoGenerateAudio: "false", videoWatermark: "true", videoSeed: "", videoOutputFormat: "mp4" });
         expect(videoModelRequestParameters(previous)).toEqual({ videoMode: "auto", seconds: 5, resolution: "2K", size: "16:9", watermark: true });
     });
 

@@ -1,4 +1,5 @@
 import type { RefObject } from "react";
+import { videoFileExtension } from "../../../../shared/video-output";
 import type { useCanvasExport } from "@/hooks/use-canvas-export";
 import { uiText } from "@/lib/i18n";
 import { audioExtension, loadCanvasExport } from "@/lib/canvas/canvas-export-loader";
@@ -23,7 +24,7 @@ export async function downloadCanvasEditorNode(node: CanvasNodeData, options: {
             options.setImageDownload({ projectId: options.projectId, node: current, variants });
         } else {
             const title = (node.title || (node.type === CanvasNodeType.Video ? uiText("画布视频") : uiText("画布音频"))).replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").trim().replace(/[. ]+$/, "");
-            downloadCanvasContent(node.metadata.content, `${title || uiText("画布素材")}.${node.type === CanvasNodeType.Video ? "mp4" : audioExtension(node.metadata.mimeType)}`);
+            downloadCanvasContent(node.metadata.content, `${title || uiText("画布素材")}.${node.type === CanvasNodeType.Video ? videoFileExtension(node.metadata.mimeType) : audioExtension(node.metadata.mimeType)}`);
         }
     } finally { done(); }
 }

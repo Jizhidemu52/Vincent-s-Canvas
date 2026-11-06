@@ -5,15 +5,17 @@ import { workspaceOwnerHeaders } from "./workspace-owner";
 import { useUserStore } from "@/stores/use-user-store";
 import type { AiConfig } from "@/stores/use-config-store";
 import type { ReferenceImage } from "@/types/image";
+import { readImageOptions } from "@/lib/image-advanced-settings";
 
 export type GenerationDraftConfig = Pick<AiConfig, "model" | "imageModel" | "size" | "quality" | "count" | "systemPrompt" | "imageOptions">;
-export type GenerationDraftInput = { prompt: string; config: GenerationDraftConfig; maskReferenceIndex?: number };
+export type GenerationDraftInput = { prompt: string; config: GenerationDraftConfig; maskReferenceIndex?: number; markupReferenceIndex?: number };
 export type ArchivedReference = { id: string; name: string; originalFileName?: string; type: string; bytes: number; sha256: string; url: string; sourceAssetId?: string };
 export type GenerationInputArchive = {
     version: 1; ownerId: string; modelConfigId: string; modelId: string;
     prompt: string; userInput?: PromptInputData; optimized?: boolean; effectivePrompt: string; submittedPrompt?: string; config: GenerationDraftConfig;
     parameters: Record<string, unknown>; references: ArchivedReference[];
     maskReferenceIndex?: number;
+    markupReferenceIndex?: number;
 };
 export function generationDraftInput(config: AiConfig, prompt: string): GenerationDraftInput {
     return { prompt, config: { model: config.model, imageModel: config.imageModel, size: config.size, quality: config.quality, count: config.count, systemPrompt: "", imageOptions: config.imageOptions || "" } };
@@ -55,6 +57,8 @@ export async function restoreGenerationDraft(taskId: string) {
         throw new Error("原模型已停用或配置已改变，无法完整恢复；请保留原记录并手动新建草稿");
     }
     const references: ReferenceImage[] = [];
+    if (archive.markupReferenceIndex !== undefined && (!Number.isInteger(archive.markupReferenceIndex) || archive.markupReferenceIndex < 1
+        || archive.markupReferenceIndex >= archive.references.length || archive.maskReferenceIndex !== undefined)) throw new Error("历史标注层归档索引无效，未套用任何参数");
     for (const [index, item] of archive.references.entries()) {
         const blob = await (await get(item.url)).blob();
         if (blob.size !== item.bytes || await fingerprintImage(blob) !== item.sha256) {
@@ -68,6 +72,12 @@ export async function restoreGenerationDraft(taskId: string) {
         references.push({ id: `history:${taskId}:${index}`, name: item.name, originalFileName: item.originalFileName, type: item.type, bytes: item.bytes, sourceAssetId: item.sourceAssetId, dataUrl });
     }
     assertOwner();
-    return { prompt: archive.prompt, userInput: archive.userInput || task.userInput, optimized: task.optimized === true, finalPrompt: task.prompt as string, config: { ...archive.config, model: archive.modelConfigId, imageModel: archive.modelConfigId }, references,
+    const restoredConfig = { ...archive.config, model: archive.modelConfigId, imageModel: archive.modelConfigId };
+    if (archive.markupReferenceIndex !== undefined) {
+        const markup = references.splice(archive.markupReferenceIndex, 1)[0]!;
+        if (markup.type !== "image/png") throw new Error("历史标注层不是 PNG，未套用任何参数");
+        restoredConfig.imageOptions = JSON.stringify({ ...readImageOptions(restoredConfig.imageOptions), markup_reference: JSON.stringify(markup) });
+    }
+    return { prompt: archive.prompt, userInput: archive.userInput || task.userInput, optimized: task.optimized === true, finalPrompt: task.prompt as string, config: restoredConfig, references,
         operationType: String(task.operationType), tool: typeof task.parameters.tool === "string" ? task.parameters.tool : undefined, parameters: { ...archive.parameters }, maskReferenceIndex: archive.maskReferenceIndex };
 }

@@ -6,6 +6,7 @@ import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 import { CanvasNodeType, type CanvasConnection, type CanvasGenerationMode, type CanvasNodeData } from "@/types/canvas";
 import { getGenerationResourceNodes } from "@/lib/canvas/canvas-resource-references";
 import { canvasImageBaseName, canvasImageVersion } from "@/lib/canvas/canvas-image-filename";
+import { videoFileExtension } from "../../../../shared/video-output";
 import { resolveCanvasImageReferences } from "@/lib/canvas/canvas-image-references";
 
 export type NodeGenerationContext = {
@@ -279,7 +280,7 @@ function readReferenceVideo(node: CanvasNodeData): ReferenceVideo | null {
     if (node.type !== CanvasNodeType.Video || (!node.metadata?.content && !node.metadata?.storageKey)) return null;
     return {
         id: node.id,
-        name: `${node.title || node.id}.mp4`,
+        name: `${node.title || node.id}.${videoFileExtension(node.metadata.mimeType)}`,
         type: node.metadata.mimeType || "video/mp4",
         url: node.metadata.content || "",
         storageKey: node.metadata.storageKey,

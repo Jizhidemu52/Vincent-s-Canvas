@@ -1,4 +1,5 @@
 import { isApiMartImageMimeType } from "./apimart-upload";
+import { parseVideoSeed } from "../../shared/video-output";
 
 export const supportedVideoModelIds = [
   "MiniMax-H3",
@@ -44,6 +45,8 @@ export type VideoProviderParameters = {
   generateAudio?: unknown;
   happyHorseMode?: unknown;
   videoMode?: unknown;
+  seed?: unknown;
+  outputFormat?: unknown;
 };
 
 export type ProviderVideoRequest = {
@@ -184,6 +187,7 @@ export function validateVideoSources(model: SupportedVideoModelId, parameters: V
     }
     const { width, height } = source;
     if (image && model === "happyhorse-1.1" && mode === "first-frame" && width !== undefined && height !== undefined && (Math.min(width, height) < 300 || width / height < 0.4 || width / height > 2.5)) throw new Error("HappyHorse 首帧短边至少 300px，宽高比需在 0.4–2.5 之间");
+    if (image && model === "happyhorse-1.1" && mode === "reference" && width !== undefined && height !== undefined && (width / height < 0.4 || width / height > 2.5)) throw new Error("HappyHorse 参考图宽高比需在 0.4–2.5 之间");
     if (video && model !== "wan2.7" && source.fps !== undefined && (source.fps < (model === "MiniMax-H3" ? 23.976 : 24) || source.fps > 60)) throw new Error(`${model} 视频帧率不符合要求`);
     if (video || (image && ["MiniMax-H3", "doubao-seedance-2.5"].includes(model))) {
       const [min, max, minRatio, maxRatio] = model === "MiniMax-H3" ? [256, 5760, 0.4, 2.5] : model === "wan2.7" ? [240, 4096, 0.125, 8] : [300, 6000, 0.4, 2.5];
@@ -218,6 +222,14 @@ export function buildVideoProviderRequest(
   const adaptive = frame || (model === "doubao-seedance-2.5" && ["edit", "extend"].includes(mode)) || (model === "wan2.7" && videos.length > 0);
   const size = adaptive ? "adaptive" : normalizeChoice(parameters.size === "auto" ? "adaptive" : parameters.size, capability.sizes, model === "doubao-seedance-2.5" ? "adaptive" : "16:9");
   const body: Record<string, unknown> = { model: model === "doubao-seedance-2.5" ? "seedance-2.5" : model, prompt, duration, resolution, watermark: parameters.watermark === true };
+  if (["doubao-seedance-2.5", "happyhorse-1.1"].includes(model)) {
+    const seed = parseVideoSeed(parameters.seed, model === "happyhorse-1.1" ? 2147483647 : undefined);
+    if (seed !== undefined) body.seed = seed;
+  }
+  if (parameters.outputFormat !== undefined && parameters.outputFormat !== "") {
+    if (model !== "doubao-seedance-2.5" || !["mp4", "mov"].includes(String(parameters.outputFormat))) throw new Error("当前视频模型不支持此输出格式");
+    body.output_format = parameters.outputFormat;
+  }
   if (model === "MiniMax-H3") {
     if (!frame) body.aspect_ratio = size;
     if (mode === "first-frame" || mode === "first-last-frame") body.first_frame_image = imageUrls[0];

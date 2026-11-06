@@ -252,9 +252,12 @@ test("QuickTime H264 is converted to an actual MP4, not returned as video/quickt
   await temporary(async directory => {
     const input = join(directory, "source.mov"), output = join(directory, "playback.mp4");
     await command(process.env.FFMPEG_PATH || "ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "testsrc2=s=160x224:r=24", "-t", "1", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-f", "mov", input]);
-    expect((await prepareVideoPlayback(input, output, AbortSignal.timeout(5000))).kind).toBe("derived");
+    const originalHash = createHash("sha256").update(await readFile(input)).digest("hex");
+    expect(await prepareVideoPlayback(input, output, AbortSignal.timeout(5000))).toMatchObject({ kind: "derived", metadata: playbackMetadata });
     const { fileTypeFromFile } = await import("file-type");
     expect((await fileTypeFromFile(output))?.mime).toBe("video/mp4");
+    expect((await fileTypeFromFile(input))?.mime).toBe("video/quicktime");
+    expect(createHash("sha256").update(await readFile(input)).digest("hex")).toBe(originalHash);
   });
 });
 

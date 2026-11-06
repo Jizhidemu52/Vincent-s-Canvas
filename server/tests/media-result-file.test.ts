@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { readFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { downloadVideoResult, disposeProviderResults } from "../src/media-result-file";
+import { videoResultMimeType } from "../src/video-result-type";
 
 test("video download streams original byte views to disk without arrayBuffer and cleans all result owners", async () => {
   const source = new Uint8Array([99, 1, 2, 3, 88]);
@@ -33,4 +34,17 @@ test("video HTTP or type rejection cancels the body, stream errors leave no part
   const response = new Response(new ReadableStream({ pull(controller) { controller.error(new Error("fixture download disconnected")); } }, { highWaterMark: 0 }), { headers: { "content-type": "video/mp4" } });
   await expect(downloadVideoResult("https://fixture.invalid/video", async () => response)).rejects.toThrow("fixture download disconnected");
   expect((await readdir(tmpdir())).filter(name => name.startsWith("canvas-video-result-"))).toEqual(before);
+});
+
+test("MOV container bytes override generic or incorrect CDN MIME without reencoding the original", async () => {
+  const mov = Buffer.concat([Buffer.from("0000001466747970717420200000000071742020", "hex"), Buffer.alloc(32, 1)]);
+  for (const contentType of ["video/quicktime", "application/octet-stream", "video/mp4"]) {
+    expect(await videoResultMimeType(mov, contentType)).toBe("video/quicktime");
+    const result = await downloadVideoResult("https://fixture.invalid/original", async () => new Response(mov, { headers: { "content-type": contentType } }));
+    try {
+      expect(result.mimeType).toBe("video/quicktime");
+      expect(await readFile(result.filePath)).toEqual(mov);
+      expect(result.byteSize).toBe(mov.length);
+    } finally { await result.dispose(); }
+  }
 });

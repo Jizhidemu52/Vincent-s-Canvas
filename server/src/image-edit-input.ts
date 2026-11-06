@@ -6,7 +6,7 @@ import { loadView } from "exifreader";
 
 type ImageEditSource = { bytes: Uint8Array; mimeType: string; filename?: string };
 type ImageEditTarget = { protocol: string; modelId: string; operationType: string; workflow?: boolean };
-export type ImageEditInput<T> = { references: T[]; mask?: T };
+export type ImageEditInput<T> = { references: T[]; mask?: T; markup?: T };
 
 export class ImageEditInputError extends Error {
   readonly code = "INVALID_IMAGE_MASK";
@@ -54,8 +54,24 @@ function archivedMaskIndex(parameters: Record<string, unknown>) {
   return (archive as Record<string, unknown>).maskReferenceIndex;
 }
 
+function archivedMarkupIndex(parameters: Record<string, unknown>) {
+  const archive = parameters.inputArchive;
+  return archive && typeof archive === "object" ? (archive as Record<string, unknown>).markupReferenceIndex : undefined;
+}
+
+export function assertImageEditMarkupSupport(parameters: Record<string, unknown>, target: ImageEditTarget, sourceCount?: number) {
+  const index = archivedMarkupIndex(parameters);
+  if (index === undefined) return;
+  if (typeof index !== "number" || !Number.isInteger(index) || index < 1 || sourceCount !== undefined && index >= sourceCount) throw new ImageEditInputError("标注层引用索引无效或缺少原图，请重新上传透明 PNG 标注层；尚未提交生成");
+  if (archivedMaskIndex(parameters) !== undefined) throw new ImageEditInputError("标注层与蒙版不能同时使用；尚未提交生成");
+  if (target.protocol !== "apimart" || !/^gpt-image-2\.6-(?:flare|sunburst)$/.test(target.modelId) || target.workflow
+    || !["inpaint", "image_generation"].includes(target.operationType)) throw new ImageEditInputError("当前模型或操作不支持独立标注层，请使用 GPT Image 2.6 图像编辑；尚未提交生成");
+  if (parameters.output_format === "gif" || parameters.output_format === "svg") throw new ImageEditInputError("GIF 不支持标注引导编辑；尚未提交生成");
+}
+
 /** Reject unsupported mask routes instead of silently treating the mask as a reference image. */
 export function assertImageEditMaskSupport(parameters: Record<string, unknown>, target: ImageEditTarget, sourceCount?: number) {
+  assertImageEditMarkupSupport(parameters, target, sourceCount);
   const index = archivedMaskIndex(parameters);
   if (index === undefined) return;
   if (typeof index !== "number" || !Number.isInteger(index) || index < 1) throw new ImageEditInputError("蒙版引用索引无效，请重新绘制蒙版；尚未提交生成");
@@ -71,6 +87,17 @@ export function assertImageEditMaskSupport(parameters: Record<string, unknown>, 
 /** The archive indexes sourceUrls, including its mask. Keep all actual reference images in order. */
 export async function prepareImageEditInput<T extends ImageEditSource>(sources: T[], parameters: Record<string, unknown>, target: ImageEditTarget): Promise<ImageEditInput<T>> {
   assertImageEditMaskSupport(parameters, target, sources.length);
+  const markupIndex = archivedMarkupIndex(parameters);
+  if (typeof markupIndex === "number") {
+    const markup = sources[markupIndex]!;
+    const references = sources.filter((_, sourceIndex) => sourceIndex !== markupIndex);
+    if (markup.mimeType !== "image/png" || !markup.bytes.byteLength || markup.bytes.byteLength > 50 * 1024 * 1024) throw new ImageEditInputError("标注层必须为不超过 50 MiB 的透明 PNG；尚未提交生成");
+    const originalMeta = await inspectEditImage(references[0]!, "markup");
+    const markupMeta = await inspectEditImage(markup, "markup");
+    if (!/^(?:rgba|bgra|argb|abgr|ya8|rgba64(?:le|be)|bgra64(?:le|be)|ya16(?:le|be))$/.test(markupMeta.pixelFormat)) throw new ImageEditInputError("PNG 标注层缺少 alpha 透明通道；尚未提交生成");
+    if (markupMeta.width !== originalMeta.width || markupMeta.height !== originalMeta.height) throw new ImageEditInputError(`标注层尺寸 ${markupMeta.width}×${markupMeta.height} 与第一张原图 ${originalMeta.width}×${originalMeta.height} 不一致；尚未提交生成`);
+    return { references, markup };
+  }
   const index = archivedMaskIndex(parameters);
   if (index === undefined) return { references: sources };
   if (typeof index !== "number") throw new ImageEditInputError("蒙版引用索引无效；尚未提交生成");
@@ -93,7 +120,7 @@ export async function prepareImageEditInput<T extends ImageEditSource>(sources: 
 }
 
 /** Decode bounded local files with the existing FFmpeg installation; never fetch a client URL. */
-async function inspectEditImage(source: ImageEditSource) {
+async function inspectEditImage(source: ImageEditSource, layer: "mask" | "markup" = "mask") {
   const formats: Record<string, string> = { "image/png": "png_pipe", "image/jpeg": "jpeg_pipe", "image/webp": "webp_pipe" };
   if (!formats[source.mimeType] || !source.bytes.byteLength || source.bytes.byteLength > 50 * 1024 * 1024) {
     throw new ImageEditInputError("蒙版编辑原图必须为不超过 50 MiB 的 PNG、JPEG 或 WebP；尚未提交生成");
@@ -121,10 +148,10 @@ async function inspectEditImage(source: ImageEditSource) {
     if (decoded.format?.format_name !== formats[source.mimeType] || !image || Number(image.nb_read_frames) !== 1 || !Number.isInteger(image.width) || !Number.isInteger(image.height) || image.width! < 1 || image.height! < 1) {
       throw new ImageEditInputError("原图或蒙版的真实格式、像素尺寸或单帧内容无效；尚未提交生成");
     }
-    if (image.width! > 8192 || image.height! > 8192 || image.width! * image.height! > 16_777_216) {
+    if (layer === "mask" && (image.width! > 8192 || image.height! > 8192) || image.width! * image.height! > 16_777_216) {
       throw new ImageEditInputError("严格蒙版编辑仅支持单边不超过 8192、总像素不超过 16777216 的原图和蒙版；尚未提交生成");
     }
-    if (/(?:9|10|12|14|16|48|64)(?:le|be)?$/.test(image.pix_fmt || "")) {
+    if (layer === "mask" && /(?:9|10|12|14|16|48|64)(?:le|be)?$/.test(image.pix_fmt || "")) {
       throw new ImageEditInputError("严格蒙版编辑仅支持 8 位（8-bit）原图和蒙版，不自动降低高位深图片精度；尚未提交生成");
     }
     if (hasNonIdentityImageOrientation(decoded, source.bytes)) {

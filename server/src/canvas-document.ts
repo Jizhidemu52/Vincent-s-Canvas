@@ -87,6 +87,25 @@ function collectMediaAssets(value: unknown): string[] {
         const object = current as Record<string, unknown>;
         const typedMedia = typeof object.type === "string" && /^(?:image|video|audio)(?:\/|$)/i.test(object.type);
         for (const [key, entry] of Object.entries(object)) {
+            // This one versioned settings field contains a serialized media record.
+            // Never parse arbitrary prompt/JSON strings as additional media references.
+            if (key === "imageOptions" && typeof entry === "string") {
+                let options: unknown;
+                try { options = JSON.parse(entry); } catch { /* Older opaque settings remain unchanged. */ }
+                if (options && typeof options === "object" && !Array.isArray(options)) {
+                    const encoded = (options as Record<string, unknown>).markup_reference;
+                    if (encoded !== undefined && encoded !== "") {
+                        let markup: unknown;
+                        try { if (typeof encoded === "string") markup = JSON.parse(encoded); } catch { /* Report only a safe validation message. */ }
+                        if (!markup || typeof markup !== "object" || Array.isArray(markup)) throw new CanvasDocumentError("CANVAS_MEDIA_INVALID", "画布标注层记录无效");
+                        const layer = markup as Record<string, unknown>;
+                        if (layer.type !== "image/png" || typeof layer.dataUrl !== "string") throw new CanvasDocumentError("CANVAS_MEDIA_INVALID", "画布标注层必须引用已上传的 PNG 素材");
+                        if (localMedia.test(layer.dataUrl.trim())) throw new CanvasDocumentError("CANVAS_LOCAL_MEDIA", "请先将画布标注层上传后再同步");
+                        if (!/^\/api\/assets\/[^/]+\/content\/?$/i.test(layer.dataUrl)) throw new CanvasDocumentError("CANVAS_MEDIA_INVALID", "画布标注层必须引用已上传的 PNG 素材");
+                        walk(layer, true, depth + 1);
+                    }
+                }
+            }
             if (key === "storageKey" && entry != null && entry !== "") throw new CanvasDocumentError("CANVAS_LOCAL_MEDIA", "画布不能同步本地媒体存储键");
             if ((key === "assetId" || key === "serverAssetId") && typeof entry === "string" && entry) {
                 if (!uuidPattern.test(entry)) throw new CanvasDocumentError("CANVAS_MEDIA_INVALID", "画布素材标识无效");

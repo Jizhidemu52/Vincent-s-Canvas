@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import ts from "typescript";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import { audioExtension } from "@/lib/canvas/canvas-export-loader";
+import { videoFileExtension } from "../../shared/video-output";
 import type { backupCanvasEditorDraft, downloadCanvasEditorNode } from "../src/pages/canvas/canvas-editor-file-actions";
 
 const source = readFileSync(new URL("../src/pages/canvas/canvas-editor-file-actions.ts", import.meta.url), "utf8").replace(/^import .*\n/gm, "").replaceAll("export async function", "async function");
@@ -57,8 +58,8 @@ describe("on-demand canvas node download", () => {
         const events: unknown[] = [];
         const node: CanvasNodeData = { id: "image", type: CanvasNodeType.Image, title: "original", position: { x: 0, y: 0 }, width: 100, height: 100, metadata: { content: "blob:original", storageKey: "image:original" } };
         let loadVariants = async () => ({ variants: "fixture" });
-        const run: typeof downloadCanvasEditorNode = new Function("CanvasNodeType", "uiText", "audioExtension", "loadCanvasExport", `${code}; return downloadCanvasEditorNode;`)(
-            CanvasNodeType, (text: string) => text, audioExtension,
+        const run: typeof downloadCanvasEditorNode = new Function("CanvasNodeType", "uiText", "audioExtension", "videoFileExtension", "loadCanvasExport", `${code}; return downloadCanvasEditorNode;`)(
+            CanvasNodeType, (text: string) => text, audioExtension, videoFileExtension,
             async () => ({ loadCanvasImageVariants: () => loadVariants(), downloadCanvasContent: (...args: unknown[]) => events.push(args) }),
         );
         const options = {
@@ -88,6 +89,11 @@ describe("on-demand canvas node download", () => {
         const state = downloadHarness();
         await state.run({ ...state.node, type: CanvasNodeType.Audio, title: 'clip:one. ', metadata: { content: "blob:audio", mimeType: "audio/wav" } });
         expect(state.events).toEqual(["loading", ["blob:audio", "clip_one.wav"], "done"]);
+    });
+    test("MOV downloads keep the original URL and extension instead of the MP4 preview", async () => {
+        const state = downloadHarness();
+        await state.run({ ...state.node, type: CanvasNodeType.Video, title: "original", metadata: { content: "blob:original-mov", mimeType: "video/quicktime" } });
+        expect(state.events).toEqual(["loading", ["blob:original-mov", "original.mov"], "done"]);
     });
     test("failed variant loading always clears progress and remains an error", async () => {
         const state = downloadHarness();

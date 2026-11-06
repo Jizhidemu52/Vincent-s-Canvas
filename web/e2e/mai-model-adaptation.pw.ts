@@ -2,9 +2,9 @@ import type { Locator, Page } from "@playwright/test";
 import { test, expect, IMAGE, newCanvas } from "./fixtures";
 import { toolDefinitions } from "../../shared/feature-catalog";
 
-const make = (last: number, name: string, profile: string) => ({ id: `10000000-0000-4000-8000-${String(last).padStart(12, "0")}`, modelId: `10000000-0000-4000-8000-${String(last).padStart(12, "0")}`, name, publicName: name, imageParameterProfile: profile, imageSupportsMask: profile === "quality-resolution", capabilities: ["generate", "edit", "batch"], creditCost: 0, rmbCost: 0, isFeatured: true, displayOrder: last });
-const flare = make(11, "aplmart-gpt2.6-flare", "quality-resolution");
-const sunburst = make(12, "aplmart-gpt2.6-sunburst", "quality-resolution");
+const make = (last: number, name: string, profile: string) => ({ id: `10000000-0000-4000-8000-${String(last).padStart(12, "0")}`, modelId: `10000000-0000-4000-8000-${String(last).padStart(12, "0")}`, name, publicName: name, imageParameterProfile: profile, imageSupportsMask: profile.startsWith("quality-resolution"), capabilities: ["generate", "edit", "batch"], creditCost: 0, rmbCost: 0, isFeatured: true, displayOrder: last });
+const flare = make(11, "aplmart-gpt2.6-flare", "quality-resolution-v2");
+const sunburst = make(12, "aplmart-gpt2.6-sunburst", "quality-resolution-v2");
 const mai = make(13, "aplmart-mai2.6-flash", "mai-image");
 const nano = make(14, "aplmart-nano2.1", "resolution-1k");
 const grok = make(15, "aplmart-grok2", "grok-image");
