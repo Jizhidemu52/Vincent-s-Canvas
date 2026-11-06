@@ -5,6 +5,7 @@ import { VideoTaskPending, VideoSubmissionClaimLost } from "../src/media-runtime
 import { ApiMartImageTaskPending } from "../src/apimart-image";
 import { WorkflowTaskPending } from "../src/workflow-task-context";
 import { readSourceAssetObject } from "../src/asset-object-error";
+import { videoFileExtension } from "../../shared/video-output";
 
 const source = ts.createSourceFile("worker.ts", await Bun.file(new URL("../src/worker.ts", import.meta.url)).text(), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
 function functions(names: string[], dependencies: Record<string, unknown>) {
@@ -72,6 +73,7 @@ test.each(["stored", "store-failed", "lease-lost"])("worker disposes generated v
 test("worker stores video via file upload with the streamed byte count", async () => {
   let writes = 0;
   const api = functions(["saveResultAsset"], {
+    videoFileExtension,
     assertTaskExecution: async () => {}, randomUUID: () => id,
     storage: { put: async () => { throw new Error("must not buffer video"); }, putFile: async (_key: string, path: string, size: number, mime: string) => { writes++; expect([path, size, mime]).toEqual(["fixture-path", 1234, "video/mp4"]); } },
     classifyDesignDirection: () => ({ primaryDirection: "other", secondaryDirections: [], ruleVersion: 1, evidence: [] }),
