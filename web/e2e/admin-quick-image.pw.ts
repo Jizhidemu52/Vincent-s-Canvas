@@ -9,6 +9,8 @@ const root = "/api/admin/model-configuration/quick-images";
 const modelA = { id: "10000000-0000-4000-8000-000000000001", name: "处理模型 A", modelId: "fixture-edit-a", providerName: "隔离 API", protocol: "apimart", capabilities: ["edit"] };
 const modelB = { ...modelA, id: "10000000-0000-4000-8000-000000000002", name: "处理模型 B", modelId: "fixture-edit-b" };
 const removeTitle = "一键去背景", hdTitle = "高清放大";
+// AntD's loading icon contributes its accessible name until the leave animation ends.
+const paidTestName = /^(?:loading )?付费试运行 1 张$/;
 
 async function setup(page: Page) {
     const api = new MockCanvasApi(test.info().project.use.baseURL);
@@ -127,7 +129,7 @@ test("save changes one action with expectedVersion; validates JSON and protects 
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await panel.getByRole("textbox", { name: `${removeTitle}处理提示词` }).scrollIntoViewIfNeeded();
     await page.screenshot({ path: info.outputPath("admin-quick-mobile.png"), fullPage: true });
-    await panel.getByRole("button", { name: "付费试运行 1 张", exact: true }).scrollIntoViewIfNeeded();
+    await panel.getByRole("button", { name: paidTestName }).scrollIntoViewIfNeeded();
     await page.screenshot({ path: info.outputPath("admin-quick-mobile-test-controls.png"), fullPage: true });
     clean(f);
 });
@@ -139,8 +141,9 @@ test("unsaved draft test sends one snapshot and one original upload; double-clic
     const panel = region(page), saved = structuredClone(f.configurations);
     await panel.getByRole("textbox", { name: `${removeTitle}处理提示词` }).fill("PRIVATE unsaved subject only");
     await upload(page);
-    await panel.getByRole("button", { name: "付费试运行 1 张", exact: true }).dblclick();
+    await panel.getByRole("button", { name: paidTestName }).dblclick();
     await expect.poll(() => f.tests.length).toBe(1);
+    await expect(panel.getByRole("button", { name: paidTestName })).toBeDisabled();
     expect(f.saves).toHaveLength(0); expect(f.uploads).toHaveLength(1); expect(f.uploadBytes).toEqual([IMAGE]);
     expect(f.tests[0]).toMatchObject({ action: "remove-background", input: { configuration: { modelConfigId: modelA.id, prompt: "PRIVATE unsaved subject only", parameters: { quality: "high" } } } });
     expect(f.tests[0].input.sourceUrl).toMatch(/^\/api\/assets\/[a-f0-9-]+\/content$/);
@@ -149,7 +152,7 @@ test("unsaved draft test sends one snapshot and one original upload; double-clic
     expect(receipts).toEqual([[`canvas:admin-quick-image-test:${owner}:remove-background`, f.tests[0].input.requestId]]);
     await f.release();
     await expect(panel.getByRole("img", { name: `${removeTitle}测试结果 1`, exact: true })).toBeVisible();
-    await expect(panel.getByRole("button", { name: "付费试运行 1 张", exact: true })).toBeEnabled();
+    await expect(panel.getByRole("button", { name: paidTestName })).toBeEnabled();
     expect(f.tests).toHaveLength(1); clean(f);
 });
 
@@ -158,10 +161,10 @@ test("uncertain POST, missing or failed queries and refresh retain the original 
     f.flags.abortTest = true; f.flags.query = "missing";
     await openPanel(page); await upload(page);
     const panel = region(page);
-    await panel.getByRole("button", { name: "付费试运行 1 张", exact: true }).click();
+    await panel.getByRole("button", { name: paidTestName }).click();
     await expect(panel.getByText(/网络连接中断/)).toBeVisible();
     const requestId = f.tests[0].input.requestId;
-    await expect(panel.getByRole("button", { name: "付费试运行 1 张", exact: true })).toBeDisabled();
+    await expect(panel.getByRole("button", { name: paidTestName })).toBeDisabled();
     await panel.getByRole("button", { name: /查询原测试任务$/ }).click();
     await expect(panel.getByText(/尚未查到原任务，不代表未提交或未扣费/)).toBeVisible();
     f.flags.query = "network";
@@ -171,11 +174,11 @@ test("uncertain POST, missing or failed queries and refresh retain the original 
     await page.getByRole("tab", { name: "快捷图片处理", exact: true }).click();
     await expect(region(page).getByText(/发现原测试请求/)).toBeVisible();
     await upload(page);
-    await expect(region(page).getByRole("button", { name: "付费试运行 1 张", exact: true })).toBeDisabled();
+    await expect(region(page).getByRole("button", { name: paidTestName })).toBeDisabled();
     f.flags.query = "task";
     await region(page).getByRole("button", { name: /查询原测试任务$/ }).click();
     await expect(region(page).getByRole("img", { name: `${removeTitle}测试结果 1`, exact: true })).toBeVisible();
-    await expect(region(page).getByRole("button", { name: "付费试运行 1 张", exact: true })).toBeEnabled();
+    await expect(region(page).getByRole("button", { name: paidTestName })).toBeEnabled();
     expect(f.tests).toHaveLength(1); expect(f.saves).toHaveLength(0); expect(f.uploads).toHaveLength(1);
     expect(f.requests.filter(value => value.startsWith("GET /api/tasks/by-request/"))).toEqual(Array(3).fill(`GET /api/tasks/by-request/${requestId}`));
     expect(f.recoveries).toEqual([]); clean(f);
@@ -186,9 +189,9 @@ for (const known of [true, false]) test(`${known ? "known-upstream" : "unknown-s
     f.flags.taskStatus = "paused"; f.flags.upstreamTaskId = known ? "fixture-upstream-id" : null;
     await openPanel(page); await upload(page);
     const panel = region(page);
-    await panel.getByRole("button", { name: "付费试运行 1 张", exact: true }).click();
+    await panel.getByRole("button", { name: paidTestName }).click();
     await expect(panel.getByText("等待恢复查询", { exact: true })).toBeVisible();
-    await expect(panel.getByRole("button", { name: "付费试运行 1 张", exact: true })).toBeDisabled();
+    await expect(panel.getByRole("button", { name: paidTestName })).toBeDisabled();
     if (known) {
         await panel.getByRole("button", { name: "恢复原任务查询", exact: true }).click();
         await expect(panel.getByRole("img", { name: `${removeTitle}测试结果 1`, exact: true })).toBeVisible();
@@ -207,11 +210,11 @@ test("local waiting can stop without cancelling the service task or permitting a
     f.flags.taskStatus = "processing";
     await openPanel(page); await upload(page);
     const panel = region(page);
-    await panel.getByRole("button", { name: "付费试运行 1 张", exact: true }).click();
+    await panel.getByRole("button", { name: paidTestName }).click();
     await expect(panel.getByText("处理中", { exact: true })).toBeVisible();
     await panel.getByRole("button", { name: "停止本地等待", exact: true }).click();
     await expect(panel.getByText(/本地查询已停止，服务端任务未取消/)).toBeVisible();
-    await expect(panel.getByRole("button", { name: "付费试运行 1 张", exact: true })).toBeDisabled();
+    await expect(panel.getByRole("button", { name: paidTestName })).toBeDisabled();
     const original = [...f.tasks.values()][0];
     expect(original.status).toBe("processing");
     original.status = "success"; original.resultUrls = ["/api/assets/fixture-output/content"];
@@ -228,7 +231,7 @@ test("unavailable saved model is explicit and cannot silently fallback or submit
     await expect(panel.getByText("当前模型未配置、已停用或不可用", { exact: true })).toBeVisible();
     await expect(panel.getByText("停用旧模型（不可用）", { exact: true })).toBeVisible();
     await upload(page, hdTitle);
-    await expect(panel.getByRole("button", { name: "付费试运行 1 张", exact: true })).toBeDisabled();
+    await expect(panel.getByRole("button", { name: paidTestName })).toBeDisabled();
     await expect(panel.getByRole("button", { name: `保存${hdTitle}配置` })).toBeDisabled();
     expect(f.tests).toHaveLength(0); expect(f.saves).toHaveLength(0); expect(f.uploads).toHaveLength(0); clean(f);
 });

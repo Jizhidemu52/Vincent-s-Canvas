@@ -1258,7 +1258,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                                 {designStatus === "error" ? <Button size="small" onClick={() => setDesignAttempt(value => value + 1)}>{uiText("重新读取设计交接")}</Button> : null}
                             </div>
                         </div> : null}
-                        <fieldset disabled={!handoffReady} className="mt-6 min-w-0 space-y-5 border-0 p-0">
+                        <fieldset disabled={!draftReady || !handoffReady} className="mt-6 min-w-0 space-y-5 border-0 p-0">
                             {initialGarmentScenario ? <GarmentRecipePanel key={garmentScope} references={references} disabled={running || !requiresPrompt} initialScenario={initialGarmentScenario} onApply={applyGarmentRecipe} onDraftChange={handleGarmentDraftChange} /> : null}
                             {requiresPrompt ? <div>
                                 <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
@@ -1359,6 +1359,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                 type="file"
                 accept="image/*"
                 multiple={!quickTool}
+                disabled={!draftReady || !handoffReady}
                 className="hidden"
                 onChange={(event) => {
                     void addReferences(event.target.files);

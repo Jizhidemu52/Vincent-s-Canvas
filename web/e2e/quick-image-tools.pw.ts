@@ -25,6 +25,13 @@ async function expectStandaloneActionOnly(page: Page) {
     await expect(page.getByText(/后台私有配方|内置配方|Nano 2\.1|MAI|4K|还差：选择模型/)).toHaveCount(0);
 }
 
+async function uploadStandaloneImage(page: Page) {
+    const chooser = page.waitForEvent("filechooser");
+    await page.getByRole("button", { name: "上传图片", exact: true }).click();
+    await (await chooser).setFiles({ name: "原图.png", mimeType: "image/png", buffer: IMAGE });
+    await expect(page.getByRole("region", { name: "参考图", exact: true })).toContainText("1 张");
+}
+
 test("remove-background exports the same transparent master as PNG or white-backed JPG without generating again", async ({ page, api }, testInfo) => {
     await page.goto("/remove-background");
     const source = Buffer.from(await page.evaluate(() => {
@@ -37,7 +44,7 @@ test("remove-background exports the same transparent master as PNG or white-back
         if (api.tasks.has(id)) api.assetBytes.set(id, source);
         await route.fallback();
     });
-    await page.locator('input[type="file"]').setInputFiles({ name: "原图.png", mimeType: "image/png", buffer: IMAGE });
+    await uploadStandaloneImage(page);
     await page.getByRole("button", { name: "一键去背景", exact: true }).click();
     await expect(page.getByRole("button", { name: "下载", exact: true })).toBeVisible();
     expect(api.submissions).toHaveLength(1);
@@ -79,7 +86,7 @@ for (const action of ["remove-background", "hd-upscale"] as const) {
         await expectStandaloneActionOnly(page);
         const submit = page.getByRole("button", { name: title, exact: true });
         await expect(submit).toBeDisabled();
-        await page.locator('input[type="file"]').setInputFiles({ name: "原图.png", mimeType: "image/png", buffer: IMAGE });
+        await uploadStandaloneImage(page);
         await expect(submit).toBeEnabled(); await submit.click();
         await expect.poll(() => api.submissions.length).toBe(1);
         expect(api.submissions[0]).toMatchObject({ toolKey: action === "hd-upscale" ? "detail-enhance" : "image-edit", operationType: action === "hd-upscale" ? "upscale" : "inpaint", parameters: { quickImageAction: action } });
@@ -108,7 +115,7 @@ for (const action of ["remove-background", "hd-upscale"] as const) {
 test("an unresolved standalone request only refreshes its original task and cannot resubmit", async ({ page, api }) => {
     api.taskStatus = "paused";
     await page.goto("/remove-background");
-    await page.locator('input[type="file"]').setInputFiles({ name: "原图.png", mimeType: "image/png", buffer: IMAGE });
+    await uploadStandaloneImage(page);
     await page.getByRole("button", { name: "一键去背景", exact: true }).click();
     await expect(page.getByText("提交结果待核查", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "一键去背景", exact: true })).toBeDisabled();
@@ -117,11 +124,43 @@ test("an unresolved standalone request only refreshes its original task and cann
 });
 
 test("placing a processed result keeps its media but does not export the managed recipe or prevent ordinary editing", async ({ page, api }) => {
+    // Hold real draft reads to exercise the same early-upload window as a slow browser store.
+    await page.addInitScript(() => {
+        const callbacks: Array<() => void> = [];
+        const originalGet = IDBObjectStore.prototype.get;
+        let holding = true;
+        const gate = (window as any).__quickDraftReadGate = { pending: 0, release: () => {
+            holding = false; IDBObjectStore.prototype.get = originalGet;
+            for (const callback of callbacks.splice(0)) callback();
+        } };
+        IDBObjectStore.prototype.get = function (key) {
+            const request = originalGet.call(this, key);
+            if (this.name !== "generation_drafts") return request;
+            const success = Object.getOwnPropertyDescriptor(IDBRequest.prototype, "onsuccess")!;
+            Object.defineProperty(request, "onsuccess", {
+                set(handler) {
+                    success.set!.call(request, (event: Event) => {
+                        if (!holding) return handler.call(request, event);
+                        gate.pending += 1; callbacks.push(() => handler.call(request, event));
+                    });
+                },
+            });
+            return request;
+        };
+    });
     await managedQuickTask(page, api);
     await page.goto("/remove-background");
-    await page.locator('input[type="file"]').setInputFiles({ name: "原图.png", mimeType: "image/png", buffer: IMAGE });
+    await expect.poll(() => page.evaluate(() => (window as any).__quickDraftReadGate.pending)).toBeGreaterThan(0);
+    await expect(page.getByText("正在恢复草稿…", { exact: true })).toBeVisible();
+    const upload = page.getByRole("button", { name: "上传图片", exact: true });
+    await expect(upload).toBeDisabled();
+    await expect(page.locator('input[type="file"]')).toBeDisabled();
+    await page.evaluate(() => (window as any).__quickDraftReadGate.release());
+    await expect(upload).toBeEnabled();
+    await uploadStandaloneImage(page);
     await page.getByRole("button", { name: "一键去背景", exact: true }).click();
     await expect(page.getByRole("button", { name: "下载", exact: true })).toBeVisible();
+    expect(api.submissions).toHaveLength(1);
     await page.getByRole("button", { name: "放入画布", exact: true }).click();
     await expect(page).toHaveURL(/\/canvas\/[^/?]+$/);
     const id = new URL(page.url()).pathname.split("/").at(-1)!;
