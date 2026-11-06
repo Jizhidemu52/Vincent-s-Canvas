@@ -2,6 +2,9 @@ import { expect, test } from "bun:test";
 import { Readable } from "node:stream";
 import { validateAssetUpload, assetResponseHeaders, matchesAssetEtag, inspectAssetStream } from "../src/asset-delivery";
 import { parseAssetListQuery, assetPage, assetBatchSchema } from "../src/asset-query";
+import * as XLSX from "xlsx";
+import { fileTypeFromBuffer } from "file-type";
+import { createHash } from "node:crypto";
 
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nWQAAAAASUVORK5CYII=", "base64");
 test("upload MIME is verified from bytes and active markup cannot masquerade as an image", async () => {
@@ -10,6 +13,54 @@ test("upload MIME is verified from bytes and active markup cannot masquerade as 
   await expect(validateAssetUpload(Buffer.from('<svg onload="alert(1)"/>'), "image/svg+xml")).rejects.toThrow();
   expect(await validateAssetUpload(Buffer.from('正常文字'), "text/plain")).toBe("text/plain");
   await expect(validateAssetUpload(Buffer.from('{invalid'), "application/json")).rejects.toThrow();
+});
+test.each(["text/csv", "text/markdown"])("%s source files accept only UTF-8 safe text and remain downloads", async mime => {
+  const original = Buffer.from(mime === "text/csv" ? '\ufeff款号,颜色\r\nA01,"红色,暖调"\r\n' : "# 设计要求\n红色开衫，保留五粒纽扣。\n");
+  expect(await validateAssetUpload(original, `${mime}; charset=utf-8`)).toBe(mime);
+  for (const bytes of [Buffer.from([0xff, 0xfe, 0x41, 0]), Buffer.from("正常\0文字"), Buffer.from('<html><script>alert(1)</script></html>'), Buffer.from('<svg onload="alert(1)"/>'), Buffer.from('<script>alert(1)</script>')]) {
+    await expect(validateAssetUpload(bytes, mime)).rejects.toThrow();
+  }
+  await expect(validateAssetUpload(png, mime)).rejects.toThrow();
+  const headers = assetResponseHeaders(mime, mime === "text/csv" ? "原件.csv" : "原件.md");
+  expect(headers["content-type"]).toBe(mime);
+  expect(headers["content-disposition"]).toStartWith("attachment;");
+  expect(headers["x-content-type-options"]).toBe("nosniff");
+  const inspected = await inspectAssetStream(Readable.from([original.subarray(0, 2), original.subarray(2)]), mime);
+  expect(inspected.mimeType).toBe(mime);
+  const received: Buffer[] = [];
+  for await (const chunk of inspected.stream) received.push(Buffer.from(chunk));
+  expect(Buffer.concat(received)).toEqual(original);
+});
+test.each(["biff5", "biff8"] as const)("real %s XLS uploads validate the workbook and preserve original bytes", async bookType => {
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([["Style", "Color"], ["A01", "Red"]]), "Design");
+  const bytes = Buffer.from(XLSX.write(workbook, { type: "buffer", bookType }));
+  const hash = createHash("sha256").update(bytes).digest("hex");
+  expect(await fileTypeFromBuffer(bytes)).toMatchObject({ mime: "application/x-cfb" });
+  expect(await validateAssetUpload(bytes, "application/vnd.ms-excel")).toBe("application/vnd.ms-excel");
+  expect(createHash("sha256").update(bytes).digest("hex")).toBe(hash);
+  const inspected = await inspectAssetStream(Readable.from([bytes.subarray(0, 1024), bytes.subarray(1024)]), "application/vnd.ms-excel");
+  expect(inspected.mimeType).toBe("application/vnd.ms-excel");
+  const received: Buffer[] = [];
+  for await (const chunk of inspected.stream) received.push(Buffer.from(chunk));
+  expect(Buffer.concat(received)).toEqual(bytes);
+  const headers = assetResponseHeaders(inspected.mimeType, "原始款式.xls");
+  expect(headers["content-disposition"]).toStartWith("attachment;");
+  expect(headers["x-content-type-options"]).toBe("nosniff");
+});
+test("XLS admission rejects arbitrary OLE, fake or nested Workbook streams, HTML, encryption and raw legacy BIFF", async () => {
+  for (const name of ["WordDocument", "Workbook", "Book", "nested/Workbook", "EncryptedPackage"]) {
+    const container = XLSX.CFB.utils.cfb_new({ root: "Root Entry" });
+    XLSX.CFB.utils.cfb_add(container, name, Buffer.from('<html><script>alert(1)</script></html>'));
+    const bytes = XLSX.CFB.write(container, { type: "buffer" });
+    expect(await fileTypeFromBuffer(bytes)).toMatchObject({ mime: "application/x-cfb" });
+    await expect(validateAssetUpload(bytes, "application/vnd.ms-excel")).rejects.toThrow("工作簿");
+    await expect(validateAssetUpload(bytes, "application/x-cfb")).rejects.toThrow("不支持");
+  }
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([["A"]]), "Sheet1");
+  const raw = XLSX.write(workbook, { type: "buffer", bookType: "biff2" });
+  for (const bytes of [png, raw, Buffer.from('<table><tr><td>A</td></tr></table>')]) await expect(validateAssetUpload(bytes, "application/vnd.ms-excel")).rejects.toThrow("格式不受支持");
 });
 test("response headers force unknown types to download and encode untrusted filenames", () => {
   const headers = assetResponseHeaders('text/html', '恶意\r\nX-Injected: yes.html');

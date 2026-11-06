@@ -128,7 +128,8 @@ test("compact type and settings controls preserve image and video mode changes",
 
 test("canvas image controls distinguish explicit size changes from automatic normalization and can restore following", () => {
     const result = controls({ size: "1:1" });
-    expect(result.markup).toContain("编辑默认跟随底图画幅");
+    expect(result.markup).toContain("编辑默认参考底图画幅");
+    expect(result.markup).toContain("不保证返回原像素尺寸");
     result.elements.find(element => element.type === "button" && element.props.children === "编辑也使用下方尺寸")!.props.onClick();
     expect(result.changes.at(-1)).toEqual({ requestedImageSize: "1:1" });
     const panel = result.elements.find(element => element.props.onConfigChange && element.props.onConfigNormalize)!;

@@ -86,7 +86,19 @@ function allowRequiredText(avoid: string, language: "en" | "zh") {
   }).join("");
 }
 
-export function parseOptimizedPrompt(raw: string, rules: readonly string[], options: { video?: boolean; reverse?: boolean; referenceCount: number; userText: string; language: "en" | "zh"; requiredText?: string[] }) {
+type PromptOutputOptions = { video?: boolean; reverse?: boolean; referenceCount: number; userText: string; language: "en" | "zh"; requiredText?: string[] };
+
+/** Apply to fresh, fallback and cached final text before any generation admission. */
+export function assertPromptOutputContent(prompt: string, rules: readonly string[], options: PromptOutputOptions) {
+  if (!prompt.trim() || prompt.length > (options.video ? 1500 : 20_000)) throw new PromptOptimizationError("PROMPT_OUTPUT_INVALID", "最终提示词无效或过长，未提交生成", 422);
+  assertNoPromptRuleLeak(prompt, rules);
+  for (const reference of prompt.matchAll(/(?:\bImage\s*|图片\s*)(\d+)/gi)) {
+    if (Number(reference[1]) < 1 || Number(reference[1]) > options.referenceCount) throw new PromptOptimizationError("PROMPT_REFERENCE_INVALID", "优化结果引用了不存在的参考图，未提交生成", 422);
+  }
+  if (options.requiredText?.some(text => !prompt.includes(text))) throw new PromptOptimizationError("PROMPT_TEXT_NOT_PRESERVED", options.video ? "动效规划未原样保留指定文字，未提交生成" : "优化结果未原样保留指定文字，未提交生成", 422);
+}
+
+export function parseOptimizedPrompt(raw: string, rules: readonly string[], options: PromptOutputOptions) {
   if (raw.length > 30_000) throw new PromptOptimizationError("PROMPT_OUTPUT_INVALID", "提示词优化输出过长，未提交生成", 422);
   let result: unknown;
   try { result = parseStrictJson(raw); } catch { throw new PromptOptimizationError("PROMPT_OUTPUT_INVALID", "提示词优化未返回有效 JSON，未提交生成", 422); }
@@ -97,12 +109,9 @@ export function parseOptimizedPrompt(raw: string, rules: readonly string[], opti
     throw new PromptOptimizationError("PROMPT_OUTPUT_INVALID", "提示词优化输出字段无效，未提交生成", 422);
   }
   assertNoPromptRuleLeak(result, rules);
-  for (const reference of value.prompt.matchAll(/(?:\bImage\s*|图片\s*)(\d+)/gi)) {
-    if (Number(reference[1]) < 1 || Number(reference[1]) > options.referenceCount) throw new PromptOptimizationError("PROMPT_REFERENCE_INVALID", "优化结果引用了不存在的参考图，未提交生成", 422);
-  }
+  assertPromptOutputContent(value.prompt, rules, options);
   if (options.video) {
     if (typeof value.summary_zh !== "string" || !value.summary_zh.trim() || value.summary_zh.length > 60 || /[\r\n]/.test(value.summary_zh)) throw new PromptOptimizationError("PROMPT_OUTPUT_INVALID", "动效说明必须为不超过 60 字的一句话", 422);
-    if (options.requiredText?.some(text => !(value.prompt as string).includes(text))) throw new PromptOptimizationError("PROMPT_TEXT_NOT_PRESERVED", "动效规划未原样保留指定文字，未提交生成", 422);
     return { prompt: value.prompt.trim(), summaryZh: value.summary_zh.trim(), keepText: [] as string[] };
   }
   if (options.reverse) {
@@ -113,11 +122,17 @@ export function parseOptimizedPrompt(raw: string, rules: readonly string[], opti
     || !Array.isArray(value.keep_text) || value.keep_text.length > 50 || value.keep_text.some(item => typeof item !== "string" || !item.length || item.length > 1_000)) {
     throw new PromptOptimizationError("PROMPT_OUTPUT_INVALID", "提示词约束格式无效，未提交生成", 422);
   }
-  const keepText = value.keep_text as string[];
-  if (keepText.some(text => (!options.userText.includes(text) && !options.requiredText?.includes(text)) || !(value.prompt as string).includes(text))
-    || options.requiredText?.some(text => !keepText.includes(text) || !(value.prompt as string).includes(text))) {
+  const reportedText = value.keep_text as string[];
+  // Reference lettering is visual input, not necessarily transcribed user text.
+  // The compiler has already loaded/authorized these images; this is not OCR
+  // verification. Every reported literal must still occur in the final prompt.
+  if (reportedText.some(text => (options.referenceCount === 0 && !options.userText.includes(text) && !options.requiredText?.includes(text)) || !(value.prompt as string).includes(text))
+    || options.requiredText?.some(text => !(value.prompt as string).includes(text))) {
     throw new PromptOptimizationError("PROMPT_TEXT_NOT_PRESERVED", "优化结果未原样保留指定文字，未提交生成", 422);
   }
+  // Missing metadata is repairable only when the actual prompt already retains
+  // every explicit literal. Never invent or patch missing text into the prompt.
+  const keepText = [...new Set([...reportedText, ...(options.requiredText || [])])];
   const avoid = (value.avoid as string[]).filter(Boolean).map(item => keepText.length ? allowRequiredText(item, options.language) : item);
   const prompt = [value.prompt.trim(), avoid.length ? `${options.language === "zh" ? "避免" : "Avoid"}: ${avoid.join(", ")}.` : ""].filter(Boolean).join("\n");
   if (prompt.length > 20_000) throw new PromptOptimizationError("PROMPT_OUTPUT_INVALID", "最终提示词过长，未提交生成", 422);

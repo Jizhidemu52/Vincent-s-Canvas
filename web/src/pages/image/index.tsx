@@ -5,12 +5,13 @@ import type { PromptInputData, PromptScene } from "../../../../shared/prompt-con
 import { ArrowLeft, ArrowRight, BookmarkPlus, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, ImagePlus, LoaderCircle, PenLine, Plus, Share2, SlidersHorizontal, Sparkles, Trash2, Upload } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { handleSubmitShortcut } from "@/lib/submit-shortcut";
-import { App, Button, Checkbox, Drawer, Empty, Image, Input, Modal, Tag, Tooltip, Typography } from "antd";
+import { App, Button, Checkbox, Drawer, Dropdown, Empty, Image, Input, Modal, Tag, Tooltip, Typography } from "antd";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { createWorkspaceStorage } from "@/lib/workspace-storage";
 import { saveAs } from "file-saver";
 
-import { ImageSettingsPanel, imageQualityLabel, imageSizeLabel } from "@/components/image-settings-panel";
+import { imageQualityLabel, imageSizeLabel } from "@/components/image-settings-panel";
+import { ImageGenerationSettingsDialog } from "@/components/image-generation-settings-dialog";
 import { GenerationElapsed } from "@/components/generation-elapsed";
 import { GenerationQueueProgress } from "@/components/generation-queue-progress";
 import { upsertGenerationLog } from "@/lib/generation-log-update";
@@ -29,19 +30,17 @@ import { imageCopyEditorNode } from "@/lib/image-edit-copy";
 import { canvasImageDownloadFileName, canvasImageReferenceIdentity } from "@/lib/canvas/canvas-image-filename";
 import { workbenchSubmissions } from "@/lib/submission-gate";
 import { ReferenceImageTray } from "@/components/reference-images/reference-image-tray";
-import { ModelPicker } from "@/components/model-picker";
 import { useToolConfig } from "@/hooks/use-tool-config";
 import { requireToolKey } from "@/services/api/tool-runtime";
 import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
-import { canvasThemes } from "@/lib/canvas-theme";
 import { deploymentFeatures } from "@/lib/deployment-features";
 import { pastedImageFiles, readClipboardImages } from "@/lib/clipboard-images";
 import { useCanManageConfig } from "@/hooks/use-can-manage-config";
 import { toolModeOperation, type AdminToolMode } from "@/lib/admin-domain";
 import { createImageReferenceItem, dedupeImageReferences, validateImageReferences } from "@/lib/image-reference-policy";
 import { modelOptionLabel, modelOptionName, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
-import { useThemeStore } from "@/stores/use-theme-store";
+import { imageModelDisplayName } from "@/lib/model-display";
 import { nanoid } from "nanoid";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
 import { requestEdit, requestGeneration } from "@/services/api/image";
@@ -70,7 +69,7 @@ import { promptImageSettings } from "@/lib/prompt-editor-parameters";
 import { useDesignLibraryShare } from "@/pages/design-library/use-design-library-share";
 import { consumePlacementAiHandoff, placementDraftScope, placementHandoffToken } from "@/pages/design-workbench/local/placement/ai-handoff";
 import { PracticeExampleRecord } from "@/components/design-examples";
-import { isQuickImageTool, quickImageModelId } from "@/lib/quick-image-tools";
+import { isQuickImageTool, quickImageReferenceFileError } from "@/lib/quick-image-tools";
 
 type GeneratedImage = {
     id: string;
@@ -131,7 +130,7 @@ type GenerationLogConfig = Pick<AiConfig, "model" | "imageModel" | "quality" | "
 
 type UpdateAiConfig = <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
 
-import { adaptImageModelSettings, gifSizeNotice, imageModelProfile, imageOutputIsGif, imageReferenceSizeIsAutomatic, normalizeImageModelSettings, useImageModelProfile } from "@/lib/image-model-settings";
+import { imageModelProfile, imageReferenceSizeIsAutomatic, normalizeImageModelSettings, useImageModelProfile } from "@/lib/image-model-settings";
 
 const LOG_STORE_KEY = "wireless-canvas:image_generation_logs";
 const RESULT_ACTION_BUTTON_CLASS = "min-w-0 px-1.5 [&_.ant-btn-icon]:shrink-0 [&>span:last-child]:min-w-0 [&>span:last-child]:truncate";
@@ -147,7 +146,7 @@ const imageResultCommits = new Map<string, { stopped: boolean; record: PendingIm
 type GenerationToolMode = Exclude<AdminToolMode, "gpt-chat" | "batch-image-edit" | "seamless-stitch">;
 
 const imageToolModes: Record<GenerationToolMode, { title: string; description: string; placeholder: string; button: string; projectId: string; requiresReference: boolean }> = {
-    "remove-background": { title: "一键去背景", description: "上传一张原图，自动去除背景并导出透明 PNG，保留主体与原图。", placeholder: "", button: "一键去背景", projectId: "tool-remove-background", requiresReference: true },
+    "remove-background": { title: "一键去背景", description: "上传一张原图，自动去除背景，可下载透明 PNG 或白底 JPG，保留主体与原图。", placeholder: "", button: "一键去背景", projectId: "tool-remove-background", requiresReference: true },
     "hd-upscale": { title: "高清放大", description: "上传一张原图，提升图片清晰度，原图保持不变。", placeholder: "", button: "高清放大", projectId: "tool-hd-upscale", requiresReference: true },
     "midjourney-blend": {
         title: "MJ 多图融合",
@@ -245,7 +244,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const [deleteLogIds, setDeleteLogIds] = useState<string[]>([]);
     const restoreBusy = useRef(false);
     const [restoringHistory, setRestoringHistory] = useState(false);
-    const defaults = useEffectiveConfig();
+    const defaults = useEffectiveConfig("image");
     const [draftConfig, setDraftConfig, configReady] = useGenerationDraft<Partial<AiConfig>>(`${inputDraftScope}:settings`, {});
     const baseConfig = { ...defaults, ...draftConfig };
     const config = baseConfig;
@@ -258,7 +257,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         ? (blendModels.find(item => item.modelId === baseImageModel || item.id === baseImageModel) || blendModels[0])?.modelId || ""
         : baseImageModel;
     const managedConfig = useToolConfig({ ...baseConfig, model: selectedImageModel, imageModel: selectedImageModel }, toolKey);
-    const effectiveConfig = quickTool ? { ...baseConfig, model: quickImageModelId(historyTool as "remove-background" | "hd-upscale"), imageModel: quickImageModelId(historyTool as "remove-background" | "hd-upscale"), count: "1", size: "auto", quality: historyTool === "hd-upscale" ? "4K" : "auto", imageOptions: "", systemPrompt: "" } : managedConfig;
+    const effectiveConfig = quickTool ? { ...baseConfig, model: "", imageModel: "", count: "1", size: "auto", quality: "", imageOptions: "", systemPrompt: "" } : managedConfig;
     const updateConfig: UpdateAiConfig = useCallback((key, value) => setDraftConfig(current => current[key] === value ? current : { ...current, [key]: value }), [setDraftConfig]);
     const updateInputConfig: UpdateAiConfig = (key, value) => { inputRevision.current += 1; updateConfig(key, value); };
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
@@ -347,14 +346,16 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const isBlend = !quickTool && (historyTool === "midjourney-blend" || selectedModelProfile.kind === "midjourney-blend");
     const requiresPrompt = !isBlend && !quickTool;
     const generationCount = quickTool ? 1 : Number(normalizeImageModelSettings(config, selectedModelProfile).count);
-    const modelReferenceValidation = validateImageReferences(adminModelId, references, isBlend ? { ...selectedModelProfile, kind: "midjourney-blend" } : selectedModelProfile);
-    const referenceValidation = quickTool && references.length > 1 ? { ...modelReferenceValidation, valid: false, message: uiText("请只添加一张原图") } : modelReferenceValidation;
+    const quickReferenceError = quickTool ? references.map(reference => quickImageReferenceFileError({ type: reference.type, size: reference.bytes })).find(Boolean) : undefined;
+    const referenceValidation = quickTool
+        ? { valid: references.length <= 1 && !quickReferenceError, minimum: 1, maximum: 1, supportsReferences: true, message: references.length > 1 ? uiText("请只添加一张原图") : quickReferenceError }
+        : validateImageReferences(adminModelId, references, isBlend ? { ...selectedModelProfile, kind: "midjourney-blend" } : selectedModelProfile);
     const estimatedUsage = estimate({ operationType, toolKey, modelId: adminModelId, quantity: generationCount });
-    const quotaBlocked = deploymentFeatures.creditsEnabled && Boolean(user && estimatedUsage.configured && user.creditBalance < estimatedUsage.credits);
+    const quotaBlocked = !quickTool && deploymentFeatures.creditsEnabled && Boolean(user && estimatedUsage.configured && user.creditBalance < estimatedUsage.credits);
     const missingReference = !isBlend && toolModeConfig.requiresReference && references.length === 0;
     const invalidBlendReferences = isBlend && (references.length < 2 || references.length > 4);
     const draftReady = configReady && referencesReady && promptReady;
-    const canGenerate = draftReady && placementStatus === "ready" && !(quickTool && pendingImages.length) && !(placementToken && isBlend) && !readingReferences && !optimizingPrompt && Boolean(model) && Boolean(user && user.status === "active") && (!requiresPrompt || Boolean(prompt.trim())) && !quotaBlocked && !missingReference && !invalidBlendReferences && referenceValidation.valid && !garmentNeedsApply && !incompleteCreativePrompt;
+    const canGenerate = draftReady && placementStatus === "ready" && !(quickTool && pendingImages.length) && !(placementToken && isBlend) && !readingReferences && !optimizingPrompt && (quickTool || Boolean(model)) && Boolean(user && user.status === "active") && (!requiresPrompt || Boolean(prompt.trim())) && !quotaBlocked && !missingReference && !invalidBlendReferences && referenceValidation.valid && !garmentNeedsApply && !incompleteCreativePrompt;
 
     const appendReferences = (items: ReferenceImage[], origin: ImageReferenceOrigin) => { inputRevision.current += 1; setReferences((value) => dedupeImageReferences([...value, ...items.map((item) => createImageReferenceItem(item, origin))])); };
     const restoreReferences = (items: ReferenceImage[], origin: ImageReferenceOrigin = "template") => { inputRevision.current += 1; setReferences(dedupeImageReferences(items.map((item) => createImageReferenceItem(item, origin)))); };
@@ -530,10 +531,15 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         try {
         const imageFiles = Array.from(files || []);
         if (imageFiles.some(file => !file.type.startsWith("image/"))) throw new Error("请选择图片文件，其他格式无法作为参考图。");
+        if (quickTool) {
+            if (references.length + imageFiles.length > 1) throw new Error("请只添加一张原图");
+            const error = imageFiles.map(quickImageReferenceFileError).find(Boolean);
+            if (error) throw new Error(error);
+        }
         const nextReferences = await Promise.all(
             imageFiles.map(async (file) => {
                 const image = await uploadImage(file);
-                return { id: nanoid(), name: file.name, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey };
+                return { id: nanoid(), name: file.name, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey, bytes: file.size };
             }),
         );
         if (!stillCurrent()) return;
@@ -549,10 +555,15 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         setReadingReferences(true);
         try {
             const blobs = await readClipboardImages(navigator.clipboard);
+            if (quickTool) {
+                if (references.length + blobs.length > 1) throw new Error("请只添加一张原图");
+                const error = blobs.map(quickImageReferenceFileError).find(Boolean);
+                if (error) throw new Error(error);
+            }
             const nextReferences = await Promise.all(
                 blobs.map(async (blob, index) => {
                     const image = await uploadImage(blob);
-                    return { id: nanoid(), name: `clipboard-${index + 1}.png`, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey };
+                    return { id: nanoid(), name: `clipboard-${index + 1}.png`, type: image.mimeType, dataUrl: image.url, storageKey: image.storageKey, bytes: blob.size };
                 }),
             );
             if (!isCurrentReferenceScope(scope)) return;
@@ -626,7 +637,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
 
     const openResultEditor = (image: GeneratedImage, index: number) => {
         const sourceLog = logs.find(log => log.images.some(item => item.id === image.id));
-        imageEditor.open({ node: resultEditorNode(image, index), originId: image.imageOriginId, sourceTaskId: image.sourceTaskId, prompt: image.prompt ?? sourceLog?.prompt ?? prompt, model: sourceLog?.model || model });
+        imageEditor.open({ node: resultEditorNode(image, index), originId: image.imageOriginId, sourceTaskId: quickTool ? undefined : image.sourceTaskId, prompt: quickTool ? "" : image.prompt ?? sourceLog?.prompt ?? prompt, model: quickTool ? "" : sourceLog?.model || model });
     };
 
     const selectResultPrompt = (image: GeneratedImage) => {
@@ -634,8 +645,13 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         reusePrompt(image.prompt ?? sourceLog?.prompt ?? "");
     };
 
-    const downloadImage = async (image: GeneratedImage, index: number) => {
-        try { saveAs(await resolveImageUrl(image.storageKey, image.dataUrl), canvasImageDownloadFileName(resultEditorNode(image, index))); }
+    const downloadImage = async (image: GeneratedImage, index: number, format?: "png" | "jpg") => {
+        try {
+            if (format) {
+                const { downloadCanvasImage } = await import("@/lib/canvas/canvas-export");
+                await downloadCanvasImage(resultEditorNode(image, index), format);
+            } else saveAs(await resolveImageUrl(image.storageKey, image.dataUrl), canvasImageDownloadFileName(resultEditorNode(image, index)));
+        }
         catch (error) { message.error(error instanceof Error ? uiText(error.message) : uiText("原图读取失败")); }
     };
 
@@ -643,7 +659,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         const sourceLog = [...logs, ...unclassifiedLogs].find(log => log.images.some(item => item.id === image.id));
         return libraryShare.share({ ownerId: user?.id || "", title: image.imageName ? `${image.imageName}_v${image.imageVersion || 1}` : `生成结果 ${index + 1}`,
             dataUrl: image.dataUrl, storageKey: image.storageKey, filename: canvasImageDownloadFileName(resultEditorNode(image, index)),
-            prompt: image.prompt ?? sourceLog?.prompt ?? "", model: sourceLog?.model || "", tags: [] });
+            prompt: quickTool ? "" : image.prompt ?? sourceLog?.prompt ?? "", model: quickTool ? "" : sourceLog?.model || "", tags: [] });
     };
 
     const addResultToReferences = async (image: GeneratedImage, index: number) => {
@@ -672,14 +688,14 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                 source: "image-page",
                 imageName: image.imageName, imageVersion: image.imageVersion || 1,
                 module: toolModeConfig.title,
-                prompt: image.prompt ?? logs.find(log => log.images.some(item => item.id === image.id))?.prompt ?? "",
+                prompt: quickTool ? "" : image.prompt ?? logs.find(log => log.images.some(item => item.id === image.id))?.prompt ?? "",
                 toolMode,
                 operationType,
                 projectId: toolModeConfig.projectId,
                 designerId: user?.id,
-                model,
-                modelId: adminModelId,
-                recreatePath: `/image?tool=${toolMode}&prompt=${encodeURIComponent(image.prompt || "")}&model=${encodeURIComponent(model)}`,
+                model: quickTool ? "" : model,
+                modelId: quickTool ? "" : adminModelId,
+                recreatePath: quickTool ? `/${historyTool}` : `/image?tool=${toolMode}&prompt=${encodeURIComponent(image.prompt || "")}&model=${encodeURIComponent(model)}`,
             },
         });
         message.success(uiText("已加入我的素材"));
@@ -826,7 +842,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const buildRequestSnapshot = (): ImageRequestSnapshot | null => {
         previewRevision.current += 1;
         setPreviewLoading(false);
-        if (!model) {
+        if (!quickTool && !model) {
             handleMissingModelConfig();
             return null;
         }
@@ -1098,6 +1114,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
             <main className="image-workbench-layout grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-y-auto p-5 lg:grid-cols-[228px_minmax(0,1fr)] lg:overflow-hidden">
                 <aside className="wb-surface thin-scrollbar hidden min-h-0 overflow-y-auto p-4 lg:block">
                     <LogPanel
+                        quickTitle={quickTool ? toolModeConfig.title : undefined}
                         logs={logs}
                         unclassifiedLogs={unclassifiedLogs}
                         selectedLogIds={selectedLogIds}
@@ -1123,8 +1140,6 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                                 <div className="flex shrink-0 gap-2 lg:hidden">
                                     <Button icon={<History className="size-4" />} onClick={() => setLogsOpen(true)}>
                                         {uiText("记录")}</Button>
-                                    {!quickTool && <Button disabled={placementStatus !== "ready"} icon={<SlidersHorizontal className="size-4" />} onClick={() => setSettingsOpen(true)}>
-                                        {uiText("参数")}</Button>}
                                 </div>
                             </div>
                         </div>
@@ -1168,16 +1183,16 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                         </div>
                         <div ref={submitToolbarRef} className="generation-submit shrink-0 pt-4">
                             {!quickTool && <div className="mb-2 flex items-center justify-between rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-sm dark:border-stone-800 dark:bg-stone-900">
-                                <span className="truncate text-stone-500 dark:text-stone-400">
-                                    {modelOptionLabel(effectiveConfig, model)} · {imageReferenceSizeIsAutomatic(selectedModelProfile, references.length) ? uiText("模型决定尺寸 · 约 100 万像素") : <>{imageSizeLabel(effectiveConfig.size)} · {imageQualityLabel(effectiveConfig.quality)}</>}
+                                <span className="min-w-0 flex-1 truncate text-stone-500 dark:text-stone-400">
+                                    {imageModelDisplayName(modelOptionLabel(effectiveConfig, model), businessModels, user?.role)} · {imageReferenceSizeIsAutomatic(selectedModelProfile, references.length) ? uiText("模型决定尺寸 · 约 100 万像素") : <>{imageSizeLabel(effectiveConfig.size)} · {imageQualityLabel(effectiveConfig.quality)}</>}
                                 </span>
-                                <Button size="small" type="text" disabled={placementStatus !== "ready"} icon={<SlidersHorizontal className="size-4" />} onClick={() => setSettingsOpen(true)}>
-                                    {uiText("调整")}</Button>
+                                <Button className="shrink-0" size="small" type="text" disabled={placementStatus !== "ready"} icon={<SlidersHorizontal className="size-4" />} onClick={() => setSettingsOpen(true)}>
+                                    {uiText("切换生成图片模型")}</Button>
                             </div>}
 
                             <div className="mb-3 rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-xs leading-5 text-stone-600 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-300">
                                 <div className="flex flex-wrap items-center justify-between gap-3">
-                                    <span>{!deploymentFeatures.creditsEnabled ? uiText("不计积分") : uiText("预计消耗 {credits} 积分", { credits: estimatedUsage.credits })}</span>
+                                    {!quickTool || !deploymentFeatures.creditsEnabled ? <span>{!deploymentFeatures.creditsEnabled ? uiText("不计积分") : uiText("预计消耗 {credits} 积分", { credits: estimatedUsage.credits })}</span> : null}
                                     <span>{deploymentFeatures.authenticationEnabled ? uiText("个人工作区") : uiText("本机试用")}</span>
                                 </div>
                                 {missingReference ? <div className="mt-1 text-amber-600 dark:text-amber-300">{uiText(toolModeConfig.title || "")}{uiText("需要先添加至少一张参考图。")}</div> : null}
@@ -1186,7 +1201,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                                 {placementToken && isBlend ? <div className="mt-1 text-red-500">{uiText("定位效果需要位置保持提示词，请选择支持文字要求的图片编辑模型。")}</div> : null}
                                 {garmentNeedsApply ? <div className="mt-1" role="status">{uiText("服装要求或参考图已改变，请重新套用。")}<Button size="small" type="link" className="!h-auto !p-0" onClick={resetGarment}>{uiText("改用当前提示词")}</Button></div> : null}
                                 {incompleteCreativePrompt ? <div className="mt-1" role="status">{uiText("请把「")}{CREATIVE_REQUIREMENT_PLACEHOLDER}{uiText("」替换成你的设计要求。")}</div> : null}
-                                {!draftReady || readingReferences || optimizingPrompt || !model || (requiresPrompt && !prompt.trim()) || invalidBlendReferences || !user || user.status !== "active" ? <div role="status">{!draftReady ? uiText("正在恢复草稿…") : readingReferences ? uiText("正在读取参考图，请稍候") : optimizingPrompt ? uiText("正在优化提示词，请稍候") : !model ? uiText("还差：选择模型") : requiresPrompt && !prompt.trim() ? uiText("还差：填写提示词") : invalidBlendReferences ? uiText("还差：添加 2–4 张参考图") : uiText("当前设计师账号不可用")}</div> : null}
+                                {!draftReady || readingReferences || optimizingPrompt || (!quickTool && !model) || (requiresPrompt && !prompt.trim()) || invalidBlendReferences || !user || user.status !== "active" ? <div role="status">{!draftReady ? uiText("正在恢复草稿…") : readingReferences ? uiText("正在读取参考图，请稍候") : optimizingPrompt ? uiText("正在优化提示词，请稍候") : !quickTool && !model ? uiText("还差：选择模型") : requiresPrompt && !prompt.trim() ? uiText("还差：填写提示词") : invalidBlendReferences ? uiText("还差：添加 2–4 张参考图") : uiText("当前设计师账号不可用")}</div> : null}
                                 {running ? <div role="status">{uiText(quickTool ? "当前图片正在处理，结果将另存，原图不会覆盖。" : "当前任务正在处理，可先编辑下一条提示词。")}</div> : null}
                                 {quickTool && !running && pendingImages.length > 0 ? <div role="status">{uiText("原任务状态待核查，请先刷新原任务状态")}</div> : null}
                             </div>
@@ -1210,7 +1225,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                             <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-3">
                                 {results.map((result, index) =>
                                     result.status === "success" && result.image ? (
-                                        <ResultImageCard key={result.id} image={result.image} index={index} hidePromptActions={quickTool} onSelect={selectResultPrompt} onEdit={addResultToReferences} onEditOriginal={openResultEditor} onDownload={downloadImage} onSaveAsset={saveResultToAssets} onSavePrompt={saveResultPrompt} onPlaceCanvas={resultCanvas.enabled ? image => { const source = logs.find(log => log.images.some(item => item.id === image.id)); void resultCanvas.place({ id: image.id, kind: "image", url: image.dataUrl, storageKey: image.storageKey, title: image.imageName || "图像生成结果", width: image.width, height: image.height, prompt: image.prompt || source?.prompt, model: source?.model, sourceTaskId: image.sourceTaskId }); } : undefined} placingCanvas={resultCanvas.busy} onShareDesign={libraryShare.canShare ? shareResultDesign : undefined} sharingDesign={libraryShare.busy} />
+                                        <ResultImageCard key={result.id} image={result.image} index={index} hidePromptActions={quickTool} chooseDownloadFormat={historyTool === "remove-background"} onSelect={selectResultPrompt} onEdit={addResultToReferences} onEditOriginal={openResultEditor} onDownload={downloadImage} onSaveAsset={saveResultToAssets} onSavePrompt={saveResultPrompt} onPlaceCanvas={resultCanvas.enabled ? image => { const source = logs.find(log => log.images.some(item => item.id === image.id)); void resultCanvas.place({ id: image.id, kind: "image", url: image.dataUrl, storageKey: image.storageKey, title: image.imageName || (quickTool ? toolModeConfig.title : "图像生成结果"), width: image.width, height: image.height, prompt: quickTool ? undefined : image.prompt || source?.prompt, model: quickTool ? undefined : source?.model, sourceTaskId: quickTool ? undefined : image.sourceTaskId }); } : undefined} placingCanvas={resultCanvas.busy} onShareDesign={libraryShare.canShare ? shareResultDesign : undefined} sharingDesign={libraryShare.busy} />
                                     ) : result.status === "failed" || result.status === "paused" ? (
                                         <FailedImageCard key={result.id} error={result.error || uiText("生成失败")} diagnostic={result.diagnostic} recovery={result.recovery} taskId={result.taskId || result.recovery?.taskId} requestId={result.requestId || (result.recovery ? `${result.recovery.requestId}:0` : undefined)} disabled={running || (!result.recovery && !result.snapshot)} onRetry={() => retryResult(index)} />
                                     ) : (
@@ -1240,6 +1255,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
             />
             <Drawer title={uiText("生成记录")} placement="bottom" size="large" open={logsOpen} onClose={() => setLogsOpen(false)}>
                 <LogPanel
+                    quickTitle={quickTool ? toolModeConfig.title : undefined}
                     logs={logs}
                     unclassifiedLogs={unclassifiedLogs}
                     selectedLogIds={selectedLogIds}
@@ -1251,11 +1267,10 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                     onPreviewLog={(log) => void previewGenerationLog(log)}
                 />
             </Drawer>
-            <Drawer title={uiText("参数")} placement="bottom" size="82vh" open={!quickTool && settingsOpen} onClose={() => setSettingsOpen(false)}>
-                <div className="grid grid-cols-2 gap-3 pb-4">
-                    <GenerationSettings toolKey={toolKey} config={effectiveConfig} model={model} referenceCount={references.length} uploadContextKey={JSON.stringify([historyTool, inputDraftScope, referenceScope, references.map(reference => [reference.id, reference.storageKey || reference.dataUrl])])} updateConfig={updateInputConfig} openConfigDialog={openConfigDialog} />
-                </div>
-            </Drawer>
+            <ImageGenerationSettingsDialog open={!quickTool && settingsOpen} onClose={() => setSettingsOpen(false)} toolKey={toolKey}
+                config={effectiveConfig} model={model} referenceCount={references.length}
+                uploadContextKey={JSON.stringify([historyTool, inputDraftScope, referenceScope, references.map(reference => [reference.id, reference.storageKey || reference.dataUrl])])}
+                updateConfig={updateInputConfig} openConfigDialog={openConfigDialog} />
             <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={reusePrompt} />
             <AssetPickerModal open={assetPickerOpen} defaultTab="my-assets" onInsert={(payload) => void insertPickedAsset(payload)} onClose={() => setAssetPickerOpen(false)} />
             <AssetPickerModal
@@ -1287,31 +1302,9 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     );
 }
 
-function GenerationSettings({ config, model, referenceCount, uploadContextKey, updateConfig, openConfigDialog, toolKey }: { config: AiConfig; model: string; referenceCount: number; uploadContextKey: string; updateConfig: UpdateAiConfig; openConfigDialog: (shouldPromptContinue?: boolean) => void; toolKey: ReturnType<typeof requireToolKey> }) {
-    useUiText();
-    const theme = canvasThemes[useThemeStore((state) => state.theme)];
-    const profile = useImageModelProfile(model);
-
-    return (
-        <>
-            <label className="col-span-2 block min-w-0">
-                <span className="mb-1.5 block text-sm font-semibold sm:mb-2 sm:text-base">{uiText("模型")}</span>
-                <ModelPicker toolKey={toolKey} config={config} value={model} onChange={(value) => {
-                    const settings = adaptImageModelSettings(config, imageModelProfile(value));
-                    updateConfig("imageModel", value);
-                    for (const key of ["size", "quality", "count", "imageOptions"] as const) updateConfig(key, settings[key]);
-                }} capability="image" modelsSource="server" fullWidth className="h-10 rounded-lg" onMissingConfig={() => openConfigDialog(false)} />
-                {profile.verified ? <span className="mt-2 block text-xs leading-5" style={{ color: "var(--wb-muted)" }}>{uiText(imageOutputIsGif(config.imageOptions, profile) ? gifSizeNotice : profile.tip || "")}</span> : null}
-            </label>
-            <div className="col-span-2">
-                <ImageSettingsPanel config={{ ...config, model, imageModel: model }} referenceCount={referenceCount} uploadContextKey={uploadContextKey} onConfigChange={(key, value) => updateConfig(key, value)} theme={theme} showTitle={false} className="space-y-4" />
-            </div>
-        </>
-    );
-}
-
 function ResultImageCard({
     hidePromptActions,
+    chooseDownloadFormat,
     image,
     index,
     onSelect,
@@ -1326,12 +1319,13 @@ function ResultImageCard({
     placingCanvas,
 }: {
     hidePromptActions?: boolean;
+    chooseDownloadFormat?: boolean;
     image: GeneratedImage;
     index: number;
     onSelect: (image: GeneratedImage) => void;
     onEdit: (image: GeneratedImage, index: number) => void;
     onEditOriginal: (image: GeneratedImage, index: number) => void;
-    onDownload: (image: GeneratedImage, index: number) => void;
+    onDownload: (image: GeneratedImage, index: number, format?: "png" | "jpg") => void | Promise<void>;
     onSaveAsset: (image: GeneratedImage, index: number) => void;
     onSavePrompt: (image: GeneratedImage) => void;
     onShareDesign?: (image: GeneratedImage, index: number) => Promise<void>;
@@ -1341,6 +1335,13 @@ function ResultImageCard({
 }) {
     useUiText();
     const previewUrl = useImagePreview(image);
+    const [downloading, setDownloading] = useState(false);
+    const download = async (format?: "png" | "jpg") => {
+        if (downloading) return;
+        setDownloading(true);
+        try { await onDownload(image, index, format); }
+        finally { setDownloading(false); }
+    };
     return (
         <div className="overflow-hidden rounded-lg border border-stone-200 bg-background dark:border-stone-800">
             <Image src={previewUrl || undefined} preview={{ src: image.dataUrl }} alt={uiText("生成结果 {value1}", { value1: index + 1 })} loading="lazy" decoding="async" className="aspect-square object-cover" />
@@ -1368,10 +1369,15 @@ function ResultImageCard({
                         <Button className={RESULT_ACTION_BUTTON_CLASS} size="small" icon={<PenLine className="size-3.5" />} onClick={() => void onEdit(image, index)}>
                             {uiText("加入参考图")}</Button>
                     </Tooltip>
-                    <Tooltip title={uiText("下载")}>
-                        <Button className={RESULT_ACTION_BUTTON_CLASS} size="small" icon={<Download className="size-3.5" />} onClick={() => onDownload(image, index)}>
+                    {chooseDownloadFormat ? <Dropdown trigger={["click"]} disabled={downloading} menu={{
+                        items: [{ key: "png", label: uiText("透明 PNG") }, { key: "jpg", label: uiText("普通图片 JPG（白底）") }],
+                        onClick: ({ key }) => { if (key === "png" || key === "jpg") void download(key); },
+                    }}>
+                        <Button className={RESULT_ACTION_BUTTON_CLASS} size="small" loading={downloading} icon={<Download className="size-3.5" />}>{uiText("下载")}</Button>
+                    </Dropdown> : <Tooltip title={uiText("下载")}>
+                        <Button className={RESULT_ACTION_BUTTON_CLASS} size="small" loading={downloading} icon={<Download className="size-3.5" />} onClick={() => void download()}>
                             {uiText("下载")}</Button>
-                    </Tooltip>
+                    </Tooltip>}
                     {!hidePromptActions && <Tooltip title={uiText("保存为个人提示词模板")}>
                         <Button className={RESULT_ACTION_BUTTON_CLASS} size="small" icon={<BookmarkPlus className="size-3.5" />} onClick={() => void onSavePrompt(image)}>
                             {uiText("存为提示词")}</Button>
@@ -1429,6 +1435,7 @@ function updateResultAt(results: GenerationResult[], index: number, next: Partia
 }
 
 function LogPanel({
+    quickTitle,
     logs,
     unclassifiedLogs,
     selectedLogIds,
@@ -1439,6 +1446,7 @@ function LogPanel({
     onDeleteSelected,
     onPreviewLog,
 }: {
+    quickTitle?: string;
     logs: GenerationLog[];
     unclassifiedLogs: GenerationLog[];
     selectedLogIds: string[];
@@ -1477,6 +1485,7 @@ function LogPanel({
                     <LogCard
                         key={log.id}
                         log={log}
+                        displayTitle={quickTitle}
                         selected={selectedLogIds.includes(log.id)}
                         active={activeLogId === log.id}
                         disabled={disabled}
@@ -1488,16 +1497,17 @@ function LogPanel({
                 {!!unclassifiedLogs.length && <details className="text-xs text-muted-foreground">
                     <summary className="cursor-pointer py-2">{uiText("未分类记录（")}{unclassifiedLogs.length}）</summary>
                     <p className="mb-2">{uiText("以下记录的原任务来源无法确认，保留查看，不自动归入当前板块。")}</p>
-                    <div className="space-y-3">{unclassifiedLogs.map(log => <LogCard key={log.id} log={log} active={activeLogId === log.id} onClick={() => onPreviewLog(log)} />)}</div>
+                    <div className="space-y-3">{unclassifiedLogs.map(log => <LogCard key={log.id} log={log} displayTitle={quickTitle} active={activeLogId === log.id} onClick={() => onPreviewLog(log)} />)}</div>
                 </details>}
             </div>
         </>
     );
 }
 
-function LogCard({ log, selected, active, disabled, onSelectedChange, onClick }: { log: GenerationLog; selected?: boolean; active: boolean; disabled?: boolean; onSelectedChange?: (checked: boolean) => void; onClick: () => void }) {
+function LogCard({ log, displayTitle, selected, active, disabled, onSelectedChange, onClick }: { log: GenerationLog; displayTitle?: string; selected?: boolean; active: boolean; disabled?: boolean; onSelectedChange?: (checked: boolean) => void; onClick: () => void }) {
     useUiText();
     const thumbnails = log.images.slice(0, 4);
+    const title = displayTitle ? uiText(displayTitle) : log.title;
 
     return (
         <button
@@ -1508,9 +1518,9 @@ function LogCard({ log, selected, active, disabled, onSelectedChange, onClick }:
         >
             <div className="grid grid-cols-[minmax(128px,1fr)_auto] gap-2">
                 <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-2">
-                    {onSelectedChange && <Checkbox className="mt-0.5" aria-label={uiText("选择记录：{title}", { title: log.title })} disabled={disabled} checked={selected} onClick={(event) => event.stopPropagation()} onChange={(event) => onSelectedChange(event.target.checked)} />}
+                    {onSelectedChange && <Checkbox className="mt-0.5" aria-label={uiText("选择记录：{title}", { title })} disabled={disabled} checked={selected} onClick={(event) => event.stopPropagation()} onChange={(event) => onSelectedChange(event.target.checked)} />}
                     <div className="min-w-0">
-                        <div className="truncate text-sm font-semibold leading-5">{log.title}</div>
+                        <div className="truncate text-sm font-semibold leading-5">{title}</div>
                         {thumbnails.length ? (
                             <div className="mt-2 flex gap-1 overflow-hidden">
                                 {thumbnails.map((image, index) => (

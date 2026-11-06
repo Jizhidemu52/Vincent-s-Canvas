@@ -135,3 +135,39 @@ describe("avoid clauses with explicitly preserved text", () => {
     expect(() => parseOptimizedPrompt(JSON.stringify({ prompt: 'Print "INCHOICE 2026" in Image 2.', avoid: ["no text"], keep_text: ["INCHOICE 2026"] }), [], options)).toThrow("不存在的参考图");
   });
 });
+
+describe("printed text from reference images versus explicit user text", () => {
+  test.each(["NOVA", "73"])("retains reference lettering %s without requiring the user to transcribe it", lettering => {
+    const parsed = parseOptimizedPrompt(JSON.stringify({ prompt: `Use the knitted hat from Image 1, preserving its original ${lettering} lettering.`, avoid: ["no text", "watermarks"], keep_text: [lettering] }), [], {
+      referenceCount: 1, userText: "展示参考图中的针织帽，保持原图案。", language: "en", requiredText: [],
+    });
+    expect(parsed.keepText).toEqual([lettering]);
+    expect(parsed.prompt).toBe(`Use the knitted hat from Image 1, preserving its original ${lettering} lettering.\nAvoid: unrelated text, watermarks.`);
+  });
+
+  test("does not treat an invented lettering claim as source text when no reference image exists", () => {
+    expect(() => parseOptimizedPrompt(JSON.stringify({ prompt: "A knitted hat with NOVA lettering.", avoid: [], keep_text: ["NOVA"] }), [], {
+      referenceCount: 0, userText: "一顶纯色针织帽", language: "en", requiredText: [],
+    })).toThrow("指定文字");
+  });
+
+  test("reference lettering metadata cannot claim text missing from the actual generation prompt", () => {
+    expect(() => parseOptimizedPrompt(JSON.stringify({ prompt: "Use the plain knitted hat from Image 1.", avoid: [], keep_text: ["NOVA"] }), [], {
+      referenceCount: 1, userText: "保留原图案", language: "en", requiredText: [],
+    })).toThrow("指定文字");
+  });
+
+  test.each([0, 1])("merges explicit lettering into metadata only after final prompt preserves it, references=%i", referenceCount => {
+    const parsed = parseOptimizedPrompt(JSON.stringify({ prompt: 'A knitted hat embroidered with "NOVA 73".', avoid: ["text", "logos"], keep_text: [] }), [], {
+      referenceCount, userText: '帽子绣上 "NOVA 73"', language: "en", requiredText: ["NOVA 73"],
+    });
+    expect(parsed.keepText).toEqual(["NOVA 73"]);
+    expect(parsed.prompt).toBe('A knitted hat embroidered with "NOVA 73".\nAvoid: unrelated text, logos.');
+  });
+
+  test.each(["NOVA", "NOVA  73", "NOVA 74"])("a reference image cannot excuse changing explicit lettering to %s", replacement => {
+    expect(() => parseOptimizedPrompt(JSON.stringify({ prompt: `A knitted hat embroidered with "${replacement}".`, avoid: [], keep_text: [replacement] }), [], {
+      referenceCount: 1, userText: '帽子绣上 "NOVA 73"', language: "en", requiredText: ["NOVA 73"],
+    })).toThrow("指定文字");
+  });
+});

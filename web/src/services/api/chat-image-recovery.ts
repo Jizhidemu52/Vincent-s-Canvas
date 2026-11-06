@@ -24,6 +24,7 @@ export type PendingChatImageTask = {
     referenceImageIds?: string[];
     focusRevision?: number;
     signature?: string;
+    requirements?: import("../../../../shared/image-agent-documents").DesignRequirements;
     maskAdaptation?: CanvasMaskAdaptation;
     regionComposite?: ChatRegionComposite;
     explanation?: string;

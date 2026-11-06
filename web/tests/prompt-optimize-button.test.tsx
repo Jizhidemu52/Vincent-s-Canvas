@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import React, { type ReactElement } from "react";
 import ts from "typescript";
-import { PromptCompilationUncertainError } from "../src/services/api/prompt-compilations";
+import { completedPromptCompilation, PromptCompilationUncertainError } from "../src/services/api/prompt-compilations";
 
 const requireModule = createRequire(new URL("../src/components/prompt-optimize-button.tsx", import.meta.url));
 const code = ts.transpileModule(readFileSync(new URL("../src/components/prompt-optimize-button.tsx", import.meta.url), "utf8"), {
@@ -16,16 +16,18 @@ const compilation = { id: "compilation-id", requestId: "compile-request", status
 function harness(compile: (...args: any[]) => Promise<unknown>, query: (id: string) => Promise<unknown> = async () => compilation) {
     const state: any[] = [];
     const applied: unknown[] = [], notices: string[] = [];
+    const cleanups: Array<() => void> = [];
     let cursor = 0, ownerId = "employee-a";
     const dependencies: Record<string, unknown> = {
         "@/lib/i18n": i18nHarness,
         react: { ...React,
             useRef: (initial: unknown) => { const index = cursor++; return state[index] ||= { current: initial }; },
             useState: (initial: unknown) => { const index = cursor++; if (!(index in state)) state[index] = initial; return [state[index], (value: unknown) => { state[index] = value; }]; },
+            useEffect: (callback: () => void | (() => void)) => { const index = cursor++; if (!(index in state)) { state[index] = true; const cleanup = callback(); if (cleanup) cleanups.push(cleanup); } },
         },
         antd: { App: { useApp: () => ({ message: { success: (text: string) => notices.push(text), warning: (text: string) => notices.push(text), error: (text: string) => notices.push(text) } }) }, Button: () => null },
         "@/services/api/image": { optimizeImagePrompt: compile },
-        "@/services/api/prompt-compilations": { getPromptCompilation: query, completedPromptCompilation: (value: unknown) => value, PromptCompilationUncertainError },
+        "@/services/api/prompt-compilations": { getPromptCompilation: query, completedPromptCompilation, PromptCompilationUncertainError },
         "@/lib/client-id": { createClientId: () => "compile-request" },
         "@/stores/use-user-store": { useUserStore: { getState: () => ({ user: { id: ownerId } }) } },
     };
@@ -36,7 +38,7 @@ function harness(compile: (...args: any[]) => Promise<unknown>, query: (id: stri
             cursor = 0;
             return module.exports.PromptOptimizeButton({ config: { model: "image-model" }, operationType: "image_generation", prompt, references, scopeKey, onApply: (...args: unknown[]) => applied.push(args), ...overrides });
         },
-        applied, notices, changeOwner: () => { ownerId = "employee-b"; },
+        applied, notices, changeOwner: () => { ownerId = "employee-b"; }, unmount: () => { cleanups.forEach(cleanup => cleanup()); },
     };
 }
 
@@ -150,4 +152,44 @@ test("querying an uncertain optimization after a node switch keeps the original 
     expect(posts).toBe(1);
     expect(queried).toEqual(["compile-request"]);
     expect(view.applied).toHaveLength(0);
+});
+
+test("a failed original-request lookup remains query-only on later clicks", async () => {
+    let posts = 0, queries = 0;
+    const view = harness(async () => { posts++; throw new PromptCompilationUncertainError("compile-request"); }, async () => {
+        if (++queries === 1) throw new TypeError("connection lost during lookup");
+        return compilation;
+    });
+    view.render().props.onClick(); await tick();
+    view.render().props.onClick(); await tick();
+    const retry = view.render();
+    expect(retry.props.children).toBe("查询原优化请求");
+    retry.props.onClick(); await tick();
+    expect(posts).toBe(1);
+    expect(queries).toBe(2);
+    expect(view.applied).toHaveLength(1);
+});
+
+test("unmounted optimizers cannot apply late results or clear another workspace's busy state", async () => {
+    let finish!: (value: unknown) => void;
+    const busy: boolean[] = [];
+    const view = harness(() => new Promise(resolve => { finish = resolve; }));
+    view.render("Change blue", [], "project-a", { onBusyChange: (value: boolean) => busy.push(value) }).props.onClick();
+    view.unmount();
+    const busyAfterUnmount = [...busy];
+    finish(compilation); await tick();
+    expect(view.applied).toEqual([]);
+    expect(view.notices).toEqual([]);
+    expect(busy).toEqual(busyAfterUnmount);
+});
+
+test("a changed URL-only reference prevents a late compilation from replacing the current input", async () => {
+    let finish!: (value: unknown) => void;
+    const view = harness(() => new Promise(resolve => { finish = resolve; }));
+    const reference = { id: "source", name: "原图", dataUrl: "", url: "/api/assets/original/content" };
+    view.render("Change blue", [reference]).props.onClick();
+    view.render("Change blue", [{ ...reference, url: "/api/assets/replacement/content" }]);
+    finish(compilation); await tick();
+    expect(view.applied).toEqual([]);
+    expect(view.notices[0]).toContain("未覆盖当前内容");
 });

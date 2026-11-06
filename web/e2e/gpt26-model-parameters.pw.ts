@@ -13,9 +13,9 @@ async function setup(page: Page) {
     await page.getByRole("textbox", { name: "图像提示词", exact: true }).fill("针织帽缓慢转动，纯色背景");
 }
 async function settings(page: Page) {
-    await page.getByRole("button", { name: "调整", exact: true }).click();
-    const dialog = page.getByRole("dialog");
-    await dialog.getByText("全部高级参数", { exact: true }).click();
+    await page.getByRole("button", { name: "切换生成图片模型", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: /^切换生成图片模型/ });
+    await dialog.getByText("高级参数", { exact: true }).click();
     return dialog;
 }
 
@@ -31,7 +31,7 @@ test("GPT2.6 GIF controls reach one request with valid frame parameters and no s
     await expect(dialog.getByRole("combobox", { name: "清晰度 / 分辨率", exact: true })).toHaveCount(0);
     await expect(dialog.getByLabel("上传独立透明 PNG 标注层", { exact: true })).toHaveCount(0);
     await page.screenshot({ path: info.outputPath("gpt26-gif-controls.png") });
-    await dialog.locator(".ant-drawer-close").click();
+    await dialog.getByRole("button", { name: "关闭模型设置", exact: true }).click();
     await page.getByRole("button", { name: "开始生成", exact: true }).click();
     await expect.poll(() => api.submissions.length).toBe(1);
     expect(api.submissions[0].parameters).toMatchObject({ size: "512x512", output_format: "gif", frame_count: 12, frame_duration_ms: 120, complexity: "high", moderation: "auto", n: 1, count: 1 });
@@ -53,7 +53,7 @@ test("GPT2.6 markup uploads separately and model switching removes unsupported o
     await expect(dialog.getByRole("button", { name: "移除标注层", exact: true })).toBeVisible();
     await dialog.getByRole("combobox", { name: "规划强度", exact: true }).selectOption("medium");
     await page.screenshot({ path: info.outputPath("gpt26-markup-controls.png") });
-    await dialog.locator(".ant-drawer-close").click();
+    await dialog.getByRole("button", { name: "关闭模型设置", exact: true }).click();
     await page.getByRole("button", { name: "开始生成", exact: true }).click();
     await expect.poll(() => api.submissions.length).toBe(1);
     const submitted = api.submissions[0];

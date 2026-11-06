@@ -17,6 +17,7 @@ import { modelOptionLabel, modelOptionName, type AiConfig, type ModelCapability 
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { filterServerModelsByCapability, getModelPickerOptions, modelCapabilityLabel, modelLabelWithUsage, resolveModelPickerSource, resolveModelPickerValue, type ModelPickerSource } from "@/lib/model-picker-options";
 import { getToolDefinition, type ToolKey } from "../../../shared/feature-catalog";
+import "./model-picker.css";
 
 type ModelPickerProps = {
     config: AiConfig;
@@ -30,7 +31,7 @@ type ModelPickerProps = {
     modelsSource?: ModelPickerSource;
     disabled?: boolean;
     toolKey?: ToolKey;
-    variant?: "default" | "canvas";
+    variant?: "default" | "canvas" | "settings";
 };
 
 export function shouldRefreshModelPickerConfig(capability: ModelCapability | undefined, status: "idle" | "loading" | "ready" | "error", source: ModelPickerSource = "server") {
@@ -95,6 +96,34 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
     const changeValue = (model: string) => {
         if (!pickerDisabled && options.includes(model)) { onChange(model); emitModelUsage("change", serverModels.find(item => item.modelId === model)?.id); }
     };
+    if (variant === "settings") {
+        const presentationFor = (model: string) => ({ ...canvasModelPresentation(nameFor(model)), description: serverModels.find(item => item.modelId === model)?.publicDescription?.trim() });
+        const selected = current ? presentationFor(current) : undefined;
+        const selectedName = binding?.enabled === false ? uiText("此板块已停用") : binding?.modelConfigId && !boundModel ? uiText("绑定模型不可用") : selected?.name || (options.length ? placeholder : emptyLabel);
+        return <Select open={open} value={current} disabled={pickerDisabled} onOpenChange={changeOpen} onValueChange={changeValue}>
+            <SelectTrigger data-usage-control="model" aria-label={uiText("生成图片模型")} className={cn("settings-model-trigger", className)}
+                title={selectedName} onMouseDown={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>
+                <span className="settings-model-icon" aria-hidden>{selected?.icon ? <img src={selected.icon} alt="" /> : <Cpu size={20} />}</span>
+                <span className="settings-model-copy">
+                    <span className="settings-model-name">{selectedName}</span>
+                    <span className="settings-model-description">{selected?.description || uiText(options.length ? "选择适合当前创作的图像模型" : emptyLabel)}</span>
+                </span>
+                {selected ? <span className="settings-model-current">{uiText(boundModel ? "后台指定" : "当前使用")}</span> : null}
+            </SelectTrigger>
+            <SelectContent data-canvas-no-zoom aria-label={uiText("可用生成图片模型")} className="settings-model-menu" position="popper" align="start" side="bottom" sideOffset={6}
+                onEscapeKeyDown={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()} onMouseDown={event => event.stopPropagation()}>
+                {options.length ? options.map(model => {
+                    const option = presentationFor(model);
+                    return <SelectItem key={model} value={model} textValue={modelLabelWithUsage(option.name, option.description)} className="settings-model-option"
+                        data-usage-control="model" data-usage-value={serverModels.find(item => item.modelId === model)?.id}>
+                        <span className="settings-model-icon" aria-hidden>{option.icon ? <img src={option.icon} alt="" /> : <Cpu size={20} />}</span>
+                        <span className="settings-model-copy"><span className="settings-model-name">{option.name}</span><span className="settings-model-description">{option.description || uiText("按此模型支持的参数生成图像")}</span></span>
+                        {model === current ? <span className="settings-model-selected">{uiText("已选")}</span> : null}
+                    </SelectItem>;
+                }) : <SelectItem value="__empty__" disabled>{emptyLabel}</SelectItem>}
+            </SelectContent>
+        </Select>;
+    }
     if (variant === "canvas" || (variant !== "default" && toolKey?.startsWith("canvas-"))) {
         const canvasOptions = options.map(model => {
             const serverModel = serverModels.find(item => item.modelId === model);

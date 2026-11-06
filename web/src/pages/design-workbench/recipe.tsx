@@ -30,7 +30,7 @@ import type { ReferenceImage } from "@/types/image";
 import {
     recipePromptInput,
     createRecipeForm,
-    createRecipeRun,
+    createRecipeProjectRun,
     parseRecipeProject,
     randomRecipePalette,
     recipeSettings,
@@ -62,7 +62,7 @@ export default function RecipePage() {
 
 function RecipeWorkspace({ ownerId }: { ownerId: string }) {
     useUiText();
-    const effectiveConfig = useEffectiveConfig();
+    const effectiveConfig = useEffectiveConfig("image");
     const user = useUserStore((state) => state.user);
     const enabled = useToolEnabled("series-recipe");
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
@@ -82,7 +82,7 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
     const [notice, setNotice] = useState("");
     const [error, setError] = useState("");
     const [preview, setPreview] = useState<ReferenceImage | null>(null);
-    const [activeColor, setActiveColor] = useState(0);
+    const activeColor = Math.min(project.selectedColor ?? 0, project.form.count - 1);
     const [colorDraft, setColorDraft] = useState(project.form.palette[0]!.hex);
     const [paletteMode, setPaletteMode] = useState<"manual" | "random">("manual");
     const configInput = useMemo(() => ({ ...effectiveConfig, ...project.settings, count: "1", model: project.settings.imageModel || project.settings.model }), [effectiveConfig, project.settings]);
@@ -119,7 +119,8 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
     const failed = branches.filter((branch) => branch.status === "failed").length;
     const uncertain = branches.filter((branch) => branch.status === "uncertain").length;
     const waiting = branches.filter((branch) => branch.status === "waiting").length;
-    const selected = branches.filter((branch) => branch.status === "success" && branch.selected);
+    const resultEntries = [...(project.history || []), ...(run ? [run] : [])].flatMap(source => source.branches.map(branch => ({ source, branch })));
+    const selected = resultEntries.filter(({ branch }) => branch.status === "success" && branch.selected);
     const completed = succeeded + failed + branches.filter((branch) => branch.status === "cancelled").length;
     const dirty = !!run && (JSON.stringify(run.form) !== JSON.stringify(project.form) || run.references[0]?.id !== project.references[0]?.id || JSON.stringify(run.settings) !== JSON.stringify(recipeSettings(config)));
 
@@ -208,9 +209,7 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
         return () => window.clearTimeout(timer);
     }, [project, ready, active, persist, current]);
     useEffect(() => {
-        const index = Math.min(activeColor, project.form.count - 1);
-        setActiveColor(index);
-        setColorDraft(project.form.palette[index]!.hex);
+        setColorDraft(project.form.palette[activeColor]!.hex);
     }, [project.form.palette, project.form.count, activeColor]);
     useEffect(() => {
         if (!preview) return;
@@ -222,7 +221,14 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
     }, [preview]);
 
     const updateForm = (patch: Partial<RecipeForm>) => {
-        if (!busy.current && !runner.current?.active) commit({ ...projectRef.current, form: { ...projectRef.current.form, ...patch } });
+        if (!busy.current && !runner.current?.active) {
+            const old = projectRef.current;
+            const form = { ...old.form, ...patch };
+            commit({ ...old, form, selectedColor: Math.min(old.selectedColor ?? 0, form.count - 1) });
+        }
+    };
+    const setActiveColor = (selectedColor: number) => {
+        if (!busy.current && !runner.current?.active) commit({ ...projectRef.current, selectedColor });
     };
     const updateSettings = useCallback(
         (key: "quality" | "size" | "count" | "imageOptions" | "model" | "imageModel", value: string) => {
@@ -305,8 +311,10 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
         setError("");
         setRecovering(mode === "recover");
         try {
-            const snapshot = mode === "new" ? createRecipeRun(ownerId, projectRef.current.form, projectRef.current.references, config) : projectRef.current.run;
+            const next = mode === "new" ? createRecipeProjectRun(projectRef.current, config, activeColor) : projectRef.current;
+            const snapshot = next.run;
             if (!snapshot) return;
+            if (mode === "new") commit(next);
             runner.current?.dispose();
             const instance = makeRunner(snapshot);
             runner.current = instance;
@@ -332,9 +340,9 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
             return { ...image, dataUrl, url: undefined, storageKey: undefined };
         };
         output.references = await Promise.all(output.references.map(embedded));
-        if (output.run) {
-            output.run.references = await Promise.all(output.run.references.map(embedded));
-            for (const branch of output.run.branches) branch.images = await Promise.all(branch.images.map(embedded));
+        for (const source of [...(output.history || []), ...(output.run ? [output.run] : [])]) {
+            source.references = await Promise.all(source.references.map(embedded));
+            for (const branch of source.branches) branch.images = await Promise.all(branch.images.map(embedded));
         }
         return output;
     };
@@ -360,11 +368,10 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
         });
     const exportBoard = () =>
         action(async () => {
-            const source = projectRef.current.run;
-            if (!source) return;
-            const candidates = source.branches.filter((branch) => branch.selected && branch.status === "success");
+            const saved = projectRef.current;
+            const candidates = [...(saved.history || []), ...(saved.run ? [saved.run] : [])].flatMap(source => source.branches.filter(branch => branch.selected && branch.status === "success").map(branch => ({ source, branch })));
             if (!candidates.length) throw new Error("请先选择候选");
-            const images = await Promise.all(candidates.map(async (branch) => loadImage(await imageToDataUrl(branch.images[0]!))));
+            const images = await Promise.all(candidates.map(async ({ branch }) => loadImage(await imageToDataUrl(branch.images[0]!))));
             if (!current()) return;
             const columns = Math.min(3, images.length),
                 width = 1440,
@@ -383,7 +390,7 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
             ctx.fillRect(0, 0, width, height);
             ctx.fillStyle = "#262626";
             ctx.font = "bold 36px sans-serif";
-            ctx.fillText(source.form.series || "系列方案", pad, 70, width - pad * 2);
+            ctx.fillText(saved.form.series || "系列方案", pad, 70, width - pad * 2);
             ctx.fillStyle = "#666666";
             ctx.font = "20px sans-serif";
             ctx.fillText("AI 生成候选 · 颜色仅为屏幕近似值，需实物打样确认", pad, 108);
@@ -394,7 +401,7 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
                 ctx.fillRect(x, y, tile, imageHeight);
                 const scale = Math.min((tile - 20) / image.naturalWidth, (imageHeight - 20) / image.naturalHeight);
                 ctx.drawImage(image, x + (tile - image.naturalWidth * scale) / 2, y + (imageHeight - image.naturalHeight * scale) / 2, image.naturalWidth * scale, image.naturalHeight * scale);
-                const candidate = candidates[index]!,
+                const { source, branch: candidate } = candidates[index]!,
                     color = source.form.palette[candidate.index]!;
                 ctx.fillStyle = source.form.kind === "structure" ? color.hex : "#8a8a8a";
                 ctx.fillRect(x, y + imageHeight + 22, 18, 18);
@@ -404,7 +411,7 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
             });
             const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((value) => (value ? resolve(value) : reject(new Error("方案板导出失败"))), "image/png"));
             if (current()) {
-                saveAs(blob, `${cleanName(source.form.series)}-方案板.png`);
+                saveAs(blob, `${cleanName(saved.form.series)}-方案板.png`);
                 setNotice(uiText("已导出所选候选的 PNG 方案板。"));
             }
         });
@@ -466,10 +473,15 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
                         <label className="sr-field">
                             {uiText("设计方向")}<textarea aria-label={uiText("设计方向")} value={project.form.prompt} maxLength={3000} rows={3} onChange={(event) => updateForm({ prompt: event.target.value })} />
                         </label>
-                        <p className="sr-help">{uiText("每次仅生成 1 个候选；可修改方向后再次发起独立任务。历史候选保留。")}</p>
+                        <p className="sr-help">{project.form.kind === "structure" ? uiText("可配置 1–6 个颜色；每次仅生成当前选中的一色，不会自动生成其他颜色。历史候选保留。") : uiText("每次仅生成 1 个候选；可修改方向后再次发起独立任务。历史候选保留。")}</p>
                         {project.form.kind === "structure" ? (
                             <section className="sr-palette" aria-label={uiText("系列配色")}>
                                 <h3>{uiText("系列配色")}</h3>
+                                <label className="sr-field">
+                                    {uiText("配色数量")}<select aria-label={uiText("配色数量")} value={project.form.count} onChange={event => updateForm({ count: Number(event.target.value) })}>
+                                        {[1, 2, 3, 4, 5, 6].map(count => <option key={count} value={count}>{count}</option>)}
+                                    </select>
+                                </label>
                                 <div className="sr-swatches">
                                     {project.form.palette.slice(0, project.form.count).map((color, index) => (
                                         <button key={index} type="button" aria-label={uiText("编辑第 {value1} 色 {hex}", { value1: index + 1, hex: color.hex })} aria-pressed={index === activeColor} onClick={() => setActiveColor(index)} style={{ background: color.hex }}>
@@ -518,7 +530,7 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
                         ) : (
                             <section className="sr-positions">
                                 <h3>{uiText("每个候选的定位要求")}</h3>
-                                {project.form.positions.slice(0, project.form.count).map((position, index) => (
+                                {project.form.positions.slice(0, 1).map((position, index) => (
                                     <label key={index} className="sr-field">
                                         {uiText("候选")}{index + 1}
                                         <input
@@ -537,8 +549,8 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
                             <ImageSettingsPanel config={config} referenceCount={refs.length} onConfigChange={updateSettings} theme={theme} maxCount={1} showTitle={false} />
                         </details>
                         <details className="sr-details">
-                            <summary>{uiText("查看候选 1 的设计输入")}</summary>
-                            <GenerationInputList fields={recipePromptInput(project.form, 0, refs.length > 1).fields} />
+                            <summary>{project.form.kind === "structure" ? uiText("查看当前选中色的设计输入") : uiText("查看候选 1 的设计输入")}</summary>
+                            <GenerationInputList fields={recipePromptInput(project.form, project.form.kind === "structure" ? activeColor : 0, refs.length > 1).fields} />
                         </details>
                     </fieldset>
                 </aside>
@@ -565,7 +577,7 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
                         </li>
                         <li>
                             <span>03</span>
-                            <b>{run?.form.count || project.form.count} {uiText(" 个独立分支")}</b>
+                            <b>{branches.length || 1} {uiText(" 个独立分支")}</b>
                             <small>{uiText("每个候选调用一次模型")}</small>
                         </li>
                         <li>
@@ -574,17 +586,17 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
                             <small>{selected.length} {uiText(" 个已入选")}</small>
                         </li>
                     </ol>
-                    {dirty && <p className="sr-callout">{uiText("当前草稿已修改。下方结果与失败重试仍使用原轮次冻结的参考图、配方和指令；“生成新一轮”使用当前设置。")}</p>}
-                    {!run ? (
+                    {dirty && <p className="sr-callout">{uiText("当前草稿已修改。已有候选与失败重试仍保留原轮次参数；新生成使用当前设置。")}</p>}
+                    {!resultEntries.length ? (
                         <div className="sr-empty">
                             {project.references[0] ? <img src={project.references[0].dataUrl} alt={uiText("当前参考底图预览")} /> : <ImagePlus size={52} strokeWidth={1} />}
                             <h3>{project.references[0] ? uiText("参考图已就位") : uiText("从你的产品参考开始")}</h3>
-                            <p>{uiText("设置一个配色或定位方向，每次生成 1 个候选。修改方向后可再次生成；不会使用模拟改色图代替模型结果。")}</p>
+                            <p>{project.form.kind === "structure" ? uiText("选择一个配色后手动生成，再选择其他颜色继续。每次仅提交 1 个任务，已有候选保留。") : uiText("设置一个配色或定位方向，每次生成 1 个候选。修改方向后可再次生成；不会使用模拟改色图代替模型结果。")}</p>
                         </div>
                     ) : (
                         <div className="sr-results">
-                            {branches.map((branch) => (
-                                <article key={branch.id} className={`sr-result ${branch.selected ? "is-selected" : ""}`}>
+                            {resultEntries.map(({ source, branch }) => (
+                                <article key={`${source.id}:${branch.id}`} className={`sr-result ${branch.selected ? "is-selected" : ""}`}>
                                     <button className="sr-result-image" type="button" disabled={!branch.images[0]} aria-label={uiText("查看候选 {value1} 大图", { value1: branch.index + 1 })} onClick={() => setPreview(branch.images[0] || null)}>
                                         {branch.images[0] ? (
                                             <img src={branch.images[0].dataUrl} alt={uiText("候选 {value1}", { value1: branch.index + 1 })} />
@@ -598,11 +610,12 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
                                     <div className="sr-result-body">
                                         <div className="sr-result-title">
                                             <h3>
-                                                {run.form.kind === "structure" && <i style={{ background: run.form.palette[branch.index]!.hex }} />}{uiText("候选 ")}{String(branch.index + 1).padStart(2, "0")}
+                                                {source.form.kind === "structure" && <i style={{ background: source.form.palette[branch.index]!.hex }} />}{uiText("候选 ")}{String(branch.index + 1).padStart(2, "0")}
                                             </h3>
                                             <span>{branch.optimizing ? uiText("正在优化提示词…") : recipeStatusLabels[branch.status]}</span>
                                         </div>
-                                        <p>{run.form.kind === "structure" ? `${run.form.palette[branch.index]!.name} · ${run.form.palette[branch.index]!.hex.toUpperCase()}` : run.form.positions[branch.index]}</p>
+                                        <p>{source.form.kind === "structure" ? `${source.form.palette[branch.index]!.name} · ${source.form.palette[branch.index]!.hex.toUpperCase()}` : source.form.positions[branch.index]}</p>
+                                        {source !== run && <small>{uiText("历史候选")}</small>}
                                         {branch.error && <GenerationDiagnostic error={branch.error} details={`requestId: ${branch.requestId || ""}\ntaskIds: ${branch.taskIds.join(", ")}`} />}
                                         <small>
                                             {uiText("已尝试 {count} 次", { count: branch.attempts })}
@@ -620,7 +633,8 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
                                                 checked={branch.selected}
                                                 onChange={(event) => {
                                                     const old = projectRef.current;
-                                                    if (old.run) commit({ ...old, run: { ...old.run, branches: old.run.branches.map((item) => (item.id === branch.id ? { ...item, selected: event.target.checked } : item)) } });
+                                                    const updateSelection = (saved: RecipeRun) => saved.id === source.id ? { ...saved, branches: saved.branches.map(item => item.id === branch.id ? { ...item, selected: event.target.checked } : item) } : saved;
+                                                    commit({ ...old, run: old.run ? updateSelection(old.run) : undefined, history: old.history?.map(updateSelection) });
                                                 }}
                                             />
                                             {branch.selected ? uiText("已选入方案板") : uiText("选入方案板")}
@@ -644,8 +658,8 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
                         )}
                         <button type="button" className="sr-button sr-primary sr-wide" disabled={locked || !!validation || !!uncertain} onClick={() => void start("new")}>
                             <Play size={15} />
-                            {run ? uiText("生成新一轮") : uiText("运行配方")}
-                            <span>{project.form.count} {uiText(" 张")}</span>
+                            {project.form.kind === "structure" ? uiText("生成第 {value1} 色", { value1: activeColor + 1 }) : run ? uiText("生成新一轮") : uiText("运行配方")}
+                            <span>1 {uiText(" 张")}</span>
                         </button>
                         <div className="sr-inline">
                             <button className="sr-button" type="button" disabled={!active || recovering} onClick={() => (paused ? runner.current?.resume() : runner.current?.pause())}>
@@ -668,7 +682,7 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
                         </button>
                         <button type="button" className="sr-button sr-wide" disabled={locked || !enabled || !uncertain} onClick={() => void start("recover")}>
                             {uiText("查询原任务 (")}{uncertain}{uiText(") · 不重新生成")}</button>
-                        <progress aria-label={uiText("分支完成进度")} max={branches.length || project.form.count} value={completed} />
+                        <progress aria-label={uiText("分支完成进度")} max={branches.length || 1} value={completed} />
                         <p className="sr-help">
                             {succeeded} {uiText(" 个成功 · ")}{failed} {uiText(" 个失败 · ")}{uncertain} {uiText("个待核查")}</p>
                         <div className="sr-estimate">

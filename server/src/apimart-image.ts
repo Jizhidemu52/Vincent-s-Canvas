@@ -66,6 +66,15 @@ export function buildApiMartImageRequest(input: ApiMartImageInput): ApiMartImage
   return buildImageRequest(input, true);
 }
 
+/** The same local validation used immediately before uploads, without network I/O. */
+export function preflightApiMartImageRequest(input: ApiMartImageInput): ApiMartImageRequest {
+  const kind = apiMartImageModel(input.modelId);
+  if (!kind) throw new Error(`不支持的 APIMart 图片模型：${input.modelId}`);
+  return isMarkImageModel(kind) ? buildMarkImageRequest(input, kind, true, false)
+    : kind === "mai-image-2.6-flash" ? buildMaiImageRequest(input, true, false)
+    : kind === "grok-imagine-image-2.0" ? buildGrokImageRequest(input, true, false) : buildImageRequest(input, false);
+}
+
 function buildImageRequest(input: ApiMartImageInput, encodeReferences: boolean): ApiMartImageRequest {
   const kind = apiMartImageModel(input.modelId);
   if (!kind) throw new Error(`不支持的 APIMart 图片模型：${input.modelId}`);

@@ -71,7 +71,16 @@ describe("quick image local result verification", () => {
     const output = await processImageResult({ result: large, parameters: parameters("hd-upscale"), editInput: { references: [original] } });
     expect(output.display.bytes).toBe(large.bytes); expect(output.operations).toContain("quick_image_4k_dimensions_verified");
   }, 15_000);
-  test("source codec, depth and oversized HD checks happen before model submission", async () => {
+  test("configured HD validates its actual resolution instead of retaining a fixed 4K gate", async () => {
+    const configured = { ...parameters("hd-upscale"), resolution: "1k", quickImage: { action: "hd-upscale", recipeVersion: 1, configurationVersion: 2 } };
+    const oneK = png(new Uint8Array(1024 * 256 * 4).fill(255), 1024, 256);
+    const output = await processImageResult({ result: oneK, parameters: configured, editInput: { references: [original] } });
+    expect(output.display.bytes).toBe(oneK.bytes); expect(output.operations).toContain("quick_image_dimensions_verified");
+    await expect(processImageResult({ result: oneK, parameters: { ...configured, resolution: "2k" }, editInput: { references: [original] } })).rejects.toMatchObject({ code: "IMAGE_RESULT_DIMENSION_MISMATCH" });
+    const modelControlled = await processImageResult({ result: generated, parameters: { ...configured, resolution: undefined }, editInput: { references: [original] } });
+    expect(modelControlled.display.bytes).toBe(generated.bytes);
+  });
+  test("source codec, depth and safe dimensions are checked without a fixed 4K input ceiling", async () => {
     await validateQuickImageSource(original, parameters("remove-background"));
     await expect(validateQuickImageSource(undefined, parameters("remove-background"))).rejects.toThrow("尚未提交生成");
     const extremeRatio = png(new Uint8Array(9 * 4).fill(255), 9, 1);
@@ -79,7 +88,7 @@ describe("quick image local result verification", () => {
     const highBit = png(new Uint8Array(32).fill(128), 4, 1, "rgba64be");
     await expect(validateQuickImageSource(highBit, parameters("remove-background"))).rejects.toThrow("8 位");
     const tooLarge = png(new Uint8Array(4097 * 513 * 4).fill(255), 4097, 513);
-    await expect(validateQuickImageSource(tooLarge, parameters("hd-upscale"))).rejects.toThrow("超过 4K");
+    await validateQuickImageSource(tooLarge, parameters("hd-upscale"));
   });
 });
 

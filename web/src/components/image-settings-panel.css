@@ -91,3 +91,35 @@
 @media (prefers-reduced-motion: reduce) {
     .ip-spacious .ip-option-choice > span { transition: none; }
 }
+
+/* Image workspace only: keep frequently used settings within one glance. */
+.image-parameters.ip-dialog { display: flex; flex-direction: column; gap: 14px; font-size: 13px; }
+.ip-dialog .ip-basics-title { margin: 0 0 12px; color: var(--ip-text); font-size: 13px; font-weight: 650; }
+.ip-dialog .ip-basics-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; align-items: start; }
+.ip-dialog .ip-basics-grid > .ip-row { min-width: 0; min-height: 0; flex-direction: column; align-items: stretch; gap: 8px; }
+.ip-dialog .ip-basics-grid .ip-label { min-height: 18px; font-size: 12px; }
+.ip-dialog .ip-select { width: 100%; max-width: none; flex: none; }
+.ip-dialog .ip-select select { min-height: 42px; border-radius: 8px; font-size: 13px; }
+.ip-dialog .ip-select > svg { top: 15px; }
+.ip-dialog .ip-segments { width: 100%; max-width: none; min-height: 42px; }
+.ip-dialog .ip-segments button { min-width: 36px; font-size: 12px; }
+.ip-dialog .ip-basics-grid > p { grid-column: 1 / -1; order: 1; margin: 0; }
+.ip-dialog .ip-basic-note { font-size: 11px; line-height: 1.7; }
+.ip-dialog .ip-details { margin: 0; }
+.ip-dialog .ip-details summary { min-height: 48px; height: auto; padding: 12px 2px; font-size: 13px; font-weight: 550; color: var(--ip-text); }
+.ip-dialog .ip-details > p { margin: 0 0 12px; }
+.ip-dialog .ip-dialog-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 16px; padding: 4px 0 12px; }
+.ip-dialog .ip-dialog-options > label { min-width: 0; gap: 8px; }
+.ip-dialog .ip-dialog-options > label > span:first-child { color: var(--ip-text); font-weight: 550; font-size: 12px; }
+.ip-dialog .ip-dialog-options :is(input:not([type="checkbox"]), select) { min-width: 0; width: 100%; min-height: 40px; padding: 8px 10px; border-radius: 8px; font-size: 13px; }
+.ip-dialog .ip-dialog-options [data-image-field="negative_prompt"], .ip-dialog .ip-dialog-options [data-image-field="markup_reference"] { grid-column: 1 / -1; }
+.ip-dialog .ip-dimensions { margin: 10px 0; }
+.ip-dialog .ip-dimensions input { height: 42px; font-size: 14px; }
+.ip-dialog .ip-align { margin-bottom: 8px; }
+.ip-dialog :is(input, select, button, summary):focus-visible { outline: 2px solid var(--ip-text); outline-offset: 3px; }
+@media (max-width: 640px) {
+    .ip-dialog .ip-basics-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .ip-dialog .ip-basics-grid > .ip-row:last-child { grid-column: 1 / -1; }
+    .ip-dialog .ip-dialog-options { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+    .ip-dialog .ip-select select, .ip-dialog .ip-dialog-options :is(input:not([type="checkbox"]), select) { min-height: 44px; }
+}

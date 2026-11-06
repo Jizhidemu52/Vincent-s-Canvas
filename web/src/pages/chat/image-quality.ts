@@ -1,4 +1,5 @@
-import { adaptImageModelSettings, imageModelProfile, normalizeImageModelSettings } from "@/lib/image-model-settings";
+import { adaptImageModelSettings, imageModelProfile } from "@/lib/image-model-settings";
+import { imageAgentQualitySettings } from "@/lib/image-agent-defaults";
 import { readImageOptions } from "@/lib/image-advanced-settings";
 import { preferredImageModel } from "@/lib/default-image-model";
 import type { PublicModel } from "@/services/api/business-config";
@@ -14,10 +15,9 @@ export function preferredChatImageModel<T extends PublicModel>(models: T[], pref
 }
 
 export function chatImageQualitySettings(profile: ReturnType<typeof imageModelProfile>, requested?: string, requestedResolution?: string) {
-    const quality = normalizeImageModelSettings({ size: "auto", count: "1", quality: requested || "" }, profile).quality;
+    const { quality, resolution } = imageAgentQualitySettings(profile, requested, requestedResolution);
     const adjustable = profile.qualityLabel !== "生成速度" && profile.qualities.length > 1;
     const independentResolution = profile.resolutions.length > 0;
-    const resolution = independentResolution ? (profile.resolutions.includes(requestedResolution || "") ? requestedResolution : "1k") : undefined;
     const labels: Record<string, string> = { auto: "自动", high: "高画质", medium: "标准", low: "普通" };
     return {
         quality, adjustable, independentResolution, resolution,
@@ -31,7 +31,7 @@ export function chatImageQualitySettings(profile: ReturnType<typeof imageModelPr
 /** Explicit model changes affect only the editable session preferences. */
 export function selectChatImageModel(modelId: string, session: { imageQuality?: string; imageResolution?: string; imageSize?: string }) {
     const settings = adaptImageModelSettings({ size: session.imageSize || "auto", quality: session.imageQuality || "", count: "1", imageOptions: JSON.stringify(session.imageResolution ? { resolution: session.imageResolution } : {}) }, imageModelProfile(modelId));
-    const quality = resolveChatImageQuality(modelId, settings.quality, JSON.parse(settings.imageOptions).resolution);
+    const quality = resolveChatImageQuality(modelId, session.imageQuality, session.imageResolution);
     return { imageModelId: modelId, imageQuality: quality.quality, imageResolution: quality.resolution, imageSize: settings.size === "auto" ? undefined : settings.size };
 }
 

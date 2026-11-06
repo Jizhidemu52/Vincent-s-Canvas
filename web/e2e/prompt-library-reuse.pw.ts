@@ -42,10 +42,10 @@ async function openLibrary(page: Page) {
 }
 
 async function modelName(page: Page) {
-    await page.getByRole("button", { name: "调整", exact: true }).click();
-    const drawer = page.getByRole("dialog", { name: "参数", exact: true });
-    const name = await drawer.locator('[data-usage-control="model"][role="combobox"]').innerText();
-    await drawer.locator(".ant-drawer-close").click(); return name;
+    await page.getByRole("button", { name: "切换生成图片模型", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: /^切换生成图片模型/ });
+    const name = await dialog.locator('[data-usage-control="model"][role="combobox"]').innerText();
+    await dialog.getByRole("button", { name: "关闭模型设置", exact: true }).click(); return name;
 }
 
 test("module picker shows the independent catalog even during a shared API outage; text reuse preserves the image model", async ({ page, context, api }, info) => {

@@ -62,14 +62,14 @@ test("keeps every worksheet visible when a large workbook is shortened for the m
 
     expect(text.length).toBeLessThanOrEqual(MAX_CHAT_ATTACHMENT_TEXT_LENGTH);
     expect(text.length).toBeLessThanOrEqual(MAX_WORKBOOK_MODEL_TEXT_LENGTH);
-    expect(MAX_WORKBOOK_MODEL_TEXT_LENGTH).toBe(8_000);
+    expect(text.length).toBeGreaterThan(8_000);
     expect(text).toContain("[工作表：Orders]");
     expect(text).toContain("[工作表：Timeline]");
     expect(text).toContain("[工作表：Requirements]");
     expect(text).toContain("[Excel 工作簿内容已按工作表截断]");
 });
 
-test("extracts an actual XLSX attachment into model-readable TSV", async () => {
+test("extracts an actual XLSX attachment into structured Markdown with cell coordinates", async () => {
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([["sku", "quantity"], ["A-01", 12]]), "Inventory");
     const file = new File([XLSX.write(workbook, { type: "array", bookType: "xlsx" })], "inventory.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
@@ -77,7 +77,8 @@ test("extracts an actual XLSX attachment into model-readable TSV", async () => {
 
     expect(attachment.kind).toBe("text");
     expect(attachment.textContent).toContain("[工作表：Inventory]");
-    expect(attachment.textContent).toContain("sku\tquantity\nA-01\t12");
+    expect(attachment.textContent).toContain("| 1 | sku | quantity |");
+    expect(attachment.textContent).toContain("| 2 | A-01 | 12 |");
 });
 
 test("marks a workbook as shortened when it is sampled across worksheets", async () => {
@@ -105,7 +106,8 @@ test.each(["xlsx", "biff8"] as const)("preserves Chinese, date formatting and ca
     const extension = bookType === "xlsx" ? "xlsx" : "xls";
     const attachment = await parseChatAttachment(new File([XLSX.write(workbook, { type: "array", bookType })], `订单.${extension}`));
     expect(attachment.textContent).toContain("[工作表：订单]");
-    expect(attachment.textContent).toContain("碎花衬衫\t2025-10-19\t12");
+    expect(attachment.textContent).toContain("| 2 | 碎花衬衫 | 2025-10-19 | 12");
+    if (bookType === "xlsx") expect(attachment.textContent).toContain("（公式：=6*2）");
 });
 
 test("extracts actual PDF attachment text and preserves page boundaries", async () => {
@@ -139,4 +141,7 @@ test("includes a locally hosted PDF worker in the production attachment bundle",
 
     expect(worker).toBeDefined();
     expect(output.some((item) => item.type === "chunk" && item.code.includes(worker!.fileName))).toBe(true);
+    const entry = output.find(item => item.type === "chunk" && item.isEntry);
+    expect(entry?.type).toBe("chunk");
+    if (entry?.type === "chunk") expect(Object.keys(entry.modules).some(id => /node_modules\/(?:mammoth|xlsx|pdfjs-dist)\//.test(id.replaceAll("\\", "/")))).toBe(false);
 }, 30_000);

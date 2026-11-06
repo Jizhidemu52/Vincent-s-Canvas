@@ -1,0 +1,25 @@
+{
+  "columns": [
+    { "udt_name": "text", "data_type": "text", "table_name": "quick_image_configurations", "column_name": "action", "is_nullable": "NO", "numeric_scale": null, "column_default": null, "ordinal_position": 1, "numeric_precision": null },
+    { "udt_name": "uuid", "data_type": "uuid", "table_name": "quick_image_configurations", "column_name": "model_config_id", "is_nullable": "NO", "numeric_scale": null, "column_default": null, "ordinal_position": 2, "numeric_precision": null },
+    { "udt_name": "text", "data_type": "text", "table_name": "quick_image_configurations", "column_name": "prompt", "is_nullable": "NO", "numeric_scale": null, "column_default": null, "ordinal_position": 3, "numeric_precision": null },
+    { "udt_name": "jsonb", "data_type": "jsonb", "table_name": "quick_image_configurations", "column_name": "parameters", "is_nullable": "NO", "numeric_scale": null, "column_default": "'{}'::jsonb", "ordinal_position": 4, "numeric_precision": null },
+    { "udt_name": "int4", "data_type": "integer", "table_name": "quick_image_configurations", "column_name": "configuration_version", "is_nullable": "NO", "numeric_scale": 0, "column_default": "1", "ordinal_position": 5, "numeric_precision": 32 },
+    { "udt_name": "uuid", "data_type": "uuid", "table_name": "quick_image_configurations", "column_name": "updated_by", "is_nullable": "YES", "numeric_scale": null, "column_default": null, "ordinal_position": 6, "numeric_precision": null },
+    { "udt_name": "timestamptz", "data_type": "timestamp with time zone", "table_name": "quick_image_configurations", "column_name": "updated_at", "is_nullable": "NO", "numeric_scale": null, "column_default": "now()", "ordinal_position": 7, "numeric_precision": null }
+  ],
+  "indexes": [
+    { "indexdef": "CREATE UNIQUE INDEX quick_image_configurations_pkey ON public.quick_image_configurations USING btree (action)", "indexname": "quick_image_configurations_pkey", "tablename": "quick_image_configurations" }
+  ],
+  "constraints": [
+    { "name": "quick_image_configurations_action_check", "type": "c", "relation": "quick_image_configurations", "definition": "CHECK ((action = ANY (ARRAY['remove-background'::text, 'hd-upscale'::text])))" },
+    { "name": "quick_image_configurations_configuration_version_check", "type": "c", "relation": "quick_image_configurations", "definition": "CHECK ((configuration_version > 0))" },
+    { "name": "quick_image_configurations_model_config_id_fkey", "type": "f", "relation": "quick_image_configurations", "definition": "FOREIGN KEY (model_config_id) REFERENCES model_configs(id)" },
+    { "name": "quick_image_configurations_parameters_check", "type": "c", "relation": "quick_image_configurations", "definition": "CHECK (((jsonb_typeof(parameters) = 'object'::text) AND (char_length((parameters)::text) <= 8000)))" },
+    { "name": "quick_image_configurations_pkey", "type": "p", "relation": "quick_image_configurations", "definition": "PRIMARY KEY (action)" },
+    { "name": "quick_image_configurations_prompt_check", "type": "c", "relation": "quick_image_configurations", "definition": "CHECK (((char_length(btrim(prompt)) >= 1) AND (char_length(btrim(prompt)) <= 4000)))" },
+    { "name": "quick_image_configurations_updated_by_fkey", "type": "f", "relation": "quick_image_configurations", "definition": "FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL" }
+  ],
+  "functions": [],
+  "triggers": []
+}

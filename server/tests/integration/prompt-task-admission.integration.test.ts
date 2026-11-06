@@ -399,6 +399,46 @@ integration(
       expect(await count("tasks", actor)).toBe(1);
     });
 
+    test("document manifests are validated before real task admission and cannot create extra asset references", async () => {
+      const actor = await user(), before = calls.length, sourceStart = sourceReads.length, queueStart = queueDeliveries.length;
+      const designDocumentCatalog = [{ id: "brief", name: "需求.pdf", kind: "pdf", sectionCount: 1, figureCount: 1,
+        sections: [{ id: "brief:page-1", figureIds: ["brief:figure-1"] }] }];
+      const designRequirements = { title: "开衫", documentIds: ["brief"], subject: "女士开衫", colors: "浅蓝色", materials: "棉布", must: ["五粒扣"], avoid: [], unknowns: [],
+        referenceFigureIds: ["brief:figure-1"], sources: [{ documentId: "brief", sectionId: "brief:page-1" }] };
+      const paired = { imageAgentProfile: "creative-chat", designRequirements, designDocumentCatalog };
+      for (const parameters of [
+        { designRequirements, designDocumentCatalog },
+        { imageAgentProfile: "creative-chat", designRequirements },
+        { imageAgentProfile: "creative-chat", designDocumentCatalog },
+        { ...paired, designRequirements: { ...designRequirements, referenceFigureIds: ["another:figure"] } },
+        { ...paired, designRequirements: { ...designRequirements, sources: [{ documentId: "brief", sectionId: "missing-page" }] } },
+        { ...paired, designDocumentCatalog: [{ ...designDocumentCatalog[0], figureCount: 2 }] },
+      ]) {
+        const response = await request(actor, "/api/tasks", "POST", input("", { toolKey: "image", promptInput: undefined, prompt: "浅蓝色开衫", parameters }));
+        expect(response.status).toBe(400);
+        expect((await response.json()).error).toBe("IMAGE_AGENT_REQUIREMENTS_INVALID");
+      }
+      expect(await count("tasks", actor)).toBe(0);
+      expect(await count("credit_reservations", actor)).toBe(0);
+      expect(await count("prompt_compilations", actor)).toBe(0);
+      expect(await balance(actor)).toBe(1000);
+      expect(calls.length).toBe(before);
+      expect(sourceReads.length).toBe(sourceStart);
+      expect(queueDeliveries.length).toBe(queueStart);
+      const value = input("", { toolKey: "image", promptInput: undefined, prompt: "浅蓝色开衫", parameters: paired });
+      const response = await request(actor, "/api/tasks", "POST", value);
+      expect(response.status).toBe(201);
+      const { task } = await response.json();
+      expect(task.parameters).toMatchObject(paired);
+      const stored = (await query("SELECT prompt,parameters,source_urls FROM tasks WHERE id=$1", [task.id])).rows[0]!;
+      expect(stored).toMatchObject({ prompt: value.prompt, parameters: paired, source_urls: [] });
+      expect(await count("tasks", actor)).toBe(1);
+      expect(await count("credit_reservations", actor)).toBe(1);
+      expect(calls.length).toBe(before);
+      expect(sourceReads.length).toBe(sourceStart);
+      expect(queueDeliveries.length).toBe(queueStart + 1);
+    });
+
     test("successful optimization stores trusted prompt, original user input and one reservation before queue delivery", async () => {
       const actor = await user(),
         value = input("retain the original jacket shape"),

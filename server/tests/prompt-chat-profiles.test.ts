@@ -26,11 +26,22 @@ describe("shared image-agent planning", () => {
         const before = JSON.stringify(request);
         const prepared = await prepareChatProfileInput(request, async () => { throw new Error("no recipe in planning"); });
         expect(prepared.input.tools.map(tool => tool.name)).toEqual([...expected]);
-        expect(prepared.input.claude).toEqual(request.claude);
+        expect(prepared.input.claude).toEqual({ ...request.claude, maxTokens: 8192 });
         expect(prepared.input.privateProfile).toBe(true);
         expect(JSON.stringify(prepared)).not.toContain(supplement);
         expect(JSON.stringify(request)).toBe(before);
         expect(prepared.input.input.at(-1)).toEqual(text.trim() ? request.input[0] : { role: "user", content: "本轮仅上传资料，没有文字处理要求。" });
+    });
+    test.each([creative, canvas])("image planning has an 8192-token floor without changing ordinary chat", async makeRequest => {
+        for (const maxTokens of [undefined, 1024, 2048, 4096, 8192, 16384]) {
+            const claude = { stream: false, thinking: true, ...(maxTokens !== undefined ? { maxTokens } : {}) };
+            const request = { ...makeRequest(), claude };
+            const prepared = await prepareChatProfileInput(request);
+            expect(prepared.input.claude).toEqual({ ...claude, maxTokens: Math.max(8192, maxTokens ?? 8192) });
+            expect(request.claude).toEqual(claude);
+            const ordinary = { input: request.input, tools: [], claude };
+            expect((await prepareChatProfileInput(ordinary)).input).toBe(ordinary);
+        }
     });
     test("rules and schema are short, shared, and free from repair/translation contracts", () => {
         expect(CREATIVE_CHAT_SYSTEM_PROMPT.length).toBeLessThanOrEqual(1500);
@@ -43,6 +54,22 @@ describe("shared image-agent planning", () => {
         expect(CREATIVE_CHAT_SYSTEM_PROMPT).toContain("完整当前作品摘要");
         expect(CREATIVE_CHAT_SYSTEM_PROMPT).toContain("不累加已撤销");
         expect(CREATIVE_CHAT_SYSTEM_PROMPT).toContain("省略才继承");
+    });
+    test.each([creative, canvas])("presentation guidance distinguishes faithful edits from new design without widening the tool contract", async makeRequest => {
+        for (const [instruction, base, prompt] of [
+            ["只把毛衫改成浅蓝，其他不变", "focus", "只把毛衫主色改成浅蓝，保持结构、图案、材质、背景与光影。"],
+            ["设计一件简洁的毛衫", "none", "一件简洁的毛衫，完整正面构图，柔和光线呈现清晰针织质感。"],
+        ] as const) {
+            const prepared = await prepareChatProfileInput(makeRequest(instruction));
+            const rules = system(prepared.input.input);
+            expect(rules).toContain("修改已有图时，不变更未授权的结构、配色、图案、材质、人物、背景或光影");
+            expect(rules).toContain("新创作或用户明确要求重新设计时，可补充服务于当前需求且不冲突的构图、光线与质感展示");
+            expect(rules).toContain("不擅自新增商标、文字或特定工艺");
+            expect(rules).toContain("新要求优先");
+            expect(rules.length).toBeLessThanOrEqual(1500);
+            const result: ChatCompletionResult = { content: "我会按你的要求处理。", toolCalls: [{ id: "edit", type: "function", function: { name: "edit_image", arguments: JSON.stringify({ base, prompt }) } }] };
+            expect(validateChatProfileOutput(result, prepared.privateRules)).toEqual(result);
+        }
     });
     test.each([creative, canvas])("clarification rules identify clickable candidates by catalog label without selecting for the user", async makeRequest => {
         const prepared = await prepareChatProfileInput(makeRequest("你指的是哪一张图片？"));

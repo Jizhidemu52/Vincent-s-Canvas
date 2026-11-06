@@ -7,6 +7,7 @@ import { useUiText } from "@/lib/i18n";
 import { imageModelDisplayName } from "@/lib/model-display";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { useUserStore } from "@/stores/use-user-store";
+import { quickImageTitle } from "@/lib/quick-image-tools";
 import type { CanvasNodeData } from "@/types/canvas";
 
 export type CanvasGenerationRecordDetailsProps = {
@@ -28,6 +29,8 @@ export function CanvasGenerationRecordDetails({ node, draftPrompt, derivatives =
     const [expanded, setExpanded] = useState(false);
     const models = useBusinessConfigStore(state => state.models);
     const role = useUserStore(state => state.user?.role);
+    // A quick action's server recipe is managed in admin, not a designer draft.
+    if (node.metadata?.quickImageAction) return null;
     const record = node.metadata?.generationRecord;
     const prompt = canvasGenerationPrompt(node);
     const model = canvasGenerationModel(node);
@@ -56,7 +59,10 @@ export function CanvasGenerationRecordDetails({ node, draftPrompt, derivatives =
             {onContinue && (node.metadata?.content || node.metadata?.storageKey) ? <Button size="small" type="text" icon={<GitBranch className="size-3.5" />} disabled={disabled} onClick={onContinue} title={t("将当前图设为参考，清空草稿，原生成档案不变")}>{t("基于此图继续")}</Button> : null}
         </div> : null}
         {derivatives.length ? <details className="min-w-0" data-testid="canvas-generation-derivatives"><summary className="cursor-pointer py-1">{t("衍生（{count}）", { count: derivatives.length })}</summary>
-            <div className="mt-1 max-h-40 space-y-1 overflow-y-auto">{derivatives.map(child => <button key={child.id} type="button" className="block w-full rounded px-1 py-1 text-left hover:bg-current/5" disabled={!onLocate} onClick={() => onLocate?.(child.id)} title={canvasGenerationPrompt(child)} aria-label={t("定位衍生图：{name}", { name: child.title })}><span className="block truncate font-medium">{child.title}</span><span className="line-clamp-2 whitespace-pre-wrap break-words leading-4 opacity-60">{canvasGenerationPrompt(child) || t("未使用提示词")}</span></button>)}</div>
+            <div className="mt-1 max-h-40 space-y-1 overflow-y-auto">{derivatives.map(child => {
+                const description = child.metadata?.quickImageAction ? t(quickImageTitle(child.metadata.quickImageAction)) : canvasGenerationPrompt(child) || t("未使用提示词");
+                return <button key={child.id} type="button" className="block w-full rounded px-1 py-1 text-left hover:bg-current/5" disabled={!onLocate} onClick={() => onLocate?.(child.id)} title={description} aria-label={t("定位衍生图：{name}", { name: child.title })}><span className="block truncate font-medium">{child.title}</span><span className="line-clamp-2 whitespace-pre-wrap break-words leading-4 opacity-60">{description}</span></button>;
+            })}</div>
         </details> : null}
     </section>;
 }

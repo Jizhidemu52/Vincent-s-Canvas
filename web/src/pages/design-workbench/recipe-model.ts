@@ -32,8 +32,8 @@ export type RecipeBranch = {
     optimizing?: boolean;
     optimized?: boolean;
 };
-export type RecipeRun = { id: string; ownerId: string; createdAt: string; form: RecipeForm; references: ReferenceImage[]; settings: RecipeSettings; branches: RecipeBranch[] };
-export type RecipeProject = { version: 1; kind: "series-recipe"; ownerId: string; form: RecipeForm; references: ReferenceImage[]; settings: RecipeSettings; run?: RecipeRun };
+export type RecipeRun = { id: string; ownerId: string; createdAt: string; form: RecipeForm; references: ReferenceImage[]; settings: RecipeSettings; branches: RecipeBranch[]; selectedColor?: number };
+export type RecipeProject = { version: 1; kind: "series-recipe"; ownerId: string; form: RecipeForm; references: ReferenceImage[]; settings: RecipeSettings; run?: RecipeRun; selectedColor?: number; history?: RecipeRun[] };
 export type RecipeDependencies = {
     generate: typeof requestEdit;
     query: (taskIds: string[], requestId: string, signal: AbortSignal) => Promise<QueuedTask | null>;
@@ -51,7 +51,7 @@ export function createRecipeForm(): RecipeForm {
         series: "我的新系列",
         constraints: "保持参考款的廓形、裁片、缝线、辅料和背景不变",
         prompt: "同一款式的协调配色系列，保留真实面料纹理和光影。",
-        count: 1,
+        count: 3,
         palette: [
             { name: "雾青", hex: "#91a8a1" },
             { name: "沙杏", hex: "#cfb799" },
@@ -75,10 +75,12 @@ export function recipePromptInput(form: RecipeForm, index: number, hasMotif: boo
         referenceRoles: ["产品底图", ...(hasMotif ? ["图案参考图"] : [])], mode: "edit" };
 }
 
-export function createRecipeRun(ownerId: string, form: RecipeForm, references: ReferenceImage[], config: Partial<AiConfig>): RecipeRun {
+export function createRecipeRun(ownerId: string, form: RecipeForm, references: ReferenceImage[], config: Partial<AiConfig>, selectedColor = 0): RecipeRun {
     if (!references[0]) throw new Error("请先上传参考底图");
-    const frozenForm = { ...copy(form), count: 1 },
+    const frozenForm = { ...copy(form), count: form.kind === "structure" ? form.count : 1 },
         frozenRefs = copy(form.kind === "pattern" ? references : references.slice(0, 1));
+    const index = form.kind === "structure" ? selectedColor : 0;
+    if (!Number.isInteger(frozenForm.count) || frozenForm.count < 1 || frozenForm.count > 6 || !Number.isInteger(index) || index < 0 || index >= frozenForm.count) throw new Error("请选择有效的系列颜色");
     return {
         id: createClientUuid(),
         ownerId,
@@ -86,7 +88,8 @@ export function createRecipeRun(ownerId: string, form: RecipeForm, references: R
         form: frozenForm,
         references: frozenRefs,
         settings: recipeSettings(config),
-        branches: Array.from({ length: 1 }, (_, index) => ({
+        ...(form.kind === "structure" ? { selectedColor: index } : {}),
+        branches: [{
             id: `variant-${index + 1}`,
             index,
             prompt: frozenForm.prompt,
@@ -97,7 +100,19 @@ export function createRecipeRun(ownerId: string, form: RecipeForm, references: R
             images: [],
             error: "",
             selected: false,
-        })),
+        }],
+    };
+}
+
+/** A manual color starts one task, retaining earlier frozen results without resubmitting them. */
+export function createRecipeProjectRun(project: RecipeProject, config: Partial<AiConfig>, selectedColor = 0): RecipeProject {
+    if (project.run?.branches.some(branch => branch.status === "uncertain" || branch.status === "running")) throw new Error("请先核查原任务，避免重复付费生成");
+    const run = createRecipeRun(project.ownerId, project.form, project.references, config, selectedColor);
+    return {
+        ...project,
+        selectedColor: project.form.kind === "structure" ? selectedColor : project.selectedColor,
+        ...(project.form.kind === "structure" && project.run ? { history: [...(project.history || []), copy(project.run)] } : {}),
+        run,
     };
 }
 
@@ -304,15 +319,21 @@ export function parseRecipeProject(value: unknown, ownerId: string, portable = f
     const input = record(value);
     if (input.version !== 1 || input.kind !== "series-recipe") throw new Error("不是受支持的系列配方项目");
     if (!portable && input.ownerId !== ownerId) throw new Error("项目不属于当前员工");
-    const project: RecipeProject = { version: 1, kind: "series-recipe", ownerId, form: { ...parseForm(input.form), count: 1 }, references: parseImages(input.references, portable), settings: recipeSettings(record(input.settings)) };
+    const parsedForm = parseForm(input.form);
+    const project: RecipeProject = { version: 1, kind: "series-recipe", ownerId, form: { ...parsedForm, count: parsedForm.kind === "structure" ? parsedForm.count : 1 }, references: parseImages(input.references, portable), settings: recipeSettings(record(input.settings)), selectedColor: Number.isInteger(input.selectedColor) ? Math.max(0, Math.min(Number(input.selectedColor), parsedForm.count - 1)) : 0 };
     if (project.references.length > 2) throw new Error("参考图最多两张");
-    if (input.run) {
-        const saved = record(input.run),
+    const parseRun = (value: unknown): RecipeRun => {
+        const saved = record(value),
             form = parseForm(saved.form),
             sameOwner = saved.ownerId === ownerId;
-        if (!Array.isArray(saved.branches) || saved.branches.length !== form.count) throw new Error("候选记录数量无效");
-        const branches = saved.branches.map((item, index): RecipeBranch => {
+        const selectedColor = saved.selectedColor;
+        const manualColor = selectedColor !== undefined;
+        if (manualColor && (form.kind !== "structure" || !Number.isInteger(selectedColor) || Number(selectedColor) < 0 || Number(selectedColor) >= form.count)) throw new Error("候选颜色索引无效");
+        if (!Array.isArray(saved.branches) || saved.branches.length !== (manualColor ? 1 : form.count)) throw new Error("候选记录数量无效");
+        const branches = saved.branches.map((item, offset): RecipeBranch => {
             const branch = record(item);
+            const index = manualColor ? Number(selectedColor) : offset;
+            if (branch.index !== undefined && branch.index !== index) throw new Error("候选颜色索引无效");
             let status: RecipeBranchStatus = Object.hasOwn(recipeStatusLabels, String(branch.status)) ? (branch.status as RecipeBranchStatus) : "cancelled";
             const submissionStarted = branch.submissionStarted === true;
             if (status === "running") status = submissionStarted ? "uncertain" : "failed";
@@ -334,8 +355,14 @@ export function parseRecipeProject(value: unknown, ownerId: string, portable = f
                 error: !sameOwner && status === "cancelled" ? "原任务属于其他员工，无法在当前账号查询或继续" : string(branch.error, 1000),
             };
         });
-        project.run = { id: string(saved.id, 100) || createClientUuid(), ownerId, createdAt: string(saved.createdAt, 40), form, references: parseImages(saved.references, portable), settings: recipeSettings(record(saved.settings)), branches };
-        if (project.run.references.length > 2 || !project.run.references.length) throw new Error("原任务参考图缺失或数量无效");
+        const run: RecipeRun = { id: string(saved.id, 100) || createClientUuid(), ownerId, createdAt: string(saved.createdAt, 40), form, references: parseImages(saved.references, portable), settings: recipeSettings(record(saved.settings)), branches, ...(manualColor ? { selectedColor: Number(selectedColor) } : {}) };
+        if (run.references.length > 2 || !run.references.length) throw new Error("原任务参考图缺失或数量无效");
+        return run;
+    };
+    if (input.run) project.run = parseRun(input.run);
+    if (input.history !== undefined) {
+        if (!Array.isArray(input.history)) throw new Error("历史候选记录无效");
+        project.history = input.history.map(parseRun);
     }
     return project;
 }

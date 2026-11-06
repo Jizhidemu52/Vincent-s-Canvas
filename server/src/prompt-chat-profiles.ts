@@ -1,11 +1,12 @@
 import { assertNoPromptRuleLeak, PromptOptimizationError } from "./prompt-safety";
 import { parseStrictJson } from "./strict-json";
 import {
-    IMAGE_AGENT_PROFILES, IMAGE_AGENT_SYSTEM_PROMPT, IMAGE_AGENT_COMPARISON_GUIDANCE, CANVAS_AGENT_GUIDANCE,
-    buildImageAgentTools, imageAgentContextSchema, imageAgentLookSchema, imageAgentTool, parseImageAgentEdit, requestsCanvasStructure,
+    IMAGE_AGENT_PROFILES, IMAGE_AGENT_SYSTEM_PROMPT, IMAGE_AGENT_COMPARISON_GUIDANCE, IMAGE_AGENT_DOCUMENT_GUIDANCE, CANVAS_AGENT_GUIDANCE,
+    buildImageAgentTools, imageAgentContextSchema, imageAgentLookSchema, imageAgentTool, parseImageAgentEdit, requestsCanvasStructure, validateImageAgentDocumentTool,
     type ImageAgentProfile,
 } from "./image-agent-profile";
 import type { ChatCompletionInput, ChatCompletionResult, ResponseInput, ResponseTool } from "./routes/chat";
+import type { AgentDocumentCatalogEntry } from "../../shared/image-agent-documents";
 
 export const chatPromptProfiles = IMAGE_AGENT_PROFILES;
 export type ChatPromptProfile = ImageAgentProfile;
@@ -25,6 +26,9 @@ const nodeType = { type: "string", enum: ["text", "image", "config", "video", "a
 const mode = { type: "string", enum: ["text", "image", "video", "audio"] };
 const viewport = { type: "object", properties: { x: { type: "number" }, y: { type: "number" }, k: { type: "number" } }, required: ["x", "y", "k"], additionalProperties: false };
 const generation = { prompt: { type: "string" }, mode, title: { type: "string" }, x: { type: "number" }, y: { type: "number" }, referenceNodeIds: ids, autoRun: { type: "boolean" } };
+// Keep validated manifest data request-local without adding it to private rule
+// matching, provider tool schemas, public history, or a process-long session cache.
+const profileDocumentCatalogs = new WeakMap<readonly string[], readonly AgentDocumentCatalogEntry[]>();
 const structuralTools: ResponseTool[] = [
     imageAgentTool("canvas_create_node", "创建节点或占位素材。", { nodeType, title: { type: "string" }, x: { type: "number" }, y: { type: "number" }, width: { type: "number" }, height: { type: "number" }, metadata: record }, ["nodeType"]),
     imageAgentTool("canvas_create_text_node", "创建文本节点。", { text: { type: "string" }, title: { type: "string" }, x: { type: "number" }, y: { type: "number" } }, ["text"]),
@@ -63,13 +67,15 @@ export async function prepareChatProfileInput<T extends ProfileInput>(request: T
     if (request.input.some(item => !item || typeof item !== "object" || Array.isArray(item))) invalidProfile();
     if (request.input.some(item => "role" in item && item.role === "system")) invalidProfile("此聊天场景的系统规则由服务端管理，不能由客户端提供。");
     const allowGeneration = Boolean(context.currentUserText.trim());
-    const tools = buildImageAgentTools({ canvas, allowGeneration, allowInspection: context.stage === "plan" });
+    const tools = buildImageAgentTools({ canvas, allowGeneration, allowInspection: context.stage === "plan", documentCatalog: context.documentCatalog, documentsInspected: context.documentsInspected });
     if (canvas && requestsCanvasStructure(context.currentUserText)) tools.push(...structuralTools);
     const system = [canvas ? CANVAS_ASSISTANT_SYSTEM_PROMPT : CREATIVE_CHAT_SYSTEM_PROMPT,
         /比较|对比|差异|分析|compare|difference/i.test(context.currentUserText) ? IMAGE_AGENT_COMPARISON_GUIDANCE : "",
+        context.documentCatalog?.length ? IMAGE_AGENT_DOCUMENT_GUIDANCE : "",
         allowGeneration ? "" : "本轮只有资料，没有文字处理要求。请阅读并自然回应，不生成。",
     ].filter(Boolean).join("\n");
     const privateRules = [system, JSON.stringify(tools)];
+    if (context.documentCatalog?.length) profileDocumentCatalogs.set(privateRules, context.documentCatalog);
     const messages = request.input.map(item => safeProfileReplayInput(item, privateRules));
     const previewCount = messages.reduce((count, item) => count + ("role" in item && Array.isArray(item.content) ? item.content.filter(part => part.type === "input_image").length : 0), 0);
     if (previewCount > 5) invalidProfile("本轮最多提供 5 张图片预览，未发送模型请求。");
@@ -85,7 +91,10 @@ export async function prepareChatProfileInput<T extends ProfileInput>(request: T
     if (context.stage === "plan" && lastUser !== messages.length - 1) invalidProfile("当前用户消息必须放在本轮资料之后，未发送模型请求。");
     if (!allowGeneration) messages[lastUser] = { role: "user", content: "本轮仅上传资料，没有文字处理要求。" };
     messages.splice(lastUser, 0, { role: "user", content: `当前图片工作集（任务资料）：\n${JSON.stringify(context)}` });
-    return { privateRules, input: { ...request, privateProfile: true, tools, toolChoice: "auto", input: [{ role: "system", content: system }, ...messages] } };
+    // Legacy clients explicitly send the ordinary 2048-token default. Planning
+    // needs room for hidden thinking plus the complete image-tool arguments.
+    const maxTokens = Math.min(16_384, Math.max(8192, request.claude?.maxTokens ?? 8192));
+    return { privateRules, input: { ...request, privateProfile: true, tools, toolChoice: "auto", claude: { ...request.claude, maxTokens }, input: [{ role: "system", content: system }, ...messages] } };
 }
 
 function safeProfileReplayInput(item: ResponseInput, privateRules: readonly string[]): ResponseInput {
@@ -140,13 +149,15 @@ export function validateChatProfileOutput(result: ChatCompletionResult, privateR
     if (!privateRules.length) return result;
     assertProfileRuleSafety(result, privateRules);
     if (result.toolCalls.filter(call => call.function.name === "edit_image").length > 1) throw new PromptOptimizationError("IMAGE_AGENT_MULTIPLE_TASKS", "本轮返回了多个图片任务，未提交任何图片生成。请一次处理一张图片。", 422);
-    const allowed = new Set((JSON.parse(privateRules[1] || "[]") as ResponseTool[]).map(tool => tool.name));
+    const declared = new Map((JSON.parse(privateRules[1] || "[]") as ResponseTool[]).map(tool => [tool.name, tool]));
+    if (result.toolCalls.length > 1 && result.toolCalls.some(call => ["read_document", "propose_requirements"].includes(call.function.name))) throw new PromptOptimizationError("IMAGE_AGENT_MULTIPLE_TASKS", "文件查阅或需求卡不能与其他操作并发，未执行操作。", 422);
     for (const call of result.toolCalls) {
-        if (!allowed.has(call.function.name)) throw new PromptOptimizationError("IMAGE_AGENT_TOOL_INVALID", "本轮返回了未开放的操作，未提交执行。", 422);
+        if (!declared.has(call.function.name)) throw new PromptOptimizationError("IMAGE_AGENT_TOOL_INVALID", "本轮返回了未开放的操作，未提交执行。", 422);
         const args = parseStrictJson(call.function.arguments);
         assertProfileRuleSafety(args, privateRules);
         if (call.function.name === "edit_image") parseImageAgentEdit(args);
         if (call.function.name === "look_at_images" && !imageAgentLookSchema.safeParse(args).success) throw new PromptOptimizationError("IMAGE_AGENT_ARGUMENTS_INVALID", "查看图片参数无效，未执行操作。", 422);
+        if (["read_document", "propose_requirements"].includes(call.function.name)) validateImageAgentDocumentTool(call.function.name, args, declared.get(call.function.name)!, profileDocumentCatalogs.get(privateRules) || []);
     }
     return { ...result,
         ...(result.claudeAssistantContent ? { claudeAssistantContent: checkedClaudeReplay(result.claudeAssistantContent, privateRules) } : {}),

@@ -7,7 +7,6 @@ import { adaptImageModelSettings, imageModelProfile, imageModelSettingsError, im
 import { imageOptionFields, normalizeImageOptions } from "@/lib/image-advanced-settings";
 import { imageTaskParameters } from "@/services/api/image";
 import { validateImageReferences } from "@/lib/image-reference-policy";
-import { quickImageModelId } from "@/lib/quick-image-tools";
 import { getModelPickerOptions } from "@/lib/model-picker-options";
 import { selectChatImageModel, chatImageQualitySettings } from "@/pages/chat/image-quality";
 import { resolveChatImageSize } from "@/pages/chat/image-size";
@@ -106,7 +105,7 @@ test("standalone and canvas MAI controls make model-determined edit dimensions v
 test("chat and agent MAI references do not perform irrelevant source-size validation", async () => {
     useBusinessConfigStore.setState({ models });
     const selected = selectChatImageModel("opaque-mai", { imageSize: "3840x2160", imageQuality: "max", imageResolution: "4k" });
-    expect(selected).toEqual({ imageModelId: "opaque-mai", imageSize: "16:9", imageQuality: "auto", imageResolution: "1k" });
+    expect(selected).toEqual({ imageModelId: "opaque-mai", imageSize: "16:9", imageQuality: "auto", imageResolution: "2k" });
     expect(chatImageQualitySettings(mai, "auto", "2k")).toMatchObject({ quality: "auto", resolution: "2k", adjustable: false, independentResolution: true });
     const shouldNotRead = async () => { throw new Error("Editing must not measure a fixed MAI output size"); };
     expect(await resolveChatImageSize(config, "3840x2160", "edit", refs(1)[0], () => undefined, shouldNotRead)).toBe("auto");
@@ -116,10 +115,8 @@ test("chat and agent MAI references do not perform irrelevant source-size valida
     expect(settings).toEqual(snapshot);
 });
 
-test("new defaults prefer Flare 2.6 without forcing selection and quick actions use separate server models", () => {
+test("ordinary image defaults prefer Flare 2.6 without forcing selection", () => {
     const order = getModelPickerOptions(defaultConfig, "image", [models[1]!, models[2]!, models[0]!], "server");
     expect(order).toEqual(["opaque-gpt", "opaque-mai", "opaque-nano"]);
-    expect(quickImageModelId("remove-background")).toBe("mai-image-2.6-flash");
-    expect(quickImageModelId("hd-upscale")).toBe("gemini-nano-banana-2.1");
     expect(JSON.parse(normalizeImageOptions('{"resolution":"4k","google_image_search":"true","web_grounding":"false"}', mai))).toEqual({ resolution: "1k", web_grounding: "false" });
 });

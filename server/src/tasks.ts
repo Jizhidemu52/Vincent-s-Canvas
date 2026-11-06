@@ -8,11 +8,14 @@ import { resolveToolExecution, type ToolConfiguration } from "./tool-configurati
 import { removeQueuedTask, scheduleQueuedTask } from "./task-queue";
 import type { PromptInput } from "../../shared/prompt-contracts";
 import { fenceBatchAdmission, type BatchAdmissionToken } from "./batch-admission";
-import { prepareQuickImageTask } from "./quick-image-tools";
+import { QUICK_IMAGE_SNAPSHOT, type QuickImageSnapshot } from "./quick-image-tools";
+import { prepareConfiguredQuickImageTask } from "./quick-image-configuration";
+import { preflightStoredQuickImageTask, validateStoredQuickImageSnapshot } from "./stored-quick-image-preflight";
 
 export type TaskPriority = "normal" | "priority" | "urgent";
 export type QueueTaskAction = "pause" | "resume" | "cancel";
 export type TaskInput = {
+  [QUICK_IMAGE_SNAPSHOT]?: QuickImageSnapshot;
   creditsEnabled?: boolean;
   /** Server-only admission policy, never accepted from the request body. */
   maxInflightTasks?: number;
@@ -100,9 +103,11 @@ export async function enqueueTask(
   cache: Cache,
   input: TaskInput,
   videoPreflight = preflightStoredVideoTask,
+  quickImagePreflight = preflightStoredQuickImageTask,
 ) {
-  input = prepareQuickImageTask(input);
+  input = await prepareConfiguredQuickImageTask(db, input);
   input.parameters = singleImageTaskParameters(input.operationType, input.parameters);
+  let preparedQuickImage: Awaited<ReturnType<typeof preflightStoredQuickImageTask>> | undefined;
   const taskId = randomUUID();
   let preparedVideo: { execution: ToolConfiguration & { modelConfigId: string }; checked: Awaited<ReturnType<typeof preflightStoredVideoTask>> } | undefined = input.videoPreflightResult && input.toolConfiguration
     ? { execution: input.toolConfiguration, checked: input.videoPreflightResult } : undefined;
@@ -130,6 +135,9 @@ export async function enqueueTask(
     };
     const existing = await findExisting();
     if (existing) return existing;
+    if (input[QUICK_IMAGE_SNAPSHOT] && (await client.query("SELECT id FROM tasks WHERE request_id=$1", [input.requestId])).rows[0]) {
+      throw new BillingError("DUPLICATE_REQUEST", "请求编号已被其他账号占用");
+    }
     const maxInflightTasks = input.maxInflightTasks ?? 100;
     if (!Number.isInteger(maxInflightTasks) || maxInflightTasks < 1 || maxInflightTasks > 1000) {
       throw new Error("Invalid server-side in-flight task limit");
@@ -143,6 +151,7 @@ export async function enqueueTask(
     // Finish the cheap duplicate/quota check before doing any external I/O.
     // The second transaction repeats those checks before atomic insert + hold.
     if (input.operationType === "video_generation" && !preparedVideo) return null;
+    if (input[QUICK_IMAGE_SNAPSHOT] && !preparedQuickImage) return null;
     const inserted = await client.query<{ id: string; queuedAt: string; availableAt: string }>(
       `INSERT INTO tasks(id,request_id,batch_id,user_id,department_id,project_id,operation_type,model_config_id,prompt,parameters,source_urls,priority,credits,rmb_cost,user_input,prompt_compilation_id,prompt_optimized)
            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,0,0,$13,$14,$15)
@@ -172,6 +181,7 @@ export async function enqueueTask(
       return duplicate;
     }
     const execution = input.toolConfiguration ?? await resolveToolExecution(client, input);
+    if (preparedQuickImage) await validateStoredQuickImageSnapshot(client, input, preparedQuickImage);
     input.modelConfigId = execution.modelConfigId;
     input.toolKey = execution.toolKey;
     input.parameters = { ...input.parameters, tool: execution.toolKey };
@@ -213,6 +223,10 @@ export async function enqueueTask(
     };
   });
   let task = await admit();
+  if (!task && input[QUICK_IMAGE_SNAPSHOT]) {
+    preparedQuickImage = await quickImagePreflight(db, input);
+    task = await admit();
+  }
   if (!task) {
     const execution = input.toolConfiguration ?? await resolveToolExecution(db, input);
     const checked = await videoPreflight(db, { ...input, modelConfigId: execution.modelConfigId, parameters: { ...input.parameters, tool: execution.toolKey } });

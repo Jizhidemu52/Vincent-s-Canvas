@@ -2,6 +2,11 @@ import { getBusinessConfig, resolveToolModel, type BusinessConfig } from "./busi
 import { getToolDefinition, resolveToolKey, type ToolKey } from "../../../../shared/feature-catalog";
 import { modelOptionName, type AiConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
+import { preferredImageModel } from "@/lib/default-image-model";
+
+export function isImageTool(toolKey: ToolKey) {
+    return getToolDefinition(toolKey)?.capabilities.some(capability => ["generate", "edit", "upscale", "batch"].includes(capability)) ?? false;
+}
 
 export function requireToolKey(operationType: string, key?: string): ToolKey {
     const resolved = resolveToolKey(operationType, key);
@@ -22,8 +27,14 @@ export function resolveConfiguredToolModel(business: BusinessConfig, toolKey: To
         return managed;
     }
     const requested = binding?.modelConfigId || requestedModel;
-    const normalized = modelOptionName(requested);
-    const model = business.models.find(item => binding?.modelConfigId ? item.id === binding.modelConfigId : item.id === requested || item.modelId === normalized || item.name === requested);
+    const normalized = modelOptionName(requested).trim();
+    const model = binding?.modelConfigId
+        ? business.models.find(item => item.id === binding.modelConfigId)
+        : normalized
+            ? business.models.find(item => [item.id, item.modelId, item.name, item.publicName].includes(normalized))
+            : isImageTool(toolKey) && toolKey !== "midjourney-blend"
+                ? preferredImageModel(business.models.filter(item => !item.modelId.startsWith("demo-") && getToolDefinition(toolKey)?.capabilities.some(capability => item.capabilities.includes(capability))))
+                : undefined;
     if (!model) throw new Error(binding?.modelConfigId ? "此板块绑定的模型暂不可用，请联系管理员。" : "所选模型暂不可用，请重新选择或联系管理员启用。");
     if (toolKey === "midjourney-blend" && model.imageParameterProfile !== "blend" && model.imageParameterProfile !== "midjourney-blend" && model.modelId !== "midjourney-blend") throw new Error("MJ 多图融合板块仅支持 Blend 模型，请管理员检查绑定。");
     return model;

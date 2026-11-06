@@ -5,6 +5,9 @@ import { mergeImageAgentWorkNote, type ImageAgentWorkNote } from "@/lib/image-ag
 import { DuplicateJsonKeyError, parseStrictJson } from "@/lib/strict-json";
 import type { AiTextMessage, ToolResponseResult } from "@/services/api/image";
 import type { ReferenceImage } from "@/types/image";
+import type { AgentDocument, DesignRequirements } from "../../../shared/image-agent-documents";
+import { agentDocumentCatalog, agentDocumentContext } from "@/lib/agent-documents";
+import { designRequirementsText } from "../../../shared/image-agent-documents";
 
 type CreativeChatAttachment = { id?: string; name: string; kind?: "image" | "text"; mimeType?: string; dataUrl?: string; textContent?: string; storageKey?: string };
 /** Historical records remain readable; new edits use parentId/workId/workNote. */
@@ -19,10 +22,11 @@ export type CreativeChatMessage = Omit<ChatHistoryMessage, "attachments"> & {
 export type CreativeImageCatalogEntry = ReferenceImage & ImageAgentImage & { messageId: string; prompt?: string; modelId?: string; lineage?: CreativeImageLineage };
 export type CreativeChatPlan =
     | { kind: "discussion"; content: string; candidateImageIds?: string[] }
+    | { kind: "requirements"; content: string; requirements: DesignRequirements }
     | { kind: "image"; content: string; action: "generate" | "edit"; prompt: string; references: ReferenceImage[]; parentId?: string; workId?: string; workNote: ImageAgentWorkNote; keep: string[] };
 
 export type CreativeChatImageSelection = { explicitTargetImageId?: string; referenceImageIds?: string[]; newCreation?: boolean };
-export type CreativeChatContextOptions = { catalog?: CreativeImageCatalogEntry[]; selectedImageId?: string; lockedImageId?: string; newCreation?: boolean; referenceImageIds?: string[]; inspectionImageIds?: string[] };
+export type CreativeChatContextOptions = { catalog?: CreativeImageCatalogEntry[]; selectedImageId?: string; lockedImageId?: string; newCreation?: boolean; referenceImageIds?: string[]; inspectionImageIds?: string[]; documents?: AgentDocument[]; requirements?: DesignRequirements };
 export const MAX_CREATIVE_CHAT_REFERENCES = 5;
 export const MAX_CREATIVE_CHAT_PREVIEW_BYTES = 8 * 1024 * 1024;
 
@@ -104,7 +108,7 @@ export function withCreativeChatImageSelection(current: CreativeChatMessage, cat
 }
 
 export function assertCreativeChatImageSelection(plan: CreativeChatPlan, selection: CreativeChatImageSelection) {
-    if (plan.kind === "discussion") return;
+    if (plan.kind !== "image") return;
     if (selection.newCreation && plan.parentId) throw new Error("新创作不应沿用旧底图，图片任务尚未提交。");
     if (selection.explicitTargetImageId && !selection.newCreation && (plan.parentId !== selection.explicitTargetImageId || plan.references[0]?.id !== selection.explicitTargetImageId)) throw new Error("图片任务未使用选中的当前图，尚未提交。");
     if ((selection.referenceImageIds || []).some(id => !plan.references.some(image => image.id === id))) throw new Error("图片任务缺少已选参考图，尚未提交。");
@@ -124,7 +128,7 @@ export async function buildCreativeChatRequest(history: CreativeChatMessage[], c
     const contextHistory = history.map(historyItem);
     const documents = (current.attachments || []).filter(item => item.textContent);
     if (documents.length) contextHistory.push({ role: "user", text: documents.map(item => `[本轮附件：${item.name}]\n${item.textContent}`).join("\n\n") });
-    return buildImageAgentContext({
+    const prepared = await buildImageAgentContext({
         images: catalog, history: contextHistory, currentText: current.content,
         focusId: focus?.id, lockedImageId, newCreation, note: focus?.note,
         explicitIds: [...new Set([...(options.referenceImageIds || []), ...(options.inspectionImageIds || [])])],
@@ -135,13 +139,17 @@ export async function buildCreativeChatRequest(history: CreativeChatMessage[], c
             return reference.dataUrl;
         },
     });
+    const documentText = agentDocumentContext(options.documents || []);
+    const requirementText = options.requirements && designRequirementsText(options.requirements);
+    if (documentText || requirementText) prepared.messages.splice(prepared.messages.length - 1, 0, { role: "user", content: [documentText, requirementText ? `已确认设计需求卡：\n${requirementText}` : ""].filter(Boolean).join("\n\n") });
+    return { ...prepared, profileContext: { ...prepared.profileContext, documentCatalog: agentDocumentCatalog(options.documents || []), requirements: options.requirements } };
 }
 
 export async function buildCreativeChatRequestMessages(history: CreativeChatMessage[], current: CreativeChatMessage, previews?: ReferenceImage[], options: CreativeChatContextOptions = {}): Promise<AiTextMessage[]> {
     return (await buildCreativeChatRequest(history, current, previews, options)).messages;
 }
 
-function validatedCall(result: ToolResponseResult) {
+export function validatedCreativeChatCall(result: ToolResponseResult) {
     if (!result || typeof result.content !== "string" || !Array.isArray(result.toolCalls)) throw new Error("创作规划响应格式不正确，未提交图片任务");
     if (["max_tokens", "length", "incomplete", "error", "content_filter"].includes(result.stopReason || "")) throw new Error("创作规划未完整返回，未提交图片任务");
     if (result.toolCalls.length > 1) throw new Error("一轮只能执行一次图片操作，未提交任何图片任务");
@@ -169,7 +177,7 @@ function imageIds(value: unknown, catalog: CreativeImageCatalogEntry[]): string[
 }
 
 export function parseCreativeChatInspection(result: ToolResponseResult, catalog: CreativeImageCatalogEntry[]): string[] | null {
-    const value = validatedCall(result);
+    const value = validatedCreativeChatCall(result);
     if (!value || value.call.function.name === "edit_image") return null;
     if (value.call.function.name !== "look_at_images") throw new Error("模型返回了未授权工具，未提交图片任务");
     if (Object.keys(value.args).some(key => key !== "image_ids")) throw new Error("查看图片工具包含未授权参数");
@@ -184,7 +192,7 @@ export function creativeChatCandidateImages(content: string, catalog: CreativeIm
 }
 
 export function parseCreativeChatPlan(result: ToolResponseResult, references: ReferenceImage[], options: CreativeChatContextOptions & { previewedImageIds?: string[]; allowImageCreation?: boolean } = {}): CreativeChatPlan {
-    const value = validatedCall(result);
+    const value = validatedCreativeChatCall(result);
     const catalog = options.catalog || references.map((reference, index) => ({ ...reference, messageId: reference.id, label: `图${index + 1}`, kind: "upload" as const }));
     if (!value) {
         if (!result.content.trim()) throw new Error("模型没有返回创作建议，未提交图片任务");
@@ -192,7 +200,7 @@ export function parseCreativeChatPlan(result: ToolResponseResult, references: Re
         return { kind: "discussion", content: result.content, ...(candidateImageIds.length ? { candidateImageIds } : {}) };
     }
     if (value.call.function.name !== "edit_image") throw new Error("模型返回了未授权工具，未提交图片任务");
-    if (options.allowImageCreation === false) return { kind: "discussion", content: "已收到你上传的内容。你希望我怎么处理？" };
+    if (options.allowImageCreation === false) return { kind: "discussion", content: options.documents?.length ? "文件已保留。请先让我整理需求卡，核对并确认后再出图。" : "已收到你上传的内容。你希望我怎么处理？" };
     const { args } = value;
     if (Object.keys(args).some(key => !["base", "references", "prompt", "keep", "note_update"].includes(key))) throw new Error("图片工具包含未授权参数，未提交图片任务");
     if (args.base !== undefined && (typeof args.base !== "string" || !args.base.trim() || args.base.length > 300)) throw new Error("图片底图方向无效，未提交图片任务");

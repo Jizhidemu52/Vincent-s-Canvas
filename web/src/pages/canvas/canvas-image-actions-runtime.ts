@@ -30,7 +30,7 @@ import type { App } from "antd";
 import type { createCanvasGraphStore } from "@/stores/canvas/canvas-graph-store";
 import type { CanvasImageActionsOptions } from "./use-canvas-image-actions";
 import { createCanvasImageOperationRunner } from "@/lib/canvas/canvas-image-operation";
-import { quickImageModelId, quickImageTitle, type QuickImageAction } from "@/lib/quick-image-tools";
+import { quickImageReferenceFileError, quickImageTitle, type QuickImageAction } from "@/lib/quick-image-tools";
 import { createCanvasGenerationRecord } from "@/lib/canvas/canvas-generation-record";
 import { isModuleAvailable, useModuleStore } from "@/stores/use-module-store";
 import { requestEdit } from "@/services/api/image";
@@ -437,13 +437,15 @@ export function createCanvasImageActionsRuntime(context: CanvasImageActionRuntim
         try {
             const node = nodesRef.current.find(item => item.id === source.id);
             if (!node || node.type !== CanvasNodeType.Image || !(node.metadata?.content || node.metadata?.storageKey)) return;
+            const referenceError = quickImageReferenceFileError({ type: node.metadata?.mimeType, size: node.metadata?.bytes });
+            if (referenceError) { message.warning(uiText(referenceError)); return; }
             if (node.metadata?.imageTask || node.metadata?.status === "loading" || nodesRef.current.some(item => item.metadata?.quickImageAction && item.metadata?.generationRecord?.sourceNodeId === node.id && (item.metadata.imageTask || item.metadata.status === "loading"))) {
                 message.warning(uiText("已有图片任务待完成，请先查看原任务")); return;
             }
             if (!isModuleAvailable(useModuleStore.getState().flags, useBusinessConfigStore.getState().tools, "canvas-edit")) { message.warning(uiText("当前图片编辑功能已停用")); return; }
             if (useUserStore.getState().user?.status !== "active" || !await waitForWriteAccess() || !isCurrent()) return;
             const title = quickImageTitle(action);
-            const config = { ...effectiveConfig, model: quickImageModelId(action), imageModel: quickImageModelId(action), count: "1", size: "auto", quality: action === "hd-upscale" ? "4K" : "auto", imageOptions: "", systemPrompt: "" };
+            const config = { ...effectiveConfig, model: "", imageModel: "", count: "1", size: "auto", quality: "", imageOptions: "", systemPrompt: "" };
             const references = [{ id: node.id, name: node.title || "原图", type: node.metadata?.mimeType || "image/png", dataUrl: node.metadata?.content || "", storageKey: node.metadata?.storageKey }];
             const size = fitNodeSize(node.metadata?.naturalWidth || node.width, node.metadata?.naturalHeight || node.height, 320, 320);
             childId = nanoid();

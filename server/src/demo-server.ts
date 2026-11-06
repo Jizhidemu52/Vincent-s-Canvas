@@ -21,7 +21,7 @@ import { ImageEditInputError, prepareImageEditInput, type ImageEditInput } from 
 import { deploymentFeatures } from "./deployment-features";
 import { billedDemoCredits, resolveStandaloneDemoUser } from "./demo-standalone-mode";
 import { serveStandaloneWeb } from "./demo-standalone-web";
-import { ApiMartImageProviderFailure, ApiMartImageQueryRetryable, apiMartImageModel, runApiMartImageTask } from "./apimart-image";
+import { ApiMartImageProviderFailure, ApiMartImageQueryRetryable, apiMartImageModel, preflightApiMartImageRequest, runApiMartImageTask } from "./apimart-image";
 import { createDemoMarkProvider } from "./demo-mark-provider";
 import { MARK_IMAGE_PROVIDER_ID } from "../../shared/mark-image-models";
 import { listAvailableDemoModels, resolveDemoExternalProviders, videoModelConfigIds } from "./demo-provider-configuration";
@@ -36,7 +36,8 @@ import { normalizeDemoPublicAssetOrigin } from "./demo-public-assets";
 import { createDemoProviderVideoSources, resolveOwnedDemoVideoSources } from "./demo-video-sources";
 import { decodeInlineImageResult } from "./demo-task-result-assets";
 import { ImageResultPersistenceError, imageResultExtension, storeImageResult } from "./image-result-storage";
-import { prepareQuickImageTask } from "./quick-image-tools";
+import { DemoQuickImageConfigurationStore } from "./demo-quick-image-configuration";
+import { ToolConfigurationError } from "./tool-configuration";
 import { ImageResultProcessingError, validateQuickImageSource } from "./image-result-processing";
 import { ImageResultVariantsError, imageResultVariantIds, isAuxiliaryImageResult, resolveImageResultVariants, type ImageResultAsset } from "./image-result-variants";
 import { DemoAssetProjectStore } from "./demo-asset-projects";
@@ -68,7 +69,7 @@ import { DemoAdmissionGate, DemoPromptBatchStore } from "./demo-prompt-batches";
 import { promptHash } from "./prompt-recipe-store";
 import { preparePromptTaskInput } from "./prompt-task-input";
 import { prepareChatProfileInput, validateChatProfileOutput, type ChatPromptProfile } from "./prompt-chat-profiles";
-import { imageAgentProviderPrompt } from "./image-agent-profile";
+import { imageAgentProviderPrompt, readImageAgentGenerationProfile } from "./image-agent-profile";
 import { imageAgentClaudeStream } from "./image-agent-stream";
 import { PromptOptimizationError } from "./prompt-safety";
 import { assertVideoMotionPolicy, ensureVideoMotionRecipe, videoMotionParameters, videoPreflightPrompt } from "./video-motion-input";
@@ -485,6 +486,7 @@ const demoPromptCompiler = createDemoPromptCompiler(demoPromptDatabase.store, {
 const demoPromptBatches = new DemoPromptBatchStore(demoPromptDatabase.store.database);
 await demoPromptBatches.initialize();
 const demoAdmissionGate = new DemoAdmissionGate();
+const demoQuickImages = new DemoQuickImageConfigurationStore(demoModels, demoProviders);
 type PreparedDemoTask = TaskSubmission & { userInput?: PromptInput; promptCompilationId?: string; summaryZh?: string; optimized: boolean };
 type TrustedDemoBatchInput = { prepared: PreparedDemoTask; batchId: string; itemIndex: number };
 const oaStore = features.oaLoginEnabled ? new DemoOaStore(demoStatePath) : null;
@@ -767,7 +769,7 @@ Bun.serve({
       return json({ error: error.code, message: error.message }, error.status, { "cache-control": "no-store" });
     if (error instanceof ZodError)
       return json({ error: "VALIDATION_ERROR", message: "请求参数格式不正确" }, 400);
-    if (error instanceof DemoToolConfigurationError)
+    if (error instanceof DemoToolConfigurationError || error instanceof ToolConfigurationError)
       return json({ error: error.code, message: error.message }, error.status);
     if (error instanceof DemoStorageError)
       return json({ error: "LOCAL_STORAGE_UNAVAILABLE", message: "本地数据未能保存，请检查磁盘空间与写入权限后重试。" }, 503);
@@ -1267,12 +1269,13 @@ Bun.serve({
       const submissionHash = promptHash(input);
       const existingTask = input.requestId
         ? [...demoTasks.values()].find((task) => task.requestId === input.requestId) : undefined;
-      if (existingTask?.ownerUserId === user.id && existingTask.submissionHash && existingTask.submissionHash !== submissionHash) throw new PromptOptimizationError("PROMPT_REQUEST_CHANGED", "同一任务编号的输入已改变，请新建请求", 409);
+      if (!input.parameters.quickImageAction && existingTask?.ownerUserId === user.id && existingTask.submissionHash && existingTask.submissionHash !== submissionHash) throw new PromptOptimizationError("PROMPT_REQUEST_CHANGED", "同一任务编号的输入已改变，请新建请求", 409);
       if (existingTask)
         return existingTask.ownerUserId === user.id
           ? json({ task: existingTask })
           : json({ error: "DUPLICATE_REQUEST", message: "任务请求标识已被使用" }, 400);
-      input = prepareQuickImageTask(input);
+      readImageAgentGenerationProfile(input.parameters, input.operationType);
+      input = demoQuickImages.prepare(input);
       const taskTool = resolveDemoToolConfiguration({ ...input, operationType: input.operationType || "" }, demoToolConfigurations, demoModels, demoProviders, demoModuleFlags);
       assertVideoMotionPolicy({ ...input, toolKey: taskTool.toolKey }, taskTool.allowRawPrompt);
       validateImagePromptExclusions(input);
@@ -1475,9 +1478,11 @@ Bun.serve({
         let editInput: ImageEditInput<DemoAsset>;
         try {
           editInput = await prepareImageEditInput(sources, input.parameters || {}, { protocol: model.providerId === openTokenProviderId ? "openai" : "apimart", modelId: imageModelId, operationType: input.operationType! });
+          if (input.parameters.quickImageAction) preflightApiMartImageRequest({ modelId: imageModelId, prompt: input.prompt, parameters: input.parameters, sourceImages: editInput.references });
           await validateQuickImageSource(editInput.references[0], input.parameters || {});
         } catch (error) {
           if (error instanceof ImageEditInputError || error instanceof ImageResultProcessingError) return json({ error: error.code, message: error.message }, 400);
+          if (input.parameters.quickImageAction) return json({ error: "QUICK_IMAGE_SOURCE_INVALID", message: error instanceof Error ? error.message : "参考图片或参数无效" }, 400);
           throw error;
         }
         if ((imageModelId === "midjourney" || imageModelId === "midjourney-blend") && input.operationType !== "image_generation")
@@ -1711,7 +1716,7 @@ Bun.serve({
     }
     if (path === "/api/tasks" && request.method === "POST") {
       const input = taskSubmissionSchema.parse(await request.json());
-      return demoAdmissionGate.run("task:" + user.id + ":" + input.requestId, promptHash(input), () => submitDemoTask(input));
+      return demoAdmissionGate.run("task:" + user.id + ":" + input.requestId, input.parameters.quickImageAction ? input.requestId : promptHash(input), () => submitDemoTask(input));
     }
     if (path === "/api/tasks" && request.method === "GET") {
       const query = Object.fromEntries(url.searchParams);

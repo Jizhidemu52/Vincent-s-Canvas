@@ -5,6 +5,8 @@ import { imageToDataUrl } from "@/services/image-storage";
 import type { AiConfig } from "@/stores/use-config-store";
 import type { ReferenceImage } from "@/types/image";
 import { resolveImageAgentFocus, selectImageAgentWorkingSet } from "@/lib/image-agent/focus";
+import type { AgentDocument, DesignRequirements } from "../../../../shared/image-agent-documents";
+import { parseAgentDocumentTool } from "@/lib/image-agent/document-tools";
 
 export function creativeChatPreviewSize(width: number, height: number) {
     if (!Number.isFinite(width) || !Number.isFinite(height) || width < 1 || height < 1) throw new Error("参考图尺寸无效");
@@ -53,7 +55,7 @@ async function createPlanningPreview(reference: ReferenceImage, signal?: AbortSi
 }
 
 /** One planning request normally suffices; an older-image lookup is optional and read-only. */
-export async function requestCreativeChatPlan(config: AiConfig, history: CreativeChatMessage[], current: CreativeChatMessage, options: CreativeChatImageSelection & { signal?: AbortSignal; onDelta?: (text: string) => void; onPhase?: (text: string) => void; selectedImageId?: string } = {}): Promise<CreativeChatPlan> {
+export async function requestCreativeChatPlan(config: AiConfig, history: CreativeChatMessage[], current: CreativeChatMessage, options: CreativeChatImageSelection & { signal?: AbortSignal; onDelta?: (text: string) => void; onPhase?: (text: string) => void; selectedImageId?: string; documents?: AgentDocument[]; requirements?: DesignRequirements } = {}): Promise<CreativeChatPlan> {
     options.signal?.throwIfAborted();
     const catalog = buildCreativeImageCatalog(history, current);
     const newCreation = options.newCreation ?? current.newCreation;
@@ -63,7 +65,7 @@ export async function requestCreativeChatPlan(config: AiConfig, history: Creativ
     const planningCurrent = withCreativeChatImageSelection(current, catalog, options);
     // This is a structural permission boundary, not keyword-based intent classification.
     // Textless uploads may be read and discussed, but their contents cannot authorize image execution.
-    const allowImageCreation = Boolean(current.content.trim());
+    const allowImageCreation = Boolean(current.content.trim()) && (!options.documents?.length || Boolean(options.requirements));
     let references = resolveCreativeChatReferences(history, current, selectedImageId, catalog, { newCreation, referenceImageIds: options.referenceImageIds });
     const previewCache = new Map<string, ReferenceImage>();
     // Originals remain authoritative for editing; temporary previews never enter lineage or storage.
@@ -87,7 +89,7 @@ export async function requestCreativeChatPlan(config: AiConfig, history: Creativ
     let previews = await previewsFor(references);
     references = references.filter((item) => previews.some((preview) => preview.id === item.id));
     options.signal?.throwIfAborted();
-    const context = { catalog, selectedImageId, lockedImageId, newCreation, referenceImageIds: options.referenceImageIds };
+    const context = { catalog, selectedImageId, lockedImageId, newCreation, referenceImageIds: options.referenceImageIds, documents: options.documents, requirements: options.requirements };
     const requestOptions = {
         tool: "gpt-chat",
         chatProfile: "creative-chat" as const,
@@ -95,11 +97,46 @@ export async function requestCreativeChatPlan(config: AiConfig, history: Creativ
         onToolCallStart: (name: string) => {
             if (name === "edit_image") options.onPhase?.("正在整理图片修改要求…");
             else if (name === "look_at_images") options.onPhase?.("正在查看较早的图片…");
+            else if (name === "read_document") options.onPhase?.("正在查阅文件页面与图示…");
+            else if (name === "propose_requirements") options.onPhase?.("正在整理待确认需求卡…");
         },
     };
     let prepared = await buildCreativeChatRequest(history, planningCurrent, previews, context);
+    // Document previews are temporary lookup material, not additional working-set
+    // images. A continuation replaces them while retaining every selected source.
+    const workingSetMessages = [...prepared.messages];
+    const workingPreviewIds = new Set(previews.map(preview => preview.id));
+    const documentPreviewSlots = Math.max(0, MAX_CREATIVE_CHAT_REFERENCES - previews.length);
+    const initialFigures = (options.documents || []).map(document => document.figures[0]).filter(figure => figure && !workingPreviewIds.has(figure.id)).slice(0, Math.min(3, documentPreviewSlots));
+    if (initialFigures.length) {
+        const figurePreviews = await previewsFor(initialFigures.map(figure => ({ ...figure, type: figure.mimeType })));
+        prepared.messages.splice(prepared.messages.length - 1, 0, { role: "user", content: figurePreviews.flatMap(figure => [
+            { type: "text" as const, text: `文件首图 ${figure.id}（仅查阅，未选为出图参考；其余页面可按需查阅）` }, { type: "image_url" as const, image_url: { url: figure.dataUrl } },
+        ]) });
+    }
     let result = await requestToolResponse(config, prepared.messages, [], "auto", options.onDelta, { ...requestOptions, profileContext: prepared.profileContext });
     options.signal?.throwIfAborted();
+    let documentTool = parseAgentDocumentTool(result, options.documents || []);
+    if (documentTool?.kind === "requirements") return { kind: "requirements", content: result.content || "已整理设计需求，请核对并确认需求卡。", requirements: documentTool.requirements };
+    if (documentTool?.kind === "read") {
+        const figures = await previewsFor(documentTool.figures.filter(figure => !workingPreviewIds.has(figure.id)).slice(0, documentPreviewSlots).map(figure => ({ ...figure, type: figure.mimeType })));
+        options.signal?.throwIfAborted();
+        const read = documentTool;
+        const visibleFigureIds = new Set([...workingPreviewIds, ...figures.map(figure => figure.id)]);
+        const omittedFigures = read.figures.filter(figure => !visibleFigureIds.has(figure.id));
+        const readText = read.text + (omittedFigures.length ? `\n[本轮优先保留当前图和已选参考图；受 5 张预览上限限制，以下文件图实际未呈现：${omittedFigures.map(figure => figure.id).join("、")}。不能将这些图视为已看；相关视觉要求列为待确认，如需看图请在下一轮减少工作集图片后查阅。]` : "");
+        result = await requestToolResponse(config, [
+            ...workingSetMessages, ...toolResponseToInput(result),
+            { role: "tool", tool_call_id: read.call.id, content: readText },
+            ...(figures.length ? [{ role: "user" as const, content: figures.flatMap(figure => [{ type: "text" as const, text: `文件图 figure_id=${figure.id}（仅查阅，未选为出图参考）` }, { type: "image_url" as const, image_url: { url: figure.dataUrl } }]) }] : []),
+            { role: "user", content: current.content || "请根据文件整理待确认的设计需求卡。" },
+        ], [], "auto", options.onDelta, { ...requestOptions, profileContext: { ...prepared.profileContext, stage: "continue", documentsInspected: true } });
+        options.signal?.throwIfAborted();
+        documentTool = parseAgentDocumentTool(result, options.documents || []);
+        if (documentTool?.kind === "requirements") return { kind: "requirements", content: result.content || "已整理设计需求，请核对并确认需求卡。", requirements: documentTool.requirements };
+        if (documentTool?.kind === "read" || result.toolCalls[0]?.function.name === "look_at_images") throw new Error("本轮文件查阅已完成，请指定下一页或补充要求后继续；没有提交图片任务。");
+        return parseCreativeChatPlan(result, references, { ...context, previewedImageIds: previews.map(item => item.id), allowImageCreation });
+    }
     const inspectionIds = parseCreativeChatInspection(result, catalog);
     if (inspectionIds) {
         const inspectedWorkingSet = selectImageAgentWorkingSet(catalog, { focusId: selectedImageId, newCreation, explicitIds: [...new Set([...inspectionIds, ...(options.referenceImageIds || [])])] });
@@ -121,6 +158,9 @@ export async function requestCreativeChatPlan(config: AiConfig, history: Creativ
             ...prepared.messages.filter(message => Array.isArray(message.content)),
         ], [], "auto", options.onDelta, { ...requestOptions, profileContext: { ...prepared.profileContext, stage: "continue" } });
         options.signal?.throwIfAborted();
+        documentTool = parseAgentDocumentTool(result, options.documents || []);
+        if (documentTool?.kind === "requirements") return { kind: "requirements", content: result.content || "已整理设计需求，请核对并确认需求卡。", requirements: documentTool.requirements };
+        if (documentTool?.kind === "read") throw new Error("本轮图片查阅已完成，请在下一条消息指定文件页；没有提交图片任务。");
     }
     return parseCreativeChatPlan(result, references, { ...context, previewedImageIds: previews.map((item) => item.id), allowImageCreation });
 }

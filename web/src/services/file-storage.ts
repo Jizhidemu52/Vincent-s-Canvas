@@ -3,6 +3,7 @@ import { rememberMediaSource } from "./canvas-media-links";
 import { nanoid } from "nanoid";
 import { createDedupedAsyncResolver } from "@/lib/deduped-async-resolver";
 import { cacheObjectUrl, releaseObjectUrl, releaseUnusedObjectUrls } from "@/lib/object-url-cache";
+import { chatImageCleanupGuard, collectChatImageReferences } from "./chat-history-references";
 
 export type UploadedFile = { url: string; storageKey: string; bytes: number; mimeType: string; width?: number; height?: number; durationMs?: number; serverAssetId?: string };
 
@@ -58,11 +59,14 @@ export async function deleteStoredMedia(keys: Iterable<string>) {
 }
 
 export async function cleanupUnusedMedia(usedData: unknown) {
+    const assertStable = chatImageCleanupGuard();
     const usedKeys = collectMediaStorageKeys(usedData);
+    for (const key of await collectChatImageReferences()) usedKeys.add(key);
     const unused: string[] = [];
     await store.iterate((_value, key) => {
         if (!usedKeys.has(key)) unused.push(key);
     });
+    assertStable();
     await deleteStoredMedia(unused);
 }
 

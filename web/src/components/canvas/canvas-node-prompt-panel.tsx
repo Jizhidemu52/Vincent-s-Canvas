@@ -344,7 +344,7 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: Can
     const defaultModel = mode === "image" ? globalConfig.imageModel : mode === "video" ? globalConfig.videoModel : mode === "audio" ? globalConfig.audioModel : globalConfig.textModel;
     return {
         ...globalConfig,
-        model: mode === "text" ? globalConfig.textModel : (mode === "image" ? node.metadata?.draftModel : undefined) || node.metadata?.model || defaultModel || (mode === "audio" ? defaultConfig.audioModel : globalConfig.model || defaultConfig.model),
+        model: mode === "text" ? globalConfig.textModel : (mode === "image" ? node.metadata?.draftModel : undefined) || (node.metadata?.quickImageAction ? undefined : node.metadata?.model) || defaultModel || (mode === "audio" ? defaultConfig.audioModel : globalConfig.model || defaultConfig.model),
         quality: node.metadata?.quality ?? globalConfig.quality ?? defaultConfig.quality,
         imageOptions: node.metadata?.imageOptions ?? globalConfig.imageOptions,
         size: node.metadata?.size || globalConfig.size || defaultConfig.size,

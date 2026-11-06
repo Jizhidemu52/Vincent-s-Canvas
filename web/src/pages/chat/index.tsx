@@ -50,6 +50,11 @@ import { flushCanvasPersistence, useCanvasStore } from "@/stores/canvas/use-canv
 import { useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { CanvasNodeType } from "@/types/canvas";
+import { AgentDocumentPanel } from "./agent-document-panel";
+import { agentDocumentCatalog } from "@/lib/agent-documents";
+import { confirmedDesignRequirements } from "@/lib/image-agent/document-tools";
+import { mapAgentDocumentMedia } from "@/lib/image-agent/document-media";
+import { AGENT_DOCUMENT_LIMITS } from "../../../../shared/image-agent-documents";
 
 const storagePrefix = "wireless-canvas:llm-chat:";
 const RegionSelectionDialog = lazy(() => import("@/pages/creative/region-selection-dialog").then(module => ({ default: module.RegionSelectionDialog })));
@@ -73,7 +78,7 @@ function readFileAsDataUrl(file: File) {
 
 function dataUrlBytes(dataUrl: string) {
     const comma = dataUrl.indexOf(",");
-    return comma < 0 ? 0 : Math.floor((dataUrl.length - comma - 1) * 0.75);
+    return comma < 0 ? 0 : Math.floor((dataUrl.length - comma - 1) * 0.75) - (dataUrl.endsWith("==") ? 2 : dataUrl.endsWith("=") ? 1 : 0);
 }
 
 export default function ChatPage() {
@@ -278,7 +283,7 @@ export default function ChatPage() {
         void chatMedia.hydrateSession(snapshot, assertCurrent).then((restored) => {
             assertCurrent();
             // A concurrently recovered image answer must not be overwritten.
-            updateSession(snapshot.id, (current) => current.messages === snapshot.messages ? { ...current, messages: restored.messages } : current);
+            updateSession(snapshot.id, (current) => ({ ...current, ...(current.messages === snapshot.messages ? { messages: restored.messages } : {}), ...(current.documents === snapshot.documents ? { documents: restored.documents } : {}) }));
         }).catch((error: unknown) => {
             if (!cancelled && isCurrentScope()) setMediaError(uiText("历史图片读取未完成：{value1}。原记录未删除。", { value1: error instanceof Error ? error.message : "本地存储不可用" }));
         }).finally(() => { if (!cancelled && isCurrentScope()) setHydratingMedia(false); });
@@ -492,7 +497,7 @@ export default function ChatPage() {
             signal.throwIfAborted();
             if (!isCurrentScope() || (!sendLifetime.detached && activeSendRef.current !== sendLifetime)) throw new DOMException("登录会话已变化", "AbortError");
         };
-        const userMessage: ChatMessage = { id: createClientId(), parentMessageId: requestSession.messages.at(-1)?.id, editTargetImageId: turnFocus?.id, focusImageId: turnFocus?.id, focusLocked: Boolean(imageSelection.explicitTargetImageId), newCreation: imageSelection.newCreation, role: "user", content: text, attachments: turnAttachments, ...(turnRegion ? { regionSelection: { ...turnRegion, mask: { ...turnRegion.mask, dataUrl: "", url: undefined }, selection: { ...turnRegion.selection, dataUrl: "", url: undefined } } } : {}), createdAt: new Date().toISOString() };
+        const userMessage: ChatMessage = { id: createClientId(), parentMessageId: requestSession.messages.at(-1)?.id, editTargetImageId: turnFocus?.id, focusImageId: turnFocus?.id, focusLocked: Boolean(imageSelection.explicitTargetImageId), newCreation: imageSelection.newCreation, role: "user", content: text, attachments: turnAttachments, documentIds: requestSession.documents?.map(document => document.id), requirementCard: requestSession.requirementCard, ...(turnRegion ? { regionSelection: { ...turnRegion, mask: { ...turnRegion.mask, dataUrl: "", url: undefined }, selection: { ...turnRegion.selection, dataUrl: "", url: undefined } } } : {}), createdAt: new Date().toISOString() };
         const assistantId = createClientId();
         const requestedImageQuality = requestSession.imageQuality;
         const requestedImageResolution = requestSession.imageResolution;
@@ -554,10 +559,15 @@ export default function ChatPage() {
             assertSendCurrent();
             const history = await chatMedia.hydrateSession(requestSession, assertSendCurrent);
             const currentTurn = await chatMedia.hydrateSession({ ...requestSession, messages: [userMessage] }, assertSendCurrent);
-            const plan = await requestCreativeChatPlan({ ...config, model: creativeModelId, textModel: creativeModelId, systemPrompt: "" }, history.messages, currentTurn.messages[0]!, { signal, selectedImageId: userMessage.focusImageId, ...imageSelection, onPhase: (phase) => { if (!signal.aborted && activeSendRef.current === sendLifetime && isCurrentScope()) setSendPhase(phase); }, onDelta: stream.push });
+            const requirements = confirmedDesignRequirements(requestSession.requirementCard);
+            const plan = await requestCreativeChatPlan({ ...config, model: creativeModelId, textModel: creativeModelId, systemPrompt: "" }, history.messages, currentTurn.messages[0]!, { signal, selectedImageId: userMessage.focusImageId, ...imageSelection, documents: history.documents, requirements, onPhase: (phase) => { if (!signal.aborted && activeSendRef.current === sendLifetime && isCurrentScope()) setSendPhase(phase); }, onDelta: stream.push });
             assertSendCurrent();
             stream.cancel();
             assertCreativeChatImageSelection(plan, imageSelection);
+            if (plan.kind === "requirements") {
+                updateSession(sessionId, session => ({ ...session, requirementCard: { ...plan.requirements, id: createClientId(), status: "draft", updatedAt: new Date().toISOString() }, messages: [...session.messages.filter(item => item.id !== assistantId), { id: assistantId, parentMessageId: userMessage.id, role: "assistant", content: plan.content, createdAt: new Date().toISOString() }] }));
+                return;
+            }
             if (plan.kind === "discussion") {
                 updateSession(sessionId, (session) => ({ ...session, messages: [...session.messages.filter((item) => item.id !== assistantId), { id: assistantId, parentMessageId: userMessage.id, role: "assistant", content: plan.content, candidateImageIds: plan.candidateImageIds, createdAt: new Date().toISOString() }], updatedAt: new Date().toISOString() }));
                 return;
@@ -582,6 +592,7 @@ export default function ChatPage() {
             const imagePrompt = maskInput ? `${maskInput.promptPrefix}\n${plan.prompt}` : plan.prompt;
             const currentSession = sessionsRef.current.find(session => session.id === sessionId)!;
             const pendingImageTask: PendingChatImageTask = { requestId: createClientId(), prompt: imagePrompt, modelId: imageModelId, quality, size: imageConfig.size, ...(resolution ? { resolution } : {}), action, parentMessageId: userMessage.id, parentId, workId, workNote, referenceImageIds: references.map(image => image.id), focusRevision: (currentSession.focusRevision || 0) + 1, ...(maskInput?.adaptation ? { maskAdaptation: maskInput.adaptation } : {}), ...(maskInput?.regionComposite ? { regionComposite: maskInput.regionComposite } : {}), explanation };
+            pendingImageTask.requirements = requirements;
             pendingImageTask.signature = chatImageTaskSignature(pendingImageTask);
             if (duplicateChatImageTask(currentSession, pendingImageTask)) throw new Error("已有相同要求的图片任务等待核实，未重复提交。请查询那条原任务；可以继续聊天或发送不同的新要求。");
             imageRequestId = pendingImageTask.requestId;
@@ -608,9 +619,10 @@ export default function ChatPage() {
                     setIsSending(false);
                 }
             };
+            const documentOptions = requirements ? { imageAgentRequirements: requirements, imageAgentDocumentCatalog: agentDocumentCatalog(history.documents || []) } : {};
             const generated = action === "edit"
-                ? await requestEdit(imageConfig, imagePrompt, maskInput?.references || references, maskInput?.mask, { operationType: "inpaint", tool: "gpt-chat-image", imageAgentProfile: "creative-chat", requestId: pendingImageTask.requestId, signal, cancelOnAbort: () => false, onSubmissionStarted, onSubmitted })
-                : await requestGeneration(imageConfig, imagePrompt, { operationType: "image_generation", tool: "gpt-chat-image", imageAgentProfile: "creative-chat", requestId: pendingImageTask.requestId, signal, cancelOnAbort: () => false, onSubmissionStarted, onSubmitted });
+                ? await requestEdit(imageConfig, imagePrompt, maskInput?.references || references, maskInput?.mask, { operationType: "inpaint", tool: "gpt-chat-image", imageAgentProfile: "creative-chat", ...documentOptions, requestId: pendingImageTask.requestId, signal, cancelOnAbort: () => false, onSubmissionStarted, onSubmitted })
+                : await requestGeneration(imageConfig, imagePrompt, { operationType: "image_generation", tool: "gpt-chat-image", imageAgentProfile: "creative-chat", ...documentOptions, requestId: pendingImageTask.requestId, signal, cancelOnAbort: () => false, onSubmissionStarted, onSubmitted });
             assertSendCurrent();
             if (!generated.length) throw new Error("图像模型没有返回图片");
             const savedImages: ChatGeneratedImage[] = [];
@@ -670,16 +682,25 @@ export default function ChatPage() {
         setReadingAttachments(true);
         const candidates = Array.from(files).slice(0, remaining);
         const next: ChatAttachment[] = [];
-        let totalBytes = attachments.reduce((sum, item) => sum + (Number(item.size) || 0), 0);
+        let totalBytes = attachments.filter(item => item.kind !== "text").reduce((sum, item) => sum + (Number(item.size) || 0), 0);
         for (const file of candidates) {
             if (!stillCurrent()) break;
-            if (file.size > 5 * 1024 * 1024) {
-                message.warning(uiText("{name} 超过 5MB，未添加", { name: file.name }));
+            const imageFile = file.type.startsWith("image/") || /\.(png|jpe?g|webp|gif)$/i.test(file.name);
+            if (file.size > (imageFile ? 5 * 1024 * 1024 : AGENT_DOCUMENT_LIMITS.fileBytes)) {
+                message.warning(`${file.name} 超过 ${imageFile ? "5MB" : "20MB"}，未添加`);
                 continue;
             }
             try {
                 const parsed = await parseChatAttachment(file, { imageToDataUrl: readFileAsDataUrl });
                 assertCurrent();
+                if (parsed.document) {
+                    const documents = sessionsRef.current.find(session => session.id === sessionId)?.documents || [];
+                    if (documents.length >= AGENT_DOCUMENT_LIMITS.files) throw new Error("每个会话最多保存 8 个设计文件，请另建会话。");
+                    const document = await mapAgentDocumentMedia(parsed.document, "persist", assertCurrent);
+                    updateSession(sessionId!, session => ({ ...session, documents: [...session.documents || [], document], requirementCard: session.requirementCard ? { ...session.requirementCard, status: "draft" } : undefined }));
+                    next.push({ id: createClientId(), name: parsed.name, kind: "text", mimeType: parsed.mimeType, size: file.size, textContent: `设计文件已保存：${document.id}。请从本会话文件目录按页查阅，不视为全文已读。` });
+                    continue;
+                }
                 const size = parsed.dataUrl ? dataUrlBytes(parsed.dataUrl) : file.size;
                 if (totalBytes + size > 8 * 1024 * 1024) {
                     message.warning(uiText("本次对话附件总大小不能超过 8MB"));
@@ -768,6 +789,12 @@ export default function ChatPage() {
                     {mediaError ? <div role="alert" className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/60 px-6 py-3 text-sm"><span>{uiText(mediaError || "")}</span><Button disabled={hydratingMedia || isSending} onClick={() => setMediaReload((value) => value + 1)}>{uiText("重试读取图片")}</Button></div> : null}
 
                     {selectedClaude ? <details className="border-b border-border px-4 py-2 text-xs text-muted-foreground md:px-6"><summary className="w-fit cursor-pointer">{uiText("模型设置")}</summary><ClaudeChatControls model={selectedParameterModel} stream={config.claudeStream !== "false"} thinking={config.claudeThinking === "true"} maxTokens={config.claudeMaxTokens} onStreamChange={(value) => updateConfig("claudeStream", String(value))} onThinkingChange={(value) => updateConfig("claudeThinking", String(value))} onMaxTokensChange={(value) => updateConfig("claudeMaxTokens", value)} /></details> : null}
+
+                    {activeSession ? <AgentDocumentPanel key={activeSession.id} documents={activeSession.documents} card={activeSession.requirementCard} disabled={imageActionsDisabled} onChange={card => { if (isCurrentScope()) updateSession(activeSession.id, session => ({ ...session, requirementCard: card })); }} onReference={figure => {
+                        if (selectedImage) updateSession(activeSession.id, session => ({ ...session, focusImageId: selectedImage.id }));
+                        else startNewCreation();
+                        addImageReference({ ...figure, type: figure.mimeType, messageId: `document:${figure.id}`, label: figure.label, kind: "upload" });
+                    }} /> : null}
 
                     <div ref={scrollRef} onScroll={(event) => { const element = event.currentTarget; followBottomRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80; }} className="min-h-0 flex-1 overflow-y-auto px-4 py-6 md:px-[8%]">
                         {!activeSession?.messages.length ? <div className="wb-empty mx-auto max-w-xl !min-h-0 !py-2">

@@ -22,7 +22,7 @@ import { fingerprintImage, type ArchivedReference, type GenerationDraftInput, ty
 import { readImageOptions } from "@/lib/image-advanced-settings";
 import { getBusinessConfig } from "./business-config";
 import { requireToolKey, resolveConfiguredToolModel } from "./tool-runtime";
-import { quickImageModelId, type QuickImageAction } from "@/lib/quick-image-tools";
+import { quickImageReferenceFileError, type QuickImageAction } from "@/lib/quick-image-tools";
 
 type ImageOperationType = "image_generation" | "inpaint" | "upscale" | "batch_image" | "seamless_stitch";
 type PublicModel = { id: string; name: string; modelId: string; capabilities: string[]; creditCost: number; rmbCost: number };
@@ -160,7 +160,7 @@ export async function requestQueuedImages(input: { quickImageAction?: QuickImage
     const model = preset ? undefined : input.resolvedModel || await resolvePublicModel(input.modelId, input.operationType, toolKey);
     assertOwner();
     input.signal?.throwIfAborted();
-    const referenceProfile = model ? imageModelProfile(model.id, [model]) : imageModelProfile(quickImageModelId(input.quickImageAction!));
+    const referenceProfile = model ? imageModelProfile(model.id, [model]) : undefined;
     const sourceUrls: string[] = [];
     const archivedReferences: ArchivedReference[] = [];
     for (const [referenceIndex, reference] of (input.references || []).entries()) {
@@ -169,8 +169,8 @@ export async function requestQueuedImages(input: { quickImageAction?: QuickImage
         input.signal?.throwIfAborted();
         const file = dataUrlToFile({ ...reference, dataUrl });
         input.signal?.throwIfAborted();
-        const isMarkup = referenceProfile.supportsMarkup && input.draft?.markupReferenceIndex === referenceIndex;
-        const referenceError = isMarkup ? file.type !== "image/png" ? "标注层必须为独立透明 PNG" : file.size > 50 * 1024 * 1024 ? "标注层不能超过 50 MB" : "" : imageReferenceFileError(file, referenceProfile);
+        const isMarkup = referenceProfile?.supportsMarkup && input.draft?.markupReferenceIndex === referenceIndex;
+        const referenceError = preset ? quickImageReferenceFileError(file) : isMarkup ? file.type !== "image/png" ? "标注层必须为独立透明 PNG" : file.size > 50 * 1024 * 1024 ? "标注层不能超过 50 MB" : "" : imageReferenceFileError(file, referenceProfile!);
         if (referenceError) throw new Error(referenceError);
         const hash = await fingerprintImage(file);
         assertOwner();

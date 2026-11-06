@@ -287,20 +287,21 @@ export function stripClientProviderSecrets(config: Partial<AiConfig>): AiConfig 
     };
 }
 
-export function useEffectiveConfig(scope?: "canvas") {
+export function useEffectiveConfig(scope?: "canvas" | "image") {
     const config = useConfigStore((state) => state.config);
     const models = useBusinessConfigStore((state) => state.models);
     const tools = useBusinessConfigStore((state) => state.tools);
     const status = useBusinessConfigStore((state) => state.status);
     return useMemo(() => {
         const available = models.filter(model => !model.modelId.startsWith("demo-") && model.capabilities.some(capability => capability === "generate" || capability === "edit"));
-        // Canvas defaults seed new work only; existing node/draft models are applied by their callers.
-        const preferred = scope === "canvas" ? [DEFAULT_CANVAS_IMAGE_MODEL] : [config.imageModel, config.model];
-        const fallback = scope === "canvas" ? DEFAULT_CANVAS_IMAGE_MODEL : config.imageModel;
+        // Image defaults seed new work only; callers overlay saved drafts, nodes and explicit choices.
+        const imageDefault = scope === "canvas" ? DEFAULT_CANVAS_IMAGE_MODEL : DEFAULT_IMAGE_MODEL;
+        const preferred = scope ? [imageDefault] : [config.imageModel, config.model];
+        const fallback = scope ? imageDefault : config.imageModel;
         const imageModel = status === "ready" ? preferredImageModel(available, preferred)?.modelId || fallback : fallback;
         const textModel = status === "ready" ? resolveToolModel({ models, tools, prices: [] }, "canvas-chat")?.modelId || "" : "";
         return { ...config, channelMode: "local" as const, imageModel, textModel,
-            model: scope === "canvas" || config.model === config.imageModel || config.model === DEFAULT_IMAGE_MODEL ? imageModel : config.model };
+            model: scope || config.model === config.imageModel || config.model === DEFAULT_IMAGE_MODEL ? imageModel : config.model };
     }, [config, models, tools, status, scope]);
 }
 

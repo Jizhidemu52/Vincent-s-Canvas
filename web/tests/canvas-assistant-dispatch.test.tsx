@@ -21,6 +21,7 @@ import * as toolRuntime from "@/services/api/tool-runtime";
 import { createAgentMediaWorkflow } from "@/lib/canvas/agent-media-workflow";
 import * as onlineTaskRecovery from "@/lib/canvas/canvas-online-task-recovery";
 import * as agentGeneration from "@/lib/agent-direct-generation";
+import { imageAgentGenerationParameters } from "@/lib/image-agent-generation-parameters";
 
 const requireModule = createRequire(new URL("../src/components/canvas/canvas-assistant-panel.tsx", import.meta.url));
 const requireToolConfigModule = createRequire(new URL("../src/hooks/use-tool-config.ts", import.meta.url));
@@ -32,7 +33,7 @@ const toolConfigCode = ts.transpileModule(readFileSync(new URL("../src/hooks/use
     compilerOptions: { target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.CommonJS, esModuleInterop: true },
 }).outputText;
 
-function panelHarness(options: { replies: ToolResponseResult[]; stream?: string; translate?: () => Promise<string>; config?: Partial<configModule.AiConfig>; flags?: Partial<Record<ModuleKey, boolean>>; tools?: BusinessConfig["tools"]; models?: BusinessConfig["models"]; imageCapabilities?: BusinessConfig["models"]; standalone?: boolean; selected?: CanvasNodeData[]; nodes?: CanvasNodeData[]; history?: CanvasAssistantMessage[]; confirmTools?: boolean; canManageConfig?: boolean; generate?: () => Promise<Array<{ id: string; dataUrl: string }>>; video?: () => Promise<{ url: string; mimeType: string }>; storedImage?: UploadedImage; storedVideo?: UploadedFile; taskLifecycle?: boolean; storeImage?: () => Promise<UploadedImage>; userId?: string; recoveryIO?: NonNullable<Parameters<typeof onlineTaskRecovery.recoverOnlineAgentTask>[3]> }) {
+function panelHarness(options: { replies: ToolResponseResult[]; stream?: string; translate?: () => Promise<string>; config?: Partial<configModule.AiConfig>; flags?: Partial<Record<ModuleKey, boolean>>; tools?: BusinessConfig["tools"]; models?: BusinessConfig["models"]; imageCapabilities?: BusinessConfig["models"]; standalone?: boolean; selected?: CanvasNodeData[]; nodes?: CanvasNodeData[]; history?: CanvasAssistantMessage[]; confirmTools?: boolean; canManageConfig?: boolean; generate?: () => Promise<Array<{ id: string; dataUrl: string }>>; video?: () => Promise<{ url: string; mimeType: string }>; storedImage?: UploadedImage; storedVideo?: UploadedFile; taskLifecycle?: boolean; storeImage?: () => Promise<UploadedImage>; userId?: string; recoveryIO?: NonNullable<Parameters<typeof onlineTaskRecovery.recoverOnlineAgentTask>[3]> } & Pick<CanvasAssistantSession, "documents" | "requirementCard">) {
     const states: unknown[] = [];
     const refs: unknown[] = [];
     const memos: Array<{ dependencies?: DependencyList; value: unknown }> = [];
@@ -63,7 +64,7 @@ function panelHarness(options: { replies: ToolResponseResult[]; stream?: string;
     ];
     const businessState = { ...business, status: "ready" as const, refresh: async () => undefined };
     const userState = { status: options.userId ? "authenticated" : "guest", user: options.userId ? { id: options.userId } : null };
-    let sessions: CanvasAssistantSession[] = options.history ? [{ id: "history", title: "History", createdAt: "2026-09-06", updatedAt: "2026-09-06", messages: options.history }] : [];
+    let sessions: CanvasAssistantSession[] = options.history || options.requirementCard || options.documents ? [{ id: "history", title: "History", createdAt: "2026-09-06", updatedAt: "2026-09-06", messages: options.history || [], documents: options.documents, requirementCard: options.requirementCard }] : [];
     let activeSessionId: string | null = null;
     const sessionCommits: Array<{ sessions: CanvasAssistantSession[]; activeId: string | null }> = [];
     const sessionUpdates: Array<{ sessions: CanvasAssistantSession[]; activeId: string | null }> = [];
@@ -94,6 +95,7 @@ function panelHarness(options: { replies: ToolResponseResult[]; stream?: string;
     };
     const snapshotRef: { current: CanvasAgentSnapshot } = { current: { projectId: "project", title: "Canvas", nodes: options.nodes || options.selected || [], connections: [], selectedNodeIds: (options.selected || []).map((node) => node.id), viewport: { x: 0, y: 0, k: 1 }, viewportSize: { width: 800, height: 600 } } };
     const imageRequest = async (type: string, args: any[]) => {
+        imageAgentGenerationParameters(args[type === "image" ? 2 : 4]);
         requests.push({ type, args });
         if (options.taskLifecycle) {
             const settings = args[type === "image" ? 2 : 4];
@@ -576,6 +578,54 @@ function tool(name: string, args: Record<string, unknown>): ToolResponseResult {
 }
 
 describe("canvas assistant submission", () => {
+    test.each([4, 5])("document continuation respects five-image budget with %s working images and preserves focus", async count => {
+        const selected: CanvasNodeData[] = Array.from({ length: count }, (_, index) => ({ id: `source-${index}`, type: CanvasNodeType.Image, title: `原图${index}`, position: { x: index * 210, y: 0 }, width: 200, height: 200, metadata: { content: `data:image/png;base64,${Buffer.from(`source-${index}`).toString("base64")}`, status: "success" } }));
+        const figures = Array.from({ length: 3 }, (_, index) => ({ id: `figure-${index}`, label: `文件图${index}`, sectionId: "section", name: `page-${index}.png`, mimeType: "image/png", dataUrl: `data:image/png;base64,${Buffer.from(`figure-${index}`).toString("base64")}` }));
+        const document: NonNullable<CanvasAssistantSession["documents"]>[number] = { id: "brief", name: "brief.docx", kind: "docx", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", bytes: 42, sections: [{ id: "section", title: "结构", text: "红色无口袋开衫", figureIds: figures.map(figure => figure.id) }], figures, warnings: [] };
+        const harness = panelHarness({ selected, documents: [document], replies: [tool("read_document", { document_id: "brief", section_start: 1, section_count: 1 }), { content: "已查阅可见内容，缺失图仍待确认。", toolCalls: [] }] });
+        await harness.submit("整理需求，不更换当前底图");
+        const calls = harness.requests.filter(request => request.type === "agent");
+        expect(calls).toHaveLength(2);
+        const images = (messages: any[]) => messages.flatMap(message => Array.isArray(message.content) ? message.content.filter((part: any) => part.type === "image_url").map((part: any) => part.image_url.url) : []);
+        const initialImages = images(calls[0].args[1]), continuedImages = images(calls[1].args[1]);
+        expect(initialImages).toHaveLength(5);
+        expect(continuedImages).toHaveLength(5);
+        for (const node of selected) expect(continuedImages).toContain(node.metadata?.content);
+        expect(calls[1].args[5].profileContext.focusImageId).toBe(calls[0].args[5].profileContext.focusImageId);
+        expect(calls[1].args[5].profileContext.lockedImageId).toBe(calls[0].args[5].profileContext.lockedImageId);
+        expect(calls[1].args[1].at(-1).content).toBe("整理需求，不更换当前底图");
+        expect(JSON.stringify(calls[1].args[1])).toContain("以下文件图未展示");
+        expect(JSON.stringify(calls[1].args[1])).toContain("不得把未展示图片视为已看");
+        if (count === 4) expect(JSON.stringify(calls[1].args[1])).toContain("仅查阅，未选为出图参考");
+        expect(harness.requests.some(request => ["image", "edit"].includes(request.type))).toBe(false);
+    });
+
+    test("new canvas image defaults reach the task as 2K / high while explicit choices remain unchanged", async () => {
+        for (const quality of ["", "low"]) {
+            const harness = panelHarness({ config: { imageModel: "gpt-image-2.6-flare", quality, imageOptions: quality ? '{"resolution":"1k"}' : "" }, replies: [tool("edit_image", { base: "none", prompt: "红色花瓶" })] });
+            await harness.submit("制作红色花瓶");
+            const image = harness.requests.find(request => request.type === "image");
+            expect(image).toBeDefined();
+            expect(image!.args[0]).toMatchObject({ quality: quality || "high", count: "1" });
+            expect(JSON.parse(image!.args[0].imageOptions).resolution).toBe(quality ? "1k" : "2k");
+        }
+    });
+
+    test.each([false, true])("ordinary image dispatch without confirmed requirements reaches the strict serializer (edit=%s)", async editing => {
+        const selected: CanvasNodeData = { id: "source", type: CanvasNodeType.Image, title: "原图", position: { x: 0, y: 0 }, width: 200, height: 200, metadata: { content: "data:image/png;base64,cmVm", status: "success" } };
+        const draft: CanvasAssistantSession["requirementCard"] = { id: "draft", status: "draft", updatedAt: "now", title: "草稿", documentIds: [], subject: "花瓶", colors: "红色", materials: "陶瓷", must: [], avoid: [], unknowns: [], referenceFigureIds: [], sources: [] };
+        for (const requirementCard of [undefined, draft]) {
+            const harness = panelHarness({ requirementCard, selected: editing ? [selected] : [], replies: [tool("edit_image", { base: editing ? "focus" : "none", prompt: "红色花瓶" })] });
+            await harness.submit("制作红色花瓶");
+            const image = harness.requests.find(request => request.type === (editing ? "edit" : "image"));
+            expect(image).toBeDefined();
+            const options = image!.args[editing ? 4 : 2];
+            expect(options).not.toHaveProperty("imageAgentRequirements");
+            expect(options).not.toHaveProperty("imageAgentDocumentCatalog");
+            expect(harness.messages().flatMap(message => message.attachments || [])).toHaveLength(1);
+        }
+    });
+
     test("workflow cards use server capability identities and binding restrictions, not stale local models", () => {
         const imageId = "d5000000-0000-4000-8000-000000000001";
         const videoId = "d5000000-0000-4000-8000-000000000005";
@@ -644,7 +694,7 @@ describe("canvas assistant submission", () => {
         expect(harness.composer().props.disabled).toBe(false);
         expect(harness.composer().props.generationControls.props.loading).toBe(false);
         expect(harness.capabilityRequests).toEqual(["image", "video"]);
-        expect(harness.composer().props.generationControls.props.settings).toMatchObject({ imageModel: "gpt-image-2", size: "1152x1536", quality: "auto", imageCount: "1" });
+        expect(harness.composer().props.generationControls.props.settings).toMatchObject({ imageModel: "gpt-image-2", size: "1152x1536", quality: "high", imageCount: "1" });
         expect(harness.requests).toHaveLength(0);
     });
 
@@ -789,7 +839,7 @@ describe("canvas assistant submission", () => {
         gate.resolve([{ id: "generated-image", dataUrl: "/api/assets/result/content" }]);
         await submitted;
         expect(harness.requests.map(request => request.type)).toEqual(["agent", "image"]);
-        expect(harness.requests[1].args[0]).toMatchObject({ model: "gpt-image-2", count: "1", size: "1152x1536", quality: "auto" });
+        expect(harness.requests[1].args[0]).toMatchObject({ model: "gpt-image-2", count: "1", size: "1152x1536", quality: "high" });
         expect(harness.messages().flatMap(message => message.attachments || [])).toContainEqual(expect.objectContaining({ id: "generated-image", mediaType: "image", width: 1024, height: 1024 }));
         expect(harness.snapshotRef.current.nodes.find(node => node.type === CanvasNodeType.Image)).toMatchObject({ width: 340, height: 340 });
     });

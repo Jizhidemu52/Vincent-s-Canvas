@@ -27,7 +27,7 @@ export async function collectChatImageReferences(source: ReferenceStore = store)
     const keys = new Set(transientKeys);
     const collect = (value: unknown) => {
         if (!value || typeof value !== "object") return;
-        if ("storageKey" in value && typeof value.storageKey === "string" && value.storageKey.startsWith("image:")) keys.add(value.storageKey);
+        if ("storageKey" in value && typeof value.storageKey === "string" && /^(image|document):/.test(value.storageKey)) keys.add(value.storageKey);
         Object.values(value).forEach(collect);
     };
     await source.iterate((value: unknown, key: string) => {

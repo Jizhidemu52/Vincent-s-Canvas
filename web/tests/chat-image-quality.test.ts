@@ -14,6 +14,10 @@ import { imageTaskParameters } from "@/services/api/image";
 import { assertCreativeChatImageSelection, buildCreativeImageCatalog } from "@/lib/creative-chat";
 import { chatFocusImage } from "@/pages/chat/chat-image-selection";
 import { chatImageTaskSignature, duplicateChatImageTask, completeChatImageTask } from "@/pages/chat/chat-image-tasks";
+import { agentDocumentCatalog } from "@/lib/agent-documents";
+import { confirmedDesignRequirements } from "@/lib/image-agent/document-tools";
+import { imageAgentGenerationParameters } from "@/lib/image-agent-generation-parameters";
+import type { DesignRequirementCard } from "../../shared/image-agent-documents";
 
 const originalModels = useBusinessConfigStore.getState().models;
 afterEach(() => useBusinessConfigStore.setState({ models: originalModels }));
@@ -64,7 +68,7 @@ visit(ast);
 
 test("public standard models expose actual quality tiers, not invented K resolutions", () => {
     const settings = chatImageQualitySettings(imageModelProfile(models[0].modelId, models));
-    expect(settings.quality).toBe("auto");
+    expect(settings.quality).toBe("high");
     expect(settings.options).toEqual([{ value: "auto", label: "自动" }, { value: "high", label: "高画质" }, { value: "medium", label: "标准" }, { value: "low", label: "普通" }]);
     expect(chatImageQualitySettings(imageModelProfile("pixel-model", models)).options.map(option => option.label)).toEqual(["1K", "2K", "4K"]);
     expect(chatImageQualitySettings(imageModelProfile("resolution-model", models)).options.map(option => option.label)).toEqual(["0.5K", "1K", "2K", "4K"]);
@@ -73,16 +77,16 @@ test("public standard models expose actual quality tiers, not invented K resolut
     expect(speed.options).toEqual([{ value: "relax", label: "模型默认" }]);
 });
 
-function sendHarness({ action = "generate", quality = "high", resolution = undefined as string | undefined, size = undefined as string | undefined, sourceSize = { width: 256, height: 256 }, imageModels = models.slice(0, 1), discussion = false, planGate = Promise.resolve() } = {}) {
+function sendHarness({ action = "generate", quality = "high", resolution = undefined as string | undefined, size = undefined as string | undefined, sourceSize = { width: 256, height: 256 }, imageModels = models.slice(0, 1), discussion = false, planGate = Promise.resolve(), requirementCard = undefined as DesignRequirementCard | undefined } = {}) {
     useBusinessConfigStore.setState({ models });
     if (!sendExpression) throw new Error("Actual send handler not found");
-    const initial = { id: "session-a", title: "会话A", imageModelId: models[0].modelId, imageQuality: quality, imageResolution: resolution, imageSize: size, messages: [] as any[] };
+    const initial = { id: "session-a", title: "会话A", imageModelId: models[0].modelId, imageQuality: quality, imageResolution: resolution, imageSize: size, requirementCard, messages: [] as any[] };
     const sessionsRef = { current: [initial] };
     const snapshots: any[] = [];
     const calls: any[] = [];
     const config = { model: "chat-model", imageModel: models[0].modelId, size: "1:1", quality: "4k", imageOptions: '{"resolution":"2k","output_format":"webp"}' };
     const bindings = {
-        ...i18nHarness,
+        ...i18nHarness, confirmedDesignRequirements, agentDocumentCatalog,
         sessionsReady: true, draft: "只改花瓣", attachments: [], readingAttachments: false, sendingRef: { current: false }, placingImageRef: { current: false }, activeSession: initial,
         hydratingMedia: false, isCurrentScope: () => true,
         imageTarget: null, referenceImageIds: [], setImageTarget() {}, setReferenceImageIds() {}, assertCreativeChatImageSelection, buildCreativeImageCatalog, chatFocusImage,
@@ -103,6 +107,7 @@ function sendHarness({ action = "generate", quality = "high", resolution = undef
         imageToDataUrl: async (image: any) => image.dataUrl, message: { warning() {}, error() {} },
     };
     async function submit(cfg: any, options: any) {
+        imageAgentGenerationParameters(options);
         calls.push(structuredClone(cfg));
         options.onSubmissionStarted();
         await options.onSubmitted(["task-quality"]);
@@ -113,6 +118,25 @@ function sendHarness({ action = "generate", quality = "high", resolution = undef
     new Function(...Object.keys(bindings), "exports", code)(...Object.values(bindings), exports);
     return { ...exports, calls, snapshots, sessionsRef, config, initial };
 }
+
+test.each(["generate", "edit"])("%s without a confirmed document card reaches the strict task serializer", async action => {
+    const draft: DesignRequirementCard = { id: "draft", status: "draft", updatedAt: "now", title: "草稿", documentIds: [], subject: "花瓶", colors: "红色", materials: "陶瓷", must: [], avoid: [], unknowns: [], referenceFigureIds: [], sources: [] };
+    for (const requirementCard of [undefined, draft]) {
+        const page = sendHarness({ action, requirementCard });
+        await page.send();
+        expect(page.calls).toHaveLength(1);
+        expect(page.sessionsRef.current[0]?.messages.at(-1).generatedImages).toHaveLength(1);
+    }
+});
+
+test.each(["generate", "edit"])("new chat %s defaults reach the task as 2K / high and exactly one image", async action => {
+    const page = sendHarness({ action, quality: "", imageModels: [models[4]] });
+    await page.send();
+    expect(page.calls).toHaveLength(1);
+    expect(page.calls[0]).toMatchObject({ quality: "high", count: "1" });
+    expect(JSON.parse(page.calls[0].imageOptions).resolution).toBe("2k");
+    expect(page.sessionsRef.current[0]).toMatchObject({ imageQuality: "high", imageResolution: "2k" });
+});
 
 test.each(["generate", "edit"])("session quality reaches the real %s request config and is retained before submission and after success", async action => {
     const page = sendHarness({ action });
@@ -170,7 +194,7 @@ test("an incompatible action fallback blocks submission and changes the availabl
     const page = sendHarness({ action: "edit", imageModels: [{ ...models[0], capabilities: ["generate"] }, { ...models[1], capabilities: ["edit"] }] });
     await page.send();
     expect(page.calls).toEqual([]);
-    expect(page.sessionsRef.current[0]).toMatchObject({ imageModelId: "pixel-model", imageQuality: "1k" });
+    expect(page.sessionsRef.current[0]).toMatchObject({ imageModelId: "pixel-model", imageQuality: "2k" });
     expect(page.sessionsRef.current[0]!.messages.at(-1).content).toContain("已更新可选档位");
     expect(page.sessionsRef.current[0]!.messages.at(-1).pendingImageTask).toBeUndefined();
 });
@@ -296,7 +320,7 @@ test("the actual image-model picker resets incompatible settings and respects ba
     useBusinessConfigStore.setState({ models });
     const page = qualitySelect({ model: models[4], control: "model", resolution: "4k" });
     page.select.props.onChange(models[6].modelId);
-    expect(page.sessions[0]).toMatchObject({ imageModelId: models[6].modelId, imageQuality: "1k", imageResolution: undefined });
+    expect(page.sessions[0]).toMatchObject({ imageModelId: models[6].modelId, imageQuality: "2k", imageResolution: undefined });
     expect(page.sessions[1]).toEqual({ id: "b", imageQuality: "low" });
     expect(qualitySelect({ control: "model", bound: true }).select.props.disabled).toBe(true);
     expect(qualitySelect({ control: "model", bound: false }).select.props.disabled).toBe(false);

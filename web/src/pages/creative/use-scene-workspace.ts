@@ -142,7 +142,7 @@ async function storeSceneResult(item: SceneResult, source: Awaited<ReturnType<ty
 
 /** Dedicated scene state; never mutates the original image workbench's settings. */
 export function useSceneWorkspace(sceneId: string) {
-    const effectiveConfig = useEffectiveConfig();
+    const effectiveConfig = useEffectiveConfig("image");
     const configRef = useRef(effectiveConfig);
     configRef.current = effectiveConfig;
     const user = useUserStore(state => state.user);

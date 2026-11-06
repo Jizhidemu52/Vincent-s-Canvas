@@ -21,6 +21,17 @@ describe("node-owned generation editor", () => {
         expect(state.references[0].storageKey).toBe("purple.png");
         expect(state.model).toBe("m");
     });
+    test("quick result selection keeps its archive but starts a blank ordinary edit with the designer model", () => {
+        const node: CanvasNodeData = { ...result, metadata: { ...result.metadata, quickImageAction: "remove-background", model: "private-admin-model" } };
+        const before = structuredClone(node);
+        const state = canvasGenerationEditorState(node, [original, node], [], defaultConfig);
+        expect(state.prompt).toBe("");
+        expect(state.model).toBe(defaultConfig.imageModel || defaultConfig.model);
+        expect(node).toEqual(before);
+        const edited = { ...node, metadata: { ...node.metadata, draftPrompt: "my next edit", draftModel: "my-edit-model" } };
+        expect(canvasGenerationEditorState(edited, [edited], [], defaultConfig)).toMatchObject({ prompt: "my next edit", model: "my-edit-model" });
+        expect(edited.metadata.generationRecord).toBe(archive);
+    });
     test("removed-source reference remains an editable input and survives an editor roundtrip", () => {
         const state = canvasGenerationEditorState(result, [result], [], defaultConfig);
         expect(state.references).toHaveLength(1);

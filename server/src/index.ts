@@ -163,7 +163,7 @@ app.use(
   "/api/admin/model-configuration",
   requireAdminSession,
   requireAccountReady,
-  createModelConfigurationRouter(db, config),
+  createModelConfigurationRouter(db, config, { cache, creditPolicy: readCreditsEnabled, maxInflightTasks: config.USER_MAX_INFLIGHT_TASKS }),
 );
 app.use("/api/tasks/events", requireSession, requireAccountReady, createTasksEventsRouter(taskEvents));
 app.use(

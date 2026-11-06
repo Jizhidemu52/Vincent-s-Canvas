@@ -198,6 +198,7 @@ export function AgentChatComposer({
     imageTarget,
     mentionImages = [],
     onMentionImage,
+    attachmentAccept = "image/*",
 }: {
     prompt: string;
     attachments?: CanvasAgentChatAttachment[];
@@ -211,6 +212,7 @@ export function AgentChatComposer({
     onSubmit: () => void;
     onStop?: () => void;
     onAddFiles?: (files: FileList | File[] | null) => void | Promise<void>;
+    attachmentAccept?: string;
     onRemoveAttachment?: (id: string) => void;
     left?: ReactNode;
     generationControls?: ReactNode;
@@ -282,12 +284,12 @@ export function AgentChatComposer({
                     <div data-testid="canvas-agent-composer-actions" className={`flex shrink-0 items-center justify-end gap-1${generationControls ? " col-start-2 row-start-2" : ""}`}>
                         {onAddFiles ? (
                             <>
-                                <input ref={fileInputRef} hidden type="file" accept="image/*" multiple onChange={(event) => {
+                                <input ref={fileInputRef} hidden type="file" accept={attachmentAccept} multiple onChange={(event) => {
                                     void onAddFiles(event.target.files);
                                     event.target.value = "";
                                 }} />
-                                <Tooltip title={t("上传图片")}>
-                                    <Button type="text" shape="circle" className="!h-11 !w-11 !min-w-11 !p-0" aria-label={t("添加参考图")} disabled={sending || disabled} style={{ color: theme.node.muted }} icon={<ImagePlus className="size-5" />} onClick={() => fileInputRef.current?.click()} />
+                                <Tooltip title={t(attachmentAccept === "image/*" ? "上传图片" : "上传图片、PDF、Word、表格或文本")}>
+                                    <Button type="text" shape="circle" className="!h-11 !w-11 !min-w-11 !p-0" aria-label={t(attachmentAccept === "image/*" ? "添加参考图" : "上传设计文件或参考图")} disabled={sending || disabled} style={{ color: theme.node.muted }} icon={<ImagePlus className="size-5" />} onClick={() => fileInputRef.current?.click()} />
                                 </Tooltip>
                             </>
                         ) : null}

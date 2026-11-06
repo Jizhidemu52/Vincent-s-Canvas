@@ -54,6 +54,10 @@ test("demo exposes the expanded Mark catalog, enforces reference limits, and sub
     expect(images.every(model => model.modelId === model.id)).toBe(true);
     expect(JSON.stringify(models)).not.toMatch(/fake-mark-http-key|127\.0\.0\.1|baseUrl|apiKey/);
     expect((await request("/api/admin/mark-image-provider", "PUT", { apiKey: "must-not-replace-server-key" })).status).toBe(403);
+    for (const [method, suffix] of [["GET", ""], ["PUT", "/hd-upscale"], ["POST", "/remove-background/test"]]) {
+      expect((await request(`/api/admin/model-configuration/quick-images${suffix}`, method, method === "GET" ? undefined : {})).status).toBe(403);
+    }
+    expect((await request("/api/auth/login", "POST", { identifier: "admin", password: "unused", portal: "admin" })).status).toBe(404);
 
     const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
     const upload = await request("/api/assets/upload-request", "POST", { filename: "reference-limit.png", mimeType: "image/png", byteSize: png.byteLength }).then(response => response.json());
@@ -113,7 +117,9 @@ test("demo exposes the expanded Mark catalog, enforces reference limits, and sub
     const quick = (await quickResponse.json()).task;
     expect(quick.modelConfigId).toBe(mai.id);
     expect(quick.parameters).not.toHaveProperty("size"); expect(quick.parameters).not.toHaveProperty("resolution");
+    expect(quick.parameters.quickImage).toMatchObject({ action: "remove-background", recipeVersion: 1, configurationVersion: 0 });
     expect((await request("/api/tasks", "POST", quickInput).then(response => response.json())).task.id).toBe(quick.id);
+    expect((await request("/api/tasks", "POST", { ...quickInput, prompt: "changed quick retry must return existing" }).then(response => response.json())).task.id).toBe(quick.id);
     for (let attempt = 0; attempt < 100 && submissions.length < 6; attempt++) await Bun.sleep(50);
     expect(submissions).toHaveLength(6);
     expect(submissions[5]).toMatchObject({ model: "mai-image-2.6-flash", n: 1, web_grounding: false });

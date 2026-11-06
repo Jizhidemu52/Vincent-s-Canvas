@@ -16,7 +16,7 @@ await db.waitReady;
 try {
   await db.exec('SET search_path=public');
   await db.exec('CREATE TABLE schema_migrations(name text PRIMARY KEY,applied_at timestamptz NOT NULL DEFAULT now())');
-  for (const name of (await readdir(resolve(root, 'server/src/migrations'))).filter(n => n.endsWith('.sql') && !n.startsWith('048_')).sort()) {
+  for (const name of (await readdir(resolve(root, 'server/src/migrations'))).filter(n => n.endsWith('.sql') && n < '048_usage_daily_facts.sql').sort()) {
     await db.exec(await readFile(resolve(root, 'server/src/migrations', name), 'utf8'));
     await db.query('INSERT INTO schema_migrations(name) VALUES($1)', [name]);
   }

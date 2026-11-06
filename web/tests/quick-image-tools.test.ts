@@ -1,6 +1,19 @@
 import { expect, test } from "bun:test";
 import { createImageTaskRequests } from "../src/services/api/generation-tasks";
 import { navigationModuleKey, navigationTools } from "../src/constant/navigation-tools";
+import { quickImageReferenceFileError } from "../src/lib/quick-image-tools";
+
+test("quick references use processing limits without a frontend model selection", () => {
+    for (const type of ["image/png", "image/jpeg", "image/webp"]) {
+        expect(quickImageReferenceFileError({ type, size: 50 * 1024 * 1024 })).toBeUndefined();
+    }
+    for (const size of [0, -1, NaN, Infinity, 50 * 1024 * 1024 + 1]) {
+        expect(quickImageReferenceFileError({ type: "image/png", size })).toBeDefined();
+    }
+    for (const type of ["image/svg+xml", "image/gif", "text/html"]) {
+        expect(quickImageReferenceFileError({ type, size: 500 })).toBeDefined();
+    }
+});
 
 test("one-click tools submit only their server action, not a prompt, model or user parameters", () => {
     for (const action of ["remove-background", "hd-upscale"] as const) {

@@ -32,3 +32,11 @@ test("keeps an intentionally cleared edit draft and does not invent a prompt for
 test("uses the generation prompt only when a new node has no saved draft", () => {
     expect(canvasNodePromptDraft({ metadata: { prompt: "new image prompt" } })).toBe("new image prompt");
 });
+
+test("a marked quick result never prefills its managed recipe, but explicit edits stay editable", () => {
+    const metadata = { quickImageAction: "remove-background" as const, prompt: "private admin recipe" };
+    expect(canvasNodePromptDraft({ metadata })).toBe("");
+    expect(canvasNodePromptDraft({ metadata: { ...metadata, draftPrompt: "my next edit" } })).toBe("my next edit");
+    expect(canvasNodePromptDraft({ metadata: { ...metadata, draftPrompt: "" } })).toBe("");
+    expect(metadata.prompt).toBe("private admin recipe");
+});

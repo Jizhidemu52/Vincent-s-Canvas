@@ -1,13 +1,14 @@
 import { createHash } from "node:crypto";
 import { promptCompilationRequestSchema, type PromptCompilationRequest, type PromptInput, type AdminPromptCompilation } from "../../shared/prompt-contracts";
 import { PromptRecipeStore, promptHash } from "./prompt-recipe-store";
-import { parseOptimizedPrompt, assertNoPromptRuleLeak, assertVideoMotionTimeline, PromptOptimizationError, specifiedPromptText } from "./prompt-safety";
+import { parseOptimizedPrompt, assertPromptOutputContent, assertVideoMotionTimeline, PromptOptimizationError, specifiedPromptText } from "./prompt-safety";
 import { readProviderSubmissionDiagnostics } from "./provider-submission-transport";
 import { prepareImageEditInput, ImageEditInputError } from "./image-edit-input";
 import { isDefinitiveSubmissionRejection } from "./provider-submission-policy";
 import { videoMotionLabels } from "../../shared/video-motion-options";
 import { ChatProtocolError } from "./routes/chat";
 import { chatUpstreamFailureReasons } from "./chat-upstream-failure";
+import { promptImageReferenceLimit } from "./image-task-policy";
 
 export type PromptActor = { id: string; role: string; departmentId?: string | null; groupId?: string | null; groupRole?: string | null };
 export type PromptSource = { bytes: Uint8Array; mimeType: string; previewDataUrl: string };
@@ -59,13 +60,14 @@ export class PromptCompiler {
     if (!optimizerId) throw new PromptOptimizationError("PROMPT_MODEL_NOT_CONFIGURED", "管理员尚未绑定此配方的扩写模型，未提交生成", 503);
     const optimizer = await this.runtime.resolveOptimizer(optimizerId);
     const isVideo = request.promptInput.scene === "video-motion";
-    if (request.sourceUrls.length > (isVideo ? 30 : 8)) throw new PromptOptimizationError("PROMPT_REFERENCE_LIMIT", `提示词优化最多支持 ${isVideo ? 30 : 8} 张输入图片（含蒙版），未提交生成`);
-    const sources: PromptSource[] = [];
-    for (const url of request.sourceUrls) sources.push(await this.runtime.readSource(actor, url));
     const maskIndex = request.promptInput.maskReferenceIndex;
-    if (request.promptInput.hasMask !== (maskIndex !== undefined) || (maskIndex !== undefined && maskIndex >= sources.length)) {
+    if (request.promptInput.hasMask !== (maskIndex !== undefined) || (maskIndex !== undefined && maskIndex >= request.sourceUrls.length)) {
       throw new PromptOptimizationError("PROMPT_MASK_INVALID", "优化选区与实际蒙版不一致，请重新绘制后提交");
     }
+    const referenceLimit = isVideo ? 30 : promptImageReferenceLimit(target);
+    if (request.sourceUrls.length - Number(maskIndex !== undefined) > referenceLimit) throw new PromptOptimizationError("PROMPT_REFERENCE_LIMIT", `当前模型的提示词优化最多支持 ${referenceLimit} 张参考图（不含独立蒙版或标注层），未提交生成`);
+    const sources: PromptSource[] = [];
+    for (const url of request.sourceUrls) sources.push(await this.runtime.readSource(actor, url));
     const mask = maskIndex === undefined ? undefined : sources[maskIndex];
     if (mask && mask.mimeType !== "image/png") throw new PromptOptimizationError("PROMPT_MASK_INVALID", "选区蒙版必须为 PNG 图片");
     if (mask) {
@@ -83,13 +85,18 @@ export class PromptCompiler {
     const userText = request.promptInput.userText || (typeof fields.instruction === "string" ? fields.instruction : "");
     const requiredText = specifiedPromptText(userText, fields);
     const language = isVideo ? "zh" : request.promptInput.outputLanguage ?? active.version.outputLanguage;
+    const modelRules = active.version.modelOverrides[target.id] ?? active.version.modelOverrides[target.modelId] ?? "";
+    const system = [active.version.systemPrompt, active.version.fieldTemplate, modelRules].filter(Boolean).join("\n\n");
+    const outputOptions = { video: isVideo, reverse: request.promptInput.scene === "reverse-prompt", referenceCount: references.length, userText: `${userText}\n${JSON.stringify(fields)}`, language, requiredText };
     const inputHash = promptHash({ version: active.version.id, target: target.fingerprint, optimizer: optimizer.fingerprint, adminTest,
       input: { ...normalInput(request.promptInput), outputLanguage: language }, references: references.map((source, index) => ({ hash: sourceHash(source), role: roles[index] ?? "" })),
       mask: mask ? sourceHash(mask) : null });
     const checkedResult = (result: AdminPromptCompilation) => {
-      // Stored success is not a bypass: older or concurrently reused results
-      // must satisfy the same timeline contract as a new planner response.
-      if (isVideo && result.status === "success") assertVideoMotionTimeline(result.prompt ?? "", fields.duration);
+      // Stored success is not a bypass, including older unvalidated fallbacks.
+      if (result.status === "success") {
+        assertPromptOutputContent(result.prompt ?? "", [system], outputOptions);
+        if (isVideo) assertVideoMotionTimeline(result.prompt ?? "", fields.duration);
+      }
       return result;
     };
     if (prior) {
@@ -102,8 +109,6 @@ export class PromptCompiler {
     });
     if (!claim.execute) return checkedResult(await this.waitForResult(claim.id, actor.id));
     const started = performance.now();
-    const modelRules = active.version.modelOverrides[target.id] ?? active.version.modelOverrides[target.modelId] ?? "";
-    const system = [active.version.systemPrompt, active.version.fieldTemplate, modelRules].filter(Boolean).join("\n\n");
     const payload = { recipe: active.recipe.key, target_model: target.modelId,
       model_style: isVideo ? "video" : request.promptInput.scene === "reverse-prompt" ? "natural" : /midjourney/i.test(target.modelId) ? "tags" : request.promptInput.mode === "edit" ? "edit" : "natural",
       output_language: language, mode: request.promptInput.mode, fields, user_text: userText,
@@ -117,7 +122,7 @@ export class PromptCompiler {
       const result = await optimizer.invoke(system, content);
       rawResponse = result.content;
       usage = result.usage;
-      const output = parseOptimizedPrompt(result.content, [system], { video: isVideo, reverse: request.promptInput.scene === "reverse-prompt", referenceCount: references.length, userText: `${userText}\n${JSON.stringify(fields)}`, language, requiredText });
+      const output = parseOptimizedPrompt(result.content, [system], outputOptions);
       if (isVideo) assertVideoMotionTimeline(output.prompt, fields.duration);
       await this.store.finish(claim.id, "success", { ...output, optimized: true, rawResponse, latencyMs: Math.round(performance.now() - started), ...usageFields(usage, optimizer.estimatedRmbCost) });
     } catch (error) {
@@ -136,9 +141,8 @@ export class PromptCompiler {
       if (!uncertain && active.recipe.failurePolicy === "fallback" && active.version.fallbackPrompt.trim() && failure.code !== "PROMPT_OUTPUT_REJECTED") {
         const prompt = active.version.fallbackPrompt.replaceAll("{{user_text}}", userText).replaceAll("{{fields}}", JSON.stringify(fields));
         try {
-          assertNoPromptRuleLeak(prompt, [system]);
-          if (prompt.length > 20_000) throw failure;
-          const fallback = isVideo ? parseOptimizedPrompt(prompt, [system], { video: true, referenceCount: references.length, userText, language, requiredText }) : { prompt };
+          const fallbackRaw = isVideo ? prompt : JSON.stringify(outputOptions.reverse ? { prompt, summary_zh: "" } : { prompt, avoid: [], keep_text: [] });
+          const fallback = parseOptimizedPrompt(fallbackRaw, [system], outputOptions);
           if (isVideo) assertVideoMotionTimeline(fallback.prompt, fields.duration);
           await this.store.finish(claim.id, "success", { ...metrics, ...fallback, optimized: false, message: "未优化：管理员已显式启用基础模板" });
         } catch (fallbackError) {

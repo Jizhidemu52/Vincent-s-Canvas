@@ -25,9 +25,11 @@ type ImageSettingsPanelProps = {
     compact?: boolean;
     /** Wide canvas dialog: readable cards while preserving the legacy compact layout. */
     spacious?: boolean;
+    /** Image workspace dialog: common controls grouped, advanced settings collapsed. */
+    dialog?: boolean;
 };
 
-export function ImageSettingsPanel({ config, onConfigChange, onConfigNormalize = onConfigChange, theme, showTitle = true, className = "", maxCount: maximum, profile: suppliedProfile, referenceCount = 0, uploadContextKey = "", compact = false, spacious = false }: ImageSettingsPanelProps) {
+export function ImageSettingsPanel({ config, onConfigChange, onConfigNormalize = onConfigChange, theme, showTitle = true, className = "", maxCount: maximum, profile: suppliedProfile, referenceCount = 0, uploadContextKey = "", compact = false, spacious = false, dialog = false }: ImageSettingsPanelProps) {
     useUiLocale();
     const [snapToStep, setSnapToStep] = useState(false);
     const [sizeNotice, setSizeNotice] = useState("");
@@ -93,22 +95,7 @@ export function ImageSettingsPanel({ config, onConfigChange, onConfigNormalize =
         input.value = String(next[index]);
         onConfigChange("size", next.join("x"));
     };
-    return (
-        <div className={`image-parameters${spacious ? " ip-spacious" : ""} ${className}`} style={{ "--ip-text": theme.node.text, "--ip-muted": theme.node.muted, "--ip-border": theme.node.stroke, "--ip-soft": theme.node.fill, "--ip-panel": theme.toolbar.panel } as CSSProperties}
-            onMouseDown={event => event.stopPropagation()}>
-            {showTitle ? <div className="ip-title">{uiText("图像设置")}</div> : null}
-            {sizeNotice ? <p role="status" className="mb-2 text-xs" style={{ color: theme.node.muted }}>{sizeNotice}</p> : null}
-            {automaticReferenceSize ? <p role="status" className="mb-2 text-xs leading-5" style={{ color: theme.node.muted }}>{uiText(automaticReferenceSizeNotice)}</p> : null}
-            {profile.kind === "mai-image" ? <p className="text-xs leading-5" style={{ color: theme.node.muted }}>{uiText("固定输出 PNG，不支持透明背景参数与蒙版。")}</p> : null}
-            {profile.kind === "midjourney-blend" ? <>
-                <div className="ip-row"><span className="ip-label">{uiText("比例预设")}</span><label className="ip-select">
-                    <select aria-label={uiText("比例预设")} value={options.dimensions || "SQUARE"} onChange={event => updateOption("dimensions", event.target.value)}>
-                        <option value="SQUARE">{uiText("方形 1:1")}</option><option value="PORTRAIT">{uiText("竖向 2:3")}</option><option value="LANDSCAPE">{uiText("横向 3:2")}</option>
-                    </select><ChevronDown size={13} aria-hidden />
-                </label></div>
-                <p className="text-xs leading-5" style={{ color: theme.node.muted }}>{uiText("选择预设会同步宽高比；实际提交的 size 优先于 dimensions，可在下方改为自由比例。")}</p>
-            </> : null}
-            {!compact && profile.verified && !automaticReferenceSize ? <><div className="ip-row">
+    const commonControls = !compact && profile.verified && !automaticReferenceSize ? <><div className="ip-row">
                 <span className="ip-label"><Ratio size={15} />{uiText("宽高比")}</span>
                 <label className="ip-select">
                     <select data-usage-control="size" aria-label={uiText("宽高比")} value={normalized.size} onChange={event => onConfigChange("size", event.target.value)}>
@@ -118,7 +105,7 @@ export function ImageSettingsPanel({ config, onConfigChange, onConfigNormalize =
                     <ChevronDown size={13} aria-hidden />
                 </label>
             </div>
-            <p className="text-xs leading-5" style={{ color: theme.node.muted }}>{uiText("仅影响下次 AI 生成，不改变已有图片。")}{gif ? null : uiText(profile.tip)} {uiText("高画质、大尺寸可能增加费用与耗时。")}</p>
+            <p className="ip-basic-note text-xs leading-5" style={{ color: theme.node.muted }}>{uiText("仅影响下次 AI 生成，不改变已有图片。")}{gif || dialog ? null : uiText(profile.tip)} {uiText("高画质、大尺寸可能增加费用与耗时。")}</p>
             {profile.resolutions.length && !gif ? <div className="ip-row">
                 <span className="ip-label">{uiText("清晰度 / 分辨率")}</span>
                 <label className="ip-select">
@@ -141,7 +128,26 @@ export function ImageSettingsPanel({ config, onConfigChange, onConfigNormalize =
                     {profile.qualities.map(value => <button key={value} data-usage-control={profile.kind === "gemini" ? "resolution" : "quality"} data-usage-value={value} type="button" aria-pressed={normalized.quality === value} onClick={() => onConfigChange("quality", value)}>{imageQualityLabel(value)}</button>)}
                 </div>}
             </div>}
-            </> : !profile.verified ? <p className="py-2 text-xs leading-5 opacity-60">{uiText(profile.tip)}</p> : null}
+            </> : !profile.verified ? <p className="py-2 text-xs leading-5 opacity-60">{uiText(profile.tip)}</p> : null;
+    return (
+        <div className={`image-parameters${spacious ? " ip-spacious" : ""}${dialog ? " ip-dialog" : ""} ${className}`} style={{ "--ip-text": theme.node.text, "--ip-muted": theme.node.muted, "--ip-border": theme.node.stroke, "--ip-soft": theme.node.fill, "--ip-panel": theme.toolbar.panel } as CSSProperties}
+            onMouseDown={event => event.stopPropagation()}>
+            {showTitle ? <div className="ip-title">{uiText("图像设置")}</div> : null}
+            {sizeNotice ? <p role="status" className="mb-2 text-xs" style={{ color: theme.node.muted }}>{sizeNotice}</p> : null}
+            {automaticReferenceSize ? <p role="status" className="mb-2 text-xs leading-5" style={{ color: theme.node.muted }}>{uiText(automaticReferenceSizeNotice)}</p> : null}
+            {profile.kind === "mai-image" ? <p className="text-xs leading-5" style={{ color: theme.node.muted }}>{uiText("固定输出 PNG，不支持透明背景参数与蒙版。")}</p> : null}
+            {profile.kind === "midjourney-blend" ? <>
+                <div className="ip-row"><span className="ip-label">{uiText("比例预设")}</span><label className="ip-select">
+                    <select aria-label={uiText("比例预设")} value={options.dimensions || "SQUARE"} onChange={event => updateOption("dimensions", event.target.value)}>
+                        <option value="SQUARE">{uiText("方形 1:1")}</option><option value="PORTRAIT">{uiText("竖向 2:3")}</option><option value="LANDSCAPE">{uiText("横向 3:2")}</option>
+                    </select><ChevronDown size={13} aria-hidden />
+                </label></div>
+                <p className="text-xs leading-5" style={{ color: theme.node.muted }}>{uiText("选择预设会同步宽高比；实际提交的 size 优先于 dimensions，可在下方改为自由比例。")}</p>
+            </> : null}
+            {dialog && commonControls ? <section className="ip-basics" aria-label={uiText("常用参数")}>
+                <h3 className="ip-basics-title">{uiText("常用参数")}</h3>
+                <div className="ip-basics-grid">{commonControls}</div>
+            </section> : commonControls}
             {!automaticReferenceSize && profile.customSize && spacious ? <section className="ip-section ip-size-section" aria-labelledby={`${resolutionNoticeId}-size-title`}>
                 <div className="ip-section-heading">
                     <span className="ip-section-icon"><Ratio size={19} aria-hidden /></span>
@@ -196,10 +202,10 @@ export function ImageSettingsPanel({ config, onConfigChange, onConfigNormalize =
                     })}
                 </div>
             </section> : fields.length ? <details className="ip-details" open={compact || undefined}>
-                <summary>{uiText("全部高级参数")}<ChevronDown size={13} /></summary>
+                <summary>{uiText(dialog ? "高级参数" : "全部高级参数")}<ChevronDown size={13} /></summary>
                 <p className="text-xs leading-5" style={{ color: theme.node.muted }}>{uiText("留空使用渠道默认；只提交当前模型支持的字段。")}</p>
-                <div className="flex flex-col gap-3 py-2">
-                    {fields.map(field => <label key={field.key} className="flex flex-col gap-1 text-xs">
+                <div className={dialog ? "ip-dialog-options" : "flex flex-col gap-3 py-2"}>
+                    {fields.map(field => <label key={field.key} data-image-field={field.key} className="flex flex-col gap-1 text-xs">
                         <span>{uiText(field.label)}</span>
                         {field.type === "image" ? <ImageMarkupInput key={`${markupContext}|${options[field.key] || ""}`} contextKey={markupContext} value={options[field.key] || ""} referenceCount={referenceCount} onChange={value => updateOption(field.key, value)} /> : field.options || field.type === "boolean" ? <select aria-label={uiText(field.label)} value={options[field.key] || ""} className="w-full rounded border px-2 py-1.5" style={{ background: theme.node.fill, color: theme.node.text, borderColor: theme.node.stroke }} onChange={event => updateOption(field.key, event.target.value)}>
                             <option value="">{uiText("渠道默认")}</option>

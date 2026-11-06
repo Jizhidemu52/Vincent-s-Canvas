@@ -11,7 +11,7 @@ export function canvasOpsDeleteContent(ops: CanvasAgentOp[] = []) {
 }
 export function canvasToolCallsRequireConfirmation(calls: ResponseToolCall[], confirmWrites: boolean) {
     return calls.some(call => {
-        if (["look_at_images", "canvas_get_state", "canvas_get_selection", "canvas_export_snapshot", "edit_image", "generate_video"].includes(call.function.name)) return false;
+        if (["look_at_images", "read_document", "propose_requirements", "canvas_get_state", "canvas_get_selection", "canvas_export_snapshot", "edit_image", "generate_video"].includes(call.function.name)) return false;
         const input = toolArguments(call);
         return confirmWrites || call.function.name === "canvas_delete_nodes" || (Array.isArray(input.ops) && canvasOpsDeleteContent(input.ops));
     });

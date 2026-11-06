@@ -1,6 +1,7 @@
 import { resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { beginChatImageWrite } from "@/services/chat-history-references";
 import type { ChatSession } from "./chat-types";
+import { mapAgentDocumentMedia } from "@/lib/image-agent/document-media";
 
 type Media = { dataUrl?: string; storageKey?: string; mimeType?: string };
 type MediaDependencies = { upload: typeof uploadImage; resolve: typeof resolveImageUrl };
@@ -46,12 +47,15 @@ export function createChatMedia(dependencies: MediaDependencies = { upload: uplo
     return {
         persist,
         hydrate,
-        hydrateSession(session: ChatSession, assertCurrent: () => void) { return mapSession(session, (image) => hydrate(image, assertCurrent)); },
+        async hydrateSession(session: ChatSession, assertCurrent: () => void) {
+            return { ...await mapSession(session, (image) => hydrate(image, assertCurrent)), ...(session.documents ? { documents: await Promise.all(session.documents.map(document => mapAgentDocumentMedia(document, "hydrate", assertCurrent))) } : {}) };
+        },
         async serializeSession(session: ChatSession) {
-            return mapSession(session, async (image) => {
+            const savedSession = await mapSession(session, async (image) => {
                 const saved = await persist(image);
                 return saved.storageKey ? { ...saved, dataUrl: "" } : saved;
             });
+            return { ...savedSession, ...(session.documents ? { documents: await Promise.all(session.documents.map(document => mapAgentDocumentMedia(document, "serialize"))) } : {}) };
         },
     };
 }

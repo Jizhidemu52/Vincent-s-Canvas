@@ -215,8 +215,8 @@ test("switching the mounted chat image picker updates GPT, Nano2.1, and official
     try {
         const initial = await page.settle();
         expect(select(initial, "出图模型").props.value).toBe("mark-gpt-uuid");
-        expect(select(initial, "图片分辨率").props.value).toBe("1k");
-        expect(select(initial, "图片质量").props.value).toBe("auto");
+        expect(select(initial, "图片分辨率").props.value).toBe("2k");
+        expect(select(initial, "图片质量").props.value).toBe("high");
         select(initial, "图片分辨率").props.onChange("4k");
         select(initial, "图片质量").props.onChange("max");
         const changed = await page.settle();
@@ -228,7 +228,7 @@ test("switching the mounted chat image picker updates GPT, Nano2.1, and official
         expect(select(nano, "出图模型").props.value).toBe("mark-nano-uuid");
         expect(select(nano, "图片分辨率")).toBeUndefined();
         expect(select(nano, "图片质量")).toBeUndefined();
-        expect(select(nano, "图片清晰度").props.value).toBe("1k");
+        expect(select(nano, "图片清晰度").props.value).toBe("2k");
         expect(elements(select(nano, "图片清晰度")).filter(element => element.type === "option").map(element => element.props.value)).toEqual(["1k", "2k", "4k"]);
         select(nano, "出图模型").props.onChange("mark-nano-official-uuid");
         const nanoOfficial = await page.settle();
@@ -237,7 +237,7 @@ test("switching the mounted chat image picker updates GPT, Nano2.1, and official
         expect(select(nanoOfficial, "图片分辨率")).toBeUndefined();
         expect(select(nanoOfficial, "图片质量")).toBeUndefined();
         const quality = select(nanoOfficial, "图片清晰度");
-        expect(quality.props.value).toBe("1k");
+        expect(quality.props.value).toBe("2k");
         expect(elements(quality).filter(element => element.type === "option").map(element => element.props.value)).toEqual(["0.5k", "1k", "2k", "4k"]);
         quality.props.onChange("0.5k");
         const halfK = await page.settle();

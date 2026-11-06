@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { CanvasNodePromptPanel } from "@/components/canvas/canvas-node-prompt-panel";
+import { CanvasGenerationRecordDetails } from "@/components/canvas/canvas-generation-record-details";
 import { defaultConfig, useConfigStore } from "@/stores/use-config-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { useModuleStore } from "@/stores/use-module-store";
@@ -54,6 +55,28 @@ test("incomplete old records warn and expose recovery instead of allowing a diff
     expect(markup).toContain(">恢复历史输入</button>");
     const generate = markup.match(/<button\b[^>]*aria-label="生成"[^>]*>/)?.[0] || "";
     expect(generate).toContain('disabled=""');
+});
+
+test("quick records hide managed prompt and model without blocking an explicit ordinary draft", () => {
+    const node: CanvasNodeData = { ...result, metadata: { ...result.metadata, quickImageAction: "hd-upscale", model: "private-admin-model", prompt: "private admin recipe",
+        generationRecord: { ...result.metadata!.generationRecord!, prompt: "private admin recipe", inputPrompt: "private admin input", parameters: { ...result.metadata!.generationRecord!.parameters, model: "private-admin-model" } } } };
+    const before = structuredClone(node);
+    const markup = render(node);
+    expect(markup).not.toContain('aria-label="图片生成档案"');
+    expect(markup).not.toContain("private admin");
+    expect(markup).not.toContain("private-admin-model");
+    expect(markup).toMatch(/<textarea\b[^>]*><\/textarea>/);
+    expect(render({ ...node, metadata: { ...node.metadata, draftPrompt: "my ordinary edit" } })).toContain("my ordinary edit");
+    expect(node).toEqual(before);
+});
+
+test("an ordinary parent's derivative list describes quick actions without revealing their recipe", () => {
+    const child: CanvasNodeData = { ...result, id: "quick", title: "quick image", metadata: { ...result.metadata, quickImageAction: "remove-background", prompt: "private recipe",
+        generationRecord: { ...result.metadata!.generationRecord!, prompt: "private recipe" } } };
+    const markup = renderToStaticMarkup(<CanvasGenerationRecordDetails node={result} draftPrompt="editable input" derivatives={[child]} onLocate={() => undefined} />);
+    expect(markup).toContain("compiled prompt");
+    expect(markup).toContain("一键去背景");
+    expect(markup).not.toContain("private recipe");
 });
 
 test("shared targets keep inherited input and execution while showing their own archive", () => {

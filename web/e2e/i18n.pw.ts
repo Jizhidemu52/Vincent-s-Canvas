@@ -94,7 +94,7 @@ test("image settings keep raw model parameters and the prompt when switching lan
     const prompt = page.locator("textarea").first();
     await expect(prompt).toBeVisible();
     await prompt.fill("我的中文设计要求：保存、透明、1024x1024");
-    await page.getByRole("button", { name: "调整", exact: true }).click();
+    await page.getByRole("button", { name: "切换生成图片模型", exact: true }).click();
     const size = page.locator('select[data-usage-control="size"]').filter({ visible: true }).first();
     await expect(size).toBeVisible();
     await size.selectOption("1024x1024");
@@ -102,18 +102,18 @@ test("image settings keep raw model parameters and the prompt when switching lan
         key: element.getAttribute("data-usage-control"), value: element instanceof HTMLSelectElement ? element.value : element.getAttribute("data-usage-value"),
     })));
     const before = await parameterState();
-    await page.getByRole("dialog").getByRole("button", { name: "关闭", exact: true }).click();
+    await page.getByRole("dialog", { name: /^切换生成图片模型/ }).getByRole("button", { name: "关闭模型设置", exact: true }).click();
     await changeLanguage(page);
     await expect(page.locator("html")).toHaveAttribute("lang", "en");
-    await page.getByRole("button", { name: "Adjust", exact: true }).click();
+    await page.getByRole("button", { name: "Switch image generation model", exact: true }).click();
     await expect(size).toHaveAttribute("aria-label", "Aspect ratio");
     await expect(prompt).toHaveValue("我的中文设计要求：保存、透明、1024x1024");
     expect(await parameterState()).toEqual(before);
     await expect(page.locator('[data-usage-control="model"]').first()).toContainText("出图模型");
     await page.screenshot({ path: info.outputPath("image-settings-English.png") });
-    await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
+    await page.getByRole("dialog", { name: /^Switch image generation model/ }).getByRole("button", { name: "Close model settings", exact: true }).click();
     await changeLanguage(page);
-    await page.getByRole("button", { name: "调整", exact: true }).click();
+    await page.getByRole("button", { name: "切换生成图片模型", exact: true }).click();
     await expect(prompt).toHaveValue("我的中文设计要求：保存、透明、1024x1024");
     expect(await parameterState()).toEqual(before);
     expect(api.submissions).toHaveLength(0);

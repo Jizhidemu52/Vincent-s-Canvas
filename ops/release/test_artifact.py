@@ -32,9 +32,26 @@ class ArtifactContracts(unittest.TestCase):
         self.assertIn("ops/release/deploy.py", artifact.PACKAGE_FILES)
         self.assertIn("ops/baota/gate.py", artifact.PACKAGE_FILES)
         self.assertFalse(any(".env" in path or "output" in path or "recipe" in path for path in artifact.PACKAGE_FILES))
-        self.assertEqual([path for path in artifact.PACKAGE_FILES if path.startswith("server/src/migrations/")], ["server/src/migrations/048_usage_daily_facts.sql"])
+        self.assertEqual([path for path in artifact.PACKAGE_FILES if path.startswith("server/src/migrations/")], ["server/src/migrations/048_usage_daily_facts.sql", "server/src/migrations/049_quick_image_configurations.sql"])
         for name in ["usage-048.py", "usage-048-state.sql", "usage-048-catalog.json"]:
             self.assertIn("ops/release/" + name, artifact.PACKAGE_FILES)
+        for name in ["quick-image-049.py", "quick-image-049-catalog.json"]:
+            self.assertIn("ops/release/" + name, artifact.PACKAGE_FILES)
+
+    def test_049_payload_only_accepts_exact_reviewed_final_migration_and_hash(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "server/src/migrations/049_quick_image_configurations.sql"
+            path.parent.mkdir(parents=True)
+            path.write_bytes(b"reviewed 049 SQL")
+            value = {"migrations": [{"name": path.name, "sha256": digest(path.read_bytes())}]}
+            artifact.verify_049_payload(root, value)
+            path.write_bytes(b"altered")
+            with self.assertRaisesRegex(Rejected, "049_SQL_MIGRATION_HASH_MISMATCH"):
+                artifact.verify_049_payload(root, value)
+            for rows in [[], value["migrations"] * 2, value["migrations"] + [{"name": "050_unreviewed.sql", "sha256": "0" * 64}]]:
+                with self.assertRaisesRegex(Rejected, "FIXED_049_MIGRATION_REQUIRED"):
+                    artifact.verify_049_payload(root, {"migrations": rows})
 
     def test_048_payload_is_bound_to_migration_manifest_not_just_file_inventory(self):
         with tempfile.TemporaryDirectory() as directory:

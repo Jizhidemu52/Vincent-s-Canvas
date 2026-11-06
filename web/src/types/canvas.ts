@@ -293,6 +293,8 @@ export type CanvasAssistantSession = {
     newCreation?: boolean;
     focusRevision?: number;
     imageAgentRegion?: import("@/lib/image-agent/mask").ImageAgentRegionSelection;
+    documents?: import("../../../shared/image-agent-documents").AgentDocument[];
+    requirementCard?: import("../../../shared/image-agent-documents").DesignRequirementCard;
 };
 
 export type ConnectionHandle = {

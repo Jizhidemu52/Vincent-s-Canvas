@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>文件解析验证</title></head>
+<body><label>需求文件 <input id="document-file" type="file"></label><pre id="status">ready</pre><div id="previews"></div>
+<script type="module">
+import { parseChatAttachment } from "/src/lib/chat-attachments.ts";
+document.querySelector("#document-file").addEventListener("change", async event => {
+    document.querySelector("#status").textContent = "parsing";
+    window.attachment = undefined;
+    try {
+        window.attachment = await parseChatAttachment(event.target.files[0]);
+        document.querySelector("#status").textContent = "complete";
+        document.querySelector("#previews").replaceChildren(...window.attachment.document.figures.map(figure => {
+            const img = document.createElement("img"); img.src = figure.dataUrl; img.alt = figure.label; img.style.maxWidth = "480px"; return img;
+        }));
+    } catch (error) { document.querySelector("#status").textContent = String(error); }
+});
+</script></body></html>

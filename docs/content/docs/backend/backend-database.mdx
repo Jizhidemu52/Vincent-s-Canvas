@@ -71,6 +71,14 @@ description: 正式数据存储边界、员工画布文档、公司设计灵感�
 
 `credit_reservations.price_snapshot` 记录 `toolKey`、`configurationVersion`、两项可空覆盖价与最终总价，批量任务在本次提交中共用同一份单项快照。源板块已知时提示词价格估算应用相同覆盖规则。此变更不重新启用部署已关闭的积分；独立对话与画布聊天分别配置且仍不新增聊天计费。`module_flags` 的总入口关闭也阻止子模块；本地工具没有服务端 AI 计费接口。
 
+## 一键图片工具独立配置
+
+`049_quick_image_configurations.sql` 仅新增 `quick_image_configurations` 空表，不插入或覆盖业务配置。`action` 主键仅接受 `remove-background`、`hd-upscale`；`model_config_id` 引用现有模型，`prompt` 保存 1–4000 字符的管理员指令，`parameters` 为 JSON 对象，`configuration_version` 为正整数，另保存 `updated_by` 与 `updated_at`。应用按紧凑 JSON 限制参数为 4000 字符，数据库上限 8000 用于兼容 JSONB 的空格展开。无记录时返回既有默认配置与版本 0。
+
+仅超级管理员可读取 `GET /api/admin/model-configuration/quick-images`、通过 `PUT /:action` 保存或通过 `POST /:action/test` 测试未保存草稿。保存使用 `expectedVersion` 比较并交换、按操作事务锁和同事务审计；只接受已启用且支持单图编辑的 APIMart 标准模型及其实际支持参数。草稿测试不写配置表，沿用任务队列、原图所有权校验、单次提交与现有额度策略，是真实模型调用而非免费预览。
+
+普通入口只提供操作与本人原图，服务端一次读取并冻结模型、提示词、参数、版本后受理；后续配置变化不修改已有任务。去背景的灰阶蒙版合成约束独立于可编辑提取指令，最终颜色来自原图。049 使用固定独立运维入口先新增空表并恢复旧服务，再由原零数据库变更发布器切换镜像；不得调用或启用 048 统计处理。目标迁移、配置持久化和真实调试仍以发布回执为准。
+
 ## 素材内容校验与复用
 
 `044_image_cost_precision.sql` 将 `model_configs`、`pricing_rule_versions`、`credit_reservations`、`tasks`、`generation_history`、`asset_events` 的 `rmb_cost` 与板块的 `rmb_cost_override` 扩为 `numeric(16,6)`，仅初始化指定 APIMart 图片模型的当前人民币成本，不修改旧金额、价格快照、员工积分或 Provider 凭据。新图片价格快照增加可选 `imageCost.rmbPerImage`；成功结算保留原计划值，另记 `settledQuantity`、`settledTotalRmb`，并在同一事务更新预占记录和任务人民币金额。没有此字段的旧快照继续沿用原价。

@@ -11,6 +11,7 @@ import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/a
 import { ImageSettingsPanel } from "@/components/image-settings-panel";
 import { ModelPicker } from "@/components/model-picker";
 import { useToolConfig } from "@/hooks/use-tool-config";
+import { useGenerationDraft } from "@/hooks/use-generation-draft";
 import { useImageDrop } from "@/hooks/use-image-drop";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { deploymentFeatures } from "@/lib/deployment-features";
@@ -27,7 +28,7 @@ import { uploadImage } from "@/services/image-storage";
 import { loadSeamlessPreview, type StitchPreviewImage } from "./seamless-preview";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
-import { useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
+import { useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
@@ -60,11 +61,13 @@ export function SeamlessStitchPage() {
     const estimate = useBusinessConfigStore((state) => state.estimate);
     const models = useBusinessConfigStore((state) => state.models);
     const tools = useBusinessConfigStore((state) => state.tools);
-    const baseConfig = useEffectiveConfig();
-    const updateConfig = useConfigStore((state) => state.updateConfig);
+    const defaults = useEffectiveConfig("image");
+    const [draftConfig, setDraftConfig, configReady] = useGenerationDraft<Partial<AiConfig>>("seamless-stitch:settings", {});
+    const baseConfig = { ...defaults, ...draftConfig };
+    const updateConfig = useCallback(<K extends keyof AiConfig>(key: K, value: AiConfig[K]) => setDraftConfig(current => ({ ...current, [key]: value })), [setDraftConfig]);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
-    const selectedModel = resolveCapabilityModel(baseConfig, "image", models, baseConfig.imageModel || baseConfig.model);
+    const selectedModel = draftConfig.imageModel || draftConfig.model || resolveCapabilityModel(defaults, "image", models, defaults.imageModel || defaults.model);
     const config = useToolConfig({ ...baseConfig, model: selectedModel, imageModel: selectedModel, count: "1" }, "seamless-stitch");
     const addAsset = useAssetStore((state) => state.addAsset);
     const [source, setSource] = useState<ReferenceImage | null>(null);
@@ -205,7 +208,7 @@ export function SeamlessStitchPage() {
     };
 
     const runStitch = async () => {
-        if (submitLockRef.current || sourceReadRef.current || imageDrop.reading) return;
+        if (!configReady || submitLockRef.current || sourceReadRef.current || imageDrop.reading) return;
         const activeSource = sourceRef.current || source;
         if (!activeSource) {
             message.error(uiText("请先上传一张需要无缝拼接的图片"));
@@ -373,7 +376,7 @@ export function SeamlessStitchPage() {
                         <ModelPicker toolKey="seamless-stitch" config={config} value={config.model} onChange={(value) => updateConfig("imageModel", value)} capability="image" modelsSource="server" fullWidth disabled={running} className="h-10 rounded-lg" onMissingConfig={() => openConfigDialog(false)} />
                     </div>
                     {usesImageSettings ? <fieldset disabled={running} className="mt-4 min-w-0 border-0 p-0">
-                        <ImageSettingsPanel config={config} referenceCount={source ? 1 : 0} onConfigChange={updateConfig} theme={theme} maxCount={1} showTitle={false} className="space-y-4" />
+                        <ImageSettingsPanel config={config} referenceCount={source ? 1 : 0} onConfigChange={updateConfig} onConfigNormalize={(key, value) => { if (configReady) updateConfig(key, value); }} theme={theme} maxCount={1} showTitle={false} className="space-y-4" />
                         <p className="mt-3 text-xs leading-5" style={{ color: theme.node.muted }}>{uiText("按参考图生成四方连续平铺的花型单元，保留原图元素、配色与风格。此模式不使用内部工作流的切割、重绘或步数参数；生成后请检查平铺接缝。")}</p>
                     </fieldset> : <><div className="mt-5">
                         <span className="mb-2 block text-sm font-semibold">{uiText("花型预设")}</span>
@@ -407,7 +410,7 @@ export function SeamlessStitchPage() {
                             {quotaBlocked ? <div className="mt-1 text-red-500">{uiText("额度不足，无法提交任务。")}</div> : null}
                         </div>
                         {!seamlessModel ? <p className="mb-3 text-xs leading-5 text-stone-500">{uiText("此工具尚未配置，管理员启用无缝拼接模型后即可使用。")}</p> : null}
-                        <Button type="primary" size="large" block icon={<Grid2x2 className="size-4" />} loading={running} disabled={!source || (deploymentFeatures.creditsEnabled && !estimatedUsage.configured) || !seamlessModel || running || readingSource || imageDrop.reading || quotaBlocked} onClick={() => void runStitch()}>
+                        <Button type="primary" size="large" block icon={<Grid2x2 className="size-4" />} loading={running} disabled={!configReady || !source || (deploymentFeatures.creditsEnabled && !estimatedUsage.configured) || !seamlessModel || running || readingSource || imageDrop.reading || quotaBlocked} onClick={() => void runStitch()}>
                             {uiText("开始无缝拼接")}</Button>
                     </div>
                 </section>

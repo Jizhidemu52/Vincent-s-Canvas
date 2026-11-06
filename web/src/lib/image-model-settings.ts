@@ -81,7 +81,7 @@ export function nearestImageSize(size: string, choices: readonly string[]) {
     return valid.length ? valid.reduce((best, value) => Math.abs(Math.log(ratio(value)! / target)) < Math.abs(Math.log(ratio(best)! / target)) ? value : best) : choices[0]!;
 }
 
-/** Match an editing base to a supported size, allowing only whole-pixel rounding. */
+/** Prefer a matching preset or legal exact dimensions; adaptive fallback never resamples the source. */
 export function imageSizeForSource(source: { width: number; height: number }, profile: ReturnType<typeof imageModelProfile>) {
     if (!Number.isFinite(source.width) || !Number.isFinite(source.height) || source.width <= 0 || source.height <= 0) throw new Error("底图尺寸无法读取，图片任务尚未提交。请重新添加底图。");
     const target = source.width / source.height;
@@ -97,6 +97,13 @@ export function imageSizeForSource(source: { width: number; height: number }, pr
     });
     const matching = candidates.filter(candidate => candidate.matches).sort((a, b) => a.difference - b.difference)[0];
     if (matching) return matching.size;
+    const pixels = `${source.width}x${source.height}`;
+    if (profile.customSize && /^[1-9]\d*x[1-9]\d*$/.test(pixels) && !imageModelSettingsError(pixels, profile)) return pixels;
+    const ratio = `${source.width}:${source.height}`;
+    if (profile.customAspect && /^[1-9]\d*:[1-9]\d*$/.test(ratio) && !imageModelSettingsError(ratio, profile)) return ratio;
+    // Arbitrary original dimensions need not be a valid output size. The provider's
+    // adaptive mode is supported, but does not promise identical output pixels.
+    if (profile.sizes.includes("auto")) return "auto";
     const nearest = candidates.length ? nearestImageSize(`${source.width}:${source.height}`, candidates.map(candidate => candidate.size)) : "";
     throw new Error(`当前模型不能精确保留底图画幅（${source.width} × ${source.height}）。请在出图设置明确选择${nearest ? ` ${nearest} 等支持的尺寸，或更换模型` : "其他模型"}；图片任务尚未提交。`);
 }

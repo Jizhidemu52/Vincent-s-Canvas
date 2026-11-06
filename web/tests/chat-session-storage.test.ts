@@ -12,6 +12,8 @@ import { createChatBranch } from "@/pages/chat/chat-message-actions";
 import { assertCreativeChatImageSelection, buildCreativeImageCatalog } from "@/lib/creative-chat";
 import { chatFocusImage } from "@/pages/chat/chat-image-selection";
 import { chatImageTaskSignature, completeChatImageTask, duplicateChatImageTask } from "@/pages/chat/chat-image-tasks";
+import { agentDocumentCatalog } from "@/lib/agent-documents";
+import { confirmedDesignRequirements } from "@/lib/image-agent/document-tools";
 
 function memoryStore() {
     const values = new Map<string, unknown>();
@@ -136,7 +138,7 @@ function pageSendHarness({ ready = true, failWrite = false, failWriteAt = 0, mod
         return taskResult;
     };
     const bindings = {
-        ...i18nHarness,
+        ...i18nHarness, confirmedDesignRequirements, agentDocumentCatalog,
         sessionsReady: ready, draft: memory.draft, attachments: memory.attachments, isSending: false, readingAttachments: false, hydratingMedia: false,
         imageTarget: null as { id: string; mode: "edit" | "original"; sessionId: string } | null, referenceImageIds: [] as string[], buildCreativeImageCatalog, assertCreativeChatImageSelection, chatFocusImage,
         regionSelection: null, setRegionSelection() {}, chatImageTaskSignature, completeChatImageTask, duplicateChatImageTask,
@@ -404,7 +406,7 @@ test.each(["generate", "edit"])("the actual creative send handler submits one %s
     expect(session.messages.at(-1).parentMessageId).toBe(session.messages[0].id);
     expect(session.messages.at(-1).content).toBe("只改花瓣，保留其余设计");
     const prepared = (page.snapshots[1] as any[])[0].messages.at(-1).pendingImageTask;
-    expect(prepared).toMatchObject({ requestId: page.taskOptions[0]!.requestId, prompt: "完整要求", modelId: "gpt-image-2.5-flare", quality: "auto", action, parentMessageId: session.messages[0].id, parentId: "old-task:0", workId: "original", workNote, referenceImageIds: ["original"], focusRevision: 1, explanation: "只改花瓣，保留其余设计" });
+    expect(prepared).toMatchObject({ requestId: page.taskOptions[0]!.requestId, prompt: "完整要求", modelId: "gpt-image-2.5-flare", quality: "high", action, parentMessageId: session.messages[0].id, parentId: "old-task:0", workId: "original", workNote, referenceImageIds: ["original"], focusRevision: 1, explanation: "只改花瓣，保留其余设计" });
     expect(prepared.signature).toBe(chatImageTaskSignature(prepared));
     expect((page.snapshots[2] as any[])[0].messages.at(-1).pendingImageTask).toEqual({ ...prepared, taskId: "task-result" });
     expect(page.events.slice(0, page.events.indexOf(`${action}-task`)).filter((item) => item === "save")).toHaveLength(2);

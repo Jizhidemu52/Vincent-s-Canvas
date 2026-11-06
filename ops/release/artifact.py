@@ -20,6 +20,8 @@ PACKAGE_FILES = [
     "ops/baota/gate.py", "ops/baota/site-proxy.conf",
     "ops/release/usage-048.py", "ops/release/usage-048-state.sql", "ops/release/usage-048-catalog.json",
     "server/src/migrations/048_usage_daily_facts.sql",
+    "ops/release/quick-image-049.py", "ops/release/quick-image-049-catalog.json",
+    "server/src/migrations/049_quick_image_configurations.sql",
 ]
 
 
@@ -27,9 +29,17 @@ def verify_048_payload(root, manifest):
     """Ship one reviewed schema preparation, never a general SQL directory."""
     relative = "server/src/migrations/048_usage_daily_facts.sql"
     rows = [row for row in manifest["migrations"] if row["name"] == Path(relative).name]
-    require(len(rows) == 1 and manifest["migrations"][-1]["name"] == Path(relative).name, "FIXED_048_MIGRATION_REQUIRED")
+    require(len(rows) == 1 and manifest["migrations"][-1]["name"] in [Path(relative).name, "049_quick_image_configurations.sql"], "FIXED_048_MIGRATION_REQUIRED")
     sql = root / relative
     require(sql.is_file() and not sql.is_symlink() and digest_file(sql) == rows[0]["sha256"], "PACKAGED_048_SQL_MIGRATION_HASH_MISMATCH")
+
+
+def verify_049_payload(root, manifest):
+    relative = "server/src/migrations/049_quick_image_configurations.sql"
+    rows = [row for row in manifest["migrations"] if row["name"] == Path(relative).name]
+    require(len(rows) == 1 and manifest["migrations"][-1]["name"] == Path(relative).name, "FIXED_049_MIGRATION_REQUIRED")
+    sql = root / relative
+    require(sql.is_file() and not sql.is_symlink() and digest_file(sql) == rows[0]["sha256"], "PACKAGED_049_SQL_MIGRATION_HASH_MISMATCH")
 
 
 def repository_commit(root):
@@ -79,6 +89,7 @@ def package(root, candidate, verification, image_archive, destination):
     require(repository_commit(root) == candidate["commit"], "PACKAGE_SOURCE_CHANGED")
     require(migrations(root) == candidate["migrations"], "PACKAGE_MIGRATIONS_CHANGED")
     verify_048_payload(root, candidate)
+    verify_049_payload(root, candidate)
     manifest = copy.deepcopy(candidate); manifest["verification"] = verification
     validate_manifest(manifest)
     require(image_archive.is_file() and not image_archive.is_symlink() and image_archive.stat().st_size > 0, "IMAGE_ARCHIVE_REQUIRED")
@@ -99,6 +110,7 @@ def package(root, candidate, verification, image_archive, destination):
         output.write("".join(f"{sha}  {path}\n" for path, sha in rows))
     verify_package(destination)
     verify_048_payload(destination, manifest)
+    verify_049_payload(destination, manifest)
     archive = destination.with_suffix(destination.suffix + ".tar")
     require(not archive.exists(), "PACKAGE_ARCHIVE_ALREADY_EXISTS")
     with tarfile.open(archive, "x") as tar:

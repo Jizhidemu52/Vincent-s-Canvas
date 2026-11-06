@@ -22,9 +22,9 @@ async function setup(page: Page) {
     return compilations;
 }
 
-async function drawer(page: Page) {
-    await page.getByRole("button", { name: "调整", exact: true }).click();
-    return page.getByRole("dialog");
+async function openSettings(page: Page) {
+    await page.getByRole("button", { name: "切换生成图片模型", exact: true }).click();
+    return page.getByRole("dialog", { name: /^切换生成图片模型/ });
 }
 async function selectStandalone(page: Page, settings: Locator, model: typeof mai) {
     await settings.locator('[data-usage-control="model"][role="combobox"]').click();
@@ -49,12 +49,12 @@ for (const model of [flare, sunburst, mai]) {
             await page.goto(`/image${editing ? "?tool=image-edit" : ""}`);
             const prompt = page.getByRole("textbox", { name: "图像提示词", exact: true });
             await prompt.fill("蓝色亚麻连衣裙，保留材质");
-            const settings = await drawer(page);
+            const settings = await openSettings(page);
             await selectStandalone(page, settings, model);
             await settings.getByRole("combobox", { name: "清晰度 / 分辨率", exact: true }).selectOption("2k");
             if (model !== mai) await settings.getByRole("combobox", { name: "图片质量", exact: true }).selectOption("high");
             else await expect(settings.getByRole("combobox", { name: "图片质量", exact: true })).toHaveCount(0);
-            await settings.locator(".ant-drawer-close").click();
+            await settings.getByRole("button", { name: "关闭模型设置", exact: true }).click();
             if (editing) {
                 await addReference(prompt);
                 await expect(page.getByRole("img", { name: "reference-1.png", exact: true })).toBeVisible();
@@ -83,31 +83,32 @@ test("standalone explicit model changes clear incompatible 4K options and old op
     await page.goto("/image");
     const prompt = page.getByRole("textbox", { name: "图像提示词", exact: true });
     await prompt.fill("保留轮廓的服装产品图");
-    let settings = await drawer(page);
-    await expect(settings.locator('[data-usage-control="model"]')).toContainText(flare.name);
+    let settings = await openSettings(page);
+    await expect(settings.locator('[data-usage-control="model"]')).toContainText("GPT Image 2.6 Flare");
     await settings.getByRole("combobox", { name: "清晰度 / 分辨率", exact: true }).selectOption("4k");
-    await settings.getByText("全部高级参数", { exact: true }).click();
+    await settings.getByText("高级参数", { exact: true }).click();
     await settings.getByRole("combobox", { name: "背景", exact: true }).selectOption("transparent");
     await settings.getByRole("combobox", { name: "输出格式", exact: true }).selectOption("webp");
-    await settings.locator(".ant-drawer-close").click();
+    await settings.getByRole("button", { name: "关闭模型设置", exact: true }).click();
     await page.getByRole("button", { name: "一键优化提示词", exact: true }).click();
     await expect(prompt).toHaveValue(optimized);
-    settings = await drawer(page);
+    settings = await openSettings(page);
     await selectStandalone(page, settings, mai);
     await expect(settings.getByRole("combobox", { name: "清晰度 / 分辨率", exact: true })).toHaveValue("1k");
+    await settings.getByText("高级参数", { exact: true }).click();
     await expect(settings.getByRole("combobox", { name: "背景", exact: true })).toHaveCount(0);
     await settings.getByRole("combobox", { name: "联网参考", exact: true }).selectOption("false");
     await page.screenshot({ path: testInfo.outputPath("mai-text-settings.png"), animations: "disabled" });
-    await settings.locator(".ant-drawer-close").click();
+    await settings.getByRole("button", { name: "关闭模型设置", exact: true }).click();
     await expect(prompt).toHaveValue(optimized);
     await addReference(prompt);
     await expect(page.getByRole("img", { name: "reference-1.png", exact: true })).toBeVisible();
     await expect(page.getByText("aplmart-mai2.6-flash · 模型决定尺寸 · 约 100 万像素", { exact: true })).toBeVisible();
-    settings = await drawer(page);
+    settings = await openSettings(page);
     await expect(settings.getByRole("combobox", { name: "清晰度 / 分辨率", exact: true })).toHaveCount(0);
     await expect(settings.getByRole("status").filter({ hasText: "图生图尺寸由模型决定，约 100 万像素" })).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath("mai-reference-settings.png"), animations: "disabled" });
-    await settings.locator(".ant-drawer-close").click();
+    await settings.getByRole("button", { name: "关闭模型设置", exact: true }).click();
     await page.getByRole("button", { name: "开始生成", exact: true }).click();
     await expect(page.getByRole("button", { name: "放入画布", exact: true })).toBeVisible();
     expect(compilations).toHaveLength(1); expect(api.submissions).toHaveLength(1);

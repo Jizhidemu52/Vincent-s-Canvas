@@ -34,7 +34,8 @@ import { promptHash } from "../prompt-recipe-store";
 import { withTransaction } from "../db-transaction";
 import { assertVideoMotionPolicy } from "../video-motion-input";
 import { claimBatchAdmission, fenceBatchAdmission, findBatchForSubmission, finishBatchAdmission, readBatchAdmission, recordBatchAdmissionFailure, type BatchAdmissionToken } from "../batch-admission";
-import { prepareQuickImageTask } from "../quick-image-tools";
+import { prepareConfiguredQuickImageTask } from "../quick-image-configuration";
+import type { preflightStoredQuickImageTask } from "../stored-quick-image-preflight";
 
 const actionSchema = z.enum(["pause", "resume", "cancel"]);
 
@@ -51,7 +52,7 @@ const batchStatsJoin = `LEFT JOIN LATERAL (SELECT
   COALESCE(SUM(t.rmb_cost) FILTER (WHERE t.status='success'),0)::float8 AS consumed_rmb_cost
   FROM tasks t WHERE t.batch_id=b.id) stats ON true`;
 
-export function createTasksRouter(db: Database, cache: Cache, creditPolicy: boolean | (() => Promise<boolean>) = true, videoPreflight = preflightStoredVideoTask, options: { maxInflightTasks?: number; promptCompiler?: PromptCompiler } = {}) {
+export function createTasksRouter(db: Database, cache: Cache, creditPolicy: boolean | (() => Promise<boolean>) = true, videoPreflight = preflightStoredVideoTask, options: { maxInflightTasks?: number; promptCompiler?: PromptCompiler; quickImagePreflight?: typeof preflightStoredQuickImageTask } = {}) {
   const router = Router();
   router.use((_request, response, next) => {
     const json = response.json.bind(response);
@@ -59,9 +60,9 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
     next();
   });
   const prepare = async <T extends ReturnType<typeof singleSchema.parse>>(actor: AuthenticatedRequest["auth"], input: T) => {
-    input = prepareQuickImageTask(input);
-    if (input.parameters.quickImageAction) return { ...input, optimized: false };
     readImageAgentGenerationProfile(input.parameters, input.operationType);
+    input = await prepareConfiguredQuickImageTask(db, input);
+    if (input.parameters.quickImageAction) return { ...input, optimized: false };
     validateImagePromptExclusions(input);
     const finish = async <P extends T>(prepared: P) => {
       if (!isImagePromptOperation(prepared.operationType) || !prepared.parameters.negative_prompt) return applyImagePromptExclusions(prepared);
@@ -171,7 +172,7 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
           .json({ error: "FORBIDDEN", message: "设计师只能提交普通任务" });
         return;
       }
-      if (options.promptCompiler) {
+      if (options.promptCompiler || input.parameters.quickImageAction) {
         const existing = (await db.query(`SELECT ${taskSelect} FROM tasks t JOIN users u ON u.id=t.user_id WHERE t.request_id=$1 AND t.user_id=$2`, [input.requestId, actor.id])).rows[0];
         if (existing) { response.status(200).json({ task: existing }); return; }
       }
@@ -182,7 +183,7 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
           maxInflightTasks: options.maxInflightTasks,
           userId: actor.id,
           departmentId: actor.departmentId,
-        }, videoPreflight);
+        }, videoPreflight, options.quickImagePreflight);
       response.status(201).json({ task: { ...task, prompt: prepared.prompt, parameters: prepared.parameters, userInput: "userInput" in prepared ? prepared.userInput : null, optimized: prepared.optimized, ...("summaryZh" in prepared ? { summaryZh: prepared.summaryZh } : {}) } });
     } catch (error) {
       if (error instanceof BillingError) {

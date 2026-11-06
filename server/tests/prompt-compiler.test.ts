@@ -7,7 +7,7 @@ import { importPromptRecipes } from "../src/prompt-recipe-import";
 import { publicPromptCompilation } from "../src/prompt-recipe-store";
 import { preparePromptTaskInput } from "../src/prompt-task-input";
 import { parseOptimizedPrompt, specifiedPromptText, assertNoPromptRuleLeak } from "../src/prompt-safety";
-import type { PromptCompilationRequest, PromptRecipeVersionContent } from "../../shared/prompt-contracts";
+import { promptScenes, type PromptCompilationRequest, type PromptRecipeVersionContent } from "../../shared/prompt-contracts";
 
 const closers: Array<() => void> = [];
 afterEach(() => { closers.splice(0).forEach(close => close()); });
@@ -17,7 +17,7 @@ const actor = { id: "employee-a", role: "designer", departmentId: null };
 const request = (patch: Partial<PromptCompilationRequest> = {}): PromptCompilationRequest => ({ requestId: randomUUID(), modelConfigId: "target", toolKey: "image", sourceUrls: [], promptInput: { scene: "text-to-style", fields: { material: "linen" }, userText: "A blue linen shirt", mode: "generate", hasMask: false, referenceRoles: [] }, ...patch });
 async function fixture(invoke: PromptOptimizer["invoke"] = async () => ({ content: good })) {
   const db = sqlitePromptRecipeStore(":memory:"); closers.push(db.close);
-  for (const key of ["text-to-style", "free-optimize", "batch-optimize", "reverse-prompt", "local-restyle"]) {
+  for (const key of promptScenes) {
     await db.store.ensure(key, { name: key, enabled: true, modelConfigId: "optimizer", failurePolicy: "stop" });
     const version = await db.store.saveVersion(key, content(), "admin");
     await db.store.activate(key, version.id);
@@ -32,12 +32,45 @@ async function fixture(invoke: PromptOptimizer["invoke"] = async () => ({ conten
 }
 
 describe("prompt compiler lifecycle", () => {
+  test.each([
+    ["gpt-image-2.6-flare", 16], ["gpt-image-2.6-sunburst", 16], ["gpt-image-2.5-flare", 16],
+    ["gpt-image-2", 15], ["gemini-3.1-flash-image-preview", 14], ["gemini-nano-banana-2.1", 16],
+    ["mai-image-2.6-flash", 5], ["grok-imagine-image-2.0", 3], ["midjourney", 16], ["midjourney-blend", 4], ["unknown-image-model", 8],
+  ])("%s accepts its actual reference budget %i and rejects overflow before source reads or optimization", async (modelId, limit) => {
+    const f = await fixture();
+    f.runtime.resolveTarget = async () => ({ id: "target", modelId, protocol: "apimart", fingerprint: modelId });
+    let reads = 0;
+    const read = f.runtime.readSource;
+    f.runtime.readSource = async (...args) => { reads++; return read(...args); };
+    const first = request({ sourceUrls: Array.from({ length: limit }, (_, index) => `reference-${index}`) });
+    expect((await f.compiler.compile(actor, first)).status).toBe("success");
+    expect(reads).toBe(limit); expect(f.calls).toHaveLength(1);
+    const excess = { ...first, requestId: randomUUID(), sourceUrls: [...first.sourceUrls, "overflow"] };
+    await expect(f.compiler.compile(actor, excess)).rejects.toMatchObject({ code: "PROMPT_REFERENCE_LIMIT" });
+    expect(reads).toBe(limit); expect(f.calls).toHaveLength(1);
+    expect(await f.store.byRequest(actor.id, excess.requestId)).toBeNull();
+  });
+  test("a GPT2.6 mask is separate from 16 ordinary references and preserves compilation reuse", async () => {
+    const f = await fixture();
+    f.runtime.resolveTarget = async () => ({ id: "target", modelId: "gpt-image-2.6-flare", protocol: "apimart", fingerprint: "target" });
+    const bytes = await readFile(new URL("../../docs/manual/prompt-optimization/testing/fixtures/flower.png", import.meta.url));
+    f.runtime.readSource = async () => ({ bytes, mimeType: "image/png", previewDataUrl: "data:image/png;base64," + bytes.toString("base64") });
+    const sourceUrls = Array.from({ length: 17 }, (_, index) => `source-${index}`);
+    const first = request({ sourceUrls, promptInput: { ...request().promptInput, scene: "local-restyle", mode: "edit", hasMask: true, maskReferenceIndex: 1, referenceRoles: Array(16).fill("reference") } });
+    const compiled = await f.compiler.compile(actor, first);
+    const prepared = await preparePromptTaskInput(f.compiler, actor, { ...first, requestId: randomUUID(), operationType: "inpaint", prompt: "old", parameters: { inputArchive: { maskReferenceIndex: 1 } }, promptInput: { ...first.promptInput, compilationId: compiled.id } });
+    expect(prepared.promptCompilationId).toBe(compiled.id); expect(prepared.sourceUrls).toEqual(sourceUrls); expect(f.calls).toHaveLength(1);
+    const sent = (f.calls[0] as Parameters<PromptOptimizer["invoke"]>)[1];
+    expect(JSON.parse((sent[0] as { text: string }).text).images).toHaveLength(16);
+    expect(sent.filter(part => part.type === "input_image")).toHaveLength(17);
+  });
   test("optimized GPT2.6 markup submission reuses the same compilation without sending the overlay to the optimizer", async () => {
     const f = await fixture();
     f.runtime.resolveTarget = async () => ({ id: "target", modelId: "gpt-image-2.6-flare", protocol: "apimart", fingerprint: "target" });
-    const first = request({ sourceUrls: ["original", "style"], promptInput: { ...request().promptInput, referenceRoles: ["subject", "style"] } });
+    const references = Array.from({ length: 16 }, (_, index) => `reference-${index}`);
+    const first = request({ sourceUrls: references, promptInput: { ...request().promptInput, referenceRoles: references.map((_, index) => index ? "style" : "subject") } });
     const compiled = await f.compiler.compile(actor, first);
-    const sources = ["original", "overlay", "style"];
+    const sources = [references[0]!, "overlay", ...references.slice(1)];
     const input = { ...first, requestId: randomUUID(), operationType: "image_generation", prompt: "ignored", sourceUrls: sources,
       parameters: { inputArchive: { markupReferenceIndex: 1 } }, promptInput: { ...first.promptInput, compilationId: compiled.id } };
     const prepared = await preparePromptTaskInput(f.compiler, actor, input);
@@ -149,6 +182,28 @@ describe("prompt compiler lifecycle", () => {
     const rejected = await f.compiler.compile(actor, request());
     expect(rejected.status).toBe("failed"); expect(rejected.errorCode).toBe("PROMPT_OUTPUT_REJECTED");
   });
+  test.each(["A plain shirt without its requested lettering.", "Image 2: preserve the lettering NOVA 73."])("image fallback cannot bypass required lettering or reference checks: %s", async fallbackPrompt => {
+    const f = await fixture(async () => ({ content: "bad" }));
+    await f.store.update("free-optimize", { ...(await f.store.get("free-optimize")), failurePolicy: "fallback" });
+    const version = await f.store.saveVersion("free-optimize", content({ fallbackPrompt }), "admin");
+    await f.store.activate("free-optimize", version.id);
+    const input = request({ sourceUrls: ["source"], promptInput: { ...request().promptInput, scene: "free-optimize", mode: "edit", userText: "保留文字‘NOVA 73’" } });
+    const result = await f.compiler.compile(actor, input);
+    expect(result.status).toBe("failed"); expect(result.errorCode).toBe("PROMPT_OUTPUT_REJECTED");
+    await expect(preparePromptTaskInput(f.compiler, actor, { ...input, requestId: randomUUID(), prompt: "ignored", operationType: "inpaint", parameters: {}, promptInput: { ...input.promptInput, compilationId: result.id } })).rejects.toMatchObject({ code: "PROMPT_OUTPUT_REJECTED" });
+    expect(f.calls).toHaveLength(1);
+  });
+  test("cached image success is rechecked without paid resubmission", async () => {
+    const f = await fixture(async () => ({ content: JSON.stringify({ prompt: "Image 1: keep lettering NOVA 73.", avoid: [], keep_text: ["NOVA 73"] }) }));
+    const input = request({ sourceUrls: ["source"], promptInput: { ...request().promptInput, scene: "free-optimize", mode: "edit", userText: "保留文字‘NOVA 73’" } });
+    const compiled = await f.compiler.compile(actor, input);
+    const read = f.store.getCompilation.bind(f.store);
+    for (const [prompt, code] of [["A plain shirt.", "PROMPT_TEXT_NOT_PRESERVED"], ["Image 2: keep NOVA 73.", "PROMPT_REFERENCE_INVALID"]]) {
+      f.store.getCompilation = async (...args) => { const result = await read(...args); return result ? { ...result, prompt, optimized: false } : result; };
+      await expect(preparePromptTaskInput(f.compiler, actor, { ...input, requestId: randomUUID(), prompt: "ignored", operationType: "inpaint", parameters: {}, promptInput: { ...input.promptInput, compilationId: compiled.id } })).rejects.toMatchObject({ code });
+    }
+    expect(f.calls).toHaveLength(1);
+  });
   test("unclassified transport errors are uncertain, while definite HTTP rejection and preflight stay failed", async () => {
     for (const [error, expected] of [
       [new TypeError("network failed"), "uncertain"],
@@ -189,6 +244,36 @@ describe("prompt compiler lifecycle", () => {
     expect(prepared.optimized).toBe(true);
     await expect(preparePromptTaskInput(f.compiler, actor, { ...input, promptInput: { ...request().promptInput, mode: "edit" } })).rejects.toMatchObject({ code: "PROMPT_OPERATION_INVALID" });
     expect(f.calls).toHaveLength(1);
+  });
+});
+
+describe("all prompt scenes through generation admission and cache reuse", () => {
+  test.each([...promptScenes])("%s preserves the visible prompt, roles and literal text without duplicate optimization", async scene => {
+    const f = await fixture(async (_system, input) => {
+      const payload = JSON.parse((input[0] as { text: string }).text);
+      expect(payload.recipe).toBe(scene);
+      const prompt = scene === "video-motion" ? "0-5秒：镜头缓慢推近图片1，保持商品及 NOVA 73 字样不变。" : `${payload.images.length ? "Image 1: " : ""}preserve the product and the literal lettering NOVA 73.`;
+      return { content: JSON.stringify(scene === "video-motion" || scene === "reverse-prompt" ? { prompt, summary_zh: "保留商品原有文字与结构。" } : { prompt, avoid: ["no text", "watermarks"], keep_text: ["NOVA", "73"] }) };
+    });
+    const bytes = await readFile(new URL("../../docs/manual/prompt-optimization/testing/fixtures/knit.png", import.meta.url));
+    f.runtime.readSource = async () => ({ bytes, mimeType: "image/png", previewDataUrl: "data:image/png;base64," + bytes.toString("base64") });
+    f.runtime.resolveTarget = async () => ({ id: "target", modelId: scene === "video-motion" ? "MiniMax-H3" : "gpt-image-2.6-flare", protocol: "apimart", fingerprint: "target" });
+    const mode = scene === "video-motion" ? "video" : scene === "text-to-style" ? "generate" : "edit";
+    const sourceUrls = scene === "text-to-style" ? [] : ["source"];
+    const fields = scene === "series-recipe" ? { palette: ["red", "blue"], positions: ["left", "right"], variantIndex: 1 } : scene === "pattern-extract" ? { extractBackground: "白底" } : {};
+    const promptInput = { scene, fields, userText: scene === "text-to-style" ? "在衣服上印上‘NOVA 73’" : "保留参考图的商品、文字和结构", mode, hasMask: false, referenceRoles: sourceUrls.map(() => "商品主体") } as PromptCompilationRequest["promptInput"];
+    const input = { requestId: randomUUID(), operationType: scene === "video-motion" ? "video_generation" : scene === "batch-optimize" ? "batch_image" : mode === "generate" ? "image_generation" : "inpaint", toolKey: scene === "series-recipe" ? "series-recipe" : scene === "text-to-style" ? "creative-text-to-style" : "canvas-edit", modelConfigId: "target", prompt: "ignored legacy prompt", sourceUrls, promptInput, parameters: scene === "video-motion" ? { seconds: 5, size: "16:9", resolution: "720p", videoMode: "first-frame" } : {} };
+    const options = scene === "video-motion" ? { videoSourceMimeTypes: ["image/png"] } : {};
+    const prepared = await preparePromptTaskInput(f.compiler, actor, input, options);
+    const reused = await preparePromptTaskInput(f.compiler, actor, { ...input, requestId: randomUUID(), promptInput: prepared.userInput! }, options);
+    expect(prepared.prompt).toContain("NOVA"); expect(prepared.prompt).toContain("73"); expect(prepared.prompt).not.toContain("legacy prompt");
+    expect(prepared.sourceUrls).toEqual(sourceUrls); expect(reused.prompt).toBe(prepared.prompt);
+    expect(reused.promptCompilationId).toBe(prepared.promptCompilationId); expect(f.calls).toHaveLength(1);
+    expect(prepared.userInput?.referenceRoles).toEqual(promptInput.referenceRoles);
+    if (scene === "series-recipe") {
+      const payload = JSON.parse(((f.calls[0] as Parameters<PromptOptimizer["invoke"]>)[1][0] as { text: string }).text);
+      expect(payload.fields).toMatchObject({ palette: "blue", positions: "right", branch_index: 1 });
+    }
   });
 });
 

@@ -1,5 +1,5 @@
 export type CanvasNodePromptDraftSource = {
-    metadata?: { content?: string; prompt?: string; draftPrompt?: string };
+    metadata?: { content?: string; prompt?: string; draftPrompt?: string; quickImageAction?: "remove-background" | "hd-upscale" };
 };
 
 export function canvasNodePromptDraft(node: CanvasNodePromptDraftSource) {
@@ -9,7 +9,7 @@ export function canvasNodePromptDraft(node: CanvasNodePromptDraftSource) {
 
     // Show the original generation prompt until the user saves an edit draft.
     // Editing remains separate from provenance, including intentionally empty drafts.
-    return node.metadata?.prompt ?? "";
+    return node.metadata?.quickImageAction ? "" : node.metadata?.prompt ?? "";
 }
 
 export function canvasNodePromptDraftPatch(draftPrompt: string) {

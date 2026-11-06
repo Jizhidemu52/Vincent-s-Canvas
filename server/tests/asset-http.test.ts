@@ -6,6 +6,7 @@ import { createAssetsRouter } from "../src/routes/assets";
 import type { Database } from "../src/db";
 import type { ObjectStorage } from "../src/object-storage";
 import type { AuthenticatedRequest, SessionUser } from "../src/types";
+import * as XLSX from "xlsx";
 
 const id = "10000000-0000-4000-8000-000000000001", otherId = "10000000-0000-4000-8000-000000000002";
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nWQAAAAASUVORK5CYII=", "base64");
@@ -34,6 +35,59 @@ test('content authorizes before HEAD/304 and streams untouched bytes with safe h
     expect(original.headers.get('x-content-type-options')).toBe('nosniff');
     expect(original.headers.get('cache-control')).toBe('private, no-cache');
     expect(Buffer.from(await original.arrayBuffer())).toEqual(png);
+  });
+});
+
+test('document sources upload and download unchanged with employee isolation and attachment-only headers', async () => {
+  const assets = new Map<string, { owner: string; object_key: string; filename: string; mime_type: string; byte_size: number; status: string; metadata: Record<string, unknown> }>();
+  const objects = new Map<string, Buffer>();
+  let reads = 0, writes = 0;
+  const query = async (sql: string, values: any[] = []) => {
+    if (["BEGIN", "COMMIT", "ROLLBACK"].includes(sql)) return { rows: [] };
+    if (sql.startsWith("INSERT INTO assets")) {
+      assets.set(values[0], { owner: values[1], object_key: values[4], filename: values[5], mime_type: values[6], byte_size: values[7], status: "pending", metadata: JSON.parse(values[10]) });
+      return { rows: [] };
+    }
+    const asset = assets.get(values[0]);
+    if (sql.startsWith("UPDATE assets SET status='ready'")) {
+      if (asset && asset.owner === values[4]) { asset.status = "ready"; asset.mime_type = values[1]; }
+      return { rows: [] };
+    }
+    if (sql.startsWith("SELECT")) return { rows: asset && asset.owner === values[1] && asset.status === (sql.includes("status='pending'") ? "pending" : "ready") ? [asset] : [] };
+    throw new Error(`Unexpected document fixture query: ${sql}`);
+  };
+  const db = { query, connect: async () => ({ query, release() {} }) };
+  const storage = { configured: true,
+    put: async (key: string, bytes: Buffer) => { writes++; objects.set(key, Buffer.from(bytes)); },
+    head: async (key: string) => { reads++; return { ETag: '"document"', ContentLength: objects.get(key)!.length }; },
+    get: async (key: string) => { reads++; const bytes = objects.get(key)!; return { ETag: '"document"', ContentLength: bytes.length, Body: Readable.from([bytes]) }; },
+  };
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([["Style"], ["A01"]]), "Design");
+  const cases = [
+    { mimeType: "text/csv", name: "款式.csv", bytes: Buffer.from("款号,颜色\r\nA01,红色\r\n") },
+    { mimeType: "text/markdown", name: "需求.md", bytes: Buffer.from("# 需求\n保留纽扣，不要口袋\n") },
+    { mimeType: "application/vnd.ms-excel", name: "原件.xls", bytes: Buffer.from(XLSX.write(workbook, { type: "buffer", bookType: "biff8" })) },
+  ];
+  await serve(db, storage, async url => {
+    for (const item of cases) {
+      const reserved = await fetch(`${url}/api/assets/upload-request`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ filename: item.name, mimeType: item.mimeType, byteSize: item.bytes.length, kind: "other" }) });
+      expect(reserved.status).toBe(201);
+      const asset = await reserved.json();
+      const upload = (owner: string) => fetch(url + asset.uploadUrl, { method: "PUT", headers: { "content-type": item.mimeType, "x-test-owner": owner }, body: item.bytes });
+      expect((await upload("employee-b")).status).toBe(404);
+      expect((await upload("employee-a")).status).toBe(204);
+      const before = reads;
+      expect((await fetch(`${url}/api/assets/${asset.assetId}/content`, { headers: { "x-test-owner": "employee-b", "if-none-match": '"document"' } })).status).toBe(404);
+      expect(reads).toBe(before);
+      const original = await fetch(`${url}/api/assets/${asset.assetId}/content`);
+      expect(original.status).toBe(200);
+      expect(original.headers.get("content-type")?.split(";")[0]).toBe(item.mimeType);
+      expect(original.headers.get("content-disposition")).toStartWith("attachment;");
+      expect(original.headers.get("x-content-type-options")).toBe("nosniff");
+      expect(Buffer.from(await original.arrayBuffer())).toEqual(item.bytes);
+    }
+    expect(writes).toBe(cases.length);
   });
 });
 

@@ -13,7 +13,8 @@ import { imageAdvancedParameters, imageMarkupReference, readImageOptions } from 
 import { resolveToolConfig } from "./tool-runtime";
 import { createClientId } from "@/lib/client-id";
 import { parseCreateImageArguments, parseStrictJson } from "@/lib/strict-json";
-import { isQuickImageTool, quickImageAction, quickImageModelId, type QuickImageAction } from "@/lib/quick-image-tools";
+import { isQuickImageTool, quickImageAction, type QuickImageAction } from "@/lib/quick-image-tools";
+import { imageAgentGenerationParameters, type ImageAgentGenerationOptions } from "@/lib/image-agent-generation-parameters";
 
 export type AiTextMessage = {
     role: "system" | "user" | "assistant";
@@ -38,7 +39,7 @@ export type ResponseFunctionTool = {
 export type ToolResponseResult = { content: string; toolCalls: ResponseToolCall[]; stopReason?: string; claudeAssistantContent?: ClaudeAssistantContent; responsesOutputItems?: Array<Record<string, unknown>> };
 
 type ToolChoice = "auto" | "required" | { type: "function"; name: string };
-type RequestOptions = { quickImageAction?: QuickImageAction; exactPrompt?: boolean; promptInput?: PromptInputData; onOptimizing?: () => void; onCompiled?: (prompt: string, optimized: boolean, submittedPrompt?: string) => void; chatProfile?: "creative-chat" | "canvas-assistant"; imageAgentProfile?: "creative-chat" | "canvas-assistant"; profileContext?: Record<string, unknown>; requestId?: string; chatRequestId?: string; signal?: AbortSignal; operationType?: "image_generation" | "inpaint" | "upscale" | "batch_image"; tool?: string; referencePromptLanguage?: "zh" | "en"; webSearch?: boolean; onToolCallStart?: (name: string) => void; onChatSubmissionStarted?: (requestId: string) => void; cancelOnAbort?: () => boolean; onSubmissionStarted?: () => void | Promise<void>; onSubmitted?: (taskIds: string[]) => void | Promise<void> };
+type RequestOptions = ImageAgentGenerationOptions & { quickImageAction?: QuickImageAction; exactPrompt?: boolean; promptInput?: PromptInputData; onOptimizing?: () => void; onCompiled?: (prompt: string, optimized: boolean, submittedPrompt?: string) => void; chatProfile?: "creative-chat" | "canvas-assistant"; profileContext?: Record<string, unknown>; requestId?: string; chatRequestId?: string; signal?: AbortSignal; operationType?: "image_generation" | "inpaint" | "upscale" | "batch_image"; tool?: string; referencePromptLanguage?: "zh" | "en"; webSearch?: boolean; onToolCallStart?: (name: string) => void; onChatSubmissionStarted?: (requestId: string) => void; cancelOnAbort?: () => boolean; onSubmissionStarted?: () => void | Promise<void>; onSubmitted?: (taskIds: string[]) => void | Promise<void> };
 type ResponseInputContent = { type: "input_text"; text: string } | { type: "input_image"; image_url: string };
 type ResponseInputItem = { role: "system" | "user" | "assistant"; content: string | ResponseInputContent[] } | { type: "claude_assistant"; content: ClaudeAssistantContent } | { type: "responses_assistant"; output: Array<Record<string, unknown>> } | { type: "function_call"; call_id: string; name: string; arguments: string; thoughtSignature?: string } | { type: "function_call_output"; call_id: string; output: string };
 type ResponseApiToolDefinition = { type: "function"; name: string; description?: string; parameters: Record<string, unknown>; strict?: boolean };
@@ -74,7 +75,7 @@ function requestResolvedGeneration(resolved: Awaited<ReturnType<typeof resolveTo
         count,
         operationType: options?.operationType || "image_generation",
         tool: options?.tool,
-        parameters: { ...imageTaskParameters(config, profile, { referenceCount: references?.length || 0 }), ...(options?.imageAgentProfile ? { imageAgentProfile: options.imageAgentProfile } : {}) },
+        parameters: { ...imageTaskParameters(config, profile, { referenceCount: references?.length || 0 }), ...imageAgentGenerationParameters(options) },
         draft: { ...generationDraftInput({ ...config, ...normalized }, profile.requiresPrompt ? options?.promptInput?.userText ?? prompt : ""), ...(markup ? { markupReferenceIndex: references?.length || 0 } : {}) },
         references: markup ? [...(references || []), markup] : references,
         requestId: options?.requestId,
@@ -91,7 +92,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
         if (mask || references.length !== 1) throw new Error("请只添加一张原图");
         const action = options!.quickImageAction || quickImageAction(options!.tool!);
         const tool = options?.tool === "canvas-edit" ? "canvas-edit" : action === "remove-background" ? "image-edit" : "detail-enhance";
-        return requestQueuedImages({ modelId: quickImageModelId(action), prompt: "", count: 1, operationType: tool === "detail-enhance" ? "upscale" : "inpaint", tool, quickImageAction: action,
+        return requestQueuedImages({ modelId: "", prompt: "", count: 1, operationType: tool === "detail-enhance" ? "upscale" : "inpaint", tool, quickImageAction: action,
             references, requestId: options?.requestId, signal: options?.signal, cancelOnAbort: options?.cancelOnAbort,
             onSubmissionStarted: options?.onSubmissionStarted, onSubmitted: options?.onSubmitted, onCompiled: options?.onCompiled });
     }
@@ -136,7 +137,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
         count,
         operationType: options?.operationType || "inpaint",
         tool: options?.tool,
-        parameters: { ...imageTaskParameters(config, profile, { mask: Boolean(mask), referenceCount: references.length }), ...(transparent ? { background: "transparent", output_format: "png" } : {}), ...(options?.imageAgentProfile ? { imageAgentProfile: options.imageAgentProfile } : {}) },
+        parameters: { ...imageTaskParameters(config, profile, { mask: Boolean(mask), referenceCount: references.length }), ...(transparent ? { background: "transparent", output_format: "png" } : {}), ...imageAgentGenerationParameters(options) },
         draft: { ...generationDraftInput({ ...config, ...normalizeImageModelSettings(config, profile) }, options?.promptInput?.userText ?? prompt), ...(mask ? { maskReferenceIndex: references.length } : {}), ...(markup ? { markupReferenceIndex: references.length } : {}) },
         references: [...references, ...(mask ? [mask] : []), ...(markup ? [markup] : [])],
         requestId: options?.requestId,

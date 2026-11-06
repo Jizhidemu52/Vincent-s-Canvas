@@ -27,6 +27,7 @@ export function createChatBranch(session: ChatSession, messageId: string, id: st
             messages: session.messages.slice(0, index), editTargetImageId: source.editTargetImageId,
             focusImageId: source.focusImageId || source.editTargetImageId, focusLocked: source.focusLocked,
             newCreation: source.newCreation, focusRevision: 0,
+            documents: session.documents?.filter(document => source.documentIds?.includes(document.id)), requirementCard: source.requirementCard,
             branchOf: { sessionId: session.id, messageId: source.id },
         } satisfies ChatSession,
     };

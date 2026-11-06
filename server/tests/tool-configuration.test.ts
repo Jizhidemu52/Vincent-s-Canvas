@@ -40,12 +40,16 @@ function fixture() {
       if (["BEGIN", "COMMIT", "ROLLBACK"].includes(sql)) return { rows: [] };
       if (sql.includes("pg_advisory_xact_lock")) return { rows: [] };
       if (sql.startsWith("SELECT id,request_id")) return { rows: [] };
+      if (sql.startsWith("SELECT id FROM tasks WHERE request_id=$1")) return { rows: [] };
       if (sql.startsWith("SELECT id FROM tasks WHERE request_id=ANY")) return { rows: [] };
       if (sql.startsWith("SELECT ") && sql.includes("FROM batch_tasks WHERE request_id")) return { rows: [...batches.values()].filter(row => row.requestId === values[0] && (values.length < 2 || row.userId === values[1])) };
       if (sql.startsWith("SELECT t.id") && sql.includes("WHERE t.batch_id=")) return { rows: [...tasks.values()].filter(row => row.batchId === values[0] && row.userId === values[1]) };
+      if (sql.startsWith("SELECT t.id") && sql.includes("WHERE t.request_id=")) return { rows: [] };
       if (sql.startsWith("SELECT count(*)::int AS count FROM tasks")) return { rows: [{ count: tasks.size }] };
       if (sql.includes("FROM model_presentation_settings")) return { rows: [] };
       if (sql.includes("FROM module_flags")) return { rows: [{ enabled: flags.get(String(values[0])) }] };
+      if (sql.includes("FROM quick_image_configurations")) return { rows: [] };
+      if (sql.includes("FROM assets WHERE id=")) return { rows: [{ id: modelId, objectKey: "fixture-source", mimeType: "image/png", byteSize: 1 }] };
       if (sql.startsWith("INSERT INTO tool_api_configurations")) {
         const [key, modelConfigId, enabled, , creditCostOverride, rmbCostOverride, allowRawPrompt] = values as [ToolConfiguration["toolKey"], string | null, boolean, unknown, number | null, number | null, boolean];
         const row = { toolKey: key, modelConfigId, enabled, creditCostOverride, rmbCostOverride, allowRawPrompt, configurationVersion: (configurations.get(key)?.configurationVersion ?? 0) + 1 };
@@ -56,6 +60,7 @@ function fixture() {
       if (sql.includes("FROM pricing_rule_versions")) return { rows: [{ operationType: values[0] ?? "inpaint", credits: 8, rmbCost: 0.8, rmb_cost: "0.8", version: 3 }] };
       if (sql.includes("FROM model_configs")) {
         let selected = values.length ? models.filter(model => model.id === values[0] || model.modelId === values[0]) : models;
+        if (sql.includes("m.provider_id=$1 AND m.model_id=$2")) selected = models.filter(model => model.providerId === values[0] && model.modelId === values[1] && model.protocol === "apimart");
         if (sql.includes("m.provider_id=$2")) selected = selected.filter(model => model.providerId === values[1] && model.protocol === "apimart");
         if (sql.includes("m.enabled=true")) selected = selected.filter(model => model.enabled && model.providerEnabled && (!model.workflowConfigId || model.workflowEnabled));
         return { rows: selected };
@@ -110,7 +115,9 @@ async function serve(state = fixture(), role = "super_admin") {
   app.use((request, _response, next) => { Object.assign(request, { auth: { id: modelId, role, departmentId: null } }); next(); });
   app.use("/admin", createModelConfigurationRouter(state.db, {} as never));
   app.use("/models", createPublicModelRouter(state.db));
-  app.use("/tasks", createTasksRouter(state.db, state.cache as never, false, state.preflight as never));
+  app.use("/tasks", createTasksRouter(state.db, state.cache as never, false, state.preflight as never, {
+    quickImagePreflight: async () => ({ id: modelId, objectKey: "fixture-source", mimeType: "image/png", byteSize: 1 }),
+  }));
   app.use("/chat", createChatRouter(state.db, {} as never));
   app.use(((error, _request, response, _next) => { response.status(error.status ?? (error.name === "ZodError" ? 400 : 500)).json({ error: error.code, message: error.message }); }) as ErrorRequestHandler);
   const server = app.listen(0, "127.0.0.1"); servers.push(server);
@@ -243,7 +250,7 @@ describe("authoritative scoped execution", () => {
       state.models[1]!.modelId = quickImageModelId(action);
       const target = quickImageTaskTarget(action, canvas);
       const response = await post(`${url}/tasks`, { ...target, requestId: `quick-${action}-${canvas}`, projectId: "canvas", modelConfigId: modelId,
-        prompt: "forged prompt", parameters: { quickImageAction: action, size: "1:1", resolution: "1k", n: 9, background: "opaque", output_format: "jpeg" }, sourceUrls: ["owned-image"] });
+        prompt: "forged prompt", parameters: { quickImageAction: action, size: "1:1", resolution: "1k", n: 9, background: "opaque", output_format: "jpeg" }, sourceUrls: [`/api/assets/${modelId}/content`] });
       expect(response.status).toBe(201);
       const { task } = await response.json();
       expect(task.modelConfigId).toBe(secondModelId); expect(task.toolKey).toBe(target.toolKey);
@@ -264,15 +271,15 @@ describe("authoritative scoped execution", () => {
     expect(state.statements.some(({ sql }) => /(?:UPDATE|INSERT INTO) (?:model_configs|providers|tool_api_configurations|module_flags)/.test(sql))).toBe(false);
   });
 
-  test("quick resolver checks the action scope even outside task admission and never picks another provider's Nano alias", async () => {
+  test("quick resolver checks the action scope and requires a trusted server snapshot outside admission", async () => {
     const state = fixture();
     state.models[0]!.modelId = quickImageModelId("remove-background"); state.models[0]!.protocol = "apimart";
     const input = { toolKey: "image-edit", operationType: "inpaint", parameters: { quickImageAction: "remove-background" } };
-    await expect(resolveToolExecution(state.db, input)).rejects.toMatchObject({ code: "MODEL_DISABLED" });
+    await expect(resolveToolExecution(state.db, input)).rejects.toMatchObject({ code: "QUICK_IMAGE_CONFIGURATION_REQUIRED" });
     for (const patch of [{ toolKey: "creative-style-to-sketch" }, { toolKey: "image", operationType: "image_generation" }, { parameters: { quickImageAction: "unknown" } }, { parameters: { quickImageAction: "hd-upscale" } }]) {
       await expect(resolveToolExecution(state.db, { ...input, ...patch }, { allowModelOverride: true })).rejects.toMatchObject({ code: "QUICK_IMAGE_ACTION_INVALID" });
     }
-    expect(state.statements.filter(({ sql }) => sql.includes("FROM model_configs"))).toHaveLength(1);
+    expect(state.statements.filter(({ sql }) => sql.includes("FROM model_configs"))).toHaveLength(0);
   });
 
   test("all chat requests ignore old or forged model choices and use the shared configuration UUID", async () => {

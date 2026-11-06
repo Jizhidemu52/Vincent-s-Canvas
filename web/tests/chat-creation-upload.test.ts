@@ -4,6 +4,8 @@ import ts from "typescript";
 import { i18nHarness } from "./helpers/i18n-harness";
 
 import { parseChatAttachment, type ParsedChatAttachment } from "../src/lib/chat-attachments";
+import { AGENT_DOCUMENT_LIMITS } from "../../shared/image-agent-documents";
+import type { ChatSession } from "@/pages/chat/chat-types";
 
 type Mode = "chat" | "agent" | "create";
 type Attachment = ParsedChatAttachment & { id: string };
@@ -44,9 +46,14 @@ function uploadHarness(legacyMode: Mode) {
     const errors: string[] = [];
     const originalReads: File[] = [];
     const compressionReads: File[] = [];
+    const sessionsRef = { current: [{ id: "session-a", title: "test", updatedAt: "now", messages: [] }] as ChatSession[] };
     function renderHandlers() {
         const bindings = {
             ...i18nHarness,
+            AGENT_DOCUMENT_LIMITS,
+            sessionsRef,
+            updateSession: (id: string, update: (session: ChatSession) => ChatSession) => { sessionsRef.current = sessionsRef.current.map(session => session.id === id ? update(session) : session); },
+            mapAgentDocumentMedia: async (document: unknown) => document,
             mode: legacyMode,
             sessionsReady: true,
             readingAttachments: reading,
@@ -156,20 +163,18 @@ describe("actual unified chat attachment upload", () => {
         expect(page.reading()).toBe(false);
     });
 
-    test("create accepts exactly 8 MiB of stored attachments and rejects the next byte-bearing file", async () => {
+    test("documents have a separate budget while images still enforce 8 MiB", async () => {
         const page = uploadHarness("create");
-        // Image byte accounting rounds padded base64 upward. Divisible-by-three
-        // image sizes plus a two-byte text file exercise the exact shared limit.
         await page.addFiles([
             new File(["ok"], "note.txt", { type: "text/plain" }),
             imageFile("first.png", 3 * MiB),
-            imageFile("second.png", 5 * MiB - 2),
+            imageFile("second.png", 5 * MiB),
         ]);
-        expect(page.attachments().reduce((total, attachment) => total + attachment.size, 0)).toBe(8 * MiB);
+        expect(page.attachments().filter(item => item.kind === "image").reduce((total, attachment) => total + attachment.size, 0)).toBe(8 * MiB);
         expect(page.warnings).toEqual([]);
 
-        await page.addFiles([new File(["x"], "over-limit.txt", { type: "text/plain" })]);
-        expect(page.attachments().map((attachment) => attachment.name)).toEqual(["note.txt", "first.png", "second.png"]);
+        await page.addFiles([new File(["x"], "extra.txt", { type: "text/plain" }), imageFile("over-limit.png")]);
+        expect(page.attachments().map((attachment) => attachment.name)).toEqual(["note.txt", "first.png", "second.png", "extra.txt"]);
         expect(page.warnings).toHaveLength(1);
         expect(page.warnings[0]).toContain("8MB");
         expect(page.errors).toEqual([]);

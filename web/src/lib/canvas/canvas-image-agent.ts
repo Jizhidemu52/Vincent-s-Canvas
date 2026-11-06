@@ -1,3 +1,5 @@
+import { sha256 } from "@noble/hashes/sha256";
+import { bytesToHex } from "@noble/hashes/utils";
 import { canvasConversationImages } from "./canvas-assistant-image-catalog";
 import type { CanvasAgentSnapshot, CanvasAgentOp } from "./canvas-agent-ops";
 import { placeCanvasImageOutputs } from "./canvas-image-output-placement";
@@ -117,8 +119,9 @@ export function canvasImageAgentResultOps(ops: CanvasAgentOp[], snapshot: Canvas
 }
 
 export async function canvasImageAgentTaskSignature(value: unknown) {
-    const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(value)));
-    return Array.from(new Uint8Array(hash), byte => byte.toString(16).padStart(2, "0")).join("");
+    // The deployed HTTP origin has no SubtleCrypto. Keep the same SHA-256
+    // deduplication contract using the browser-independent hash already bundled.
+    return bytesToHex(sha256(new TextEncoder().encode(JSON.stringify(value))));
 }
 
 export function canvasImageAgentHistory(messages: CanvasAssistantMessage[], catalog: readonly CanvasImageAgentImage[]): ImageAgentHistoryMessage[] {

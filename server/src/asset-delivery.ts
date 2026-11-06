@@ -6,25 +6,51 @@ import type { Request, Response } from "express";
 import type { ObjectStorage } from "./object-storage";
 import { AssetObjectError, isMissingAssetObject } from "./asset-object-error";
 
+const textAssetMimeTypes = new Set(["text/plain", "application/json", "text/csv", "text/markdown"]);
+const xlsMimeType = "application/vnd.ms-excel";
 export const allowedAssetMimeTypes = new Set([
   "image/png", "image/jpeg", "image/webp", "image/gif", "image/avif",
   "video/mp4", "video/quicktime", "video/webm", "audio/mpeg", "audio/wav", "audio/x-wav", "audio/mp4",
-  "application/pdf", "text/plain", "application/json",
+  "application/pdf", ...textAssetMimeTypes, xlsMimeType,
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 ]);
 export const normalizeAssetMime = (value: string) => value.toLowerCase().split(";")[0]!.trim();
 export class AssetMediaError extends Error { readonly status = 415; readonly code = "UNSUPPORTED_MEDIA_TYPE"; }
 
+async function validateLegacyWorkbook(bytes: Uint8Array) {
+  if (bytes.length > 20 * 1024 * 1024) throw new AssetMediaError("XLS 文件不能超过 20 MB，请拆分后上传");
+  try {
+    const { CFB, read } = await import("xlsx");
+    const compound = CFB.read(bytes, { type: "array" }) as { FullPaths: string[]; FileIndex: Array<{ name: string; type: number }> };
+    const root = compound.FullPaths[0];
+    const workbookStreams = compound.FullPaths.filter((path, index) => compound.FileIndex[index]?.type === 2 && (path === `${root}Workbook` || path === `${root}Book`));
+    if (compound.FileIndex[0]?.type !== 5 || workbookStreams.length !== 1
+      || compound.FileIndex.some(entry => ["EncryptedPackage", "EncryptionInfo"].includes(entry.name))) throw new Error("Not a plain Excel workbook");
+    // SheetJS inspects BIFF workbook metadata only: no formula evaluation, VBA
+    // execution, external link loading, or conversion of the original bytes.
+    const workbook = read(bytes, { type: "array", bookSheets: true, bookVBA: false, cellFormula: false, cellHTML: false, cellText: false, WTF: true });
+    if (!workbook.SheetNames.length) throw new Error("Missing workbook sheets");
+  } catch {
+    throw new AssetMediaError("XLS 原件不是可读取的 Excel 5–2003 工作簿，请解除加密或另存为 XLSX 后上传");
+  }
+  return xlsMimeType;
+}
+
 export async function validateAssetUpload(bytes: Uint8Array, declared: string) {
   const mime = normalizeAssetMime(declared);
   if (!allowedAssetMimeTypes.has(mime)) throw new AssetMediaError("不支持的文件类型");
   const detected = await fileTypeFromBuffer(bytes).catch(() => undefined);
+  if (mime === xlsMimeType) {
+    if (detected?.mime !== "application/x-cfb") throw new AssetMediaError("XLS 原件格式不受支持，请在 Excel 中另存为 XLSX 后上传");
+    return validateLegacyWorkbook(bytes);
+  }
   if (detected) {
+    if (["text/csv", "text/markdown"].includes(mime)) throw new AssetMediaError("文本文件字节与声明的媒体类型不符");
     if (!allowedAssetMimeTypes.has(detected.mime)) throw new AssetMediaError("文件真实类型不在允许范围内");
     return detected.mime;
   }
-  if (mime !== "text/plain" && mime !== "application/json") throw new AssetMediaError("文件字节与声明的媒体类型不符");
+  if (!textAssetMimeTypes.has(mime)) throw new AssetMediaError("文件字节与声明的媒体类型不符");
   let text: string;
   try { text = new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
   catch { throw new AssetMediaError("文本文件必须使用 UTF-8 编码"); }
@@ -57,9 +83,13 @@ export function matchesAssetEtag(header: string | undefined, etag: string | unde
 const sniffBytes = 8192;
 async function assetMimeFromPrefix(prefix: Uint8Array, declared: string) {
   const detected = await fileTypeFromBuffer(prefix).catch(() => undefined);
+  const mime = normalizeAssetMime(declared);
+  // A prefix cannot reparse an entire CFB workbook. New XLS uploads were fully
+  // validated above; legacy CFB records still remain attachment-only + nosniff.
+  if (mime === xlsMimeType && detected?.mime === "application/x-cfb") return xlsMimeType;
   // Unknown/active content is attachment-only even for legacy records claiming image/*.
   return detected && allowedAssetMimeTypes.has(detected.mime) ? detected.mime
-    : ["text/plain", "application/json"].includes(declared) ? declared : "application/octet-stream";
+    : textAssetMimeTypes.has(mime) ? mime : "application/octet-stream";
 }
 
 /** Sniff a bounded prefix and replay it; original media is never buffered in full. */

@@ -118,6 +118,18 @@ describe("canvas model presentation", () => {
 });
 
 describe("canvas picker integration contracts", () => {
+    test("MAI stays selectable under Microsoft even when it is not a featured model", () => {
+        const model = imageModel("mai-opaque-uuid", "aplmart-mai2.6-flash", "mai-image");
+        const { root, selected } = picker([model]);
+        expect(root.props.options).toHaveLength(1);
+        const option = root.props.options[0] as CanvasModelOption;
+        expect(option).toMatchObject({ value: model.modelId, name: "MAI Image 2.6 Flash", family: "Microsoft", isFeatured: false });
+        expect(commonCanvasModels(root.props.options)).toEqual([]);
+        expect(canvasModelGroups(root.props.options)).toEqual([{ name: "Microsoft", models: [option] }]);
+        root.props.onValueChange(model.modelId);
+        expect(selected).toEqual([model.modelId]);
+    });
+
     test("canvas gets the new presentation and emits only existing opaque values", () => {
         const model = { ...imageModel("model-uuid", "aplmart-gpt2.5-flare"), isFeatured: true, displayOrder: 3 };
         const { root, selected, usage } = picker([model]);

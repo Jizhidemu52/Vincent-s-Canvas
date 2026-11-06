@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { getToolDefinition, type ToolKey } from "../../../shared/feature-catalog";
-import { applyToolModel } from "@/services/api/tool-runtime";
+import { applyToolModel, isImageTool } from "@/services/api/tool-runtime";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import type { AiConfig } from "@/stores/use-config-store";
 import { useModuleEnabled } from "@/stores/use-module-store";
@@ -19,7 +19,12 @@ export function currentToolConfig(config: AiConfig, toolKey: ToolKey): AiConfig 
     const business = useBusinessConfigStore.getState();
     const managedChat = getToolDefinition(toolKey)?.operationType === "chat";
     if (managedChat && business.status !== "ready") throw new Error("对话服务配置尚未就绪，请稍后重试。");
-    if (!managedChat && !business.tools.some(item => item.toolKey === toolKey && item.modelConfigId)) return config;
+    if (!managedChat && !business.tools.some(item => item.toolKey === toolKey && item.modelConfigId)) {
+        if (business.status === "ready" && isImageTool(toolKey)) {
+            try { return applyToolModel(config, business, toolKey); } catch { return config; }
+        }
+        return config;
+    }
     return applyToolModel(config, business, toolKey);
 }
 
@@ -31,7 +36,14 @@ export function useToolConfig(config: AiConfig, toolKey: ToolKey) {
     return useMemo(() => {
         const managedChat = getToolDefinition(toolKey)?.operationType === "chat";
         if (managedChat && status !== "ready") return { ...config, model: "", textModel: "" };
-        if (!managedChat && !tools.some(item => item.toolKey === toolKey && item.modelConfigId)) return config;
+        if (!managedChat && !tools.some(item => item.toolKey === toolKey && item.modelConfigId)) {
+            // Normalize a default/public alias captured before the server catalog finished loading.
+            // A missing explicit choice remains visible; the fresh submission resolver rejects it.
+            if (status === "ready" && isImageTool(toolKey)) {
+                try { return applyToolModel(config, { models, tools, prices: [] }, toolKey); } catch { return config; }
+            }
+            return config;
+        }
         try { return applyToolModel(config, { models, tools, prices: [] }, toolKey); }
         catch { return managedChat ? { ...config, model: "", textModel: "" } : { ...config, model: "", imageModel: "", videoModel: "", textModel: "", audioModel: "" }; }
     }, [config, models, tools, status, toolKey]);

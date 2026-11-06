@@ -49,6 +49,17 @@ describe("canvas node assets preserve the existing save contract", () => {
         expect(asset.metadata).toMatchObject({ recreatePath: "/image?tool=image-generation&prompt=&model=", imageName: "印花", imageVersion: 1 });
     });
 
+    test("saving a marked quick result preserves original media but not its private managed recipe", () => {
+        const source = node(CanvasNodeType.Image, { content: "/api/assets/result/content", storageKey: "result-key", bytes: 150, mimeType: "image/png", quickImageAction: "remove-background", prompt: "private admin recipe", model: "private-admin-model", generationType: "edit" });
+        const before = structuredClone(source);
+        const asset = nodeAsset.createCanvasNodeAsset(source, "project-a");
+        expect(asset.data).toMatchObject({ storageKey: "result-key", bytes: 150, mimeType: "image/png" });
+        expect(asset.coverUrl).toBe(source.metadata!.content);
+        expect(asset.metadata).toMatchObject({ prompt: undefined, model: undefined, recreatePath: "/image?tool=image-edit&prompt=&model=" });
+        expect(JSON.stringify(asset)).not.toContain("private");
+        expect(source).toEqual(before);
+    });
+
     test.each([
         [CanvasNodeType.Text, " \n", "没有可保存的文本"],
         [CanvasNodeType.Video, "", "没有可保存的视频"],

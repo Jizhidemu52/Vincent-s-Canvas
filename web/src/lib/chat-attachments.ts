@@ -1,7 +1,8 @@
+import { AGENT_DOCUMENT_LIMITS, type AgentDocument } from "../../../shared/image-agent-documents";
+
 export const MAX_CHAT_ATTACHMENT_TEXT_LENGTH = 80_000;
-// Workbooks are structured but can be extremely verbose. Keeping their model context smaller
-// avoids provider-side extended thinking consuming the whole response budget before answering.
-export const MAX_WORKBOOK_MODEL_TEXT_LENGTH = 8_000;
+// This bounds the compatibility preview, never the retained document sections.
+export const MAX_WORKBOOK_MODEL_TEXT_LENGTH = 30_000;
 const WORKBOOK_TRUNCATION_MARKER = "[Excel \u5de5\u4f5c\u7c3f\u5185\u5bb9\u5df2\u6309\u5de5\u4f5c\u8868\u622a\u65ad]";
 export const CHAT_ATTACHMENT_ACCEPT = "image/*,.txt,.md,.csv,.json,.py,.js,.ts,.tsx,.jsx,.html,.css,.xml,.yaml,.yml,.sql,.java,.c,.cpp,.h,.sh,.pdf,.xlsx,.xls,.docx,text/plain,text/markdown,text/csv,application/json,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
@@ -25,6 +26,7 @@ export type ParsedChatAttachment = {
     dataUrl?: string;
     textContent?: string;
     truncated?: boolean;
+    document?: AgentDocument;
 };
 
 type ParseChatAttachmentOptions = {
@@ -132,48 +134,11 @@ async function readFileAsDataUrl(file: File) {
     });
 }
 
-async function extractPdfText(file: File) {
-    const { getDocument, GlobalWorkerOptions } = await import("pdfjs-dist/legacy/build/pdf.mjs");
-    if (typeof window !== "undefined") {
-        // PDF.js only supplies a default worker in Node. Let Vite emit and resolve
-        // the matching local browser worker instead of relying on a CDN or /src path.
-        const { default: workerSrc } = await import("pdfjs-dist/legacy/build/pdf.worker.mjs?url");
-        GlobalWorkerOptions.workerSrc = workerSrc;
-    }
-    const task = getDocument({ data: new Uint8Array(await file.arrayBuffer()), useWorkerFetch: false });
-    const pdf = await task.promise;
-    try {
-        const pages = await Promise.all(Array.from({ length: pdf.numPages }, async (_, index) => {
-            const page = await pdf.getPage(index + 1);
-            const content = await page.getTextContent();
-            return content.items.map((item) => ("str" in item ? item.str : "")).join(" ");
-        }));
-        return formatPdfText(pages);
-    } finally {
-        pdf.cleanup();
-        task.destroy();
-    }
-}
-
-async function extractWorkbookText(file: File) {
-    const XLSX = await import("xlsx");
-    const workbook = XLSX.read(await file.arrayBuffer(), { type: "array" });
-    return truncateWorkbookText(workbook.SheetNames.map((name) => ({
-        name,
-        rows: XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets[name], { header: 1, raw: false, defval: "" }),
-    })));
-}
-
-async function extractDocxText(file: File) {
-    const mammoth = (await import("mammoth")).default;
-    const result = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
-    return result.value.trim();
-}
-
 export async function parseChatAttachment(file: File, options: ParseChatAttachmentOptions = {}): Promise<ParsedChatAttachment> {
     if (!isSupportedChatAttachment(file)) {
         throw new Error("\u4ec5\u652f\u6301\u56fe\u7247\u3001PDF\u3001Excel\u3001Word\u3001\u6587\u672c\u6216\u4ee3\u7801\u6587\u4ef6");
     }
+    if (file.size > AGENT_DOCUMENT_LIMITS.fileBytes) throw new Error("单个附件不能超过 20 MB，请拆分文件后上传");
 
     const extension = chatAttachmentExtension(file.name);
     if (IMAGE_EXTENSIONS.has(extension) || file.type.startsWith("image/")) {
@@ -187,26 +152,17 @@ export async function parseChatAttachment(file: File, options: ParseChatAttachme
     }
 
     const parserKind = chatAttachmentParserKind(file);
-    let extractedText: string;
     try {
-        if (parserKind === "pdf") extractedText = await extractPdfText(file);
-        else if (parserKind === "workbook") extractedText = await extractWorkbookText(file);
-        else if (parserKind === "docx") extractedText = await extractDocxText(file);
-        else extractedText = await file.text();
+        const { parseAgentDocument, agentDocumentTextPreview } = await import("./agent-document-parser");
+        const document = await parseAgentDocument(file, parserKind || "text");
+        const preview = agentDocumentTextPreview(document, parserKind === "workbook" ? MAX_WORKBOOK_MODEL_TEXT_LENGTH : MAX_CHAT_ATTACHMENT_TEXT_LENGTH);
+        return {
+            kind: "text", name: file.name, mimeType: document.mimeType, size: file.size,
+            textContent: preview.text, truncated: preview.truncated, document,
+        };
     } catch (error) {
         const detail = error instanceof Error ? error.message : "\u672a\u77e5\u89e3\u6790\u9519\u8bef";
         throw new Error(`\u65e0\u6cd5\u89e3\u6790 ${file.name}\uff1a${detail}`);
     }
 
-    if (!extractedText.trim()) throw new Error(`${file.name} \u6ca1\u6709\u53ef\u4f9b\u5bf9\u8bdd\u6a21\u578b\u9605\u8bfb\u7684\u6587\u672c\u5185\u5bb9`);
-    const truncated = truncateChatAttachmentText(extractedText);
-    const wasWorkbookTruncated = parserKind === "workbook" && extractedText.includes(WORKBOOK_TRUNCATION_MARKER);
-    return {
-        kind: "text",
-        name: file.name,
-        mimeType: file.type || "text/plain",
-        size: file.size,
-        textContent: truncated.text,
-        truncated: truncated.truncated || wasWorkbookTruncated,
-    };
 }

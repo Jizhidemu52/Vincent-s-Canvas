@@ -174,9 +174,6 @@ export async function validateQuickImageSource(image: ProcessedResultImage | und
     if (HIGH_BIT_DEPTH.test(source.metadata.pixelFormat)) throw new ImageResultProcessingError("INVALID_IMAGE_RESULT_INPUT", "一键图片工具暂仅支持 8 位 PNG、JPEG、WebP 原图；尚未提交生成");
     const ratio = source.metadata.width / source.metadata.height;
     if (ratio < 1 / 8 || ratio > 8) throw new ImageResultProcessingError("INVALID_IMAGE_RESULT_INPUT", "原图宽高比超出本工具可处理范围（1:8 至 8:1）；尚未提交生成");
-    if (action === "hd-upscale" && Math.max(source.metadata.width, source.metadata.height) > 4096) {
-      throw new ImageResultProcessingError("INVALID_IMAGE_RESULT_INPUT", "原图已超过 4K，无需使用此高清放大功能；尚未提交生成");
-    }
     // Decoding also verifies the original is complete, single-frame and that FFmpeg is available.
     await decode(source.file, source.metadata);
   } finally {
@@ -267,12 +264,17 @@ export async function processImageResult({ result, parameters, editInput }: Imag
         throw new ImageResultProcessingError("IMAGE_RESULT_DIMENSION_MISMATCH", "结果宽高比与原图不一致；未拉伸、裁剪或替换原图，请检查已保存的渠道原件");
       }
       if (quickAction === "hd-upscale") {
-        if (Math.max(generated.metadata.width, generated.metadata.height) < 3840
+        // Old v1 tasks requested 4K. New snapshots explicitly freeze their configured
+        // resolution; model-controlled output still must not shrink the original.
+        const configured = parameters.quickImage && typeof parameters.quickImage === "object" && "configurationVersion" in parameters.quickImage;
+        const resolution = String(parameters.resolution ?? (configured ? "" : "4k")).toLowerCase();
+        const minimum = resolution === "4k" ? 3840 : resolution === "2k" ? 1920 : resolution === "1k" ? 960 : resolution === "0.5k" ? 480 : 0;
+        if (Math.max(generated.metadata.width, generated.metadata.height) < minimum
           || generated.metadata.width < source.metadata.width || generated.metadata.height < source.metadata.height) {
-          throw new ImageResultProcessingError("IMAGE_RESULT_DIMENSION_MISMATCH", "高清结果未达到 4K 或小于原图尺寸；渠道原件已保留，不会把低清结果标记为高清放大成功");
+          throw new ImageResultProcessingError("IMAGE_RESULT_DIMENSION_MISMATCH", "高清结果未达到配置分辨率或小于原图尺寸；渠道原件已保留，不会把低清结果标记为高清放大成功");
         }
         await decode(generated.file, generated.metadata);
-        return { display: { bytes: result.bytes, mimeType: generated.mimeType }, operations: ["quick_image_4k_dimensions_verified"],
+        return { display: { bytes: result.bytes, mimeType: generated.mimeType }, operations: [resolution === "4k" ? "quick_image_4k_dimensions_verified" : "quick_image_dimensions_verified"],
           warning: "AI 高清修复结果，已验证输出尺寸与宽高比；文字及细节请结合原图检查。" };
       }
       if (HIGH_BIT_DEPTH.test(source.metadata.pixelFormat)) throw new ImageResultProcessingError("INVALID_IMAGE_RESULT_INPUT", "一键去背景暂仅支持 8 位原图，不会自动降低高位深图片精度");

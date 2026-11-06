@@ -1,11 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { createRecipeForm, createRecipeRun, recipePromptInput, parseRecipeProject, SeriesRecipeRunner, type RecipeDependencies } from "../src/pages/design-workbench/recipe-model";
+import { createRecipeForm, createRecipeRun, recipePromptInput, parseRecipeProject, SeriesRecipeRunner, type RecipeDependencies, type RecipeProject } from "../src/pages/design-workbench/recipe-model";
+import * as recipeModel from "../src/pages/design-workbench/recipe-model";
 import { defaultConfig } from "../src/stores/use-config-store";
 
 const reference = { id: "source", name: "garment.png", type: "image/png", dataUrl: "data:image/png;base64,AAAA" };
 // Legacy imported runs keep all prior branches; each explicit start must schedule only one.
 const makeRun = (count = 3) => {
     const run = createRecipeRun("owner", createRecipeForm(), [reference], defaultConfig);
+    delete run.selectedColor;
     run.form.count = count;
     run.branches = Array.from({ length: count }, (_, index) => ({ ...structuredClone(run.branches[0]!), id: `variant-${index + 1}`, index, prompt: run.form.prompt }));
     return run;
@@ -22,14 +24,78 @@ const dependencies = (generate: RecipeDependencies["generate"]): RecipeDependenc
 });
 
 describe("formal series recipe", () => {
-    test("new runs and legacy form counts create one candidate without mutating original form", () => {
-        expect(createRecipeForm().count).toBe(1);
+    test("a selected color creates only its own candidate and retains the complete palette", () => {
         const form = { ...createRecipeForm(), count: 6 };
-        const run = createRecipeRun("owner", form, [reference], { ...defaultConfig, count: "10" });
+        const run = createRecipeRun("owner", form, [reference], { ...defaultConfig, count: "10" }, 2);
         expect(run.branches).toHaveLength(1);
-        expect(run.form.count).toBe(1);
+        expect(run.branches[0]).toMatchObject({ id: "variant-3", index: 2 });
+        expect(run.form.count).toBe(6);
+        expect(run.form.palette).toHaveLength(6);
+        expect(run.form.palette[2]?.hex).toBe("#b9827b");
         expect(run.settings.count).toBe("1");
         expect(form.count).toBe(6);
+    });
+    test("selected third color submits exactly one task and never schedules the other colors", async () => {
+        const calls: Array<{ count: string; index: unknown }> = [];
+        const runner = new SeriesRecipeRunner(createRecipeRun("owner", { ...createRecipeForm(), count: 6 }, [reference], defaultConfig, 2), defaultConfig, dependencies(async (config, _prompt, _refs, _mask, options) => {
+            calls.push({ count: config.count, index: options?.promptInput?.fields?.variantIndex });
+            return [{ id: "third-color", dataUrl: "data:image/png;base64,AAAA", sourceTaskId: "third-task" }];
+        }));
+        await runner.start();
+        await runner.start();
+        expect(calls).toEqual([{ count: "1", index: 2 }]);
+        expect(runner.snapshot().branches[0]?.status).toBe("success");
+    });
+    test("manual color changes retain prior frozen results and survive project restore", () => {
+        const form = { ...createRecipeForm(), count: 6 };
+        const run = createRecipeRun("owner", form, [reference], defaultConfig, 2);
+        run.branches[0]!.status = "success";
+        run.branches[0]!.images = [{ ...reference, id: "third-result" }];
+        const project: RecipeProject = { version: 1, kind: "series-recipe", ownerId: "owner", form, references: [reference], settings: run.settings, run, selectedColor: 2 };
+        const next = recipeModel.createRecipeProjectRun(project, defaultConfig, 4);
+        const restored = parseRecipeProject(JSON.parse(JSON.stringify(next)), "owner");
+        expect(restored.form.count).toBe(6);
+        expect(restored.selectedColor).toBe(4);
+        expect(restored.run?.branches.map(branch => branch.index)).toEqual([4]);
+        expect(restored.history?.[0]?.branches[0]).toMatchObject({ index: 2, status: "success", images: [{ id: "third-result" }] });
+        expect(restored.history?.[0]?.form.palette).toHaveLength(6);
+        expect(project.history).toBeUndefined();
+        expect(project.run?.branches[0]?.index).toBe(2);
+    });
+    test("unresolved accepted tasks cannot be archived by starting another selected color", () => {
+        const run = createRecipeRun("owner", createRecipeForm(), [reference], defaultConfig, 2);
+        run.branches[0]!.status = "uncertain";
+        run.branches[0]!.submissionStarted = true;
+        const project: RecipeProject = { version: 1, kind: "series-recipe", ownerId: "owner", form: run.form, references: [reference], settings: run.settings, run };
+        expect(() => recipeModel.createRecipeProjectRun(project, defaultConfig, 0)).toThrow("请先核查原任务");
+        expect(project.run?.branches[0]?.status).toBe("uncertain");
+    });
+    test("pattern workflow still creates only its first placement and ignores color selection", () => {
+        const form = { ...createRecipeForm(), kind: "pattern" as const, count: 6 };
+        const run = createRecipeRun("owner", form, [reference], defaultConfig, 4);
+        expect(run.form.count).toBe(1);
+        expect(run.branches.map(branch => branch.index)).toEqual([0]);
+    });
+    test("legacy multi-branch imports retain every original color and task without automatic submission", () => {
+        const run = makeRun(3);
+        run.branches[1]!.status = "success";
+        run.branches[1]!.images = [{ ...reference, id: "legacy-second" }];
+        run.branches[2]!.status = "running";
+        run.branches[2]!.submissionStarted = true;
+        run.branches[2]!.requestId = "legacy-accepted";
+        const restored = parseRecipeProject({ version: 1, kind: "series-recipe", ownerId: "owner", form: run.form, references: [reference], settings: run.settings, run }, "owner");
+        expect(restored.form.count).toBe(3);
+        expect(restored.run?.branches.map(branch => branch.index)).toEqual([0, 1, 2]);
+        expect(restored.run?.branches.map(branch => branch.status)).toEqual(["waiting", "success", "uncertain"]);
+        expect(restored.run?.branches[1]?.images[0]?.id).toBe("legacy-second");
+        expect(restored.run?.branches[2]?.requestId).toBe("legacy-accepted");
+        expect(() => recipeModel.createRecipeProjectRun(restored, defaultConfig, 0)).toThrow("请先核查原任务");
+    });
+    test("selected-color imports reject inconsistent or out-of-range color indices", () => {
+        const run = createRecipeRun("owner", createRecipeForm(), [reference], defaultConfig, 2);
+        const saved = { version: 1, kind: "series-recipe", ownerId: "owner", form: run.form, references: [reference], settings: run.settings, run };
+        expect(() => parseRecipeProject({ ...saved, run: { ...run, selectedColor: 6 } }, "owner")).toThrow("候选颜色索引无效");
+        expect(() => parseRecipeProject({ ...saved, run: { ...run, branches: [{ ...run.branches[0], index: 0 }] } }, "owner")).toThrow("候选颜色索引无效");
     });
     test("sends public form values and ordered reference roles without frontend authoring rules", () => {
         const form = { ...createRecipeForm(), kind: "pattern" as const, constraints: "纽扣不变", prompt: "只在指定部位调整" };

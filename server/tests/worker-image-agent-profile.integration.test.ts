@@ -6,6 +6,7 @@ import { assertImageEditMaskSupport, prepareImageEditInput } from "../src/image-
 import { imageAgentProviderPrompt, type ImageAgentProfile } from "../src/image-agent-profile";
 import { postgresPromptRecipeStore } from "../src/prompt-recipe-postgres";
 import { createIsolatedPostgres } from "./helpers/isolated-postgres";
+import type { AgentDocumentCatalogEntry, DesignRequirements } from "../../shared/image-agent-documents";
 
 // The production entrypoint starts configured services. Extract only the same
 // real functions used by the existing Worker tests, with no config/.env import.
@@ -22,6 +23,10 @@ const profiles: ImageAgentProfile[] = ["creative-chat", "canvas-assistant"];
 const rules = (profile: ImageAgentProfile) => `PRIVATE_WORKER_FIXTURE_${profile}: Preserve the supplied structure and follow the user's current change.`;
 const bytes = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAACXBIWXMAAAABAAAAAQBPJcTWAAAAFUlEQVR4nGP8////fwYGBgYWEAHCAD4KBAICIHhuAAAAAElFTkSuQmCC", "base64");
 const timing = { measure: async (_stage: string, operation: () => unknown) => operation() };
+const documentCatalog: AgentDocumentCatalogEntry[] = [{ id: "brief", name: "需求.pdf", kind: "pdf", sectionCount: 1, figureCount: 1,
+    sections: [{ id: "brief:page-1", figureIds: ["brief:figure-1"] }] }];
+const designRequirements: DesignRequirements = { title: "开衫", documentIds: ["brief"], subject: "女士落肩开衫", colors: "浅燕麦色", materials: "羊毛混纺",
+    must: ["保留五粒扣"], avoid: ["亮片"], unknowns: ["袖长尚未提供"], referenceFigureIds: ["brief:figure-1"], sources: [{ documentId: "brief", sectionId: "brief:page-1" }] };
 
 integration("production Worker image-agent recipe boundary over isolated PostgreSQL", () => {
     let fixture: Awaited<ReturnType<typeof createIsolatedPostgres>>;
@@ -55,10 +60,10 @@ integration("production Worker image-agent recipe boundary over isolated Postgre
         expect(unexpectedEgress).toBe(0);
     });
 
-    async function createTask(profile: ImageAgentProfile, edit = false) {
+    async function createTask(profile: ImageAgentProfile, edit = false, documentParameters: Record<string, unknown> = {}) {
         const id = randomUUID(), executionToken = randomUUID();
         const prompt = "只把衣服改成浅蓝色，版型和纽扣保持原样";
-        const parameters = { imageAgentProfile: profile, size: "3:4", inputArchive: { prompt, references: edit ? [{ id: "source", name: "original.png" }] : [] } };
+        const parameters = { imageAgentProfile: profile, size: "3:4", inputArchive: { prompt, references: edit ? [{ id: "source", name: "original.png" }] : [] }, ...documentParameters };
         await fixture.db.query(`INSERT INTO tasks(id,request_id,user_id,project_id,operation_type,model_config_id,prompt,parameters,source_urls,status,execution_token,lease_expires_at)
             VALUES($1,$2,$3,'worker-profile-fixture',$4,$5,$6,$7,$8,'processing',$9,now()+interval '1 hour')`,
             [id, `request-${id}`, actor, edit ? "inpaint" : "image_generation", model, prompt, JSON.stringify(parameters), JSON.stringify(edit ? ["/api/assets/fixture-source/content"] : []), executionToken]);
@@ -156,6 +161,33 @@ integration("production Worker image-agent recipe boundary over isolated Postgre
             expect((await loadTask(task.id)).upstream_task_id).toBeNull();
             expect(await publicRecord(task.id)).toEqual(saved);
         } finally { await store.activate(profile, activeVersions.get(profile)!); }
+    });
+
+    test("validated document requirements reach only the provider prompt while manifest IDs do not become source assets", async () => {
+        const task = await createTask("creative-chat", false, { designRequirements, designDocumentCatalog: documentCatalog }), h = harness();
+        const saved = await publicRecord(task.id);
+        await expect(h.execute(task)).rejects.toBeInstanceOf(ApiMartImageTaskPending);
+        expect(h.requests).toHaveLength(1);
+        expect(h.requests[0]!.prompt).toContain("女士落肩开衫");
+        expect(h.requests[0]!.prompt).toContain("保留五粒扣");
+        expect(h.requests[0]!.prompt).not.toContain("袖长尚未提供");
+        expect(h.requests[0]!.prompt).not.toContain("brief:figure-1");
+        expect(h.requests[0]!.prompt?.endsWith(task.prompt)).toBe(true);
+        expect(h.loadedSources).toEqual([]);
+        expect(await publicRecord(task.id)).toEqual(saved);
+    });
+
+    test("mismatched or missing document manifests stop the real worker before recipe reads, asset reads or submission", async () => {
+        for (const designDocumentCatalog of [undefined, [{ ...documentCatalog[0]!, sections: [{ id: "brief:page-1", figureIds: ["different:figure-1"] }] }]]) {
+            const task = await createTask("canvas-assistant", true, { designRequirements, ...(designDocumentCatalog ? { designDocumentCatalog } : {}) }), h = harness();
+            const saved = await publicRecord(task.id), statementStart = fixture.statements.length;
+            await expect(h.execute(task)).rejects.toMatchObject({ code: "IMAGE_AGENT_REQUIREMENTS_INVALID" });
+            expect(h.requests).toHaveLength(0);
+            expect(h.loadedSources).toHaveLength(0);
+            expect(fixture.statements.slice(statementStart).some(sql => /prompt_recipes|prompt_recipe_versions/.test(sql))).toBe(false);
+            expect((await loadTask(task.id)).upstream_submission_started_at).toBeNull();
+            expect(await publicRecord(task.id)).toEqual(saved);
+        }
     });
 
     test("submitted-without-id and changed synchronous/workflow routes never resubmit or load recipes", async () => {

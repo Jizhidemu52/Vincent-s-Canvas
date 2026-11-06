@@ -19,6 +19,7 @@ import { readToolConfiguration } from "../tool-configuration";
 import { getApimartImageCost } from "../../../shared/apimart-image-costs";
 import { configurationErrorHandler } from "./admin-configuration-errors";
 import { readConfigurationExport } from "./configuration-export";
+import { createQuickImageConfigurationRouter, type QuickImageRouterOptions } from "./quick-image-configuration";
 
 const protocol = z.enum(["openai", "openai-chat", "anthropic", "gemini", "apimart", "volcengine", "runninghub", "comfyui", "custom"]);
 const capabilities = z.array(z.enum(["generate", "edit", "upscale", "remove_background", "batch", "chat", "video", "audio"])).min(1);
@@ -33,7 +34,7 @@ const toolConfigurationInput = z.object({ modelConfigId: z.string().uuid().nulla
 const providerSelect = `id,name,protocol,base_url AS "baseUrl",enabled,(encrypted_credentials IS NOT NULL) AS "hasCredentials",created_at AS "createdAt",updated_at AS "updatedAt"`;
 const modelSelect = `m.id,m.public_number AS "publicNumber",m.provider_id AS "providerId",p.name AS "providerName",p.protocol,p.enabled AS "providerEnabled",m.workflow_config_id AS "workflowConfigId",w.name AS "workflowName",m.replacement_model_config_id AS "replacementModelConfigId",m.name,m.model_id AS "modelId",m.capabilities,m.credit_cost AS "creditCost",m.rmb_cost::float8 AS "rmbCost",m.concurrency_limit AS "concurrencyLimit",m.enabled,m.created_at AS "createdAt",m.updated_at AS "updatedAt"`;
 
-export function createModelConfigurationRouter(db: Database, config: AppConfig) {
+export function createModelConfigurationRouter(db: Database, config: AppConfig, quickImageOptions: QuickImageRouterOptions = {}) {
     const router = Router();
     router.use((request, response, next) => {
         if (!(request as unknown as AuthenticatedRequest).auth) {
@@ -50,6 +51,7 @@ export function createModelConfigurationRouter(db: Database, config: AppConfig) 
     });
     router.use("/mark-images", createMarkImageProviderRouter(db, config));
     router.use("/featured-models", createFeaturedModelsRouter(db));
+    router.use("/quick-images", createQuickImageConfigurationRouter(db, quickImageOptions));
 
     router.get("/export", async (_request, response, next) => {
         try {

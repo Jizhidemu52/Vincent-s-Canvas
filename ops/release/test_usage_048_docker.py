@@ -116,7 +116,7 @@ class Usage048DockerPostgres17(unittest.TestCase):
     def setUp(self):
         self.database = "usage048_" + uuid.uuid4().hex
         self.psql('CREATE DATABASE "' + self.database + '";', "postgres")
-        names = sorted(path.name for path in MIGRATIONS.glob("*.sql"))
+        names = sorted(path.name for path in MIGRATIONS.glob("*.sql") if path.name <= operator.MIGRATION)
         self.assertEqual(names[-1], operator.MIGRATION, "This fixed operator test only supports a release ending in 048")
         previous = [name for name in names if name != operator.MIGRATION]
         # Both historical 015 files are registered migrations; 048 therefore

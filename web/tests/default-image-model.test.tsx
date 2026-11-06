@@ -5,6 +5,9 @@ import { resolveCapabilityModel } from "@/lib/model-picker-options";
 import { defaultConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { preferredChatImageModel } from "@/pages/chat/image-quality";
+import { currentToolConfig, useToolConfig } from "@/hooks/use-tool-config";
+import { applyToolModel } from "@/services/api/tool-runtime";
+import { toolDefinitions } from "../../shared/feature-catalog";
 
 const models = [
     { id: "open-gpt2", modelId: "open-gpt2", name: "gpt-image-2", capabilities: ["generate", "edit"], creditCost: 0, rmbCost: 0 },
@@ -26,6 +29,59 @@ afterEach(() => {
 });
 
 describe("APIMart GPT2.6 Flare default selection", () => {
+    const imageTools = toolDefinitions.filter(tool => tool.toolKey !== "midjourney-blend" && ["image_generation", "inpaint", "upscale", "seamless_stitch", "batch_image"].includes(tool.operationType));
+
+    test("new image workspaces ignore an old global default without changing stored preferences or other media", () => {
+        const saved = { ...defaultConfig, model: "mark-gpt2", imageModel: "mark-gpt2", videoModel: "saved-video", textModel: "saved-chat" };
+        Object.assign(configInitialState, { config: saved });
+        Object.assign(businessInitialState, { models, status: "ready" });
+        let imageConfig = defaultConfig;
+        let regularConfig = defaultConfig;
+        function ReadConfig() { imageConfig = useEffectiveConfig("image"); regularConfig = useEffectiveConfig(); return null; }
+        renderToStaticMarkup(<ReadConfig />);
+        expect(imageConfig).toMatchObject({ model: "mark-flare26", imageModel: "mark-flare26", videoModel: "saved-video" });
+        expect(regularConfig).toMatchObject({ model: "mark-gpt2", imageModel: "mark-gpt2", videoModel: "saved-video" });
+        expect(imageConfig.textModel).toBe(regularConfig.textModel);
+        expect(configInitialState.config).toBe(saved);
+        Object.assign(businessInitialState, { status: "loading", models: [] });
+        renderToStaticMarkup(<ReadConfig />);
+        expect(imageConfig).toMatchObject({ model: DEFAULT_IMAGE_MODEL, imageModel: DEFAULT_IMAGE_MODEL });
+    });
+
+    test.each(imageTools)("$toolKey resolves a new empty choice to Flare but preserves a saved choice and forced binding", tool => {
+        const business = { models, prices: [], tools: [] };
+        const empty = { ...defaultConfig, model: "", imageModel: "" };
+        expect(applyToolModel(empty, business, tool.toolKey)).toMatchObject({ model: "mark-flare26", imageModel: "mark-flare26" });
+        const selected = { ...defaultConfig, model: "mark-flare", imageModel: "mark-flare" };
+        expect(applyToolModel(selected, business, tool.toolKey).model).toBe("mark-flare");
+        const bound = { ...business, tools: [{ toolKey: tool.toolKey, modelConfigId: "mark-gpt2", enabled: true, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 1 }] };
+        expect(applyToolModel(empty, bound, tool.toolKey).model).toBe("mark-gpt2");
+        expect(() => applyToolModel(empty, { ...bound, tools: [{ ...bound.tools[0]!, modelConfigId: "removed" }] }, tool.toolKey)).toThrow("绑定的模型");
+        expect(() => applyToolModel(empty, { ...bound, tools: [{ ...bound.tools[0]!, enabled: false }] }, tool.toolKey)).toThrow("已停用");
+        expect(selected.model).toBe("mark-flare");
+    });
+
+    test("a default captured before loading resolves an opaque public alias without rewriting the draft", () => {
+        const opaqueModels = models.map(model => ({ ...model, publicName: model.name, name: `Display ${model.id}` }));
+        const business = { models: opaqueModels, prices: [], tools: [], status: "ready" as const };
+        Object.assign(businessInitialState, business);
+        useBusinessConfigStore.setState(business);
+        let current = defaultConfig;
+        function ReadConfig() { current = useToolConfig(defaultConfig, "creative-style-to-sketch"); return null; }
+        renderToStaticMarkup(<ReadConfig />);
+        expect(current).toMatchObject({ model: "mark-flare26", imageModel: "mark-flare26" });
+        expect(currentToolConfig(defaultConfig, "canvas-batch")).toMatchObject({ model: "mark-flare26", imageModel: "mark-flare26" });
+        expect(defaultConfig.imageModel).toBe(DEFAULT_IMAGE_MODEL);
+        const selected = { ...defaultConfig, model: "mark-flare", imageModel: "mark-flare" };
+        expect(currentToolConfig(selected, "canvas-batch")).toMatchObject({ model: "mark-flare", imageModel: "mark-flare" });
+    });
+
+    test("missing explicit models and non-image or dedicated Blend workflows never silently use the image default", () => {
+        const business = { models, prices: [], tools: [] };
+        expect(() => applyToolModel({ ...defaultConfig, model: "removed-model" }, business, "canvas-image")).toThrow("所选模型");
+        expect(() => applyToolModel({ ...defaultConfig, model: "", videoModel: "" }, business, "video")).toThrow("所选模型");
+        expect(() => applyToolModel({ ...defaultConfig, model: "", imageModel: "" }, business, "midjourney-blend")).toThrow("所选模型");
+    });
     test("new and stale selections prefer APIMart rather than another provider's GPT2 or the first row", () => {
         expect(defaultConfig.imageModel).toBe(DEFAULT_IMAGE_MODEL);
         expect(defaultConfig.model).toBe(DEFAULT_IMAGE_MODEL);

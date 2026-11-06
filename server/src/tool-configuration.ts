@@ -3,8 +3,8 @@ import type { Database } from "./db";
 import { modelSupportsOperation } from "./billing";
 import { assertModuleEnabled } from "./module-flags";
 import { DEFAULT_CHAT_MODEL_TOOL_KEY } from "./chat-model-policy";
-import { isQuickImageAction, matchesQuickImageTaskTarget, quickImageModelId } from "../../shared/quick-image-tools";
-import { MARK_IMAGE_PROVIDER_ID } from "../../shared/mark-image-models";
+import { isQuickImageAction, matchesQuickImageTaskTarget } from "../../shared/quick-image-tools";
+import { QUICK_IMAGE_SNAPSHOT, type QuickImageSnapshot } from "./quick-image-tools";
 
 export type ToolConfiguration = {
   toolKey: ToolKey;
@@ -44,6 +44,7 @@ export async function readToolConfiguration(db: Pick<Database, "query">, toolKey
 export async function resolveToolExecution(db: Pick<Database, "query">, input: {
   operationType: string; toolKey?: string | null; parameters?: Record<string, unknown>;
   modelConfigId?: string | null; modelId?: string | null;
+  [QUICK_IMAGE_SNAPSHOT]?: QuickImageSnapshot;
 }, options: { allowModelOverride?: boolean } = {}): Promise<ToolConfiguration & { modelConfigId: string }> {
   const toolKey = normalizeTaskTool(input);
   const quickAction = input.parameters?.quickImageAction;
@@ -62,7 +63,9 @@ export async function resolveToolExecution(db: Pick<Database, "query">, input: {
   const modelConfiguration = isChat && toolKey !== DEFAULT_CHAT_MODEL_TOOL_KEY
     ? await readToolConfiguration(db, DEFAULT_CHAT_MODEL_TOOL_KEY) : configuration;
   const isQuickImage = isQuickImageAction(quickAction);
-  const selected = isQuickImage ? quickImageModelId(quickAction) : isChat ? modelConfiguration.modelConfigId : options.allowModelOverride && requested ? requested : configuration.modelConfigId ?? requested;
+  const quickSnapshot = input[QUICK_IMAGE_SNAPSHOT];
+  if (isQuickImage && (!quickSnapshot || quickSnapshot.action !== quickAction)) throw new ToolConfigurationError("QUICK_IMAGE_CONFIGURATION_REQUIRED", "一键工具缺少服务端配置快照");
+  const selected = isQuickImage ? quickSnapshot!.modelConfigId : isChat ? modelConfiguration.modelConfigId : options.allowModelOverride && requested ? requested : configuration.modelConfigId ?? requested;
   if (isChat && !selected) throw new ToolConfigurationError("CHAT_MODEL_NOT_CONFIGURED", "管理员尚未配置统一对话模型", 503);
   if (!selected) throw new ToolConfigurationError("MODEL_REQUIRED", "请先选择一个已启用的模型");
   const result = await db.query<{
@@ -72,13 +75,11 @@ export async function resolveToolExecution(db: Pick<Database, "query">, input: {
       m.workflow_config_id AS "workflowConfigId",w.enabled AS "workflowEnabled"
       FROM model_configs m JOIN providers p ON p.id=m.provider_id
       LEFT JOIN workflow_configs w ON w.id=m.workflow_config_id
-      ${isQuickImage ? "WHERE m.model_id=$1 AND m.provider_id=$2 AND p.protocol='apimart' LIMIT 1"
-        : "WHERE m.id::text=$1 OR m.model_id=$1 ORDER BY (m.id::text=$1) DESC LIMIT 1"}`, isQuickImage ? [selected, MARK_IMAGE_PROVIDER_ID] : [selected]);
+      WHERE m.id::text=$1 OR m.model_id=$1 ORDER BY (m.id::text=$1) DESC LIMIT 1`, [selected]);
   const model = result.rows[0];
   if (!model || !model.enabled || !model.providerEnabled) throw new ToolConfigurationError("MODEL_DISABLED", "模型或 Provider 不存在或未启用");
   if (model.workflowConfigId && !model.workflowEnabled) throw new ToolConfigurationError("WORKFLOW_DISABLED", "模型工作流未启用");
-  if (isQuickImage && model.modelId !== selected) throw new ToolConfigurationError("TOOL_MODEL_MISMATCH", "一键图片工具必须使用该操作指定的模型");
-  if (isQuickImage && (model.protocol !== "apimart" || model.workflowConfigId)) throw new ToolConfigurationError("TOOL_MODEL_MISMATCH", "一键图片工具需要启用指定模型的 APIMart 标准图片渠道");
+  if (isQuickImage && (model.modelId !== quickSnapshot!.modelId || model.protocol !== "apimart" || model.workflowConfigId || !model.capabilities.includes("edit"))) throw new ToolConfigurationError("TOOL_MODEL_MISMATCH", "一键图片模型已变化，请重新提交");
   if (!isQuickImage && !isChat && !options.allowModelOverride && configuration.modelConfigId && requested && requested !== model.id && requested !== model.modelId) {
     throw new ToolConfigurationError("TOOL_MODEL_CHANGED", "管理员已更改该板块模型，请刷新模型配置和参数后重试", 409);
   }

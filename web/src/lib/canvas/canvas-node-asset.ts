@@ -7,7 +7,7 @@ import { canvasImageBaseName, canvasImageExportStem, canvasImageVersion } from "
 export function createCanvasNodeAsset(node: CanvasNodeData, projectId: string): AssetInput {
     const metadata = {
         source: "canvas", module: "无线画布", nodeId: node.id,
-        prompt: node.metadata?.prompt, model: node.metadata?.model, projectId,
+        prompt: node.metadata?.quickImageAction ? undefined : node.metadata?.prompt, model: node.metadata?.quickImageAction ? undefined : node.metadata?.model, projectId,
     };
     const shared = { coverUrl: "", tags: [], source: "无线画布", metadata };
     if (node.type === CanvasNodeType.Text) {
@@ -15,7 +15,7 @@ export function createCanvasNodeAsset(node: CanvasNodeData, projectId: string): 
         if (!content) throw new Error("没有可保存的文本");
         return { ...shared, kind: "text", title: node.metadata?.prompt?.slice(0, 24) || "画布文本", data: { content } };
     }
-    const query = `prompt=${encodeURIComponent(String(node.metadata?.prompt || ""))}&model=${encodeURIComponent(String(node.metadata?.model || ""))}`;
+    const query = `prompt=${encodeURIComponent(String(metadata.prompt || ""))}&model=${encodeURIComponent(String(metadata.model || ""))}`;
     if (node.type === CanvasNodeType.Video) {
         if (!node.metadata?.content) throw new Error("没有可保存的视频");
         return {

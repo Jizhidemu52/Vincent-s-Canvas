@@ -31,6 +31,7 @@ test.each([
     [{ width: 2000, height: 1500 }, "4:3"],
     [{ width: 1254, height: 1254 }, "1:1"],
     [{ width: 1080, height: 1920 }, "9:16"],
+    [{ width: 577, height: 591 }, "auto"],
 ] as const)("automatic edit of %j pixels delegates dimensions to the model without strict source matching", async (dimensions) => {
     useBusinessConfigStore.setState({ models });
     const before = structuredClone({ config, base });

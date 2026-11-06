@@ -28,6 +28,20 @@ API 默认命令仅 `bun src/index.ts`，Worker 默认仅 `bun src/worker.ts`。
 
 旧 fingerprinted 静态资源仅从当前 Web 的 `/usr/share/nginx/html/assets` 拷入审计目录，拒绝 symlink、HTML、JSON、map、env 和未带 hash 的文件；新 Web 只读挂载该兼容目录。其他旧源码挂载只删除实例明确列出的只读代码挂载；未知或可写代码挂载直接拒绝。
 
+## 049 一键图片配置的独立准备
+
+`quick-image-049.py` 只为已登记此前全部迁移的实例新增固定空配置表与一条迁移记录，不保存模型配置、不启用统计处理，也不切换镜像。已执行 049 的实例拒绝重复运行。包内 SQL、脚本和精确 catalog 受同一文件清单及迁移哈希约束；没有任意 SQL 输入。
+
+```sh
+python3 -B /absolute/package/ops/release/quick-image-049.py preflight /absolute/instance.json /absolute/package
+python3 -B /absolute/package/ops/release/quick-image-049.py migrate /absolute/instance.json /absolute/package /absolute/049-preflight-audit
+# 原容器及正常入口恢复后，重新取得零变更发布预检，再切换同一冻结镜像。
+bash /absolute/package/ops/deploy.sh preflight /absolute/instance.json /absolute/package
+bash /absolute/package/ops/deploy.sh apply /absolute/instance.json /absolute/package /absolute/new-deploy-preflight-audit
+```
+
+预检有效期为 15 分钟。迁移使用现有维护门、活动排空、停止原容器和数据库备份；事务内锁定所有旧表、复查完整基线，只允许新增空 `quick_image_configurations` 表及唯一 049 登记。全部旧业务行、目录、序列、旧迁移和停用的统计状态保持不变。成功时恢复同一原容器 ID，核对健康、完整数据库与保护对象后才打开入口。失败只记录明确阶段和可能关闭的维护状态，不自动重试、恢复数据库或声称入口已恢复；先查实际提交结果再处理。049 复用旧运维模块的只读快照、备份及原容器恢复方法，不执行 048 的迁移或启停操作。
+
 ## 048 使用分析的独立准备与启停
 
 `deploy.py` 的零数据库变更合同不变；它既不执行 048，也不开启统计处理。离线包仅额外携带固定 `048_usage_daily_facts.sql`、专用 operator 和精确结构清单；SQL 文件 SHA256 必须同时匹配包文件清单及迁移清单。没有任意 SQL、迁移目录或版本号参数。

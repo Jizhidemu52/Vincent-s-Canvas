@@ -2,6 +2,7 @@ import type { ParsedChatAttachment } from "@/lib/chat-attachments";
 import type { CreativeImageLineage, CreativeImageWork } from "@/lib/creative-chat";
 import type { ChatRegionComposite, ImageAgentRegionSelection } from "@/lib/image-agent/mask";
 import type { PendingChatImageTask } from "@/services/api/chat-image-recovery";
+import type { AgentDocument, DesignRequirementCard } from "../../../../shared/image-agent-documents";
 
 export type ChatAttachment = Omit<ParsedChatAttachment, "kind"> & {
     id: string;
@@ -21,6 +22,8 @@ export type ChatMessage = {
     pendingImageTask?: PendingChatImageTask; stopped?: boolean; createdAt: string;
     focusImageId?: string; focusLocked?: boolean; newCreation?: boolean;
     candidateImageIds?: string[];
+    documentIds?: string[];
+    requirementCard?: DesignRequirementCard;
     /** Durable selection for explicit regenerate/edit branches; image bytes stay in storage. */
     regionSelection?: ImageAgentRegionSelection;
 };
@@ -32,4 +35,6 @@ export type ChatSession = {
     imageSize?: string;
     editTargetImageId?: string; canvasProjectId?: string; branchOf?: { sessionId: string; messageId: string };
     focusImageId?: string; focusLocked?: boolean; newCreation?: boolean; focusRevision?: number;
+    documents?: AgentDocument[];
+    requirementCard?: DesignRequirementCard;
 };

@@ -47,6 +47,7 @@ import { summarizeCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot }
 import { classifyAgentMediaIntent, resolveAgentMediaToolDispatch } from "@/lib/canvas/agent-media-workflow";
 import { agentQuickstartPreset, buildAgentGeneratedMediaOps, buildAgentGenerationBrief, buildAgentGenerationPlan, buildAgentReferenceImageContent, buildAgentVideoPrompt, createAgentVideoConfirmation, normalizeAgentImageSettings, normalizeAgentVideoSettings, resolveAgentGeneratedMediaPosition, resolveAgentImageGenerationSettings, selectAgentVideoReferences, type AgentGenerationSettings, type AgentVideoConfirmation } from "@/lib/agent-direct-generation";
 import { adaptImageModelSettings, imageModelProfile, imageModelSettingsError, useImageModelProfile } from "@/lib/image-model-settings";
+import { imageAgentDraftSettings } from "@/lib/image-agent-defaults";
 import { getVideoModelParameterSpec } from "@/lib/video-model-parameters";
 import { getGenerationCapabilities, getImageGenerationModels, QueuedTaskFailedError, QueuedTaskPausedError, type GenerationCapabilityModel, type ImageGenerationModel } from "@/services/api/generation-tasks";
 import type { ReferenceImage } from "@/types/image";
@@ -76,12 +77,18 @@ import { canvasConversationImageForAsset, canvasConversationImageLabels, canvasC
 import { pendingOnlineAgentTask, recoverOnlineAgentTask, type PendingOnlineAgentTask } from "@/lib/canvas/canvas-online-task-recovery";
 import { CANVAS_AGENT_ATTACHMENT_LIMIT, readCanvasAgentAttachments } from "@/lib/canvas/canvas-agent-attachments";
 import { canvasCompareSource } from "@/lib/canvas/canvas-image-compare-source";
+import { AgentDocumentPanel } from "@/pages/chat/agent-document-panel";
+import { agentDocumentCatalog, agentDocumentContext, parseDesignRequirements, readAgentDocument } from "@/lib/agent-documents";
+import { confirmedDesignRequirements } from "@/lib/image-agent/document-tools";
+import { mapAgentDocumentMedia } from "@/lib/image-agent/document-media";
+import { CHAT_ATTACHMENT_ACCEPT, parseChatAttachment } from "@/lib/chat-attachments";
+import { AGENT_DOCUMENT_LIMITS, designRequirementsText, type AgentDocument, type AgentDocumentReadInput, type DesignRequirements } from "../../../../shared/image-agent-documents";
 
 const PANEL_MOTION_SECONDS = CANVAS_AGENT_PANEL_MOTION_MS / 1000;
 const ONLINE_AGENT_MAX_STEPS = 4;
 
 
-const ONLINE_READ_TOOLS = new Set(["look_at_images", "canvas_get_state", "canvas_get_selection", "canvas_export_snapshot"]);
+const ONLINE_READ_TOOLS = new Set(["look_at_images", "read_document", "canvas_get_state", "canvas_get_selection", "canvas_export_snapshot"]);
 
 type OnlineAgentTab = "setup" | "chat" | "history" | "log";
 type OnlineAgentLog = { id: string; time: string; title: string; data?: unknown };
@@ -94,8 +101,11 @@ type OnlineTurnContext = {
     images: CanvasImageAgentImage[]; focusId?: string; lockedImageId?: string; newCreation?: boolean;
     explicitIds: string[]; previewedIds?: string[]; focusRevision: number; profileContext?: Record<string, unknown>;
     inspectedPreviews?: Array<{ id: string; dataUrl: string }>;
+    workingPreviews?: Array<{ id: string; dataUrl: string }>;
     regionSelection?: ImageAgentRegionSelection;
     userMessageId?: string;
+    documents: AgentDocument[]; requirements?: DesignRequirements; documentsInspected?: boolean;
+    documentPreviews?: Array<{ id: string; dataUrl: string }>;
 };
 type OnlineToolResult = { ok: true; message: string; data?: unknown; mediaWorkflow?: CanvasAgentMediaWorkflow } | { ok: false; message: string; data?: unknown };
 type OnlineExecutedToolCall = { toolCallId: string; name: string; result: OnlineToolResult };
@@ -188,8 +198,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
         imageModel: effectiveConfig.imageModel || effectiveConfig.model,
         videoModel: effectiveConfig.videoModel || effectiveConfig.model,
         size: effectiveConfig.size || "1:1",
-        quality: effectiveConfig.quality || "1k",
-        imageOptions: effectiveConfig.imageOptions,
+        ...imageAgentDraftSettings(imageModelProfile(effectiveConfig.imageModel || effectiveConfig.model, businessModels), effectiveConfig.quality, effectiveConfig.imageOptions),
         imageCount: "1",
         videoSeconds: effectiveConfig.videoSeconds || "5",
         videoQuality: effectiveConfig.vquality || "1080P",
@@ -329,7 +338,8 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
             setGenerationSettings((current) => {
                 const selected = preferredImageModel(images.value, [current.imageModel]);
                 if (!selected) return current;
-                const normalized = normalizeAgentImageSettings({ ...current, imageModel: selected.modelId });
+                const profile = imageModelProfile(selected.modelId, images.value);
+                const normalized = normalizeAgentImageSettings({ ...current, imageModel: selected.modelId, ...imageAgentDraftSettings(profile, current.quality, current.imageOptions) }, profile);
                 return current.mode === "image" ? normalized : { ...normalized, size: current.size };
             });
         } else {
@@ -660,6 +670,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
         const focusRevision = (session.focusRevision || 0) + 1;
         updateSession(session.id, current => ({ ...current, focusRevision }));
         const turn: OnlineTurnContext = { signal: beginOnlineRequest(), userPrompt: text, references: refs, images,
+            documents: session.documents || [], requirements: confirmedDesignRequirements(session.requirementCard),
             focusId: focus?.id, lockedImageId: selectedImage?.id || (session.focusLocked ? focus?.id : undefined), newCreation: session.newCreation && !selectedImage,
             explicitIds, focusRevision, settings, videoSize: videoSizeRef.current, config: onlineAgentConfig(effectiveConfig, settings),
             canvasSnapshot: captureCanvasContextSnapshot(snapshotRef.current), autoContext,
@@ -688,6 +699,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
             });
             turn.signal?.throwIfAborted();
             turn.previewedIds = conversation.previews.map(image => image.id);
+            turn.workingPreviews = conversation.previews;
             turn.profileContext = conversation.profileContext;
             const contextReferences = conversation.workingSet.map(image => ({ ...image.reference, id: image.id }));
             upsertMessage(sessionId, { ...userMessage, contextReferences,
@@ -695,6 +707,19 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                     conversationContext: { images: contextReferences.length, historyMessages: Math.min(history.length, 20) } },
                 meta: `本轮助手看到了 ${contextReferences.length} 张图片` });
             const messages: ResponseInputMessage[] = conversation.messages;
+            const documentText = agentDocumentContext(turn.documents);
+            const requirementText = turn.requirements && designRequirementsText(turn.requirements);
+            if (documentText || requirementText) messages.splice(messages.length - 1, 0, { role: "user", content: [documentText, requirementText ? `已确认设计需求卡：\n${requirementText}` : ""].filter(Boolean).join("\n\n") });
+            const firstFigures = turn.documents.map(document => document.figures[0]).filter(Boolean).slice(0, Math.max(0, 5 - conversation.previews.length));
+            if (firstFigures.length) {
+                const figureContent: Exclude<AiTextMessage["content"], string> = [];
+                for (const figure of firstFigures) {
+                    const dataUrl = await readConversationImage({ dataUrl: figure.dataUrl, storageKey: figure.storageKey });
+                    turn.signal?.throwIfAborted();
+                    figureContent.push({ type: "text", text: `文件图 ${figure.id}（首图预览，仅查阅，未选为出图参考）` }, { type: "image_url", image_url: { url: dataUrl } });
+                }
+                messages.splice(messages.length - 1, 0, { role: "user", content: figureContent });
+            }
             const textReferences = turn.references.filter(reference => reference.text);
             if (textReferences.length) messages.splice(messages.length - 1, 0, { role: "user", content: textReferences.map(reference => `选中文本「${reference.title}」：${reference.text?.slice(0, 4000)}`).join("\n") });
             addOnlineLog(`Agent Tool Loop ${loop.step} 开始`, { toolChoice: "auto", images: turn.previewedIds });
@@ -770,15 +795,30 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
             upsertMessage(sessionId, { id: assistantId, role: "assistant", text: toolResults.map(item => toolResultText(item.result)).join("\n") });
             return;
         }
-        if (turn.inspectedPreviews) {
-            for (const message of nextMessages) if ("role" in message && message.role !== "tool" && Array.isArray(message.content)) {
-                message.content = message.content.filter(part => part.type !== "image_url");
+        if (turn.inspectedPreviews || turn.documentPreviews) {
+            // Replace the prior visual block, including file first-page previews,
+            // rather than accumulating a sixth image on a read_document continuation.
+            for (let index = 0; index < nextMessages.length; index++) {
+                const message = nextMessages[index]!;
+                if ("role" in message && message.role !== "tool" && Array.isArray(message.content)) {
+                    nextMessages[index] = { ...message, content: message.content.filter(part => part.type !== "image_url") };
+                }
             }
-            nextMessages.push({ role: "user", content: turn.inspectedPreviews.flatMap(image => [
+            if (turn.inspectedPreviews) turn.workingPreviews = turn.inspectedPreviews;
+            if (turn.workingPreviews?.length) nextMessages.push({ role: "user", content: turn.workingPreviews.flatMap(image => [
                 { type: "text" as const, text: `${turn.images.find(item => item.id === image.id)?.label || image.id}（image_id=${image.id}）` },
                 { type: "image_url" as const, image_url: { url: image.dataUrl } },
             ]) });
             turn.inspectedPreviews = undefined;
+            if (turn.documentPreviews?.length) nextMessages.push({ role: "user", content: turn.documentPreviews.flatMap(figure => [
+                { type: "text" as const, text: `文件图 ${figure.id}（仅查阅，未选为出图参考）` }, { type: "image_url" as const, image_url: { url: figure.dataUrl } },
+            ]) });
+            turn.documentPreviews = undefined;
+            nextMessages.push({ role: "user", content: turn.userPrompt });
+        }
+        if (turn.documentsInspected && !toolCalls.some(call => call.function.name === "read_document")) {
+            upsertMessage(sessionId, { id: assistantId, role: "assistant", text: "本轮文件查阅已完成；如需其他页面，请再发一条消息。没有自动出图。" });
+            return;
         }
         if (step >= ONLINE_AGENT_MAX_STEPS) {
             upsertMessage(sessionId, { id: assistantId, role: "assistant", text: toolResults.map((item) => toolResultText(item.result)).join("\n") || "工具已执行。" });
@@ -913,6 +953,23 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
         turn.signal?.throwIfAborted();
         const current = snapshotRef.current;
         try {
+            if (name === "read_document") {
+                if (turn.documentsInspected) throw new Error("本轮只查阅一次文件，请在下一条消息继续指定页码。");
+                const read = readAgentDocument(turn.documents, args as AgentDocumentReadInput);
+                const figures = await Promise.all(read.figures.map(async figure => ({ id: figure.id, dataUrl: await readConversationImage({ dataUrl: figure.dataUrl, storageKey: figure.storageKey }) })));
+                turn.signal?.throwIfAborted();
+                const working = turn.workingPreviews || [];
+                const remaining = figures.filter(figure => !working.some(image => image.id === figure.id || image.dataUrl === figure.dataUrl));
+                turn.documentPreviews = remaining.slice(0, Math.max(0, 5 - working.length));
+                const omitted = remaining.slice(turn.documentPreviews.length).map(figure => figure.id);
+                turn.documentsInspected = true;
+                return { ok: true, message: read.text + (omitted.length ? `\n[为保留当前底图和已选参考图，以下文件图未展示：${omitted.join("、")}。不得把未展示图片视为已看；相关视觉要求请列入待确认，或请用户在下一轮减少参考图后查阅。]` : "") };
+            }
+            if (name === "propose_requirements") {
+                const requirements = parseDesignRequirements(args, turn.documents);
+                updateSession(sessionId, session => ({ ...session, requirementCard: { ...requirements, id: nanoid(), status: "draft", updatedAt: new Date().toISOString() } }));
+                return { ok: true, message: "设计需求卡已整理为草稿，请核对、编辑并确认。确认不会自动出图。" };
+            }
             if (name === "canvas_get_state") {
                 const readImages = canvasImageAgentCatalog([], current.nodes, buildAssistantReferences(current.nodes));
                 for (const image of readImages) if (!turn.images.some(existing => (existing.storageKey || existing.dataUrl) === (image.storageKey || image.dataUrl))) turn.images.push({ ...image, label: `图${turn.images.length + 1}` });
@@ -942,6 +999,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                 return { ok: true, message: "已查看所选图片。", data: { imageIds: turn.previewedIds } };
             }
             if (name === "edit_image") {
+                if (turn.documents.length && !turn.requirements) throw new Error("请先整理并确认设计需求卡，再提交图片任务。");
                 const edit = resolveCanvasImageAgentEdit(args, turn.images, { focusId: turn.focusId, lockedImageId: turn.lockedImageId,
                     newCreation: turn.newCreation, explicitIds: turn.explicitIds, previewedIds: turn.previewedIds, focusRevision: turn.focusRevision });
                 turn.writeOperationAttempted = true;
@@ -998,6 +1056,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
     };
 
     const executeOnlineToolCalls = async (sessionId: string, toolCalls: ResponseToolCall[], turn: OnlineTurnContext) => {
+        if (toolCalls.some(call => ["read_document", "propose_requirements"].includes(call.function.name)) && toolCalls.length !== 1) throw new Error("文件工具每轮只能单独调用一次，未执行任何操作。");
         if (canvasOnlineGenerationCallCount(toolCalls, snapshotRef.current, turn.config) > 1) throw new Error("单轮只允许提交一个生成任务，本轮没有提交；请分别发送要求。");
         const results: OnlineExecutedToolCall[] = [];
         let stopped = false;
@@ -1128,6 +1187,9 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
     };
 
     const runDirectGeneration = async (sessionId: string, text: string, settings: AgentGenerationSettings, references: ReferenceImage[], baseConfig: AiConfig, imageAgent?: CanvasImageAgentRecord, signal?: AbortSignal, nodeId?: string, regionSelection?: ImageAgentRegionSelection) => {
+        const documentSession = localSessionsRef.current.find(session => session.id === sessionId);
+        const requirements = confirmedDesignRequirements(documentSession?.requirementCard);
+        if (settings.mode === "image" && documentSession?.documents?.length && !requirements) throw new Error("请先确认设计需求卡，图片任务尚未提交。");
         const assertTarget = () => {
             signal?.throwIfAborted();
             if (nodeId && !snapshotRef.current.nodes.some(node => node.id === nodeId)) throw new DOMException("生成源节点已删除，可查询原任务", "AbortError");
@@ -1151,7 +1213,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
         const requestSettings = plan.kind === "image"
             ? { mode: plan.kind, model: plan.model, size: plan.size, quality: plan.quality, count: plan.count, imageOptions: plan.imageOptions ?? baseConfig.imageOptions }
             : { mode: plan.kind, model: plan.model, size: plan.size, quality: plan.quality, seconds: plan.seconds, audio: settings.videoGenerateAudio ?? baseConfig.videoGenerateAudio };
-        const signature = await canvasImageAgentTaskSignature({ sessionId, prompt, settings: requestSettings, references: activeReferences.map(reference => reference.storageKey || reference.dataUrl), base: imageAgent?.baseImageId, mask: regionSelection?.mask.storageKey });
+        const signature = await canvasImageAgentTaskSignature({ sessionId, prompt, requirements, settings: requestSettings, references: activeReferences.map(reference => reference.storageKey || reference.dataUrl), base: imageAgent?.baseImageId, mask: regionSelection?.mask.storageKey });
         assertTarget();
         if (pendingSignaturesRef.current.has(signature) || localSessionsRef.current.find(session => session.id === sessionId)?.messages.some(message => pendingOnlineAgentTask(message.detail?.pendingTask)?.signature === signature)) throw new Error("相同请求的原任务尚未核实，请先查询原任务；其他任务和聊天仍可继续。");
         pendingSignaturesRef.current.add(signature);
@@ -1167,6 +1229,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                 assertTarget();
                 const requestId = nanoid();
                 const requestOptions = { requestId, signal, cancelOnAbort: () => false, imageAgentProfile: "canvas-assistant" as const,
+                    ...(requirements ? { imageAgentRequirements: requirements, imageAgentDocumentCatalog: agentDocumentCatalog(documentSession?.documents || []) } : {}),
                     onSubmissionStarted: async () => {
                         pending = { requestId: `${requestId}:0`, ownerId: user?.id || "", projectId: snapshotRef.current.projectId, mode: "image", model: plan.model, prompt, imageAgent: record, signature, nodeId, maskAdaptation: maskInput?.adaptation };
                         try { await savePendingOnlineTask(sessionId, progressId, pending, signal, true); }
@@ -1285,7 +1348,9 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
         };
         try {
             const available = CANVAS_AGENT_ATTACHMENT_LIMIT - uploadedReferences.reduce((bytes, item) => bytes + (item.dataUrl?.length || 0), 0);
-            const result = await readCanvasAgentAttachments(Array.from(files || []), available, fileToDataUrl, current);
+            const selectedFiles = Array.from(files || []);
+            const imageFiles = selectedFiles.filter(file => file.type.startsWith("image/") || /\.(png|jpe?g|webp|gif)$/i.test(file.name));
+            const result = await readCanvasAgentAttachments(imageFiles, available, fileToDataUrl, current);
             if (!current()) return;
             const stored: CanvasAssistantReference[] = [];
             for (const image of result.images) {
@@ -1295,6 +1360,18 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                 stored.push({ id: nanoid(), type: CanvasNodeType.Image, title: image.name, dataUrl: asset.url, storageKey: asset.storageKey });
             }
             setUploadedReferences(previous => [...previous, ...stored]);
+            const sessionId = localActiveSessionIdRef.current || localSessionsRef.current[0]?.id;
+            for (const file of selectedFiles.filter(file => !imageFiles.includes(file))) {
+                if (!current() || !sessionId) return;
+                const documents = localSessionsRef.current.find(session => session.id === sessionId)?.documents || [];
+                if (documents.length >= AGENT_DOCUMENT_LIMITS.files) throw new Error("每个会话最多保存 8 个设计文件，请另建会话。");
+                const parsed = await parseChatAttachment(file, { imageToDataUrl: fileToDataUrl });
+                if (!current()) return;
+                if (!parsed.document) throw new Error("此文件尚未解析为设计资料，请使用 PDF、Word、表格或文本。");
+                const document = await mapAgentDocumentMedia(parsed.document, "persist", () => { if (!current()) throw new DOMException("会话已切换", "AbortError"); });
+                updateSession(sessionId, session => ({ ...session, documents: [...session.documents || [], document], requirementCard: session.requirementCard ? { ...session.requirementCard, status: "draft" } : undefined }));
+                setPrompt(value => value || "请理解上传的设计文件，整理需求卡供我确认。");
+            }
             setAttachmentErrors(result.errors);
         } catch (error) {
             if (current()) setAttachmentErrors([error instanceof Error ? error.message : "图片保存失败，请重新添加"]);
@@ -1641,6 +1718,14 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                         <button type="button" className="shrink-0 hover:underline" aria-pressed={autoContext} onClick={() => setAutoContext((current) => !current)}>{autoContext ? t("取消") : t("让助手看当前视野")}</button>
                     </div>
                     <div {...attachmentDrop.dropProps} data-testid="canvas-agent-attachment-drop">
+                    {activeSession ? <div style={{ color: theme.node.text }}><AgentDocumentPanel key={activeSession.id} documents={activeSession.documents} card={activeSession.requirementCard} disabled={isRunning || attachmentsLoading} onChange={card => updateSession(activeSession.id, session => ({ ...session, requirementCard: card }))} onReference={figure => {
+                        updateSession(activeSession.id, session => ({ ...session, focusImageId: draftFocus?.id, newCreation: !draftFocus, ...(draftFocus ? {} : { focusLocked: false }) }));
+                        setUploadedReferences(previous => previous.some(item => item.id === figure.id) ? previous : [...previous, { id: figure.id, type: CanvasNodeType.Image, title: figure.label, dataUrl: figure.dataUrl, storageKey: figure.storageKey }]);
+                    }} onPlace={() => {
+                        const card = activeSession.requirementCard;
+                        if (!card || card.status !== "confirmed") return;
+                        executeOps([{ type: "add_node", id: nanoid(), nodeType: CanvasNodeType.Text, title: card.title || "设计需求卡", position: { x: nextCanvasX(snapshotRef.current), y: 0 }, metadata: { content: designRequirementsText(card), status: "success" } }]);
+                    }} /></div> : null}
                     {attachmentDrop.dragging || attachmentDrop.reading ? <p role="status" className="mx-4 mb-2 text-xs" style={{ color: theme.node.text }}>{t(attachmentDrop.reading ? "正在读取拖入图片，请稍候。" : "松开以添加对话参考图，不会自动发送")}</p> : null}
                     <AgentChatComposer
                         key={`${activeSession?.id}:${onlineProjectId}:${user?.id || ""}`}
@@ -1669,6 +1754,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                         onSubmit={submit}
                         onStop={stopOnlineAgent}
                         onAddFiles={addImagesToAgent}
+                        attachmentAccept={CHAT_ATTACHMENT_ACCEPT}
                         onRemoveAttachment={(id) => setUploadedReferences((current) => current.filter((item) => item.id !== id))}
                         left={<CanvasPromptLibrary onSelect={selectPromptTemplate} />}
                         generationControls={<AgentGenerationControls editing={Boolean(selectedConversationImage) || generationReferences.length > 0} settings={generationSettings} config={effectiveConfig} imageCapabilities={imageCapabilities} videoCapabilities={videoCapabilities} theme={theme} onChange={updateGenerationSettings}
@@ -1833,7 +1919,7 @@ function AgentGenerationControls({ settings: savedSettings, config: baseConfig, 
                     {loading ? <p className="mb-3" role="status">{t("正在加载模型与参数…")}</p> : error ? <div className="mb-3 space-y-2" role="alert"><p>{error}</p><Button size="small" onClick={onRetry}>{t("重新加载")}</Button></div> : !currentModels.length ? <p className="mb-3" role="status">{t("尚未配置可用的")}{isImage ? t("图像") : t("视频")}{t("模型，请在后台启用模型后重新加载。")}</p> : null}
                     <div className="grid gap-2">
                         {isImage ? <>
-                            <p className="leading-5 opacity-60">{settings.requestedImageSize ? <>{t("编辑使用已选画幅：")}{settings.requestedImageSize} <button type="button" className="underline" onClick={() => onChange({ requestedImageSize: undefined })}>{t("恢复跟随底图")}</button></> : <>{t("编辑默认跟随底图画幅；下方尺寸用于新创作。 ")}<button type="button" className="underline" onClick={() => onChange({ requestedImageSize: imageSettings.size })}>{t("编辑也使用下方尺寸")}</button></>}</p>
+                            <p className="leading-5 opacity-60">{settings.requestedImageSize ? <>{t("编辑使用已选画幅：")}{settings.requestedImageSize} <button type="button" className="underline" onClick={() => onChange({ requestedImageSize: undefined })}>{t("恢复跟随底图")}</button></> : <>{t("编辑默认参考底图画幅；特殊尺寸由模型自适应，不保证返回原像素尺寸。下方尺寸用于新创作。 ")}<button type="button" className="underline" onClick={() => onChange({ requestedImageSize: imageSettings.size })}>{t("编辑也使用下方尺寸")}</button></>}</p>
                             <ImageSettingsPanel maxCount={1} config={{ ...config, model: settings.imageModel, imageModel: settings.imageModel, size: imageSettings.size, quality: imageSettings.quality, count: "1", imageOptions: imageSettings.imageOptions }} profile={imageProfile} referenceCount={editing ? 1 : 0} theme={theme} showTitle={false}
                                 onConfigNormalize={(key, value) => onChange({ [key === "count" ? "imageCount" : key]: value })}
                                 onConfigChange={(key, value) => onChange({ [key === "count" ? "imageCount" : key]: value, ...(key === "size" ? { requestedImageSize: value } : {}) })} />
@@ -2190,7 +2276,7 @@ export type OnlineToolExecution = { kind: "workflow"; workflow: CanvasAgentMedia
 /** Preflight the whole batch before applying even its first mutation. */
 export function canvasOnlineGenerationCallCount(calls: ResponseToolCall[], snapshot: CanvasAgentSnapshot, config: AiConfig) {
     return calls.reduce((total, call) => {
-        if (ONLINE_READ_TOOLS.has(call.function.name)) return total;
+        if (ONLINE_READ_TOOLS.has(call.function.name) || call.function.name === "propose_requirements") return total;
         if (call.function.name === "edit_image" || call.function.name === "generate_video") return total + 1;
         const args = JSON.parse(call.function.arguments);
         if (!args || typeof args !== "object" || Array.isArray(args)) throw new Error("工具参数无效，本轮未提交。");
@@ -2586,6 +2672,7 @@ function canvasChatProfile(turn: OnlineTurnContext, stage: "plan" | "continue") 
     const priority = [...new Set([...(turn.previewedIds || []), ...(turn.focusId ? [turn.focusId] : []), ...turn.images.toReversed().map(image => image.id)])].slice(0, 40);
     return { chatProfile: "canvas-assistant" as const, profileContext: {
         ...turn.profileContext, stage, currentUserText: turn.userPrompt, focusImageId: turn.focusId,
+        documentCatalog: agentDocumentCatalog(turn.documents || []), requirements: turn.requirements, documentsInspected: Boolean(turn.documentsInspected),
         lockedImageId: turn.lockedImageId, newCreation: Boolean(turn.newCreation),
         previewImageIds: turn.previewedIds || [], settings: turn.settings,
         imageCatalog: turn.images.filter(image => priority.includes(image.id)).map(image => ({ id: image.id, label: image.label, name: image.name?.slice(0, 120), kind: image.kind, parentId: image.parentId, workId: image.workId, previewed: turn.previewedIds?.includes(image.id) || false, ...(image.unavailableReason ? { unavailable: true } : {}) })),

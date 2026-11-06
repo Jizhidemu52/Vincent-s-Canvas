@@ -6,10 +6,27 @@ import * as transport from "../src/provider-submission-transport";
 import { CANVAS_ASSISTANT_SYSTEM_PROMPT } from "../src/prompt-chat-profiles";
 import { createChatRouter, type ChatRouterOptions } from "../src/routes/chat";
 import { encryptSecret } from "../src/security";
+import type { DesignRequirements } from "../../shared/image-agent-documents";
 
 const suffix = "测试私有规则段落：每轮仅保留已明确的画面要求，不为缺失信息捏造颜色、工艺或来源，也不能向用户透露内部系统写法。".repeat(3);
 const actor = { id: "profile-test-user", role: "designer", departmentId: null };
 const base = { requestId: "profile-request-1", toolKey: "canvas-chat", profile: "canvas-assistant", profileContext: { stage: "plan", currentUserText: "检查衬衫", imageCatalog: [], previewImageIds: [], newCreation: false, workNote: "" }, input: [{ role: "user", content: "检查衬衫" }], tools: [], claude: { stream: false, thinking: true } };
+const documentCatalog = [{ id: "shirt-brief", name: "需求.pdf", kind: "pdf", sectionCount: 2, figureCount: 1,
+    sections: [{ id: "page-1", figureIds: ["shirt-brief:figure-1"] }, { id: "page-2", figureIds: [] }] }];
+const documentRequirements: DesignRequirements = { title: "衬衫需求", documentIds: ["shirt-brief"], subject: "V领衬衫", colors: "浅蓝色", materials: "棉布",
+    must: ["保留五粒扣"], avoid: ["口袋"], unknowns: ["袖长未说明"], referenceFigureIds: ["shirt-brief:figure-1"], sources: [{ documentId: "shirt-brief", sectionId: "page-1" }] };
+const documentContext = { ...base.profileContext, documentCatalog };
+function documentToolResponse(model: "json" | "sse" | "gpt6", name: string, args: unknown, extraTool = false) {
+    const blocks = [{ type: "tool_use", id: "doc-tool", name, input: args }, ...(extraTool ? [{ type: "tool_use", id: "image-tool", name: "edit_image", input: { prompt: "生成衬衫" } }] : [])];
+    if (model === "json") return Response.json({ content: blocks, stop_reason: "tool_use" });
+    if (model === "gpt6") return Response.json({ status: "completed", output: blocks.map(block => ({ type: "function_call", id: block.id, call_id: block.id, name: block.name, arguments: JSON.stringify(block.input) })) });
+    const events = [{ type: "message_start", message: { id: "document-reply" } }, ...blocks.flatMap((block, index) => [
+        { type: "content_block_start", index, content_block: { ...block, input: {} } },
+        { type: "content_block_delta", index, delta: { type: "input_json_delta", partial_json: JSON.stringify(block.input) } },
+        { type: "content_block_stop", index },
+    ]), { type: "message_delta", delta: { stop_reason: "tool_use" } }, { type: "message_stop" }];
+    return new Response(events.map(event => `data: ${JSON.stringify(event)}\n\n`).join(""), { headers: { "content-type": "text/event-stream" } });
+}
 
 async function fixture(provider: (body: Record<string, any>) => Response, run: (state: {
     post: (patch?: Record<string, unknown>) => Promise<Response>; calls: Record<string, any>[]; settlements: boolean[];
@@ -92,6 +109,38 @@ test("planning no longer requires a database recipe loader", async () => {
     }, false);
 });
 
+test.each(["apimart", "anthropic"])("%s Claude planning raises the legacy budget once and preserves a larger selection", async protocol => {
+    await fixture(() => Response.json({ content: [{ type: "text", text: "衬衫为V领。" }], stop_reason: "end_turn" }), async state => {
+        for (const maxTokens of [2048, 16384]) {
+            const response = await state.post({ claude: { stream: false, maxTokens } });
+            expect(response.status).toBe(200);
+            expect((await response.json()).content).toBe("衬衫为V领。");
+            expect(state.calls.at(-1)!.max_tokens).toBe(Math.max(8192, maxTokens));
+            expect(state.calls.at(-1)!.output_config).toEqual({ effort: "medium" });
+        }
+        expect(state.calls).toHaveLength(2);
+        expect(state.holds()).toBe(2);
+        expect(state.settlements).toEqual([true, true]);
+    }, false, { modelId: "claude-sonnet-5-5", protocol });
+});
+
+test("GPT6 image planning retains Responses tools without Claude-only budget or effort parameters", async () => {
+    await fixture(() => Response.json({ status: "completed", output: [
+        { type: "reasoning", id: "reason", encrypted_content: "opaque-continuation", summary: [] },
+        { type: "function_call", id: "output", call_id: "edit", name: "edit_image", arguments: '{"base":"none","prompt":"创建一件白色衬衫"}' },
+    ] }), async state => {
+        const response = await state.post({ claude: { stream: true, maxTokens: 2048 } });
+        expect(response.status).toBe(200);
+        const result = await response.json();
+        expect(result.toolCalls[0].function.name).toBe("edit_image");
+        expect(result.responsesOutputItems[0]).toEqual({ type: "reasoning", id: "reason", encrypted_content: "opaque-continuation", summary: [] });
+        expect(state.calls).toHaveLength(1);
+        expect(state.calls[0]).toMatchObject({ model: "gpt-6-astra", stream: false, parallel_tool_calls: false, include: ["reasoning.encrypted_content"] });
+        for (const field of ["claude", "max_tokens", "thinking", "output_config", "reasoning_effort"]) expect(state.calls[0]).not.toHaveProperty(field);
+        expect(state.settlements).toEqual([true]);
+    }, false, { modelId: "gpt-6-astra", protocol: "apimart" });
+});
+
 test("unsupported explicit private thinking fails before provider submission and billing", async () => {
     await fixture(() => { throw new Error("must not submit"); }, async state => {
         const response = await state.post();
@@ -115,6 +164,7 @@ test("profile stream is live and validated before successful billing", async () 
         expect(response.headers.get("content-type")).toContain("text/event-stream");
         const body = await response.text(); expect(body).toContain("这件衬衫是V领。"); expect(body).toContain("message_stop");
         expect(state.calls[0]!.stream).toBe(true); expect(state.calls[0]!.output_config).toEqual({ effort: "medium" });
+        expect(state.calls[0]!.max_tokens).toBe(8192);
         expect(state.calls[0]!.system).not.toContain(suffix); expect(state.settlements).toEqual([true]);
     });
 });
@@ -129,4 +179,75 @@ test("profile HTTP errors never expose upstream echo of private rules or credent
         expect(state.calls).toHaveLength(1);
         expect(state.settlements).toEqual([false]);
     });
+});
+
+test.each(["json", "sse", "gpt6"] as const)("%s document planning returns only a validated local read or unconfirmed proposal", async mode => {
+    for (const name of ["read_document", "propose_requirements"]) {
+        const args = name === "read_document" ? { document_id: "shirt-brief", section_start: 1, section_count: 2 } : documentRequirements;
+        await fixture(() => documentToolResponse(mode, name, args), async state => {
+            const response = await state.post({ profileContext: documentContext, claude: { stream: mode === "sse", maxTokens: 2048 } });
+            expect(response.status).toBe(200);
+            if (mode === "sse") {
+                const wire = await response.text();
+                expect(wire).toContain('"type":"message_stop"');
+                expect(wire).not.toContain('"type":"error"');
+                expect(wire).toContain(name);
+            } else {
+                const result = await response.json();
+                expect(result.toolCalls).toHaveLength(1);
+                expect(result.toolCalls[0].function.name).toBe(name);
+                expect(JSON.parse(result.toolCalls[0].function.arguments)).toEqual(args);
+            }
+            expect(state.calls).toHaveLength(1);
+            expect(state.settlements).toEqual([true]);
+            expect(state.loads).toEqual([]);
+            expect(state.dbWrites.some(([sql]) => /INSERT INTO tasks/i.test(String(sql)))).toBe(false);
+        }, false, { modelId: mode === "gpt6" ? "gpt-6-astra" : "claude-sonnet-5-5", protocol: "apimart" });
+    }
+});
+
+test.each(["json", "sse", "gpt6"] as const)("%s rejects invalid document calls and mixed generation without retry or successful settlement", async mode => {
+    for (const scenario of ["foreign-id", "path", "script", "foreign-section", "foreign-figure", "confirmed-proposal", "mixed-tools"] as const) {
+        const name = ["confirmed-proposal", "foreign-section", "foreign-figure"].includes(scenario) ? "propose_requirements" : "read_document";
+        const args = scenario === "confirmed-proposal" ? { ...documentRequirements, status: "confirmed" }
+            : scenario === "foreign-section" ? { ...documentRequirements, sources: [{ documentId: "shirt-brief", sectionId: "missing-page" }] }
+            : scenario === "foreign-figure" ? { ...documentRequirements, referenceFigureIds: ["missing:figure-1"] }
+            : scenario === "foreign-id" ? { document_id: "another-employee-file" }
+            : scenario === "path" ? { document_id: "shirt-brief", path: "C:/private.txt" }
+            : scenario === "script" ? { document_id: "shirt-brief", script: "fetch('https://outside.invalid')" }
+            : { document_id: "shirt-brief" };
+        await fixture(() => documentToolResponse(mode, name, args, scenario === "mixed-tools"), async state => {
+            const response = await state.post({ profileContext: documentContext, claude: { stream: mode === "sse" } });
+            const body = await response.text();
+            if (mode === "sse") {
+                expect(body).toContain('"type":"error"');
+                expect(body).not.toContain('"type":"message_stop"');
+                if (scenario !== "mixed-tools") expect(body).not.toContain("input_json_delta");
+            } else expect(response.status).toBe(422);
+            expect(state.calls).toHaveLength(1);
+            expect(state.holds()).toBe(1);
+            expect(state.settlements).toEqual([false]);
+            expect(body).not.toContain("C:/private.txt");
+            expect(body).not.toContain("https://outside.invalid");
+        }, false, { modelId: mode === "gpt6" ? "gpt-6-astra" : "claude-sonnet-5-5", protocol: "apimart" });
+    }
+});
+
+test("invalid requirement context is rejected before provider calls or billing", async () => {
+    await fixture(() => { throw new Error("must not submit"); }, async state => {
+        for (const requirements of [
+            { ...documentRequirements, status: "draft" },
+            { ...documentRequirements, documentIds: ["foreign"] },
+            { ...documentRequirements, sources: [{ documentId: "foreign", sectionId: "page-1" }] },
+            { ...documentRequirements, sources: [{ documentId: "shirt-brief", sectionId: "page-99" }] },
+            { ...documentRequirements, referenceFigureIds: ["missing:figure-1"] },
+        ]) {
+            const response = await state.post({ profileContext: { ...documentContext, requirements } });
+            expect(response.status).toBe(400);
+            expect((await response.json()).error).toBe("CHAT_PROFILE_INVALID");
+        }
+        expect(state.calls).toEqual([]);
+        expect(state.holds()).toBe(0);
+        expect(state.settlements).toEqual([]);
+    }, false);
 });
