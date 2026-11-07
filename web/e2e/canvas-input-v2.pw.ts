@@ -47,7 +47,7 @@ test("500 节点下搜索、长对话与配置输入的前后测量及最新值�
     doc.activeChatId = "input-session";
     const models = [
         { id: "input-image", modelId: "gpt-image-2", name: "隔离图片模型", protocol: "openai", capabilities: ["generate", "edit", "batch"], creditCost: 0, rmbCost: 0 },
-        { id: "input-chat", modelId: "input-chat", name: "隔离对话模型", protocol: "openai", capabilities: ["chat"], creditCost: 0, rmbCost: 0 },
+        { id: "input-chat", modelId: "input-chat", name: "隔离对话模型", protocol: "openai", capabilities: ["chat", "vision"], creditCost: 0, rmbCost: 0 },
     ];
     await context.route("**/api/models", route => route.fulfill({ json: { models, prices: [], tools: toolDefinitions.map(tool => ({ ...tool, enabled: true, modelConfigId: /chat|text|agent/.test(tool.toolKey) ? "input-chat" : "input-image", configurationVersion: 1 })) } }));
     await context.route("**/api/generation-capabilities?*", route => route.fulfill({ json: { models: [] } }));

@@ -9,7 +9,7 @@ async function setup(context: BrowserContext) {
     let discuss = false;
     await context.route("**/api/generation-capabilities?*", route => route.fulfill({ json: { models: [] } }));
     await context.route("**/api/models", route => route.fulfill({ json: { models: [
-        { id: "doc-chat", modelId: "gpt-6-astra", name: "隔离对话", capabilities: ["chat"], creditCost: 0, rmbCost: 0 },
+        { id: "doc-chat", modelId: "gpt-6-astra", name: "隔离对话", capabilities: ["chat", "vision"], creditCost: 0, rmbCost: 0 },
         { id: "doc-image", modelId: "gpt-image-2", name: "隔离图片", imageParameterProfile: "standard", capabilities: ["generate", "edit"], creditCost: 0, rmbCost: 0 },
     ], prices: [], tools: toolDefinitions.map(tool => ({ ...tool, enabled: true, modelConfigId: /chat|text|agent/.test(tool.toolKey) && tool.toolKey !== "gpt-chat-image" ? "doc-chat" : "doc-image", configurationVersion: 1 })) } }));
     await context.route("**/api/chat/responses", route => {

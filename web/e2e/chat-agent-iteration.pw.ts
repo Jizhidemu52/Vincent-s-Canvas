@@ -110,12 +110,16 @@ test("检查失败不修复或重绘，新创作缺底图明确提示不可核�
         ? { content: "", toolCalls: [{ id: "review", type: "function", function: { name: "report_image_review", arguments: JSON.stringify(failReview ? { summary: "invalid", checks: [] } : review) } }] }
         : answer() }));
     await send(page, "新建针织上衣"); await expect(generated(page)).toHaveCount(1);
-    await page.getByRole("button", { name: "检查结果", exact: true }).click();
+    // Ant Design's leaving loading icon can prefix the accessible name even
+    // after completion. Wait for enabled state, not a decorative icon's removal.
+    const reviewButton = page.getByRole("button", { name: /检查结果$/ });
+    await reviewButton.click();
     await expect(page.getByText(/检查未返回|检查报告|结果检查/).first()).toBeVisible();
     expect(plans).toHaveLength(2); expect(api.submissions).toHaveLength(1);
     expect(await page.getByTestId("chat-image-review").count()).toBe(0);
     failReview = false;
-    await page.getByRole("button", { name: "检查结果", exact: true }).click();
+    await expect(reviewButton).toBeEnabled();
+    await reviewButton.click();
     await expect(page.getByTestId("chat-image-review")).toContainText("未取得本轮底图");
     await expect(page.getByRole("button", { name: "准备纠正草稿", exact: true })).toBeDisabled();
     expect(plans).toHaveLength(3); expect(api.submissions).toHaveLength(1);

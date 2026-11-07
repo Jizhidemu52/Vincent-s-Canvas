@@ -76,7 +76,7 @@ function send(record: StreamRecord, payload: Record<string, unknown>) {
 
 async function models(context: BrowserContext) {
     const models = [
-        { id: "fixture-chat-streaming", modelId: "claude-sonnet-5-5", name: "隔离流式对话", protocol: "anthropic", capabilities: ["chat"], creditCost: 0, rmbCost: 0 },
+        { id: "fixture-chat-streaming", modelId: "claude-sonnet-5-5", name: "隔离流式对话", protocol: "anthropic", capabilities: ["chat", "vision"], creditCost: 0, rmbCost: 0 },
         { id: "fixture-image-streaming", modelId: "gpt-image-2", name: "禁止调用的隔离图片模型", protocol: "openai", imageParameterProfile: "standard", capabilities: ["generate", "edit"], creditCost: 0, rmbCost: 0 },
     ];
     await context.route("**/api/models", route => route.fulfill({ json: { models, prices: [], tools: toolDefinitions.map(tool => ({ ...tool, enabled: true, modelConfigId: /chat|text|agent/.test(tool.toolKey) ? models[0].id : models[1].id, configurationVersion: 1 })) } }));

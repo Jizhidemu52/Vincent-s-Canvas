@@ -1,5 +1,5 @@
 import type { BrowserContext, Route } from "@playwright/test";
-import { test, expect, newCanvas, uploadImage } from "./fixtures";
+import { test, expect, fixturePng, newCanvas, uploadImage } from "./fixtures";
 import { toolDefinitions } from "../../shared/feature-catalog";
 
 async function chatFixture(context: BrowserContext) {
@@ -7,7 +7,7 @@ async function chatFixture(context: BrowserContext) {
     let response: (route: Route) => Promise<void> = route => route.fulfill({ json: { content: "已收到", toolCalls: [] } });
     const models = [
         { id: "ux-image", modelId: "gpt-image-2", name: "隔离图片模型", protocol: "openai", capabilities: ["generate", "edit", "batch"], creditCost: 0, rmbCost: 0 },
-        { id: "ux-chat", modelId: "ux-chat", name: "隔离对话模型", protocol: "openai", capabilities: ["chat"], creditCost: 0, rmbCost: 0 },
+        { id: "ux-chat", modelId: "ux-chat", name: "隔离对话模型", protocol: "openai", capabilities: ["chat", "vision", "tools"], creditCost: 0, rmbCost: 0 },
     ];
     await context.route("**/api/models", route => route.fulfill({ json: { models, prices: [], tools: toolDefinitions.map(tool => ({ ...tool, enabled: true, modelConfigId: /chat|text|agent/.test(tool.toolKey) ? "ux-chat" : "ux-image", configurationVersion: 1 })) } }));
     await context.route("**/api/generation-capabilities?*", route => route.fulfill({ json: { models: [] } }));
@@ -43,25 +43,32 @@ test("创建面板的 @ 添加画布图片并保留草稿，组合回车不触�
     expect(api.submissions).toHaveLength(0);
 });
 
-test("助手草稿和参考图不会因画布选区清空；中文组合回车不提交", async ({ page, context, api }, info) => {
+test("助手草稿和已上传参考图在清空画布选区后保留；自然图号与中文组合回车不选图或误提交", async ({ page, context, api }, info) => {
     const chat = await chatFixture(context);
     const id = await newCanvas(page);
-    await uploadImage(page, "assistant-reference.png");
+    await uploadImage(page, "canvas-selection.png");
     await expect.poll(() => api.document(id)?.nodes.length).toBe(1);
     const nodeId = api.document(id)!.nodes[0].id;
     await page.getByRole("tab", { name: "对话", exact: true }).first().click();
     const panel = page.locator(".cw-agent-panel");
     const input = panel.getByPlaceholder(promptPlaceholder);
     await input.fill("保留这段草稿，参考图片来分析");
+    const chooser = page.waitForEvent("filechooser");
+    await panel.getByRole("button", { name: "上传设计文件或参考图", exact: true }).click();
+    await (await chooser).setFiles({ name: "assistant-reference.png", mimeType: "image/png", buffer: fixturePng(200) });
+    await expect(panel.getByRole("button", { name: /参考图 \d：assistant-reference\.png/ })).toBeVisible();
     await page.locator(`[data-node-id="${nodeId}"]`).click();
     await expect(input).toHaveValue("保留这段草稿，参考图片来分析");
-    await page.mouse.click(180, 240);
+    const nodeBounds = await page.locator(`[data-node-id="${nodeId}"]`).boundingBox();
+    await page.mouse.click(nodeBounds!.x + nodeBounds!.width + 120, nodeBounds!.y + nodeBounds!.height / 2);
+    await expect(page.locator(`[data-node-id="${nodeId}"]`)).not.toHaveAttribute("aria-label", /已选择/);
     await expect(input).toHaveValue("保留这段草稿，参考图片来分析");
-    await expect(panel.getByText("图1", { exact: true }).first()).toBeVisible();
+    await expect(panel.getByRole("button", { name: "参考图 1：assistant-reference.png，点击调整顺序", exact: true })).toBeVisible();
     await input.dispatchEvent("keydown", { key: "Enter", code: "Enter", keyCode: 229, isComposing: true, bubbles: true });
     expect(chat.requests).toHaveLength(0);
     await input.fill("参考@");
-    await expect(panel.getByRole("option").first()).toBeVisible();
+    await expect(panel.getByRole("listbox", { name: "选择图片引用" })).toHaveCount(0);
+    await expect(input).not.toHaveAttribute("aria-autocomplete", "list");
     await input.dispatchEvent("keydown", { key: "Enter", code: "Enter", keyCode: 229, isComposing: true, bubbles: true });
     await expect(input).toHaveValue("参考@");
     expect(chat.requests).toHaveLength(0);
@@ -69,11 +76,19 @@ test("助手草稿和参考图不会因画布选区清空；中文组合回车�
     await input.fill("");
     await expect(panel.getByRole("button", { name: "发送", exact: true })).toBeDisabled();
     await expect(panel.getByText("请写下希望如何处理这些图片", { exact: true })).toBeVisible();
-    await input.fill("只分析这张参考图，不生成");
+    const analysisPrompt = "只分析图1，不生成；备注@只是普通文字";
+    await input.fill(analysisPrompt);
     await input.press("Enter");
     await expect(panel.getByText("已收到", { exact: true })).toBeVisible();
+    expect(chat.requests).toHaveLength(1);
+    expect(chat.requests[0].profileContext.currentUserText).toBe(analysisPrompt);
+    expect(chat.requests[0].profileContext.imageCatalog).toHaveLength(1);
+    expect(chat.requests[0].profileContext.imageCatalog[0]).toMatchObject({ label: "图1", name: "assistant-reference.png" });
+    expect(chat.requests[0].profileContext.previewImageIds).toEqual([chat.requests[0].profileContext.imageCatalog[0].id]);
     await expect.poll(() => api.document(id)?.chatSessions?.flatMap((s: any) => s.messages).filter((m: any) => m.role === "user").length).toBe(1);
     const userMessage = api.document(id)!.chatSessions.flatMap((s: any) => s.messages).find((m: any) => m.role === "user");
+    expect(userMessage.references).toHaveLength(1);
+    expect(userMessage.references[0].title).toBe("assistant-reference.png");
     expect(Boolean(userMessage.references[0].storageKey) || /^\/api\/assets\/[^/]+\/content/.test(userMessage.references[0].dataUrl || "")).toBe(true);
     expect(userMessage.references[0].dataUrl || "").not.toContain("base64");
     await page.setViewportSize({ width: 720, height: 900 });
