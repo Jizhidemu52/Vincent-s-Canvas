@@ -38,7 +38,7 @@ async function fixture(provider: (body: Record<string, any>) => Response, run: (
         if (sql.includes("FROM module_flags")) return { rows: [{ enabled: true }] };
         if (sql.includes("FROM tool_api_configurations")) return { rows: [{ toolKey: "canvas-chat", modelConfigId: "profile-model", enabled: true, creditCostOverride: 2, rmbCostOverride: 0, configurationVersion: 1 }] };
         if (sql.includes("FROM credit_policy")) return { rows: [{ creditsEnabled: true }] };
-        if (sql.includes("FROM model_configs")) return { rows: [{ id: "profile-model", modelId: model.modelId, enabled: true, providerEnabled: true, capabilities: ["chat"], model_id: model.modelId, protocol: model.protocol, base_url: "https://not-submitted.invalid/v1", encrypted_credentials: encryptSecret(JSON.stringify({ apiKey: "fixture-secret" }), encryptionKey) }] };
+        if (sql.includes("FROM model_configs")) return { rows: [{ id: "profile-model", modelId: model.modelId, enabled: true, providerEnabled: true, capabilities: ["chat", "vision"], model_id: model.modelId, protocol: model.protocol, base_url: "https://not-submitted.invalid/v1", encrypted_credentials: encryptSecret(JSON.stringify({ apiKey: "fixture-secret" }), encryptionKey) }] };
         if (sql.includes("INSERT INTO audit_logs") || sql.startsWith("INSERT INTO usage_chat_requests") || sql.startsWith("UPDATE usage_chat_requests")) { dbWrites.push([sql, args]); return { rows: [] }; }
         throw new Error(`Unexpected SQL: ${sql}`);
     } } as unknown as Database;

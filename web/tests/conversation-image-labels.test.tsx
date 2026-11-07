@@ -19,7 +19,7 @@ function evaluate(path: string, select: (ast: ts.SourceFile) => ts.Node | undefi
     const ast = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
     const selected = select(ast);
     if (!selected) throw new Error(`Presentation source not found: ${path}`);
-    const code = ts.transpileModule(`exports.value = (${selected.getText(ast)});`, { compilerOptions: { target: ts.ScriptTarget.ESNext, jsx: ts.JsxEmit.React } }).outputText;
+    const code = ts.transpileModule(`exports.value = (${selected.getText(ast).replace(/^export\s+/, "")});`, { compilerOptions: { target: ts.ScriptTarget.ESNext, jsx: ts.JsxEmit.React } }).outputText;
     const exports = {} as { value: any };
     new Function(...Object.keys(bindings), "exports", code)(...Object.values(bindings), exports);
     return exports.value;
@@ -66,9 +66,9 @@ test("chat full-image preview labels switch languages without editing the target
     expect(english.find(node => node.type === "img")!.props.alt).toBe("Image 2");
     button.props.onClick();
     expect(opened).toEqual([true]); expect(selected).toEqual([]);
-    english.find(node => node.type === "image-actions")!.props.onAction("edit", image.id);
-    expect(selected).toEqual([["edit", image.id]]);
-    expect(english.find(node => node.type === "image-actions")!.props.image.label).toBe("图2");
+    expect(english.some(node => node.type === "image-actions")).toBe(false);
+    english.find(node => node.type === "button" && node.props["aria-label"] === "Download original · Image 2")!.props.onClick();
+    expect(selected).toEqual([["download", image.id]]);
     expect(image).toEqual(original);
     await setUiLocale("zh-CN");
     expect(render().find(node => node.type === "img")!.props.alt).toBe("图2");
@@ -114,4 +114,40 @@ test("canvas reference chips localize canonical and original labels but not user
         expect(tree.find(node => node.type === "preview")!.props.alt).toBe(item.title);
     }
     expect(item.title).toBe("图4");
+});
+
+test("online canvas conversation-only images retain labels preview download and region tools without base selectors", () => {
+    const render = component("components/canvas/canvas-agent-chat-ui.tsx", "AgentMessageAttachments");
+    const image = { id: "catalog-image-2", label: "图2", name: "结果", dataUrl: "data:image/png;base64,AQID" };
+    const actions: unknown[][] = [], masks: string[] = [];
+    const tree = elements(render({ messageId: "message", attachments: [{ id: "attachment", name: "结果", url: image.dataUrl }], theme: canvasThemes.light,
+        imageControls: new Map([["message:attachment", { image, version: 3 }]]), activeImageId: image.id, conversationOnlyImages: true,
+        onImageAction: (...args: unknown[]) => actions.push(args), onMaskImage: (id: string) => masks.push(id) }));
+    expect(tree.some(node => node.type === "image-actions")).toBe(false);
+    expect(tree.some(node => node.props["data-testid"] === "canvas-agent-image-current")).toBe(false);
+    expect(tree.some(node => node.type === "button" && node.props["aria-label"] === "查看大图 · 图2")).toBe(true);
+    tree.find(node => node.type === "button" && node.props.children === "下载")!.props.onClick();
+    tree.find(node => node.type === "button" && node.props.children === "圈选修改")!.props.onClick();
+    expect(actions).toEqual([["download", image.id]]); expect(masks).toEqual([image.id]);
+});
+
+test("composer without a mention handler disables the picker without blocking ordinary Enter", () => {
+    const options: { disabled: boolean }[] = [], sent: string[] = [];
+    const render = component("components/canvas/canvas-agent-chat-ui.tsx", "AgentChatComposer", {
+        useRef: () => ({ current: null }), useLayoutEffect() {}, Button: "button", Tooltip: "tooltip", ArrowUp: "icon",
+        useImageMentions: (current: { disabled: boolean }) => {
+            options.push(current);
+            return { menu: current.disabled ? null : "picker", inputProps: { "aria-autocomplete": "list" },
+                handleChange() {}, handleSelect() {}, handleKeyDown: () => !current.disabled };
+        },
+    });
+    const props = { prompt: "比较 @图1", placeholder: "对话", theme: canvasThemes.light, onPromptChange() {}, onSubmit: () => sent.push("sent") };
+    const ordinary = elements(render(props)), textarea = ordinary.find(node => node.type === "textarea")!;
+    expect(options.at(-1)?.disabled).toBe(true);
+    expect(textarea.props["aria-autocomplete"]).toBeUndefined();
+    textarea.props.onKeyDown({ key: "Enter", nativeEvent: {}, preventDefault() {} });
+    expect(sent).toEqual(["sent"]);
+    const withMentions = elements(render({ ...props, onMentionImage() {} }));
+    expect(options.at(-1)?.disabled).toBe(false);
+    expect(withMentions.find(node => node.type === "textarea")!.props["aria-autocomplete"]).toBe("list");
 });

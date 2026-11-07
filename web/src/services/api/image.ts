@@ -15,6 +15,8 @@ import { createClientId } from "@/lib/client-id";
 import { parseCreateImageArguments, parseStrictJson } from "@/lib/strict-json";
 import { isQuickImageTool, quickImageAction, type QuickImageAction } from "@/lib/quick-image-tools";
 import { imageAgentGenerationParameters, type ImageAgentGenerationOptions } from "@/lib/image-agent-generation-parameters";
+import { ImageAgentPlanningError, isImageAgentPlanningIssue, IMAGE_AGENT_REPAIR_CODES } from "../../../../shared/image-agent-iteration";
+import { imageAgentVisionError } from "../../../../shared/image-agent-capabilities";
 
 export type AiTextMessage = {
     role: "system" | "user" | "assistant";
@@ -242,14 +244,40 @@ export async function requestToolResponse(config: AiConfig, messages: ResponseIn
     if (Array.isArray(result.toolCalls)) for (const call of result.toolCalls) {
         if (typeof call.function?.arguments !== "string") continue;
         if (call.function.name === "create_image") call.function.arguments = JSON.stringify(parseCreateImageArguments(call.function.arguments));
-        else parseStrictJson(call.function.arguments);
+        else parsePlanningToolArguments(call.function.arguments, call.function.name, permitsPlanningRepair(options) && !["max_tokens", "length", "incomplete", "error", "content_filter"].includes(result.stopReason || ""));
     }
     if (result.content) onDelta?.(result.content);
     return result;
 }
 
+function permitsPlanningRepair(options?: Pick<RequestOptions, "chatProfile" | "profileContext">) {
+    return Boolean(options?.chatProfile && ["plan", "continue", "repair"].includes(String(options.profileContext?.stage || "plan")));
+}
+
+function parsePlanningToolArguments(source: string, name: string, allowRepair: boolean) {
+    try { return parseStrictJson(source); }
+    catch (error) {
+        if (allowRepair && ["edit_image", "look_at_images"].includes(name) && error instanceof SyntaxError) {
+            throw new ImageAgentPlanningError("IMAGE_AGENT_ARGUMENTS_INVALID", "图片规划参数格式无效，图片任务尚未提交，可重新整理一次规划。");
+        }
+        throw error;
+    }
+}
+
+/** Only the server's explicit validation refusal can advertise safe plan repair. */
+function chatResponseError(value: unknown, fallback: string, allowRepair: boolean) {
+    const payload = value && typeof value === "object" ? value as Record<string, unknown> : {};
+    const issue = { code: payload.code ?? payload.error, message: payload.message, repairable: payload.repairable, submitted: payload.submitted };
+    if (allowRepair && isImageAgentPlanningIssue(issue)) return new ImageAgentPlanningError(issue.code as typeof IMAGE_AGENT_REPAIR_CODES[number], issue.message);
+    return new Error(typeof payload.message === "string" && payload.message ? payload.message : fallback);
+}
+
 async function requestServerResponse(config: AiConfig, input: ResponseInputItem[], tools: ResponseApiToolDefinition[], toolChoice: ToolChoice, options?: RequestOptions, onDelta?: (text: string) => void): Promise<ToolResponseResult> {
+    options?.signal?.throwIfAborted();
     const resolved = await resolveToolConfig(config, "chat", options?.tool || "gpt-chat");
+    options?.signal?.throwIfAborted();
+    const visionError = imageAgentVisionError(options?.chatProfile, resolved.model.capabilities);
+    if (visionError) throw new Error(visionError);
     config = resolved.config;
     const modelId = modelOptionName(config.model || config.textModel);
     const claude = isClaudeModel(resolved.model.parameterModelId || resolved.model.modelId)
@@ -266,10 +294,10 @@ async function requestServerResponse(config: AiConfig, input: ResponseInputItem[
         signal: options?.signal,
     });
     if (!response.ok) {
-        const payload = (await response.json().catch(() => ({}))) as { message?: string };
-        throw new Error(payload.message || `对话请求失败：${response.status}`);
+        const payload: unknown = await response.json().catch(() => ({}));
+        throw chatResponseError(payload, `对话请求失败：${response.status}`, response.status === 422 && permitsPlanningRepair(options));
     }
-    if (response.headers.get("content-type")?.includes("text/event-stream")) return readClaudeSseResponse(response, onDelta, options?.onToolCallStart);
+    if (response.headers.get("content-type")?.includes("text/event-stream")) return readClaudeSseResponse(response, onDelta, options?.onToolCallStart, { strictProfile: Boolean(options?.chatProfile), allowPlanningRepair: permitsPlanningRepair(options) });
     return response.json() as Promise<ToolResponseResult>;
 }
 
@@ -288,29 +316,32 @@ export function toolResponseToInput(result: Pick<ToolResponseResult, "toolCalls"
     return result.toolCalls.map((call) => ({ type: "function_call", call_id: call.id, name: call.function.name, arguments: call.function.arguments, ...(call.thoughtSignature ? { thoughtSignature: call.thoughtSignature } : {}) }));
 }
 
-type ClaudeSseState = { buffer: string; content: string; stopReason?: string; blocks: Map<number, { block: Record<string, unknown>; inputJson: string }> };
+type ClaudeSseState = { buffer: string; content: string; stopReason?: string; ended: boolean; blocks: Map<number, { block: Record<string, unknown>; inputJson: string }> };
 
-export async function readClaudeSseResponse(response: Response, onDelta?: (text: string) => void, onToolCallStart?: (name: string) => void): Promise<ToolResponseResult> {
+export async function readClaudeSseResponse(response: Response, onDelta?: (text: string) => void, onToolCallStart?: (name: string) => void, options: { strictProfile?: boolean; allowPlanningRepair?: boolean } = {}): Promise<ToolResponseResult> {
     if (!response.body) throw new Error("Claude 流式响应为空");
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
-    const state: ClaudeSseState = { buffer: "", content: "", blocks: new Map() };
+    const state: ClaudeSseState = { buffer: "", content: "", ended: false, blocks: new Map() };
+    try {
     while (true) {
         const { done, value } = await reader.read();
         state.buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
         state.buffer = state.buffer.replace(/\r\n/g, "\n");
         let boundary = state.buffer.indexOf("\n\n");
         while (boundary >= 0) {
-            consumeClaudeSseEvent(state.buffer.slice(0, boundary), state, onDelta, onToolCallStart);
+            consumeClaudeSseEvent(state.buffer.slice(0, boundary), state, onDelta, onToolCallStart, options.allowPlanningRepair);
             state.buffer = state.buffer.slice(boundary + 2);
             boundary = state.buffer.indexOf("\n\n");
         }
         if (done) break;
     }
-    if (state.buffer.trim()) consumeClaudeSseEvent(state.buffer, state, onDelta, onToolCallStart);
+    if (state.buffer.trim()) consumeClaudeSseEvent(state.buffer, state, onDelta, onToolCallStart, options.allowPlanningRepair);
+    if (options.strictProfile && !state.ended) throw new Error("对话流未完整返回，本轮未完成，不会自动重新提交。");
     const blocks: ClaudeAssistantContent = Array.from(state.blocks.entries()).sort(([left], [right]) => left - right).map(([, item]) => {
-        const parseArguments = item.block.type === "tool_use" && item.block.name === "create_image" ? parseCreateImageArguments : parseStrictJson;
-        return { ...item.block, ...(item.inputJson ? { input: parseArguments(item.inputJson) } : {}) };
+        const input = !item.inputJson ? undefined : item.block.type === "tool_use" && item.block.name === "create_image" ? parseCreateImageArguments(item.inputJson)
+            : parsePlanningToolArguments(item.inputJson, String(item.block.name || ""), Boolean(options.allowPlanningRepair) && !["max_tokens", "length", "incomplete", "error", "content_filter"].includes(state.stopReason || ""));
+        return { ...item.block, ...(input !== undefined ? { input } : {}) };
     });
     const toolCalls: ResponseToolCall[] = blocks.flatMap((block) => block.type === "tool_use" && typeof block.id === "string" && typeof block.name === "string" ? [{
         id: block.id,
@@ -323,15 +354,22 @@ export async function readClaudeSseResponse(response: Response, onDelta?: (text:
         ...(toolCalls.length ? { claudeAssistantContent: blocks } : {}),
         ...(state.stopReason ? { stopReason: state.stopReason } : {}),
     };
+    } catch (error) {
+        await reader.cancel().catch(() => undefined);
+        throw error;
+    } finally {
+        reader.releaseLock();
+    }
 }
 
-function consumeClaudeSseEvent(event: string, state: ClaudeSseState, onDelta?: (text: string) => void, onToolCallStart?: (name: string) => void) {
+function consumeClaudeSseEvent(event: string, state: ClaudeSseState, onDelta?: (text: string) => void, onToolCallStart?: (name: string) => void, allowPlanningRepair = false) {
     const raw = event.split("\n").filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trimStart()).join("\n");
     if (!raw || raw === "[DONE]") return;
-    let payload: { type?: string; index?: number; content_block?: Record<string, unknown>; delta?: { type?: string; text?: string; thinking?: string; signature?: string; partial_json?: string; stop_reason?: string | null }; error?: { message?: string } };
+    let payload: { type?: string; index?: number; content_block?: Record<string, unknown>; delta?: { type?: string; text?: string; thinking?: string; signature?: string; partial_json?: string; stop_reason?: string | null }; error?: unknown };
     payload = parseStrictJson(raw) as typeof payload;
     const index = payload.index ?? 0;
-    if (payload.type === "error") throw new Error(payload.error?.message || "Claude 流式响应失败");
+    if (payload.type === "error") throw chatResponseError(payload.error, "Claude 流式响应失败", allowPlanningRepair);
+    if (payload.type === "message_stop") { state.ended = true; return; }
     if (payload.type === "content_block_start") {
         state.blocks.set(index, { block: { ...payload.content_block }, inputJson: "" });
         // This reports upstream activity only. Partial arguments are never executed.

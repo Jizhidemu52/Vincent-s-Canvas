@@ -28,7 +28,7 @@ function Fixture() {
             <button onClick={() => setNarrow(value => !value)}>narrow</button>
         </nav>
         <section data-testid="result-panel" style={{ width: narrow ? 240 : 380, maxWidth: "100%" }}>
-            <AgentChatMessage item={item} theme={theme} user={null} imageControls={controls} activeImageId={active} imageActionsDisabled={busy}
+            <AgentChatMessage item={item} theme={theme} user={null} imageControls={controls} activeImageId={active} imageActionsDisabled={busy} conversationOnlyImages
                 onImageAction={(name, id) => { setAction(`${name}:${id}`); if (name === "edit") setActive(id); }}
                 onMaskImage={id => setAction(`mask:${id}`)} onUseImageForVideo={value => setAction(`video:${value.id}`)} />
         </section>

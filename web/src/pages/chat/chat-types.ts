@@ -14,6 +14,9 @@ export type ChatGeneratedImage = CreativeImageWork & {
     width?: number; height?: number; bytes?: number;
     prompt?: string; modelId?: string; quality?: string; resolution?: string; size?: string; lineage?: CreativeImageLineage;
     sourceTaskId?: string; sourceResultUrl?: string; regionComposite?: ChatRegionComposite;
+    /** Exact submitted image identities, including the base; absent on older records. */
+    referenceImageIds?: string[];
+    review?: { report: import("../../../../shared/image-agent-iteration").ImageAgentReview; reviewedAt: string; baseImageId?: string; baseUnavailable: boolean };
 };
 export type ChatMessage = {
     id: string; parentMessageId?: string; editTargetImageId?: string;

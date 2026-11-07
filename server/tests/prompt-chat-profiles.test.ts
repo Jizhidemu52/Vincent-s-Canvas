@@ -49,13 +49,13 @@ describe("shared image-agent planning", () => {
         const edit = buildCreativeChatTools()[0]!.function;
         expect(edit.name).toBe("edit_image");
         expect(edit.parameters.required).toEqual(["prompt"]);
-        expect(Object.keys(edit.parameters.properties as object)).toEqual(["base", "references", "prompt", "keep", "note_update"]);
+        expect(Object.keys(edit.parameters.properties as object)).toEqual(["base", "references", "prompt", "keep", "note_update", "edit_spec"]);
         for (const removed of ["editContract", "correct_original", "superseded_constraints", "repair-image-contract", "english-image-prompt"]) expect(JSON.stringify([edit, CANVAS_ASSISTANT_SYSTEM_PROMPT])).not.toContain(removed);
         expect(CREATIVE_CHAT_SYSTEM_PROMPT).toContain("完整当前作品摘要");
         expect(CREATIVE_CHAT_SYSTEM_PROMPT).toContain("不累加已撤销");
         expect(CREATIVE_CHAT_SYSTEM_PROMPT).toContain("省略才继承");
     });
-    test.each([creative, canvas])("presentation guidance distinguishes faithful edits from new design without widening the tool contract", async makeRequest => {
+    test.each([creative, canvas])("conversation prompt resolves accepted intent without adding creative expansions", async makeRequest => {
         for (const [instruction, base, prompt] of [
             ["只把毛衫改成浅蓝，其他不变", "focus", "只把毛衫主色改成浅蓝，保持结构、图案、材质、背景与光影。"],
             ["设计一件简洁的毛衫", "none", "一件简洁的毛衫，完整正面构图，柔和光线呈现清晰针织质感。"],
@@ -63,7 +63,8 @@ describe("shared image-agent planning", () => {
             const prepared = await prepareChatProfileInput(makeRequest(instruction));
             const rules = system(prepared.input.input);
             expect(rules).toContain("修改已有图时，不变更未授权的结构、配色、图案、材质、人物、背景或光影");
-            expect(rules).toContain("新创作或用户明确要求重新设计时，可补充服务于当前需求且不冲突的构图、光线与质感展示");
+            expect(rules).toContain("自明的本轮修改直接使用原话");
+            expect(rules).toContain("不扩写创意、不擅自翻译英文");
             expect(rules).toContain("不擅自新增商标、文字或特定工艺");
             expect(rules).toContain("新要求优先");
             expect(rules.length).toBeLessThanOrEqual(1500);
@@ -71,11 +72,12 @@ describe("shared image-agent planning", () => {
             expect(validateChatProfileOutput(result, prepared.privateRules)).toEqual(result);
         }
     });
-    test.each([creative, canvas])("clarification rules identify clickable candidates by catalog label without selecting for the user", async makeRequest => {
+    test.each([creative, canvas])("clarification uses natural dialogue without requiring image-selection controls", async makeRequest => {
         const prepared = await prepareChatProfileInput(makeRequest("你指的是哪一张图片？"));
         const rules = system(prepared.input.input);
         expect(rules).toContain("用目录中的稳定图号明确列出候选");
         expect(rules).toContain("不编造候选，不替用户选中");
+        expect(rules).toContain("不展示内部选图过程或要求用户点击选图控件");
         expect(rules.length).toBeLessThanOrEqual(1500);
         expect((prepared.input.input.at(-2) as { content: string }).content).toContain('"label":"图1"');
         expect(prepared.input.input.at(-1)).toEqual({ role: "user", content: "你指的是哪一张图片？" });
@@ -168,15 +170,15 @@ describe("image-agent output and private recipe boundary", () => {
         expect(validateChatProfileOutput(result, privateRules).claudeAssistantContent).toEqual(blocks);
         expect(() => validateChatProfileOutput({ ...result, claudeAssistantContent: [{ type: "thinking", thinking: "hidden text", signature: "signed" }, ...blocks] }, privateRules)).toThrow("明文思考");
     });
-    test("recipe joins only provider-local prompt; input and public archive stay unchanged", async () => {
+    test("conversational generation forwards its public prompt exactly without a second private recipe", async () => {
         const input = { operationType: "inpaint", prompt: "把衣领改成V领", parameters: { imageAgentProfile: "creative-chat", inputArchive: { prompt: "把衣领改成V领" } } };
         const before = JSON.stringify(input); let loads = 0;
         const provider = await imageAgentProviderPrompt(input, async profile => { loads++; expect(profile).toBe("creative-chat"); return supplement; });
-        expect(provider).toContain(supplement); expect(provider.endsWith(input.prompt)).toBe(true);
-        expect(JSON.stringify(input)).toBe(before); expect(loads).toBe(1);
+        expect(provider).toBe(input.prompt); expect(provider).not.toContain(supplement);
+        expect(JSON.stringify(input)).toBe(before); expect(loads).toBe(0);
         expect(await imageAgentProviderPrompt({ ...input, parameters: {} }, async () => { throw new Error("no load"); })).toBe(input.prompt);
         await expect(imageAgentProviderPrompt({ ...input, operationType: "video_generation" }, async () => supplement)).rejects.toMatchObject({ code: "IMAGE_AGENT_PROFILE_INVALID" });
-        await expect(imageAgentProviderPrompt(input, async () => " ")).rejects.toMatchObject({ code: "IMAGE_AGENT_RECIPE_UNAVAILABLE" });
+        expect(await imageAgentProviderPrompt(input, async () => { throw new Error("No active recipe"); })).toBe(input.prompt);
     });
     test("model adapters allow supported hidden thinking and stream, without legacy overrides", () => {
         const input = { input: [], tools: [], privateProfile: true, claude: { stream: true, thinking: true, maxTokens: 2048 } };

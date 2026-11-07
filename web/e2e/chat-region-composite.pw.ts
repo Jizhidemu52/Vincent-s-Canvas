@@ -25,7 +25,7 @@ async function prepare(page: Page, api: MockCanvasApi, resultSize = { width: 102
     const plans: any[] = [];
     await page.route("**/api/models", route => route.fulfill({ json: {
         models: [
-            { id: "fixture-chat", modelId: "gpt-6-astra", name: "隔离对话模型", capabilities: ["chat"], creditCost: 0, rmbCost: 0 },
+            { id: "fixture-chat", modelId: "gpt-6-astra", name: "隔离对话模型", capabilities: ["chat", "vision"], creditCost: 0, rmbCost: 0 },
             { id: "fixture-nano", modelId: "gemini-3.1-flash-image-preview-official", name: "隔离 Nano2", imageParameterProfile: "resolution", imageSupportsMask: false, capabilities: ["generate", "edit"], creditCost: 0, rmbCost: 0 },
         ], prices: [], tools: [
             { toolKey: "gpt-chat", enabled: true, modelConfigId: "fixture-chat", configurationVersion: 1 },
@@ -64,8 +64,7 @@ async function prepare(page: Page, api: MockCanvasApi, resultSize = { width: 102
 async function paintRegion(page: Page) {
     const card = page.locator('[data-message-role="user"] .group\\/image').first();
     await card.hover();
-    await card.getByRole("button", { name: "更多图片操作", exact: true }).click();
-    await page.getByRole("menuitem", { name: "圈选修改", exact: true }).click();
+    await card.getByRole("button", { name: "涂选修改区域", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "涂选修改区域", exact: true });
     await expect(dialog.getByText(/它不是模型原生蒙版/)).toBeVisible();
     const paint = dialog.getByLabel("修改区域画布", { exact: true });

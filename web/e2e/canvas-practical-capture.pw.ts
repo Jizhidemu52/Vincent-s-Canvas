@@ -436,7 +436,7 @@ test("实操素材：选中毛衫并填写助手草稿但不发送", async ({ pa
     const image = nodes.find(node => node.type === "image")!;
     await page.locator(`[data-node-id="${image.id}"]`).click({ position: { x: 90, y: 60 } });
     await page.getByRole("tab", { name: "对话", exact: true }).first().click();
-    const input = page.locator(".cw-agent-panel").getByPlaceholder("理解画布、修改图片或批量编排；输入 @ 引用图片…");
+    const input = page.locator(".cw-agent-panel").getByPlaceholder("理解画布、修改图片或批量编排…");
     await input.fill("只讨论这件毛衫：换成海军蓝时，哪些版型、领口和针织细节需要保留？");
     await expect(input).toHaveValue(/只讨论这件毛衫/);
     await snapshot(page, info, "assistant"); zeroGenerations(api);

@@ -101,7 +101,7 @@ async function start(entry: Entry, page: Page) {
     await uploadImage(page, "流式验收原图.png");
     await page.getByRole("tab", { name: "对话", exact: true }).first().click();
     const panel = page.locator(".cw-agent-panel");
-    await panel.getByPlaceholder("理解画布、修改图片或批量编排；输入 @ 引用图片…").fill("先只读画布，再分析图片搭配建议，不生成也不修改图片。");
+    await panel.getByPlaceholder("理解画布、修改图片或批量编排…").fill("先只读画布，再分析图片搭配建议，不生成也不修改图片。");
     await panel.getByRole("button", { name: "发送", exact: true }).click();
     return panel;
 }

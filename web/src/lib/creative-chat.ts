@@ -8,11 +8,13 @@ import type { ReferenceImage } from "@/types/image";
 import type { AgentDocument, DesignRequirements } from "../../../shared/image-agent-documents";
 import { agentDocumentCatalog, agentDocumentContext } from "@/lib/agent-documents";
 import { designRequirementsText } from "../../../shared/image-agent-documents";
+import { ImageAgentPlanningError, type ImageAgentEditSpec } from "../../../shared/image-agent-iteration";
+import { compileImageAgentPrompt, imageAgentSpecText } from "@/lib/image-agent/compile";
 
 type CreativeChatAttachment = { id?: string; name: string; kind?: "image" | "text"; mimeType?: string; dataUrl?: string; textContent?: string; storageKey?: string };
 /** Historical records remain readable; new edits use parentId/workId/workNote. */
 export type CreativeImageLineage = { parentImageId?: string; sourceImageIds: string[]; preservedConstraints: string[] };
-export type CreativeImageWork = { parentId?: string; workId?: string; workNote?: ImageAgentWorkNote };
+export type CreativeImageWork = { parentId?: string; workId?: string; workNote?: ImageAgentWorkNote; spec?: ImageAgentEditSpec };
 export type CreativeChatMessage = Omit<ChatHistoryMessage, "attachments"> & {
     id?: string; parentMessageId?: string; editTargetImageId?: string;
     focusImageId?: string; focusLocked?: boolean; newCreation?: boolean;
@@ -23,7 +25,7 @@ export type CreativeImageCatalogEntry = ReferenceImage & ImageAgentImage & { mes
 export type CreativeChatPlan =
     | { kind: "discussion"; content: string; candidateImageIds?: string[] }
     | { kind: "requirements"; content: string; requirements: DesignRequirements }
-    | { kind: "image"; content: string; action: "generate" | "edit"; prompt: string; references: ReferenceImage[]; parentId?: string; workId?: string; workNote: ImageAgentWorkNote; keep: string[] };
+    | { kind: "image"; content: string; action: "generate" | "edit"; prompt: string; references: ReferenceImage[]; parentId?: string; workId?: string; workNote: ImageAgentWorkNote; keep: string[]; spec?: ImageAgentEditSpec };
 
 export type CreativeChatImageSelection = { explicitTargetImageId?: string; referenceImageIds?: string[]; newCreation?: boolean };
 export type CreativeChatContextOptions = { catalog?: CreativeImageCatalogEntry[]; selectedImageId?: string; lockedImageId?: string; newCreation?: boolean; referenceImageIds?: string[]; inspectionImageIds?: string[]; documents?: AgentDocument[]; requirements?: DesignRequirements };
@@ -37,6 +39,14 @@ function isImage(item: CreativeChatAttachment) {
 function unavailableImageReason(dataUrl: string, storageKey?: string) {
     return (!dataUrl && !storageKey) || (dataUrl.startsWith("data:") && !/^data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/]+={0,2}$/i.test(dataUrl))
         ? "图片原件缺失或无效，请重新添加" : undefined;
+}
+
+function recordedPromptBrief(prompt?: string) {
+    if (!prompt?.trim()) return undefined;
+    const prefix = "该版历史要求摘录（仅表示请求意图，并非已实现事实；当前要求优先）：\n";
+    const suffix = "\n[历史要求较长，此处仅为节选]";
+    const text = prompt.trim();
+    return prefix + (text.length <= 1600 - prefix.length ? text : text.slice(0, 1600 - prefix.length - suffix.length) + suffix);
 }
 
 /** Persisted IDs and parent links remain authoritative; previews never define identity. */
@@ -71,6 +81,7 @@ export function buildCreativeImageCatalog(history: CreativeChatMessage[], curren
                 ...(generated?.parentId || generated?.lineage?.parentImageId ? { parentId: generated.parentId || generated.lineage?.parentImageId } : {}),
                 ...(generated?.workId ? { workId: generated.workId } : {}),
                 ...(generated?.workNote ? { note: generated.workNote } : {}),
+                ...(generated?.spec ? { designBrief: imageAgentSpecText(generated.spec).slice(0, 1600) } : generated?.prompt ? { designBrief: recordedPromptBrief(generated.prompt) } : {}),
                 ...(unavailableImageReason(dataUrl, item.storageKey) ? { unavailableReason: unavailableImageReason(dataUrl, item.storageKey) } : {}),
             };
             catalog.push(entry); byId.set(id, entry);
@@ -156,23 +167,23 @@ export function validatedCreativeChatCall(result: ToolResponseResult) {
     if (!result.toolCalls.length) return null;
     const call = result.toolCalls[0]!;
     if (call.type !== "function" || !call.id || typeof call.function?.arguments !== "string") throw new Error("模型返回了未授权工具，未提交图片任务");
+    if (!["edit_image", "look_at_images", "read_document", "propose_requirements"].includes(call.function.name)) throw new Error("模型返回了未授权工具，未提交图片任务");
     let parsed: unknown;
     try { parsed = parseStrictJson(call.function.arguments); } catch (error) {
-        if (error instanceof DuplicateJsonKeyError) throw error;
-        throw new Error("图片工具参数不是有效 JSON，未提交图片任务");
+        throw new ImageAgentPlanningError("IMAGE_AGENT_ARGUMENTS_INVALID", error instanceof DuplicateJsonKeyError ? "图片工具参数存在重复字段，请只保留每个字段的一份明确值；未提交图片任务。" : "图片工具参数不是有效 JSON，未提交图片任务");
     }
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("图片工具参数格式不正确，未提交图片任务");
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new ImageAgentPlanningError("IMAGE_AGENT_ARGUMENTS_INVALID", "图片工具参数格式不正确，未提交图片任务");
     return { call, args: parsed as Record<string, unknown> };
 }
 
 function imageIds(value: unknown, catalog: CreativeImageCatalogEntry[]): string[] {
-    if (!Array.isArray(value) || value.length > MAX_CREATIVE_CHAT_REFERENCES || value.some(item => typeof item !== "string" || !item.trim() || item.length > 300)) throw new Error("图片标识列表无效，未提交图片任务");
+    if (!Array.isArray(value) || value.length > MAX_CREATIVE_CHAT_REFERENCES || value.some(item => typeof item !== "string" || !item.trim() || item.length > 300)) throw new ImageAgentPlanningError("IMAGE_AGENT_REFERENCES_INVALID", "图片标识列表无效，未提交图片任务");
     const ids = value.map(value => {
         const image = catalog.find(item => item.id === value || item.label === value);
-        if (!image) throw new Error("图片工具引用了目录外图片，未提交图片任务");
+        if (!image) throw new ImageAgentPlanningError("IMAGE_AGENT_REFERENCES_INVALID", "图片工具引用了目录外图片，未提交图片任务");
         originalReference(image); return image.id;
     });
-    if (new Set(ids).size !== ids.length) throw new Error("图片标识重复，未提交图片任务");
+    if (new Set(ids).size !== ids.length) throw new ImageAgentPlanningError("IMAGE_AGENT_REFERENCES_INVALID", "图片标识重复，未提交图片任务");
     return ids;
 }
 
@@ -180,9 +191,9 @@ export function parseCreativeChatInspection(result: ToolResponseResult, catalog:
     const value = validatedCreativeChatCall(result);
     if (!value || value.call.function.name === "edit_image") return null;
     if (value.call.function.name !== "look_at_images") throw new Error("模型返回了未授权工具，未提交图片任务");
-    if (Object.keys(value.args).some(key => key !== "image_ids")) throw new Error("查看图片工具包含未授权参数");
+    if (Object.keys(value.args).some(key => key !== "image_ids")) throw new ImageAgentPlanningError("IMAGE_AGENT_ARGUMENTS_INVALID", "查看图片工具包含未授权参数");
     const ids = imageIds(value.args.image_ids, catalog);
-    if (!ids.length) throw new Error("查看图片至少需要一张图片");
+    if (!ids.length) throw new ImageAgentPlanningError("IMAGE_AGENT_REFERENCES_INVALID", "查看图片至少需要一张图片");
     return ids;
 }
 
@@ -202,29 +213,29 @@ export function parseCreativeChatPlan(result: ToolResponseResult, references: Re
     if (value.call.function.name !== "edit_image") throw new Error("模型返回了未授权工具，未提交图片任务");
     if (options.allowImageCreation === false) return { kind: "discussion", content: options.documents?.length ? "文件已保留。请先让我整理需求卡，核对并确认后再出图。" : "已收到你上传的内容。你希望我怎么处理？" };
     const { args } = value;
-    if (Object.keys(args).some(key => !["base", "references", "prompt", "keep", "note_update"].includes(key))) throw new Error("图片工具包含未授权参数，未提交图片任务");
-    if (args.base !== undefined && (typeof args.base !== "string" || !args.base.trim() || args.base.length > 300)) throw new Error("图片底图方向无效，未提交图片任务");
-    if (typeof args.prompt !== "string" || !args.prompt.trim() || args.prompt.length > 20_000) throw new Error("图片提示词必须为 1 至 20000 个字符，未提交图片任务");
+    if (Object.keys(args).some(key => !["base", "references", "prompt", "keep", "note_update", "edit_spec"].includes(key))) throw new ImageAgentPlanningError("IMAGE_AGENT_ARGUMENTS_INVALID", "图片工具包含未授权参数，未提交图片任务");
+    if (args.base !== undefined && (typeof args.base !== "string" || !args.base.trim() || args.base.length > 300)) throw new ImageAgentPlanningError("IMAGE_AGENT_ARGUMENTS_INVALID", "图片底图方向无效，未提交图片任务");
+    if (typeof args.prompt !== "string" || !args.prompt.trim() || args.prompt.length > 20_000) throw new ImageAgentPlanningError("IMAGE_AGENT_ARGUMENTS_INVALID", "图片提示词必须为 1 至 20000 个字符，未提交图片任务");
     const keep = args.keep as string[] | undefined;
-    if (keep !== undefined && (!Array.isArray(keep) || keep.length > 20 || keep.some(item => typeof item !== "string" || !item.trim() || item.length > 400))) throw new Error("需保持的要求必须为简短文字列表，未提交图片任务");
-    if (args.note_update !== undefined && (typeof args.note_update !== "string" || args.note_update.length > 800)) throw new Error("作品说明应不超过 800 字，未提交图片任务");
+    if (keep !== undefined && (!Array.isArray(keep) || keep.length > 20 || keep.some(item => typeof item !== "string" || !item.trim() || item.length > 400))) throw new ImageAgentPlanningError("IMAGE_AGENT_ARGUMENTS_INVALID", "需保持的要求必须为简短文字列表，未提交图片任务");
+    if (args.note_update !== undefined && (typeof args.note_update !== "string" || args.note_update.length > 800)) throw new ImageAgentPlanningError("IMAGE_AGENT_ARGUMENTS_INVALID", "作品说明应不超过 800 字，未提交图片任务");
+    const requestedBase = typeof args.base === "string" ? args.base.trim() : undefined;
+    if (requestedBase && !["focus", "latest", "none", "original", "previous"].includes(requestedBase) && !catalog.some(image => image.id === requestedBase || image.label === requestedBase)) throw new ImageAgentPlanningError("IMAGE_AGENT_REFERENCES_INVALID", "图片底图不在本会话目录内，未提交图片任务。");
     const base = resolveImageAgentBase(catalog, { focusId: options.selectedImageId, lockedImageId: options.lockedImageId, newCreation: options.newCreation }, args.base as string | undefined);
     const auxiliaryIds = args.references === undefined ? [] : imageIds(args.references, catalog);
     const sourceIds = [...new Set([...(base ? [base.id] : []), ...auxiliaryIds, ...(options.referenceImageIds || [])])];
-    if (sourceIds.length > 5) throw new Error("底图与参考图合计最多 5 张，未提交图片任务");
+    if (sourceIds.length > 5) throw new ImageAgentPlanningError("IMAGE_AGENT_REFERENCES_INVALID", "底图与参考图合计最多 5 张，未提交图片任务");
     const seen = new Set(options.previewedImageIds || references.map(item => item.id));
     const selected = sourceIds.map(id => {
         const entry = catalog.find(item => item.id === id);
-        if (!entry) throw new Error("图片工具引用了目录外图片，未提交图片任务");
-        if (!seen.has(id)) throw new Error("需要先查看这张较早图片，未提交图片任务");
+        if (!entry) throw new ImageAgentPlanningError("IMAGE_AGENT_REFERENCES_INVALID", "图片工具引用了目录外图片，未提交图片任务");
+        if (!seen.has(id)) throw new ImageAgentPlanningError("IMAGE_AGENT_UNPREVIEWED_IMAGE", `需要先查看较早图片 ${entry.label}（${entry.id}），未提交图片任务`);
         const reference = references.find(item => item.id === id);
         if (!reference) throw new Error("参考图片原件不可用，未提交图片任务");
         originalReference(entry); return { ...reference };
     });
     const workNote = mergeImageAgentWorkNote(base?.note, args.note_update as string | undefined, keep);
-    const order = selected.map((reference, index) => `输入图${index + 1}对应${catalog.find(image => image.id === reference.id)!.label}${reference.id === base?.id ? "（修改底图）" : "（参考图）"}`).join("；");
-    const prompt = [order ? `本次提供的图片顺序：${order}。` : "", args.prompt.trim(), workNote.keep.length ? `需要保持：${workNote.keep.join("；")}。` : ""].filter(Boolean).join("\n\n");
-    if (prompt.length > 20_000) throw new Error("完整图片要求超过 20000 字，请精简后再发送。");
-    return { kind: "image", content: result.content, action: selected.length ? "edit" : "generate", prompt, references: selected,
+    const compiled = compileImageAgentPrompt({ prompt: args.prompt, keep: workNote.keep, images: selected.map(reference => ({ id: reference.id, label: catalog.find(image => image.id === reference.id)!.label })), baseImageId: base?.id, spec: args.edit_spec, requirements: options.requirements });
+    return { kind: "image", content: result.content, action: selected.length ? "edit" : "generate", prompt: compiled.prompt, references: selected, ...(compiled.spec ? { spec: compiled.spec } : {}),
         ...(base ? { parentId: base.id, workId: imageAgentWorkId(catalog, base) } : {}), workNote, keep: workNote.keep };
 }

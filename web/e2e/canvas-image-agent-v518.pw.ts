@@ -2,13 +2,13 @@ import type { BrowserContext, Route } from "@playwright/test";
 import { test, expect, newCanvas, uploadImage } from "./fixtures";
 import { toolDefinitions } from "../../shared/feature-catalog";
 
-const placeholder = "理解画布、修改图片或批量编排；输入 @ 引用图片…";
+const placeholder = "理解画布、修改图片或批量编排…";
 async function fixture(context: BrowserContext, supportsMask = true) {
     const requests: any[] = [];
-    let reply: (route: Route, request: any) => Promise<void> = (route, input) => route.fulfill({ json: { content: "准备修改当前图", toolCalls: [{ id: `edit-${requests.length}`, type: "function", function: { name: "edit_image", arguments: JSON.stringify({ prompt: input.profileContext.currentUserText, note_update: input.profileContext.currentUserText }) } }] } });
+    let reply: (route: Route, request: any) => Promise<void> = (route, input) => route.fulfill({ json: { content: "准备修改当前图", toolCalls: [{ id: `edit-${requests.length}`, type: "function", function: { name: "edit_image", arguments: JSON.stringify({ base: input.profileContext.currentUserText.includes("上一版") ? "previous" : input.profileContext.currentUserText.includes("原版") ? "original" : "focus", prompt: input.profileContext.currentUserText, note_update: input.profileContext.currentUserText }) } }] } });
     const models = [
         { id: "test-image", modelId: "gpt-image-2", name: "隔离图片", protocol: "openai", imageParameterProfile: "standard", imageSupportsMask: supportsMask, capabilities: ["generate", "edit", "batch"], creditCost: 0, rmbCost: 0 },
-        { id: "test-chat", modelId: "test-chat", name: "隔离对话", protocol: "openai", capabilities: ["chat"], creditCost: 0, rmbCost: 0 },
+        { id: "test-chat", modelId: "test-chat", name: "隔离对话", protocol: "openai", capabilities: ["chat", "vision"], creditCost: 0, rmbCost: 0 },
     ];
     await context.route("**/api/models", route => route.fulfill({ json: { models, prices: [], tools: toolDefinitions.map(tool => ({ ...tool, enabled: true, modelConfigId: /chat|text|agent/.test(tool.toolKey) ? "test-chat" : "test-image", configurationVersion: 1 })) } }));
     await context.route("**/api/generation-capabilities?*", route => route.fulfill({ json: { models: [] } }));
@@ -109,23 +109,21 @@ test("current image persists through continuous edits, previous/original and sel
     expect(chat.requests[1].profileContext.previewImageIds).toContain(chat.requests[1].profileContext.focusImageId);
     expect(chat.requests[1].input.at(-1).content).toContain("颜色再浅一点");
     expect(api.submissions.every(item => item.parameters.imageAgentProfile === "canvas-assistant")).toBe(true);
-    await panel.locator("[data-image-agent-focus]").getByRole("button", { name: "上一版", exact: true }).click();
-    await send("袖子改短", 3);
+    await send("回上一版，袖子改短", 3);
     const third = api.document(id)!.nodes.find((node: any) => node.metadata?.imageAgent && !outputs.some((old: any) => old.id === node.id));
     expect(third.metadata.imageAgent.parentNodeId).toBe(first.id);
-    await panel.locator("[data-image-agent-focus]").getByRole("button", { name: "原图", exact: true }).click();
-    chat.setReply((route, input) => route.fulfill({ json: { content: "准备修改", toolCalls: [{ id: "try-other-base", type: "function", function: { name: "edit_image", arguments: JSON.stringify({ base: "none", prompt: input.profileContext.currentUserText }) } }] } }));
     await send("在原版上加小口袋", 4);
     const fourth = api.document(id)!.nodes.find((node: any) => node.metadata?.imageAgent && node.id !== third.id && !outputs.some((old: any) => old.id === node.id));
     expect(fourth.metadata.imageAgent.parentNodeId).toBe(original.id);
     await page.reload(); await page.getByRole("tab", { name: "对话", exact: true }).first().click();
-    await expect(panel.locator("[data-image-agent-focus]")).toHaveAttribute("data-focus-id", new RegExp(fourth.id));
-    await expect.poll(() => panel.locator("[data-image-agent-focus] img").first().evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true);
+    await expect(panel.locator("[data-image-agent-focus]")).toHaveCount(0);
+    await expect.poll(() => api.document(id)?.chatSessions.find((session: any) => session.id === api.document(id)?.activeChatId)?.focusImageId).toContain(fourth.id);
+    await expect.poll(() => panel.locator('[data-testid="canvas-agent-image-result"] img').last().evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true);
     await expect(panel.getByText("工具自动执行完成", { exact: true })).toHaveCount(0);
     await page.screenshot({ path: info.outputPath("canvas-focus-version-chain.png"), animations: "disabled" });
 });
 
-test("seen thumbnails and clarification candidates select the same locked base as @ mentions", async ({ page, context, api }, info) => {
+test("clarification and image mentions stay conversational without selection candidates or locked base UI", async ({ page, context, api }, info) => {
     const chat = await fixture(context);
     const id = await newCanvas(page);
     await uploadImage(page, "original.png");
@@ -135,29 +133,26 @@ test("seen thumbnails and clarification candidates select the same locked base a
     await expect.poll(() => api.document(id)?.nodes.length).toBe(2);
     const original = api.document(id)!.nodes[0];
     const seen = panel.getByRole("group", { name: "本轮助手看到了", exact: true });
-    await expect(seen.first().getByRole("button")).toHaveCount(1);
+    await expect(seen).toHaveCount(0);
     chat.setReply(route => route.fulfill({ json: { content: "你想改图1还是图2？", toolCalls: [] } }));
     await input.fill("你指的是哪一个"); await input.press("Enter");
     const candidates = panel.getByRole("group", { name: "选择要修改的图片", exact: true });
-    await expect(candidates.getByRole("button")).toHaveCount(2);
-    await candidates.getByRole("button", { name: "选择 图1 作为编辑目标", exact: true }).click();
-    await expect(panel.locator("[data-image-agent-focus]")).toContainText("底图已锁定");
-    chat.setReply((route, request) => route.fulfill({ json: { content: "修改选中图", toolCalls: [{ id: "edit", type: "function", function: { name: "edit_image", arguments: JSON.stringify({ base: "none", prompt: request.profileContext.currentUserText }) } }] } }));
-    await input.fill("把袖口改短"); await input.press("Enter");
+    await expect(panel.getByText("你想改图1还是图2？", { exact: true })).toBeVisible();
+    await expect(candidates).toHaveCount(0);
+    await expect(panel.locator("[data-image-agent-focus]")).toHaveCount(0);
+    chat.setReply((route, request) => route.fulfill({ json: { content: "修改图1", toolCalls: [{ id: "edit", type: "function", function: { name: "edit_image", arguments: JSON.stringify({ base: "图1", prompt: request.profileContext.currentUserText }) } }] } }));
+    await input.fill("图1，把袖口改短"); await input.press("Enter");
     await expect.poll(() => api.submissions.length).toBe(2);
     await expect.poll(() => api.document(id)?.nodes.length).toBe(3);
     expect(api.document(id)!.nodes.at(-1).metadata.imageAgent.parentNodeId).toBe(original.id);
-    await input.fill("@");
-    const menu = panel.getByRole("listbox", { name: "选择图片引用" });
-    await expect(menu).toBeVisible();
-    await menu.getByRole("option", { name: /original/ }).first().click();
-    const label = await input.inputValue();
-    expect(label).toContain("图1");
-    await input.fill(`${label} 再把背景改浅灰`); await input.press("Enter");
+    await input.fill("@图1 再把背景改浅灰");
+    await expect(panel.getByRole("listbox", { name: "选择图片引用" })).toHaveCount(0);
+    await input.press("Enter");
     await expect.poll(() => api.submissions.length).toBe(3);
     await expect.poll(() => api.document(id)?.nodes.length).toBe(4);
     const lastPlan = chat.requests.at(-1).profileContext;
-    expect(lastPlan.imageCatalog.find((image: any) => image.id === lastPlan.lockedImageId).label).toBe("图1");
+    expect(lastPlan.lockedImageId).toBeUndefined();
+    expect(lastPlan.imageCatalog.some((image: any) => image.label === "图1")).toBe(true);
     expect(api.document(id)!.nodes.at(-1).metadata.imageAgent.parentNodeId).toBe(original.id);
     await page.screenshot({ path: info.outputPath("canvas-seen-candidates-mention.png") });
 });
@@ -172,7 +167,7 @@ test("canvas mask UI submits paired mask and preserves original outside pixels",
     await context.route("**/api/assets/*/content", route => api.tasks.has(new URL(route.request().url()).pathname.split("/")[3]!) ? route.fulfill({ contentType: "image/png", body: Buffer.from(redPng, "base64") }) : route.fallback());
     await page.getByRole("tab", { name: "对话", exact: true }).first().click();
     const panel = page.locator(".cw-agent-panel"), input = panel.getByPlaceholder(placeholder);
-    await panel.locator("[data-image-agent-focus]").getByRole("button", { name: "圈选修改", exact: true }).click();
+    await panel.getByRole("button", { name: "圈选修改", exact: true }).last().click();
     const dialog = page.getByRole("dialog", { name: "涂选修改区域", exact: true });
     const paint = dialog.getByLabel("修改区域画布", { exact: true });
     await expect(paint).toBeVisible();
@@ -209,13 +204,15 @@ test("canvas mask UI submits paired mask and preserves original outside pixels",
     await page.screenshot({ path: info.outputPath("canvas-mask-output.png") });
 });
 
-test("unsupported masks and multi-generation plans make no generation submission", async ({ page, context, api }) => {
+test("non-native selection is available and multi-generation plans make no generation submission", async ({ page, context, api }) => {
     const chat = await fixture(context, false);
     const id = await newCanvas(page); await uploadImage(page);
     await page.getByRole("tab", { name: "对话", exact: true }).first().click();
     const panel = page.locator(".cw-agent-panel"), input = panel.getByPlaceholder(placeholder);
-    await panel.locator("[data-image-agent-focus]").getByRole("button", { name: "圈选修改", exact: true }).click();
-    await expect(panel.getByText("当前模型不支持局部蒙版，请先在出图设置选择支持蒙版的模型。", { exact: true })).toBeVisible();
+    await panel.getByRole("button", { name: "圈选修改", exact: true }).last().click();
+    const selectionDialog = page.getByRole("dialog", { name: "涂选修改区域", exact: true });
+    await expect(selectionDialog.getByText(/它不是模型原生蒙版/)).toBeVisible();
+    await selectionDialog.getByRole("button", { name: /^取\s*消$/ }).click();
     expect(api.submissions).toHaveLength(0);
     chat.setReply(route => route.fulfill({ json: { content: "准备两张", toolCalls: ["first", "second"].map(callId => ({ id: callId, type: "function", function: { name: "edit_image", arguments: JSON.stringify({ prompt: "修改颜色" }) } })) } }));
     await input.fill("改成绿色"); await input.press("Enter");
@@ -237,10 +234,11 @@ test("pending generation does not block chat and late result cannot steal newer 
     chat.setReply(route => route.fulfill({ json: { content: "针织帽的浅色更适合春夏，这是文字分析。", toolCalls: [] } }));
     await input.fill("只分析浅色适合什么季节，不生成"); await input.press("Enter");
     await expect(panel.getByText("针织帽的浅色更适合春夏，这是文字分析。", { exact: true })).toBeVisible();
-    const focusBefore = await panel.locator("[data-image-agent-focus]").getAttribute("data-focus-id");
+    const focusBefore = api.document(id)?.chatSessions.find((session: any) => session.id === api.document(id)?.activeChatId)?.focusImageId;
     for (const task of api.tasks.values()) { task.status = "success"; task.resultUrls = [`/api/assets/${task.id}/content`]; }
     await expect.poll(() => api.document(id)?.nodes.length, { timeout: 30_000 }).toBe(2);
-    expect(await panel.locator("[data-image-agent-focus]").getAttribute("data-focus-id")).toBe(focusBefore);
+    expect(api.document(id)?.chatSessions.find((session: any) => session.id === api.document(id)?.activeChatId)?.focusImageId).toBe(focusBefore);
+    await expect(panel.locator("[data-image-agent-focus]")).toHaveCount(0);
     expect(api.submissions).toHaveLength(1);
 });
 

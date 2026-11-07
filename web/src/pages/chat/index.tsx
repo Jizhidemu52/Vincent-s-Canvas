@@ -15,11 +15,8 @@ import { pastedImageFiles } from "@/lib/clipboard-images";
 import { CHAT_ATTACHMENT_ACCEPT, openChatAttachmentPicker, parseChatAttachment } from "@/lib/chat-attachments";
 import { assertCreativeChatImageSelection, buildCreativeImageCatalog, type CreativeChatImageSelection, type CreativeImageCatalogEntry } from "@/lib/creative-chat";
 import { conversationImageLabel, type ConversationImageAction, type ConversationImageItem } from "@/components/conversation-image-controls";
-import { ImageAgentFocus } from "@/components/image-agent-focus";
-import { CanvasPersistedMediaPreview } from "@/components/canvas/canvas-persisted-media-preview";
 import { imageAgentWorkNoteText } from "@/lib/image-agent/work-note";
 import { useConversationImageTools } from "@/hooks/use-conversation-image-tools";
-import { useImageMentions } from "@/hooks/use-image-mentions";
 import { useImageDrop } from "@/hooks/use-image-drop";
 import { useCopyText } from "@/hooks/use-copy-text";
 import { createDeferredPersistQueue } from "@/lib/deferred-persist-queue";
@@ -29,7 +26,7 @@ import { chatMedia } from "./chat-media";
 import { ChatMarkdown } from "./chat-markdown";
 import { ChatImage } from "./chat-image";
 import { chatSourceTurn, createChatBranch } from "./chat-message-actions";
-import { chatFocusImage, chatImageDisplayLabel, chatImageOriginal } from "./chat-image-selection";
+import { chatFocusImage, chatImageOriginal } from "./chat-image-selection";
 import { chatImageTaskSignature, completeChatImageTask, duplicateChatImageTask } from "./chat-image-tasks";
 import { useChatTaskRecovery } from "./use-chat-task-recovery";
 import { prepareChatRegionEdit, restoreChatMaskResult, saveChatRegionSelection } from "@/lib/image-agent/mask";
@@ -43,6 +40,9 @@ import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { useModuleEnabled } from "@/stores/use-module-store";
 import { isClaudeModel, requestEdit, requestGeneration } from "@/services/api/image";
 import { requestCreativeChatPlan } from "@/services/api/creative-chat";
+import { imageAgentSpecText } from "@/lib/image-agent/compile";
+import { requestImageAgentReview } from "@/services/api/image-agent-inspection";
+import { prepareChatImageCorrection } from "./chat-image-review";
 import { resolveToolModel } from "@/services/api/business-config";
 import type { PendingChatImageTask } from "@/services/api/chat-image-recovery";
 import { uploadImage } from "@/services/image-storage";
@@ -116,7 +116,7 @@ export default function ChatPage() {
     const [draft, setDraft] = useState("");
     const [editing, setEditing] = useState<{ messageId: string; content: string } | null>(null);
     const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
-    const [imageTarget, setImageTarget] = useState<{ id: string; mode: "edit" | "original"; sessionId: string } | null>(null);
+    const [imageTarget, setImageTarget] = useState<{ id: string; mode: "region" | "correction"; sessionId: string } | null>(null);
     const [referenceImageIds, setReferenceImageIds] = useState<string[]>([]);
     const [regionImage, setRegionImage] = useState<SceneImage | null>(null);
     const [regionSelection, setRegionSelection] = useState<ChatRegionSelection | null>(null);
@@ -129,6 +129,8 @@ export default function ChatPage() {
     const sendingRef = useRef(false);
     const activeSendRef = useRef<{ controller: AbortController; submitted: boolean; stopRequested?: boolean; detached?: boolean } | null>(null);
     const imageRequestsRef = useRef(new Map<string, AbortController>());
+    const reviewRequestsRef = useRef(new Map<string, AbortController>());
+    const [reviewingImageIds, setReviewingImageIds] = useState<ReadonlySet<string>>(new Set());
     const [activeImageRequestIds, setActiveImageRequestIds] = useState<ReadonlySet<string>>(new Set());
     const [sendPhase, setSendPhase] = useState("");
     const [placingImage, setPlacingImage] = useState(false);
@@ -169,6 +171,8 @@ export default function ChatPage() {
             activeSendRef.current = null;
             for (const controller of imageRequestsRef.current.values()) controller.abort();
             imageRequestsRef.current.clear();
+            for (const controller of reviewRequestsRef.current.values()) controller.abort();
+            reviewRequestsRef.current.clear();
             attachmentReadRef.current = null;
             loadedStorageKeyRef.current = null;
         };
@@ -252,9 +256,10 @@ export default function ChatPage() {
     const imageQualitySettings = chatImageQualitySettings(qualityProfile, activeSession?.imageQuality, activeSession?.imageResolution);
     const creativeModelId = selectedModel;
     const imageCatalog = useMemo(() => buildCreativeImageCatalog(activeSession?.messages || []), [activeSession?.messages]);
-    const imageLabels = useMemo(() => new Map(imageCatalog.map(item => [item.id, chatImageDisplayLabel(imageCatalog, item.id)])), [imageCatalog]);
+    const imageLabels = useMemo(() => new Map(imageCatalog.map(item => [item.id, item.label])), [imageCatalog]);
     const composerImageCatalog = useMemo(() => buildCreativeImageCatalog(activeSession?.messages || [], { role: "user", content: "", attachments }), [activeSession?.messages, attachments]);
-    const selectedImage = chatFocusImage(composerImageCatalog, activeSession);
+    const operationTargetId = regionSelection?.imageId || (imageTarget?.sessionId === activeSession?.id && imageTarget?.mode === "correction" ? imageTarget.id : undefined);
+    const selectedImage = chatFocusImage(composerImageCatalog, { focusImageId: operationTargetId || (!activeSession?.focusLocked ? activeSession?.focusImageId || activeSession?.editTargetImageId : undefined) });
     const imageReferenceParametersAutomatic = imageReferenceSizeIsAutomatic(qualityProfile, selectedImage || attachments.some(item => item.kind === "image") ? 1 : 0);
     const imageTools = useConversationImageTools();
     const imageActionsDisabled = !sessionsReady || isSending || placingImage || readingAttachments || hydratingMedia || Boolean(editing);
@@ -266,6 +271,9 @@ export default function ChatPage() {
         setReferenceImageIds([]);
         setRegionSelection(null);
         setRegionImage(null);
+        for (const controller of reviewRequestsRef.current.values()) controller.abort();
+        reviewRequestsRef.current.clear();
+        setReviewingImageIds(new Set());
     }, [activeSession?.id, storageKey]);
 
     const updateSession = (id: string, update: (session: ChatSession) => ChatSession) => {
@@ -338,7 +346,7 @@ export default function ChatPage() {
         imageRequestsRef.current.get(item.pendingImageTask.requestId)?.abort();
     };
 
-    const selectImageTarget = (image: ConversationImageItem, mode: "edit" | "original" = "edit") => {
+    const selectImageTarget = (image: ConversationImageItem, mode: "region" | "correction") => {
         if (imageActionsDisabled || !activeSession || !isCurrentScope()) return false;
         if (image.unavailableReason) { message.warning(uiText(image.unavailableReason)); return false; }
         const attachedIds = buildCreativeImageCatalog([], { role: "user", content: "", attachments }).map((item) => item.id);
@@ -358,7 +366,7 @@ export default function ChatPage() {
 
     const openRegionSelection = async (imageId: string) => {
         const image = composerImageCatalog.find(item => item.id === imageId);
-        if (!image || !activeSession || !selectImageTarget(image)) return;
+        if (!image || !activeSession || !selectImageTarget(image, "region")) return;
         const sessionId = activeSession.id;
         const assertCurrent = () => { if (!isCurrentScope() || activeSessionIdRef.current !== sessionId) throw new DOMException("会话已切换", "AbortError"); };
         try {
@@ -387,12 +395,56 @@ export default function ChatPage() {
         const image = composerImageCatalog.find((item) => item.id === imageId);
         if (!image) return;
         if (action === "download") { void imageTools.download(image); return; }
-        if (action === "reference") { addImageReference(image); return; }
-        if (action === "edit") { selectImageTarget(image); return; }
+        if (action !== "compare") return;
         const original = chatImageOriginal(composerImageCatalog, image.id);
         if (!original.image || original.image.id === image.id) { message.warning(uiText(original.reason || "这张图已经是原图")); return; }
-        if (action === "compare") imageTools.compare(image, [original.image]);
-        else selectImageTarget(original.image, "original");
+        imageTools.compare(image, [original.image]);
+    };
+
+    const reviewImage = async (image: ChatGeneratedImage) => {
+        if (imageActionsDisabled || !activeSession || !creativeModelId || !isCurrentScope() || reviewRequestsRef.current.has(image.id)) return;
+        const sessionId = activeSession.id, controller = new AbortController();
+        const assertCurrent = () => {
+            controller.signal.throwIfAborted();
+            if (!isCurrentScope() || activeSessionIdRef.current !== sessionId || !sessionsRef.current.find(session => session.id === sessionId)?.messages.some(item => item.generatedImages?.some(saved => saved.id === image.id))) throw new DOMException("会话已切换", "AbortError");
+        };
+        reviewRequestsRef.current.set(image.id, controller);
+        setReviewingImageIds(previous => new Set(previous).add(image.id));
+        try {
+            assertCurrent();
+            const base = imageCatalog.find(item => item.id === image.parentId && !item.unavailableReason);
+            const result = imageCatalog.find(item => item.id === image.id && !item.unavailableReason);
+            if (!result) throw new Error("生成结果原件不可用，未开始检查。");
+            const report = await requestImageAgentReview({ ...config, model: creativeModelId, textModel: creativeModelId, systemPrompt: "" }, { profile: "creative-chat", base, result, prompt: image.prompt || "", spec: image.spec, signal: controller.signal, assertCurrent });
+            assertCurrent();
+            const review = { report, reviewedAt: new Date().toISOString(), baseImageId: base?.id, baseUnavailable: !base };
+            updateSession(sessionId, session => ({ ...session, messages: session.messages.map(item => ({ ...item, ...(item.generatedImages ? { generatedImages: item.generatedImages.map(saved => saved.id === image.id ? { ...saved, review } : saved) } : {}) })) }));
+            // A prepared new turn owns its queued snapshot; do not enqueue an
+            // older history after it. The normal persistence effect follows commit.
+            if (!preparingMessageRef.current) { persistence.clear(); await persistSessions(sessionsRef.current); }
+        } catch (error) {
+            if (!controller.signal.aborted && isCurrentScope() && activeSessionIdRef.current === sessionId) message.error(error instanceof Error ? error.message : "检查失败，原生成结果已保留。");
+        } finally {
+            if (reviewRequestsRef.current.get(image.id) === controller) reviewRequestsRef.current.delete(image.id);
+            if (isCurrentScope() && activeSessionIdRef.current === sessionId) setReviewingImageIds(previous => { const next = new Set(previous); next.delete(image.id); return next; });
+        }
+    };
+
+    const prepareCorrection = (image: ChatGeneratedImage) => {
+        if (imageActionsDisabled || !isCurrentScope() || !activeSession) return;
+        if (draft.trim() || attachments.length || referenceImageIds.length || regionSelection) { message.warning("请先发送或清空当前草稿、附件和选区，再准备纠正；已有内容未改动。"); return; }
+        try {
+            const prepared = prepareChatImageCorrection(image, imageCatalog);
+            const sourceReply = activeSession.messages.find(item => item.generatedImages?.some(saved => saved.id === image.id));
+            const sourceRegion = activeSession.messages.find(item => item.id === sourceReply?.parentMessageId)?.regionSelection;
+            if (image.regionComposite && sourceRegion?.imageId !== prepared.base.id) throw new Error("原局部选区不可重用，请在原图片上重新圈选后描述纠正要求。");
+            if (!selectImageTarget(prepared.base, "correction")) return;
+            setAttachments(prepared.references.map(reference => ({ id: reference.id, name: reference.name, kind: "image", mimeType: reference.type, dataUrl: reference.dataUrl, storageKey: reference.storageKey, size: dataUrlBytes(reference.dataUrl) })));
+            setReferenceImageIds(prepared.references.map(reference => reference.id));
+            setRegionSelection(sourceRegion?.imageId === prepared.base.id ? sourceRegion : null);
+            setDraft(prepared.prompt); composerRef.current?.focus();
+            message.success("已准备纠正草稿；点击发送才会生成新任务。");
+        } catch (error) { message.warning(error instanceof Error ? error.message : "无法准备纠正，原结果未改动。"); }
     };
 
     const placeImageOnCanvas = async (image: ChatGeneratedImage) => {
@@ -479,14 +531,18 @@ export default function ChatPage() {
         const text = (resend ? resend.content ?? branch!.source.content : draft).trim();
         const turnAttachments = branch?.source.attachments || (resend ? [] : attachments);
         if (!text && !turnAttachments.length) return;
+        const turnRegion = resend ? branch!.source.regionSelection || null : regionSelection;
+        // Old picker locks are historical state, not authority over a new sentence.
+        // Only this turn's region/correction operation or an explicit replay is locked.
+        const operationTarget = turnRegion?.imageId || (!resend && imageTarget?.sessionId === requestSession.id && imageTarget.mode === "correction" ? imageTarget.id : undefined);
+        const focusContext = resend ? requestSession : { focusImageId: operationTarget || (!requestSession.focusLocked ? requestSession.focusImageId || requestSession.editTargetImageId : undefined) };
         const imageSelection: CreativeChatImageSelection = {
-            explicitTargetImageId: requestSession.focusLocked ? requestSession.focusImageId : undefined,
+            explicitTargetImageId: operationTarget || (resend && requestSession.focusLocked ? requestSession.focusImageId : undefined),
             referenceImageIds: referenceImageIds.filter((id) => turnAttachments.some((item) => item.id === id)),
-            newCreation: requestSession.newCreation,
+            newCreation: resend ? requestSession.newCreation : false,
         };
-        const turnFocus = chatFocusImage(buildCreativeImageCatalog(requestSession.messages, { role: "user", content: text, attachments: turnAttachments }), requestSession);
-        const turnRegion = resend ? branch!.source.regionSelection || null : regionSelection?.imageId === turnFocus?.id ? regionSelection : null;
-        if (turnRegion && turnRegion.imageId !== turnFocus?.id) { message.warning(uiText("原局部选区与当前底图不一致，未重新调用模型。请选择原底图并重新圈选后发送。")); return; }
+        const turnFocus = chatFocusImage(buildCreativeImageCatalog(requestSession.messages, { role: "user", content: text, attachments: turnAttachments }), focusContext);
+        if (turnRegion && turnRegion.imageId !== turnFocus?.id) { message.warning(uiText("原局部选区与本轮图片不一致，未重新调用模型。请在原图片上重新圈选后发送。")); return; }
         const selectedInputIds = buildCreativeImageCatalog([], { role: "user", content: "", attachments: turnAttachments }).map((item) => item.id);
         if (new Set([...selectedInputIds, ...(imageSelection.explicitTargetImageId ? [imageSelection.explicitTargetImageId] : [])]).size > 5) { message.warning(uiText("编辑目标与参考图片合计最多 5 张，请先移除一张图片")); return; }
         const sessionId = requestSession.id;
@@ -507,7 +563,7 @@ export default function ChatPage() {
         // request. A failed write must leave the user's attachments available.
         const selectedSessionModels = { chatModelId: creativeModelId };
         const conversationTitle = (text || turnAttachments[0]?.name || "新对话").slice(0, 18);
-        const committedSession = { ...requestSession, ...selectedSessionModels, focusImageId: turnFocus?.id, title: requestSession.messages.length || branch ? requestSession.title : conversationTitle, messages: [...requestSession.messages, userMessage], updatedAt: new Date().toISOString() };
+        const committedSession = { ...requestSession, ...selectedSessionModels, focusImageId: turnFocus?.id, focusLocked: false, newCreation: imageSelection.newCreation, title: requestSession.messages.length || branch ? requestSession.title : conversationTitle, messages: [...requestSession.messages, userMessage], updatedAt: new Date().toISOString() };
         const nextSessions = branch ? [committedSession, ...sessionsRef.current] : sessionsRef.current.map((session) => session.id === sessionId ? committedSession : session);
         preparingMessageRef.current = true;
         sendingRef.current = true;
@@ -540,12 +596,17 @@ export default function ChatPage() {
             // A previous accepted task may have completed during the durable write.
             // Append only this turn; never replace its result with our old snapshot.
             updateSession(sessionId, session => ({ ...session, ...selectedSessionModels,
+                ...(requestSession.focusLocked && !imageSelection.explicitTargetImageId && session.focusLocked && session.focusImageId === requestSession.focusImageId && session.focusRevision === requestSession.focusRevision
+                    ? { focusImageId: turnFocus?.id, editTargetImageId: turnFocus?.id } : {}),
+                focusLocked: false, newCreation: imageSelection.newCreation,
                 title: committedSession.title, messages: [...session.messages, userMessage], updatedAt: committedSession.updatedAt }));
             setDraft((current) => current === draft ? "" : current);
             const sentAttachmentIds = new Set(turnAttachments.map((item) => item.id));
             setAttachments((current) => current.filter((item) => !sentAttachmentIds.has(item.id)));
             setReferenceImageIds((ids) => ids.filter((id) => !sentAttachmentIds.has(id)));
         }
+        setImageTarget(null);
+        setRegionSelection(null);
         followBottomRef.current = true;
         const stream = createChatStreamBuffer((content) => { if (signal.aborted || activeSendRef.current !== sendLifetime) return; updateSession(sessionId, (session) => ({
             ...session,
@@ -572,7 +633,7 @@ export default function ChatPage() {
                 updateSession(sessionId, (session) => ({ ...session, messages: [...session.messages.filter((item) => item.id !== assistantId), { id: assistantId, parentMessageId: userMessage.id, role: "assistant", content: plan.content, candidateImageIds: plan.candidateImageIds, createdAt: new Date().toISOString() }], updatedAt: new Date().toISOString() }));
                 return;
             }
-            const { references, action, content: explanation, parentId, workId, workNote } = plan;
+            const { references, action, content: explanation, parentId, workId, workNote, spec } = plan;
             assertSendCurrent();
             const imageModel = preferredChatImageModel(imageModels, [requestSession.imageModelId, config.imageModel, config.model], action);
             if (!imageModel) throw new Error(`当前尚未配置可用的图片${action === "edit" ? "编辑" : "生成"}服务。可以继续讨论，图片处理需管理员启用。`);
@@ -593,6 +654,7 @@ export default function ChatPage() {
             const currentSession = sessionsRef.current.find(session => session.id === sessionId)!;
             const pendingImageTask: PendingChatImageTask = { requestId: createClientId(), prompt: imagePrompt, modelId: imageModelId, quality, size: imageConfig.size, ...(resolution ? { resolution } : {}), action, parentMessageId: userMessage.id, parentId, workId, workNote, referenceImageIds: references.map(image => image.id), focusRevision: (currentSession.focusRevision || 0) + 1, ...(maskInput?.adaptation ? { maskAdaptation: maskInput.adaptation } : {}), ...(maskInput?.regionComposite ? { regionComposite: maskInput.regionComposite } : {}), explanation };
             pendingImageTask.requirements = requirements;
+            pendingImageTask.spec = spec;
             pendingImageTask.signature = chatImageTaskSignature(pendingImageTask);
             if (duplicateChatImageTask(currentSession, pendingImageTask)) throw new Error("已有相同要求的图片任务等待核实，未重复提交。请查询那条原任务；可以继续聊天或发送不同的新要求。");
             imageRequestId = pendingImageTask.requestId;
@@ -741,7 +803,6 @@ export default function ChatPage() {
     const composerAttachments = editing && activeSession ? chatSourceTurn(activeSession, editing.messageId)?.attachments || [] : attachments;
     const composerText = editing?.content ?? draft;
     const sendComposer = () => void send(editing || undefined);
-    const mentions = useImageMentions({ value: composerText, onChange: (value) => editing ? setEditing({ ...editing, content: value }) : setDraft(value), images: composerImageCatalog, onSelect: (image) => selectImageTarget(image), disabled: imageActionsDisabled });
     const editMessage = (item: ChatMessage) => {
         if (isSending || placingImage || readingAttachments || hydratingMedia) return;
         setImageTarget(null);
@@ -801,20 +862,18 @@ export default function ChatPage() {
                             <div className="hidden size-12 place-items-center rounded-2xl bg-muted text-foreground [@media(min-height:850px)]:grid"><WandSparkles className="size-6" /></div>
                             <h2 className="mt-2 text-xl font-semibold text-foreground sm:text-2xl">{uiText("有什么想法，直接说。")}</h2>
                             <p>{uiText("问问题、生成图片，或上传图片和文件，接着聊、接着改。")}</p>
-                        </div> : <div className="mx-auto max-w-3xl space-y-6">{activeSession.messages.map((item) => <ChatBubble key={item.id} message={item} imageLabels={imageLabels} imageCatalog={imageCatalog} selectedImageId={selectedImage?.id} actionsDisabled={imageActionsDisabled} onImageAction={imageAction} onMask={id => void openRegionSelection(id)} onPlaceOnCanvas={(image) => void placeImageOnCanvas(image)} onEdit={() => editMessage(item)} onRegenerate={chatSourceTurn(activeSession, item.id) ? () => void send({ messageId: item.id }) : undefined} checkingTask={taskRecovery.checking.has(item.id) || Boolean(item.pendingImageTask && activeImageRequestIds.has(item.pendingImageTask.requestId))} onQueryTask={() => taskRecovery.query(item)} onStopWaiting={item.pendingImageTask && activeImageRequestIds.has(item.pendingImageTask.requestId) ? () => stopImageWaiting(item) : undefined} />)}{isSending ? <div role="status" className="flex items-center gap-2 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />{sendPhase}</div> : null}</div>}
+                        </div> : <div className="mx-auto max-w-3xl space-y-6">{activeSession.messages.map((item) => <ChatBubble key={item.id} message={item} imageLabels={imageLabels} imageCatalog={imageCatalog} actionsDisabled={imageActionsDisabled} onImageAction={imageAction} onMask={id => void openRegionSelection(id)} onPlaceOnCanvas={(image) => void placeImageOnCanvas(image)} onReview={image => void reviewImage(image)} onCorrect={prepareCorrection} reviewingImageIds={reviewingImageIds} onEdit={() => editMessage(item)} onRegenerate={chatSourceTurn(activeSession, item.id) ? () => void send({ messageId: item.id }) : undefined} checkingTask={taskRecovery.checking.has(item.id) || Boolean(item.pendingImageTask && activeImageRequestIds.has(item.pendingImageTask.requestId))} onQueryTask={() => taskRecovery.query(item)} onStopWaiting={item.pendingImageTask && activeImageRequestIds.has(item.pendingImageTask.requestId) ? () => stopImageWaiting(item) : undefined} />)}{isSending ? <div role="status" className="flex items-center gap-2 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />{sendPhase}</div> : null}</div>}
                     </div>
 
                     <div className="border-t border-border bg-card px-4 py-4 md:px-[8%]">
                         <div className="mx-auto max-w-3xl">
                             {editing ? <div role="status" className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground"><span>{uiText("编辑后将从这条消息创建新分支，原会话和附件保留；发送会重新调用模型。")}</span><Button size="small" disabled={isSending} onClick={() => setEditing(null)}>{uiText("取消编辑")}</Button></div> : null}
                             <div className="relative rounded-2xl border border-input bg-background p-3 focus-within:border-orange-400">
-                                {!editing ? <ImageAgentFocus images={composerImageCatalog} focusId={selectedImage?.id} locked={activeSession?.focusLocked} newCreation={activeSession?.newCreation} referenceCount={composerAttachments.filter(item => item.kind !== "text" && item.id !== selectedImage?.id).length} disabled={imageActionsDisabled} onSelect={id => { const image = composerImageCatalog.find(item => item.id === id); if (image) selectImageTarget(image); }} onNewCreation={startNewCreation} /> : null}
                                 {regionSelection && selectedImage?.id === regionSelection.imageId ? <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground"><Brush className="size-3.5" /><span>{uiText("已圈选局部区域，仅修改选区内")}</span><button type="button" onClick={() => void openRegionSelection(regionSelection.imageId)} className="underline">{uiText("调整选区")}</button><button type="button" aria-label={uiText("清除局部选区")} onClick={() => setRegionSelection(null)}><X className="size-3.5" /></button></div> : null}
-                                {selectedImage ? <p className="mb-2 text-xs leading-relaxed text-muted-foreground">{uiText("涂选后只合入选区，区域外保留原图；未涂选时仅靠文字约束。选区内结构、接缝与光影仍需核对。")}</p> : null}
+                                {regionSelection ? <p className="mb-2 text-xs leading-relaxed text-muted-foreground">{uiText("涂选后只合入选区，区域外保留原图；选区内结构、接缝与光影仍需核对。")}</p> : null}
                                 {composerAttachments.length ? <div className="flex flex-wrap gap-2 pb-3">{composerAttachments.map((item) => <div key={item.id} className="group relative flex h-14 max-w-[180px] items-center gap-2 rounded-xl border border-border bg-card p-1.5">{item.dataUrl ? <img src={item.dataUrl} alt="" className="size-10 rounded-lg object-cover" /> : <span className="grid size-10 place-items-center rounded-lg bg-muted text-muted-foreground"><FileText className="size-5" /></span>}<span className="min-w-0 flex-1 truncate text-xs font-medium">{!editing && referenceImageIds.includes(item.id) ? uiText("参考 · {value1}", { value1: conversationImageLabel(imageLabels.get(item.id) || "") || item.name }) : item.name}</span>{!editing ? <button type="button" aria-label={uiText("移除 ") + item.name} onClick={() => { setAttachments((current) => current.filter((attachment) => attachment.id !== item.id)); setReferenceImageIds((ids) => ids.filter((id) => id !== item.id)); if (imageTarget?.id === item.id && !imageCatalog.some((image) => image.id === item.id)) setImageTarget(null); }} className="absolute -right-1.5 -top-1.5 grid size-6 place-items-center rounded-full border border-border bg-card text-muted-foreground hover:text-red-600"><X className="size-3.5" /></button> : null}</div>)}</div> : null}
                                 {readingAttachments || imageDrop.reading ? <div role="status" className="mb-2 flex items-center gap-2 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />{uiText("正在读取附件，请稍候…")}</div> : null}
-                                {mentions.menu}
-                                <textarea ref={composerRef} {...mentions.inputProps} aria-label={editing ? uiText("编辑消息") : uiText("对话内容")} value={composerText} disabled={!sessionsReady} onChange={mentions.handleChange} onSelect={mentions.handleSelect} onPaste={pasteAttachments} onKeyDown={(event) => { if (event.nativeEvent.isComposing || event.keyCode === 229 || event.repeat) return; if (mentions.handleKeyDown(event)) return; handleSubmitShortcut(event, sessionsReady && !isSending && !readingAttachments && !hydratingMedia && !!selectedModel, sendComposer); }} placeholder={uiText("说说怎么改 · @ 选图 · Ctrl / ⌘ + Enter 发送")} className="min-h-[80px] w-full resize-none bg-transparent px-1 py-1 text-sm leading-7 text-foreground outline-none placeholder:text-muted-foreground" />
+                                <textarea ref={composerRef} aria-label={editing ? uiText("编辑消息") : uiText("对话内容")} value={composerText} disabled={!sessionsReady} onChange={event => { if (editing) setEditing({ ...editing, content: event.target.value }); else { setDraft(event.target.value); if (!event.target.value.trim() && imageTarget?.mode === "correction") setImageTarget(null); } }} onPaste={pasteAttachments} onKeyDown={(event) => { if (event.nativeEvent.isComposing || event.keyCode === 229 || event.repeat) return; handleSubmitShortcut(event, sessionsReady && !isSending && !readingAttachments && !hydratingMedia && !!selectedModel, sendComposer); }} placeholder={uiText("直接说怎么改 · Ctrl / ⌘ + Enter 发送")} className="min-h-[80px] w-full resize-none bg-transparent px-1 py-1 text-sm leading-7 text-foreground outline-none placeholder:text-muted-foreground" />
                                 <p className="mb-2 text-right text-xs text-muted-foreground">{composerText.length} {uiText("字")}</p>
                                 <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-2">
                                     <div className="flex min-w-0 flex-wrap items-center gap-1">
@@ -828,7 +887,7 @@ export default function ChatPage() {
                                             {qualityProfile.kind !== "mai-image" ? <label className="grid gap-1 text-xs text-muted-foreground">{uiText(imageQualitySettings.label || "")}<Select data-usage-control={imageQualitySettings.independentResolution ? "quality" : "resolution"} aria-label={imageQualitySettings.independentResolution ? uiText("图片质量") : uiText("图片清晰度")} data-testid="chat-image-quality" value={imageQualitySettings.quality} disabled={!sessionsReady || modelsLoading || isSending || !preferredImageModel || !imageQualitySettings.adjustable} onChange={value => { if (activeSession && preferredImageModel) updateSession(activeSession.id, session => ({ ...session, imageModelId: preferredImageModel.modelId, imageQuality: value })); }} options={imageQualitySettings.options.map(option => ({ ...option, label: uiText(option.label) }))} /></label> : null}
                                             {imageBinding?.modelConfigId ? <p className="text-xs text-muted-foreground">{uiText("当前出图模型由管理员固定，无需选择。")}</p> : null}
                                         </div>}><button type="button" aria-label={uiText("出图设置")} className="inline-flex min-h-10 max-w-[220px] items-center gap-1.5 rounded-lg px-2 text-xs text-muted-foreground hover:bg-muted"><Settings2 className="size-4 shrink-0" /><span>{uiText("出图设置")}</span><span className="truncate opacity-70">{preferredImageModel?.name}</span></button></Popover>
-                                        <Tooltip title={uiText("Ctrl / ⌘ + V 粘贴图片；Ctrl / ⌘ + Enter 发送；@ 选图，当前图与参考图合计最多 5 张")}><button type="button" aria-label={uiText("对话操作帮助")} className="grid size-8 place-items-center rounded text-muted-foreground hover:bg-muted"><CircleHelp className="size-4" /></button></Tooltip>
+                                        <Tooltip title={uiText("Ctrl / ⌘ + V 粘贴图片；Ctrl / ⌘ + Enter 发送；直接说回原图、上一版或图号")}><button type="button" aria-label={uiText("对话操作帮助")} className="grid size-8 place-items-center rounded text-muted-foreground hover:bg-muted"><CircleHelp className="size-4" /></button></Tooltip>
                                     </div>
                                     {isSending ? <Tooltip title={uiText("停止本页请求和等待，不保证取消服务端执行或计费")}><Button danger onClick={stopSending} icon={<Square className="size-4" />} className="!h-10 !px-4">{uiText("停止")}</Button></Tooltip> : <Button type="primary" disabled={!sessionsReady || (!composerText.trim() && !composerAttachments.length) || placingImage || readingAttachments || hydratingMedia || !selectedModel} onClick={sendComposer} icon={<Send className="size-4" />} className="!h-10 !px-4">{editing ? uiText("发送为新分支") : uiText("发送")}</Button>}
                                 </div>
@@ -851,19 +910,21 @@ export default function ChatPage() {
     );
 }
 
-const ChatBubble = memo(function ChatBubble({ message, imageLabels, imageCatalog, selectedImageId, actionsDisabled, onImageAction, onMask, onPlaceOnCanvas, onEdit, onRegenerate, checkingTask, onQueryTask, onStopWaiting }: {
-    message: ChatMessage; imageLabels: Map<string, string>; imageCatalog: CreativeImageCatalogEntry[]; selectedImageId?: string; actionsDisabled: boolean;
+const ChatBubble = memo(function ChatBubble({ message, imageLabels, imageCatalog, actionsDisabled, onImageAction, onMask, onPlaceOnCanvas, onReview, onCorrect, reviewingImageIds, onEdit, onRegenerate, checkingTask, onQueryTask, onStopWaiting }: {
+    message: ChatMessage; imageLabels: Map<string, string>; imageCatalog: CreativeImageCatalogEntry[]; actionsDisabled: boolean;
     onImageAction: (action: ConversationImageAction, imageId: string) => void; onMask: (imageId: string) => void;
     onPlaceOnCanvas: (image: ChatGeneratedImage) => void; onEdit: () => void; onRegenerate?: () => void;
+    onReview: (image: ChatGeneratedImage) => void; onCorrect: (image: ChatGeneratedImage) => void; reviewingImageIds: ReadonlySet<string>;
     checkingTask?: boolean; onQueryTask: () => void; onStopWaiting?: () => void;
 }) {
     useUiText();
     const isUser = message.role === "user";
     const copyText = useCopyText();
+    const imageWork = message.generatedImages?.[0] || message.pendingImageTask;
     const imageControls = (imageId: string) => {
         const original = chatImageOriginal(imageCatalog, imageId);
         const reason = original.reason || (original.image?.id === imageId ? "这张图已经是原图" : undefined);
-        return { onAction: onImageAction, onMask: () => onMask(imageId), selected: imageId === selectedImageId, disabled: actionsDisabled, originalDisabledReason: reason, compareDisabledReason: reason };
+        return { onAction: onImageAction, onMask: () => onMask(imageId), disabled: actionsDisabled, compareDisabledReason: reason };
     };
     return (
         <div data-message-id={message.id} data-message-role={message.role} className={cn("flex gap-3", isUser ? "justify-end" : "justify-start")}>
@@ -871,12 +932,22 @@ const ChatBubble = memo(function ChatBubble({ message, imageLabels, imageCatalog
             <div className={cn("min-w-0 max-w-[86%] rounded-2xl px-4 py-3 text-sm leading-7", isUser ? "order-1 bg-foreground text-background" : message.role === "error" ? "border border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200" : "border border-border bg-card text-foreground")}>
                 {message.content ? message.role === "error" ? <GenerationDiagnostic error={message.content} /> : <ChatMarkdown>{message.content}</ChatMarkdown> : null}
                 {message.stopped ? <p className="mt-2 text-xs opacity-70">{uiText("已停止接收；已有内容已保留，不代表服务端计费已取消。")}</p> : null}
-                {message.generatedImages?.length ? <div className={cn("grid grid-cols-1 gap-3", message.content && "mt-3", message.generatedImages.length > 1 && "sm:grid-cols-2")}>{message.generatedImages.map((item) => <ChatImage key={item.id} image={item} label={imageLabels.get(item.id) || uiText("生成结果")} {...imageControls(item.id)} onPlace={() => onPlaceOnCanvas(item)} />)}</div> : null}
+                {message.generatedImages?.length ? <div className={cn("grid grid-cols-1 gap-3", message.content && "mt-3", message.generatedImages.length > 1 && "sm:grid-cols-2")}>{message.generatedImages.map((item) => <div key={item.id}>
+                    <ChatImage image={item} label={imageLabels.get(item.id) || uiText("生成结果")} {...imageControls(item.id)} onPlace={() => onPlaceOnCanvas(item)} />
+                    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs"><Button size="small" loading={reviewingImageIds.has(item.id)} disabled={actionsDisabled || reviewingImageIds.has(item.id)} title="额外调用当前对话模型检查图片，不会重新生成" onClick={() => onReview(item)}>{uiText("检查结果")}</Button><span className="text-muted-foreground">{uiText("仅手动检查，不自动重绘")}</span></div>
+                    {item.review ? <div data-testid="chat-image-review" className="mt-2 space-y-1 text-xs text-muted-foreground">
+                        <p className="font-medium">{uiText("AI 检查建议（非像素级认证）")}</p>
+                        {item.review.baseUnavailable ? <p>{uiText("未取得本轮底图，保留项无法进行前后核验。")}</p> : null}
+                        <p>{item.review.report.summary}</p>
+                        <ul className="list-inside list-disc space-y-1">{item.review.report.checks.map((check, index) => <li key={`${index}:${check.criterion}`}><span>{check.result === "pass" ? "观察符合" : check.result === "warning" ? "发现疑点" : "无法核验"} · {check.criterion}</span><p className="pl-3">{check.evidence}</p></li>)}</ul>
+                        {item.review.report.checks.some(check => check.result !== "pass") ? <Button size="small" disabled={actionsDisabled || item.review.baseUnavailable} onClick={() => onCorrect(item)}>{uiText("准备纠正草稿")}</Button> : null}
+                    </div> : null}
+                </div>)}</div> : null}
                 {message.generatedImages?.[0]?.workNote ? <details className="mt-2 text-xs text-muted-foreground"><summary className="w-fit cursor-pointer">{uiText("本次修改与作品说明")}</summary><p className="mt-2 whitespace-pre-wrap">{imageAgentWorkNoteText(message.generatedImages[0].workNote)}</p></details> : null}
-                {message.candidateImageIds?.length ? <div role="group" aria-label={uiText("选择要修改的图片")} className="mt-3 flex flex-wrap gap-2">{message.candidateImageIds.map(id => {
-                    const image = imageCatalog.find(item => item.id === id); if (!image) return null;
-                    return <button key={id} type="button" disabled={actionsDisabled || Boolean(image.unavailableReason)} onClick={() => onImageAction("edit", id)} className="grid w-20 gap-1 rounded p-1 text-xs hover:bg-muted disabled:opacity-40"><CanvasPersistedMediaPreview kind="image" url={image.dataUrl} storageKey={image.storageKey} alt={image.label} className="size-18 rounded object-cover" /><span>{imageLabels.get(id) || image.label}</span></button>;
-                })}</div> : null}
+                {imageWork?.spec ? <div data-testid="chat-image-spec" className="mt-2 text-xs text-muted-foreground">
+                    {imageWork.spec.assumptions?.length ? <p className="whitespace-pre-wrap">{uiText("本轮假设")}：{imageWork.spec.assumptions.join("；")}</p> : null}
+                    <details><summary className="w-fit cursor-pointer">{uiText("本轮改图要求（待核对，不代表验收通过）")}</summary><p className="mt-2 whitespace-pre-wrap">{imageAgentSpecText(imageWork.spec)}</p></details>
+                </div> : null}
                 {message.pendingImageTask ? <div data-testid="chat-pending-image-card" className="mt-3 grid gap-2 rounded-lg bg-muted/60 p-3 text-xs text-muted-foreground">
                     <span role="status">{checkingTask ? uiText("正在等待原任务结果…") : uiText("原图片任务等待核实")}</span>
                     <span>{uiText("可以继续聊天或发送不同的新要求；请勿重复提交这条原任务。")}</span>

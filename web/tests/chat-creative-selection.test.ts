@@ -23,7 +23,7 @@ function bubbleHarness(actionsDisabled = false) {
         React, memo: <T,>(component: T) => component,
         cn: (...values: unknown[]) => values.filter(Boolean).join(" "),
         Bot: () => null, FileText: () => null, Copy: () => null, Pencil: () => null, RotateCcw: () => null,
-        useCopyText: () => () => undefined, ChatMarkdown: "div", ChatImage: "chat-image", Tooltip: "div", chatImageOriginal,
+        useCopyText: () => () => undefined, ChatMarkdown: "div", ChatImage: "chat-image", Tooltip: "div", Button: "review-button", chatImageOriginal,
     };
     const code = ts.transpileModule(`exports.Bubble = ${initializer.getText(ast)};`, { compilerOptions: { target: ts.ScriptTarget.ESNext, jsx: ts.JsxEmit.React } }).outputText;
     const exports = {} as { Bubble: (props: any) => ReactElement<any> };
@@ -35,7 +35,7 @@ function bubbleHarness(actionsDisabled = false) {
     ] };
     const imageCatalog = buildCreativeImageCatalog([{ id: "user", role: "user", content: "", attachments: message.attachments }, { ...message, role: "assistant" }]);
     const imageActions: unknown[] = [];
-    const tree = exports.Bubble({ message, imageLabels: new Map([["original", "图1"], ["task:0", "图2"]]), imageCatalog, selectedImageId: "task:0", actionsDisabled, onImageAction: (action: string, id: string) => imageActions.push([action, id]), onPlaceOnCanvas: (image: unknown) => calls.push(image) });
+    const tree = exports.Bubble({ message, imageLabels: new Map([["original", "图1"], ["task:0", "图2"]]), imageCatalog, actionsDisabled, reviewingImageIds: new Set(), onImageAction: (action: string, id: string) => imageActions.push([action, id]), onPlaceOnCanvas: (image: unknown) => calls.push(image) });
     const nodes: ReactElement<any>[] = [];
     function walk(value: any) {
         if (Array.isArray(value)) { value.forEach(walk); return; }
@@ -66,7 +66,7 @@ test("the page keeps one natural conversation entry and no LLM model or mode sel
     for (const fn of ["switchMode", "continueEditing", "setMode", "onContinueEditing"]) expect(calledFunctions).not.toContain(fn);
 });
 
-test("real chat image bubbles wire originals and results to the shared image actions", () => {
+test("real chat image bubbles expose media effects without selected-target presentation", () => {
     const page = bubbleHarness();
     const images = page.nodes.filter((node) => node.type === "chat-image");
     expect(images.map((node) => node.props.image.dataUrl)).toEqual(["data:image/png;base64,cmVzdWx0", "data:image/png;base64,b3JpZ2luYWw="]);
@@ -74,11 +74,11 @@ test("real chat image bubbles wire originals and results to the shared image act
     expect(buttons.map((button) => page.text(button))).toEqual([]);
     expect(page.text(page.tree)).toContain("规格.pdf");
     expect(page.calls).toEqual([]);
-    expect(images[0]!.props.selected).toBe(true);
-    expect(images[0]!.props.originalDisabledReason).toBeUndefined();
-    expect(images[1]!.props.originalDisabledReason).toBe("这张图已经是原图");
-    for (const action of ["edit", "original", "reference", "compare", "download"]) images[0]!.props.onAction(action, "task:0");
-    expect(page.imageActions).toEqual(["edit", "original", "reference", "compare", "download"].map((action) => [action, "task:0"]));
+    expect(images.every(image => image.props.selected === undefined)).toBe(true);
+    expect(images[0]!.props.compareDisabledReason).toBeUndefined();
+    expect(images[1]!.props.compareDisabledReason).toBe("这张图已经是原图");
+    for (const action of ["compare", "download"]) images[0]!.props.onAction(action, "task:0");
+    expect(page.imageActions).toEqual(["compare", "download"].map((action) => [action, "task:0"]));
     images[0]!.props.onPlace();
     expect(page.calls).toEqual([page.generated]);
 });
@@ -103,7 +103,7 @@ function imageActionHarness() {
     ]);
     const memory = { target: null as { id: string; mode: string; sessionId: string } | null, session: { id: "session" } as any, references: [] as string[], attachments: [] as any[], disabled: false, currentScope: true, focus: 0 };
     const warnings: string[] = [], downloads: unknown[] = [], comparisons: unknown[] = [];
-    const code = ts.transpileModule(`const selectImageTarget = ${initializers.get("selectImageTarget")}; const addImageReference = ${initializers.get("addImageReference")}; exports.act = ${initializers.get("imageAction")}; exports.select = selectImageTarget;`, { compilerOptions: { target: ts.ScriptTarget.ESNext } }).outputText;
+    const code = ts.transpileModule(`const selectImageTarget = ${initializers.get("selectImageTarget")}; const addImageReference = ${initializers.get("addImageReference")}; exports.act = ${initializers.get("imageAction")}; exports.select = selectImageTarget; exports.add = addImageReference;`, { compilerOptions: { target: ts.ScriptTarget.ESNext } }).outputText;
     const render = () => {
         const bindings = {
             ...i18nHarness, buildCreativeImageCatalog, chatImageOriginal, composerImageCatalog: catalog, imageActionsDisabled: memory.disabled,
@@ -117,32 +117,38 @@ function imageActionHarness() {
             dataUrlBytes: (value: string) => Math.floor((value.length - value.indexOf(",") - 1) * 0.75),
             imageTools: { download: async (image: unknown) => { downloads.push(image); }, compare: (image: unknown, originals: unknown[]) => comparisons.push({ image, originals }) },
         };
-        const exports = {} as { act: (action: string, id: string) => void; select: (image: unknown) => boolean };
+        const exports = {} as { act: (action: string, id: string) => void; select: (image: unknown, mode: "region" | "correction") => boolean; add: (image: unknown) => boolean };
         new Function(...Object.keys(bindings), "exports", code)(...Object.values(bindings), exports);
         return exports;
     };
-    return { memory, catalog, warnings, downloads, comparisons, act: (action: string, id: string) => render().act(action, id), select: (id: string) => render().select(catalog.find((image) => image.id === id)) };
+    return { memory, catalog, warnings, downloads, comparisons, act: (action: string, id: string) => render().act(action, id), select: (id: string, mode: "region" | "correction" = "region") => render().select(catalog.find((image) => image.id === id), mode), add: (id: string) => render().add(catalog.find(image => image.id === id)) };
 }
 
-test("real image handlers select the result or verified root without executing a model request", () => {
+test("removed target and reference actions cannot silently alter the conversational composer", () => {
     const page = imageActionHarness();
-    page.act("edit", "result");
-    expect(page.memory.target).toEqual({ id: "result", mode: "edit", sessionId: "session" });
-    expect(page.memory.session).toMatchObject({ focusImageId: "result", focusLocked: true, newCreation: false, focusRevision: 1 });
-    page.act("original", "result");
-    expect(page.memory.target).toEqual({ id: "original", mode: "original", sessionId: "session" });
+    for (const action of ["edit", "original", "reference"]) page.act(action, "result");
+    expect(page.memory.target).toBeNull();
+    expect(page.memory.session).toEqual({ id: "session" });
     expect(page.memory.attachments).toEqual([]);
+    expect(page.memory.references).toEqual([]);
     expect(page.downloads).toEqual([]);
     expect(page.comparisons).toEqual([]);
-    expect(page.memory.focus).toBe(2);
-    page.act("original", "original");
-    expect(page.warnings).toEqual(["这张图已经是原图"]);
+    expect(page.memory.focus).toBe(0);
 });
 
-test("setting a reference copies original identity once and never changes the selected target", () => {
+test.each(["region", "correction"] as const)("optional %s operation retains an explicit internal source without an image-selection UI", (mode) => {
     const page = imageActionHarness();
-    page.act("edit", "original");
-    page.act("reference", "result"); page.act("reference", "result");
+    expect(page.select("result", mode)).toBe(true);
+    expect(page.memory.target).toEqual({ id: "result", mode, sessionId: "session" });
+    expect(page.memory.session).toMatchObject({ focusImageId: "result", focusLocked: true, newCreation: false, focusRevision: 1 });
+    expect(page.memory.attachments).toEqual([]); expect(page.memory.references).toEqual([]);
+    expect(page.downloads).toEqual([]); expect(page.comparisons).toEqual([]);
+});
+
+test("document reference addition copies original identity once without changing a current operation target", () => {
+    const page = imageActionHarness();
+    page.select("original");
+    page.add("result"); page.add("result");
     expect(page.memory.target?.id).toBe("original");
     expect(page.memory.references).toEqual(["result"]);
     expect(page.memory.attachments).toHaveLength(1);
@@ -154,9 +160,9 @@ test("setting a reference copies original identity once and never changes the se
 test("reference limits reject before dropping any selected image or changing the target", () => {
     const page = imageActionHarness();
     page.memory.attachments = Array.from({ length: 4 }, (_, index) => ({ id: `image-${index}`, name: "图", kind: "image", dataUrl: "data:image/png;base64,AQID" }));
-    page.act("edit", "original");
+    page.select("original");
     const before = structuredClone(page.memory.attachments);
-    page.act("reference", "result");
+    page.add("result");
     expect(page.memory.attachments).toEqual(before);
     expect(page.memory.references).toEqual([]);
     expect(page.memory.target?.id).toBe("original");
@@ -168,6 +174,7 @@ test("busy or stale-account image actions do not modify the composer or open med
         const page = imageActionHarness();
         page.memory[blockedBy] = blockedBy === "disabled";
         for (const action of ["edit", "original", "reference", "compare", "download"]) page.act(action, "result");
+        page.select("result"); page.add("result");
         expect(page.memory.target).toBeNull(); expect(page.memory.attachments).toEqual([]); expect(page.memory.references).toEqual([]);
         expect(page.downloads).toEqual([]); expect(page.comparisons).toEqual([]);
     }

@@ -121,7 +121,7 @@ function pageSendHarness({ ready = true, failWrite = false, failWriteAt = 0, mod
     const session = { id: "session", mode, title: "新对话", editTargetImageId: undefined as string | undefined, imageModelId: undefined as string | undefined, focusImageId: undefined as string | undefined, focusLocked: false, focusRevision: 0, messages: [] as any[] };
     const sessionsRef = { current: [session] };
     const businessConfig: BusinessConfig = {
-        models: [{ id: "fixture-chat", modelId: creativeModelId || "gpt-6-astra", name: "Fixture chat", capabilities: ["chat"], creditCost: 0, rmbCost: 0 }],
+        models: [{ id: "fixture-chat", modelId: creativeModelId || "gpt-6-astra", name: "Fixture chat", capabilities: ["chat", "vision"], creditCost: 0, rmbCost: 0 }],
         prices: [],
         tools: [{ toolKey: "gpt-chat", modelConfigId: creativeModelId ? "fixture-chat" : null, enabled: true, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 1 }],
     };
@@ -140,7 +140,7 @@ function pageSendHarness({ ready = true, failWrite = false, failWriteAt = 0, mod
     const bindings = {
         ...i18nHarness, confirmedDesignRequirements, agentDocumentCatalog,
         sessionsReady: ready, draft: memory.draft, attachments: memory.attachments, isSending: false, readingAttachments: false, hydratingMedia: false,
-        imageTarget: null as { id: string; mode: "edit" | "original"; sessionId: string } | null, referenceImageIds: [] as string[], buildCreativeImageCatalog, assertCreativeChatImageSelection, chatFocusImage,
+        imageTarget: null as { id: string; mode: "region" | "correction"; sessionId: string } | null, referenceImageIds: [] as string[], buildCreativeImageCatalog, assertCreativeChatImageSelection, chatFocusImage,
         regionSelection: null, setRegionSelection() {}, chatImageTaskSignature, completeChatImageTask, duplicateChatImageTask,
         imageRequestsRef: { current: new Map<string, AbortController>() }, setActiveImageRequestIds() {},
         restoreChatMaskResult: async (_pending: unknown, url: string) => url,
@@ -329,12 +329,13 @@ test("a selected older version and message ancestry are saved before the planner
     expect(page.sessionsRef.current[0]!.editTargetImageId).toBe("old-task:0");
 });
 
-test("the actual send freezes an explicit older image even when the composer is cancelled during planning", async () => {
+test("the actual send freezes an explicit correction source even when the composer is cancelled during planning", async () => {
     const decision = Promise.withResolvers<any>();
     const page = pageSendHarness({ plan: decision.promise });
     page.bindings.activeSession.editTargetImageId = "latest";
     page.bindings.activeSession.messages.push({ id: "old", role: "assistant", content: "", generatedImages: [{ id: "older", dataUrl: "data:image/png;base64,AQID" }] });
     page.bindings.activeSession.focusImageId = "older"; page.bindings.activeSession.focusLocked = true;
+    page.bindings.imageTarget = { id: "older", mode: "correction", sessionId: "session" };
     const sending = page.send();
     for (let turn = 0; turn < 20 && !page.plannerCalls.length; turn++) await Promise.resolve();
     page.bindings.imageTarget = null;
@@ -345,10 +346,11 @@ test("the actual send freezes an explicit older image even when the composer is 
     expect(page.sessionsRef.current[0]!.messages.at(-1).generatedImages[0].parentId).toBe("older");
 });
 
-test.each(["wrong-target", "wrong-order", "generate", "missing-reference"])("explicit composer choices block %s before any paid image submission", async (failure) => {
+test.each(["wrong-target", "wrong-order", "generate", "missing-reference"])("explicit correction choices block %s before any paid image submission", async (failure) => {
     const references = failure === "generate" ? [] : failure === "wrong-order" ? [{ id: "palette" }, { id: "older" }] : [{ id: failure === "wrong-target" ? "latest" : "older" }];
     const page = pageSendHarness({ plan: Promise.resolve({ kind: "image", action: failure === "generate" ? "generate" : "edit", content: "", prompt: "do not execute", references, lineage: { parentImageId: failure === "wrong-target" ? "latest" : "older", sourceImageIds: references.map((item) => item.id), preservedConstraints: [] } }) });
     page.bindings.activeSession.focusImageId = "older"; page.bindings.activeSession.focusLocked = true;
+    page.bindings.imageTarget = { id: "older", mode: "correction", sessionId: "session" };
     page.bindings.activeSession.messages.push({ id: "old", role: "assistant", content: "", generatedImages: [{ id: "older", dataUrl: "data:image/png;base64,AQID" }] });
     if (failure === "missing-reference") page.bindings.referenceImageIds = ["image"];
     await page.send();
@@ -370,11 +372,34 @@ test("cancelling a composer target keeps only the existing soft automatic candid
     expect(page.taskOptions).toEqual([]);
 });
 
+test.each(["old-lock", "old-new-creation", "cancelled-region"])("ordinary conversation ignores stale %s and uses the latest result without an explicit target", async (state) => {
+    const page = pageSendHarness();
+    page.memory.attachments = [];
+    page.bindings.activeSession.messages.push(
+        { id: "old", role: "assistant", content: "", generatedImages: [{ id: "older", dataUrl: "data:image/png;base64,AQID" }] },
+        { id: "new", role: "assistant", content: "", generatedImages: [{ id: "latest", parentId: "older", dataUrl: "data:image/png;base64,BAUG" }] },
+    );
+    Object.assign(page.bindings.activeSession, { focusImageId: "older", editTargetImageId: "older", focusLocked: true, newCreation: state === "old-new-creation" });
+    if (state === "cancelled-region") page.bindings.imageTarget = { id: "older", sessionId: "session", mode: "region" };
+    await page.send();
+    expect(page.plannerCalls[0]!.options).toMatchObject({ selectedImageId: "latest", newCreation: false });
+    expect(page.plannerCalls[0]!.options.explicitTargetImageId).toBeUndefined();
+    expect(page.plannerCalls[0]!.current.focusLocked).toBe(false);
+    expect(page.sessionsRef.current[0]!.focusLocked).toBe(false);
+    expect(page.sessionsRef.current[0]!.focusImageId).toBe("latest");
+    expect(page.bindings.imageTarget).toBeNull();
+    expect(page.taskOptions).toEqual([]);
+    page.memory.draft = "再继续讨论，不出图";
+    await page.send();
+    expect(page.plannerCalls[1]!.options.selectedImageId).toBe("latest");
+    expect(page.plannerCalls[1]!.options.explicitTargetImageId).toBeUndefined();
+});
+
 test("an explicit target from another conversation is never sent as this conversation's target", async () => {
     const page = pageSendHarness();
     page.bindings.activeSession.editTargetImageId = "current-latest";
     page.bindings.activeSession.messages.push({ id: "old", role: "assistant", content: "", generatedImages: [{ id: "current-latest", dataUrl: "data:image/png;base64,AQID" }] });
-    page.bindings.imageTarget = { id: "other-image", sessionId: "other-session", mode: "edit" };
+    page.bindings.imageTarget = { id: "other-image", sessionId: "other-session", mode: "correction" };
     await page.send();
     expect(page.plannerCalls[0]!.options.explicitTargetImageId).toBeUndefined();
     expect(page.plannerCalls[0]!.current.editTargetImageId).toBe("current-latest");
@@ -384,6 +409,7 @@ test("six selected image inputs are rejected without writing a user turn or invo
     const page = pageSendHarness();
     page.memory.attachments = Array.from({ length: 5 }, (_, index) => ({ id: `reference-${index}`, name: "参考.png", kind: "image", dataUrl: "data:image/png;base64,AQID" }));
     page.bindings.activeSession.focusImageId = "older"; page.bindings.activeSession.focusLocked = true;
+    page.bindings.imageTarget = { id: "older", mode: "correction", sessionId: "session" };
     await page.send();
     expect(page.events).toEqual(["编辑目标与参考图片合计最多 5 张，请先移除一张图片"]);
     expect(page.snapshots).toEqual([]);
@@ -400,7 +426,7 @@ test.each(["generate", "edit"])("the actual creative send handler submits one %s
     const session = (page.snapshots.at(-1) as any[])[0];
     expect(session.chatModelId).toBe("gpt-6-astra");
     expect(session.imageModelId).toBe("gpt-image-2.5-flare");
-    expect(session.messages.at(-1).generatedImages[0]).toMatchObject({ dataUrl: "data:image/png;base64,cmVzdWx0", modelId: "gpt-image-2.5-flare", prompt: "完整要求", parentId: "old-task:0", workId: "original", workNote });
+    expect(session.messages.at(-1).generatedImages[0]).toMatchObject({ dataUrl: "data:image/png;base64,cmVzdWx0", modelId: "gpt-image-2.5-flare", prompt: "完整要求", parentId: "old-task:0", workId: "original", workNote, referenceImageIds: ["original"] });
     expect(session.messages.at(-1).generatedImages[0].id).toBe("task-result:0");
     expect(session.editTargetImageId).toBe("task-result:0");
     expect(session.messages.at(-1).parentMessageId).toBe(session.messages[0].id);

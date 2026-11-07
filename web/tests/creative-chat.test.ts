@@ -3,6 +3,14 @@ import { buildCreativeChatRequest, buildCreativeImageCatalog, parseCreativeChatI
 import { assertCreativeChatReferenceSource, creativeChatPreviewSize, requestCreativeChatPlan } from "../src/services/api/creative-chat";
 import type { AiConfig } from "../src/stores/use-config-store";
 import type { ToolResponseResult } from "../src/services/api/image";
+import { ImageAgentPlanningError } from "../../shared/image-agent-iteration";
+import { IMAGE_AGENT_BASE_PRESERVATION } from "../src/lib/image-agent/compile";
+import { completeChatImageTask } from "../src/pages/chat/chat-image-tasks";
+import type { ChatSession } from "../src/pages/chat/chat-types";
+import type { PendingChatImageTask } from "../src/services/api/chat-image-recovery";
+import { prepareChatProfileInput, validateChatProfileOutput } from "../../server/src/prompt-chat-profiles";
+import { imageAgentRepairMetadata } from "../../server/src/image-agent-profile";
+import { PromptOptimizationError } from "../../server/src/prompt-safety";
 
 const image = (id: string) => ({ id, name: id + ".png", mimeType: "image/png", dataUrl: "data:image/png;base64," + btoa(id) });
 const user = (content: string, attachments: CreativeChatMessage["attachments"] = []): CreativeChatMessage => ({ role: "user", content, attachments });
@@ -72,12 +80,19 @@ describe("natural multi-turn context", () => {
         expect(JSON.stringify(prepared.messages)).toContain("本轮附件：规格.pdf");
         expect(prepared.messages.at(-1)?.content).toBe("按照规格");
     });
-    test("old full prompts and legacy contract fields are not replayed as instructions", async () => {
-        const prepared = await buildCreativeChatRequest([{ role: "assistant", content: "旧版", generatedImages: [{ ...image("old"), prompt: "DO NOT REPLAY THIS PROMPT", lineage: { parentImageId: "missing", sourceImageIds: ["missing"], preservedConstraints: ["OLD CONTRACT"] } }] }], user("提亮"));
-        const payload = JSON.stringify({ messages: prepared.messages, profileContext: prepared.profileContext });
-        expect(payload).not.toContain("DO NOT REPLAY THIS PROMPT");
-        expect(payload).not.toContain("OLD CONTRACT");
+    test("old public prompts become labelled historical excerpts, not new message instructions", async () => {
+        const prompt = "该旧版曾要求暖灰背景。" + "历史要求".repeat(500) + "FULL PROMPT TAIL";
+        const prepared = await buildCreativeChatRequest([{ role: "assistant", content: "旧版", generatedImages: [{ ...image("old"), prompt, lineage: { parentImageId: "missing", sourceImageIds: ["missing"], preservedConstraints: ["OLD CONTRACT"] } }] }], user("提亮"));
+        const brief = prepared.profileContext.imageCatalog[0]?.designBrief;
+        expect(brief).toContain("该旧版曾要求暖灰背景");
+        expect(brief).toContain("并非已实现事实");
+        expect(brief).toContain("仅为节选");
+        expect(brief?.length).toBeLessThanOrEqual(1600);
+        expect(JSON.stringify(prepared.messages)).not.toContain("该旧版曾要求暖灰背景");
+        expect(JSON.stringify(prepared.profileContext)).not.toContain("FULL PROMPT TAIL");
+        expect(JSON.stringify(prepared.profileContext)).not.toContain("OLD CONTRACT");
         expect(prepared.previews.map(item => item.id)).toEqual(["old"]);
+        expect(prepared.messages.at(-1)?.content).toBe("提亮");
     });
 });
 
@@ -133,7 +148,7 @@ afterEach(() => { globalThis.fetch = originalFetch; });
 const config = { model: "gpt-6-astra", textModel: "gpt-6-astra", systemPrompt: "" } as AiConfig;
 function fakeFetch(handler: (url: string, body: any) => Promise<Response> | Response, model = "gpt-6-astra") {
     globalThis.fetch = (async (url, init) => String(url) === "/api/models"
-        ? Response.json({ models: [{ id: "fixture", modelId: model, name: model, capabilities: ["chat"], creditCost: 0, rmbCost: 0 }], tools: [{ toolKey: "gpt-chat", modelConfigId: "fixture", enabled: true, configurationVersion: 1 }], prices: [] })
+        ? Response.json({ models: [{ id: "fixture", modelId: model, name: model, capabilities: ["chat", "vision"], creditCost: 0, rmbCost: 0 }], tools: [{ toolKey: "gpt-chat", modelConfigId: "fixture", enabled: true, configurationVersion: 1 }], prices: [] })
         : handler(String(url), init?.body ? JSON.parse(String(init.body)) : undefined)) as typeof fetch;
 }
 function previewFixture(onLoad?: (loaded: () => void, failed: () => void) => void, previewUrl = image("preview").dataUrl) {
@@ -175,6 +190,89 @@ describe("real planning service boundaries", () => {
             expect(userIndex).toBeLessThan(callIndex); expect(callIndex).toBeLessThan(outputIndex); expect(outputIndex).toBeLessThan(pixelsIndex);
             expect(calls[1].body.profileContext.stage).toBe("continue");
             expect(JSON.stringify(input).match(/"type":"input_image"/g)?.length).toBeLessThanOrEqual(5);
+        } finally { fixture.restore(); }
+    });
+    test("explicit old-version lookup returns only those versions' bounded historical metadata", async () => {
+        const fixture = previewFixture(), calls: any[] = [];
+        const oldPrompt = "旧版暖灰海报：" + "保留文字层次".repeat(1000);
+        const records: CreativeChatMessage[] = [{ role: "assistant", content: "旧版", generatedImages: [{ ...image("old"), prompt: oldPrompt, workNote: { summary: "旧版说明".repeat(300), keep: ["保留标题"] } }] }, ...history];
+        try {
+            fakeFetch((url, body) => { calls.push({ url, body }); return Response.json(calls.length === 1 ? { content: "查阅指定旧版", toolCalls: [look(["old", "v2"])] } : result({ base: "old" })); });
+            const plan = await requestCreativeChatPlan(config, records, user("查看指定旧版，基于旧版改色"));
+            expect(calls).toHaveLength(2);
+            const output = calls[1].body.input.find((item: any) => item.type === "function_call_output").output;
+            const metadata = JSON.parse(output);
+            expect(output.length).toBeLessThanOrEqual(36_000);
+            expect(metadata.metadata_scope).toContain("不是已实现或验收事实");
+            expect(metadata.version_details.map((item: any) => item.id)).toEqual(["old", "v2"]);
+            expect(metadata.version_details[0]).toMatchObject({ id: "old", label: "图1", prompt: oldPrompt.slice(0, 4000), promptTruncated: true, workNoteTruncated: true });
+            expect(metadata.version_details[0].workNote.length).toBeLessThanOrEqual(800);
+            expect(metadata.version_details[0].designBrief.length).toBeLessThanOrEqual(1600);
+            expect(metadata.version_details[1]).toMatchObject({ id: "v2", parentId: "original", prompt: "", promptTruncated: false, workNote: "浅蓝色上衣，V领\n需保持：版型；白底" });
+            expect(metadata.version_details.some((item: any) => item.id === "v3" || item.id === "original")).toBe(false);
+            expect(records[0]?.generatedImages?.[0]?.prompt).toBe(oldPrompt);
+            expect(plan).toMatchObject({ kind: "image", parentId: "old", references: [{ id: "old", dataUrl: image("old").dataUrl }] });
+        } finally { fixture.restore(); }
+    });
+    test("escaped lookup metadata exceeding the aggregate budget refuses without dropping images or calling again", async () => {
+        const fixture = previewFixture(); let calls = 0;
+        const records: CreativeChatMessage[] = Array.from({ length: 5 }, (_, index) => ({ role: "assistant", content: "历史版本", generatedImages: [{ ...image(`old-${index}`), prompt: "\u0000".repeat(5000) }] }));
+        try {
+            fakeFetch(() => { calls++; return Response.json({ content: "查阅旧版", toolCalls: [look(records.map(item => item.generatedImages![0]!.id))] }); });
+            await expect(requestCreativeChatPlan(config, records, { ...user("只查阅这五版"), newCreation: true })).rejects.toThrow("超过 36000");
+            expect(calls).toBe(1);
+            expect(records.every(item => item.generatedImages?.[0]?.prompt?.length === 5000)).toBe(true);
+        } finally { fixture.restore(); }
+    });
+    test("actual service requests preserve discussion, chosen proposal, feedback and previous/original branches without manual review", async () => {
+        const fixture = previewFixture(), calls: any[] = [];
+        const records: CreativeChatMessage[] = [];
+        const proposal = "方案A：红色方形标题。方案B：蓝色圆形标题。";
+        const responses: ToolResponseResult[] = [
+            { content: proposal, toolCalls: [] },
+            result({ prompt: "采用方案B，蓝色圆形标题，保持版面。" }),
+            result({ prompt: "蓝色圆形标题缩小，保持版面。" }),
+            result({ base: "previous", prompt: "回到圆形标题未缩小的上一版，只增强文字对比。" }),
+            result({ base: "original", prompt: "以原图为准，只调整标题位置。" }),
+        ];
+        try {
+            fakeFetch((url, body) => { calls.push({ url, body }); return Response.json(responses[calls.length - 1]); });
+            const initial = user("先讨论这张海报的标题方向，不出图", [image("poster-original")]);
+            const discussion = await requestCreativeChatPlan(config, records, initial);
+            expect(discussion).toMatchObject({ kind: "discussion", content: proposal });
+            records.push(initial, { role: "assistant", content: discussion.content });
+            const turns = [
+                { text: "选B，按这个方案出图", focus: "poster-original", output: "poster-v1", base: "poster-original" },
+                { text: "圆形太大了，缩小一点，蓝色保留", focus: "poster-v1", output: "poster-v2", base: "poster-v1" },
+                { text: "回上一版，圆形不缩小，只增强文字对比", focus: "poster-v2", output: "poster-v3", base: "poster-v1" },
+                { text: "回原图，只调整标题位置", focus: "poster-v3", output: "poster-v4", base: "poster-original" },
+            ];
+            for (const turn of turns) {
+                const current = user(turn.text);
+                const plan = await requestCreativeChatPlan(config, records, current, { selectedImageId: turn.focus });
+                expect(plan).toMatchObject({ kind: "image", parentId: turn.base, references: [{ id: turn.base, dataUrl: image(turn.base).dataUrl }] });
+                if (plan.kind !== "image") throw new Error("expected image plan");
+                const body = calls.at(-1)!.body;
+                expect(body.profileContext).toMatchObject({ focusImageId: turn.focus, currentUserText: turn.text });
+                expect(JSON.stringify(body.input)).toContain(proposal);
+                expect(JSON.stringify(body.input)).toContain("选B");
+                expect(JSON.stringify(body.input.at(-1))).toContain(turn.text);
+                expect(body.profileContext.previewImageIds).toContain(turn.base);
+                if (turn.focus !== "poster-original") {
+                    const firstBrief = body.profileContext.imageCatalog.find((item: any) => item.id === "poster-v1").designBrief;
+                    expect(firstBrief).toContain("采用方案B，蓝色圆形标题");
+                    expect(firstBrief).toContain("并非已实现事实");
+                    expect(firstBrief).not.toContain("缩小");
+                }
+                if (turn.focus === "poster-v2") {
+                    expect(body.profileContext.imageCatalog.find((item: any) => item.id === "poster-v2").designBrief).toContain("标题缩小");
+                    expect(JSON.stringify(body.input)).toContain("圆形太大了");
+                }
+                records.push(current, { role: "assistant", content: plan.content, generatedImages: [{ ...image(turn.output), parentId: plan.parentId, workId: plan.workId, prompt: plan.prompt }] });
+            }
+            expect(calls).toHaveLength(5);
+            expect(calls.every(call => call.url === "/api/chat/responses")).toBe(true);
+            expect(calls.some(call => call.body.profileContext.stage === "repair" || call.body.profileContext.stage === "continue")).toBe(false);
         } finally { fixture.restore(); }
     });
     test.each(["legacy", "second-look", "network", "many-tools"])("bad %s response is not repaired, translated or replayed", async mode => {
@@ -228,5 +326,142 @@ describe("real planning service boundaries", () => {
     });
     test("same-origin persisted content and original data URLs remain allowed", () => {
         for (const source of [image("png").dataUrl, "/api/assets/x/content", "https://canvas.test/api/assets/x/content", "blob:https://canvas.test/abc"]) expect(() => assertCreativeChatReferenceSource(source, "https://canvas.test")).not.toThrow();
+    });
+});
+
+describe("standalone structured edits and bounded planning repair", () => {
+    const spec = { changes: ["左袖口改为罗纹"], region: "左袖口", acceptance: ["袖口为罗纹，其余待核对"], assumptions: ["只处理左袖口"], reference_roles: [{ image_id: "图3", role: "base" as const, purpose: "保留当前版型", do_not_transfer: "不增加装饰" }] };
+    test("full planner description and structured requirements compile with code-owned preservation", () => {
+        const references = resolveCreativeChatReferences(history, user("改左袖口"));
+        const plan = parseCreativeChatPlan(result({ prompt: "完整规划描述：自然棉纱光泽，袖口罗纹过渡清晰。", edit_spec: spec }), references, { catalog: buildCreativeImageCatalog(history), selectedImageId: "v3" });
+        expect(plan.kind).toBe("image");
+        if (plan.kind !== "image") return;
+        expect(plan.prompt).toContain("完整规划描述：自然棉纱光泽，袖口罗纹过渡清晰。");
+        expect(plan.prompt).toContain(IMAGE_AGENT_BASE_PRESERVATION);
+        expect(plan.prompt).toContain("不迁移：不增加装饰");
+        expect(plan.spec).toMatchObject({ ...spec, reference_roles: [{ ...spec.reference_roles[0], image_id: "v3" }] });
+        const fresh = parseCreativeChatPlan(result({ base: "none", edit_spec: { changes: ["新建帽子"] } }), references, { catalog: buildCreativeImageCatalog(history), selectedImageId: "v3" });
+        expect(fresh.kind === "image" && fresh.prompt).not.toContain(IMAGE_AGENT_BASE_PRESERVATION);
+    });
+    test("invalid roles and unseen sources are typed refusal, source corruption is not repairable", () => {
+        const references = resolveCreativeChatReferences(history, user("改色"));
+        const options = { catalog: buildCreativeImageCatalog(history), selectedImageId: "v3" };
+        expect(() => parseCreativeChatPlan(result({ edit_spec: { ...spec, reference_roles: [{ ...spec.reference_roles[0], image_id: "outside" }] } }), references, options)).toThrow(ImageAgentPlanningError);
+        expect(() => parseCreativeChatPlan(result({ base: "v2" }), references, { ...options, previewedImageIds: ["v3"] })).toThrow(ImageAgentPlanningError);
+        const broken = options.catalog.map(item => item.id === "v3" ? { ...item, unavailableReason: "source missing" } : item);
+        try { parseCreativeChatPlan(result(), references, { ...options, catalog: broken }); throw new Error("must refuse"); }
+        catch (error) { expect(error).not.toBeInstanceOf(ImageAgentPlanningError); expect(String(error)).toContain("不可读取"); }
+    });
+    test("version briefs are bounded and belong only to their own recorded specification", async () => {
+        const records: CreativeChatMessage[] = [user("原版", [image("original")]),
+            { ...generated("v2", "original"), generatedImages: [{ ...image("v2"), parentId: "original", spec: { changes: ["蓝色袖口"], assumptions: ["保留纽扣"] } }] },
+            { ...generated("v3", "v2"), generatedImages: [{ ...image("v3"), parentId: "v2", spec: { changes: Array.from({ length: 8 }, () => "绿色领口".repeat(80)) } }] }];
+        const catalog = buildCreativeImageCatalog(records);
+        expect(catalog[0]?.designBrief).toBeUndefined();
+        expect(catalog[1]?.designBrief).toContain("蓝色袖口");
+        expect(catalog[1]?.designBrief).not.toContain("绿色领口");
+        expect(catalog[2]?.designBrief?.length).toBeLessThanOrEqual(1600);
+        expect(catalog[2]?.designBrief).not.toContain("蓝色袖口");
+        const prepared = await buildCreativeChatRequest(records, user("回到这版"), undefined, { selectedImageId: "v2" });
+        expect(prepared.profileContext.focusImageId).toBe("v2");
+        expect(prepared.profileContext.imageCatalog.find(item => item.id === "v2")?.designBrief).toContain("蓝色袖口");
+    });
+    test("missing optional specs and notes fall back only to the exact version's public prompt", () => {
+        const records: CreativeChatMessage[] = [{ role: "assistant", content: "版本", generatedImages: [
+            { ...image("one"), prompt: "第一版要求蓝色圆形标题" },
+            { ...image("two"), parentId: "one", prompt: "第二版要求缩小标题" },
+            { ...image("three"), parentId: "two", prompt: "不采用这份旧提示词", spec: { changes: ["第三版按明确规格改位置"] } },
+        ] }];
+        const catalog = buildCreativeImageCatalog(records);
+        expect(catalog[0]?.designBrief).toContain("第一版要求蓝色圆形标题");
+        expect(catalog[0]?.designBrief).not.toContain("缩小");
+        expect(catalog[1]?.designBrief).toContain("第二版要求缩小标题");
+        expect(catalog[1]?.designBrief).not.toContain("第一版");
+        expect(catalog[2]?.designBrief).toContain("第三版按明确规格改位置");
+        expect(catalog[2]?.designBrief).not.toContain("不采用这份旧提示词");
+        expect(catalog.every(item => !item.note)).toBe(true);
+    });
+    test("pending specification survives completion and recovery without becoming an acceptance claim", () => {
+        const pending: PendingChatImageTask = { requestId: "r", prompt: "袖口罗纹", modelId: "fixture", action: "edit", parentId: "v3", workId: "original", spec, explanation: "将修改左袖口" };
+        const session: ChatSession = { id: "s", title: "test", updatedAt: "", messages: [{ id: "a", role: "assistant", content: "处理中", createdAt: "", pendingImageTask: pending }] };
+        for (const recovered of [false, true]) {
+            const complete = completeChatImageTask(session, "a", pending, [image("out")], recovered);
+            expect(complete.messages[0]?.generatedImages?.[0]?.spec).toEqual(spec);
+            expect(complete.messages[0]?.content).toContain("将修改左袖口");
+            expect(complete.messages[0]?.content).not.toContain("验收通过");
+        }
+    });
+    test("a known invalid plan repairs once before image submission and retains original context", async () => {
+        const fixture = previewFixture(), calls: any[] = [];
+        try {
+            fakeFetch((url, body) => { calls.push({ url, body }); return Response.json(calls.length === 1 ? result({ keep: "bad" }) : result({ edit_spec: spec })); });
+            const plan = await requestCreativeChatPlan(config, history, user("左袖口改罗纹"));
+            expect(plan).toMatchObject({ kind: "image", parentId: "v3" });
+            expect(calls).toHaveLength(2);
+            expect(calls.every(call => call.url === "/api/chat/responses")).toBe(true);
+            expect(calls[1].body.profileContext).toMatchObject({ stage: "repair", currentUserText: "左袖口改罗纹", focusImageId: "v3", repairIssue: { code: "IMAGE_AGENT_ARGUMENTS_INVALID", repairable: true, submitted: false } });
+            expect(calls[1].body.input).toEqual(calls[0].body.input);
+        } finally { fixture.restore(); }
+    });
+    test.each(["double-invalid", "repair-then-lookup-invalid", "lookup-then-repair"])("one repair budget covers %s across continuations", async mode => {
+        const fixture = previewFixture(), calls: any[] = [];
+        try {
+            fakeFetch((url, body) => {
+                calls.push({ url, body });
+                if (mode === "double-invalid") return Response.json(result({ edit_spec: { changes: [] } }));
+                if ((mode === "lookup-then-repair" && calls.length === 1) || (mode === "repair-then-lookup-invalid" && calls.length === 2)) return Response.json({ content: "查阅", toolCalls: [look(["original"])] });
+                if (mode === "lookup-then-repair" && calls.length === 3) return Response.json(result({ edit_spec: spec }));
+                return Response.json(result({ keep: "bad" }));
+            });
+            const request = requestCreativeChatPlan(config, history, user("修改袖口"));
+            if (mode === "lookup-then-repair") expect(await request).toMatchObject({ kind: "image", parentId: "v3" });
+            else await expect(request).rejects.toBeInstanceOf(ImageAgentPlanningError);
+            expect(calls).toHaveLength(mode === "double-invalid" ? 2 : 3);
+            expect(calls.filter(call => call.body.profileContext.stage === "repair")).toHaveLength(1);
+            expect(calls.every(call => call.url === "/api/chat/responses")).toBe(true);
+        } finally { fixture.restore(); }
+    });
+    test("lookup then typed repair satisfies the real server validator without breaking tool evidence adjacency", async () => {
+        const fixture = previewFixture(), calls: any[] = [];
+        const current = user("先看指定旧版，再把标题移到左上角");
+        try {
+            fakeFetch(async (url, body) => {
+                calls.push({ url, body });
+                try {
+                    const prepared = await prepareChatProfileInput(body);
+                    const response = calls.length === 1 ? { content: "先查看指定旧版", toolCalls: [look(["old"])] }
+                        : calls.length === 2 ? result({ base: "old", keep: "invalid-list" }) : result({ base: "old", prompt: "以指定旧版为底图，将标题移到左上角。" });
+                    return Response.json(validateChatProfileOutput(response, prepared.privateRules));
+                } catch (error) {
+                    if (!(error instanceof PromptOptimizationError)) throw error;
+                    return Response.json({ error: error.code, message: error.message, ...imageAgentRepairMetadata(error) }, { status: error.status });
+                }
+            });
+            const plan = await requestCreativeChatPlan(config, [generated("old"), ...history], current);
+            expect(plan).toMatchObject({ kind: "image", parentId: "old", references: [{ id: "old", dataUrl: image("old").dataUrl }] });
+            expect(calls).toHaveLength(3);
+            expect(calls.map(call => call.body.profileContext.stage)).toEqual(["plan", "continue", "repair"]);
+            const continued = calls[1]!.body.input, repaired = calls[2]!.body.input;
+            expect(repaired.slice(0, -1)).toEqual(continued);
+            expect(repaired.at(-1)).toEqual({ role: "user", content: current.content });
+            const toolIndex = repaired.findIndex((item: any) => item.type === "function_call");
+            expect(repaired[toolIndex + 1]).toMatchObject({ type: "function_call_output", call_id: repaired[toolIndex].call_id });
+            expect(calls[2]!.body.profileContext).toMatchObject({ currentUserText: current.content, focusImageId: "v3", repairIssue: { code: "IMAGE_AGENT_ARGUMENTS_INVALID", submitted: false, repairable: true } });
+            expect(calls[2]!.body.profileContext.previewImageIds).toContain("old");
+            expect(calls.every(call => call.url === "/api/chat/responses")).toBe(true);
+        } finally { fixture.restore(); }
+    });
+    test("abort after invalid response prevents repair and unknown document access never gets repaired", async () => {
+        const fixture = previewFixture(); let calls = 0;
+        try {
+            const controller = new AbortController();
+            fakeFetch(() => { calls++; controller.abort(); return Response.json(result({ keep: "bad" })); });
+            await expect(requestCreativeChatPlan(config, history, user("改色"), { signal: controller.signal })).rejects.toThrow();
+            expect(calls).toBe(1);
+            calls = 0;
+            fakeFetch(() => { calls++; return Response.json({ content: "", toolCalls: [{ id: "doc", type: "function", function: { name: "read_document", arguments: JSON.stringify({ document_id: "not-owned" }) } }] }); });
+            await expect(requestCreativeChatPlan(config, history, user("读文件"))).rejects.toThrow();
+            expect(calls).toBe(1);
+        } finally { fixture.restore(); }
     });
 });

@@ -15,7 +15,7 @@ async function chatFixture(context: BrowserContext) {
     return { requests, reply: (next: typeof response) => { response = next; } };
 }
 
-const promptPlaceholder = "理解画布、修改图片或批量编排；输入 @ 引用图片…";
+const promptPlaceholder = "理解画布、修改图片或批量编排…";
 
 test("创建面板的 @ 添加画布图片并保留草稿，组合回车不触发生成", async ({ page, context, api }) => {
     await chatFixture(context);

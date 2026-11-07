@@ -103,8 +103,9 @@ async function openColorLibrary(page: Page, slot = 1) {
 async function drawSelection(page: Page, modal: Locator) {
     const canvas = modal.getByLabel("修改区域画布", { exact: true });
     await expect(modal.getByRole("button", { name: "保存选区", exact: true })).toBeEnabled();
-    // Reading pixels may finish during the modal's scale-in animation. Wait for
-    // the actual drawing surface to stabilize before measuring drag coordinates.
+    // Hover's short stability check can finish while AntD is still scaling the
+    // dialog. Wait for that motion to finish before freezing drag coordinates.
+    await expect(modal).not.toHaveClass(/\bant-zoom-(?:appear|enter)\b/);
     await canvas.hover();
     const box = (await canvas.boundingBox())!;
     await page.mouse.move(box.x + box.width * .35, box.y + box.height * .5);

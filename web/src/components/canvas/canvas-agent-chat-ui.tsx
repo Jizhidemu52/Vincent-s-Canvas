@@ -30,7 +30,7 @@ export type CanvasAgentChatMessage = {
 
 const WORKING_TEXT = "处理中…";
 
-export const AgentChatMessage = memo(function AgentChatMessage({ item, theme, user, onRejectTool, onApproveTool, onUseImageForVideo, imageControls, activeImageId, imageActionsDisabled, onImageAction, onMaskImage, onEditMessage }: { item: CanvasAgentChatMessage; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; user: LocalUser | null; onRejectTool?: (id: string) => void; onApproveTool?: (id: string) => void; onUseImageForVideo?: (attachment: CanvasAgentChatAttachment) => void; imageControls?: ReadonlyMap<string, CanvasAgentChatImageControl>; activeImageId?: string; imageActionsDisabled?: boolean; onImageAction?: (action: ConversationImageAction, imageId: string) => void; onMaskImage?: (imageId: string) => void; onEditMessage?: (id: string) => void }) {
+export const AgentChatMessage = memo(function AgentChatMessage({ item, theme, user, onRejectTool, onApproveTool, onUseImageForVideo, imageControls, activeImageId, imageActionsDisabled, onImageAction, onMaskImage, onEditMessage, conversationOnlyImages }: { item: CanvasAgentChatMessage; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; user: LocalUser | null; onRejectTool?: (id: string) => void; onApproveTool?: (id: string) => void; onUseImageForVideo?: (attachment: CanvasAgentChatAttachment) => void; imageControls?: ReadonlyMap<string, CanvasAgentChatImageControl>; activeImageId?: string; imageActionsDisabled?: boolean; onImageAction?: (action: ConversationImageAction, imageId: string) => void; onMaskImage?: (imageId: string) => void; onEditMessage?: (id: string) => void; conversationOnlyImages?: boolean }) {
     const t = useUiText();
     const isUser = item.role === "user";
     const isSystem = item.role === "system";
@@ -59,7 +59,7 @@ export const AgentChatMessage = memo(function AgentChatMessage({ item, theme, us
             {!isUser ? <AgentAvatar theme={theme} /> : null}
             <div className={`min-w-0 max-w-[82%] text-sm leading-6 ${isUser ? "text-right" : "text-left"}`} style={{ color }}>
                 <div className="break-words text-left">{isUser ? <div className="whitespace-pre-wrap">{item.text}</div> : <ChatMarkdown>{item.text}</ChatMarkdown>}</div>
-                {item.attachments?.length ? <AgentMessageAttachments messageId={item.id} attachments={item.attachments} theme={theme} onUseImageForVideo={onUseImageForVideo} imageControls={imageControls} activeImageId={activeImageId} disabled={imageActionsDisabled} onImageAction={onImageAction} onMaskImage={onMaskImage} /> : null}
+                {item.attachments?.length ? <AgentMessageAttachments messageId={item.id} attachments={item.attachments} theme={theme} onUseImageForVideo={onUseImageForVideo} imageControls={imageControls} activeImageId={activeImageId} disabled={imageActionsDisabled} onImageAction={onImageAction} onMaskImage={onMaskImage} conversationOnlyImages={conversationOnlyImages} /> : null}
                 {item.meta ? <div className="mt-1 text-[11px] opacity-45">{maskImageModelText(item.meta)}</div> : null}
                 <div className="mt-1 flex gap-2 text-[11px]" style={{ color: theme.node.muted }}>
                     <button type="button" className="inline-flex min-h-7 items-center gap-1 hover:underline" onClick={() => copyToClipboard(item.text)} aria-label={t("复制消息")}><Copy size={12} />{t("复制")}</button>
@@ -73,7 +73,7 @@ export const AgentChatMessage = memo(function AgentChatMessage({ item, theme, us
     && previous.onRejectTool === next.onRejectTool && previous.onApproveTool === next.onApproveTool
     && previous.onEditMessage === next.onEditMessage && previous.imageActionsDisabled === next.imageActionsDisabled
     && (!next.item.attachments?.length || (previous.onUseImageForVideo === next.onUseImageForVideo && previous.imageControls === next.imageControls
-        && previous.activeImageId === next.activeImageId && previous.onImageAction === next.onImageAction && previous.onMaskImage === next.onMaskImage)));
+        && previous.activeImageId === next.activeImageId && previous.onImageAction === next.onImageAction && previous.onMaskImage === next.onMaskImage && previous.conversationOnlyImages === next.conversationOnlyImages)));
 
 export function AgentPendingToolCard({ summary, detail, theme, onReject, onApprove }: { summary: string; detail?: unknown; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onReject?: () => void; onApprove?: () => void }) {
     const t = useUiText();
@@ -231,7 +231,7 @@ export function AgentChatComposer({
         textarea.style.height = `${Math.min(192, Math.max(80, textarea.scrollHeight))}px`;
     }, [prompt]);
     const canSubmit = !disabled && !submitDisabled && !sending && Boolean(prompt.trim());
-    const mentions = useImageMentions({ value: prompt, onChange: onPromptChange, images: mentionImages, onSelect: onMentionImage || (() => false), disabled: disabled || sending });
+    const mentions = useImageMentions({ value: prompt, onChange: onPromptChange, images: mentionImages, onSelect: onMentionImage || (() => false), disabled: disabled || sending || !onMentionImage });
     return (
         <div className="min-w-0 w-full shrink-0 px-2 pb-2 pt-2" onWheelCapture={(event) => event.stopPropagation()}>
             <div className="min-w-0 rounded-xl border px-2.5 pb-2 pt-2 shadow-sm" style={{ background: theme.node.panel, borderColor: theme.node.stroke }}>
@@ -253,7 +253,7 @@ export function AgentChatComposer({
                 <div className="relative">
                 {mentions.menu}
                 <textarea
-                    {...mentions.inputProps}
+                    {...(onMentionImage ? mentions.inputProps : {})}
                     ref={textareaRef}
                     value={prompt}
                     onChange={mentions.handleChange}
@@ -410,15 +410,15 @@ function AgentUserAvatar({ user, theme }: { user: LocalUser | null; theme: (type
     );
 }
 
-function AgentMessageAttachments({ messageId, attachments, theme, onUseImageForVideo, imageControls, activeImageId, disabled, onImageAction, onMaskImage }: { messageId: string; attachments: CanvasAgentChatAttachment[]; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onUseImageForVideo?: (attachment: CanvasAgentChatAttachment) => void; imageControls?: ReadonlyMap<string, CanvasAgentChatImageControl>; activeImageId?: string; disabled?: boolean; onImageAction?: (action: ConversationImageAction, imageId: string) => void; onMaskImage?: (imageId: string) => void }) {
+function AgentMessageAttachments({ messageId, attachments, theme, onUseImageForVideo, imageControls, activeImageId, disabled, onImageAction, onMaskImage, conversationOnlyImages }: { messageId: string; attachments: CanvasAgentChatAttachment[]; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onUseImageForVideo?: (attachment: CanvasAgentChatAttachment) => void; imageControls?: ReadonlyMap<string, CanvasAgentChatImageControl>; activeImageId?: string; disabled?: boolean; onImageAction?: (action: ConversationImageAction, imageId: string) => void; onMaskImage?: (imageId: string) => void; conversationOnlyImages?: boolean }) {
     const t = useUiText();
     const [previewImage, setPreviewImage] = useState<ConversationImageItem | null>(null);
     return (
         <div className="mt-2 grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 260px), 1fr))" }}>
             {attachments.map((item) => {
                 const control = imageControls?.get(`${messageId}:${item.id}`);
-                const selected = Boolean(control && control.image.id === activeImageId);
-                const version = control?.version && Number.isInteger(control.version) && control.version > 0 ? control.version : undefined;
+                const selected = !conversationOnlyImages && Boolean(control && control.image.id === activeImageId);
+                const version = !conversationOnlyImages && control?.version && Number.isInteger(control.version) && control.version > 0 ? control.version : undefined;
                 const preview = (
                     <CanvasPersistedMediaPreview
                         kind={item.mediaType === "video" ? "video" : "image"}
@@ -441,7 +441,11 @@ function AgentMessageAttachments({ messageId, attachments, theme, onUseImageForV
                         {selected ? <span data-testid="canvas-agent-image-current" className="pointer-events-none absolute right-2 top-2 rounded px-1.5 py-0.5 text-xs font-medium" style={{ color: theme.node.panel, background: theme.canvas.selectionStroke }}>{t("当前")}</span> : null}
                     </button> : preview}
                     {control && onImageAction ? <div data-testid="canvas-agent-image-actions" className="absolute inset-x-2 bottom-2 transition-opacity group-hover/result:pointer-events-auto group-hover/result:opacity-100 group-focus-within/result:pointer-events-auto group-focus-within/result:opacity-100 [@media(hover:hover)]:pointer-events-none [@media(hover:hover)]:opacity-0 motion-reduce:transition-none">
-                        <ConversationImageActions {...control} compact disabled={disabled} onAction={onImageAction} onMask={control.onMask || (onMaskImage ? () => onMaskImage(control.image.id) : undefined)} extra={videoAction} />
+                        {conversationOnlyImages ? <div className="flex flex-wrap items-center gap-2 rounded px-2" style={{ color: theme.node.text, background: theme.node.panel }}>
+                            <button type="button" disabled={disabled || Boolean(control.image.unavailableReason)} className="min-h-9 text-xs hover:underline disabled:opacity-35" onClick={() => onImageAction("download", control.image.id)}>{t("下载")}</button>
+                            {onMaskImage ? <button type="button" disabled={disabled || Boolean(control.image.unavailableReason)} className="min-h-9 text-xs hover:underline disabled:opacity-35" onClick={() => onMaskImage(control.image.id)}>{t("圈选修改")}</button> : null}
+                            {videoAction}
+                        </div> : <ConversationImageActions {...control} compact disabled={disabled} onAction={onImageAction} onMask={control.onMask || (onMaskImage ? () => onMaskImage(control.image.id) : undefined)} extra={videoAction} />}
                     </div> : videoAction}
                 </div>
             })}

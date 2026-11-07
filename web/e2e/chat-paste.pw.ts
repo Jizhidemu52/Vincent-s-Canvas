@@ -46,7 +46,7 @@ test("独立对话支持真实 Ctrl+V 图片，并保留普通文字粘贴", asy
 test("粘贴图片遵守附件上限，发送携图且刷新后原图可恢复", async ({ page, api }, testInfo) => {
     const requests: unknown[] = [];
     await page.route("**/api/models", route => route.fulfill({ json: {
-        models: [{ id: "chat-paste-model", modelId: "chat-paste-model", name: "隔离对话模型", protocol: "openai", capabilities: ["chat"], creditCost: 0, rmbCost: 0 }],
+        models: [{ id: "chat-paste-model", modelId: "chat-paste-model", name: "隔离对话模型", protocol: "openai", capabilities: ["chat", "vision"], creditCost: 0, rmbCost: 0 }],
         prices: [], tools: [{ toolKey: "gpt-chat", enabled: true, modelConfigId: "chat-paste-model", configurationVersion: 1 }],
     } }));
     await page.route("**/api/chat/responses", route => {

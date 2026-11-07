@@ -22,7 +22,7 @@ import { readConfigurationExport } from "./configuration-export";
 import { createQuickImageConfigurationRouter, type QuickImageRouterOptions } from "./quick-image-configuration";
 
 const protocol = z.enum(["openai", "openai-chat", "anthropic", "gemini", "apimart", "volcengine", "runninghub", "comfyui", "custom"]);
-const capabilities = z.array(z.enum(["generate", "edit", "upscale", "remove_background", "batch", "chat", "video", "audio"])).min(1);
+const capabilities = z.array(z.enum(["generate", "edit", "upscale", "remove_background", "batch", "chat", "vision", "tools", "video", "audio"])).min(1);
 const providerInput = z.object({ name: z.string().trim().min(1).max(100), protocol, baseUrl: z.string().url(), enabled: z.boolean().default(true), credentials: z.record(z.string(), z.string().max(10_000)).optional() });
 const providerUpdate = providerInput.partial();
 const modelInput = z.object({ providerId: z.string().uuid(), workflowConfigId: z.string().uuid().nullish(), replacementModelConfigId: z.string().uuid().nullish(), name: z.string().trim().min(1).max(120), modelId: z.string().trim().min(1).max(200), capabilities, creditCost: z.number().int().nonnegative(), rmbCost: z.number().nonnegative(), concurrencyLimit: z.number().int().min(1).max(100).default(5), enabled: z.boolean().default(true) });

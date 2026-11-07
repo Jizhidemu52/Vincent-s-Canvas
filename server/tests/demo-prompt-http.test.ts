@@ -182,14 +182,14 @@ test("real Demo HTTP compiles once, fails closed, keeps private rules server-sid
     expect(imageCalls).toHaveLength(6);
 
     // Agent generation uses the already planned public prompt, without a second
-    // optimizer call. The recipe exists only in the outbound image request.
+    // optimizer call or private recipe injected into the outbound image request.
     const agentInput = { ...exclusionInput, requestId: crypto.randomUUID(), prompt: "只把衬衫领口改成V领", parameters: { imageAgentProfile: "canvas-assistant", inputArchive: { prompt: "只把衬衫领口改成V领" } } };
     const plannedCalls = optimizerCalls.length;
     const agent = await (await request("/api/tasks", "POST", agentInput)).json();
     expect(agent.task.prompt).toBe(agentInput.prompt); expect(JSON.stringify(agent)).not.toContain(chatRules);
     const finished = await settle(agent.task.id); expect(finished.status).toBe("success");
     expect(optimizerCalls).toHaveLength(plannedCalls); expect(imageCalls).toHaveLength(7);
-    expect(imageCalls.at(-1)!.prompt).toContain(chatRules); expect(String(imageCalls.at(-1)!.prompt).endsWith(agentInput.prompt)).toBe(true);
+    expect(imageCalls.at(-1)!.prompt).toBe(agentInput.prompt); expect(imageCalls.at(-1)!.prompt).not.toContain(chatRules);
     expect(finished.prompt).toBe(agentInput.prompt); expect(JSON.stringify(finished)).not.toContain(chatRules);
     const repeated = await (await request("/api/tasks", "POST", agentInput)).json();
     expect(repeated.task.id).toBe(agent.task.id); expect(imageCalls).toHaveLength(7);

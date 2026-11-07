@@ -17,7 +17,7 @@ export function completeChatImageTask(session: ChatSession, messageId: string, p
     if (!images.length || !session.messages.some(item => item.id === messageId && item.pendingImageTask?.requestId === pending.requestId)) return session;
     const shouldFocus = (session.focusRevision || 0) === (pending.focusRevision || 0);
     const workId = pending.workId || images[0]!.id;
-    const results = images.map(image => ({ ...image, ...(pending.size ? { size: pending.size } : {}), parentId: pending.parentId, workId, workNote: pending.workNote }));
+    const results = images.map(image => ({ ...image, ...(pending.size ? { size: pending.size } : {}), parentId: pending.parentId, workId, workNote: pending.workNote, ...(pending.spec ? { spec: pending.spec } : {}), ...(pending.referenceImageIds ? { referenceImageIds: [...pending.referenceImageIds] } : {}) }));
     return {
         ...session,
         ...(shouldFocus ? { focusImageId: results[0]!.id, editTargetImageId: results[0]!.id, focusLocked: false, newCreation: false, focusRevision: (session.focusRevision || 0) + 1 } : {}),

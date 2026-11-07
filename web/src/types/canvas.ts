@@ -70,7 +70,7 @@ export type CanvasGenerationRecord = {
 export type CanvasNodeMetadata = {
     quickImageAction?: "remove-background" | "hd-upscale" | "item-extract";
     locked?: boolean;
-    imageAgent?: { parentNodeId?: string; workId: string; version: number; note: import("@/lib/image-agent/work-note").ImageAgentWorkNote };
+    imageAgent?: { parentNodeId?: string; workId: string; version: number; note: import("@/lib/image-agent/work-note").ImageAgentWorkNote; spec?: import("../../../shared/image-agent-iteration").ImageAgentEditSpec };
     maskAdaptation?: import("@/lib/canvas/canvas-mask-adaptation").CanvasMaskAdaptation;
     promptInput?: import("../../../shared/prompt-contracts").PromptInputData;
     userInput?: import("../../../shared/prompt-contracts").PromptInputData;
@@ -268,6 +268,12 @@ export type CanvasAssistantAttachment = {
     width?: number;
     height?: number;
     mediaType: "image" | "video";
+    imageReview?: {
+        report: import("../../../shared/image-agent-iteration").ImageAgentReview;
+        reviewedAt: string;
+        fingerprint: string;
+        inputs?: { revision: string; sources: Array<{ id: string; storageKey?: string; url: string }> };
+    };
 };
 
 export type CanvasAssistantMessage = {

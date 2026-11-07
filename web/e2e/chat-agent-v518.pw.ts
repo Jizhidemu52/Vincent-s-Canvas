@@ -4,13 +4,13 @@ import { test, expect, IMAGE, type MockCanvasApi } from "./fixtures";
 async function prepare(page: Page, plans: any[], planner?: (body: any, index: number) => any, imageParameterProfile = "standard") {
     await page.route("**/api/models", route => route.fulfill({ json: {
         models: [
-            { id: "fixture-chat", modelId: "gpt-6-astra", name: "隔离对话模型", capabilities: ["chat"], creditCost: 0, rmbCost: 0 },
+            { id: "fixture-chat", modelId: "gpt-6-astra", name: "隔离对话模型", capabilities: ["chat", "vision"], creditCost: 0, rmbCost: 0 },
             { id: "fixture-image", modelId: "gpt-image-2", name: "隔离图片模型", imageParameterProfile, imageSupportsMask: true, capabilities: ["generate", "edit"], creditCost: 0, rmbCost: 0 },
         ], prices: [], tools: [{ toolKey: "gpt-chat", enabled: true, modelConfigId: "fixture-chat", configurationVersion: 1 }, { toolKey: "gpt-chat-image", enabled: true, modelConfigId: "fixture-image", configurationVersion: 1 }],
     } }));
     await page.route("**/api/chat/responses", route => {
         const body = route.request().postDataJSON(); plans.push(body);
-        const answer = planner?.(body, plans.length) || { content: "好的，按你的要求调整。", toolCalls: [{ id: "edit-" + plans.length, type: "function", function: { name: "edit_image", arguments: JSON.stringify({ prompt: body.profileContext.currentUserText, note_update: "当前设计：" + body.profileContext.currentUserText, keep: ["版型", "白色背景"] }) } }] };
+        const answer = planner?.(body, plans.length) || { content: "好的，按你的要求调整。", toolCalls: [{ id: "edit-" + plans.length, type: "function", function: { name: "edit_image", arguments: JSON.stringify({ ...(body.profileContext.currentUserText.startsWith("新画") ? { base: "none" } : {}), prompt: body.profileContext.currentUserText, note_update: "当前设计：" + body.profileContext.currentUserText, keep: ["版型", "白色背景"] }) } }] };
         return route.fulfill({ json: answer });
     });
     await page.goto("/chat");
@@ -87,53 +87,44 @@ test("显式方图优先且刷新保留，恢复默认后的新创作不沿用�
     await page.screenshot({ path: info.outputPath("chat-image-size-settings.png"), animations: "disabled" });
     await page.getByRole("button", { name: "出图设置", exact: true }).click();
     await selectImageSize(page, "自动（默认）");
-    await page.locator("[data-image-agent-focus]").getByRole("button", { name: "新创作", exact: true }).click();
     await send(page, "新画一顶帽子"); await expect(generated(page)).toHaveCount(2);
-    expect(plans.at(-1).profileContext.newCreation).toBe(true);
+    expect(plans.at(-1).profileContext.lockedImageId).toBeUndefined();
     expect(api.submissions[1].parameters.size).toBe("auto");
     expect(api.submissions[1].sourceUrls || []).toHaveLength(0);
     expect((await savedSessions(page))[0].imageSize).toBeUndefined();
     expect(await page.evaluate(async () => (await import("/src/stores/use-config-store.ts")).useConfigStore.getState().config.size)).toBe(globalSize);
 });
 
-test("连续改图常驻焦点、上传参考、候选版本与新创作保持一致", async ({ page, api }, info) => {
+test("连续改图和上传参考保持当前图，版本选择与新创作均用对话表达", async ({ page, api }, info) => {
     const plans: any[] = [];
     await prepare(page, plans, body => {
         if (body.profileContext.currentUserText === "请帮我选择") return { content: "你想改图1还是图2？", toolCalls: [] };
         const palette = body.profileContext.imageCatalog.filter((item: any) => item.kind === "upload").at(-1);
-        return { content: "已按要求调整。", toolCalls: [{ id: "edit", type: "function", function: { name: "edit_image", arguments: JSON.stringify({ prompt: body.profileContext.currentUserText, ...(body.profileContext.currentUserText === "按上传配色" ? { references: [palette.id] } : {}), note_update: "浅蓝色V领上衣", keep: ["版型", "白底"] }) } }] };
+        return { content: "已按要求调整。", toolCalls: [{ id: "edit", type: "function", function: { name: "edit_image", arguments: JSON.stringify({ prompt: body.profileContext.currentUserText, ...(body.profileContext.currentUserText === "按上传配色" ? { references: [palette.id] } : body.profileContext.currentUserText === "新画一顶帽子" ? { base: "none" } : {}), note_update: "浅蓝色V领上衣", keep: ["版型", "白底"] }) } }] };
     });
     await send(page, "画一件T恤"); await expect(generated(page)).toHaveCount(1);
     const focus = page.locator("[data-image-agent-focus]");
     const first = [...api.tasks.keys()][0]!;
-    await expect(focus).toHaveAttribute("data-focus-id", first + ":0");
+    await expect(focus).toHaveCount(0);
+    expect((await savedSessions(page))[0].focusImageId).toBe(first + ":0");
     await send(page, "颜色再浅点"); await expect(generated(page)).toHaveCount(2);
     const second = [...api.tasks.keys()][1]!;
     expect(plans[1].profileContext.focusImageId).toBe(first + ":0");
     expect(plans[1].profileContext.previewImageIds).toContain(first + ":0");
-    await expect(focus).toHaveAttribute("data-focus-id", second + ":0");
+    expect((await savedSessions(page))[0].focusImageId).toBe(second + ":0");
     await upload(page, "配色.png");
-    await expect(focus).toHaveAttribute("data-focus-id", second + ":0");
-    await expect(focus).toContainText("参考图 1");
+    expect((await savedSessions(page))[0].focusImageId).toBe(second + ":0");
     await send(page, "按上传配色"); await expect(generated(page)).toHaveCount(3);
     expect(plans[2].profileContext.focusImageId).toBe(second + ":0");
     expect(api.submissions[2].sourceUrls).toHaveLength(2);
-    await focus.getByRole("button", { name: "上一版", exact: true }).click();
-    await expect(focus).toHaveAttribute("data-focus-id", second + ":0");
-    await expect(focus).toContainText("底图已锁定");
     await send(page, "请帮我选择");
     const candidates = page.getByRole("group", { name: "选择要修改的图片", exact: true });
-    await expect(candidates.getByRole("button")).toHaveCount(2);
-    await candidates.getByRole("button").first().click();
-    await expect(focus).toHaveAttribute("data-focus-id", first + ":0");
-    await page.reload(); await expect(focus).toHaveAttribute("data-focus-id", first + ":0");
-    await focus.getByRole("button", { name: "选择图片", exact: true }).click();
-    await expect(focus.getByRole("group", { name: "作品版本", exact: true }).getByRole("button")).toHaveCount(3);
-    await focus.getByRole("button", { name: "新创作", exact: true }).click();
-    await send(page, "画一顶帽子"); await expect(generated(page)).toHaveCount(4);
-    expect(plans.at(-1).profileContext.newCreation).toBe(true);
-    expect(plans.at(-1).profileContext.previewImageIds).toEqual([]);
-    await focus.getByRole("button", { name: "选择图片", exact: true }).click();
+    await expect(page.getByText("你想改图1还是图2？", { exact: true })).toBeVisible();
+    await expect(candidates).toHaveCount(0);
+    await page.reload(); await expect(generated(page)).toHaveCount(3);
+    await send(page, "新画一顶帽子"); await expect(generated(page)).toHaveCount(4);
+    expect(api.submissions[3].sourceUrls || []).toEqual([]);
+    expect((await savedSessions(page))[0].messages.at(-1).generatedImages[0].parentId).toBeUndefined();
     await page.getByRole("button", { name: "出图设置", exact: true }).click();
     await expect(page.getByRole("combobox", { name: "出图模型", exact: true })).toBeVisible();
     await page.screenshot({ path: info.outputPath("chat-focus-version-settings-light.png"), animations: "disabled" });
@@ -141,7 +132,7 @@ test("连续改图常驻焦点、上传参考、候选版本与新创作保持�
     await page.getByRole("button", { name: "切换到深色主题", exact: true }).click();
     await expect(page.getByRole("button", { name: "切换到浅色主题", exact: true })).toBeVisible();
     await generated(page).last().hover();
-    await expect(generated(page).last().getByRole("button", { name: "在此基础上改", exact: true })).toBeVisible();
+    await expect(generated(page).last().getByRole("button", { name: /^下载原图 · / })).toBeVisible();
     await page.screenshot({ path: info.outputPath("chat-focus-actions-dark.png"), animations: "disabled" });
     expect(plans).toHaveLength(5); expect(api.submissions).toHaveLength(4);
 });
@@ -163,14 +154,12 @@ test("生成中的独立任务允许继续聊天，刷新后各自恢复且晚�
     await page.reload();
     await expect(generated(page)).toHaveCount(1);
     await expect(page.getByTestId("chat-pending-image-card")).toHaveCount(1);
-    const focus = page.locator("[data-image-agent-focus]");
-    await expect(focus).toHaveAttribute("data-focus-id", second + ":0");
-    await focus.getByRole("button", { name: "新创作", exact: true }).click();
+    expect((await savedSessions(page))[0].focusImageId).toBe(second + ":0");
     await complete(api, first!);
     await page.getByTestId("chat-image-recovery-action").click();
     await expect(generated(page)).toHaveCount(2);
     await expect(page.getByTestId("chat-pending-image-card")).toHaveCount(0);
-    await expect(focus).toContainText("不沿用当前图片");
+    expect((await savedSessions(page))[0].focusImageId).toBe(second + ":0");
     expect(api.submissions).toHaveLength(2);
     expect(plans).toHaveLength(3);
     await page.setViewportSize({ width: 390, height: 844 });
@@ -190,8 +179,7 @@ test("圈选保存真实蒙版，提交时尺寸配对并保留选区外像素",
     await upload(page); await send(page, "先看看这张图"); await expect(generated(page)).toHaveCount(1);
     // Select the real original upload, not the generated red fixture.
     const uploadCard = page.locator('[data-message-role="user"] .group\\/image').first();
-    await uploadCard.hover(); await uploadCard.getByRole("button", { name: "更多图片操作", exact: true }).click();
-    await page.getByRole("menuitem", { name: "圈选修改", exact: true }).click();
+    await uploadCard.getByRole("button", { name: "涂选修改区域", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "涂选修改区域", exact: true });
     const paint = dialog.getByLabel("修改区域画布", { exact: true });
     await expect(paint).toBeVisible();

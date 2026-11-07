@@ -1,5 +1,6 @@
 import { test, expect, IMAGE, fixturePng, type MockCanvasApi } from "./fixtures";
 import type { BrowserContext, Locator, Page } from "@playwright/test";
+import { createHash } from "node:crypto";
 
 const owner = "00000000-0000-4000-8000-000000000099";
 const primaryId = "79100000-0000-4000-8000-000000000001";
@@ -80,8 +81,14 @@ test("recipe library inputs respect disabled secondary, preserve both images and
     await expect(page.getByRole("img", { name: "参考底图（必需）", exact: true })).toHaveCount(0);
     await choose(page, page.getByRole("button", { name: "从素材库选择参考底图（必需）", exact: true }), "图案素材");
     expect(await bytes(page.getByRole("img", { name: "参考底图（必需）", exact: true }))).toEqual(fixturePng(40));
-    await page.getByRole("tab", { name: /^任务 1/ }).click();
-    expect(await bytes(page.getByRole("img", { name: "参考底图（必需）", exact: true }))).toEqual(IMAGE);
+    const firstTask = page.getByRole("tab", { name: /^任务 1/ });
+    await firstTask.click();
+    // Activation commits its IndexedDB registry before changing the visible pane.
+    // Do not capture an image handle from task 2 while that write is pending.
+    await expect(firstTask).toHaveAttribute("aria-selected", "true");
+    const restoredPrimary = await bytes(page.getByRole("img", { name: "参考底图（必需）", exact: true }));
+    const digest = (value: Buffer) => ({ bytes: value.length, sha256: createHash("sha256").update(value).digest("hex") });
+    expect(restoredPrimary.equals(IMAGE), JSON.stringify({ expected: digest(IMAGE), received: digest(restoredPrimary) })).toBe(true);
     await page.reload(); await expect(page.getByRole("img", { name: "图案参考（可选）", exact: true })).toBeVisible();
     expect(await bytes(page.getByRole("img", { name: "图案参考（可选）", exact: true }))).toEqual(fixturePng(40));
     expect(api.submissions).toHaveLength(0);

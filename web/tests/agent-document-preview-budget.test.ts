@@ -36,7 +36,7 @@ function previewFixture() {
 function planningFixture(documentId: string, sectionCount: number) {
     const requests: any[] = [];
     globalThis.fetch = (async (url, init) => {
-        if (String(url) === "/api/models") return Response.json({ models: [{ id: "document-budget-chat", modelId: "gpt-6-astra", name: "isolated", capabilities: ["chat"], creditCost: 0, rmbCost: 0 }], tools: [{ toolKey: "gpt-chat", modelConfigId: "document-budget-chat", enabled: true, configurationVersion: 1 }], prices: [] });
+        if (String(url) === "/api/models") return Response.json({ models: [{ id: "document-budget-chat", modelId: "gpt-6-astra", name: "isolated", capabilities: ["chat", "vision"], creditCost: 0, rmbCost: 0 }], tools: [{ toolKey: "gpt-chat", modelConfigId: "document-budget-chat", enabled: true, configurationVersion: 1 }], prices: [] });
         if (String(url) !== "/api/chat/responses") throw new Error(`Unexpected request: ${url}`);
         const body = JSON.parse(String(init?.body));
         requests.push(body);

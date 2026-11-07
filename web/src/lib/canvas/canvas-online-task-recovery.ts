@@ -8,7 +8,7 @@ import type { CanvasImageAgentRecord } from "./canvas-image-agent";
 import type { CanvasAssistantAttachment } from "@/types/canvas";
 import { CanvasNodeType } from "@/types/canvas";
 import type { CanvasAgentOp } from "./canvas-agent-ops";
-import { restoreChatMaskResult } from "@/lib/image-agent/mask";
+import { restoreChatMaskResult, type ChatRegionComposite } from "@/lib/image-agent/mask";
 import type { CanvasMaskAdaptation } from "./canvas-mask-adaptation";
 
 export type PendingOnlineAgentTask = {
@@ -18,6 +18,7 @@ export type PendingOnlineAgentTask = {
     imageAgent?: CanvasImageAgentRecord;
     signature?: string;
     maskAdaptation?: CanvasMaskAdaptation;
+    regionComposite?: ChatRegionComposite;
 };
 
 export function pendingOnlineAgentTask(value: unknown): PendingOnlineAgentTask | null {
@@ -74,7 +75,7 @@ export async function recoverOnlineAgentTask(pending: PendingOnlineAgentTask, po
                 ops.push({ type: "add_node", id, nodeType: CanvasNodeType.Audio, title: "生成音频", position,
                     metadata: { content: audio.url, storageKey: audio.storageKey, mimeType: audio.mimeType, prompt: pending.prompt, model: pending.model, status: "success", sourceTaskId: task.id } });
             } else {
-                const file = pending.mode === "image" ? await io.uploadImage(pending.maskAdaptation ? await io.restoreChatMaskResult(pending, url) : url) : await io.storeGeneratedVideo({ url, mimeType: "video/mp4" });
+                const file = pending.mode === "image" ? await io.uploadImage(pending.maskAdaptation || pending.regionComposite ? await io.restoreChatMaskResult(pending, url) : url) : await io.storeGeneratedVideo({ url, mimeType: "video/mp4" });
                 signal.throwIfAborted();
                 attachments.push({ id, name: pending.mode === "image" ? `生成图片 ${index + 1}` : "生成视频", mediaType: pending.mode, ...file });
             }

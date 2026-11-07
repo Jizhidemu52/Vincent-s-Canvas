@@ -30,7 +30,7 @@ const operationOptions = [
     ["batch_image", "批量处理每张图"],
     ["seamless_stitch", "无缝拼接"],
 ].map(([value, label]) => ({ value, label }));
-const capabilityOptions = ["generate", "edit", "upscale", "remove_background", "batch", "chat", "video", "audio"].map((value) => ({ value, label: adminLabel(value) }));
+const capabilityOptions = ["generate", "edit", "upscale", "remove_background", "batch", "chat", "vision", "tools", "video", "audio"].map((value) => ({ value, label: adminLabel(value) }));
 
 type PriceValues = { operationType: string; label: string; credits: number; rmbCost: number };
 type ModelValues = Omit<ServerModel, "id" | "providerName" | "workflowName" | "imageCost">;

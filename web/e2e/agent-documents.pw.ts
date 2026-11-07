@@ -103,7 +103,7 @@ test("canvas accepts a file, confirms a durable card and creates a reusable text
     const id = await newCanvas(page);
     await page.getByRole("tab", { name: "对话", exact: true }).first().click();
     await upload(page, "上传设计文件或参考图");
-    const input = page.locator(".cw-agent-panel").getByPlaceholder("理解画布、修改图片或批量编排；输入 @ 引用图片…");
+    const input = page.locator(".cw-agent-panel").getByPlaceholder("理解画布、修改图片或批量编排…");
     await input.fill("整理需求卡"); await input.press("Enter");
     const panel = page.getByTestId("agent-document-panel");
     await expect(panel.getByRole("button", { name: "确认需求卡", exact: true })).toBeEnabled();

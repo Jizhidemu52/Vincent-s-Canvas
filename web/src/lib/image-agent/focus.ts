@@ -9,6 +9,8 @@ export type ImageAgentImage = {
     parentId?: string;
     workId?: string;
     note?: ImageAgentWorkNote;
+    /** Requirements for this exact version, never evidence of visual correctness. */
+    designBrief?: string;
     unavailableReason?: string;
 };
 

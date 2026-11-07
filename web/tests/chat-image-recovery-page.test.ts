@@ -83,6 +83,32 @@ test("each restored pending message has an independent exact-ID observer", async
     page.cleanup();
 });
 
+test("recovery without an edit spec persists exact submitted references and the full public prompt", async () => {
+    const referenceImageIds = ["original", "palette"];
+    const prompt = "已确认需求：深蓝色三颗银扣。当前要求：只改袖口，保持其余内容。";
+    const item = pendingMessage("a", { pendingImageTask: pending("a", { prompt, referenceImageIds }) });
+    const calls: string[] = [];
+    globalThis.fetch = (async (url, init) => {
+        calls.push(`${init?.method || "GET"} ${url}`);
+        return Response.json({ task: serverTask("a") });
+    }) as typeof fetch;
+    const page = recoveryHarness(session([item]));
+    try {
+        await until(() => Boolean(page.writes.at(-1)?.[0]?.messages[0]?.generatedImages));
+        const restored = structuredClone(page.writes.at(-1)![0]!);
+        const image = restored.messages[0]!.generatedImages![0]!;
+        expect(image).toMatchObject({ prompt, referenceImageIds: ["original", "palette"], parentId: "original", sourceTaskId: "task-a" });
+        expect(image.spec).toBeUndefined();
+        expect(restored.messages[0]!.pendingImageTask).toBeUndefined();
+        expect(page.sessionsRef.current[0]!.messages[0]!.generatedImages![0]!.referenceImageIds).not.toBe(referenceImageIds);
+        referenceImageIds.push("later-unrelated-reference");
+        expect(page.sessionsRef.current[0]!.messages[0]!.generatedImages![0]!.referenceImageIds).toEqual(["original", "palette"]);
+        expect(calls).toEqual(["GET /api/tasks/task-a"]);
+    } finally {
+        page.cleanup();
+    }
+});
+
 test("a recovered composite persists only its protected PNG and keeps its raw task provenance", async () => {
     const regionComposite = { mode: "selection-composite" as const, source: { imageId: "original", storageKey: "image:original", width: 64, height: 64 }, selection: { storageKey: "image:selection", width: 64, height: 64 } };
     const item = pendingMessage("a", { pendingImageTask: pending("a", { regionComposite }) });

@@ -16,8 +16,10 @@ import { DuplicateJsonKeyError, parseStrictJson } from "../strict-json";
 import { chatPromptProfiles, prepareChatProfileInput, validateChatProfileOutput, type ChatPromptProfile } from "../prompt-chat-profiles";
 import { PromptOptimizationError } from "../prompt-safety";
 import { imageAgentClaudeStream } from "../image-agent-stream";
+import { imageAgentRepairMetadata } from "../image-agent-profile";
 import { chatUpstreamFailureMessage, readChatUpstreamFailure, type ChatUpstreamFailureReason } from "../chat-upstream-failure";
 import { createProductCandidatesRouter, type ProductCandidatesRouterOptions } from "./product-candidates";
+import { imageAgentVisionError } from "../../../shared/image-agent-capabilities";
 
 type ResponseContent = { type: "input_text"; text: string } | { type: "input_image"; image_url: string };
 export type ResponseInput =
@@ -138,8 +140,8 @@ export function createChatRouter(db: Database, config: AppConfig, options: ChatR
             const prepared = await prepareChatProfileInput(parsed, options.loadProfileRules ? profile => options.loadProfileRules!(profile, actor) : undefined);
             let input = prepared.input;
             const execution = await resolveToolExecution(db, { ...input, operationType: "chat" });
-            const result = await db.query<ChatModel>(
-                `SELECT m.model_id,p.base_url,p.protocol,p.encrypted_credentials
+            const result = await db.query<ChatModel & { capabilities: string[] }>(
+                `SELECT m.model_id,m.capabilities,p.base_url,p.protocol,p.encrypted_credentials
                  FROM model_configs m JOIN providers p ON p.id=m.provider_id
                  WHERE m.id=$1
                    AND m.enabled=true AND p.enabled=true AND 'chat'=ANY(m.capabilities)
@@ -149,6 +151,11 @@ export function createChatRouter(db: Database, config: AppConfig, options: ChatR
             const model = result.rows[0];
             if (!model) {
                 response.status(400).json({ error: "MODEL_DISABLED", message: "管理员尚未启用该对话模型" });
+                return;
+            }
+            const visionError = imageAgentVisionError(parsed.profile, model.capabilities);
+            if (visionError) {
+                response.status(422).json({ error: "CHAT_VISION_REQUIRED", message: visionError });
                 return;
             }
             if (!model.encrypted_credentials || !config.PROVIDER_ENCRYPTION_KEY) {
@@ -266,7 +273,7 @@ export function createChatRouter(db: Database, config: AppConfig, options: ChatR
                 return;
             }
             if (error instanceof PromptOptimizationError) {
-                response.status(error.status).json({ error: error.code, message: error.message });
+                response.status(error.status).json({ error: error.code, message: error.message, ...imageAgentRepairMetadata(error) });
                 return;
             }
             if (diagnostics) {

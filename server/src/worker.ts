@@ -304,8 +304,8 @@ async function executeProvider(task: WorkRow, timing: GenerationTiming) {
     if (task.protocol !== "apimart") throw new Error("当前视频执行器仅支持已配置的 APIMart 视频模型，请检查 Provider 协议");
     return executeApiMartVideo(task, credentials);
   }
-  // The persisted task and asset prompt stay public. Private recipe text exists
-  // only in this execution-local value, and is not needed when polling old work.
+  // Planning has already prepared the public prompt. Validate fresh image-agent
+  // tasks without injecting another recipe; polling reuses the persisted prompt.
   const providerPrompt = task.upstream_task_id || task.upstream_submission_started_at ? task.prompt
     : await imageAgentProviderPrompt({ prompt: task.prompt, parameters: task.parameters, operationType: task.operation_type }, async profile => (await postgresPromptRecipeStore(db).active(profile)).version.systemPrompt);
   if (task.workflow_config_id && task.submit_path && task.output_path)

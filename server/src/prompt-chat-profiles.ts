@@ -2,8 +2,9 @@ import { assertNoPromptRuleLeak, PromptOptimizationError } from "./prompt-safety
 import { parseStrictJson } from "./strict-json";
 import {
     IMAGE_AGENT_PROFILES, IMAGE_AGENT_SYSTEM_PROMPT, IMAGE_AGENT_COMPARISON_GUIDANCE, IMAGE_AGENT_DOCUMENT_GUIDANCE, CANVAS_AGENT_GUIDANCE,
-    buildImageAgentTools, imageAgentContextSchema, imageAgentLookSchema, imageAgentTool, parseImageAgentEdit, requestsCanvasStructure, validateImageAgentDocumentTool,
-    type ImageAgentProfile,
+    IMAGE_AGENT_REPAIR_GUIDANCE, IMAGE_AGENT_REVIEW_GUIDANCE, IMAGE_AGENT_REGION_GUIDANCE,
+    buildImageAgentTools, imageAgentContextSchema, imageAgentLookSchema, imageAgentTool, parseImageAgentEdit, requestsCanvasStructure, validateImageAgentDocumentTool, validateImageAgentInspectionTool,
+    ImageAgentArgumentsError, type ImageAgentProfile, type ImageAgentContext,
 } from "./image-agent-profile";
 import type { ChatCompletionInput, ChatCompletionResult, ResponseInput, ResponseTool } from "./routes/chat";
 import type { AgentDocumentCatalogEntry } from "../../shared/image-agent-documents";
@@ -29,6 +30,7 @@ const generation = { prompt: { type: "string" }, mode, title: { type: "string" }
 // Keep validated manifest data request-local without adding it to private rule
 // matching, provider tool schemas, public history, or a process-long session cache.
 const profileDocumentCatalogs = new WeakMap<readonly string[], readonly AgentDocumentCatalogEntry[]>();
+const profileContexts = new WeakMap<readonly string[], ImageAgentContext>();
 const structuralTools: ResponseTool[] = [
     imageAgentTool("canvas_create_node", "创建节点或占位素材。", { nodeType, title: { type: "string" }, x: { type: "number" }, y: { type: "number" }, width: { type: "number" }, height: { type: "number" }, metadata: record }, ["nodeType"]),
     imageAgentTool("canvas_create_text_node", "创建文本节点。", { text: { type: "string" }, title: { type: "string" }, x: { type: "number" }, y: { type: "number" } }, ["text"]),
@@ -66,19 +68,23 @@ export async function prepareChatProfileInput<T extends ProfileInput>(request: T
     if (!canvas && (context.selectedNodes || context.settings)) invalidProfile();
     if (request.input.some(item => !item || typeof item !== "object" || Array.isArray(item))) invalidProfile();
     if (request.input.some(item => "role" in item && item.role === "system")) invalidProfile("此聊天场景的系统规则由服务端管理，不能由客户端提供。");
-    const allowGeneration = Boolean(context.currentUserText.trim());
-    const tools = buildImageAgentTools({ canvas, allowGeneration, allowInspection: context.stage === "plan", documentCatalog: context.documentCatalog, documentsInspected: context.documentsInspected });
-    if (canvas && requestsCanvasStructure(context.currentUserText)) tools.push(...structuralTools);
-    const system = [canvas ? CANVAS_ASSISTANT_SYSTEM_PROMPT : CREATIVE_CHAT_SYSTEM_PROMPT,
-        /比较|对比|差异|分析|compare|difference/i.test(context.currentUserText) ? IMAGE_AGENT_COMPARISON_GUIDANCE : "",
-        context.documentCatalog?.length ? IMAGE_AGENT_DOCUMENT_GUIDANCE : "",
-        allowGeneration ? "" : "本轮只有资料，没有文字处理要求。请阅读并自然回应，不生成。",
+    const inspection = context.stage === "review" || context.stage === "locate";
+    const allowGeneration = !inspection && Boolean(context.currentUserText.trim());
+    const tools = buildImageAgentTools({ stage: context.stage, canvas, allowGeneration, allowInspection: context.stage === "plan", documentCatalog: context.documentCatalog, documentsInspected: context.documentsInspected });
+    if (!inspection && context.stage !== "repair" && canvas && requestsCanvasStructure(context.currentUserText)) tools.push(...structuralTools);
+    const system = [context.stage === "review" ? IMAGE_AGENT_REVIEW_GUIDANCE : context.stage === "locate" ? IMAGE_AGENT_REGION_GUIDANCE : canvas ? CANVAS_ASSISTANT_SYSTEM_PROMPT : CREATIVE_CHAT_SYSTEM_PROMPT,
+        !inspection && /比较|对比|差异|分析|compare|difference/i.test(context.currentUserText) ? IMAGE_AGENT_COMPARISON_GUIDANCE : "",
+        !inspection && context.stage !== "repair" && context.documentCatalog?.length ? IMAGE_AGENT_DOCUMENT_GUIDANCE : "",
+        context.stage === "repair" ? IMAGE_AGENT_REPAIR_GUIDANCE : "",
+        allowGeneration || inspection ? "" : "本轮只有资料，没有文字处理要求。请阅读并自然回应，不生成。",
     ].filter(Boolean).join("\n");
     const privateRules = [system, JSON.stringify(tools)];
+    profileContexts.set(privateRules, context);
     if (context.documentCatalog?.length) profileDocumentCatalogs.set(privateRules, context.documentCatalog);
     const messages = request.input.map(item => safeProfileReplayInput(item, privateRules));
     const previewCount = messages.reduce((count, item) => count + ("role" in item && Array.isArray(item.content) ? item.content.filter(part => part.type === "input_image").length : 0), 0);
     if (previewCount > 5) invalidProfile("本轮最多提供 5 张图片预览，未发送模型请求。");
+    if (inspection && previewCount !== context.previewImageIds.length) invalidProfile("检查或选区建议缺少与目录对应的实际图片预览，未发送模型请求。");
     // On tool continuations keep the assistant/tool-result pair contiguous.
     let lastUser = -1;
     for (let index = messages.length - 1; index >= 0; index--) {
@@ -88,8 +94,8 @@ export async function prepareChatProfileInput<T extends ProfileInput>(request: T
         if (text === context.currentUserText) { lastUser = index; break; }
     }
     if (lastUser < 0) invalidProfile("当前用户消息与上下文不一致，未发送模型请求。");
-    if (context.stage === "plan" && lastUser !== messages.length - 1) invalidProfile("当前用户消息必须放在本轮资料之后，未发送模型请求。");
-    if (!allowGeneration) messages[lastUser] = { role: "user", content: "本轮仅上传资料，没有文字处理要求。" };
+    if (context.stage !== "continue" && lastUser !== messages.length - 1) invalidProfile("当前用户消息必须放在本轮资料之后，未发送模型请求。");
+    if (!allowGeneration && !inspection) messages[lastUser] = { role: "user", content: "本轮仅上传资料，没有文字处理要求。" };
     messages.splice(lastUser, 0, { role: "user", content: `当前图片工作集（任务资料）：\n${JSON.stringify(context)}` });
     // Legacy clients explicitly send the ordinary 2048-token default. Planning
     // needs room for hidden thinking plus the complete image-tool arguments.
@@ -151,18 +157,33 @@ export function validateChatProfileOutput(result: ChatCompletionResult, privateR
     if (result.toolCalls.filter(call => call.function.name === "edit_image").length > 1) throw new PromptOptimizationError("IMAGE_AGENT_MULTIPLE_TASKS", "本轮返回了多个图片任务，未提交任何图片生成。请一次处理一张图片。", 422);
     const declared = new Map((JSON.parse(privateRules[1] || "[]") as ResponseTool[]).map(tool => [tool.name, tool]));
     if (result.toolCalls.length > 1 && result.toolCalls.some(call => ["read_document", "propose_requirements"].includes(call.function.name))) throw new PromptOptimizationError("IMAGE_AGENT_MULTIPLE_TASKS", "文件查阅或需求卡不能与其他操作并发，未执行操作。", 422);
+    const context = profileContexts.get(privateRules);
+    if ((context?.stage === "review" || context?.stage === "locate") && result.toolCalls.length !== 1) throw new PromptOptimizationError("IMAGE_AGENT_INSPECTION_INVALID", "检查或选区建议必须返回单一只读结果，没有提交图片修改。", 422);
     for (const call of result.toolCalls) {
         if (!declared.has(call.function.name)) throw new PromptOptimizationError("IMAGE_AGENT_TOOL_INVALID", "本轮返回了未开放的操作，未提交执行。", 422);
-        const args = parseStrictJson(call.function.arguments);
-        assertProfileRuleSafety(args, privateRules);
+        const args = parseImageAgentToolArguments(call.function.arguments, privateRules);
         if (call.function.name === "edit_image") parseImageAgentEdit(args);
-        if (call.function.name === "look_at_images" && !imageAgentLookSchema.safeParse(args).success) throw new PromptOptimizationError("IMAGE_AGENT_ARGUMENTS_INVALID", "查看图片参数无效，未执行操作。", 422);
+        if (call.function.name === "look_at_images" && !imageAgentLookSchema.safeParse(args).success) throw new ImageAgentArgumentsError();
         if (["read_document", "propose_requirements"].includes(call.function.name)) validateImageAgentDocumentTool(call.function.name, args, declared.get(call.function.name)!, profileDocumentCatalogs.get(privateRules) || []);
+        if (["report_image_review", "propose_image_region"].includes(call.function.name)) validateImageAgentInspectionTool(call.function.name, args, context);
     }
     return { ...result,
         ...(result.claudeAssistantContent ? { claudeAssistantContent: checkedClaudeReplay(result.claudeAssistantContent, privateRules) } : {}),
         ...(result.responsesOutputItems ? { responsesOutputItems: checkedResponsesReplay(result.responsesOutputItems, privateRules) } : {}),
     };
+}
+
+/** Only completed tool arguments qualify; never use this for SSE envelopes or transport data. */
+export function parseImageAgentToolArguments(source: string, privateRules: readonly string[]): unknown {
+    assertProfileRuleSafety(source, privateRules);
+    let value: unknown;
+    try { value = parseStrictJson(source); }
+    catch (error) {
+        if (error instanceof SyntaxError) throw new ImageAgentArgumentsError();
+        throw error;
+    }
+    assertProfileRuleSafety(value, privateRules);
+    return value;
 }
 
 export function assertProfileRuleSafety(value: unknown, privateRules: readonly string[]) {

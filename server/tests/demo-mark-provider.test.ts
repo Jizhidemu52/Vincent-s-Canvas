@@ -23,16 +23,18 @@ const productionCode = ts.transpileModule(names.map(name => {
 }).join("\n"), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText;
 
 type Task = { id: string; requestId: string; ownerUserId: string; status: string; operationType: string; credits: number; parameters: Record<string, unknown>; upstreamTaskId?: string; upstreamResultUrl?: string; submissionStartedAt?: string; errorCode?: string; failureReason?: string; lastFailure?: ImageTaskFailureDetail };
-type Input = { baseUrl: string; apiKey: string; sourceDataUrls: string[]; maskDataUrl?: string; upstreamTaskId?: string; submissionStarted?: boolean; beforeSubmit?: () => void; onSubmitted?: (id: string) => void };
+type Input = { baseUrl: string; apiKey: string; prompt: string; sourceDataUrls: string[]; maskDataUrl?: string; upstreamTaskId?: string; submissionStarted?: boolean; beforeSubmit?: () => void; onSubmitted?: (id: string) => void };
 function harness(failure?: "prepare" | "preflight" | "submission" | "polling" | "download" | "store" | "terminal", recipeFailure?: Error) {
   const demoState = new DemoStateStore(":memory:"); stores.push(demoState);
   const inputs: Input[] = [];
   const completed: unknown[][] = [];
   let paid = 0;
   let downloads = 0;
+  let recipeLoads = 0;
   const dependencies = {
     imageAgentProviderPrompt, PromptOptimizationError,
     demoPromptCompiler: { store: { active: async () => {
+      recipeLoads++;
       if (recipeFailure) throw recipeFailure;
       return { version: { systemPrompt: "PRIVATE_IMAGE_RECIPE_FIXTURE" } };
     } } },
@@ -65,7 +67,7 @@ function harness(failure?: "prepare" | "preflight" | "submission" | "polling" | 
   const run = new Function(...Object.keys(dependencies), `${productionCode}\nreturn runApiMartImageTaskForDemo;`)(...Object.values(dependencies));
   const task: Task = { id: "task-mark", requestId: "request-mark", ownerUserId: "owner", status: "processing", operationType: "image_generation", credits: 3, parameters: {} };
   const user = { id: "owner", creditBalance: 10 };
-  return { task, user, inputs, completed, demoState, paid: () => paid, downloads: () => downloads, clearFailure: () => { failure = undefined; }, run: (prepared?: unknown) => run(task, user, "gpt-image-2.5-flare", "prompt", task.parameters, [], MARK_IMAGE_PROVIDER_ID, prepared) };
+  return { task, user, inputs, completed, demoState, paid: () => paid, downloads: () => downloads, recipeLoads: () => recipeLoads, clearFailure: () => { failure = undefined; }, run: (prepared?: unknown) => run(task, user, "gpt-image-2.5-flare", "prompt", task.parameters, [], MARK_IMAGE_PROVIDER_ID, prepared) };
 }
 
 describe("read-only demo Mark catalog", () => {
@@ -139,25 +141,36 @@ describe("read-only demo Mark catalog", () => {
     ["PROMPT_RECIPE_UNAVAILABLE", "管理员尚未配置此场景的优化配方，未提交生成"],
     ["PROMPT_RECIPE_UNAVAILABLE", "管理员尚未启用此场景的配方版本，未提交生成"],
     ["PROMPT_RECIPE_DISABLED", "此场景的提示词优化已停用，未提交生成"],
-  ])("recipe preflight preserves %s without creating an upstream request", async (code, message) => {
+  ])("already planned image input does not consult a recipe that would report %s", async (code, message) => {
     const h = harness(undefined, new PromptOptimizationError(code, message, 503));
     h.task.operationType = "inpaint";
     h.task.parameters.imageAgentProfile = "creative-chat";
     await h.run();
-    expect(h.task).toMatchObject({ status: "failed", errorCode: code, failureReason: message, lastFailure: { phase: "preflight", code } });
-    expect(h.demoState.load().tasks[0]).toMatchObject({ errorCode: code, failureReason: message, lastFailure: { phase: "preflight", code } });
-    expect(h.task.submissionStartedAt).toBeUndefined(); expect(h.task.upstreamTaskId).toBeUndefined();
-    expect(h.inputs).toHaveLength(0); expect(h.paid()).toBe(0); expect(h.downloads()).toBe(0);
-    expect(h.completed).toHaveLength(0); expect(h.user.creditBalance).toBe(13);
+    expect(h.task.status).toBe("success"); expect(h.task.errorCode).toBeUndefined();
+    expect(h.task.submissionStartedAt).toEqual(expect.any(String)); expect(h.task.upstreamTaskId).toBe("mark-original-task");
+    expect(h.inputs).toHaveLength(1); expect(h.inputs[0]!.prompt).toBe("prompt");
+    expect(h.inputs[0]!.prompt).not.toContain("PRIVATE_IMAGE_RECIPE_FIXTURE");
+    expect(h.recipeLoads()).toBe(0); expect(h.paid()).toBe(1); expect(h.downloads()).toBe(1);
+    expect(h.completed).toHaveLength(1); expect(h.user.creditBalance).toBe(10);
   });
 
-  test("unknown recipe loader failures still hide private details before submission", async () => {
+  test("unknown recipe loader failures are never triggered or injected into an image-agent request", async () => {
     const h = harness(undefined, new Error("PRIVATE_IMAGE_RECIPE_FIXTURE fake-mark-key"));
     h.task.parameters.imageAgentProfile = "creative-chat";
     await h.run();
-    expect(h.task).toMatchObject({ status: "failed", errorCode: "MARK_IMAGE_FAILED", lastFailure: { phase: "preflight", code: "PROVIDER_OPERATION_FAILED" } });
-    expect(h.task.failureReason).not.toMatch(/PRIVATE_IMAGE_RECIPE_FIXTURE|fake-mark-key/);
-    expect(h.inputs).toHaveLength(0); expect(h.paid()).toBe(0);
+    expect(h.task.status).toBe("success"); expect(h.task.failureReason).toBeUndefined();
+    expect(JSON.stringify(h.task)).not.toMatch(/PRIVATE_IMAGE_RECIPE_FIXTURE|fake-mark-key/);
+    expect(h.inputs).toHaveLength(1); expect(h.inputs[0]!.prompt).toBe("prompt");
+    expect(h.recipeLoads()).toBe(0); expect(h.paid()).toBe(1);
+  });
+
+  test("invalid image-agent identity is still rejected before recipe reads or submission", async () => {
+    const h = harness();
+    h.task.parameters.imageAgentProfile = "unrecognized-image-agent";
+    await h.run();
+    expect(h.task).toMatchObject({ status: "failed", errorCode: "IMAGE_AGENT_PROFILE_INVALID", lastFailure: { phase: "preflight", code: "IMAGE_AGENT_PROFILE_INVALID" } });
+    expect(h.task.submissionStartedAt).toBeUndefined(); expect(h.task.upstreamTaskId).toBeUndefined();
+    expect(h.inputs).toHaveLength(0); expect(h.recipeLoads()).toBe(0); expect(h.paid()).toBe(0);
   });
 
   test("recovery preflight and result-store failures retain their real phases and never refund or replay", async () => {

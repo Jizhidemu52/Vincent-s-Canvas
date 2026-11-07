@@ -1,5 +1,6 @@
 import { parseStrictJson } from "./strict-json";
-import { assertProfileRuleSafety, validateChatProfileOutput } from "./prompt-chat-profiles";
+import { assertProfileRuleSafety, parseImageAgentToolArguments, validateChatProfileOutput } from "./prompt-chat-profiles";
+import { imageAgentRepairMetadata } from "./image-agent-profile";
 import { PromptOptimizationError } from "./prompt-safety";
 import type { ChatCompletionResult, ResponseTool } from "./routes/chat";
 
@@ -109,7 +110,7 @@ export function imageAgentClaudeStream(upstream: Response, rules: readonly strin
                 if (event.type !== "content_block_stop") throw invalid();
                 if (block.value.type === "text") text(index, block, true);
                 if (block.value.type === "tool_use") {
-                    const args = block.json ? parseStrictJson(block.json) : block.value.input;
+                    const args = parseImageAgentToolArguments(block.json || JSON.stringify(block.value.input), rules);
                     const single: ChatCompletionResult = { content: "", toolCalls: [{ id: String(block.value.id), type: "function", function: { name: String(block.value.name), arguments: JSON.stringify(args) } }] };
                     validateChatProfileOutput(single, rules);
                     block.value.input = args;
@@ -133,7 +134,7 @@ export function imageAgentClaudeStream(upstream: Response, rules: readonly strin
                 }
                 if (!stopped && !cancelled) throw invalid();
             } catch (error) {
-                if (!cancelled) send({ type: "error", error: { code: error instanceof PromptOptimizationError ? error.code : "CHAT_STREAM_INTERRUPTED", message: error instanceof PromptOptimizationError ? error.message : "对话流已中断，本轮未完成，不会自动重新提交。" } });
+                if (!cancelled) send({ type: "error", error: { code: error instanceof PromptOptimizationError ? error.code : "CHAT_STREAM_INTERRUPTED", message: error instanceof PromptOptimizationError ? error.message : "对话流已中断，本轮未完成，不会自动重新提交。", ...imageAgentRepairMetadata(error) } });
             } finally {
                 try { await reader.cancel(); } catch { /* Do not replace the actual outcome. */ }
                 reader.releaseLock();

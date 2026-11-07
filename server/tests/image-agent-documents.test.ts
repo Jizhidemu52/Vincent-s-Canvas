@@ -120,15 +120,17 @@ describe("image-agent document planning boundary", () => {
 });
 
 describe("image-agent confirmed requirements at provider submission", () => {
-    test("compiles known visual facts before current instructions, without unknowns or public archive mutation", async () => {
+    test("validated document snapshots do not secretly change the already prepared public prompt", async () => {
         const input = { prompt: "本轮只改成黑色", operationType: "inpaint", parameters: { imageAgentProfile: "creative-chat", designRequirements: requirements, designDocumentCatalog: catalog, inputArchive: { prompt: "本轮只改成黑色" } } };
         const before = JSON.stringify(input);
-        const prompt = await imageAgentProviderPrompt(input, async () => "PRIVATE_IMAGE_RECIPE");
-        expect(prompt).toContain(designRequirementsText(requirements));
+        let loads = 0;
+        const prompt = await imageAgentProviderPrompt(input, async () => { loads++; return "PRIVATE_IMAGE_RECIPE"; });
+        expect(prompt).toBe(input.prompt);
+        expect(prompt).not.toContain(designRequirementsText(requirements));
         expect(prompt).not.toContain(requirements.unknowns[0]!);
         expect(prompt).not.toContain("brief:figure-1");
         expect(prompt.endsWith(input.prompt)).toBe(true);
-        expect(prompt.indexOf(designRequirementsText(requirements))).toBeLessThan(prompt.lastIndexOf(input.prompt));
+        expect(loads).toBe(0);
         expect(JSON.stringify(input)).toBe(before);
     });
 

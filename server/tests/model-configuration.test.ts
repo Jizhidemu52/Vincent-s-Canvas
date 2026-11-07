@@ -26,6 +26,7 @@ type StoredProvider = {
 
 async function serve(role = "super_admin") {
   const providers = new Map<string, StoredProvider>();
+  const models = new Map<string, Record<string, unknown>>();
   const publicProvider = ({ encryptedCredentials, ...provider }: StoredProvider) => ({
     ...provider,
     hasCredentials: Boolean(encryptedCredentials),
@@ -61,6 +62,13 @@ async function serve(role = "super_admin") {
         const rows = values.length ? [providers.get(String(values[0]))].filter((item): item is StoredProvider => Boolean(item)) : [...providers.values()];
         return { rows: rows.map(publicProvider) };
       }
+      if (sql.startsWith("INSERT INTO model_configs") || sql.startsWith("UPDATE model_configs")) {
+        const id = sql.startsWith("INSERT") ? crypto.randomUUID() : String(values[10]);
+        const columns = ["providerId", "workflowConfigId", "replacementModelConfigId", "name", "modelId", "capabilities", "creditCost", "rmbCost", "concurrencyLimit", "enabled"];
+        models.set(id, { id, ...Object.fromEntries(columns.map((column, index) => [column, values[index]])) });
+        return { rows: [{ id }] };
+      }
+      if (sql.startsWith("SELECT") && sql.includes("FROM model_configs")) return { rows: [models.get(String(values[0]))].filter(Boolean) };
       if (sql.startsWith("INSERT INTO audit_logs")) return { rows: [] };
       throw new Error(`Unexpected database operation: ${sql}`);
     },
@@ -81,7 +89,7 @@ async function serve(role = "super_admin") {
   await new Promise<void>((resolve) => server.once("listening", resolve));
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("No test port");
-  return { url: `http://127.0.0.1:${address.port}/api/admin/model-configuration/providers`, providers };
+  return { url: `http://127.0.0.1:${address.port}/api/admin/model-configuration/providers`, providers, models };
 }
 
 function save(url: string, input: Record<string, unknown>, method = "POST") {
@@ -89,6 +97,25 @@ function save(url: string, input: Record<string, unknown>, method = "POST") {
 }
 
 describe("formal provider configuration", () => {
+  test("model creation and edits preserve explicit vision and tools capabilities", async () => {
+    const { url, models } = await serve();
+    const modelsUrl = url.replace(/\/providers$/, "/models");
+    const capabilities = ["chat", "vision", "tools"];
+    const response = await save(modelsUrl, { providerId: crypto.randomUUID(), name: "Vision chat", modelId: "declared-vision-chat", capabilities, creditCost: 0, rmbCost: 0 });
+    expect(response.status).toBe(201);
+    const model = (await response.json()).model;
+    expect(model.capabilities).toEqual(capabilities);
+    expect(models.get(model.id)?.capabilities).toEqual(capabilities);
+    for (const patch of [{ capabilities, name: "Vision chat renamed" }, { creditCost: 2 }]) {
+      const updated = await save(`${modelsUrl}/${model.id}`, patch, "PATCH");
+      expect(updated.status).toBe(200);
+      expect((await updated.json()).model.capabilities).toEqual(capabilities);
+      expect(models.get(model.id)?.capabilities).toEqual(capabilities);
+    }
+    expect((await save(`${modelsUrl}/${model.id}`, { capabilities: ["chat", "invented-capability"] }, "PATCH")).status).toBe(400);
+    expect(models.get(model.id)?.capabilities).toEqual(capabilities);
+  });
+
   test.each(["anthropic", "openai-chat"])("saves and edits a %s provider without exposing or replacing its key", async (protocol) => {
     const { url, providers } = await serve();
     const original = await save(url, { name: "OpenToken images", protocol: "openai", baseUrl: "https://gateway.example.test/v1", credentials: { apiKey: "test-provider-key" } });

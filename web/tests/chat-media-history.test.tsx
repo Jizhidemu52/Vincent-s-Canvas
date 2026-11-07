@@ -4,6 +4,8 @@ import { ChatMarkdown } from "@/pages/chat/chat-markdown";
 import { createChatMedia } from "@/pages/chat/chat-media";
 import { createChatIndexedHistory } from "@/pages/chat/chat-indexed-history";
 import { createChatBranch } from "@/pages/chat/chat-message-actions";
+import { completeChatImageTask } from "@/pages/chat/chat-image-tasks";
+import type { PendingChatImageTask } from "@/services/api/chat-image-recovery";
 import { beginChatImageWrite, chatImageCleanupGuard, collectChatImageReferences } from "@/services/chat-history-references";
 import type { ChatSession } from "@/pages/chat/chat-types";
 
@@ -80,6 +82,27 @@ test("media stores original sources once across branches, strips only transient 
     const hydrated = await media.hydrateSession(one, () => {});
     expect(hydrated.messages[0]!.attachments![0]!.dataUrl).toBe("blob:fresh");
     expect(resolutions).toEqual(["image:fixture"]);
+});
+
+test.each([{ referenceImageIds: undefined }, { referenceImageIds: [] }, { referenceImageIds: ["original", "palette"] }])("completed reference identities %j survive media serialization and fresh indexed history reload", async ({ referenceImageIds }) => {
+    const store = memoryStore();
+    const media = createChatMedia({ upload: async () => { throw new Error("Existing media must not be uploaded again"); }, resolve: async () => "blob:restored-original" });
+    const task: PendingChatImageTask = { requestId: "one", action: "edit", modelId: "fixture", prompt: "完整原要求与确认需求卡", parentId: "original", ...(referenceImageIds ? { referenceImageIds } : {}) };
+    const initial = { ...session("one"), messages: [{ id: "reply", role: "assistant" as const, content: "", createdAt: "", pendingImageTask: task }] };
+    const completed = completeChatImageTask(initial, "reply", task, [{ id: "result", dataUrl: "blob:temporary", storageKey: "image:result", prompt: task.prompt }]);
+    const result = completed.messages[0]!.generatedImages![0]!;
+    expect(result.referenceImageIds).toEqual(referenceImageIds);
+    if (referenceImageIds) expect(result.referenceImageIds).not.toBe(referenceImageIds);
+    const history = createChatIndexedHistory<ChatSession>(store, media.serializeSession);
+    await history.save(key, [completed]);
+    const restored = (await createChatIndexedHistory<ChatSession>(store, media.serializeSession).load(key, () => null))[0]!;
+    expect(restored.messages[0]!.generatedImages![0]).toMatchObject({ storageKey: "image:result", dataUrl: "", prompt: task.prompt, parentId: "original" });
+    expect(restored.messages[0]!.generatedImages![0]!.referenceImageIds).toEqual(referenceImageIds);
+    expect(restored.messages[0]!.generatedImages![0]!.spec).toBeUndefined();
+    const hydrated = await media.hydrateSession(restored, () => {});
+    expect(hydrated.messages[0]!.generatedImages![0]).toMatchObject({ dataUrl: "blob:restored-original", prompt: task.prompt });
+    expect(hydrated.messages[0]!.generatedImages![0]!.referenceImageIds).toEqual(referenceImageIds);
+    expect(hydrated.messages[0]!.pendingImageTask).toBeUndefined();
 });
 
 test("a late image save after an owner switch cannot return usable data to the new session", async () => {

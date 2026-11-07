@@ -3,6 +3,7 @@ import { DuplicateJsonKeyError, parseStrictJson } from "../src/lib/strict-json";
 import { parseCreativeChatInspection, parseCreativeChatPlan } from "../src/lib/creative-chat";
 import { readClaudeSseResponse, requestToolResponse } from "../src/services/api/image";
 import { defaultConfig } from "../src/stores/use-config-store";
+import { ImageAgentPlanningError } from "../../shared/image-agent-iteration";
 
 const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; });
@@ -47,7 +48,11 @@ describe("strict JSON duplicate-key boundary", () => {
     });
 
     test("direct planner replay cannot bypass the strict boundary with duplicate arrays", () => {
-        expect(() => parseCreativeChatPlan({ content: "", toolCalls: [call(args('"keep":["领口不变"],"keep":["白底不变"]'))] }, [reference])).toThrow(DuplicateJsonKeyError);
+        const parse = () => parseCreativeChatPlan({ content: "", toolCalls: [call(args('"keep":["领口不变"],"keep":["白底不变"]'))] }, [reference]);
+        expect(parse).toThrow(ImageAgentPlanningError);
+        try { parse(); } catch (error) {
+            expect(error).toMatchObject({ code: "IMAGE_AGENT_ARGUMENTS_INVALID", repairable: true, submitted: false });
+        }
     });
 
     test.each([
@@ -150,7 +155,7 @@ describe("legacy create_image transport recovery cannot re-enter image-agent pla
             .toEqual(["  领口不变\n", '"preserve": {装饰} \\ 保留🧵', "  领口不变\n"]);
         // The generic parser and raw direct planner replay remain fail-closed.
         expect(() => parseStrictJson(raw)).toThrow(DuplicateJsonKeyError);
-        expect(() => parseCreativeChatPlan({ content: "", toolCalls: [call(raw)] }, [reference])).toThrow(DuplicateJsonKeyError);
+        expect(() => parseCreativeChatPlan({ content: "", toolCalls: [call(raw)] }, [reference])).toThrow("未授权工具");
     });
 
     test("transport preserves the old generate action without authorizing it in the new planner", async () => {

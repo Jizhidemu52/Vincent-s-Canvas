@@ -72,6 +72,8 @@ import { prepareChatProfileInput, validateChatProfileOutput, type ChatPromptProf
 import { imageAgentProviderPrompt, readImageAgentGenerationProfile } from "./image-agent-profile";
 import { imageAgentClaudeStream } from "./image-agent-stream";
 import { PromptOptimizationError } from "./prompt-safety";
+import { imageAgentRepairMetadata } from "./image-agent-profile";
+import { imageAgentVisionError } from "../../shared/image-agent-capabilities";
 import { assertVideoMotionPolicy, ensureVideoMotionRecipe, videoMotionParameters, videoPreflightPrompt } from "./video-motion-input";
 
 const sessions = new Map<string, string>();
@@ -768,7 +770,7 @@ Bun.serve({
   idleTimeout: DEMO_STREAM_IDLE_TIMEOUT_SECONDS,
   error(error) {
     if (error instanceof PromptOptimizationError)
-      return json({ error: error.code, message: error.message }, error.status, { "cache-control": "no-store" });
+      return json({ error: error.code, message: error.message, ...imageAgentRepairMetadata(error) }, error.status, { "cache-control": "no-store" });
     if (error instanceof ZodError)
       return json({ error: "VALIDATION_ERROR", message: "请求参数格式不正确" }, 400);
     if (error instanceof DemoToolConfigurationError || error instanceof ToolConfigurationError)
@@ -1049,6 +1051,8 @@ Bun.serve({
       if (!parsedTools.success) return json({ error: "INVALID_TOOLS", message: "对话只允许已声明的 function 工具；图片生成必须通过图像任务入口" }, 400);
       input.tools = parsedTools.data;
       if (input.profile) {
+        const visionError = imageAgentVisionError(input.profile, selectedConfig?.capabilities);
+        if (visionError) return json({ error: "CHAT_VISION_REQUIRED", message: visionError }, 422);
         const prepared = await prepareChatProfileInput({ ...input, input: input.input || [], tools: parsedTools.data }, async profile => (await demoPromptCompiler.store.active(profile)).version.systemPrompt);
         const provider = selectedConfig && demoProviders.find(item => item.id === selectedConfig.providerId && item.enabled === true);
         const apiKey = provider ? demoChatProviderApiKey(String(provider.id)) : "";

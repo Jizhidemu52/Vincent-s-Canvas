@@ -42,6 +42,6 @@ describe("simple creative image execution", () => {
         expect(() => parseCreativeChatPlan(response({ prompt: "改色", references: ["palette", "palette"] }), references, options)).toThrow();
         expect(() => parseCreativeChatPlan(response({ prompt: "改色", references: ["palette"] }), references, { ...options, previewedImageIds: ["result"] })).toThrow("先查看");
         expect(() => parseCreativeChatPlan(response({ prompt: "改色", superseded_constraints: [] }), references, options)).toThrow("未授权参数");
-        expect(() => parseCreativeChatPlan(response({ prompt: "改".repeat(20_000), keep: ["白底"] }), references, options)).toThrow("超过 20000");
+        expect(() => parseCreativeChatPlan(response({ prompt: "改".repeat(20_000), keep: ["白底"] }), references, options)).toThrow(/超过\s*20000/);
     });
 });

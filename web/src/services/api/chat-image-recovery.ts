@@ -21,6 +21,7 @@ export type PendingChatImageTask = {
     parentId?: string;
     workId?: string;
     workNote?: ImageAgentWorkNote;
+    spec?: import("../../../../shared/image-agent-iteration").ImageAgentEditSpec;
     referenceImageIds?: string[];
     focusRevision?: number;
     signature?: string;

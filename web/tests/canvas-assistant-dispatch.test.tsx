@@ -33,7 +33,7 @@ const toolConfigCode = ts.transpileModule(readFileSync(new URL("../src/hooks/use
     compilerOptions: { target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.CommonJS, esModuleInterop: true },
 }).outputText;
 
-function panelHarness(options: { replies: ToolResponseResult[]; stream?: string; translate?: () => Promise<string>; config?: Partial<configModule.AiConfig>; flags?: Partial<Record<ModuleKey, boolean>>; tools?: BusinessConfig["tools"]; models?: BusinessConfig["models"]; imageCapabilities?: BusinessConfig["models"]; standalone?: boolean; selected?: CanvasNodeData[]; nodes?: CanvasNodeData[]; history?: CanvasAssistantMessage[]; confirmTools?: boolean; canManageConfig?: boolean; generate?: () => Promise<Array<{ id: string; dataUrl: string }>>; video?: () => Promise<{ url: string; mimeType: string }>; storedImage?: UploadedImage; storedVideo?: UploadedFile; taskLifecycle?: boolean; storeImage?: () => Promise<UploadedImage>; userId?: string; recoveryIO?: NonNullable<Parameters<typeof onlineTaskRecovery.recoverOnlineAgentTask>[3]> } & Pick<CanvasAssistantSession, "documents" | "requirementCard">) {
+function panelHarness(options: { replies: ToolResponseResult[]; stream?: string; translate?: () => Promise<string>; config?: Partial<configModule.AiConfig>; flags?: Partial<Record<ModuleKey, boolean>>; tools?: BusinessConfig["tools"]; models?: BusinessConfig["models"]; imageCapabilities?: BusinessConfig["models"]; standalone?: boolean; selected?: CanvasNodeData[]; nodes?: CanvasNodeData[]; history?: CanvasAssistantMessage[]; session?: Partial<CanvasAssistantSession>; confirmTools?: boolean; canManageConfig?: boolean; generate?: () => Promise<Array<{ id: string; dataUrl: string }>>; video?: () => Promise<{ url: string; mimeType: string }>; storedImage?: UploadedImage; storedVideo?: UploadedFile; taskLifecycle?: boolean; storeImage?: () => Promise<UploadedImage>; userId?: string; recoveryIO?: NonNullable<Parameters<typeof onlineTaskRecovery.recoverOnlineAgentTask>[3]> } & Pick<CanvasAssistantSession, "documents" | "requirementCard">) {
     const states: unknown[] = [];
     const refs: unknown[] = [];
     const memos: Array<{ dependencies?: DependencyList; value: unknown }> = [];
@@ -53,7 +53,7 @@ function panelHarness(options: { replies: ToolResponseResult[]; stream?: string;
     const flags = { ...Object.fromEntries(moduleKeys.map(key => [key, true])), ...options.flags } as Record<ModuleKey, boolean>;
     const business: BusinessConfig = {
         models: options.models || [
-            { id: "text-model", name: config.textModel, modelId: config.textModel, capabilities: ["chat"], creditCost: 0, rmbCost: 0 },
+            { id: "text-model", name: config.textModel, modelId: config.textModel, capabilities: ["chat", "vision"], creditCost: 0, rmbCost: 0 },
             { id: "image-model", name: config.imageModel, modelId: config.imageModel, capabilities: ["generate", "edit"], creditCost: 0, rmbCost: 0 },
             { id: "video-model", name: config.videoModel, modelId: config.videoModel, capabilities: ["video"], creditCost: 0, rmbCost: 0 },
         ], prices: [], tools: options.tools || [],
@@ -64,7 +64,7 @@ function panelHarness(options: { replies: ToolResponseResult[]; stream?: string;
     ];
     const businessState = { ...business, status: "ready" as const, refresh: async () => undefined };
     const userState = { status: options.userId ? "authenticated" : "guest", user: options.userId ? { id: options.userId } : null };
-    let sessions: CanvasAssistantSession[] = options.history || options.requirementCard || options.documents ? [{ id: "history", title: "History", createdAt: "2026-09-06", updatedAt: "2026-09-06", messages: options.history || [], documents: options.documents, requirementCard: options.requirementCard }] : [];
+    let sessions: CanvasAssistantSession[] = options.history || options.requirementCard || options.documents ? [{ id: "history", title: "History", createdAt: "2026-09-06", updatedAt: "2026-09-06", messages: options.history || [], documents: options.documents, requirementCard: options.requirementCard, ...options.session }] : [];
     let activeSessionId: string | null = null;
     const sessionCommits: Array<{ sessions: CanvasAssistantSession[]; activeId: string | null }> = [];
     const sessionUpdates: Array<{ sessions: CanvasAssistantSession[]; activeId: string | null }> = [];
@@ -243,18 +243,7 @@ function panelHarness(options: { replies: ToolResponseResult[]; stream?: string;
         referenceTray() {
             return findElements(composer().props.attachmentPreview).find(element => typeof element.props.onMove === "function")!.props;
         },
-        conversationImages: () => composer().props.mentionImages as Array<{ id: string; label: string }>,
-        imageTarget: () => { const props = composer().props.imageTarget.props; return props.images.find((image: any) => image.id === props.focusId); },
-        cancelImageTarget() { composer().props.imageTarget.props.onNewCreation(); },
-        imageAction(label: string, action = "edit") {
-            const image = composer().props.mentionImages.find((item: { label: string }) => item.label === label);
-            if (!image) throw new Error(`Missing catalog image ${label}`);
-            findElements(render()).find(element => typeof element.props.onImageAction === "function")!.props.onImageAction(action, image.id);
-        },
-        mentionImage(label: string) {
-            const input = composer();
-            return input.props.onMentionImage(input.props.mentionImages.find((image: { label: string }) => image.label === label));
-        },
+        session: () => (sessionUpdates.at(-1)?.sessions || sessions).find(session => session.id === (sessionUpdates.at(-1)?.activeId || sessions[0]?.id)),
         displayedMessages() {
             return findElements(render()).filter(element => typeof element.type === "object" && element.props.item).map(element => element.props.item as CanvasAssistantMessage);
         },
@@ -295,7 +284,7 @@ async function waitFor(predicate: () => boolean) {
     throw new Error("Panel did not reach the expected state");
 }
 
-describe("canvas conversation image controls", () => {
+describe("canvas conversational image selection without target controls", () => {
     const original = { id: "source", type: CanvasNodeType.Image, title: "原图", dataUrl: "data:image/png;base64,ORIGINAL", storageKey: "image:source" };
     const sourceId = "chat-image:source-message:reference:0:source";
     const oldId = "chat-image:old-message:result:old";
@@ -305,12 +294,11 @@ describe("canvas conversation image controls", () => {
         { id: "latest-message", role: "assistant", text: "另一项新任务", detail: { status: "completed", imageAgent: { referenceIds: [], note: { summary: "蓝色裙子", keep: ["保留蓝色"] } } }, attachments: [{ id: "latest", name: "最新结果", mediaType: "image", url: "data:image/png;base64,LATEST", storageKey: "image:latest" }] },
     ];
 
-    test("clicking a historical result locks its pixels and work note despite a planner asking for another base", async () => {
-        const harness = panelHarness({ history: history(), replies: [tool("edit_image", { base: "图3", prompt: "再亮一点", note_update: "白背景花瓶，光线更亮" })] });
-        harness.imageAction("图2");
-        expect(harness.imageTarget()?.label).toBe("图2");
-        expect(harness.requests).toHaveLength(0);
-        await harness.submit("再亮一点");
+    test("natural conversation inspects and edits a historical result without a target button or unrelated branch requirements", async () => {
+        const harness = panelHarness({ history: history(), replies: [tool("look_at_images", { image_ids: [oldId] }), tool("edit_image", { base: oldId, prompt: "图2再亮一点", note_update: "白背景花瓶，光线更亮" })] });
+        expect(harness.composer().props.imageTarget.props.images).toBeUndefined();
+        expect(harness.composer().props.imageTarget.props.onSelect).toBeUndefined();
+        await harness.submit("图2再亮一点");
         const request = harness.requests.find(item => item.type === "edit")!;
         expect(request.args[2].map((image: any) => image.storageKey)).toEqual(["image:old"]);
         expect(harness.imageSizeReads).toEqual([oldId]);
@@ -318,33 +306,49 @@ describe("canvas conversation image controls", () => {
         expect(request.args[1]).not.toContain("蓝色");
         const saved = harness.messages().filter(message => message.attachments?.length).at(-1)!;
         expect(saved.detail?.imageAgent).toMatchObject({ baseImageId: oldId, workId: sourceId, note: { summary: "白背景花瓶，光线更亮", keep: ["保留白色背景"] } });
-        expect(harness.requests.map(request => request.type)).toEqual(["agent", "edit"]);
+        expect(harness.requests.map(request => request.type)).toEqual(["agent", "agent", "edit"]);
     });
 
-    test("return-to-original keeps its frozen base after acceptance while the user selects another image", async () => {
+    test("a conversational original request keeps its frozen pixels after acceptance while another canvas node is selected", async () => {
         const gate = Promise.withResolvers<Array<{ id: string; dataUrl: string }>>();
-        const harness = panelHarness({ history: history(), confirmTools: true, taskLifecycle: true, generate: () => gate.promise, replies: [tool("edit_image", { base: "focus", prompt: "再亮一点" })] });
-        harness.imageAction("图2", "original");
-        const submitted = harness.submit("再亮一点");
+        const other: CanvasNodeData = { id: "other", type: CanvasNodeType.Image, title: "另一张", position: { x: 0, y: 0 }, width: 100, height: 100, metadata: { content: "blob:other" } };
+        const harness = panelHarness({ history: history(), session: { focusImageId: oldId, focusLocked: true }, nodes: [other], confirmTools: true, taskLifecycle: true, generate: () => gate.promise, replies: [tool("edit_image", { base: "original", prompt: "从原图再亮一点" })] });
+        const submitted = harness.submit("从原图再亮一点");
         await waitFor(() => harness.messages().some(message => (message.detail?.pendingTask as { taskIds?: string[] })?.taskIds?.includes("accepted-image")) && !harness.composer().props.sending);
-        harness.imageAction("图3");
-        expect(harness.imageTarget()?.label).toBe("图3");
+        harness.select([other]);
         gate.resolve([{ id: "bright-result", dataUrl: "/api/assets/bright/content" }]);
         await submitted;
         expect(harness.requests.find(request => request.type === "edit")!.args[2].map((image: any) => image.storageKey)).toEqual(["image:source"]);
         expect(harness.requests.filter(request => request.type === "agent")).toHaveLength(1);
         expect(harness.messages().some(message => message.detail?.status === "pending")).toBe(false);
-        expect(harness.imageTarget()?.label).toBe("图3");
+        expect(harness.snapshotRef.current.selectedNodeIds).toEqual([other.id]);
+    });
+
+    test("a restored legacy focus lock and persistent canvas selection cannot override spoken previous or original", async () => {
+        const messages = history(), latestId = "chat-image:latest-message:result:latest";
+        messages[2]!.detail!.imageAgent = { baseImageId: oldId, workId: sourceId, referenceIds: [oldId], note: { summary: "当前花瓶", keep: [] } };
+        const selected: CanvasNodeData = { id: "source", type: CanvasNodeType.Image, title: "原图", position: { x: 0, y: 0 }, width: 100, height: 100, metadata: { storageKey: "image:source", content: "data:image/png;base64,ORIGINAL" } };
+        let generated = 0;
+        const harness = panelHarness({ history: messages, selected: [selected], session: { focusImageId: latestId, focusLocked: true },
+            generate: async () => [{ id: `result-${++generated}`, dataUrl: `/api/assets/result-${generated}/content` }],
+            replies: [tool("edit_image", { base: "previous", prompt: "回上一版调亮" }), tool("edit_image", { base: "original", prompt: "从原图重新改颜色" })] });
+        await harness.submit("回上一版调亮");
+        await harness.submit("从原图重新改颜色");
+        const plans = harness.requests.filter(request => request.type === "agent");
+        expect(plans[0].args[5].profileContext.focusImageId).toBe(latestId);
+        expect(plans.every(request => !request.args[5].profileContext.lockedImageId)).toBe(true);
+        expect(harness.requests.filter(request => request.type === "edit").map(request => request.args[2].map((image: any) => image.storageKey))).toEqual([["image:old"], ["image:source"]]);
+        expect(harness.messages().filter(message => message.detail?.kind === "agent_generation" && message.detail.status === "completed").map(message => (message.detail!.imageAgent as { baseImageId: string }).baseImageId)).toEqual([oldId, sourceId]);
+        expect(harness.session()?.focusLocked).toBe(false);
     });
 
     test.each([
         ["canvas_run_generation", { nodeId: "generator", mode: "image", prompt: "Brighten the image." }],
         ["canvas_create_generation_flow", { mode: "image", prompt: "Brighten the image.", autoRun: true }],
         ["canvas_apply_ops", { ops: [{ type: "run_generation", nodeId: "generator", mode: "image", prompt: "Brighten the image." }] }],
-    ] as const)("a selected target cannot be bypassed by %s", async (name, args) => {
+    ] as const)("an explicit local selection cannot be bypassed by %s", async (name, args) => {
         const node: CanvasNodeData = { id: "generator", type: CanvasNodeType.Config, title: "生成", position: { x: 0, y: 0 }, width: 200, height: 200, metadata: { generationMode: "image" } };
-        const harness = panelHarness({ history: history(), nodes: [node], replies: [tool(name, args)] });
-        harness.imageAction("图2");
+        const harness = panelHarness({ history: history(), session: { imageAgentRegion: { imageId: oldId, mask: { id: "mask", name: "mask", type: "image/png", dataUrl: "data:image/png;base64,MASK" }, selection: { id: "selection", name: "selection", type: "image/png", dataUrl: "data:image/png;base64,SELECTION" } } }, nodes: [node], replies: [tool(name, args)] });
         const before = JSON.stringify(harness.snapshotRef.current.nodes);
         await harness.submit("再亮一点");
         expect(harness.requests.map(request => request.type)).toEqual(["agent"]);
@@ -352,27 +356,26 @@ describe("canvas conversation image controls", () => {
         expect(harness.messages().some(message => message.text.includes("不会通过节点生成绕过"))).toBe(true);
     });
 
-    test("mentions keep persistent image numbers and add references without spending", async () => {
-        const harness = panelHarness({ history: history(), replies: [{ content: "讨论", toolCalls: [] }] });
-        expect(harness.mentionImage("图2")).toBe("图2");
-        harness.imageAction("图1", "reference");
-        expect(harness.referenceTray().references.map((image: any) => image.storageKey)).toEqual(["image:old", "image:source"]);
+    test("speaking image numbers allows read-only discussion without mention selection or media submission", async () => {
+        const harness = panelHarness({ history: history(), replies: [tool("look_at_images", { image_ids: [oldId, sourceId] }), { content: "讨论", toolCalls: [] }] });
+        expect(harness.composer().props.mentionImages).toBeUndefined();
+        expect(harness.composer().props.onMentionImage).toBeUndefined();
         expect(harness.requests).toEqual([]);
         await harness.submit("比较图2和图1，先不要修改");
-        expect(harness.requests.map(request => request.type)).toEqual(["agent"]);
+        expect(harness.requests.map(request => request.type)).toEqual(["agent", "agent"]);
         expect(harness.assets).toEqual([]);
     });
 
-    test("project changes clear an old target instead of carrying it into another canvas", () => {
-        const harness = panelHarness({ history: history(), replies: [] });
-        harness.imageAction("图2");
+    test("project changes clear an old conversation instead of carrying its target into another canvas", async () => {
+        const harness = panelHarness({ history: history(), session: { focusImageId: oldId }, replies: [{ content: "新画布", toolCalls: [] }] });
         harness.switchProject("other-project");
-        expect(harness.imageTarget()).toBeUndefined();
+        await harness.submit("你好");
+        expect(harness.requests[0].args[5].profileContext.focusImageId).toBeUndefined();
+        expect(harness.requests[0].args[5].profileContext.imageCatalog).toEqual([]);
     });
 
     test("new creation does not silently reuse a prior result as edit pixels", async () => {
-        const harness = panelHarness({ history: history(), replies: [tool("edit_image", { base: "focus", prompt: "生成新包" })] });
-        harness.cancelImageTarget();
+        const harness = panelHarness({ history: history(), replies: [tool("edit_image", { base: "none", prompt: "生成新包" })] });
         await harness.submit("重新创作一个包");
         expect(harness.requests.map(request => request.type)).toEqual(["agent", "image"]);
         expect(harness.requests[1].args[3]).toEqual([]);
@@ -866,20 +869,60 @@ describe("canvas assistant submission", () => {
         ["model override", { model: "other-provider" }],
         ["multiple outputs", { count: 7 }],
         ["legacy contract", { editContract: { mode: "complete" } }],
-        ["unknown image", { base: "missing-image" }],
-        ["unknown reference", { references: ["missing-image"] }],
         ["invalid base", { base: 12 }],
         ["invalid keep", { keep: [""] }],
         ["oversized note", { note_update: "x".repeat(801) }],
         ["empty prompt", { prompt: "" }],
-    ] as const)("invalid edit parameters fail before media submission and never trigger paid repair: %s", async (_name, invalid) => {
-        const harness = panelHarness({ replies: [tool("edit_image", { prompt: "红色花瓶", ...invalid }), tool("edit_image", { prompt: "must not retry" })] });
+    ] as const)("invalid edit parameters allow one typed planning repair, then stop before every write: %s", async (_name, invalid) => {
+        const invalidPlan = tool("edit_image", { prompt: "红色花瓶", ...invalid });
+        invalidPlan.toolCalls.unshift({ ...tool("canvas_create_text_node", { title: "必须拦截", text: "invalid plan must not write" }).toolCalls[0], id: "blocked-write" });
+        const harness = panelHarness({ replies: [invalidPlan, invalidPlan, tool("edit_image", { prompt: "must not reach a third plan" })] });
         await harness.submit("生成红色花瓶");
-        expect(harness.requests.map(request => request.type)).toEqual(["agent"]);
-        expect(harness.messages().some(message => message.role === "tool" && message.detail?.status === "failed")).toBe(true);
+        expect(harness.requests.map(request => request.type)).toEqual(["agent", "agent"]);
+        const [initial, repaired] = harness.requests.map(request => request.args[5].profileContext);
+        expect(initial.stage).toBe("plan");
+        expect(initial.repairIssue).toBeUndefined();
+        expect(repaired).toEqual({ ...initial, stage: "repair", repairIssue: {
+            code: "IMAGE_AGENT_ARGUMENTS_INVALID", message: expect.any(String), repairable: true, submitted: false,
+        } });
+        expect(harness.messages()).toContainEqual(expect.objectContaining({ role: "error", title: "操作失败", text: repaired.repairIssue.message }));
         expect(harness.snapshotRef.current.nodes).toEqual([]);
         expect(harness.assets).toEqual([]);
         expect(harness.imageUploads).toEqual([]);
+    });
+
+    test.each([
+        ["unknown image", { base: "missing-image" }, "指定的图片已不在当前作品中，请重新选择；本次尚未提交生成。"],
+        ["unknown reference", { references: ["missing-image"] }, "有一张参考图已不可用，请重新选择；尚未提交生成。"],
+    ] as const)("unavailable edit sources never trigger planning repair or media submission: %s", async (_name, invalid, reason) => {
+        const harness = panelHarness({ replies: [tool("edit_image", { prompt: "红色花瓶", ...invalid }), tool("edit_image", { prompt: "must not retry" })] });
+        await harness.submit("生成红色花瓶");
+        expect(harness.requests.map(request => request.type)).toEqual(["agent"]);
+        expect(harness.requests[0].args[5].profileContext.repairIssue).toBeUndefined();
+        expect(harness.messages()).toContainEqual(expect.objectContaining({ role: "error", title: "操作失败", text: reason }));
+        expect(harness.snapshotRef.current.nodes).toEqual([]);
+        expect(harness.assets).toEqual([]);
+        expect(harness.imageUploads).toEqual([]);
+    });
+
+    test("a valid planning correction submits one authorized image without replaying invalid sibling writes or model overrides", async () => {
+        const invalidPlan = tool("edit_image", { prompt: "红色花瓶", model: "other-provider", count: 7 });
+        invalidPlan.toolCalls.unshift({ ...tool("canvas_create_text_node", { title: "必须拦截", text: "invalid plan must not write" }).toolCalls[0], id: "blocked-write" });
+        const harness = panelHarness({ replies: [invalidPlan, tool("edit_image", { prompt: "红色花瓶" }), tool("edit_image", { prompt: "must not repeat generation" })] });
+        await harness.submit("生成红色花瓶");
+        expect(harness.requests.map(request => request.type)).toEqual(["agent", "agent", "image"]);
+        const [initial, repaired] = harness.requests.slice(0, 2).map(request => request.args[5].profileContext);
+        expect(initial.stage).toBe("plan");
+        expect(repaired).toEqual({ ...initial, stage: "repair", repairIssue: {
+            code: "IMAGE_AGENT_ARGUMENTS_INVALID", message: expect.any(String), repairable: true, submitted: false,
+        } });
+        const generated = harness.requests[2];
+        expect(generated.args[0]).toMatchObject({ model: "gpt-image-2", count: "1" });
+        expect(generated.args[1]).toContain("红色花瓶");
+        expect(harness.snapshotRef.current.nodes).toHaveLength(1);
+        expect(harness.snapshotRef.current.nodes[0].type).toBe(CanvasNodeType.Image);
+        expect(harness.assets).toHaveLength(1);
+        expect(harness.messages().some(message => message.role === "error")).toBe(false);
     });
 
     test("draft reorder keeps the planner preview order and binds edit inputs explicitly with the base first", async () => {
