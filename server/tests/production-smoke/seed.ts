@@ -53,10 +53,11 @@ export async function seedSmokeDatabase(db: Database, env: Environment, security
         await client.query(`INSERT INTO providers(id,name,protocol,base_url,encrypted_credentials) VALUES
             ($1,'OpenToken','openai','http://mock-provider:4180/v1',$3),
             ($2,'Isolated smoke video','apimart','http://mock-provider:4180/v1',$3)`, [providers.imageChat, providers.video, encrypted]);
+        // Image-agent chat profiles require explicit vision even for text-only smoke prompts.
         await client.query(`INSERT INTO model_configs(id,provider_id,name,model_id,capabilities,credit_cost,rmb_cost,concurrency_limit) VALUES
             ($1,$4,'Smoke image','gpt-image-2',ARRAY['generate','edit','batch'],1,0,2),
             ($2,$5,'Smoke video','MiniMax-H3',ARRAY['video'],1,0,2),
-            ($3,$4,'Smoke chat','gpt-6-astra',ARRAY['chat'],1,0,2)`, [models.image, models.video, models.chat, providers.imageChat, providers.video]);
+            ($3,$4,'Smoke chat','gpt-6-astra',ARRAY['chat','vision'],1,0,2)`, [models.image, models.video, models.chat, providers.imageChat, providers.video]);
         for (const [keys, model] of [
             [["image", "image-edit", "canvas-image", "canvas-edit", "canvas-mask-edit", "canvas-batch"], models.image],
             [["video", "canvas-video"], models.video], [["gpt-chat", "canvas-chat"], models.chat],

@@ -274,6 +274,13 @@ test("exact formal stack: login, large upload, canvas generation/recovery, origi
     expect(taskPosts).toEqual(["image_generation", "video_generation"]);
 
     await page.goto("/chat");
+    const chatCatalog = await getJson<{
+        models: Array<{ id: string; capabilities: string[] }>;
+        tools: Array<{ toolKey: string; modelConfigId: string | null; enabled: boolean }>;
+    }>(page, "/api/models");
+    expect(chatCatalog.tools.find(tool => tool.toolKey === "gpt-chat")).toMatchObject({ modelConfigId: seed.models.chat, enabled: true });
+    expect(chatCatalog.models.find(model => model.id === seed.models.chat)?.capabilities,
+        "The isolated chat binding must support the image-agent vision contract before Send").toEqual(expect.arrayContaining(["chat", "vision"]));
     const composer = page.getByRole("textbox", { name: "对话内容", exact: true });
     await expect(composer).toBeEnabled();
     await composer.fill("Reply with a short confirmation only; do not generate or edit any image.");

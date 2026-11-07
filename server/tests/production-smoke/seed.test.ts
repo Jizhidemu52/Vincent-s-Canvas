@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { imageAgentVisionError } from "../../../shared/image-agent-capabilities";
 import { decryptSecret, encryptSecret, hashPassword, verifyPassword } from "../../src/security";
 import { isSelectableCreativeModel } from "../../src/model-presentation";
 import { createIsolatedPostgres } from "../helpers/isolated-postgres";
@@ -38,15 +39,30 @@ sqlTest("formal smoke seed creates usable local-provider bindings and rejects re
             expect(provider.base_url).toBe("http://mock-provider:4180/v1");
             expect(JSON.parse(decryptSecret(provider.encrypted_credentials, env.PROVIDER_ENCRYPTION_KEY))).toEqual({ apiKey: SMOKE_PROVIDER_KEY });
         }
-        const models = await state.db.query(`SELECT m.id,m.model_id AS "modelId",m.capabilities,p.id AS "providerId",p.name AS "providerName",p.base_url AS "providerBaseUrl",p.protocol
+        const models = await state.db.query(`SELECT m.id,m.model_id AS "modelId",m.capabilities,m.credit_cost,m.rmb_cost,m.concurrency_limit,
+            p.id AS "providerId",p.name AS "providerName",p.base_url AS "providerBaseUrl",p.protocol
             FROM model_configs m JOIN providers p ON p.id=m.provider_id`);
         expect(models.rows).toHaveLength(3);
         expect(models.rows.every(isSelectableCreativeModel)).toBe(true);
+        expect(models.rows.find(row => row.id === seed.models.image).capabilities).toEqual(["generate", "edit", "batch"]);
+        expect(models.rows.find(row => row.id === seed.models.video).capabilities).toEqual(["video"]);
+        for (const model of models.rows) {
+            expect(Number(model.credit_cost)).toBe(1);
+            expect(Number(model.rmb_cost)).toBe(0);
+            expect(model.concurrency_limit).toBe(2);
+        }
         const bindings = await state.db.query("SELECT tool_key,model_config_id,allow_raw_prompt FROM tool_api_configurations WHERE model_config_id IS NOT NULL");
         expect(bindings.rows).toHaveLength(10);
         expect(bindings.rows.find(row => row.tool_key === "canvas-image").model_config_id).toBe(seed.models.image);
         expect(bindings.rows.find(row => row.tool_key === "video")).toMatchObject({ model_config_id: seed.models.video, allow_raw_prompt: true });
-        expect(bindings.rows.find(row => row.tool_key === "gpt-chat").model_config_id).toBe(seed.models.chat);
+        for (const [toolKey, profile] of [["gpt-chat", "creative-chat"], ["canvas-chat", "canvas-assistant"]]) {
+            const binding = bindings.rows.find(row => row.tool_key === toolKey);
+            expect(binding.model_config_id).toBe(seed.models.chat);
+            const model = models.rows.find(row => row.id === binding.model_config_id);
+            // Both real image-agent guards apply even when this smoke sends text only.
+            expect(imageAgentVisionError(profile, model.capabilities)).toBeNull();
+            expect(model.capabilities).toEqual(["chat", "vision"]);
+        }
         const before = await state.db.query("SELECT row_to_json(u) AS value FROM users u");
         await expect(seedSmokeDatabase(state.db, env, { hashPassword, encryptSecret })).rejects.toThrow("empty disposable database");
         expect((await state.db.query("SELECT row_to_json(u) AS value FROM users u")).rows).toEqual(before.rows);
