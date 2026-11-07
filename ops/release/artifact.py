@@ -12,6 +12,7 @@ import sys
 import tarfile
 
 from contract import Rejected, assert_image, digest, digest_file, read_json, require, validate_manifest, verify_package, write_new_json
+from creative_seed import MIGRATIONS as CREATIVE_MIGRATIONS, SEED_PATH, build_source_seed, verify_payload as verify_creative_payload
 
 
 PACKAGE_FILES = [
@@ -22,14 +23,24 @@ PACKAGE_FILES = [
     "server/src/migrations/048_usage_daily_facts.sql",
     "ops/release/quick-image-049.py", "ops/release/quick-image-049-catalog.json",
     "server/src/migrations/049_quick_image_configurations.sql",
+    "ops/release/creative-050-051.py", "ops/release/creative-050-051-catalog.json",
+    "ops/release/creative-050-051-state.sql", "ops/release/creative_seed.py",
+    "server/src/migrations/050_quick_image_item_extract.sql", "server/src/migrations/051_new_creative_scenes.sql",
 ]
+
+
+def fixed_migration_tail(manifest, first):
+    allowed = ["048_usage_daily_facts.sql", "049_quick_image_configurations.sql", *CREATIVE_MIGRATIONS]
+    expected = allowed[allowed.index(first):]
+    actual = [row["name"] for row in manifest["migrations"] if row["name"] >= first[:3]]
+    return bool(actual) and actual == expected[:len(actual)]
 
 
 def verify_048_payload(root, manifest):
     """Ship one reviewed schema preparation, never a general SQL directory."""
     relative = "server/src/migrations/048_usage_daily_facts.sql"
     rows = [row for row in manifest["migrations"] if row["name"] == Path(relative).name]
-    require(len(rows) == 1 and manifest["migrations"][-1]["name"] in [Path(relative).name, "049_quick_image_configurations.sql"], "FIXED_048_MIGRATION_REQUIRED")
+    require(len(rows) == 1 and fixed_migration_tail(manifest, Path(relative).name), "FIXED_048_MIGRATION_REQUIRED")
     sql = root / relative
     require(sql.is_file() and not sql.is_symlink() and digest_file(sql) == rows[0]["sha256"], "PACKAGED_048_SQL_MIGRATION_HASH_MISMATCH")
 
@@ -37,7 +48,7 @@ def verify_048_payload(root, manifest):
 def verify_049_payload(root, manifest):
     relative = "server/src/migrations/049_quick_image_configurations.sql"
     rows = [row for row in manifest["migrations"] if row["name"] == Path(relative).name]
-    require(len(rows) == 1 and manifest["migrations"][-1]["name"] == Path(relative).name, "FIXED_049_MIGRATION_REQUIRED")
+    require(len(rows) == 1 and fixed_migration_tail(manifest, Path(relative).name), "FIXED_049_MIGRATION_REQUIRED")
     sql = root / relative
     require(sql.is_file() and not sql.is_symlink() and digest_file(sql) == rows[0]["sha256"], "PACKAGED_049_SQL_MIGRATION_HASH_MISMATCH")
 
@@ -90,6 +101,7 @@ def package(root, candidate, verification, image_archive, destination):
     require(migrations(root) == candidate["migrations"], "PACKAGE_MIGRATIONS_CHANGED")
     verify_048_payload(root, candidate)
     verify_049_payload(root, candidate)
+    seed = build_source_seed(root)
     manifest = copy.deepcopy(candidate); manifest["verification"] = verification
     validate_manifest(manifest)
     require(image_archive.is_file() and not image_archive.is_symlink() and image_archive.stat().st_size > 0, "IMAGE_ARCHIVE_REQUIRED")
@@ -102,19 +114,24 @@ def package(root, candidate, verification, image_archive, destination):
         require(source.is_file() and not source.is_symlink(), "PUBLIC_RELEASE_TOOL_MISSING")
         target = destination / relative; target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, target)
+    # Generated from exactly two public source defaults, never a DB export or
+    # the legacy private authoring corpus. The manifest binds this exact file.
+    write_new_json(destination / SEED_PATH, seed, 0o644)
+    verify_creative_payload(destination, candidate)
     manifest["files"] = [{"path": path.relative_to(destination).as_posix(), "sha256": digest_file(path), "bytes": path.stat().st_size}
-                         for path in sorted(destination.rglob("*")) if path.is_file()]
+                         for path in sorted(destination.rglob("*"), key=lambda item: item.relative_to(destination).as_posix()) if path.is_file()]
     write_new_json(destination / "release-manifest.json", manifest, 0o644)
-    rows = [(path.relative_to(destination).as_posix(), digest_file(path)) for path in sorted(destination.rglob("*")) if path.is_file()]
+    rows = [(path.relative_to(destination).as_posix(), digest_file(path)) for path in sorted(destination.rglob("*"), key=lambda item: item.relative_to(destination).as_posix()) if path.is_file()]
     with (destination / "SHA256SUMS").open("x", encoding="utf-8", newline="\n") as output:
         output.write("".join(f"{sha}  {path}\n" for path, sha in rows))
     verify_package(destination)
     verify_048_payload(destination, manifest)
     verify_049_payload(destination, manifest)
+    verify_creative_payload(destination, manifest)
     archive = destination.with_suffix(destination.suffix + ".tar")
     require(not archive.exists(), "PACKAGE_ARCHIVE_ALREADY_EXISTS")
     with tarfile.open(archive, "x") as tar:
-        for path in sorted(destination.rglob("*")):
+        for path in sorted(destination.rglob("*"), key=lambda item: item.relative_to(destination).as_posix()):
             info = tar.gettarinfo(str(path), arcname=path.relative_to(destination).as_posix())
             info.uid = info.gid = 0; info.uname = info.gname = "root"; info.mtime = 0
             info.mode = 0o755 if path.is_dir() else 0o644

@@ -76,7 +76,7 @@ export function RegionSelectionDialog({ source, initialMask, nativeMask = false,
                 <canvas ref={canvas} aria-label={uiText("修改区域画布")} className="absolute inset-0 block size-full touch-none cursor-crosshair" style={{ opacity: .55, pointerEvents: ready && !saving ? "auto" : "none" }}
                     onPointerDown={event => { if (event.button !== 0) return; event.currentTarget.setPointerCapture(event.pointerId); last.current = point(event); stroke(last.current); }}
                     onPointerMove={event => { if (last.current) stroke(point(event)); }}
-                    onPointerUp={() => { last.current = null; }} onPointerCancel={() => { last.current = null; }} onLostPointerCapture={() => { last.current = null; }} />
+                    onPointerUp={() => { if (last.current && mode === "涂选") setError(""); last.current = null; }} onPointerCancel={() => { last.current = null; }} onLostPointerCapture={() => { last.current = null; }} />
             </div>
             {!ready && !error && <p className="text-xs text-muted-foreground">{uiText("正在读取原图…")}</p>}
         </div>

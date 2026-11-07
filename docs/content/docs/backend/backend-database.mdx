@@ -75,6 +75,10 @@ description: 正式数据存储边界、员工画布文档、公司设计灵感�
 
 `049_quick_image_configurations.sql` 仅新增 `quick_image_configurations` 空表，不插入或覆盖业务配置。`action` 主键仅接受 `remove-background`、`hd-upscale`；`model_config_id` 引用现有模型，`prompt` 保存 1–4000 字符的管理员指令，`parameters` 为 JSON 对象，`configuration_version` 为正整数，另保存 `updated_by` 与 `updated_at`。应用按紧凑 JSON 限制参数为 4000 字符，数据库上限 8000 用于兼容 JSONB 的空格展开。无记录时返回既有默认配置与版本 0。
 
+`050_quick_image_item_extract.sql` 仅将同一表的 `action` CHECK 扩展为允许 `item-extract`，不新增、覆盖或发布配置行。产品提取独立使用管理员配置，无记录时由应用提供 Flare 2.6／2K／medium 默认值；它不是新的普通图片编辑模型绑定。
+
+`051_new_creative_scenes.sql` 扩展 `tool_api_configurations.tool_key` 与 `module_flags.module_key` 的固定 CHECK 列表，登记 `creative-virtual-try-on`、`creative-sketch-to-photo`；已存在的同名行保持不变。仅在精确指定的 APIMart Provider 下存在已启用、支持 edit 的 Flare 2.6 时绑定该模型，否则保持未绑定，不创建模型或启用停用模型。两个新场景的提示词配方由独立显式安装步骤添加，只补缺失配方，已有草稿、激活版本及自定义内容不被替换；普通镜像发布仍不迁移数据库。
+
 仅超级管理员可读取 `GET /api/admin/model-configuration/quick-images`、通过 `PUT /:action` 保存或通过 `POST /:action/test` 测试未保存草稿。保存使用 `expectedVersion` 比较并交换、按操作事务锁和同事务审计；只接受已启用且支持单图编辑的 APIMart 标准模型及其实际支持参数。草稿测试不写配置表，沿用任务队列、原图所有权校验、单次提交与现有额度策略，是真实模型调用而非免费预览。
 
 普通入口只提供操作与本人原图，服务端一次读取并冻结模型、提示词、参数、版本后受理；后续配置变化不修改已有任务。去背景的灰阶蒙版合成约束独立于可编辑提取指令，最终颜色来自原图。049 使用固定独立运维入口先新增空表并恢复旧服务，再由原零数据库变更发布器切换镜像；不得调用或启用 048 统计处理。目标迁移、配置持久化和真实调试仍以发布回执为准。

@@ -29,6 +29,15 @@ test("progress text distinguishes model-ready queue, demo, estimates and unknown
     expect(generationProgressText({ ...waiting, phase: "paused" })).toContain("已暂停");
 });
 
+test("missing or malformed queue estimates never render NaN, Infinity or an invalid rank", () => {
+    for (const value of [undefined, Number.NaN, Number.POSITIVE_INFINITY, -1, "20"]) {
+        const progress = { ...waiting, queuePosition: value, estimatedWaitSeconds: value, estimatedRemainingSeconds: value } as unknown as QueuedTaskProgress;
+        expect(generationProgressText(progress)).toBe("排队中，名次暂不可用 · 暂无可靠耗时估算");
+    }
+    expect(generationProgressText({ ...waiting, queuePosition: 0 })).toContain("名次暂不可用");
+    expect(generationProgressText({ ...waiting, estimatedWaitSeconds: Number.NaN, estimatedRemainingSeconds: 0 })).toBe("同模型可运行队列第 3 位 · 预计还需约 1 秒（仅供参考）");
+});
+
 test("poller pauses while hidden and stops on completion without changing task execution", async () => {
     const visibility = visibilityFixture(true);
     const states: QueuedTaskProgress[] = [];

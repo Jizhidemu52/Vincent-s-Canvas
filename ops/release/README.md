@@ -12,6 +12,8 @@
 - `bash ops/deploy.sh apply /absolute/instance.json /absolute/package /absolute/preflight-audit`：仅接受 15 分钟内且仍匹配的预检；先加载并核验镜像、关闭已审阅维护门、排空活动、停止三个应用服务、备份并核对数据库，再替换应用镜像。基础设施和 `newvcan-*` 不变。
 - `bash ops/deploy.sh rollback /absolute/instance.json /absolute/successful-deployment-audit`：使用该发布保存的完整旧 Compose 与旧 image ID，在新的维护窗口保留当前数据并回滚应用。旧镜像、旧代码挂载目录和该审计目录必须保留。
 
+隔离栈验证发布标记后、浏览器 smoke 与容器清理前，必须运行 `verify-container-worker.py`：绑定实际 Web 容器、精确 image ID 与 commit，核对 minified PDF worker / URL wrapper 的真实 HTTP 字节、JavaScript MIME、`nosniff`、immutable 缓存，以及 CSS、HTML/no-store 和缺失 worker 的非缓存 404。失败即阻止该栈验收与导出；成功的 `pdf-worker-http.json` 仅作为公有验证回执归档到现有 release-receipts。此探针不创建或修改容器、不访问生产、不调用模型；离线模拟测试不代替正式容器检查。
+
 所有命令都必须使用真实目标的 `instance.json`；没有默认服务器。实例包含已核对的 Compose 文件、环境文件、实际应用容器名、数据库身份、受保护容器及 PostgreSQL/Redis/MinIO 实际 volume 名、网络、维护门脚本 SHA256、域名及本机探针。不能从示例猜生产值。实例与展开后的 Compose 含私有运行信息，应置于 0700 目录且文件 0600，不入仓库。
 
 维护门是实例指定、哈希锁定的 Python 脚本：`python3 gate.py close|verify-closed|open|verify-open <instance.json> <audit-directory>`。该脚本负责当前宝塔站点的维护响应、Nginx 校验和外层入口验证；发布器不会替换证书、站点认证或访问限制。失败时默认保留维护门关闭，不盲目恢复服务或恢复数据库。实例可记录外层代理文件哈希供根任务实际核对。
@@ -27,6 +29,24 @@ API 默认命令仅 `bun src/index.ts`，Worker 默认仅 `bun src/worker.ts`。
 发布器仅操作实例中的 API、Worker、Web。不会执行 `compose down`、删除卷、清理旧文件、更新 Provider、改价格/历史/员工数据或初始化私有配方。切换前后对全部 public 表进行行数及完整内容哈希核对，并核对 schema、迁移、序列、数据库身份和所有非应用容器。备份用原数据库容器 `pg_dump` 保存到私有审计目录；没有自动数据库 restore。
 
 旧 fingerprinted 静态资源仅从当前 Web 的 `/usr/share/nginx/html/assets` 拷入审计目录，拒绝 symlink、HTML、JSON、map、env 和未带 hash 的文件；新 Web 只读挂载该兼容目录。其他旧源码挂载只删除实例明确列出的只读代码挂载；未知或可写代码挂载直接拒绝。
+
+## 050/051 创意模块的独立准备
+
+`creative-050-051.py` 用于已登记至 049、统计处理仍停用的实例，不切换镜像。050 仅扩展产品提取配置的 CHECK；051 仅新增两个创意模块的缺失开关与模型绑定，并扩展对应 CHECK。两份新默认配方只在整个配方 key 缺失时新增并激活；已有草稿、自定义设置和已发布版本一律保持原样。
+
+包内种子仅从 `new-creative-recipes.ts` 导出两个白名单默认配方，不含旧私有配方或数据库导出。SQL、catalog、种子与工具受同一发布清单及哈希约束。操作者必须是当前启用的超级管理员，优化模型必须是当前启用的聊天模型；不会启用原本关闭的模型。
+
+```sh
+python3 -B /absolute/package/ops/release/creative-050-051.py preflight /absolute/instance.json /absolute/package --actor <enabled-superadmin-uuid> --optimizer-model <enabled-chat-model-uuid>
+python3 -B /absolute/package/ops/release/creative-050-051.py migrate /absolute/instance.json /absolute/package /absolute/050-051-preflight-audit --actor <enabled-superadmin-uuid> --optimizer-model <enabled-chat-model-uuid>
+# 原容器及入口恢复后，重新取得零变更发布预检，再切换同一冻结镜像。
+bash /absolute/package/ops/deploy.sh preflight /absolute/instance.json /absolute/package
+bash /absolute/package/ops/deploy.sh apply /absolute/instance.json /absolute/package /absolute/new-deploy-preflight-audit
+```
+
+预检绑定同一实例、包与参数，有效期 15 分钟。维护门关闭、活动排空、停止原三个应用容器和备份完成后，在固定单事务中锁表、复查完整基线并执行唯一允许的变更。全部原业务行、既有配方、序列和停用的统计状态不变；恢复同一原容器 ID 后再次核对数据库与健康，才打开入口。异常时不自动重放、不自动 restore；结果未知先查实际提交状态，已提交 schema 而入口恢复失败时保留 schema 并排查原服务。
+
+本地 PGlite 和生命周期测试不代替 PostgreSQL 17；发布前必须取得同一冻结 commit 的 Docker CI，包括新增四项真实事务、catalog 与回滚用例的通过结果。
 
 ## 049 一键图片配置的独立准备
 

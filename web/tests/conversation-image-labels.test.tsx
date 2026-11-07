@@ -29,6 +29,7 @@ const bindings = {
     React, uiText, useUiText: () => uiText, conversationImageLabel, canvasThemes,
     useThemeStore: (select: (state: { theme: "light" }) => unknown) => select({ theme: "light" }),
     CanvasPersistedMediaPreview: "preview", ConversationImageActions: "image-actions", X: "icon", WandSparkles: "icon",
+    ConversationImagePreview: "full-image-preview", useState: (initial: unknown) => [initial, () => undefined],
 };
 
 function component(path: string, name: string, extra: Record<string, unknown> = {}) {
@@ -46,24 +47,26 @@ function elements(value: unknown): ReactElement<any>[] {
     return [element, ...elements(element.props.children)];
 }
 
-test("chat image accessible labels switch languages without changing canonical labels or action IDs", async () => {
+test("chat full-image preview labels switch languages without editing the target or changing canonical labels", async () => {
     const image = { id: "saved-image-2", dataUrl: "data:image/png;base64,AQID", name: "我的图片.png" };
-    const original = structuredClone(image), selected: unknown[][] = [];
+    const original = structuredClone(image), selected: unknown[][] = [], opened: unknown[] = [];
     const render = () => {
         let state = 0;
         const ChatImage = component("pages/chat/chat-image.tsx", "ChatImage", {
             useUserStore: () => undefined, useEffect() {},
-            useState: (initial: unknown) => [state++ === 0 ? image.dataUrl : initial, () => undefined],
+            useState: (initial: unknown) => [state++ === 0 ? image.dataUrl : initial, (next: unknown) => opened.push(next)],
             cn: (...values: unknown[]) => values.filter(Boolean).join(" "), Button: "button",
         });
         return elements(ChatImage({ image, label: "图2", onAction: (...args: unknown[]) => selected.push(args) }));
     };
-    expect(render().find(node => node.type === "button")!.props["aria-label"]).toBe("以 图2 为编辑目标");
+    expect(render().find(node => node.type === "button")!.props["aria-label"]).toBe("查看大图 · 图2");
     await setUiLocale("en-US");
     const english = render(), button = english.find(node => node.type === "button")!;
-    expect(button.props["aria-label"]).toBe("Use Image 2 as the editing target");
+    expect(button.props["aria-label"]).toBe("View full image · Image 2");
     expect(english.find(node => node.type === "img")!.props.alt).toBe("Image 2");
     button.props.onClick();
+    expect(opened).toEqual([true]); expect(selected).toEqual([]);
+    english.find(node => node.type === "image-actions")!.props.onAction("edit", image.id);
     expect(selected).toEqual([["edit", image.id]]);
     expect(english.find(node => node.type === "image-actions")!.props.image.label).toBe("图2");
     expect(image).toEqual(original);
@@ -81,18 +84,21 @@ test("chat reference chips localize catalog labels but leave fallback filenames 
     expect(imageLabels.get("saved-image-4")).toBe("图4");
 });
 
-test("canvas image targets localize accessibility text without changing attachment names or IDs", async () => {
+test("canvas image preview localizes accessibility text without changing the selected target, attachment names or IDs", async () => {
     await setUiLocale("en-US");
-    const render = component("components/canvas/canvas-agent-chat-ui.tsx", "AgentMessageAttachments");
+    const opened: unknown[] = [];
+    const render = component("components/canvas/canvas-agent-chat-ui.tsx", "AgentMessageAttachments", { useState: () => [null, (image: unknown) => opened.push(image)] });
     const attachment = { id: "attachment-2", name: "我的图2.png", url: "data:image/png;base64,AQID" };
     const image = { id: "catalog-image-2", label: "图2", name: attachment.name, dataUrl: attachment.url };
     const selected: unknown[][] = [];
     const tree = elements(render({ messageId: "message", attachments: [attachment], theme: canvasThemes.light,
         imageControls: new Map([["message:attachment-2", { image }]]), onImageAction: (...args: unknown[]) => selected.push(args) }));
     const button = tree.find(node => node.type === "button")!;
-    expect(button.props["aria-label"]).toBe("Select Image 2 as the editing target");
+    expect(button.props["aria-label"]).toBe("View full image · Image 2");
     expect(tree.find(node => node.type === "preview")!.props.alt).toBe(attachment.name);
     button.props.onClick();
+    expect(opened).toEqual([image]); expect(selected).toEqual([]);
+    tree.find(node => node.type === "image-actions")!.props.onAction("edit", image.id);
     expect(selected).toEqual([["edit", image.id]]);
     expect(image.label).toBe("图2");
 });

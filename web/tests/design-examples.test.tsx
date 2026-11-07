@@ -12,8 +12,8 @@ import { navigationTools } from "@/constant/navigation-tools";
 import { creativePresets } from "@/lib/creative-presets";
 
 describe("concise illustrated design examples", () => {
-    test("all 25 module-specific examples use one short sentence for input, action and result", () => {
-        expect(Object.keys(designExamples)).toHaveLength(25);
+    test("all 27 module-specific examples use one short sentence for input, action and result", () => {
+        expect(Object.keys(designExamples)).toHaveLength(27);
         for (const example of Object.values(designExamples)) {
             expect(example.steps.map(step => step.title)).toEqual(["输入", "操作", "结果"]);
             for (const step of example.steps) {

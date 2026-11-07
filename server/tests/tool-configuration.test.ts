@@ -223,16 +223,28 @@ describe("formal catalog configuration", () => {
   test("migration constraints and non-destructive seeds exactly cover the shared catalog", () => {
     const original = readFileSync(new URL("../src/migrations/026_formal_module_configuration.sql", import.meta.url), "utf8");
     const migration = readFileSync(new URL("../src/migrations/027_midjourney_blend_module.sql", import.meta.url), "utf8");
+    const creative = readFileSync(new URL("../src/migrations/051_new_creative_scenes.sql", import.meta.url), "utf8");
+    const creativeKeys = ["creative-virtual-try-on", "creative-sketch-to-photo"];
     const keys = (value: string) => [...value.matchAll(/'([^']+)'/g)].map(match => match[1]).sort();
-    const toolCheck = /CHECK \(tool_key IN \(([\s\S]*?)\)\)/.exec(migration)![1]!;
-    const moduleCheck = /CHECK \(module_key IN \(([\s\S]*?)\)\)/.exec(migration)![1]!;
+    const toolCheck = (value: string) => keys(/CHECK \(tool_key IN \(([\s\S]*?)\)\)/.exec(value)![1]!);
+    const moduleCheck = (value: string) => keys(/CHECK \(module_key IN \(([\s\S]*?)\)\)/.exec(value)![1]!);
+    const allTools = toolDefinitions.map(tool => tool.toolKey).sort();
+    const allModules = [...moduleKeys].sort();
+    const beforeCreative = (key: string) => !creativeKeys.includes(key);
+    const beforeBlend = (key: string) => beforeCreative(key) && key !== "midjourney-blend";
     const arrays = [...original.matchAll(/unnest\(ARRAY\[([\s\S]*?)\]\)/g)];
-    expect(keys(toolCheck)).toEqual(toolDefinitions.map(tool => tool.toolKey).sort());
-    expect(keys(moduleCheck)).toEqual([...moduleKeys].sort());
-    expect(keys(arrays[0]![1]!)).toEqual(moduleKeys.filter(key => key !== "midjourney-blend").sort());
-    expect(keys(arrays[1]![1]!)).toEqual(toolDefinitions.map(tool => tool.toolKey).filter(key => key !== "midjourney-blend").sort());
-    expect(migration).toContain("ON CONFLICT(module_key) DO NOTHING");
-    expect(migration).toContain("ON CONFLICT(tool_key) DO NOTHING");
+    expect(toolCheck(creative)).toEqual(allTools);
+    expect(moduleCheck(creative)).toEqual(allModules);
+    expect(toolCheck(migration)).toEqual(allTools.filter(beforeCreative));
+    expect(moduleCheck(migration)).toEqual(allModules.filter(beforeCreative));
+    expect(keys(arrays[0]![1]!)).toEqual(allModules.filter(beforeBlend));
+    expect(keys(arrays[1]![1]!)).toEqual(allTools.filter(beforeBlend));
+    expect(keys(/unnest\(ARRAY\[([\s\S]*?)\]\)/.exec(creative)![1]!)).toEqual([...creativeKeys].sort());
+    for (const value of [migration, creative]) {
+      expect(value).toContain("ON CONFLICT(module_key) DO NOTHING");
+      expect(value).toContain("ON CONFLICT(tool_key) DO NOTHING");
+    }
+    expect(creative).not.toMatch(/UPDATE\s+(?:model_configs|providers|pricing_rule_versions)/);
     expect(original).toContain("ALTER COLUMN model_config_id DROP NOT NULL");
     expect(original).not.toMatch(/UPDATE\s+(?:model_configs|pricing_rule_versions)/);
   });

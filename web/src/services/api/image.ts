@@ -91,7 +91,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     if (isQuickImageTool(options?.tool) || options?.quickImageAction) {
         if (mask || references.length !== 1) throw new Error("请只添加一张原图");
         const action = options!.quickImageAction || quickImageAction(options!.tool!);
-        const tool = options?.tool === "canvas-edit" ? "canvas-edit" : action === "remove-background" ? "image-edit" : "detail-enhance";
+        const tool = options?.tool === "canvas-edit" ? "canvas-edit" : action === "hd-upscale" ? "detail-enhance" : "image-edit";
         return requestQueuedImages({ modelId: "", prompt: "", count: 1, operationType: tool === "detail-enhance" ? "upscale" : "inpaint", tool, quickImageAction: action,
             references, requestId: options?.requestId, signal: options?.signal, cancelOnAbort: options?.cancelOnAbort,
             onSubmissionStarted: options?.onSubmissionStarted, onSubmitted: options?.onSubmitted, onCompiled: options?.onCompiled });

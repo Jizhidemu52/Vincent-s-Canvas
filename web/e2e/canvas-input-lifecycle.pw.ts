@@ -18,9 +18,12 @@ test("同一图片的左右提示词同步，直接从节点编辑转到左侧�
     await expect(editor).toBeVisible();
 
     await editor.fill("A RED knit hat");
-    // Real pointer focus transfer commits the previous textarea before a new
-    // pending draft starts. Do not wait for either 180 ms draft timer.
-    await lower.fill("B BLUE knit hat");
+    // Focus first, then select and replace as a user does. fill() selects before
+    // focus, so the intentional focus-time sync can collapse its stale selection.
+    // Do not wait for either 180 ms draft timer.
+    await lower.click();
+    await page.keyboard.press("ControlOrMeta+A");
+    await page.keyboard.insertText("B BLUE knit hat");
     await left.locator(".cw-generate-button").click();
     await expect.poll(() => api.submissions.length).toBe(1);
     expect(api.submissions[0].prompt).toBe("B BLUE knit hat");

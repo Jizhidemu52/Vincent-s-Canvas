@@ -6,7 +6,7 @@ import { moduleDefinitions, toolDefinitions } from "../../shared/feature-catalog
 export const ORIGIN = "http://127.0.0.1:5199";
 // A real 256px fixture keeps pointer handles and image previews usable. Built
 // without an image package so CI has no additional native dependency.
-function fixturePng(blue = 160) {
+export function fixturePng(blue = 160) {
     const chunk = (type: string, data: Buffer) => {
         const body = Buffer.concat([Buffer.from(type), data]);
         let crc = 0xffffffff;

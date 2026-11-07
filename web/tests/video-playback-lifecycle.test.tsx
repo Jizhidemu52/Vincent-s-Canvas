@@ -40,6 +40,8 @@ function harness(playback: (id: string, options: { signal: AbortSignal }) => Pro
             pending.push(() => { previous?.cleanup?.(); effects[index] = { deps: values, cleanup: effect() }; });
         } },
         "@/lib/i18n": i18nHarness,
+        // Playback lifecycle runs in the default visible task; task-tab transitions have separate DOM coverage.
+        "@/components/workbench-tasks": { WorkbenchTasks: ({ children }: any) => children.type(children.props), useWorkbenchTask: () => ({ id: "default", active: true, draftScope: (scope: string) => scope }), useWorkbenchTaskStatus() {} },
         "@/lib/workspace-storage": { createWorkspaceStorage: () => ({ iterate: async (visit: (value: unknown) => void) => logs.forEach(visit), setItem: async (...args: unknown[]) => writes.push(args) }) },
         "@/hooks/use-generation-draft": { useGenerationDraft: (_key: string, initial: unknown) => [initial, () => {}, true] },
         "@/hooks/use-generation-workspace": { useGenerationWorkspace: () => workspace },
@@ -50,7 +52,7 @@ function harness(playback: (id: string, options: { signal: AbortSignal }) => Pro
         "@/hooks/use-tool-config": { useToolConfig: (config: unknown) => config },
         "@/hooks/use-video-playback": { ...requireModule("@/hooks/use-video-playback"), acquireVideoPlayback: createVideoPlaybackResolver({ owner: () => "owner:designer", subscribe: () => () => {}, fetch: (id, signal) => playback(id, { signal }), createUrl: blob => URL.createObjectURL(blob), revokeUrl: url => URL.revokeObjectURL(url) }) },
         "@/stores/use-config-store": { ...requireModule("@/stores/use-config-store"), useEffectiveConfig: () => defaultConfig, useConfigStore: (select: any) => select({ openConfigDialog() {} }) },
-        "@/stores/use-user-store": { useUserStore: (select: any) => select({ user: { id: "owner", status: "active", creditBalance: 100 } }) },
+        "@/stores/use-user-store": { useUserStore: Object.assign((select: any) => select({ user: { id: "owner", status: "active", creditBalance: 100 } }), { getState: () => ({ user: { id: "owner", status: "active", creditBalance: 100 } }) }) },
         "@/stores/use-business-config-store": { useBusinessConfigStore: (select: any) => select({ models: [], tools: [], status: "ready", estimate: () => ({ credits: 0, configured: true }) }) },
         "@/stores/use-asset-store": { useAssetStore: (select: any) => select({ addAsset: () => { throw new Error("preview must not create an asset"); } }) },
         "@/stores/use-theme-store": { useThemeStore: (select: any) => select({ theme: "light" }) },

@@ -4,7 +4,7 @@ import { moduleDefinitions, moduleIsEnabled, type ModuleKey } from "../../../sha
 
 export type UsageDestination = { key: string; label: string; path: string; moduleKey: ModuleKey };
 export const usageDestinations: UsageDestination[] = [
-    ...navigationTools.filter(tool => tool.group !== "admin" && !["my-prompts", "remove-background", "hd-upscale"].includes(tool.slug)).map(tool => ({ key: navigationModuleKey(tool.slug), label: tool.label, path: tool.path, moduleKey: navigationModuleKey(tool.slug) as ModuleKey })),
+    ...navigationTools.filter(tool => tool.group !== "admin" && !["my-prompts", "remove-background", "hd-upscale", "item-extract"].includes(tool.slug)).map(tool => ({ key: navigationModuleKey(tool.slug), label: tool.label, path: tool.path, moduleKey: navigationModuleKey(tool.slug) as ModuleKey })),
     ...creativePresets.map(preset => ({ key: `creative-${preset.id}`, label: preset.title, path: `/creative/${preset.id}`, moduleKey: `creative-${preset.id}` as ModuleKey })),
     { key: "pattern-placement", label: "图案定位", path: "/creative/pattern-placement", moduleKey: "pattern-placement" },
     { key: "pattern-repeat", label: "图案循环", path: "/creative/pattern-repeat", moduleKey: "pattern-repeat" },
@@ -14,7 +14,7 @@ export const usageDestinations: UsageDestination[] = [
 const imageBoards = new Set(["image", "detail-enhance", "image-edit", "angle-control", "seamless-stitch", "midjourney-blend"]);
 const boards = new Set(moduleDefinitions.filter(item => !["team", "performance"].includes(item.moduleKey)).map(item => item.moduleKey as string));
 export function usageBoardForLocation(pathname: string, search = ""): string | null {
-    if (pathname === "/remove-background") return "image-edit";
+    if (pathname === "/remove-background" || pathname === "/item-extract") return "image-edit";
     if (pathname === "/hd-upscale") return "detail-enhance";
     if (pathname === "/") return "home";
     if (pathname === "/image") { const key = new URLSearchParams(search).get("tool") || "image"; return imageBoards.has(key) ? key : "image"; }

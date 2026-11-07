@@ -23,7 +23,7 @@ function elements(node: unknown): React.ReactElement<any>[] {
 }
 
 // Execute the actual page closures, replacing only browser/storage/API boundaries.
-function harness(kind: "image" | "video", options: { logs?: any[]; upload?: () => Promise<any>; wait?: () => Promise<any>; media?: () => Promise<any>; query?: string; template?: () => Promise<any>; submit?: (...args: any[]) => Promise<any> } = {}) {
+function harness(kind: "image" | "video", options: { logs?: any[]; readLogs?: () => Promise<void>; upload?: () => Promise<any>; wait?: () => Promise<any>; media?: () => Promise<any>; query?: string; template?: () => Promise<any>; submit?: (...args: any[]) => Promise<any> } = {}) {
     globalThis.fetch = (async () => { throw new Error("Unexpected network request in offline scope regression"); }) as typeof fetch;
     const path = new URL(`../src/pages/${kind}/index.tsx`, import.meta.url);
     const requireModule = createRequire(path);
@@ -50,7 +50,9 @@ function harness(kind: "image" | "video", options: { logs?: any[]; upload?: () =
                 if (previous && values && previous.deps?.length === values.length && values.every((value, i) => Object.is(value, previous.deps![i]))) return;
                 pending.push(() => { previous?.cleanup?.(); effects[index] = { deps: values, cleanup: effect() }; }); } },
         "@/lib/i18n": i18nHarness,
-        "@/lib/workspace-storage": { createWorkspaceStorage: (name: string) => ({ iterate: async (visit: any) => { if (!name.includes("pending")) storedLogs.forEach(visit); }, setItem: async (key: string, value: any) => { writes.push(value); storedLogs.set(key, value); }, removeItem: async (key: string) => { storedLogs.delete(key); } }) },
+        // These closure tests exercise the original single-task workspace; tab lifecycle is covered by DOM tests.
+        "@/components/workbench-tasks": { WorkbenchTasks: ({ children }: any) => children.type(children.props), useWorkbenchTask: () => ({ id: "default", active: true, draftScope: (scope: string) => scope }), useWorkbenchTaskStatus() {} },
+        "@/lib/workspace-storage": { createWorkspaceStorage: (name: string) => ({ iterate: async (visit: any) => { if (!name.includes("pending")) { await options.readLogs?.(); storedLogs.forEach(visit); } }, setItem: async (key: string, value: any) => { writes.push(value); storedLogs.set(key, value); }, removeItem: async (key: string) => { storedLogs.delete(key); } }) },
         "@/hooks/use-generation-draft": { useGenerationDraft: (key: string, initial: any) => { if (!drafts.has(key)) drafts.set(key, key.endsWith(":settings") ? { ...config } : initial);
             if (!draftSetters.has(key)) draftSetters.set(key, (next: any) => drafts.set(key, typeof next === "function" ? next(drafts.get(key)) : next));
             return [drafts.get(key), draftSetters.get(key), true]; } },
@@ -98,6 +100,56 @@ function harness(kind: "image" | "video", options: { logs?: any[]; upload?: () =
         cards: () => elements(render()).filter(element => ["ResultVideoCard", "PendingVideoCard", "FailedVideoCard"].includes(element.type?.name)),
     };
 }
+
+test("video: the first history read blocks button, shortcut and direct submission, then keeps original and new tasks parallel", async () => {
+    const read = Promise.withResolvers<void>();
+    const polls: string[][] = []; let submissions = 0;
+    const app = harness("video", { logs: [videoLog], readLogs: () => read.promise,
+        wait: (...args: any[]) => { polls.push(args[0]); return new Promise(() => {}); },
+        submit: async (...args) => { submissions++; await args[5].onSubmissionStarted("new-request"); return { ...videoLog.task, id: "new-task", requestId: "new-request" }; } });
+    app.render(); await settle();
+    const generate = elements(app.render()).find(element => element.props.children === "生成视频" && element.props.onClick)!;
+    expect(generate.props.disabled).toBe(true);
+    generate.props.onClick();
+    elements(app.render()).find(element => element.props["aria-label"] === "视频提示词")!.props.onKeyDown({ key: "Enter", ctrlKey: true, metaKey: false, altKey: false, shiftKey: false, repeat: false, nativeEvent: {}, preventDefault() {} });
+    await settle();
+    expect(submissions).toBe(0); expect(app.writes).toEqual([]); expect(polls).toEqual([]);
+    read.resolve(); await settle(); app.render();
+    expect(polls).toEqual([["old-task"]]);
+    const parallel = elements(app.render()).find(element => element.props.children === "继续生成新视频" && element.props.onClick)!;
+    expect(parallel.props.disabled).toBe(false); parallel.props.onClick(); await settle();
+    expect(submissions).toBe(1); expect(polls).toEqual([["old-task"], ["new-task"]]);
+});
+
+test("video: failed initial history stays visibly blocked and explicit retry only reads the original task", async () => {
+    const retry = Promise.withResolvers<void>(); let reads = 0, polls = 0, submissions = 0;
+    const app = harness("video", { logs: [videoLog], readLogs: () => ++reads === 1 ? Promise.reject(new Error("FIXTURE_HISTORY_READ_FAILED")) : retry.promise,
+        wait: () => { polls++; return new Promise(() => {}); }, submit: async () => { submissions++; return videoLog.task; } });
+    app.render(); await settle();
+    const alert = elements(app.render()).find(element => element.props.role === "alert")!;
+    expect(alert).toBeDefined();
+    expect(elements(alert).some(element => element.props.children === "视频历史读取失败：FIXTURE_HISTORY_READ_FAILED")).toBe(true);
+    const generate = elements(app.render()).find(element => element.props.children === "生成视频" && element.props.onClick)!;
+    expect(generate.props.disabled).toBe(true); generate.props.onClick(); await settle();
+    expect(submissions).toBe(0); expect(app.writes).toEqual([]);
+    elements(alert).find(element => element.props.children === "重新读取视频记录")!.props.onClick(); app.render();
+    expect(reads).toBe(2); expect(polls).toBe(0); expect(submissions).toBe(0);
+    retry.resolve(); await settle();
+    expect(elements(app.render()).filter(element => element.props.role === "alert")).toEqual([]);
+    expect(polls).toBe(1); expect(submissions).toBe(0); expect(app.writes).toEqual([]);
+});
+
+for (const boundary of ["owner", "unmount"] as const) test(`video: a delayed history retry cannot resume the old task after ${boundary}`, async () => {
+    const retry = Promise.withResolvers<void>(); let reads = 0, polls = 0;
+    const app = harness("video", { logs: [videoLog], readLogs: () => ++reads === 1 ? Promise.reject(new Error("FIXTURE_HISTORY_READ_FAILED")) : retry.promise,
+        wait: () => { polls++; return new Promise(() => {}); } });
+    app.render(); await settle();
+    elements(app.render()).find(element => element.props.children === "重新读取视频记录")!.props.onClick();
+    if (boundary === "owner") app.userState.user = { ...app.userState.user, id: "other-owner" };
+    else app.unmount();
+    retry.resolve(); await settle();
+    expect(polls).toBe(0); expect(app.writes).toEqual([]); expect(app.assets).toEqual([]);
+});
 
 for (const kind of ["image", "video"] as const) {
     test(`${kind}: new draft rejects the previous clipboard upload but still accepts a current upload`, async () => {

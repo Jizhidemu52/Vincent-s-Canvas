@@ -4,7 +4,8 @@ import { AGENT_DOCUMENT_LIMITS } from "../../../shared/image-agent-documents";
 /** Sequential rendering bounds decoded page memory; images are previews, never source replacements. */
 export async function parsePdfDocument(bytes: Uint8Array, builder: AgentDocumentBuilder) {
     const { getDocument, GlobalWorkerOptions } = await import("pdfjs-dist/legacy/build/pdf.mjs");
-    if (typeof window !== "undefined") GlobalWorkerOptions.workerSrc = (await import("pdfjs-dist/legacy/build/pdf.worker.mjs?url")).default;
+    // Ship PDF.js's minified module with a distinct content hash and intact fake-worker exports.
+    if (typeof window !== "undefined") GlobalWorkerOptions.workerSrc = (await import("pdfjs-dist/legacy/build/pdf.worker.min.mjs?url")).default;
     const loading = getDocument({ data: bytes.slice(), useWorkerFetch: false, enableXfa: false });
     let pdf: Awaited<typeof loading.promise> | undefined;
     try {

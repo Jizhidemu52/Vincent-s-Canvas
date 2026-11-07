@@ -9,6 +9,7 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { displayModelMetadata, maskImageModelText } from "@/lib/model-display";
 import { CanvasPersistedMediaPreview } from "./canvas-persisted-media-preview";
 import { ConversationImageActions, conversationImageLabel, type ConversationImageAction, type ConversationImageItem } from "@/components/conversation-image-controls";
+import { ConversationImagePreview } from "@/components/conversation-image-preview";
 import { useImageMentions } from "@/hooks/use-image-mentions";
 import { useCanManageConfig } from "@/hooks/use-can-manage-config";
 import type { LocalUser } from "@/stores/use-user-store";
@@ -411,6 +412,7 @@ function AgentUserAvatar({ user, theme }: { user: LocalUser | null; theme: (type
 
 function AgentMessageAttachments({ messageId, attachments, theme, onUseImageForVideo, imageControls, activeImageId, disabled, onImageAction, onMaskImage }: { messageId: string; attachments: CanvasAgentChatAttachment[]; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onUseImageForVideo?: (attachment: CanvasAgentChatAttachment) => void; imageControls?: ReadonlyMap<string, CanvasAgentChatImageControl>; activeImageId?: string; disabled?: boolean; onImageAction?: (action: ConversationImageAction, imageId: string) => void; onMaskImage?: (imageId: string) => void }) {
     const t = useUiText();
+    const [previewImage, setPreviewImage] = useState<ConversationImageItem | null>(null);
     return (
         <div className="mt-2 grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 260px), 1fr))" }}>
             {attachments.map((item) => {
@@ -434,8 +436,8 @@ function AgentMessageAttachments({ messageId, attachments, theme, onUseImageForV
                             <WandSparkles className="size-3.5" />
                             {t("选此图生成视频")}</button>) : null;
                 return <div key={item.id} data-testid="canvas-agent-image-result" data-image-id={control?.image.id} className="group/result relative overflow-hidden rounded-xl border" style={{ borderColor: selected ? theme.node.activeStroke : theme.node.stroke }}>
-                    {control && onImageAction ? <button type="button" disabled={disabled || Boolean(control.image.unavailableReason)} onClick={() => onImageAction("edit", control.image.id)} aria-pressed={selected} aria-label={t("选择 {label} 作为编辑目标", { label: conversationImageLabel(control.image.label) })} className="relative block w-full focus-visible:outline-2 focus-visible:outline-offset-[-2px]" style={{ outlineColor: theme.canvas.selectionStroke }}>
-                        {preview}<span className="pointer-events-none absolute left-2 top-2 rounded px-1.5 py-0.5 text-xs" style={{ color: theme.node.text, background: theme.node.panel }}>{conversationImageLabel(control.image.label)}{version ? ` · V${version}` : ""}</span>
+                    {item.mediaType !== "video" ? <button type="button" disabled={Boolean(control?.image.unavailableReason) || (!item.url && !item.storageKey)} onClick={() => setPreviewImage(control?.image || { id: item.id, label: item.name, name: item.name, dataUrl: item.url, storageKey: item.storageKey })} aria-haspopup="dialog" aria-label={`${t("查看大图")} · ${conversationImageLabel(control?.image.label || item.name)}`} className="relative block w-full cursor-zoom-in focus-visible:outline-2 focus-visible:outline-offset-[-2px]" style={{ outlineColor: theme.canvas.selectionStroke }}>
+                        {preview}{control ? <span className="pointer-events-none absolute left-2 top-2 rounded px-1.5 py-0.5 text-xs" style={{ color: theme.node.text, background: theme.node.panel }}>{conversationImageLabel(control.image.label)}{version ? ` · V${version}` : ""}</span> : null}
                         {selected ? <span data-testid="canvas-agent-image-current" className="pointer-events-none absolute right-2 top-2 rounded px-1.5 py-0.5 text-xs font-medium" style={{ color: theme.node.panel, background: theme.canvas.selectionStroke }}>{t("当前")}</span> : null}
                     </button> : preview}
                     {control && onImageAction ? <div data-testid="canvas-agent-image-actions" className="absolute inset-x-2 bottom-2 transition-opacity group-hover/result:pointer-events-auto group-hover/result:opacity-100 group-focus-within/result:pointer-events-auto group-focus-within/result:opacity-100 [@media(hover:hover)]:pointer-events-none [@media(hover:hover)]:opacity-0 motion-reduce:transition-none">
@@ -443,6 +445,7 @@ function AgentMessageAttachments({ messageId, attachments, theme, onUseImageForV
                     </div> : videoAction}
                 </div>
             })}
+            {previewImage ? <ConversationImagePreview key={previewImage.id} image={previewImage} onClose={() => setPreviewImage(null)} /> : null}
         </div>
     );
 }

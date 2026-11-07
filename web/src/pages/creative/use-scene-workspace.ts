@@ -1,4 +1,6 @@
 import { uiText } from "@/lib/i18n";
+import { useWorkbenchTask, useWorkbenchTaskStatus } from "@/components/workbench-tasks";
+import { DEFAULT_WORKBENCH_TASK, matchesWorkbenchTask } from "@/lib/workbench-task-state";
 import { deleteHistoryEntries } from "@/lib/history-batch-delete";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createWorkspaceStorage } from "@/lib/workspace-storage";
@@ -48,6 +50,7 @@ export type SceneLog = {
     optimized?: boolean;
     submittedReferences?: SceneImage[];
     id: string; ownerId: string; sceneId: string; createdAt: number; prompt: string;
+    workspaceId?: string;
     form: SceneForm; referenceImages: SceneImages; config: SceneParameters;
     results: SceneResult[]; images: SceneImage[]; durationMs: number; successCount: number; failCount: number;
     selection?: SceneSelection | null; operation?: "ai" | "recolor";
@@ -143,6 +146,7 @@ async function storeSceneResult(item: SceneResult, source: Awaited<ReturnType<ty
 
 /** Dedicated scene state; never mutates the original image workbench's settings. */
 export function useSceneWorkspace(sceneId: string, handoffToken: string | null = null) {
+    const workbenchTask = useWorkbenchTask();
     const effectiveConfig = useEffectiveConfig("image");
     const configRef = useRef(effectiveConfig);
     configRef.current = effectiveConfig;
@@ -152,7 +156,8 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
     const refreshBusinessConfig = useBusinessConfigStore(state => state.refresh);
     const estimate = useBusinessConfigStore(state => state.estimate);
     const destination = `creative-${sceneId}`;
-    const scope = user ? `${encodeURIComponent(user.id)}:${encodeURIComponent(sceneId)}${handoffToken ? `:${designDraftScope(handoffToken, destination)}` : ""}` : null;
+    const scope = user ? workbenchTask.draftScope(`${encodeURIComponent(user.id)}:${encodeURIComponent(sceneId)}${handoffToken ? `:${designDraftScope(handoffToken, destination)}` : ""}`) : null;
+    const workspaceId = workbenchTask.id === DEFAULT_WORKBENCH_TASK && !handoffToken ? DEFAULT_WORKBENCH_TASK : scope || workbenchTask.id;
     const history = useMemo(() => user ? createSceneHistory(storage, user.id, sceneId) : null, [user?.id, sceneId]);
     const resultActions = useMemo(() => user ? createSceneResultActions(user.id) : null, [user?.id, sceneId]);
     const scopeRef = useRef(scope);
@@ -170,6 +175,7 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
     const [parameters, setParameters] = useState(() => sceneParameters(effectiveConfig));
     const [systemPromptOverride, setSystemPromptOverride] = useState<string | undefined>();
     const [logs, setLogs] = useState<SceneLogSummary[]>([]);
+    const [pendingLogIds, setPendingLogIds] = useState<Set<string>>(() => new Set());
     const knownLogIds = useRef(new Set<string>());
     const [recoveredRequestId, setRecoveredRequestId] = useState<string | null>(null);
     const [historyTotal, setHistoryTotal] = useState(0);
@@ -189,6 +195,8 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
     const [resultActionBusy, setResultActionBusy] = useState(false);
     const resultActionGate = useRef(false);
     const loading = loadedScope !== scope || restoring;
+    useWorkbenchTaskStatus({ busy: running || restoring || uploadCount > 0 || resultActionBusy, pending: pendingLogIds.size > 0,
+        ready: loadedScope === scope && draftReady, label: results.some(result => result.status === "success") ? "已完成" : results.some(result => result.status === "failed") ? "已失败" : "草稿" });
     const toolKey = `creative-${sceneId}` as ToolKey;
     const toolEnabled = useToolEnabled(toolKey);
     const selectionEnabled = useModuleEnabled("creative-selection");
@@ -208,7 +216,7 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
     const quotaBlocked = deploymentFeatures.creditsEnabled && Boolean(user && estimateValue.configured && user.creditBalance < estimateValue.credits);
     const referenceValidation = validateImageReferences(model, references);
     const validation = loading ? "正在读取当前板块的数据"
-        : handoffToken && !draftReady ? "设计交接草稿尚未准备好，请从原结果重新打开。"
+        : !draftReady ? handoffToken ? "设计交接草稿尚未准备好，请从原结果重新打开。" : "本地草稿或任务记录读取失败，请刷新页面重试。"
         : !toolEnabled ? "当前创意场景已停用，原有草稿和结果仍保留"
         : selection && !selectionEnabled ? "选区绘制已停用，请清除选区后再生成"
         : uploadCount ? "图片正在保存，请稍候"
@@ -233,7 +241,7 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
 
     useEffect(() => {
         const revision = ++epoch.current;
-        knownLogIds.current.clear(); setRecoveredRequestId(null);
+        knownLogIds.current.clear(); setPendingLogIds(new Set()); setRecoveredRequestId(null);
         setForm(createSceneForm(sceneId)); setImages({}); setSelection(null); setLogs([]); setResults([]); setActiveLog(null); setSelectedPrompt(null); setPreviewing(false);
         setHistoryTotal(0); setHistoryHasMore(false); setHistoryLoading(false); historyLoadingRef.current = false;
         setSystemPromptOverride(undefined);
@@ -242,7 +250,8 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
         void (async () => {
             try {
                 await draftWrites.get(scope);
-                const [storedDraft, page, pendingLogs] = await Promise.all([storage.getItem<SceneDraft>(`draft:${scope}`), history!.page(), history!.pending()]);
+                const [storedDraft, page, allPendingLogs, latest] = await Promise.all([storage.getItem<SceneDraft>(`draft:${scope}`), history!.page(), history!.pending(), history!.latest(workspaceId)]);
+                const pendingLogs = allPendingLogs.filter(log => matchesWorkbenchTask(log, workspaceId));
                 if (revision !== epoch.current) return;
                 let draft = storedDraft;
                 if (!draft && handoffToken) {
@@ -264,6 +273,7 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
                 }
                 setLogs(page.entries); setHistoryTotal(page.total); setHistoryHasMore(page.hasMore);
                 knownLogIds.current = new Set([...page.entries, ...pendingLogs].map(entry => entry.id));
+                setPendingLogIds(new Set(pendingLogs.map(log => log.id)));
                 if (draft) {
                     setSystemPromptOverride(draft.systemPromptOverride);
                     setForm(cloneSceneForm({ ...createSceneForm(sceneId), ...draft.form })); setParameters(sceneParameters(draft.config)); setImages(draft.images); setSelection(draft.selection || null);
@@ -274,14 +284,18 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
                         if (revision === epoch.current) setSelection(restoredSelection);
                     } catch (caught) { if (revision === epoch.current) setError(uiText(errorText(caught))); }
                 }
-                if (pendingLogs[0]) {
-                    const pendingLog = await hydrateLog(await history!.read(pendingLogs[0].id));
+                // Result previews may be missing without invalidating the successfully read draft.
+                if (revision === epoch.current) setDraftReady(true);
+                const resume = pendingLogs[0] || latest;
+                if (resume) {
+                    const pendingLog = await hydrateLog(await history!.read(resume.id));
                     if (revision === epoch.current) {
                         setActiveLog(pendingLog); setResults(pendingLog.results); setSelectedPrompt(pendingLog.prompt); setRecoveredRequestId(pendingLog.id);
-                        setNotice(uiText("已恢复未结束的原请求。请查询原请求，不会自动重新生成或扣费；修改设计输入可开始新任务。"));
+                        if (pendingLogs[0]) {
+                            setNotice(uiText("已恢复未结束的原请求。请查询原请求，不会自动重新生成或扣费；修改设计输入可开始新任务。"));
+                        }
                     }
                 }
-                if (revision === epoch.current) setDraftReady(true);
             } catch (caught) {
                 if (revision === epoch.current) setError(uiText("本地草稿或记录读取失败：{value1}", { value1: errorText(caught) }));
             } finally { if (revision === epoch.current) setLoadedScope(scope); }
@@ -348,6 +362,11 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
     const rememberLog = (log: SceneLog) => {
         const summary = summarizeSceneLog(log);
         setLogs(current => [summary, ...current.filter(item => item.id !== log.id)]);
+        if (matchesWorkbenchTask(log, workspaceId)) setPendingLogIds(current => {
+            const next = new Set(current);
+            if (summary.unresolvedCount) next.add(log.id); else next.delete(log.id);
+            return next;
+        });
         if (!knownLogIds.current.has(log.id)) { knownLogIds.current.add(log.id); setHistoryTotal(current => current + 1); }
     };
 
@@ -448,7 +467,7 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
             const stored = await uploadImage(blob);
             const image: SceneImage = { ...stored, id: nanoid(), name: "精确换色结果.png", dataUrl: stored.url, type: stored.mimeType, ...canvasImageReferenceIdentity(images.primary) };
             const result: SceneResult = { id: nanoid(), status: "success", image };
-            const log: SceneLog = { id: nanoid(), ownerId: user.id, sceneId, createdAt: Date.now(), prompt: description,
+            const log: SceneLog = { id: nanoid(), ownerId: user.id, sceneId, workspaceId, createdAt: Date.now(), prompt: description,
                 form: cloneSceneForm(form), referenceImages: { primary: original }, config: sceneParameters(config), operation: "recolor", inputArchiveVersion: 1,
                 results: [result], images: [image], durationMs: performance.now() - start, successCount: 1, failCount: 0 };
             if (revision === epoch.current) { setResults([result]); rememberLog(log); setActiveLog(log); }
@@ -465,13 +484,14 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
             setError(uiText("相同输入已有未结束的原请求，请先查询原请求。修改设计输入后才会创建新任务。")); setRecoveredRequestId(activeLog.id); return;
         }
         let prompt = form.description.trim() || form.change.trim();
-        const promptInput = scenePromptInput(sceneId, form);
+        const promptInput = scenePromptInput(sceneId, form, images);
         let optimized = false;
-        const release = workbenchSubmissions.acquire(`creative:${user.id}:${sceneId}`);
+        const release = workbenchSubmissions.acquire(`creative:${scope}`);
         if (!release) { setError(uiText("图片任务正在处理，请勿重复提交")); return; }
         const revision = epoch.current;
         try {
             for (const summary of await history!.pending()) {
+                if (!matchesWorkbenchTask(summary, workspaceId)) continue;
                 const prior = await history!.read(summary.id);
                 if (revision !== epoch.current) { release(); return; }
                 if (sceneInputMatchesLog(prior, form, images, config, selection)) {
@@ -510,7 +530,7 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
             // Preparing a guide is local and may outlive navigation or an account change.
             // Do not start a paid request for a workspace that is no longer active.
             if (revision !== epoch.current) return;
-            const runLog: SceneLog = { id: logId, ownerId: user.id, sceneId, createdAt, prompt, userInput: promptInput, optimized, form: snapshot.form, referenceImages: snapshot.images,
+            const runLog: SceneLog = { id: logId, ownerId: user.id, sceneId, workspaceId, createdAt, prompt, userInput: promptInput, optimized, form: snapshot.form, referenceImages: snapshot.images,
                 submittedReferences: requestReferences, config: snapshot.config, selection: snapshot.selection, operation: "ai", inputArchiveVersion: 1, results: pending, images: [], durationMs: 0, successCount: 0, failCount: 0 };
             const persistRun = async () => {
                 if (revision !== epoch.current || useUserStore.getState().user?.id !== user.id) throw new Error("员工或场景已变化，未继续提交");
@@ -551,7 +571,7 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
 
     const retryResult = async (result: SceneResult) => {
         if (!user || !history || !activeLog || running || loading || !toolEnabled || !canRetrySceneResult(result)) return;
-        const release = workbenchSubmissions.acquire(`creative:${user.id}:${sceneId}`);
+        const release = workbenchSubmissions.acquire(`creative:${scope}`);
         if (!release) { setError(uiText("当前场景正在处理任务，请勿重复提交")); return; }
         const revision = epoch.current, originalId = activeLog.id, start = performance.now(), retryId = nanoid();
         const controller = new AbortController(); observationControllers.current.add(controller);
@@ -572,7 +592,7 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
             if (revision !== epoch.current) return;
             setActiveLog(null); setResults([pending]); setSelectedPrompt(original.prompt);
             const warnings: string[] = [];
-            const retryLog: SceneLog = { ...original, id: retryId, createdAt: Date.now(), config: { ...original.config, count: "1" }, results: [pending], images: [], successCount: 0, failCount: 0, durationMs: 0,
+            const retryLog: SceneLog = { ...original, id: retryId, workspaceId, createdAt: Date.now(), config: { ...original.config, count: "1" }, results: [pending], images: [], successCount: 0, failCount: 0, durationMs: 0,
                 referenceImages: prepared.referenceImages, selection: prepared.selection, userInput: prepared.input.promptInput,
                 submittedReferences,
                 retryOf: { logId: original.id, resultId: result.id, taskId: result.taskId! } };
@@ -600,7 +620,7 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
 
     const queryResult = async (result: SceneResult, continueSubmission = false) => {
         if (!user || !history || !activeLog || running || loading || !canQuerySceneResult(result)) return;
-        const release = workbenchSubmissions.acquire(`creative:${user.id}:${sceneId}`);
+        const release = workbenchSubmissions.acquire(`creative:${scope}`);
         if (!release) return;
         const revision = epoch.current, originalId = activeLog.id;
         const controller = new AbortController(); observationControllers.current.add(controller);

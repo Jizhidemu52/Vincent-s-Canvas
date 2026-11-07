@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import ts from "typescript";
 import { hasImageTransparency, processImageResult, ImageResultProcessingError, validateQuickImageSource } from "../src/image-result-processing";
 import { prepareQuickImageTask } from "../src/quick-image-tools";
-import { quickImageTaskTarget } from "../../shared/quick-image-tools";
+import { quickImageTaskTarget, type QuickImageAction } from "../../shared/quick-image-tools";
 import { hasNonIdentityImageOrientation, prepareImageEditInput } from "../src/image-edit-input";
 
 const ffmpeg = process.env.FFMPEG_PATH || "ffmpeg";
@@ -34,7 +34,27 @@ const editInput = { references: [original], mask };
 const expectedComposite = [10, 20, 30, 255, 77, 88, 99, 0, 90, 80, 70, 200, 100, 100, 100, 128];
 
 describe("quick image local result verification", () => {
-  const parameters = (action: "remove-background" | "hd-upscale") => prepareQuickImageTask({ ...quickImageTaskTarget(action), sourceUrls: ["owned"], parameters: { quickImageAction: action } }).parameters;
+  const parameters = (action: QuickImageAction) => prepareQuickImageTask({ ...quickImageTaskTarget(action), sourceUrls: ["owned"], parameters: { quickImageAction: action } }).parameters;
+  test("product extraction accepts reframed color output at configured resolution, not a source-aligned matte", async () => {
+    const pixels = new Uint8Array(1920 * 960 * 4).fill(255);
+    pixels.set([20, 50, 90, 255], 400);
+    const product = png(pixels, 1920, 960);
+    const output = await processImageResult({ result: product, parameters: parameters("item-extract"), editInput: { references: [original] } });
+    expect(output.display.bytes).toBe(product.bytes);
+    expect(output.operations).toContain("product_image_opaque_verified");
+    expect(output.operations).not.toContain("ai_foreground_matte");
+    expect(output.warning).toContain("遮挡补全");
+    await expect(processImageResult({ result: generated, parameters: parameters("item-extract"), editInput: { references: [original] } })).rejects.toMatchObject({ code: "IMAGE_RESULT_DIMENSION_MISMATCH" });
+  }, 15_000);
+  test("product extraction composites returned alpha on white and respects administrator resolution", async () => {
+    const pixels = new Uint8Array(960 * 480 * 4).fill(255);
+    pixels.set([20, 40, 60, 0], 0); pixels.set([20, 40, 60, 128], 4);
+    const product = png(pixels, 960, 480);
+    const output = await processImageResult({ result: product, parameters: { ...parameters("item-extract"), resolution: "1k" }, editInput: { references: [original] } });
+    expect([...rgba(output.display).subarray(0, 8)]).toEqual([255, 255, 255, 255, 137, 147, 157, 255]);
+    expect(output.operations).toContain("product_alpha_flattened_white");
+    expect(await hasImageTransparency(output.display)).toBe(false);
+  }, 15_000);
   test("matte preserves original RGB, dimensions, holes and soft edges in true PNG alpha", async () => {
     const pixels = [20, 40, 60, 255, 70, 80, 90, 255, 110, 120, 130, 200, 150, 160, 170, 255];
     const input = png(pixels);

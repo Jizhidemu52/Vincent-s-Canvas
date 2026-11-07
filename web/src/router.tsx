@@ -60,7 +60,7 @@ function moduleRoute(Page: RoutePage, moduleKey: ModuleKey | ((search: string) =
 
 function imageModule(search: string): ModuleKey {
     const tool = new URLSearchParams(search).get("tool");
-    if (tool === "remove-background") return "image-edit";
+    if (tool === "remove-background" || tool === "item-extract") return "image-edit";
     if (tool === "hd-upscale") return "detail-enhance";
     return tool === "detail-enhance" || tool === "image-edit" || tool === "angle-control" || tool === "seamless-stitch" || tool === "midjourney-blend" ? tool : "image";
 }
@@ -87,6 +87,7 @@ export const router = createBrowserRouter([
             { path: "/image", element: moduleRoute(ImagePage, imageModule) },
             { path: "/remove-background", element: moduleRoute(ImagePage, "image-edit") },
             { path: "/hd-upscale", element: moduleRoute(ImagePage, "detail-enhance") },
+            { path: "/item-extract", element: moduleRoute(ImagePage, "image-edit") },
             { path: "/video", element: moduleRoute(VideoPage, "video") },
             { path: "/assets", element: moduleRoute(AssetsPage, "assets") },
             { path: "/reference-import", element: moduleRoute(ReferenceImportPage, "reference-import") },

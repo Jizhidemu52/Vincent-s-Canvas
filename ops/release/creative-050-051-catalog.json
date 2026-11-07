@@ -1,0 +1,47 @@
+{
+  "schema": 1,
+  "constraints": [
+    {
+      "before": {
+        "name": "module_flags_module_key_check",
+        "type": "c",
+        "relation": "module_flags",
+        "definition": "CHECK ((module_key = ANY (ARRAY['creative'::text, 'canvas'::text, 'standard-colors'::text, 'photo-color-picker'::text, 'pattern-recolor'::text, 'svg-trace'::text, 'creative-selection'::text, 'canvas-local-tools'::text, 'canvas-local-agent'::text, 'assets'::text, 'prompts'::text, 'reference-import'::text, 'design-library'::text, 'team'::text, 'performance'::text, 'pattern-placement'::text, 'pattern-repeat'::text, 'image'::text, 'detail-enhance'::text, 'image-edit'::text, 'angle-control'::text, 'seamless-stitch'::text, 'midjourney-blend'::text, 'video'::text, 'creative-text-to-style'::text, 'creative-style-to-sketch'::text, 'creative-local-restyle'::text, 'creative-garment-colorway'::text, 'creative-back-design'::text, 'creative-pattern-extract'::text, 'creative-pattern-colorway'::text, 'creative-accessory-design'::text, 'creative-pattern-craft'::text, 'canvas-image'::text, 'canvas-edit'::text, 'canvas-mask-edit'::text, 'canvas-angle'::text, 'canvas-batch'::text, 'canvas-chat'::text, 'canvas-video'::text, 'canvas-audio'::text, 'gpt-chat'::text, 'gpt-chat-image'::text, 'series-recipe'::text])))"
+      },
+      "after": {
+        "name": "module_flags_module_key_check",
+        "type": "c",
+        "relation": "module_flags",
+        "definition": "CHECK ((module_key = ANY (ARRAY['creative'::text, 'canvas'::text, 'standard-colors'::text, 'photo-color-picker'::text, 'pattern-recolor'::text, 'svg-trace'::text, 'creative-selection'::text, 'canvas-local-tools'::text, 'canvas-local-agent'::text, 'assets'::text, 'prompts'::text, 'reference-import'::text, 'design-library'::text, 'team'::text, 'performance'::text, 'pattern-placement'::text, 'pattern-repeat'::text, 'image'::text, 'detail-enhance'::text, 'image-edit'::text, 'angle-control'::text, 'seamless-stitch'::text, 'midjourney-blend'::text, 'video'::text, 'creative-text-to-style'::text, 'creative-style-to-sketch'::text, 'creative-local-restyle'::text, 'creative-garment-colorway'::text, 'creative-back-design'::text, 'creative-pattern-extract'::text, 'creative-pattern-colorway'::text, 'creative-accessory-design'::text, 'creative-pattern-craft'::text, 'creative-virtual-try-on'::text, 'creative-sketch-to-photo'::text, 'canvas-image'::text, 'canvas-edit'::text, 'canvas-mask-edit'::text, 'canvas-angle'::text, 'canvas-batch'::text, 'canvas-chat'::text, 'canvas-video'::text, 'canvas-audio'::text, 'gpt-chat'::text, 'gpt-chat-image'::text, 'series-recipe'::text])))"
+      }
+    },
+    {
+      "before": {
+        "name": "quick_image_configurations_action_check",
+        "type": "c",
+        "relation": "quick_image_configurations",
+        "definition": "CHECK ((action = ANY (ARRAY['remove-background'::text, 'hd-upscale'::text])))"
+      },
+      "after": {
+        "name": "quick_image_configurations_action_check",
+        "type": "c",
+        "relation": "quick_image_configurations",
+        "definition": "CHECK ((action = ANY (ARRAY['remove-background'::text, 'hd-upscale'::text, 'item-extract'::text])))"
+      }
+    },
+    {
+      "before": {
+        "name": "tool_api_configurations_tool_key_check",
+        "type": "c",
+        "relation": "tool_api_configurations",
+        "definition": "CHECK ((tool_key = ANY (ARRAY['image'::text, 'detail-enhance'::text, 'image-edit'::text, 'angle-control'::text, 'seamless-stitch'::text, 'midjourney-blend'::text, 'video'::text, 'creative-text-to-style'::text, 'creative-style-to-sketch'::text, 'creative-local-restyle'::text, 'creative-garment-colorway'::text, 'creative-back-design'::text, 'creative-pattern-extract'::text, 'creative-pattern-colorway'::text, 'creative-accessory-design'::text, 'creative-pattern-craft'::text, 'canvas-image'::text, 'canvas-edit'::text, 'canvas-mask-edit'::text, 'canvas-angle'::text, 'canvas-batch'::text, 'canvas-chat'::text, 'canvas-video'::text, 'canvas-audio'::text, 'gpt-chat'::text, 'gpt-chat-image'::text, 'series-recipe'::text])))"
+      },
+      "after": {
+        "name": "tool_api_configurations_tool_key_check",
+        "type": "c",
+        "relation": "tool_api_configurations",
+        "definition": "CHECK ((tool_key = ANY (ARRAY['image'::text, 'detail-enhance'::text, 'image-edit'::text, 'angle-control'::text, 'seamless-stitch'::text, 'midjourney-blend'::text, 'video'::text, 'creative-text-to-style'::text, 'creative-style-to-sketch'::text, 'creative-local-restyle'::text, 'creative-garment-colorway'::text, 'creative-back-design'::text, 'creative-pattern-extract'::text, 'creative-pattern-colorway'::text, 'creative-accessory-design'::text, 'creative-pattern-craft'::text, 'creative-virtual-try-on'::text, 'creative-sketch-to-photo'::text, 'canvas-image'::text, 'canvas-edit'::text, 'canvas-mask-edit'::text, 'canvas-angle'::text, 'canvas-batch'::text, 'canvas-chat'::text, 'canvas-video'::text, 'canvas-audio'::text, 'gpt-chat'::text, 'gpt-chat-image'::text, 'series-recipe'::text])))"
+      }
+    }
+  ]
+}

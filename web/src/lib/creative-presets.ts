@@ -92,6 +92,22 @@ export const creativePresets: readonly CreativePreset[] = [
         tool: "image-edit",
         prompt: CREATIVE_REQUIREMENT_PLACEHOLDER,
     },
+    {
+        id: "virtual-try-on",
+        title: "虚拟试穿",
+        description: "以产品图为主体，结合模特图或成人模特描述生成试穿效果。",
+        group: "new",
+        tool: "image-edit",
+        prompt: "单件产品试穿效果",
+    },
+    {
+        id: "sketch-to-photo",
+        title: "线稿转实拍",
+        description: "以线稿结构为依据，指定材质与颜色，生成实拍质感效果。",
+        group: "new",
+        tool: "image-edit",
+        prompt: "线稿结构与指定材质配色",
+    },
 ];
 
 export function getCreativePreset(id: string | null): CreativePreset | undefined {

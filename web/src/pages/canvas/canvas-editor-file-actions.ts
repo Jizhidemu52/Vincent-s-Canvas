@@ -4,6 +4,8 @@ import type { useCanvasExport } from "@/hooks/use-canvas-export";
 import { uiText } from "@/lib/i18n";
 import { audioExtension, loadCanvasExport } from "@/lib/canvas/canvas-export-loader";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
+import { useUserStore } from "@/stores/use-user-store";
+import { resolveMediaUrl } from "@/services/file-storage";
 import { CanvasNodeType, type CanvasNodeData, type ViewportTransform } from "@/types/canvas";
 import type { App } from "antd";
 import type { useCanvasDialogs } from "./use-canvas-dialogs";
@@ -14,6 +16,8 @@ export async function downloadCanvasEditorNode(node: CanvasNodeData, options: {
     message: ReturnType<typeof App.useApp>["message"]; setImageDownload: ReturnType<typeof useCanvasDialogs>["setImageDownload"];
 }) {
     if ((node.type !== CanvasNodeType.Image && node.type !== CanvasNodeType.Video && node.type !== CanvasNodeType.Audio) || !node.metadata?.content) return;
+    const identity = useUserStore.getState();
+    const ownerId = identity.user?.id, ownerStatus = identity.status;
     const done = options.message.loading({ content: uiText("正在准备下载…"), duration: 0 });
     try {
         const { downloadCanvasContent, loadCanvasImageVariants } = await loadCanvasExport();
@@ -23,8 +27,12 @@ export async function downloadCanvasEditorNode(node: CanvasNodeData, options: {
             if (options.savedProjectIdRef.current !== options.projectId || !current || current.metadata?.content !== node.metadata.content || current.metadata?.storageKey !== node.metadata.storageKey) return;
             options.setImageDownload({ projectId: options.projectId, node: current, variants });
         } else {
+            const content = await resolveMediaUrl(node.metadata.storageKey, node.metadata.content);
+            const current = options.nodesRef.current.find(item => item.id === node.id), session = useUserStore.getState();
+            if (session.user?.id !== ownerId || session.status !== ownerStatus || options.savedProjectIdRef.current !== options.projectId || !current || current.metadata?.content !== node.metadata.content || current.metadata?.storageKey !== node.metadata.storageKey) return;
             const title = (node.title || (node.type === CanvasNodeType.Video ? uiText("画布视频") : uiText("画布音频"))).replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").trim().replace(/[. ]+$/, "");
-            downloadCanvasContent(node.metadata.content, `${title || uiText("画布素材")}.${node.type === CanvasNodeType.Video ? videoFileExtension(node.metadata.mimeType) : audioExtension(node.metadata.mimeType)}`);
+            const extension = node.type === CanvasNodeType.Video ? videoFileExtension(node.metadata.mimeType) : audioExtension(node.metadata.mimeType), name = title || uiText("画布素材");
+            downloadCanvasContent(content, name.toLowerCase().endsWith(`.${extension}`) ? name : `${name}.${extension}`);
         }
     } finally { done(); }
 }

@@ -43,6 +43,20 @@ test("concurrent records are serialized without dropping a history entry", async
     await Promise.all(Array.from({ length: 12 }, (_, index) => f.history.save(log(String(index), index))));
     expect((await f.history.page()).total).toBe(12);
 });
+
+test("each task restores its own latest result even beyond the first history page", async () => {
+    const f = fixture();
+    await f.history.save(log("legacy", 1));
+    await f.history.save({ ...log("task-a-old", 2), workspaceId: "a" });
+    await f.history.save({ ...log("task-a-latest", 3), workspaceId: "a" });
+    await Promise.all(Array.from({ length: 40 }, (_, index) => f.history.save({ ...log(`task-b-${index}`, 10 + index), workspaceId: "b" })));
+    expect((await f.history.page()).entries.every(item => item.workspaceId === "b")).toBe(true);
+    f.reads.length = 0;
+    expect((await f.history.latest("a"))?.id).toBe("task-a-latest");
+    expect((await f.history.latest("default"))?.id).toBe("legacy");
+    expect(await f.history.latest("new-task")).toBeNull();
+    expect(f.reads.every(key => key === "history-index:owner:text-to-style")).toBe(true);
+});
 test("history access remains scoped by both owner and scene", async () => {
     const f = fixture(); await f.history.page();
     await expect(f.history.save({ ...log("other", 1), ownerId: "another" })).rejects.toThrow("其他账号");

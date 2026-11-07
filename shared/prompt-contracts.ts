@@ -1,9 +1,12 @@
 import { z } from "zod";
 
 /** Public input vocabulary only. Authoring rules are never bundled into the client. */
-export const promptScenes = [
+export const creativePromptScenes = [
   "text-to-style", "style-to-sketch", "local-restyle", "garment-colorway", "back-design",
-  "pattern-extract", "pattern-colorway", "accessory-design", "pattern-craft", "series-recipe",
+  "pattern-extract", "pattern-colorway", "accessory-design", "pattern-craft", "virtual-try-on", "sketch-to-photo",
+] as const;
+export const promptScenes = [
+  ...creativePromptScenes, "series-recipe",
   "workflow-step", "print-placement", "garment-presentation", "free-optimize", "batch-optimize", "reverse-prompt", "video-motion",
 ] as const;
 export const promptInputSchema = z.object({
@@ -47,7 +50,7 @@ export type PublicPromptCompilation = {
 export function requiredPromptScene(toolKey: string | undefined): PromptScene | undefined {
   if (toolKey === "series-recipe") return "series-recipe";
   const key = toolKey?.replace(/^creative-/, "");
-  return toolKey?.startsWith("creative-") && (promptScenes.slice(0, 9) as readonly string[]).includes(key!) ? key as PromptScene : undefined;
+  return toolKey?.startsWith("creative-") && (creativePromptScenes as readonly string[]).includes(key!) ? key as PromptScene : undefined;
 }
 
 export const promptRecipeSettingsSchema = z.object({

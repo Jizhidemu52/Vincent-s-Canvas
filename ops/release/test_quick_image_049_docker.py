@@ -25,7 +25,7 @@ class QuickImage049DockerPostgres17(unittest.TestCase):
         self.database = "usage048_" + uuid.uuid4().hex
         self.psql('CREATE DATABASE "' + self.database + '";', "postgres")
         bootstrap = ["CREATE TABLE schema_migrations(name text PRIMARY KEY,applied_at timestamptz NOT NULL DEFAULT now());"]
-        names = sorted(path.name for path in fixture.MIGRATIONS.glob("*.sql"))
+        names = sorted(path.name for path in fixture.MIGRATIONS.glob("*.sql") if path.name <= operator.MIGRATION)
         self.assertEqual(names[-1], operator.MIGRATION)
         for name in names[:-1]:
             self.assertRegex(name, r"^[0-9]{3}_[a-z0-9_]+\.sql$")

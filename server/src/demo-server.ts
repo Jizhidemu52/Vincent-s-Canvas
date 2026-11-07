@@ -397,9 +397,11 @@ const demoPrices: Array<Record<string, unknown>> = Array.from(
 }));
 const demoToolConfigurations: Array<{ toolKey: ToolKey; modelConfigId: string | null; enabled: boolean; creditCostOverride: number | null; rmbCostOverride: number | null; configurationVersion: number; allowRawPrompt: boolean }> = toolDefinitions.map((tool) => ({
   toolKey: tool.toolKey,
-  // Only chat has a mandatory shared default; image choices remain independent.
+  // Chat has a shared default; the two new creative boards start with Flare 2.6.
   modelConfigId: tool.toolKey === "gpt-chat"
     ? String(markImageProvider.models.find(model => model.modelId === INITIAL_CHAT_MODEL_ID)!.id)
+    : ["creative-virtual-try-on", "creative-sketch-to-photo"].includes(tool.toolKey)
+      ? String(markImageProvider.models.find(model => model.modelId === "gpt-image-2.6-flare")!.id)
     : tool.toolKey === "seamless-stitch" && !markImageProvider.apiKey ? String(demoModels[3]!.id) : null,
   enabled: true,
   creditCostOverride: null,

@@ -10,7 +10,12 @@ export const QUICK_IMAGE_MATTE_CONSTRAINT = [
   "Use neutral grayscale only for anti-aliased contours, fine hair/fibers and genuinely translucent material, representing foreground opacity. Preserve all fine protrusions without inventing details.",
   "Return only the aligned black-and-white alpha matte. No colored pixels, checkerboard, outlines, labels, captions, border or background scene. The original RGB pixels will be composited by the server.",
 ].join("\n");
-export const quickImageDefaultPrompts = {
+export const quickImageDefaultParameters: Record<QuickImageAction, Readonly<Record<string, unknown>>> = {
+  "remove-background": {},
+  "hd-upscale": { size: "auto", resolution: "4k" },
+  "item-extract": { size: "auto", resolution: "2k", quality: "medium", background: "opaque", output_format: "png" },
+};
+export const quickImageDefaultPrompts: Record<QuickImageAction, string> = {
   "remove-background": [
     "Extract only the main product and its attached parts. Exclude hands or people holding it, display supports and every part of the background.",
     "Preserve the complete product silhouette, fine fibers, straps, handles, lace and genuine holes without adding or redesigning any detail.",
@@ -21,6 +26,16 @@ export const quickImageDefaultPrompts = {
     "Keep all text, logos, symbols, repeated motifs and pattern counts exactly as in the reference. Do not translate, replace, add, remove or reinterpret them.",
     "Recover natural edge clarity and existing fine texture with restrained denoising and deblurring. Do not invent texture, change material, smooth away craft detail, oversharpen or add halos.",
     "No crop, expansion, redesign, extra objects, watermark or captions. Return one restored image only.",
+  ].join("\n"),
+  "item-extract": [
+    "Extract the complete main physical product shown in the supplied photograph into one clean, high-definition e-commerce product photograph on a pure white (#FFFFFF) background. This is a faithful product extraction and flat-lay presentation, not print artwork extraction, a technical drawing or a new design.",
+    "Select the most visually prominent main product. If the main subject is an evident matching pair or coordinated set, keep all visible matching pieces and their original count together. Exclude unrelated products; do not merge different products, duplicate pieces or invent a missing mate.",
+    "Remove the person, hands, body parts, mannequin, hanger, display supports, packaging unrelated to the product, surrounding objects and original scene. Do not leave skin, human-shaped bulges, supports or background fragments inside or around the product.",
+    "Present clothing and flexible accessories naturally laid flat, front-facing to the camera, with the product fully visible and centered with a modest white margin. For rigid or inherently three-dimensional products, use the closest evidence-supported front/flat presentation while retaining their real volume; do not crush, unfold, split or turn them into a pattern piece. Do not reveal an unseen back or interior by rotating the product.",
+    "Preserve the product identity and every visible design feature: silhouette, construction, proportions, cut, component relationships, colors, material boundaries, knit/weave/grain, texture, stitching, trims, fasteners, straps and decorations. Keep the exact count, shape, relative scale and placement of visible buttons, buckles, holes, prints, embroidery, repeated motifs, text and logos. Do not translate, rewrite, mirror, add, remove or redesign them.",
+    "Only correct perspective and wearing-induced folds as needed for a plausible flat presentation without changing the cut or dimensions. Retain natural material texture and true construction folds. Restore only small, locally occluded areas when continuation is strongly supported by adjacent visible evidence; never invent hidden construction, unseen back details, labels, print content or a substantially missing product. When evidence is insufficient, retain the uncertainty instead of presenting fabricated details as real.",
+    "Keep delicate fibers, lace openings, translucent parts, white-on-white edges and reflective highlights intact. Use clean, natural edge clarity and realistic material detail without invented texture, excessive smoothing, halos or artificial sharpening. The background must be solid white, not transparent, gray, checkerboard, a studio room, a floor texture or a gradient. Avoid cast shadows outside the product; retain only shading needed to describe its material and volume.",
+    "Return one finished full-color product image only at the configured output resolution. No crop through the product, collage, before/after comparison, dimension lines, annotations, captions, watermark, added brand marks or extra objects.",
   ].join("\n"),
 };
 
@@ -54,7 +69,7 @@ export function prepareQuickImageTask<T extends QuickImageInput>(input: T, snaps
     ...input, toolKey: tool, modelConfigId: snapshot?.modelConfigId, promptInput: undefined,
     prompt: action === "remove-background" ? `${prompt}\n\nMandatory output contract (cannot be overridden):\n${QUICK_IMAGE_MATTE_CONSTRAINT}` : prompt,
     ...(snapshot ? { [QUICK_IMAGE_SNAPSHOT]: snapshot } : {}),
-    parameters: { ...(snapshot?.parameters ?? (action === "hd-upscale" ? { size: "auto", resolution: "4k" } : {})), tool, n: 1, count: 1, quickImageAction: action,
+    parameters: { ...(snapshot?.parameters ?? quickImageDefaultParameters[action]), tool, n: 1, count: 1, quickImageAction: action,
       quickImage: { action, recipeVersion: QUICK_IMAGE_RECIPE_VERSION, ...(snapshot ? { configurationVersion: snapshot.configurationVersion, ...(snapshot.adminTest ? { adminTest: true } : {}) } : {}) } },
   };
 }

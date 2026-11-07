@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { buildCreativePresetHref, CREATIVE_REQUIREMENT_PLACEHOLDER, creativePresetGroups, creativePresets, getCreativePreset } from "@/lib/creative-presets";
 
 describe("creative design presets", () => {
-    test("offers nine uniquely addressable presets across the three design groups", () => {
-        expect(creativePresets).toHaveLength(9);
+    test("offers eleven uniquely addressable presets across the three design groups", () => {
+        expect(creativePresets).toHaveLength(11);
         expect(new Set(creativePresets.map((preset) => preset.id)).size).toBe(creativePresets.length);
         expect(creativePresetGroups.map((group) => group.title)).toEqual(["新款设计", "改款设计", "图案设计"]);
         for (const preset of creativePresets) {

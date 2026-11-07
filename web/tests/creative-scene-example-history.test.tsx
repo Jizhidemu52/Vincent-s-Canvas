@@ -56,6 +56,9 @@ function harness(sceneId = "style-to-sketch", recoveredRequestId?: string) {
         antd: { App: { useApp: () => ({ modal: { confirm(value: unknown) { calls.confirms.push(value); } } }) }, Button: "button", Checkbox: "input", Image: () => null },
         "react-router-dom": { Link: () => null, useParams: () => ({ presetId: sceneId }), useNavigate: () => () => {}, useSearchParams: () => [new URLSearchParams()] },
         "@/components/design-examples": { PracticeExampleRecord },
+        "@/components/design-result-review": { DesignResultReview: () => null },
+        "@/components/workbench-tasks": { WorkbenchTasks: () => null, useWorkbenchTask: () => ({ id: "default", active: true }) },
+        "./scene-product-picker": { SceneProductPicker: () => null },
         "@/components/auth/module-gate": { ModuleGate: () => null },
         "@/components/image-settings-panel": { ImageSettingsPanel: () => null, imageQualityLabel: (value: string) => value, imageSizeLabel: (value: string) => value },
         "@/components/model-picker": { ModelPicker: () => null },
@@ -74,7 +77,7 @@ function harness(sceneId = "style-to-sketch", recoveredRequestId?: string) {
     const render = () => {
         stateIndex = effectIndex = 0;
         const gate = module.exports.default();
-        const workspace = gate.props.children;
+        const workspace = gate.props.children.props.children;
         const output = workspace.type(workspace.props);
         pendingEffects.splice(0).forEach(effect => effect());
         return output;
@@ -124,7 +127,7 @@ test("new task and the empty result link return to history without generating", 
     button(output, "看看实操案例").props.onClick();
     expect(elements(app.render()).some(item => item.type === PracticeExampleRecord)).toBe(true);
     button(app.render(), "当前结果").props.onClick();
-    button(app.render(), "新建任务").props.onClick();
+    button(app.render(), "清空当前草稿").props.onClick();
     output = app.render();
     expect(button(output, "最近任务").props["aria-pressed"]).toBe(true);
     expect(app.calls.reset).toBe(1);

@@ -24,6 +24,9 @@ function harness(saved = new Map<string, unknown>(), initialLog?: SceneLog) {
     const states: any[] = [], refs: any[] = [], effects: any[] = [], pendingEffects: Array<() => void> = [];
     const calls: string[] = [], submissions: any[] = [];
     let stateIndex = 0, refIndex = 0, effectIndex = 0, ownerId = "owner";
+    let taskStatus: { busy: boolean; pending: boolean; ready: boolean };
+    let resolveImage = async (key: string, fallback: string) => fallback || key;
+    let failReadOnce = "";
     let originalTask: QueuedTask | null = null, originalCompilation: PublicPromptCompilation | null = compilation;
     let queryTask: (() => Promise<QueuedTask | null>) | undefined;
     let submit = async (options: any) => {
@@ -37,11 +40,12 @@ function harness(saved = new Map<string, unknown>(), initialLog?: SceneLog) {
     const userState = () => ({ user: { id: ownerId, status: "active", creditBalance: 100 } });
     const userStore = Object.assign((select: Function) => select(userState()), { getState: userState });
     const dependencies: Record<string, any> = {
+        "@/components/workbench-tasks": { useWorkbenchTask: () => ({ id: "default", active: true, draftScope: (scope: string) => scope }), useWorkbenchTaskStatus(status: typeof taskStatus) { taskStatus = status; } },
         react: { ...React, useState: (initial: any) => { const index = stateIndex++; if (!(index in states)) states[index] = typeof initial === "function" ? initial() : initial; return [states[index], (next: any) => { states[index] = typeof next === "function" ? next(states[index]) : next; }]; },
             useRef: (initial: any) => refs[refIndex++] ||= { current: initial }, useMemo: (factory: Function) => factory(),
             useEffect: (effect: Function, deps?: any[]) => { const index = effectIndex++, prior = effects[index]; if (prior && deps?.every((value, i) => Object.is(value, prior.deps?.[i]))) return; pendingEffects.push(() => { prior?.cleanup?.(); effects[index] = { deps, cleanup: effect() }; }); },
         },
-        "@/lib/workspace-storage": { createWorkspaceStorage: () => ({ getItem: async (key: string) => structuredClone(saved.get(key) ?? null), setItem: async (key: string, value: unknown) => { saved.set(key, structuredClone(value)); } }) },
+        "@/lib/workspace-storage": { createWorkspaceStorage: () => ({ getItem: async (key: string) => { if (failReadOnce && key.startsWith(failReadOnce)) { failReadOnce = ""; throw new Error("essential-storage-read-failed"); } return structuredClone(saved.get(key) ?? null); }, setItem: async (key: string, value: unknown) => { saved.set(key, structuredClone(value)); } }) },
         "@/lib/submission-gate": { workbenchSubmissions: { acquire: () => () => {} } },
         "@/stores/use-config-store": { ...requireModule("@/stores/use-config-store"), useEffectiveConfig: () => config },
         "@/stores/use-user-store": { useUserStore: userStore },
@@ -50,7 +54,7 @@ function harness(saved = new Map<string, unknown>(), initialLog?: SceneLog) {
         "@/hooks/use-tool-config": { useToolConfig: (value: unknown) => value, useToolEnabled: () => true },
         "@/lib/deployment-features": { deploymentFeatures: { creditsEnabled: false } },
         "@/lib/image-model-settings": { ...requireModule("@/lib/image-model-settings"), useImageModelProfile: () => requireModule("@/lib/image-model-settings").imageModelProfile(config.model) },
-        "@/services/image-storage": { resolveImageUrl: async (key: string, fallback: string) => fallback || key, uploadImage: async (url: string) => ({ url, storageKey: "result-storage", width: 100, height: 100, bytes: 20, mimeType: "image/png" }) },
+        "@/services/image-storage": { resolveImageUrl: (key: string, fallback: string) => resolveImage(key, fallback), uploadImage: async (url: string) => ({ url, storageKey: "result-storage", width: 100, height: 100, bytes: 20, mimeType: "image/png" }) },
         "@/services/generation-local-inputs": { freezeLocalInput: async (image: any) => ({ ...image, inputSha256: "sha" }), restoreLocalInput: async (image: any) => ({ ...image }) },
         "@/services/api/image": { requestGeneration: (_config: unknown, _prompt: string, options: any) => submit(options), requestEdit: (_config: unknown, _prompt: string, _references: unknown, _mask: unknown, options: any) => submit(options) },
         "./scene-recovery": { ...requireModule("./scene-recovery"), readSceneRequest: (log: SceneLog, result: any, owner: string) => readSceneRequest(log, result, owner, { getQueuedTask: getTask, getQueuedTaskByRequestId: getTask, getPromptCompilation: async () => { calls.push("GET compilation"); return originalCompilation; } }) },
@@ -58,9 +62,65 @@ function harness(saved = new Map<string, unknown>(), initialLog?: SceneLog) {
     const module = { exports: {} as any };
     new Function("require", "module", "exports", code)((name: string) => dependencies[name] || requireModule(name), module, module.exports);
     const render = () => { stateIndex = refIndex = effectIndex = 0; const value = module.exports.useSceneWorkspace("text-to-style"); pendingEffects.splice(0).forEach(effect => effect()); return value; };
-    return { render, saved, calls, submissions, initialize: async () => { render(); await tick(); render(); await tick(); return render(); },
+    return { render, saved, calls, submissions, status: () => taskStatus, setReadFailure: (prefix: string) => { failReadOnce = prefix; }, setResolveImage: (resolve: typeof resolveImage) => { resolveImage = resolve; }, initialize: async () => { render(); await tick(); render(); await tick(); return render(); },
         setTask: (task: QueuedTask | null) => { originalTask = task; }, setCompilation: (value: PublicPromptCompilation | null) => { originalCompilation = value; },
         setTaskQuery: (query: () => Promise<QueuedTask | null>) => { queryTask = query; }, setSubmit: (fn: typeof submit) => { submit = fn; }, changeOwner: () => { ownerId = "other"; }, unmount: () => effects.forEach(effect => effect?.cleanup?.()) };
+}
+
+test("creative unresolved records beyond the first history page protect their tab after clear and history preview", async () => {
+    const completed: SceneLog[] = Array.from({ length: 21 }, (_, index) => ({ ...structuredClone(pendingLog), id: `completed-${index}`, createdAt: index + 2,
+        results: [{ id: `done-${index}`, status: "success" }], successCount: 1 }));
+    const otherWorkspace: SceneLog = { ...structuredClone(pendingLog), id: "other-workspace", workspaceId: "other-task", createdAt: 30 };
+    const saved = new Map<string, unknown>([["history:owner:text-to-style", [pendingLog, ...completed, otherWorkspace]]]);
+    const app = harness(saved); const ws = await app.initialize();
+    expect(ws.logs).toHaveLength(20);
+    expect(ws.logs.some((log: SceneLog) => log.id === pendingLog.id)).toBe(false);
+    expect(app.status().pending).toBe(true);
+    ws.reset(); app.render();
+    expect(app.status().pending).toBe(true);
+    await app.render().previewLog(ws.logs.find((log: SceneLog) => log.id.startsWith("completed-"))); app.render();
+    expect(app.status().pending).toBe(true);
+    await app.render().previewLog(pendingLog); const pending = app.render();
+    app.setTask({ id: "late-task", requestId: "original-request:0", userId: "owner", status: "success", resultUrls: ["/original.png"], failureReason: null });
+    await pending.queryResult(pending.results[0]); app.render();
+    // A different workspace's unresolved record must not pin this completed tab.
+    expect(app.status().pending).toBe(false);
+    await app.render().previewLog(otherWorkspace); app.render();
+    expect(app.status().pending).toBe(false);
+    expect(app.submissions).toHaveLength(0);
+    app.unmount();
+});
+
+test("missing latest preview preserves draft readiness and subsequent input writes", async () => {
+    const image = { id: "missing", name: "missing.png", storageKey: "missing-storage", dataUrl: "", width: 100, height: 100, bytes: 20, mimeType: "image/png", type: "image/png" };
+    const latest: SceneLog = { ...structuredClone(pendingLog), results: [{ id: "result", status: "success", image }], images: [image], successCount: 1 };
+    const app = harness(new Map(), latest);
+    app.setResolveImage(async () => "");
+    const ws = await app.initialize();
+    expect(ws.error).toContain("本地文件已不可用");
+    expect(app.status().ready).toBe(true);
+    ws.setForm({ ...ws.form, description: "仍需保存的修改" }); app.render(); await tick();
+    expect((app.saved.get("draft:owner:text-to-style") as any).form.description).toBe("仍需保存的修改");
+    expect(app.saved.get("history-record:owner:text-to-style:pending-log")).toEqual(latest);
+    expect(app.submissions).toHaveLength(0);
+    app.unmount();
+});
+
+for (const failedRead of ["draft:", "history-index:"]) {
+    test(`essential creative ${failedRead} read failure blocks submissions and preserves the unread draft`, async () => {
+        const app = harness();
+        const original = structuredClone(app.saved.get("draft:owner:text-to-style"));
+        app.setReadFailure(failedRead);
+        const ws = await app.initialize();
+        expect(ws.error).toContain("essential-storage-read-failed");
+        expect(app.status().ready).toBe(false);
+        ws.setForm(form); const edited = app.render(); await tick();
+        await edited.generate();
+        expect(app.submissions).toHaveLength(0);
+        expect(edited.validation).toContain("读取失败");
+        expect(app.saved.get("draft:owner:text-to-style")).toEqual(original);
+        app.unmount();
+    });
 }
 
 test("original IDs normalize only once and foreign scene records cannot be queried", async () => {

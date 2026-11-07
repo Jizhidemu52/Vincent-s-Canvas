@@ -12,6 +12,7 @@ describe("quick image model selection and safe parameter boundaries", () => {
     ["mai-image-2.6-flash", { web_grounding: false }],
     ["gemini-nano-banana-2.1", { resolution: "4k", size: "auto" }],
     ["gpt-image-2.5-flare", { resolution: "2k", quality: "high", output_format: "webp", output_compression: 90 }],
+    ["gpt-image-2.6-flare", { resolution: "2k", quality: "medium", background: "opaque", output_format: "png", size: "auto" }],
     ["gpt-image-2.6-sunburst", { resolution: "1k", complexity: "high", moderation: "auto" }],
     ["gpt-image-2-ext", { resolution: "2k", size: "auto", official_fallback: true }],
     ["gemini-3.1-flash-image-preview-official", { resolution: "0.5k", size: "auto", googleSearch: true }],
@@ -32,6 +33,7 @@ describe("quick image model selection and safe parameter boundaries", () => {
       expect(() => validateQuickImageConfiguration("hd-upscale", configuration(parameters), model("gemini-3.1-flash-image-preview"))).toThrow();
     }
     expect(() => validateQuickImageConfiguration("remove-background", configuration({ background: "transparent" }), model("gpt-image-2.6-flare"))).toThrow();
+    expect(() => validateQuickImageConfiguration("item-extract", configuration({ background: "transparent" }), model("gpt-image-2.6-flare"))).toThrow("白底商品图");
   });
 
   test("editable intent and execution version cannot remove the fixed matte contract or count", () => {

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { App } from "antd";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
-import { SeamlessStitchPage } from "@/pages/image/seamless-stitch";
+import { SeamlessStitchWorkspace } from "@/pages/image/seamless-stitch";
 import { DEFAULT_SEAMLESS_STITCH_PARAMETERS, requestSeamlessStitch, SEAMLESS_PATTERN_PROMPT } from "@/services/api/internal-ai";
 import type { BusinessConfig, PublicModel, PublicToolConfiguration } from "@/services/api/business-config";
 import { defaultConfig, useConfigStore } from "@/stores/use-config-store";
@@ -128,13 +128,37 @@ test("disabled binding and invalid Mark size reject before any reference upload"
     expect(invalid.map(call => call.path)).toEqual(["/api/models"]);
 });
 
+test("seamless lifecycle persists its stable request identity before the single paid POST", async () => {
+    const calls = mockServer([flare]);
+    const lifecycle: string[] = [];
+    await requestSeamlessStitch(reference, DEFAULT_SEAMLESS_STITCH_PARAMETERS, config(flare.id), {
+        requestId: "workspace-independent-request",
+        onSubmissionStarted: async () => {
+            expect(calls.some(call => call.path === "/api/tasks" && call.body)).toBe(false);
+            lifecycle.push("persisted");
+        },
+        onSubmitted: async ids => { expect(lifecycle).toEqual(["persisted"]); expect(ids).toEqual(["task-1"]); lifecycle.push("accepted"); },
+    });
+    expect(calls.find(call => call.path === "/api/tasks" && call.body)?.body?.requestId).toBe("workspace-independent-request:0");
+    expect(lifecycle).toEqual(["persisted", "accepted"]);
+});
+
+test("seamless task identity storage failure stops before the paid POST", async () => {
+    const calls = mockServer([flare]);
+    await expect(requestSeamlessStitch(reference, DEFAULT_SEAMLESS_STITCH_PARAMETERS, config(flare.id), {
+        requestId: "workspace-storage-rejected",
+        onSubmissionStarted: async () => { throw new Error("fixture disk full"); },
+    })).rejects.toThrow("fixture disk full");
+    expect(calls.filter(call => call.path === "/api/tasks" && call.body)).toHaveLength(0);
+});
+
 test.each([flare, sunburst, nano, internal])("$id renders the correct seamless controls without changing the existing workspace", model => {
     globals.window = originalWindow;
     const business = { models: [model], tools: [], prices: [], status: "ready" as const };
     useBusinessConfigStore.setState(business);
     Object.assign(businessInitial, business);
     configInitial.config = config(model.id);
-    const html = renderToStaticMarkup(<MemoryRouter><App><SeamlessStitchPage /></App></MemoryRouter>);
+    const html = renderToStaticMarkup(<MemoryRouter><App><SeamlessStitchWorkspace /></App></MemoryRouter>);
     expect(html).toContain("处理模型");
     expect(html).toContain("输入图片");
     expect(html).toContain("历史出图");

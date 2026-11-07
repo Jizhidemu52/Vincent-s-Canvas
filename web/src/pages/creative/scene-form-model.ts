@@ -12,6 +12,7 @@ export type SceneForm = {
     category: string;
     silhouette: string;
     fabric: string;
+    colorDescription: string;
     presentation: string;
     sketchStyle: string;
     sketchDetail: string;
@@ -42,6 +43,7 @@ export function createSceneForm(_sceneId: string): SceneForm {
         category: "按描述判断",
         silhouette: "按描述判断",
         fabric: "",
+        colorDescription: "",
         presentation: "白底平铺",
         sketchStyle: "technical",
         sketchDetail: "standard",
@@ -118,10 +120,26 @@ export const sceneSummaries: Record<string, { input: string; output: string; exa
         example: "将图片2的花朵轮廓应用到图片1的拉链头，设计为花形金属拉链头，保留连接孔位与金属质感。",
         limit: "设计效果不代表开模、尺寸、连接强度或真实生产可行性。",
     },
+    "virtual-try-on": {
+        input: "产品图与可选模特图",
+        output: "单品试穿效果",
+        example: "让一位短发成年女性穿着产品图中的毛衣，全身站姿，搭配简洁黑色长裤，保留毛衣的领型、绞花与罗纹。",
+        limit: "首次支持一件产品的视觉试穿；不保证真实身份、实际尺寸或合身度，不替代真人试衣。",
+    },
+    "sketch-to-photo": {
+        input: "线稿与可选材质图",
+        output: "实拍质感效果",
+        example: "根据毛衣线稿生成实拍质感效果，指定粉色羊毛针织，保留领口、衣身比例和绞花布局，白底平铺。",
+        limit: "黑白线稿不含原色信息；材质与颜色以填写内容或参考图为依据，不宣称还原未知原色或真实工艺。",
+    },
 };
 
 export function supportsSceneProductTarget(sceneId: string): boolean {
     return ["style-to-sketch", "garment-colorway", "local-restyle", "back-design", "pattern-extract"].includes(sceneId);
+}
+
+export function supportsSceneKeepDetails(sceneId: string): boolean {
+    return supportsSceneProductTarget(sceneId) || sceneId === "virtual-try-on" || sceneId === "sketch-to-photo";
 }
 
 export function getSceneSlots(sceneId: string, form: SceneForm): SceneSlot[] {
@@ -129,6 +147,14 @@ export function getSceneSlots(sceneId: string, form: SceneForm): SceneSlot[] {
     if (sceneId === "accessory-design") return [
         { id: "primary", label: "辅料图", hint: "图片1 · 提供辅料的结构、材质与连接方式", required: true },
         { id: "secondary", label: "图案图", hint: "图片2 · 只提供要应用的图案或造型元素", required: true },
+    ];
+    if (sceneId === "virtual-try-on") return [
+        { id: "primary", label: "产品图", hint: "图片1 · 只提供要试穿的一件产品及其设计细节", required: true },
+        { id: "secondary", label: "模特图", hint: "图片2 · 可选，只提供成人模特与姿态；不替代产品图", required: false },
+    ];
+    if (sceneId === "sketch-to-photo") return [
+        { id: "primary", label: "线稿图", hint: "图片1 · 决定产品轮廓、结构与细节位置", required: true },
+        { id: "secondary", label: "材质与配色参考图", hint: "图片2 · 可选，只参考材质与配色，不带入其款式结构", required: false },
     ];
     const pattern = sceneId.startsWith("pattern-");
     const slots: SceneSlot[] = [{
@@ -206,6 +232,11 @@ export function validateSceneForm(sceneId: string, form: SceneForm, images: Part
         if (slot.required && !images[slot.id]) return `请上传${slot.label}。`;
     }
     if (sceneId === "text-to-style" && !form.description.trim()) return "请写下你想设计的款式。";
+    if (sceneId === "virtual-try-on" && !images.secondary && !form.description.trim()) return "请上传模特图，或填写成人模特与试穿要求。";
+    if (sceneId === "sketch-to-photo") {
+        if (!form.fabric.trim()) return "请填写材质方向；有参考图时可明确填写参考图材质。";
+        if (!form.colorDescription.trim()) return "请填写颜色方向；黑白线稿不能自动还原未知原色。";
+    }
     if (sceneId === "local-restyle" && !form.change.trim()) return "请描述这个部位要改成什么样。";
     if (sceneId === "back-design" && form.backStructure === "自由描述" && !form.description.trim()) return "请补充你想要的背面结构。";
     if (sceneId === "garment-colorway" || sceneId === "pattern-colorway") {
@@ -221,7 +252,7 @@ export function validateSceneForm(sceneId: string, form: SceneForm, images: Part
 }
 
 /** Public form values only; the server owns all scene authoring rules. */
-export function scenePromptInput(sceneId: string, form: SceneForm): import("../../../../shared/prompt-contracts").PromptInputData {
+export function scenePromptInput(sceneId: string, form: SceneForm, images: Partial<Record<SceneSlotId, ReferenceImage>> = {}): import("../../../../shared/prompt-contracts").PromptInputData {
     if (!Object.hasOwn(sceneSummaries, sceneId)) throw new Error("暂不支持这个设计场景。");
     const keys: Record<string, Array<keyof SceneForm>> = {
         "text-to-style": ["category", "silhouette", "fabric", "presentation"],
@@ -233,11 +264,13 @@ export function scenePromptInput(sceneId: string, form: SceneForm): import("../.
         "pattern-extract": ["extractMode", "extractBackground"],
         "pattern-craft": ["craft", "craftFabric"],
         "accessory-design": ["accessoryType", "accessoryApply"],
+        "virtual-try-on": [],
+        "sketch-to-photo": ["fabric", "colorDescription", "presentation"],
     };
     const frozen = cloneSceneForm(form);
     frozen.carryoverRequirements = frozen.carryoverRequirements.map(value => value.trim()).filter(Boolean);
-    const fields = Object.fromEntries(["description", ...(frozen.carryoverRequirements.length ? ["carryoverRequirements"] : []), ...(supportsSceneProductTarget(sceneId) ? ["targetProduct", "keepDetails"] : []), ...keys[sceneId]!].map(key => [key, frozen[key as keyof SceneForm]]));
+    const fields = Object.fromEntries(["description", ...(frozen.carryoverRequirements.length ? ["carryoverRequirements"] : []), ...(supportsSceneProductTarget(sceneId) ? ["targetProduct"] : []), ...(supportsSceneKeepDetails(sceneId) ? ["keepDetails"] : []), ...keys[sceneId]!].map(key => [key, frozen[key as keyof SceneForm]]));
     return { scene: sceneId as import("../../../../shared/prompt-contracts").PromptScene, fields,
         userText: [form.description.trim(), sceneId === "local-restyle" ? form.change.trim() : ""].filter(Boolean).join("\n"),
-        referenceRoles: getSceneSlots(sceneId, form).map(slot => slot.label), mode: sceneId === "text-to-style" ? "generate" : "edit" };
+        referenceRoles: getSceneSlots(sceneId, form).filter(slot => slot.required || images[slot.id]).map(slot => slot.label), mode: sceneId === "text-to-style" ? "generate" : "edit" };
 }

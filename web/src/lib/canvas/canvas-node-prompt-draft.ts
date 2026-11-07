@@ -1,5 +1,5 @@
 export type CanvasNodePromptDraftSource = {
-    metadata?: { content?: string; prompt?: string; draftPrompt?: string; quickImageAction?: "remove-background" | "hd-upscale" };
+    metadata?: { content?: string; prompt?: string; draftPrompt?: string; quickImageAction?: "remove-background" | "hd-upscale" | "item-extract" };
 };
 
 export function canvasNodePromptDraft(node: CanvasNodePromptDraftSource) {

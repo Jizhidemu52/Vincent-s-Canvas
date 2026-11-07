@@ -7,9 +7,10 @@ import { MARK_IMAGE_PROVIDER_ID } from "../../shared/mark-image-models";
 import { quickImageTaskTarget } from "../../shared/quick-image-tools";
 
 const admin = { id: "admin", role: "super_admin" }, employee = { id: "employee", role: "designer" };
-const mai = "10000000-0000-4000-8000-000000000001", nano = "10000000-0000-4000-8000-000000000002", alternative = "10000000-0000-4000-8000-000000000003";
+const mai = "10000000-0000-4000-8000-000000000001", nano = "10000000-0000-4000-8000-000000000002", alternative = "10000000-0000-4000-8000-000000000003", flare = "10000000-0000-4000-8000-000000000004";
 const models = [{ id: mai, modelId: "mai-image-2.6-flash", providerId: MARK_IMAGE_PROVIDER_ID, enabled: true, capabilities: ["edit"] },
   { id: nano, modelId: "gemini-nano-banana-2.1", providerId: MARK_IMAGE_PROVIDER_ID, enabled: true, capabilities: ["edit"] },
+  { id: flare, modelId: "gpt-image-2.6-flare", providerId: MARK_IMAGE_PROVIDER_ID, enabled: true, capabilities: ["edit"] },
   { id: alternative, modelId: "gpt-image-2.6-flare", providerId: "alternative", enabled: true, capabilities: ["edit"] }];
 const providers = [{ id: MARK_IMAGE_PROVIDER_ID, protocol: "apimart", enabled: true }, { id: "alternative", protocol: "apimart", enabled: true }];
 const draft = { modelConfigId: alternative, prompt: "Restore selected product", parameters: { resolution: "2k", size: "auto" } };
@@ -20,7 +21,9 @@ describe("in-memory demo quick configuration shares production contract without 
     const store = new DemoQuickImageConfigurationStore(models, providers);
     expect(store.read("remove-background")).toMatchObject({ modelConfigId: mai, configurationVersion: 0, isDefault: true });
     expect(store.read("hd-upscale")).toMatchObject({ modelConfigId: nano, parameters: { resolution: "4k" } });
-    expect(store.catalog(admin).models.map(model => model.id)).toEqual([mai, nano, alternative]);
+    expect(store.read("item-extract")).toMatchObject({ modelConfigId: flare, parameters: { resolution: "2k", quality: "medium", background: "opaque", output_format: "png" } });
+    expect(store.catalog(admin).models.map(model => model.id)).toEqual([mai, nano, flare, alternative]);
+    expect(store.catalog(admin).configurations.map(value => value.action)).toEqual(["remove-background", "hd-upscale", "item-extract"]);
     for (const actor of [null, employee, { id: "department", role: "department_admin" }]) {
       expect(() => store.catalog(actor)).toThrow(); expect(() => store.save("hd-upscale", { ...draft, expectedVersion: 0 }, actor)).toThrow();
       expect(() => store.prepare(input, { configuration: draft, actor })).toThrow();

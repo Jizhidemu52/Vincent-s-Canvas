@@ -85,7 +85,7 @@ test("500 节点下搜索、长对话与配置输入的前后测量及最新值�
     await expect.poll(() => api.document(PROJECT_ID)?.nodes.find((node: any) => node.id === config.id)?.metadata.composerContent).toBe("最新中文配置内容必须完整保留");
     await page.getByRole("tab", { name: "对话", exact: true }).first().click();
     const panel = page.locator(".cw-agent-panel");
-    const chat = panel.getByPlaceholder("直接问当前画布上的内容…");
+    const chat = panel.getByPlaceholder("理解画布、修改图片或批量编排；输入 @ 引用图片…");
     await expect(chat).toBeEnabled();
     await expect(panel.getByText(/^第79条合成对话。/)).toBeVisible();
     for (let round = 0; round < 3; round++) measurements.assistant.push(await measureTyping(page, chat, "explain current canvas without generating 0123456789"));

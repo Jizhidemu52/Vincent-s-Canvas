@@ -20,6 +20,7 @@ function harness(saved = new Map<string, unknown>(), token: string | null = "tok
     const userState = () => ({ user: { id: "owner", role: "designer", status: "active", creditBalance: 100 }, status: "authenticated" });
     const userStore = Object.assign((select: Function) => select(userState()), { getState: userState });
     const dependencies: Record<string, any> = {
+        "@/components/workbench-tasks": { useWorkbenchTask: () => ({ id: "default", active: true, draftScope: (scope: string) => scope }), useWorkbenchTaskStatus() {} },
         react: { ...React,
             useState(initial: any) { const index = stateIndex++; if (!(index in states)) states[index] = typeof initial === "function" ? initial() : initial; return [states[index], (value: any) => { states[index] = typeof value === "function" ? value(states[index]) : value; }]; },
             useRef: (initial: any) => refs[refIndex++] ||= { current: initial }, useMemo: (factory: Function) => factory(),

@@ -1,0 +1,233 @@
+import { readFileSync } from "node:fs";
+import type { BrowserContext, Page } from "@playwright/test";
+import { test, expect, IMAGE, type MockCanvasApi } from "./fixtures";
+import { toolDefinitions } from "../../shared/feature-catalog";
+
+const videoBytes = readFileSync(new URL("./media/video.mp4", import.meta.url));
+const imageModel = { id: "10000000-0000-4000-8000-000000000001", name: "E2E Image", modelId: "gpt-image-2", capabilities: ["generate", "edit", "batch"], creditCost: 0, rmbCost: 0 };
+const videoModel = { id: "10000000-0000-4000-8000-000000000003", name: "E2E Video", modelId: "wan2.7", capabilities: ["video"], creditCost: 0, rmbCost: 0 };
+const FIRST_OWNER = "00000000-0000-4000-8000-000000000099";
+const SECOND_OWNER = "00000000-0000-4000-8000-000000000088";
+const boards = [
+    { kind: "video", path: "/video", submit: "生成视频" },
+    { kind: "seamless", path: "/image?tool=seamless-stitch", submit: "开始无缝拼接" },
+    { kind: "recipe", path: "/creative/series-recipe", submit: "生成第 1 色 1 张" },
+] as const;
+type Board = typeof boards[number];
+const pane = (page: Page) => page.getByRole("tabpanel");
+const tabs = (page: Page) => page.getByRole("tablist", { name: "任务列表", exact: true }).getByRole("tab");
+
+async function mockModelsAndMedia(context: BrowserContext, api: MockCanvasApi) {
+    await context.route("**/api/models", route => route.fulfill({ json: {
+        models: [imageModel, videoModel], prices: [],
+        tools: toolDefinitions.map(tool => ({ ...tool, enabled: true, modelConfigId: tool.toolKey === "video" || tool.toolKey === "canvas-video" ? videoModel.id : imageModel.id, configurationVersion: 1 })),
+    } }));
+    await context.route("**/api/tasks/preflight", route => route.fulfill({ json: { ok: true, normalized: {} } }));
+    await context.route("**/api/tasks/by-request/*", route => {
+        const requestId = decodeURIComponent(new URL(route.request().url()).pathname.split("/").at(-1)!);
+        return route.fulfill({ json: { task: [...api.tasks.values()].find(task => task.requestId === requestId) } });
+    });
+    await context.route("**/api/assets/*/content", route => {
+        const id = new URL(route.request().url()).pathname.split("/")[3];
+        return api.tasks.get(id)?.operationType === "video_generation" ? route.fulfill({ contentType: "video/mp4", body: videoBytes }) : route.fallback();
+    });
+    await context.route("**/api/assets/*/playback", route => route.fulfill({ contentType: "video/mp4", body: videoBytes }));
+}
+
+async function fill(page: Page, board: Board, marker: string) {
+    if (board.kind === "video") await pane(page).getByRole("textbox", { name: "视频提示词", exact: true }).fill(marker);
+    if (board.kind === "recipe") {
+        await pane(page).getByRole("textbox", { name: "系列名称", exact: true }).fill(marker);
+        await pane(page).getByLabel("上传参考底图（必需）", { exact: true }).setInputFiles({ name: `${marker}.png`, mimeType: "image/png", buffer: IMAGE });
+    }
+    if (board.kind === "seamless") {
+        await pane(page).locator('input[type="file"]').setInputFiles({ name: `${marker}.png`, mimeType: "image/png", buffer: IMAGE });
+        await expect(pane(page).getByRole("img", { name: `${marker}.png`, exact: true })).toBeVisible();
+    }
+}
+
+async function expectInput(page: Page, board: Board, marker: string) {
+    if (board.kind === "video") await expect(pane(page).getByRole("textbox", { name: "视频提示词", exact: true })).toHaveValue(marker);
+    if (board.kind === "recipe") await expect(pane(page).getByRole("textbox", { name: "系列名称", exact: true })).toHaveValue(marker);
+    if (board.kind === "seamless") await expect(pane(page).getByRole("img", { name: `${marker}.png`, exact: true })).toBeVisible();
+}
+
+async function expectOriginalResult(page: Page, board: Board) {
+    if (board.kind === "video") await expect(pane(page).locator("video")).toHaveCount(1);
+    if (board.kind === "seamless") await expect(pane(page).getByRole("img", { name: "无缝拼接结果", exact: true })).toBeVisible();
+    if (board.kind === "recipe") {
+        // Recipe recovery remains explicit and query-only after route unmount.
+        const recover = pane(page).getByRole("button", { name: /^查询原任务 \(1\)/ });
+        await expect(recover).toBeEnabled();
+        await recover.click();
+        await expect(pane(page).locator(".sr-result img")).toHaveCount(1);
+    }
+}
+
+test("boundary: video initial history delay and failure block new submission until query-only retry restores the original task", async ({ page, context, api }) => {
+    await mockModelsAndMedia(context, api);
+    api.taskStatus = "queued";
+    const taskControlPosts: string[] = [];
+    await context.route(/\/api\/tasks\/[^/]+\/(?:cancel|recover)$/, route => {
+        taskControlPosts.push(new URL(route.request().url()).pathname);
+        return route.fulfill({ status: 409, json: { error: "FIXTURE_QUERY_ONLY_RETRY" } });
+    });
+    await page.goto("/video");
+    await fill(page, boards[0], "ORIGINAL_VIDEO_HISTORY_GATE");
+    await pane(page).getByRole("button", { name: "生成视频", exact: true }).click();
+    await expect.poll(() => api.submissions.length).toBe(1);
+    const originalTask = [...api.tasks.values()][0]!;
+    await expect(tabs(page).first()).toContainText("处理中");
+    await page.addInitScript(() => {
+        const original = IDBObjectStore.prototype.openCursor;
+        const success = Object.getOwnPropertyDescriptor(IDBRequest.prototype, "onsuccess")!;
+        const callbacks: Array<() => void> = [];
+        let mode = sessionStorage.getItem("isolated-video-history-mode");
+        const gate = (window as any).__videoHistoryGate = { count: 0, release() {
+            mode = null;
+            IDBObjectStore.prototype.openCursor = original;
+            for (const callback of callbacks.splice(0)) callback();
+        } };
+        IDBObjectStore.prototype.openCursor = function (...args) {
+            if (this.name === "video_generation_logs" && mode === "fail") throw new Error("isolated-video-history-unavailable");
+            const request = original.apply(this, args);
+            if (this.name !== "video_generation_logs") return request;
+            Object.defineProperty(request, "onsuccess", { set(handler) {
+                success.set!.call(request, (event: Event) => {
+                    if (mode !== "hold" || request.result !== null) return handler.call(request, event);
+                    gate.count += 1;
+                    callbacks.push(() => handler.call(request, event));
+                });
+            } });
+            return request;
+        };
+    });
+    await page.evaluate(() => sessionStorage.setItem("isolated-video-history-mode", "hold"));
+    await page.reload();
+    await expect.poll(() => page.evaluate(() => (window as any).__videoHistoryGate.count)).toBeGreaterThan(0);
+    await expect(pane(page).getByRole("button", { name: "生成视频", exact: true })).toBeDisabled();
+    await expect(pane(page).getByText("正在恢复视频记录…", { exact: true })).toBeVisible();
+    await pane(page).getByRole("textbox", { name: "视频提示词", exact: true }).press("Control+Enter");
+    expect(api.submissions).toHaveLength(1);
+    await page.evaluate(() => (window as any).__videoHistoryGate.release());
+    await expect(tabs(page).first()).toContainText("处理中");
+    await expectInput(page, boards[0], "ORIGINAL_VIDEO_HISTORY_GATE");
+    await expect(pane(page).getByRole("button", { name: "继续生成新视频", exact: true })).toBeEnabled();
+    await expect.poll(() => api.taskReads.includes(`/api/tasks/${originalTask.id}`)).toBe(true);
+    await page.evaluate(() => sessionStorage.setItem("isolated-video-history-mode", "fail"));
+    await page.reload();
+    await expect(pane(page).getByRole("alert")).toContainText("isolated-video-history-unavailable");
+    await expect(pane(page).getByRole("button", { name: "生成视频", exact: true })).toBeDisabled();
+    await pane(page).getByRole("textbox", { name: "视频提示词", exact: true }).press("Control+Enter");
+    expect(api.submissions).toHaveLength(1);
+    const oldReads = api.taskReads.filter(path => path === `/api/tasks/${originalTask.id}`).length;
+    await page.evaluate(() => (window as any).__videoHistoryGate.release());
+    await pane(page).getByRole("button", { name: "重新读取视频记录", exact: true }).click();
+    await expect(pane(page).getByRole("alert")).toHaveCount(0);
+    await expect.poll(() => api.taskReads.filter(path => path === `/api/tasks/${originalTask.id}`).length).toBeGreaterThan(oldReads);
+    await expectInput(page, boards[0], "ORIGINAL_VIDEO_HISTORY_GATE");
+    expect(api.submissions).toHaveLength(1);
+    await pane(page).getByRole("textbox", { name: "视频提示词", exact: true }).fill("EXPLICIT_PARALLEL_VIDEO_AFTER_READ");
+    await pane(page).getByRole("button", { name: "继续生成新视频", exact: true }).click();
+    await expect.poll(() => api.submissions.length).toBe(2);
+    expect(api.submissions[0]!.requestId).toBe(originalTask.requestId);
+    expect(api.submissions[1]!.requestId).not.toBe(originalTask.requestId);
+    expect(taskControlPosts).toEqual([]);
+    await expect.poll(() => page.evaluate(async () => {
+        const { createWorkspaceStorage } = await import("/src/lib/workspace-storage.ts");
+        const logs: Array<{ requestId?: string; prompt: string }> = [];
+        await createWorkspaceStorage("video_generation_logs").iterate<any, void>(value => { logs.push({ requestId: value.requestId, prompt: value.prompt }); });
+        return logs;
+    })).toEqual(expect.arrayContaining([{ requestId: originalTask.requestId, prompt: "ORIGINAL_VIDEO_HISTORY_GATE" }, { requestId: api.submissions[1]!.requestId, prompt: "EXPLICIT_PARALLEL_VIDEO_AFTER_READ" }]));
+});
+
+test("boundary: duplicate clicks and board navigation retain three original tasks without cancellation or resubmission", async ({ page, context, api }) => {
+    await mockModelsAndMedia(context, api);
+    api.taskStatus = "queued";
+    const controlPosts: string[] = [];
+    await context.route(/\/api\/tasks\/[^/]+\/(?:cancel|recover)$/, route => {
+        controlPosts.push(new URL(route.request().url()).pathname);
+        return route.fulfill({ status: 409, json: { error: "FIXTURE_NO_TASK_CONTROL_EXPECTED" } });
+    });
+    for (const [index, board] of boards.entries()) {
+        await page.goto(board.path);
+        await fill(page, board, `BOARD_${board.kind}`);
+        await pane(page).getByRole("button", { name: board.submit, exact: true }).dblclick();
+        await expect.poll(() => api.submissions.length).toBe(index + 1);
+        await expect(tabs(page).first()).toContainText("处理中");
+    }
+    const ids = [...api.tasks.keys()];
+    expect(ids).toHaveLength(3);
+    for (const task of api.tasks.values()) { task.status = "success"; task.resultUrls = [`/api/assets/${task.id}/content`]; }
+    for (const board of boards) {
+        await page.goto(board.path);
+        await expectInput(page, board, `BOARD_${board.kind}`);
+        await expectOriginalResult(page, board);
+    }
+    expect(api.submissions).toHaveLength(3);
+    expect(new Set(api.submissions.map(task => task.requestId)).size).toBe(3);
+    expect(controlPosts).toEqual([]);
+    expect([...api.tasks.keys()]).toEqual(ids);
+});
+
+for (const board of boards) {
+    test(`boundary: ${board.kind} switches employee without exposing or overwriting another employee's tasks`, async ({ page, context, api }) => {
+        await mockModelsAndMedia(context, api);
+        api.taskStatus = "queued";
+        let secondOwner = false;
+        const secondOwnerTaskReads: string[] = [];
+        await context.route("**/api/auth/session", route => secondOwner ? route.fulfill({ json: { user: { id: SECOND_OWNER, username: "second", displayName: "第二员工", role: "designer", status: "active", creditBalance: 999 } } }) : route.fallback());
+        // Model the server's existing owner filter; an auth test must not return
+        // employee A's backend history as if it belonged to employee B.
+        await context.route(/\/api\/tasks(?:\?.*)?$/, route => secondOwner && route.request().method() === "GET" ? route.fulfill({ json: { tasks: [], nextCursor: null } }) : route.fallback());
+        await context.route(/\/api\/tasks\/(?:by-request\/)?[^/?]+(?:\/progress)?$/, route => {
+            if (!secondOwner) return route.fallback();
+            // An already-started A request can reach the server while its session check is in flight.
+            // It remains bound to A and must be rejected; it is not a request from B's workspace.
+            if (route.request().headers()["x-canvas-owner-id"] !== FIRST_OWNER)
+                secondOwnerTaskReads.push(new URL(route.request().url()).pathname);
+            return route.fulfill({ status: 404, json: { error: "FIXTURE_OTHER_OWNER" } });
+        });
+        await page.goto(board.path);
+        await page.getByRole("button", { name: "新建任务", exact: true }).click();
+        await expect(tabs(page)).toHaveCount(2);
+        await fill(page, board, `EMPLOYEE_A_${board.kind}`);
+        await pane(page).getByRole("button", { name: board.submit, exact: true }).click();
+        await expect.poll(() => api.submissions.length).toBe(1);
+        await expect(tabs(page).nth(1)).toContainText("处理中");
+        secondOwner = true;
+        await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+        await expect(page.getByRole("heading", { name: "登录状态已变化，工作区已暂停", exact: true })).toBeVisible();
+        await expect(page.getByRole("tabpanel")).toHaveCount(0);
+        const original = [...api.tasks.values()][0]!;
+        original.status = "success"; original.resultUrls = [`/api/assets/${original.id}/content`];
+        await page.reload();
+        await expect(tabs(page)).toHaveCount(1);
+        await expect(tabs(page).first()).toContainText("草稿");
+        if (board.kind === "video") await expect(pane(page).getByRole("textbox", { name: "视频提示词", exact: true })).toHaveValue("");
+        if (board.kind === "recipe") await expect(pane(page).getByRole("textbox", { name: "系列名称", exact: true })).toHaveValue("我的新系列");
+        await expect(pane(page).getByText(`EMPLOYEE_A_${board.kind}`, { exact: true })).toHaveCount(0);
+        await expect(pane(page).getByRole("img", { name: `EMPLOYEE_A_${board.kind}.png`, exact: true })).toHaveCount(0);
+        await expect(pane(page).locator("video,.sr-result img")).toHaveCount(0);
+        await expect(pane(page).getByRole("img", { name: "无缝拼接结果", exact: true })).toHaveCount(0);
+        await fill(page, board, `EMPLOYEE_B_${board.kind}`);
+        // Read-only persistence evidence before a deliberate full reload.
+        await expect.poll(() => page.evaluate(async ({ kind, owner }) => {
+            const { createWorkspaceStorage } = await import("/src/lib/workspace-storage.ts");
+            if (kind === "recipe") return (await createWorkspaceStorage("series_recipe_workspaces").getItem<any>(`project:${encodeURIComponent(owner)}`))?.form.series;
+            const drafts = createWorkspaceStorage("generation_drafts");
+            return kind === "video" ? drafts.getItem<string>("video:prompt") : (await drafts.getItem<any>("seamless-stitch:source"))?.name?.replace(/\.png$/, "");
+        }, { kind: board.kind, owner: SECOND_OWNER })).toBe(`EMPLOYEE_B_${board.kind}`);
+        secondOwner = false;
+        await page.reload();
+        await expect(tabs(page)).toHaveCount(2);
+        await expectInput(page, board, `EMPLOYEE_A_${board.kind}`);
+        await expectOriginalResult(page, board);
+        secondOwner = true;
+        await page.reload();
+        await expect(tabs(page)).toHaveCount(1);
+        await expectInput(page, board, `EMPLOYEE_B_${board.kind}`);
+        expect(api.submissions).toHaveLength(1);
+        expect(secondOwnerTaskReads.filter(path => path.includes(original.id) || path.includes(original.requestId))).toEqual([]);
+    });
+}

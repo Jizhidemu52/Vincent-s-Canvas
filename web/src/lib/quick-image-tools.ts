@@ -1,11 +1,16 @@
-export const quickImageToolKeys = ["remove-background", "hd-upscale"] as const;
+import type { QuickImageAction } from "../../../shared/quick-image-tools";
+export type { QuickImageAction } from "../../../shared/quick-image-tools";
+
+export const quickImageToolKeys = ["remove-background", "hd-upscale", "item-extract"] as const;
 export type QuickImageToolKey = (typeof quickImageToolKeys)[number];
-export type QuickImageAction = "remove-background" | "hd-upscale";
 export function isQuickImageTool(key: unknown): key is QuickImageToolKey {
     return typeof key === "string" && quickImageToolKeys.some(item => item === key);
 }
-export function quickImageTitle(action: QuickImageAction) { return action === "remove-background" ? "一键去背景" : "高清放大"; }
-export function quickImageAction(key: string): QuickImageAction { return key.endsWith("remove-background") ? "remove-background" : "hd-upscale"; }
+export function quickImageTitle(action: QuickImageAction) { return action === "remove-background" ? "一键去背景" : action === "item-extract" ? "提取产品图" : "高清放大"; }
+export function quickImageAction(key: string): QuickImageAction {
+    if (isQuickImageTool(key)) return key;
+    throw new Error("不支持这个快捷图片操作");
+}
 
 /** Common processing boundary only. Model-specific validation belongs to the server's saved configuration. */
 export function quickImageReferenceFileError(file: { size?: number; type?: string }) {

@@ -85,7 +85,7 @@ function QuickImageConfigurationSession({ owner }: { owner: string }) {
     }, [owner]);
     return <section aria-label="快捷图片处理配置" className="space-y-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
-            <div><h3 className="text-base font-semibold">快捷图片处理</h3><p className="mt-1 text-sm text-[var(--muted-foreground)]">统一配置一键去背景与高清放大；普通使用页面只保留操作入口。</p></div>
+            <div><h3 className="text-base font-semibold">快捷图片处理</h3><p className="mt-1 text-sm text-[var(--muted-foreground)]">统一配置一键去背景、高清放大与提取产品图；普通使用页面只保留操作入口。</p></div>
             <Button icon={<RefreshCw className="size-4" />} loading={loading} onClick={async () => { if (await confirmUnsaved()) void load(); }}>重新加载</Button>
         </div>
         <Alert type="info" showIcon title="保存与试运行相互独立" description="保存后影响此操作的后续请求；试运行使用当前未保存草稿，只创建 1 个付费任务，不会修改线上配置。离开页面只停止本地查询，不取消任务。" />
@@ -193,7 +193,7 @@ export function QuickImageConfigurationEditor({ owner, configuration, models, lo
     };
     return <section aria-label={`${title}配置`} className="wb-surface min-w-0 space-y-4 p-4 sm:p-5">
         <div className="flex flex-wrap items-center justify-between gap-2"><h4 className="font-semibold">{title}</h4><span><Tag>{saved.isDefault ? "系统初始配置" : `配置 v${saved.configurationVersion}`}</Tag>{dirty ? <Tag color="warning">未保存</Tag> : null}</span></div>
-        <p className="text-xs leading-relaxed text-[var(--muted-foreground)]">{action === "remove-background" ? "提示词用于说明需要提取的主体。透明蒙版与原图 RGB 合成规则由服务端固定保护，保留主体原有颜色和细节。" : "输出尺寸与清晰度由所选模型及参数决定，不固定承诺 4K。"}</p>
+        <p className="text-xs leading-relaxed text-[var(--muted-foreground)]">{action === "remove-background" ? "提示词用于说明需要提取的主体。透明蒙版与原图 RGB 合成规则由服务端固定保护，保留主体原有颜色和细节。" : action === "item-extract" ? "生成白底平放的完整产品图，属于 AI 重构而非透明抠图；只补足必要遮挡，不把推测当成真实隐藏结构。模型、提示词和出图参数仅在此处管理。" : "输出尺寸与清晰度由所选模型及参数决定，不固定承诺 4K。"}</p>
         {error ? <Alert type="error" showIcon title={error} /> : null}
         {notice ? <Alert type="success" showIcon title={notice} /> : null}
         {unavailable ? <Alert type="warning" showIcon title="当前模型未配置、已停用或不可用" description={`已保存：${saved.modelName || saved.modelId || saved.modelConfigId || "无可用绑定"}。请明确选择可用模型；不会自动替换。`} /> : null}

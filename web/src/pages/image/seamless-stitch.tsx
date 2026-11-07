@@ -10,6 +10,9 @@ import { useSearchParams } from "react-router-dom";
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
 import { ImageSettingsPanel } from "@/components/image-settings-panel";
 import { ModelPicker } from "@/components/model-picker";
+import { WorkbenchTasks, useWorkbenchTask, useWorkbenchTaskStatus } from "@/components/workbench-tasks";
+import { DEFAULT_WORKBENCH_TASK, matchesWorkbenchTask } from "@/lib/workbench-task-state";
+import { createWorkspaceStorage } from "@/lib/workspace-storage";
 import { useToolConfig } from "@/hooks/use-tool-config";
 import { useGenerationDraft } from "@/hooks/use-generation-draft";
 import { useImageDrop } from "@/hooks/use-image-drop";
@@ -20,11 +23,11 @@ import { imageModelProfile } from "@/lib/image-model-settings";
 import { resolveCapabilityModel } from "@/lib/model-picker-options";
 import { resolveToolModel } from "@/services/api/business-config";
 import { DEFAULT_SEAMLESS_STITCH_PARAMETERS, requestSeamlessStitch, type SeamlessStitchParameters } from "@/services/api/internal-ai";
-import { listQueuedTasks, type QueuedTask } from "@/services/api/generation-tasks";
+import { getQueuedTaskByRequestId, listQueuedTasks, QueuedTaskFailedError, QueuedTaskSubmissionUncertainError, type QueuedTask } from "@/services/api/generation-tasks";
 import { fetchServerAssetContent } from "@/services/api/server-assets";
 import { hydratePromptReuse } from "@/services/api/prompts";
 import { promptImageSettings } from "@/lib/prompt-editor-parameters";
-import { uploadImage } from "@/services/image-storage";
+import { resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { loadSeamlessPreview, type StitchPreviewImage } from "./seamless-preview";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
@@ -41,9 +44,17 @@ const SEAMLESS_PRESETS = {
 type StitchPreset = keyof typeof SEAMLESS_PRESETS | "custom";
 
 type StitchResult = { status: "idle" } | { status: "pending" } | { status: "failed"; error: string } | { status: "success"; image: StitchPreviewImage; durationMs: number };
+type StitchTaskRecord = { workspaceId: string; requestId: string; taskId?: string; pending: boolean };
 
 export function SeamlessStitchPage() {
+    const ownerId = useUserStore(state => state.user?.id);
+    return <WorkbenchTasks key={ownerId || "local"} ownerId={ownerId} boardKey="seamless-stitch"><SeamlessStitchWorkspace /></WorkbenchTasks>;
+}
+
+export function SeamlessStitchWorkspace() {
     useUiText();
+    const { id: workspaceId, active: workspaceActive, draftScope } = useWorkbenchTask();
+    const [stitchTaskStore] = useState(() => createWorkspaceStorage("seamless_stitch_tasks"));
     const { message, modal } = App.useApp();
     const [searchParams] = useSearchParams();
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -62,7 +73,7 @@ export function SeamlessStitchPage() {
     const models = useBusinessConfigStore((state) => state.models);
     const tools = useBusinessConfigStore((state) => state.tools);
     const defaults = useEffectiveConfig("image");
-    const [draftConfig, setDraftConfig, configReady] = useGenerationDraft<Partial<AiConfig>>("seamless-stitch:settings", {});
+    const [draftConfig, setDraftConfig, configReady] = useGenerationDraft<Partial<AiConfig>>(draftScope("seamless-stitch:settings"), {});
     const baseConfig = { ...defaults, ...draftConfig };
     const updateConfig = useCallback(<K extends keyof AiConfig>(key: K, value: AiConfig[K]) => setDraftConfig(current => ({ ...current, [key]: value })), [setDraftConfig]);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
@@ -70,9 +81,10 @@ export function SeamlessStitchPage() {
     const selectedModel = draftConfig.imageModel || draftConfig.model || resolveCapabilityModel(defaults, "image", models, defaults.imageModel || defaults.model);
     const config = useToolConfig({ ...baseConfig, model: selectedModel, imageModel: selectedModel, count: "1" }, "seamless-stitch");
     const addAsset = useAssetStore((state) => state.addAsset);
-    const [source, setSource] = useState<ReferenceImage | null>(null);
-    const [preset, setPreset] = useState<StitchPreset>(() => searchParams.get("preset") === "small" ? "small" : "large");
-    const [parameters, setParameters] = useState<SeamlessStitchParameters>(() => readSeamlessParameters(searchParams));
+    const [source, setSource, sourceReady] = useGenerationDraft<ReferenceImage | null>(draftScope("seamless-stitch:source"), null, async saved => saved ? { ...saved, dataUrl: await resolveImageUrl(saved.storageKey, saved.dataUrl) } : null);
+    sourceRef.current = source;
+    const [preset, setPreset, presetReady] = useGenerationDraft<StitchPreset>(draftScope("seamless-stitch:preset"), workspaceId === DEFAULT_WORKBENCH_TASK && searchParams.get("preset") === "small" ? "small" : "large");
+    const [parameters, setParameters, parametersReady] = useGenerationDraft<SeamlessStitchParameters>(draftScope("seamless-stitch:parameters"), readSeamlessParameters(workspaceId === DEFAULT_WORKBENCH_TASK ? searchParams : new URLSearchParams()));
     const [result, setResult] = useState<StitchResult>({ status: "idle" });
     const [running, setRunning] = useState(false);
     const [readingSource, setReadingSource] = useState(false);
@@ -80,6 +92,8 @@ export function SeamlessStitchPage() {
     const [history, setHistory] = useState<QueuedTask[]>([]);
     const [historyLoading, setHistoryLoading] = useState(true);
     const [historyError, setHistoryError] = useState("");
+    const [historyPending, setHistoryPending] = useState(false);
+    const [historyReady, setHistoryReady] = useState(false);
     const [previewLoading, setPreviewLoading] = useState(false);
     const [previewMode, setPreviewMode] = useState<"single" | "repeat">("single");
     const seamlessModel = resolveToolModel({ models, tools, prices: [] }, "seamless-stitch", config.model);
@@ -87,14 +101,42 @@ export function SeamlessStitchPage() {
     const usesImageSettings = typeof seamlessModel?.imageSupportsMask === "boolean" || modelProfile.kind === "quality-resolution" || modelProfile.kind === "resolution-1k";
     const estimatedUsage = estimate({ operationType: "seamless_stitch", toolKey: "seamless-stitch", modelId: config.model, quantity: 1 });
     const quotaBlocked = deploymentFeatures.creditsEnabled && Boolean(user && estimatedUsage.configured && user.creditBalance < estimatedUsage.credits);
+    const draftReady = configReady && sourceReady && presetReady && parametersReady;
+    useWorkbenchTaskStatus({ busy: running || readingSource, pending: historyPending, ready: draftReady && historyReady, label: result.status === "success" ? "已完成" : result.status === "failed" ? "已失败" : "草稿" });
 
     const refreshHistory = useCallback(async () => {
         if (historyBusyRef.current) return;
         historyBusyRef.current = true;
         try {
+            const ownerId = useUserStore.getState().user?.id;
+            const records: StitchTaskRecord[] = [];
+            await stitchTaskStore.iterate<StitchTaskRecord, void>(record => { records.push(record); });
             const tasks = await listQueuedTasks(undefined, "seamless_stitch");
+            // Recover only previously persisted requests; a missing response is never a new POST.
+            const owned = records.filter(record => matchesWorkbenchTask(record, workspaceId));
+            for (const record of owned.filter(record => record.pending)) {
+                if (tasks.some(task => task.id === record.taskId || task.requestId === `${record.requestId}:0`)) continue;
+                const original = await getQueuedTaskByRequestId(`${record.requestId}:0`);
+                if (original) tasks.push(original);
+            }
+            if (useUserStore.getState().user?.id !== ownerId) return;
             if (!mountedRef.current) return;
-            setHistory(tasks.filter((task) => task.operationType === "seamless_stitch").slice(0, 20));
+            const belongs = (task: QueuedTask) => {
+                const record = records.find(item => item.taskId === task.id || task.requestId === `${item.requestId}:0`);
+                return record ? matchesWorkbenchTask(record, workspaceId) : workspaceId === DEFAULT_WORKBENCH_TASK;
+            };
+            const matching = tasks.filter(task => task.operationType === "seamless_stitch" && belongs(task));
+            for (const record of owned.filter(record => record.pending)) {
+                const task = matching.find(task => task.id === record.taskId || task.requestId === `${record.requestId}:0`);
+                if (task && ["success", "failed", "cancelled"].includes(task.status)) {
+                    await stitchTaskStore.setItem(record.requestId, { ...record, taskId: task.id, pending: false });
+                    record.pending = false;
+                }
+            }
+            if (!mountedRef.current || useUserStore.getState().user?.id !== ownerId) return;
+            setHistory(matching.slice(0, 20));
+            setHistoryPending(owned.some(record => record.pending) || matching.some(task => !["success", "failed", "cancelled"].includes(task.status)));
+            setHistoryReady(true);
             setHistoryError("");
         } catch {
             if (mountedRef.current) setHistoryError("历史记录暂时未能加载，当前图片仍可使用。");
@@ -102,7 +144,7 @@ export function SeamlessStitchPage() {
             historyBusyRef.current = false;
             if (mountedRef.current) setHistoryLoading(false);
         }
-    }, []);
+    }, [workspaceId, stitchTaskStore]);
 
     const openHistoryTask = async (task: QueuedTask) => {
         const imageUrl = task.resultUrls[0];
@@ -130,10 +172,10 @@ export function SeamlessStitchPage() {
     }, [refreshHistory]);
     const hasActiveHistory = history.some(task => ["queued", "pending", "processing", "running"].includes(task.status));
     useEffect(() => {
-        if (!running && !hasActiveHistory) return;
+        if (!running && !hasActiveHistory && !historyPending) return;
         const timer = window.setInterval(() => { if (document.visibilityState === "visible") void refreshHistory(); }, 4_000);
         return () => window.clearInterval(timer);
-    }, [hasActiveHistory, refreshHistory, running]);
+    }, [hasActiveHistory, historyPending, refreshHistory, running]);
 
     useEffect(() => {
         if (running || previewLoading || result.status !== "idle") return;
@@ -161,8 +203,8 @@ export function SeamlessStitchPage() {
     };
 
     const imageDrop = useImageDrop({
-        scopeKey: "seamless-stitch:source",
-        disabled: running || readingSource || user?.status !== "active",
+        scopeKey: draftScope("seamless-stitch:source"),
+        disabled: !workspaceActive || !draftReady || running || readingSource || user?.status !== "active",
         onFiles: async files => {
             if (files.length !== 1) throw new Error("每个参考图位置一次只能拖入一张图片，请分别放入对应位置。");
             await setSourceFromBlob(files[0]!, files[0]!.name);
@@ -208,7 +250,7 @@ export function SeamlessStitchPage() {
     };
 
     const runStitch = async () => {
-        if (!configReady || submitLockRef.current || sourceReadRef.current || imageDrop.reading) return;
+        if (!draftReady || !historyReady || historyPending || submitLockRef.current || sourceReadRef.current || imageDrop.reading) return;
         const activeSource = sourceRef.current || source;
         if (!activeSource) {
             message.error(uiText("请先上传一张需要无缝拼接的图片"));
@@ -216,6 +258,10 @@ export function SeamlessStitchPage() {
         }
         submitLockRef.current = true;
         setRunning(true);
+        const ownerId = useUserStore.getState().user?.id;
+        const requestId = nanoid();
+        let submitted = false;
+        let taskId: string | undefined;
         try {
         if (deploymentFeatures.authenticationEnabled) await hydrateSession();
         const currentUser = useUserStore.getState().user;
@@ -236,8 +282,22 @@ export function SeamlessStitchPage() {
         ++previewSequenceRef.current;
         setPreviewLoading(false);
         setResult({ status: "pending" });
-            const response = await requestSeamlessStitch(activeSource, parameters, config);
+            const response = await requestSeamlessStitch(activeSource, parameters, config, {
+                requestId,
+                onSubmissionStarted: async () => {
+                    await stitchTaskStore.setItem(requestId, { workspaceId, requestId, pending: true } satisfies StitchTaskRecord);
+                    submitted = true;
+                    if (mountedRef.current) setHistoryPending(true);
+                },
+                onSubmitted: async ids => {
+                    taskId = ids[0];
+                    await stitchTaskStore.setItem(requestId, { workspaceId, requestId, taskId, pending: true } satisfies StitchTaskRecord);
+                },
+            });
+            if (useUserStore.getState().user?.id !== ownerId) return;
+            await stitchTaskStore.setItem(requestId, { workspaceId, requestId, taskId: response.sourceTaskId || taskId, pending: false } satisfies StitchTaskRecord);
             const uploaded = await uploadImage(response.dataUrl);
+            if (!mountedRef.current || useUserStore.getState().user?.id !== ownerId) return;
             const recreateParameters = new URLSearchParams({ tool: "seamless-stitch", model: response.model.modelId });
             if (response.usesImageSettings) {
                 recreateParameters.set("size", response.config.size);
@@ -273,27 +333,30 @@ export function SeamlessStitchPage() {
             setResult({ status: "success", image: uploaded, durationMs: performance.now() - startedAt });
             message.success(!deploymentFeatures.creditsEnabled ? uiText("无缝拼接完成") : uiText("无缝拼接完成，预计消耗 {credits} 积分", { credits: estimatedUsage.credits }));
         } catch (error) {
+            if (useUserStore.getState().user?.id !== ownerId) return;
+            const unresolved = submitted && !(error instanceof QueuedTaskFailedError) && (Boolean(taskId) || error instanceof QueuedTaskSubmissionUncertainError);
+            if (submitted && !unresolved) await stitchTaskStore.setItem(requestId, { workspaceId, requestId, taskId, pending: false } satisfies StitchTaskRecord);
             const reason = error instanceof Error ? error.message : "无缝拼接失败";
-            setResult({ status: "failed", error: reason });
-            message.error(uiText(reason));
+            if (mountedRef.current) { setHistoryPending(unresolved); setResult({ status: "failed", error: reason }); message.error(uiText(reason)); }
         } finally {
             submitLockRef.current = false;
-            setRunning(false);
-            void refreshHistory();
+            if (mountedRef.current && useUserStore.getState().user?.id === ownerId) { setRunning(false); void refreshHistory(); }
         }
     };
     runStitchRef.current = runStitch;
 
     useEffect(() => {
+        if (workspaceId !== DEFAULT_WORKBENCH_TASK) return;
         const model = searchParams.get("model");
         if (model) updateConfig("imageModel", model);
         for (const key of ["size", "quality", "imageOptions"] as const) {
             const value = searchParams.get(key);
             if (value !== null) updateConfig(key, value);
         }
-    }, [searchParams, updateConfig]);
+    }, [searchParams, updateConfig, workspaceId]);
 
     useEffect(() => {
+        if (workspaceId !== DEFAULT_WORKBENCH_TASK) return;
         const token = searchParams.get("reuseToken");
         if (!token || loadedReuseTokenRef.current.has(token)) return;
         loadedReuseTokenRef.current.add(token);
@@ -410,7 +473,8 @@ export function SeamlessStitchPage() {
                             {quotaBlocked ? <div className="mt-1 text-red-500">{uiText("额度不足，无法提交任务。")}</div> : null}
                         </div>
                         {!seamlessModel ? <p className="mb-3 text-xs leading-5 text-stone-500">{uiText("此工具尚未配置，管理员启用无缝拼接模型后即可使用。")}</p> : null}
-                        <Button type="primary" size="large" block icon={<Grid2x2 className="size-4" />} loading={running} disabled={!configReady || !source || (deploymentFeatures.creditsEnabled && !estimatedUsage.configured) || !seamlessModel || running || readingSource || imageDrop.reading || quotaBlocked} onClick={() => void runStitch()}>
+                        {historyPending && !running ? <p role="status" className="mb-2 text-xs text-muted-foreground">{uiText("原任务仍在处理或待核查；可新建独立任务，当前请求不会自动重发。")}</p> : null}
+                        <Button type="primary" size="large" block icon={<Grid2x2 className="size-4" />} loading={running} disabled={!draftReady || !historyReady || historyPending || !source || (deploymentFeatures.creditsEnabled && !estimatedUsage.configured) || !seamlessModel || running || readingSource || imageDrop.reading || quotaBlocked} onClick={() => void runStitch()}>
                             {uiText("开始无缝拼接")}</Button>
                     </div>
                 </section>
@@ -521,7 +585,7 @@ export function SeamlessStitchPage() {
                     event.target.value = "";
                 }}
             />
-            <AssetPickerModal open={assetPickerOpen} defaultTab="my-assets" onInsert={(payload) => void insertAsset(payload)} onClose={() => setAssetPickerOpen(false)} />
+            <AssetPickerModal open={workspaceActive && assetPickerOpen} defaultTab="my-assets" onInsert={(payload) => void insertAsset(payload)} onClose={() => setAssetPickerOpen(false)} />
         </div>
     );
 }

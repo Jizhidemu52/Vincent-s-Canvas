@@ -110,10 +110,19 @@ jobs:
           bun install --cwd shared --frozen-lockfile
           cd web
           bunx playwright install --with-deps chromium
+      - name: Install isolated migration SQL fixture runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          fixture_dir="$RUNNER_TEMP/release-pglite"
+          mkdir -p "$fixture_dir"
+          printf '{"private":true,"type":"module"}\n' > "$fixture_dir/package.json"
+          bun add --cwd "$fixture_dir" --exact @electric-sql/pglite@0.5.10
       - name: Verify contracts and the exact formal application stack
         shell: bash
         env:
           COMPOSE_RUNTIME_TEST_IMAGE: canvas-release-api:${{ github.sha }}-${{ matrix.arch }}
+          PGLITE_RUNTIME_PATH: ${{ runner.temp }}/release-pglite
         run: |
           set -euo pipefail
           RUN_DOCKER_COMPOSE_CONTRACT_TESTS=true python3 -m unittest discover -s ops/release -p 'test_*.py'
@@ -175,6 +184,7 @@ jobs:
             ${{ runner.temp }}/release-identity/candidate.json
             ${{ runner.temp }}/release-smoke/verification.json
             ${{ runner.temp }}/release-smoke/browser-smoke.json
+            ${{ runner.temp }}/release-smoke/pdf-worker-http.json
             ${{ runner.temp }}/release-smoke/health.json
             ${{ runner.temp }}/release-smoke/marker.json
             ${{ runner.temp }}/release-smoke/infra-images.json

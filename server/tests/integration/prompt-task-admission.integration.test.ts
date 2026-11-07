@@ -32,6 +32,7 @@ import type {
   PromptRecipeVersionContent,
 } from "../../../shared/prompt-contracts";
 import { createIsolatedPostgres } from "../helpers/isolated-postgres";
+import { installNewCreativeRecipes } from "../../src/new-creative-recipes";
 
 const integration = process.env.PGLITE_RUNTIME_PATH ? describe : describe.skip;
 
@@ -190,7 +191,7 @@ integration(
         "UPDATE tool_api_configurations SET model_config_id=$1,credit_cost_override=7,enabled=true WHERE tool_key=ANY($2::text[])",
         [
           imageId,
-          ["image", "image-edit", "creative-text-to-style", "canvas-batch"],
+          ["image", "image-edit", "creative-text-to-style", "canvas-batch", "creative-virtual-try-on", "creative-sketch-to-photo"],
         ],
       );
       await query(
@@ -198,6 +199,7 @@ integration(
         [otherChatId],
       );
       store = postgresPromptRecipeStore(fixture.db);
+      await installNewCreativeRecipes(store, { actorId: adminId, optimizerModelConfigId: chatId, activate: true });
       for (const scene of [
         "text-to-style",
         "free-optimize",
@@ -375,6 +377,38 @@ integration(
         await new Promise<void>((resolve) => server.close(() => resolve()));
       }
       await fixture?.close();
+    });
+
+    for (const scene of ["virtual-try-on", "sketch-to-photo"] as const) for (const references of [1, 2]) test(`${scene} ${references} references uses its strict recipe and admits one task/reservation for repeated concurrent submissions`, async () => {
+      const actor = await user(), before = calls.length, fields = scene === "virtual-try-on"
+        ? { description: references === 1 ? "成年模特正面试穿" : "", keepDetails: "五粒扣" }
+        : { fabric: "棉", colorDescription: "蓝色", presentation: "白底平铺" };
+      const authored = { ...promptInput("preserve the supplied product", scene, fields), mode: "edit", referenceRoles: (scene === "virtual-try-on" ? ["产品图", "模特图"] : ["线稿图", "材质与配色参考图"]).slice(0, references) };
+      const value = input(authored.userText, { toolKey: `creative-${scene}`, operationType: "inpaint", promptInput: authored, sourceUrls: [sourceA, sourceB].slice(0, references) });
+      const responses = await Promise.all([request(actor, "/api/tasks", "POST", value), request(actor, "/api/tasks", "POST", value)]);
+      const bodies = await Promise.all(responses.map(response => response.json()));
+      expect(responses.map(response => response.status).sort()).toEqual([200, 201]);
+      expect(new Set(bodies.map(body => body.task.id)).size).toBe(1); expect(calls.length - before).toBe(1);
+      expect(calls.at(-1)!.payload.images.map((image: any) => image.role)).toEqual(authored.referenceRoles);
+      const stored = (await query("SELECT tool_key,prompt,user_input,prompt_optimized,source_urls FROM tasks WHERE id=$1", [bodies[0].task.id])).rows[0]!;
+      expect(stored).toMatchObject({ tool_key: `creative-${scene}`, prompt_optimized: true, user_input: { scene, fields }, source_urls: value.sourceUrls });
+      expect(stored.prompt).not.toContain("forged browser"); expect(await count("tasks", actor)).toBe(1); expect(await count("credit_reservations", actor)).toBe(1);
+      expect(queueDeliveries.filter(id => id === bodies[0].task.id)).toHaveLength(1);
+    });
+
+    test("new scene invalid inputs, raw-prompt bypass and wrong recipe fail before optimization, task admission or credit reservation", async () => {
+      const actor = await user(), before = calls.length, sourceStart = sourceReads.length;
+      const valid = { ...promptInput("", "sketch-to-photo", { fabric: "棉", colorDescription: "蓝色", presentation: "白底平铺" }), mode: "edit" };
+      const value = input("", { toolKey: "creative-sketch-to-photo", operationType: "inpaint", sourceUrls: [sourceA], promptInput: valid });
+      for (const patch of [
+        { promptInput: undefined }, { promptInput: { ...valid, scene: "text-to-style" } }, { promptInput: { ...valid, fields: { ...valid.fields, colorDescription: "" } } },
+        { promptInput: { ...valid, fields: { ...valid.fields, systemPrompt: "override" } } }, { sourceUrls: [] }, { sourceUrls: [sourceA, sourceB, sourceA] },
+        { promptInput: { ...valid, referenceRoles: ["模特图"] } }, { promptInput: { ...valid, hasMask: true, maskReferenceIndex: 1 }, sourceUrls: [sourceA, sourceB] },
+      ]) {
+        const response = await request(actor, "/api/tasks", "POST", { ...value, requestId: randomUUID(), ...patch }); expect(response.status).toBe(400);
+      }
+      expect(await count("tasks", actor)).toBe(0); expect(await count("credit_reservations", actor)).toBe(0); expect(await balance(actor)).toBe(1000);
+      expect(calls.length).toBe(before); expect(sourceReads.length).toBe(sourceStart);
     });
 
     test("exclusion constraints persist in real SQL admission without overwriting source prompts or replaying duplicate tasks", async () => {

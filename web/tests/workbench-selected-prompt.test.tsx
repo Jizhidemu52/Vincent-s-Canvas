@@ -57,6 +57,8 @@ function harness(kind: "video" | "creative", resolveImage?: (key?: string, fallb
     };
     const dependencies: Record<string, unknown> = {
         "@/lib/i18n": i18nHarness,
+        // Keep this harness inside the default task while exercising the real prompt/history closures.
+        "@/components/workbench-tasks": { WorkbenchTasks: ({ children }: any) => children.type(children.props), useWorkbenchTask: () => ({ id: "default", active: true, draftScope: (scope: string) => scope }), useWorkbenchTaskStatus() {} },
         react: { ...React, useState, useCallback: (callback: Function) => callback, useRef: (initial: unknown) => refs[refIndex++] ||= { current: initial }, useMemo: (factory: () => unknown) => factory(),
             useEffect(effect: () => (() => void) | void, deps?: readonly unknown[]) {
                 const index = effectIndex++, prior = effects[index];
@@ -90,7 +92,7 @@ function harness(kind: "video" | "creative", resolveImage?: (key?: string, fallb
         "@/stores/use-module-store": { useModuleEnabled: (key: string) => key === "creative-selection" },
         "@/stores/use-config-store": { ...requireModule("@/stores/use-config-store"), useEffectiveConfig: () => currentConfig, useConfigStore: (select: Function) => select({ config: currentConfig, updateConfig: (key: string, value: unknown) => { (currentConfig as any)[key] = value; } }) },
         "@/stores/use-business-config-store": { useBusinessConfigStore: (select: Function) => select({ status: "ready", tools: [], prices: [], models: [{ id: "gpt-image-2", modelId: "gpt-image-2", capabilities: ["generate", "edit"] }], estimate: () => ({ credits: 0, configured: true }) }) },
-        "@/stores/use-user-store": { useUserStore: (select: Function) => select({ user: { id: "owner", status: "active", creditBalance: 100 } }) },
+        "@/stores/use-user-store": { useUserStore: Object.assign((select: Function) => select({ user: { id: "owner", status: "active", creditBalance: 100 } }), { getState: () => ({ user: { id: "owner", status: "active", creditBalance: 100 } }) }) },
         "@/stores/use-asset-store": { useAssetStore: (select: Function) => select({ addAsset: () => undefined }) },
         "@/stores/use-theme-store": { useThemeStore: (select: Function) => select({ theme: "light" }) },
         "@/lib/deployment-features": { deploymentFeatures: { creditsEnabled: false } },
@@ -204,6 +206,8 @@ test("creative previews cannot accept another account or scene and a late older 
     const started = Promise.withResolvers<void>();
     const app = harness("creative", async key => slow && key === "image:generated" ? new Promise<string>(resolve => { finish = resolve; started.resolve(); }) : `blob:${key}`);
     app.render(); await settle();
+    // A board now restores its latest result; start a fresh view before testing invalid history selections.
+    app.render().reset();
     const workspace = app.render();
     await workspace.previewLog({ ...sceneLog, ownerId: "other-owner" });
     await workspace.previewLog({ ...sceneLog, sceneId: "other-scene" });
@@ -241,6 +245,8 @@ test("editing creative parameters while a preview loads cancels the spinner and 
 test("creative result selection only accepts an explicit result of this owner and scene", async () => {
     const app = harness("creative");
     app.render(); await settle();
+    // Clear the automatically restored result so the first selection is intentionally unrelated to this view.
+    app.render().reset();
     const workspace = app.render();
     expect(typeof workspace.selectResultPrompt).toBe("function");
     workspace.selectResultPrompt(sceneLog.results[0]);

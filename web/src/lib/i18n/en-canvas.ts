@@ -981,6 +981,8 @@ const enCanvas: Record<string, string> = {
   "多角度": "Multiple angles",
   "生成角度": "Generate angle",
   "查看大图": "View full image",
+  "缩小大图": "Zoom out full image",
+  "放大大图": "Zoom in full image",
   "查看图片详情": "View image details",
   "已复制画布链接；同步完成后，可在另一设备用同一员工账号打开（非公开分享）。": "Canvas link copied. After sync completes, open it on another device using the same employee account (not a public share).",
   "已复制当前画布链接；本地画布需在同一浏览器打开，跨设备请从菜单导出画布文件。": "Canvas link copied. Local canvases require the same browser; export the canvas file from the menu to transfer it to another device.",

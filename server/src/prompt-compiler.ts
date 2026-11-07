@@ -11,6 +11,7 @@ import { videoMotionLabels } from "../../shared/video-motion-options";
 import { ChatProtocolError } from "./routes/chat";
 import { chatUpstreamFailureReasons } from "./chat-upstream-failure";
 import { promptImageReferenceLimit } from "./image-task-policy";
+import { newCreativeFields, validateNewCreativeReferences } from "./new-creative-scenes";
 
 export type PromptActor = { id: string; role: string; departmentId?: string | null; groupId?: string | null; groupRole?: string | null };
 export type PromptSource = { bytes: Uint8Array; mimeType: string; previewDataUrl: string };
@@ -32,6 +33,8 @@ const designFieldsSchema = z.object({
 
 /** Public form fields remain data. Shape adaptation does not contain recipe prose. */
 export function normalizePromptFields(input: PromptInput) {
+  const specific = newCreativeFields(input);
+  if (specific) return specific;
   const checked = designFieldsSchema.safeParse(input.fields);
   if (!checked.success) throw new PromptOptimizationError("PROMPT_FIELDS_INVALID", "目标产品、关键特征或沿用要求格式无效或超过长度限制，未提交优化。", 400);
   const fields = structuredClone(checked.data);
@@ -57,6 +60,7 @@ export class PromptCompiler {
   async compile(actor: PromptActor, data: PromptCompilationRequest, options: PromptCompileOptions = {}): Promise<AdminPromptCompilation> {
     const request = promptCompilationRequestSchema.parse(data);
     const fields = normalizePromptFields(request.promptInput);
+    validateNewCreativeReferences(request.promptInput, fields, request.sourceUrls.length);
     if ((options.versionId || options.optimizerModelConfigId) && actor.role !== "super_admin") throw new PromptOptimizationError("FORBIDDEN", "仅超级管理员可选择测试版本", 403);
     const byRequest = await this.store.byRequest(actor.id, request.requestId);
     const reused = request.promptInput.compilationId ? await this.store.getCompilation(request.promptInput.compilationId, actor.id) : null;

@@ -50,7 +50,7 @@ function deferred<T>() {
 }
 
 /** Per-instance hook state, effect cleanup, and keyed reconciliation without process-global mocks. */
-function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]>, models: Parameters<typeof imageModelProfile>[1] = [{ id: "test-model", modelId: "test-model", name: "Test model", capabilities: ["generate", "edit"], creditCost: 0, rmbCost: 0 }], pendingRead?: { ready: Promise<void>; records: any[] }) {
+function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]>, models: Parameters<typeof imageModelProfile>[1] = [{ id: "test-model", modelId: "test-model", name: "Test model", capabilities: ["generate", "edit"], creditCost: 0, rmbCost: 0 }], pendingRead?: { ready: Promise<void> | (() => Promise<void>); records: any[] }) {
     type Frame = { values: any[]; effects: Array<{ dependencies?: DependencyList; cleanup?: ReturnType<EffectCallback> }>; pending: Array<() => void>; cursor: number; mounted: boolean };
     const frame = (): Frame => ({ values: [], effects: [], pending: [], cursor: 0, mounted: true });
     const wrapper = frame();
@@ -66,6 +66,7 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
     const requests: Array<{ kind: string; args: any[] }> = [];
     const errors: string[] = [];
     const warnings: string[] = [];
+    let reportedTaskStatus: { ready: boolean; pending: boolean } | undefined;
     let restoredDraft: Record<string, any> | undefined;
     const delayedMedia = new Map<string, Promise<string>>();
     const stored = new Map(initial.map(log => [log.id, structuredClone(log)]));
@@ -109,7 +110,7 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
         ...storage,
         async iterate(visitor: (value: unknown, key: string, index: number) => void) {
             const records = structuredClone([...storedPending.values()]);
-            await pendingRead?.ready;
+            await (typeof pendingRead?.ready === "function" ? pendingRead.ready() : pendingRead?.ready);
             records.forEach((value, index) => visitor(value, value.id, index + 1));
         },
         async setItem(key: string, value: any) { storedPending.set(key, structuredClone(value)); return value; },
@@ -126,6 +127,9 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
     };
     const component = (name: string) => name;
     const dependencies: Record<string, any> = {
+        // These closure tests exercise the default pane; actual multi-pane
+        // persistence, switching and ownership run in workbench-multitask.pw.ts.
+        "@/components/workbench-tasks": { WorkbenchTasks: ({ children }: any) => children.type(children.props), useWorkbenchTask: () => ({ id: "default", active: true, draftScope: (scope: string) => scope }), useWorkbenchTaskStatus(status: { ready: boolean; pending: boolean }) { reportedTaskStatus = status; } },
         "@/lib/i18n": i18nHarness,
         react: {
             ...React, useState, useMemo,
@@ -230,6 +234,7 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
     disposers.push(unmount);
     return {
         boundary, render, stored, requests, errors, warnings, config, confirmations,
+        taskStatus() { render(); return reportedTaskStatus; },
         setRestoredDraft(value: Record<string, any>) { restoredDraft = value; },
         navigate(tool: string, query = "") { params = new URLSearchParams(`tool=${tool}${query ? `&${query}` : ""}`); },
         setOwner(value: string) { ownerId = value; },
@@ -258,6 +263,45 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
 }
 
 describe("image workspace isolation", () => {
+    test.each(["item-extract", "remove-background", "hd-upscale"])("%s pending recovery blocks submission and closing until every original receipt is read", async tool => {
+        const ready = deferred<void>();
+        const pending = { id: "original-pending", requestId: "original-request", taskId: "original-task", ownerId: "designer-a", tool, createdAt: 1, stopped: true,
+            snapshot: { text: "", config: { model: "", imageModel: "", size: "auto", quality: "", count: "1" }, references: [] } };
+        const page = pageHarness([], async () => [{ id: "duplicate", dataUrl: "data:image/png;base64,YQ==" }], undefined, { ready: ready.promise, records: [pending] });
+        page.navigate(tool); await page.settle();
+        page.references().onChange([{ id: "source", name: "source.png", type: "image/png", dataUrl: "data:image/png;base64,YQ==" }]);
+        expect(page.taskStatus()?.ready).toBe(false);
+        expect(page.generate().disabled).toBe(true);
+        page.generate().onClick(); await page.settle();
+        expect(page.requests).toHaveLength(0);
+        ready.resolve(); await page.settle();
+        expect(page.taskStatus()).toMatchObject({ ready: true, pending: true });
+        expect(page.generate().disabled).toBe(true);
+        expect(page.failedCards()[0]?.props.recovery).toMatchObject({ id: pending.id, requestId: pending.requestId });
+        expect(page.requests).toHaveLength(0);
+    });
+
+    test("failed pending recovery remains closed until an explicit successful storage read", async () => {
+        let reads = 0;
+        const page = pageHarness([], async () => [{ id: "after-recovery", dataUrl: "data:image/png;base64,YQ==" }], undefined,
+            { ready: async () => { if (++reads === 1) throw new Error("isolated-pending-read-failed"); }, records: [] });
+        page.navigate("item-extract"); await page.settle();
+        page.references().onChange([{ id: "source", name: "source.png", type: "image/png", dataUrl: "data:image/png;base64,YQ==" }]);
+        expect(page.taskStatus()?.ready).toBe(false);
+        expect(page.generate().disabled).toBe(true);
+        expect(textContent(page.render())).toContain("isolated-pending-read-failed");
+        page.generate().onClick(); await page.settle();
+        expect(page.requests).toHaveLength(0);
+        elements(page.render()).find(element => element.props.children === "重试读取原任务")!.props.onClick();
+        await page.settle();
+        expect(reads).toBe(2);
+        expect(page.taskStatus()).toMatchObject({ ready: true, pending: false });
+        expect(page.generate().disabled).toBe(false);
+        await page.generate().onClick(); await page.settle();
+        expect(page.requests).toHaveLength(1);
+        expect(page.images().map(image => image.id)).toEqual(["after-recovery"]);
+    });
+
     test.each(["image", "image-generation"])("history restoration accepts %s as the image entry and restores user input without generating", async archivedTool => {
         const log = storedLog("image-generation", "optimized", 10);
         Object.assign(log.images[0]!, { sourceTaskId: "original-task" });
@@ -292,26 +336,32 @@ describe("image workspace isolation", () => {
         expect(page.requests).toHaveLength(0);
     });
 
-    test("a delayed startup pending read cannot replace a newer completed generation", async () => {
+    test("a delayed startup pending read must finish before a newer completed generation", async () => {
         const ready = deferred<void>();
         const pending = { id: "old-pending", requestId: "old-request", taskId: "old-task", ownerId: "designer-a", tool: "image-generation", createdAt: 1,
             snapshot: { text: "older request", config: { model: "test-model", imageModel: "test-model", size: "1024x1024", quality: "standard", count: "1" }, references: [] } };
         const page = pageHarness([], async () => [{ id: "new-result", dataUrl: "data:image/png;base64,bmV3" }], undefined, { ready: ready.promise, records: [pending] });
         await page.settle();
         page.prompt().onChange({ target: { value: "newer request" } });
+        expect(page.generate().disabled).toBe(true);
         await page.generate().onClick();
         await page.settle();
+        expect(page.requests).toHaveLength(0);
+        ready.resolve(); await page.settle();
+        expect(page.failedCards()[0]?.props.recovery).toMatchObject({ id: "old-pending", requestId: "old-request" });
+        expect(page.prompt().value).toBe("newer request");
+        expect(page.generate().disabled).toBe(false);
+        await page.generate().onClick(); await page.settle();
         expect(page.errors).toEqual([]);
         expect(page.requests).toHaveLength(1);
         expect(page.images().map(image => image.id)).toEqual(["new-result"]);
-        ready.resolve();
         await page.settle();
         expect(page.images().map(image => image.id)).toEqual(["new-result"]);
         expect(page.failedCards()).toHaveLength(0);
         expect(page.requests).toHaveLength(1);
     });
 
-    test("a delayed startup pending read leaves a new in-flight slot owned by its current request", async () => {
+    test("a restored startup receipt stays separate from a newly accepted in-flight slot", async () => {
         const ready = deferred<void>(), generation = deferred<Image[]>();
         const pending = { id: "old-pending", requestId: "old-request", taskId: "old-task", ownerId: "designer-a", tool: "image-generation", createdAt: 1,
             snapshot: { text: "older request", config: { model: "test-model", imageModel: "test-model", size: "1024x1024", quality: "standard", count: "1" }, references: [] } };
@@ -319,8 +369,11 @@ describe("image workspace isolation", () => {
         await page.settle();
         page.prompt().onChange({ target: { value: "new in-flight request" } });
         page.generate().onClick();
+        expect(page.requests).toHaveLength(0);
         ready.resolve();
         await page.settle();
+        expect(page.failedCards()[0]?.props.recovery).toMatchObject({ id: "old-pending", requestId: "old-request" });
+        page.generate().onClick(); await page.settle();
         expect(page.queueProgress().active).toBe(true);
         expect(page.failedCards()).toHaveLength(0);
         generation.resolve([{ id: "new-inflight-result", dataUrl: "data:image/png;base64,bmV3" }]);
@@ -701,6 +754,7 @@ describe("Blend entry semantics", () => {
     test.each([0, 1, 2, 4, 5])("unconfigured Blend with %i references keeps no-prompt copy and exact limits without submitting", async count => {
         const page = pageHarness([], undefined, []);
         page.navigate("midjourney-blend");
+        await page.settle();
         page.references().onChange(references(count));
         const tree = page.render();
         expect(elements(tree).some(element => element.type === "TextArea")).toBe(false);
@@ -722,6 +776,7 @@ describe("Blend entry semantics", () => {
             { id: "opaque-blend", modelId: "opaque-blend", name: "Blend fixture", imageParameterProfile: "blend", capabilities: ["generate"], creditCost: 0, rmbCost: 0 },
         ]);
         page.navigate("midjourney-blend");
+        await page.settle();
         page.references().onChange(references(count));
         const allowed = count >= 2 && count <= 4;
         expect(page.generate().disabled).toBe(!allowed);
@@ -738,13 +793,15 @@ describe("Blend entry semantics", () => {
         } else expect(page.errors).toContain("当前合成模型需要 2–4 张参考图。");
     });
 
-    test("ordinary image and edit entries retain prompt and single-reference guidance", () => {
+    test("ordinary image and edit entries retain prompt and single-reference guidance", async () => {
         const page = pageHarness();
+        await page.settle();
         expect(textContent(page.render())).toContain("第一张作品，从一句描述开始");
         expect(page.generate().disabled).toBe(true);
         page.prompt().onChange({ target: { value: "A normal image prompt" } });
         expect(page.generate().disabled).toBe(false);
         page.navigate("image-edit");
+        await page.settle();
         expect(textContent(page.render())).toContain("至少一张参考图");
         page.prompt().onChange({ target: { value: "A normal edit prompt" } });
         page.references().onChange(references(1));

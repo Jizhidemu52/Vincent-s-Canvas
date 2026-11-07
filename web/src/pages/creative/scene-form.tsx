@@ -1,10 +1,11 @@
 import { uiText, useUiText } from "@/lib/i18n";
 import { ImagePlus, Palette, Plus, Trash2, Upload } from "lucide-react";
-import { lazy, Suspense, useState, type ReactNode } from "react";
+import { lazy, Suspense, useId, useState, type ReactNode } from "react";
 import { useImageDrop } from "@/hooks/use-image-drop";
+import { useWorkbenchTask } from "@/components/workbench-tasks";
 import type { ReferenceImage } from "@/types/image";
 import { useModuleEnabled } from "@/stores/use-module-store";
-import { addSceneColor, getSceneColorSelection, isSceneHexColor, removeSceneColor, setSceneColor, supportsSceneProductTarget, type SceneForm, type SceneSlot, type SceneSlotId } from "./scene-form-model";
+import { addSceneColor, getSceneColorSelection, isSceneHexColor, removeSceneColor, setSceneColor, supportsSceneKeepDetails, supportsSceneProductTarget, type SceneForm, type SceneSlot, type SceneSlotId } from "./scene-form-model";
 
 const StandardColorDialog = lazy(() => import("./standard-color-dialog"));
 
@@ -14,6 +15,7 @@ type SceneFieldsProps = {
     onChange: (next: SceneForm) => void;
     disabled?: boolean;
     sourceImage?: string;
+    hasSecondaryImage?: boolean;
     productPicker?: ReactNode;
 };
 
@@ -46,11 +48,12 @@ function colorPickerValue(color: string): string {
     return value.length === 4 ? `#${value.slice(1).split("").map((part) => part + part).join("")}` : value;
 }
 
-export function SceneFields({ sceneId, form, onChange, disabled = false, sourceImage, productPicker }: SceneFieldsProps) {
+export function SceneFields({ sceneId, form, onChange, disabled = false, sourceImage, hasSecondaryImage = false, productPicker }: SceneFieldsProps) {
     useUiText();
+    const instanceId = useId();
     const [colorSlot, setColorSlot] = useState<number | null>(null);
     const colorLibraryEnabled = useModuleEnabled("standard-colors");
-    const id = (name: string) => `cs-${sceneId}-${name}`;
+    const id = (name: string) => `cs-${sceneId}-${name}-${instanceId}`;
     const update = <K extends keyof SceneForm>(key: K, value: SceneForm[K]) => onChange({ ...form, [key]: value });
     const choice = (key: keyof SceneForm, label: string, options: readonly (string | { value: string; label: string })[]) => <Choices
         id={id(key)} label={uiText(label || "")} value={String(form[key])} options={options} disabled={disabled}
@@ -182,6 +185,28 @@ export function SceneFields({ sceneId, form, onChange, disabled = false, sourceI
                 {extra("如：图案居中，保留金属质感，不改变连接孔位。")}
             </>;
             break;
+        case "virtual-try-on":
+            fields = <>
+                {descriptionField("成人模特与试穿要求", "无模特图时请描述成人模特，如：短发成年女性、全身站姿、简洁黑裤、白色影棚。", !hasSecondaryImage)}
+                <p className="cs-help">{uiText("产品图决定衣物设计；可选模特图只提供成人模特与姿态，两张图不会交换角色。未上传模特图时依据文字生成成人模特。")}</p>
+                <p className="cs-help">{uiText("本次支持一件产品，不是多服装组合；结果仅为视觉试穿，不保证真实身份、尺寸或合身度。")}</p>
+            </>;
+            break;
+        case "sketch-to-photo":
+            fields = <>
+                <div className="cs-field">
+                    <label className="cs-label" htmlFor={id("fabric")}>{uiText("材质方向")}<span className="cs-required" aria-hidden="true"> *</span></label>
+                    <input id={id("fabric")} className="cs-input" value={form.fabric} onChange={event => update("fabric", event.target.value)} maxLength={500} required disabled={disabled} placeholder={uiText("如：羊毛绞花针织，或明确填写参考图材质")} />
+                </div>
+                <div className="cs-field">
+                    <label className="cs-label" htmlFor={id("colorDescription")}>{uiText("颜色方向")}<span className="cs-required" aria-hidden="true"> *</span></label>
+                    <input id={id("colorDescription")} className="cs-input" value={form.colorDescription} onChange={event => update("colorDescription", event.target.value)} maxLength={500} required disabled={disabled} placeholder={uiText("如：淡粉色，或明确填写参考图配色")} />
+                </div>
+                {choice("presentation", "实拍展示方式", ["白底平铺", "白底悬浮"])}
+                <p className="cs-help">{uiText("线稿图决定轮廓、结构和细节位置；可选参考图只提供材质与配色。黑白线稿没有原色信息，不能自动还原未知原色。")}</p>
+                {extra("如：柔和影棚光线，保留全部绞花数量与罗纹范围。")}
+            </>;
+            break;
         default:
             return null;
     }
@@ -193,6 +218,8 @@ export function SceneFields({ sceneId, form, onChange, disabled = false, sourceI
                 <p className="cs-help">{uiText("用名称和位置说明目标；这不是像素选区，也不会自动生成蒙版。")}</p>
                 {productPicker}
             </div>
+        </>}
+        {supportsSceneKeepDetails(sceneId) && <>
             <div className="cs-field">
                 <label className="cs-label" htmlFor={id("keepDetails")}>{uiText("关键特征保持")} <span className="cs-help">{uiText("可选")}</span></label>
                 <textarea id={id("keepDetails")} className="cs-textarea" value={form.keepDetails} onChange={event => update("keepDetails", event.target.value)} rows={2} maxLength={2000} disabled={disabled} placeholder={uiText("如：保持领型、纽扣数量、图案位置与面料纹理")} />
@@ -233,18 +260,20 @@ function SceneUploadSlot({ slot, reference, onImage, disabled, scopeKey }: {
     scopeKey: string;
 }) {
     useUiText();
+    const task = useWorkbenchTask();
+    const uploadId = `cs-upload-${slot.id}-${useId()}`;
     const imageDrop = useImageDrop({
-        scopeKey: `${scopeKey}:${slot.id}:${slot.label}`,
-        disabled,
+        scopeKey: `${scopeKey}:${task.id}:${slot.id}:${slot.label}`,
+        disabled: disabled || !task.active,
         onFiles: async files => {
             if (files.length !== 1) throw new Error("每个参考图位置一次只能拖入一张图片，请分别放入对应位置。");
             await onImage(slot.id, files[0]!);
         },
     });
-    return <section className="cs-upload" aria-labelledby={`cs-upload-${slot.id}-label`}>
-                <div className="cs-label" id={`cs-upload-${slot.id}-label`}>{uiText(slot.label || "")}{slot.required && <span className="cs-required" aria-hidden="true"> *</span>}</div>
-                <label {...imageDrop.dropProps} aria-busy={imageDrop.reading} className={`cs-upload-control${reference ? " has-image" : ""}${disabled ? " is-disabled" : ""}${imageDrop.dragging ? " outline outline-2 outline-offset-2 outline-primary" : ""}`} htmlFor={`cs-upload-${slot.id}`}>
-                    <input id={`cs-upload-${slot.id}`} className="cs-upload-input" type="file" accept="image/jpeg,image/png,image/webp" aria-label={uiText("上传{label}", { label: uiText(slot.label) })} disabled={disabled} onChange={(event) => {
+    return <section className="cs-upload" aria-labelledby={`${uploadId}-label`}>
+                <div className="cs-label" id={`${uploadId}-label`}>{uiText(slot.label || "")}{slot.required ? <span className="cs-required" aria-hidden="true"> *</span> : <span className="cs-help"> · {uiText("可选")}</span>}</div>
+                <label {...imageDrop.dropProps} aria-busy={imageDrop.reading} className={`cs-upload-control${reference ? " has-image" : ""}${disabled ? " is-disabled" : ""}${imageDrop.dragging ? " outline outline-2 outline-offset-2 outline-primary" : ""}`} htmlFor={uploadId}>
+                    <input id={uploadId} className="cs-upload-input" type="file" accept="image/jpeg,image/png,image/webp" aria-label={uiText("上传{label}", { label: uiText(slot.label) })} disabled={disabled} onChange={(event) => {
                         const file = event.currentTarget.files?.[0];
                         if (file) onImage(slot.id, file);
                         event.currentTarget.value = "";

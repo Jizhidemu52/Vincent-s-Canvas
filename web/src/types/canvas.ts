@@ -68,7 +68,7 @@ export type CanvasGenerationRecord = {
 };
 
 export type CanvasNodeMetadata = {
-    quickImageAction?: "remove-background" | "hd-upscale";
+    quickImageAction?: "remove-background" | "hd-upscale" | "item-extract";
     locked?: boolean;
     imageAgent?: { parentNodeId?: string; workId: string; version: number; note: import("@/lib/image-agent/work-note").ImageAgentWorkNote };
     maskAdaptation?: import("@/lib/canvas/canvas-mask-adaptation").CanvasMaskAdaptation;

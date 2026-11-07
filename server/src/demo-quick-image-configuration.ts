@@ -3,7 +3,7 @@ import type { AdminQuickImageConfiguration, QuickImageConfigurationInput, QuickI
 import { isQuickImageAction, quickImageModelId, type QuickImageAction } from "../../shared/quick-image-tools";
 import { MARK_IMAGE_PROVIDER_ID } from "../../shared/mark-image-models";
 import { isQuickImageEligibleModel, quickImageActions, quickImageConfigurationUpdateSchema, validateQuickImageConfiguration } from "./quick-image-configuration";
-import { prepareQuickImageTask, QUICK_IMAGE_SNAPSHOT, quickImageDefaultPrompts, type QuickImageInput, type QuickImageSnapshot } from "./quick-image-tools";
+import { prepareQuickImageTask, QUICK_IMAGE_SNAPSHOT, quickImageDefaultParameters, quickImageDefaultPrompts, type QuickImageInput, type QuickImageSnapshot } from "./quick-image-tools";
 import { ToolConfigurationError } from "./tool-configuration";
 
 type Actor = { id: string; role: string } | null;
@@ -32,7 +32,7 @@ export class DemoQuickImageConfigurationStore {
     if (saved) return structuredClone(saved);
     const model = this.models.find(value => value.modelId === quickImageModelId(action) && value.providerId === MARK_IMAGE_PROVIDER_ID);
     return { action, modelConfigId: model ? String(model.id) : null, modelId: model ? String(model.modelId) : null, modelName: model ? String(model.name || model.modelId) : null,
-      prompt: quickImageDefaultPrompts[action], parameters: action === "hd-upscale" ? { size: "auto", resolution: "4k" } : {}, configurationVersion: 0, isDefault: true };
+      prompt: quickImageDefaultPrompts[action], parameters: { ...quickImageDefaultParameters[action] }, configurationVersion: 0, isDefault: true };
   }
 
   catalog(actor: Actor) {

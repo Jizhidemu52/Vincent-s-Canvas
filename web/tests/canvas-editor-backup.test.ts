@@ -58,16 +58,20 @@ describe("on-demand canvas node download", () => {
         const events: unknown[] = [];
         const node: CanvasNodeData = { id: "image", type: CanvasNodeType.Image, title: "original", position: { x: 0, y: 0 }, width: 100, height: 100, metadata: { content: "blob:original", storageKey: "image:original" } };
         let loadVariants = async () => ({ variants: "fixture" });
-        const run: typeof downloadCanvasEditorNode = new Function("CanvasNodeType", "uiText", "audioExtension", "videoFileExtension", "loadCanvasExport", `${code}; return downloadCanvasEditorNode;`)(
+        let resolveMedia = async (_key?: string, fallback = "") => fallback;
+        let owner = { user: { id: "owner-a" }, status: "authenticated" };
+        const run: typeof downloadCanvasEditorNode = new Function("CanvasNodeType", "uiText", "audioExtension", "videoFileExtension", "loadCanvasExport", "resolveMediaUrl", "useUserStore", `${code}; return downloadCanvasEditorNode;`)(
             CanvasNodeType, (text: string) => text, audioExtension, videoFileExtension,
             async () => ({ loadCanvasImageVariants: () => loadVariants(), downloadCanvasContent: (...args: unknown[]) => events.push(args) }),
+            (key?: string, fallback?: string) => resolveMedia(key, fallback), { getState: () => owner },
         );
         const options = {
             projectId: "project", nodesRef: { current: [node] }, savedProjectIdRef: { current: "project" },
             message: { loading: () => { events.push("loading"); return () => events.push("done"); } },
             setImageDownload: (value: unknown) => events.push(value),
         } as unknown as Parameters<typeof downloadCanvasEditorNode>[1];
-        return { run: (input = node) => run(input, options), node, options, events, setVariants: (fn: typeof loadVariants) => { loadVariants = fn; } };
+        return { run: (input = node) => run(input, options), node, options, events, setVariants: (fn: typeof loadVariants) => { loadVariants = fn; },
+            setMediaResolver: (fn: typeof resolveMedia) => { resolveMedia = fn; }, setOwner: (id: string, status = "authenticated") => { owner = { user: { id }, status }; } };
     }
     test("opens image choices from the still-current original node and clears progress", async () => {
         const state = downloadHarness();
@@ -87,13 +91,55 @@ describe("on-demand canvas node download", () => {
     });
     test("audio keeps sanitized filenames and original download URLs", async () => {
         const state = downloadHarness();
-        await state.run({ ...state.node, type: CanvasNodeType.Audio, title: 'clip:one. ', metadata: { content: "blob:audio", mimeType: "audio/wav" } });
+        Object.assign(state.node, { type: CanvasNodeType.Audio, title: 'clip:one. ', metadata: { content: "blob:audio", mimeType: "audio/wav" } });
+        await state.run();
         expect(state.events).toEqual(["loading", ["blob:audio", "clip_one.wav"], "done"]);
     });
     test("MOV downloads keep the original URL and extension instead of the MP4 preview", async () => {
         const state = downloadHarness();
-        await state.run({ ...state.node, type: CanvasNodeType.Video, title: "original", metadata: { content: "blob:original-mov", mimeType: "video/quicktime" } });
+        Object.assign(state.node, { type: CanvasNodeType.Video, metadata: { content: "blob:original-mov", mimeType: "video/quicktime" } });
+        await state.run();
         expect(state.events).toEqual(["loading", ["blob:original-mov", "original.mov"], "done"]);
+    });
+    for (const [type, mimeType, extension] of [[CanvasNodeType.Audio, "audio/wav", "wav"], [CanvasNodeType.Video, "video/quicktime", "mov"]] as const) test(`${type} preserves an existing case-insensitive format extension without stripping unrelated title suffixes`, async () => {
+        const state = downloadHarness();
+        Object.assign(state.node, { type, title: `original.${extension.toUpperCase()}`, metadata: { content: "blob:original", mimeType } });
+        await state.run();
+        expect(state.events).toEqual(["loading", ["blob:original", `original.${extension.toUpperCase()}`], "done"]);
+        state.node.title = "original.reference.mp4";
+        await state.run();
+        expect(state.events.slice(-3)).toEqual(["loading", ["blob:original", `original.reference.mp4.${extension}`], "done"]);
+    });
+    for (const [type, mimeType, extension] of [[CanvasNodeType.Audio, "audio/wav", "wav"], [CanvasNodeType.Video, "video/quicktime", "mov"]] as const) test(`${type} resolves the durable original after its saved blob URL expires`, async () => {
+        const state = downloadHarness();
+        Object.assign(state.node, { type, metadata: { content: "blob:expired", storageKey: `${type}:persisted-original`, mimeType } });
+        state.setMediaResolver(async (key, fallback) => {
+            expect(key).toBe(`${type}:persisted-original`); expect(fallback).toBe("blob:expired");
+            return "blob:resolved-original";
+        });
+        await state.run();
+        expect(state.events).toEqual(["loading", ["blob:resolved-original", `original.${extension}`], "done"]);
+        expect(state.node.metadata?.content).toBe("blob:expired");
+    });
+    for (const change of ["project", "node", "owner", "session"]) test(`late original media cannot download after the ${change} changes`, async () => {
+        const state = downloadHarness(), gate = Promise.withResolvers<string>();
+        Object.assign(state.node, { type: CanvasNodeType.Audio, metadata: { content: "blob:expired", storageKey: "audio:stored", mimeType: "audio/wav" } });
+        state.setMediaResolver(() => gate.promise);
+        const running = state.run();
+        if (change === "project") state.options.savedProjectIdRef.current = "next-project";
+        if (change === "node") state.options.nodesRef.current = [{ ...state.node, metadata: { content: "blob:replacement", storageKey: "audio:replacement" } }];
+        if (change === "owner") state.setOwner("owner-b");
+        if (change === "session") state.setOwner("owner-a", "unauthenticated");
+        gate.resolve("blob:resolved-original");
+        await running;
+        expect(state.events).toEqual(["loading", "done"]);
+    });
+    test("original media storage failure is explicit and never falls back to the expired URL", async () => {
+        const state = downloadHarness();
+        Object.assign(state.node, { type: CanvasNodeType.Audio, metadata: { content: "blob:expired", storageKey: "audio:stored", mimeType: "audio/wav" } });
+        state.setMediaResolver(async () => { throw new Error("员工会话已变化"); });
+        await expect(state.run()).rejects.toThrow("员工会话已变化");
+        expect(state.events).toEqual(["loading", "done"]);
     });
     test("failed variant loading always clears progress and remains an error", async () => {
         const state = downloadHarness();

@@ -14,9 +14,10 @@ const ast = ts.createSourceFile("canvas-agent-chat-ui.tsx", source, ts.ScriptTar
 function find(node: ts.Node, predicate: (node: ts.Node) => boolean): ts.Node | undefined {
     return predicate(node) ? node : ts.forEachChild(node, child => find(child, predicate));
 }
+const previewUpdates: unknown[] = [];
 function evaluate(node: ts.Node) {
     const code = ts.transpileModule(`exports.value = (${node.getText(ast)});`, { compilerOptions: { jsx: ts.JsxEmit.React, target: ts.ScriptTarget.ESNext } }).outputText;
-    const bindings = { React, useUiText: () => uiText, conversationImageLabel, CanvasPersistedMediaPreview: "preview", ConversationImageActions: "image-actions", WandSparkles: "icon" };
+    const bindings = { React, useUiText: () => uiText, useState: (initial: unknown) => [initial, (value: unknown) => previewUpdates.push(value)], conversationImageLabel, CanvasPersistedMediaPreview: "preview", ConversationImagePreview: "full-preview", ConversationImageActions: "image-actions", WandSparkles: "icon" };
     const exports = {} as { value: any };
     new Function(...Object.keys(bindings), "exports", code)(...Object.values(bindings), exports);
     return exports.value;
@@ -33,14 +34,15 @@ function elements(value: unknown): ReactElement<any>[] {
 const attachment = { id: "result", name: "原始名称.png", url: "data:image/png;base64,AQID", width: 320, height: 240 };
 const image = { id: "result-image", label: "图2", name: attachment.name, dataUrl: attachment.url };
 const base = { messageId: "message", attachments: [attachment], theme: canvasThemes.light, imageControls: new Map([["message:result", { image, version: 3 }]]), onImageAction() {} };
-const render = (patch: object = {}) => elements(renderAttachments({ ...base, ...patch }));
+const render = (patch: object = {}) => { previewUpdates.length = 0; return elements(renderAttachments({ ...base, ...patch })); };
 const byId = (tree: ReactElement<any>[], id: string) => tree.find(element => element.props["data-testid"] === id)!;
 
 test("result card keeps original media, explicit version and current selection while compact controls remain separate", () => {
     const tree = render({ activeImageId: image.id });
     const preview = tree.find(element => element.type === "preview")!;
     expect(preview.props).toMatchObject({ url: attachment.url, alt: attachment.name, width: 320, height: 240 });
-    expect(tree.find(element => element.type === "button")!.props["aria-pressed"]).toBe(true);
+    expect(tree.find(element => element.type === "button")!.props["aria-haspopup"]).toBe("dialog");
+    expect(byId(tree, "canvas-agent-image-result").props.style.borderColor).toBe(canvasThemes.light.node.activeStroke);
     expect(tree.some(element => element.type === "span" && element.props.children?.includes?.(" · V3"))).toBe(true);
     expect(byId(tree, "canvas-agent-image-current").props.children).toBe("当前");
     const actions = tree.find(element => element.type === "image-actions")!;
@@ -53,12 +55,15 @@ test("result card keeps original media, explicit version and current selection w
     expect(overlay).not.toContain("hidden");
 });
 
-test("result selection and mask use catalog identity, with a per-image mask callback taking priority", () => {
+test("preview keeps catalog identity without changing the target, while explicit edit and mask keep their callbacks", () => {
     const calls: unknown[][] = [];
     const action = (...args: unknown[]) => calls.push(args);
     const mask = (id: string) => calls.push(["mask", id]);
     const tree = render({ onImageAction: action, onMaskImage: mask });
     tree.find(element => element.type === "button")!.props.onClick();
+    expect(previewUpdates).toEqual([image]);
+    expect(calls).toEqual([]);
+    tree.find(element => element.type === "image-actions")!.props.onAction("edit", image.id);
     tree.find(element => element.type === "image-actions")!.props.onMask();
     expect(calls).toEqual([["edit", image.id], ["mask", image.id]]);
     const override = render({ onMaskImage: mask, imageControls: new Map([["message:result", { image, onMask: () => calls.push(["specific"]) }]]) });
@@ -68,7 +73,8 @@ test("result selection and mask use catalog identity, with a per-image mask call
 });
 
 test("busy, unavailable and unselected cards retain accurate state without inventing a current target or version", () => {
-    expect(render({ disabled: true }).find(element => element.type === "button")!.props.disabled).toBe(true);
+    // Accepted work disables mutating actions, not a read-only original preview.
+    expect(render({ disabled: true }).find(element => element.type === "button")!.props.disabled).toBe(false);
     expect(render({ disabled: true }).find(element => element.type === "image-actions")!.props.disabled).toBe(true);
     const unavailable = render({ imageControls: new Map([["message:result", { image: { ...image, unavailableReason: "原图无法读取" }, version: 0 }]]) });
     expect(unavailable.find(element => element.type === "button")!.props.disabled).toBe(true);

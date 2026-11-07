@@ -40,8 +40,10 @@ describe("demo formal tool configuration", () => {
     expect(() => resolveDemoToolConfiguration({ operationType: "chat", toolKey: "canvas-chat", modelConfigId: "chat-b" }, configured, chats, chatProviders, flags)).toThrow("未启用");
   });
   test("catalog includes formal AI slots, promoted design tools and no unfinished placeholders", () => {
-    expect(toolDefinitions).toHaveLength(27);
-    expect(new Set(moduleKeys).size).toBe(44);
+    expect(toolDefinitions).toHaveLength(29);
+    expect(new Set(moduleKeys).size).toBe(46);
+    expect(moduleKeys).toContain("creative-virtual-try-on");
+    expect(moduleKeys).toContain("creative-sketch-to-photo");
     expect(moduleKeys).toContain("midjourney-blend");
     expect(moduleKeys).toContain("standard-colors");
     expect(moduleKeys).not.toContain("canvas-ai-upscale");

@@ -81,3 +81,20 @@ test("PDF section overflow is rejected explicitly without exposing a partial doc
     await expect(page.locator("#status")).toContainText("超过 200 页");
     expect(await page.evaluate(() => (window as any).attachment)).toBeUndefined();
 });
+
+test("PDF fallback retains text and previews when the browser cannot create a worker", async ({ page }) => {
+    await page.addInitScript(() => {
+        Object.defineProperty(window, "Worker", { configurable: true, value: class {
+            constructor() { throw new Error("worker unavailable in this test environment"); }
+        } });
+    });
+    const pdf = await PDFDocument.create();
+    pdf.addPage([400, 300]).drawText("PDF_FALLBACK_731", { x: 20, y: 220 });
+    await page.goto("/e2e/agent-document-parser.fixture.html");
+    await page.locator("#document-file").setInputFiles({ name: "fallback.pdf", mimeType: "application/pdf", buffer: Buffer.from(await pdf.save()) });
+    await expect(page.locator("#status")).toHaveText("complete");
+    const result = await page.evaluate(() => (window as any).attachment.document);
+    expect(result.sections[0].text).toContain("PDF_FALLBACK_731");
+    expect(result.figures).toHaveLength(1);
+    expect(result.figures[0].width).toBeGreaterThan(0);
+});

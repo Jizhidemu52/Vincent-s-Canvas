@@ -60,12 +60,12 @@ export function generationProgressText(progress: QueuedTaskProgress): string {
     if (progress.phase === "complete") return progress.status === "success" ? uiText("生成完成") : progress.status === "cancelled" ? uiText("任务已取消") : uiText("生成失败");
     if (progress.phase === "paused") return uiText("任务已暂停，请查询原任务");
     const stage = progress.runtime === "demo" ? uiText("生成中（本机无共享排队）")
-        : progress.phase === "waiting" ? progress.queuePosition === null ? uiText("排队中，名次暂不可用") : uiText("同模型可运行队列第 {position} 位", { position: progress.queuePosition })
+        : progress.phase === "waiting" ? typeof progress.queuePosition !== "number" || !Number.isSafeInteger(progress.queuePosition) || progress.queuePosition < 1 ? uiText("排队中，名次暂不可用") : uiText("同模型可运行队列第 {position} 位", { position: progress.queuePosition })
         : progress.phase === "delayed" ? uiText("等待调度重试")
         : progress.phase === "preparing" ? uiText("正在准备生成") : uiText("正在生成");
-    if (progress.estimatedRemainingSeconds === null) return uiText("{stage} · 暂无可靠耗时估算", { stage });
+    if (typeof progress.estimatedRemainingSeconds !== "number" || !Number.isFinite(progress.estimatedRemainingSeconds) || progress.estimatedRemainingSeconds < 0) return uiText("{stage} · 暂无可靠耗时估算", { stage });
     const wait = progress.estimatedWaitSeconds;
-    return uiText("{stage}{wait} · 预计还需约 {remaining}（仅供参考）", { stage, wait: wait !== null && wait > 0 ? uiText(" · 预计排队约 {time}", { time: humanSeconds(wait) }) : "", remaining: humanSeconds(progress.estimatedRemainingSeconds) });
+    return uiText("{stage}{wait} · 预计还需约 {remaining}（仅供参考）", { stage, wait: typeof wait === "number" && Number.isFinite(wait) && wait > 0 ? uiText(" · 预计排队约 {time}", { time: humanSeconds(wait) }) : "", remaining: humanSeconds(progress.estimatedRemainingSeconds) });
 }
 
 function humanSeconds(seconds: number) {

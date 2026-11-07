@@ -100,6 +100,10 @@ import json,sys
 marker=json.load(open(sys.argv[1])); candidate=json.load(open(sys.argv[2]))
 assert marker=={'schema':1,'version':candidate['version'],'commit':candidate['commit']}
 PY
+python3 -B "$repo/ops/release/verify-container-worker.py" \
+  --container "$(dc ps -q web)" --base-url "http://127.0.0.1:$port" \
+  --expected-image-id "$web_id" --expected-commit "$commit" \
+  --output "$work/pdf-worker-http.json"
 [[ -f "$repo/ops/release/browser-smoke.sh" && ! -L "$repo/ops/release/browser-smoke.sh" ]] || { echo REQUIRED_PRODUCTION_BROWSER_SMOKE_MISSING >&2; exit 1; }
 export CANVAS_SMOKE_BASE_URL="http://127.0.0.1:$port" CANVAS_SMOKE_PROJECT="$project"
 export CANVAS_SMOKE_COMPOSE_FILE="$work/compose.json" CANVAS_SMOKE_ENV_FILE="$work/test.env" CANVAS_SMOKE_OUTPUT_DIR="$work"

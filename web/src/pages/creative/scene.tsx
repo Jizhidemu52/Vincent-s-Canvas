@@ -4,6 +4,8 @@ import { ArrowLeft, ArrowRight, ChevronDown, Download, History, LoaderCircle, Pl
 import { App, Button, Checkbox, Image } from "antd";
 import { handleSubmitShortcut } from "@/lib/submit-shortcut";
 import { GenerationInputList } from "@/components/generation-input-list";
+import { WorkbenchTasks, useWorkbenchTask } from "@/components/workbench-tasks";
+import { DEFAULT_WORKBENCH_TASK } from "@/lib/workbench-task-state";
 import { GenerationDiagnostic } from "@/components/generation-diagnostic";
 import { GenerationTaskCancel } from "@/components/generation-task-cancel";
 import { GenerationQueueProgress } from "@/components/generation-queue-progress";
@@ -51,14 +53,15 @@ export default function CreativeScenePage() {
         <Link to="/creative" className="wb-primary-link">{uiText("返回创意设计")}</Link>
     </main>;
     return <ModuleGate moduleKey={`creative-${preset.id}` as ModuleKey}>
-        <CreativeSceneWorkspace key={`${ownerId}:${preset.id}:${handoffToken || "default"}`} preset={preset} handoffToken={handoffToken} />
+        <WorkbenchTasks key={`${ownerId}:${preset.id}:${handoffToken || "default"}`} ownerId={ownerId} boardKey={`creative:${preset.id}:${handoffToken || "default"}`}><CreativeSceneWorkspace preset={preset} handoffToken={handoffToken} /></WorkbenchTasks>
     </ModuleGate>;
 }
 
 function CreativeSceneWorkspace({ preset, handoffToken }: { preset: CreativePreset; handoffToken: string | null }) {
     useUiText();
     const { modal } = App.useApp();
-    const ws = useSceneWorkspace(preset.id, handoffToken);
+    const task = useWorkbenchTask();
+    const ws = useSceneWorkspace(preset.id, task.id === DEFAULT_WORKBENCH_TASK ? handoffToken : null);
     const selectionEnabled = useModuleEnabled("creative-selection");
     const recolorEnabled = useModuleEnabled("pattern-recolor");
     const traceEnabled = useModuleEnabled("svg-trace");
@@ -109,7 +112,7 @@ function CreativeSceneWorkspace({ preset, handoffToken }: { preset: CreativePres
                     {available.map(item => <option key={item.id} value={item.id}>{uiText(item.title || "")}</option>)}
                 </select><ChevronDown size={14} />
             </div>
-            <button className="cs-new" type="button" disabled={ws.running || ws.loading} onClick={() => { ws.reset(); setView("history"); }}><Plus size={15} />{uiText("新建任务")}</button>
+            <button className="cs-new" type="button" disabled={ws.running || ws.loading} onClick={() => { ws.reset(); setView("history"); }}><Plus size={15} />{uiText("清空当前草稿")}</button>
         </header>
         <div className="cs-layout">
             <aside className="cs-form-panel" aria-label={uiText("{title}设计参数", { title: uiText(preset.title) })} onKeyDown={event => {
@@ -118,14 +121,14 @@ function CreativeSceneWorkspace({ preset, handoffToken }: { preset: CreativePres
             }}>
                 <div className="cs-form-heading"><span className="cs-eyebrow">{uiText("设计工作台")}</span><h1>{uiText(preset.title || "")}</h1><p>{uiText(preset.description || "")}</p></div>
                 {ws.loading ? <div className="cs-loading"><LoaderCircle size={18} className="animate-spin" />{uiText("正在恢复场景草稿…")}</div> : <fieldset disabled={ws.running} className="cs-form-body">
-                    {!!slots.length && <section className="cs-upload-section"><h2 className="cs-section-label"><span>01</span>{preset.id === "accessory-design" ? uiText("上传辅料与图案") : preset.id.startsWith("pattern-") ? uiText("上传图案素材") : uiText("上传款式图")}</h2><SceneUploads slots={slots} images={ws.images} onImage={(id, file) => ws.setImage(id, file)} disabled={ws.running || ws.uploading || ws.loading} scopeKey={`creative:${preset.id}`} />
+                    {!!slots.length && <section className="cs-upload-section"><h2 className="cs-section-label"><span>01</span>{preset.id === "accessory-design" ? uiText("上传辅料与图案") : preset.id === "virtual-try-on" ? uiText("上传产品与可选模特图") : preset.id === "sketch-to-photo" ? uiText("上传线稿与可选参考图") : preset.id === "item-extract" ? uiText("上传产品来源图") : preset.id.startsWith("pattern-") ? uiText("上传图案素材") : uiText("上传款式图")}</h2><SceneUploads slots={slots} images={ws.images} onImage={(id, file) => ws.setImage(id, file)} disabled={ws.running || ws.uploading || ws.loading} scopeKey={`creative:${preset.id}`} />
                         {preset.id === "local-restyle" && (selectionEnabled || ws.selection) && <div className="cs-local-tool">{selectionEnabled && <button type="button" className="cs-tool-entry" disabled={!ws.images.primary || ws.uploading} onClick={() => setTool("selection")}>{ws.selection ? uiText("编辑修改选区") : uiText("涂选修改区域")}<ArrowRight size={14} /></button>}
                             <p className="cs-help">{ws.selection ? uiText("已开启选区合成：选区外保留原图。修改处的结构和衔接仍需检查。") : uiText("未涂选时由 AI 修改整张图，不能保证其他部位不变。")}</p>
                             {ws.selection && <button type="button" className="cs-help" onClick={ws.clearSelection}>{uiText("清除选区，使用整图 AI 修改")}</button>}</div>}
                         {recolorEnabled && preset.id === "pattern-colorway" && <div className="cs-local-tool"><button type="button" className="cs-tool-entry" disabled={!ws.images.primary || ws.uploading} onClick={() => setTool("recolor")}>{uiText("精确换色")}<small>{uiText("本地 · 不调用 AI")}</small><ArrowRight size={14} /></button><p className="cs-help">{uiText("平面花型可按原色→目标色直接替换；下方保留 AI 配色拓展。")}</p></div>}
                         {traceEnabled && preset.id === "style-to-sketch" && <div className="cs-local-tool"><button type="button" className="cs-tool-entry" disabled={!ws.images.primary || ws.uploading} onClick={() => setTraceImage(ws.images.primary!)}>{uiText("已有线稿转 SVG")}<ArrowRight size={14} /></button><p className="cs-help">{uiText("也可先生成线稿，再从结果卡导出矢量路径。")}</p></div>}
                     </section>}
-                    <section className="cs-business-section"><h2 className="cs-section-label"><span>{slots.length ? "02" : "01"}</span>{preset.id.includes("colorway") ? uiText("选择配色方式") : preset.id === "pattern-craft" ? uiText("选择工艺效果") : preset.id === "text-to-style" ? uiText("描述你的设计") : preset.id === "style-to-sketch" ? uiText("线稿要求") : preset.id === "local-restyle" ? uiText("指定修改部位") : preset.id === "back-design" ? uiText("构思背面结构") : preset.id === "accessory-design" ? uiText("定义辅料外观") : uiText("提取要求")}</h2><SceneFields sceneId={preset.id} form={ws.form} onChange={ws.setForm} disabled={ws.running} sourceImage={ws.images.primary?.dataUrl}
+                    <section className="cs-business-section"><h2 className="cs-section-label"><span>{slots.length ? "02" : "01"}</span>{preset.id.includes("colorway") ? uiText("选择配色方式") : preset.id === "pattern-craft" ? uiText("选择工艺效果") : preset.id === "text-to-style" ? uiText("描述你的设计") : preset.id === "style-to-sketch" ? uiText("线稿要求") : preset.id === "virtual-try-on" ? uiText("试穿要求") : preset.id === "sketch-to-photo" ? uiText("材质与配色要求") : preset.id === "local-restyle" ? uiText("指定修改部位") : preset.id === "back-design" ? uiText("构思背面结构") : preset.id === "accessory-design" ? uiText("定义辅料外观") : uiText("提取要求")}</h2><SceneFields sceneId={preset.id} form={ws.form} onChange={ws.setForm} disabled={ws.running} sourceImage={ws.images.primary?.dataUrl} hasSecondaryImage={Boolean(ws.images.secondary)}
                         productPicker={supportsSceneProductTarget(preset.id) ? <SceneProductPicker key={ws.images.primary?.id || "empty"} sceneId={preset.id} source={ws.images.primary} disabled={ws.running || ws.uploading || ws.loading} onConfirm={targetProduct => ws.setForm(current => ({ ...current, targetProduct }))} /> : undefined} /></section>
                     <details className="cs-output-settings"><summary><span>{uiText("出图设置")}</span><span>{uiText(imageSizeLabel(ws.config.size))} · {uiText(imageQualityLabel(ws.config.quality))} · {ws.count} {uiText(" 张")}<ChevronDown size={13} /></span></summary>
                         <label className="cs-label">{uiText("生成模型")}</label><ModelPicker toolKey={`creative-${preset.id}` as ToolKey} config={ws.config} value={ws.model} onChange={value => ws.updateConfig("imageModel", value)} capability="image" fullWidth disabled={ws.running} />
@@ -139,7 +142,7 @@ function CreativeSceneWorkspace({ preset, handoffToken }: { preset: CreativePres
                     {!ws.error && ws.validation && <p className="cs-validation">{uiText(ws.validation || "")}</p>}
                     {ws.quotaBlocked ? <p role="status" className="cs-validation">{uiText("额度不足，请联系管理员")}</p> : null}
                     <p className="cs-help">{uiText("Ctrl / ⌘ + Enter 提交")}</p>
-                    <button type="button" className="cs-generate" disabled={ws.loading || ws.running || Boolean(ws.validation) || ws.quotaBlocked} onClick={submit}>{ws.running ? <><LoaderCircle size={16} className="animate-spin" />{ws.optimizing ? uiText("正在优化提示词…") : uiText("正在生成")}<GenerationElapsed startedAt={ws.startedAt} /></> : <><Sparkles size={16} />{uiText("生成{kind}", { kind: preset.title === "以文生款" ? uiText("款式") : preset.title === "款生线稿" ? uiText("线稿") : preset.title === "花型提取" ? uiText("图案") : uiText("设计") })}<span>{ws.count} {uiText(" 张")}</span></>}</button>
+                    <button type="button" className="cs-generate" disabled={ws.loading || ws.running || Boolean(ws.validation) || ws.quotaBlocked} onClick={submit}>{ws.running ? <><LoaderCircle size={16} className="animate-spin" />{ws.optimizing ? uiText("正在优化提示词…") : uiText("正在生成")}<GenerationElapsed startedAt={ws.startedAt} /></> : <><Sparkles size={16} />{uiText("生成{kind}", { kind: preset.title === "以文生款" ? uiText("款式") : preset.title === "款生线稿" ? uiText("线稿") : preset.title === "花型提取" ? uiText("图案") : preset.id === "item-extract" ? uiText("完整单品") : preset.id === "virtual-try-on" ? uiText("试穿效果") : preset.id === "sketch-to-photo" ? uiText("实拍效果") : uiText("设计") })}<span>{ws.count} {uiText(" 张")}</span></>}</button>
                     <p className="cs-submit-note">{deploymentFeatures.creditsEnabled ? uiText("预计 {estimatedCredits} 积分 · ", { estimatedCredits: ws.estimatedCredits }) : ""}{uiText("点击后先优化提示词，再提交图片任务")}</p>
                     {ws.running && <button type="button" className="cs-tool-entry" onClick={ws.stopObserving}>{uiText("停止本页查询（不取消服务端任务）")}</button>}
                 </div>

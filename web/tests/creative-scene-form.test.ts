@@ -9,7 +9,7 @@ import type { ReferenceImage } from "@/types/image";
 const primary: ReferenceImage = { id: "main", name: "主体.png", type: "image/png", dataUrl: "data:image/png;base64,cHJpbWFyeQ==" };
 const secondary: ReferenceImage = { id: "reference", name: "参考.png", type: "image/png", dataUrl: "data:image/png;base64,c2Vjb25kYXJ5" };
 const images = { primary, secondary };
-const sceneIds = ["text-to-style", "style-to-sketch", "local-restyle", "garment-colorway", "back-design", "pattern-extract", "pattern-colorway", "pattern-craft", "accessory-design"];
+const sceneIds = ["text-to-style", "style-to-sketch", "local-restyle", "garment-colorway", "back-design", "pattern-extract", "pattern-colorway", "pattern-craft", "accessory-design", "virtual-try-on", "sketch-to-photo"];
 
 function formFor(sceneId: string, patch: Partial<SceneForm> = {}): SceneForm {
     return { ...createSceneForm(sceneId), ...patch };
@@ -88,7 +88,7 @@ describe("standard color selections for clothing photos", () => {
 });
 
 describe("creative scene input roles", () => {
-    test("offers nine scene summaries and independent editable defaults", () => {
+    test("offers eleven scene summaries and independent editable defaults", () => {
         expect(Object.keys(sceneSummaries)).toEqual(sceneIds);
         const original = createSceneForm("garment-colorway");
         original.colors.push("#FFFFFF");
@@ -180,7 +180,8 @@ describe("structured creative controls", () => {
                 expect(input.fields?.keepDetails).toBe("保留六颗纽扣与领型");
             } else {
                 expect(input.fields).not.toHaveProperty("targetProduct");
-                expect(input.fields).not.toHaveProperty("keepDetails");
+                if (["virtual-try-on", "sketch-to-photo"].includes(scene)) expect(input.fields).toHaveProperty("keepDetails", "保留六颗纽扣与领型");
+                else expect(input.fields).not.toHaveProperty("keepDetails");
             }
         }
     });
@@ -224,8 +225,8 @@ describe("specialized form presentation", () => {
     test("product targeting stays editable and makes no mask or pixel-lock claim", () => {
         for (const scene of ["style-to-sketch", "garment-colorway", "local-restyle", "back-design", "pattern-extract"]) {
             const markup = fields(scene, { targetProduct: "蓝色衬衫", keepDetails: "领型" });
-            expect(markup).toContain(`id="cs-${scene}-targetProduct"`);
-            expect(markup).toContain(`id="cs-${scene}-keepDetails"`);
+            expect(markup).toContain(`id="cs-${scene}-targetProduct-`);
+            expect(markup).toContain(`id="cs-${scene}-keepDetails-`);
             expect(markup).toContain("这不是像素选区");
             expect(markup).toContain("不能保证像素级一致");
         }
@@ -243,13 +244,15 @@ describe("specialized form presentation", () => {
             ["pattern-colorway", "配色方式", "配色方向", "改色区域"],
             ["pattern-craft", "目标工艺", "承载面料", "毛巾绣"],
             ["accessory-design", "辅料类型", "图案应用方式", "仅表面纹样"],
+            ["virtual-try-on", "成人模特与试穿要求", "关键特征保持", "不保证真实身份"],
+            ["sketch-to-photo", "材质方向", "颜色方向", "实拍展示方式", "关键特征保持"],
         ];
         for (const [sceneId, ...expected] of labels) {
             const markup = fields(sceneId!);
             for (const label of expected) expect(markup).toContain(label!);
             expect(markup).not.toContain("ant-select");
             expect(markup).not.toContain("完整提示词");
-            if (sceneId !== "text-to-style") expect(markup).toContain("<details");
+            if (sceneId !== "text-to-style" && sceneId !== "virtual-try-on") expect(markup).toContain("<details");
         }
     });
 

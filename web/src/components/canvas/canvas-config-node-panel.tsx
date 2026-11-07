@@ -133,7 +133,7 @@ export function CanvasConfigNodePanel({ node, isRunning, linkedTaskCount = 0, li
             <div className="thin-scrollbar min-h-0 flex-1 overflow-y-auto" aria-label={t("生成配置内容")}>
             <div className="mb-2 flex items-center justify-between gap-3">
                 <div className="min-w-0 truncate text-sm font-semibold" title={node.title}>{node.title || t("生成配置")}</div>
-                <div className="cursor-default" onMouseDown={(event) => event.stopPropagation()}>
+                <div className="cursor-default" onPointerDown={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()}>
                     <Segmented
                         size="small"
                         className="canvas-config-mode !rounded-md !p-0.5"

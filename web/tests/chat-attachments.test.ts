@@ -122,7 +122,7 @@ test("extracts actual PDF attachment text and preserves page boundaries", async 
     expect(attachment.textContent).toContain("[第 2 页]\nPDF_CHECK_SECOND_942");
 });
 
-test("includes a locally hosted PDF worker in the production attachment bundle", async () => {
+test("ships the minified PDF worker under a fresh content hash while retaining fake-worker exports", async () => {
     const { build } = await import("vite");
     const result = await build({
         configFile: false,
@@ -137,9 +137,16 @@ test("includes a locally hosted PDF worker in the production attachment bundle",
     });
     const bundles = Array.isArray(result) ? result : [result];
     const output = bundles.flatMap((bundle) => "output" in bundle ? bundle.output : []);
-    const worker = output.find((item) => item.type === "asset" && /pdf\.worker-[^/]+\.mjs$/.test(item.fileName));
+    const worker = output.find((item) => item.type === "asset" && /pdf\.worker\.min-[^/]+\.mjs$/.test(item.fileName));
 
     expect(worker).toBeDefined();
+    // Existing clients may have cached this old worker with the wrong immutable MIME.
+    expect(output.some(item => item.fileName === "assets/pdf.worker-Dg_VPFYK.mjs")).toBe(false);
+    if (worker?.type === "asset") {
+        const shipped = await Bun.file(resolve(import.meta.dir, "../node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs")).text();
+        expect(String(worker.source)).toBe(shipped);
+        expect(shipped).toMatch(/export\s*\{[^}]*\bWorkerMessageHandler\b[^}]*\}/);
+    }
     expect(output.some((item) => item.type === "chunk" && item.code.includes(worker!.fileName))).toBe(true);
     const entry = output.find(item => item.type === "chunk" && item.isEntry);
     expect(entry?.type).toBe("chunk");

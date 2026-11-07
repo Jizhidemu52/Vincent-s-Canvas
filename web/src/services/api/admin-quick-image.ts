@@ -58,7 +58,7 @@ export async function getAdminQuickImageConfigurations(options: PromptAdminOptio
     const result = await request(root, options);
     if (!object(result) || !Array.isArray(result.configurations) || !Array.isArray(result.models)) throw fail();
     const configurations = result.configurations.map(configuration);
-    if (configurations.length !== 2 || new Set(configurations.map(item => item.action)).size !== 2) throw fail();
+    if (configurations.length !== 3 || new Set(configurations.map(item => item.action)).size !== 3) throw fail();
     for (const model of result.models) if (!object(model) || ![model.id, model.name, model.modelId, model.providerName, model.protocol].every(item => typeof item === "string")
         || !Array.isArray(model.capabilities) || !model.capabilities.every(item => typeof item === "string")) throw fail();
     return { configurations, models: result.models as QuickImageEligibleModel[] };

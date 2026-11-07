@@ -24,7 +24,7 @@ integration("administrator quick image configuration through real SQL and queue 
   const realFetch = globalThis.fetch.bind(globalThis);
   const identities = new Map<string, SessionUser>(), objects = new Map<string, Uint8Array>(), queued = new Set<string>();
   const admin = randomUUID(), designer = randomUUID(), department = randomUUID(), departmentId = randomUUID(), other = randomUUID();
-  const provider = randomUUID(), nano = randomUUID(), mai = randomUUID(), alternative = randomUUID(), ordinary = randomUUID(), mj = randomUUID(), disabled = randomUUID();
+  const provider = randomUUID(), nano = randomUUID(), mai = randomUUID(), flare = randomUUID(), alternative = randomUUID(), ordinary = randomUUID(), mj = randomUUID(), disabled = randomUUID();
   const query = (sql: string, values: unknown[] = []) => fixture.db.query<Record<string, any>>(sql, values);
   const cache = { eval: async (_script: string, options: { arguments: string[] }) => { queued.add(options.arguments[0]!); return 1; } } as unknown as Cache;
   const preflight: typeof preflightStoredQuickImageTask = (db, input) => preflightStoredQuickImageTask(db, input, { readSource: async key => {
@@ -57,7 +57,7 @@ integration("administrator quick image configuration through real SQL and queue 
       identities.set(id, { id, role, departmentId: role === "department_admin" ? departmentId : null, groupId: null, groupRole: null, status: "active", displayName: "Quick config test" } as SessionUser);
     }
     for (const id of [MARK_IMAGE_PROVIDER_ID, provider]) await query("INSERT INTO providers(id,name,protocol,base_url,enabled) VALUES($1,$2,'apimart','https://no-network.invalid/v1',true) ON CONFLICT(id) DO UPDATE SET protocol='apimart',enabled=true", [id, `Quick provider ${id}`]);
-    for (const [id, owner, modelId] of [[nano, MARK_IMAGE_PROVIDER_ID, "gemini-nano-banana-2.1"], [mai, MARK_IMAGE_PROVIDER_ID, "mai-image-2.6-flash"], [alternative, provider, "gpt-image-2.6-flare"], [ordinary, provider, "ordinary-model"], [mj, provider, "midjourney"], [disabled, provider, "gpt-image-2.5-flare"]]) {
+    for (const [id, owner, modelId] of [[nano, MARK_IMAGE_PROVIDER_ID, "gemini-nano-banana-2.1"], [mai, MARK_IMAGE_PROVIDER_ID, "mai-image-2.6-flash"], [flare, MARK_IMAGE_PROVIDER_ID, "gpt-image-2.6-flare"], [alternative, provider, "gpt-image-2.6-flare"], [ordinary, provider, "ordinary-model"], [mj, provider, "midjourney"], [disabled, provider, "gpt-image-2.5-flare"]]) {
       await query("INSERT INTO model_configs(id,provider_id,name,model_id,capabilities,enabled,credit_cost,rmb_cost) VALUES($1,$2,$3,$3,ARRAY['generate','edit'],true,2,0)", [id, owner, modelId]);
     }
     await query("UPDATE model_configs SET enabled=false WHERE id=$1", [disabled]);
@@ -79,9 +79,10 @@ integration("administrator quick image configuration through real SQL and queue 
 
   test("absence keeps separate defaults; only supported edit models are listed without credentials", async () => {
     const response = await request(admin, "/api/admin/model-configuration/quick-images"), body = await response.json();
-    expect(response.status).toBe(200); expect(body.configurations).toHaveLength(2);
+    expect(response.status).toBe(200); expect(body.configurations).toHaveLength(3);
     expect(body.configurations.find((value: any) => value.action === "remove-background")).toMatchObject({ modelConfigId: mai, configurationVersion: 0, isDefault: true, parameters: {} });
     expect(body.configurations.find((value: any) => value.action === "hd-upscale")).toMatchObject({ modelConfigId: nano, configurationVersion: 0, parameters: { resolution: "4k" } });
+    expect(body.configurations.find((value: any) => value.action === "item-extract")).toMatchObject({ modelConfigId: flare, configurationVersion: 0, parameters: { resolution: "2k", quality: "medium", background: "opaque", output_format: "png" } });
     const ids = body.models.map((model: any) => model.id); expect(ids).toContain(alternative); expect(ids).not.toContain(mj); expect(ids).not.toContain(disabled); expect(ids).not.toContain(ordinary);
     expect(JSON.stringify(body)).not.toMatch(/baseUrl|credentials|apiKey/);
     expect((await query("SELECT count(*)::int AS n FROM quick_image_configurations")).rows[0]!.n).toBe(0);
@@ -103,6 +104,7 @@ integration("administrator quick image configuration through real SQL and queue 
     const updated = await save("hd-upscale", 1, configuration(alternative, prompt)); expect(updated.status).toBe(200);
     expect((await updated.json()).configuration).toMatchObject({ configurationVersion: 2, isDefault: false, modelConfigId: alternative, prompt });
     expect((await save("remove-background", 0, configuration(mai, "Only the product, exclude hands", {}))).status).toBe(200);
+    expect((await save("item-extract", 0, configuration(flare, "Flat product on pure white", { resolution: "2k", quality: "medium", background: "opaque" }))).status).toBe(200);
     expect((await query("SELECT * FROM tool_api_configurations ORDER BY tool_key")).rows).toEqual(before);
     const audits = (await query("SELECT detail FROM audit_logs WHERE action='quick_image_configuration.updated'")).rows;
     expect(audits.length).toBeGreaterThanOrEqual(3); expect(JSON.stringify(audits)).not.toContain("PRIVATE_ADMIN_QUICK_PROMPT"); expect(audits.at(-1)!.detail.promptHash).toMatch(/^[a-f0-9]{64}$/);
@@ -120,47 +122,65 @@ integration("administrator quick image configuration through real SQL and queue 
     expect((await query("SELECT count(*)::int AS n FROM quick_image_configurations")).rows[0]!.n).toBe(0);
   });
 
-  test("ordinary requests cannot forge snapshots, prompt or parameters, and preserve one frozen configuration across concurrent edits", async () => {
-    expect((await save("hd-upscale", 0, configuration(alternative, "VERSION_ONE", { resolution: "2k", size: "auto" }))).status).toBe(200);
+  test.each(["hd-upscale", "item-extract"] as const)("%s cannot forge execution controls and preserves its snapshot across concurrent admin edits", async action => {
+    expect((await save(action, 0, configuration(alternative, "VERSION_ONE", { resolution: "2k", size: "auto" }))).status).toBe(200);
     const src = await source();
-    onRead = async () => { expect((await save("hd-upscale", 1, configuration(nano, "VERSION_TWO", { resolution: "4k", size: "auto" }))).status).toBe(200); };
-    const input = ordinaryRequest("hd-upscale", src, { modelConfigId: ordinary, prompt: "FORGED", toolConfiguration: { modelConfigId: ordinary },
-      quickImageConfiguration: configuration(ordinary, "FORGED"), parameters: { quickImageAction: "hd-upscale", quickImage: { configurationVersion: 999 }, resolution: "1k", n: 9, mask_url: "https://evil.invalid" } });
+    onRead = async () => { expect((await save(action, 1, configuration(nano, "VERSION_TWO", { resolution: "4k", size: "auto" }))).status).toBe(200); };
+    const input = ordinaryRequest(action, src, { modelConfigId: ordinary, prompt: "FORGED", toolConfiguration: { modelConfigId: ordinary },
+      quickImageConfiguration: configuration(ordinary, "FORGED"), parameters: { quickImageAction: action, quickImage: { configurationVersion: 999 }, resolution: "1k", n: 9, mask_url: "https://evil.invalid" } });
     const response = await request(designer, "/api/tasks", "POST", input), body = await response.json();
     expect({ status: response.status, body }).toMatchObject({ status: 201, body: { task: { modelConfigId: alternative, prompt: "VERSION_ONE", parameters: { n: 1, resolution: "2k", quickImage: { configurationVersion: 1 } } } } });
     const stored = (await query("SELECT model_config_id,prompt,parameters FROM tasks WHERE id=$1", [body.task.id])).rows[0]!;
     expect(stored).toMatchObject({ model_config_id: alternative, prompt: "VERSION_ONE", parameters: { resolution: "2k" } }); expect(JSON.stringify(stored)).not.toMatch(/FORGED|mask_url|999/);
     const repeat = await request(designer, "/api/tasks", "POST", input); expect(repeat.status).toBe(200); expect((await repeat.json()).task.id).toBe(body.task.id);
-    const prepared = await prepareConfiguredQuickImageTask(fixture.db, { ...ordinaryRequest("hd-upscale", src), prompt: "" });
+    const prepared = await prepareConfiguredQuickImageTask(fixture.db, { ...ordinaryRequest(action, src), prompt: "" });
     expect(Object.isFrozen(prepared[QUICK_IMAGE_SNAPSHOT])).toBe(true); expect(Object.isFrozen(prepared[QUICK_IMAGE_SNAPSHOT]!.parameters)).toBe(true);
   });
 
-  test("draft tests use real tasks/credits and are idempotent without saving or selecting the published config", async () => {
+  test.each(["remove-background", "item-extract"] as const)("%s concurrent draft tests reserve once without publishing and never replay a paused submission", async action => {
     const initial = await counts(), src = await source(admin);
     const input = { requestId: randomUUID(), sourceUrl: src, configuration: configuration(alternative, "DRAFT_ONLY", { resolution: "2k", size: "auto" }) };
-    const responses = await Promise.all([request(admin, `${route("remove-background")}/test`, "POST", input), request(admin, `${route("remove-background")}/test`, "POST", input)]);
+    const responses = await Promise.all(Array.from({ length: 8 }, () => request(admin, `${route(action)}/test`, "POST", input)));
     const bodies = await Promise.all(responses.map(response => response.json()));
     expect(responses.every(response => [200, 201].includes(response.status))).toBe(true); expect(new Set(bodies.map(body => body.task.id)).size).toBe(1);
     const stored = (await query("SELECT * FROM tasks WHERE request_id=$1", [input.requestId])).rows[0]!;
     expect(stored).toMatchObject({ user_id: admin, model_config_id: alternative, credits: 7, prompt_optimized: false, parameters: { n: 1, count: 1, quickImage: { adminTest: true, recipeVersion: 1 } } });
-    expect(stored.prompt).toContain("DRAFT_ONLY"); expect(stored.prompt).toContain("original RGB pixels"); expect(stored.prompt).toContain("Mandatory output contract");
+    expect(stored.prompt).toContain("DRAFT_ONLY");
+    if (action === "remove-background") { expect(stored.prompt).toContain("original RGB pixels"); expect(stored.prompt).toContain("Mandatory output contract"); }
+    else expect(stored.prompt).not.toContain("Mandatory output contract");
     expect((await query("SELECT count(*)::int AS n FROM quick_image_configurations")).rows[0]!.n).toBe(0);
     expect(await counts()).toEqual({ tasks: initial.tasks + 1, holds: initial.holds + 1, queued: initial.queued + 1 });
     await query("UPDATE tasks SET status='paused',upstream_submission_started_at=now(),attempts=1 WHERE id=$1", [stored.id]);
     const recovered = await request(admin, `/api/tasks/by-request/${encodeURIComponent(input.requestId)}`); expect(recovered.status).toBe(200); expect((await recovered.json()).task.id).toBe(stored.id);
-    const repeated = await request(admin, `${route("remove-background")}/test`, "POST", { ...input, configuration: configuration(nano, "CHANGED", {}) });
+    const repeated = await request(admin, `${route(action)}/test`, "POST", { ...input, configuration: configuration(nano, "CHANGED", {}) });
     expect(repeated.status).toBe(200); expect((await repeated.json()).task.status).toBe("paused"); expect(await counts()).toEqual({ tasks: initial.tasks + 1, holds: initial.holds + 1, queued: initial.queued + 1 });
   });
 
   test("foreign, corrupt, unsafe and changed source assets fail before a task, reservation or queue entry", async () => {
     const initial = await counts(), foreign = await source(other), corrupt = await source(designer, Buffer.from("broken")), svg = await source(designer, Buffer.from("<svg/>"), "image/svg+xml");
-    for (const src of [foreign, corrupt, svg, "https://evil.invalid/image.png"]) {
-      expect((await request(designer, "/api/tasks", "POST", ordinaryRequest("remove-background", src))).status).toBe(400);
+    for (const action of ["remove-background", "item-extract"] as const) for (const src of [foreign, corrupt, svg, "https://evil.invalid/image.png"]) {
+      expect((await request(designer, "/api/tasks", "POST", ordinaryRequest(action, src))).status).toBe(400);
     }
     const changed = await source();
     onRead = async () => { await query("UPDATE assets SET status='failed' WHERE id=$1", [changed.split("/")[3]]); };
     expect((await request(designer, "/api/tasks", "POST", ordinaryRequest("remove-background", changed))).status).toBe(400);
     expect(await counts()).toEqual(initial);
+  });
+
+  test("item-extract concurrent CAS is isolated from other quick actions and invalid drafts do not change a saved configuration", async () => {
+    expect((await save("remove-background", 0, configuration(mai, "Keep old matte settings", {}))).status).toBe(200);
+    expect((await save("hd-upscale", 0, configuration(nano, "Keep old upscale settings", { resolution: "4k", size: "auto" }))).status).toBe(200);
+    const before = (await query("SELECT * FROM quick_image_configurations ORDER BY action")).rows;
+    const attempts = Array.from({ length: 8 }, (_, index) => save("item-extract", 0, configuration(flare, `EXTRACT_${index}`, { resolution: "2k", quality: "medium", background: "opaque" })));
+    const responses = await Promise.all(attempts);
+    expect(responses.filter(response => response.status === 200)).toHaveLength(1);
+    expect(responses.filter(response => response.status === 409)).toHaveLength(7);
+    expect((await query("SELECT * FROM quick_image_configurations WHERE action <> 'item-extract' ORDER BY action")).rows).toEqual(before);
+    const saved = (await query("SELECT * FROM quick_image_configurations WHERE action='item-extract'")).rows;
+    for (const parameters of [{ background: "transparent" }, { output_format: "gif" }, { resolution: "8k" }, { n: 2 }, { mask_url: "https://evil.invalid" }]) {
+      expect((await save("item-extract", 1, configuration(flare, "INVALID replacement", parameters))).status).toBe(400);
+    }
+    expect((await query("SELECT * FROM quick_image_configurations WHERE action='item-extract'")).rows).toEqual(saved);
   });
 
   test("selected adapter reference limits and model changes fail before task or credit admission", async () => {

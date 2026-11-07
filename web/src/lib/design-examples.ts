@@ -131,6 +131,26 @@ export const designExamples: Record<string, DesignExample> = {
         ],
         prompt: "整理为白底黑线的正面毛衫款式线稿，保留圆领、落肩、袖长、衣长与领口袖口下摆的罗纹范围。不增加图案，不推测背面，不标注虚构尺寸。",
     }),
+    "creative-virtual-try-on": example("creative-virtual-try-on", {
+        title: "虚拟试穿 · 单件毛衫操作示例", category: "毛衫",
+        purpose: "将一件产品的设计带到成人模特上，先确认产品与模特的参考角色。", location: "创意设计 → 虚拟试穿",
+        media: [asset("knit-source", "输入示意 · 毛衫产品图"), asset("model-natural-source", "可选输入示意 · 成人模特与姿态")],
+        steps: [
+            { title: "输入", detail: "上传一件毛衫，并选择上传成人模特图或填写成人模特描述。" },
+            { title: "操作", detail: "填写需保持的领型、绞花与罗纹，确认参考角色后点击“生成设计”，上传不会自动生成。" },
+            { title: "结果", detail: "此处仅为输入示意而非实测结果，实际输出需核对衣物结构与身体关系，不保证身份或真实合身度。" },
+        ],
+    }),
+    "creative-sketch-to-photo": example("creative-sketch-to-photo", {
+        title: "线稿转实拍 · 毛衫材质与配色示例", category: "毛衫",
+        purpose: "按线稿结构生成指定材质和颜色的实拍质感效果。", location: "创意设计 → 线稿转实拍",
+        media: [asset("knit-sketch", "输入示意 · 毛衫结构线稿"), asset("knit-source", "可选输入示意 · 针织材质与配色")],
+        steps: [
+            { title: "输入", detail: "上传线稿图，可选添加只提供材质与配色的参考图。" },
+            { title: "操作", detail: "明确填写材质方向、颜色方向与需保持的细节，选择展示方式后点击“生成设计”。" },
+            { title: "结果", detail: "此处仅为输入示意而非实测结果，黑白线稿没有原色信息，生成图不能当作原色还原或生产工艺验证。" },
+        ],
+    }),
     "creative-local-restyle": example("creative-local-restyle", {
         title: "局部改款 · 马甲换金属扣", category: "女装",
         purpose: "修改服装的指定细节。", location: "创意设计 → 局部改款",

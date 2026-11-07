@@ -25,6 +25,8 @@ import { GenerationDiagnostic } from "@/components/generation-diagnostic";
 import { useResultCanvas } from "@/hooks/use-result-canvas";
 import { GenerationTaskCancel } from "@/components/generation-task-cancel";
 import { useGenerationWorkspace } from "@/hooks/use-generation-workspace";
+import { WorkbenchTasks, useWorkbenchTask, useWorkbenchTaskStatus } from "@/components/workbench-tasks";
+import { DEFAULT_WORKBENCH_TASK, matchesWorkbenchTask } from "@/lib/workbench-task-state";
 import { useImageCopyEditor } from "@/hooks/use-image-copy-editor";
 import { useImagePreview } from "@/hooks/use-image-preview";
 import { imageCopyEditorNode } from "@/lib/image-edit-copy";
@@ -108,6 +110,7 @@ type GenerationLog = {
     id: string;
     ownerId?: string;
     tool?: string;
+    workspaceId?: string;
     createdAt: number;
     title: string;
     prompt: string;
@@ -150,6 +153,7 @@ type GenerationToolMode = Exclude<AdminToolMode, "gpt-chat" | "batch-image-edit"
 const imageToolModes: Record<GenerationToolMode, { title: string; description: string; placeholder: string; button: string; projectId: string; requiresReference: boolean }> = {
     "remove-background": { title: "一键去背景", description: "上传一张原图，自动去除背景，可下载透明 PNG 或白底 JPG，保留主体与原图。", placeholder: "", button: "一键去背景", projectId: "tool-remove-background", requiresReference: true },
     "hd-upscale": { title: "高清放大", description: "上传一张原图，提升图片清晰度，原图保持不变。", placeholder: "", button: "高清放大", projectId: "tool-hd-upscale", requiresReference: true },
+    "item-extract": { title: "提取产品图", description: "上传一张产品来源图，生成白底平放的完整产品图。AI 会补足必要遮挡，不是仅删除背景，也不代表真实隐藏结构。", placeholder: "", button: "提取产品图", projectId: "tool-item-extract", requiresReference: true },
     "midjourney-blend": {
         title: "MJ 多图融合",
         description: "上传 2–4 张参考图进行融合，不使用提示词。可独立调整生成速度、布局与自由比例。",
@@ -193,7 +197,7 @@ const imageToolModes: Record<GenerationToolMode, { title: string; description: s
 };
 
 function resolveImageToolMode(value: string | null): GenerationToolMode {
-    if (value === "detail-enhance" || value === "image-edit" || value === "angle-control" || value === "midjourney-blend" || value === "remove-background" || value === "hd-upscale") return value;
+    if (value === "detail-enhance" || value === "image-edit" || value === "angle-control" || value === "midjourney-blend" || isQuickImageTool(value)) return value;
     return "image-generation";
 }
 
@@ -208,23 +212,27 @@ export function ImageGenerationPage({ creativePreset }: { creativePreset?: Creat
     const [searchParams] = useSearchParams();
     const { pathname } = useLocation();
     const ownerId = useUserStore(state => state.user?.id);
-    const historyTool = creativePreset ? `creative-${creativePreset.id}` : resolveImageToolMode(pathname === "/remove-background" ? "remove-background" : pathname === "/hd-upscale" ? "hd-upscale" : searchParams.get("tool"));
+    const historyTool = creativePreset ? `creative-${creativePreset.id}` : resolveImageToolMode(isQuickImageTool(pathname.slice(1)) ? pathname.slice(1) : searchParams.get("tool"));
     const placementToken = placementHandoffToken(searchParams, historyTool);
     const designToken = historyTool === "image-edit" ? searchParams.get("designToken") : null;
-    return <ImageGenerationWorkspace key={JSON.stringify([ownerId, historyTool, placementToken, designToken])} creativePreset={creativePreset} historyTool={historyTool} />;
+    const boardKey = JSON.stringify([historyTool, placementToken, designToken]);
+    return <WorkbenchTasks key={JSON.stringify([ownerId, boardKey])} ownerId={ownerId} boardKey={boardKey}><ImageGenerationWorkspace creativePreset={creativePreset} historyTool={historyTool} /></WorkbenchTasks>;
 }
 
 function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePreset?: CreativePreset; historyTool: string }) {
     useUiText();
+    const workbenchTask = useWorkbenchTask();
+    const acceptsUrlInput = workbenchTask.id === DEFAULT_WORKBENCH_TASK;
     const quickTool = isQuickImageTool(historyTool);
     const { message, modal } = App.useApp();
     const libraryShare = useDesignLibraryShare();
     const resultCanvas = useResultCanvas();
     const [searchParams] = useSearchParams();
-    const designRequested = historyTool === "image-edit" && searchParams.has("designToken");
+    const designRequested = acceptsUrlInput && historyTool === "image-edit" && searchParams.has("designToken");
     const designToken = designRequested ? designHandoffToken(searchParams, "image-edit") : null;
-    const placementToken = designRequested ? null : placementHandoffToken(searchParams, historyTool);
-    const inputDraftScope = designToken ? designDraftScope(designToken, "image-edit") : designRequested ? "image-edit:design:invalid" : placementToken ? placementDraftScope(placementToken) : historyTool;
+    const placementToken = designRequested || !acceptsUrlInput ? null : placementHandoffToken(searchParams, historyTool);
+    const inputDraftScope = workbenchTask.draftScope(designToken ? designDraftScope(designToken, "image-edit") : designRequested ? "image-edit:design:invalid" : placementToken ? placementDraftScope(placementToken) : historyTool);
+    const workspaceId = workbenchTask.id === DEFAULT_WORKBENCH_TASK && !designRequested && !placementToken ? DEFAULT_WORKBENCH_TASK : inputDraftScope;
     const [placementStatus, setPlacementStatus] = useState<"loading" | "ready" | "error">(placementToken ? "loading" : "ready");
     const [placementError, setPlacementError] = useState("");
     const [placementAttempt, setPlacementAttempt] = useState(0);
@@ -257,7 +265,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const baseConfig = { ...defaults, ...draftConfig };
     const config = baseConfig;
     const [references, setReferences, referencesReady] = useGenerationDraft<ImageReferenceItem[]>(`${inputDraftScope}:references`, [], async items => Promise.all(items.map(async item => ({ ...item, dataUrl: await resolveImageUrl(item.storageKey, item.dataUrl) }))));
-    const toolKey = requireToolKey(historyTool === "detail-enhance" || historyTool === "hd-upscale" ? "upscale" : historyTool === "image-generation" || historyTool === "midjourney-blend" || historyTool === "creative-text-to-style" ? "image_generation" : "inpaint", historyTool === "remove-background" ? "image-edit" : historyTool === "hd-upscale" ? "detail-enhance" : historyTool);
+    const toolKey = requireToolKey(historyTool === "detail-enhance" || historyTool === "hd-upscale" ? "upscale" : historyTool === "image-generation" || historyTool === "midjourney-blend" || historyTool === "creative-text-to-style" ? "image_generation" : "inpaint", historyTool === "remove-background" || historyTool === "item-extract" ? "image-edit" : historyTool === "hd-upscale" ? "detail-enhance" : historyTool);
     const businessModels = useBusinessConfigStore(state => state.models);
     const blendModels = businessModels.filter(item => item.imageParameterProfile === "blend" || item.imageParameterProfile === "midjourney-blend" || item.modelId === "midjourney-blend");
     const baseImageModel = baseConfig.imageModel || baseConfig.model;
@@ -304,6 +312,9 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const observationStopRequested = useRef(false);
     const finishingImages = useRef(imageResultCommits);
     const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
+    const [pendingReady, setPendingReady] = useState(false);
+    const [pendingReadError, setPendingReadError] = useState("");
+    const [pendingReadAttempt, setPendingReadAttempt] = useState(0);
     const latestPendingImages = useRef(pendingImages);
     latestPendingImages.current = pendingImages;
     const submitToolbarRef = useRef<HTMLDivElement>(null);
@@ -374,7 +385,9 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const invalidBlendReferences = isBlend && (references.length < 2 || references.length > 4);
     const draftReady = configReady && referencesReady && promptReady && (!designRequested || carryoverReady);
     const handoffReady = placementStatus === "ready" && designStatus === "ready";
-    const canGenerate = draftReady && handoffReady && !carryoverError && !(quickTool && pendingImages.length) && !((placementToken || designRequested) && isBlend) && !readingReferences && !optimizingPrompt && (quickTool || Boolean(model)) && Boolean(user && user.status === "active") && (!requiresPrompt || Boolean(prompt.trim())) && !quotaBlocked && !missingReference && !invalidBlendReferences && referenceValidation.valid && !garmentNeedsApply && !incompleteCreativePrompt;
+    useWorkbenchTaskStatus({ busy: running || readingReferences || optimizingPrompt || restoringHistory, pending: pendingImages.length > 0, ready: draftReady && handoffReady && pendingReady,
+        label: results.some(result => result.status === "success") ? "已完成" : results.some(result => result.status === "failed") ? "已失败" : "草稿" });
+    const canGenerate = draftReady && handoffReady && pendingReady && !carryoverError && !(quickTool && pendingImages.length) && !((placementToken || designRequested) && isBlend) && !readingReferences && !optimizingPrompt && (quickTool || Boolean(model)) && Boolean(user && user.status === "active") && (!requiresPrompt || Boolean(prompt.trim())) && !quotaBlocked && !missingReference && !invalidBlendReferences && referenceValidation.valid && !garmentNeedsApply && !incompleteCreativePrompt;
 
     const appendReferences = (items: ReferenceImage[], origin: ImageReferenceOrigin) => { inputRevision.current += 1; setReferences((value) => dedupeImageReferences([...value, ...items.map((item) => createImageReferenceItem(item, origin))])); };
     const restoreReferences = (items: ReferenceImage[], origin: ImageReferenceOrigin = "template") => { inputRevision.current += 1; setReferences(dedupeImageReferences(items.map((item) => createImageReferenceItem(item, origin)))); };
@@ -389,13 +402,12 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     };
 
     useEffect(() => {
-        let active = true;
-        const restoreRevision = pendingRestoreRevision.current;
         mountedRef.current = true;
         const onSaved = (log: GenerationLog, preserveView = false) => {
             if (log.ownerId !== user?.id || log.tool !== historyTool) return;
             logRefreshRevision.current += 1;
             setLogs(current => upsertGenerationLog(current, log));
+            if (!matchesWorkbenchTask(log, workspaceId)) return;
             if (preserveView && log.images.length) {
                 removedPendingIds.current.add(log.id);
                 setPendingImages(current => current.filter(record => record.id !== log.id));
@@ -410,12 +422,20 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         };
         imageLogListeners.add(onSaved);
         void refreshLogs();
+        return () => { mountedRef.current = false; for (const controller of observationControllers.current) controller.abort(); imageLogListeners.delete(onSaved); logRefreshRevision.current += 1; };
+    }, []);
+
+    useEffect(() => {
+        let active = true;
+        const restoreRevision = pendingRestoreRevision.current;
+        setPendingReady(false);
+        setPendingReadError("");
         const pending: PendingImage[] = [];
         void pendingImageStore.iterate<PendingImage, void>(value => { pending.push(value); }).then(() => {
             // StrictMode can replay this effect while its first IndexedDB read
             // is still pending. A per-effect lifetime rejects that stale read.
             if (!active || !mountedRef.current) return;
-            const records = pendingImagesForWorkspace(pending, user?.id || "", historyTool).filter(record => !removedPendingIds.current.has(record.id));
+            const records = pendingImagesForWorkspace(pending, user?.id || "", historyTool, workspaceId).filter(record => !removedPendingIds.current.has(record.id));
             setPendingImages(current => [...records.filter(record => !current.some(item => item.id === record.id)), ...current]);
             // Restore only the untouched initial view. A slow browser database
             // must not replace a task or preview the user has started meanwhile.
@@ -423,14 +443,15 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                 restoredInitialResultRef.current = true;
                 setResults(records.map(record => ({ id: record.id, status: "paused", error: record.recovery === "investigate" ? submissionInvestigationMessage : record.stopped ? "已停止本页查询；可手动刷新原任务状态。" : "已找回原任务，正在核对已有结果，不会重新生成", recovery: record, snapshot: record.snapshot })));
             }
-        }).catch(error => { if (active && mountedRef.current) message.warning(uiText("在途记录读取失败：{value1}", { value1: error instanceof Error ? error.message : "浏览器存储不可用" })); });
-        return () => { active = false; mountedRef.current = false; for (const controller of observationControllers.current) controller.abort(); imageLogListeners.delete(onSaved); logRefreshRevision.current += 1; };
-    }, []);
+            setPendingReady(true);
+        }).catch(error => { if (active && mountedRef.current) setPendingReadError(uiText("在途记录读取失败：{value1}", { value1: error instanceof Error ? error.message : "浏览器存储不可用" })); });
+        return () => { active = false; };
+    }, [pendingReadAttempt]);
 
     useEffect(() => {
         if (restoredInitialResultRef.current || running || !logs.length || results.length) return;
         restoredInitialResultRef.current = true;
-        const latest = logs.find((log) => log.status === "成功" && log.images.length);
+        const latest = logs.find((log) => matchesWorkbenchTask(log, workspaceId) && log.status === "成功" && log.images.length);
         if (!latest) return;
         const revision = ++previewRevision.current;
         void hydrateImageLogMedia(latest, resolveImageUrl, false).then(log => {
@@ -539,7 +560,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     }, [designRequested, designToken, designAttempt]);
 
     useEffect(() => {
-        if (placementToken || designRequested) return;
+        if (!acceptsUrlInput || placementToken || designRequested) return;
         const presetPrompt = searchParams.get("prompt");
         const presetModel = searchParams.get("model");
         if (presetPrompt) replacePrompt(presetPrompt);
@@ -547,7 +568,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     }, [searchParams, updateConfig]);
 
     useEffect(() => {
-        if (placementToken || designRequested) return;
+        if (!acceptsUrlInput || placementToken || designRequested) return;
         const sourceAssetId = searchParams.get("sourceAssetId");
         if (!sourceAssetId || loadedRecreateAssetsRef.current.has(sourceAssetId)) return;
         loadedRecreateAssetsRef.current.add(sourceAssetId);
@@ -573,7 +594,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     }, [message, searchParams, toolMode, user?.id]);
 
     useEffect(() => {
-        if (placementToken || designRequested) return;
+        if (!acceptsUrlInput || placementToken || designRequested) return;
         const token = searchParams.get("reuseToken");
         if (!token || loadedReuseTokenRef.current.has(token)) return;
         loadedReuseTokenRef.current.add(token);
@@ -659,6 +680,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     };
 
     const generate = async () => {
+        if (!pendingReady) { message.warning(uiText("请先完成原任务记录核对，再提交生成。")); return; }
         if (quickTool && latestPendingImages.current.length) { message.warning(uiText("原任务状态待核查，请先刷新原任务状态")); return; }
         if (!draftReady || designStatus !== "ready") { message.warning(uiText("请先完成设计草稿读取，再提交生成。")); return; }
         if (placementStatus !== "ready") {
@@ -690,7 +712,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         const snapshot = buildRequestSnapshot();
         if (!snapshot) return;
 
-        const release = workbenchSubmissions.acquire(`image:${user.id}`);
+        const release = workbenchSubmissions.acquire(`image:${user.id}:${inputDraftScope}`);
         if (!release) { message.info(uiText("图片任务正在处理，请勿重复提交")); return; }
 
         pendingRestoreRevision.current += 1;
@@ -868,7 +890,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         if (quickTool) log = { ...log, title: `${toolModeConfig.title} · ${log.references[0]?.name || "图片"}` };
         assertCurrent();
         if (!user || useUserStore.getState().user?.id !== user.id) throw new Error("员工会话已变化，未写入其他账号的记录");
-        const scopedLog = { ...log, ownerId: user.id, tool: historyTool };
+        const scopedLog = { ...log, ownerId: user.id, tool: historyTool, workspaceId };
         await historyStore.setItem(log.id, serializeLog(scopedLog));
         assertCurrent();
         for (const onSaved of imageLogListeners) onSaved(scopedLog, preserveView);
@@ -1017,7 +1039,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const runGenerationSlot = async (index: number, snapshot: ImageRequestSnapshot) => {
         const controller = new AbortController();
         observationControllers.current.add(controller);
-        const record: PendingImage = { id: nanoid(), requestId: nanoid(), ownerId: user!.id, tool: historyTool, createdAt: Date.now(), snapshot: snapshotImageRequest(snapshot) };
+        const record: PendingImage = { id: nanoid(), requestId: nanoid(), ownerId: user!.id, tool: historyTool, workspaceId, createdAt: Date.now(), snapshot: snapshotImageRequest(snapshot) };
         let submissionStarted = false;
         try {
             const snapshotIsBlend = historyTool === "midjourney-blend" || imageModelProfile(modelOptionName(snapshot.config.model), businessModels).kind === "midjourney-blend";
@@ -1055,7 +1077,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
 
     const resumePendingImages = async (records: PendingImage[], resumePaused = false) => {
         if (activeSubmissionRef.current || !records.length) return;
-        const release = workbenchSubmissions.acquire(`image:${user?.id}`);
+        const release = workbenchSubmissions.acquire(`image:${user?.id}:${inputDraftScope}`);
         if (!release) return;
         pendingRestoreRevision.current += 1;
         observationStopRequested.current = false;
@@ -1103,7 +1125,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         if (!handoffReady) { message.warning(uiText("请先完成参考图带入，再提交新任务。")); return; }
         const snapshot = previous?.snapshot;
         if (!snapshot) return;
-        const release = workbenchSubmissions.acquire(`image:${user?.id}`);
+        const release = workbenchSubmissions.acquire(`image:${user?.id}:${inputDraftScope}`);
         if (!release) { message.info(uiText("图片任务正在处理，请勿重复提交")); return; }
         pendingRestoreRevision.current += 1;
         observationStopRequested.current = false;
@@ -1203,7 +1225,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const imageDrop = useImageDrop({
         onFiles: addReferences,
         scopeKey: `${historyTool}:${referenceScope}`,
-        disabled: !draftReady || !handoffReady || readingReferences || running || restoringHistory || user?.status !== "active",
+        disabled: !workbenchTask.active || !draftReady || !handoffReady || readingReferences || running || restoringHistory || user?.status !== "active",
     });
 
     return (
@@ -1316,6 +1338,11 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                                 {!draftReady || readingReferences || optimizingPrompt || (!quickTool && !model) || (requiresPrompt && !prompt.trim()) || invalidBlendReferences || !user || user.status !== "active" ? <div role="status">{!draftReady ? uiText("正在恢复草稿…") : readingReferences ? uiText("正在读取参考图，请稍候") : optimizingPrompt ? uiText("正在优化提示词，请稍候") : !quickTool && !model ? uiText("还差：选择模型") : requiresPrompt && !prompt.trim() ? uiText("还差：填写提示词") : invalidBlendReferences ? uiText("还差：添加 2–4 张参考图") : uiText("当前设计师账号不可用")}</div> : null}
                                 {running ? <div role="status">{uiText(quickTool ? "当前图片正在处理，结果将另存，原图不会覆盖。" : "当前任务正在处理，可先编辑下一条提示词。")}</div> : null}
                                 {quickTool && !running && pendingImages.length > 0 ? <div role="status">{uiText("原任务状态待核查，请先刷新原任务状态")}</div> : null}
+                                {!pendingReady && !pendingReadError ? <div role="status">{uiText("正在核对原任务记录…")}</div> : null}
+                                {pendingReadError ? <div role="alert" className="mt-1 text-destructive">
+                                    <p>{pendingReadError}</p><p>{uiText("原记录已保留；读取成功前不能提交或关闭此任务。")}</p>
+                                    <Button size="small" onClick={() => setPendingReadAttempt(value => value + 1)}>{uiText("重试读取原任务")}</Button>
+                                </div> : null}
                             </div>
                             <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} loading={running} disabled={!canGenerate || running} onClick={() => void generate()}>
                                 {optimizingPrompt ? uiText("正在优化提示词…") : running ? uiText("正在生成，请稍候…") : uiText(toolModeConfig.button)}

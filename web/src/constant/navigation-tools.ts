@@ -5,6 +5,7 @@ import type { AdminOperationType } from "@/lib/admin-domain";
 export const navigationTools = [
     { slug: "remove-background", path: "/remove-background", label: "一键去背景", icon: Scissors, group: "local" },
     { slug: "hd-upscale", path: "/hd-upscale", label: "高清放大", icon: ScanLine, group: "local" },
+    { slug: "item-extract", path: "/item-extract", label: "提取产品图", icon: Box, group: "local" },
     {
         slug: "creative",
         path: "/creative",
@@ -123,12 +124,13 @@ export type NavigationGroup = (typeof navigationTools)[number]["group"];
 export type NavigationToolSlug = (typeof navigationTools)[number]["slug"];
 
 export function navigationModuleKey(slug: NavigationToolSlug) {
-    return slug === "remove-background" ? "image-edit" : slug === "hd-upscale" ? "detail-enhance" : slug === "my-prompts" ? "prompts" : slug;
+    return slug === "remove-background" || slug === "item-extract" ? "image-edit" : slug === "hd-upscale" ? "detail-enhance" : slug === "my-prompts" ? "prompts" : slug;
 }
 
 export const navigationToolBilling: Partial<Record<NavigationToolSlug, { operationType: AdminOperationType | "chat"; toolKey: string }>> = {
     "remove-background": { operationType: "inpaint", toolKey: "image-edit" },
     "hd-upscale": { operationType: "upscale", toolKey: "detail-enhance" },
+    "item-extract": { operationType: "inpaint", toolKey: "image-edit" },
     "gpt-chat": { operationType: "chat", toolKey: "gpt-chat" },
     image: { operationType: "image_generation", toolKey: "image" },
     "detail-enhance": { operationType: "upscale", toolKey: "detail-enhance" },

@@ -4,10 +4,10 @@ import { isQuickImageAction, quickImageModelId, type QuickImageAction } from "..
 import { MARK_IMAGE_PROVIDER_ID } from "../../shared/mark-image-models";
 import { apiMartImageModel, preflightApiMartImageRequest } from "./apimart-image";
 import type { Database } from "./db";
-import { prepareQuickImageTask, QUICK_IMAGE_SNAPSHOT, quickImageDefaultPrompts, type QuickImageInput, type QuickImageSnapshot } from "./quick-image-tools";
+import { prepareQuickImageTask, QUICK_IMAGE_SNAPSHOT, quickImageDefaultParameters, quickImageDefaultPrompts, type QuickImageInput, type QuickImageSnapshot } from "./quick-image-tools";
 import { ToolConfigurationError } from "./tool-configuration";
 
-export const quickImageActions = ["remove-background", "hd-upscale"] as const;
+export const quickImageActions = ["remove-background", "hd-upscale", "item-extract"] as const;
 export const quickImageActionSchema = z.enum(quickImageActions);
 const scalar = z.union([z.string().max(1000), z.number().finite(), z.boolean()]);
 export const quickImageConfigurationSchema = z.object({ modelConfigId: z.string().uuid(), prompt: z.string().trim().min(1).max(4000),
@@ -45,6 +45,7 @@ export function validateQuickImageConfiguration(action: QuickImageAction, raw: Q
   }
   if (input.parameters.output_format === "gif" || input.parameters.output_format === "svg") throw new ToolConfigurationError("QUICK_IMAGE_PARAMETER_INVALID", "一键图片编辑仅支持静态 PNG、JPEG 或 WebP");
   if (action === "remove-background" && input.parameters.background === "transparent") throw new ToolConfigurationError("QUICK_IMAGE_PARAMETER_INVALID", "去背景使用灰阶蒙版后合成原图，不接受透明蒙版输出参数");
+  if (action === "item-extract" && input.parameters.background === "transparent") throw new ToolConfigurationError("QUICK_IMAGE_PARAMETER_INVALID", "提取产品图输出白底商品图，不接受透明背景参数");
   try {
     preflightApiMartImageRequest({ modelId: model.modelId, prompt: input.prompt, parameters: { ...input.parameters, n: 1 }, sourceImages: ["https://owned-reference.invalid/source.png"] });
   } catch (error) { throw new ToolConfigurationError("QUICK_IMAGE_PARAMETER_INVALID", error instanceof Error ? error.message : "模型参数不正确"); }
@@ -71,7 +72,7 @@ export async function readQuickImageConfiguration(db: Pick<Database, "query">, a
   const model = (await db.query<{ id: string; modelId: string; name: string }>(`SELECT m.id,m.model_id AS "modelId",m.name FROM model_configs m
     JOIN providers p ON p.id=m.provider_id WHERE m.provider_id=$1 AND m.model_id=$2 AND p.protocol='apimart' LIMIT 1`, [MARK_IMAGE_PROVIDER_ID, quickImageModelId(action)])).rows[0];
   return { action, modelConfigId: model?.id ?? null, modelId: model?.modelId ?? null, modelName: model?.name ?? null,
-    prompt: quickImageDefaultPrompts[action], parameters: action === "hd-upscale" ? { size: "auto", resolution: "4k" } : {}, configurationVersion: 0, isDefault: true };
+    prompt: quickImageDefaultPrompts[action], parameters: { ...quickImageDefaultParameters[action] }, configurationVersion: 0, isDefault: true };
 }
 
 export async function prepareConfiguredQuickImageTask<T extends QuickImageInput>(db: Pick<Database, "query">, input: T,

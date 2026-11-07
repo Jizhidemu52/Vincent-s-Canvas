@@ -7,7 +7,9 @@ const flags = Object.fromEntries(moduleKeys.map(key => [key, true]));
 
 describe("formal feature visibility", () => {
     test("covers existing scenes, promoted design workbenches and distinct canvas capabilities", () => {
-        expect(toolDefinitions.filter(item => item.toolKey.startsWith("creative-"))).toHaveLength(9);
+        expect(toolDefinitions.filter(item => item.toolKey.startsWith("creative-"))).toHaveLength(11);
+        expect(moduleKeys).toContain("creative-virtual-try-on");
+        expect(moduleKeys).toContain("creative-sketch-to-photo");
         expect(toolDefinitions.filter(item => item.toolKey.startsWith("canvas-"))).toHaveLength(8);
         expect(moduleKeys).toContain("pattern-placement");
         expect(moduleKeys).toContain("pattern-repeat");

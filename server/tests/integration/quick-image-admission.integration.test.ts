@@ -10,6 +10,7 @@ import { createTasksRouter } from "../../src/routes/tasks";
 import type { AuthenticatedRequest, SessionUser } from "../../src/types";
 import { createIsolatedPostgres } from "../helpers/isolated-postgres";
 import { preflightStoredQuickImageTask } from "../../src/stored-quick-image-preflight";
+import { quickImageDefaultParameters } from "../../src/quick-image-tools";
 
 const integration = process.env.PGLITE_RUNTIME_PATH ? describe : describe.skip;
 integration("quick image HTTP admission through real schema, recipes, SQL and reservations", () => {
@@ -17,7 +18,7 @@ integration("quick image HTTP admission through real schema, recipes, SQL and re
   let server: ReturnType<ReturnType<typeof express>["listen"]>, base = "";
   let fetchGuard: { mockRestore(): void };
   const realFetch = globalThis.fetch.bind(globalThis);
-  const ordinaryProvider = randomUUID(), ordinaryModel = randomUUID(), nanoModel = randomUUID(), maiModel = randomUUID(), decoyNano = randomUUID();
+  const ordinaryProvider = randomUUID(), ordinaryModel = randomUUID(), nanoModel = randomUUID(), maiModel = randomUUID(), flareModel = randomUUID(), decoyNano = randomUUID();
   const users = new Map<string, SessionUser>(), queued = new Set<string>();
   const sourceByUser = new Map<string, string>();
   let latestUser = "";
@@ -54,7 +55,7 @@ integration("quick image HTTP admission through real schema, recipes, SQL and re
     for (const [id, name] of [[MARK_IMAGE_PROVIDER_ID, "Quick fixed provider"], [ordinaryProvider, "Quick ordinary provider"]]) {
       await query("INSERT INTO providers(id,name,protocol,base_url,enabled) VALUES($1,$2,'apimart','https://no-network.invalid/v1',true) ON CONFLICT(id) DO UPDATE SET enabled=true,protocol='apimart'", [id, name]);
     }
-    for (const [id, provider, model] of [[nanoModel, MARK_IMAGE_PROVIDER_ID, quickImageModelId("hd-upscale")], [maiModel, MARK_IMAGE_PROVIDER_ID, quickImageModelId("remove-background")], [ordinaryModel, ordinaryProvider, "ordinary-model"], [decoyNano, ordinaryProvider, quickImageModelId("remove-background")]]) {
+    for (const [id, provider, model] of [[nanoModel, MARK_IMAGE_PROVIDER_ID, quickImageModelId("hd-upscale")], [maiModel, MARK_IMAGE_PROVIDER_ID, quickImageModelId("remove-background")], [flareModel, MARK_IMAGE_PROVIDER_ID, quickImageModelId("item-extract")], [ordinaryModel, ordinaryProvider, "ordinary-model"], [decoyNano, ordinaryProvider, quickImageModelId("remove-background")]]) {
       await query("INSERT INTO model_configs(id,provider_id,name,model_id,capabilities,enabled,credit_cost,rmb_cost) VALUES($1,$2,$3,$3,ARRAY['generate','edit'],true,2,0)", [id, provider, model]);
     }
     await query("UPDATE module_flags SET enabled=true");
@@ -80,18 +81,18 @@ integration("quick image HTTP admission through real schema, recipes, SQL and re
     expect(externalCalls).toBe(0); expect(optimizerCalls).toBe(0);
   });
 
-  for (const action of ["remove-background", "hd-upscale"] as const) for (const canvas of [false, true]) {
+  for (const action of ["remove-background", "hd-upscale", "item-extract"] as const) for (const canvas of [false, true]) {
     test(`${action} ${canvas ? "canvas" : "standalone"} accepts no prompt/model and persists only the fixed recipe`, async () => {
       const actor = await user(), value = input(action, canvas);
-      const expectedModel = action === "remove-background" ? maiModel : nanoModel;
+      const expectedModel = action === "remove-background" ? maiModel : action === "item-extract" ? flareModel : nanoModel;
       expect(value).not.toHaveProperty("prompt"); expect(value).not.toHaveProperty("modelConfigId");
       const response = await send(actor, value), body = await response.json();
       expect({ status: response.status, body }).toMatchObject({ status: 201, body: { task: { modelConfigId: expectedModel, toolKey: value.toolKey, credits: 7, optimized: false } } });
       const stored = (await query("SELECT model_config_id,prompt,parameters,source_urls,user_input,prompt_optimized FROM tasks WHERE id=$1", [body.task.id])).rows[0]!;
       expect(stored).toMatchObject({ model_config_id: expectedModel, source_urls: value.sourceUrls, user_input: null, prompt_optimized: false,
-        parameters: { quickImageAction: action, ...(action === "hd-upscale" ? { resolution: "4k", size: "auto" } : {}), n: 1, count: 1, quickImage: { action, recipeVersion: 1 } } });
+        parameters: { quickImageAction: action, ...quickImageDefaultParameters[action], n: 1, count: 1, quickImage: { action, recipeVersion: 1 } } });
       if (action === "remove-background") { expect(stored.parameters).not.toHaveProperty("size"); expect(stored.parameters).not.toHaveProperty("resolution"); }
-      expect(stored.prompt).toContain(action === "hd-upscale" ? "configured output resolution" : "foreground alpha matte");
+      expect(stored.prompt).toContain(action === "hd-upscale" ? "configured output resolution" : action === "item-extract" ? "flat-lay presentation" : "foreground alpha matte");
       expect(stored.prompt).toBe(body.task.prompt); expect(queued.has(body.task.id)).toBe(true);
       const duplicate = await send(actor, value);
       expect(duplicate.status).toBe(200); expect((await duplicate.json()).task.id).toBe(body.task.id);
@@ -100,9 +101,9 @@ integration("quick image HTTP admission through real schema, recipes, SQL and re
     });
   }
 
-  test("parallel duplicate admission shares one real task/reservation and cannot be claimed or read by another employee", async () => {
-    const actor = await user(), other = await user(), value = input("remove-background", true, actor);
-    const responses = await Promise.all([send(actor, value), send(actor, value), send(actor, value)]);
+  test.each(["remove-background", "hd-upscale", "item-extract"] as const)("%s twelve parallel duplicates share one task/reservation and remain employee-isolated", async action => {
+    const actor = await user(), other = await user(), value = input(action, true, actor);
+    const responses = await Promise.all(Array.from({ length: 12 }, () => send(actor, value)));
     expect(responses.every(response => response.status === 200 || response.status === 201)).toBe(true);
     const ids = await Promise.all(responses.map(async response => (await response.json()).task.id));
     expect(new Set(ids).size).toBe(1); expect(await counts(actor)).toEqual({ tasks: 1, reservations: 1, compilations: 0 });
@@ -150,7 +151,7 @@ integration("quick image HTTP admission through real schema, recipes, SQL and re
       sections: [{ id: "brief:page-1", figureIds: [] }] }];
     const designRequirements = { title: "开衫", documentIds: ["brief"], subject: "女士开衫", colors: "蓝色", materials: "棉", must: [], avoid: [], unknowns: [],
       referenceFigureIds: [], sources: [{ documentId: "brief", sectionId: "brief:page-1" }] };
-    for (const action of ["remove-background", "hd-upscale"] as const) for (const parameters of [
+    for (const action of ["remove-background", "hd-upscale", "item-extract"] as const) for (const parameters of [
       { designRequirements, designDocumentCatalog },
       { imageAgentProfile: "creative-chat", designRequirements },
       { imageAgentProfile: "creative-chat", designDocumentCatalog },

@@ -16,6 +16,8 @@ export const toolDefinitions = [
   { toolKey: "creative-pattern-colorway", label: "图案配色", group: "创意工具", operationType: "inpaint", operations: ["inpaint"], capabilities: ["edit"], parent: "creative" },
   { toolKey: "creative-accessory-design", label: "辅料设计", group: "创意工具", operationType: "inpaint", operations: ["inpaint"], capabilities: ["edit"], parent: "creative" },
   { toolKey: "creative-pattern-craft", label: "图案工艺", group: "创意工具", operationType: "inpaint", operations: ["inpaint"], capabilities: ["edit"], parent: "creative" },
+  { toolKey: "creative-virtual-try-on", label: "虚拟试穿", group: "创意工具", operationType: "inpaint", operations: ["inpaint"], capabilities: ["edit"], parent: "creative" },
+  { toolKey: "creative-sketch-to-photo", label: "线稿转实拍", group: "创意工具", operationType: "inpaint", operations: ["inpaint"], capabilities: ["edit"], parent: "creative" },
   { toolKey: "series-recipe", label: "系列配方", group: "创意工具", operationType: "inpaint", operations: ["inpaint"], capabilities: ["edit"], parent: "creative" },
   { toolKey: "canvas-image", label: "画布图片生成", group: "自由画布", operationType: "image_generation", operations: ["image_generation"], capabilities: ["generate"], parent: "canvas" },
   { toolKey: "canvas-edit", label: "画布图片编辑", group: "自由画布", operationType: "inpaint", operations: ["inpaint"], capabilities: ["edit"], parent: "canvas" },
@@ -31,7 +33,7 @@ export const toolDefinitions = [
 
 export type ToolKey = (typeof toolDefinitions)[number]["toolKey"];
 export const nonAiDefinitions = [
-  { moduleKey: "creative", label: "创意工具总入口", group: "创意工具", kind: "group", description: "管理九个创意场景及创意本地工具的总入口", parent: null },
+  { moduleKey: "creative", label: "创意工具总入口", group: "创意工具", kind: "group", description: "管理创意场景及创意本地工具的总入口", parent: null },
   { moduleKey: "canvas", label: "自由画布总入口", group: "自由画布", kind: "group", description: "管理画布入口；子能力可分别设置", parent: null },
   { moduleKey: "standard-colors", label: "标准色库 / 近似色搜索", group: "创意本地工具", kind: "local", description: "标准色查询、近似色搜索；本地数据，无需 API", parent: "creative" },
   { moduleKey: "photo-color-picker", label: "照片取色", group: "创意本地工具", kind: "local", description: "从照片提取色值与配色；本地执行，无需 API", parent: "creative" },

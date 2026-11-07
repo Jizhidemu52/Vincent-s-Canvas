@@ -2,6 +2,7 @@ import { uiText, useUiText } from "@/lib/i18n";
 import { handleSubmitShortcut } from "@/lib/submit-shortcut";
 import { GenerationInputList } from "@/components/generation-input-list";
 import { GenerationDiagnostic } from "@/components/generation-diagnostic";
+import { WorkbenchTasks, useWorkbenchTask, useWorkbenchTaskStatus } from "@/components/workbench-tasks";
 import { PracticeExampleRecord } from "@/components/design-examples";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
@@ -51,7 +52,7 @@ export default function RecipePage() {
     useUiText();
     const ownerId = useUserStore((state) => state.user?.id);
     return ownerId ? (
-        <RecipeWorkspace key={ownerId} ownerId={ownerId} />
+        <WorkbenchTasks key={ownerId} ownerId={ownerId} boardKey="series-recipe"><RecipeWorkspace ownerId={ownerId} /></WorkbenchTasks>
     ) : (
         <main className="series-recipe-page">
             <h1>{uiText("系列配方")}</h1>
@@ -62,19 +63,24 @@ export default function RecipePage() {
 
 function RecipeWorkspace({ ownerId }: { ownerId: string }) {
     useUiText();
+    const { draftScope, active: workspaceActive } = useWorkbenchTask();
     const effectiveConfig = useEffectiveConfig("image");
     const user = useUserStore((state) => state.user);
     const enabled = useToolEnabled("series-recipe");
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const business = useBusinessConfigStore();
     const [storage] = useState(() => createWorkspaceStorage("series_recipe_workspaces"));
-    const scope = `project:${encodeURIComponent(ownerId)}`;
+    const scope = draftScope(`project:${encodeURIComponent(ownerId)}`);
     const mounted = useRef(true);
     const runner = useRef<SeriesRecipeRunner | null>(null);
     const busy = useRef(false);
     const [project, setProject] = useState<RecipeProject>(() => ({ version: 1, kind: "series-recipe", ownerId, form: createRecipeForm(), references: [], settings: recipeSettings({ ...effectiveConfig, model: effectiveConfig.imageModel, count: "1" }) }));
     const projectRef = useRef(project);
     const [ready, setReady] = useState(false);
+    const [readFailed, setReadFailed] = useState(false);
+    const [readAttempt, setReadAttempt] = useState(0);
+    const readyRef = useRef(false);
+    readyRef.current = ready;
     const [active, setActive] = useState(false);
     const [paused, setPaused] = useState(false);
     const [recovering, setRecovering] = useState(false);
@@ -123,6 +129,7 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
     const selected = resultEntries.filter(({ branch }) => branch.status === "success" && branch.selected);
     const completed = succeeded + failed + branches.filter((branch) => branch.status === "cancelled").length;
     const dirty = !!run && (JSON.stringify(run.form) !== JSON.stringify(project.form) || run.references[0]?.id !== project.references[0]?.id || JSON.stringify(run.settings) !== JSON.stringify(recipeSettings(config)));
+    useWorkbenchTaskStatus({ busy: active || working || recovering, pending: uncertain > 0 || branches.some(branch => branch.status === "running"), ready, label: succeeded ? "已完成" : failed ? "已失败" : "草稿" });
 
     const current = useCallback(() => mounted.current && storage.isCurrent() && useUserStore.getState().user?.id === ownerId, [ownerId, storage]);
     const commit = useCallback(
@@ -140,7 +147,9 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
             const write = (draftWrites.get(scope) || Promise.resolve())
                 .catch(() => undefined)
                 .then(async () => {
-                    if (!current()) return;
+                    // A queued save belongs to this employee even after a finished
+                    // task tab is closed. Only an identity change invalidates it.
+                    if (!storage.isCurrent() || useUserStore.getState().user?.id !== ownerId) return;
                     await storage.setItem(scope, frozen);
                 });
             draftWrites.set(scope, write);
@@ -151,12 +160,14 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
                 .catch(() => undefined);
             return write;
         },
-        [scope, storage, current],
+        [scope, storage, ownerId],
     );
 
     useEffect(() => {
         mounted.current = true;
         let alive = true;
+        setReadFailed(false);
+        setError("");
         void (async () => {
             try {
                 await draftWrites.get(scope);
@@ -165,10 +176,12 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
                     commit(parseRecipeProject(saved, ownerId));
                     setNotice(uiText("已恢复当前员工的本地项目。未完成任务不会自动重发。"));
                 }
-            } catch (caught) {
-                if (alive && current()) setError(uiText("本地项目读取失败：{value1}", { value1: errorText(caught) }));
-            } finally {
                 if (alive && current()) setReady(true);
+            } catch (caught) {
+                if (alive && current()) {
+                    setReadFailed(true);
+                    setError(uiText("本地项目读取失败：{value1}", { value1: errorText(caught) }));
+                }
             }
         })();
         const unsubscribe = useUserStore.subscribe((state) => {
@@ -183,6 +196,7 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
         const unsubscribeModules = useModuleStore.subscribe(checkEnabled);
         const unsubscribeConfig = useBusinessConfigStore.subscribe(checkEnabled);
         return () => {
+            if (readyRef.current && current()) void persist(projectRef.current).catch(() => undefined);
             alive = false;
             mounted.current = false;
             runner.current?.dispose();
@@ -190,7 +204,7 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
             unsubscribeModules();
             unsubscribeConfig();
         };
-    }, [scope, storage, ownerId, current, commit]);
+    }, [scope, storage, ownerId, current, commit, persist, readAttempt]);
 
     useEffect(() => {
         if (business.status === "idle") void business.refresh().catch(() => undefined);
@@ -452,13 +466,13 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
                                 <option value="pattern">{uiText("产品与图案 → 定位 → 系列候选")}</option>
                             </select>
                         </label>
-                        <RecipeUpload label={uiText("参考底图（必需）")} scopeKey={`recipe:${project.form.kind}:primary`} image={project.references[0]} disabled={locked} onUpload={(file) => upload(0, file)} onRemove={() => commit({ ...projectRef.current, references: [] })} />
+                        <RecipeUpload label={uiText("参考底图（必需）")} scopeKey={draftScope(`recipe:${project.form.kind}:primary`)} image={project.references[0]} disabled={locked || !workspaceActive} onUpload={(file) => upload(0, file)} onRemove={() => commit({ ...projectRef.current, references: [] })} />
                         {project.form.kind === "pattern" && (
                             <RecipeUpload
                                 label={uiText("图案参考（可选）")}
-                                scopeKey={`recipe:${project.form.kind}:secondary`}
+                                scopeKey={draftScope(`recipe:${project.form.kind}:secondary`)}
                                 image={project.references[1]}
-                                disabled={locked || !project.references[0]}
+                                disabled={locked || !workspaceActive || !project.references[0]}
                                 onUpload={(file) => upload(1, file)}
                                 onRemove={() => commit({ ...projectRef.current, references: projectRef.current.references.slice(0, 1) })}
                             />
@@ -742,6 +756,11 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
                             <p className="sr-error" role="alert">
                                 {uiText(error || "")}
                             </p>
+                        )}
+                        {readFailed && (
+                            <button type="button" className="sr-button sr-wide" onClick={() => setReadAttempt(attempt => attempt + 1)}>
+                                {uiText("重试读取原项目")}
+                            </button>
                         )}
                     </div>
                 </aside>

@@ -283,8 +283,9 @@ describe("all prompt scenes through generation admission and cache reuse", () =>
     f.runtime.resolveTarget = async () => ({ id: "target", modelId: scene === "video-motion" ? "MiniMax-H3" : "gpt-image-2.6-flare", protocol: "apimart", fingerprint: "target" });
     const mode = scene === "video-motion" ? "video" : scene === "text-to-style" ? "generate" : "edit";
     const sourceUrls = scene === "text-to-style" ? [] : ["source"];
-    const fields = scene === "series-recipe" ? { palette: ["red", "blue"], positions: ["left", "right"], variantIndex: 1 } : scene === "pattern-extract" ? { extractBackground: "白底" } : {};
-    const promptInput = { scene, fields, userText: scene === "text-to-style" ? "在衣服上印上‘NOVA 73’" : "保留参考图的商品、文字和结构", mode, hasMask: false, referenceRoles: sourceUrls.map(() => "商品主体") } as PromptCompilationRequest["promptInput"];
+    const fields = scene === "series-recipe" ? { palette: ["red", "blue"], positions: ["left", "right"], variantIndex: 1 } : scene === "pattern-extract" ? { extractBackground: "白底" }
+      : scene === "virtual-try-on" ? { description: "成年模特正面展示产品" } : scene === "sketch-to-photo" ? { fabric: "棉织物", colorDescription: "蓝色", presentation: "白底平铺" } : {};
+    const promptInput = { scene, fields, userText: scene === "text-to-style" ? "在衣服上印上‘NOVA 73’" : "保留参考图的商品、文字和结构", mode, hasMask: false, referenceRoles: sourceUrls.map(() => scene === "virtual-try-on" ? "产品图" : scene === "sketch-to-photo" ? "线稿图" : "商品主体") } as PromptCompilationRequest["promptInput"];
     const input = { requestId: randomUUID(), operationType: scene === "video-motion" ? "video_generation" : scene === "batch-optimize" ? "batch_image" : mode === "generate" ? "image_generation" : "inpaint", toolKey: scene === "series-recipe" ? "series-recipe" : scene === "text-to-style" ? "creative-text-to-style" : "canvas-edit", modelConfigId: "target", prompt: "ignored legacy prompt", sourceUrls, promptInput, parameters: scene === "video-motion" ? { seconds: 5, size: "16:9", resolution: "720p", videoMode: "first-frame" } : {} };
     const options = scene === "video-motion" ? { videoSourceMimeTypes: ["image/png"] } : {};
     const prepared = await preparePromptTaskInput(f.compiler, actor, input, options);

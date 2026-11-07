@@ -19,6 +19,7 @@ async function setup(page: Page) {
     const configurations: AdminQuickImageConfiguration[] = [
         { action: "remove-background", modelConfigId: modelA.id, modelId: modelA.modelId, modelName: modelA.name, prompt: "PRIVATE saved subject extraction", parameters: { quality: "high" }, configurationVersion: 7, isDefault: false },
         { action: "hd-upscale", modelConfigId: modelA.id, modelId: modelA.modelId, modelName: modelA.name, prompt: "PRIVATE saved upscale", parameters: { resolution: "2K" }, configurationVersion: 4, isDefault: false },
+        { action: "item-extract", modelConfigId: modelA.id, modelId: modelA.modelId, modelName: modelA.name, prompt: "PRIVATE product flat lay extraction", parameters: { resolution: "2k", quality: "medium" }, configurationVersion: 0, isDefault: true },
     ];
     const requests: string[] = [];
     const saves: Array<{ action: string; input: QuickImageConfigurationUpdate }> = [];
@@ -131,6 +132,32 @@ test("save changes one action with expectedVersion; validates JSON and protects 
     await page.screenshot({ path: info.outputPath("admin-quick-mobile.png"), fullPage: true });
     await panel.getByRole("button", { name: paidTestName }).scrollIntoViewIfNeeded();
     await page.screenshot({ path: info.outputPath("admin-quick-mobile-test-controls.png"), fullPage: true });
+    clean(f);
+});
+
+test("product extraction has independent admin model, prompt and parameters while saving never starts a paid task", async ({ page }, info) => {
+    const f = await setup(page);
+    await openPanel(page);
+    const title = "提取产品图", panel = region(page, title);
+    await expect(panel).toBeVisible();
+    await expect(panel.getByText(/AI 重构而非透明抠图/)).toBeVisible();
+    const others = structuredClone(f.configurations.slice(0, 2));
+    await panel.getByRole("combobox", { name: `${title}处理模型`, exact: true }).click();
+    await page.locator(".ant-select-dropdown:visible").getByText("处理模型 B · 隔离 API · fixture-edit-b", { exact: true }).click();
+    await panel.getByRole("textbox", { name: `${title}处理提示词`, exact: true }).fill("提取主要产品，白底平放，只补足必要遮挡，不臆造隐藏结构");
+    await panel.locator("summary").click();
+    await panel.getByRole("textbox", { name: `${title}高级参数 JSON`, exact: true }).fill('{"resolution":"2k","quality":"medium"}');
+    await panel.getByRole("button", { name: `保存${title}配置`, exact: true }).click();
+    await expect(panel.getByText(/已保存，仅影响此操作之后的新请求/)).toBeVisible();
+    expect(f.saves).toEqual([{ action: "item-extract", input: { modelConfigId: modelB.id, prompt: "提取主要产品，白底平放，只补足必要遮挡，不臆造隐藏结构", parameters: { resolution: "2k", quality: "medium" }, expectedVersion: 0 } }]);
+    expect(f.configurations.slice(0, 2)).toEqual(others);
+    expect(f.tests).toHaveLength(0); expect(f.uploads).toHaveLength(0);
+    await panel.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: info.outputPath("admin-product-extract-desktop.png"), fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await panel.scrollIntoViewIfNeeded();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+    await page.screenshot({ path: info.outputPath("admin-product-extract-mobile.png"), fullPage: true });
     clean(f);
 });
 

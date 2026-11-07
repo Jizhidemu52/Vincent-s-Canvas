@@ -23,7 +23,7 @@ test("desktop result actions reveal on hover and keyboard focus while version an
     await expect(page.getByTestId("canvas-node-agent-version")).toHaveText("V3");
     await result.hover(); await expect(actions).toHaveCSS("opacity", "1");
     await page.mouse.move(800, 800); await expect(actions).toHaveCSS("opacity", "0");
-    await result.getByRole("button", { name: "选择 图2 作为编辑目标", exact: true }).focus();
+    await result.getByRole("button", { name: "查看大图 · 图2", exact: true }).focus();
     await expect(actions).toHaveCSS("opacity", "1");
     await page.keyboard.press("Tab");
     await expect(result.getByRole("button", { name: "在此基础上改", exact: true })).toBeFocused();
@@ -38,7 +38,12 @@ test("selection, busy state and narrow light/dark cards preserve target and oper
     await page.getByRole("button", { name: "clear selection", exact: true }).click();
     await expect(page.getByTestId("canvas-agent-image-current")).toHaveCount(0);
     const result = page.getByTestId("canvas-agent-image-result");
-    await result.getByRole("button", { name: "选择 图2 作为编辑目标", exact: true }).click();
+    await result.getByRole("button", { name: "查看大图 · 图2", exact: true }).click();
+    await expect(page.getByRole("button", { name: "放大大图", exact: true })).toBeVisible();
+    await expect(page.getByTestId("canvas-agent-image-current")).toHaveCount(0);
+    await expect(page.getByTestId("last-action")).toHaveText("none");
+    await page.keyboard.press("Escape");
+    await result.getByRole("button", { name: "在此基础上改", exact: true }).click();
     await expect(page.getByTestId("canvas-agent-image-current")).toBeVisible();
     await page.getByRole("button", { name: "busy", exact: true }).click(); await result.hover();
     await expect(result.getByRole("button", { name: "在此基础上改", exact: true })).toBeDisabled();

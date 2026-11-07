@@ -74,9 +74,9 @@ test("remove-background exports the same transparent master as PNG or white-back
     expect(api.assetBytes.get(taskId)?.equals(source)).toBe(true);
 });
 
-for (const action of ["remove-background", "hd-upscale"] as const) {
+for (const action of ["remove-background", "hd-upscale", "item-extract"] as const) {
     test(`${action} standalone uses a managed server recipe with no prompt or model input`, async ({ page, api }, testInfo) => {
-        const title = action === "remove-background" ? "一键去背景" : "高清放大";
+        const title = action === "remove-background" ? "一键去背景" : action === "item-extract" ? "提取产品图" : "高清放大";
         await managedQuickTask(page, api);
         // A designer need not see or select the privately managed processing model.
         await page.route("**/api/models", route => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ models: [], prices: [], tools: [] }) }));
@@ -87,7 +87,9 @@ for (const action of ["remove-background", "hd-upscale"] as const) {
         const submit = page.getByRole("button", { name: title, exact: true });
         await expect(submit).toBeDisabled();
         await uploadStandaloneImage(page);
-        await expect(submit).toBeEnabled(); await submit.click();
+        await expect(submit).toBeEnabled();
+        expect(api.submissions).toHaveLength(0);
+        await submit.click();
         await expect.poll(() => api.submissions.length).toBe(1);
         expect(api.submissions[0]).toMatchObject({ toolKey: action === "hd-upscale" ? "detail-enhance" : "image-edit", operationType: action === "hd-upscale" ? "upscale" : "inpaint", parameters: { quickImageAction: action } });
         expect(api.submissions[0]).not.toHaveProperty("prompt"); expect(api.submissions[0]).not.toHaveProperty("modelConfigId");

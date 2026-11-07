@@ -256,6 +256,26 @@ export async function processImageResult({ result, parameters, editInput }: Imag
   };
   try {
     const generated = await load("generated", result);
+    if (quickAction === "item-extract") {
+      // Extraction may reframe a worn product into a flat lay, unlike exact-frame
+      // upscaling/matting. Validate real output pixels without forcing source ratio.
+      const resolution = String(parameters.resolution ?? "").toLowerCase();
+      const minimum = resolution === "4k" ? 3840 : resolution === "2k" ? 1920 : resolution === "1k" ? 960 : resolution === "0.5k" ? 480 : 0;
+      if (Math.max(generated.metadata.width, generated.metadata.height) < minimum) {
+        throw new ImageResultProcessingError("IMAGE_RESULT_DIMENSION_MISMATCH", "提取产品图未达到配置分辨率；渠道原件已保留，不会把低清结果标记为高清商品图");
+      }
+      if (HIGH_BIT_DEPTH.test(generated.metadata.pixelFormat)) throw new ImageResultProcessingError("INVALID_IMAGE_RESULT_INPUT", "提取产品图后处理暂仅支持 8 位结果，不会自动降低高位深图片精度");
+      const flattened = flattenWhite(await decode(generated.file, generated.metadata));
+      operations.push("quick_image_dimensions_verified", "product_image_opaque_verified");
+      if (flattened.changed) operations.push("product_alpha_flattened_white");
+      const target = format ?? "png";
+      const converted = compression !== undefined || generated.mimeType !== `image/${target}`;
+      const display = flattened.changed || converted ? await encode(flattened.pixels, generated.metadata, target, compression)
+        : { bytes: result.bytes, mimeType: generated.mimeType };
+      if (converted) operations.push("format_conversion");
+      if (compression !== undefined) operations.push("compression_applied");
+      return { display, operations, warning: "AI 平面商品图，已验证输出尺寸与不透明格式；白底、产品结构、遮挡补全和文字细节请结合原图检查。" };
+    }
     if (quickAction && original) {
       const source = await load("original", original);
       const sourceRatio = source.metadata.width / source.metadata.height;

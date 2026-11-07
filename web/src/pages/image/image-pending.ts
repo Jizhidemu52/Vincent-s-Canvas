@@ -2,12 +2,14 @@ import { defaultConfig, type AiConfig } from "@/stores/use-config-store";
 import type { ReferenceImage } from "@/types/image";
 import { generationDraftInput } from "@/services/api/generation-history";
 import type { TaskRecoveryKind } from "@/services/api/task-result-reconciliation";
+import { matchesWorkbenchTask, DEFAULT_WORKBENCH_TASK } from "@/lib/workbench-task-state";
 
 export type ImageRequestSnapshot = { text: string; promptInput?: import("../../../../shared/prompt-contracts").PromptInputData; config: AiConfig; references: ReferenceImage[] };
 export type PendingImage = {
     id: string;
     ownerId: string;
     tool: string;
+    workspaceId?: string;
     createdAt: number;
     requestId: string;
     taskId?: string;
@@ -23,8 +25,8 @@ export function snapshotImageRequest(snapshot: ImageRequestSnapshot): ImageReque
     return structuredClone({ text: snapshot.text, promptInput: snapshot.promptInput, config: { ...defaultConfig, ...generationDraftInput(snapshot.config, snapshot.text).config }, references: snapshot.references });
 }
 
-export function pendingImagesForWorkspace(records: PendingImage[], ownerId: string, tool: string) {
-    return records.filter(record => record.ownerId === ownerId && record.tool === tool).sort((a, b) => a.createdAt - b.createdAt);
+export function pendingImagesForWorkspace(records: PendingImage[], ownerId: string, tool: string, workspaceId = DEFAULT_WORKBENCH_TASK) {
+    return records.filter(record => record.ownerId === ownerId && record.tool === tool && matchesWorkbenchTask(record, workspaceId)).sort((a, b) => a.createdAt - b.createdAt);
 }
 
 /** Every recovery is a lookup. A missing response must never become a new POST. */

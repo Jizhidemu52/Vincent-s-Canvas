@@ -1,7 +1,8 @@
 import { readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { toolDefinitions } from "../../shared/feature-catalog";
 import { test, expect, IMAGE, type MockCanvasApi } from "./fixtures";
-import type { BrowserContext, Locator, Page } from "@playwright/test";
+import type { BrowserContext, Locator, Page, Route } from "@playwright/test";
 
 function tool(name: string, args: Record<string, unknown>) {
     return { content: "已整理修改要求。", toolCalls: [{ id: `fixture-${name}`, type: "function", function: { name, arguments: JSON.stringify(args) } }] };
@@ -27,6 +28,40 @@ async function savedChat(page: Page) {
         const { useUserStore } = await import("/src/stores/use-user-store.ts");
         return (await chatSessionStorage.load(`wireless-canvas:llm-chat:${useUserStore.getState().user!.id}`, () => null))[0];
     });
+}
+
+async function inspectOriginal(page: Page, card: Locator, expected: Buffer, screenshotPath?: string) {
+    await card.getByRole("button", { name: /^查看大图 · / }).click();
+    const preview = page.getByRole("dialog");
+    await expect(preview.getByRole("button", { name: "下载原图", exact: true })).toBeVisible();
+    const picture = preview.locator("img").first();
+    await expect(picture).toBeVisible();
+    // The 256px fixture must finish the preview entrance animation first.
+    await expect.poll(async () => Math.round((await picture.boundingBox())!.width)).toBe(256);
+    const initialBox = (await picture.boundingBox())!;
+    await preview.getByRole("button", { name: "放大大图", exact: true }).click();
+    await expect.poll(async () => (await picture.boundingBox())!.width).toBeGreaterThan(initialBox.width);
+    await preview.getByRole("button", { name: "缩小大图", exact: true }).click();
+    await expect.poll(async () => Math.abs((await picture.boundingBox())!.width - initialBox.width)).toBeLessThan(1);
+    for (let index = 0; index < 5; index++) await preview.getByRole("button", { name: "放大大图", exact: true }).click();
+    await expect.poll(async () => (await picture.boundingBox())!.width).toBeGreaterThan(1800);
+    const beforeDrag = (await picture.boundingBox())!;
+    await page.mouse.move(900, 500); await page.mouse.down(); await page.mouse.move(1030, 560, { steps: 8 });
+    await expect.poll(async () => (await picture.boundingBox())!.x).not.toBe(beforeDrag.x);
+    await page.mouse.up();
+    await preview.getByRole("button", { name: "适应画面", exact: true }).click();
+    await expect.poll(async () => Math.abs((await picture.boundingBox())!.width - initialBox.width)).toBeLessThan(1);
+    const downloadEvent = page.waitForEvent("download");
+    await preview.getByRole("button", { name: "下载原图", exact: true }).click();
+    const download = await downloadEvent;
+    const bytes = await readFile((await download.path())!);
+    expect(bytes).toEqual(expected);
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    expect(sha256).toBe(createHash("sha256").update(expected).digest("hex"));
+    if (screenshotPath) await page.screenshot({ path: screenshotPath, animations: "disabled" });
+    await page.keyboard.press("Escape");
+    await expect(preview).toHaveCount(0);
+    return { bytes: bytes.length, sha256, expectedSha256: createHash("sha256").update(expected).digest("hex"), byteExact: true };
 }
 
 test("chat image actions preserve original bytes and keep the selected old version despite a different model target", async ({ page, context, api }, info) => {
@@ -61,6 +96,10 @@ test("chat image actions preserve original bytes and keep the selected old versi
     expect(api.submissions).toHaveLength(2);
 
     const calls = plannerRequests.length;
+    const focusBeforePreview = await focus.getAttribute("data-focus-id");
+    await inspectOriginal(page, page.locator(".group\\/image").nth(1), api.assetBytes.get([...api.tasks.keys()][0])!);
+    await expect(focus).toHaveAttribute("data-focus-id", focusBeforePreview!);
+    expect(plannerRequests).toHaveLength(calls); expect(api.submissions).toHaveLength(2);
     const originalId = plannerRequests.at(-1).profileContext.imageCatalog.find((image: any) => image.label === "图1").id;
     const oldId = plannerRequests.at(-1).profileContext.imageCatalog.find((image: any) => image.label === "图2").id;
     await actions(2).getByRole("button", { name: "在此基础上改", exact: true }).click();
@@ -125,6 +164,67 @@ test("chat image actions preserve original bytes and keep the selected old versi
     expect(api.submissions).toHaveLength(4);
 });
 
+for (const surface of ["chat", "canvas"] as const) test(`${surface} keeps original preview usable during generation and planning, then removes it on employee change`, async ({ page, context, api }, info) => {
+    await models(context);
+    const plans: any[] = [];
+    let heldPlanner: Route | undefined;
+    await context.route("**/api/chat/responses", route => {
+        const body = route.request().postDataJSON(); plans.push(body);
+        if (body.profileContext.currentUserText === "先继续讨论") { heldPlanner = route; return; }
+        return route.fulfill({ json: tool("edit_image", { base: "none", prompt: body.profileContext.currentUserText }) });
+    });
+    if (surface === "canvas") {
+        await page.goto(`/canvas/${canvasHistory(api)}`);
+        await page.getByRole("button", { name: "跟我走一遍", exact: true }).click();
+        await page.getByRole("button", { name: "跳过引导", exact: true }).click();
+        await page.getByRole("tab", { name: "对话", exact: true }).first().click();
+    } else await page.goto("/chat");
+    const composer = surface === "chat" ? page.getByRole("textbox", { name: "对话内容", exact: true }) : page.locator(".cw-agent-panel textarea").last();
+    const send = async (text: string) => {
+        await composer.fill(text);
+        await (surface === "chat" ? page : page.locator(".cw-agent-panel")).getByRole("button", { name: "发送", exact: true }).click();
+    };
+    const oldCard = surface === "chat" ? page.locator('[data-message-role="assistant"] .group\\/image').first() : page.getByTestId("canvas-agent-image-result").filter({ has: group(page, "图2") });
+    if (surface === "chat") { await send("画一件毛衣"); await expect(oldCard).toBeVisible(); }
+    const original = surface === "chat" ? api.assetBytes.get([...api.tasks.keys()][0])! : IMAGE;
+    api.taskStatus = "processing";
+    await send("再生成另一款毛衣");
+    const expectedTasks = surface === "chat" ? 2 : 1;
+    await expect.poll(() => api.submissions.length).toBe(expectedTasks);
+    const pendingId = [...api.tasks.keys()].at(-1)!;
+    await expect((surface === "chat" ? page : page.locator(".cw-agent-panel")).getByRole("button", { name: "发送", exact: true })).toBeVisible();
+    await send("先继续讨论");
+    await expect.poll(() => Boolean(heldPlanner)).toBe(true);
+    await oldCard.hover();
+    await expect(oldCard.getByRole("button", { name: "在此基础上改", exact: true })).toBeDisabled();
+    const requestsBeforePreview = plans.length;
+    const originalIntegrity = await inspectOriginal(page, oldCard, original, info.outputPath(`${surface}-full-original-preview.png`));
+    await info.attach(`${surface}-original-download-integrity`, { body: JSON.stringify(originalIntegrity), contentType: "application/json" });
+    expect(api.submissions).toHaveLength(expectedTasks); expect(plans).toHaveLength(requestsBeforePreview);
+    expect(api.tasks.get(pendingId)!.status).toBe("processing");
+    await heldPlanner!.fulfill({ json: { content: "可以先讨论，不产生新的图片任务。", toolCalls: [] } });
+    await expect(page.getByText("可以先讨论，不产生新的图片任务。", { exact: true })).toBeVisible();
+    await page.setViewportSize({ width: 390, height: 844 });
+    if (surface === "chat") {
+        const collapse = page.locator("aside").getByRole("button", { name: "收起会话", exact: true });
+        if (await collapse.isVisible()) await collapse.click();
+    }
+    await oldCard.getByRole("button", { name: /^查看大图 · / }).click();
+    await expect(page.getByRole("dialog").getByRole("button", { name: "下载原图", exact: true })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+    await page.screenshot({ path: info.outputPath(`${surface}-full-original-mobile.png`), animations: "disabled" });
+    let ownerReads = 0;
+    await context.route("**/api/auth/session", route => { ownerReads++; return route.fulfill({ json: { user: { id: "00000000-0000-4000-8000-000000000088", username: "second", displayName: "第二员工", role: "designer", status: "active", creditBalance: 999 } } }); });
+    // Exercise the real focus-time session revalidation, not an injected app store.
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect.poll(() => ownerReads).toBeGreaterThan(0);
+    await expect(page.getByRole("heading", { name: "登录状态已变化，工作区已暂停", exact: true })).toBeVisible();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "下载原图", exact: true })).toHaveCount(0);
+    expect(api.submissions).toHaveLength(expectedTasks); expect(plans).toHaveLength(requestsBeforePreview);
+    expect(api.tasks.get(pendingId)!.status).toBe("processing");
+});
+
 function canvasHistory(api: MockCanvasApi) {
     const now = "2026-10-01T00:00:00.000Z", id = "conversation-actions-canvas";
     const original = { id: "original", type: "image", title: "原款.png", dataUrl: "/api/assets/original/content" };
@@ -161,6 +261,10 @@ test("canvas image controls lock an older result despite a model requesting a ne
     await page.getByRole("tab", { name: "对话", exact: true }).first().click();
     await expect(group(page, "图2")).toBeVisible();
     const focus = page.locator(".cw-agent-panel [data-image-agent-focus]");
+    const focusBeforePreview = await focus.getAttribute("data-focus-id");
+    await inspectOriginal(page, page.getByTestId("canvas-agent-image-result").filter({ has: group(page, "图2") }), IMAGE);
+    expect(await focus.getAttribute("data-focus-id")).toBe(focusBeforePreview);
+    expect(plans).toHaveLength(0); expect(api.submissions).toHaveLength(0);
     const oldId = "chat-image:result-message-0:result:old-result";
     const originalId = "chat-image:upload-message:reference:0:original";
     await page.getByTestId("canvas-agent-image-result").filter({ has: group(page, "图2") }).hover();

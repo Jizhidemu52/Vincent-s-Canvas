@@ -9,7 +9,7 @@ import type * as Client from "../src/services/api/admin-quick-image";
 const code = ts.transpileModule(readFileSync(new URL("../src/services/api/admin-quick-image.ts", import.meta.url), "utf8"), { compilerOptions: { target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.CommonJS } }).outputText;
 const options = { expectedOwnerId: "admin-1" };
 const configuration = { action: "remove-background", modelConfigId: "model-1", modelId: "test-model", modelName: "Test", prompt: "只提取主体", parameters: {}, configurationVersion: 2, isDefault: false };
-const catalog = { configurations: [configuration, { ...configuration, action: "hd-upscale" }], models: [{ id: "model-1", name: "Test", modelId: "test-model", providerName: "API", protocol: "openai", capabilities: ["edit"] }] };
+const catalog = { configurations: [configuration, { ...configuration, action: "hd-upscale" }, { ...configuration, action: "item-extract" }], models: [{ id: "model-1", name: "Test", modelId: "test-model", providerName: "API", protocol: "openai", capabilities: ["edit"] }] };
 const ok = (value: unknown) => Response.json(value);
 function harness(handler: (path: string, init: RequestInit) => Response | Promise<Response> = () => ok(catalog)) {
     const state = { status: "authenticated", user: { id: "admin-1", role: "super_admin", status: "active" } };
@@ -40,7 +40,7 @@ test("quick-image configuration reads raw owner-bound admin data without fronten
 });
 
 test("malformed catalogs and wrapped responses cannot be treated as an empty fallback", async () => {
-    for (const value of [{ code: 0, data: catalog }, { ...catalog, configurations: [] }, { ...catalog, configurations: [configuration, configuration] }, { ...catalog, models: [{}] }]) {
+    for (const value of [{ code: 0, data: catalog }, { ...catalog, configurations: [] }, { ...catalog, configurations: catalog.configurations.slice(0, 2) }, { ...catalog, configurations: [configuration, configuration, catalog.configurations[2]] }, { ...catalog, models: [{}] }]) {
         const h = harness(() => ok(value));
         await expect(h.api.getAdminQuickImageConfigurations(options)).rejects.toThrow("响应无效");
     }
