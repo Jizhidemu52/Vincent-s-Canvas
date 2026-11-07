@@ -141,34 +141,51 @@ test("boundary: video initial history delay and failure block new submission unt
     })).toEqual(expect.arrayContaining([{ requestId: originalTask.requestId, prompt: "ORIGINAL_VIDEO_HISTORY_GATE" }, { requestId: api.submissions[1]!.requestId, prompt: "EXPLICIT_PARALLEL_VIDEO_AFTER_READ" }]));
 });
 
-test("boundary: duplicate clicks and board navigation retain three original tasks without cancellation or resubmission", async ({ page, context, api }) => {
-    await mockModelsAndMedia(context, api);
-    api.taskStatus = "queued";
-    const controlPosts: string[] = [];
-    await context.route(/\/api\/tasks\/[^/]+\/(?:cancel|recover)$/, route => {
-        controlPosts.push(new URL(route.request().url()).pathname);
-        return route.fulfill({ status: 409, json: { error: "FIXTURE_NO_TASK_CONTROL_EXPECTED" } });
+for (const completion of ["before-navigation", "after-navigation"] as const) {
+    test(`boundary: duplicate clicks and board navigation retain three original tasks without cancellation or resubmission (${completion})`, async ({ page, context, api }) => {
+        await mockModelsAndMedia(context, api);
+        api.taskStatus = "queued";
+        const controlPosts: string[] = [];
+        await context.route(/\/api\/tasks\/[^/]+\/(?:cancel|recover)$/, route => {
+            controlPosts.push(new URL(route.request().url()).pathname);
+            return route.fulfill({ status: 409, json: { error: "FIXTURE_NO_TASK_CONTROL_EXPECTED" } });
+        });
+        for (const [index, board] of boards.entries()) {
+            await page.goto(board.path);
+            await fill(page, board, `BOARD_${board.kind}`);
+            await pane(page).getByRole("button", { name: board.submit, exact: true }).dblclick();
+            await expect.poll(() => api.submissions.length).toBe(index + 1);
+            await expect(tabs(page).first()).toContainText("处理中");
+        }
+        const ids = [...api.tasks.keys()];
+        expect(ids).toHaveLength(3);
+        // The final board is recipe. Complete it deterministically on either side
+        // of unmount instead of racing its active observer against navigation.
+        if (completion === "after-navigation") {
+            await page.goto("/");
+            await expect(pane(page)).toHaveCount(0);
+        }
+        for (const task of api.tasks.values()) { task.status = "success"; task.resultUrls = [`/api/assets/${task.id}/content`]; }
+        if (completion === "before-navigation") {
+            await expect(pane(page).locator(".sr-result img")).toHaveCount(1);
+            await expect(tabs(page).first()).toContainText("已完成");
+        }
+        for (const board of boards) {
+            await page.goto(board.path);
+            await expectInput(page, board, `BOARD_${board.kind}`);
+            if (board.kind === "recipe" && completion === "before-navigation") {
+                await expect(pane(page).locator(".sr-result img")).toHaveCount(1);
+                await expect(pane(page).getByRole("button", { name: /^查询原任务 \(0\)/ })).toBeDisabled();
+            } else {
+                await expectOriginalResult(page, board);
+            }
+        }
+        expect(api.submissions).toHaveLength(3);
+        expect(new Set(api.submissions.map(task => task.requestId)).size).toBe(3);
+        expect(controlPosts).toEqual([]);
+        expect([...api.tasks.keys()]).toEqual(ids);
     });
-    for (const [index, board] of boards.entries()) {
-        await page.goto(board.path);
-        await fill(page, board, `BOARD_${board.kind}`);
-        await pane(page).getByRole("button", { name: board.submit, exact: true }).dblclick();
-        await expect.poll(() => api.submissions.length).toBe(index + 1);
-        await expect(tabs(page).first()).toContainText("处理中");
-    }
-    const ids = [...api.tasks.keys()];
-    expect(ids).toHaveLength(3);
-    for (const task of api.tasks.values()) { task.status = "success"; task.resultUrls = [`/api/assets/${task.id}/content`]; }
-    for (const board of boards) {
-        await page.goto(board.path);
-        await expectInput(page, board, `BOARD_${board.kind}`);
-        await expectOriginalResult(page, board);
-    }
-    expect(api.submissions).toHaveLength(3);
-    expect(new Set(api.submissions.map(task => task.requestId)).size).toBe(3);
-    expect(controlPosts).toEqual([]);
-    expect([...api.tasks.keys()]).toEqual(ids);
-});
+}
 
 for (const board of boards) {
     test(`boundary: ${board.kind} switches employee without exposing or overwriting another employee's tasks`, async ({ page, context, api }) => {
