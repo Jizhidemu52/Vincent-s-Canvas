@@ -830,15 +830,18 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         try {
         if (payload.kind === "text") {
             reusePrompt(payload.content);
+            message.success(uiText("已选择"));
         } else if (payload.kind === "image") {
             const stored = await uploadImage(payload.dataUrl);
             if (!isCurrentReferenceScope(scope)) return;
             appendReferences([{ id: nanoid(), name: payload.title, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey, imageName: payload.imageName, imageVersion: payload.imageVersion }], "asset");
+            message.success(uiText("已加入参考图"));
         } else {
             message.warning(uiText("生图工作台只能使用文本或图片素材"));
+            return;
         }
         setAssetPickerOpen(false);
-        } catch (error) { if (isCurrentReferenceScope(scope)) message.error(uiText(generationErrorMessage(error))); }
+        } catch (error) { if (isCurrentReferenceScope(scope)) throw error; }
         finally { if (isCurrentReferenceScope(scope)) setReadingReferences(false); }
     };
 
@@ -1412,20 +1415,27 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                 uploadContextKey={JSON.stringify([historyTool, inputDraftScope, referenceScope, references.map(reference => [reference.id, reference.storageKey || reference.dataUrl])])}
                 updateConfig={updateInputConfig} openConfigDialog={openConfigDialog} />
             <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={reusePrompt} />
-            <AssetPickerModal open={assetPickerOpen} defaultTab="my-assets" onInsert={(payload) => void insertPickedAsset(payload)} onClose={() => setAssetPickerOpen(false)} />
+            <AssetPickerModal open={assetPickerOpen} defaultTab="my-assets" onInsert={insertPickedAsset} onClose={() => setAssetPickerOpen(false)} />
             <AssetPickerModal
                 open={referenceAssetPickerOpen}
                 defaultTab="my-assets"
                 selectionMode="multiple-images"
-                onInsertMany={(payloads) => {
+                onInsertMany={async (payloads) => {
                     if (!draftReady || !handoffReady || readingReferences) return;
                     const scope = referenceScopeRef.current;
                     setReadingReferences(true);
-                    void Promise.all(payloads.filter((payload): payload is Extract<InsertAssetPayload, { kind: "image" }> => payload.kind === "image").map(async (payload) => {
+                    try {
+                    const items = await Promise.all(payloads.filter((payload): payload is Extract<InsertAssetPayload, { kind: "image" }> => payload.kind === "image").map(async (payload) => {
                         const stored = await uploadImage(payload.dataUrl);
                         return { id: nanoid(), name: payload.title, type: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey, imageName: payload.imageName, imageVersion: payload.imageVersion };
-                    })).then((items) => { if (isCurrentReferenceScope(scope)) appendReferences(items, "asset"); }).catch(error => { if (isCurrentReferenceScope(scope)) message.error(uiText(generationErrorMessage(error))); }).finally(() => { if (isCurrentReferenceScope(scope)) setReadingReferences(false); });
-                    setReferenceAssetPickerOpen(false);
+                    }));
+                    if (isCurrentReferenceScope(scope)) {
+                        appendReferences(items, "asset");
+                        message.success(uiText("已加入参考图"));
+                        setReferenceAssetPickerOpen(false);
+                    }
+                    } catch (error) { if (isCurrentReferenceScope(scope)) throw error; }
+                    finally { if (isCurrentReferenceScope(scope)) setReadingReferences(false); }
                 }}
                 onClose={() => setReferenceAssetPickerOpen(false)}
             />
@@ -1719,6 +1729,7 @@ function normalizeLog(log: Partial<GenerationLog>): GenerationLog {
         id: log.id || nanoid(),
         ownerId: log.ownerId,
         tool: log.tool,
+        workspaceId: log.workspaceId,
         createdAt: log.createdAt ?? Number.NaN,
         title: log.title || log.model || "未命名",
         prompt: log.prompt || log.title || "",

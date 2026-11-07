@@ -342,6 +342,7 @@ export async function mountRepeat(root, services) {
         projects.changed();
         selectedId = item.id;
         syncDetails();
+        return true;
     }
     async function importImage(file, operation = operationSequence) {
         const src = await readImageFile(file);
@@ -438,7 +439,10 @@ export async function mountRepeat(root, services) {
                 case "asset-element": {
                     const operation = operationSequence;
                     const asset = await services.pickImage();
-                    if (asset && !disposed && operation === operationSequence) await addElement(asset.src, asset.name);
+                    if (asset && !disposed && operation === operationSequence && await addElement(asset.src, asset.name)) {
+                        status("元素已加入。文件原有透明度保留，不自动去背景。");
+                        notify("元素已加入。文件原有透明度保留，不自动去背景。");
+                    }
                     break;
                 }
                 case "save-asset":

@@ -311,7 +311,13 @@ function parseImages(value: unknown, portable: boolean): ReferenceImage[] {
             url = String(image.dataUrl || "");
         const embedded = /^data:image\/(png|jpeg|webp);base64,[A-Za-z\d+/=\s]+$/.test(url);
         if (!embedded && (portable || !/^\/api\/assets\/[\w-]+\/content(?:\?[^#]*)?$/.test(url))) throw new Error("项目必须包含 PNG/JPG/WebP 图片内容，不能引用外部链接");
-        return { id: string(image.id, 100) || createClientUuid(), name: string(image.name, 200, "参考图"), type: embedded ? url.slice(5, url.indexOf(";")) : "image/png", dataUrl: url };
+        const originalFileName = string(image.originalFileName, 200), imageName = string(image.imageName, 200);
+        const storageKey = !portable && typeof image.storageKey === "string" && /^image:[\w-]{1,160}$/.test(image.storageKey) ? image.storageKey : undefined;
+        const sourceAssetId = !portable ? string(image.sourceAssetId, 100) : "";
+        return { id: string(image.id, 100) || createClientUuid(), name: string(image.name, 200, "参考图"), type: embedded ? url.slice(5, url.indexOf(";")) : "image/png", dataUrl: url,
+            ...(originalFileName ? { originalFileName } : {}), ...(imageName ? { imageName } : {}),
+            ...(Number.isInteger(image.imageVersion) && Number(image.imageVersion) > 0 ? { imageVersion: Number(image.imageVersion) } : {}),
+            ...(storageKey ? { storageKey } : {}), ...(sourceAssetId ? { sourceAssetId } : {}) };
     });
 }
 

@@ -196,6 +196,7 @@ export function SeamlessStitchWorkspace() {
             const nextSource = { id: nanoid(), name, type: uploaded.mimeType, dataUrl: uploaded.url, url: uploaded.url, storageKey: uploaded.storageKey };
             sourceRef.current = nextSource;
             setSource(nextSource);
+            return true;
         } finally {
             sourceReadRef.current = false;
             if (mountedRef.current) setReadingSource(false);
@@ -242,7 +243,8 @@ export function SeamlessStitchWorkspace() {
         try {
             const response = await fetch(payload.dataUrl);
             if (!response.ok) throw new Error(`素材读取失败（${response.status}）`);
-            await setSourceFromBlob(await response.blob(), payload.title);
+            if (!await setSourceFromBlob(await response.blob(), payload.title)) return;
+            message.success(uiText("已加入参考图"));
             setAssetPickerOpen(false);
         } catch (error) {
             message.error(error instanceof Error ? uiText(error.message) : uiText("素材读取失败，请重试"));
@@ -585,7 +587,7 @@ export function SeamlessStitchWorkspace() {
                     event.target.value = "";
                 }}
             />
-            <AssetPickerModal open={workspaceActive && assetPickerOpen} defaultTab="my-assets" onInsert={(payload) => void insertAsset(payload)} onClose={() => setAssetPickerOpen(false)} />
+            <AssetPickerModal open={workspaceActive && assetPickerOpen} defaultTab="my-assets" selectionMode="single-image" onInsert={insertAsset} onClose={() => setAssetPickerOpen(false)} />
         </div>
     );
 }

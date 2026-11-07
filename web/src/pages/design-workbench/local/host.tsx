@@ -114,6 +114,7 @@ export function LocalDesignWorkbench({ moduleKey, title, description, mount }: {
                 <Suspense fallback={<p role="status">{uiText("正在打开素材库…")}</p>}>
                     <AssetPickerModal
                         open
+                        selectionMode="single-image"
                         onClose={() => {
                             assetSelection.current?.(null);
                             assetSelection.current = null;

@@ -1166,7 +1166,9 @@ const enCanvas: Record<string, string> = {
   "待执行 {count} 个任务": "{count} pending tasks",
   "提示词仍引用已移除的任务图片，请先删除该引用或恢复图片；当前仍为合并参考模式。": "The prompt still refers to a removed task image. Remove that reference or restore the image first. Combined-reference mode is unchanged.",
   "提示词指定了多张不同的任务图片，已保留合并参考。请将每个任务的主图改写为“图片1”；需要固定共享的图片请添加为公共参考。": "The prompt refers to multiple task images, so combined-reference mode is retained. Use “图片1” for each task's main image; add fixed shared images as common references.",
-  "已将任务图片引用改为“图片1”（每个任务的当前主图），公共参考引用保持不变。": "The task-image reference is now “图片1” (the current main image of each task). Common references are unchanged."
+  "已将任务图片引用改为“图片1”（每个任务的当前主图），公共参考引用保持不变。": "The task-image reference is now “图片1” (the current main image of each task). Common references are unchanged.",
+  "选择图片": "Select image",
+  "已选中 {count} 张图片": "{count} images selected"
 };
 
 export default enCanvas;

@@ -6,7 +6,8 @@ import { WorkbenchTasks, useWorkbenchTask, useWorkbenchTaskStatus } from "@/comp
 import { PracticeExampleRecord } from "@/components/design-examples";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft, Download, ImagePlus, LoaderCircle, Palette, Pause, Play, RefreshCw, Save, Square, Upload, X } from "lucide-react";
+import { ArrowLeft, Download, FolderOpen, ImagePlus, LoaderCircle, Palette, Pause, Play, RefreshCw, Save, Square, Upload, X } from "lucide-react";
+import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
 import { saveAs } from "file-saver";
 import { ImageSettingsPanel } from "@/components/image-settings-panel";
 import { ModelPicker } from "@/components/model-picker";
@@ -16,7 +17,7 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { deploymentFeatures } from "@/lib/deployment-features";
 import { validateImageReferences } from "@/lib/image-reference-policy";
 import { adaptImageModelSettings, imageModelProfile, useImageModelProfile } from "@/lib/image-model-settings";
-import { readFileAsDataUrl } from "@/lib/image-utils";
+import { getDataUrlByteSize, readFileAsDataUrl } from "@/lib/image-utils";
 import { createWorkspaceStorage } from "@/lib/workspace-storage";
 import { createClientUuid } from "@/lib/client-uuid";
 import { requestEdit } from "@/services/api/image";
@@ -119,6 +120,8 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
                         ? "当前额度不足"
                         : "";
     const locked = active || working || !ready;
+    const assetInputState = useRef({ scope, active: workspaceActive, kind: project.form.kind, enabled });
+    assetInputState.current = { scope, active: workspaceActive, kind: project.form.kind, enabled };
     const run = project.run;
     const branches = run?.branches || [];
     const succeeded = branches.filter((branch) => branch.status === "success").length;
@@ -281,6 +284,38 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
             commit({ ...old, references: images });
             setNotice(uiText("已读取 {name}，原图不会被修改。", { name: file.name }));
         });
+
+    const insertAsset = async (slot: number, asset: Extract<InsertAssetPayload, { kind: "image" }>) => {
+        const kind = project.form.kind;
+        const assertCurrent = () => {
+            const state = assetInputState.current;
+            if (!current() || useUserStore.getState().user?.status !== "active" || state.scope !== scope || !state.active || state.kind !== kind || !state.enabled || !readyRef.current || runner.current?.active || slot === 1 && (kind !== "pattern" || !projectRef.current.references[0])) throw new Error("账号、任务或参考图位置已变化，请重新选择素材");
+        };
+        assertCurrent();
+        if (busy.current) throw new Error("正在处理当前任务，请稍候再选择素材");
+        busy.current = true; setWorking(true); setError(""); setNotice("");
+        try {
+            const dataUrl = await imageToDataUrl(asset);
+            const mimeType = /^data:(image\/(?:png|jpeg|webp));base64,/i.exec(dataUrl)?.[1]?.toLowerCase();
+            const bytes = getDataUrlByteSize(dataUrl);
+            if (!mimeType || !bytes || bytes > 15 * 1024 * 1024) throw new Error("请选择不超过 15 MB 的 PNG、JPG 或 WebP 图片素材");
+            const image = await loadImage(dataUrl);
+            assertCurrent();
+            const old = projectRef.current;
+            const references = [...old.references];
+            references[slot] = { id: createClientUuid(), name: asset.originalFileName || asset.title, originalFileName: asset.originalFileName,
+                imageName: asset.imageName, imageVersion: asset.imageVersion, sourceAssetId: asset.sourceAssetId, type: mimeType, dataUrl, storageKey: asset.storageKey,
+                bytes, width: image.naturalWidth, height: image.naturalHeight };
+            commit({ ...old, references });
+            setNotice(uiText("已从素材库加入{name}；原素材保持不变。", { name: asset.title }));
+        } catch (caught) {
+            if (current()) setError(uiText(errorText(caught)));
+            throw caught;
+        } finally {
+            busy.current = false;
+            if (current()) setWorking(false);
+        }
+    };
 
     const makeRunner = (snapshot: RecipeRun) => {
         const instance: SeriesRecipeRunner = new SeriesRecipeRunner(
@@ -466,7 +501,7 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
                                 <option value="pattern">{uiText("产品与图案 → 定位 → 系列候选")}</option>
                             </select>
                         </label>
-                        <RecipeUpload label={uiText("参考底图（必需）")} scopeKey={draftScope(`recipe:${project.form.kind}:primary`)} image={project.references[0]} disabled={locked || !workspaceActive} onUpload={(file) => upload(0, file)} onRemove={() => commit({ ...projectRef.current, references: [] })} />
+                        <RecipeUpload label={uiText("参考底图（必需）")} scopeKey={draftScope(`recipe:${project.form.kind}:primary`)} image={project.references[0]} disabled={locked || !workspaceActive} onUpload={(file) => upload(0, file)} onAsset={asset => insertAsset(0, asset)} onRemove={() => commit({ ...projectRef.current, references: [] })} />
                         {project.form.kind === "pattern" && (
                             <RecipeUpload
                                 label={uiText("图案参考（可选）")}
@@ -474,6 +509,7 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
                                 image={project.references[1]}
                                 disabled={locked || !workspaceActive || !project.references[0]}
                                 onUpload={(file) => upload(1, file)}
+                                onAsset={asset => insertAsset(1, asset)}
                                 onRemove={() => commit({ ...projectRef.current, references: projectRef.current.references.slice(0, 1) })}
                             />
                         )}
@@ -777,8 +813,15 @@ function RecipeWorkspace({ ownerId }: { ownerId: string }) {
     );
 }
 
-function RecipeUpload({ label, scopeKey, image, disabled, onUpload, onRemove }: { label: string; scopeKey: string; image?: ReferenceImage; disabled: boolean; onUpload: (file: File) => void | Promise<void>; onRemove: () => void }) {
+function RecipeUpload({ label, scopeKey, image, disabled, onUpload, onAsset, onRemove }: { label: string; scopeKey: string; image?: ReferenceImage; disabled: boolean; onUpload: (file: File) => void | Promise<void>; onAsset: (asset: Extract<InsertAssetPayload, { kind: "image" }>) => Promise<void>; onRemove: () => void }) {
     useUiText();
+    const task = useWorkbenchTask();
+    const ownerId = useUserStore(state => state.user?.id);
+    const [assetPickerOpen, setAssetPickerOpen] = useState(false);
+    const selectionScope = `${scopeKey}:${ownerId}`;
+    const latest = useRef({ selectionScope, disabled, active: task.active });
+    latest.current = { selectionScope, disabled, active: task.active };
+    useEffect(() => { setAssetPickerOpen(false); }, [selectionScope, task.active]);
     const imageDrop = useImageDrop({
         scopeKey,
         disabled,
@@ -808,6 +851,13 @@ function RecipeUpload({ label, scopeKey, image, disabled, onUpload, onRemove }: 
                     }}
                 />
             </label>
+            <button type="button" className="sr-button sr-wide" aria-label={uiText("从素材库选择{label}", { label })} disabled={disabled} onClick={() => setAssetPickerOpen(true)}><FolderOpen size={14} aria-hidden="true" />{uiText("从素材库选择")}</button>
+            {assetPickerOpen && task.active && <AssetPickerModal open selectionMode="single-image" onClose={() => setAssetPickerOpen(false)} onInsert={async asset => {
+                if (asset.kind !== "image") throw new Error("请选择图片素材");
+                if (latest.current.selectionScope !== selectionScope || latest.current.disabled || !latest.current.active || useUserStore.getState().user?.id !== ownerId) throw new Error("参考图位置或任务状态已变化，请重新打开素材库");
+                await onAsset(asset);
+                if (latest.current.selectionScope === selectionScope) setAssetPickerOpen(false);
+            }} />}
             {imageDrop.dragging || imageDrop.reading ? <p role="status" className="sr-help">{imageDrop.dragging ? uiText("松开以添加到{label}，不会自动生成。", { label }) : uiText("正在读取拖入图片，请稍候。")}</p> : null}
             {image && (
                 <div className="sr-upload-name">

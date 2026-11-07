@@ -1,10 +1,12 @@
 import { uiText, useUiText } from "@/lib/i18n";
-import { ImagePlus, Palette, Plus, Trash2, Upload } from "lucide-react";
-import { lazy, Suspense, useId, useState, type ReactNode } from "react";
+import { FolderOpen, ImagePlus, Palette, Plus, Trash2, Upload } from "lucide-react";
+import { lazy, Suspense, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
 import { useImageDrop } from "@/hooks/use-image-drop";
 import { useWorkbenchTask } from "@/components/workbench-tasks";
 import type { ReferenceImage } from "@/types/image";
 import { useModuleEnabled } from "@/stores/use-module-store";
+import { useUserStore } from "@/stores/use-user-store";
 import { addSceneColor, getSceneColorSelection, isSceneHexColor, removeSceneColor, setSceneColor, supportsSceneKeepDetails, supportsSceneProductTarget, type SceneForm, type SceneSlot, type SceneSlotId } from "./scene-form-model";
 
 const StandardColorDialog = lazy(() => import("./standard-color-dialog"));
@@ -238,29 +240,37 @@ export function SceneFields({ sceneId, form, onChange, disabled = false, sourceI
     </div>;
 }
 
-export function SceneUploads({ slots, images, onImage, disabled = false, scopeKey = "creative" }: {
+export function SceneUploads({ slots, images, onImage, onAsset, disabled = false, scopeKey = "creative" }: {
     slots: SceneSlot[];
     images: Partial<Record<SceneSlotId, ReferenceImage>>;
     onImage: (slotId: SceneSlotId, file: File | null) => void | Promise<void>;
+    onAsset?: (slotId: SceneSlotId, asset: Extract<InsertAssetPayload, { kind: "image" }>) => Promise<void>;
     disabled?: boolean;
     scopeKey?: string;
 }) {
     useUiText();
     if (!slots.length) return null;
     return <div className={`cs-upload-grid${slots.length === 2 ? " cs-upload-grid-pair" : ""}`}>
-        {slots.map(slot => <SceneUploadSlot key={slot.id} slot={slot} reference={images[slot.id]} onImage={onImage} disabled={disabled} scopeKey={scopeKey} />)}
+        {slots.map(slot => <SceneUploadSlot key={slot.id} slot={slot} reference={images[slot.id]} onImage={onImage} onAsset={onAsset} disabled={disabled} scopeKey={scopeKey} />)}
     </div>;
 }
 
-function SceneUploadSlot({ slot, reference, onImage, disabled, scopeKey }: {
+function SceneUploadSlot({ slot, reference, onImage, onAsset, disabled, scopeKey }: {
     slot: SceneSlot;
     reference?: ReferenceImage;
     onImage: (slotId: SceneSlotId, file: File | null) => void | Promise<void>;
+    onAsset?: (slotId: SceneSlotId, asset: Extract<InsertAssetPayload, { kind: "image" }>) => Promise<void>;
     disabled: boolean;
     scopeKey: string;
 }) {
     useUiText();
     const task = useWorkbenchTask();
+    const ownerId = useUserStore(state => state.user?.id);
+    const [assetPickerOpen, setAssetPickerOpen] = useState(false);
+    const selectionScope = `${scopeKey}:${task.id}:${slot.id}:${slot.label}:${ownerId}`;
+    const latest = useRef({ selectionScope, disabled, active: task.active });
+    latest.current = { selectionScope, disabled, active: task.active };
+    useEffect(() => { setAssetPickerOpen(false); }, [selectionScope, task.active]);
     const uploadId = `cs-upload-${slot.id}-${useId()}`;
     const imageDrop = useImageDrop({
         scopeKey: `${scopeKey}:${task.id}:${slot.id}:${slot.label}`,
@@ -283,6 +293,13 @@ function SceneUploadSlot({ slot, reference, onImage, disabled, scopeKey }: {
                         <span className="cs-upload-replace"><Upload size={14} aria-hidden="true" />{uiText("重新上传")}</span>
                     </> : <span className="cs-upload-empty"><ImagePlus size={28} strokeWidth={1.5} aria-hidden="true" /><strong>{uiText("上传")}{uiText(slot.label || "")}</strong><span>{uiText("点击或拖入 PNG / JPG / WebP")}</span></span>}
                 </label>
+                {onAsset && <button type="button" className="cs-tool-entry" aria-label={uiText("从素材库选择{label}", { label: uiText(slot.label) })} disabled={disabled || !task.active} onClick={() => setAssetPickerOpen(true)}><FolderOpen size={14} aria-hidden="true" />{uiText("从素材库选择")}</button>}
+                {assetPickerOpen && onAsset && task.active && <AssetPickerModal open selectionMode="single-image" onClose={() => setAssetPickerOpen(false)} onInsert={async asset => {
+                    if (asset.kind !== "image") throw new Error("请选择图片素材");
+                    if (latest.current.selectionScope !== selectionScope || latest.current.disabled || !latest.current.active || useUserStore.getState().user?.id !== ownerId) throw new Error("参考图位置或任务状态已变化，请重新打开素材库");
+                    await onAsset(slot.id, asset);
+                    if (latest.current.selectionScope === selectionScope) setAssetPickerOpen(false);
+                }} />}
                 {imageDrop.dragging || imageDrop.reading ? <p role="status" className="cs-help">{imageDrop.dragging ? uiText("松开以添加到{label}，不会自动生成。", { label: uiText(slot.label) }) : uiText("正在读取拖入图片，请稍候。")}</p> : null}
                 <p className="cs-upload-meta">{uiText(slot.hint || "")}</p>
                 {reference && <div className="cs-upload-file"><span title={reference.name}>{reference.name}</span><button type="button" className="cs-upload-remove" aria-label={uiText("移除{label}", { label: uiText(slot.label) })} disabled={disabled} onClick={() => onImage(slot.id, null)}><Trash2 size={13} aria-hidden="true" />{uiText("移除")}</button></div>}

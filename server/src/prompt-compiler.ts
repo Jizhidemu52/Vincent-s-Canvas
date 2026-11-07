@@ -12,6 +12,7 @@ import { ChatProtocolError } from "./routes/chat";
 import { chatUpstreamFailureReasons } from "./chat-upstream-failure";
 import { promptImageReferenceLimit } from "./image-task-policy";
 import { newCreativeFields, validateNewCreativeReferences } from "./new-creative-scenes";
+import { imagePromptOutputContract } from "./prompt-output-contract";
 
 export type PromptActor = { id: string; role: string; departmentId?: string | null; groupId?: string | null; groupRole?: string | null };
 export type PromptSource = { bytes: Uint8Array; mimeType: string; previewDataUrl: string };
@@ -99,7 +100,8 @@ export class PromptCompiler {
     const requiredText = specifiedPromptText(userText, fields);
     const language = isVideo ? "zh" : request.promptInput.outputLanguage ?? active.version.outputLanguage;
     const modelRules = active.version.modelOverrides[target.id] ?? active.version.modelOverrides[target.modelId] ?? "";
-    const system = [active.version.systemPrompt, active.version.fieldTemplate, modelRules].filter(Boolean).join("\n\n");
+    const system = [active.version.systemPrompt, active.version.fieldTemplate, modelRules,
+      !isVideo && request.promptInput.scene !== "reverse-prompt" ? imagePromptOutputContract : ""].filter(Boolean).join("\n\n");
     const outputOptions = { video: isVideo, reverse: request.promptInput.scene === "reverse-prompt", referenceCount: references.length, userText: `${userText}\n${JSON.stringify(fields)}`, language, requiredText };
     const inputHash = promptHash({ version: active.version.id, target: target.fingerprint, optimizer: optimizer.fingerprint, adminTest,
       input: { ...normalInput(request.promptInput), outputLanguage: language }, references: references.map((source, index) => ({ hash: sourceHash(source), role: roles[index] ?? "" })),

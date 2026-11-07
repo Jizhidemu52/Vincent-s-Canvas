@@ -270,4 +270,15 @@ describe("formal series recipe", () => {
         expect(project.run?.branches[0]?.requestId).toBeUndefined();
         expect(() => parseRecipeProject({ ...project, references: [{ ...reference, dataUrl: "https://attacker.test/image" }] }, "new-owner", true)).toThrow();
     });
+
+    test("local recipe reload retains image identity while portable imports drop employee-scoped media IDs", () => {
+        const identity = { originalFileName: "original.png", imageName: "原底图", imageVersion: 3, storageKey: "image:original-key", sourceAssetId: "server-original" };
+        const input = { version: 1, kind: "series-recipe", ownerId: "owner", form: createRecipeForm(), references: [{ ...reference, ...identity }], settings: defaultConfig };
+        expect(parseRecipeProject(input, "owner").references[0]).toMatchObject(identity);
+        const imported = parseRecipeProject(input, "another-owner", true).references[0]!;
+        expect(imported).toMatchObject({ originalFileName: identity.originalFileName, imageName: identity.imageName, imageVersion: identity.imageVersion, dataUrl: reference.dataUrl });
+        expect(imported.storageKey).toBeUndefined(); expect(imported.sourceAssetId).toBeUndefined();
+        const invalid = parseRecipeProject({ ...input, references: [{ ...reference, storageKey: "https://untrusted.test/file", imageVersion: -1 }] }, "owner").references[0]!;
+        expect(invalid.storageKey).toBeUndefined(); expect(invalid.imageVersion).toBeUndefined();
+    });
 });

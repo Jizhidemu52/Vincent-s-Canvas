@@ -1,4 +1,5 @@
 import { parseStrictJson } from "./strict-json";
+import { imagePromptOutputLimits } from "./prompt-output-contract";
 
 export class PromptOptimizationError extends Error {
   constructor(public readonly code: string, message: string, public readonly status = 400) { super(message); }
@@ -90,7 +91,7 @@ type PromptOutputOptions = { video?: boolean; reverse?: boolean; referenceCount:
 
 /** Apply to fresh, fallback and cached final text before any generation admission. */
 export function assertPromptOutputContent(prompt: string, rules: readonly string[], options: PromptOutputOptions) {
-  if (!prompt.trim() || prompt.length > (options.video ? 1500 : 20_000)) throw new PromptOptimizationError("PROMPT_OUTPUT_INVALID", "最终提示词无效或过长，未提交生成", 422);
+  if (!prompt.trim() || prompt.length > (options.video ? 1500 : imagePromptOutputLimits.prompt)) throw new PromptOptimizationError("PROMPT_OUTPUT_INVALID", "最终提示词无效或过长，未提交生成", 422);
   assertNoPromptRuleLeak(prompt, rules);
   for (const reference of prompt.matchAll(/(?:\bImage\s*|图片\s*)(\d+)/gi)) {
     if (Number(reference[1]) < 1 || Number(reference[1]) > options.referenceCount) throw new PromptOptimizationError("PROMPT_REFERENCE_INVALID", "优化结果引用了不存在的参考图，未提交生成", 422);
@@ -99,13 +100,13 @@ export function assertPromptOutputContent(prompt: string, rules: readonly string
 }
 
 export function parseOptimizedPrompt(raw: string, rules: readonly string[], options: PromptOutputOptions) {
-  if (raw.length > 30_000) throw new PromptOptimizationError("PROMPT_OUTPUT_INVALID", "提示词优化输出过长，未提交生成", 422);
+  if (raw.length > imagePromptOutputLimits.raw) throw new PromptOptimizationError("PROMPT_OUTPUT_INVALID", "提示词优化输出过长，未提交生成", 422);
   let result: unknown;
   try { result = parseStrictJson(raw); } catch { throw new PromptOptimizationError("PROMPT_OUTPUT_INVALID", "提示词优化未返回有效 JSON，未提交生成", 422); }
   if (!result || typeof result !== "object" || Array.isArray(result)) throw new PromptOptimizationError("PROMPT_OUTPUT_INVALID", "提示词优化输出格式无效，未提交生成", 422);
   const value = result as Record<string, unknown>;
   const allowed = options.reverse || options.video ? ["prompt", "summary_zh"] : ["prompt", "avoid", "keep_text"];
-  if (Object.keys(value).some(key => !allowed.includes(key)) || typeof value.prompt !== "string" || !value.prompt.trim() || value.prompt.length > (options.video ? 1500 : 20_000)) {
+  if (Object.keys(value).some(key => !allowed.includes(key)) || typeof value.prompt !== "string" || !value.prompt.trim() || value.prompt.length > (options.video ? 1500 : imagePromptOutputLimits.prompt)) {
     throw new PromptOptimizationError("PROMPT_OUTPUT_INVALID", "提示词优化输出字段无效，未提交生成", 422);
   }
   assertNoPromptRuleLeak(result, rules);
@@ -118,8 +119,8 @@ export function parseOptimizedPrompt(raw: string, rules: readonly string[], opti
     if (typeof value.summary_zh !== "string" || value.summary_zh.length > 1_000) throw new PromptOptimizationError("PROMPT_OUTPUT_INVALID", "反推摘要格式无效", 422);
     return { prompt: value.prompt.trim(), summaryZh: value.summary_zh, keepText: [] as string[] };
   }
-  if (!Array.isArray(value.avoid) || value.avoid.length > 8 || value.avoid.some(item => typeof item !== "string" || item.length > 500)
-    || !Array.isArray(value.keep_text) || value.keep_text.length > 50 || value.keep_text.some(item => typeof item !== "string" || !item.length || item.length > 1_000)) {
+  if (!Array.isArray(value.avoid) || value.avoid.length > imagePromptOutputLimits.avoidItems || value.avoid.some(item => typeof item !== "string" || item.length > imagePromptOutputLimits.avoidItem)
+    || !Array.isArray(value.keep_text) || value.keep_text.length > imagePromptOutputLimits.keepTextItems || value.keep_text.some(item => typeof item !== "string" || !item.length || item.length > imagePromptOutputLimits.keepTextItem)) {
     throw new PromptOptimizationError("PROMPT_OUTPUT_INVALID", "提示词约束格式无效，未提交生成", 422);
   }
   const reportedText = value.keep_text as string[];
@@ -135,6 +136,6 @@ export function parseOptimizedPrompt(raw: string, rules: readonly string[], opti
   const keepText = [...new Set([...reportedText, ...(options.requiredText || [])])];
   const avoid = (value.avoid as string[]).filter(Boolean).map(item => keepText.length ? allowRequiredText(item, options.language) : item);
   const prompt = [value.prompt.trim(), avoid.length ? `${options.language === "zh" ? "避免" : "Avoid"}: ${avoid.join(", ")}.` : ""].filter(Boolean).join("\n");
-  if (prompt.length > 20_000) throw new PromptOptimizationError("PROMPT_OUTPUT_INVALID", "最终提示词过长，未提交生成", 422);
+  if (prompt.length > imagePromptOutputLimits.prompt) throw new PromptOptimizationError("PROMPT_OUTPUT_INVALID", "最终提示词过长，未提交生成", 422);
   return { prompt, keepText };
 }

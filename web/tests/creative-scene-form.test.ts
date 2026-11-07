@@ -296,4 +296,15 @@ describe("specialized form presentation", () => {
         const controls = render(true).match(/<(?:input|button)\b[^>]*>/g) ?? [];
         expect(controls.every((control) => control.includes('disabled=""'))).toBe(true);
     });
+
+    test("every visible creative image role offers its own guarded library entry", () => {
+        for (const sceneId of sceneIds) {
+            const slots = getSceneSlots(sceneId, { ...formFor(sceneId), colorMode: "reference" });
+            const render = (disabled: boolean) => renderToStaticMarkup(createElement(SceneUploads, { slots, images: {}, disabled,
+                onImage() { throw new Error("Rendering must not upload"); }, onAsset: async () => { throw new Error("Rendering must not select"); } }));
+            expect((render(false).match(/aria-label="从素材库选择/g) || []).length).toBe(slots.length);
+            const controls = render(true).match(/<button\b[^>]*aria-label="从素材库选择[^>]*>/g) || [];
+            expect(controls.every(control => control.includes('disabled=""'))).toBe(true);
+        }
+    });
 });

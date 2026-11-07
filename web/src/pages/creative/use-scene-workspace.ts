@@ -22,6 +22,7 @@ import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { modelOptionName, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
+import type { InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
 import { scenePromptInput, cloneSceneForm, createSceneForm, getSceneSlots, validateSceneForm, type SceneForm, type SceneSlotId } from "./scene-form-model";
 import { compositeSelectedImage, createSelectionGuide } from "./image-processing-browser";
 import { preferredSelectionSize, selectionSizeMatches } from "./image-processing";
@@ -208,6 +209,9 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
         [effectiveConfig, parameters, normalized.size, normalized.quality, normalized.count, model, systemPromptOverride]);
     const count = Number(normalized.count);
     const sceneSlots = getSceneSlots(sceneId, form);
+    const assetImportBusy = useRef(false);
+    const assetInputState = useRef({ scope, active: workbenchTask.active, loading, running, toolEnabled, slots: sceneSlots });
+    assetInputState.current = { scope, active: workbenchTask.active, loading, running, toolEnabled, slots: sceneSlots };
     const references = sceneSlots.flatMap(slot => images[slot.id] ? [images[slot.id]!] : []);
     const editing = sceneSlots.length > 0;
     const operationType = editing ? "inpaint" as const : "image_generation" as const;
@@ -339,6 +343,51 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
                 mimeType: stored.mimeType, dataUrl: stored.url, storageKey: stored.storageKey, width: stored.width, height: stored.height, bytes: stored.bytes } }));
         } catch (caught) { if (revision === epoch.current) setError(uiText("图片保存失败：{value1}", { value1: errorText(caught) })); }
         finally { if (revision === epoch.current) setUploadCount(value => Math.max(0, value - 1)); }
+    };
+
+    const setAsset = async (slot: SceneSlotId, asset: Extract<InsertAssetPayload, { kind: "image" }>) => {
+        const revision = epoch.current;
+        const expectedOwnerId = user?.id;
+        const slotLabel = sceneSlots.find(item => item.id === slot)?.label;
+        const assertCurrent = () => {
+            const state = assetInputState.current;
+            const currentUser = useUserStore.getState().user;
+            if (!expectedOwnerId || currentUser?.id !== expectedOwnerId || currentUser.status !== "active" || revision !== epoch.current || state.scope !== scope || !state.active || state.loading || state.running || !state.toolEnabled || !slotLabel || state.slots.find(item => item.id === slot)?.label !== slotLabel) throw new Error("账号、任务或参考图位置已变化，请重新选择素材");
+        };
+        assertCurrent();
+        if (assetImportBusy.current || uploadCount) throw new Error("正在读取参考图，请稍候再选择素材");
+        assetImportBusy.current = true;
+        const uploadRevision = ++inputEpoch.current[slot];
+        setError(null); setNotice(null); setUploadCount(value => value + 1);
+        try {
+            const original = asset.storageKey ? await getImageBlob(asset.storageKey) : null;
+            assertCurrent();
+            const url = await resolveImageUrl(asset.storageKey, asset.dataUrl);
+            let blob = original;
+            if (!blob) {
+                const response = await fetch(url);
+                if (!response.ok) throw new Error(uiText("图片读取失败（{status}），请重新选择素材", { status: response.status }));
+                blob = await response.blob();
+            }
+            assertCurrent();
+            if (!["image/jpeg", "image/png", "image/webp"].includes(blob.type)) throw new Error("请选择 PNG、JPG 或 WebP 图片素材");
+            const stored = original && asset.storageKey
+                ? { ...(await readImageMeta(url)), url, storageKey: asset.storageKey, mimeType: blob.type, bytes: blob.size }
+                : await uploadImage(blob);
+            assertCurrent();
+            if (uploadRevision !== inputEpoch.current[slot]) throw new Error("参考图已更新，请重新选择素材");
+            if (slot === "primary") { setSelection(null); setForm(current => ({ ...current, targetProduct: "" })); }
+            setImages(current => ({ ...current, [slot]: { id: nanoid(), name: asset.originalFileName || asset.title, originalFileName: asset.originalFileName,
+                imageName: asset.imageName, imageVersion: asset.imageVersion, sourceAssetId: asset.sourceAssetId, type: stored.mimeType, mimeType: stored.mimeType,
+                dataUrl: stored.url, storageKey: stored.storageKey, width: stored.width, height: stored.height, bytes: stored.bytes } }));
+            setNotice(uiText("已从素材库加入{name}；原素材保持不变。", { name: asset.title }) + (slot === "primary" && imagesRef.current.primary ? uiText("请重新确认要处理的产品。") : ""));
+        } catch (caught) {
+            if (revision === epoch.current && useUserStore.getState().user?.id === expectedOwnerId) setError(uiText("素材读取失败：{value1}", { value1: uiText(errorText(caught)) }));
+            throw caught;
+        } finally {
+            assetImportBusy.current = false;
+            if (revision === epoch.current) setUploadCount(value => Math.max(0, value - 1));
+        }
     };
 
     const reset = () => {
@@ -721,7 +770,7 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
     };
 
     const updateForm: typeof setForm = (value) => { viewEpoch.current += 1; setRestoring(false); setPreviewing(false); setSelectedPrompt(null); setForm(value); };
-    return { form, setForm: updateForm, images, setImage, selection, saveSelection, clearSelection: () => { if (!running) { viewEpoch.current += 1; setRestoring(false); setPreviewing(false); setSelectedPrompt(null); setSelection(null); setError(null); } }, saveLocalResult, config, updateConfig, model, profile, count, running, optimizing, loading,
+    return { form, setForm: updateForm, images, setImage, setAsset, selection, saveSelection, clearSelection: () => { if (!running) { viewEpoch.current += 1; setRestoring(false); setPreviewing(false); setSelectedPrompt(null); setSelection(null); setError(null); } }, saveLocalResult, config, updateConfig, model, profile, count, running, optimizing, loading,
         uploading: uploadCount > 0, logs, historyTotal, historyHasMore, historyLoading, loadMoreHistory, deleteLogs, stopObserving, activeLog, selectedPrompt, previewing, previewLog, selectResultPrompt, results, generate, restoreLog, reset, error, validation,
         quotaBlocked, estimatedCredits: estimateValue.credits, download, startedAt, notice, resultActionBusy, resultAction, retryResult, queryResult, recoveredRequestId };
 }

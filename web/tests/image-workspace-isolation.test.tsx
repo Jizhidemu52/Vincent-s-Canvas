@@ -6,6 +6,7 @@ import React, { type DependencyList, type EffectCallback, type ReactElement } fr
 import ts from "typescript";
 import { adaptImageModelSettings, imageModelProfile, imageReferenceSizeIsAutomatic, normalizeImageModelSettings } from "@/lib/image-model-settings";
 import * as referencePolicy from "@/lib/image-reference-policy";
+import { workbenchTaskScope } from "@/lib/workbench-task-state";
 import { QueuedTaskFailedError, QueuedTaskPausedError, QueuedTaskSubmissionUncertainError } from "@/services/api/generation-tasks";
 
 const pageUrl = new URL("../src/pages/image/index.tsx", import.meta.url);
@@ -50,7 +51,7 @@ function deferred<T>() {
 }
 
 /** Per-instance hook state, effect cleanup, and keyed reconciliation without process-global mocks. */
-function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]>, models: Parameters<typeof imageModelProfile>[1] = [{ id: "test-model", modelId: "test-model", name: "Test model", capabilities: ["generate", "edit"], creditCost: 0, rmbCost: 0 }], pendingRead?: { ready: Promise<void> | (() => Promise<void>); records: any[] }) {
+function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]>, models: Parameters<typeof imageModelProfile>[1] = [{ id: "test-model", modelId: "test-model", name: "Test model", capabilities: ["generate", "edit"], creditCost: 0, rmbCost: 0 }], pendingRead?: { ready: Promise<void> | (() => Promise<void>); records: any[] }, taskId = "default") {
     type Frame = { values: any[]; effects: Array<{ dependencies?: DependencyList; cleanup?: ReturnType<EffectCallback> }>; pending: Array<() => void>; cursor: number; mounted: boolean };
     const frame = (): Frame => ({ values: [], effects: [], pending: [], cursor: 0, mounted: true });
     const wrapper = frame();
@@ -127,9 +128,9 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
     };
     const component = (name: string) => name;
     const dependencies: Record<string, any> = {
-        // These closure tests exercise the default pane; actual multi-pane
+        // These closure tests exercise one selected pane; actual multi-pane
         // persistence, switching and ownership run in workbench-multitask.pw.ts.
-        "@/components/workbench-tasks": { WorkbenchTasks: ({ children }: any) => children.type(children.props), useWorkbenchTask: () => ({ id: "default", active: true, draftScope: (scope: string) => scope }), useWorkbenchTaskStatus(status: { ready: boolean; pending: boolean }) { reportedTaskStatus = status; } },
+        "@/components/workbench-tasks": { WorkbenchTasks: ({ children }: any) => children.type(children.props), useWorkbenchTask: () => ({ id: taskId, active: true, draftScope: (scope: string) => workbenchTaskScope(scope, taskId) }), useWorkbenchTaskStatus(status: { ready: boolean; pending: boolean }) { reportedTaskStatus = status; } },
         "@/lib/i18n": i18nHarness,
         react: {
             ...React, useState, useMemo,
@@ -263,6 +264,21 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
 }
 
 describe("image workspace isolation", () => {
+    for (const [taskId, imageId] of [["default", "knit-image"], ["bag-task", "bag-image"], ["empty-task", undefined]] as const) {
+        test(`item-extract saved completion restores only its original ${taskId} pane without generation`, async () => {
+            const knit = storedLog("item-extract", "knit", 10);
+            const bag = { ...storedLog("item-extract", "bag", 20), workspaceId: "item-extract:task:bag-task" };
+            const page = pageHarness([knit, bag], undefined, undefined, undefined, taskId);
+            page.navigate("item-extract");
+            await page.settle();
+            expect(page.images().map(image => image.id)).toEqual(imageId ? [imageId] : []);
+            expect(page.panels()[0].logs.find((log: StoredLog) => log.id === "bag").workspaceId).toBe(bag.workspaceId);
+            expect([...page.stored.values()]).toEqual([knit, bag]);
+            expect(page.requests).toHaveLength(0);
+            expect(page.errors).toEqual([]);
+        });
+    }
+
     test.each(["item-extract", "remove-background", "hd-upscale"])("%s pending recovery blocks submission and closing until every original receipt is read", async tool => {
         const ready = deferred<void>();
         const pending = { id: "original-pending", requestId: "original-request", taskId: "original-task", ownerId: "designer-a", tool, createdAt: 1, stopped: true,

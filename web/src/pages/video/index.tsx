@@ -539,6 +539,7 @@ function VideoGenerationWorkspace() {
     };
 
     const insertPickedAsset = async (payload: InsertAssetPayload) => {
+        if (!workspaceActive || !draftReady || readingReferences) return;
         const scope = referenceScopeRef.current;
         setReadingReferences(true);
         try {
@@ -555,6 +556,7 @@ function VideoGenerationWorkspace() {
             if (error) { message.warning(uiText(error)); return; }
             setVideoReferences((value) => [...value, reference]);
         }
+        message.success(uiText(payload.kind === "image" ? "已加入参考图" : "已选择"));
         setAssetPickerOpen(false);
         } catch (error) { if (isCurrentReferenceScope(scope)) message.error(uiText(generationErrorMessage(error))); }
         finally { if (isCurrentReferenceScope(scope)) setReadingReferences(false); }
@@ -1005,7 +1007,7 @@ function VideoGenerationWorkspace() {
                 </div>
             </Drawer>
             <PromptSelectDialog open={workspaceActive && promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={next => reusePrompt(next)} />
-            <AssetPickerModal open={workspaceActive && assetPickerOpen} defaultTab="my-assets" onInsert={(payload) => void insertPickedAsset(payload)} onClose={() => setAssetPickerOpen(false)} />
+            <AssetPickerModal open={workspaceActive && assetPickerOpen} defaultTab="my-assets" onInsert={insertPickedAsset} onClose={() => setAssetPickerOpen(false)} />
             <Modal title={uiText("删除生成记录")} open={workspaceActive && deleteConfirmOpen} onCancel={() => { if (!deletingLogs) setDeleteConfirmOpen(false); }} onOk={deleteSelectedLogs} confirmLoading={deletingLogs} cancelButtonProps={{ disabled: deletingLogs }} okText={uiText("删除")} okButtonProps={{ danger: true }} cancelText={uiText("取消")}>
                 {uiText("确定删除选中的")}{selectedLogIds.length} {uiText("条生成记录吗？")}</Modal>
         </div>

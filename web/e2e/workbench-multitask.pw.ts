@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import type { Page } from "@playwright/test";
 import { test, expect, IMAGE, fixturePng, type MockCanvasApi } from "./fixtures";
 import { toolDefinitions } from "../../shared/feature-catalog";
@@ -99,11 +100,77 @@ for (const route of [
         await expect(active(page).getByRole("img", { name: "生成结果 1", exact: true })).toBeVisible();
         expect(api.submissions).toHaveLength(6);
         await tabs(page).nth(5).click();
+        await expect(active(page).getByRole("img", { name: "生成结果 1", exact: true })).toBeVisible();
         if (route.prompt) await expect(active(page).getByRole("textbox", { name: "图像提示词", exact: true })).toHaveValue("MULTI_5_独立款式，不改变其他任务");
         await page.setViewportSize({ width: 390, height: 844 });
         await expectActiveTabVisible(page);
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
         await page.screenshot({ path: testInfo.outputPath(`${route.button}-multi-mobile.png`), fullPage: true });
+    });
+}
+
+for (const completion of ["before switching", "after switching"] as const) {
+    test(`item-extract bag completion ${completion} restores to task two after ordinary reload without resubmission`, async ({ page, api }) => {
+        api.taskStatus = "processing";
+        const sources = [fixturePng(47), fixturePng(173)];
+        await page.goto("/item-extract");
+        await upload(page, "knit.png", sources[0]);
+        await active(page).getByRole("button", { name: "提取产品图", exact: true }).click();
+        await expect.poll(() => api.submissions.length).toBe(1);
+        finish(api, 0);
+        await expect(tabs(page).nth(0)).toContainText("已完成");
+
+        await openNext(page, 2);
+        await upload(page, "bag.png", sources[1]);
+        await active(page).getByRole("button", { name: "提取产品图", exact: true }).click();
+        await expect.poll(() => api.submissions.length).toBe(2);
+        await expect(tabs(page).nth(1)).toContainText("处理中");
+        const taskIds = [...api.tasks.keys()];
+        const requestIds = api.submissions.map(input => input.requestId);
+        expect(new Set(requestIds).size).toBe(2);
+        if (completion === "before switching") {
+            finish(api, 1);
+            await expect(tabs(page).nth(1)).toContainText("已完成");
+        }
+        await openNext(page, 3);
+        if (completion === "after switching") finish(api, 1);
+        await expect(tabs(page).nth(1)).toContainText("已完成");
+        await expect(active(page).getByRole("img", { name: "生成结果 1", exact: true })).toHaveCount(0);
+
+        const readCompleted = () => page.evaluate(async () => {
+            const { createWorkspaceStorage } = await import("/src/lib/workspace-storage.ts");
+            const records: any[] = [];
+            await createWorkspaceStorage("image_generation_logs").iterate(value => { records.push(value); });
+            return records.map(log => ({ id: log.id, workspaceId: log.workspaceId, sourceTaskId: log.images[0]?.sourceTaskId, references: log.references }));
+        });
+        const storedBefore = await readCompleted();
+        expect(storedBefore).toHaveLength(2);
+        expect(storedBefore.find(log => log.sourceTaskId === taskIds[1])?.workspaceId).toMatch(/^item-extract:task:/);
+
+        await page.reload();
+        await expect(tabs(page)).toHaveCount(3);
+        await expect(tabs(page).nth(2)).toHaveAttribute("aria-selected", "true");
+        await expect(tabs(page).nth(0)).toContainText("已完成");
+        await expect(tabs(page).nth(1)).toContainText("已完成");
+        await expect(tabs(page).nth(2)).toContainText("草稿");
+        await expect(active(page).getByRole("img", { name: "生成结果 1", exact: true })).toHaveCount(0);
+        for (const index of [1, 0]) {
+            await tabs(page).nth(index).click();
+            await expect(active(page).getByRole("img", { name: index ? "bag.png" : "knit.png", exact: true })).toBeVisible();
+            await expect(active(page).getByRole("img", { name: "生成结果 1", exact: true })).toBeVisible();
+            const downloadPromise = page.waitForEvent("download");
+            await active(page).getByRole("button", { name: "下载", exact: true }).click();
+            const download = await downloadPromise;
+            const downloadPath = await download.path();
+            expect(downloadPath).toBeTruthy();
+            expect((await readFile(downloadPath!)).equals(api.assetBytes.get(taskIds[index])!)).toBe(true);
+            const sourceId = api.submissions[index].sourceUrls[0].split("/")[3];
+            expect(api.assetBytes.get(sourceId)?.equals(sources[index])).toBe(true);
+        }
+        expect(await readCompleted()).toEqual(storedBefore);
+        expect(api.submissions.map(input => input.requestId)).toEqual(requestIds);
+        expect([...api.tasks.keys()]).toEqual(taskIds);
+        expect(api.submissions).toHaveLength(2);
     });
 }
 
@@ -288,6 +355,7 @@ test("MJ blend owns three pairs of references without a prompt or cross-task upl
     await expect(tabs(page).nth(2)).toContainText("已完成");
     await page.reload(); await expect(tabs(page)).toHaveCount(3);
     await expect(active(page).getByRole("img", { name: "pair-2-first.png", exact: true })).toBeVisible();
+    await expect(active(page).getByRole("img", { name: "生成结果 1", exact: true })).toBeVisible();
     expect(api.submissions).toHaveLength(3);
 });
 

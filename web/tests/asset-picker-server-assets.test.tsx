@@ -41,7 +41,7 @@ function elements(node: unknown): ReactElement<any>[] {
 
 // Execute the real component, API and access rules with per-instance hooks/fetch.
 // No process-global module or fetch mocks can leak into unrelated regression tests.
-function harness(localAssets: Asset[] = [], initialMode: "single" | "multiple-images" = "single", initiallyOpen = true, authenticationEnabled = true) {
+function harness(localAssets: Asset[] = [], initialMode: "single" | "single-image" | "multiple-images" = "single", initiallyOpen = true, authenticationEnabled = true, resolveOriginal = async (_key?: string, fallback = "") => fallback) {
     type Frame = { values: any[]; effects: Array<{ dependencies?: DependencyList; cleanup?: ReturnType<EffectCallback> }>; pending: Array<() => void>; cursor: number; mounted: boolean };
     const frame = (): Frame => ({ values: [], effects: [], pending: [], cursor: 0, mounted: true });
     let active = frame();
@@ -99,7 +99,7 @@ function harness(localAssets: Asset[] = [], initialMode: "single" | "multiple-im
         "@/lib/utils": { cn: (...values: unknown[]) => values.filter(Boolean).join(" ") },
         "@/lib/server-asset-local": { isSupportedServerAsset, serverAssetToLocal },
         "@/lib/canvas/canvas-asset-preview": {},
-        "@/services/image-storage": {}, "@/services/file-storage": {},
+        "@/services/image-storage": { resolveImageUrl: resolveOriginal }, "@/services/file-storage": { resolveMediaUrl: resolveOriginal },
         "@/services/api/server-assets": apiModule.exports,
         "@/stores/use-asset-store": { ...permissions, useAssetStore: (select: Function) => select({ assets: localAssets }) },
         "@/stores/use-user-store": { useUserStore: userStore },
@@ -150,7 +150,8 @@ describe("shared asset picker server-backed materials", () => {
         await picker.settle();
         expect(picker.assets()).toMatchObject([{ id: "formal-image", title: "前台复测素材", data: { width: 1024, height: 1024, dataUrl: "/api/assets/formal-image/content" } }]);
         picker.cards()[0]!.props.onClick();
-        expect(picker.inserted).toEqual([{ kind: "image", dataUrl: "/api/assets/formal-image/content", storageKey: undefined, title: "前台复测素材", mimeType: "image/png", imageName: "原图", imageVersion: 2 }]);
+        await picker.settle();
+        expect(picker.inserted).toEqual([{ kind: "image", dataUrl: "/api/assets/formal-image/content", storageKey: undefined, title: "前台复测素材", mimeType: "image/png", imageName: "原图", imageVersion: 2, originalFileName: undefined, sourceAssetId: "formal-image" }]);
     });
 
     test("server assets supersede synced browser copies while owner-only local assets remain usable", async () => {
@@ -203,6 +204,7 @@ describe("shared asset picker server-backed materials", () => {
         expect(picker.nodes().find(node => node.type === "Alert")?.props.description).toBe("本机服务未启动");
         expect(picker.assets().map(asset => asset.id)).toEqual(["local-only"]);
         picker.cards()[0]!.props.onClick();
+        await picker.settle();
         expect(picker.inserted).toMatchObject([{ kind: "image", dataUrl: "data:image/png;base64,bG9jYWw=", storageKey: "local-image-key" }]);
         picker.setOwner(null); await picker.settle();
         expect(picker.assets()).toEqual([]);
@@ -261,7 +263,60 @@ describe("shared asset picker server-backed materials", () => {
         picker.search("does-not-match"); await picker.settle();
         expect(picker.confirm().disabled).toBe(true);
         picker.search(""); await picker.settle(); picker.confirm().onClick();
+        await picker.settle();
         expect(picker.batches).toMatchObject([[{ kind: "image", dataUrl: "/api/assets/picture/content" }]]);
+    });
+
+    test("single and multiple selections resolve original storage, never the stale blob or thumbnail", async () => {
+        const local: Asset = { ...serverAssetToLocal(serverAsset("saved")), metadata: {}, coverUrl: "data:image/png;base64,thumbnail", kind: "image", data: { dataUrl: "blob:previous-page", storageKey: "image:saved", width: 512, height: 512, bytes: 64, mimeType: "image/png" } };
+        for (const mode of ["single", "multiple-images"] as const) {
+            const reads: unknown[] = [];
+            const picker = harness([local], mode, true, true, async (key, fallback) => { reads.push([key, fallback]); return "blob:restored-original"; });
+            picker.render(); picker.requests[0]!.succeed([]); await picker.settle();
+            picker.cards()[0]!.props.onClick();
+            if (mode === "multiple-images") picker.confirm().onClick();
+            await picker.settle();
+            expect(reads).toEqual([["image:saved", "blob:previous-page"]]);
+            expect(mode === "single" ? picker.inserted : picker.batches[0]).toMatchObject([{ dataUrl: "blob:restored-original", storageKey: "image:saved" }]);
+        }
+    });
+
+    test("failed original resolution retains the selection, shows an error and permits an explicit retry", async () => {
+        let fail = true;
+        const picker = harness([], "multiple-images", true, true, async () => { if (fail) throw new Error("原图读取中断"); return "/original"; });
+        picker.render(); picker.requests[0]!.succeed([serverAsset("picture")]); await picker.settle();
+        picker.cards()[0]!.props.onClick(); picker.confirm().onClick(); await picker.settle();
+        expect(picker.batches).toEqual([]);
+        expect(picker.nodes().find(node => node.type === "Alert")?.props.description).toBe("原图读取中断");
+        expect(picker.cards()[0]!.props.selected).toBe(true);
+        expect(picker.confirm().disabled).toBe(false);
+        fail = false; picker.confirm().onClick(); await picker.settle();
+        expect(picker.batches).toMatchObject([[{ dataUrl: "/original" }]]);
+    });
+
+    test("late original resolution cannot insert after the employee or picker scope changes", async () => {
+        for (const change of ["owner", "close", "search"] as const) {
+            let release!: (url: string) => void;
+            const picker = harness([], "single", true, true, () => new Promise<string>(resolve => { release = resolve; }));
+            picker.render(); picker.requests[0]!.succeed([serverAsset("picture")]); await picker.settle();
+            picker.cards()[0]!.props.onClick();
+            expect(picker.cards()[0]!.props.disabled).toBe(true);
+            if (change === "owner") picker.setOwner("employee-b");
+            else if (change === "close") picker.setOpen(false);
+            else picker.search("other");
+            picker.render(); release("/original"); await picker.settle();
+            expect(picker.inserted).toEqual([]);
+        }
+    });
+
+    test("single-image entry requests and accepts only images", async () => {
+        const picker = harness([], "single-image"); picker.render();
+        expect(picker.requests[0]!.path).toContain("kind=image");
+        picker.requests[0]!.succeed([serverAsset("picture"), serverAsset("clip", "employee-a", "video"), serverAsset("copy", "employee-a", "text")]);
+        await picker.settle();
+        expect(picker.assets().map(asset => asset.id)).toEqual(["picture"]);
+        picker.cards()[0]!.props.onClick(); await picker.settle();
+        expect(picker.inserted).toMatchObject([{ kind: "image" }]);
     });
 
     test("a closed picker does not issue hidden requests", async () => {
