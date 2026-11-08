@@ -391,7 +391,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
             reviewRequestsRef.current.clear();
         };
     }, [attachmentScope]);
-    const historySessions = safeSessions.filter((session) => session.messages.length > 0);
+    const historySessions = safeSessions.filter((session) => session.messages.length > 0 || Boolean(session.documents?.length));
     const messages = activeSession?.messages || [];
     useEffect(() => { imageReadCacheRef.current = new Map(); videoReadCacheRef.current = new Map(); }, [onlineProjectId, user?.id, activeSession?.id]);
     const chatFollow = useChatBottomFollow(messages, activeSession?.id);
@@ -2127,7 +2127,7 @@ function AssistantHistory({ sessions, activeSession, onOpen, onDelete, onRename 
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const [search, setSearch] = useState("");
     const [editing, setEditing] = useState<{ id: string; title: string } | null>(null);
-    const visible = sessions.filter(session => `${session.title}\n${session.messages.map(message => message.text).join("\n")}`.toLocaleLowerCase().includes(search.toLocaleLowerCase()));
+    const visible = sessions.filter(session => `${session.title}\n${sessionPreview(session)}\n${session.messages.map(message => message.text).join("\n")}`.toLocaleLowerCase().includes(search.toLocaleLowerCase()));
     const saveName = () => { if (editing?.title.trim()) onRename(editing.id, editing.title.trim()); setEditing(null); };
 
     return (
@@ -2299,6 +2299,7 @@ function sessionPreview(session: CanvasAssistantSession) {
         const preview = canvasAssistantDisplayMessage(session.messages[index]!);
         if (preview?.text) return preview.text;
     }
+    if (!session.messages.length && session.documents?.length) return uiText("已上传文件：{value1}", { value1: session.documents.map(document => document.name).join("、") });
     return `${session.messages.length} 条消息`;
 }
 
