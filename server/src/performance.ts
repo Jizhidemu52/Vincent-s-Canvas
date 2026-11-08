@@ -192,8 +192,8 @@ export function aggregatePerformance(tasks: TaskRow[], assets: AssetRow[], event
       averageUsabilityScore: assets.length ? round([...projections.values()].reduce((sum, item) => sum + item.usabilityScore, 0) / assets.length) : null,
     },
     trend, directions, funnel, designers, failureReasons,
-    tasks: tasks.slice().sort((a, b) => b.queuedAt.localeCompare(a.queuedAt)).slice(0, 100),
-    assets: assets.slice().sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 100).map((asset) => ({ ...asset, ...projections.get(asset.id) })),
+    tasks: tasks.slice().sort((a, b) => new Date(b.queuedAt).getTime() - new Date(a.queuedAt).getTime()).slice(0, 100),
+    assets: assets.slice().sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 100).map((asset) => ({ ...asset, ...projections.get(asset.id) })),
     options,
   };
 }
