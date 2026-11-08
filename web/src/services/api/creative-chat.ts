@@ -131,6 +131,48 @@ export async function requestCreativeChatPlan(config: AiConfig, history: Creativ
     const requestValidated = (messages: Parameters<typeof requestToolResponse>[1], profileContext: Record<string, unknown>, lookup: "initial" | "document" | "image") => requestImageAgentPlanWithRepair({
         budget: repairBudget, signal: options.signal,
         onRepair: () => options.onPhase?.("正在修正本轮图片规划，尚未提交生成…"),
+        prepareRepair: async issue => {
+            if (issue.code !== "IMAGE_AGENT_UNPREVIEWED_IMAGE" || !issue.missingImageIds?.length) return;
+            const requiredIds = [...new Set(issue.requiredImageIds || [])];
+            if (!requiredIds.length || requiredIds.length > MAX_CREATIVE_CHAT_REFERENCES || issue.missingImageIds.some(id => !requiredIds.includes(id))) throw new Error("待补充的图片上下文无效，未提交图片任务。");
+            // Required edit sources take priority over optional current/original/previous
+            // previews. The conversation focus itself must not change during a repair.
+            const nextIds = [...new Set([...requiredIds, ...previews.map(image => image.id)])].slice(0, MAX_CREATIVE_CHAT_REFERENCES);
+            const nextReferences = nextIds.map(id => {
+                const entry = catalog.find(image => image.id === id);
+                if (!entry || entry.unavailableReason) throw new Error("待查阅图片原件不可用，未提交图片任务。");
+                const { name, type, dataUrl, storageKey } = entry;
+                return { id, name, type, dataUrl, ...(storageKey ? { storageKey } : {}) };
+            });
+            options.onPhase?.("正在读取指定旧版的真实图片，尚未提交生成…");
+            const nextPreviews = await previewsFor(nextReferences);
+            options.signal?.throwIfAborted();
+            const visibleIds = new Set(nextPreviews.map(image => image.id));
+            if (requiredIds.some(id => !visibleIds.has(id))) throw new Error("指定旧版的图片预览不完整，未提交图片任务。");
+            const previousCatalog = (Array.isArray(profileContext.imageCatalog) ? profileContext.imageCatalog : []) as Array<Record<string, unknown> & { id: string }>;
+            const catalogIds = new Set([...new Set([...nextIds, ...(selectedImageId ? [selectedImageId] : []), ...previousCatalog.map(image => image.id)])].slice(0, 40));
+            const imageCatalog = catalog.filter(image => catalogIds.has(image.id)).map(image => ({
+                ...(previousCatalog.find(previous => previous.id === image.id) || {
+                    id: image.id, label: image.label, name: image.name?.slice(0, 120), kind: image.kind,
+                    parentId: image.parentId, workId: image.workId,
+                }), previewed: visibleIds.has(image.id),
+            }));
+            // Replace only user pixel blocks, never provider tool/thinking evidence.
+            // Previous lookup outputs remain paired; this snapshot states exactly
+            // which pixels the repaired request now contains.
+            messages = [
+                ...messages.filter(message => !("role" in message && message.role === "user" && Array.isArray(message.content))),
+                { role: "user", content: `本次规划已重新装载图片预览；仅以下清单是本次请求实际可见的图片，其他版本不可当作已查看。\n${inspectionResult(catalog, requiredIds, nextIds, [])}` },
+                { role: "user", content: nextPreviews.flatMap(image => [
+                    { type: "text" as const, text: `${catalog.find(entry => entry.id === image.id)!.label}（image_id=${image.id}）${image.id === selectedImageId ? " · 当前图" : ""}` },
+                    { type: "image_url" as const, image_url: { url: image.dataUrl } },
+                ]) },
+                { role: "user", content: current.content },
+            ];
+            profileContext = { ...profileContext, imageCatalog, previewImageIds: nextIds };
+            references = nextReferences;
+            previews = nextPreviews;
+        },
         request: issue => {
             const last = messages.at(-1);
             // Lookup continuations end with tool evidence/pixels. Keep that pair intact

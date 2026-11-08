@@ -1,4 +1,6 @@
-import { isImageAgentPlanningIssue, type ImageAgentPlanningIssue } from "../../../../shared/image-agent-iteration";
+import { ImageAgentPlanningError, isImageAgentPlanningIssue, type ImageAgentPlanningIssue, type ImageAgentRepairPreparationIssue } from "../../../../shared/image-agent-iteration";
+
+export type { ImageAgentRepairPreparationIssue } from "../../../../shared/image-agent-iteration";
 
 export type ImageAgentRepairBudget = { used: boolean };
 /** At most one new planning call, exclusively after a known validation refusal and before any execution. */
@@ -9,6 +11,7 @@ export async function requestImageAgentPlanWithRepair<Result, Value>(options: {
     signal?: AbortSignal;
     canRepair?: () => boolean;
     onRepair?: () => void;
+    prepareRepair?: (issue: ImageAgentRepairPreparationIssue) => Promise<void>;
 }): Promise<Value> {
     options.signal?.throwIfAborted();
     try {
@@ -21,6 +24,11 @@ export async function requestImageAgentPlanWithRepair<Result, Value>(options: {
         options.budget.used = true;
         options.onRepair?.();
         const issue: ImageAgentPlanningIssue = { code: error.code, message: error.message, repairable: true, submitted: false };
+        await options.prepareRepair?.({ ...issue, ...(error instanceof ImageAgentPlanningError ? {
+            missingImageIds: error.missingImageIds, requiredImageIds: error.requiredImageIds,
+        } : {}) });
+        options.signal?.throwIfAborted();
+        if (options.canRepair?.() === false) throw error;
         const result = await options.request(issue);
         options.signal?.throwIfAborted();
         return options.validate(result);

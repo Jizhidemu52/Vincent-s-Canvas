@@ -4,12 +4,12 @@ import { canvasConversationImages } from "./canvas-assistant-image-catalog";
 import type { CanvasAgentSnapshot, CanvasAgentOp } from "./canvas-agent-ops";
 import { placeCanvasImageOutputs } from "./canvas-image-output-placement";
 import { CanvasNodeType, type CanvasAssistantMessage, type CanvasAssistantReference, type CanvasNodeData } from "@/types/canvas";
-import { imageAgentWorkId, getImageAgentVersions, resolveImageAgentBase, type ImageAgentImage } from "@/lib/image-agent/focus";
+import { imageAgentWorkId, getImageAgentVersions, resolveImageAgentBase, IMAGE_AGENT_MAX_IMAGES, type ImageAgentImage } from "@/lib/image-agent/focus";
 import { mergeImageAgentWorkNote, type ImageAgentWorkNote } from "@/lib/image-agent/work-note";
-import type { ImageAgentHistoryMessage } from "@/lib/image-agent/context";
+import { IMAGE_AGENT_PREVIEW_BYTES, type ImageAgentHistoryMessage } from "@/lib/image-agent/context";
 import type { ImageAgentRegionSelection } from "@/lib/image-agent/mask";
 import { compileImageAgentPrompt, imageAgentSpecText } from "@/lib/image-agent/compile";
-import { ImageAgentPlanningError, parseImageAgentEditSpec, parseImageAgentReview, type ImageAgentEditSpec, type ImageAgentReview } from "../../../../shared/image-agent-iteration";
+import { ImageAgentPlanningError, parseImageAgentEditSpec, parseImageAgentReview, type ImageAgentEditSpec, type ImageAgentRepairPreparationIssue, type ImageAgentReview } from "../../../../shared/image-agent-iteration";
 import type { DesignRequirements } from "../../../../shared/image-agent-documents";
 
 export type CanvasImageAgentRecord = {
@@ -215,14 +215,59 @@ export function resolveCanvasImageAgentEdit(args: Record<string, unknown>, catal
     }
     if (references.size > 5) throw new ImageAgentPlanningError("IMAGE_AGENT_REFERENCES_INVALID", "底图与参考图合计最多 5 张。");
     if ([...references.values()].some(image => !source(image))) throw new Error("图片原件不可读取，尚未提交生成。");
-    if (selection.previewedIds && [...references.keys()].some(id => !selection.previewedIds!.includes(id))) throw new ImageAgentPlanningError("IMAGE_AGENT_UNPREVIEWED_IMAGE", "需要先查看指定图片，再提交修改；本次未生成。");
     const note = mergeImageAgentWorkNote(base?.note, args.note_update as string | undefined, args.keep as string[] | undefined);
     const keep = note.keep;
     const { prompt, spec } = compileImageAgentPrompt({ prompt: args.prompt, keep, images: [...references.values()], baseImageId: base?.id, spec: args.edit_spec, requirements: selection.requirements });
+    const missingImageIds = selection.previewedIds ? [...references.keys()].filter(id => !selection.previewedIds!.includes(id)) : [];
+    if (missingImageIds.length) throw new ImageAgentPlanningError("IMAGE_AGENT_UNPREVIEWED_IMAGE", "需要先查看指定图片，再提交修改；本次未生成。", {
+        missingImageIds, requiredImageIds: [...references.keys()],
+    });
     const record: CanvasImageAgentRecord = { baseImageId: base?.id, sourceNodeId: base?.nodeId,
         workId: base ? imageAgentWorkId(catalog, base) : undefined, referenceIds: [...references.keys()], note, focusRevision: selection.focusRevision,
         version: base ? getImageAgentVersions(catalog, base.id).length + 1 : 1, ...(spec ? { spec } : {}) };
     return { base, prompt, record, references: [...references.values()].map(image => ({ ...image.reference, id: image.id, dataUrl: image.reference.dataUrl || "" })) };
+}
+
+/** Load actual pixels for a fully resolved plan before its single planning repair. */
+export async function prepareCanvasImageAgentRepairPreviews(issue: ImageAgentRepairPreparationIssue, catalog: readonly CanvasImageAgentImage[], options: {
+    focusId?: string;
+    previewedIds?: readonly string[];
+    readImage: (image: CanvasImageAgentImage) => Promise<string>;
+    signal?: AbortSignal;
+}) {
+    if (issue.code !== "IMAGE_AGENT_UNPREVIEWED_IMAGE") return;
+    const { missingImageIds, requiredImageIds } = issue;
+    if (!missingImageIds?.length || !requiredImageIds?.length || requiredImageIds.length > IMAGE_AGENT_MAX_IMAGES
+        || new Set(requiredImageIds).size !== requiredImageIds.length
+        || new Set(missingImageIds).size !== missingImageIds.length
+        || missingImageIds.some(id => !requiredImageIds.includes(id) || options.previewedIds?.includes(id))) {
+        throw new Error("缺少已核对的图片查阅范围，尚未提交生成。");
+    }
+    const find = (id: string) => {
+        const image = catalog.find(item => item.id === id);
+        if (!image || image.unavailableReason || !source(image)) throw new Error("指定图片原件不可读取，尚未提交生成。");
+        return image;
+    };
+    // Required inputs cannot be displaced by older working previews. The focus
+    // identity stays unchanged even when five required images fill this request.
+    const ids = [...requiredImageIds];
+    for (const id of [...(options.focusId ? [options.focusId] : []), ...(options.previewedIds || [])]) {
+        if (ids.length < IMAGE_AGENT_MAX_IMAGES && !ids.includes(id)) ids.push(id);
+    }
+    const images = ids.map(find);
+    const details = canvasImageAgentInspectionDetails(requiredImageIds.map(find), ids);
+    const previews: Array<{ id: string; dataUrl: string }> = [];
+    let bytes = 0;
+    for (const image of images) {
+        options.signal?.throwIfAborted();
+        const dataUrl = await options.readImage(image);
+        options.signal?.throwIfAborted();
+        if (!/^data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/]+=*$/i.test(dataUrl)) throw new Error(`${image.label}预览不可用，尚未提交生成。`);
+        bytes += Math.ceil((dataUrl.length - dataUrl.indexOf(",") - 1) * 0.75);
+        if (bytes > IMAGE_AGENT_PREVIEW_BYTES) throw new Error("本轮图片预览超过 8 MB，请减少参考图后重试；尚未提交生成。");
+        previews.push({ id: image.id, dataUrl });
+    }
+    return { previews, details };
 }
 
 /** Validate the image plan before any tool in its batch may mutate the canvas. */

@@ -48,6 +48,45 @@ test("one repair budget spans continuations and never retries execution/network 
     expect(attempts).toBe(1);
 });
 
+test("local image preparation is awaited once and only the wire issue reaches the next request", async () => {
+    const events: string[] = [], requests: unknown[] = [];
+    const missing = ["old"], required = ["old", "reference"];
+    const error = new ImageAgentPlanningError("IMAGE_AGENT_UNPREVIEWED_IMAGE", "missing pixels", { missingImageIds: missing, requiredImageIds: required });
+    missing.push("outside"); required.push("outside");
+    const budget = { used: false };
+    const answer = await requestImageAgentPlanWithRepair({
+        budget,
+        request: async issue => { events.push(issue ? "repair" : "initial"); requests.push(issue); return requests.length; },
+        validate: value => { if (value === 1) throw error; return value; },
+        prepareRepair: async issue => {
+            expect(budget.used).toBe(true);
+            expect(issue).toMatchObject({ missingImageIds: ["old"], requiredImageIds: ["old", "reference"] });
+            events.push("prepare"); await Promise.resolve(); events.push("ready");
+        },
+    });
+    expect(answer).toBe(2);
+    expect(events).toEqual(["initial", "prepare", "ready", "repair"]);
+    expect(requests[1]).toEqual({ code: error.code, message: error.message, repairable: true, submitted: false });
+});
+
+test.each(["load-failure", "aborted", "execution-started"])("%s during image preparation prevents repair without restoring its budget", async mode => {
+    const budget = { used: false }, controller = new AbortController();
+    let calls = 0, mayRepair = true;
+    await expect(requestImageAgentPlanWithRepair({
+        budget, signal: controller.signal, canRepair: () => mayRepair,
+        request: async () => ++calls,
+        validate: () => { throw new ImageAgentPlanningError("IMAGE_AGENT_UNPREVIEWED_IMAGE", "missing pixels", { missingImageIds: ["old"], requiredImageIds: ["old"] }); },
+        prepareRepair: async () => {
+            await Promise.resolve();
+            if (mode === "load-failure") throw new Error("original unavailable");
+            if (mode === "aborted") controller.abort();
+            if (mode === "execution-started") mayRepair = false;
+        },
+    })).rejects.toThrow();
+    expect(calls).toBe(1);
+    expect(budget.used).toBe(true);
+});
+
 test("compiler retains full visual prompt and code-owned non-target preservation", () => {
     const full = "只把左袖口换成蓝色罗纹，沿用原有细腻布纹与柔和侧光。";
     const compiled = compileImageAgentPrompt({ prompt: full, keep: [], images: [{ id: "a", label: "图8" }], baseImageId: "a", spec: { changes: ["左袖口改蓝色罗纹"], assumptions: ["不修改右袖口"], acceptance: ["左袖口可见蓝色罗纹"] } });

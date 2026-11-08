@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
 import { applyCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
-import { canvasImageAgentCatalog, canvasImageAgentResultOps, resolveCanvasImageAgentEdit, type CanvasImageAgentImage, type CanvasImageAgentRecord } from "@/lib/canvas/canvas-image-agent";
+import { canvasImageAgentCatalog, canvasImageAgentResultOps, prepareCanvasImageAgentRepairPreviews, resolveCanvasImageAgentEdit, type CanvasImageAgentImage, type CanvasImageAgentRecord } from "@/lib/canvas/canvas-image-agent";
+import { ImageAgentPlanningError } from "../../shared/image-agent-iteration";
 import { pendingOnlineAgentTask, recoverOnlineAgentTask, type PendingOnlineAgentTask } from "@/lib/canvas/canvas-online-task-recovery";
 import { originalImageAgentImage } from "@/lib/image-agent/focus";
 import { CanvasNodeType, type CanvasAssistantSession, type CanvasNodeData } from "@/types/canvas";
@@ -103,6 +104,65 @@ describe("canvas image-agent execution invariants", () => {
         expect(resolveCanvasImageAgentEdit({ base: "focus", prompt: "继续改当前图" }, images, selection).base?.nodeId).toBe("result");
         expect(() => resolveCanvasImageAgentEdit({ base: "original", prompt: "回原图修改" }, images, selection)).toThrow("原图已不可用");
         expect(() => resolveCanvasImageAgentEdit({ base: "previous", prompt: "回上一版修改" }, images, selection)).toThrow("重新选择");
+    });
+});
+
+describe("canvas image-agent repair preview bounds", () => {
+    const issue = (requiredImageIds = ["original", "color"], missingImageIds = ["original"]) => new ImageAgentPlanningError(
+        "IMAGE_AGENT_UNPREVIEWED_IMAGE", "需要先查看指定图片", { missingImageIds, requiredImageIds });
+    const pixel = (id: string) => `data:image/png;base64,${Buffer.from(`pixels:${id}`).toString("base64")}`;
+
+    test("only a fully legal plan reports canonical missing and required image identities", () => {
+        try {
+            resolveCanvasImageAgentEdit({ base: "图3", references: ["图12"], prompt: "原图改色" }, catalog(), { ...selection, previewedIds: ["current", "color"] });
+            throw new Error("Expected an unpreviewed-image refusal");
+        } catch (error) {
+            expect(error).toMatchObject({ code: "IMAGE_AGENT_UNPREVIEWED_IMAGE", missingImageIds: ["original"], requiredImageIds: ["original", "color"], submitted: false });
+        }
+        try {
+            resolveCanvasImageAgentEdit({ base: "图3", prompt: "原图改色", edit_spec: { changes: [] } }, catalog(), { ...selection, previewedIds: ["current"] });
+            throw new Error("Expected an invalid-spec refusal");
+        } catch (error) {
+            expect(error).toMatchObject({ code: "IMAGE_AGENT_SPEC_INVALID", submitted: false });
+            expect((error as ImageAgentPlanningError).missingImageIds).toBeUndefined();
+        }
+    });
+
+    test("required original pixels precede the focus and do not mutate source identities or notes", async () => {
+        const images = catalog(), before = structuredClone(images), read: string[] = [];
+        const result = await prepareCanvasImageAgentRepairPreviews(issue(), images, { focusId: "current", previewedIds: ["current", "color"],
+            readImage: async value => { read.push(value.id); return pixel(value.id); } });
+        expect(read).toEqual(["original", "color", "current"]);
+        expect(result?.previews).toEqual(read.map(id => ({ id, dataUrl: pixel(id) })));
+        expect(result?.details.imageIds).toEqual(read);
+        expect(images).toEqual(before);
+    });
+
+    test("five required images keep all exact references without treating unchanged focus identity as a sixth pixel", async () => {
+        const images = Array.from({ length: 7 }, (_, index) => image(`v${index + 1}`, `图${index + 1}`));
+        const required = images.slice(0, 5).map(value => value.id), read: string[] = [];
+        const result = await prepareCanvasImageAgentRepairPreviews(issue(required, required), images, { focusId: "v6", previewedIds: ["v6", "v7"],
+            readImage: async value => { read.push(value.id); return pixel(value.id); } });
+        expect(read).toEqual(required);
+        expect(result?.previews).toHaveLength(5);
+    });
+
+    test.each([
+        ["missing scope", new ImageAgentPlanningError("IMAGE_AGENT_UNPREVIEWED_IMAGE", "缺图")],
+        ["missing outside required", issue(["original"], ["color"])],
+        ["duplicate required", issue(["original", "original"])],
+        ["six required", issue(["original", "color", "a", "b", "c", "d"])],
+    ])("invalid repair scope cannot read or falsely mark previews: %s", async (_name, error) => {
+        const read: string[] = [];
+        await expect(prepareCanvasImageAgentRepairPreviews(error as ImageAgentPlanningError, catalog(), { readImage: async value => { read.push(value.id); return pixel(value.id); } })).rejects.toThrow();
+        expect(read).toEqual([]);
+    });
+
+    test.each([
+        ["not actual pixels", "/api/assets/image/content", "预览不可用"],
+        ["over 8 MB", `data:image/png;base64,${"A".repeat(Math.ceil(8 * 1024 * 1024 / 3) * 4 + 4)}`, "超过 8 MB"],
+    ])("%s stops without returning any replacement previews", async (_name, dataUrl, reason) => {
+        await expect(prepareCanvasImageAgentRepairPreviews(issue(["original"]), catalog(), { readImage: async () => dataUrl })).rejects.toThrow(reason);
     });
 });
 

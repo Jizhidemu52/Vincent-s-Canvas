@@ -1,5 +1,5 @@
 import type { Page, Route } from "@playwright/test";
-import { test, expect, IMAGE } from "./fixtures";
+import { test, expect, IMAGE, type MockCanvasApi } from "./fixtures";
 
 const spec = { changes: ["左袖口改为罗纹"], region: "左袖口", acceptance: ["袖口为罗纹", "纽扣数量保持"], assumptions: ["只处理左袖口"] };
 const answer = (args: Record<string, unknown> = {}) => ({ content: "将按所列要求修改，结果仍需核对。", toolCalls: [{ id: "edit", type: "function", function: { name: "edit_image", arguments: JSON.stringify({ prompt: "完整规划：左袖口罗纹过渡自然，保留真实棉纱纹理。", edit_spec: spec, ...args }) } }] });
@@ -20,6 +20,97 @@ async function upload(page: Page) {
 async function send(page: Page, text: string) { await page.getByRole("textbox", { name: "对话内容", exact: true }).fill(text); await page.getByRole("button", { name: "发送", exact: true }).click(); }
 async function sessions(page: Page) { return page.evaluate(async () => { const { chatSessionStorage } = await import("/src/pages/chat/chat-session-storage.ts"); const { useUserStore } = await import("/src/stores/use-user-store.ts"); return chatSessionStorage.load(`wireless-canvas:llm-chat:${useUserStore.getState().user!.id}`, () => null) as Promise<any[]>; }); }
 const generated = (page: Page) => page.locator('[data-message-role="assistant"] .group\\/image');
+
+// Build the observed branching history through the actual composer, with five
+// distinct PNG originals supplied by the existing isolated business-API fixture.
+async function prepareOlderBranch(page: Page, api: MockCanvasApi, plans: any[]) {
+    await setup(page, plans, (body, _index, route) => {
+        const text = body.profileContext.currentUserText;
+        const target = body.profileContext.imageCatalog.find((image: any) => image.label === "图3");
+        const base = text.includes("以图3") ? target.id : text.includes("上一版") ? "previous" : text.includes("原图") ? "original" : "focus";
+        return route.fulfill({ json: answer({ base, prompt: text, edit_spec: { changes: [text] } }) });
+    });
+    await upload(page);
+    for (const [index, text] of ["把包身和肩带改成森林绿", "保持森林绿，把背景改浅暖灰", "回上一版，把包身改成酒红色", "回原图，只把背景改成蓝色"].entries()) {
+        await send(page, text);
+        await expect(generated(page)).toHaveCount(index + 1);
+    }
+    const snapshot = (await sessions(page))[0];
+    const original = snapshot.messages[0].attachments.find((item: any) => item.kind === "image");
+    const versions = snapshot.messages.flatMap((message: any) => message.generatedImages || []);
+    expect(versions.map((image: any) => image.parentId)).toEqual([original.id, versions[0].id, versions[0].id, original.id]);
+    expect(plans).toHaveLength(4); expect(api.submissions).toHaveLength(4);
+    return { original, versions, snapshot, olderBytes: api.assetBytes.get(versions[1].id.split(":")[0])! };
+}
+
+const olderInstruction = "以图3为基础，只把两侧连接环从金色改成银色。保留图3的森林绿包身和肩带、浅暖灰背景，以及原有包型，生成一张。";
+const planningPixels = (body: any) => body.input.flatMap((item: any) => Array.isArray(item.content) ? item.content.filter((part: any) => part.type === "input_image").map((part: any) => part.image_url) : []);
+
+test("旧图像素补载：五版本分支直接改图3，唯一repair带真实像素且只提交一次正确原件", async ({ page, api }, info) => {
+    const plans: any[] = [];
+    const { original, versions, olderBytes } = await prepareOlderBranch(page, api, plans);
+    const olderId = versions[1].id, currentId = versions[3].id;
+    const expectedPreview = await page.evaluate(async dataUrl => {
+        const image = new Image();
+        await new Promise<void>((resolve, reject) => { image.onload = () => resolve(); image.onerror = () => reject(new Error("fixture PNG unreadable")); image.src = dataUrl; });
+        const canvas = document.createElement("canvas"); canvas.width = image.naturalWidth; canvas.height = image.naturalHeight;
+        const context = canvas.getContext("2d")!; context.fillStyle = "#ffffff"; context.fillRect(0, 0, canvas.width, canvas.height); context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        return canvas.toDataURL("image/jpeg", 0.78);
+    }, `data:image/png;base64,${olderBytes.toString("base64")}`);
+    await send(page, olderInstruction);
+    await expect(generated(page)).toHaveCount(5);
+    expect(plans).toHaveLength(6);
+    const [initial, repaired] = plans.slice(4);
+    expect(initial.profileContext.previewImageIds).toEqual([currentId, original.id]);
+    expect(planningPixels(initial)).not.toContain(expectedPreview);
+    expect(repaired.profileContext).toMatchObject({ stage: "repair", focusImageId: currentId, previewImageIds: [olderId, currentId, original.id] });
+    expect(repaired.profileContext.imageCatalog.find((item: any) => item.id === olderId)).toMatchObject({ parentId: versions[0].id, previewed: true });
+    expect(planningPixels(repaired)).toHaveLength(3);
+    expect(planningPixels(repaired)[0]).toBe(expectedPreview);
+    expect(repaired.input.at(-1)).toEqual({ role: "user", content: olderInstruction });
+    expect(Object.keys(repaired.profileContext.repairIssue).sort()).toEqual(["code", "message", "repairable", "submitted"]);
+    expect(api.submissions).toHaveLength(5);
+    const submitted = api.submissions[4];
+    expect(submitted.parameters.inputArchive.references.map((item: any) => item.id)).toEqual([olderId]);
+    expect(submitted.sourceUrls).toHaveLength(1);
+    const submittedBytes = api.assetBytes.get(new URL(submitted.sourceUrls[0], "http://fixture.test").pathname.split("/")[3]);
+    expect(submittedBytes).toEqual(olderBytes);
+    const savedVersions = (await sessions(page))[0].messages.flatMap((message: any) => message.generatedImages || []);
+    expect(savedVersions.slice(0, 4)).toEqual(versions);
+    expect(savedVersions.at(-1)).toMatchObject({ parentId: olderId, workId: original.id });
+    await expect(page.locator('[data-message-role="error"]')).toHaveCount(0);
+    await expect(page.getByText(/需要先查看较早图片|未预览/)).toHaveCount(0);
+    await page.screenshot({ path: info.outputPath("chat-older-branch-pixel-repair.png"), animations: "disabled" });
+    await page.reload(); await expect(generated(page)).toHaveCount(5);
+    expect(api.submissions).toHaveLength(5); expect(plans).toHaveLength(6);
+});
+
+test("旧图像素补载：读取图3时取消不重发repair或提交图像且原版本保留", async ({ page, api }) => {
+    const plans: any[] = [];
+    const { versions, olderBytes } = await prepareOlderBranch(page, api, plans);
+    // Hold only the detached decoder for this exact old PNG. The stored original,
+    // displayed images and all other decodes remain unchanged; the real Stop
+    // button must abort the loader before it can send a repair request.
+    await page.evaluate(dataUrl => {
+        const descriptor = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, "src")!;
+        Object.defineProperty(HTMLImageElement.prototype, "src", { ...descriptor, set(value: string) {
+            if (!this.isConnected && value === dataUrl) { (window as any).__olderPreviewHeld = true; return; }
+            descriptor.set!.call(this, value);
+        } });
+    }, `data:image/png;base64,${olderBytes.toString("base64")}`);
+    await send(page, olderInstruction);
+    await expect.poll(() => page.evaluate(() => Boolean((window as any).__olderPreviewHeld))).toBe(true);
+    expect(plans).toHaveLength(5);
+    await page.getByRole("button", { name: "停止", exact: true }).click();
+    await expect(page.getByRole("textbox", { name: "对话内容", exact: true })).toBeEnabled();
+    await expect(page.getByRole("button", { name: "停止", exact: true })).toHaveCount(0);
+    expect(plans).toHaveLength(5); expect(api.submissions).toHaveLength(4);
+    const saved = (await sessions(page))[0];
+    expect(saved.messages.flatMap((message: any) => message.generatedImages || [])).toEqual(versions);
+    expect(saved.focusImageId).toBe(versions[3].id);
+    await page.reload(); await expect(generated(page)).toHaveCount(4);
+    expect(plans).toHaveLength(5); expect(api.submissions).toHaveLength(4);
+});
 
 test("只用对话连续改当前图、上一版、原图和图号，刷新后继续且原件与谱系正确", async ({ page, api }, info) => {
     const plans: any[] = [];

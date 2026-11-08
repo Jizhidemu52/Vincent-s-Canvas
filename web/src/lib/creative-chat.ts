@@ -225,17 +225,23 @@ export function parseCreativeChatPlan(result: ToolResponseResult, references: Re
     const auxiliaryIds = args.references === undefined ? [] : imageIds(args.references, catalog);
     const sourceIds = [...new Set([...(base ? [base.id] : []), ...auxiliaryIds, ...(options.referenceImageIds || [])])];
     if (sourceIds.length > 5) throw new ImageAgentPlanningError("IMAGE_AGENT_REFERENCES_INVALID", "底图与参考图合计最多 5 张，未提交图片任务");
-    const seen = new Set(options.previewedImageIds || references.map(item => item.id));
-    const selected = sourceIds.map(id => {
+    const sources = sourceIds.map(id => {
         const entry = catalog.find(item => item.id === id);
         if (!entry) throw new ImageAgentPlanningError("IMAGE_AGENT_REFERENCES_INVALID", "图片工具引用了目录外图片，未提交图片任务");
-        if (!seen.has(id)) throw new ImageAgentPlanningError("IMAGE_AGENT_UNPREVIEWED_IMAGE", `需要先查看较早图片 ${entry.label}（${entry.id}），未提交图片任务`);
-        const reference = references.find(item => item.id === id);
-        if (!reference) throw new Error("参考图片原件不可用，未提交图片任务");
-        originalReference(entry); return { ...reference };
+        originalReference(entry); return entry;
     });
     const workNote = mergeImageAgentWorkNote(base?.note, args.note_update as string | undefined, keep);
-    const compiled = compileImageAgentPrompt({ prompt: args.prompt, keep: workNote.keep, images: selected.map(reference => ({ id: reference.id, label: catalog.find(image => image.id === reference.id)!.label })), baseImageId: base?.id, spec: args.edit_spec, requirements: options.requirements });
+    const compiled = compileImageAgentPrompt({ prompt: args.prompt, keep: workNote.keep, images: sources.map(({ id, label }) => ({ id, label })), baseImageId: base?.id, spec: args.edit_spec, requirements: options.requirements });
+    const seen = new Set(options.previewedImageIds || references.map(item => item.id));
+    const missing = sources.filter(entry => !seen.has(entry.id));
+    if (missing.length) throw new ImageAgentPlanningError("IMAGE_AGENT_UNPREVIEWED_IMAGE", `需要先查看较早图片 ${missing.map(entry => entry.label).join("、")}，未提交图片任务`, {
+        missingImageIds: missing.map(entry => entry.id), requiredImageIds: sourceIds,
+    });
+    const selected = sourceIds.map(id => {
+        const reference = references.find(item => item.id === id);
+        if (!reference) throw new Error("参考图片原件不可用，未提交图片任务");
+        return { ...reference };
+    });
     return { kind: "image", content: result.content, action: selected.length ? "edit" : "generate", prompt: compiled.prompt, references: selected, ...(compiled.spec ? { spec: compiled.spec } : {}),
         ...(base ? { parentId: base.id, workId: imageAgentWorkId(catalog, base) } : {}), workNote, keep: workNote.keep };
 }

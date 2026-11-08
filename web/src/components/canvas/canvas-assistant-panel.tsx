@@ -67,7 +67,7 @@ import { canvasToolCallPreview, canvasToolCallsRequireConfirmation, expireCanvas
 import { canvasAgentUndoMessage } from "@/lib/canvas/canvas-agent-undo-report";
 import { buildImageAgentContext } from "@/lib/image-agent/context";
 import { resolveImageAgentFocus, resolveImageAgentBase, originalImageAgentImage, imageAgentVersion, imageAgentCandidateIds } from "@/lib/image-agent/focus";
-import { canvasImageAgentCatalog, canvasImageAgentHistory, canvasImageAgentForReference, canvasImageAgentFocusId, canvasImageAgentSelectedSnapshot, canvasImageAgentResultOps, canvasImageAgentTaskSignature, canvasImageAgentReviewTarget, canvasImageAgentReviewFingerprint, canvasImageAgentReviewInputs, canvasImageAgentReviewMatches, canvasImageAgentCorrectionDraft, canvasImageAgentInspectionDetails, resolveCanvasImageAgentEdit, validateCanvasImageAgentPlan, type CanvasImageAgentImage, type CanvasImageAgentRecord } from "@/lib/canvas/canvas-image-agent";
+import { canvasImageAgentCatalog, canvasImageAgentHistory, canvasImageAgentForReference, canvasImageAgentFocusId, canvasImageAgentSelectedSnapshot, canvasImageAgentResultOps, canvasImageAgentTaskSignature, canvasImageAgentReviewTarget, canvasImageAgentReviewFingerprint, canvasImageAgentReviewInputs, canvasImageAgentReviewMatches, canvasImageAgentCorrectionDraft, canvasImageAgentInspectionDetails, prepareCanvasImageAgentRepairPreviews, resolveCanvasImageAgentEdit, validateCanvasImageAgentPlan, type CanvasImageAgentImage, type CanvasImageAgentRecord } from "@/lib/canvas/canvas-image-agent";
 import { requestImageAgentReview } from "@/services/api/image-agent-inspection";
 import { requestImageAgentPlanWithRepair, type ImageAgentRepairBudget } from "@/lib/image-agent/planning-repair";
 import { imageAgentSpecText } from "@/lib/image-agent/compile";
@@ -683,18 +683,66 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
         await runOnlineAgentStep(session.id, assistantId, history, userMessage, { step: 1 }, turn);
     };
 
-    const requestCanvasAgentPlan = (turn: OnlineTurnContext, messages: ResponseInputMessage[], stage: "plan" | "continue", onChunk: (text: string) => void) => requestImageAgentPlanWithRepair({
-        budget: turn.planningRepairBudget ||= { used: false }, signal: turn.signal,
-        canRepair: () => !turn.writeOperationAttempted,
-        onRepair: () => addOnlineLog("规划参数修正一次", { submitted: false }),
-        request: issue => requestToolResponse(
-            { ...turn.config, model: turn.config.textModel || turn.config.model, systemPrompt: "" },
-            issue ? [...messages, { role: "user", content: turn.userPrompt }] : messages,
-            [], "auto", onChunk,
-            { webSearch: true, tool: "canvas-chat", signal: turn.signal, ...canvasChatProfile(turn, issue ? "repair" : stage, issue) },
-        ),
-        validate: result => validateCanvasImageAgentPlan(result, turn.images, turn),
-    });
+    const requestCanvasAgentPlan = (sessionId: string, turn: OnlineTurnContext, messages: ResponseInputMessage[], stage: "plan" | "continue", onChunk: (text: string) => void) => {
+        let planningMessages = messages;
+        let repairPreviewIds: string[] | undefined;
+        return requestImageAgentPlanWithRepair({
+            budget: turn.planningRepairBudget ||= { used: false }, signal: turn.signal,
+            canRepair: () => !turn.writeOperationAttempted && onlineMountedRef.current && (!turn.signal || onlineRequestsRef.current.has(turn.signal)),
+            prepareRepair: async issue => {
+                const prepared = await prepareCanvasImageAgentRepairPreviews(issue, turn.images, {
+                    focusId: turn.focusId, previewedIds: turn.previewedIds, signal: turn.signal,
+                    readImage: image => readConversationImage(image.reference),
+                });
+                if (!prepared) return;
+                turn.signal?.throwIfAborted();
+                if (turn.writeOperationAttempted || !onlineMountedRef.current || (turn.signal && !onlineRequestsRef.current.has(turn.signal))) throw new DOMException("本轮已停止", "AbortError");
+                // Replace all old pixel blocks (including document previews), never
+                // append a sixth image or label an unread catalog entry as viewed.
+                planningMessages = messages.map(message => "role" in message && message.role !== "tool" && Array.isArray(message.content)
+                    ? { ...message, content: message.content.filter(part => part.type !== "image_url") } : message);
+                planningMessages.push({ role: "user", content: [
+                    { type: "text", text: `本次规划修正实际查阅的图片如下；此前图像块已替换。\n${JSON.stringify(prepared.details)}` },
+                    ...prepared.previews.flatMap(image => [
+                        { type: "text" as const, text: `${turn.images.find(item => item.id === image.id)?.label || image.id}（image_id=${image.id}）${image.id === turn.focusId ? " · 当前图" : ""}` },
+                        { type: "image_url" as const, image_url: { url: image.dataUrl } },
+                    ]),
+                ] });
+                turn.previewedIds = prepared.previews.map(image => image.id);
+                repairPreviewIds = [...turn.previewedIds];
+                turn.workingPreviews = prepared.previews;
+                // Keep the turn's lookup snapshot consistent with the actual repair
+                // pixels; this does not grant additional tools to the repair stage.
+                turn.inspectedPreviews = prepared.previews;
+            },
+            onRepair: () => addOnlineLog("规划参数修正一次", { submitted: false }),
+            request: async issue => {
+                const sentPreviewIds = issue && repairPreviewIds ? [...repairPreviewIds] : undefined;
+                const result = await requestToolResponse(
+                    { ...turn.config, model: turn.config.textModel || turn.config.model, systemPrompt: "" },
+                    issue ? [...planningMessages, { role: "user", content: turn.userPrompt }] : planningMessages,
+                    [], "auto", onChunk,
+                    { webSearch: true, tool: "canvas-chat", signal: turn.signal, ...canvasChatProfile(turn, issue ? "repair" : stage, issue) },
+                );
+                turn.signal?.throwIfAborted();
+                // Only a completed, still-authorized planner request proves the
+                // replacement pixels were sent. Preparing or cancelling a read
+                // must not claim that the assistant already saw those images.
+                if (sentPreviewIds && turn.userMessageId && !turn.writeOperationAttempted && onlineMountedRef.current
+                    && (!turn.signal || onlineRequestsRef.current.has(turn.signal))) {
+                    const labels = sentPreviewIds.map(id => turn.images.find(image => image.id === id)?.label || id).join("、");
+                    updateSession(sessionId, session => ({ ...session, messages: session.messages.map(message => {
+                        if (message.id !== turn.userMessageId) return message;
+                        const context = message.detail?.conversationContext;
+                        return { ...message, meta: `本轮助手看到了 ${sentPreviewIds.length} 张图片（${labels}）`, detail: { ...message.detail,
+                            previewImageIds: sentPreviewIds, conversationContext: { ...(context && typeof context === "object" ? context : {}), images: sentPreviewIds.length } } };
+                    }) }));
+                }
+                return result;
+            },
+            validate: result => validateCanvasImageAgentPlan(result, turn.images, turn),
+        });
+    };
 
     const runOnlineAgentStep = async (sessionId: string, assistantId: string, history: CanvasAssistantMessage[], userMessage: CanvasAssistantMessage, loop: OnlineLoopContext, turn: OnlineTurnContext) => {
         try {
@@ -714,7 +762,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
             upsertMessage(sessionId, { ...userMessage, contextReferences,
                 detail: { ...userMessage.detail, focusImageId: turn.focusId, previewImageIds: turn.previewedIds,
                     conversationContext: { images: contextReferences.length, historyMessages: Math.min(history.length, 20) } },
-                meta: `本轮助手看到了 ${contextReferences.length} 张图片` });
+                meta: `本轮助手看到了 ${contextReferences.length} 张图片${conversation.workingSet.length ? `（${conversation.workingSet.map(image => image.label).join("、")}）` : ""}` });
             const messages: ResponseInputMessage[] = conversation.messages;
             const documentText = agentDocumentContext(turn.documents);
             const requirementText = turn.requirements && designRequirementsText(turn.requirements);
@@ -733,7 +781,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
             if (textReferences.length) messages.splice(messages.length - 1, 0, { role: "user", content: textReferences.map(reference => `选中文本「${reference.title}」：${reference.text?.slice(0, 4000)}`).join("\n") });
             addOnlineLog(`Agent Tool Loop ${loop.step} 开始`, { toolChoice: "auto", images: turn.previewedIds });
             let streamed = "";
-            const result = await requestCanvasAgentPlan(turn, messages, "plan",
+            const result = await requestCanvasAgentPlan(sessionId, turn, messages, "plan",
                 (text) => {
                     streamed = text;
                     if (!turn.signal?.aborted) upsertMessage(sessionId, { id: assistantId, role: "assistant", text });
@@ -830,7 +878,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
             return;
         }
         let streamed = "";
-        const next = await requestCanvasAgentPlan(turn, nextMessages, "continue",
+        const next = await requestCanvasAgentPlan(sessionId, turn, nextMessages, "continue",
             (text) => {
                 streamed = text;
                 if (!turn.signal?.aborted) upsertMessage(sessionId, { id: assistantId, role: "assistant", text });

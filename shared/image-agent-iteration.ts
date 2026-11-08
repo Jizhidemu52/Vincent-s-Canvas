@@ -24,14 +24,25 @@ export type ImageAgentRegionProposal = {
     note: string;
 };
 export type ImageAgentPlanningIssue = { code: string; message: string; submitted: false; repairable: true };
+/** Local preparation data only; these identifiers are never added to the wire repair issue. */
+export type ImageAgentRepairPreparationIssue = ImageAgentPlanningIssue & Partial<{
+    missingImageIds: readonly string[];
+    requiredImageIds: readonly string[];
+}>;
 export const IMAGE_AGENT_REPAIR_CODES = ["IMAGE_AGENT_ARGUMENTS_INVALID", "IMAGE_AGENT_SPEC_INVALID", "IMAGE_AGENT_REFERENCES_INVALID", "IMAGE_AGENT_UNPREVIEWED_IMAGE"] as const;
 
 export class ImageAgentPlanningError extends Error {
     readonly submitted = false;
     readonly repairable = true;
-    constructor(readonly code: typeof IMAGE_AGENT_REPAIR_CODES[number], message: string) {
+    readonly missingImageIds?: readonly string[];
+    readonly requiredImageIds?: readonly string[];
+    constructor(readonly code: typeof IMAGE_AGENT_REPAIR_CODES[number], message: string, images?: { missingImageIds: readonly string[]; requiredImageIds: readonly string[] }) {
         super(message);
         this.name = "ImageAgentPlanningError";
+        if (images) {
+            this.missingImageIds = Object.freeze([...images.missingImageIds]);
+            this.requiredImageIds = Object.freeze([...images.requiredImageIds]);
+        }
     }
 }
 export function isImageAgentPlanningIssue(value: unknown): value is ImageAgentPlanningIssue {

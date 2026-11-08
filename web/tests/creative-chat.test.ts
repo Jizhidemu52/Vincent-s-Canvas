@@ -11,6 +11,7 @@ import type { PendingChatImageTask } from "../src/services/api/chat-image-recove
 import { prepareChatProfileInput, validateChatProfileOutput } from "../../server/src/prompt-chat-profiles";
 import { imageAgentRepairMetadata } from "../../server/src/image-agent-profile";
 import { PromptOptimizationError } from "../../server/src/prompt-safety";
+import type { AgentDocument, DesignRequirements } from "../../shared/image-agent-documents";
 
 const image = (id: string) => ({ id, name: id + ".png", mimeType: "image/png", dataUrl: "data:image/png;base64," + btoa(id) });
 const user = (content: string, attachments: CreativeChatMessage["attachments"] = []): CreativeChatMessage => ({ role: "user", content, attachments });
@@ -151,11 +152,11 @@ function fakeFetch(handler: (url: string, body: any) => Promise<Response> | Resp
         ? Response.json({ models: [{ id: "fixture", modelId: model, name: model, capabilities: ["chat", "vision"], creditCost: 0, rmbCost: 0 }], tools: [{ toolKey: "gpt-chat", modelConfigId: "fixture", enabled: true, configurationVersion: 1 }], prices: [] })
         : handler(String(url), init?.body ? JSON.parse(String(init.body)) : undefined)) as typeof fetch;
 }
-function previewFixture(onLoad?: (loaded: () => void, failed: () => void) => void, previewUrl = image("preview").dataUrl) {
+function previewFixture(onLoad?: (loaded: () => void, failed: () => void, source: string) => void, previewUrl: string | ((source: string) => string) = image("preview").dataUrl) {
     const globals = globalThis as unknown as Record<string, unknown>;
     const previous = { Image: globals.Image, document: globals.document };
-    const canvas = { width: 0, height: 0, getContext: () => ({ fillStyle: "", fillRect() {}, drawImage() {} }), toDataURL: () => previewUrl };
-    globals.Image = class { naturalWidth = 4096; naturalHeight = 2048; onload?: () => void; onerror?: () => void; set src(_value: string) { if (onLoad) onLoad(() => this.onload?.(), () => this.onerror?.()); else queueMicrotask(() => this.onload?.()); } };
+    const canvas = { width: 0, height: 0, source: "", getContext: () => ({ fillStyle: "", fillRect() {}, drawImage(element: { source: string }) { canvas.source = element.source; } }), toDataURL: () => typeof previewUrl === "function" ? previewUrl(canvas.source) : previewUrl };
+    globals.Image = class { naturalWidth = 4096; naturalHeight = 2048; source = ""; onload?: () => void; onerror?: () => void; set src(value: string) { this.source = value; if (onLoad) onLoad(() => this.onload?.(), () => this.onerror?.(), value); else queueMicrotask(() => this.onload?.()); } };
     globals.document = { createElement: () => canvas };
     return { canvas, restore: () => Object.assign(globals, previous) };
 }
@@ -401,6 +402,100 @@ describe("standalone structured edits and bounded planning repair", () => {
             expect(calls.every(call => call.url === "/api/chat/responses")).toBe(true);
             expect(calls[1].body.profileContext).toMatchObject({ stage: "repair", currentUserText: "左袖口改罗纹", focusImageId: "v3", repairIssue: { code: "IMAGE_AGENT_ARGUMENTS_INVALID", repairable: true, submitted: false } });
             expect(calls[1].body.input).toEqual(calls[0].body.input);
+        } finally { fixture.restore(); }
+    });
+    test("a direct edit of branched 图3 reloads its actual pixels before the sole repair and retains its original lineage", async () => {
+        const records = [user("原包", [image("one")]), generated("two", "one"), generated("three", "two"), generated("four", "two"), generated("five", "one")];
+        const originalRecords = JSON.stringify(records);
+        const current = user("以图3为基础，只把两侧连接环从金色改成银色。保留图3的森林绿包身和肩带、浅暖灰背景，以及原有包型，生成一张。");
+        const previewOf = (source: string) => image(`preview:${atob(source.split(",")[1]!)}`).dataUrl;
+        const fixture = previewFixture(undefined, previewOf), calls: any[] = [];
+        try {
+            fakeFetch(async (url, body) => {
+                calls.push({ url, body });
+                const prepared = await prepareChatProfileInput(body);
+                return Response.json(validateChatProfileOutput(result({ base: "three", prompt: current.content }), prepared.privateRules));
+            });
+            const plan = await requestCreativeChatPlan(config, records, current);
+            expect(calls).toHaveLength(2);
+            expect(calls.every(call => call.url === "/api/chat/responses")).toBe(true);
+            expect(calls[0].body.profileContext.previewImageIds).toEqual(["five", "one"]);
+            expect(JSON.stringify(calls[0].body.input)).not.toContain(previewOf(image("three").dataUrl));
+            const repaired = calls[1].body;
+            expect(repaired.profileContext).toMatchObject({ stage: "repair", focusImageId: "five", previewImageIds: ["three", "five", "one"] });
+            expect(repaired.profileContext.imageCatalog.find((entry: any) => entry.id === "three")).toMatchObject({ parentId: "two", previewed: true });
+            expect(repaired.profileContext.imageCatalog.find((entry: any) => entry.id === "four").previewed).toBe(false);
+            expect(Object.keys(repaired.profileContext.repairIssue).sort()).toEqual(["code", "message", "repairable", "submitted"]);
+            const pixels = repaired.input.flatMap((message: any) => Array.isArray(message.content) ? message.content.filter((part: any) => part.type === "input_image").map((part: any) => part.image_url) : []);
+            expect(pixels).toEqual(["three", "five", "one"].map(id => previewOf(image(id).dataUrl)));
+            expect(repaired.input.at(-1)).toEqual({ role: "user", content: current.content });
+            expect(plan).toMatchObject({ kind: "image", parentId: "three", workId: "one", references: [{ id: "three", dataUrl: image("three").dataUrl }] });
+            expect(plan.kind === "image" && plan.references).toHaveLength(1);
+            expect(JSON.stringify(records)).toBe(originalRecords);
+        } finally { fixture.restore(); }
+    });
+    test("five required repair sources replace optional focus pixels without changing the focus", async () => {
+        const records = [...Array.from({ length: 5 }, (_, index) => generated(`old-${index}`)), ...history];
+        const fixture = previewFixture(), calls: any[] = [];
+        try {
+            fakeFetch((url, body) => { calls.push({ url, body }); return Response.json(result({ base: "old-0", references: ["old-1", "old-2", "old-3", "old-4"] })); });
+            const plan = await requestCreativeChatPlan(config, records, user("以早期图为底图参考其余四图"));
+            expect(calls).toHaveLength(2);
+            expect(calls[1].body.profileContext).toMatchObject({ focusImageId: "v3", previewImageIds: ["old-0", "old-1", "old-2", "old-3", "old-4"] });
+            expect(calls[1].body.profileContext.imageCatalog.find((entry: any) => entry.id === "v3").previewed).toBe(false);
+            expect(JSON.stringify(calls[1].body.input).match(/"type":"input_image"/g)).toHaveLength(5);
+            expect(plan.kind === "image" && plan.references.map(reference => reference.id)).toEqual(["old-0", "old-1", "old-2", "old-3", "old-4"]);
+        } finally { fixture.restore(); }
+    });
+    test("pixel repair does not widen the real server's permission to introduce a document lookup", async () => {
+        const document: AgentDocument = { id: "brief", name: "brief.pdf", kind: "pdf", mimeType: "application/pdf", bytes: 1, warnings: [],
+            sections: [{ id: "s1", title: "配件要求", text: "两侧连接环改银色", figureIds: ["figure"] }],
+            figures: [{ ...image("figure"), sectionId: "s1", label: "配件图" }] };
+        const requirements: DesignRequirements = { title: "配件改色", documentIds: ["brief"], subject: "包", colors: "银色", materials: "", must: ["只改连接环"], avoid: [], unknowns: [], referenceFigureIds: [], sources: [{ documentId: "brief", sectionId: "s1" }] };
+        const previewOf = (source: string) => image(`preview:${atob(source.split(",")[1]!)}`).dataUrl;
+        const fixture = previewFixture(undefined, previewOf), calls: any[] = [];
+        const current = user("以旧图为基础，核对文件后只把连接环改银色");
+        try {
+            fakeFetch(async (url, body) => {
+                calls.push({ url, body });
+                const prepared = await prepareChatProfileInput(body);
+                const response = calls.length === 2
+                    ? { content: "核对文件要求", toolCalls: [{ id: "read-1", type: "function" as const, function: { name: "read_document", arguments: JSON.stringify({ document_id: "brief", section_start: 1 }) } }] }
+                    : result({ base: "old", prompt: current.content });
+                return Response.json(validateChatProfileOutput(response, prepared.privateRules));
+            });
+            await expect(requestCreativeChatPlan(config, [generated("old"), ...history], current, { documents: [document], requirements })).rejects.toThrow("未开放");
+            expect(calls.map(call => call.body.profileContext.stage)).toEqual(["plan", "repair"]);
+            const repaired = calls[1].body;
+            const pixels = repaired.input.flatMap((message: any) => Array.isArray(message.content) ? message.content.filter((part: any) => part.type === "input_image").map((part: any) => part.image_url) : []);
+            expect(pixels).toHaveLength(4);
+            expect(pixels).toContain(previewOf(image("old").dataUrl));
+            expect(pixels).not.toContain(previewOf(image("figure").dataUrl));
+            expect(repaired.profileContext).toMatchObject({ previewImageIds: ["old", "v3", "original", "v2"], focusImageId: "v3" });
+            expect(repaired.input.at(-1)).toEqual({ role: "user", content: current.content });
+        } finally { fixture.restore(); }
+    });
+    test.each(["load-failure", "abort", "oversized"])("old-image %s during repair makes no second planning request", async mode => {
+        const controller = new AbortController(), calls: any[] = [];
+        const oldSource = image("old").dataUrl;
+        const fixture = previewFixture((loaded, failed, source) => {
+            if (source === oldSource && mode === "load-failure") failed();
+            else if (source === oldSource && mode === "abort") controller.abort();
+            else loaded();
+        }, source => source === oldSource && mode === "oversized" ? "data:image/jpeg;base64," + "A".repeat(2_097_160) : image("preview").dataUrl);
+        try {
+            fakeFetch((url, body) => { calls.push({ url, body }); return Response.json(result({ base: "old" })); });
+            await expect(requestCreativeChatPlan(config, [generated("old"), ...history], user("改旧图"), { signal: controller.signal })).rejects.toThrow();
+            expect(calls).toHaveLength(1);
+            expect(calls[0].url).toBe("/api/chat/responses");
+        } finally { fixture.restore(); }
+    });
+    test("a repaired plan selecting a different unseen version refuses without a third request", async () => {
+        const fixture = previewFixture(), calls: any[] = [];
+        try {
+            fakeFetch((url, body) => { calls.push({ url, body }); return Response.json(result({ base: calls.length === 1 ? "old-a" : "old-b" })); });
+            await expect(requestCreativeChatPlan(config, [generated("old-a"), generated("old-b"), ...history], user("修改旧图"))).rejects.toBeInstanceOf(ImageAgentPlanningError);
+            expect(calls).toHaveLength(2);
         } finally { fixture.restore(); }
     });
     test.each(["double-invalid", "repair-then-lookup-invalid", "lookup-then-repair"])("one repair budget covers %s across continuations", async mode => {

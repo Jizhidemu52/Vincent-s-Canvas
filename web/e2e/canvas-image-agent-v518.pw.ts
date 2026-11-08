@@ -1,5 +1,6 @@
 import type { BrowserContext, Route } from "@playwright/test";
-import { test, expect, newCanvas, uploadImage } from "./fixtures";
+import { createHash } from "node:crypto";
+import { test, expect, fixturePng, newCanvas, uploadImage, type MockCanvasApi } from "./fixtures";
 import { toolDefinitions } from "../../shared/feature-catalog";
 
 const placeholder = "理解画布、修改图片或批量编排…";
@@ -14,6 +15,135 @@ async function fixture(context: BrowserContext, supportsMask = true) {
     await context.route("**/api/generation-capabilities?*", route => route.fulfill({ json: { models: [] } }));
     await context.route("**/api/chat/responses", route => { const input = route.request().postDataJSON(); requests.push(input); return reply(route, input); });
     return { requests, setReply: (next: typeof reply) => { reply = next; } };
+}
+
+/** Saved test-only cloud history: 1→2→3, 2→4, 1→5; no app store injection. */
+function historicalBranch(api: MockCanvasApi) {
+    const project = "historical-branch-repair", sessionId = "historical-branch-session", now = "2026-11-08T00:00:00.000Z";
+    const nodeId = (version: number) => `branch-v${version}`;
+    const assetId = (version: number) => `73000000-0000-4000-8000-${String(version).padStart(12, "0")}`;
+    const url = (version: number) => `/api/assets/${assetId(version)}/content`;
+    const imageId = (version: number): string => version === 1 ? `chat-image:branch-upload:reference:0:${nodeId(1)}` : `chat-image:branch-message-${version}:result:${nodeId(version)}`;
+    const parent = (version: number) => version === 2 || version === 5 ? 1 : 2;
+    const note = (version: number) => ({ summary: `版本${version}`, keep: version === 3 ? ["森林绿包身和肩带", "浅暖灰背景"] : [`其他分支${version}`] });
+    const bytes = Array.from({ length: 5 }, (_, index) => fixturePng(20 + index * 40));
+    for (const [index, data] of bytes.entries()) api.assetBytes.set(assetId(index + 1), data);
+    const nodes = Array.from({ length: 5 }, (_, index) => {
+        const version = index + 1;
+        return { id: nodeId(version), type: "image", title: `包版本${version}`, position: { x: index * 230, y: 50 }, width: 180, height: 180,
+            metadata: { content: url(version), status: "success", naturalWidth: 256, naturalHeight: 256, mimeType: "image/png",
+                ...(version > 1 ? { imageAgent: { parentNodeId: nodeId(parent(version)), workId: imageId(1), version, note: note(version) } } : {}) } };
+    });
+    const messages = [{ id: "branch-upload", role: "user", text: "原包", references: [{ id: nodeId(1), type: "image", title: "原包", dataUrl: url(1) }] },
+        ...[2, 3, 4, 5].map(version => ({ id: `branch-message-${version}`, role: "assistant", text: `版本${version}已生成`,
+            attachments: [{ id: nodeId(version), name: `版本${version}`, mediaType: "image", url: url(version) }],
+            detail: { kind: "agent_generation", status: "completed", prompt: version === 3 ? "森林绿包身和肩带、浅暖灰背景、金色连接环" : `其他版本${version}`,
+                imageAgent: { baseImageId: imageId(parent(version)), sourceNodeId: nodeId(parent(version)), workId: imageId(1),
+                    referenceIds: [imageId(parent(version))], version, note: note(version) } } })),
+    ];
+    const document = { id: project, title: "历史分支修复隔离回归", createdAt: now, updatedAt: now, nodes,
+        connections: [2, 3, 4, 5].map(version => ({ id: `branch-edge-${version}`, fromNodeId: nodeId(parent(version)), toNodeId: nodeId(version) })), groups: [],
+        chatSessions: [{ id: sessionId, title: "五版包历史", createdAt: now, updatedAt: now, messages, focusImageId: imageId(5), focusRevision: 5 }],
+        activeChatId: sessionId, backgroundMode: "dots", showImageInfo: false, viewport: { x: 180, y: 100, k: 1 }, selectedNodeIds: [], history: { past: [], future: [] } };
+    api.documents.set(project, { id: project, revision: 1, document, deleted: false, updatedAt: now });
+    return { project, sessionId, imageId, nodeId, url, bytes, original: structuredClone(document) };
+}
+
+for (const failPreview of [false, true]) {
+    test(`historical branch repair ${failPreview ? "stops before replanning when image 3 cannot load" : "loads exact image 3 pixels before one edit submission"}`, async ({ page, context, api }, info) => {
+        const chat = await fixture(context), branch = historicalBranch(api);
+        const prompt = "以图3为基础，只把两侧连接环从金色改成银色。保留图3的森林绿包身和肩带、浅暖灰背景，以及原有包型，生成一张。";
+        const order: string[] = [];
+        page.on("request", request => {
+            if (request.method() !== "POST") return;
+            const path = new URL(request.url()).pathname;
+            if (path === "/api/chat/responses") order.push("agent");
+            if (path === "/api/tasks") order.push("image");
+        });
+        let failOriginal = false, failedReads = 0;
+        await context.route(`**${branch.url(3)}`, route => {
+            if (!failOriginal) return route.fallback();
+            failedReads++;
+            return route.fulfill({ status: 404, contentType: "text/plain", body: "isolated missing original" });
+        });
+        chat.setReply((route, request) => {
+            if (failPreview && request.profileContext.stage === "plan") failOriginal = true;
+            return route.fulfill({ json: { content: "只修改图3的连接环", toolCalls: [{ id: `historical-edit-${chat.requests.length}`, type: "function",
+                function: { name: "edit_image", arguments: JSON.stringify({ base: branch.imageId(3), prompt }) } }] } });
+        });
+        await page.goto(`/canvas/${branch.project}`);
+        await page.getByRole("tab", { name: "对话", exact: true }).first().click();
+        const panel = page.locator(".cw-agent-panel"), input = panel.getByPlaceholder(placeholder);
+        await expect(panel.getByTestId("canvas-agent-image-result")).toHaveCount(4);
+        await input.fill(prompt); await input.press("Enter");
+        if (failPreview) {
+            await expect(panel.getByText("画布媒体不可读取", { exact: true })).toBeVisible();
+            await expect(panel.getByRole("button", { name: "发送", exact: true })).toBeVisible();
+            expect(failedReads).toBeGreaterThan(0);
+            expect(order).toEqual(["agent"]);
+            expect(chat.requests).toHaveLength(1);
+            expect(api.submissions).toHaveLength(0);
+            expect(api.document(branch.project)!.nodes).toHaveLength(5);
+            expect(api.document(branch.project)!.chatSessions[0].focusImageId).toBe(branch.imageId(5));
+            await expect(panel.getByText("本轮助手看到了 2 张图片（图5、图1）", { exact: true })).toBeVisible();
+            await expect(panel.getByText("本轮助手看到了 3 张图片（图3、图5、图1）", { exact: true })).toHaveCount(0);
+            await expect.poll(() => api.document(branch.project)!.chatSessions[0].messages
+                .find((message: any) => message.role === "user" && message.text === prompt)?.detail?.previewImageIds)
+                .toEqual([branch.imageId(5), branch.imageId(1)]);
+            await expect(input).toHaveValue(prompt);
+        } else {
+            await expect.poll(() => api.submissions.length).toBe(1);
+            await expect.poll(() => api.document(branch.project)?.nodes.length).toBe(6);
+            await expect(panel.getByRole("button", { name: "发送", exact: true })).toBeVisible();
+            expect(order).toEqual(["agent", "agent", "image"]);
+            expect(chat.requests).toHaveLength(2);
+            const [initial, repair] = chat.requests;
+            expect(initial.profileContext.previewImageIds).toEqual([branch.imageId(5), branch.imageId(1)]);
+            expect(repair.profileContext).toMatchObject({ stage: "repair", focusImageId: branch.imageId(5),
+                previewImageIds: [branch.imageId(3), branch.imageId(5), branch.imageId(1)], repairIssue: { code: "IMAGE_AGENT_UNPREVIEWED_IMAGE", submitted: false } });
+            expect(repair.profileContext.imageCatalog.find((image: any) => image.id === branch.imageId(3))).toMatchObject({ previewed: true, parentId: branch.imageId(2) });
+            const expectedPreviews = await page.evaluate(async sources => Promise.all(sources.map(async source => {
+                const image = new Image(); image.src = source; await image.decode();
+                const canvas = document.createElement("canvas"); canvas.width = image.naturalWidth; canvas.height = image.naturalHeight;
+                const drawing = canvas.getContext("2d")!; drawing.fillStyle = "#fff"; drawing.fillRect(0, 0, canvas.width, canvas.height); drawing.drawImage(image, 0, 0);
+                return canvas.toDataURL("image/jpeg", 0.85);
+            })), branch.bytes.map(bytes => `data:image/png;base64,${bytes.toString("base64")}`));
+            const previews = (request: any) => request.input.flatMap((message: any) => Array.isArray(message.content)
+                ? message.content.filter((part: any) => part.type === "input_image").map((part: any) => part.image_url) : []);
+            expect(previews(initial)).toEqual([expectedPreviews[4], expectedPreviews[0]]);
+            expect(previews(repair)).toEqual([expectedPreviews[2], expectedPreviews[4], expectedPreviews[0]]);
+            expect(repair.input.at(-1).content).toContain(prompt);
+            const submitted = api.submissions[0], reference = submitted.parameters.inputArchive.references[0];
+            expect(submitted.operationType).toBe("inpaint");
+            expect(submitted.parameters.imageAgentProfile).toBe("canvas-assistant");
+            expect(submitted.parameters.inputArchive.references).toHaveLength(1);
+            expect(reference.id).toBe(branch.imageId(3));
+            expect(reference.sha256).toBe(createHash("sha256").update(branch.bytes[2]).digest("hex"));
+            expect(submitted.sourceUrls).toHaveLength(1);
+            const document = api.document(branch.project)!;
+            const added = document.nodes.find((node: any) => !branch.original.nodes.some(original => original.id === node.id));
+            expect(added.metadata.imageAgent).toMatchObject({ parentNodeId: branch.nodeId(3), workId: branch.imageId(1), version: 6 });
+            expect(document.connections.some((edge: any) => edge.fromNodeId === branch.nodeId(3) && edge.toNodeId === added.id)).toBe(true);
+            const saved = document.chatSessions[0].messages.findLast((message: any) => message.detail?.kind === "agent_generation");
+            expect(saved.detail.imageAgent).toMatchObject({ baseImageId: branch.imageId(3), referenceIds: [branch.imageId(3)], sourceNodeId: branch.nodeId(3) });
+            expect(document.nodes.slice(0, 5)).toEqual(branch.original.nodes);
+            await expect(panel.getByText(/需要先查看指定图片|IMAGE_AGENT_UNPREVIEWED_IMAGE|操作失败/)).toHaveCount(0);
+            await expect(panel.getByText("本轮助手看到了 3 张图片（图3、图5、图1）", { exact: true })).toBeVisible();
+            await expect(panel.getByText("本轮助手看到了 2 张图片（图5、图1）", { exact: true })).toHaveCount(0);
+            const userMessage = document.chatSessions[0].messages.find((message: any) => message.role === "user" && message.text === prompt);
+            expect(userMessage.detail).toMatchObject({ previewImageIds: [branch.imageId(3), branch.imageId(5), branch.imageId(1)], conversationContext: { images: 3 } });
+            expect(userMessage.contextReferences.map((reference: any) => reference.id)).toEqual([branch.imageId(5), branch.imageId(1)]);
+        }
+        expect(chat.requests[0].profileContext.previewImageIds).toEqual([branch.imageId(5), branch.imageId(1)]);
+        expect(api.batchSubmissions).toHaveLength(0);
+        await page.screenshot({ path: info.outputPath(`historical-branch-${failPreview ? "missing-original" : "repaired"}.png`), animations: "disabled" });
+        await info.attach("historical-branch-evidence", { contentType: "application/json", body: Buffer.from(JSON.stringify({
+            mode: failPreview ? "missing-original" : "success", order, plannerCalls: chat.requests.length, imageSubmissions: api.submissions.length,
+            previewImageIds: chat.requests.map(request => request.profileContext.previewImageIds), failedReads,
+            baseImageId: api.submissions[0]?.parameters.inputArchive.references[0]?.id,
+            originalSha256: createHash("sha256").update(branch.bytes[2]).digest("hex"), submittedSha256: api.submissions[0]?.parameters.inputArchive.references[0]?.sha256,
+        }, null, 2)) });
+    });
 }
 
 // Department admins have no canvas workspace access; their component guard is
