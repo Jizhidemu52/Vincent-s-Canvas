@@ -24,8 +24,19 @@ for (const surface of ["chat", "canvas"] as const) {
             const input = surface === "chat" ? page.getByRole("textbox", { name: /^(对话内容|Message)$/ }) : page.locator(".cw-agent-panel textarea").last();
             await expect(input).toBeEnabled();
             await input.fill("保留我的草稿，不发送，也不替换参考图。");
-            const requests: string[] = [];
-            page.on("request", request => { if (request.method() === "POST") requests.push(new URL(request.url()).pathname); });
+            const origin = new URL(page.url()).origin;
+            const requests: string[] = [], telemetryRequests: string[] = [];
+            let telemetryProbeRequests = 0;
+            page.on("request", request => {
+                if (request.method() !== "POST") return;
+                const url = new URL(request.url());
+                if (url.origin === origin && url.pathname === "/api/usage/events") {
+                    telemetryRequests.push(url.pathname);
+                    if (request.headers()["x-e2e-telemetry-probe"] === "conversation-examples") telemetryProbeRequests++;
+                    return;
+                }
+                requests.push(url.origin === origin ? url.pathname : url.href);
+            });
             if (surface === "canvas" && width === 390) {
                 await page.getByRole("button", { name: "打开画布菜单", exact: true }).click();
                 await page.getByRole("menuitem", { name: "收起对话", exact: true }).click();
@@ -69,6 +80,15 @@ for (const surface of ["chat", "canvas"] as const) {
             await expect(content).toBeHidden();
             await toggle.click(); await expect(content).toBeVisible();
             await expect(input).toHaveValue("保留我的草稿，不发送，也不替换参考图。");
+            // Deliberately overlap one same-origin telemetry POST with observation;
+            // this regression must not depend on the production flush timer firing.
+            expect(await page.evaluate(async boardKey => (await fetch("/api/usage/events", {
+                method: "POST", headers: { "content-type": "application/json", "x-e2e-telemetry-probe": "conversation-examples" },
+                body: JSON.stringify({ events: [{ eventId: crypto.randomUUID(), occurredAt: new Date().toISOString(), boardKey, action: "visit" }] }),
+            })).status, surface)).toBe(200);
+            await info.attach("post-request-boundary", { contentType: "application/json", body: JSON.stringify({ telemetryRequests, telemetryProbeRequests, requests, generationSubmissions: api.submissions.length, batchSubmissions: api.batchSubmissions.length }, null, 2) });
+            expect(telemetryProbeRequests).toBe(1);
+            expect(telemetryRequests.length).toBeGreaterThanOrEqual(1);
             expect(requests).toEqual([]);
             expect(api.submissions).toHaveLength(0);
             expect(api.batchSubmissions).toHaveLength(0);
