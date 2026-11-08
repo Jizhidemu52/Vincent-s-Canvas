@@ -10,6 +10,7 @@ import { imageModelDisplayName, imageModelIdentityHidden } from "@/lib/model-dis
 import { preferredImageModel } from "@/lib/default-image-model";
 import { ModelPicker } from "@/components/model-picker";
 import { ConversationExamples } from "@/components/conversation-examples";
+import { ConversationImagePreview } from "@/components/conversation-image-preview";
 import { CanvasPanelSizeControl } from "@/components/canvas/canvas-panel-size-control";
 import { conversationImageLabel, type ConversationImageAction, type ConversationImageItem } from "@/components/conversation-image-controls";
 import { useConversationImageTools } from "@/hooks/use-conversation-image-tools";
@@ -1671,7 +1672,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                 <Button size="small" disabled={[...onlineRequestsRef.current.keys()].some(signal => turnIdsRef.current.get(signal) === source.detail?.turnId)} onClick={() => void handleQueryOriginalTask(activeSession!.id, source)}>{t("查询原任务")}</Button>
                 {source.detail?.status === "running" && typeof source.detail.turnId === "string" ? <Button size="small" onClick={() => stopOnlineAgent(String(source.detail?.turnId))}>{t("停止本页等待")}</Button> : null}
             </div> : null}
-            {message.references?.length ? <MessageReferences message={message} nodes={messageReferenceNodes} images={conversationImages} disabled={isRunning} /> : null}
+            {message.references?.length ? <MessageReferences key={attachmentScope} message={message} nodes={messageReferenceNodes} images={conversationImages} /> : null}
             {typeof source.detail?.prompt === "string" && source.detail.prompt ? <details className="pl-11 text-xs" style={{ color: theme.node.muted }}>
                 <summary className="cursor-pointer">最终提示词</summary>
                 {specText ? <section aria-label="本轮要求与假设" className="mt-2 space-y-1">
@@ -1739,7 +1740,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                 />
             ) : null}
         </div>
-    ); }), [renderedMessages, messages, theme, user, isRunning, onlineEnabled, activeSession?.id, messageReferenceNodes, mediaWorkflowModels, onMediaWorkflowAction, handleRejectOnlineTool, handleApproveOnlineTool, handleUseImageForVideo, handleQueryOriginalTask, conversationImageControls, conversationImages, handleConversationImageAction, handleMaskImage, handleEditMessage, handleReviewResult, handleCorrectionDraft, reviewingResults, reviewErrors, undoneTurns, undoingTurn, canUndoOps, t]);
+    ); }), [renderedMessages, messages, theme, user, isRunning, onlineEnabled, activeSession?.id, attachmentScope, messageReferenceNodes, mediaWorkflowModels, onMediaWorkflowAction, handleRejectOnlineTool, handleApproveOnlineTool, handleUseImageForVideo, handleQueryOriginalTask, conversationImageControls, conversationImages, handleConversationImageAction, handleMaskImage, handleEditMessage, handleReviewResult, handleCorrectionDraft, reviewingResults, reviewErrors, undoneTurns, undoingTurn, canUndoOps, t]);
 
     const onlineContent = (
         <>
@@ -2235,8 +2236,9 @@ function OnlineAgentLogView({ logs, theme, context, onClear }: { logs: OnlineAge
     );
 }
 
-function MessageReferences({ message, nodes, images = [], disabled, onSelect }: { message: CanvasAssistantMessage; nodes: CanvasNodeData[]; images?: CanvasConversationImage[]; disabled?: boolean; onSelect?: (image: ConversationImageItem) => unknown }) {
+function MessageReferences({ message, nodes, images = [] }: { message: CanvasAssistantMessage; nodes: CanvasNodeData[]; images?: CanvasConversationImage[] }) {
     const t = useUiText();
+    const [previewImage, setPreviewImage] = useState<ConversationImageItem | null>(null);
     return (
         <div className={`flex max-w-[88%] flex-wrap gap-2 ${message.role === "user" ? "ml-auto justify-end" : "ml-11 justify-start"}`}>
             {message.references?.map((item, index, references) => {
@@ -2244,13 +2246,17 @@ function MessageReferences({ message, nodes, images = [], disabled, onSelect }: 
                 const reference = node?.metadata?.storageKey ? { ...item, storageKey: node.metadata.storageKey } : item;
                 const image = canvasConversationImageForAsset(images, message.id, item);
                 const label = image ? t("图{number}", { number: image.label.replace(/^图/u, "") }) : assistantImageReferenceLabel(references, index);
-                return <AssistantReferenceChip key={`${item.id}-${index}`} item={reference} label={label} disabled={disabled || Boolean(image?.unavailableReason)} onSelect={image && onSelect ? () => onSelect(image) : undefined} />;
+                return <AssistantReferenceChip key={`${item.id}-${index}`} item={reference} label={label} disabled={Boolean(image?.unavailableReason)} onPreview={() => setPreviewImage({
+                    id: image?.id || `reference:${message.id}:${index}:${item.id}`, label: image?.label || label || item.title, name: item.title,
+                    dataUrl: reference.dataUrl, storageKey: reference.storageKey, unavailableReason: image?.unavailableReason,
+                })} />;
             })}
+            {previewImage ? <ConversationImagePreview key={previewImage.id} image={previewImage} onClose={() => setPreviewImage(null)} /> : null}
         </div>
     );
 }
 
-function AssistantReferenceChip({ item, label, onRemove, onSelect, disabled }: { item: CanvasAssistantReference; label?: string; onRemove?: () => void; onSelect?: () => unknown; disabled?: boolean }) {
+function AssistantReferenceChip({ item, label, onRemove, onPreview, onSelect, disabled }: { item: CanvasAssistantReference; label?: string; onRemove?: () => void; onPreview?: () => unknown; onSelect?: () => unknown; disabled?: boolean }) {
     const t = useUiText();
     const displayLabel = label ? conversationImageLabel(label) : undefined;
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
@@ -2262,7 +2268,7 @@ function AssistantReferenceChip({ item, label, onRemove, onSelect, disabled }: {
     return (
         <div className="group/chip relative inline-flex max-w-[150px] shrink-0 items-center gap-1.5 rounded-lg text-sm" style={{ color: theme.node.text }}>
             {item.dataUrl || item.storageKey ? (
-                onSelect ? <button type="button" disabled={disabled} onClick={onSelect} aria-label={t("选择 {label} 作为编辑目标", { label: displayLabel || item.title })} className="relative block size-20 shrink-0 rounded-lg border focus-visible:outline-2" style={{ borderColor: theme.node.stroke, outlineColor: theme.canvas.selectionStroke }}>{preview}</button>
+                onPreview || onSelect ? <button type="button" disabled={disabled} onClick={onPreview || onSelect} aria-haspopup={onPreview ? "dialog" : undefined} aria-label={onPreview ? `${t("查看大图")} · ${displayLabel || item.title}` : t("选择 {label} 作为编辑目标", { label: displayLabel || item.title })} className={`relative block size-20 shrink-0 rounded-lg border focus-visible:outline-2${onPreview ? " cursor-zoom-in" : ""}`} style={{ borderColor: theme.node.stroke, outlineColor: theme.canvas.selectionStroke }}>{preview}</button>
                     : <span className="relative block size-20 shrink-0 rounded-lg border" style={{ borderColor: theme.node.stroke }}>{preview}</span>
             ) : (
                 <span className="grid size-8 place-items-center rounded-lg border text-sm font-medium" style={{ background: theme.node.panel, borderColor: theme.node.activeStroke }}>

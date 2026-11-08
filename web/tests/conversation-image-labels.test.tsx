@@ -4,7 +4,9 @@ import React, { type ReactElement } from "react";
 import ts from "typescript";
 import { conversationImageLabel } from "@/components/conversation-image-controls";
 import { canvasThemes } from "@/lib/canvas-theme";
+import { canvasConversationImageForAsset, canvasConversationImages } from "@/lib/canvas/canvas-assistant-image-catalog";
 import { setUiLocale, setUiPathname, uiText } from "@/lib/i18n";
+import { CanvasNodeType, type CanvasAssistantMessage } from "@/types/canvas";
 
 afterEach(async () => { setUiPathname("/"); await setUiLocale("zh-CN"); });
 
@@ -103,17 +105,78 @@ test("canvas image preview localizes accessibility text without changing the sel
     expect(image.label).toBe("图2");
 });
 
-test("canvas reference chips localize canonical and original labels but not user titles", async () => {
+test("canvas reference chips localize preview labels without selecting an editing target or changing user titles", async () => {
     await setUiLocale("en-US");
     const render = component("components/canvas/canvas-assistant-panel.tsx", "AssistantReferenceChip");
     const item = { id: "saved-reference", title: "图4", dataUrl: "data:image/png;base64,AQID" };
+    const opened: string[] = [], selected: string[] = [];
     for (const [label, display] of [["图4", "Image 4"], ["原图4", "Original 4"], ["Image 4", "Image 4"], [undefined, "图4"]]) {
-        const tree = elements(render({ item, label, onSelect() {} }));
-        expect(tree.find(node => node.type === "button")!.props["aria-label"]).toBe(`Select ${display} as the editing target`);
+        const tree = elements(render({ item, label, onPreview: () => opened.push(display!), onSelect: () => selected.push(display!) }));
+        const button = tree.find(node => node.type === "button")!;
+        expect(button.props["aria-label"]).toBe(`View full image · ${display}`);
+        expect(button.props["aria-haspopup"]).toBe("dialog");
+        button.props.onClick();
         if (label) expect(tree.some(node => node.type === "span" && node.props.children === display)).toBe(true);
         expect(tree.find(node => node.type === "preview")!.props.alt).toBe(item.title);
     }
+    expect(opened).toEqual(["Image 4", "Original 4", "Image 4", "图4"]);
+    expect(selected).toEqual([]);
     expect(item.title).toBe("图4");
+});
+
+test("historical reference preview keeps canonical identity and the stored original including a recovered node key", () => {
+    for (const source of [
+        { dataUrl: "data:image/png;base64,THUMBNAIL", storageKey: "image:original", expectedKey: "image:original" },
+        { dataUrl: "blob:expired-reference", storageKey: undefined, expectedKey: "image:recovered-original" },
+    ]) {
+        const reference = { id: "source-node", type: CanvasNodeType.Image, title: "原款.png", dataUrl: source.dataUrl, storageKey: source.storageKey };
+        const message: CanvasAssistantMessage = { id: "historical-message", role: "user", text: "只讨论", references: [reference] };
+        const nodes = [{ id: reference.id, type: CanvasNodeType.Image, metadata: { storageKey: "image:recovered-original" } }];
+        const images = canvasConversationImages([message]);
+        const before = structuredClone({ message, nodes, images });
+        let preview: unknown = null;
+        const render = component("components/canvas/canvas-assistant-panel.tsx", "MessageReferences", {
+            CanvasNodeType, canvasConversationImageForAsset, AssistantReferenceChip: "reference-chip",
+            useState: () => [preview, (next: unknown) => { preview = next; }],
+        });
+        const props = { message, nodes, images, disabled: true };
+        const chip = elements(render(props)).find(node => node.type === "reference-chip")!;
+        expect(chip.props.item.storageKey).toBe(source.expectedKey);
+        expect(chip.props.disabled).toBe(false);
+        expect(chip.props.onSelect).toBeUndefined();
+        chip.props.onPreview();
+        const opened = elements(render(props)).find(node => node.type === "full-image-preview")!;
+        expect(opened.props.image).toEqual({ id: images[0]!.id, label: "图1", name: reference.title,
+            dataUrl: source.dataUrl, storageKey: source.expectedKey, unavailableReason: undefined });
+        expect(opened.key).toBe(images[0]!.id);
+        opened.props.onClose();
+        expect(elements(render(props)).some(node => node.type === "full-image-preview")).toBe(false);
+        expect({ message, nodes, images }).toEqual(before);
+    }
+});
+
+test("historical preview remount key includes session and project changes for the same employee", () => {
+    const path = "components/canvas/canvas-assistant-panel.tsx";
+    const scopeFor = (project: string, session: string) => evaluate(path, ast => {
+        const declaration = findNode(ast, node => ts.isVariableDeclaration(node) && node.name.getText(ast) === "attachmentScope");
+        return declaration && ts.isVariableDeclaration(declaration) ? declaration.initializer : undefined;
+    }, { onlineProjectId: project, attachmentOwner: "authenticated:employee-a", activeSession: { id: session } });
+    const referenceKey = (attachmentScope: string) => (evaluate(path, ast => findNode(ast, node =>
+        ts.isJsxSelfClosingElement(node) && node.tagName.getText(ast) === "MessageReferences"), {
+        React, MessageReferences: "message-references", attachmentScope, message: {}, messageReferenceNodes: [], conversationImages: [],
+    }) as ReactElement).key;
+    const oldScope = scopeFor("project-a", "session-a");
+    expect(referenceKey(oldScope)).toBe(oldScope);
+    for (const nextScope of [scopeFor("project-a", "session-b"), scopeFor("project-b", "session-a")]) {
+        expect(referenceKey(nextScope)).toBe(nextScope);
+        expect(referenceKey(nextScope)).not.toBe(referenceKey(oldScope));
+    }
+    // The memo must recompute the actual keyed JSX when this scope changes.
+    const source = readFileSync(new URL(`../src/${path}`, import.meta.url), "utf8");
+    const ast = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+    const declaration = findNode(ast, node => ts.isVariableDeclaration(node) && node.name.getText(ast) === "messageItems") as ts.VariableDeclaration;
+    const dependencies = (declaration.initializer as ts.CallExpression).arguments[1] as ts.ArrayLiteralExpression;
+    expect(dependencies.elements.map(node => node.getText(ast))).toContain("attachmentScope");
 });
 
 test("online canvas conversation-only images retain labels preview download and region tools without base selectors", () => {

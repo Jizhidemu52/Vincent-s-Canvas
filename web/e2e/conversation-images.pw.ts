@@ -31,8 +31,8 @@ async function savedChat(page: Page) {
     });
 }
 
-async function inspectOriginal(page: Page, card: Locator, expected: Buffer, screenshotPath?: string) {
-    await card.getByRole("button", { name: /^查看大图 · / }).click();
+async function inspectOriginal(page: Page, card: Locator, expected: Buffer, screenshotPath?: string, alreadyOpen = false) {
+    if (!alreadyOpen) await card.getByRole("button", { name: /^查看大图 · / }).click();
     const preview = page.getByRole("dialog");
     await expect(preview.getByRole("button", { name: "下载原图", exact: true })).toBeVisible();
     const picture = preview.locator("img").first();
@@ -229,6 +229,111 @@ function canvasHistory(api: MockCanvasApi) {
     api.documents.set(id, { id, revision: 1, document, deleted: false, updatedAt: now });
     return id;
 }
+
+test("canvas historical reference opens its original without selecting a target or changing the conversation", async ({ page, context, api }, info) => {
+    await models(context);
+    const project = canvasHistory(api);
+    const session = api.document(project)!.chatSessions[0];
+    const reference = session.messages[0].references[0];
+    session.messages = [
+        { id: "upload-message", role: "user", text: "只讨论这张原款，不生成图片。", references: [reference], contextReferences: [reference] },
+        { id: "discussion-answer", role: "assistant", text: "已确认，只讨论，不修改图片。" },
+        { id: "followup-message", role: "user", text: "保持原来的要求。", references: [], contextReferences: [reference] },
+    ];
+    session.focusImageId = "chat-image:upload-message:reference:0:original";
+    session.focusRevision = 7;
+    const modelPosts: string[] = [];
+    context.on("request", request => {
+        if (request.method() === "POST" && /\/api\/(?:chat\/responses|prompt-compilations|tasks)(?:[/?]|$)/u.test(request.url())) modelPosts.push(request.url());
+    });
+    await page.goto(`/canvas/${project}`);
+    await page.getByRole("button", { name: "跟我走一遍", exact: true }).click();
+    await page.getByRole("button", { name: "跳过引导", exact: true }).click();
+    await page.getByRole("tab", { name: "对话", exact: true }).first().click();
+    const panel = page.locator(".cw-agent-panel");
+    const chip = panel.locator(".group\\/chip").filter({ has: page.getByRole("img", { name: "原款.png", exact: true }) });
+    await expect(chip).toHaveCount(1);
+    const composer = panel.locator("textarea").last();
+    await composer.fill("保留这段未发送草稿，不要自动选择底图。");
+    const before = structuredClone(api.document(project)!.chatSessions);
+    // Reproduce the real historical-reference click, not a generated-result card.
+    await chip.getByRole("img", { name: "原款.png", exact: true }).click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    const integrity = await inspectOriginal(page, chip, IMAGE, info.outputPath("canvas-history-reference-preview.png"), true);
+    await info.attach("historical-reference-original-integrity", { body: JSON.stringify(integrity), contentType: "application/json" });
+    const previewButton = chip.getByRole("button", { name: "查看大图 · 图1", exact: true });
+    await previewButton.focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("dialog").getByRole("button", { name: "下载原图", exact: true })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(composer).toHaveValue("保留这段未发送草稿，不要自动选择底图。");
+    await expect(panel.locator("[data-image-agent-focus], [data-testid='conversation-image-target']")).toHaveCount(0);
+    await expect(panel.getByRole("button", { name: /作为编辑目标/u })).toHaveCount(0);
+    expect(api.document(project)!.chatSessions).toEqual(before);
+    expect(modelPosts).toEqual([]);
+    expect(api.submissions).toHaveLength(0);
+});
+
+test("canvas historical references reject missing originals without substituting a thumbnail", async ({ page, context, api }, info) => {
+    await models(context);
+    const project = canvasHistory(api);
+    const session = api.document(project)!.chatSessions[0];
+    const original = session.messages[0].references[0];
+    const missingId = "00000000-0000-4000-8000-000000000091";
+    session.messages = [{ id: "upload-message", role: "user", text: "已保存的历史参考图。", references: [original, { ...original, id: missingId, title: "失效原件.png", dataUrl: `/api/assets/${missingId}/content` }] }];
+    await context.route(`**/api/assets/${missingId}/content`, route => route.fulfill({ status: 410, body: "Original unavailable" }));
+    await page.goto(`/canvas/${project}`);
+    await page.getByRole("button", { name: "跟我走一遍", exact: true }).click();
+    await page.getByRole("button", { name: "跳过引导", exact: true }).click();
+    await page.getByRole("tab", { name: "对话", exact: true }).first().click();
+    const panel = page.locator(".cw-agent-panel");
+    const missing = panel.locator(".group\\/chip").filter({ has: page.getByRole("img", { name: "失效原件.png", exact: true }) });
+    // A valid cached/server thumbnail must not become the downloadable original.
+    await expect.poll(() => missing.getByRole("img").evaluate(image => (image as HTMLImageElement).naturalWidth)).toBe(256);
+    await missing.getByRole("button", { name: "查看大图 · 图2", exact: true }).click();
+    await expect(page.getByRole("dialog").getByRole("alert")).toHaveText("原图暂时无法读取");
+    await expect(page.getByRole("dialog").getByRole("button", { name: "下载原图", exact: true })).toHaveCount(0);
+    await page.getByRole("dialog").screenshot({ path: info.outputPath("canvas-history-missing-original.png"), animations: "disabled" });
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    expect(api.submissions).toHaveLength(0);
+});
+
+test("canvas historical reference preview stays read-only during planning and closes on employee change", async ({ page, context, api }) => {
+    await models(context);
+    const project = canvasHistory(api);
+    const plans: any[] = [];
+    let heldPlanner: Route | undefined;
+    await context.route("**/api/chat/responses", route => { plans.push(route.request().postDataJSON()); heldPlanner = route; });
+    await page.goto(`/canvas/${project}`);
+    await page.getByRole("button", { name: "跟我走一遍", exact: true }).click();
+    await page.getByRole("button", { name: "跳过引导", exact: true }).click();
+    await page.getByRole("tab", { name: "对话", exact: true }).first().click();
+    const panel = page.locator(".cw-agent-panel");
+    await panel.locator("textarea").last().fill("先继续讨论");
+    await panel.getByRole("button", { name: "发送", exact: true }).click();
+    await expect.poll(() => Boolean(heldPlanner)).toBe(true);
+    const available = panel.locator(".group\\/chip").filter({ has: page.getByRole("img", { name: "原款.png", exact: true }) }).first();
+    const previewButton = available.getByRole("button", { name: "查看大图 · 图1", exact: true });
+    await expect(previewButton).toBeEnabled();
+    await previewButton.focus(); await page.keyboard.press("Space");
+    await expect(page.getByRole("dialog").getByRole("button", { name: "下载原图", exact: true })).toBeVisible();
+    expect(plans).toHaveLength(1); expect(api.submissions).toHaveLength(0);
+    await page.keyboard.press("Escape");
+    await heldPlanner!.fulfill({ json: { content: "只讨论，没有生成图片。", toolCalls: [] } });
+    await expect(panel.getByText("只讨论，没有生成图片。", { exact: true })).toBeVisible();
+    await previewButton.click();
+    await expect(page.getByRole("dialog").getByRole("button", { name: "下载原图", exact: true })).toBeVisible();
+    let ownerReads = 0;
+    await context.route("**/api/auth/session", route => { ownerReads++; return route.fulfill({ json: { user: { id: "00000000-0000-4000-8000-000000000088", username: "second", displayName: "第二员工", role: "designer", status: "active", creditBalance: 999 } } }); });
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect.poll(() => ownerReads).toBeGreaterThan(0);
+    await expect(page.getByRole("heading", { name: "登录状态已变化，工作区已暂停", exact: true })).toBeVisible();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "下载原图", exact: true })).toHaveCount(0);
+    expect(plans).toHaveLength(1); expect(api.submissions).toHaveLength(0);
+});
 
 test("canvas image preview preserves original bytes while older-version and original requests stay conversational", async ({ page, context, api }, info) => {
     await models(context);
