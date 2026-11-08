@@ -189,7 +189,7 @@ test("standard color load failure is explicit and retries only on click, with in
     localOnly(api, posts);
 });
 
-test("photo sampling maps real pixels and precise keys, ignores transparency, and applies a confirmed nearest color", async ({ page, api }, info) => {
+for (const layout of ["default", "viewport change"] as const) test(`photo sampling maps real pixels and precise keys, ignores transparency, and applies a confirmed nearest color (${layout})`, async ({ page, api }, info) => {
     const posts = watchPosts(page);
     await page.goto("/creative/garment-colorway");
     const bytes = await makeRaster(page, "colors");
@@ -200,6 +200,7 @@ test("photo sampling maps real pixels and precise keys, ignores transparency, an
     await modal.getByText("从已上传的款式图取色", { exact: true }).click();
     const sampler = modal.getByRole("button", { name: "衣服照片取色", exact: true });
     await expect(sampler).toBeVisible();
+    await expect(modal).not.toHaveClass(/\bant-zoom-(?:appear|enter)\b/);
     const photo = sampler.getByRole("img"); const box = (await photo.boundingBox())!;
     // MouseEvent client coordinates are integral; ceil the source pixel boundary
     // so a fractional CSS top does not select the preceding row.
@@ -210,7 +211,11 @@ test("photo sampling maps real pixels and precise keys, ignores transparency, an
     await expect(modal.getByText("取色位置：横向 34，纵向 33", { exact: true })).toBeVisible();
     await sampler.press("Enter");
     await expect(modal.getByRole("textbox", { name: "参考色", exact: true })).toHaveValue("#00FF00");
-    await page.mouse.click(box.x + 32.5 / 128 * box.width, box.y + 90.5 / 96 * box.height);
+    if (layout === "viewport change") await page.setViewportSize({ width: 960, height: 720 });
+    // Sampling and keyboard focus can reflow/scroll the dialog. Let the locator
+    // resolve its current position instead of reusing the first viewport box.
+    const transparentPoint = await photo.evaluate(image => ({ x: 32.5 / 128 * image.clientWidth, y: 90.5 / 96 * image.clientHeight }));
+    await photo.click({ position: transparentPoint });
     await expect(modal.getByText("此处为透明像素，请选择衣服上的其他位置", { exact: true })).toBeVisible();
     await expect(modal.getByRole("textbox", { name: "参考色", exact: true })).toHaveValue("#00FF00");
     await expect(modal.locator("button.sc-card")).toHaveCount(48);
