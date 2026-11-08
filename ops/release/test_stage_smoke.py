@@ -405,14 +405,18 @@ class StageIsolationTests(unittest.TestCase):
             def inspect(*arguments):
                 identity = arguments[-1]
                 return [{"Id": identity, "Os": "linux", "Architecture": "amd64", "Config": {"Labels": {"org.opencontainers.image.revision": state["commit"], "io.canvas.stage.kind": "browser-runner"}}}]
-            def save(arguments, output=None):
+            ci_host = "unix:///home/runner/setup-docker-action/run-test/docker.sock"
+            def execute(docker_host, *arguments):
+                self.assertEqual(docker_host, ci_host)
+                if arguments[:2] == ("image", "inspect"):
+                    return json.dumps(inspect(*arguments)).encode()
                 calls.append(arguments)
                 stage.write_new(Path(arguments[arguments.index("-o") + 1]), "fake tool images for unit test")
                 return b""
-            with patch.object(package.subprocess, "check_output", side_effect=[release["commit"].encode(), b""]), patch.object(package.stage, "docker_json", side_effect=inspect), patch.object(package.stage, "command", side_effect=save):
-                manifest = package.package(repository, release_root, receipt_path, state["images"]["browser"], destination)
-            self.assertEqual(calls[0][:3], ["docker", "image", "save"])
-            self.assertEqual(set(calls[0][5:]), {state["images"][role] for role in stage.ROLES})
+            with patch.object(package.subprocess, "check_output", side_effect=[release["commit"].encode(), b""]), patch.object(package, "docker_command", side_effect=execute):
+                manifest = package.package(repository, release_root, receipt_path, state["images"]["browser"], destination, ci_host)
+            self.assertEqual(calls[0][:2], ("image", "save"))
+            self.assertEqual(set(calls[0][4:]), {state["images"][role] for role in stage.ROLES})
             self.assertNotIn(state["images"]["api"], calls[0])
             self.assertNotIn(state["images"]["web"], calls[0])
             self.assertEqual(set(stage.verify_files(destination, manifest)), {"stage-images.tar", "stage-smoke.py", "stage-smoke-README.md"} | {"scripts/" + name for name in stage.SCRIPT_FILES})
@@ -421,6 +425,43 @@ class StageIsolationTests(unittest.TestCase):
                 self.assertNotIn("release-manifest.json", archive.getnames())
                 self.assertIn("stage-tools-manifest.json", archive.getnames())
             self.assertTrue(Path(str(destination.with_suffix(".tar")) + ".sha256").is_file())
+
+    def test_ci_packager_uses_explicit_local_socket_without_changing_target_default(self):
+        host = "unix:///home/runner/setup-docker-action/run-test/docker.sock"
+        with patch.dict(os.environ, {"DOCKER_HOST": host, "COMPOSE_PROJECT_NAME": "unrelated", "HTTPS_PROXY": "http://proxy"}, clear=True), \
+                patch.object(package.subprocess, "run") as run:
+            run.return_value.returncode = 0
+            run.return_value.stdout = b"[]"
+            self.assertEqual(package.docker_command(host, "image", "inspect", "sha256:" + "a" * 64), b"[]")
+            self.assertEqual(run.call_args[0][0][:5], ["docker", "--host", host, "image", "inspect"])
+            self.assertEqual(run.call_args[1]["env"], {})
+            self.assertEqual(run.call_args[1]["timeout"], 1800)
+        with patch.dict(os.environ, {}, clear=True), patch.object(package.stage, "command", return_value=b"local") as command:
+            self.assertEqual(package.docker_command(None, "version"), b"local")
+            command.assert_called_once_with(["docker", "version"])
+
+    def test_ci_packager_rejects_remote_implicit_or_ambiguous_hosts_before_commands(self):
+        host = "unix:///tmp/ci-docker.sock"
+        cases = [(None, {"DOCKER_HOST": host}, "EXPLICIT_CI_DOCKER_HOST_REQUIRED"),
+                 (host, {"DOCKER_HOST": "unix:///tmp/other.sock"}, "DOCKER_HOST_MISMATCH")]
+        for remote in ("tcp://192.0.2.1:2375", "ssh://production", "unix://remote/socket", "unix:///", "unix:///tmp/socket?x=1", "unix:///tmp/socket#x", "unix:///tmp/bad\nsocket"):
+            cases.append((remote, {"DOCKER_HOST": remote}, "LOCAL_UNIX_DOCKER_HOST_REQUIRED"))
+        for key in ("DOCKER_CONTEXT", "DOCKER_TLS_VERIFY", "DOCKER_CERT_PATH"):
+            cases.append((host, {"DOCKER_HOST": host, key: "unexpected"}, "IMPLICIT_DOCKER_OVERRIDE_REFUSED"))
+        for argument, environment, message in cases:
+            with self.subTest(argument=argument, environment=environment), patch.dict(os.environ, environment, clear=True), \
+                    patch.object(package.subprocess, "run") as run, patch.object(package.stage, "command") as command:
+                with self.assertRaisesRegex(package.stage.Rejected, message):
+                    package.docker_command(argument, "image", "inspect", "sha256:" + "a" * 64)
+                run.assert_not_called()
+                command.assert_not_called()
+
+    def test_ci_packager_command_failure_is_not_reported_as_success(self):
+        host = "unix:///tmp/ci-docker.sock"
+        with patch.dict(os.environ, {"DOCKER_HOST": host}, clear=True), patch.object(package.subprocess, "run") as run:
+            run.return_value.returncode = 1
+            with self.assertRaisesRegex(package.stage.Rejected, "CI_DOCKER_COMMAND_FAILED"):
+                package.docker_command(host, "image", "save", "-o", "never-created.tar", "sha256:" + "a" * 64)
 
     def test_bundled_scripts_parse_with_python_37_grammar_and_runner_lock_matches_project(self):
         for name in ("stage-smoke.py", "stage-smoke-package.py"):

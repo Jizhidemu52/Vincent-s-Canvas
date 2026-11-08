@@ -100,7 +100,11 @@ import json,sys
 marker=json.load(open(sys.argv[1])); candidate=json.load(open(sys.argv[2]))
 assert marker=={'schema':1,'version':candidate['version'],'commit':candidate['commit']}
 PY
-python3 -B "$repo/ops/release/verify-container-worker.py" \
+# The pinned CI daemon publishes a local DOCKER_HOST. Pass it explicitly so
+# the read-only probe checks this same daemon, never an implicit remote one.
+worker_docker_args=()
+if [[ -n ${DOCKER_HOST:-} ]]; then worker_docker_args=(--docker-host "$DOCKER_HOST"); fi
+python3 -B "$repo/ops/release/verify-container-worker.py" "${worker_docker_args[@]}" \
   --container "$(dc ps -q web)" --base-url "http://127.0.0.1:$port" \
   --expected-image-id "$web_id" --expected-commit "$commit" \
   --output "$work/pdf-worker-http.json"

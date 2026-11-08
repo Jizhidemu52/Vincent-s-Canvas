@@ -37,6 +37,7 @@ def main():
     parser.add_argument("--expected-image-id", required=True)
     parser.add_argument("--expected-commit", required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--docker-host", help="Explicit local Unix socket used by the isolated CI stack")
     args = parser.parse_args()
     require(re.fullmatch(r"[a-f0-9]{12,64}", args.container), "EXACT_CONTAINER_ID_REQUIRED")
     require(re.fullmatch(r"sha256:[a-f0-9]{64}", args.expected_image_id), "EXACT_IMAGE_ID_REQUIRED")
@@ -48,19 +49,31 @@ def main():
     require(not args.output.exists(), "NEW_RECEIPT_REQUIRED")
     require(args.output.parent.is_dir(), "EXISTING_EVIDENCE_DIRECTORY_REQUIRED")
     require(shutil.which("docker"), "LOCAL_DOCKER_CLI_REQUIRED")
-    require(not any(os.environ.get(key) for key in ("DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_TLS_VERIFY", "DOCKER_CERT_PATH")),
+    require(not any(os.environ.get(key) for key in ("DOCKER_CONTEXT", "DOCKER_TLS_VERIFY", "DOCKER_CERT_PATH")),
             "IMPLICIT_DOCKER_OVERRIDE_REFUSED")
+    if args.docker_host is not None:
+        host = urlsplit(args.docker_host)
+        require(host.scheme == "unix" and not host.netloc and host.path.startswith("/")
+                and host.path != "/" and not host.query and not host.fragment
+                and not re.search(r"\s", args.docker_host), "LOCAL_UNIX_DOCKER_HOST_REQUIRED")
+        require(os.environ.get("DOCKER_HOST", args.docker_host) == args.docker_host, "DOCKER_HOST_MISMATCH")
+    else:
+        require(not os.environ.get("DOCKER_HOST"), "IMPLICIT_DOCKER_OVERRIDE_REFUSED")
 
     def command(*values):
         result = subprocess.run(["docker", *values], check=True, capture_output=True, timeout=30)
         return result.stdout
 
-    context = command("context", "show").decode().strip()
-    require(context and not re.search(r"\s", context), "DOCKER_CONTEXT_INVALID")
-    endpoint = json.loads(command("context", "inspect", context, "--format", "{{json .Endpoints.docker.Host}}"))
-    require(isinstance(endpoint, str) and (endpoint.startswith("unix:///") or endpoint.startswith("npipe:////./pipe/")),
-            "LOCAL_DOCKER_ENDPOINT_REQUIRED")
-    container, = json.loads(command("--context", context, "inspect", args.container))
+    if args.docker_host is not None:
+        docker_selector = ["--host", args.docker_host]
+    else:
+        context = command("context", "show").decode().strip()
+        require(context and not re.search(r"\s", context), "DOCKER_CONTEXT_INVALID")
+        endpoint = json.loads(command("context", "inspect", context, "--format", "{{json .Endpoints.docker.Host}}"))
+        require(isinstance(endpoint, str) and (endpoint.startswith("unix:///") or endpoint.startswith("npipe:////./pipe/")),
+                "LOCAL_DOCKER_ENDPOINT_REQUIRED")
+        docker_selector = ["--context", context]
+    container, = json.loads(command(*docker_selector, "inspect", args.container))
     labels = container["Config"].get("Labels") or {}
     project = labels.get("com.docker.compose.project", "")
     require(re.fullmatch(r"ci-release-[0-9]+-[0-9]+-(amd64|arm64)", project), "ISOLATED_RELEASE_STACK_REQUIRED")
@@ -68,15 +81,15 @@ def main():
     require(container["State"]["Running"] is True and container["Image"] == args.expected_image_id, "RUNNING_IMAGE_ID_MISMATCH")
     ports = container["NetworkSettings"]["Ports"].get("3000/tcp")
     require(ports == [{"HostIp": "127.0.0.1", "HostPort": str(base.port)}], "CONTAINER_HTTP_PORT_MISMATCH")
-    image, = json.loads(command("--context", context, "image", "inspect", args.expected_image_id))
+    image, = json.loads(command(*docker_selector, "image", "inspect", args.expected_image_id))
     require(image["Os"] == "linux", "LINUX_IMAGE_REQUIRED")
     require(image["Architecture"] == project.rsplit("-", 1)[1], "IMAGE_PLATFORM_MISMATCH")
     require(image["Config"]["Labels"].get("org.opencontainers.image.revision") == args.expected_commit, "IMAGE_COMMIT_MISMATCH")
 
     def file_bytes(path):
-        return command("--context", context, "exec", args.container, "cat", path)
+        return command(*docker_selector, "exec", args.container, "cat", path)
 
-    assets = command("--context", context, "exec", args.container, "find", "/usr/share/nginx/html/assets", "-maxdepth", "1", "-type", "f").decode().splitlines()
+    assets = command(*docker_selector, "exec", args.container, "find", "/usr/share/nginx/html/assets", "-maxdepth", "1", "-type", "f").decode().splitlines()
     require(not any(re.fullmatch(r"/usr/share/nginx/html/assets/pdf\.worker-[A-Za-z0-9_-]+\.(?:mjs|js)", path) for path in assets),
             "LEGACY_NON_MINIFIED_PDF_WORKER_NOT_ALLOWED")
     workers = [path for path in assets if re.fullmatch(r"/usr/share/nginx/html/assets/pdf\.worker\.min-[A-Za-z0-9_-]+\.mjs", path)]

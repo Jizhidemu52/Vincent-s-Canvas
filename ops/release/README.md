@@ -4,6 +4,8 @@
 
 发布 job 固定 Ubuntu 24.04、Docker Engine 28.0.4 与 classic `overlay2` image store，启动后核对实际版本和存储驱动；不继承 runner 的可变 Docker 默认值，也不修改目标服务器的 daemon。导出后，`verify-image-export.py` 在 CI 内只读核对 APP / TOOLS 的完整 config image ID 集合以及各层未压缩 SHA256 与 `rootfs.diff_ids` 的顺序一致性；不接受 OCI index 充当 config 或压缩层冒充 classic 层。两个检查通过才上传，仍须保留目标同镜像隔离验收。
 
+CI 的 PDF Worker 探针与工具包导出通过 `--docker-host` 显式绑定该隔离 daemon 的本机 Unix socket，并校验它与当前栈的 `DOCKER_HOST` 一致；远程地址、冲突 context/TLS 环境仍拒绝。容器、镜像、commit、平台及回执约束不变；目标端 `stage-smoke.py` 继续固定使用本机默认 socket，不继承这些 CI 设置。
+
 ## 操作入口
 
 验收环境中，仅 Web 同时连接内部业务网络和独立入口网络，并只向宿主 `127.0.0.1` 发布端口；API、Worker、合成 Provider 和数据服务仅连接内部网络。Docker 不会为仅连接 `internal` 网络的容器建立宿主端口映射，因此必须验证实际端口和浏览器入口，而不只检查容器健康。

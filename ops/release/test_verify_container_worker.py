@@ -64,8 +64,13 @@ class WorkerReceiptTests(unittest.TestCase):
                 200, {"Content-Type": mime, "X-Content-Type-Options": "nosniff",
                       "Cache-Control": "public, max-age=31536000, immutable"}, self.files[filename]]
         self.requests = []
+        self.environment = {}
+        self.extra_arguments = []
+        self.docker_selector = ["--context", "default"]
+        self.docker_calls = []
 
     def docker(self, arguments, **kwargs):
+        self.docker_calls.append(arguments)
         self.assertEqual(kwargs, {"check": True, "capture_output": True, "timeout": 30})
         self.assertEqual(arguments[0], "docker")
         values = arguments[1:]
@@ -74,7 +79,7 @@ class WorkerReceiptTests(unittest.TestCase):
         elif values == ["context", "inspect", "default", "--format", "{{json .Endpoints.docker.Host}}"]:
             data = json.dumps(self.endpoint).encode()
         else:
-            self.assertEqual(values[:2], ["--context", "default"])
+            self.assertEqual(values[:2], self.docker_selector)
             values = values[2:]
             if values == ["inspect", self.container_id]:
                 data = json.dumps([self.container]).encode()
@@ -101,8 +106,8 @@ class WorkerReceiptTests(unittest.TestCase):
     def run_check(self):
         arguments = [str(SCRIPT), "--container", self.container_id,
                      "--base-url", "http://127.0.0.1:41234", "--expected-image-id", self.image_id,
-                     "--expected-commit", self.commit, "--output", str(self.output)]
-        with patch.object(check.sys, "argv", arguments), patch.dict(check.os.environ, {}, clear=True), \
+                     "--expected-commit", self.commit, "--output", str(self.output), *self.extra_arguments]
+        with patch.object(check.sys, "argv", arguments), patch.dict(check.os.environ, self.environment, clear=True), \
                 patch.object(check.shutil, "which", return_value="docker"), \
                 patch.object(check.subprocess, "run", side_effect=self.docker), \
                 patch.object(check, "build_opener", return_value=SimpleNamespace(open=self.open)) as opener_factory, \
@@ -254,11 +259,63 @@ class WorkerReceiptTests(unittest.TestCase):
         self.assert_failure("LOCAL_DOCKER_ENDPOINT_REQUIRED")
         self.assertEqual(self.requests, [])
 
+    def explicit_ci_host(self, host="unix:///home/runner/setup-docker-action/run-0ffa6120/docker.sock"):
+        self.environment = {"DOCKER_HOST": host}
+        self.extra_arguments = ["--docker-host", host]
+        self.docker_selector = ["--host", host]
+
+    def test_explicit_ci_local_socket_binds_every_docker_command(self):
+        self.explicit_ci_host()
+        self.run_check()
+        self.assertEqual(json.loads(self.output.read_text())["status"], "passed")
+        self.assertGreater(len(self.docker_calls), 3)
+        self.assertTrue(all(call[1:3] == self.docker_selector for call in self.docker_calls))
+
+    def test_implicit_host_is_still_refused_before_docker_or_http(self):
+        self.environment = {"DOCKER_HOST": "unix:///var/run/docker.sock"}
+        self.assert_failure("IMPLICIT_DOCKER_OVERRIDE_REFUSED")
+        self.assertEqual(self.docker_calls, [])
+        self.assertEqual(self.requests, [])
+
+    def test_explicit_remote_or_malformed_host_is_refused_before_docker(self):
+        for host in ("tcp://192.0.2.1:2375", "ssh://production", "unix://remote/docker.sock",
+                     "unix:///", "unix:///tmp/docker.sock?remote=1", "unix:///tmp/docker.sock#ignored",
+                     "unix:///tmp/bad\nsocket"):
+            with self.subTest(host=host):
+                self.explicit_ci_host(host)
+                self.assert_failure("LOCAL_UNIX_DOCKER_HOST_REQUIRED")
+                self.assertEqual(self.docker_calls, [])
+                self.assertEqual(self.requests, [])
+
+    def test_explicit_host_must_match_the_stack_environment(self):
+        self.explicit_ci_host()
+        self.environment["DOCKER_HOST"] = "unix:///var/run/different.sock"
+        self.assert_failure("DOCKER_HOST_MISMATCH")
+        self.assertEqual(self.docker_calls, [])
+
+    def test_explicit_host_cannot_hide_other_docker_overrides(self):
+        for key, value in (("DOCKER_CONTEXT", "other"), ("DOCKER_TLS_VERIFY", "1"),
+                           ("DOCKER_CERT_PATH", "/tmp/certs")):
+            with self.subTest(key=key):
+                self.explicit_ci_host()
+                self.environment[key] = value
+                self.assert_failure("IMPLICIT_DOCKER_OVERRIDE_REFUSED")
+                self.assertEqual(self.docker_calls, [])
+
+    def test_explicit_host_keeps_container_and_commit_identity_checks(self):
+        self.explicit_ci_host()
+        self.container["Image"] = "sha256:" + "d" * 64
+        self.assert_failure("RUNNING_IMAGE_ID_MISMATCH")
+        self.container["Image"] = self.image_id
+        self.image["Config"]["Labels"]["org.opencontainers.image.revision"] = "e" * 40
+        self.assert_failure("IMAGE_COMMIT_MISMATCH")
+        self.assertEqual(self.requests, [])
+
 
 class ReleaseIntegrationTests(unittest.TestCase):
     def test_real_probe_is_mandatory_inside_live_stack_before_browser_and_sealing(self):
         script = SCRIPT.with_name("stack-smoke.sh").read_text(encoding="utf-8")
-        invocation = 'python3 -B "$repo/ops/release/verify-container-worker.py" \\\n  --container "$(dc ps -q web)" --base-url "http://127.0.0.1:$port" \\\n  --expected-image-id "$web_id" --expected-commit "$commit" \\\n  --output "$work/pdf-worker-http.json"'
+        invocation = 'python3 -B "$repo/ops/release/verify-container-worker.py" "${worker_docker_args[@]}" \\\n  --container "$(dc ps -q web)" --base-url "http://127.0.0.1:$port" \\\n  --expected-image-id "$web_id" --expected-commit "$commit" \\\n  --output "$work/pdf-worker-http.json"'
         self.assertEqual(script.count(invocation), 1)
         marker = script.index("assert marker=={'schema':1,'version':candidate['version'],'commit':candidate['commit']}")
         probe = script.index(invocation)
@@ -269,6 +326,7 @@ class ReleaseIntegrationTests(unittest.TestCase):
         self.assertLess(probe, browser)
         self.assertLess(browser, seal)
         self.assertIn("set -Eeuo pipefail", script)
+        self.assertIn('if [[ -n ${DOCKER_HOST:-} ]]; then worker_docker_args=(--docker-host "$DOCKER_HOST"); fi', script)
 
     def test_existing_ci_discovers_offline_tests_and_archives_public_receipt(self):
         root = SCRIPT.parents[2]

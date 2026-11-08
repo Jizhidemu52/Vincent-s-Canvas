@@ -2,11 +2,14 @@
 """CI-only packaging of already-used infrastructure plus a browser tool image."""
 import argparse
 import importlib.util
+import json
+import os
 from pathlib import Path
 import re
 import shutil
 import subprocess
 import tarfile
+from urllib.parse import urlsplit
 
 spec = importlib.util.spec_from_file_location("stage_smoke", str(Path(__file__).with_name("stage-smoke.py")))
 stage = importlib.util.module_from_spec(spec)
@@ -21,7 +24,26 @@ def validate_infra(receipt, release):
     stage.require(receipt["project"].split("-")[2] == str(release["verification"]["workflowRunId"]), "INFRASTRUCTURE_WORKFLOW_MISMATCH")
 
 
-def package(repository, release_root, receipt_path, runner, destination):
+def docker_command(docker_host, *arguments):
+    if docker_host is None:
+        stage.require(not os.environ.get("DOCKER_HOST"), "EXPLICIT_CI_DOCKER_HOST_REQUIRED")
+        return stage.command(["docker", *arguments])
+    host = urlsplit(docker_host)
+    stage.require(host.scheme == "unix" and not host.netloc and host.path.startswith("/")
+                  and host.path != "/" and not host.query and not host.fragment
+                  and not re.search(r"\s", docker_host), "LOCAL_UNIX_DOCKER_HOST_REQUIRED")
+    stage.require(os.environ.get("DOCKER_HOST", docker_host) == docker_host, "DOCKER_HOST_MISMATCH")
+    stage.require(not any(os.environ.get(key) for key in ("DOCKER_CONTEXT", "DOCKER_TLS_VERIFY", "DOCKER_CERT_PATH")),
+                  "IMPLICIT_DOCKER_OVERRIDE_REFUSED")
+    environment = {key: value for key, value in os.environ.items() if not key.startswith(("COMPOSE_", "DOCKER_"))
+                   and key.upper() not in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY")}
+    result = subprocess.run(["docker", "--host", docker_host, *arguments],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=environment, timeout=1800)
+    stage.require(result.returncode == 0, "CI_DOCKER_COMMAND_FAILED")
+    return result.stdout
+
+
+def package(repository, release_root, receipt_path, runner, destination, docker_host=None):
     release = stage.validate_release(stage.read_json(release_root / "release-manifest.json"))
     stage.verify_files(release_root, release)
     infra = stage.read_json(receipt_path)
@@ -34,7 +56,7 @@ def package(repository, release_root, receipt_path, runner, destination):
     state = {"commit": release["commit"], "images": images}
     for role, identity in images.items():
         stage.require(re.fullmatch(r"sha256:[a-f0-9]{64}", identity), "IMAGE_IDS_NOT_TAGS_REQUIRED")
-        stage.assert_image(stage.docker_json("image", "inspect", identity)[0], state, role)
+        stage.assert_image(json.loads(docker_command(docker_host, "image", "inspect", identity))[0], state, role)
     destination.mkdir(mode=0o700)
     (destination / "scripts").mkdir()
     for filename in stage.SCRIPT_FILES:
@@ -44,7 +66,7 @@ def package(repository, release_root, receipt_path, runner, destination):
     for filename in ("stage-smoke.py", "stage-smoke-README.md"):
         shutil.copyfile(str(repository / "ops/release" / filename), str(destination / filename))
     archive = destination / "stage-images.tar"
-    stage.command(["docker", "image", "save", "-o", str(archive)] + sorted(set(images.values())))
+    docker_command(docker_host, "image", "save", "-o", str(archive), *sorted(set(images.values())))
     manifest = {"schema": 1, "kind": "canvas-stage-smoke-tools", "commit": release["commit"], "platform": release["platform"],
                 "workflowRunId": release["verification"]["workflowRunId"], "images": images,
                 "infraReceiptSha256": stage.digest(receipt_path), "files": []}
@@ -75,8 +97,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("repository", "release", "infra-receipt", "runner-image-id", "output"):
         parser.add_argument("--" + name, required=True)
+    parser.add_argument("--docker-host", help="Explicit local Unix socket of the CI stack and browser runner")
     args = parser.parse_args()
-    package(stage.absolute_directory(args.repository), stage.absolute_directory(args.release), Path(args.infra_receipt), args.runner_image_id, stage.absolute_directory(args.output, False))
+    package(stage.absolute_directory(args.repository), stage.absolute_directory(args.release), Path(args.infra_receipt), args.runner_image_id, stage.absolute_directory(args.output, False), args.docker_host)
 
 
 if __name__ == "__main__":
