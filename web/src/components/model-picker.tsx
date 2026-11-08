@@ -32,13 +32,14 @@ type ModelPickerProps = {
     disabled?: boolean;
     toolKey?: ToolKey;
     variant?: "default" | "canvas" | "settings";
+    side?: "top" | "right" | "bottom" | "left";
 };
 
 export function shouldRefreshModelPickerConfig(capability: ModelCapability | undefined, status: "idle" | "loading" | "ready" | "error", source: ModelPickerSource = "server") {
     return source === "server" && Boolean(capability) && (status === "idle" || status === "error");
 }
 
-export function ModelPicker({ config, value, onChange, capability, className, fullWidth = false, placeholder = uiText("选择模型"), onMissingConfig, modelsSource, disabled = false, toolKey, variant }: ModelPickerProps) {
+export function ModelPicker({ config, value, onChange, capability, className, fullWidth = false, placeholder = uiText("选择模型"), onMissingConfig, modelsSource, disabled = false, toolKey, variant, side }: ModelPickerProps) {
     useUiLocale();
     const pickerId = useId();
     const [open, setOpen] = useState(false);
@@ -135,7 +136,7 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
         const label = binding?.enabled === false ? uiText("此板块已停用") : binding?.modelConfigId && !boundModel ? uiText("绑定模型不可用")
             : canvasOptions.find(option => option.value === current)?.name || (options.length ? placeholder : emptyLabel);
         return <CanvasModelPicker options={canvasOptions} value={current} label={label} emptyLabel={emptyLabel} open={open} disabled={pickerDisabled} bound={Boolean(boundModel)}
-            categoryLabel={uiText("{label}模型", { label: uiText(capability === "image" ? "图像" : modelCapabilityLabel(capability)) })} className={className} onOpenChange={changeOpen} onValueChange={changeValue} />;
+            categoryLabel={uiText("{label}模型", { label: uiText(capability === "image" ? "图像" : modelCapabilityLabel(capability)) })} className={className} side={side} onOpenChange={changeOpen} onValueChange={changeValue} />;
     }
 
     return (

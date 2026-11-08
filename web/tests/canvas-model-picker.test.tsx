@@ -165,6 +165,12 @@ describe("canvas picker integration contracts", () => {
         expect(root.props.options.map((option: CanvasModelOption) => option.value)).toEqual(["blend-uuid"]);
     });
 
+    test("nested canvas settings can place the menu below without changing other picker defaults", () => {
+        const model = imageModel("model-uuid", "aplmart-gpt2");
+        expect(picker([model]).root.props.side).toBeUndefined();
+        expect(picker([model], { variant: "canvas", side: "bottom" }).root.props.side).toBe("bottom");
+    });
+
     test("tool binding, disabled state, and incompatible capabilities remain authoritative", () => {
         const first = imageModel("uuid-first", "aplmart-gpt2");
         const second = imageModel("uuid-second", "aplmart-nano2");

@@ -152,8 +152,11 @@ for (const scene of ["text-to-style", "style-to-sketch", "local-restyle", "garme
             await page.getByRole("button", { name: "涂选修改区域", exact: true }).click();
             const dialog = page.getByRole("dialog", { name: "涂选修改区域", exact: true });
             await expect(dialog.getByRole("button", { name: "保存选区", exact: true })).toBeEnabled();
-            const box = (await dialog.locator('canvas[aria-label="修改区域画布"]').boundingBox())!;
-            await page.mouse.click(box.x + box.width / 2, box.y + box.height / 3);
+            const selection = dialog.getByLabel("修改区域画布", { exact: true });
+            await expect(dialog).not.toHaveClass(/\bant-zoom-(?:appear|enter)\b/);
+            const box = (await selection.boundingBox())!;
+            await selection.click({ position: { x: box.width / 2, y: box.height / 3 } });
+            await expect.poll(() => selection.evaluate((canvas: HTMLCanvasElement) => canvas.getContext("2d")!.getImageData(Math.floor(canvas.width / 2), Math.floor(canvas.height / 3), 1, 1).data[3])).toBe(255);
             await dialog.getByRole("button", { name: "保存选区", exact: true }).click();
             await expect(dialog).toBeHidden();
         }

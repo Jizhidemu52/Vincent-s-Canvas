@@ -18,11 +18,12 @@ type CanvasModelPickerProps = {
     bound: boolean;
     categoryLabel: string;
     className?: string;
+    side?: "top" | "right" | "bottom" | "left";
     onOpenChange: (open: boolean) => void;
     onValueChange: (value: string) => void;
 };
 
-export function CanvasModelPicker({ options, value, label, emptyLabel, open, disabled, bound, categoryLabel, className, onOpenChange, onValueChange }: CanvasModelPickerProps) {
+export function CanvasModelPicker({ options, value, label, emptyLabel, open, disabled, bound, categoryLabel, className, side = "right", onOpenChange, onValueChange }: CanvasModelPickerProps) {
     const t = useUiText();
     const themeName = useThemeStore(state => state.theme);
     const theme = canvasThemes[themeName];
@@ -88,7 +89,7 @@ export function CanvasModelPicker({ options, value, label, emptyLabel, open, dis
         </Popover.Trigger>
         <Popover.Portal>
             <Popover.Content ref={menuRef} id={listId} data-testid="canvas-model-picker-menu" data-canvas-no-zoom data-theme={themeName}
-                aria-label={t("选择画布模型")} className="canvas-model-menu" style={palette} side="right" align="start" sideOffset={12} collisionPadding={12}
+                aria-label={t("选择画布模型")} className="canvas-model-menu" style={palette} side={side} align="start" sideOffset={12} collisionPadding={12}
                 onOpenAutoFocus={focusOnOpen}
                 onPointerDown={event => event.stopPropagation()} onMouseDown={event => event.stopPropagation()} onWheel={event => event.stopPropagation()}
                 onKeyDown={moveFocus}>

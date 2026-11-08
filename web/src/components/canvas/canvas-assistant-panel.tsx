@@ -2067,14 +2067,14 @@ function AgentGenerationControls({ settings: savedSettings, config: baseConfig, 
         const capability = videoCapabilities.find((item) => item.modelId === model)?.capability;
         onChange(capability ? normalizeAgentVideoSettings({ ...settings, videoModel: model }, capability) : { videoModel: model });
     };
-    const modelPicker = <ModelPicker toolKey={toolKey} variant="canvas" fullWidth config={config} value={currentModel} capability={isImage ? "image" : "video"} onChange={changeModel} disabled={loading || !currentModels.length} className="h-auto min-h-11 w-full min-w-0 max-w-none rounded-lg border-0 bg-transparent px-2 text-base shadow-none" />;
+    const modelPicker = <ModelPicker toolKey={toolKey} variant="canvas" side="bottom" fullWidth config={config} value={currentModel} capability={isImage ? "image" : "video"} onChange={changeModel} disabled={loading || !currentModels.length} className="h-auto min-h-11 w-full min-w-0 max-w-none rounded-lg border-0 bg-transparent px-2 text-base shadow-none" />;
     return (
         <>
             <div data-testid="canvas-agent-generation-actions" className="col-span-2 flex min-w-0 items-center gap-2 text-xs">
             <select aria-label={t("生成类型")} value={settings.mode} className="max-w-24 bg-transparent py-2" onChange={event => onChange(event.target.value === "image" ? { ...normalizeAgentImageSettings({ ...settings, mode: "image" }, imageProfile), imageCount: "1" } : videoCapability ? normalizeAgentVideoSettings({ ...settings, mode: "video" }, videoCapability) : { mode: "video" })}><option value="image">{t("图片")}</option><option value="video">{t("视频")}</option></select>
             <span className="min-w-0 flex-1 truncate" title={imageModelDisplayName(modelOptionName(currentModel))}>{imageModelDisplayName(modelOptionName(currentModel))}</span>
-            <Popover trigger="click" placement="topLeft" content={
-                <div data-canvas-no-zoom className="w-[280px] max-w-[calc(100vw-48px)] text-xs">
+            <Popover trigger="click" placement="top" content={
+                <div data-canvas-no-zoom className="w-[280px] max-w-[calc(100vw-48px)] max-h-[calc(100dvh-48px)] overflow-y-auto overscroll-contain text-xs">
                     <div className="mb-3 text-sm font-semibold">{isImage ? t("图像设置") : t("视频设置")}</div>
                     <div data-testid="canvas-agent-generation-model">{modelPicker}</div>
                     {loading ? <p className="mb-3" role="status">{t("正在加载模型与参数…")}</p> : error ? <div className="mb-3 space-y-2" role="alert"><p>{error}</p><Button size="small" onClick={onRetry}>{t("重新加载")}</Button></div> : !currentModels.length ? <p className="mb-3" role="status">{t("尚未配置可用的")}{isImage ? t("图像") : t("视频")}{t("模型，请在后台启用模型后重新加载。")}</p> : null}
