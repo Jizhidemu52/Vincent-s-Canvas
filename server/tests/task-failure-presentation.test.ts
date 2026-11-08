@@ -35,3 +35,21 @@ test("real task HTTP detail redacts employees while the admin route and stored r
         expect(admin.task.failureReason).toBe(row.failureReason); expect(row.failureReason).toContain("api_key=private");
     } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
 });
+
+test("exact reference-upload limits retain the pre-generation boundary without echoing provider bodies", () => {
+    for (const purpose of ["图片", "视频"]) {
+        const raw = `APIMart 参考图上传失败（429），尚未提交${purpose}生成`;
+        const expected = `参考图上传已被服务商限制，尚未提交${purpose}生成；请联系管理员检查上传配额，恢复后再试。`;
+        expect(publicGenerationFailure(raw)).toBe(expected);
+        expect(publicGenerationFailure(expected)).toBe(expected);
+        const original = { task: { status: "failed", failureReason: raw }, message: raw };
+        expect(publicTaskFailurePayload(original)).toEqual({ task: { status: "failed", failureReason: expected }, message: expected });
+        expect(original.task.failureReason).toBe(raw);
+        expect(publicGenerationFailure(raw, "paused")).toContain("不要重复生成");
+        expect(publicGenerationFailure(raw, "cancelled")).toBe("任务已取消。");
+        const untrusted = `${raw}; key=private; url=https://private.example`;
+        const safe = publicGenerationFailure(untrusted);
+        expect(safe).not.toMatch(/尚未提交|private|key=|https:/);
+    }
+    expect(publicGenerationFailure("429 overload")).toBe("生成服务繁忙，请稍后重试；已有任务请先查询原状态。");
+});

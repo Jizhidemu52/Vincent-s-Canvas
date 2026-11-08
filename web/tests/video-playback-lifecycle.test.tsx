@@ -29,6 +29,9 @@ function harness(playback: (id: string, options: { signal: AbortSignal }) => Pro
     const requireModule = createRequire(path);
     const states: any[] = [], refs: any[] = [], effects: Array<{ deps?: readonly unknown[]; cleanup?: (() => void) | void }> = [], pending: Array<() => void> = [];
     let stateIndex = 0, refIndex = 0, effectIndex = 0;
+    let urlInputKey: string | null = null;
+    const location = { pathname: "/video", search: "", hash: "", state: null, key: "video-playback" };
+    const unexpectedNavigation = () => { throw new Error("Playback preview must not navigate or consume a prompt URL"); };
     const writes: unknown[] = [];
     const useState = (initial: any) => { const index = stateIndex++; if (!(index in states)) states[index] = typeof initial === "function" ? initial() : initial; return [states[index], (next: any) => { states[index] = typeof next === "function" ? next(states[index]) : next; }]; };
     const workspace: Record<string, any> = { logs: [], running: false, startedAt: 0, activeTaskId: null, previewLoading: false, logsOpen: false, settingsOpen: false, promptDialogOpen: false, assetPickerOpen: false, selectedLogIds: [], previewLog: null, deleteConfirmOpen: false, deletingLogs: false };
@@ -41,7 +44,7 @@ function harness(playback: (id: string, options: { signal: AbortSignal }) => Pro
         } },
         "@/lib/i18n": i18nHarness,
         // Playback lifecycle runs in the default visible task; task-tab transitions have separate DOM coverage.
-        "@/components/workbench-tasks": { WorkbenchTasks: ({ children }: any) => children.type(children.props), useWorkbenchTask: () => ({ id: "default", active: true, draftScope: (scope: string) => scope }), useWorkbenchTaskStatus() {} },
+        "@/components/workbench-tasks": { WorkbenchTasks: ({ children, urlInputKey: nextKey }: any) => { urlInputKey = nextKey ?? null; return children.type(children.props); }, useWorkbenchTask: () => ({ id: "default", active: true, urlInputKey, draftScope: (scope: string) => scope }), useWorkbenchTaskStatus() {} },
         "@/lib/workspace-storage": { createWorkspaceStorage: () => ({ iterate: async (visit: (value: unknown) => void) => logs.forEach(visit), setItem: async (...args: unknown[]) => writes.push(args) }) },
         "@/hooks/use-generation-draft": { useGenerationDraft: (_key: string, initial: unknown) => [initial, () => {}, true] },
         "@/hooks/use-generation-workspace": { useGenerationWorkspace: () => workspace },
@@ -59,9 +62,16 @@ function harness(playback: (id: string, options: { signal: AbortSignal }) => Pro
         "@/services/file-storage": { resolveMediaUrl: async (_key: string, fallback: string) => fallback },
         "@/services/api/server-assets": { ...requireModule("@/services/api/server-assets"), fetchServerAssetPlayback: playback },
         "@/services/api/video": { createVideoGenerationTask: () => { throw new Error("preview must not regenerate"); } },
-        "react-router-dom": { useSearchParams: () => [new URLSearchParams()] },
+        "react-router-dom": { useSearchParams: () => [new URLSearchParams(location.search)], useLocation: () => location, useNavigate: () => unexpectedNavigation },
         antd: { ...antd, App: { useApp: () => ({ message: { error() {}, warning() {}, success() {}, info() {} }, modal: { confirm() {} } }) } },
     };
+    // The real hook participates in lifecycle cleanup; this suite has no URL input.
+    const handoffModule = { exports: {} };
+    const handoffCode = ts.transpileModule(readFileSync(new URL("../src/hooks/use-prompt-url-handoff.ts", import.meta.url), "utf8"), {
+        compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ESNext },
+    }).outputText;
+    new Function("require", "module", "exports", handoffCode)((name: string) => deps[name] || requireModule(name), handoffModule, handoffModule.exports);
+    deps["@/hooks/use-prompt-url-handoff"] = handoffModule.exports;
     const module = { exports: {} as any };
     const code = ts.transpileModule(readFileSync(path, "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2018, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
     new Function("require", "module", "exports", "window", code)((name: string) => name.endsWith(".css") ? {} : deps[name] || requireModule(name), module, module.exports, {});

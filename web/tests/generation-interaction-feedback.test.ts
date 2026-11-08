@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { generationDownloadName, generationErrorDiagnostic, generationErrorMessage, shouldConfirmPromptReuse } from "../src/lib/generation-feedback";
 import { snapshotVideoRequest } from "../src/pages/video/video-retry";
 import { defaultConfig } from "../src/stores/use-config-store";
+import { publicTaskFailurePayload } from "../../shared/generation-error";
 
 describe("generation interaction safety", () => {
     test("reusing a different prompt requires confirmation only for a nonempty draft", () => {
@@ -26,6 +27,16 @@ describe("generation interaction safety", () => {
         const result = generationErrorMessage("原任务状态待核查，勿重复生成；Failed to fetch", 500);
         expect(result).toContain("继续查询原任务");
         expect(result).toContain("不要重复生成");
+    });
+    test("task upload-limit guidance survives the API and result-display formatting", () => {
+        for (const purpose of ["图片", "视频"]) {
+            const raw = `APIMart 参考图上传失败（429），尚未提交${purpose}生成`;
+            const payload = publicTaskFailurePayload({ task: { status: "failed", failureReason: raw } }) as { task: { failureReason: string } };
+            const shown = generationErrorMessage(new Error(payload.task.failureReason));
+            expect(shown).toBe(`参考图上传已被服务商限制，尚未提交${purpose}生成；请联系管理员检查上传配额，恢复后再试。`);
+            expect(generationErrorMessage(new Error(raw))).toBe(shown);
+            expect(shown).not.toMatch(/服务繁忙|已提交的任务/);
+        }
     });
     test("an unrecoverable submission keeps the investigation guidance instead of promising recovery", () => {
         const result = generationErrorMessage("upstream HTTP 500，提交结果待核查，暂无法恢复上游查询。请勿重复提交。");

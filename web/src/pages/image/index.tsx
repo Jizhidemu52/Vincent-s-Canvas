@@ -18,6 +18,7 @@ import { GenerationQueueProgress } from "@/components/generation-queue-progress"
 import { upsertGenerationLog } from "@/lib/generation-log-update";
 import { deleteHistoryEntries } from "@/lib/history-batch-delete";
 import { useGenerationDraft } from "@/hooks/use-generation-draft";
+import { isOrdinaryPromptUrl, usePromptUrlHandoff } from "@/hooks/use-prompt-url-handoff";
 import { useImageDrop } from "@/hooks/use-image-drop";
 import { useUnsavedGuard } from "@/hooks/use-unsaved-guard";
 import { generationErrorMessage, generationErrorDiagnostic, shouldConfirmPromptReuse } from "@/lib/generation-feedback";
@@ -210,13 +211,13 @@ export default function ImagePage() {
 export function ImageGenerationPage({ creativePreset }: { creativePreset?: CreativePreset } = {}) {
     useUiText();
     const [searchParams] = useSearchParams();
-    const { pathname } = useLocation();
+    const { pathname, key: navigationKey } = useLocation();
     const ownerId = useUserStore(state => state.user?.id);
     const historyTool = creativePreset ? `creative-${creativePreset.id}` : resolveImageToolMode(isQuickImageTool(pathname.slice(1)) ? pathname.slice(1) : searchParams.get("tool"));
     const placementToken = placementHandoffToken(searchParams, historyTool);
     const designToken = historyTool === "image-edit" ? searchParams.get("designToken") : null;
     const boardKey = JSON.stringify([historyTool, placementToken, designToken]);
-    return <WorkbenchTasks key={JSON.stringify([ownerId, boardKey])} ownerId={ownerId} boardKey={boardKey}><ImageGenerationWorkspace creativePreset={creativePreset} historyTool={historyTool} /></WorkbenchTasks>;
+    return <WorkbenchTasks key={JSON.stringify([ownerId, boardKey])} ownerId={ownerId} boardKey={boardKey} urlInputKey={isOrdinaryPromptUrl(searchParams) ? navigationKey : undefined}><ImageGenerationWorkspace creativePreset={creativePreset} historyTool={historyTool} /></WorkbenchTasks>;
 }
 
 function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePreset?: CreativePreset; historyTool: string }) {
@@ -385,6 +386,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const invalidBlendReferences = isBlend && (references.length < 2 || references.length > 4);
     const draftReady = configReady && referencesReady && promptReady && (!designRequested || carryoverReady);
     const handoffReady = placementStatus === "ready" && designStatus === "ready";
+    usePromptUrlHandoff({ ready: draftReady && handoffReady, prompt, applyPrompt: replacePrompt, applyModel: value => updateConfig("imageModel", value) });
     useWorkbenchTaskStatus({ busy: running || readingReferences || optimizingPrompt || restoringHistory, pending: pendingImages.length > 0, ready: draftReady && handoffReady && pendingReady,
         label: results.some(result => result.status === "success") ? "已完成" : results.some(result => result.status === "failed") ? "已失败" : "草稿" });
     const canGenerate = draftReady && handoffReady && pendingReady && !carryoverError && !(quickTool && pendingImages.length) && !((placementToken || designRequested) && isBlend) && !readingReferences && !optimizingPrompt && (quickTool || Boolean(model)) && Boolean(user && user.status === "active") && (!requiresPrompt || Boolean(prompt.trim())) && !quotaBlocked && !missingReference && !invalidBlendReferences && referenceValidation.valid && !garmentNeedsApply && !incompleteCreativePrompt;
@@ -560,7 +562,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     }, [designRequested, designToken, designAttempt]);
 
     useEffect(() => {
-        if (!acceptsUrlInput || placementToken || designRequested) return;
+        if (!acceptsUrlInput || placementToken || designRequested || isOrdinaryPromptUrl(searchParams)) return;
         const presetPrompt = searchParams.get("prompt");
         const presetModel = searchParams.get("model");
         if (presetPrompt) replacePrompt(presetPrompt);

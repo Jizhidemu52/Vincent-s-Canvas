@@ -425,11 +425,14 @@
         padding: 28px;
     }
     .local-design-workbench .repeat-right .panel-body {
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: minmax(0, 1fr);
         gap: 12px;
     }
     .local-design-workbench .repeat-right .repeat-preview-group {
-        grid-column: 1/-1;
+        grid-column: auto;
+        grid-row: auto;
+        min-width: 0;
+        width: 100%;
         max-width: 400px;
         margin: auto;
     }

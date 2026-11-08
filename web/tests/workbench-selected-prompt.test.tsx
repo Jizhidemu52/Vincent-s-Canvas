@@ -37,6 +37,9 @@ function harness(kind: "video" | "creative", resolveImage?: (key?: string, fallb
     const effects: Array<{ deps?: readonly unknown[]; cleanup?: (() => void) | void }> = [];
     const pendingEffects: Array<() => void> = [];
     let stateIndex = 0, refIndex = 0, effectIndex = 0, prompt = "当前草稿";
+    let urlInputKey: string | null = null;
+    const location = { pathname: kind === "video" ? "/video" : "/creative/style-to-sketch", search: "", hash: "", state: null, key: "selected-prompt" };
+    const unexpectedNavigation = () => { throw new Error("History selection and explicit local reuse must not navigate"); };
     let toolEnabled = true;
     const currentConfig = { ...config };
     const draftFields = new Map<string, unknown>();
@@ -58,7 +61,7 @@ function harness(kind: "video" | "creative", resolveImage?: (key?: string, fallb
     const dependencies: Record<string, unknown> = {
         "@/lib/i18n": i18nHarness,
         // Keep this harness inside the default task while exercising the real prompt/history closures.
-        "@/components/workbench-tasks": { WorkbenchTasks: ({ children }: any) => children.type(children.props), useWorkbenchTask: () => ({ id: "default", active: true, draftScope: (scope: string) => scope }), useWorkbenchTaskStatus() {} },
+        "@/components/workbench-tasks": { WorkbenchTasks: ({ children, urlInputKey: nextKey }: any) => { urlInputKey = nextKey ?? null; return children.type(children.props); }, useWorkbenchTask: () => ({ id: "default", active: true, urlInputKey, draftScope: (scope: string) => scope }), useWorkbenchTaskStatus() {} },
         react: { ...React, useState, useCallback: (callback: Function) => callback, useRef: (initial: unknown) => refs[refIndex++] ||= { current: initial }, useMemo: (factory: () => unknown) => factory(),
             useEffect(effect: () => (() => void) | void, deps?: readonly unknown[]) {
                 const index = effectIndex++, prior = effects[index];
@@ -101,7 +104,7 @@ function harness(kind: "video" | "creative", resolveImage?: (key?: string, fallb
         "@/services/file-storage": { resolveMediaUrl: async (key: string) => { reads.push(key); return `blob:${key}`; } },
         "@/services/api/image": { requestGeneration: (...args: unknown[]) => { submissions.push(args); throw new Error("unexpected generation"); }, requestEdit: (...args: unknown[]) => { submissions.push(args); throw new Error("unexpected edit"); } },
         "@/services/api/video": { createVideoGenerationTask: (...args: unknown[]) => { submissions.push(args); throw new Error("unexpected video generation"); } },
-        "react-router-dom": { useSearchParams: () => [new URLSearchParams()] },
+        "react-router-dom": { useSearchParams: () => [new URLSearchParams(location.search)], useLocation: () => location, useNavigate: () => unexpectedNavigation },
         antd: { ...antd, App: { useApp: () => ({ message: { error() {}, warning() {}, success() {}, info() {} }, modal: { confirm: (options: { onOk?: () => unknown }) => { confirmations.push(options); } } }) } },
     };
     const workspaceModule = { exports: {} };
@@ -110,6 +113,13 @@ function harness(kind: "video" | "creative", resolveImage?: (key?: string, fallb
     }).outputText;
     new Function("require", "module", "exports", workspaceCode)((name: string) => dependencies[name], workspaceModule, workspaceModule.exports);
     dependencies["@/hooks/use-generation-workspace"] = workspaceModule.exports;
+    // Preserve real URL eligibility/cleanup while history tests stay on a query-free route.
+    const handoffModule = { exports: {} };
+    const handoffCode = ts.transpileModule(readFileSync(new URL("../src/hooks/use-prompt-url-handoff.ts", import.meta.url), "utf8"), {
+        compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ESNext },
+    }).outputText;
+    new Function("require", "module", "exports", handoffCode)((name: string) => dependencies[name] || requireModule(name), handoffModule, handoffModule.exports);
+    dependencies["@/hooks/use-prompt-url-handoff"] = handoffModule.exports;
     const module = { exports: {} as any };
     new Function("require", "module", "exports", "window", code)((name: string) => name.endsWith(".css") ? {} : dependencies[name] || requireModule(name), module, module.exports, {});
     const render = () => {

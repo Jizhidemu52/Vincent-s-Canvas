@@ -4,6 +4,12 @@ export function publicGenerationFailure(reason: unknown, status?: string): strin
     if (status === "paused" || /待核查|勿重复|不要重复|submission.{0,20}(unknown|uncertain)|query.{0,12}paused/i.test(raw))
         return "原任务结果待核查，请查询原任务或联系管理员；不要重复生成。";
     if (status === "cancelled") return "任务已取消。";
+    // Only the exact upload adapter message proves generation never started.
+    // A generic 429 may belong to a submitted task and must keep its old guidance.
+    for (const purpose of ["图片", "视频"]) {
+        const uploadLimit = `参考图上传已被服务商限制，尚未提交${purpose}生成；请联系管理员检查上传配额，恢复后再试。`;
+        if (raw === `APIMart 参考图上传失败（429），尚未提交${purpose}生成` || raw === uploadLimit) return uploadLimit;
+    }
     // These bounded local size limits are actionable, not raw provider diagnostics.
     const referenceLimit = /^单张参考图超过 (10|12|20) MB，请压缩后重试$/.exec(raw);
     if (referenceLimit) return `参考图超过当前模型单张 ${referenceLimit[1]} MiB 上限，请另存较小副本或切换模型；原图未修改，尚未提交生成。`;

@@ -34,6 +34,9 @@ function harness(kind: "image" | "video", options: { logs?: any[]; readLogs?: ()
     const storedLogs = new Map((options.logs || []).map(log => [log.id, log]));
     const writes: any[] = [], assets: any[] = [], confirmations: any[] = [], notices: any[] = [];
     const searchParams = new URLSearchParams(options.query);
+    let urlInputKey: string | null = null;
+    const location = { pathname: `/${kind}`, search: searchParams.size ? `?${searchParams}` : "", hash: "", state: null, key: `${kind}-async-scope` };
+    const unexpectedNavigation = () => { throw new Error("Async scope tests must not navigate; reuseToken retains its separate handoff"); };
     const userState = { user: { id: "owner", status: "active", creditBalance: 100 }, status: "authenticated" };
     const useUserStore = Object.assign((select: any) => select(userState), { getState: () => userState });
     const assetState = { assets, addAsset: (asset: any) => { assets.push({ ...asset, id: "saved-asset", ownerId: "owner" }); return "saved-asset"; } };
@@ -51,7 +54,7 @@ function harness(kind: "image" | "video", options: { logs?: any[]; readLogs?: ()
                 pending.push(() => { previous?.cleanup?.(); effects[index] = { deps: values, cleanup: effect() }; }); } },
         "@/lib/i18n": i18nHarness,
         // These closure tests exercise the original single-task workspace; tab lifecycle is covered by DOM tests.
-        "@/components/workbench-tasks": { WorkbenchTasks: ({ children }: any) => children.type(children.props), useWorkbenchTask: () => ({ id: "default", active: true, draftScope: (scope: string) => scope }), useWorkbenchTaskStatus() {} },
+        "@/components/workbench-tasks": { WorkbenchTasks: ({ children, urlInputKey: nextKey }: any) => { urlInputKey = nextKey ?? null; return children.type(children.props); }, useWorkbenchTask: () => ({ id: "default", active: true, urlInputKey, draftScope: (scope: string) => scope }), useWorkbenchTaskStatus() {} },
         "@/lib/workspace-storage": { createWorkspaceStorage: (name: string) => ({ iterate: async (visit: any) => { if (!name.includes("pending")) { await options.readLogs?.(); storedLogs.forEach(visit); } }, setItem: async (key: string, value: any) => { writes.push(value); storedLogs.set(key, value); }, removeItem: async (key: string) => { storedLogs.delete(key); } }) },
         "@/hooks/use-generation-draft": { useGenerationDraft: (key: string, initial: any) => { if (!drafts.has(key)) drafts.set(key, key.endsWith(":settings") ? { ...config } : initial);
             if (!draftSetters.has(key)) draftSetters.set(key, (next: any) => drafts.set(key, typeof next === "function" ? next(drafts.get(key)) : next));
@@ -78,13 +81,17 @@ function harness(kind: "image" | "video", options: { logs?: any[]; readLogs?: ()
         "@/services/api/prompts": { hydratePromptReuse: options.template },
         "@/services/api/server-assets": { fetchServerAssetContent: async () => new Blob(["image"], { type: "image/png" }) },
         "@/lib/deployment-features": { deploymentFeatures: { creditsEnabled: false } },
-        "react-router-dom": { useSearchParams: () => [searchParams], useLocation: () => ({ pathname: "/image" }) },
+        "react-router-dom": { useSearchParams: () => [searchParams], useLocation: () => location, useNavigate: () => unexpectedNavigation },
         antd: { ...antd, App: { useApp: () => appContext } },
     };
     const compile = (path: URL) => ts.transpileModule(readFileSync(path, "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ESNext, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
     const workspace = { exports: {} };
     new Function("require", "module", "exports", compile(new URL("../src/hooks/use-generation-workspace.ts", import.meta.url)))((name: string) => dependencies[name], workspace, workspace.exports);
     dependencies["@/hooks/use-generation-workspace"] = workspace.exports;
+    // Execute the real URL gate with these same React/router shims, including reuseToken exclusion.
+    const handoffModule = { exports: {} };
+    new Function("require", "module", "exports", compile(new URL("../src/hooks/use-prompt-url-handoff.ts", import.meta.url)))((name: string) => dependencies[name] || requireModule(name), handoffModule, handoffModule.exports);
+    dependencies["@/hooks/use-prompt-url-handoff"] = handoffModule.exports;
     const module = { exports: {} as any };
     new Function("require", "module", "exports", "window", "navigator", compile(path))((name: string) => name.endsWith(".css") ? {} : dependencies[name] || requireModule(name), module, module.exports, {}, { clipboard: {} });
     const render = () => { stateIndex = refIndex = effectIndex = memoIndex = 0;

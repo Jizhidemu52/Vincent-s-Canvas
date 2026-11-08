@@ -6,8 +6,8 @@ import { uiText, useUiText } from "@/lib/i18n";
 import { addWorkbenchTask, closeWorkbenchTask, DEFAULT_WORKBENCH_TASK, initialWorkbenchTasks, readWorkbenchTasks, workbenchTaskScope, type WorkbenchTaskState } from "@/lib/workbench-task-state";
 
 type TaskStatus = { busy: boolean; pending?: boolean; ready?: boolean; label?: string };
-type TaskContext = { id: string; active: boolean; draftScope: (base: string) => string; report: (status: TaskStatus) => void };
-const defaultTask: TaskContext = { id: DEFAULT_WORKBENCH_TASK, active: true, draftScope: base => base, report: () => {} };
+type TaskContext = { id: string; active: boolean; urlInputKey: string | null; draftScope: (base: string) => string; report: (status: TaskStatus) => void };
+const defaultTask: TaskContext = { id: DEFAULT_WORKBENCH_TASK, active: true, urlInputKey: null, draftScope: base => base, report: () => {} };
 const WorkbenchTaskContext = createContext<TaskContext>(defaultTask);
 
 export function useWorkbenchTask() { return useContext(WorkbenchTaskContext); }
@@ -17,10 +17,10 @@ export function useWorkbenchTaskStatus({ busy, pending = false, ready = true, la
     useEffect(() => { report({ busy, pending, ready, label }); }, [report, busy, pending, ready, label]);
 }
 
-function TaskPane({ id, active, report, children, panelId, tabId }: { id: string; active: boolean; report: (id: string, status: TaskStatus) => void; children: ReactNode; panelId: string; tabId: string }) {
+function TaskPane({ id, active, urlInputKey, report, children, panelId, tabId }: { id: string; active: boolean; urlInputKey: string | null; report: (id: string, status: TaskStatus) => void; children: ReactNode; panelId: string; tabId: string }) {
     const reportStatus = useCallback((status: TaskStatus) => report(id, status), [id, report]);
     const draftScope = useCallback((base: string) => workbenchTaskScope(base, id), [id]);
-    const value = useMemo(() => ({ id, active, draftScope, report: reportStatus }), [id, active, draftScope, reportStatus]);
+    const value = useMemo(() => ({ id, active, urlInputKey, draftScope, report: reportStatus }), [id, active, urlInputKey, draftScope, reportStatus]);
     // Keep inactive workspaces mounted: their original request/observer and frozen
     // input stay intact. Hiding a tab is not cancellation or a new submission.
     return <div role="tabpanel" id={panelId} aria-labelledby={tabId} hidden={!active} style={{ display: active ? "block" : "none" }} className="h-full min-h-0 min-w-0">
@@ -29,7 +29,7 @@ function TaskPane({ id, active, report, children, panelId, tabId }: { id: string
 }
 
 /** One owner per board. Only tiny task identities live here; each editor owns its existing durable input/result records. */
-export function WorkbenchTasks({ boardKey, ownerId, children }: { boardKey: string; ownerId?: string | null; children: ReactNode }) {
+export function WorkbenchTasks({ boardKey, ownerId, urlInputKey, children }: { boardKey: string; ownerId?: string | null; urlInputKey?: string; children: ReactNode }) {
     useUiText();
     const prefix = useId();
     const [storage] = useState(() => createWorkspaceStorage("generation_workbench_tasks"));
@@ -37,6 +37,11 @@ export function WorkbenchTasks({ boardKey, ownerId, children }: { boardKey: stri
     const [state, setState] = useState<WorkbenchTaskState>(initialWorkbenchTasks);
     const stateRef = useRef(state);
     const [ready, setReady] = useState(false);
+    // Freeze ordinary URL input ownership only after restoring the task registry.
+    // Tab switches and newly created panes must not retarget an incoming draft.
+    const urlInputTarget = useRef<{ key: string; id: string } | null>(null);
+    if (!urlInputKey) urlInputTarget.current = null;
+    else if (ready && urlInputTarget.current?.key !== urlInputKey) urlInputTarget.current = { key: urlInputKey, id: state.activeId };
     const [saving, setSaving] = useState(false);
     const savingRef = useRef(false);
     const [error, setError] = useState("");
@@ -124,6 +129,6 @@ export function WorkbenchTasks({ boardKey, ownerId, children }: { boardKey: stri
         </div>
         {error && <div role="alert" className="flex shrink-0 items-center gap-2 px-3 py-2 text-xs text-destructive"><span>{uiText(error)}</span>{!ready && <button type="button" className="underline" onClick={() => setAttempt(value => value + 1)}>{uiText("重试读取")}</button>}</div>}
         {!ready && !error ? <div role="status" className="p-4 text-sm text-muted-foreground">{uiText("正在读取任务列表…")}</div> : null}
-        <div className="min-h-0 min-w-0 flex-1">{ready && state.tasks.map(task => <TaskPane key={task.id} id={task.id} active={state.activeId === task.id} report={report} panelId={`${prefix}-panel-${task.id}`} tabId={`${prefix}-tab-${task.id}`}>{children}</TaskPane>)}</div>
+        <div className="min-h-0 min-w-0 flex-1">{ready && state.tasks.map(task => <TaskPane key={task.id} id={task.id} active={state.activeId === task.id} urlInputKey={urlInputTarget.current?.id === task.id ? urlInputTarget.current.key : null} report={report} panelId={`${prefix}-panel-${task.id}`} tabId={`${prefix}-tab-${task.id}`}>{children}</TaskPane>)}</div>
     </section>;
 }

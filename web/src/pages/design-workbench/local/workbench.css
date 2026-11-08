@@ -138,6 +138,7 @@
     color: var(--primary-foreground);
 }
 .local-design-workbench .btn.primary:hover:not(:disabled) {
+    background: var(--accent);
     filter: brightness(0.93);
 }
 .local-design-workbench .btn.ghost {

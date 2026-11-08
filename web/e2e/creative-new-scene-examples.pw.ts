@@ -1,5 +1,6 @@
 import { test, expect } from "./fixtures";
 import type { Locator } from "@playwright/test";
+import { designExamplesForScene } from "../src/lib/design-examples";
 
 async function expectDecodedImage(image: Locator) {
     await image.scrollIntoViewIfNeeded();
@@ -44,6 +45,7 @@ for (const [sceneId, draftLabel, action] of [
 ]) {
     test(`${sceneId} offers two input-only operation examples without changing the draft or submitting`, async ({ page, context, api }, info) => {
         const writes: string[] = [];
+        await context.grantPermissions(["clipboard-read", "clipboard-write"]);
         context.on("request", request => {
             const path = new URL(request.url()).pathname;
             if (path.startsWith("/api/") && !path.startsWith("/api/usage") && !["GET", "HEAD", "OPTIONS"].includes(request.method())) writes.push(`${request.method()} ${path}`);
@@ -60,8 +62,18 @@ for (const [sceneId, draftLabel, action] of [
             await expect(article).toContainText(action!);
             await expect(article).toContainText("仅为输入示意而非实测结果");
             for (const image of await article.locator("img").all()) await expectDecodedImage(image);
+            const exampleId = await record.getAttribute("data-example-id");
+            const example = designExamplesForScene(sceneId!).find(item => item.id === exampleId);
+            expect(example?.prompt, `the ${exampleId} example has its own copyable requirements`).toBeTruthy();
+            // A fresh sentinel makes every click prove its own clipboard write;
+            // neither a previous copy nor a still-visible success notice can pass it.
+            const sentinel = `not-copied:${exampleId}`;
+            await page.evaluate(value => navigator.clipboard.writeText(value), sentinel);
+            await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(sentinel);
             await article.getByRole("button", { name: "复制示例要求", exact: true }).click();
-            await expect(page.getByText("示例要求已复制", { exact: true })).toBeVisible();
+            await expect.poll(() => page.evaluate(async () => (await navigator.clipboard.readText()).replace(/\r\n/g, "\n"))).toBe(example!.prompt!.replace(/\r\n/g, "\n"));
+            // Ant Design may legitimately keep both successful-copy notices visible.
+            await expect(page.getByText("示例要求已复制", { exact: true }).last()).toBeVisible();
             await expect(draft).toHaveValue("我的未提交草稿，操作示例不能覆盖");
         }
         await page.screenshot({ path: info.outputPath(`${sceneId}-examples-desktop.png`), fullPage: true });

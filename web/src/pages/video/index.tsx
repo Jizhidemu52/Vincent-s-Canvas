@@ -3,6 +3,7 @@ import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download,
 import { useCallback, useEffect, useRef, useState } from "react";
 import { handleSubmitShortcut } from "@/lib/submit-shortcut";
 import { useGenerationDraft } from "@/hooks/use-generation-draft";
+import { isOrdinaryPromptUrl, usePromptUrlHandoff } from "@/hooks/use-prompt-url-handoff";
 import { useImageDrop } from "@/hooks/use-image-drop";
 import { acquireVideoPlayback, videoPlaybackOwner, type VideoPlaybackView } from "@/hooks/use-video-playback";
 import { useUnsavedGuard } from "@/hooks/use-unsaved-guard";
@@ -28,7 +29,7 @@ import { App, Button, Checkbox, Drawer, Empty, Input, Modal, Tag, Typography } f
 import { createWorkspaceStorage } from "@/lib/workspace-storage";
 import { nanoid } from "nanoid";
 import { saveAs } from "file-saver";
-import { useSearchParams } from "react-router-dom";
+import { useLocation, useSearchParams } from "react-router-dom";
 
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
 import { ModelPicker } from "@/components/model-picker";
@@ -128,7 +129,9 @@ export function videoModelSummaryLabel(config: AiConfig, model: string, models: 
 export default function VideoPage() {
     useUiText();
     const ownerId = useUserStore(state => state.user?.id);
-    return <WorkbenchTasks key={ownerId || "local"} ownerId={ownerId} boardKey="video"><VideoGenerationWorkspace /></WorkbenchTasks>;
+    const [searchParams] = useSearchParams();
+    const { key: navigationKey } = useLocation();
+    return <WorkbenchTasks key={ownerId || "local"} ownerId={ownerId} boardKey="video" urlInputKey={isOrdinaryPromptUrl(searchParams) ? navigationKey : undefined}><VideoGenerationWorkspace /></WorkbenchTasks>;
 }
 
 function VideoGenerationWorkspace() {
@@ -200,6 +203,7 @@ function VideoGenerationWorkspace() {
     const [logsLoading, setLogsLoading] = useState(false);
     const [logsError, setLogsError] = useState("");
     const draftReady = configReady && promptReady && referencesReady && videosReady && audiosReady && motionReady && rawReady;
+    usePromptUrlHandoff({ ready: draftReady, prompt, applyPrompt: setPrompt, applyModel: value => updateConfig("videoModel", value) });
     useWorkbenchTaskStatus({ busy: submitting || running || readingReferences, pending: logs.some(log => log.status === "生成中" || log.status === "查询暂停"), ready: draftReady && logsReady, label: results.some(result => result.status === "success") ? "已完成" : results.some(result => result.status === "failed") ? "已失败" : "草稿" });
     useUnsavedGuard(readingReferences, uiText("参考素材正在读取，离开可能中断上传。"));
     const reusePrompt = (next: string, apply = () => setPrompt(next)) => {
@@ -293,7 +297,7 @@ function VideoGenerationWorkspace() {
     }, [logs, message, previewLoader, results.length, running]);
 
     useEffect(() => {
-        if (workspaceId !== DEFAULT_WORKBENCH_TASK) return;
+        if (workspaceId !== DEFAULT_WORKBENCH_TASK || isOrdinaryPromptUrl(searchParams)) return;
         const presetPrompt = searchParams.get("prompt");
         const presetModel = searchParams.get("model");
         if (presetPrompt) setPrompt(presetPrompt);

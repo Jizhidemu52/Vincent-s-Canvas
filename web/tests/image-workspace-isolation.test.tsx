@@ -61,6 +61,15 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
     let mountedKey: string | null | undefined;
     let mountedType: unknown;
     let params = new URLSearchParams("tool=image-generation");
+    let navigationSequence = 0;
+    let navigationKey = "image-workspace-0";
+    let urlInputKey: string | null = null;
+    const navigations: Array<{ destination: { pathname: string; search: string; hash: string }; options: { replace?: boolean; state?: unknown } }> = [];
+    const navigate = (destination: { pathname: string; search: string; hash: string }, options: { replace?: boolean; state?: unknown } = {}) => {
+        navigations.push({ destination, options });
+        params = new URLSearchParams(destination.search);
+        navigationKey = `image-workspace-${++navigationSequence}`;
+    };
     let ownerId = "designer-a";
     let creativePreset: any;
     let sequence = 0;
@@ -93,7 +102,7 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
     };
     const message = { success() {}, info() {}, warning: (warning: string) => warnings.push(warning), error: (error: string) => errors.push(error) };
     const confirmations: Array<{ onOk?: () => unknown }> = [];
-    const app = { message, modal: { confirm(options: { onOk?: () => unknown }) { confirmations.push(options); } } };
+    const app = { message, modal: { confirm(options: { onOk?: () => unknown }) { confirmations.push(options); return { destroy() {} }; } } };
     const updateConfig = (key: string, value: unknown) => { config[key] = value; };
     const configState = { config, updateConfig, openConfigDialog() {} };
     const userState = () => ({ user: { id: ownerId, status: "active", role: "designer", creditBalance: 100 } });
@@ -130,7 +139,7 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
     const dependencies: Record<string, any> = {
         // These closure tests exercise one selected pane; actual multi-pane
         // persistence, switching and ownership run in workbench-multitask.pw.ts.
-        "@/components/workbench-tasks": { WorkbenchTasks: ({ children }: any) => children.type(children.props), useWorkbenchTask: () => ({ id: taskId, active: true, draftScope: (scope: string) => workbenchTaskScope(scope, taskId) }), useWorkbenchTaskStatus(status: { ready: boolean; pending: boolean }) { reportedTaskStatus = status; } },
+        "@/components/workbench-tasks": { WorkbenchTasks: ({ children, urlInputKey: nextKey }: any) => { urlInputKey = nextKey ?? null; return children.type(children.props); }, useWorkbenchTask: () => ({ id: taskId, active: true, urlInputKey, draftScope: (scope: string) => workbenchTaskScope(scope, taskId) }), useWorkbenchTaskStatus(status: { ready: boolean; pending: boolean }) { reportedTaskStatus = status; } },
         "@/lib/i18n": i18nHarness,
         react: {
             ...React, useState, useMemo,
@@ -150,7 +159,7 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
             App: { useApp: () => app }, Button: "Button", Checkbox: "Checkbox", Drawer: "Drawer", Empty: "Empty", Image: "Image", Modal: "Modal", Tag: "Tag", Tooltip: "Tooltip",
             Input: { TextArea: "TextArea" }, Typography: { Text: "Typography.Text" },
         },
-        "react-router-dom": { Link: "Link", useLocation: () => ({ pathname: "/image", search: `?${params.toString()}`, hash: "", state: null, key: "image-workspace" }), useSearchParams: () => [params] },
+        "react-router-dom": { Link: "Link", useLocation: () => ({ pathname: "/image", search: `?${params.toString()}`, hash: "", state: null, key: navigationKey }), useSearchParams: () => [params], useNavigate: () => navigate },
         "@/lib/workspace-storage": { createWorkspaceStorage: (name: string) => name === "image_pending_tasks" ? pendingStorage : storage },
         "@/stores/use-config-store": {
             useConfigStore: Object.assign((select: Function) => select(configState), { getState: () => configState }),
@@ -204,6 +213,13 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
     }).outputText;
     new Function("require", "module", "exports", workspaceCode)((name: string) => dependencies[name], workspaceModule, workspaceModule.exports);
     dependencies["@/hooks/use-generation-workspace"] = workspaceModule.exports;
+    // Run the real URL hook against the same per-instance React/router boundary.
+    const handoffModule = { exports: {} };
+    const handoffCode = ts.transpileModule(readFileSync(new URL("../src/hooks/use-prompt-url-handoff.ts", import.meta.url), "utf8"), {
+        compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ESNext },
+    }).outputText;
+    new Function("require", "module", "exports", handoffCode)((name: string) => dependencies[name] || requireModule(name), handoffModule, handoffModule.exports);
+    dependencies["@/hooks/use-prompt-url-handoff"] = handoffModule.exports;
     const module = { exports: {} as { ImageGenerationPage: (props?: object) => ReactElement<any> } };
     // Everything under test, including scope filtering and media hydration, uses its real module.
     new Function("require", "module", "exports", "window", code)(
@@ -234,10 +250,10 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
     const unmount = () => { cleanup(workspace); cleanup(wrapper); };
     disposers.push(unmount);
     return {
-        boundary, render, stored, requests, errors, warnings, config, confirmations,
+        boundary, render, stored, requests, errors, warnings, config, confirmations, navigations,
         taskStatus() { render(); return reportedTaskStatus; },
         setRestoredDraft(value: Record<string, any>) { restoredDraft = value; },
-        navigate(tool: string, query = "") { params = new URLSearchParams(`tool=${tool}${query ? `&${query}` : ""}`); },
+        navigate(tool: string, query = "") { params = new URLSearchParams(`tool=${tool}${query ? `&${query}` : ""}`); navigationKey = `image-workspace-${++navigationSequence}`; },
         setOwner(value: string) { ownerId = value; },
         setCreative(value?: object) { creativePreset = value; },
         restoreLegacyFailedSlot(error: string, snapshot: { text: string; config: Record<string, any>; references: unknown[] }) {
@@ -442,6 +458,8 @@ describe("image workspace isolation", () => {
         expect(page.prompt().value).toBe("");
         page.navigate("image-generation", "prompt=new-prompt");
         page.render();
+        expect(page.prompt().value).toBe("new-prompt");
+        expect(page.navigations).toEqual([{ destination: { pathname: "/image", search: "tool=image-generation", hash: "" }, options: { replace: true, state: null } }]);
         expect(page.references().references).toHaveLength(1);
         expect(page.panels()[0].selectedLogIds).toEqual(["a"]);
         page.navigate("image-edit");
