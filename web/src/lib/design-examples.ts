@@ -132,24 +132,26 @@ export const designExamples: Record<string, DesignExample> = {
         prompt: "整理为白底黑线的正面毛衫款式线稿，保留圆领、落肩、袖长、衣长与领口袖口下摆的罗纹范围。不增加图案，不推测背面，不标注虚构尺寸。",
     }),
     "creative-virtual-try-on": example("creative-virtual-try-on", {
-        title: "虚拟试穿 · 单件毛衫操作示例", category: "毛衫",
+        title: "虚拟试穿 · 产品图与成人模特图", category: "毛衫",
         purpose: "将一件产品的设计带到成人模特上，先确认产品与模特的参考角色。", location: "创意设计 → 虚拟试穿",
         media: [asset("knit-source", "输入示意 · 毛衫产品图"), asset("model-natural-source", "可选输入示意 · 成人模特与姿态")],
         steps: [
-            { title: "输入", detail: "上传一件毛衫，并选择上传成人模特图或填写成人模特描述。" },
-            { title: "操作", detail: "填写需保持的领型、绞花与罗纹，确认参考角色后点击“生成设计”，上传不会自动生成。" },
+            { title: "输入", detail: "产品图上传毛衫，模特图上传成人模特照片，两张图分别放入对应位置。" },
+            { title: "操作", detail: "填写试穿要求与关键特征保持，再点击“生成试穿效果”，上传不会自动生成。" },
             { title: "结果", detail: "此处仅为输入示意而非实测结果，实际输出需核对衣物结构与身体关系，不保证身份或真实合身度。" },
         ],
+        prompt: "让模特图中的成人模特穿着产品图这件燕麦色毛衫，模特图只参考人物与姿态，不沿用其原有毛衣设计。关键特征保持：产品图的圆领、落肩、平针纹理与领口、袖口、下摆罗纹范围，不新增绞花、文字或装饰。",
     }),
     "creative-sketch-to-photo": example("creative-sketch-to-photo", {
-        title: "线稿转实拍 · 毛衫材质与配色示例", category: "毛衫",
+        title: "线稿转实拍 · 指定材质与颜色", category: "毛衫",
         purpose: "按线稿结构生成指定材质和颜色的实拍质感效果。", location: "创意设计 → 线稿转实拍",
-        media: [asset("knit-sketch", "输入示意 · 毛衫结构线稿"), asset("knit-source", "可选输入示意 · 针织材质与配色")],
+        media: [asset("knit-sketch", "输入示意 · 毛衫结构线稿")],
         steps: [
-            { title: "输入", detail: "上传线稿图，可选添加只提供材质与配色的参考图。" },
-            { title: "操作", detail: "明确填写材质方向、颜色方向与需保持的细节，选择展示方式后点击“生成设计”。" },
+            { title: "输入", detail: "上传毛衫线稿，无参考图时直接指定材质和颜色。" },
+            { title: "操作", detail: "材质方向填羊毛混纺平针，颜色方向填酒红色，选择白底平铺后点击“生成实拍效果”。" },
             { title: "结果", detail: "此处仅为输入示意而非实测结果，黑白线稿没有原色信息，生成图不能当作原色还原或生产工艺验证。" },
         ],
+        prompt: "材质方向：羊毛混纺平针。颜色方向：酒红色 #7B1E32。关键特征保持：线稿的圆领、落肩、袖长、衣长与领口、袖口、下摆罗纹范围。实拍展示方式：白底平铺。不新增绞花、纽扣、文字或流苏。",
     }),
     "creative-local-restyle": example("creative-local-restyle", {
         title: "局部改款 · 马甲换金属扣", category: "女装",
@@ -313,6 +315,31 @@ export const designExamples: Record<string, DesignExample> = {
     }),
 };
 
+const additionalSceneExamples: Record<string, DesignExample> = {
+    "virtual-try-on": example("creative-virtual-try-on-text-model", {
+        title: "虚拟试穿 · 只有产品图时", category: "毛衫",
+        purpose: "没有模特照片时，用文字描述成人模特与试穿场景。", location: "创意设计 → 虚拟试穿",
+        media: [asset("knit-source", "输入示意 · 毛衫产品图")],
+        steps: [
+            { title: "输入", detail: "只上传一件毛衫产品图，模特图留空。" },
+            { title: "操作", detail: "填写成人模特与试穿要求和关键特征保持，再点击“生成试穿效果”。" },
+            { title: "结果", detail: "此处仅为输入示意而非实测结果，模特依据文字生成，需检查衣物结构与身体关系。" },
+        ],
+        prompt: "成人模特与试穿要求：短发成年女性，正面全身站姿，简洁黑色长裤与白色影棚，穿着产品图中的毛衫。关键特征保持：原燕麦色、圆领、落肩、平针纹理及罗纹范围，不加绞花、文字或装饰。",
+    }),
+    "sketch-to-photo": example("creative-sketch-to-photo-material-reference", {
+        title: "线稿转实拍 · 搭配材质配色参考", category: "毛衫",
+        purpose: "结构以线稿为准，另一张图只提供材质与配色方向。", location: "创意设计 → 线稿转实拍",
+        media: [asset("knit-sketch", "输入示意 · 毛衫结构线稿"), asset("knit-source", "可选输入示意 · 针织材质与配色")],
+        steps: [
+            { title: "输入", detail: "线稿图上传结构线稿，材质与配色参考图上传毛衫照片。" },
+            { title: "操作", detail: "材质方向和颜色方向分别填写参考图材质与配色，选择白底悬浮后点击“生成实拍效果”。" },
+            { title: "结果", detail: "此处仅为输入示意而非实测结果，参考图不替换线稿结构，实际颜色与材质效果仍需核对。" },
+        ],
+        prompt: "材质方向：参考图中的细密平针与罗纹质感。颜色方向：参考图的燕麦色。关键特征保持：以线稿的圆领、落肩、衣长、袖长与罗纹位置为准，不带入参考图的其他款式结构。实拍展示方式：白底悬浮。",
+    }),
+};
+
 const imageTools = new Set(["image", "detail-enhance", "image-edit", "angle-control", "seamless-stitch", "midjourney-blend"]);
 const paths: Record<string, string> = {
     "/video": "video", "/chat": "gpt-chat", "/prompts": "prompts", "/my-prompts": "my-prompts",
@@ -322,6 +349,12 @@ const paths: Record<string, string> = {
 
 export function designExampleForScene(id: string): DesignExample | undefined {
     return Object.hasOwn(designExamples, `creative-${id}`) ? designExamples[`creative-${id}`] : undefined;
+}
+
+export function designExamplesForScene(id: string): DesignExample[] {
+    const first = designExampleForScene(id);
+    if (!first) return [];
+    return Object.hasOwn(additionalSceneExamples, id) ? [first, additionalSceneExamples[id]!] : [first];
 }
 
 /** The caller stays inside the existing AuthGate/ModuleGate. No route or feature is enabled here. */

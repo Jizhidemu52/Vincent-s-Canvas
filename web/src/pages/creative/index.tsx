@@ -15,6 +15,11 @@ const workbenches = [
     { key: "series-recipe", title: "系列配方", description: "组合参考、配色和设计约束，冻结配方后生成系列候选，分支重试与保存。", mode: "AI 生成 · 独立模型配置" },
 ] as const;
 
+const inputCovers: Record<string, { src: string; label: string }> = {
+    "virtual-try-on": { src: "/design-examples/knit-source.webp", label: "输入示意 · 毛衫产品图" },
+    "sketch-to-photo": { src: "/design-examples/knit-sketch.webp", label: "输入示意 · 毛衫结构线稿" },
+};
+
 export default function CreativePage() {
     useUiText();
     const flags = useModuleStore((state) => state.flags);
@@ -40,9 +45,9 @@ export default function CreativePage() {
                     <div className="creative-grid">
                         {items.map((preset) => <article key={preset.id} className="creative-card flex flex-col">
                             <Link to={buildCreativePresetHref(preset)} className="block flex-1 text-inherit no-underline">
-                            <div className="creative-cover">
-                                <img src={`/creative-scenes/v2/${preset.id}.preview.webp`} alt={uiText("{input} → {output}的功能示意", { input: uiText(sceneSummaries[preset.id]?.input || ""), output: uiText(sceneSummaries[preset.id]?.output || "") })} loading="lazy" decoding="async" />
-                                <div className="creative-cover-flow" aria-hidden="true"><span>{uiText(sceneSummaries[preset.id]?.input || "")}</span><ArrowRight size={15} /><span>{uiText(sceneSummaries[preset.id]?.output || "")}</span></div>
+                            <div className={`creative-cover${inputCovers[preset.id] ? " creative-input-cover" : ""}`}>
+                                <img src={inputCovers[preset.id]?.src ?? `/creative-scenes/v2/${preset.id}.preview.webp`} alt={inputCovers[preset.id] ? uiText(inputCovers[preset.id].label) : uiText("{input} → {output}的功能示意", { input: uiText(sceneSummaries[preset.id]?.input || ""), output: uiText(sceneSummaries[preset.id]?.output || "") })} loading="lazy" decoding="async" />
+                                <div className="creative-cover-flow" aria-hidden="true">{inputCovers[preset.id] ? <span>{uiText(inputCovers[preset.id].label)}</span> : <><span>{uiText(sceneSummaries[preset.id]?.input || "")}</span><ArrowRight size={15} /><span>{uiText(sceneSummaries[preset.id]?.output || "")}</span></>}</div>
                             </div>
                             <div className="creative-card-copy"><h3>{uiText(preset.title || "")}<ArrowRight size={16} strokeWidth={1.5} /></h3><p>{uiText(preset.description || "")}</p></div>
                             </Link>

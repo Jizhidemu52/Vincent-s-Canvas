@@ -4,7 +4,7 @@ import { createRequire } from "node:module";
 import React, { type ReactElement } from "react";
 import ts from "typescript";
 import { creativePresets } from "@/lib/creative-presets";
-import { designExampleForScene } from "@/lib/design-examples";
+import { designExampleForScene, designExamplesForScene } from "@/lib/design-examples";
 import { createSceneForm } from "@/pages/creative/scene-form-model";
 import { i18nHarness } from "./helpers/i18n-harness";
 
@@ -106,7 +106,8 @@ test("each creative scene starts in history with only its own practice record, o
         const app = harness(preset.id);
         const output = app.render();
         const records = elements(output).filter(item => item.type === PracticeExampleRecord);
-        expect(records).toHaveLength(1);
+        expect(records.map(record => record.props.example)).toEqual(designExamplesForScene(preset.id));
+        expect(records).toHaveLength(["virtual-try-on", "sketch-to-photo"].includes(preset.id) ? 2 : 1);
         expect(records[0]!.props.example).toBe(designExampleForScene(preset.id));
         const history = elements(output).find(item => item.props.className === "cs-history")!;
         expect(elements(history)[1]!.type).toBe(PracticeExampleRecord);

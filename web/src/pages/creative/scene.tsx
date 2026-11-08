@@ -15,7 +15,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ModuleGate } from "@/components/auth/module-gate";
 import { PracticeExampleRecord } from "@/components/design-examples";
-import { designExampleForScene } from "@/lib/design-examples";
+import { designExamplesForScene } from "@/lib/design-examples";
 import { GenerationElapsed } from "@/components/generation-elapsed";
 import { ImageSettingsPanel, imageQualityLabel, imageSizeLabel } from "@/components/image-settings-panel";
 import { ModelPicker } from "@/components/model-picker";
@@ -79,7 +79,7 @@ function CreativeSceneWorkspace({ preset, handoffToken }: { preset: CreativePres
     const [selectedLogIds, setSelectedLogIds] = useState<string[]>([]);
     useEffect(() => { if (ws.recoveredRequestId) setView("results"); }, [ws.recoveredRequestId]);
     const summary = sceneSummaries[preset.id]!;
-    const example = designExampleForScene(preset.id);
+    const examples = designExamplesForScene(preset.id);
     const slots = getSceneSlots(preset.id, ws.form);
     const available = creativePresets.filter(item => isModuleAvailable(flags, tools, `creative-${item.id}` as ModuleKey));
     const submit = () => { setView("results"); void ws.generate(); };
@@ -153,7 +153,7 @@ function CreativeSceneWorkspace({ preset, handoffToken }: { preset: CreativePres
                     <button type="button" className="cs-history-tab" aria-pressed={view === "history"} onClick={() => setView("history")}><History size={15} />{uiText("最近任务")}{ws.historyTotal ? <span>{ws.historyTotal}</span> : null}</button>
                 </nav>
                 {view === "history" ? <div className="cs-history">
-                    {example ? <PracticeExampleRecord example={example} /> : null}
+                    {examples.map(example => <PracticeExampleRecord key={example.id} example={example} />)}
                     <div className="flex flex-wrap items-center justify-between gap-2"><h2>{uiText("最近任务")}</h2><Button size="small" disabled={historyBusy || !ws.logs.length} onClick={() => { setHistorySelection(current => !current); setSelectedLogIds([]); }}>{historySelection ? uiText("退出批量管理") : uiText("批量管理")}</Button></div>
                     <p className="cs-help">{uiText("显示当前账号在「")}{uiText(preset.title || "")}{uiText("」中的任务与待查询原请求，保存在本机浏览器。")}</p>
                     {historySelection && <div className="mb-3 space-y-2">

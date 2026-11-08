@@ -1,7 +1,7 @@
 import { uiText, useUiLocale } from "@/lib/i18n";
 import { lazy, Suspense, memo, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { BookOpen, ChevronDown, Download, Globe, Home, Images, Info, LayoutGrid, Plus, Redo2, Trash2, Undo2, Upload } from "lucide-react";
+import { BookOpen, ChevronDown, Download, Globe, Home, Images, Info, LayoutGrid, MessageSquare, Plus, Redo2, Trash2, Undo2, Upload } from "lucide-react";
 import { Dropdown, Popover } from "antd";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { deploymentFeatures } from "@/lib/deployment-features";
@@ -45,7 +45,7 @@ export const CanvasTopBar = memo(function CanvasTopBar({
     compactAgentStatus,
     onToggleAgent,
 }: CanvasTopBarRenderState) {
-    useUiLocale();
+    const locale = useUiLocale();
     const navigate = useNavigate();
     const { id: canvasId } = useParams<{ id: string }>();
     const canImportReferences = useModuleEnabled("reference-import");
@@ -73,6 +73,7 @@ export const CanvasTopBar = memo(function CanvasTopBar({
                         ...(onOpenExamples ? [canvasActionMenuItem("examples", onOpenExamples, <BookOpen className="size-4" />)] : []),
                         canvasActionMenuItem("renameProject", onStartTitleEditing),
                         canvasActionMenuItem("tools", onOpenTools, <LayoutGrid className="size-4" />),
+                        { key: "toggle-chat", icon: <MessageSquare className="size-4" />, label: locale === "en-US" ? (agentOpen ? "Hide chat" : "Open chat") : (agentOpen ? "收起对话" : "打开对话"), onClick: onToggleAgent },
                         { type: "divider" },
                         canvasActionMenuItem("upload", onImportImage, <Upload className="size-4" />),
                         ...(canImportReferences ? [canvasActionMenuItem("referenceImport", () => navigate(`/reference-import${canvasId ? `?returnTo=${encodeURIComponent(`/canvas/${canvasId}`)}` : ""}`), <Globe className="size-4" />)] : []),

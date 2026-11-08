@@ -3,6 +3,7 @@ import { handleSubmitShortcut } from "@/lib/submit-shortcut";
 import { GenerationDiagnostic } from "@/components/generation-diagnostic";
 import { GenerationTaskCancel } from "@/components/generation-task-cancel";
 import { PracticeExampleRecord } from "@/components/design-examples";
+import { ConversationExamples } from "@/components/conversation-examples";
 import { App, Button, Checkbox, Popover, Select, Tooltip } from "antd";
 import { Bot, Brush, CircleHelp, Copy, FileText, ImagePlus, LoaderCircle, MessageSquarePlus, Paperclip, PanelLeftClose, PanelLeftOpen, Pencil, RotateCcw, Send, Settings2, Square, Trash2, WandSparkles, X } from "lucide-react";
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type SetStateAction } from "react";
@@ -867,6 +868,7 @@ export default function ChatPage() {
 
                     <div className="border-t border-border bg-card px-4 py-4 md:px-[8%]">
                         <div className="mx-auto max-w-3xl">
+                            <ConversationExamples className="mb-2 text-muted-foreground" />
                             {editing ? <div role="status" className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground"><span>{uiText("编辑后将从这条消息创建新分支，原会话和附件保留；发送会重新调用模型。")}</span><Button size="small" disabled={isSending} onClick={() => setEditing(null)}>{uiText("取消编辑")}</Button></div> : null}
                             <div className="relative rounded-2xl border border-input bg-background p-3 focus-within:border-orange-400">
                                 {regionSelection && selectedImage?.id === regionSelection.imageId ? <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground"><Brush className="size-3.5" /><span>{uiText("已圈选局部区域，仅修改选区内")}</span><button type="button" onClick={() => void openRegionSelection(regionSelection.imageId)} className="underline">{uiText("调整选区")}</button><button type="button" aria-label={uiText("清除局部选区")} onClick={() => setRegionSelection(null)}><X className="size-3.5" /></button></div> : null}

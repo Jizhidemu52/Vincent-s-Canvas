@@ -9,6 +9,7 @@ import { modelOptionName, normalizeModelOptionValue, selectableModelsByCapabilit
 import { imageModelDisplayName, imageModelIdentityHidden } from "@/lib/model-display";
 import { preferredImageModel } from "@/lib/default-image-model";
 import { ModelPicker } from "@/components/model-picker";
+import { ConversationExamples } from "@/components/conversation-examples";
 import { CanvasPanelSizeControl } from "@/components/canvas/canvas-panel-size-control";
 import { conversationImageLabel, type ConversationImageAction, type ConversationImageItem } from "@/components/conversation-image-controls";
 import { useConversationImageTools } from "@/hooks/use-conversation-image-tools";
@@ -1839,6 +1840,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                         executeOps([{ type: "add_node", id: nanoid(), nodeType: CanvasNodeType.Text, title: card.title || "设计需求卡", position: { x: nextCanvasX(snapshotRef.current), y: 0 }, metadata: { content: designRequirementsText(card), status: "success" } }]);
                     }} /></div> : null}
                     {attachmentDrop.dragging || attachmentDrop.reading ? <p role="status" className="mx-4 mb-2 text-xs" style={{ color: theme.node.text }}>{t(attachmentDrop.reading ? "正在读取拖入图片，请稍候。" : "松开以添加对话参考图，不会自动发送")}</p> : null}
+                    <div className="mx-4 mb-1 min-w-0" style={{ color: theme.node.muted }}><ConversationExamples /></div>
                     <AgentChatComposer
                         key={`${activeSession?.id}:${onlineProjectId}:${user?.id || ""}`}
                         disabled={!onlineEnabled || !effectiveConfig.textModel}
