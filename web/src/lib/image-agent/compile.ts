@@ -2,7 +2,7 @@ import { ImageAgentPlanningError, parseImageAgentEditSpec, type ImageAgentEditSp
 import { designRequirementsText, type DesignRequirements } from "../../../../shared/image-agent-documents";
 
 /** Code-owned scope protection, separate from the user's explicit keep-list provenance. */
-export const IMAGE_AGENT_BASE_PRESERVATION = "仅修改本轮明确要求的内容；未涉及的主体剪影、版型结构、配色、面料纹理、印花与文字、辅料数量、人物特征、背景、光影和构图保持与修改底图一致。本轮明确要求的变化优先，不把保留规则用于阻止这些变化；不要擅自新增商标、文字或装饰。";
+export const IMAGE_AGENT_BASE_PRESERVATION = "仅修改本轮明确要求的内容；未涉及的主体剪影、版型结构、配色、面料纹理、印花与文字、辅料数量、人物特征、背景、光影和构图保持与修改底图当前可见状态一致。保留项中的历史加宽、缩短、旋转或相对倍率仅是旧记录，不作为本轮增量，也不重新套用到修改底图；发生歧义时保持底图现状。合法静态尺寸、数量和比例原样保留。本轮明确要求的变化优先，明确要求再次变化时仍执行，不把保留规则用于阻止这些变化；不要擅自新增商标、文字或装饰。";
 type Image = { id: string; label: string };
 const roleLabels = { base: "修改底图", material: "面料或花型", color: "配色", model: "模特", pose: "姿势", background: "背景或场景", style: "风格", reference: "辅助参考" };
 

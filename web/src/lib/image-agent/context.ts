@@ -115,7 +115,7 @@ export async function buildImageAgentContext<T extends ImageAgentImage>(options:
         content.push({ type: "text", text: `${image.label}（image_id=${image.id}）${image.id === options.focusId ? " · 当前图" : ""}` }, { type: "image_url", image_url: { url: dataUrl } });
     }
     const note = imageAgentWorkNoteText(options.note);
-    if (note) content.push({ type: "text", text: `当前作品说明（已记录的要求，不代表视觉验收）：\n${note}` });
+    if (note) content.push({ type: "text", text: `当前作品说明（已记录的要求，不代表视觉验收；历史相对变化不是本轮增量，保持以本轮所选底图当前可见状态为准）：\n${note}` });
     const messages = imageAgentHistoryMessages(options.history, options.images);
     if (content.length) messages.push({ role: "user", content });
     // The user's actual instruction is always the last message, after all pixels.

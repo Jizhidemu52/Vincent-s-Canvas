@@ -6,6 +6,7 @@ import { canvasImageAgentCatalog, canvasImageAgentResultOps, prepareCanvasImageA
 import { ImageAgentPlanningError } from "../../shared/image-agent-iteration";
 import { pendingOnlineAgentTask, recoverOnlineAgentTask, type PendingOnlineAgentTask } from "@/lib/canvas/canvas-online-task-recovery";
 import { originalImageAgentImage } from "@/lib/image-agent/focus";
+import { buildImageAgentContext } from "@/lib/image-agent/context";
 import { CanvasNodeType, type CanvasAssistantSession, type CanvasNodeData } from "@/types/canvas";
 import { QueuedTaskFailedError, type QueuedTask } from "@/services/api/generation-tasks";
 
@@ -39,6 +40,64 @@ describe("canvas image-agent execution invariants", () => {
         expect(cleared.prompt).not.toContain("版型不变");
         const inherited = resolveCanvasImageAgentEdit({ prompt: "换蓝色" }, catalog(), selection);
         expect(inherited.prompt).toContain("版型不变");
+    });
+
+    test.each(["planner", "inherited"] as const)("%s relative keep is scoped to the chosen base state, not another 1.2x edit", origin => {
+        // The live case established this textual ambiguity, not a measured pixel change.
+        const polluted = ["提手宽度（图3的1.2倍宽度）、长度、弧度、位置"];
+        const source = image("bag-v3", "图3", { kind: "generated", note: {
+            summary: "基于图2继续：包身改为深绿色，提手保持宝蓝色且保留当前1.2倍宽度。",
+            keep: origin === "inherited" ? polluted : ["两根提手保持宝蓝色，宽度、长度、弧度、位置不变"],
+        } });
+        const before = structuredClone(source);
+        const current = "只把图3背景改成浅米色，提手宽度保持图3当前状态。";
+        const result = resolveCanvasImageAgentEdit({ base: "图3", prompt: current, ...(origin === "planner" ? { keep: polluted } : {}),
+            edit_spec: { changes: ["背景改成浅米色"] } }, [source], { focusId: source.id, previewedIds: [source.id] });
+        expect(result.base?.id).toBe(source.id);
+        expect(result.references.map(item => item.storageKey)).toEqual(["image:bag-v3"]);
+        expect(result.prompt).toContain("输入图1对应图3（修改底图）");
+        expect(result.prompt).toContain(current);
+        expect(result.prompt).toContain("修改底图当前可见状态");
+        expect(result.prompt).toContain("历史加宽、缩短、旋转");
+        expect(result.prompt).toContain("不作为本轮增量");
+        expect(result.prompt).toContain("发生歧义时保持底图现状");
+        // Retain the original requirement record: no numeric stripping or invented rewrite.
+        expect(result.record.note.keep).toEqual(polluted);
+        expect(result.prompt).toContain(polluted[0]!);
+        expect(result.record.spec?.changes).toEqual(["背景改成浅米色"]);
+        expect(source).toEqual(before);
+    });
+
+    test("an explicit new relative edit and legitimate static numeric constraints remain intact", () => {
+        const current = "在图3当前宽度基础上，再次把提手加宽1.2倍，并顺时针旋转10度。";
+        const keep = ["缝线间距3mm", "保留2颗纽扣", "包身长宽比1.2:1"];
+        const changes = ["提手在图3当前宽度基础上再次加宽1.2倍", "顺时针旋转10度"];
+        const source = image("bag-v3", "图3");
+        const result = resolveCanvasImageAgentEdit({ prompt: current, keep, edit_spec: { changes } }, [source], { focusId: source.id });
+        expect(result.prompt).toContain(current);
+        expect(result.record.spec?.changes).toEqual(changes);
+        expect(result.record.note.keep).toEqual(keep);
+        for (const constraint of keep) expect(result.prompt).toContain(constraint);
+        expect(result.prompt).toContain("本轮明确要求的变化优先");
+        expect(result.prompt).toContain("明确要求再次变化时仍执行");
+        expect(result.prompt).toContain("静态尺寸、数量和比例原样保留");
+    });
+
+    test("historical relative values stay attributed as context before the current instruction", async () => {
+        const note = { summary: "图3提手已按原图1.2倍宽度提出修改，尚未测量验收。", keep: ["提手宽度不变"] };
+        const before = structuredClone(note);
+        const currentText = "只把图3背景改成浅米色，保持图3当前提手宽度。";
+        const context = await buildImageAgentContext({ images: [image("bag-v3", "图3", { note })], history: [], focusId: "bag-v3", note,
+            currentText, readImage: async () => "data:image/png;base64,AA==" });
+        expect(context.messages.at(-1)?.content).toBe(currentText);
+        const content = context.messages.flatMap(message => typeof message.content === "string" ? [] : message.content)
+            .filter(part => part.type === "text").map(part => part.text).join("\n");
+        expect(content).toContain("不代表视觉验收");
+        expect(content).toContain("历史相对变化不是本轮增量");
+        expect(content).toContain("本轮所选底图当前可见状态");
+        expect(content).toContain(note.summary);
+        expect(context.profileContext.workNote).toContain(note.summary);
+        expect(note).toEqual(before);
     });
 
     test("the 400-character keep contract is shared with the server and chat surface", () => {

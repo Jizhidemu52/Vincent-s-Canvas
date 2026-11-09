@@ -72,6 +72,23 @@ describe("shared image-agent planning", () => {
             expect(validateChatProfileOutput(result, prepared.privateRules)).toEqual(result);
         }
     });
+    test.each([creative, canvas])("preservation anchors historical relative edits to the selected base without deleting new numeric instructions", async makeRequest => {
+        const instruction = "只把图3背景改浅米色，提手宽度保持图3当前状态";
+        const request = makeRequest(instruction);
+        request.profileContext.workNote = "图3提手保留当前1.2倍宽度；这是历史要求，未测量验收。";
+        const prepared = await prepareChatProfileInput(request);
+        const rules = system(prepared.input.input);
+        expect(rules).toContain("所选底图当前可见状态");
+        expect(rules).toContain("历史加宽、缩短、旋转不作为本轮增量");
+        expect(rules).toContain("本轮明确要求再次变化才执行");
+        expect(rules).toContain("静态尺寸、数量和比例原样保留");
+        const edit = prepared.input.tools.find(tool => tool.name === "edit_image")!;
+        expect(JSON.stringify(edit.parameters)).toContain("所选底图当前可见状态");
+        expect(JSON.stringify(prepared.input.input)).toContain(request.profileContext.workNote);
+        expect(prepared.input.input.at(-1)).toMatchObject({ role: "user", content: instruction });
+        const args = { prompt: "在图3当前宽度上再次加宽1.2倍", keep: ["缝线间距3mm", "保留2颗纽扣", "包身长宽比1.2:1"] };
+        expect(parseImageAgentEdit(args)).toMatchObject(args);
+    });
     test.each([creative, canvas])("clarification uses natural dialogue without requiring image-selection controls", async makeRequest => {
         const prepared = await prepareChatProfileInput(makeRequest("你指的是哪一张图片？"));
         const rules = system(prepared.input.input);
