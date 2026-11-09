@@ -20,10 +20,8 @@ import type { CanvasCommandBindings } from "@/components/canvas/canvas-command-p
 import type { CanvasConnectionLayerHandle } from "@/components/canvas/canvas-connection-layer";
 import { CanvasConnectionSvg, CanvasGraphConnectionLayer } from "@/components/canvas/canvas-connection-svg";
 import { CanvasConnectionHover } from "@/components/canvas/canvas-connection-hover";
-import { CanvasConnectionControls } from "@/components/canvas/canvas-connection-controls";
 import { CanvasMentionImagesProvider } from "@/components/canvas/canvas-mention-images";
 import type { CanvasGroupLayerHandle } from "@/components/canvas/canvas-group-layer";
-import { CanvasMultiSelection } from "@/components/canvas/canvas-multi-selection";
 import { CanvasHoverToolbarHost } from "@/components/canvas/canvas-hover-toolbar-host";
 import { createConfigGenerationInputIndex } from "@/components/canvas/canvas-node-generation";
 import { CanvasNodeLayer } from "@/components/canvas/canvas-node-layer";
@@ -153,6 +151,8 @@ const CanvasSaveFailureNotice = lazy(() => import("@/components/canvas/canvas-sa
 const loadExperienceMetrics = () => import("@/lib/canvas/canvas-experience-metrics");
 const loadCanvasFileActions = () => import("./canvas-editor-file-actions");
 const CanvasNodeContextMenu = lazy(() => import("@/components/canvas/canvas-context-menu").then(module => ({ default: module.CanvasNodeContextMenu })));
+const CanvasConnectionControls = lazy(() => import("@/components/canvas/canvas-connection-controls").then(module => ({ default: module.CanvasConnectionControls })));
+const CanvasMultiSelection = lazy(() => import("@/components/canvas/canvas-multi-selection").then(module => ({ default: module.CanvasMultiSelection })));
 const CanvasWorkspaceTools = lazy(() => import("@/components/canvas/canvas-workspace-tools").then(module => ({ default: module.CanvasWorkspaceTools })));
 const CanvasBatchEditDialog = lazy(() => import("@/components/canvas/canvas-batch-edit-dialog"));
 const CanvasZoomControls = lazy(() => import("@/components/canvas/canvas-zoom-controls").then(module => ({ default: module.CanvasZoomControls })));
@@ -484,7 +484,8 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
     }, [canManageConfig, message, openConfigDialog]);
 
     const flushGenerationHistory = useCallback(() => flushQuickHistoryRef.current?.(), []);
-    const batchEdit = useCanvasBatchEdit({ projectId, generationDispatchLocksRef, getCanvasCenter, handleMissingModelConfig, isAiConfigReady, flushPendingHistory: flushGenerationHistory });
+    const batchEdit = useCanvasBatchEdit({ projectId, generationDispatchLocksRef, getCanvasCenter, handleMissingModelConfig, isAiConfigReady, flushPendingHistory: flushGenerationHistory,
+        waitForWriteAccess: generationRuntime.waitForWriteAccess, isObservationCurrent: generationRuntime.isObservationCurrent });
     const {
         batchEditOpen, setBatchEditOpen, batchEditPrompt, setBatchEditPrompt, batchOptimizePrompt, setBatchOptimizePrompt,
         batchOptimizing, batchImageSettings, setBatchImageSettings, batchEditItems, setBatchEditItems,
@@ -684,7 +685,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
         projectId, projectLoaded, usePerformanceScenario, projectSaveQueueRef, history, updateProject,
         writable,
         current: { nodes, connections, groups, chatSessions, activeChatId, backgroundMode, showImageInfo },
-        batchEditRunning, runningNodeId, viewport, selectedNodeIds,
+        batchEditRunning: batchEdit.batchEditBatches.some(batch => batch.running), runningNodeId, viewport, selectedNodeIds,
     });
 
     useEffect(() => {
@@ -2662,6 +2663,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
     const imageSequence = useCanvasImageSequence({
         projectId, nodes: nodesRef, connections: connectionsRef, groups: groupsRef, locks: generationDispatchLocksRef,
         setNodes, setConnections, setGroups, stopGeneration: stopGenerationByRunningId,
+        waitForWriteAccess: generationRuntime.waitForWriteAccess, isObservationCurrent: generationRuntime.isObservationCurrent,
         generate: async (nodeId, lockKey, signal) => {
             let result: CanvasGenerationResult | undefined;
             const node = nodesRef.current.find(item => item.id === nodeId);
@@ -2902,7 +2904,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
         imageSequence: {
             runFromNode: (...args) => configNodeActionsRef.current.imageSequence.runFromNode(...args),
             rerunStep: (...args) => configNodeActionsRef.current.imageSequence.rerunStep(...args),
-            stop: () => configNodeActionsRef.current.imageSequence.stop(),
+            stop: (...args) => configNodeActionsRef.current.imageSequence.stop(...args),
         },
     }), []);
     type ConfigRenderer = (node: CanvasNodeData, options: { isRunning: boolean }) => React.ReactNode;
@@ -2914,7 +2916,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
         for (const node of nodes) {
             if (node.type !== CanvasNodeType.Config) continue;
             const inputs = configGenerationInputIndex.get(node.id);
-            const snapshot = configRenderCacheRef.current.select(node, graph, getInputSummary(inputs), inputs, imageSequence.activeGroupId);
+            const snapshot = configRenderCacheRef.current.select(node, graph, getInputSummary(inputs), inputs, imageSequence.activeGroupIds);
             const previous = configRenderersRef.current.get(node.id);
             const render = previous?.snapshot === snapshot ? previous.render : ((contentNode, { isRunning }) => (
                 <Suspense fallback={null}><CanvasConfigNodeContent node={contentNode} snapshot={snapshot}
@@ -2925,7 +2927,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
         }
         for (const id of configRenderersRef.current.keys()) if (!next.has(id)) configRenderersRef.current.delete(id);
         return next;
-    }, [nodes, connections, groups, configGenerationInputIndex, imageSequence.activeGroupId, configNodeActions]);
+    }, [nodes, connections, groups, configGenerationInputIndex, imageSequence.activeGroupIds, configNodeActions]);
 
     const addImageNodeFromToolbar = useCallback(() => createNode(CanvasNodeType.Image), [createNode]);
     const addVideoNodeFromToolbar = useCallback(() => createNode(CanvasNodeType.Video), [createNode]);
@@ -3209,8 +3211,8 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
                         onSelect={connection => { setSelectedConnectionId(connection.id); setSelectedNodeIds(new Set()); setContextMenu(null); }}
                         onContextMenu={(event, connection) => { setSelectedConnectionId(connection.id); setSelectedNodeIds(new Set()); setContextMenu({ type: "connection", x: event.clientX, y: event.clientY, connectionId: connection.id }); }} />
                     <CanvasConnectionHover containerRef={containerRef} connections={visibleConnections} nodeById={connectionNodes.byId} scale={viewport.k} screenToCanvas={screenToCanvas} disabled={isNodeDragging || isNodeResizing || isSelecting || Boolean(connectingParams) || interactionMode === "hand"} onChange={setHoveredConnectionId} onDelete={deleteConnection} />
-                    <CanvasConnectionControls edge={selectedConnectionId ? connectionById.get(selectedConnectionId) : undefined} nodes={renderedNodes} nodeById={connectionNodes.byId}
-                        scale={viewport.k} theme={theme} connecting={Boolean(connectingParams)} targetId={connectionTargetNodeId} targetHint={connectionTargetHint} canConnect={canConnectNode} onReconnect={handleReconnectStart} />
+                    {selectedConnectionId || connectingParams || connectionTargetNodeId ? <Suspense fallback={null}><CanvasConnectionControls edge={selectedConnectionId ? connectionById.get(selectedConnectionId) : undefined} nodes={renderedNodes} nodeById={connectionNodes.byId}
+                        scale={viewport.k} theme={theme} connecting={Boolean(connectingParams)} targetId={connectionTargetNodeId} targetHint={connectionTargetHint} canConnect={canConnectNode} onReconnect={handleReconnectStart} /></Suspense> : null}
                     <CanvasNodeLayer nodes={renderedNodes} highlight={graphHighlight}
                         resourceReferences={resourceReferencesForActiveNode} globalReferences={globalResourceReferenceIndex}
                         nodeProps={node => ({
@@ -3243,7 +3245,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
                     {localToolsEnabled && !isNodeDragging && !isNodeResizing && !isSelecting && !connectingParams && singleSelectedNode?.type === CanvasNodeType.Image && renderedNodes.some(node => node.id === singleSelectedNode.id) ? <Suspense fallback={null}><CanvasInlineImageCompare key={singleSelectedNode.id} node={singleSelectedNode} nodes={nodes} scale={viewport.k} viewport={viewport} viewportHeight={size.height} showImageInfo={showImageInfo} onAdvanced={sourceId => sourceId ? setCompareImageIds([sourceId, singleSelectedNode.id]) : openImageCompare(singleSelectedNode)} /></Suspense> : null}
                     <CanvasSelectionOverlay ref={selectionOverlayRef} borderColor={theme.canvas.selectionStroke} background={theme.canvas.selectionFill} />
                     <svg className="pointer-events-none absolute left-0 top-0 z-[90] overflow-visible" width="1" height="1"><path ref={snapGuidesRef} fill="none" stroke={theme.canvas.selectionStroke} strokeWidth="1" vectorEffect="non-scaling-stroke" strokeDasharray="4 3" /></svg>
-                    <CanvasMultiSelection nodes={nodes.filter(node => selectedNodeIds.has(node.id) && !hiddenGroupNodeIds.has(node.id))} scale={viewport.k} theme={theme} hidden={isNodeDragging || isSelecting || Boolean(connectingParams)} toolbarTop={Math.min(Infinity, ...groupIndex.groups.filter(group => !group.group.collapsed && [...group.nodeIds].every(id => selectedNodeIds.has(id))).map(group => canvasGroupVisualBounds(group, viewport.k)?.y ?? Infinity))} screenToCanvas={screenToCanvas} onBegin={beginMultiResize} onPreview={previewMultiResize} onEnd={finishMultiResize} onArrange={arrangeNodes} />
+                    {selectedNodeIds.size > 1 ? <Suspense fallback={null}><CanvasMultiSelection nodes={nodes.filter(node => selectedNodeIds.has(node.id) && !hiddenGroupNodeIds.has(node.id))} scale={viewport.k} theme={theme} hidden={isNodeDragging || isSelecting || Boolean(connectingParams)} toolbarTop={Math.min(Infinity, ...groupIndex.groups.filter(group => !group.group.collapsed && [...group.nodeIds].every(id => selectedNodeIds.has(id))).map(group => canvasGroupVisualBounds(group, viewport.k)?.y ?? Infinity))} screenToCanvas={screenToCanvas} onBegin={beginMultiResize} onPreview={previewMultiResize} onEnd={finishMultiResize} onArrange={arrangeNodes} /></Suspense> : null}
                     {importPlaceholder ? <div role="status" className="pointer-events-none absolute flex h-40 w-80 flex-col items-center justify-center gap-3 rounded-xl border p-4 text-center text-sm" style={{ left: importPlaceholder.position.x - 160, top: importPlaceholder.position.y - 80, background: theme.node.panel, borderColor: theme.canvas.selectionStroke, color: theme.node.text }}><span className="max-w-full truncate">{importPlaceholder.name}</span><span>{t("正在导入 {value1}/{value2} 个文件…", { value1: importPlaceholder.completed, value2: importPlaceholder.total })}</span><progress max={importPlaceholder.total} value={importPlaceholder.completed} /></div> : null}
                     {pendingConnectionCreate ? <Suspense fallback={null}><ConnectionCreateMenu pending={pendingConnectionCreate} onCreate={(type) => createConnectedNode(type, pendingConnectionCreate)} onClose={cancelPendingConnectionCreate} /></Suspense> : null}
                 </WirelessCanvas>
@@ -3403,7 +3405,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
                     applyDesignTemplate, saveGroupName, saveNodeName, saveManualImageEdit, cropImageNode, maskEditImageNode,
                     splitImageNode, upscaleImageNode, generateAngleNode, clearCanvas, handleAssetInsert,
                 }} /></Suspense> : null}
-            {batchEditOpen ? <Suspense fallback={null}><CanvasBatchEditDialog open={batchEditOpen} running={batchEditRunning} prompt={batchEditPrompt} optimizePrompt={batchOptimizePrompt} optimizing={batchOptimizing} onOptimizePromptChange={setBatchOptimizePrompt} items={batchEditItems} imageSettings={batchImageSettings} serverId={batchEditServerId} action={batchEditAction} onClose={() => setBatchEditOpen(false)} onPromptChange={setBatchEditPrompt} onImageSettingsChange={setBatchImageSettings} onSelectFiles={() => batchFilesInputRef.current?.click()} onClearItems={() => setBatchEditItems([])} onRun={runBatchImageEdit} onControlBatch={controlActiveBatchEdit} /></Suspense> : null}
+            {batchEditOpen ? <Suspense fallback={null}><CanvasBatchEditDialog key={batchEdit.activeBatchEditId} open={batchEditOpen} batches={batchEdit.batchEditBatches} activeBatchId={batchEdit.activeBatchEditId} onNewBatch={batchEdit.createBatchEdit} onSelectBatch={batchEdit.selectBatchEdit} running={batchEditRunning} prompt={batchEditPrompt} optimizePrompt={batchOptimizePrompt} optimizing={batchOptimizing} onOptimizePromptChange={setBatchOptimizePrompt} items={batchEditItems} imageSettings={batchImageSettings} serverId={batchEditServerId} action={batchEditAction} onClose={() => setBatchEditOpen(false)} onPromptChange={setBatchEditPrompt} onImageSettingsChange={setBatchImageSettings} onSelectFiles={() => batchFilesInputRef.current?.click()} onClearItems={() => setBatchEditItems([])} onRun={runBatchImageEdit} onControlBatch={controlActiveBatchEdit} /></Suspense> : null}
                 <input ref={batchFilesInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleBatchFolderInputChange} />
                 {localAgentModuleEnabled && codexCompactAgent && !assistantMounted ? (
                     <Suspense fallback={null}>

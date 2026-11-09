@@ -14,7 +14,7 @@ function select(cache: ReturnType<typeof createCanvasConfigRenderCache>, current
     const inputs = createConfigGenerationInputIndex(current.nodes, current.connections).get("config");
     const summary = { textCount: inputs.filter(input => input.type === "text").length, imageCount: inputs.filter(input => input.type === "image").length,
         videoCount: inputs.filter(input => input.type === "video").length, audioCount: inputs.filter(input => input.type === "audio").length };
-    return cache.select(current.nodes.find(node => node.id === "config")!, current, summary, inputs, activeGroupId);
+    return cache.select(current.nodes.find(node => node.id === "config")!, current, summary, inputs, new Set(activeGroupId ? [activeGroupId] : []));
 }
 
 describe("current React graph config render cache", () => {
@@ -106,5 +106,17 @@ describe("current React graph config render cache", () => {
         const before = select(cache, original);
         cache.clear();
         expect(select(cache, original)).not.toBe(before);
+    });
+
+    test("parallel active groups render independently and finishing B preserves A's cached panel", () => {
+        const cache = createCanvasConfigRenderCache(), original = graph();
+        const workflow = { ...original, nodes: [...original.nodes, config("second")], groups: [group("a"), group("b", "second")] };
+        const summary = { textCount: 0, imageCount: 0, videoCount: 0, audioCount: 0 };
+        const a = workflow.nodes.find(node => node.id === "config")!, b = workflow.nodes.find(node => node.id === "second")!;
+        const active = new Set(["a", "b"]);
+        const panelA = cache.select(a, workflow, summary, [], active), panelB = cache.select(b, workflow, summary, [], active);
+        expect(panelA.workflowRunning).toBe(true); expect(panelB.workflowRunning).toBe(true);
+        expect(cache.select(a, workflow, summary, [], new Set(["a"]))).toBe(panelA);
+        expect(cache.select(b, workflow, summary, [], new Set(["a"])).workflowRunning).toBe(false);
     });
 });

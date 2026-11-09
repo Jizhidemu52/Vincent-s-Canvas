@@ -24,7 +24,7 @@ export function CanvasImageSequenceDialog({ controller, groups, nodes, model, on
     const dialog = controller.dialog;
     const group = groups.find(item => item.id === (dialog && "groupId" in dialog ? dialog.groupId : undefined));
     const source = nodes.find(item => item.id === (dialog && "sourceId" in dialog ? dialog.sourceId : group?.imageSequence?.sourceNodeId));
-    const running = Boolean(group && controller.activeGroupId === group.id);
+    const running = Boolean(group && controller.activeGroupIds.has(group.id));
     const onClose = () => controller.setDialog(null);
     const focus = (node?: CanvasNodeData) => { if (node) onFocus(node.position, node.width, node.height); };
     const onCreate = async (steps: ImageSequenceStep[]) => { if (source) focus(await controller.add(source.id, steps, model)); };
@@ -52,7 +52,7 @@ export function CanvasImageSequenceDialog({ controller, groups, nodes, model, on
         <div className="mt-4 flex shrink-0 flex-wrap items-center justify-between gap-2">
             {!sequence ? <Button icon={<Plus size={14} />} disabled={drafts.length >= 10} onClick={() => setDrafts(items => [...items, ["新步骤", "", "custom"]])}>{t("添加步骤")}</Button> : <span className="text-xs opacity-60">{t("继续只执行未完成步骤；已完成图片不会重跑。")}</span>}
             {!sequence ? <Button type="primary" disabled={!source || drafts.some(([title, prompt]) => !title.trim() || !prompt.trim())} onClick={() => onCreate(drafts)}>{t("创建并连接节点")}</Button>
-                : running ? <Button danger onClick={controller.stop}>{t("停止后续步骤")}</Button>
+                : running ? <Button danger onClick={() => controller.stop(group?.id)}>{t("停止后续步骤")}</Button>
                     : <Button type="primary" disabled={!source || cards.some(card => !card.node || !card.prompt.trim())} onClick={onRun}>{sequence.status === "success" ? t("按连线重新运行") : sequence.status === "idle" ? t("按连线运行") : t("核查并继续")}</Button>}
         </div>
     </Modal>;

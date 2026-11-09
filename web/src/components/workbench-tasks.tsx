@@ -6,8 +6,8 @@ import { uiText, useUiText } from "@/lib/i18n";
 import { addWorkbenchTask, closeWorkbenchTask, DEFAULT_WORKBENCH_TASK, initialWorkbenchTasks, readWorkbenchTasks, workbenchTaskScope, type WorkbenchTaskState } from "@/lib/workbench-task-state";
 
 type TaskStatus = { busy: boolean; pending?: boolean; ready?: boolean; label?: string };
-type TaskContext = { id: string; active: boolean; urlInputKey: string | null; draftScope: (base: string) => string; report: (status: TaskStatus) => void };
-const defaultTask: TaskContext = { id: DEFAULT_WORKBENCH_TASK, active: true, urlInputKey: null, draftScope: base => base, report: () => {} };
+type TaskContext = { id: string; active: boolean; ready: boolean; creating: boolean; createNewTask: () => Promise<boolean>; urlInputKey: string | null; draftScope: (base: string) => string; report: (status: TaskStatus) => void };
+const defaultTask: TaskContext = { id: DEFAULT_WORKBENCH_TASK, active: true, ready: false, creating: false, createNewTask: async () => false, urlInputKey: null, draftScope: base => base, report: () => {} };
 const WorkbenchTaskContext = createContext<TaskContext>(defaultTask);
 
 export function useWorkbenchTask() { return useContext(WorkbenchTaskContext); }
@@ -17,10 +17,10 @@ export function useWorkbenchTaskStatus({ busy, pending = false, ready = true, la
     useEffect(() => { report({ busy, pending, ready, label }); }, [report, busy, pending, ready, label]);
 }
 
-function TaskPane({ id, active, urlInputKey, report, children, panelId, tabId }: { id: string; active: boolean; urlInputKey: string | null; report: (id: string, status: TaskStatus) => void; children: ReactNode; panelId: string; tabId: string }) {
+function TaskPane({ id, active, ready, creating, createNewTask, urlInputKey, report, children, panelId, tabId }: { id: string; active: boolean; ready: boolean; creating: boolean; createNewTask: () => Promise<boolean>; urlInputKey: string | null; report: (id: string, status: TaskStatus) => void; children: ReactNode; panelId: string; tabId: string }) {
     const reportStatus = useCallback((status: TaskStatus) => report(id, status), [id, report]);
     const draftScope = useCallback((base: string) => workbenchTaskScope(base, id), [id]);
-    const value = useMemo(() => ({ id, active, urlInputKey, draftScope, report: reportStatus }), [id, active, urlInputKey, draftScope, reportStatus]);
+    const value = useMemo(() => ({ id, active, ready, creating, createNewTask, urlInputKey, draftScope, report: reportStatus }), [id, active, ready, creating, createNewTask, urlInputKey, draftScope, reportStatus]);
     // Keep inactive workspaces mounted: their original request/observer and frozen
     // input stay intact. Hiding a tab is not cancellation or a new submission.
     return <div role="tabpanel" id={panelId} aria-labelledby={tabId} hidden={!active} style={{ display: active ? "block" : "none" }} className="h-full min-h-0 min-w-0">
@@ -78,16 +78,21 @@ export function WorkbenchTasks({ boardKey, ownerId, urlInputKey, children }: { b
         return () => observer.disconnect();
     }, [prefix, state.activeId, ready]);
 
-    const persist = async (next: WorkbenchTaskState) => {
-        if (!ready || savingRef.current) return;
+    const persist = useCallback(async (next: WorkbenchTaskState) => {
+        if (!ready || savingRef.current) return false;
         savingRef.current = true; setSaving(true); setError("");
         try {
             await storage.setItem(registryKey, next);
-            if (!mounted.current) return;
+            if (!mounted.current) return false;
             stateRef.current = next; setState(next);
-        } catch (caught) { if (mounted.current) setError(caught instanceof Error ? caught.message : "任务页签保存失败，未创建新任务。"); }
+            return true;
+        } catch (caught) {
+            if (mounted.current) setError(caught instanceof Error ? caught.message : "任务页签保存失败，未创建新任务。");
+            return false;
+        }
         finally { savingRef.current = false; if (mounted.current) setSaving(false); }
-    };
+    }, [ready, storage, registryKey]);
+    const createNewTask = useCallback(() => persist(addWorkbenchTask(stateRef.current, nanoid(), Date.now())), [persist]);
     const activate = (id: string) => { if (id !== stateRef.current.activeId) void persist({ ...stateRef.current, activeId: id }); };
     const close = (id: string) => {
         const status = statuses[id];
@@ -125,10 +130,10 @@ export function WorkbenchTasks({ boardKey, ownerId, urlInputKey, children }: { b
                 })}
             </div>
             <button type="button" disabled={!ready || saving} className="flex shrink-0 items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-40"
-                title={uiText("开始独立任务，当前任务继续处理")} onClick={() => void persist(addWorkbenchTask(stateRef.current, nanoid(), Date.now()))}><Plus size={14} />{uiText("新建任务")}</button>
+                title={uiText("开始独立任务，当前任务继续处理")} onClick={() => void createNewTask()}><Plus size={14} />{uiText("新建任务")}</button>
         </div>
         {error && <div role="alert" className="flex shrink-0 items-center gap-2 px-3 py-2 text-xs text-destructive"><span>{uiText(error)}</span>{!ready && <button type="button" className="underline" onClick={() => setAttempt(value => value + 1)}>{uiText("重试读取")}</button>}</div>}
         {!ready && !error ? <div role="status" className="p-4 text-sm text-muted-foreground">{uiText("正在读取任务列表…")}</div> : null}
-        <div className="min-h-0 min-w-0 flex-1">{ready && state.tasks.map(task => <TaskPane key={task.id} id={task.id} active={state.activeId === task.id} urlInputKey={urlInputTarget.current?.id === task.id ? urlInputTarget.current.key : null} report={report} panelId={`${prefix}-panel-${task.id}`} tabId={`${prefix}-tab-${task.id}`}>{children}</TaskPane>)}</div>
+        <div className="min-h-0 min-w-0 flex-1">{ready && state.tasks.map(task => <TaskPane key={task.id} id={task.id} active={state.activeId === task.id} ready={ready} creating={saving} createNewTask={createNewTask} urlInputKey={urlInputTarget.current?.id === task.id ? urlInputTarget.current.key : null} report={report} panelId={`${prefix}-panel-${task.id}`} tabId={`${prefix}-tab-${task.id}`}>{children}</TaskPane>)}</div>
     </section>;
 }

@@ -136,7 +136,8 @@ export default function VideoPage() {
 
 function VideoGenerationWorkspace() {
     useUiText();
-    const { id: workspaceId, active: workspaceActive, draftScope } = useWorkbenchTask();
+    const workbenchTask = useWorkbenchTask();
+    const { id: workspaceId, active: workspaceActive, draftScope } = workbenchTask;
     const [logStore] = useState(() => createWorkspaceStorage("video_generation_logs"));
     const { message, modal } = App.useApp();
     const resultCanvas = useResultCanvas();
@@ -566,22 +567,10 @@ function VideoGenerationWorkspace() {
         finally { if (isCurrentReferenceScope(scope)) setReadingReferences(false); }
     };
 
-    const createSession = () => {
-        resetReferenceScope();
-        resultViewScopeRef.current += 1;
-        visibleResultLogIdsRef.current.clear();
-        restoredInitialResultRef.current = true;
-        previewLoader.invalidate();
-        setPreviewLoading(false);
-        setPreviewError("");
-        setPrompt("");
-        setReferences([]);
-        setVideoReferences([]);
-        setAudioReferences([]);
-        setResults([]);
-        setStartedAt(0);
-        setSelectedLogIds([]);
-        setPreviewLog(null);
+    const createTask = async () => {
+        // Preserve this workspace and its in-flight observers. A failed registry
+        // write must not discard the draft or close the mobile history portal.
+        if (await workbenchTask.createNewTask()) setLogsOpen(false);
     };
 
     const deleteSelectedLogs = async () => {
@@ -786,7 +775,8 @@ function VideoGenerationWorkspace() {
                         selectedLogIds={selectedLogIds}
                         activeLogId={previewLog?.id}
                         onSelectedLogIdsChange={setSelectedLogIds}
-                        onCreateSession={createSession}
+                        createDisabled={!workbenchTask.ready || workbenchTask.creating}
+                        onCreateTask={() => void createTask()}
                         onDeleteSelected={() => setDeleteConfirmOpen(true)}
                         onPreviewLog={previewGenerationLog}
                     />
@@ -937,6 +927,7 @@ function VideoGenerationWorkspace() {
                             <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} loading={submitting} disabled={!canGenerate || submitting || readingReferences || previewLoading} onClick={() => void generate()}>
                                 {submitting ? uiText("正在提交视频") : running ? uiText("继续生成新视频") : uiText("生成视频")}
                             </Button>
+                            {submitting || running ? <Button block icon={<Plus className="size-4" />} loading={workbenchTask.creating} disabled={!workbenchTask.ready || workbenchTask.creating} onClick={() => void createTask()}>{uiText("新建任务，继续创作")}</Button> : null}
                             {running ? <Button block onClick={() => { for (const controller of observationControllers.current.values()) controller.abort(); }}>{uiText("停止本页查询（不取消服务端任务）")}</Button> : logs.some(log => log.status === "查询暂停") ? <Button block onClick={() => resumePendingLogs(logs)}>{uiText("继续查询原任务")}</Button> : null}
                         </div>
                     </div>
@@ -1000,7 +991,8 @@ function VideoGenerationWorkspace() {
                     selectedLogIds={selectedLogIds}
                     activeLogId={previewLog?.id}
                     onSelectedLogIdsChange={setSelectedLogIds}
-                    onCreateSession={createSession}
+                    createDisabled={!workbenchTask.ready || workbenchTask.creating}
+                    onCreateTask={() => void createTask()}
                     onDeleteSelected={() => setDeleteConfirmOpen(true)}
                     onPreviewLog={previewGenerationLog}
                 />
@@ -1110,16 +1102,18 @@ function LogPanel({
     logs,
     selectedLogIds,
     activeLogId,
+    createDisabled,
     onSelectedLogIdsChange,
-    onCreateSession,
+    onCreateTask,
     onDeleteSelected,
     onPreviewLog,
 }: {
     logs: GenerationLog[];
     selectedLogIds: string[];
     activeLogId?: string;
+    createDisabled: boolean;
     onSelectedLogIdsChange: (ids: string[]) => void;
-    onCreateSession: () => void;
+    onCreateTask: () => void;
     onDeleteSelected: () => void;
     onPreviewLog: (log: GenerationLog) => void;
 }) {
@@ -1136,7 +1130,7 @@ function LogPanel({
                 <Tag className="m-0">{logs.length}</Tag>
             </div>
             <div className="mb-4 flex flex-wrap gap-2">
-                <Button size="small" icon={<Plus className="size-3.5" />} onClick={onCreateSession}>
+                <Button size="small" icon={<Plus className="size-3.5" />} disabled={createDisabled} onClick={onCreateTask}>
                     {uiText("新建")}</Button>
                 <Button size="small" icon={<CheckSquare className="size-3.5" />} disabled={!logs.length} onClick={toggleAll}>
                     {allSelected ? uiText("取消") : uiText("全选")}

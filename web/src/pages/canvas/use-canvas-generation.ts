@@ -93,7 +93,7 @@ export function useCanvasGeneration({ projectId, nodesRef, connectionsRef, desig
     };
 
     const executeGenerateNode = useCallback(
-        async (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string, onResult?: (result: CanvasGenerationResult) => void, shared?: SharedGenerationExecution, replay?: CanvasGenerationRecord, onDispatched?: () => void) => {
+        async (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string, onResult?: (result: CanvasGenerationResult) => void, shared?: SharedGenerationExecution, replay?: CanvasGenerationRecord, onDispatched?: () => void, sequenceController?: AbortController) => {
             const ownerId = useUserStore.getState().user?.id;
             const snapshotNodes = nodesRef.current;
             const snapshotConnections = connectionsRef.current;
@@ -109,9 +109,9 @@ export function useCanvasGeneration({ projectId, nodesRef, connectionsRef, desig
                 reported = true;
                 onResult?.({ mode, outputs });
             };
-            if (!await waitForWriteAccess() || !isCurrent()) return;
-            const recovered = mode === "image" ? await recoverPending(nodeId) : null;
-            if (!await waitForWriteAccess() || !isCurrent()) return;
+            if (!await waitForWriteAccess() || !isCurrent() || sequenceController?.signal.aborted) return;
+            const recovered = mode === "image" ? await recoverPending(nodeId, sequenceController?.signal) : null;
+            if (!await waitForWriteAccess() || !isCurrent() || sequenceController?.signal.aborted) return;
             if (recovered) {
                 reportResult(recovered);
                 return;
@@ -128,7 +128,7 @@ export function useCanvasGeneration({ projectId, nodesRef, connectionsRef, desig
             }
             let generationConfig = replay ? canvasGenerationRecordConfig(replay, effectiveConfig) : shared?.config || buildGenerationConfig(effectiveConfig, sourceNode, mode);
             await ensureCanvasModelsReady();
-            if (!await waitForWriteAccess() || !isCurrent()) return;
+            if (!await waitForWriteAccess() || !isCurrent() || sequenceController?.signal.aborted) return;
             if (!isAiConfigReady(generationConfig, generationConfig.model)) {
                 handleMissingModelConfig();
                 reportResult([{ nodeId, status: "failed", error: "模型配置不可用" }]);
@@ -138,7 +138,7 @@ export function useCanvasGeneration({ projectId, nodesRef, connectionsRef, desig
             const requestKey = mode === "image" && !shared ? `image-run:${nanoid()}` : nodeId;
             const runningId = shared?.runningId || requestKey;
             setRunningNodeId(runningId);
-            const runController = startGenerationRequest(requestKey, nodeId, runningId, shared?.controller);
+            const runController = startGenerationRequest(requestKey, nodeId, runningId, shared?.controller || sequenceController);
             const generationOrigin = { configNodeId: shared?.plan.configNode.id, sourceNodeId: nodeId, runId: shared?.runId || nanoid(), mode };
             const sourceTextContent = sourceNode?.type === CanvasNodeType.Text ? sourceNode.metadata?.content?.trim() || "" : "";
             const editingTextNode = mode === "text" && Boolean(sourceTextContent);
@@ -483,13 +483,20 @@ export function useCanvasGeneration({ projectId, nodesRef, connectionsRef, desig
         }
         const releaseDispatch = ownsSequenceLock ? undefined : acquireDispatch(nodeId);
         const snapshot = { nodes: nodesRef.current, connections: connectionsRef.current };
+        // One controller belongs to this invocation, including shared targets and
+        // original-task recovery. Preserve observation-only abort reasons verbatim.
+        const sequenceController = sequenceSignal ? new AbortController() : undefined;
+        const abortSequence = () => sequenceController?.abort(sequenceSignal?.reason);
+        if (sequenceSignal?.aborted) abortSequence();
+        else sequenceSignal?.addEventListener("abort", abortSequence, { once: true });
         try {
             const { runCanvasGeneration } = await import("./canvas-shared-generation-runtime");
             if (!await waitForWriteAccess() || sequenceSignal?.aborted) return;
             await runCanvasGeneration(nodeId, mode, prompt, onResult, {
                 snapshot, retryFailedOnly, getSnapshot: () => ({ nodes: nodesRef.current, connections: connectionsRef.current }),
                 buildConfig: (node, selectedMode) => buildGenerationConfig(effectiveConfig, node, selectedMode),
-                isAiConfigReady, execute: (id, selectedMode, inputPrompt, callback, shared) => executeGenerateNode(id, selectedMode, inputPrompt, callback, shared, undefined, releaseDispatch), recover: recoverPending, start: startGenerationRequest, finish: finishGenerationRequest,
+                isAiConfigReady, execute: (id, selectedMode, inputPrompt, callback, shared) => executeGenerateNode(id, selectedMode, inputPrompt, callback, shared, undefined, releaseDispatch, sequenceController),
+                recover: id => recoverPending(id, sequenceController?.signal), start: (targetId, originId, runningId) => startGenerationRequest(targetId, originId, runningId, sequenceController), finish: finishGenerationRequest,
                 setRunning: setRunningNodeId, setNodes, message, isObserving: id => runtime.generationRequestsRef.current.has(id),
             });
         } catch (error) {
@@ -497,6 +504,7 @@ export function useCanvasGeneration({ projectId, nodesRef, connectionsRef, desig
             message.error(detail);
             onResult?.({ mode, outputs: [{ nodeId, status: "failed", error: detail }] });
         } finally {
+            sequenceSignal?.removeEventListener("abort", abortSequence);
             releaseDispatch?.();
         }
     }, [effectiveConfig, executeGenerateNode, finishGenerationRequest, isAiConfigReady, message, recoverPending, startGenerationRequest, waitForWriteAccess]);

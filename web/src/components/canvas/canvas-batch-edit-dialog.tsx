@@ -1,12 +1,13 @@
 import { useUiText } from "@/lib/i18n";
 import type { Dispatch, SetStateAction } from "react";
-import { Button, Input, Modal, Tag, Switch, theme as antdTheme } from "antd";
+import { Button, Input, Modal, Select, Tag, Switch, theme as antdTheme } from "antd";
 import { Pause, Play, X } from "lucide-react";
 import { ModelPicker } from "@/components/model-picker";
 import { ImageSettingsPanel } from "@/components/image-settings-panel";
 import { useToolConfig } from "@/hooks/use-tool-config";
 import { canvasThemes } from "@/lib/canvas-theme";
 import type { BatchEditFileItem } from "@/pages/canvas/canvas-batch-edit-runtime";
+import type { CanvasBatchEditSummary } from "@/pages/canvas/use-canvas-batch-edit";
 import type { QueuedBatchAction } from "@/services/api/generation-tasks";
 import { useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -22,6 +23,10 @@ export type CanvasBatchEditDialogProps = {
     imageSettings: Partial<AiConfig>;
     serverId: string | null;
     action: QueuedBatchAction | null;
+    batches: CanvasBatchEditSummary[];
+    activeBatchId: string;
+    onNewBatch: () => void;
+    onSelectBatch: (id: string) => void;
     onClose: () => void;
     onPromptChange: (prompt: string) => void;
     onImageSettingsChange: Dispatch<SetStateAction<Partial<AiConfig>>>;
@@ -34,37 +39,46 @@ export type CanvasBatchEditDialogProps = {
 /** The editor owns the batch lifecycle; this chunk contains only its dialog UI. */
 export default function CanvasBatchEditDialog({
     open, running, prompt, optimizePrompt, optimizing, onOptimizePromptChange, items, imageSettings, serverId, action,
-    onClose, onPromptChange, onImageSettingsChange, onSelectFiles, onClearItems, onRun, onControlBatch,
+    batches, activeBatchId, onNewBatch, onSelectBatch, onClose, onPromptChange, onImageSettingsChange, onSelectFiles, onClearItems, onRun, onControlBatch,
 }: CanvasBatchEditDialogProps) {
     const t = useUiText();
     const theme = canvasThemes[useThemeStore(state => state.theme)];
     const { token } = antdTheme.useToken();
     const effectiveConfig = useEffectiveConfig("canvas");
     const config = useToolConfig({ ...effectiveConfig, ...imageSettings, model: imageSettings.model || effectiveConfig.imageModel || effectiveConfig.model, count: "1" }, "canvas-batch");
+    const hasOriginalRequest = items.some(item => item.requestId);
+    const inputLocked = running || hasOriginalRequest;
     return (
         <Modal
             title={t("批量一键改图")}
             open={open}
             width={760}
-            onCancel={() => { if (!running) onClose(); }}
+            onCancel={onClose}
             footer={
                 <>
-                    <Button disabled={running} onClick={onClose}>{t("关闭")}</Button>
-                    <Button type="primary" loading={running} onClick={() => void onRun()}>{optimizing ? t("正在优化提示词…") : t("一键生图")}</Button>
+                    <Button onClick={onClose}>{t("关闭")}</Button>
+                    <Button type="primary" loading={running} disabled={hasOriginalRequest && !running} onClick={() => void onRun()}>{optimizing ? t("正在优化提示词…") : t("一键生图")}</Button>
                 </>
             }
         >
             <div className="space-y-4">
+                <div className="flex items-center gap-2">
+                    <Select aria-label={t("切换批次")} className="min-w-0 flex-1" value={activeBatchId} onChange={onSelectBatch}
+                        options={batches.map(batch => ({ value: batch.id, label: `${batch.label} · ${t(batch.status === "running" ? "处理中" : batch.status === "pending" ? "待核查" : batch.status === "finished" ? "已结束" : "草稿")} · ${batch.completed}/${batch.total}` }))} />
+                    <Button onClick={onNewBatch}>{t("新批次")}</Button>
+                </div>
                 <div className="rounded-lg border px-3 py-2 text-xs leading-5" style={{ borderColor: theme.node.stroke, background: theme.node.fill, color: theme.node.text }}>{t("可多选 1–100 张图片，每张独立生成 1 张结果，原图保留。")}</div>
-                <fieldset disabled={running} className="space-y-2 border-0 p-0">
-                    <ModelPicker toolKey="canvas-batch" config={config} value={config.model} capability="image" fullWidth disabled={running}
+                <div className="text-xs" style={{ color: theme.node.muted }}>{t("可新建批次继续创作；切换批次或关闭窗口不会取消已提交的任务。")}</div>
+                {hasOriginalRequest ? <div className="text-xs" style={{ color: theme.node.muted }}>{t("已保留该批次的原请求和结果；如需再次创作，请新建批次。")}</div> : null}
+                <fieldset disabled={inputLocked} className="space-y-2 border-0 p-0">
+                    <ModelPicker toolKey="canvas-batch" config={config} value={config.model} capability="image" fullWidth disabled={inputLocked}
                         onChange={model => onImageSettingsChange(current => ({ ...current, model, imageModel: model }))} />
                     <ImageSettingsPanel config={config} referenceCount={items.length ? 1 : 0} theme={theme} maxCount={1} showTitle={false}
                         onConfigChange={(key, value) => onImageSettingsChange(current => ({ ...current, [key]: value }))} />
                 </fieldset>
                 <div className="flex flex-wrap gap-2">
-                    <Button onClick={onSelectFiles} disabled={running}>{t("选择图片（可多选）")}</Button>
-                    <Button disabled={running || !items.length} onClick={onClearItems}>{t("清空列表")}</Button>
+                    <Button onClick={onSelectFiles} disabled={inputLocked}>{t("选择图片（可多选）")}</Button>
+                    <Button disabled={inputLocked || !items.length} onClick={onClearItems}>{t("清空列表")}</Button>
                 </div>
                 {serverId && running ? (
                     <div className="flex flex-wrap items-center gap-2 rounded-md border px-3 py-2" style={{ borderColor: theme.node.stroke, background: theme.node.fill }}>
@@ -80,8 +94,8 @@ export default function CanvasBatchEditDialog({
                             onClick={() => void onControlBatch("cancel")}>{t("取消未处理项")}</Button>
                     </div>
                 ) : null}
-                <label className="flex items-center gap-2 text-sm"><Switch checked={optimizePrompt} disabled={running} onChange={onOptimizePromptChange} aria-label={t("批量统一优化提示词")} />{t("统一优化提示词（整批只优化一次，默认关闭）")}</label>
-                <Input.TextArea disabled={running} value={prompt} onChange={event => onPromptChange(event.target.value)} rows={4} placeholder={t("例如：白底图产品摄影，保留产品结构，提升质感和光影，适合电商详情页")} />
+                <label className="flex items-center gap-2 text-sm"><Switch checked={optimizePrompt} disabled={inputLocked} onChange={onOptimizePromptChange} aria-label={t("批量统一优化提示词")} />{t("统一优化提示词（整批只优化一次，默认关闭）")}</label>
+                <Input.TextArea aria-label={t("批量改图提示词")} disabled={inputLocked} value={prompt} onChange={event => onPromptChange(event.target.value)} rows={4} placeholder={t("例如：白底图产品摄影，保留产品结构，提升质感和光影，适合电商详情页")} />
                 <div className="rounded-lg border" style={{ borderColor: theme.node.stroke, color: theme.node.text }}>
                     <div className="flex items-center justify-between border-b px-3 py-2 text-xs font-semibold" style={{ borderColor: theme.node.stroke, color: theme.node.muted }}>
                         <span>{t("待处理图片")}{items.length} {t(" 张")}</span><span>{t("按文件名顺序处理")}</span>

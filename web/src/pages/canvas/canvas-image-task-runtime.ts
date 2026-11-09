@@ -153,15 +153,16 @@ export default function createCanvasImageTaskRuntime({ nodes, setNodes, saveQueu
             };
             return options;
         },
-        async recoverPending(nodeId?: string): Promise<RecoveryOutput[] | null> {
-            if (!inScope()) return [];
+        async recoverPending(nodeId?: string, signal?: AbortSignal): Promise<RecoveryOutput[] | null> {
+            if (!inScope() || signal?.aborted) return [];
             await waitForWriteAccess();
+            if (signal?.aborted) return [];
             const source = nodes.current.find(node => node.id === nodeId);
             if (nodeId && !source) return [];
             const pending = nodes.current.filter(node => node.type === CanvasNodeType.Image && node.metadata?.imageTask
                 && (!nodeId || node.id === nodeId || (source?.metadata?.isBatchRoot && node.metadata.batchRootId === nodeId)));
             if (!pending.length) return null;
-            await Promise.all(pending.map(node => runtime.recoverImageTask(node.id, node.metadata!.imageTask!, Boolean(nodeId))));
+            await Promise.all(pending.map(node => runtime.recoverImageTask(node.id, node.metadata!.imageTask!, Boolean(nodeId), signal)));
             return pending.map(node => {
                 const restored = nodes.current.find(item => item.id === node.id);
                 return restored?.metadata?.status === "success"
@@ -169,15 +170,19 @@ export default function createCanvasImageTaskRuntime({ nodes, setNodes, saveQueu
                     : { nodeId: node.id, status: "failed", error: restored?.metadata?.errorDetails || "原图片任务仍待查询" };
             });
         },
-        async recoverImageTask(nodeId: string, binding: CanvasImageTaskBinding, explicit = false) {
+        async recoverImageTask(nodeId: string, binding: CanvasImageTaskBinding, explicit = false, signal?: AbortSignal) {
             const recoveries = scope.recoveries;
-            if (!current(nodeId, binding) || recoveries.has(nodeId) || generating.current.has(nodeId)) return;
+            if (signal?.aborted || !current(nodeId, binding) || recoveries.has(nodeId) || generating.current.has(nodeId)) return;
             const controller = new AbortController();
+            // Recovery only observes the existing attempt; abort never calls cancel.
+            const abort = () => controller.abort(signal?.reason);
+            signal?.addEventListener("abort", abort, { once: true });
             // No await precedes this shared lock, including after concurrent imports.
             recoveries.set(nodeId, controller);
             try {
                 await runtime.recover(nodeId, binding, controller.signal, explicit);
             } finally {
+                signal?.removeEventListener("abort", abort);
                 if (recoveries.get(nodeId) === controller) recoveries.delete(nodeId);
             }
         },

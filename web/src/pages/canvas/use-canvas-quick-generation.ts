@@ -35,7 +35,7 @@ type CanvasQuickGenerationOptions = {
     connectionsRef?: RefObject<CanvasConnection[]>;
     flushPendingHistoryRef?: RefObject<(() => void) | null>;
     runtime: ReturnType<typeof useCanvasGenerationRuntime>;
-    batchEdit: Pick<ReturnType<typeof useCanvasBatchEdit>, "setBatchEditPrompt" | "setBatchImageSettings" | "setBatchEditOpen" | "batchInputVersionRef">;
+    batchEdit: Pick<ReturnType<typeof useCanvasBatchEdit>, "applyBatchEditTemplate" | "batchInputVersionRef">;
     setDialogNodeId: Dispatch<SetStateAction<string | null>>;
     getCanvasCenter: () => Position;
     handleMissingModelConfig: () => void;
@@ -53,7 +53,7 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, c
     const setSelectedNodeIds = useCanvasGraphSetter("selectedNodeIds");
     const setSelectedConnectionId = useCanvasGraphSetter("selectedConnectionId");
     const { createOptions, startGenerationRequest, finishGenerationRequest, setRunningNodeId, waitForWriteAccess, isObservationCurrent } = runtime;
-    const { setBatchEditPrompt, setBatchImageSettings, setBatchEditOpen, batchInputVersionRef } = batchEdit;
+    const { applyBatchEditTemplate, batchInputVersionRef } = batchEdit;
     const NODE_STATUS_LOADING = "loading" as const;
     const NODE_STATUS_ERROR = "error" as const;
     const quickGenerateOpen = useCanvasPanelStore(state => state.creationOpen);
@@ -515,9 +515,7 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, c
             generate: () => quickGenerateRef.current(),
             apply: (prompt, settings, references, batch) => {
                 if (batch) {
-                    setBatchEditPrompt(prompt);
-                    setBatchImageSettings({ ...settings, imageModel: settings.model });
-                    setBatchEditOpen(true);
+                    applyBatchEditTemplate(prompt, { ...settings, imageModel: settings.model });
                 } else {
                     loadQuickGenerationNode(null);
                     setQuickGeneratePrompt(prompt);

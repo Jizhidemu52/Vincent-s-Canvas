@@ -56,6 +56,7 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
     const frame = (): Frame => ({ values: [], effects: [], pending: [], cursor: 0, mounted: true });
     const wrapper = frame();
     let workspace = frame();
+    const retainedWorkspaces: Frame[] = [];
     let active = wrapper;
     let root: ReactElement<any>;
     let mountedKey: string | null | undefined;
@@ -139,7 +140,12 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
     const dependencies: Record<string, any> = {
         // These closure tests exercise one selected pane; actual multi-pane
         // persistence, switching and ownership run in workbench-multitask.pw.ts.
-        "@/components/workbench-tasks": { WorkbenchTasks: ({ children, urlInputKey: nextKey }: any) => { urlInputKey = nextKey ?? null; return children.type(children.props); }, useWorkbenchTask: () => ({ id: taskId, active: true, urlInputKey, draftScope: (scope: string) => workbenchTaskScope(scope, taskId) }), useWorkbenchTaskStatus(status: { ready: boolean; pending: boolean }) { reportedTaskStatus = status; } },
+        "@/components/workbench-tasks": { WorkbenchTasks: ({ children, urlInputKey: nextKey }: any) => { urlInputKey = nextKey ?? null; return children.type(children.props); }, useWorkbenchTask: () => ({ id: taskId, active: true, ready: true, creating: false, createNewTask: async () => {
+            // Match the real keyed pane boundary: retain the old owner of its
+            // async closures and give the new independent task fresh hook state.
+            retainedWorkspaces.push(workspace); workspace = frame(); taskId = `new-task-${++sequence}`;
+            return true;
+        }, urlInputKey, draftScope: (scope: string) => workbenchTaskScope(scope, taskId) }), useWorkbenchTaskStatus(status: { ready: boolean; pending: boolean }) { reportedTaskStatus = status; } },
         "@/lib/i18n": i18nHarness,
         react: {
             ...React, useState, useMemo,
@@ -247,7 +253,7 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
         root = run(workspace, () => (child.type as Function)(child.props));
         return root;
     };
-    const unmount = () => { cleanup(workspace); cleanup(wrapper); };
+    const unmount = () => { cleanup(workspace); retainedWorkspaces.forEach(cleanup); cleanup(wrapper); };
     disposers.push(unmount);
     return {
         boundary, render, stored, requests, errors, warnings, config, confirmations, navigations,
@@ -630,7 +636,7 @@ describe("image workspace isolation", () => {
         expect(page.errors).toEqual([]);
     });
 
-    test("a new session created after returning stays empty when the previous task finishes", async () => {
+    test("a new independent task created after returning stays empty when the previous task finishes", async () => {
         const pending = deferred<Image[]>();
         const page = pageHarness([storedLog("image-generation", "a-old", 10)], () => pending.promise);
         await page.settle();
@@ -640,14 +646,17 @@ describe("image workspace isolation", () => {
         await page.settle();
         page.navigate("image-generation");
         await page.settle();
-        page.panels()[0].onCreateSession();
+        page.panels()[0].onCreateTask();
         page.prompt().onChange({ target: { value: "fresh draft" } });
         pending.resolve([{ id: "previous-result", dataUrl: "data:image/png;base64,YQ==" }]);
         await page.settle();
         expect(page.images()).toEqual([]);
         expect(page.prompt().value).toBe("fresh draft");
         expect(page.panels()[0].activeLogId).toBeUndefined();
+        // Tool history remains browseable across tabs; it must not populate B's
+        // active result view or rewrite the original task's stored ownership.
         expect(page.panels()[0].logs[0].images[0].id).toBe("previous-result");
+        expect(page.panels()[0].logs[0].workspaceId).toBe("default");
         expect(page.errors).toEqual([]);
     });
 

@@ -125,7 +125,7 @@ test("a completed batch archives each original reference and final prompt in one
         uploadImage: async (file: File | string) => ({ url: typeof file === "string" ? file : `blob:${file.name}`, storageKey: `image:${typeof file === "string" ? file : file.name}`, width: 100, height: 100, mimeType: "image/png" }),
         requestBatchEdit: async (_config: unknown, _prompt: string, _files: unknown, options: any) => {
             await options.onSubmissionStarted("batch", [{ itemIndex: 0 }, { itemIndex: 1 }]);
-            options.onCompiled("最终批次提示词", true);
+            await options.onCompiled("最终批次提示词", true);
             return { batchId: "batch", failures: [], tasks: files.map((file, itemIndex) => ({ id: `task-${itemIndex}`, itemIndex, status: "success", resultUrls: [`result-${file.name}`] })) };
         },
         mapCanvasAsyncPool: async (entries: any[], _limit: number, map: Function) => Promise.all(entries.map(entry => map(entry))),

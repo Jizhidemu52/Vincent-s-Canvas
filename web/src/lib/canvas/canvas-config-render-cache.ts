@@ -49,7 +49,7 @@ export function createCanvasConfigRenderCache() {
     const groupByConfig = new Map<string, CanvasNodeGroup>();
     const entries = new Map<string, { metadata: CanvasNodeData["metadata"]; nodes: CanvasNodeData[]; edges: CanvasConnection[]; snapshot: CanvasConfigRenderSnapshot }>();
     return {
-        select(node: CanvasNodeData, graph: CanvasConfigRenderGraph, inputSummary: CanvasConfigInputSummary, inputs: NodeGenerationInput[], activeGroupId: string | null): CanvasConfigRenderSnapshot {
+        select(node: CanvasNodeData, graph: CanvasConfigRenderGraph, inputSummary: CanvasConfigInputSummary, inputs: NodeGenerationInput[], activeGroupIds: ReadonlySet<string>): CanvasConfigRenderSnapshot {
             if (indexedNodes !== graph.nodes) {
                 indexedNodes = graph.nodes;
                 nodeById = new Map(graph.nodes.map(item => [item.id, item]));
@@ -80,7 +80,7 @@ export function createCanvasConfigRenderCache() {
             const workflow = edges.some(edge => edge.kind === "config-sequence")
                 ? { groupId: group?.id, status: group?.imageSequence?.status, stepStatus: group?.imageSequence?.steps.find(step => step.configNodeId === node.id)?.status }
                 : undefined;
-            const workflowRunning = Boolean(group && group.id === activeGroupId);
+            const workflowRunning = Boolean(group && activeGroupIds.has(group.id));
             const previous = entries.get(node.id);
             if (previous && previous.metadata === node.metadata && sameItems(previous.nodes, relatedNodes) && sameItems(previous.edges, edges)
                 && sameFields(previous.snapshot.inputSummary, inputSummary) && sameItems(previous.snapshot.inputs, inputs, sameInput)

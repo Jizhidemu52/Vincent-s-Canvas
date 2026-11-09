@@ -5,6 +5,7 @@ import React from "react";
 import * as antd from "antd";
 import ts from "typescript";
 import { defaultConfig } from "@/stores/use-config-store";
+import { workbenchTaskScope } from "@/lib/workbench-task-state";
 import { i18nHarness } from "./helpers/i18n-harness";
 
 const settle = () => new Promise<void>(resolve => setTimeout(resolve, 0));
@@ -27,7 +28,9 @@ function harness(kind: "image" | "video", options: { logs?: any[]; readLogs?: ()
     globalThis.fetch = (async () => { throw new Error("Unexpected network request in offline scope regression"); }) as typeof fetch;
     const path = new URL(`../src/pages/${kind}/index.tsx`, import.meta.url);
     const requireModule = createRequire(path);
-    const states: any[] = [], refs: any[] = [], memos: any[] = [], effects: Array<{ deps?: readonly unknown[]; cleanup?: (() => void) | void }> = [], pending: Array<() => void> = [];
+    const frame = () => ({ states: [] as any[], refs: [] as any[], memos: [] as any[], effects: [] as Array<{ deps?: readonly unknown[]; cleanup?: (() => void) | void }>, pending: [] as Array<() => void> });
+    const taskFrames = new Map([["default", frame()]]);
+    let taskId = "default", currentFrame = taskFrames.get(taskId)!;
     let stateIndex = 0, refIndex = 0, effectIndex = 0, memoIndex = 0;
     const drafts = new Map<string, any>();
     const draftSetters = new Map<string, (next: any) => void>();
@@ -41,20 +44,23 @@ function harness(kind: "image" | "video", options: { logs?: any[]; readLogs?: ()
     const useUserStore = Object.assign((select: any) => select(userState), { getState: () => userState });
     const assetState = { assets, addAsset: (asset: any) => { assets.push({ ...asset, id: "saved-asset", ownerId: "owner" }); return "saved-asset"; } };
     const useAssetStore = Object.assign((select: any) => select(assetState), { getState: () => assetState });
-    const useState = (initial: any) => { const index = stateIndex++; if (!(index in states)) states[index] = typeof initial === "function" ? initial() : initial;
-        return [states[index], (next: any) => { states[index] = typeof next === "function" ? next(states[index]) : next; }]; };
-    const useMemo = (factory: () => any, deps?: readonly unknown[]) => { const index = memoIndex++, previous = memos[index];
-        if (!previous || !deps || previous.deps?.length !== deps.length || !deps.every((value, i) => Object.is(value, previous.deps[i]))) memos[index] = { deps, value: factory() };
-        return memos[index].value; };
+    const useState = (initial: any) => { const owner = currentFrame, index = stateIndex++; if (!(index in owner.states)) owner.states[index] = typeof initial === "function" ? initial() : initial;
+        return [owner.states[index], (next: any) => { owner.states[index] = typeof next === "function" ? next(owner.states[index]) : next; }]; };
+    const useMemo = (factory: () => any, deps?: readonly unknown[]) => { const owner = currentFrame, index = memoIndex++, previous = owner.memos[index];
+        if (!previous || !deps || previous.deps?.length !== deps.length || !deps.every((value, i) => Object.is(value, previous.deps[i]))) owner.memos[index] = { deps, value: factory() };
+        return owner.memos[index].value; };
     const appContext = { message: Object.fromEntries(["error", "warning", "success", "info"].map(name => [name, (value: any) => notices.push(value)])), modal: { confirm: (value: any) => confirmations.push(value) } };
     const dependencies: Record<string, any> = {
-        react: { ...React, useState, useRef: (initial: any) => refs[refIndex++] ||= { current: initial }, useMemo, useCallback: (callback: any, deps?: readonly unknown[]) => useMemo(() => callback, deps),
-            useEffect: (effect: () => any, values?: readonly unknown[]) => { const index = effectIndex++, previous = effects[index];
+        react: { ...React, useState, useRef: (initial: any) => currentFrame.refs[refIndex++] ||= { current: initial }, useMemo, useCallback: (callback: any, deps?: readonly unknown[]) => useMemo(() => callback, deps),
+            useEffect: (effect: () => any, values?: readonly unknown[]) => { const owner = currentFrame, index = effectIndex++, previous = owner.effects[index];
                 if (previous && values && previous.deps?.length === values.length && values.every((value, i) => Object.is(value, previous.deps![i]))) return;
-                pending.push(() => { previous?.cleanup?.(); effects[index] = { deps: values, cleanup: effect() }; }); } },
+                owner.pending.push(() => { previous?.cleanup?.(); owner.effects[index] = { deps: values, cleanup: effect() }; }); } },
         "@/lib/i18n": i18nHarness,
-        // These closure tests exercise the original single-task workspace; tab lifecycle is covered by DOM tests.
-        "@/components/workbench-tasks": { WorkbenchTasks: ({ children, urlInputKey: nextKey }: any) => { urlInputKey = nextKey ?? null; return children.type(children.props); }, useWorkbenchTask: () => ({ id: "default", active: true, urlInputKey, draftScope: (scope: string) => scope }), useWorkbenchTaskStatus() {} },
+        // Each task keeps its original hook owners and async closures. The real
+        // registry, visible tabs and persistence failure paths run in DOM tests.
+        "@/components/workbench-tasks": { WorkbenchTasks: ({ children, urlInputKey: nextKey }: any) => { urlInputKey = nextKey ?? null; return children.type(children.props); }, useWorkbenchTask: () => ({ id: taskId, active: true, ready: true, creating: false, createNewTask: async () => {
+            taskId = `task-${taskFrames.size + 1}`; taskFrames.set(taskId, frame()); return true;
+        }, urlInputKey, draftScope: (scope: string) => workbenchTaskScope(scope, taskId) }), useWorkbenchTaskStatus() {} },
         "@/lib/workspace-storage": { createWorkspaceStorage: (name: string) => ({ iterate: async (visit: any) => { if (!name.includes("pending")) { await options.readLogs?.(); storedLogs.forEach(visit); } }, setItem: async (key: string, value: any) => { writes.push(value); storedLogs.set(key, value); }, removeItem: async (key: string) => { storedLogs.delete(key); } }) },
         "@/hooks/use-generation-draft": { useGenerationDraft: (key: string, initial: any) => { if (!drafts.has(key)) drafts.set(key, key.endsWith(":settings") ? { ...config } : initial);
             if (!draftSetters.has(key)) draftSetters.set(key, (next: any) => drafts.set(key, typeof next === "function" ? next(drafts.get(key)) : next));
@@ -94,15 +100,17 @@ function harness(kind: "image" | "video", options: { logs?: any[]; readLogs?: ()
     dependencies["@/hooks/use-prompt-url-handoff"] = handoffModule.exports;
     const module = { exports: {} as any };
     new Function("require", "module", "exports", "window", "navigator", compile(path))((name: string) => name.endsWith(".css") ? {} : dependencies[name] || requireModule(name), module, module.exports, {}, { clipboard: {} });
-    const render = () => { stateIndex = refIndex = effectIndex = memoIndex = 0;
+    const render = () => { currentFrame = taskFrames.get(taskId)!; stateIndex = refIndex = effectIndex = memoIndex = 0;
         const page = kind === "image" ? module.exports.ImageGenerationPage() : module.exports.default();
-        const tree = page.type(page.props); pending.splice(0).forEach(effect => effect()); return tree; };
-    const unmount = () => effects.forEach(effect => effect.cleanup?.());
+        const tree = page.type(page.props); currentFrame.pending.splice(0).forEach(effect => effect()); return tree; };
+    const unmount = () => taskFrames.forEach(owner => owner.effects.forEach(effect => effect.cleanup?.()));
     cleanups.push(unmount);
     const find = (name: string) => elements(render()).find(element => element.type?.name === name)!;
     return { render, find, drafts, writes, assets, notices, confirmations, userState, unmount,
-        references: () => drafts.get(kind === "video" ? "video:references" : "image-generation:references"),
-        createSession: () => find("LogPanel").props.onCreateSession(),
+        currentDraft: (field: string) => { if (kind === "video") return drafts.get(workbenchTaskScope(field, taskId)); const [scope, ...parts] = field.split(":"); return drafts.get(`${workbenchTaskScope(scope, taskId)}:${parts.join(":")}`); },
+        references: () => drafts.get(kind === "video" ? workbenchTaskScope("video:references", taskId) : `${workbenchTaskScope("image-generation", taskId)}:references`),
+        selectTask: (id: string) => { if (!taskFrames.has(id)) throw new Error(`Unknown workspace ${id}`); taskId = id; return render(); },
+        createSession: () => { const props = find("LogPanel").props; (props.onCreateTask || props.onCreateSession)(); render(); },
         clipboard: () => kind === "image" ? find("ReferenceImageTray").props.onRequestClipboard() : elements(render()).find(element => element.props.children === "剪切板")!.props.onClick(),
         cards: () => elements(render()).filter(element => ["ResultVideoCard", "PendingVideoCard", "FailedVideoCard"].includes(element.type?.name)),
     };
@@ -168,6 +176,7 @@ for (const kind of ["image", "video"] as const) {
         expect(app.references()).toEqual([]);
         app.clipboard(); await settle(); app.render();
         expect(app.references()).toMatchObject([{ storageKey: "image:current" }]);
+        if (kind === "video") { app.selectTask("default"); expect(app.references()).toMatchObject([{ dataUrl: "blob:old" }]); }
     });
 
     test(`${kind}: a late material picker import cannot repopulate a new draft`, async () => {
@@ -178,6 +187,7 @@ for (const kind of ["image", "video"] as const) {
         if (kind === "video") picker.props.onInsert(payload); else picker.props.onInsertMany([payload]);
         app.createSession(); app.render(); upload.resolve({ ...image, url: "blob:old" }); await settle();
         expect(app.references()).toEqual([]);
+        if (kind === "video") { app.selectTask("default"); expect(app.references()).toMatchObject([{ dataUrl: "blob:old" }]); }
     });
 
     test(`${kind}: restoring historical inputs rejects an upload started for the previous draft`, async () => {
@@ -201,6 +211,7 @@ for (const kind of ["image", "video"] as const) {
         expect(busy).toBe(true);
         second.resolve({ ...image, url: "blob:new", storageKey: "image:new" }); await settle();
         expect(app.references()).toMatchObject([{ storageKey: "image:new" }]);
+        if (kind === "video") { app.selectTask("default"); expect(app.references()).toMatchObject([{ dataUrl: "blob:old" }]); }
     });
 
     test(`${kind}: leaving the workspace rejects a late clipboard result`, async () => {
@@ -229,7 +240,10 @@ test("video: new draft rejects a template whose references finish loading later"
     }) });
     app.render(); await settle(); app.createSession(); app.render(); upload.resolve({ ...image, url: "blob:old" }); await settle();
     expect(app.references()).toEqual([]);
-    expect(app.drafts.get("video:prompt")).toBe("");
+    expect(app.currentDraft("video:prompt")).toBe("");
+    app.selectTask("default");
+    expect(app.currentDraft("video:prompt")).toBe("旧模板提示词");
+    expect(app.references()).toMatchObject([{ dataUrl: "blob:old" }]);
 });
 
 for (const kind of ["video", "audio"] as const) test(`video: a late ${kind} upload cannot repopulate a new draft`, async () => {
@@ -240,7 +254,10 @@ for (const kind of ["video", "audio"] as const) test(`video: a late ${kind} uplo
     const input = elements(app.render()).find(element => element.type === "input" && element.props.accept.startsWith(`${kind}/`))!;
     input.props.onChange({ target: { files: [new File(["media"], kind === "video" ? "old.mp4" : "old.wav", { type: kind === "video" ? "video/mp4" : "audio/wav" })], value: "" } });
     await settle(); expect(started).toBe(true); app.createSession(); app.render(); upload.resolve({ url: "blob:old-media", storageKey: "media:old" }); await settle();
-    expect(app.drafts.get(kind === "video" ? "video:videos" : "video:audios")).toEqual([]);
+    const field = kind === "video" ? "video:videos" : "video:audios";
+    expect(app.currentDraft(field)).toEqual([]);
+    app.selectTask("default");
+    expect(app.currentDraft(field)).toMatchObject([{ storageKey: "media:old" }]);
 });
 
 for (const switchView of ["new", "history"] as const) test(`video: old completion stays in history/assets after switching to ${switchView}`, async () => {
@@ -258,7 +275,9 @@ for (const switchView of ["new", "history"] as const) test(`video: old completio
 test("video: selecting the original running task again receives its completion", async () => {
     const wait = Promise.withResolvers<any>();
     const app = harness("video", { logs: [videoLog], wait: () => wait.promise }); app.render(); await settle(); app.render();
-    app.createSession(); app.render(); app.find("LogPanel").props.onPreviewLog(videoLog); await settle();
+    app.createSession(); app.render();
+    expect(app.cards()).toEqual([]);
+    app.selectTask("default"); app.find("LogPanel").props.onPreviewLog(videoLog); await settle();
     wait.resolve([{ id: "old-task", requestId: "old-request", status: "success", resultUrls: ["/api/assets/old/content"] }]); await settle();
     expect(app.cards()).toHaveLength(1);
     expect(app.cards()[0]!.props.video).toMatchObject({ storageKey: "video:old-result" });
@@ -283,11 +302,17 @@ test("video: refreshing history after deleting another record cannot reclaim a n
     const app = harness("video", { logs: [videoLog, { ...videoLog, id: "delete-me", status: "失败", task: undefined }], wait: () => ++polls === 1 ? firstWait.promise : Promise.resolve([{ id: "old-task", requestId: "old-request", status: "success", resultUrls: ["/api/assets/old/content"] }]) });
     app.render(); await settle(); app.createSession(); app.render();
     firstWait.reject(new Error("Observation paused")); await settle(); app.render();
+    expect(app.find("LogPanel").props.logs).toEqual([]);
+    app.selectTask("default");
     app.find("LogPanel").props.onSelectedLogIdsChange(["delete-me"]);
     app.find("LogPanel").props.onDeleteSelected();
-    await elements(app.render()).find(element => element.props.title === "删除生成记录")!.props.onOk(); await settle();
+    const deleting = elements(app.render()).find(element => element.props.title === "删除生成记录")!.props.onOk();
+    app.selectTask("task-2");
+    await deleting; await settle();
     expect(polls).toBe(2);
     expect(app.cards()).toEqual([]);
     expect(app.writes.at(-1)).toMatchObject({ id: "old-task-log", status: "成功" });
     expect(app.assets).toHaveLength(1);
+    app.selectTask("default");
+    expect(app.cards()[0]!.props.video).toMatchObject({ storageKey: "video:old-result" });
 });

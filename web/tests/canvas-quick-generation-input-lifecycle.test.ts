@@ -43,7 +43,7 @@ function harness(reuse?: { hydrate?: Promise<typeof template>; upload?: Promise<
     const searchParams = new URLSearchParams(reuse ? "reuseToken=template-token" : "");
     const message = { info: (value: string) => notices.push(value), success: (value: string) => notices.push(value), warning: (value: string) => notices.push(value), error: (value: string) => notices.push(value) };
     const modal = { confirm: (value: { onOk: () => unknown }) => confirmations.push(value) };
-    let cursor = 0, dirty = false, active = true, projectId = "project-a";
+    let cursor = 0, dirty = false, active = true, projectId = "project-a", nextId = 0;
     let account = { status: "authenticated", user: { id: "employee-a", status: "active" } };
     let selectedNodeIds = new Set<string>();
     let effects: Array<() => void> = [], layouts: Array<() => void> = [];
@@ -66,10 +66,10 @@ function harness(reuse?: { hydrate?: Promise<typeof template>; upload?: Promise<
     };
     const setNodes = (update: CanvasNodeData[] | ((current: CanvasNodeData[]) => CanvasNodeData[])) => { const next = typeof update === "function" ? update(nodes.current) : update; if (next !== nodes.current) dirty = true; nodes.current = next; };
     const useUserStore = Object.assign((select: (state: typeof account) => unknown) => select(account), { getState: () => account });
-    const runtime = { isObservationCurrent: () => active };
+    const runtime = { isObservationCurrent: () => active, waitForWriteAccess: async () => active };
     const dependencies: Record<string, unknown> = {
         react, antd: { App: { useApp: () => ({ message, modal }) } }, "react-router-dom": { useSearchParams: () => [searchParams] },
-        "@/lib/i18n": { uiText: (text: string) => text }, nanoid: { nanoid: () => "template-reference" },
+        "@/lib/i18n": { uiText: (text: string) => text }, nanoid: { nanoid: () => `template-reference-${++nextId}` },
         "@/stores/use-user-store": { useUserStore }, "@/stores/use-config-store": { defaultConfig, useEffectiveConfig: () => defaultConfig },
         "@/hooks/use-tool-config": { useToolConfig: (config: unknown) => config },
         "@/stores/use-business-config-store": { useBusinessConfigStore: (select: Function) => select({ estimate: () => ({ credits: 0, rmbCost: 0 }) }) },
@@ -116,7 +116,8 @@ function harness(reuse?: { hydrate?: Promise<typeof template>; upload?: Promise<
                 // Execute both real page hooks in their normal order so batch
                 // input versions are exercised through their actual setters.
                 // biome-ignore lint/correctness/useHookAtTopLevel: The harness runs a complete render with its own deterministic hook slots.
-                batch = batchModule.exports.useCanvasBatchEdit({ projectId, generationDispatchLocksRef: { current: new Set() }, getCanvasCenter: () => ({ x: 0, y: 0 }), handleMissingModelConfig: noop, isAiConfigReady: () => true });
+                batch = batchModule.exports.useCanvasBatchEdit({ projectId, generationDispatchLocksRef: { current: new Set() }, getCanvasCenter: () => ({ x: 0, y: 0 }), handleMissingModelConfig: noop, isAiConfigReady: () => true,
+                    waitForWriteAccess: runtime.waitForWriteAccess, isObservationCurrent: runtime.isObservationCurrent });
                 // biome-ignore lint/correctness/useHookAtTopLevel: The harness runs a complete render with its own deterministic hook slots.
                 form = module.exports.useCanvasQuickGeneration({ projectId, projectLoaded: true, nodesRef: nodes, connectionsRef: connections,
                     runtime, batchEdit: batch, setDialogNodeId: noop, getCanvasCenter: () => ({ x: 0, y: 0 }), handleMissingModelConfig: noop, isAiConfigReady: () => true });

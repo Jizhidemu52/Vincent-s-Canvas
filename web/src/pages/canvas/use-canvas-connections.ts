@@ -98,7 +98,8 @@ export function useCanvasConnections({ nodesRef, connectionsRef, viewportRef, ge
         if (current.nodeId === targetNodeId) return uiText("不能连接节点自身");
         const connection = normalizeConnection(current.nodeId, targetNodeId, nodesRef.current, current.handleType);
         if (!connection) return uiText("工作流中间步骤需为生图，最后一步支持生图、文本或视频");
-        if ([...generationDispatchLocksRef.current].some(key => key.startsWith("image-sequence:"))) return uiText("请先停止工作流，再修改连线");
+        const previous = connectionsRef.current.find(edge => edge.id === reconnectingIdRef.current);
+        if ([connection.fromNodeId, connection.toNodeId, previous?.fromNodeId, previous?.toNodeId].some(id => id && generationDispatchLocksRef.current.has(id))) return uiText("请先停止涉及此节点的工作流，再修改连线");
         const edges = connectionsRef.current.filter(edge => edge.id !== reconnectingIdRef.current);
         if (reconnectingIdRef.current && edges.some(edge => edge.fromNodeId === connection.fromNodeId && edge.toNodeId === connection.toNodeId)) return uiText("这两个节点已经连接，请选择其他节点");
         const workflowError = imageWorkflowConnectionError(connection, edges);
@@ -135,7 +136,7 @@ export function useCanvasConnections({ nodesRef, connectionsRef, viewportRef, ge
 
     const createConnectedNode = useCallback(
         (type: CanvasNodeType.Image | CanvasNodeType.Text | CanvasNodeType.Config | CanvasNodeType.Video | CanvasNodeType.Audio, pending: PendingConnectionCreate) => {
-            if ([...generationDispatchLocksRef.current].some(key => key.startsWith("image-sequence:"))) { message.info(uiText("请先停止工作流，再修改连线")); return; }
+            if (generationDispatchLocksRef.current.has(pending.connection.nodeId)) { message.info(uiText("请先停止涉及此节点的工作流，再修改连线")); return; }
             const sourceNode = nodesRef.current.find(node => node.id === pending.connection.nodeId);
             const option = canvasConnectionCreateOptions(sourceNode, pending.connection.handleType).find(item => item.type === type);
             if (!option) { message.info(uiText("当前节点不支持这种连接，请重新选择。")); return; }
@@ -282,7 +283,8 @@ export function useCanvasConnections({ nodesRef, connectionsRef, viewportRef, ge
     );
 
     const deleteConnection = useCallback((connectionId: string) => {
-        if ([...generationDispatchLocksRef.current].some(key => key.startsWith("image-sequence:"))) { message.info(uiText("请先停止工作流，再修改连线")); return; }
+        const edge = connectionsRef.current.find(item => item.id === connectionId);
+        if (edge && [edge.fromNodeId, edge.toNodeId].some(id => generationDispatchLocksRef.current.has(id))) { message.info(uiText("请先停止涉及此节点的工作流，再修改连线")); return; }
         flushPendingHistory();
         setConnections((prev) => prev.filter((conn) => conn.id !== connectionId));
         setSelectedConnectionId((current) => (current === connectionId ? null : current));
@@ -292,7 +294,7 @@ export function useCanvasConnections({ nodesRef, connectionsRef, viewportRef, ge
     const handleReconnectStart = useCallback((event: ReactPointerEvent, edge: CanvasConnection, endpoint: "source" | "target") => {
         event.preventDefault(); event.stopPropagation();
         if (event.button !== 0) return;
-        if ([...generationDispatchLocksRef.current].some(key => key.startsWith("image-sequence:"))) { message.info(uiText("请先停止工作流，再修改连线")); return; }
+        if ([edge.fromNodeId, edge.toNodeId].some(id => generationDispatchLocksRef.current.has(id))) { message.info(uiText("请先停止涉及此节点的工作流，再修改连线")); return; }
         setConnecting(null);
         reconnectingIdRef.current = edge.id;
         const current: ConnectionHandle = endpoint === "source"

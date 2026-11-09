@@ -187,7 +187,7 @@ export function imageTaskParameters(config: AiConfig, profile = imageModelProfil
     return { size, resolution: quality, ...advanced };
 }
 
-export async function requestBatchEdit(config: AiConfig, prompt: string, files: Array<{ file: File; title: string }>, options?: { optimizePrompt?: boolean; onOptimizing?: () => void; onCompiled?: (prompt: string, optimized: boolean, submittedPrompt?: string) => void; onSubmissionStarted?: (requestId: string, items: Array<{ itemIndex: number }>) => void | Promise<void>; signal?: AbortSignal; onSubmitted?: (batchId: string) => void; onProgress?: (items: QueuedBatchItem[]) => void }) {
+export async function requestBatchEdit(config: AiConfig, prompt: string, files: Array<{ file: File; title: string }>, options?: { optimizePrompt?: boolean; onOptimizing?: () => void; onCompiled?: (prompt: string, optimized: boolean, submittedPrompt?: string) => void | Promise<void>; onSubmissionStarted?: (requestId: string, items: Array<{ itemIndex: number }>) => void | Promise<void>; signal?: AbortSignal; cancelOnAbort?: () => boolean; projectId?: string; onSubmitted?: (batchId: string) => void | Promise<void>; onProgress?: (items: QueuedBatchItem[]) => void | Promise<void> }) {
     if (!files.length || files.length > 100) throw new Error("每批请选择 1–100 张图片，每张独立生成 1 张结果。");
     const resolved = await resolveToolConfig(config, "batch_image", "canvas-batch");
     config = resolved.config;
@@ -208,6 +208,8 @@ export async function requestBatchEdit(config: AiConfig, prompt: string, files: 
         parameters: imageTaskParameters(config, profile, { referenceCount: 1 }),
         files,
         signal: options?.signal,
+        cancelOnAbort: options?.cancelOnAbort,
+        projectId: options?.projectId,
         onSubmissionStarted: options?.onSubmissionStarted,
         onSubmitted: options?.onSubmitted,
         onProgress: options?.onProgress,

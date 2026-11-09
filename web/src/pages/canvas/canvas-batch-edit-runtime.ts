@@ -11,6 +11,7 @@ import { mapCanvasAsyncPool } from "@/lib/canvas/canvas-async-pool";
 import { assertCanvasImageUploadSize } from "@/lib/canvas/canvas-image-upload-limit";
 import { compiledCanvasGenerationRecord, createCanvasGenerationRecord } from "@/lib/canvas/canvas-generation-record";
 import { imageModelProfile, normalizeImageModelSettings } from "@/lib/image-model-settings";
+import { shouldCancelCanvasGeneration } from "@/lib/canvas/canvas-project-async-lifecycle";
 import { deploymentFeatures } from "@/lib/deployment-features";
 import { modelOptionName, type AiConfig } from "@/stores/use-config-store";
 import type { AssetInput } from "@/stores/use-asset-store";
@@ -51,6 +52,9 @@ type Runtime = {
     setConnections: Dispatch<SetStateAction<CanvasConnection[]>>;
     setSelectedNodeIds: Dispatch<SetStateAction<Set<string>>>;
     flushPendingHistory?: () => unknown;
+    signal?: AbortSignal;
+    isCurrent?: () => boolean;
+    waitForWriteAccess?: () => Promise<boolean>;
     message: { error: (text: string) => unknown; warning: (text: string) => unknown; success: (text: string) => unknown };
 };
 
@@ -59,8 +63,17 @@ export async function runCanvasBatchImageEdit({
     prompt: batchEditPrompt, optimizePrompt = false, setOptimizing, items: batchEditItems, config: batchGenerationConfig, estimate: estimateUsage, isAiConfigReady,
     onMissingModel: handleMissingModelConfig, user, projectId, getCenter: getCanvasCenter, imageMetadata, addAssets,
     setRunning: setBatchEditRunning, setServerId: setBatchEditServerId, setAction: setBatchEditAction, setItems: setBatchEditItems,
-    setNodes, setConnections, setSelectedNodeIds, flushPendingHistory, message,
+    setNodes, setConnections, flushPendingHistory, message, signal, isCurrent = () => true, waitForWriteAccess = async () => true,
 }: Runtime) {
+        let revoked = false;
+        const current = () => !revoked && !signal?.aborted && isCurrent();
+        const assertCurrent = async () => {
+            if (!current() || !await waitForWriteAccess() || !current()) {
+                revoked = true;
+                throw new DOMException("画布所属账号或编辑权已变化", "AbortError");
+            }
+        };
+        await assertCurrent();
         let prompt = batchEditPrompt.trim();
         let optimized = false;
         const items = batchEditItems;
@@ -126,8 +139,10 @@ export async function runCanvasBatchImageEdit({
             const sourceId = `${localBatchId}-source-${index + 1}`;
             const resultId = `${localBatchId}-result-${index + 1}`;
             try {
+                await assertCurrent();
                 setBatchEditItems((prev) => prev.map((entry) => (entry.id === item.id ? { ...entry, status: "processing" } : entry)));
                 const uploadedSource = await uploadImage(item.file);
+                await assertCurrent();
                 const sourceSize = fitNodeSize(uploadedSource.width, uploadedSource.height, maxWidth, maxHeight);
                 const rowY = origin.y + index * (Math.max(sourceSize.height, maxHeight) + rowGap);
                 initialBatchNodes.push(
@@ -171,6 +186,8 @@ export async function runCanvasBatchImageEdit({
                 prepared.push({ originalIndex: index, item, sourceId, resultId, uploadedSource });
                 setBatchEditItems((prev) => prev.map((entry) => (entry.id === item.id ? { ...entry, status: "waiting", sourceUrl: uploadedSource.url } : entry)));
             } catch (error) {
+                if (!current()) return;
+                try { await assertCurrent(); } catch { return; }
                 localFailures += 1;
                 const reason = error instanceof Error ? error.message : "本地图片读取失败";
                 setBatchEditItems((prev) => prev.map((entry) => (entry.id === item.id ? { ...entry, status: "failed", sourceUrl: `file://${item.relativePath}`, failureReason: reason } : entry)));
@@ -184,6 +201,7 @@ export async function runCanvasBatchImageEdit({
             return;
         }
 
+        await assertCurrent();
         flushPendingHistory?.();
         setNodes((prev) => [...prev, ...initialBatchNodes]);
         setConnections((prev) => [...prev, ...initialBatchConnections]);
@@ -198,24 +216,28 @@ export async function runCanvasBatchImageEdit({
                 prompt,
                 prepared.map((entry) => ({ file: entry.item.file, title: entry.item.relativePath })),
                 {
-                    optimizePrompt,
+                    optimizePrompt, signal, projectId, cancelOnAbort: () => (!signal || shouldCancelCanvasGeneration(signal)) && isCurrent(),
                     onSubmissionStarted: async (requestId, uploadedItems) => {
+                        await assertCurrent();
                         const bindings = new Map(uploadedItems.map((item, index) => [prepared[item.itemIndex]!.resultId, { requestId: `${requestId}:${index}`, ownerId: user!.id, projectId, resultIndex: 0 }]));
                         setBatchEditItems(prev => prev.map(item => ({ ...item, requestId })));
                         let durableNodes: CanvasNodeData[] = [];
                         flushSync(() => setNodes(prev => { durableNodes = prev.map(node => bindings.has(node.id) ? { ...node, metadata: { ...node.metadata, imageTask: bindings.get(node.id) } } : node); return durableNodes; }));
                         useCanvasStore.getState().updateProject(projectId, { nodes: durableNodes });
                         await flushCanvasPersistence();
+                        await assertCurrent();
                     },
-                    onOptimizing: () => setOptimizing?.(true),
-                    onCompiled: (finalPrompt, wasOptimized, submittedPrompt) => {
+                    onOptimizing: () => { if (current()) setOptimizing?.(true); },
+                    onCompiled: async (finalPrompt, wasOptimized, submittedPrompt) => {
+                        await assertCurrent();
                         prompt = finalPrompt; optimized = wasOptimized; setOptimizing?.(false);
                         const resultIds = new Set(prepared.map(entry => entry.resultId));
                         setNodes(previous => previous.map(node => resultIds.has(node.id) ? { ...node, metadata: { ...node.metadata, prompt: finalPrompt, submittedPrompt, generationRecord: compiledCanvasGenerationRecord(node.metadata?.generationRecord, finalPrompt, submittedPrompt) } } : node));
                     },
-                    onSubmitted: setBatchEditServerId,
-                    onProgress: (current) => {
-                        const byPreparedIndex = new Map(current.map((task) => [task.itemIndex, task]));
+                    onSubmitted: async id => { await assertCurrent(); setBatchEditServerId(id); },
+                    onProgress: async (tasks) => {
+                        await assertCurrent();
+                        const byPreparedIndex = new Map(tasks.map((task) => [task.itemIndex, task]));
                         setBatchEditItems((prev) => {
                             let changed = false;
                             const next = prev.map((entry) => {
@@ -238,6 +260,7 @@ export async function runCanvasBatchImageEdit({
                     },
                 },
             );
+            await assertCurrent();
 
             const completedBatchItems = new Map<string, { status: "failed" | "cancelled"; failureReason: string }>();
             const completedBatchResultNodes = new Map<string, string>();
@@ -278,7 +301,9 @@ export async function runCanvasBatchImageEdit({
             }
             await mapCanvasAsyncPool(successfulBatchTasks, 3, async ({ entry, resultUrl, sourceTaskId }) => {
                 try {
+                    await assertCurrent();
                     const uploadedResult = await uploadImage(resultUrl);
+                    await assertCurrent();
                     const resultSize = fitNodeSize(uploadedResult.width, uploadedResult.height, maxWidth, maxHeight);
                     selectedResults.push(entry.resultId);
                     setNodes((prev) =>
@@ -345,6 +370,7 @@ export async function runCanvasBatchImageEdit({
                     });
                     setBatchEditItems((prev) => prev.map((item) => (item.id === entry.item.id ? { ...item, status: "success", resultUrl: uploadedResult.url } : item)));
                 } catch (error) {
+                    if (!current()) return;
                     failedCount += 1;
                     const reason = error instanceof Error ? error.message : "结果图存储失败";
                     completedBatchItems.set(entry.item.id, { status: "failed", failureReason: reason });
@@ -353,6 +379,7 @@ export async function runCanvasBatchImageEdit({
                     settledResultIds.add(entry.resultId);
                 }
             });
+            await assertCurrent();
             if (completedBatchItems.size) {
                 setBatchEditItems((prev) =>
                     prev.map((item) => {
@@ -370,6 +397,8 @@ export async function runCanvasBatchImageEdit({
                 );
             }
         } catch (error) {
+            if (!current()) return;
+            try { await assertCurrent(); } catch { return; }
             const uncertain = error instanceof QueuedTaskSubmissionUncertainError;
             const rejected = error instanceof QueuedTaskHttpError && error.submissionRejected;
             const reason = error instanceof Error ? error.message : "批量任务提交失败";
@@ -381,10 +410,11 @@ export async function runCanvasBatchImageEdit({
             setBatchEditItems((prev) => prev.map((item) => (unresolvedItemIds.has(item.id) ? { ...item, ...(rejected ? { requestId: undefined } : {}), status: uncertain ? "paused" : "failed", failureReason: reason } : item)));
             setNodes((prev) => prev.map((node) => (unresolvedResultIds.has(node.id) ? { ...node, metadata: { ...node.metadata, ...(rejected ? { imageTask: undefined } : {}), status: "error", errorDetails: reason } } : node)));
         } finally {
-            if (generatedAssets.length) addAssets(generatedAssets);
-            setSelectedNodeIds(new Set(selectedResults));
-            setBatchEditRunning(false);
-            setOptimizing?.(false);
+            if (current()) {
+                if (generatedAssets.length) addAssets(generatedAssets);
+                setBatchEditRunning(false);
+                setOptimizing?.(false);
+            }
         }
 
         if (unresolvedCount) {

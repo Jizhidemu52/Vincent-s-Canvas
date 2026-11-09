@@ -847,20 +847,10 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         finally { if (isCurrentReferenceScope(scope)) setReadingReferences(false); }
     };
 
-    const createSession = () => {
-        if (!handoffReady) return;
-        resetReferenceScope();
-        resultViewPinnedRef.current = true;
-        restoredInitialResultRef.current = true;
-        previewRevision.current += 1;
-        setPreviewLoading(false);
-        replacePrompt(creativePreset?.prompt || "");
-        setReferences([]);
-        if (designRequested) { setCarryoverRequirements([]); setOptimizedDraft(undefined); }
-        setResults([]);
-        setStartedAt(0);
-        setSelectedLogIds([]);
-        setPreviewLog(null);
+    const createTask = async () => {
+        // Keep this workspace and its observer intact. Close the portal only
+        // after the new independent task has been durably registered.
+        if (await workbenchTask.createNewTask()) setLogsOpen(false);
     };
 
     const confirmDeleteSelected = () => {
@@ -1244,8 +1234,9 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                         selectedLogIds={selectedLogIds}
                         activeLogId={previewLog?.id}
                         disabled={running || deletingLogs || !handoffReady}
+                        createDisabled={!workbenchTask.ready || workbenchTask.creating}
                         onSelectedLogIdsChange={setSelectedLogIds}
-                        onCreateSession={createSession}
+                        onCreateTask={() => void createTask()}
                         onDeleteSelected={confirmDeleteSelected}
                         onPreviewLog={(log) => void previewGenerationLog(log)}
                     />
@@ -1341,7 +1332,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                                 {garmentNeedsApply ? <div className="mt-1" role="status">{uiText("服装要求或参考图已改变，请重新套用。")}<Button size="small" type="link" className="!h-auto !p-0" onClick={resetGarment}>{uiText("改用当前提示词")}</Button></div> : null}
                                 {incompleteCreativePrompt ? <div className="mt-1" role="status">{uiText("请把「")}{CREATIVE_REQUIREMENT_PLACEHOLDER}{uiText("」替换成你的设计要求。")}</div> : null}
                                 {!draftReady || readingReferences || optimizingPrompt || (!quickTool && !model) || (requiresPrompt && !prompt.trim()) || invalidBlendReferences || !user || user.status !== "active" ? <div role="status">{!draftReady ? uiText("正在恢复草稿…") : readingReferences ? uiText("正在读取参考图，请稍候") : optimizingPrompt ? uiText("正在优化提示词，请稍候") : !quickTool && !model ? uiText("还差：选择模型") : requiresPrompt && !prompt.trim() ? uiText("还差：填写提示词") : invalidBlendReferences ? uiText("还差：添加 2–4 张参考图") : uiText("当前设计师账号不可用")}</div> : null}
-                                {running ? <div role="status">{uiText(quickTool ? "当前图片正在处理，结果将另存，原图不会覆盖。" : "当前任务正在处理，可先编辑下一条提示词。")}</div> : null}
+                                {running ? <div role="status">{uiText(quickTool ? "当前图片正在处理，原图不会覆盖；可新建独立任务继续创作。" : "当前任务继续处理；可新建独立任务，无需等待。")}</div> : null}
                                 {quickTool && !running && pendingImages.length > 0 ? <div role="status">{uiText("原任务状态待核查，请先刷新原任务状态")}</div> : null}
                                 {!pendingReady && !pendingReadError ? <div role="status">{uiText("正在核对原任务记录…")}</div> : null}
                                 {pendingReadError ? <div role="alert" className="mt-1 text-destructive">
@@ -1352,6 +1343,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                             <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} loading={running} disabled={!canGenerate || running} onClick={() => void generate()}>
                                 {optimizingPrompt ? uiText("正在优化提示词…") : running ? uiText("正在生成，请稍候…") : uiText(toolModeConfig.button)}
                             </Button>
+                            {running ? <Button block icon={<Plus className="size-4" />} loading={workbenchTask.creating} disabled={!workbenchTask.ready || workbenchTask.creating} onClick={() => void createTask()}>{uiText("新建任务，继续创作")}</Button> : null}
                             {running ? <Button block onClick={stopPendingQueries}>{uiText("停止本页查询（不取消服务端任务）")}</Button> : pendingImages.length ? <><Button block onClick={() => void resumePendingImages(pendingImages)}>{uiText("刷新原任务状态（")}{pendingImages.length}）</Button>{pendingImages.some(record => !record.stopped) && <Button block onClick={stopPendingQueries}>{uiText("停止自动核对")}</Button>}</> : null}
                         </div>
                     </div>
@@ -1406,8 +1398,9 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                     selectedLogIds={selectedLogIds}
                     activeLogId={previewLog?.id}
                     disabled={running || deletingLogs || !handoffReady}
+                    createDisabled={!workbenchTask.ready || workbenchTask.creating}
                     onSelectedLogIdsChange={setSelectedLogIds}
-                    onCreateSession={createSession}
+                    onCreateTask={() => void createTask()}
                     onDeleteSelected={confirmDeleteSelected}
                     onPreviewLog={(log) => void previewGenerationLog(log)}
                 />
@@ -1594,8 +1587,9 @@ function LogPanel({
     selectedLogIds,
     activeLogId,
     disabled,
+    createDisabled,
     onSelectedLogIdsChange,
-    onCreateSession,
+    onCreateTask,
     onDeleteSelected,
     onPreviewLog,
 }: {
@@ -1605,8 +1599,9 @@ function LogPanel({
     selectedLogIds: string[];
     activeLogId?: string;
     disabled?: boolean;
+    createDisabled: boolean;
     onSelectedLogIdsChange: (ids: string[]) => void;
-    onCreateSession: () => void;
+    onCreateTask: () => void;
     onDeleteSelected: () => void;
     onPreviewLog: (log: GenerationLog) => void;
 }) {
@@ -1624,7 +1619,7 @@ function LogPanel({
                 <Tag className="m-0">{logs.length}</Tag>
             </div>
             <div className="mb-4 flex flex-wrap gap-2">
-                <Button size="small" icon={<Plus className="size-3.5" />} disabled={disabled} onClick={onCreateSession}>
+                <Button size="small" icon={<Plus className="size-3.5" />} disabled={createDisabled} onClick={onCreateTask}>
                     {uiText("新建")}</Button>
                 <Button size="small" icon={<CheckSquare className="size-3.5" />} disabled={disabled || !logs.length} onClick={toggleAll}>
                     {allSelected ? uiText("取消全选") : uiText("全选")}

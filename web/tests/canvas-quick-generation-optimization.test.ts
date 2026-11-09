@@ -81,7 +81,7 @@ function harness(prepare: () => Promise<void> = async () => undefined) {
             cursor = 0; effects = [];
             // biome-ignore lint/correctness/useHookAtTopLevel: The harness runs a complete render with its own deterministic hook slots.
             const result = module.exports.useCanvasQuickGeneration({ projectId, projectLoaded: true, nodesRef: nodes, connectionsRef: { current: [] },
-                runtime: runtime as unknown as Parameters<Hook>[0]["runtime"], batchEdit: { setBatchEditOpen: noop, setBatchEditPrompt: noop, setBatchImageSettings: noop, batchInputVersionRef: { current: 0 } },
+                runtime: runtime as unknown as Parameters<Hook>[0]["runtime"], batchEdit: { applyBatchEditTemplate: noop, batchInputVersionRef: { current: 0 } },
                 setDialogNodeId: noop, getCanvasCenter: () => ({ x: 0, y: 0 }), handleMissingModelConfig: noop, isAiConfigReady: () => true });
             effects.forEach(run => run());
             return result;

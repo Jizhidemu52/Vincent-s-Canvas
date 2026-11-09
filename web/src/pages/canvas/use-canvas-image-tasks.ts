@@ -38,9 +38,9 @@ export function useCanvasImageTasks({ projectId, nodes, setNodes, saveQueue, gen
                 const requestId = nanoid();
                 return (await loadRuntime()).createOptions(nodeId, controller, requestId, onSubmitted, toolKey);
             },
-            async recoverPending(nodeId?: string) {
+            async recoverPending(nodeId?: string, signal?: AbortSignal) {
                 try {
-                    return await (await loadRuntime()).recoverPending(nodeId);
+                    return await (await loadRuntime()).recoverPending(nodeId, signal);
                 } catch (error) {
                     // Keep the restored node and binding untouched and block a fresh POST.
                     return nodeId ? [{ nodeId, status: "failed" as const, error: String(error) }] : [];

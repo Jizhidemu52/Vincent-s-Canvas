@@ -254,7 +254,7 @@ export async function requestQueuedImages(input: { quickImageAction?: QuickImage
     }
 }
 
-export async function requestQueuedImageBatch(input: { modelId: string; resolvedModel?: PublicModel; prompt: string; promptInput?: PromptInputData; onOptimizing?: () => void; onCompiled?: (prompt: string, optimized: boolean, submittedPrompt?: string) => void; parameters?: Record<string, unknown>; files: Array<{ file: File; title: string }>; onSubmissionStarted?: (requestId: string, items: Array<{ itemIndex: number }>) => void | Promise<void>; signal?: AbortSignal; onSubmitted?: (batchId: string) => void; onProgress?: (items: QueuedBatchItem[]) => void }) {
+export async function requestQueuedImageBatch(input: { modelId: string; resolvedModel?: PublicModel; prompt: string; promptInput?: PromptInputData; onOptimizing?: () => void; onCompiled?: (prompt: string, optimized: boolean, submittedPrompt?: string) => void | Promise<void>; parameters?: Record<string, unknown>; files: Array<{ file: File; title: string }>; onSubmissionStarted?: (requestId: string, items: Array<{ itemIndex: number }>) => void | Promise<void>; signal?: AbortSignal; cancelOnAbort?: () => boolean; projectId?: string; onSubmitted?: (batchId: string) => void | Promise<void>; onProgress?: (items: QueuedBatchItem[]) => void | Promise<void> }) {
     if (!input.files.length || input.files.length > 100) throw new Error("每批请选择 1–100 张图片，每张独立生成 1 张结果。");
     const ownerId = useUserStore.getState().user?.id;
     if (!ownerId) throw new Error("当前账号不可用");
@@ -293,7 +293,7 @@ export async function requestQueuedImageBatch(input: { modelId: string; resolved
         method: "POST",
         body: JSON.stringify({
             requestId,
-            projectId: currentProjectId("canvas-batch-edit"),
+            projectId: input.projectId || currentProjectId("canvas-batch-edit"),
             operationType: "batch_image",
             toolKey: "canvas-batch",
             modelConfigId: model.id,
@@ -310,12 +310,17 @@ export async function requestQueuedImageBatch(input: { modelId: string; resolved
         if (original && original.submissionComplete !== false) return original;
         throw new QueuedTaskSubmissionUncertainError(requestId, undefined, error);
     });
-    if (result.prompt !== undefined) { const prompts = imageTaskPrompts(result.tasks.find(task => task.parameters?.promptExclusions) || { prompt: result.prompt }); input.onCompiled?.(prompts.prompt, result.optimized === true, prompts.submittedPrompt); }
     const remapped = restoreBatchItemIndices(uploadedItems, result.tasks, result.failures);
     const itemIndexByTaskId = new Map(remapped.tasks.map((task) => [task.id, task.itemIndex]));
     const failures = [...uploadFailures, ...remapped.failures];
     const ids = result.tasks.map((task) => task.id);
-    input.onSubmitted?.(result.batchId);
+    try {
+        if (result.prompt !== undefined) { const prompts = imageTaskPrompts(result.tasks.find(task => task.parameters?.promptExclusions) || { prompt: result.prompt }); await input.onCompiled?.(prompts.prompt, result.optimized === true, prompts.submittedPrompt); }
+        await input.onSubmitted?.(result.batchId);
+    } catch (error) {
+        if (input.signal?.aborted) throw error;
+        throw new QueuedTaskSubmissionUncertainError(requestId, undefined, error);
+    }
     void refreshSessionBalance();
     if (!ids.length) return { batchId: result.batchId, tasks: [] as QueuedBatchItem[], failures };
     try {
@@ -327,7 +332,7 @@ export async function requestQueuedImageBatch(input: { modelId: string; resolved
         };
     } catch (error) {
         if (input.signal?.aborted) {
-            await request<{ changed: number }>(`/api/tasks/batches/${result.batchId}/cancel`, { method: "POST" }).catch(() => undefined);
+            if (input.cancelOnAbort?.() ?? true) await request<{ changed: number }>(`/api/tasks/batches/${result.batchId}/cancel`, { method: "POST" }).catch(() => undefined);
             throw error;
         }
         throw new QueuedTaskSubmissionUncertainError(requestId, undefined, error);
@@ -541,7 +546,7 @@ async function resolvePublicModel(modelId: string, operationType: string, toolKe
     return resolveConfiguredToolModel(await getBusinessConfig(), requireToolKey(operationType, toolKey), modelId);
 }
 
-export async function waitForTasks(ids: string[], signal?: AbortSignal, onPoll?: (tasks: QueuedTask[]) => void, haltOnPaused = false) {
+export async function waitForTasks(ids: string[], signal?: AbortSignal, onPoll?: (tasks: QueuedTask[]) => void | Promise<void>, haltOnPaused = false) {
     if (!ids.length) return [];
     const events = watchTaskEvents(ids, { background: true });
     let revision = events.version;
@@ -549,7 +554,7 @@ export async function waitForTasks(ids: string[], signal?: AbortSignal, onPoll?:
         waitForChange: (remaining, nextSignal) => events.next(revision, remaining, nextSignal),
         read: async querySignal => {
             revision = events.version;
-            return readTaskSnapshot(ids, async snapshotSignal => {
+            const tasks = await readTaskSnapshot(ids, async snapshotSignal => {
                 if (ids.length === 1) {
                     const task = await getQueuedTask(ids[0]!, snapshotSignal);
                     if (!task) throw new Error(`原任务 ${ids[0]} 不存在或无权访问`);
@@ -559,9 +564,11 @@ export async function waitForTasks(ids: string[], signal?: AbortSignal, onPoll?:
                 if (tasks.length !== ids.length) throw new Error("部分原任务不存在或无权访问");
                 return tasks;
             }, querySignal);
+            await onPoll?.(tasks);
+            querySignal.throwIfAborted();
+            return tasks;
         },
         done: tasks => {
-        onPoll?.(tasks);
         const paused = haltOnPaused ? tasks.find((task) => task.status === "paused") : undefined;
         if (paused) throw new QueuedTaskPausedError(paused);
         return tasks.length === ids.length && tasks.every((task) => ["success", "failed", "cancelled"].includes(task.status));
