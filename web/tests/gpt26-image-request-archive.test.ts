@@ -44,7 +44,7 @@ beforeEach(() => {
             tasks.set(id, task); return Response.json({ task });
         }
         if (path.startsWith("/api/tasks/")) return Response.json({ task: tasks.get(path.split("/").pop()!) });
-        if (/^\/api\/assets\/source-\d+$/.test(path)) return Response.json({ asset: { id: path.split("/").pop()!, ownerId: owner, kind: "image", status: "ready" } });
+        if (/^\/api\/assets\/source-\d+$/.test(path)) return Response.json({ asset: { id: path.split("/").pop()!, ownerUserId: owner, kind: "image", status: "ready" } });
         if (method === "HEAD" && path.startsWith("/api/assets/")) return new Response(null, { headers: { "content-type": "image/png" } });
         if (path.startsWith("/api/assets/")) return new Response(assets.get(path.split("/")[3]!), { headers: { "content-type": "image/png" } });
         throw new Error(`Unexpected ${method} ${path}`);

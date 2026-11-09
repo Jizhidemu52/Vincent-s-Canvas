@@ -44,6 +44,7 @@ import { postgresPromptRecipeStore } from "./prompt-recipe-postgres";
 import { PromptOptimizationError } from "./prompt-safety";
 import { AssetObjectError, readSourceAssetObject } from "./asset-object-error";
 import { processUsageRollups, scheduleUsageRollupMaintenance } from "./usage-rollups";
+import { ProviderImageAccess } from "./provider-image-access";
 
 type WorkRow = {
   id: string;
@@ -426,6 +427,18 @@ async function executeApiMartImage(
     protocol: "apimart", modelId: task.model_id!, operationType: task.operation_type,
   }) : { references: sourceAssets };
   if (!task.upstream_task_id && !task.upstream_submission_started_at && task.parameters.quickImageAction) await validateQuickImageSource(editInput.references[0], task.parameters);
+  let sourceImages: Array<SourceAsset | string> = editInput.references;
+  if (!task.upstream_task_id && !task.upstream_submission_started_at && task.model_id === "gpt-image-2.6-flare"
+    && editInput.references.length && config.PROVIDER_IMAGE_PUBLIC_ORIGIN) {
+    const access = new ProviderImageAccess(db, cache, storage, config.PROVIDER_IMAGE_PUBLIC_ORIGIN);
+    sourceImages = [];
+    // Publish only validated, owned references; never expose mask/markup layers or reload a submitted task.
+    for (const source of editInput.references) {
+      if (!source.assetId) throw new Error("参考图缺少素材身份；尚未提交生成");
+      sourceImages.push(await access.issue({ taskId: task.id, userId: task.user_id, executionToken: task.execution_token,
+        source: { ...source, assetId: source.assetId } }));
+    }
+  }
   let result: Awaited<ReturnType<typeof stepApiMartImageTask>>;
   try { result = await stepApiMartImageTask({
     baseUrl: task.base_url!,
@@ -434,7 +447,7 @@ async function executeApiMartImage(
     submissionKey: task.id,
     prompt: providerPrompt,
     parameters: task.parameters,
-    sourceImages: editInput.references,
+    sourceImages,
     ...(editInput.mask ? { maskImage: editInput.mask } : {}),
     ...(editInput.markup ? { markupImage: editInput.markup } : {}),
     upstreamTaskId: task.upstream_task_id,
@@ -708,6 +721,8 @@ function joinUrl(base: string, path: string) {
 }
 
 type SourceAsset = ProviderVideoSource & {
+  assetId?: string;
+  etag?: string;
   objectKey: string;
   bytes: Uint8Array;
   mimeType: string;
@@ -743,6 +758,8 @@ async function loadSourceAsset(url: string, userId: string): Promise<SourceAsset
   if (!asset) throw new Error("参考图不存在或无权访问");
   const object = await readSourceAssetObject(storage, asset.object_key);
   return {
+    assetId: match[1]!,
+    etag: object.ETag,
     objectKey: asset.object_key,
     bytes: await object.Body!.transformToByteArray(),
     mimeType: asset.mime_type,

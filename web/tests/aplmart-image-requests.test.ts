@@ -46,7 +46,7 @@ beforeEach(() => {
             expect(init).toMatchObject({ credentials: "include", cache: "no-store" });
             return new Response(null, { status: 200, headers: { "content-type": "image/png" } });
         }
-        if (path === "/api/assets/reference") return Response.json({ asset: { id: "reference", kind: "image", status: "ready" } });
+        if (path === "/api/assets/reference") return Response.json({ asset: { id: "reference", ownerUserId: "qa-user", kind: "image", status: "ready" } });
         if (path === "/api/tasks/batch") {
             batchTasks = body!.items.map((_: unknown, itemIndex: number) => ({ id: `batch-task-${itemIndex}`, itemIndex, status: "success", resultUrls: [`/api/assets/result-${itemIndex}/content`] }));
             return Response.json({ batchId: "batch-many", tasks: batchTasks, failures: [] });

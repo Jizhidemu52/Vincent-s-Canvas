@@ -29,7 +29,7 @@ function network() {
         const path = String(url), method = init?.method || "GET", body = init?.body ? JSON.parse(String(init.body)) : undefined;
         requests.push({ path, method, body });
         if (path === "/api/models") return Response.json({ models: [model], tools: [], prices: [] });
-        if (path === "/api/assets/source") return Response.json({ asset: { id: "source", kind: "image", status: "ready" } });
+        if (path === "/api/assets/source") return Response.json({ asset: { id: "source", ownerUserId: "operation-test", kind: "image", status: "ready" } });
         if (path === "/api/assets/source/content" && method === "HEAD") return new Response(null, { status: 200 });
         if (path === "/api/prompt-compilations") return Response.json({ compilation: { ...compilation, requestId: body.requestId } });
         if (path === "/api/tasks" && method === "POST") {

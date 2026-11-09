@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { normalizeProviderImageOrigin } from "./provider-image-access";
 
 const schema = z.object({
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -22,6 +23,7 @@ const schema = z.object({
     WECOM_SECRET: z.string().optional(),
     WECOM_CALLBACK_URL: z.string().url().optional().or(z.literal("")),
     PROVIDER_ENCRYPTION_KEY: z.string().optional(),
+    PROVIDER_IMAGE_PUBLIC_ORIGIN: z.string().optional(),
     WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(40).default(10),
     USER_MAX_INFLIGHT_TASKS: z.coerce.number().int().min(1).max(1000).default(100),
     WORKER_SHUTDOWN_GRACE_SECONDS: z.coerce.number().int().min(1).max(3600).default(1200),
@@ -39,6 +41,9 @@ export type AppConfig = z.infer<typeof schema>;
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): AppConfig {
     const config = schema.parse(env);
+    if (config.PROVIDER_IMAGE_PUBLIC_ORIGIN !== undefined) {
+        config.PROVIDER_IMAGE_PUBLIC_ORIGIN = normalizeProviderImageOrigin(config.PROVIDER_IMAGE_PUBLIC_ORIGIN);
+    }
     if (config.OA_LOGIN_ENABLED === "true") {
         const endpoint = new URL(config.OA_USERINFO_URL);
         if (endpoint.protocol !== "https:" || endpoint.username || endpoint.password) {

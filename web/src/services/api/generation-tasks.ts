@@ -600,17 +600,29 @@ export async function uploadImageReference(reference: ReferenceImage, file: File
     const assertOwner = () => { signal?.throwIfAborted(); if (useUserStore.getState().user?.id !== ownerId) throw new Error("员工会话已变化"); };
     assertOwner();
     if (referenceUploadOwner !== ownerId) { referenceUploads.clear(); referenceUploadOwner = ownerId; }
+    let sharedSourceId: string | undefined;
     if (reference.sourceAssetId) {
         const { asset } = await fetchServerAsset(reference.sourceAssetId, signal);
         assertOwner();
-        if (asset.kind !== "image" || asset.status !== "ready") throw new Error("原参考图不可用，请重新选择素材");
-        try { await assertServerAssetContent(asset.id, signal); assertOwner(); return asset.id; }
+        if (asset.kind !== "image" || asset.status !== "ready" || asset.deletedAt || !asset.ownerUserId) throw new Error("原参考图不可用，请重新选择素材");
+        const owned = asset.ownerUserId === ownerId;
+        try { await assertServerAssetContent(asset.id, signal); assertOwner(); }
         catch (error) {
             assertOwner();
-            if (!(error instanceof ServerAssetContentError) || error.code !== "ASSET_OBJECT_MISSING") throw error;
+            // Read access never authorizes repairing another employee's original.
+            if (!owned || !(error instanceof ServerAssetContentError) || error.code !== "ASSET_OBJECT_MISSING") throw error;
             return uploadReferenceBytes(reference, file, hash, ownerId, assertOwner, asset.id);
         }
+        if (owned) return asset.id;
+        sharedSourceId = asset.id;
     }
+    const finish = async (assetId: string) => {
+        // A copy/upload may outlive source permission. Recheck even when the
+        // employee-owned destination came from the byte-deduplication cache.
+        if (sharedSourceId) await assertServerAssetContent(sharedSourceId, signal);
+        assertOwner();
+        return assetId;
+    };
     const key = `${ownerId}:${hash}`;
     const existing = referenceUploads.get(key);
     if (existing) {
@@ -619,17 +631,20 @@ export async function uploadImageReference(reference: ReferenceImage, file: File
         // Permissions/deletion may change during this browser session.
         const { asset } = await fetchServerAsset(assetId, signal);
         assertOwner();
-        if (asset.kind !== "image" || asset.status !== "ready") throw new Error("原参考图不可用，请重新选择素材");
-        try { await assertServerAssetContent(assetId, signal); assertOwner(); return assetId; }
+        if (asset.ownerUserId !== ownerId || asset.kind !== "image" || asset.status !== "ready" || asset.deletedAt) throw new Error("原参考图不可用，请重新选择素材");
+        try { await assertServerAssetContent(assetId, signal); assertOwner(); }
         catch (error) {
             assertOwner();
             if (!(error instanceof ServerAssetContentError) || error.code !== "ASSET_OBJECT_MISSING") throw error;
             const repaired = await uploadReferenceBytes(reference, file, hash, ownerId, assertOwner, assetId);
             if (referenceUploads.get(key) === existing) referenceUploads.set(key, Promise.resolve(repaired));
-            return repaired;
+            return finish(repaired);
         }
+        return finish(assetId);
     }
-    return uploadReferenceBytes(reference, file, hash, ownerId, assertOwner);
+    // Shared inputs use their already-read original bytes, never a thumbnail or
+    // the author's asset ID. Uploads and content-hash reuse are employee-scoped.
+    return finish(await uploadReferenceBytes(reference, file, hash, ownerId, assertOwner));
 }
 
 async function uploadReferenceBytes(reference: ReferenceImage, file: File, hash: string, ownerId: string, assertOwner: () => void, repairAssetId?: string) {

@@ -69,6 +69,8 @@ import { PromptOptimizationError } from "./prompt-safety";
 import { ensureVideoMotionRecipe } from "./video-motion-input";
 import { writeAudit } from "./audit";
 import { createAdminReleaseNotesRouter, createReleaseNotesRouter } from "./routes/release-notes";
+import { ProviderImageAccess, PROVIDER_IMAGE_PATH } from "./provider-image-access";
+import { createProviderImagesRouter } from "./routes/provider-images";
 
 const config = loadConfig();
 const features = deploymentFeatures(config);
@@ -100,6 +102,13 @@ app.use("/api/canvas-documents", canvasBodyError);
 app.use(express.json({ limit: "2mb" }));
 app.use(cookieParser());
 app.use(requireSameOrigin);
+// Only task-scoped random reference paths bypass login. Employee asset routes
+// below retain their existing session and ownership checks.
+if (config.PROVIDER_IMAGE_PUBLIC_ORIGIN) {
+  app.use(PROVIDER_IMAGE_PATH, createProviderImagesRouter(
+    new ProviderImageAccess(db, cache, storage, config.PROVIDER_IMAGE_PUBLIC_ORIGIN), storage,
+  ));
+}
 const readCreditsEnabled = async () => features.authenticationEnabled && await getCreditsEnabled(db, features.creditsEnabled);
 app.get("/api/deployment", async (_request, response, next) => {
   try { response.set("Cache-Control", "no-store").json({ ...features, creditsEnabled: await readCreditsEnabled() }); }
