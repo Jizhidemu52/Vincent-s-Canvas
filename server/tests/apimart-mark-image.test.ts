@@ -7,6 +7,27 @@ const publicReference = "https://images.example/reference.png";
 const base = { baseUrl: "https://provider.example/v1/", apiKey: "server-secret", modelId: "gpt-image-2.5-flare", prompt: "Change the ribbon", parameters: {} };
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } });
 const completed = { code: 200, data: { id: "task_saved", status: "completed", progress: 100, result: { images: [{ url: ["https://images.example/one.png", "https://images.example/two.jpg"], expires_at: 1799000000 }, { url: ["https://images.example/three.png"], expires_at: 1799000000 }] } } };
+const grantToken = "0123456789abcdef".repeat(4);
+const grantUrl = `http://images.example/api/provider-images/${grantToken}/image`;
+const percentHex = (value: string) => [...value].map(char => `%${char.charCodeAt(0).toString(16)}`).join("");
+
+async function reflectedProviderFailure(phase: string, message: string, apiKey = base.apiKey) {
+  let calls = 0;
+  const error = await runApiMartImageTask({ ...base, modelId: "gpt-image-2.6-flare", apiKey, sourceImages: [grantUrl],
+    ...(phase === "submission" ? {} : { upstreamTaskId: "existing", submissionStarted: true }),
+  }, { sleep: async () => { throw new Error("Rejected requests must not retry"); }, fetch: async (_url, init) => {
+    calls++;
+    expect(init?.method).toBe(phase === "submission" ? "POST" : "GET");
+    // Redaction is for diagnostics only; never alter the authorized reference sent to the provider.
+    if (phase === "submission") expect(JSON.parse(String(init?.body)).image_urls).toEqual([grantUrl]);
+    return phase === "terminal" ? json({ data: { status: "failed", error: { message } } }) : json({ error: { message } }, 400);
+  } }).catch(error => error);
+  expect(error).toBeInstanceOf(Error);
+  expect(error instanceof ApiMartImageProviderFailure).toBe(phase !== "status-http");
+  expect(error).not.toBeInstanceOf(ApiMartImageQueryRetryable);
+  expect(calls).toBe(1);
+  return error as Error;
+}
 
 describe("Mark APIMart image contracts", () => {
   test.each(["submission", "status-http", "terminal"])("provider errors redact the known credential before worker persistence: %s", async (phase) => {
@@ -27,6 +48,36 @@ describe("Mark APIMart image contracts", () => {
     expect(error.message).not.toContain(encodeURIComponent(apiKey));
     expect(error.message).not.toContain(JSON.stringify(apiKey).slice(1, -1));
     expect(calls).toBe(1);
+  });
+
+  test.each(["submission", "status-http", "terminal"])("provider-image bearer echoes are removed before persistence in %s errors", async phase => {
+    const variants = [grantToken, grantUrl, grantUrl.replace(/\//g, "\\/"), encodeURIComponent(grantUrl),
+      encodeURIComponent(encodeURIComponent(grantUrl)), percentHex(grantToken), percentHex(grantToken).toUpperCase(),
+      [...grantToken].map((char, index) => index % 2 ? percentHex(char) : char).join(""),
+      [...grantToken].map(char => `\\u00${char.charCodeAt(0).toString(16)}`).join("")];
+    for (const value of variants) {
+      const error = await reflectedProviderFailure(phase, `Reference unavailable: ${value}; quota unchanged.`);
+      expect(error.message).toContain("Reference unavailable:");
+      expect(error.message).toContain("[redacted]");
+      expect(error.message).toContain("; quota unchanged.");
+      expect(error.message).not.toContain(value);
+      expect(error.message).not.toContain(grantToken.slice(0, 16));
+    }
+  });
+
+  test.each(["submission", "status-http", "terminal"])("secret redaction precedes the 500-character truncation in %s errors", async phase => {
+    const apiKey = "fixture-secret/+\"-must-not-leak";
+    for (const secret of [grantToken, percentHex(grantToken), apiKey, encodeURIComponent(apiKey), JSON.stringify(apiKey).slice(1, -1)]) {
+      const error = await reflectedProviderFailure(phase, `${"x".repeat(480)}${secret} trailing diagnostic`, apiKey);
+      expect(error.message).toContain(`${"x".repeat(480)}[redacted]`);
+      expect(error.message).not.toContain(secret.slice(0, 16));
+      expect(error.message).not.toContain(grantToken.slice(0, 16));
+    }
+  });
+
+  test.each(["submission", "status-http", "terminal"])("ordinary non-sensitive provider diagnostics survive %s redaction unchanged", async phase => {
+    const message = "Task not found or has expired. retry_after=30; size=1k; docs=https://provider.example/help";
+    expect((await reflectedProviderFailure(phase, message)).message.endsWith(message)).toBe(true);
   });
 
   test("keeps all three model IDs independent and preserves old Nano mapping", () => {

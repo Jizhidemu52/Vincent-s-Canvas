@@ -683,10 +683,14 @@ function readFailureMessage(value: unknown) {
 }
 
 function redactProviderCredential(value: string, apiKey: string) {
-  // Redact before truncation so a credential crossing the length boundary cannot leak a prefix.
+  // Redact before truncation so a secret crossing the length boundary cannot leak a prefix.
   const variants = [...new Set([apiKey, encodeURIComponent(apiKey), JSON.stringify(apiKey).slice(1, -1)])]
     .filter(Boolean).sort((left, right) => right.length - left.length);
   for (const secret of variants) value = value.split(secret).join("[redacted]");
+  // Provider-image grants are 64 hex characters and may be echoed without their
+  // URL, including on later polls that no longer carry references. Treat this
+  // shape as secret even when percent/JSON-escaped; leave other diagnostics intact.
+  value = value.replace(/(?:[a-f0-9]|%(?:3[0-9]|[46][1-6])|\\u00(?:3[0-9]|[46][1-6])){64,}/gi, "[redacted]");
   return value.slice(0, 500);
 }
 
