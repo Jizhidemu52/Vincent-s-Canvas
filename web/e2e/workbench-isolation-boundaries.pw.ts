@@ -141,6 +141,67 @@ test("boundary: video initial history delay and failure block new submission unt
     })).toEqual(expect.arrayContaining([{ requestId: originalTask.requestId, prompt: "ORIGINAL_VIDEO_HISTORY_GATE" }, { requestId: api.submissions[1]!.requestId, prompt: "EXPLICIT_PARALLEL_VIDEO_AFTER_READ" }]));
 });
 
+for (const viewport of [{ width: 1800, height: 1200 }, { width: 390, height: 844 }]) {
+    for (const kind of ["image", "video"] as const) {
+        test(`boundary: ${kind} repeated pointer clicks retain the original task and query at ${viewport.width}px`, async ({ page, context, api }) => {
+            await page.setViewportSize(viewport);
+            await mockModelsAndMedia(context, api);
+            api.taskStatus = "queued";
+            let releaseSubmission!: () => void;
+            const submissionGate = new Promise<void>(resolve => { releaseSubmission = resolve; });
+            let attempts = 0;
+            const controls: string[] = [];
+            await context.route(/\/api\/tasks$/, async route => {
+                if (route.request().method() !== "POST") return route.fallback();
+                attempts += 1;
+                await submissionGate;
+                return route.fallback();
+            });
+            await context.route(/\/api\/tasks\/[^/]+\/(?:cancel|recover)$/, route => {
+                controls.push(new URL(route.request().url()).pathname);
+                return route.fulfill({ status: 409, json: { error: "FIXTURE_NO_TASK_CONTROL_EXPECTED" } });
+            });
+            try {
+                await page.goto(`/${kind}`);
+                const prompt = pane(page).getByRole("textbox", { name: kind === "image" ? "图像提示词" : "视频提示词", exact: true });
+                await prompt.fill(`POINTER_${kind}_${viewport.width}`);
+                const originalTabId = await tabs(page).first().getAttribute("id");
+                const submit = pane(page).locator(".generation-submit .ant-btn-primary");
+                await expect(submit).toBeEnabled();
+                await submit.scrollIntoViewIfNeeded();
+                const before = (await submit.boundingBox())!;
+                await page.evaluate(() => {
+                    (window as any).__submitPointerTargets = [];
+                    document.addEventListener("pointerdown", event => {
+                        const button = (event.target as Element).closest("button");
+                        if (button) (window as any).__submitPointerTargets.push(button.textContent);
+                    }, true);
+                });
+                // Exercise the same physical location across the submitting reflow.
+                // Holding the POST keeps this distinct from a deliberate later generation.
+                await page.mouse.dblclick(before.x + before.width / 2, before.y + before.height / 2, { delay: 80 });
+                await expect.poll(() => attempts).toBe(1);
+                await expect(tabs(page)).toHaveCount(1);
+                await expect(tabs(page).first()).toHaveAttribute("id", originalTabId!);
+                await expect(tabs(page).first()).toHaveAttribute("aria-selected", "true");
+                await expect(prompt).toHaveValue(`POINTER_${kind}_${viewport.width}`);
+                expect(await page.evaluate(() => (window as any).__submitPointerTargets)).not.toEqual(expect.arrayContaining([expect.stringMatching(/新建任务|停止.*查询/)]));
+                const during = (await submit.boundingBox())!;
+                expect(Math.abs(during.y - before.y)).toBeLessThan(1);
+                releaseSubmission();
+                await expect.poll(() => api.submissions.length).toBe(1);
+                const original = [...api.tasks.values()][0]!;
+                await expect(tabs(page).first()).toContainText("处理中");
+                const oldReads = api.taskReads.filter(path => path === `/api/tasks/${original.id}`).length;
+                await expect.poll(() => api.taskReads.filter(path => path === `/api/tasks/${original.id}`).length).toBeGreaterThan(oldReads);
+                await expect(pane(page).getByRole("button", { name: "停止本页查询（不取消服务端任务）", exact: true })).toBeVisible();
+                expect(attempts).toBe(1);
+                expect(controls).toEqual([]);
+            } finally { releaseSubmission(); }
+        });
+    }
+}
+
 for (const completion of ["before-navigation", "after-navigation"] as const) {
     test(`boundary: duplicate clicks and board navigation retain three original tasks without cancellation or resubmission (${completion})`, async ({ page, context, api }) => {
         await mockModelsAndMedia(context, api);
@@ -156,6 +217,8 @@ for (const completion of ["before-navigation", "after-navigation"] as const) {
             await pane(page).getByRole("button", { name: board.submit, exact: true }).dblclick();
             await expect.poll(() => api.submissions.length).toBe(index + 1);
             await expect(tabs(page).first()).toContainText("处理中");
+            await expect(tabs(page)).toHaveCount(1);
+            await expect(tabs(page).first()).toHaveAttribute("aria-selected", "true");
         }
         const ids = [...api.tasks.keys()];
         expect(ids).toHaveLength(3);

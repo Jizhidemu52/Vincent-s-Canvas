@@ -1340,11 +1340,12 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                                     <Button size="small" onClick={() => setPendingReadAttempt(value => value + 1)}>{uiText("重试读取原任务")}</Button>
                                 </div> : null}
                             </div>
+                            {running ? <Button block icon={<Plus className="size-4" />} loading={workbenchTask.creating} disabled={!workbenchTask.ready || workbenchTask.creating} onClick={() => void createTask()}>{uiText("新建任务，继续创作")}</Button> : null}
+                            {running ? <Button block onClick={stopPendingQueries}>{uiText("停止本页查询（不取消服务端任务）")}</Button> : pendingImages.length ? <><Button block onClick={() => void resumePendingImages(pendingImages)}>{uiText("刷新原任务状态（")}{pendingImages.length}）</Button>{pendingImages.some(record => !record.stopped) && <Button block onClick={stopPendingQueries}>{uiText("停止自动核对")}</Button>}</> : null}
+                            {/* Keep the primary action bottom-most so a second pointer click cannot hit a newly inserted action. */}
                             <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} loading={running} disabled={!canGenerate || running} onClick={() => void generate()}>
                                 {optimizingPrompt ? uiText("正在优化提示词…") : running ? uiText("正在生成，请稍候…") : uiText(toolModeConfig.button)}
                             </Button>
-                            {running ? <Button block icon={<Plus className="size-4" />} loading={workbenchTask.creating} disabled={!workbenchTask.ready || workbenchTask.creating} onClick={() => void createTask()}>{uiText("新建任务，继续创作")}</Button> : null}
-                            {running ? <Button block onClick={stopPendingQueries}>{uiText("停止本页查询（不取消服务端任务）")}</Button> : pendingImages.length ? <><Button block onClick={() => void resumePendingImages(pendingImages)}>{uiText("刷新原任务状态（")}{pendingImages.length}）</Button>{pendingImages.some(record => !record.stopped) && <Button block onClick={stopPendingQueries}>{uiText("停止自动核对")}</Button>}</> : null}
                         </div>
                     </div>
 
