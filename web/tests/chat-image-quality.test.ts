@@ -100,7 +100,7 @@ function sendHarness({ action = "generate", quality = "high", resolution = undef
         createClientId: (() => { let count = 0; return () => `message-${++count}`; })(),
         persistSessions: async (value: any[]) => { snapshots.push(structuredClone(value)); }, persistence: { clear() {} }, setIsSending() {}, setSendPhase() {}, setDraft() {}, setAttachments() {},
         updateSession: (id: string, update: (value: any) => any) => { sessionsRef.current = sessionsRef.current.map(value => value.id === id ? update(value) : value); },
-        followBottomRef: { current: false }, activeStreamRef: { current: null }, createChatStreamBuffer: () => ({ push() {}, flush() {}, cancel() {} }),
+        chatFollow: { scrollToBottom() {} }, activeStreamRef: { current: null }, createChatStreamBuffer: () => ({ push() {}, flush() {}, cancel() {} }),
         requestCreativeChatPlan: async () => { await planGate; return discussion ? { kind: "discussion", content: "只讨论" } : { kind: "image", action, prompt: "只改花瓣", content: "", references: action === "edit" ? [{ id: "base", name: "底图.png", type: "image/png", dataUrl: "data:image/png;base64,AQID" }] : [], keep: [], workNote: { summary: "花瓣变细", keep: [] } }; },
         requestGeneration: async (cfg: any, _prompt: string, options: any) => submit(cfg, options),
         requestEdit: async (cfg: any, _prompt: string, _refs: any, _mask: any, options: any) => submit(cfg, options),

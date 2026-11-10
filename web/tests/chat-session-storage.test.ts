@@ -161,7 +161,7 @@ function pageSendHarness({ ready = true, failWrite = false, failWriteAt = 0, mod
         updateSession: (id: string, update: (value: typeof session) => typeof session) => { if (bindings.loadedStorageKeyRef.current !== bindings.storageKey) return; sessionsRef.current = sessionsRef.current.map((item) => item.id === id ? update(item) : item); },
         setDraft: (update: string | ((value: string) => string)) => { memory.draft = typeof update === "function" ? update(memory.draft) : update; },
         setAttachments: (update: typeof memory.attachments | ((value: typeof memory.attachments) => typeof memory.attachments)) => { memory.attachments = typeof update === "function" ? update(memory.attachments) : update; },
-        followBottomRef: { current: false }, activeStreamRef: { current: null },
+        chatFollow: { scrollToBottom: () => events.push("follow-bottom") }, activeStreamRef: { current: null },
         createChatStreamBuffer: (onFlush: (value: string) => void) => ({ push: onFlush, cancel() {}, flush() {} }),
         chatMedia: { hydrateSession: async (value: any, assertCurrent: () => void) => { assertCurrent(); return value; }, persist: async (value: any, assertCurrent: () => void) => { assertCurrent(); return value; } },
         requestImageQuestion: async () => { events.push("model-request"); return "已读取图片"; },
@@ -208,6 +208,7 @@ test("the actual chat send handler keeps drafts and attachments after a save fai
     expect(page.memory).toEqual(draft);
     expect(page.events).not.toContain("model-request");
     expect(page.events).not.toContain("planner-request");
+    expect(page.events).not.toContain("follow-bottom");
     expect(page.events).toContain("聊天记录未保存，消息尚未发送；草稿和附件已保留。");
 });
 
@@ -215,6 +216,9 @@ test("the actual chat send handler commits attachments before requesting and the
     const page = pageSendHarness();
     await page.send();
     expect(page.events.indexOf("save")).toBeLessThan(page.events.indexOf("planner-request"));
+    expect(page.events.filter(event => event === "follow-bottom")).toHaveLength(1);
+    expect(page.events.indexOf("follow-bottom")).toBeGreaterThan(page.events.indexOf("save"));
+    expect(page.events.indexOf("follow-bottom")).toBeLessThan(page.events.indexOf("planner-request"));
     expect(page.snapshots).toHaveLength(2);
     expect((page.snapshots[0] as any[])[0].messages[0].attachments[0].dataUrl).toBe("data:image/png;base64,AQID");
     expect((page.snapshots[1] as any[])[0].messages.at(-1).content).toBe("只讨论设计");
