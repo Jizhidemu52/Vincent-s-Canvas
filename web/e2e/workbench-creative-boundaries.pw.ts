@@ -25,7 +25,7 @@ for (const viewChange of ["clear", "successful-history"] as const) {
         await prompt(page).fill("SECOND_PENDING_INPUT");
         await active(page).locator("button.cs-generate").click();
         await expect.poll(() => api.submissions.length).toBe(2);
-        await active(page).getByRole("button", { name: "停止本页查询（不取消服务端任务）", exact: true }).click();
+        await active(page).getByRole("button", { name: "暂停获取进度", exact: true }).click();
         await expect(tabs(page).nth(1)).toContainText("待核查");
         await expect(closeSecond(page)).toBeDisabled();
         if (viewChange === "clear") {
@@ -45,7 +45,8 @@ for (const viewChange of ["clear", "successful-history"] as const) {
         pending.resultUrls = [`/api/assets/${pending.id}/content`];
         await active(page).getByRole("button", { name: /^最近任务/ }).click();
         await active(page).locator("button.cs-history-item").first().click();
-        await active(page).getByRole("button", { name: "查询原请求", exact: true }).click();
+        // Selecting the unresolved history now starts a GET-only reconciliation.
+        await expect(active(page).getByRole("button", { name: "下载原图", exact: true })).toBeVisible();
         await expect(closeSecond(page)).toBeEnabled();
         expect(api.submissions).toHaveLength(2);
         await closeSecond(page).click();

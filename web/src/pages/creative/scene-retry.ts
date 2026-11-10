@@ -3,11 +3,11 @@ import { restoreGenerationDraft, type GenerationInputArchive } from "@/services/
 import { restoreLocalInput } from "@/services/generation-local-inputs";
 import type { SceneLog, SceneResult } from "./use-scene-workspace";
 
-export function sceneFailure(error: unknown, submitted: boolean, taskId?: string, requestId?: string): Pick<SceneResult, "status" | "error" | "failureKind" | "taskId" | "requestId"> {
+export function sceneFailure(error: unknown, submitted: boolean, taskId?: string, requestId?: string): Pick<SceneResult, "status" | "error" | "failureKind" | "taskId" | "requestId" | "recovery"> {
     const message = error instanceof Error ? error.message : "操作未完成";
     if ((error as { submissionRejected?: boolean })?.submissionRejected) return { status: "failed", error: message, failureKind: "local", requestId };
     if (error instanceof QueuedTaskFailedError) return { status: "failed", error: message, failureKind: error.task.status === "failed" ? "terminal" : "local", taskId: error.task.id, requestId: error.task.requestId };
-    if (error instanceof QueuedTaskPausedError) return { status: "failed", error: message, failureKind: "uncertain", taskId: error.task.id, requestId: error.task.requestId };
+    if (error instanceof QueuedTaskPausedError) return { status: "failed", error: error.canRecover ? "获取结果已暂停，点击“继续获取结果”即可继续。" : "暂时无法获取结果，需要管理员协助。", failureKind: "uncertain", recovery: error.recovery, taskId: error.task.id, requestId: error.task.requestId };
     if (error instanceof QueuedTaskSubmissionUncertainError) return { status: "failed", error: message, failureKind: "uncertain", taskId: error.taskId || taskId, requestId: error.requestId };
     return { status: "failed", error: submitted ? `${message}；请查询原任务，勿重复生成。` : message, failureKind: submitted ? "uncertain" : "local", taskId, requestId };
 }

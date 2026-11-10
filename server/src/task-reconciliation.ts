@@ -145,7 +145,7 @@ export async function reconcileTask(db: Database, cache: Cache, taskId: string, 
             await client.query(
                 `UPDATE tasks SET upstream_task_id=$2,upstream_submission_started_at=COALESCE(upstream_submission_started_at,now()),
                     status='processing',execution_token=NULL,lease_expires_at=NULL,available_at=now(),failure_reason=NULL,
-                    poll_deadline_at=CASE WHEN operation_type='video_generation' THEN now()+interval '20 minutes' ELSE poll_deadline_at END,updated_at=now()
+                    poll_deadline_at=now()+CASE WHEN operation_type='video_generation' THEN interval '20 minutes' ELSE interval '15 minutes' END,updated_at=now()
                   WHERE id=$1`, [task.id, decision.upstreamTaskId],
             );
             task.upstream_task_id = decision.upstreamTaskId;

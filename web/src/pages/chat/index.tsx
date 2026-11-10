@@ -6,19 +6,20 @@ import { PracticeExampleRecord } from "@/components/design-examples";
 import { ConversationExamples } from "@/components/conversation-examples";
 import { App, Button, Checkbox, Popover, Select, Tooltip } from "antd";
 import { Bot, Brush, CircleHelp, Copy, FileText, ImagePlus, LoaderCircle, MessageSquarePlus, Paperclip, PanelLeftClose, PanelLeftOpen, Pencil, RotateCcw, Send, Settings2, Square, Trash2, WandSparkles, X } from "lucide-react";
-import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type SetStateAction } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type SetStateAction } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { cn } from "@/lib/utils";
 import { deploymentFeatures } from "@/lib/deployment-features";
 import { createClientId } from "@/lib/client-id";
-import { pastedImageFiles } from "@/lib/clipboard-images";
+import { pastedConversationImageFiles } from "@/lib/conversation-image-clipboard";
 import { CHAT_ATTACHMENT_ACCEPT, openChatAttachmentPicker, parseChatAttachment } from "@/lib/chat-attachments";
 import { assertCreativeChatImageSelection, buildCreativeImageCatalog, type CreativeChatImageSelection, type CreativeImageCatalogEntry } from "@/lib/creative-chat";
 import { conversationImageLabel, type ConversationImageAction, type ConversationImageItem } from "@/components/conversation-image-controls";
 import { imageAgentWorkNoteText } from "@/lib/image-agent/work-note";
 import { useConversationImageTools } from "@/hooks/use-conversation-image-tools";
 import { useImageDrop } from "@/hooks/use-image-drop";
+import { useChatBottomFollow } from "@/hooks/use-chat-bottom-follow";
 import { useCopyText } from "@/hooks/use-copy-text";
 import { createDeferredPersistQueue } from "@/lib/deferred-persist-queue";
 import { createChatStreamBuffer } from "./chat-stream-buffer";
@@ -136,8 +137,6 @@ export default function ChatPage() {
     const [sendPhase, setSendPhase] = useState("");
     const [placingImage, setPlacingImage] = useState(false);
     const placingImageRef = useRef(false);
-    const scrollRef = useRef<HTMLDivElement>(null);
-    const followBottomRef = useRef(true);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const composerRef = useRef<HTMLTextAreaElement>(null);
     const activeStreamRef = useRef<ReturnType<typeof createChatStreamBuffer> | null>(null);
@@ -231,20 +230,8 @@ export default function ChatPage() {
         if (modelsStatus === "idle") void refreshModels().catch(() => undefined);
     }, [modelsStatus, refreshModels]);
 
-    useEffect(() => {
-        followBottomRef.current = true;
-    }, [activeSessionId]);
-
-    useEffect(() => {
-        const current = sessions.find((item) => item.id === activeSessionId) || sessions[0];
-        if (!current?.messages.length) {
-            scrollRef.current?.scrollTo({ top: 0, behavior: "instant" });
-            return;
-        }
-        if (followBottomRef.current) scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "instant" });
-    }, [sessions, activeSessionId, isSending]);
-
     const activeSession = useMemo(() => sessions.find((item) => item.id === activeSessionId) || sessions[0], [activeSessionId, sessions]);
+    const chatFollow = useChatBottomFollow(activeSession?.messages, activeSessionId || undefined);
     const imageBinding = toolBindings.find(item => item.toolKey === "gpt-chat-image");
     const chatImageEnabled = useModuleEnabled("gpt-chat-image");
     const selected = modelsStatus === "ready" ? resolveToolModel(businessConfig, "gpt-chat") : undefined;
@@ -395,6 +382,7 @@ export default function ChatPage() {
         if (imageActionsDisabled || !isCurrentScope()) return;
         const image = composerImageCatalog.find((item) => item.id === imageId);
         if (!image) return;
+        if (action === "copy") { void imageTools.copy(image); return; }
         if (action === "download") { void imageTools.download(image); return; }
         if (action !== "compare") return;
         const original = chatImageOriginal(composerImageCatalog, image.id);
@@ -608,7 +596,7 @@ export default function ChatPage() {
         }
         setImageTarget(null);
         setRegionSelection(null);
-        followBottomRef.current = true;
+        chatFollow.scrollToBottom();
         const stream = createChatStreamBuffer((content) => { if (signal.aborted || activeSendRef.current !== sendLifetime) return; updateSession(sessionId, (session) => ({
             ...session,
             messages: [...session.messages.filter((item) => item.id !== assistantId), { id: assistantId, parentMessageId: userMessage.id, role: "assistant", content, createdAt: new Date().toISOString() }],
@@ -784,13 +772,14 @@ export default function ChatPage() {
     };
 
     const pasteAttachments = (event: ClipboardEvent<HTMLTextAreaElement>) => {
-        const files = pastedImageFiles(event.clipboardData);
-        if (!files.length) return; // Let the browser insert ordinary text at the caret.
+        const files = pastedConversationImageFiles(event.clipboardData);
+        if (!files) return; // Let the browser insert ordinary text at the caret.
+        void files.catch(() => undefined);
         event.preventDefault();
         if (editing) { message.warning(uiText("编辑历史消息时保留原附件，请取消编辑后再粘贴新图片")); return; }
         if (sendingRef.current) { message.warning(uiText("请等待当前回复结束后再添加图片")); return; }
         if (attachmentReadRef.current || readingAttachments) { message.warning(uiText("正在读取附件，请稍后再粘贴图片")); return; }
-        void addFiles(files);
+        void files.then(addFiles).catch(error => message.error(error instanceof Error ? uiText(error.message) : uiText("图片复制失败，请重试")));
     };
 
     const imageDrop = useImageDrop({
@@ -803,6 +792,12 @@ export default function ChatPage() {
 
     const composerAttachments = editing && activeSession ? chatSourceTurn(activeSession, editing.messageId)?.attachments || [] : attachments;
     const composerText = editing?.content ?? draft;
+    useLayoutEffect(() => {
+        const textarea = composerRef.current;
+        if (!textarea) return;
+        textarea.style.height = "auto";
+        textarea.style.height = `${Math.min(176, Math.max(56, textarea.scrollHeight))}px`;
+    }, [composerText]);
     const sendComposer = () => void send(editing || undefined);
     const editMessage = (item: ChatMessage) => {
         if (isSending || placingImage || readingAttachments || hydratingMedia) return;
@@ -812,8 +807,8 @@ export default function ChatPage() {
     };
 
     return (
-        <main className="wb-page h-full min-h-0 p-3 md:p-5">
-            <div className="wb-surface relative mx-auto flex h-full max-w-[1600px] overflow-hidden">
+        <main className="h-full min-h-0 bg-background">
+            <div className="relative mx-auto flex h-full min-h-0 max-w-[1600px] overflow-hidden">
                 {sidebarOpen ? <button type="button" aria-label={uiText("关闭会话列表")} className="absolute inset-0 z-10 bg-black/25 md:hidden" onClick={() => setSidebarOpen(false)} /> : null}
                 <aside inert={!sidebarOpen} aria-hidden={!sidebarOpen} className={cn("absolute inset-y-0 left-0 z-20 flex shrink-0 flex-col border-r border-border bg-background transition-[width] duration-200 md:relative md:inset-auto", sidebarOpen ? "w-[260px]" : "w-0 overflow-hidden border-r-0")}>
                     <div className="flex items-center justify-between px-4 py-4">
@@ -837,10 +832,10 @@ export default function ChatPage() {
                     <div className="border-t border-border px-4 py-4 text-xs leading-6 text-muted-foreground">{uiText("对话保存在当前浏览器。")}<br />{uiText("模型与密钥由服务端统一管理。")}</div>
                 </aside>
 
-                <section {...imageDrop.dropProps} aria-label={uiText("对话图片拖入区域")} aria-busy={imageDrop.reading || readingAttachments} className={cn("flex min-w-0 flex-1 flex-col", imageDrop.dragging && "outline outline-2 -outline-offset-2 outline-primary")}>
-                    <header className="flex min-h-24 flex-wrap items-center gap-3 border-b border-border px-4 py-4 md:px-6">
+                <section {...imageDrop.dropProps} aria-label={uiText("对话图片拖入区域")} aria-busy={imageDrop.reading || readingAttachments} className={cn("flex min-h-0 min-w-0 flex-1 flex-col", imageDrop.dragging && "outline outline-2 -outline-offset-2 outline-primary")}>
+                    <header className="flex h-16 shrink-0 items-center gap-2 px-3 sm:px-5">
                         <Tooltip title={sidebarOpen ? uiText("收起会话") : uiText("展开会话")}><button type="button" aria-label={sidebarOpen ? uiText("收起会话") : uiText("展开会话")} onClick={() => setSidebarOpen((value) => !value)} className="grid size-10 place-items-center rounded-xl text-muted-foreground hover:bg-muted">{sidebarOpen ? <PanelLeftClose className="size-5" /> : <PanelLeftOpen className="size-5" />}</button></Tooltip>
-                        <div className="min-w-0 flex-1"><h1 className="wb-title">{uiText("对话改图")}</h1><p className="mt-1 text-sm text-muted-foreground">{uiText("直接发消息、图片或文件，接着聊、接着改。")}</p></div>
+                        <div className="min-w-0 flex-1"><h1 className="truncate text-base font-medium">{uiText("对话改图")}</h1><p className="truncate text-xs text-muted-foreground">{uiText("直接发消息、图片或文件，接着聊、接着改。")}</p></div>
                         {modelsLoading ? <LoaderCircle role="status" aria-label={uiText("正在读取对话配置")} className="size-4 animate-spin text-muted-foreground" /> : null}
                     </header>
                     {imageDrop.dragging ? <p role="status" className="border-b border-border bg-primary/10 px-6 py-3 text-sm text-foreground">{uiText("松开以添加图片或文件，不会自动发送。")}</p> : null}
@@ -858,27 +853,29 @@ export default function ChatPage() {
                         addImageReference({ ...figure, type: figure.mimeType, messageId: `document:${figure.id}`, label: figure.label, kind: "upload" });
                     }} /> : null}
 
-                    <div ref={scrollRef} onScroll={(event) => { const element = event.currentTarget; followBottomRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80; }} className="min-h-0 flex-1 overflow-y-auto px-4 py-6 md:px-[8%]">
+                    <div ref={chatFollow.listRef} onScroll={chatFollow.onScroll} data-testid="chat-message-list" className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 [overflow-anchor:none] sm:px-6 sm:py-8" style={{ scrollbarGutter: "stable" }}>
+                        <div ref={chatFollow.contentRef} className="mx-auto w-full max-w-3xl">
                         {!activeSession?.messages.length ? <div className="wb-empty mx-auto max-w-xl !min-h-0 !py-2">
                             <div className="hidden size-12 place-items-center rounded-2xl bg-muted text-foreground [@media(min-height:850px)]:grid"><WandSparkles className="size-6" /></div>
                             <h2 className="mt-2 text-xl font-semibold text-foreground sm:text-2xl">{uiText("有什么想法，直接说。")}</h2>
                             <p>{uiText("问问题、生成图片，或上传图片和文件，接着聊、接着改。")}</p>
-                        </div> : <div className="mx-auto max-w-3xl space-y-6">{activeSession.messages.map((item) => <ChatBubble key={item.id} message={item} imageLabels={imageLabels} imageCatalog={imageCatalog} actionsDisabled={imageActionsDisabled} onImageAction={imageAction} onMask={id => void openRegionSelection(id)} onPlaceOnCanvas={(image) => void placeImageOnCanvas(image)} onReview={image => void reviewImage(image)} onCorrect={prepareCorrection} reviewingImageIds={reviewingImageIds} onEdit={() => editMessage(item)} onRegenerate={chatSourceTurn(activeSession, item.id) ? () => void send({ messageId: item.id }) : undefined} checkingTask={taskRecovery.checking.has(item.id) || Boolean(item.pendingImageTask && activeImageRequestIds.has(item.pendingImageTask.requestId))} onQueryTask={() => taskRecovery.query(item)} onStopWaiting={item.pendingImageTask && activeImageRequestIds.has(item.pendingImageTask.requestId) ? () => stopImageWaiting(item) : undefined} />)}{isSending ? <div role="status" className="flex items-center gap-2 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />{sendPhase}</div> : null}</div>}
+                        </div> : <div className="space-y-8 sm:space-y-10">{activeSession.messages.map((item) => <ChatBubble key={item.id} message={item} imageLabels={imageLabels} imageCatalog={imageCatalog} actionsDisabled={imageActionsDisabled} onImageAction={imageAction} onMask={id => void openRegionSelection(id)} onPlaceOnCanvas={(image) => void placeImageOnCanvas(image)} onReview={image => void reviewImage(image)} onCorrect={prepareCorrection} reviewingImageIds={reviewingImageIds} onEdit={() => editMessage(item)} onRegenerate={chatSourceTurn(activeSession, item.id) ? () => void send({ messageId: item.id }) : undefined} checkingTask={taskRecovery.checking.has(item.id) || Boolean(item.pendingImageTask && activeImageRequestIds.has(item.pendingImageTask.requestId))} onQueryTask={() => taskRecovery.query(item)} onStopWaiting={item.pendingImageTask && activeImageRequestIds.has(item.pendingImageTask.requestId) ? () => stopImageWaiting(item) : undefined} />)}{isSending ? <div role="status" className="flex items-center gap-2 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />{sendPhase}</div> : null}</div>}
+                        </div>
                     </div>
-
-                    <div className="border-t border-border bg-card px-4 py-4 md:px-[8%]">
-                        <div className="mx-auto max-w-3xl">
+                    {chatFollow.hasNewMessages ? <div className="flex shrink-0 justify-center pb-1"><button type="button" onClick={chatFollow.scrollToBottom} className="rounded-full border border-border bg-background px-3 py-1.5 text-xs text-muted-foreground shadow-sm hover:text-foreground">↓ {uiText("新消息")}</button></div> : null}
+                    <div data-testid="chat-composer-dock" className="shrink-0 bg-background px-3 pb-3 pt-2 sm:px-6 sm:pb-4">
+                        <div className="mx-auto w-full max-w-3xl">
                             <ConversationExamples className="mb-2 text-muted-foreground" />
                             {editing ? <div role="status" className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground"><span>{uiText("编辑后将从这条消息创建新分支，原会话和附件保留；发送会重新调用模型。")}</span><Button size="small" disabled={isSending} onClick={() => setEditing(null)}>{uiText("取消编辑")}</Button></div> : null}
-                            <div className="relative rounded-2xl border border-input bg-background p-3 focus-within:border-orange-400">
+                            <div className="relative rounded-3xl border border-input bg-card p-3 shadow-sm transition-colors focus-within:border-ring motion-reduce:transition-none sm:p-4">
                                 {regionSelection && selectedImage?.id === regionSelection.imageId ? <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground"><Brush className="size-3.5" /><span>{uiText("已圈选局部区域，仅修改选区内")}</span><button type="button" onClick={() => void openRegionSelection(regionSelection.imageId)} className="underline">{uiText("调整选区")}</button><button type="button" aria-label={uiText("清除局部选区")} onClick={() => setRegionSelection(null)}><X className="size-3.5" /></button></div> : null}
                                 {regionSelection ? <p className="mb-2 text-xs leading-relaxed text-muted-foreground">{uiText("涂选后只合入选区，区域外保留原图；选区内结构、接缝与光影仍需核对。")}</p> : null}
                                 {composerAttachments.length ? <div className="flex flex-wrap gap-2 pb-3">{composerAttachments.map((item) => <div key={item.id} className="group relative flex h-14 max-w-[180px] items-center gap-2 rounded-xl border border-border bg-card p-1.5">{item.dataUrl ? <img src={item.dataUrl} alt="" className="size-10 rounded-lg object-cover" /> : <span className="grid size-10 place-items-center rounded-lg bg-muted text-muted-foreground"><FileText className="size-5" /></span>}<span className="min-w-0 flex-1 truncate text-xs font-medium">{!editing && referenceImageIds.includes(item.id) ? uiText("参考 · {value1}", { value1: conversationImageLabel(imageLabels.get(item.id) || "") || item.name }) : item.name}</span>{!editing ? <button type="button" aria-label={uiText("移除 ") + item.name} onClick={() => { setAttachments((current) => current.filter((attachment) => attachment.id !== item.id)); setReferenceImageIds((ids) => ids.filter((id) => id !== item.id)); if (imageTarget?.id === item.id && !imageCatalog.some((image) => image.id === item.id)) setImageTarget(null); }} className="absolute -right-1.5 -top-1.5 grid size-6 place-items-center rounded-full border border-border bg-card text-muted-foreground hover:text-red-600"><X className="size-3.5" /></button> : null}</div>)}</div> : null}
                                 {readingAttachments || imageDrop.reading ? <div role="status" className="mb-2 flex items-center gap-2 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />{uiText("正在读取附件，请稍候…")}</div> : null}
-                                <textarea ref={composerRef} aria-label={editing ? uiText("编辑消息") : uiText("对话内容")} value={composerText} disabled={!sessionsReady} onChange={event => { if (editing) setEditing({ ...editing, content: event.target.value }); else { setDraft(event.target.value); if (!event.target.value.trim() && imageTarget?.mode === "correction") setImageTarget(null); } }} onPaste={pasteAttachments} onKeyDown={(event) => { if (event.nativeEvent.isComposing || event.keyCode === 229 || event.repeat) return; handleSubmitShortcut(event, sessionsReady && !isSending && !readingAttachments && !hydratingMedia && !!selectedModel, sendComposer); }} placeholder={uiText("直接说怎么改 · Ctrl / ⌘ + Enter 发送")} className="min-h-[80px] w-full resize-none bg-transparent px-1 py-1 text-sm leading-7 text-foreground outline-none placeholder:text-muted-foreground" />
-                                <p className="mb-2 text-right text-xs text-muted-foreground">{composerText.length} {uiText("字")}</p>
-                                <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-2">
-                                    <div className="flex min-w-0 flex-wrap items-center gap-1">
+                                <textarea ref={composerRef} aria-label={editing ? uiText("编辑消息") : uiText("对话内容")} value={composerText} disabled={!sessionsReady} onChange={event => { if (editing) setEditing({ ...editing, content: event.target.value }); else { setDraft(event.target.value); if (!event.target.value.trim() && imageTarget?.mode === "correction") setImageTarget(null); } }} onPaste={pasteAttachments} onKeyDown={(event) => { if (event.nativeEvent.isComposing || event.keyCode === 229 || event.repeat) return; handleSubmitShortcut(event, sessionsReady && !isSending && !readingAttachments && !hydratingMedia && !!selectedModel, sendComposer); }} placeholder={uiText("直接说怎么改 · Ctrl / ⌘ + Enter 发送")} style={{ outline: "none" }} className="block max-h-44 min-h-14 w-full resize-none overflow-y-auto overscroll-contain bg-transparent px-1 py-1 text-base leading-7 text-foreground placeholder:text-muted-foreground" />
+                                {composerText.length > 240 ? <p className="mb-1 text-right text-[11px] text-muted-foreground">{composerText.length} {uiText("字")}</p> : null}
+                                <div className="mt-2 flex items-end justify-between gap-2">
+                                    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-0.5">
                                         <Tooltip title={uiText("上传图片、PDF、Word、表格或文本")}><button type="button" disabled={!sessionsReady || isSending || Boolean(editing) || readingAttachments || attachments.length >= 5} onClick={() => openChatAttachmentPicker(fileInputRef.current)} className="grid size-10 place-items-center rounded-xl text-muted-foreground hover:bg-muted disabled:opacity-40" aria-label={uiText("上传文件")}><Paperclip className="size-5" /></button></Tooltip>
                                         <Tooltip title={uiText("上传图片")}><button type="button" disabled={!sessionsReady || isSending || Boolean(editing) || readingAttachments || attachments.length >= 5} onClick={() => openChatAttachmentPicker(fileInputRef.current, true)} className="grid size-10 place-items-center rounded-xl text-muted-foreground hover:bg-muted disabled:opacity-40" aria-label={uiText("上传图片")}><ImagePlus className="size-5" /></button></Tooltip>
                                         <Popover trigger="click" placement="topRight" title={uiText("出图设置")} content={<div className="grid w-[min(300px,75vw)] gap-3">
@@ -888,13 +885,13 @@ export default function ChatPage() {
                                             {imageQualitySettings.independentResolution ? <label className="grid gap-1 text-xs text-muted-foreground">{uiText("清晰度")}<Select data-usage-control="resolution" aria-label={uiText("图片分辨率")} data-testid="chat-image-resolution" value={imageQualitySettings.resolution} disabled={imageReferenceParametersAutomatic || !sessionsReady || modelsLoading || isSending || !preferredImageModel} onChange={value => { if (activeSession && preferredImageModel) updateSession(activeSession.id, session => ({ ...session, imageModelId: preferredImageModel.modelId, imageResolution: value })); }} options={imageQualitySettings.resolutionOptions.map(option => ({ ...option, label: uiText(option.label) }))} /></label> : null}
                                             {qualityProfile.kind !== "mai-image" ? <label className="grid gap-1 text-xs text-muted-foreground">{uiText(imageQualitySettings.label || "")}<Select data-usage-control={imageQualitySettings.independentResolution ? "quality" : "resolution"} aria-label={imageQualitySettings.independentResolution ? uiText("图片质量") : uiText("图片清晰度")} data-testid="chat-image-quality" value={imageQualitySettings.quality} disabled={!sessionsReady || modelsLoading || isSending || !preferredImageModel || !imageQualitySettings.adjustable} onChange={value => { if (activeSession && preferredImageModel) updateSession(activeSession.id, session => ({ ...session, imageModelId: preferredImageModel.modelId, imageQuality: value })); }} options={imageQualitySettings.options.map(option => ({ ...option, label: uiText(option.label) }))} /></label> : null}
                                             {imageBinding?.modelConfigId ? <p className="text-xs text-muted-foreground">{uiText("当前出图模型由管理员固定，无需选择。")}</p> : null}
-                                        </div>}><button type="button" aria-label={uiText("出图设置")} className="inline-flex min-h-10 max-w-[220px] items-center gap-1.5 rounded-lg px-2 text-xs text-muted-foreground hover:bg-muted"><Settings2 className="size-4 shrink-0" /><span>{uiText("出图设置")}</span><span className="truncate opacity-70">{preferredImageModel?.name}</span></button></Popover>
+                                        </div>}><button type="button" aria-label={uiText("出图设置")} className="inline-flex min-h-10 max-w-full items-center gap-1.5 rounded-lg px-2 text-xs text-muted-foreground hover:bg-muted"><Settings2 className="size-4 shrink-0" /><span className="shrink-0">{uiText("出图设置")}</span><span className="hidden max-w-28 truncate opacity-70 sm:block">{preferredImageModel?.name}</span></button></Popover>
                                         <Tooltip title={uiText("Ctrl / ⌘ + V 粘贴图片；Ctrl / ⌘ + Enter 发送；直接说回原图、上一版或图号")}><button type="button" aria-label={uiText("对话操作帮助")} className="grid size-8 place-items-center rounded text-muted-foreground hover:bg-muted"><CircleHelp className="size-4" /></button></Tooltip>
                                     </div>
-                                    {isSending ? <Tooltip title={uiText("停止本页请求和等待，不保证取消服务端执行或计费")}><Button danger onClick={stopSending} icon={<Square className="size-4" />} className="!h-10 !px-4">{uiText("停止")}</Button></Tooltip> : <Button type="primary" disabled={!sessionsReady || (!composerText.trim() && !composerAttachments.length) || placingImage || readingAttachments || hydratingMedia || !selectedModel} onClick={sendComposer} icon={<Send className="size-4" />} className="!h-10 !px-4">{editing ? uiText("发送为新分支") : uiText("发送")}</Button>}
+                                    {isSending ? <Tooltip title={uiText("停止本页请求和等待，不保证取消服务端执行或计费")}><Button danger onClick={stopSending} icon={<Square className="size-4" />} className="!h-10 !shrink-0 !rounded-full !px-3">{uiText("停止")}</Button></Tooltip> : <Button type="primary" disabled={!sessionsReady || (!composerText.trim() && !composerAttachments.length) || placingImage || readingAttachments || hydratingMedia || !selectedModel} onClick={sendComposer} icon={<Send className="size-4" />} className="!h-10 !shrink-0 !rounded-full !px-3">{editing ? uiText("发送为新分支") : uiText("发送")}</Button>}
                                 </div>
                                 <input ref={fileInputRef} type="file" multiple disabled={!sessionsReady || isSending || Boolean(editing) || readingAttachments} accept={CHAT_ATTACHMENT_ACCEPT} className="hidden" onChange={(event) => { void addFiles(event.target.files); event.currentTarget.value = ""; }} />
-                                {!isSending && (!sessionsReady || !selectedModel || (!composerText.trim() && !composerAttachments.length) || placingImage || readingAttachments || hydratingMedia) ? <p role="status" className="mt-2 text-xs text-muted-foreground">{!sessionsReady ? uiText("正在读取对话，请稍候") : !selectedModel ? uiText("暂无可用对话模型，请联系管理员") : readingAttachments ? uiText("正在读取附件，请稍候") : hydratingMedia ? uiText("正在恢复图片，请稍候") : placingImage ? uiText("正在保存画布，请稍候") : uiText("还差：填写消息或添加附件")}</p> : null}
+                                {!isSending && (!sessionsReady || !selectedModel || placingImage || readingAttachments || hydratingMedia) ? <p role="status" className="mt-2 text-xs text-muted-foreground">{!sessionsReady ? uiText("正在读取对话，请稍候") : !selectedModel ? uiText("暂无可用对话模型，请联系管理员") : readingAttachments ? uiText("正在读取附件，请稍候") : hydratingMedia ? uiText("正在恢复图片，请稍候") : uiText("正在保存画布，请稍候")}</p> : null}
                             </div>
                             {deploymentFeatures.creditsEnabled ? <p className="mt-2 text-xs text-muted-foreground">{uiText("对话按成功模型调用计费（含工具续答），生成图片另计积分")}</p> : null}
                             {isSending ? <p className="mt-1 text-xs text-muted-foreground">{uiText("停止仅中断本页等待，服务端执行与计费不保证取消。")}</p> : null}
@@ -929,12 +926,11 @@ const ChatBubble = memo(function ChatBubble({ message, imageLabels, imageCatalog
         return { onAction: onImageAction, onMask: () => onMask(imageId), disabled: actionsDisabled, compareDisabledReason: reason };
     };
     return (
-        <div data-message-id={message.id} data-message-role={message.role} className={cn("flex gap-3", isUser ? "justify-end" : "justify-start")}>
-            <div className={cn("grid size-8 shrink-0 place-items-center rounded-xl", isUser ? "order-2 bg-foreground text-background" : message.role === "error" ? "bg-red-50 text-red-600 dark:bg-red-950/40 dark:text-red-300" : "bg-muted text-muted-foreground")}>{isUser ? <span className="text-xs font-semibold">{uiText("我")}</span> : message.role === "error" ? <span className="text-xs font-semibold">!</span> : <Bot className="size-4" />}</div>
-            <div className={cn("min-w-0 max-w-[86%] rounded-2xl px-4 py-3 text-sm leading-7", isUser ? "order-1 bg-foreground text-background" : message.role === "error" ? "border border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200" : "border border-border bg-card text-foreground")}>
+        <div data-message-id={message.id} data-message-role={message.role} className={cn("flex min-w-0", isUser ? "justify-end" : "justify-start")}>
+            <div className={cn("min-w-0 text-[15px] leading-7 [overflow-wrap:anywhere] sm:text-base", isUser ? "max-w-[90%] rounded-3xl bg-muted px-4 py-3 text-foreground sm:max-w-[85%] sm:px-5" : message.role === "error" ? "w-full rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200" : "w-full text-foreground")}>
                 {message.content ? message.role === "error" ? <GenerationDiagnostic error={message.content} /> : <ChatMarkdown>{message.content}</ChatMarkdown> : null}
                 {message.stopped ? <p className="mt-2 text-xs opacity-70">{uiText("已停止接收；已有内容已保留，不代表服务端计费已取消。")}</p> : null}
-                {message.generatedImages?.length ? <div className={cn("grid grid-cols-1 gap-3", message.content && "mt-3", message.generatedImages.length > 1 && "sm:grid-cols-2")}>{message.generatedImages.map((item) => <div key={item.id}>
+                {message.generatedImages?.length ? <div className={cn("grid min-w-0 grid-cols-1 gap-5", message.content && "mt-4", message.generatedImages.length > 1 && "sm:grid-cols-2")}>{message.generatedImages.map((item) => <div key={item.id} className="min-w-0">
                     <ChatImage image={item} label={imageLabels.get(item.id) || uiText("生成结果")} {...imageControls(item.id)} onPlace={() => onPlaceOnCanvas(item)} />
                     <div className="mt-2 flex flex-wrap items-center gap-2 text-xs"><Button size="small" loading={reviewingImageIds.has(item.id)} disabled={actionsDisabled || reviewingImageIds.has(item.id)} title="额外调用当前对话模型检查图片，不会重新生成" onClick={() => onReview(item)}>{uiText("检查结果")}</Button><span className="text-muted-foreground">{uiText("仅手动检查，不自动重绘")}</span></div>
                     {item.review ? <div data-testid="chat-image-review" className="mt-2 space-y-1 text-xs text-muted-foreground">
@@ -958,7 +954,7 @@ const ChatBubble = memo(function ChatBubble({ message, imageLabels, imageCatalog
                     <details><summary className="w-fit cursor-pointer">{uiText("任务信息")}</summary><Button size="small" type="text" onClick={() => void copyText(JSON.stringify({ requestId: `${message.pendingImageTask!.requestId}:0`, taskId: message.pendingImageTask?.taskId, status: message.pendingImageTask?.taskStatus, recovery: message.pendingImageTask?.recovery }, null, 2), uiText("诊断信息已复制"))}>{uiText("复制诊断信息")}</Button></details>
                 </div> : null}
                 {message.attachments?.length ? <div className={cn("flex flex-wrap gap-2", message.content && "mt-3")}>{message.attachments.map((item) => item.dataUrl || item.storageKey || item.kind === "image" ? <ChatImage key={item.id} image={item} label={imageLabels.get(item.id) || item.name} {...imageControls(item.id)} /> : <span key={item.id} className={cn("inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs", isUser ? "bg-background/10" : "bg-muted text-muted-foreground")}><FileText className="size-3.5" />{item.name}</span>)}</div> : null}
-                <div className="mt-2 flex flex-wrap items-center gap-1 border-t border-current/10 pt-1 text-xs opacity-75">
+                <div className="mt-2 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
                     {message.content ? <button type="button" aria-label={uiText("复制消息")} onClick={() => copyText(message.content)} className="inline-flex min-h-8 items-center gap-1 rounded px-2 hover:bg-current/10"><Copy className="size-3" />{uiText("复制")}</button> : null}
                     {isUser ? <button type="button" disabled={actionsDisabled} aria-label={uiText("编辑消息")} onClick={onEdit} className="inline-flex min-h-8 items-center gap-1 rounded px-2 hover:bg-current/10 disabled:opacity-40"><Pencil className="size-3" />{uiText("编辑")}</button> : onRegenerate && !message.pendingImageTask ? <Tooltip title={uiText("按当前配置重新发送到新分支，原会话保留；这会重新调用模型")}><button type="button" disabled={actionsDisabled} aria-label={uiText("重新生成")} onClick={onRegenerate} className="inline-flex min-h-8 items-center gap-1 rounded px-2 hover:bg-current/10 disabled:opacity-40"><RotateCcw className="size-3" />{uiText("重新生成")}</button></Tooltip> : null}
                 </div>

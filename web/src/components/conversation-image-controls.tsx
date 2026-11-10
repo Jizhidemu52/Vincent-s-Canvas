@@ -1,5 +1,5 @@
 import { memo, type ReactNode } from "react";
-import { Brush, Download, ImagePlus, MoreHorizontal, Pencil, RotateCcw, SplitSquareHorizontal, X } from "lucide-react";
+import { Brush, Copy, Download, ImagePlus, MoreHorizontal, Pencil, RotateCcw, SplitSquareHorizontal, X } from "lucide-react";
 import { Dropdown } from "antd";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { uiText, useUiText } from "@/lib/i18n";
@@ -16,7 +16,7 @@ export type ConversationImageItem = {
     unavailableReason?: string;
     source?: "canvas" | "conversation";
 };
-export type ConversationImageAction = "edit" | "original" | "reference" | "compare" | "download";
+export type ConversationImageAction = "edit" | "original" | "reference" | "compare" | "copy" | "download";
 
 /** Keep saved/request labels canonical; localize only their UI presentation. */
 export function conversationImageLabel(label: string) {
@@ -29,6 +29,7 @@ const actions = [
     { id: "original", text: "回原图重做", icon: RotateCcw },
     { id: "reference", text: "设为参考", icon: ImagePlus },
     { id: "compare", text: "和原图对比", icon: SplitSquareHorizontal },
+    { id: "copy", text: "复制图片", icon: Copy },
     { id: "download", text: "下载", icon: Download },
 ] as const;
 

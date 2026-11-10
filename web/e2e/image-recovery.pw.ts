@@ -20,11 +20,11 @@ async function submitImage(page: Page, api: MockCanvasApi, prompt: string) {
 }
 
 async function unknownCard(page: Page) {
-    await expect(page.getByText("提交结果待核查", { exact: true })).toBeVisible();
-    await expect(page.getByRole("alert").filter({ hasText: "暂无法恢复上游查询" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "刷新状态", exact: true })).toBeEnabled();
+    await expect(page.getByText("需要管理员协助", { exact: true })).toBeVisible();
+    await expect(page.getByRole("alert").filter({ hasText: "暂时无法获取结果，需要管理员协助。可先刷新进度，不会重新生成。" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "刷新进度", exact: true })).toBeEnabled();
     await expect(page.getByRole("button", { name: "复制诊断信息", exact: true })).toBeVisible();
-    await expect(page.getByRole("button", { name: "恢复原任务查询", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "继续获取结果", exact: true })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "取消任务", exact: true })).toHaveCount(0);
 }
 
@@ -35,7 +35,7 @@ test("停止观察会跨刷新保留，认证恢复和前台事件不自动重�
     const original = await submitImage(page, api, "认证恢复与停止观察回归");
     await expect.poll(() => api.taskReads.length).toBeGreaterThan(0);
     await page.getByRole("button", { name: "停止本页查询（不取消服务端任务）", exact: true }).click();
-    await expect(page.getByText("原任务状态核对", { exact: true })).toBeVisible();
+    await expect(page.getByText("暂时无法获取进度", { exact: true })).toBeVisible();
     const reads = api.taskReads.length;
     api.holdSession = true;
     await page.reload();
@@ -45,13 +45,13 @@ test("停止观察会跨刷新保留，认证恢复和前台事件不自动重�
     expect(api.submissions).toHaveLength(1);
     original.status = "success"; original.resultUrls = [`/api/assets/${original.id}/content`];
     await api.releaseSessions();
-    await expect(page.getByRole("button", { name: "刷新状态", exact: true })).toBeEnabled();
+    await expect(page.getByRole("button", { name: "刷新进度", exact: true })).toBeEnabled();
     await page.evaluate(() => { window.dispatchEvent(new Event("focus")); window.dispatchEvent(new Event("online")); });
     await page.waitForTimeout(700);
     expect(api.taskReads).toHaveLength(reads);
     await expect(page.getByRole("button", { name: "下载", exact: true })).toHaveCount(0);
     await page.screenshot({ path: testInfo.outputPath("stopped-reload.png"), fullPage: true });
-    await page.getByRole("button", { name: "刷新状态", exact: true }).click();
+    await page.getByRole("button", { name: "刷新进度", exact: true }).click();
     await expect.poll(() => api.taskReads.length).toBeGreaterThan(reads);
     await expect(page.getByRole("button", { name: "停止本页查询（不取消服务端任务）", exact: true })).toHaveCount(0);
     await expect(page.getByRole("button", { name: /下载/ }).first()).toBeVisible();
@@ -68,13 +68,13 @@ for (const wake of ["focus", "online"]) {
         const original = await submitImage(page, api, `提交未知等待-${wake}`);
         await unknownCard(page);
         const reads = api.taskReads.length;
-        await page.getByRole("button", { name: "刷新状态", exact: true }).click();
+        await page.getByRole("button", { name: "刷新进度", exact: true }).click();
         await unknownCard(page);
         await expect.poll(() => api.taskReads.length).toBeGreaterThan(reads);
         expect(recoveries).toEqual([]);
         if (wake === "focus") {
             await page.setViewportSize({ width: 390, height: 844 });
-            const refresh = page.getByRole("button", { name: "刷新状态", exact: true });
+            const refresh = page.getByRole("button", { name: "刷新进度", exact: true });
             await refresh.scrollIntoViewIfNeeded();
             await refresh.click({ trial: true, timeout: 3_000 });
             await page.getByRole("button", { name: "复制诊断信息", exact: true }).click({ trial: true, timeout: 3_000 });
@@ -91,7 +91,7 @@ for (const wake of ["focus", "online"]) {
         original.resultUrls = [`/api/assets/${original.id}/content`];
         await page.evaluate(event => window.dispatchEvent(new Event(event)), wake);
         await expect(page.getByRole("button", { name: "下载", exact: true })).toBeVisible({ timeout: 8_000 });
-        await expect(page.getByText("提交结果待核查", { exact: true })).toHaveCount(0);
+        await expect(page.getByText("需要管理员协助", { exact: true })).toHaveCount(0);
         await expect(page.getByRole("textbox", { name: "图像提示词", exact: true })).toHaveValue(draft);
         expect(api.submissions).toHaveLength(1);
         expect(recoveries).toEqual([]);

@@ -45,6 +45,7 @@ import { type HappyHorseMode } from "@/lib/happyhorse-video";
 import { getVideoModelParameterSpec, normalizeVideoModelConfig, resolveVideoMode, videoReferenceError } from "@/lib/video-model-parameters";
 import { readReferenceMediaFile } from "@/lib/video-reference-files";
 import { createLatestVideoPreview, hydrateVideoLogMedia } from "./video-log-media";
+import { completedVideoTaskDurationMs } from "./video-task-duration";
 import { deleteStoredMedia, resolveMediaUrl, uploadMediaFile } from "@/services/file-storage";
 import { resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { createVideoGenerationTask, storeGeneratedVideo, type VideoGenerationTask } from "@/services/api/video";
@@ -67,7 +68,7 @@ type GeneratedVideo = {
     id: string;
     url: string;
     storageKey: string;
-    durationMs: number;
+    durationMs: number | null;
     width: number;
     height: number;
     bytes: number;
@@ -104,7 +105,7 @@ type GenerationLog = {
     videoReferences: ReferenceVideo[];
     audioReferences: ReferenceAudio[];
     happyHorseMode?: HappyHorseMode;
-    durationMs: number;
+    durationMs: number | null;
     size: string;
     resolution: string;
     seconds: string;
@@ -423,7 +424,7 @@ function VideoGenerationWorkspace() {
         if (!release) { message.info(uiText("视频正在提交，请勿重复点击")); return; }
         setSubmitting(true);
         setPreviewLog(null);
-        let log = { ...buildLog({ prompt: snapshot.text, model: snapshot.config.model, config: snapshot.config, references: snapshot.references, videoReferences: snapshot.videoReferences, audioReferences: snapshot.audioReferences, durationMs: 0, status: "生成中" }), workspaceId, promptInput: snapshot.promptInput };
+        let log = { ...buildLog({ prompt: snapshot.text, model: snapshot.config.model, config: snapshot.config, references: snapshot.references, videoReferences: snapshot.videoReferences, audioReferences: snapshot.audioReferences, durationMs: null, status: "生成中" }), workspaceId, promptInput: snapshot.promptInput };
         visibleResultLogIdsRef.current.add(log.id);
         setResults(current => [...current, { id: log.id, status: "pending", createdAt: log.createdAt }]);
         try {
@@ -445,7 +446,7 @@ function VideoGenerationWorkspace() {
             const uncertain = error instanceof QueuedTaskSubmissionUncertainError;
             const diagnostic = generationErrorDiagnostic(error, { requestId: log.requestId, taskId: log.task?.id });
             setResults(current => current.map(item => item.id === log.id ? { id: log.id, status: uncertain ? "paused" : "failed", error: errorMessage, diagnostic, ...(uncertain ? { recovery: { logId: log.id, canRecover: true } } : {}) } : item));
-            await saveLog({ ...log, status: uncertain ? "查询暂停" : "失败", error: errorMessage, diagnostic, durationMs: Date.now() - log.createdAt, canRecover: uncertain ? true : undefined });
+            await saveLog({ ...log, status: uncertain ? "查询暂停" : "失败", error: errorMessage, diagnostic, durationMs: null, canRecover: uncertain ? true : undefined });
             message.error(uiText(errorMessage));
         } finally {
             release();
@@ -481,7 +482,7 @@ function VideoGenerationWorkspace() {
 
     const retryResult = async (result: GenerationResult) => {
         if (result.recovery) {
-            if (!result.recovery.canRecover) { message.warning(uiText("原任务提交状态待核查，请勿重复生成")); return; }
+            if (!result.recovery.canRecover) { message.warning(uiText("需要管理员协助确认原任务，请勿重复生成")); return; }
             const log = logs.find((item) => item.id === result.recovery?.logId);
             if (!log) { message.error(uiText("原任务记录暂未读取，请从生成记录中重新打开")); return; }
             void pollGenerationLog(log, true);
@@ -668,7 +669,7 @@ function VideoGenerationWorkspace() {
             if (useUserStore.getState().user?.id !== ownerId) return;
             const nextVideo: GeneratedVideo = {
                 id: nanoid(), url: stored.url, storageKey: stored.storageKey,
-                durationMs: Date.now() - log.createdAt,
+                durationMs: completedVideoTaskDurationMs(completed),
                 // Asset dimensions use zero for unknown; the player displays measured metadata only.
                 width: stored.width ?? 0, height: stored.height ?? 0,
                 bytes: stored.bytes, mimeType: stored.mimeType,
@@ -690,7 +691,7 @@ function VideoGenerationWorkspace() {
             // A later missing/read-failed lookup cannot erase the original POST failure.
             const diagnostic = canRecover !== undefined && log.diagnostic ? log.diagnostic : generationErrorDiagnostic(error, { requestId: log.requestId || task?.requestId, taskId: task?.id });
             displayResult({ id: log.id, status: canRecover === undefined ? "failed" : "paused", error: errorMessage, diagnostic, ...(canRecover !== undefined ? { recovery: { logId: log.id, task, canRecover } } : {}) });
-            await saveLog({ ...log, status: canRecover === undefined ? "失败" : "查询暂停", durationMs: Date.now() - log.createdAt, error: errorMessage, diagnostic, canRecover });
+            await saveLog({ ...log, status: canRecover === undefined ? "失败" : "查询暂停", durationMs: null, error: errorMessage, diagnostic, canRecover });
             if (isCurrent() && !controller.signal.aborted) message.warning(uiText(errorMessage));
         } finally {
             observationControllers.current.delete(log.id);
@@ -709,7 +710,9 @@ function VideoGenerationWorkspace() {
     };
 
     const previewGenerationLog = (log: GenerationLog, restoreDraft = false) => {
-        resultViewScopeRef.current += 1;
+        const revision = ++resultViewScopeRef.current;
+        const ownerId = user?.id;
+        const isCurrent = () => mountedRef.current && resultViewScopeRef.current === revision && useUserStore.getState().user?.id === ownerId;
         visibleResultLogIdsRef.current = new Set([log.id]);
         restoredInitialResultRef.current = true;
         setPreviewLog(log);
@@ -736,9 +739,26 @@ function VideoGenerationWorkspace() {
             updateConfig("videoOutputFormat", log.config.videoOutputFormat || "mp4");
         }
         void previewLoader.load(
-            (signal) => hydrateVideoLogMedia(log, { image: resolveImageUrl, media: resolveMediaUrl, task: getQueuedTask }, restoreDraft, signal),
+            async (signal) => {
+                const resolved = await hydrateVideoLogMedia(log, { image: resolveImageUrl, media: resolveMediaUrl, task: getQueuedTask, refreshDuration: true }, restoreDraft, signal);
+                signal.throwIfAborted();
+                if (!isCurrent()) throw new DOMException("记录读取已停止或员工会话已变化", "AbortError");
+                if (resolved.durationMs !== log.durationMs || resolved.video?.durationMs !== log.video?.durationMs) {
+                    try { await logStore.setItem(resolved.id, serializeLog(resolved)); }
+                    catch { if (isCurrent() && !signal.aborted) message.warning(uiText("耗时已核对，但本地记录保存失败；下次打开时将重新核对。")); }
+                    signal.throwIfAborted();
+                    if (!isCurrent()) throw new DOMException("记录读取已停止或员工会话已变化", "AbortError");
+                }
+                return resolved;
+            },
             (resolved) => {
+                if (!isCurrent()) return;
                 setPreviewLoading(false);
+                setPreviewLog(resolved);
+                if (resolved.durationMs !== log.durationMs || resolved.video?.durationMs !== log.video?.durationMs) {
+                    logRefreshRevisionRef.current += 1;
+                    setLogs(current => upsertGenerationLog(current, resolved));
+                }
                 if (restoreDraft) {
                     setReferences(resolved.references);
                     setVideoReferences(resolved.videoReferences);
@@ -746,7 +766,7 @@ function VideoGenerationWorkspace() {
                 }
                 setResults(resolved.status === "生成中" ? [{ id: resolved.id, status: "pending" }] : resolved.video ? [{ id: resolved.id, status: "success", video: resolved.video }] : [{ id: resolved.id, status: "failed", error: resolved.error || "生成失败", diagnostic: resolved.diagnostic, taskId: resolved.task?.id, ...((resolved.task || resolved.requestId) && resolved.canRecover !== undefined ? { recovery: { logId: resolved.id, task: resolved.task, canRecover: resolved.canRecover } } : {}) }]);
             },
-            (error) => { setPreviewLoading(false); setPreviewError(error instanceof Error ? uiText(error.message) : uiText("记录中的媒体暂时无法读取")); },
+            (error) => { if (isCurrent()) { setPreviewLoading(false); setPreviewError(error instanceof Error ? uiText(error.message) : uiText("记录中的媒体暂时无法读取")); } },
         );
     };
 
@@ -1086,13 +1106,13 @@ function FailedVideoCard({ error, diagnostic, recovery, onRetry }: { error: stri
     return (
         <div className="overflow-hidden rounded-lg border border-red-200 bg-red-50 dark:border-red-950 dark:bg-red-950/20">
             <div className="flex aspect-video flex-col items-center justify-center gap-3 p-5 text-center">
-                <div className="text-sm font-medium text-red-600 dark:text-red-300">{recovery ? uiText("原任务查询暂停") : uiText("生成失败")}</div>
+                <div className="text-sm font-medium text-red-600 dark:text-red-300">{recovery?.canRecover === false ? uiText("需要管理员协助") : recovery ? uiText("暂时无法获取进度") : uiText("生成失败")}</div>
                 <GenerationDiagnostic error={error} details={diagnostic} />
                 {recovery && <GenerationTaskCancel taskId={recovery.task?.id} />}
             </div>
             <div className="flex justify-end border-t border-red-200 p-3 dark:border-red-950">
                 <Button size="small" danger disabled={recovery?.canRecover === false} onClick={onRetry}>
-                    {recovery ? recovery.canRecover ? uiText("恢复查询原任务") : uiText("提交状态待核查") : uiText("按原参数重试")}
+                    {recovery ? recovery.canRecover ? uiText("继续获取结果") : uiText("需要管理员协助") : uiText("按原参数重试")}
                 </Button>
             </div>
         </div>
@@ -1181,7 +1201,7 @@ function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: Ge
                         {uiText(log.status || "")}
                     </Tag>
                     <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none" color="green">
-                        {formatDuration(log.durationMs)}
+                        {log.durationMs === null ? uiText("耗时未知") : formatDuration(log.durationMs)}
                     </Tag>
                 </div>
             </div>
@@ -1220,7 +1240,7 @@ function normalizeLog(log: Partial<GenerationLog>): GenerationLog {
         videoReferences: log.videoReferences || [],
         audioReferences: log.audioReferences || [],
         happyHorseMode: log.happyHorseMode,
-        durationMs: log.durationMs || 0,
+        durationMs: typeof log.durationMs === "number" && Number.isFinite(log.durationMs) && log.durationMs >= 0 ? log.durationMs : null,
         size: log.size || config.size || "",
         resolution: normalizeResolution(log.resolution || config.vquality || ""),
         seconds: log.seconds || config.videoSeconds || "",
@@ -1303,7 +1323,7 @@ function buildLog({
     videoReferences: ReferenceVideo[];
     audioReferences: ReferenceAudio[];
     happyHorseMode?: HappyHorseMode;
-    durationMs: number;
+    durationMs: number | null;
     status: GenerationLog["status"];
     task?: VideoGenerationTask;
     video?: GeneratedVideo;

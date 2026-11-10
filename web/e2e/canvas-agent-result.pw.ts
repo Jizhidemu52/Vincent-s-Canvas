@@ -26,6 +26,8 @@ test("desktop result actions reveal on hover and keyboard focus without base or 
     await result.getByRole("button", { name: "查看大图 · 图2", exact: true }).focus();
     await expect(actions).toHaveCSS("opacity", "1");
     await page.keyboard.press("Tab");
+    await expect(result.getByRole("button", { name: "复制图片", exact: true })).toBeFocused();
+    await page.keyboard.press("Tab");
     await expect(result.getByRole("button", { name: "下载", exact: true })).toBeFocused();
     await page.keyboard.press("Enter");
     await expect(page.getByTestId("last-action")).toHaveText("download:image-v3");

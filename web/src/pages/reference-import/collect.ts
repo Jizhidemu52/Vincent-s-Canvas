@@ -23,6 +23,8 @@ export async function collectReferencePage(options: {
     onFailure: (name: string, reason: string) => void;
     onProgress: (completed: number, total: number) => void;
     scan?: ReferenceScan;
+    /** The input used to create this scan; pageUrl may be sanitized or redirected. */
+    scanInputUrl?: string;
     candidateIds?: readonly string[];
 }) {
     const { ownerId, signal } = options;
@@ -31,7 +33,9 @@ export async function collectReferencePage(options: {
         if (options.getOwner() !== ownerId) throw new ReferenceRequestError("员工身份已变化，本批采集已停止", 403);
     };
     check();
-    const scan = options.scan ?? await scanReferencePage(normalizePageUrl(options.url), ownerId, signal);
+    const url = normalizePageUrl(options.url);
+    if (options.scan && normalizePageUrl(options.scanInputUrl ?? options.scan.pageUrl) !== url) throw new Error("网页链接已变化，请重新扫描后读取图片");
+    const scan = options.scan ?? await scanReferencePage(url, ownerId, signal);
     check();
     options.onScan(scan);
     let totalBytes = 0;

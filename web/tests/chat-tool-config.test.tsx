@@ -48,11 +48,12 @@ function chatPageHarness(initial: BusinessConfig, savedImageModelId?: string) {
         "@/hooks/use-conversation-image-tools": { useConversationImageTools: () => ({ download: async () => undefined, compare() {}, compareDialog: null }) },
         "@/hooks/use-image-mentions": { useImageMentions: ({ onChange }: { onChange: (value: string) => void }) => ({ menu: null, inputProps: {}, handleChange: (event: { target: { value: string } }) => onChange(event.target.value), handleSelect() {}, handleKeyDown: () => false }) },
         "@/hooks/use-copy-text": { useCopyText: () => async () => true },
+        "@/hooks/use-chat-bottom-follow": { useChatBottomFollow: () => ({ listRef: { current: null }, contentRef: { current: null }, onScroll() {}, scrollToBottom() {}, hasNewMessages: false }) },
         // External drops have isolated browser coverage; this harness owns no React context.
         "@/hooks/use-image-drop": { useImageDrop: () => ({ dropProps: {}, dragging: false, reading: false }) },
         // Recovery owns a separate hook harness and browser cases; these fixtures contain no image tasks.
         "./use-chat-task-recovery": { useChatTaskRecovery: () => ({ checking: new Set(), query() {}, stop() {} }) },
-        react: { ...React, useState, useMemo, useCallback: (callback: unknown, dependencies?: DependencyList) => useMemo(() => callback, dependencies),
+        react: { ...React, useState, useMemo, useLayoutEffect() {}, useCallback: (callback: unknown, dependencies?: DependencyList) => useMemo(() => callback, dependencies),
             useRef: (value: unknown) => { const index = cursor++; return values[index] ||= { current: value }; },
             useEffect: (effect: EffectCallback, dependencies?: DependencyList) => {
                 const index = cursor++;

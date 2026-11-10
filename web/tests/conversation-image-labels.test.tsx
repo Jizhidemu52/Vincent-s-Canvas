@@ -190,13 +190,17 @@ test("online canvas conversation-only images retain labels preview download and 
     expect(tree.some(node => node.props["data-testid"] === "canvas-agent-image-current")).toBe(false);
     expect(tree.some(node => node.type === "button" && node.props["aria-label"] === "查看大图 · 图2")).toBe(true);
     tree.find(node => node.type === "button" && node.props.children === "下载")!.props.onClick();
+    const copy = tree.find(node => node.type === "button" && node.props.children === "复制图片");
+    expect(copy).toBeDefined();
+    copy!.props.onClick();
     tree.find(node => node.type === "button" && node.props.children === "圈选修改")!.props.onClick();
-    expect(actions).toEqual([["download", image.id]]); expect(masks).toEqual([image.id]);
+    expect(actions).toEqual([["download", image.id], ["copy", image.id]]); expect(masks).toEqual([image.id]);
 });
 
 test("composer without a mention handler disables the picker without blocking ordinary Enter", () => {
     const options: { disabled: boolean }[] = [], sent: string[] = [];
     const render = component("components/canvas/canvas-agent-chat-ui.tsx", "AgentChatComposer", {
+        App: { useApp: () => ({ message: { error() {} } }) },
         useRef: () => ({ current: null }), useLayoutEffect() {}, Button: "button", Tooltip: "tooltip", ArrowUp: "icon",
         useImageMentions: (current: { disabled: boolean }) => {
             options.push(current);

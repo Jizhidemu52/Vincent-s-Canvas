@@ -22,7 +22,7 @@ function harness(saved = new Map<string, unknown>(), initialLog?: SceneLog) {
     const path = new URL("../src/pages/creative/use-scene-workspace.ts", import.meta.url), requireModule = createRequire(path);
     const code = ts.transpileModule(readFileSync(path, "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ESNext } }).outputText;
     const states: any[] = [], refs: any[] = [], effects: any[] = [], pendingEffects: Array<() => void> = [];
-    const calls: string[] = [], submissions: any[] = [];
+    const calls: string[] = [], submissions: any[] = [], observations: any[] = [];
     let stateIndex = 0, refIndex = 0, effectIndex = 0, ownerId = "owner";
     let taskStatus: { busy: boolean; pending: boolean; ready: boolean };
     let resolveImage = async (key: string, fallback: string) => fallback || key;
@@ -40,6 +40,8 @@ function harness(saved = new Map<string, unknown>(), initialLog?: SceneLog) {
     const userState = () => ({ user: { id: ownerId, status: "active", creditBalance: 100 } });
     const userStore = Object.assign((select: Function) => select(userState()), { getState: userState });
     const dependencies: Record<string, any> = {
+        "@/services/api/generation-tasks": { ...requireModule("@/services/api/generation-tasks"), recoverQueuedTask: async (id: string) => { calls.push(`RECOVER ${id}`); return { ...originalTask, status: "processing" }; } },
+        "@/services/api/task-result-reconciliation": { watchTaskReconciliation: (options: any) => { observations.push(options); return new Promise<void>(resolve => options.signal.addEventListener("abort", () => resolve(), { once: true })); } },
         "@/components/workbench-tasks": { useWorkbenchTask: () => ({ id: "default", active: true, draftScope: (scope: string) => scope }), useWorkbenchTaskStatus(status: typeof taskStatus) { taskStatus = status; } },
         react: { ...React, useState: (initial: any) => { const index = stateIndex++; if (!(index in states)) states[index] = typeof initial === "function" ? initial() : initial; return [states[index], (next: any) => { states[index] = typeof next === "function" ? next(states[index]) : next; }]; },
             useRef: (initial: any) => refs[refIndex++] ||= { current: initial }, useMemo: (factory: Function) => factory(),
@@ -57,12 +59,12 @@ function harness(saved = new Map<string, unknown>(), initialLog?: SceneLog) {
         "@/services/image-storage": { resolveImageUrl: (key: string, fallback: string) => resolveImage(key, fallback), uploadImage: async (url: string) => ({ url, storageKey: "result-storage", width: 100, height: 100, bytes: 20, mimeType: "image/png" }) },
         "@/services/generation-local-inputs": { freezeLocalInput: async (image: any) => ({ ...image, inputSha256: "sha" }), restoreLocalInput: async (image: any) => ({ ...image }) },
         "@/services/api/image": { requestGeneration: (_config: unknown, _prompt: string, options: any) => submit(options), requestEdit: (_config: unknown, _prompt: string, _references: unknown, _mask: unknown, options: any) => submit(options) },
-        "./scene-recovery": { ...requireModule("./scene-recovery"), readSceneRequest: (log: SceneLog, result: any, owner: string) => readSceneRequest(log, result, owner, { getQueuedTask: getTask, getQueuedTaskByRequestId: getTask, getPromptCompilation: async () => { calls.push("GET compilation"); return originalCompilation; } }) },
+        "./scene-recovery": { ...requireModule("./scene-recovery"), readSceneRequest: (log: SceneLog, result: any, owner: string, _deps: unknown, signal?: AbortSignal) => readSceneRequest(log, result, owner, { getQueuedTask: getTask, getQueuedTaskByRequestId: getTask, getPromptCompilation: async () => { calls.push("GET compilation"); return originalCompilation; } }, signal) },
     };
     const module = { exports: {} as any };
     new Function("require", "module", "exports", code)((name: string) => dependencies[name] || requireModule(name), module, module.exports);
     const render = () => { stateIndex = refIndex = effectIndex = 0; const value = module.exports.useSceneWorkspace("text-to-style"); pendingEffects.splice(0).forEach(effect => effect()); return value; };
-    return { render, saved, calls, submissions, status: () => taskStatus, setReadFailure: (prefix: string) => { failReadOnce = prefix; }, setResolveImage: (resolve: typeof resolveImage) => { resolveImage = resolve; }, initialize: async () => { render(); await tick(); render(); await tick(); return render(); },
+    return { render, saved, calls, submissions, status: () => taskStatus, observations, reconcile: async () => { const observer = observations.findLast(item => !item.signal.aborted); expect(observer).toBeDefined(); await observer.reconcile(); }, setReadFailure: (prefix: string) => { failReadOnce = prefix; }, setResolveImage: (resolve: typeof resolveImage) => { resolveImage = resolve; }, initialize: async () => { render(); await tick(); render(); await tick(); return render(); },
         setTask: (task: QueuedTask | null) => { originalTask = task; }, setCompilation: (value: PublicPromptCompilation | null) => { originalCompilation = value; },
         setTaskQuery: (query: () => Promise<QueuedTask | null>) => { queryTask = query; }, setSubmit: (fn: typeof submit) => { submit = fn; }, changeOwner: () => { ownerId = "other"; }, unmount: () => effects.forEach(effect => effect?.cleanup?.()) };
 }
@@ -87,6 +89,74 @@ test("creative unresolved records beyond the first history page protect their ta
     expect(app.status().pending).toBe(false);
     await app.render().previewLog(otherWorkspace); app.render();
     expect(app.status().pending).toBe(false);
+    expect(app.submissions).toHaveLength(0);
+    app.unmount();
+});
+
+test("creative automatically reconciles a restored original request through success with GET only", async () => {
+    const app = harness(new Map(), pendingLog); await app.initialize();
+    app.setCompilation({ ...compilation, status: "optimizing", prompt: undefined });
+    await app.reconcile();
+    expect(app.render().results[0].failureKind).toBe("uncertain");
+    app.setTask({ id: "late-task", requestId: "original-request:0", status: "success", userId: "owner", resultUrls: ["/original.png"], failureReason: null });
+    await app.reconcile();
+    expect(app.render().results[0].status).toBe("success");
+    expect(app.status().pending).toBe(false);
+    expect(app.submissions).toHaveLength(0);
+    expect(app.calls.every(call => call.startsWith("GET"))).toBe(true);
+    app.unmount();
+});
+
+test("automatic compilation recovery closes confirmed failure but never continues a successful compilation", async () => {
+    const app = harness(new Map(), pendingLog); await app.initialize();
+    await app.reconcile();
+    expect(app.render().results[0].compilationId).toBe(compilation.id);
+    expect(app.submissions).toHaveLength(0);
+    app.setCompilation({ ...compilation, status: "failed", message: "提示词准备失败，未提交图片。" });
+    await app.reconcile();
+    expect(app.render().results[0].failureKind).toBe("local");
+    expect(app.status().pending).toBe(false);
+    expect(app.submissions).toHaveLength(0);
+    app.unmount();
+});
+
+test("a paused accepted task is not shown as generating and only an explicit action resumes its original ID", async () => {
+    const app = harness(new Map(), pendingLog); await app.initialize();
+    app.setTask({ id: "paused-original", requestId: "original-request:0", status: "paused", upstreamTaskId: "existing-upstream", userId: "owner", resultUrls: [], failureReason: "轮询已暂停" });
+    await app.reconcile();
+    let ws = app.render();
+    expect(ws.results[0]).toMatchObject({ status: "failed", failureKind: "uncertain", recovery: "resume" });
+    expect(app.calls).toEqual(["GET task"]);
+    await ws.queryResult(ws.results[0], true); ws = app.render();
+    expect(ws.results[0]).toMatchObject({ status: "pending", taskId: "paused-original" });
+    expect(ws.results[0].recovery).toBeUndefined();
+    expect(app.calls).toEqual(["GET task", "GET task", "RECOVER paused-original"]);
+    expect(app.submissions).toHaveLength(0);
+    app.unmount();
+});
+
+test("a paused task without upstream identity can never be resumed or regenerated by continuation", async () => {
+    const app = harness(new Map(), pendingLog); let ws = await app.initialize();
+    app.setTask({ id: "unknown-original", requestId: "original-request:0", status: "paused", upstreamTaskId: null, userId: "owner", resultUrls: [], failureReason: "提交结果待核查" });
+    await app.reconcile(); ws = app.render();
+    expect(ws.results[0].recovery).toBe("investigate");
+    await ws.queryResult(ws.results[0], true);
+    expect(app.calls.every(call => call === "GET task")).toBe(true);
+    expect(app.submissions).toHaveLength(0);
+    expect(app.render().results[0].status).not.toBe("pending");
+    app.unmount();
+});
+
+test("stopping automatic scene observation prevents late results from changing the saved original", async () => {
+    const app = harness(new Map(), pendingLog); await app.initialize();
+    let finish!: (task: QueuedTask | null) => void;
+    app.setTaskQuery(() => new Promise(resolve => { finish = resolve; }));
+    const reading = app.reconcile(); await tick();
+    app.render().stopObserving(); app.render();
+    finish({ id: "late-task", requestId: "original-request:0", status: "success", userId: "owner", resultUrls: ["/original.png"], failureReason: null });
+    await reading;
+    expect(app.render().results[0].status).toBe("pending");
+    expect(app.observations.every(item => item.signal.aborted)).toBe(true);
     expect(app.submissions).toHaveLength(0);
     app.unmount();
 });
@@ -128,6 +198,42 @@ test("original IDs normalize only once and foreign scene records cannot be queri
     expect(sceneRootRequestId(pendingLog.results[0]!)).toBe("original-request");
     expect(canQuerySceneResult(pendingLog.results[0]!)).toBe(true);
     await expect(readSceneRequest(pendingLog, pendingLog.results[0]!, "other")).rejects.toThrow("当前账号");
+});
+
+test("a verified task remains authoritative when the auxiliary compilation query fails", async () => {
+    const task: QueuedTask = { id: "accepted", requestId: "original-request:0", status: "success", resultUrls: ["/original.png"], failureReason: null, userId: "owner" };
+    const result = await readSceneRequest(pendingLog, pendingLog.results[0]!, "owner", {
+        getQueuedTask: async () => task, getQueuedTaskByRequestId: async () => task,
+        getPromptCompilation: async () => { throw new Error("compilation unavailable"); },
+    });
+    expect(result.task).toEqual(task);
+    expect(result.compilation).toBeNull();
+});
+
+test("accepted task recovery never starts an auxiliary compilation request that could hang", async () => {
+    let compilationReads = 0;
+    const task: QueuedTask = { id: "accepted", requestId: "original-request:0", status: "success", resultUrls: ["/original.png"], failureReason: null, userId: "owner" };
+    const result = await readSceneRequest(pendingLog, pendingLog.results[0]!, "owner", {
+        getQueuedTask: async () => task, getQueuedTaskByRequestId: async () => task,
+        getPromptCompilation: async () => { compilationReads++; return new Promise(() => {}); },
+    });
+    expect(result.task).toEqual(task);
+    expect(compilationReads).toBe(0);
+});
+
+test("a foreign compilation cannot close or continue the original scene request", async () => {
+    await expect(readSceneRequest(pendingLog, pendingLog.results[0]!, "owner", {
+        getQueuedTask: async () => null, getQueuedTaskByRequestId: async () => null,
+        getPromptCompilation: async () => ({ ...compilation, requestId: "another-request:0", status: "failed" }),
+    })).rejects.toThrow("身份不匹配");
+});
+
+test("a previously accepted task cannot become a pre-admission failure after a missing lookup", async () => {
+    const log = { ...pendingLog, results: [{ ...pendingLog.results[0]!, taskId: "accepted" }] };
+    await expect(readSceneRequest(log, log.results[0]!, "owner", {
+        getQueuedTask: async () => null, getQueuedTaskByRequestId: async () => null,
+        getPromptCompilation: async () => ({ ...compilation, status: "failed" }),
+    })).rejects.toThrow("原图片任务暂时无法读取");
 });
 
 test("creative submission persists the original request before POST and refresh does not resubmit it", async () => {

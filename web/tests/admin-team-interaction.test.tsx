@@ -139,7 +139,7 @@ describe("admin/team interaction guards", () => {
         let calls = 0;
         const harness = componentHarness("../src/pages/team/index.tsx", "default", {
             "@/lib/deployment-features": { deploymentFeatures: { creditsEnabled: true } },
-            "@/stores/use-user-store": { useUserStore: (selector: any) => selector({ user, hydrateSession: async () => undefined }) },
+            "@/stores/use-user-store": { useUserStore: Object.assign((selector: any) => selector({ user, hydrateSession: async () => undefined }), { getState: () => ({ user }) }) },
             "@/stores/use-module-store": { useModuleStore: (selector: any) => selector({ flags: { performance: false } }) },
             "./team-overview": { loadTeamOverview: () => pending[calls++].promise },
         });
@@ -160,7 +160,7 @@ describe("admin/team interaction guards", () => {
         let submitted = 0;
         const harness = componentHarness("../src/pages/team/index.tsx", "default", {
             "@/lib/deployment-features": { deploymentFeatures: { creditsEnabled: true } },
-            "@/stores/use-user-store": { useUserStore: (selector: any) => selector({ user: { id: "user", groupId: "group", groupRole: "member", creditBalance: 100 }, hydrateSession: async () => undefined }) },
+            "@/stores/use-user-store": { useUserStore: Object.assign((selector: any) => selector({ user: { id: "user", groupId: "group", groupRole: "member", creditBalance: 100 }, hydrateSession: async () => undefined }), { getState: () => ({ user: { id: "user", groupId: "group" } }) }) },
             "@/stores/use-module-store": { useModuleStore: (selector: any) => selector({ flags: { performance: false } }) },
             "./team-overview": { loadTeamOverview: async () => ({ myCredits: { policy: {}, wallet: {}, requests: [] }, errors: [] }) },
             "@/services/api/group-credits": { submitGroupCreditRequest: () => { submitted++; return pending.promise; } },

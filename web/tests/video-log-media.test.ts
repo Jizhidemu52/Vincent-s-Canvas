@@ -117,3 +117,33 @@ test("changing selected logs aborts the previous read", async () => {
     await first;
     expect(priorSignal?.aborted).toBe(true);
 });
+
+test("opening a saved success checks timing and original asset identity with one GET", async () => {
+    const serverAssetId = "7075c394-1184-44cc-9077-068d78e8b36d";
+    const reads: string[] = [];
+    const source = { ...log, status: "成功", durationMs: 2124000, task: { id: "paid-original" }, video: { ...log.video, durationMs: 2124000 } };
+    const resolved = await hydrateVideoLogMedia(source, {
+        media: async () => "", image: async () => "", refreshDuration: true,
+        task: async id => {
+            reads.push(id);
+            return { id, status: "success", resultUrls: [`/api/assets/${serverAssetId}/content`], queuedAt: "2026-11-10T07:50:48.073Z", completedAt: "2026-11-10T07:59:32.825Z" };
+        },
+    }, false);
+    expect(reads).toEqual(["paid-original"]);
+    expect(resolved.durationMs).toBe(524752);
+    expect(resolved.video).toMatchObject({ serverAssetId, durationMs: 524752, storageKey: log.video.storageKey });
+    expect(source.durationMs).toBe(2124000);
+});
+
+test("an identified video asset still refreshes its selected original task timing", async () => {
+    const reads: string[] = [];
+    const source = { ...log, status: "成功", durationMs: 2124000, task: { id: "paid-original" }, video: { ...log.video, serverAssetId: "7075c394-1184-44cc-9077-068d78e8b36d" } };
+    const resolved = await hydrateVideoLogMedia(source, {
+        media: async () => "", image: async () => "", refreshDuration: true,
+        task: async id => { reads.push(id); return { id, status: "success", resultUrls: [], queuedAt: "2026-11-10T07:50:48.073Z", completedAt: null }; },
+    }, false);
+    expect(reads).toEqual(["paid-original"]);
+    expect(resolved.durationMs).toBeNull();
+    expect(resolved.video?.durationMs).toBeNull();
+    expect(resolved.video?.serverAssetId).toBe(source.video.serverAssetId);
+});

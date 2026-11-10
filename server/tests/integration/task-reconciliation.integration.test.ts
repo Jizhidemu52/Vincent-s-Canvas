@@ -5,6 +5,8 @@ import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import express, { type ErrorRequestHandler } from "express";
+import ts from "typescript";
+import { ApiMartImageQueryRetryable, ApiMartImageTaskPending, stepApiMartImageTask } from "../../src/apimart-image";
 import { reserveCredits } from "../../src/billing";
 import type { Cache, Database } from "../../src/db";
 import { createTaskReconciliationRouter } from "../../src/routes/task-reconciliation";
@@ -191,19 +193,54 @@ integration("auditable administrator reconciliation using isolated PostgreSQL an
 
     test.each(["image_generation", "video_generation"])("attach_upstream %s preserves identity, original order and slot without submitting work", async operation => {
         const item = await task(operation);
-        const original = await row("SELECT queued_at,parameters FROM tasks WHERE id=$1", [item.id]);
+        await db.query("UPDATE tasks SET poll_deadline_at=now()-interval '30 minutes',started_at=now()-interval '1 hour' WHERE id=$1", [item.id]);
+        const original = await row("SELECT queued_at,started_at,upstream_submission_started_at,parameters FROM tasks WHERE id=$1", [item.id]);
         const response = await taskResolve(item.id, "attach_upstream", { upstreamTaskId: "existing-provider-job" });
         expect(response.status).toBe(200);
         expect((await response.json()).data).toMatchObject({ status: "processing", upstreamTaskId: "existing-provider-job", queuePending: false });
-        const current = await row("SELECT status,upstream_task_id,upstream_submission_started_at,execution_token,lease_expires_at,model_slot_token,queued_at,parameters,poll_deadline_at FROM tasks WHERE id=$1", [item.id]);
-        expect(current).toMatchObject({ status: "processing", upstream_task_id: "existing-provider-job", execution_token: null, lease_expires_at: null, model_slot_token: item.slot, queued_at: original.queued_at, parameters: original.parameters });
-        if (operation === "video_generation") expect(new Date(current.poll_deadline_at).getTime()).toBeGreaterThan(Date.now());
+        const current = await row("SELECT status,upstream_task_id,upstream_submission_started_at,execution_token,lease_expires_at,model_slot_token,queued_at,started_at,parameters,poll_deadline_at,EXTRACT(EPOCH FROM poll_deadline_at-now())::float AS polling_seconds FROM tasks WHERE id=$1", [item.id]);
+        expect(current).toMatchObject({ status: "processing", upstream_task_id: "existing-provider-job", execution_token: null, lease_expires_at: null, model_slot_token: item.slot, ...original });
+        const pollingSeconds = operation === "video_generation" ? 20 * 60 : 15 * 60;
+        expect(current.polling_seconds).toBeGreaterThan(pollingSeconds - 30);
+        expect(current.polling_seconds).toBeLessThanOrEqual(pollingSeconds);
         expect(cacheCalls.at(-1)!.arguments[0]).toBe(item.id);
         expect(Number(cacheCalls.at(-1)!.arguments[3])).toBe(queueScore("normal", new Date(original.queued_at).getTime()));
         expect(await balance(item.userId)).toBe(93);
         expect((await row("SELECT status FROM credit_reservations WHERE request_id=$1", [item.requestId])).status).toBe("held");
         expect((await (await taskResolve(item.id, "attach_upstream", { upstreamTaskId: "existing-provider-job" })).json()).data.duplicate).toBe(true);
         expect((await taskResolve(item.id, "attach_upstream", { upstreamTaskId: "different-provider-job" })).status).toBe(409);
+    });
+
+    test("attaching an expired original image ID lets the real Worker query that ID once without a new paid submission", async () => {
+        const item = await task("inpaint");
+        await db.query("UPDATE tasks SET upstream_task_id='original-image-job',poll_deadline_at=now()-interval '30 minutes' WHERE id=$1", [item.id]);
+        const original = await row("SELECT queued_at,upstream_submission_started_at,attempts,credits FROM tasks WHERE id=$1", [item.id]);
+        expect((await taskResolve(item.id, "attach_upstream", { upstreamTaskId: "original-image-job" })).status).toBe(200);
+        const attached = await row("SELECT * FROM tasks WHERE id=$1", [item.id]);
+        const file = await readFile(new URL("../../src/worker.ts", import.meta.url), "utf8");
+        const source = ts.createSourceFile("worker.ts", file, ts.ScriptTarget.Latest, true);
+        const declaration = source.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === "executeApiMartImage");
+        if (!declaration) throw new Error("Missing Worker image execution function");
+        const code = ts.transpileModule(declaration.getText(source), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText;
+        const requests: string[] = [];
+        const dependencies = {
+            db, ApiMartImageQueryRetryable, ApiMartImageTaskPending,
+            loadSourceAssets: async () => { throw new Error("Original-ID recovery must not reload references"); },
+            stepApiMartImageTask: (input: Parameters<typeof stepApiMartImageTask>[0]) => stepApiMartImageTask(input, {
+                fetch: async (url, init) => {
+                    requests.push(`${init?.method}:${url}`);
+                    return Response.json({ data: { status: "completed", result: { images: [{ url: ["https://results.invalid/original.png"] }] } } });
+                },
+            }),
+            fetchProviderResult: async (url: string) => ({ bytes: new Uint8Array([1, 2, 3]), mimeType: "image/png", url }),
+        };
+        const execute = new Function(...Object.keys(dependencies), `${code};return executeApiMartImage`)(...Object.values(dependencies));
+        expect(await execute({ ...attached, model_id: "gpt-image-2.6-flare", base_url: "https://never-called.invalid/v1" }, { apiKey: "isolated-test-key" }, "existing prompt")).toHaveLength(1);
+        expect(requests).toEqual(["GET:https://never-called.invalid/v1/tasks/original-image-job"]);
+        expect(await row("SELECT queued_at,upstream_submission_started_at,attempts,credits FROM tasks WHERE id=$1", [item.id])).toEqual(original);
+        expect((await row("SELECT count(*)::int AS count FROM credit_ledger WHERE reference_id=$1", [item.requestId])).count).toBe(1);
+        expect((await row("SELECT status FROM credit_reservations WHERE request_id=$1", [item.requestId])).status).toBe("held");
+        expect(await balance(item.userId)).toBe(93);
     });
 
     test("queue outage never erases an attached upstream ID and SQL recovery redelivers it", async () => {

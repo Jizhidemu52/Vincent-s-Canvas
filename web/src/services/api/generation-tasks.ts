@@ -1,6 +1,7 @@
 import { nanoid } from "nanoid";
 import { generationErrorMessage, generationSubmissionRejected } from "@/lib/generation-feedback";
 import { cancelOriginalTask } from "@/lib/generation-task-cancel";
+import { completedTaskDurationMs } from "@/lib/completed-task-duration";
 import type { PromptInputData } from "../../../../shared/prompt-contracts";
 import { getPromptCompilation } from "./prompt-compilations";
 import type { TaskSubmission } from "../../../../shared/task-contracts";
@@ -39,7 +40,7 @@ export type QueuedTaskProgress = {
     estimateReason: string | null;
     retryAfterSeconds: number | null;
 };
-export type QueuedTask = { prompt?: string; summaryZh?: string; userInput?: PromptInputData; optimized?: boolean; id: string; requestId: string; operationType?: string; attempts?: number; status: string; stage?: string; errorCode?: string | null; upstreamTaskId?: string | null; submissionStartedAt?: string | null; resultUrls: string[]; failureReason: string | null; createdAt?: string; updatedAt?: string; userId?: string; ownerUserId?: string; parameters?: Record<string, unknown> };
+export type QueuedTask = { prompt?: string; summaryZh?: string; userInput?: PromptInputData; optimized?: boolean; id: string; requestId: string; operationType?: string; attempts?: number; status: string; stage?: string; errorCode?: string | null; upstreamTaskId?: string | null; submissionStartedAt?: string | null; resultUrls: string[]; failureReason: string | null; createdAt?: string; updatedAt?: string; queuedAt?: string | null; startedAt?: string | null; completedAt?: string | null; userId?: string; ownerUserId?: string; parameters?: Record<string, unknown> };
 
 /** The server snapshot keeps exclusion text out of the editable/replay prompt. */
 export function imageTaskPrompts(task: Pick<QueuedTask, "prompt" | "parameters">, fallback = ""): { prompt: string; submittedPrompt?: string } {
@@ -78,7 +79,7 @@ export class QueuedTaskFailedError extends Error {
 /** A POST may have been accepted, or an accepted task could not be settled locally. Never generate again to recover it. */
 export class QueuedTaskSubmissionUncertainError extends Error {
     constructor(readonly requestId: string, readonly taskId?: string, readonly cause?: unknown) {
-        super(`原任务状态待核查${taskId ? `（任务 ${taskId}）` : ""}，请查询原任务，勿重复生成。`);
+        super("暂时无法获取进度，请稍后再试");
         this.name = "QueuedTaskSubmissionUncertainError";
     }
 }
@@ -228,9 +229,20 @@ export async function requestQueuedImages(input: { quickImageAction?: QuickImage
                 return result;
             } catch (error) {
                 if (error instanceof QueuedTaskHttpError && error.submissionRejected) throw error;
-                // Both the optimizer and image submission are looked up; neither POST is replayed.
-                const [original] = await Promise.all([getQueuedTaskByRequestId(task.requestId).catch(() => null), input.promptInput ? getPromptCompilation(task.requestId).catch(() => null) : Promise.resolve(null)]);
+                // An accepted task is authoritative. Do not let an auxiliary
+                // compilation endpoint hide its result or replay the paid POST.
+                const lookupSignal = AbortSignal.timeout(10_000);
+                const [taskLookup] = await Promise.allSettled([getQueuedTaskByRequestId(task.requestId, lookupSignal)]);
+                assertOwner();
+                const original = taskLookup.status === "fulfilled" ? taskLookup.value : null;
                 if (original?.id) { const prompts = imageTaskPrompts(original, input.prompt); input.onCompiled?.(prompts.prompt, original.optimized === true, prompts.submittedPrompt); return { task: original }; }
+                const compilation = input.promptInput && taskLookup.status === "fulfilled" && taskLookup.value === null ? await getPromptCompilation(task.requestId, lookupSignal).catch(() => null) : null;
+                assertOwner();
+                // Only an authoritative missing task and this request's failed
+                // compilation prove preparation ended before image admission.
+                if (taskLookup.status === "fulfilled" && taskLookup.value === null && compilation?.requestId === task.requestId && compilation.status === "failed") {
+                    throw Object.assign(new QueuedTaskHttpError(422, compilation.message || "提示词准备失败，尚未提交图片生成，请重试。", compilation.errorCode || "PROMPT_OPTIMIZATION_FAILED"), { requestId: task.requestId });
+                }
                 throw new QueuedTaskSubmissionUncertainError(task.requestId, undefined, error);
             }
         }),
@@ -245,7 +257,7 @@ export async function requestQueuedImages(input: { quickImageAction?: QuickImage
         const tasks = await waitForTasks(ids, input.signal, undefined, true);
         const failed = tasks.find((task) => task.status === "failed" || task.status === "cancelled");
         if (failed) throw new QueuedTaskFailedError(failed);
-        return tasks.flatMap((task) => task.resultUrls.map((dataUrl) => ({ id: nanoid(), dataUrl, sourceTaskId: task.id, ...imageTaskPrompts(task, input.prompt), userInput: task.userInput || input.promptInput, optimized: task.optimized === true })));
+        return tasks.flatMap((task) => task.resultUrls.map((dataUrl) => ({ id: nanoid(), dataUrl, sourceTaskId: task.id, durationMs: completedTaskDurationMs(task), ...imageTaskPrompts(task, input.prompt), userInput: task.userInput || input.promptInput, optimized: task.optimized === true })));
     } catch (error) {
         if (input.signal?.aborted && (input.cancelOnAbort?.() ?? true)) await cancelTasks(ids);
         throw error;
@@ -306,8 +318,19 @@ export async function requestQueuedImageBatch(input: { modelId: string; resolved
         signal: input.signal,
     }).catch(async error => {
         if (error instanceof QueuedTaskHttpError && error.submissionRejected) throw error;
-        const [original] = await Promise.all([getQueuedBatchByRequestId(requestId).catch(() => null), getPromptCompilation(requestId).catch(() => null), getQueuedTaskByRequestId(`${requestId}:0`).catch(() => null)]);
-        if (original && original.submissionComplete !== false) return original;
+        const lookupSignal = AbortSignal.timeout(10_000);
+        const [batchLookup] = await Promise.allSettled([getQueuedBatchByRequestId(requestId, lookupSignal)]);
+        assertOwner();
+        const original = batchLookup.status === "fulfilled" ? batchLookup.value : null;
+        if (original?.batchId && Array.isArray(original.tasks) && Array.isArray(original.failures) && original.submissionComplete !== false) return original;
+        if (batchLookup.status === "fulfilled" && batchLookup.value === null) {
+            const [taskLookup, compilationLookup] = await Promise.allSettled([getQueuedTaskByRequestId(`${requestId}:0`, lookupSignal), getPromptCompilation(requestId, lookupSignal)]);
+            assertOwner();
+            const compilation = compilationLookup.status === "fulfilled" ? compilationLookup.value : null;
+            if (taskLookup.status === "fulfilled" && taskLookup.value === null && compilation?.requestId === requestId && compilation.status === "failed") {
+                throw Object.assign(new QueuedTaskHttpError(422, compilation.message || "提示词准备失败，尚未提交图片生成，请重试。", compilation.errorCode || "PROMPT_OPTIMIZATION_FAILED"), { requestId });
+            }
+        }
         throw new QueuedTaskSubmissionUncertainError(requestId, undefined, error);
     });
     const remapped = restoreBatchItemIndices(uploadedItems, result.tasks, result.failures);
@@ -341,8 +364,8 @@ export async function requestQueuedImageBatch(input: { modelId: string; resolved
     }
 }
 
-export async function getQueuedBatchByRequestId(requestId: string) {
-    const response = await fetch(`/api/tasks/batches/by-request/${encodeURIComponent(requestId)}`, { credentials: "include", headers: workspaceOwnerHeaders(), cache: "no-store" });
+export async function getQueuedBatchByRequestId(requestId: string, signal?: AbortSignal) {
+    const response = await fetch(`/api/tasks/batches/by-request/${encodeURIComponent(requestId)}`, { credentials: "include", headers: workspaceOwnerHeaders(), cache: "no-store", signal });
     if (response.status === 404) return null;
     if (!response.ok) throw new Error("原批次查询失败");
     return response.json() as Promise<{ batchId: string; tasks: Array<QueuedTask & { itemIndex: number }>; failures: QueuedBatchFailure[]; prompt?: string; optimized?: boolean; submissionComplete?: boolean; totalItems?: number }>;

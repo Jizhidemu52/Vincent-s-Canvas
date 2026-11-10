@@ -64,7 +64,7 @@ export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotR
     const undoLifetimeRef = useRef({ active: true });
     const [messageRenderLimit, setMessageRenderLimit] = useState(DEFAULT_AGENT_MESSAGE_WINDOW);
     const scrollContent = useMemo(() => ({ messages, pendingTool, waiting }), [messages, pendingTool, waiting]);
-    const chatFollow = useChatBottomFollow(scrollContent, activeThreadId);
+    const chatFollow = useChatBottomFollow(scrollContent, `${activeThreadId}:${activeTab}`);
     const listRef = chatFollow.listRef;
     const fallbackSnapshotRef = useRef<CanvasAgentSnapshot>(snapshot || EMPTY_AGENT_SNAPSHOT);
     const snapshotRef: { current: CanvasAgentSnapshot } = externalSnapshotRef || fallbackSnapshotRef;
@@ -626,7 +626,8 @@ export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotR
                 />
             ) : (
                 <>
-                    <div ref={listRef} onScroll={chatFollow.onScroll} data-canvas-shortcuts="ignore" className="thin-scrollbar min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
+                    <div ref={listRef} onScroll={chatFollow.onScroll} data-canvas-shortcuts="ignore" className="thin-scrollbar min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 [overflow-anchor:none]">
+                        <div ref={chatFollow.contentRef} className="mx-auto w-full max-w-3xl space-y-6">
                         {renderedMessageWindow.hidden ? (
                             <div className="flex justify-center">
                                 <Button size="small" type="text" onClick={() => setMessageRenderLimit((current) => expandAgentMessageWindow(current, messages.length))}>
@@ -640,6 +641,7 @@ export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotR
                         })}
                         {pendingTool ? <AgentPendingToolCard summary={summarizeCanvasAgentOps(pendingTool.input?.ops || []) || toolName(pendingTool.name)} detail={{ status: "pending", preview: canvasToolCallPreview([{ id: pendingTool.requestId, type: "function", function: { name: pendingTool.name, arguments: JSON.stringify(pendingTool.input || {}) } }], snapshotRef.current) }} theme={theme} onReject={rejectPendingTool} onApprove={approvePendingTool} /> : null}
                         {waiting && !pendingTool ? <AgentWorkingMessage theme={theme} /> : null}
+                        </div>
                     </div>
                     {chatFollow.hasNewMessages ? <div className="flex shrink-0 justify-center"><button type="button" className="px-3 py-1 text-xs hover:underline" onClick={chatFollow.scrollToBottom}>↓ 新消息</button></div> : null}
                     <AgentChatComposer

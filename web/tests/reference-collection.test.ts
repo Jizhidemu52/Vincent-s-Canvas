@@ -157,6 +157,26 @@ test("selected candidates after number twenty are fetched without rescanning or 
     await expect(collectReferencePage({ ...ctx.options, scan: largeScan, candidateIds: largeScan.candidates.map(item => item.id) })).rejects.toThrow("最多 20");
 });
 
+test("a supplied scan cannot be read against a different current URL", async () => {
+    let fetched = 0;
+    globalThis.fetch = (async () => { fetched++; return success(image("one")); }) as typeof fetch;
+    const ctx = context();
+    await expect(collectReferencePage({ ...ctx.options, url: "https://other.invalid/gallery", scan, candidateIds: ["one"] })).rejects.toThrow("重新扫描");
+    expect(fetched).toBe(0);
+    expect(ctx.images).toEqual([]);
+});
+
+test("an explicit scan input binding preserves query URLs and redirect provenance", async () => {
+    const requested: unknown[] = [];
+    globalThis.fetch = (async (_path, init) => { requested.push(JSON.parse(String(init!.body))); return success(image("one")); }) as typeof fetch;
+    const ctx = context();
+    const redirected = { ...scan, pageUrl: "https://cdn.invalid/redirected" };
+    await collectReferencePage({ ...ctx.options, url: " https://example.com/gallery?sort=new#section ", scan: redirected, scanInputUrl: "https://example.com/gallery?sort=new", candidateIds: ["one"] });
+    expect(requested).toEqual([{ scanId: scan.scanId, imageId: "one" }]);
+    await expect(collectReferencePage({ ...ctx.options, url: "https://example.com/gallery?sort=old", scan: redirected, scanInputUrl: "https://example.com/gallery?sort=new", candidateIds: ["one"] })).rejects.toThrow("重新扫描");
+    expect(requested).toHaveLength(1);
+});
+
 test("two images load concurrently but output and progress retain the selected order", async () => {
     let active = 0, maximum = 0;
     let releaseFirst!: () => void;

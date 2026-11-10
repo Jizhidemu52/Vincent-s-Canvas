@@ -31,6 +31,7 @@ const requestStatus: Record<string, { label: string; color: string }> = {
   rejected: { label: "已拒绝", color: "red" }, expired: { label: "已过期", color: "default" },
   cancelled: { label: "已取消", color: "default" },
 };
+type CreditIntent = { key: string; requestId: string; confirmed: boolean };
 
 export default function TeamPage() {
     const t = useUiText();
@@ -51,7 +52,19 @@ export default function TeamPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [pendingAction, setPendingAction] = useState("");
-  const pendingActionRef = useRef("");
+  const pendingActionRef = useRef<object | null>(null);
+  const creditIntents = useRef<{ request?: CreditIntent; contribution?: CreditIntent }>({});
+  const actionScopeRef = useRef({ userId: user?.id, groupId: user?.groupId, active: true });
+  if (actionScopeRef.current.userId !== user?.id || actionScopeRef.current.groupId !== user?.groupId) {
+    actionScopeRef.current.active = false;
+    actionScopeRef.current = { userId: user?.id, groupId: user?.groupId, active: true };
+    creditIntents.current = {}; pendingActionRef.current = null;
+  }
+  const actionScope = actionScopeRef.current;
+  const isCurrentScope = () => {
+    const current = useUserStore.getState().user;
+    return actionScope.active && actionScopeRef.current === actionScope && current?.id === actionScope.userId && current?.groupId === actionScope.groupId;
+  };
   const requestSequence = useRef(0);
   const isLeader = user?.groupRole === "leader";
   const performanceEnabled = useModuleStore((state) => state.flags.performance);
@@ -76,31 +89,52 @@ export default function TeamPage() {
   };
   useEffect(() => {
     setMyCredits(undefined); setManagedCredits(undefined); setOverview(undefined); setHistory([]); setAssets([]); setAssetTotal(0); setAuditLogs([]); setLoadError("");
+    setPendingAction(""); setRequestOpen(false); setContributionOpen(false); requestForm.resetFields(); contributionForm.resetFields();
     void refresh();
     return () => { requestSequence.current++; };
   }, [user?.id, user?.groupId, user?.groupRole]);
+  useEffect(() => { actionScope.active = true; return () => { actionScope.active = false; }; }, [actionScope]);
 
   const runAction = async (key: string, action: () => Promise<void>) => {
-    if (pendingActionRef.current) return;
-    pendingActionRef.current = key; setPendingAction(key);
+    if (!isCurrentScope() || pendingActionRef.current) return;
+    const pending = {}; pendingActionRef.current = pending; setPendingAction(key);
     try { await action(); }
-    finally { pendingActionRef.current = ""; setPendingAction(""); }
+    finally { if (pendingActionRef.current === pending) { pendingActionRef.current = null; if (isCurrentScope()) setPendingAction(""); } }
   };
 
   if (!deploymentFeatures.creditsEnabled || !user || !user.groupId) return <main role="alert" className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center"><h1 className="text-xl font-semibold">{t("小组功能暂不可用")}</h1><p className="text-sm text-muted-foreground">{!deploymentFeatures.creditsEnabled ? t("当前未启用小组积分功能。") : t("当前账号尚未分配小组，请联系管理员。")}</p><Link to="/" className="underline">{t("返回工作台")}</Link></main>;
 
+  const creditIntent = (kind: "request" | "contribution", values: { amount: number; reason?: string }) => {
+    // A lost acknowledgement may already be committed; unchanged retries must keep this page's ID.
+    const key = JSON.stringify([user.id, user.groupId, values.amount, values.reason ?? ""]);
+    let intent = creditIntents.current[kind];
+    if (!intent || intent.key !== key) {
+      intent = { key, requestId: `group-${kind === "request" ? "claim" : "contribution"}-${createClientId()}`, confirmed: false };
+      creditIntents.current[kind] = intent;
+    }
+    return intent;
+  };
   const applyCredits = (values: { amount: number; reason: string }) => runAction("request", async () => {
+    const intent = creditIntent("request", values);
+    if (intent.confirmed) return;
     try {
-      await submitGroupCreditRequest({ requestId: `group-claim-${createClientId()}`, ...values });
-      message.success(t("额度申请已提交，等待组长审批")); setRequestOpen(false); requestForm.resetFields(); await refresh(true);
-    } catch (error) { message.error(error instanceof Error ? error.message : t("申请失败")); }
+      await submitGroupCreditRequest({ requestId: intent.requestId, ...values });
+    } catch (error) { if (isCurrentScope()) message.error(error instanceof Error ? error.message : t("申请失败")); return; }
+    intent.confirmed = true;
+    if (!isCurrentScope()) return;
+    message.success(t("额度申请已提交，等待组长审批")); setRequestOpen(false); requestForm.resetFields(); await refresh(true);
   });
   const contribute = (values: { amount: number }) => runAction("contribution", async () => {
+    const intent = creditIntent("contribution", values);
+    if (intent.confirmed) return;
     try {
-      await contributeGroupCredits({ requestId: `group-contribution-${createClientId()}`, ...values });
-      message.success(t("积分已归还到本组共享池，本月个人额度同步减少")); setContributionOpen(false);
-      contributionForm.resetFields(); await Promise.all([hydrateSession(), refresh(true)]);
-    } catch (error) { message.error(error instanceof Error ? error.message : t("归还失败")); }
+      await contributeGroupCredits({ requestId: intent.requestId, ...values });
+    } catch (error) { if (isCurrentScope()) message.error(error instanceof Error ? error.message : t("归还失败")); return; }
+    intent.confirmed = true;
+    if (!isCurrentScope()) return;
+    message.success(t("积分已归还到本组共享池，本月个人额度同步减少")); setContributionOpen(false); contributionForm.resetFields();
+    const [session] = await Promise.allSettled([hydrateSession(), refresh(true)]);
+    if (isCurrentScope() && session.status === "rejected") message.warning(t("积分归还已完成，但账户余额暂未刷新；请刷新查看，不要重复归还。"));
   });
   const decide = (id: string, decision: "approved" | "rejected") => runAction(`decision:${id}`, async () => {
     try {
@@ -126,7 +160,7 @@ export default function TeamPage() {
       <main className="mx-auto w-full max-w-7xl space-y-6 px-4 py-6 sm:px-6 lg:px-8">
         <header className="wb-header !mb-0">
           <div><div className="wb-eyebrow">{isLeader ? t("组长工作台") : t("我的小组")}</div><h1 className="wb-title">{overview?.group.name || user.groupName || t("团队协作")}</h1><p className="wb-description">{t("查看小组额度与协作成果。优先使用个人月度额度，不足时再使用已审批的小组额度。")}</p></div>
-          <div className="wb-toolbar"><Button className="!h-10" loading={loading} icon={<RefreshCw className="size-4" />} onClick={() => void refresh()}>{t("刷新")}</Button><Button className="!h-10" disabled={loading || !myCredits || Boolean(pendingAction) || user.creditBalance <= 0} icon={<HandCoins className="size-4" />} onClick={() => setContributionOpen(true)}>{t("归还个人额度")}</Button><Button className="!h-10" disabled={loading || !myCredits || Boolean(pendingAction) || myCredits.policy.perRequestLimit <= 0} type="primary" icon={<Send className="size-4" />} onClick={() => setRequestOpen(true)}>{t("申请小组额度")}</Button></div>
+          <div className="wb-toolbar"><Button className="!h-10" loading={loading} icon={<RefreshCw className="size-4" />} onClick={() => void refresh()}>{t("刷新")}</Button><Button className="!h-10" disabled={loading || !myCredits || Boolean(pendingAction) || user.creditBalance <= 0} icon={<HandCoins className="size-4" />} onClick={() => { if (creditIntents.current.contribution?.confirmed) delete creditIntents.current.contribution; setContributionOpen(true); }}>{t("归还个人额度")}</Button><Button className="!h-10" disabled={loading || !myCredits || Boolean(pendingAction) || myCredits.policy.perRequestLimit <= 0} type="primary" icon={<Send className="size-4" />} onClick={() => { if (creditIntents.current.request?.confirmed) delete creditIntents.current.request; setRequestOpen(true); }}>{t("申请小组额度")}</Button></div>
         </header>
         {loadError ? <Alert type="warning" showIcon title={t("部分小组数据暂未更新")} description={loadError} action={<Button loading={loading} onClick={() => void refresh()}>{t("重试")}</Button>} /> : null}
 

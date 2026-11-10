@@ -13,6 +13,7 @@ import { collectReferencePage, normalizePageUrl, referenceReturnPath } from "./c
 import { scanReferencePage, type ReferenceScan } from "@/services/api/reference-import";
 
 type Draft = { payload: ReferencePayload; file: File; preview: string; clientReferenceId: string; selected: boolean; status: "pending" | "uploading" | "done" | "error"; error?: string };
+type PageScan = { result: ReferenceScan; inputUrl: string };
 
 export default function ReferenceImportPage() {
     useUiText();
@@ -24,11 +25,13 @@ export default function ReferenceImportPage() {
     const [busy, setBusy] = useState(false);
     const [collecting, setCollecting] = useState(false);
     const [pageUrl, setPageUrl] = useState("");
+    const pageUrlRef = useRef("");
     const [progress, setProgress] = useState("");
     const [failures, setFailures] = useState<{ name: string; reason: string }[]>([]);
     const [scanWarnings, setScanWarnings] = useState<string[]>([]);
     const [pageTitle, setPageTitle] = useState("");
-    const [scan, setScan] = useState<ReferenceScan | null>(null);
+    const [scan, setScan] = useState<PageScan | null>(null);
+    const scanRef = useRef<PageScan | null>(null);
     const [candidateIds, setCandidateIds] = useState<string[]>([]);
     const controller = useRef<AbortController | null>(null);
     const revision = useRef(0);
@@ -36,7 +39,16 @@ export default function ReferenceImportPage() {
     const cancelled = useRef(false);
     const owner = useRef(user?.id);
     const publish = () => setItems([...drafts.current]);
-    const clear = () => { revision.current++; controller.current?.abort(); drafts.current.forEach(item => URL.revokeObjectURL(item.preview)); drafts.current = []; publish(); setFailures([]); setScanWarnings([]); setPageTitle(""); setProgress(""); setScan(null); setCandidateIds([]); };
+    const invalidateScan = () => {
+        revision.current++; controller.current?.abort(); controller.current = null;
+        scanRef.current = null; setScan(null); setCandidateIds([]); setFailures([]); setScanWarnings([]); setPageTitle(""); setProgress("");
+    };
+    const clear = () => { invalidateScan(); drafts.current.forEach(item => URL.revokeObjectURL(item.preview)); drafts.current = []; publish(); };
+    const changePageUrl = (value: string) => {
+        if (busyRef.current && !controller.current) return; // Never interrupt an upload through an old input callback.
+        invalidateScan(); pageUrlRef.current = value; setPageUrl(value);
+        busyRef.current = false; setBusy(false); setCollecting(false);
+    };
     const returnPath = referenceReturnPath(window.location.search);
 
     useEffect(() => {
@@ -75,15 +87,18 @@ export default function ReferenceImportPage() {
     const collect = async () => {
         if (busyRef.current || !user?.id) return;
         if (drafts.current.length) { setNotice(uiText("请先审核、导入或清空本页草稿，再采集另一网页。现有图片不会被覆盖。")); return; }
+        invalidateScan();
         const expectedOwnerId = user.id;
-        const currentRevision = ++revision.current;
+        const currentRevision = revision.current;
         const requestController = new AbortController(); controller.current = requestController;
         const active = () => revision.current === currentRevision && useUserStore.getState().user?.id === expectedOwnerId && !requestController.signal.aborted;
         busyRef.current = true; setBusy(true); setCollecting(true); setNotice(""); setFailures([]); setScanWarnings([]); setPageTitle(""); setProgress(uiText("正在读取公开网页…"));
         try {
-            const result = await scanReferencePage(normalizePageUrl(pageUrl), expectedOwnerId, requestController.signal);
+            const inputUrl = normalizePageUrl(pageUrlRef.current);
+            const result = await scanReferencePage(inputUrl, expectedOwnerId, requestController.signal);
             if (active()) {
-                setScan(result); setCandidateIds(result.candidates.slice(0, MAX_IMAGES).map(item => item.id));
+                const currentScan = { result, inputUrl }; scanRef.current = currentScan; setScan(currentScan);
+                setCandidateIds(result.candidates.slice(0, MAX_IMAGES).map(item => item.id));
                 setPageTitle(result.pageTitle); setScanWarnings(result.warnings);
                 setProgress(uiText("找到 {length} 张候选图片，请选择最多 20 张后读取；尚未下载图片或写入素材库", { length: result.candidates.length }));
             }
@@ -95,7 +110,12 @@ export default function ReferenceImportPage() {
     };
 
     const readSelectedCandidates = async () => {
-        if (!scan || !candidateIds.length || busyRef.current || !user?.id || drafts.current.length) return;
+        if (!scan || scanRef.current !== scan || !candidateIds.length || busyRef.current || !user?.id || drafts.current.length) return;
+        let inputUrl: string;
+        try {
+            inputUrl = normalizePageUrl(pageUrlRef.current);
+            if (inputUrl !== scan.inputUrl) throw new Error("网页链接已变化，请重新扫描后读取图片");
+        } catch (error) { invalidateScan(); setNotice(error instanceof Error ? uiText(error.message) : uiText("请重新扫描网页")); return; }
         const expectedOwnerId = user.id;
         const currentRevision = ++revision.current;
         const requestController = new AbortController(); controller.current = requestController;
@@ -104,7 +124,7 @@ export default function ReferenceImportPage() {
         let received = 0;
         try {
             await collectReferencePage({
-                url: pageUrl, scan, candidateIds, ownerId: expectedOwnerId, signal: requestController.signal,
+                url: inputUrl, scan: scan.result, scanInputUrl: scan.inputUrl, candidateIds, ownerId: expectedOwnerId, signal: requestController.signal,
                 getOwner: () => useUserStore.getState().user?.id,
                 onScan: () => {},
                 onImage: ({ payload, file }) => {
@@ -180,13 +200,13 @@ export default function ReferenceImportPage() {
             <header className="space-y-2"><h1 className="flex items-center gap-3 text-2xl font-semibold"><Globe />{uiText("网页参考图采集")}</h1><p className="text-sm text-muted-foreground">{uiText("粘贴公开网页链接，无需安装插件。先采集、再审核，只有点击“确认导入”才会写入当前员工的素材库。")}</p></header>
             <form className="space-y-3" onSubmit={event => { event.preventDefault(); void collect(); }}>
                 <label htmlFor="reference-page-url" className="block text-sm font-medium">{uiText("公开网页链接")}</label>
-                <div className="flex flex-col gap-3 sm:flex-row"><Input id="reference-page-url" type="url" value={pageUrl} onChange={event => setPageUrl(event.target.value)} placeholder={uiText("https://example.com/gallery（也支持 HTTP）")} autoComplete="off" disabled={busy} className="min-w-0 flex-1" /><Button htmlType="submit" type="primary" icon={<Search size={16} />} loading={collecting} disabled={busy || !user?.id || !pageUrl.trim()} data-testid="reference-scan">{uiText("采集网页图片")}</Button>{collecting && <Button onClick={cancelCollection}>{uiText("取消采集")}</Button>}</div>
+                <div className="flex flex-col gap-3 sm:flex-row"><Input id="reference-page-url" type="url" value={pageUrl} onChange={event => changePageUrl(event.target.value)} placeholder={uiText("https://example.com/gallery（也支持 HTTP）")} autoComplete="off" disabled={busy} className="min-w-0 flex-1" /><Button htmlType="submit" type="primary" icon={<Search size={16} />} loading={collecting} disabled={busy || !user?.id || !pageUrl.trim()} data-testid="reference-scan">{uiText("采集网页图片")}</Button>{collecting && <Button onClick={cancelCollection}>{uiText("取消采集")}</Button>}</div>
                 <p className="text-xs leading-5 text-muted-foreground">{uiText("扫描公开 HTML 中最多 100 张候选，先选择最多 20 张再读取，不执行网页脚本。登录、动态加载或防盗链图片可能无法读取；已有草稿请先处理，再开始新一批。")}</p>
                 {(progress || pageTitle) && <div role="status" className="break-words text-sm text-muted-foreground">{pageTitle && <span className="mr-3 font-medium text-foreground">{pageTitle}</span>}{uiText(progress || "")}</div>}
             </form>
             {scan && !items.length && <section aria-label={uiText("网页候选图片")} className="space-y-3 rounded-xl border border-border p-4">
-                <div className="flex flex-wrap items-center gap-3"><h2 className="font-medium">{uiText("选择要读取的候选图片")}</h2><span className="text-sm text-muted-foreground">{uiText("已选 ")}{candidateIds.length}{uiText("/20 · 共 ")}{scan.candidates.length} {uiText(" 张")}</span><Button size="small" disabled={busy} onClick={() => setCandidateIds([])}>{uiText("清空选择")}</Button><Button size="small" disabled={busy} onClick={() => setCandidateIds(scan.candidates.slice(0, MAX_IMAGES).map(item => item.id))}>{uiText("选择前 20 张")}</Button></div>
-                <div className="grid max-h-72 gap-3 overflow-y-auto sm:grid-cols-2">{scan.candidates.map((candidate, index) => <div key={candidate.id} className="min-w-0"><Checkbox checked={candidateIds.includes(candidate.id)} disabled={busy || (!candidateIds.includes(candidate.id) && candidateIds.length >= MAX_IMAGES)} onChange={event => setCandidateIds(current => event.target.checked ? [...current, candidate.id] : current.filter(id => id !== candidate.id))}>{index + 1}. {candidate.name}</Checkbox><p className="truncate pl-6 text-xs text-muted-foreground" title={candidate.sourceImage}>{candidate.sourceImage}</p></div>)}</div>
+                <div className="flex flex-wrap items-center gap-3"><h2 className="font-medium">{uiText("选择要读取的候选图片")}</h2><span className="text-sm text-muted-foreground">{uiText("已选 ")}{candidateIds.length}{uiText("/20 · 共 ")}{scan.result.candidates.length} {uiText(" 张")}</span><Button size="small" disabled={busy} onClick={() => setCandidateIds([])}>{uiText("清空选择")}</Button><Button size="small" disabled={busy} onClick={() => setCandidateIds(scan.result.candidates.slice(0, MAX_IMAGES).map(item => item.id))}>{uiText("选择前 20 张")}</Button></div>
+                <div className="grid max-h-72 gap-3 overflow-y-auto sm:grid-cols-2">{scan.result.candidates.map((candidate, index) => <div key={candidate.id} className="min-w-0"><Checkbox checked={candidateIds.includes(candidate.id)} disabled={busy || (!candidateIds.includes(candidate.id) && candidateIds.length >= MAX_IMAGES)} onChange={event => setCandidateIds(current => event.target.checked ? [...current, candidate.id] : current.filter(id => id !== candidate.id))}>{index + 1}. {candidate.name}</Checkbox><p className="truncate pl-6 text-xs text-muted-foreground" title={candidate.sourceImage}>{candidate.sourceImage}</p></div>)}</div>
                 <Button type="primary" disabled={busy || !candidateIds.length} onClick={() => void readSelectedCandidates()}>{uiText("读取所选 ")}{candidateIds.length} {uiText(" 张图片")}</Button><p className="text-xs text-muted-foreground">{uiText("读取后可查看原图并再次审核；候选记录约 5 分钟后过期。")}</p>
             </section>}
             <Alert type="info" title={uiText("当前员工：{value1} · {length}/20 张 · 原始图片字节，不压缩、不重绘", { value1: user?.displayName || user?.username || "未登录", length: items.length })} description={uiText("仅 PNG / JPEG / WebP / GIF，单张 ≤ 10 MiB、总计 ≤ 30 MiB。来源会移除查询参数和片段。草稿仅在本页内存中，刷新或离页会丢失；请确认你有权保存这些图片。")} />

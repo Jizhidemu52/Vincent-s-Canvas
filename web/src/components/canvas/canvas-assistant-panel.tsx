@@ -395,7 +395,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
     const historySessions = safeSessions.filter((session) => session.messages.length > 0 || Boolean(session.documents?.length));
     const messages = activeSession?.messages || [];
     useEffect(() => { imageReadCacheRef.current = new Map(); videoReadCacheRef.current = new Map(); }, [onlineProjectId, user?.id, activeSession?.id]);
-    const chatFollow = useChatBottomFollow(messages, activeSession?.id);
+    const chatFollow = useChatBottomFollow(messages, `${activeSession?.id}:${view}`);
     const conversationImages = useMemo(() => canvasConversationImages(messages), [messages]);
     const persistedAgentImages = useMemo(() => canvasImageAgentCatalog(messages, snapshotRef.current.nodes), [messages, snapshotRef.current.nodes]);
     const selectedConversationImage = conversationImages.find(image => image.id === activeSession?.focusImageId);
@@ -1463,6 +1463,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
     const useConversationImage = (action: ConversationImageAction, imageId: string) => {
         const image = draftImages.find(item => item.id === imageId);
         if (!image || isRunning || attachmentReadRef.current.busy) return false;
+        if (action === "copy") { void imageTools.copy(image); return true; }
         if (action === "download") { void imageTools.download(image); return true; }
         if (action === "compare") {
             try { const original = resolveImageAgentBase(draftImages, { focusId: image.id }, "original"); imageTools.compare(image, original ? [original] : []); }
@@ -1796,7 +1797,8 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
             {canManageConfig && view === "setup" ? (
                 <OnlineAgentSetupView theme={theme} />
             ) : (
-                <div ref={chatFollow.listRef} onScroll={chatFollow.onScroll} data-testid="canvas-agent-message-list" className="thin-scrollbar min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
+                <div ref={chatFollow.listRef} onScroll={chatFollow.onScroll} data-testid="canvas-agent-message-list" className="thin-scrollbar min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 [overflow-anchor:none]" style={{ scrollbarGutter: "stable" }}>
+                    <div ref={chatFollow.contentRef} className="mx-auto w-full max-w-3xl space-y-6">
                     {view === "history" ? (
                         <AssistantHistory
                             sessions={historySessions}
@@ -1843,6 +1845,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                             <div className="mt-3 font-serif text-base italic tracking-wide opacity-60">{t("想法成真")}</div>
                         </div>
                     */}</>}
+                    </div>
                 </div>
             )}
 
@@ -1879,7 +1882,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                         <span>{autoContext ? t("仅下一条消息读取当前视野（最多 5 张图）") : t("仅读取当前图与所选素材")}</span>
                         <button type="button" className="shrink-0 hover:underline" aria-pressed={autoContext} onClick={() => setAutoContext((current) => !current)}>{autoContext ? t("取消") : t("让助手看当前视野")}</button>
                     </div>
-                    <div {...attachmentDrop.dropProps} data-testid="canvas-agent-attachment-drop">
+                    <div {...attachmentDrop.dropProps} data-testid="canvas-agent-attachment-drop" className="min-w-0 shrink-0">
                     {activeSession ? <div style={{ color: theme.node.text }}><AgentDocumentPanel key={activeSession.id} documents={activeSession.documents} card={activeSession.requirementCard} disabled={isRunning || attachmentsLoading} onChange={card => updateSession(activeSession.id, session => ({ ...session, requirementCard: card }))} onReference={figure => {
                         updateSession(activeSession.id, session => ({ ...session, focusImageId: draftFocus?.id, newCreation: !draftFocus, ...(draftFocus ? {} : { focusLocked: false }) }));
                         setUploadedReferences(previous => previous.some(item => item.id === figure.id) ? previous : [...previous, { id: figure.id, type: CanvasNodeType.Image, title: figure.label, dataUrl: figure.dataUrl, storageKey: figure.storageKey }]);
@@ -1966,7 +1969,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
 
     return (
         <motion.div
-            className="flex shrink-0"
+            className="flex min-h-0 shrink-0"
             data-canvas-shortcuts="ignore"
             initial={{ width: 0, opacity: 0 }}
             animate={{ width: closing ? 0 : width + 1, opacity: closing ? 0 : 1 }}
@@ -1974,7 +1977,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
             style={{ overflow: "clip", pointerEvents: closing ? "none" : undefined }}
         >
             <motion.aside
-                className="relative flex shrink-0 flex-col border-l"
+                className="relative flex min-h-0 shrink-0 flex-col border-l"
                 initial={{ x: 48 }}
                 animate={{ x: closing ? 28 : 0 }}
                 transition={{ duration: PANEL_MOTION_SECONDS, ease: [0.22, 1, 0.36, 1] }}
@@ -2016,7 +2019,7 @@ function AgentQuickstart({ theme, onSelect }: { theme: (typeof canvasThemes)[key
         { kind: "poster", label: "海报" },
     ];
     return (
-        <div className="flex h-full min-h-[360px] flex-col items-center justify-center px-5 text-center" style={{ color: theme.node.text }}>
+        <div className="flex min-h-[240px] flex-col items-center justify-center px-3 py-8 text-center" style={{ color: theme.node.text }}>
             <div className="relative mb-5 h-20 w-44">
                 <span className="absolute left-3 top-5 h-14 w-14 -rotate-6 rounded-sm bg-[#1d3564] shadow-md" />
                 <span className="absolute left-[61px] top-1 h-20 w-14 rounded-sm bg-[linear-gradient(145deg,#ef9a70,#24304a)] shadow-lg" />

@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react"
 import { App } from "antd";
 import type { ConversationImageItem } from "@/components/conversation-image-controls";
 import { loadCanvasExport } from "@/lib/canvas/canvas-export-loader";
+import { copyConversationImage } from "@/lib/conversation-image-clipboard";
 import { uiText, useUiText } from "@/lib/i18n";
 import { useUserStore } from "@/stores/use-user-store";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
@@ -24,6 +25,18 @@ export function useConversationImageTools() {
     const jobs = useRef(new Map<string, AbortController>());
     const [comparison, setComparison] = useState<{ owner: string | undefined; nodes: CanvasNodeData[]; initialIds: string[] } | null>(null);
     useEffect(() => () => { for (const job of jobs.current.values()) job.abort(); jobs.current.clear(); }, [owner]);
+    const copy = useCallback(async (image: ConversationImageItem) => {
+        const key = `copy:${image.id}`;
+        if (jobs.current.has(key)) return;
+        const job = new AbortController(); jobs.current.set(key, job);
+        try {
+            if (image.unavailableReason || (!image.storageKey && !image.dataUrl)) throw new Error(uiText(image.unavailableReason || "原图暂时无法读取"));
+            const mode = await copyConversationImage(conversationImageNode(image), job.signal);
+            if (!job.signal.aborted && useUserStore.getState().user?.id === owner) void message.success(uiText(mode === "system" ? "图片已复制，可粘贴到对话输入框" : "图片已复制，可在本页面的对话输入框粘贴（当前地址不支持复制到其他应用）"));
+        } catch (error) {
+            if (!job.signal.aborted && useUserStore.getState().user?.id === owner) void message.error(error instanceof Error ? uiText(error.message) : uiText("图片复制失败，请重试"));
+        } finally { if (jobs.current.get(key) === job) jobs.current.delete(key); }
+    }, [message, owner]);
     const download = useCallback(async (image: ConversationImageItem) => {
         if (jobs.current.has(image.id)) return;
         const job = new AbortController(); jobs.current.set(image.id, job);
@@ -45,5 +58,5 @@ export function useConversationImageTools() {
         setComparison({ owner, nodes: [...before, after], initialIds: before.length === 1 ? [before[0].id, after.id] : [after.id] });
     }, [message, owner]);
     const compareDialog = comparison && comparison.owner === owner ? <Suspense fallback={<div role="status">{t("正在打开图片对比…")}</div>}><CompareDialog key={comparison.initialIds.join("|")} nodes={comparison.nodes} initialIds={comparison.initialIds} comparisonBasis="original" onClose={() => setComparison(null)} /></Suspense> : null;
-    return { download, compare, compareDialog };
+    return { copy, download, compare, compareDialog };
 }

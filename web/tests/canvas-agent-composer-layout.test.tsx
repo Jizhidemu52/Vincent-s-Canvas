@@ -27,6 +27,7 @@ function composer(initial: Partial<Props> = {}) {
     const react = { ...React, useLayoutEffect() {}, useRef(value: unknown) { const index = cursor++; return refs[index] ||= { current: value }; } };
     const module = { exports: {} as { AgentChatComposer: (props: Props) => ReactElement<any> } };
     new Function("require", "module", "exports", code)((id: string) => id === "@/lib/i18n" ? i18nHarness
+        : id === "antd" ? { ...localRequire(id), App: { useApp: () => ({ message: { error() {} } }) } }
         // The real mention popup and keyboard selection run in browser tests; this tree harness has no DOM dispatcher.
         : id === "@/hooks/use-image-mentions" ? { useImageMentions: (options: { onChange: (value: string) => void }) => ({ menu: null, inputProps: {}, handleChange: (event: { target: { value: string } }) => options.onChange(event.target.value), handleSelect: () => undefined, handleKeyDown: () => false }) }
         : ((name: string) => name === "react" ? react : localRequire(name))(id), module, module.exports);
@@ -109,7 +110,7 @@ test("both composer modes keep 44px upload and send controls outside the flexibl
     expect(control(withoutUpload, "发送")).toBeDefined();
 });
 
-test("attachment removal and paste keep image-only uploads without swallowing ordinary text", () => {
+test("attachment removal and paste keep image-only uploads without swallowing ordinary text", async () => {
     const attachment = { id: "reference", name: "reference.png", url: "blob:reference" };
     const panel = composer({ attachments: [attachment] });
     const tree = panel.render();
@@ -121,15 +122,17 @@ test("attachment removal and paste keep image-only uploads without swallowing or
     const text = new File(["text"], "note.txt", { type: "text/plain" });
     const textarea = tree.find(element => element.type === "textarea")!;
     let prevented = 0;
-    const paste = (files: File[]) => ({ clipboardData: { files }, preventDefault() { prevented++; } });
+    const paste = (files: File[]) => ({ clipboardData: { files, getData: () => "" }, preventDefault() { prevented++; } });
     textarea.props.onPaste(paste([text, image]));
+    await Promise.resolve();
     expect(panel.uploads).toEqual([[image]]);
     expect(prevented).toBe(1);
     textarea.props.onPaste(paste([text]));
     textarea.props.onPaste(paste([]));
     panel.render({ onAddFiles: undefined }).find(element => element.type === "textarea")!.props.onPaste(paste([image]));
+    await Promise.resolve();
     expect(panel.uploads).toEqual([[image]]);
-    expect(prevented).toBe(1);
+    expect(prevented).toBe(2);
 });
 
 test("a unified reference tray replaces small attachment previews without duplicating images", () => {

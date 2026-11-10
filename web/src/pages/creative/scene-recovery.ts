@@ -15,13 +15,20 @@ export function sceneInputMatchesLog(log: SceneLog, form: SceneForm, images: Sce
 }
 
 /** GET-only reconciliation. In particular, a missing task is not permission to generate. */
-export async function readSceneRequest(log: SceneLog, result: SceneResult, ownerId: string, deps = { getQueuedTask, getQueuedTaskByRequestId, getPromptCompilation }): Promise<{ task: QueuedTask | null; compilation: PublicPromptCompilation | null }> {
+export async function readSceneRequest(log: SceneLog, result: SceneResult, ownerId: string, deps = { getQueuedTask, getQueuedTaskByRequestId, getPromptCompilation }, signal?: AbortSignal): Promise<{ task: QueuedTask | null; compilation: PublicPromptCompilation | null }> {
     if (log.ownerId !== ownerId || !log.results.some(item => item.id === result.id && item.requestId === result.requestId) || !canQuerySceneResult(result)) throw new Error("原请求不属于当前账号或记录，未查询或提交");
     const requestId = sceneTaskRequestId(result);
-    const [task, compilation] = await Promise.all([
-        result.taskId ? deps.getQueuedTask(result.taskId) : requestId ? deps.getQueuedTaskByRequestId(requestId) : Promise.resolve(null),
-        requestId ? deps.getPromptCompilation(requestId) : Promise.resolve(null),
-    ]);
-    if (task && ((task.userId && task.userId !== ownerId) || (task.ownerUserId && task.ownerUserId !== ownerId) || (requestId && task.requestId !== requestId))) throw new Error("原任务身份不匹配，未恢复结果");
-    return { task, compilation };
+    const task = result.taskId ? await deps.getQueuedTask(result.taskId, signal) : requestId ? await deps.getQueuedTaskByRequestId(requestId, signal) : null;
+    signal?.throwIfAborted();
+    if (task) {
+        if (!task.id || (result.taskId && task.id !== result.taskId) || (task.userId && task.userId !== ownerId) || (task.ownerUserId && task.ownerUserId !== ownerId) || (requestId && task.requestId !== requestId)) throw new Error("原任务身份不匹配，未恢复结果");
+        // Accepted task state is authoritative; an auxiliary lookup cannot hide its result.
+        return { task, compilation: null };
+    }
+    if (task !== null || result.taskId) throw new Error("原图片任务暂时无法读取，请稍后再试。");
+    const compilation = requestId ? await deps.getPromptCompilation(requestId, signal) : null;
+    signal?.throwIfAborted();
+    if (compilation && compilation.requestId !== requestId) throw new Error("原提示词记录身份不匹配，未恢复或提交");
+    if (compilation === undefined) throw new Error("提示词记录暂时无法读取，请稍后再试。");
+    return { task: null, compilation };
 }

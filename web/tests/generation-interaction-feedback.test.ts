@@ -25,8 +25,9 @@ describe("generation interaction safety", () => {
     });
     test("unknown paid submissions always request original task lookup", () => {
         const result = generationErrorMessage("原任务状态待核查，勿重复生成；Failed to fetch", 500);
-        expect(result).toContain("继续查询原任务");
-        expect(result).toContain("不要重复生成");
+        expect(result).toContain("请稍后再试");
+        expect(result).toContain("刷新进度不会重新生成");
+        expect(result).not.toMatch(/待核查|尚未确认|生成失败/);
     });
     test("task upload-limit guidance survives the API and result-display formatting", () => {
         for (const purpose of ["图片", "视频"]) {
@@ -40,8 +41,8 @@ describe("generation interaction safety", () => {
     });
     test("an unrecoverable submission keeps the investigation guidance instead of promising recovery", () => {
         const result = generationErrorMessage("upstream HTTP 500，提交结果待核查，暂无法恢复上游查询。请勿重复提交。");
-        expect(result).toContain("联系管理员");
-        expect(result).toContain("刷新状态");
+        expect(result).toContain("管理员协助");
+        expect(result).toContain("刷新进度");
         expect(result).not.toContain("继续查询原任务");
     });
     test.each([[401, "登录已过期"], [402, "额度不足"], [429, "服务请求较多"], [504, "响应超时"], [503, "暂时不可用"]])("HTTP %s maps to actionable Chinese guidance", (status, expected) => {

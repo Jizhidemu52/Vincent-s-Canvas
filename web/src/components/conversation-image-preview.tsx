@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Image, Modal, Spin } from "antd";
-import { Download, Maximize, ZoomIn, ZoomOut } from "lucide-react";
+import { Copy, Download, Maximize, ZoomIn, ZoomOut } from "lucide-react";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useUiText } from "@/lib/i18n";
 import { useConversationImageTools } from "@/hooks/use-conversation-image-tools";
@@ -15,10 +15,11 @@ export function ConversationImagePreview({ image, onClose }: { image: Conversati
     const theme = canvasThemes[useThemeStore(state => state.theme)];
     const owner = useUserStore(state => state.user?.id);
     const openedOwner = useRef(owner);
-    const { download } = useConversationImageTools();
+    const { copy, download } = useConversationImageTools();
     const [source, setSource] = useState("");
     const [error, setError] = useState("");
     const [downloading, setDownloading] = useState(false);
+    const [copying, setCopying] = useState(false);
     useEffect(() => { if (owner !== openedOwner.current) onClose(); }, [owner, onClose]);
     useEffect(() => {
         let active = true;
@@ -42,6 +43,7 @@ export function ConversationImagePreview({ image, onClose }: { image: Conversati
             <span className="w-14 text-center text-xs tabular-nums">{Math.round(transform.scale * 100)}%</span>
             <Button aria-label={t("放大大图")} disabled={transform.scale >= 16} icon={<ZoomIn size={18} />} onClick={actions.onZoomIn} />
             <Button icon={<Maximize size={16} />} onClick={actions.onReset}>{t("适应画面")}</Button>
+            <Button loading={copying} icon={<Copy size={16} />} onClick={() => { setCopying(true); void copy(image).finally(() => setCopying(false)); }}>{t("复制图片")}</Button>
             <Button loading={downloading} icon={<Download size={16} />} onClick={() => { setDownloading(true); void download(image).finally(() => setDownloading(false)); }}>{t("下载原图")}</Button>
         </div>,
     }} />;

@@ -1,6 +1,7 @@
 import { useUiText } from "@/lib/i18n";
 import { memo, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { Button, Tooltip } from "antd";
+import { App, Button, Tooltip } from "antd";
+import { pastedConversationImageFiles } from "@/lib/conversation-image-clipboard";
 import { ArrowUp, Bot, CheckCircle2, CircleAlert, Copy, ImagePlus, LoaderCircle, Pencil, Square, UserRound, WandSparkles, Wrench, X, XCircle } from "lucide-react";
 import copyToClipboard from "copy-to-clipboard";
 import { ChatMarkdown } from "@/pages/chat/chat-markdown";
@@ -55,13 +56,12 @@ export const AgentChatMessage = memo(function AgentChatMessage({ item, theme, us
         );
     }
     return (
-        <div className={`flex items-start gap-3 ${isUser ? "justify-end" : "justify-start"}`}>
-            {!isUser ? <AgentAvatar theme={theme} /> : null}
-            <div className={`min-w-0 max-w-[82%] text-sm leading-6 ${isUser ? "text-right" : "text-left"}`} style={{ color }}>
+        <div data-message-role={item.role} className={`flex min-w-0 items-start gap-2 ${isUser ? "justify-end" : "justify-start"}`}>
+            <div className={`min-w-0 text-sm leading-7 [overflow-wrap:anywhere] ${isUser ? "max-w-[88%] rounded-2xl px-3 py-2.5 text-right" : "w-full text-left"}`} style={{ color, background: isUser ? theme.node.fill : undefined }}>
                 <div className="break-words text-left">{isUser ? <div className="whitespace-pre-wrap">{item.text}</div> : <ChatMarkdown>{item.text}</ChatMarkdown>}</div>
                 {item.attachments?.length ? <AgentMessageAttachments messageId={item.id} attachments={item.attachments} theme={theme} onUseImageForVideo={onUseImageForVideo} imageControls={imageControls} activeImageId={activeImageId} disabled={imageActionsDisabled} onImageAction={onImageAction} onMaskImage={onMaskImage} conversationOnlyImages={conversationOnlyImages} /> : null}
                 {item.meta ? <div className="mt-1 text-[11px] opacity-45">{maskImageModelText(item.meta)}</div> : null}
-                <div className="mt-1 flex gap-2 text-[11px]" style={{ color: theme.node.muted }}>
+                <div className="mt-1 flex flex-wrap gap-3 text-[11px]" style={{ color: theme.node.muted }}>
                     <button type="button" className="inline-flex min-h-7 items-center gap-1 hover:underline" onClick={() => copyToClipboard(item.text)} aria-label={t("复制消息")}><Copy size={12} />{t("复制")}</button>
                     {isUser && onEditMessage ? <button type="button" disabled={imageActionsDisabled} className="inline-flex min-h-7 items-center gap-1 hover:underline disabled:opacity-40" onClick={() => onEditMessage(item.id)}><Pencil size={12} />{t("编辑后重发")}</button> : null}
                 </div>
@@ -222,19 +222,20 @@ export function AgentChatComposer({
     onMentionImage?: (image: ConversationImageItem) => boolean | void | string | Promise<boolean | void | string>;
 }) {
     const t = useUiText();
+    const { message } = App.useApp();
     const fileInputRef = useRef<HTMLInputElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     useLayoutEffect(() => {
         const textarea = textareaRef.current;
         if (!textarea) return;
         textarea.style.height = "auto";
-        textarea.style.height = `${Math.min(192, Math.max(80, textarea.scrollHeight))}px`;
+        textarea.style.height = `${Math.min(160, Math.max(56, textarea.scrollHeight))}px`;
     }, [prompt]);
     const canSubmit = !disabled && !submitDisabled && !sending && Boolean(prompt.trim());
     const mentions = useImageMentions({ value: prompt, onChange: onPromptChange, images: mentionImages, onSelect: onMentionImage || (() => false), disabled: disabled || sending || !onMentionImage });
     return (
-        <div className="min-w-0 w-full shrink-0 px-2 pb-2 pt-2" onWheelCapture={(event) => event.stopPropagation()}>
-            <div className="min-w-0 rounded-xl border px-2.5 pb-2 pt-2 shadow-sm" style={{ background: theme.node.panel, borderColor: theme.node.stroke }}>
+        <div className="mx-auto w-full min-w-0 max-w-3xl shrink-0 px-3 pb-3 pt-2" onWheelCapture={(event) => event.stopPropagation()}>
+            <div className="min-w-0 rounded-3xl border px-3 pb-2 pt-3 shadow-sm focus-within:outline focus-within:outline-1 focus-within:outline-[var(--composer-focus)]" style={{ background: theme.node.panel, borderColor: theme.node.stroke, "--composer-focus": theme.node.muted } as CSSProperties}>
                 {imageTarget}
                 {attachmentPreview ?? (attachments.length ? (
                     <div className="thin-scrollbar mb-2 flex gap-2 overflow-x-auto pb-1">
@@ -259,11 +260,12 @@ export function AgentChatComposer({
                     onChange={mentions.handleChange}
                     onSelect={mentions.handleSelect}
                     onPaste={(event) => {
-                        if (!onAddFiles || sending || disabled) return;
-                        const images = Array.from(event.clipboardData.files).filter((file) => file.type.startsWith("image/"));
-                        if (!images.length) return;
+                        const images = pastedConversationImageFiles(event.clipboardData);
+                        if (!images) return;
+                        void images.catch(() => undefined);
                         event.preventDefault();
-                        void onAddFiles(images);
+                        if (!onAddFiles || sending || disabled) return;
+                        void images.then(onAddFiles).catch(error => message.error(error instanceof Error ? t(error.message) : t("图片复制失败，请重试")));
                     }}
                     onKeyDown={(event) => {
                         if (event.nativeEvent.isComposing || event.keyCode === 229) return;
@@ -273,13 +275,13 @@ export function AgentChatComposer({
                         event.preventDefault();
                         if (canSubmit && !event.repeat) void onSubmit();
                     }}
-                    className="thin-scrollbar max-h-48 min-h-20 w-full resize-none border-0 bg-transparent px-1 py-1 text-sm leading-5 outline-none placeholder:text-[var(--canvas-placeholder)] placeholder:opacity-100"
-                    style={{ color: theme.node.text, "--canvas-placeholder": theme.node.placeholder } as CSSProperties}
+                    className="thin-scrollbar block max-h-40 min-h-14 w-full resize-none overflow-y-auto overscroll-contain border-0 bg-transparent px-1 py-1 text-base leading-6 outline-none placeholder:text-[var(--canvas-placeholder)] placeholder:opacity-100"
+                    style={{ color: theme.node.text, outline: "none", "--canvas-placeholder": theme.node.placeholder } as CSSProperties}
                     placeholder={placeholder}
                 />
                 </div>
                 {!prompt.trim() && attachments.length ? <p className="px-1 text-[11px]" style={{ color: theme.node.muted }}>{t("请写下希望如何处理这些图片")}</p> : null}
-                <div data-testid="canvas-agent-composer-controls" className="mt-2 grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-2 border-t pt-2" style={{ borderColor: theme.node.stroke }}>
+                <div data-testid="canvas-agent-composer-controls" className="mt-2 grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1">
                     {generationControls ? <div data-testid="canvas-agent-generation-slot" className="contents">{generationControls}</div>
                         : <div className="flex min-w-0 flex-wrap items-center gap-1">{left}</div>}
                     <div data-testid="canvas-agent-composer-actions" className={`flex shrink-0 items-center justify-end gap-1${generationControls ? " col-start-2 row-start-2" : ""}`}>
@@ -404,7 +406,7 @@ function AgentUserAvatar({ user, theme }: { user: LocalUser | null; theme: (type
     const t = useUiText();
     const avatarUrl = user?.avatarUrl?.trim();
     return (
-        <span className="grid size-8 shrink-0 place-items-center overflow-hidden rounded-full" style={{ color: theme.node.text }}>
+        <span className="mt-2 grid size-6 shrink-0 place-items-center overflow-hidden rounded-full" style={{ color: theme.node.text }}>
             {avatarUrl ? <img src={avatarUrl} alt="" className="size-full object-cover" referrerPolicy="no-referrer" /> : <UserRound className="size-4" />}
         </span>
     );
@@ -414,7 +416,7 @@ function AgentMessageAttachments({ messageId, attachments, theme, onUseImageForV
     const t = useUiText();
     const [previewImage, setPreviewImage] = useState<ConversationImageItem | null>(null);
     return (
-        <div className="mt-2 grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 260px), 1fr))" }}>
+        <div className="mt-3 grid min-w-0 max-w-[36rem] gap-3" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 260px), 1fr))" }}>
             {attachments.map((item) => {
                 const control = imageControls?.get(`${messageId}:${item.id}`);
                 const selected = !conversationOnlyImages && Boolean(control && control.image.id === activeImageId);
@@ -428,25 +430,27 @@ function AgentMessageAttachments({ messageId, attachments, theme, onUseImageForV
                         height={item.height}
                         alt={item.name}
                         controls={item.mediaType === "video"}
-                        className={item.mediaType === "video" ? "aspect-video w-full bg-black object-cover" : "h-48 w-full object-contain"}
+                        className={item.mediaType === "video" ? "aspect-video w-full bg-black object-contain" : "aspect-[4/3] max-h-96 w-full object-contain"}
                     />
                 );
                 const videoAction = item.mediaType !== "video" && onUseImageForVideo ? (
                         <button type="button" disabled={disabled} className="inline-flex min-h-9 items-center justify-center gap-1.5 px-2 py-2 text-xs font-medium transition hover:opacity-70 disabled:opacity-35" onClick={() => onUseImageForVideo(item)}>
                             <WandSparkles className="size-3.5" />
                             {t("选此图生成视频")}</button>) : null;
-                return <div key={item.id} data-testid="canvas-agent-image-result" data-image-id={control?.image.id} className="group/result relative overflow-hidden rounded-xl border" style={{ borderColor: selected ? theme.node.activeStroke : theme.node.stroke }}>
-                    {item.mediaType !== "video" ? <button type="button" disabled={Boolean(control?.image.unavailableReason) || (!item.url && !item.storageKey)} onClick={() => setPreviewImage(control?.image || { id: item.id, label: item.name, name: item.name, dataUrl: item.url, storageKey: item.storageKey })} aria-haspopup="dialog" aria-label={`${t("查看大图")} · ${conversationImageLabel(control?.image.label || item.name)}`} className="relative block w-full cursor-zoom-in focus-visible:outline-2 focus-visible:outline-offset-[-2px]" style={{ outlineColor: theme.canvas.selectionStroke }}>
+                return <div key={item.id} data-testid="canvas-agent-image-result" data-image-id={control?.image.id} className="group/result relative min-w-0 overflow-hidden rounded-2xl" style={{ outline: selected ? `1px solid ${theme.node.activeStroke}` : undefined }}>
+                    {item.mediaType !== "video" ? <button type="button" disabled={Boolean(control?.image.unavailableReason) || (!item.url && !item.storageKey)} onClick={() => setPreviewImage(control?.image || { id: item.id, label: item.name, name: item.name, dataUrl: item.url, storageKey: item.storageKey })} aria-haspopup="dialog" aria-label={`${t("查看大图")} · ${conversationImageLabel(control?.image.label || item.name)}`} className="relative block w-full overflow-hidden rounded-2xl cursor-zoom-in focus-visible:outline-2 focus-visible:outline-offset-[-2px]" style={{ outlineColor: theme.canvas.selectionStroke, background: theme.node.fill }}>
                         {preview}{control ? <span className="pointer-events-none absolute left-2 top-2 rounded px-1.5 py-0.5 text-xs" style={{ color: theme.node.text, background: theme.node.panel }}>{conversationImageLabel(control.image.label)}{version ? ` · V${version}` : ""}</span> : null}
                         {selected ? <span data-testid="canvas-agent-image-current" className="pointer-events-none absolute right-2 top-2 rounded px-1.5 py-0.5 text-xs font-medium" style={{ color: theme.node.panel, background: theme.canvas.selectionStroke }}>{t("当前")}</span> : null}
                     </button> : preview}
-                    {control && onImageAction ? <div data-testid="canvas-agent-image-actions" className="absolute inset-x-2 bottom-2 transition-opacity group-hover/result:pointer-events-auto group-hover/result:opacity-100 group-focus-within/result:pointer-events-auto group-focus-within/result:opacity-100 [@media(hover:hover)]:pointer-events-none [@media(hover:hover)]:opacity-0 motion-reduce:transition-none">
+                    {control && onImageAction ? <div data-testid="canvas-agent-image-actions" className="mt-1 min-h-9 transition-opacity group-hover/result:pointer-events-auto group-hover/result:opacity-100 group-focus-within/result:pointer-events-auto group-focus-within/result:opacity-100 [@media(hover:hover)]:pointer-events-none [@media(hover:hover)]:opacity-0 motion-reduce:transition-none">
                         {conversationOnlyImages ? <div className="flex flex-wrap items-center gap-2 rounded px-2" style={{ color: theme.node.text, background: theme.node.panel }}>
+                            <button type="button" disabled={disabled || Boolean(control.image.unavailableReason)} className="min-h-9 text-xs hover:underline disabled:opacity-35" onClick={() => onImageAction("copy", control.image.id)}>{t("复制图片")}</button>
                             <button type="button" disabled={disabled || Boolean(control.image.unavailableReason)} className="min-h-9 text-xs hover:underline disabled:opacity-35" onClick={() => onImageAction("download", control.image.id)}>{t("下载")}</button>
                             {onMaskImage ? <button type="button" disabled={disabled || Boolean(control.image.unavailableReason)} className="min-h-9 text-xs hover:underline disabled:opacity-35" onClick={() => onMaskImage(control.image.id)}>{t("圈选修改")}</button> : null}
                             {videoAction}
                         </div> : <ConversationImageActions {...control} compact disabled={disabled} onAction={onImageAction} onMask={control.onMask || (onMaskImage ? () => onMaskImage(control.image.id) : undefined)} extra={videoAction} />}
                     </div> : videoAction}
+                    {control && onMaskImage ? <p className="px-2 text-[11px] leading-5" style={{ color: theme.node.muted }}>{t("只改局部时，先涂选；选区外保留原图")}</p> : null}
                 </div>
             })}
             {previewImage ? <ConversationImagePreview key={previewImage.id} image={previewImage} onClose={() => setPreviewImage(null)} /> : null}

@@ -14,6 +14,7 @@ import { adaptImageModelSettings, imageModelProfile, normalizeImageModelSettings
 import { validateImageReferences } from "@/lib/image-reference-policy";
 import { getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
 import { workbenchSubmissions } from "@/lib/submission-gate";
+import { completedTaskDurationMs } from "@/lib/completed-task-duration";
 import { requestEdit, requestGeneration } from "@/services/api/image";
 import { getImageBlob, resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { freezeLocalInput, restoreLocalInput } from "@/services/generation-local-inputs";
@@ -30,7 +31,8 @@ import { useToolConfig, useToolEnabled } from "@/hooks/use-tool-config";
 import { useModuleEnabled } from "@/stores/use-module-store";
 import type { ToolKey } from "../../../../shared/feature-catalog";
 import { createSceneHistory, summarizeSceneLog, type SceneLogSummary } from "./scene-history";
-import { requestQueuedImages, QueuedTaskFailedError } from "@/services/api/generation-tasks";
+import { requestQueuedImages, QueuedTaskFailedError, QueuedTaskPausedError, recoverQueuedTask } from "@/services/api/generation-tasks";
+import { watchTaskReconciliation } from "@/services/api/task-result-reconciliation";
 import { canRetrySceneResult, prepareSceneRetry, sceneFailure } from "./scene-retry";
 import { createSceneResultActions } from "./scene-result-actions";
 import { canQuerySceneResult, readSceneRequest, sceneInputMatchesLog, sceneRootRequestId } from "./scene-recovery";
@@ -38,13 +40,14 @@ import { canQuerySceneResult, readSceneRequest, sceneInputMatchesLog, sceneRootR
 export type SceneImage = ReferenceImage & {
     inputSha256?: string;
     width: number; height: number; bytes: number; mimeType: string;
-    sourceTaskId?: string; durationMs?: number;
+    sourceTaskId?: string; durationMs?: number | null;
 };
 export type SceneImages = Partial<Record<SceneSlotId, SceneImage>>;
 export type SceneParameters = Pick<AiConfig, "model" | "imageModel" | "size" | "quality" | "count" | "imageOptions">;
 export type SceneSelection = { sourceId: string; mask: SceneImage };
 export type SceneResult = { id: string; status: "pending" | "success" | "failed"; image?: SceneImage; uncompositedImage?: SceneImage; error?: string;
-    taskId?: string; requestId?: string; compilationId?: string; failureKind?: "terminal" | "uncertain" | "local"; retryLogId?: string };
+    taskId?: string; requestId?: string; compilationId?: string; failureKind?: "terminal" | "uncertain" | "local"; retryLogId?: string;
+    recovery?: "resume" | "investigate" };
 export type SceneLog = {
     inputArchiveVersion?: 1;
     userInput?: import("../../../../shared/prompt-contracts").PromptInputData;
@@ -167,6 +170,8 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
     const inputEpoch = useRef<Record<SceneSlotId, number>>({ primary: 0, secondary: 0 });
     const viewEpoch = useRef(0);
     const observationControllers = useRef(new Set<AbortController>());
+    const [observationStopped, setObservationStopped] = useState(false);
+    const queryingResult = useRef(false);
     const [loadedScope, setLoadedScope] = useState<string | null>();
     const [draftReady, setDraftReady] = useState(false);
     const [form, setForm] = useState(() => createSceneForm(sceneId));
@@ -197,7 +202,7 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
     const resultActionGate = useRef(false);
     const loading = loadedScope !== scope || restoring;
     useWorkbenchTaskStatus({ busy: running || restoring || uploadCount > 0 || resultActionBusy, pending: pendingLogIds.size > 0,
-        ready: loadedScope === scope && draftReady, label: results.some(result => result.status === "success") ? "已完成" : results.some(result => result.status === "failed") ? "已失败" : "草稿" });
+        ready: loadedScope === scope && draftReady, label: results.some(canQuerySceneResult) ? "等待结果" : results.some(result => result.status === "success") ? "已完成" : results.some(result => result.status === "failed") ? "已失败" : "草稿" });
     const toolKey = `creative-${sceneId}` as ToolKey;
     const toolEnabled = useToolEnabled(toolKey);
     const selectionEnabled = useModuleEnabled("creative-selection");
@@ -246,6 +251,7 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
     useEffect(() => {
         const revision = ++epoch.current;
         knownLogIds.current.clear(); setPendingLogIds(new Set()); setRecoveredRequestId(null);
+        setObservationStopped(false);
         setForm(createSceneForm(sceneId)); setImages({}); setSelection(null); setLogs([]); setResults([]); setActiveLog(null); setSelectedPrompt(null); setPreviewing(false);
         setHistoryTotal(0); setHistoryHasMore(false); setHistoryLoading(false); historyLoadingRef.current = false;
         setSystemPromptOverride(undefined);
@@ -296,7 +302,7 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
                     if (revision === epoch.current) {
                         setActiveLog(pendingLog); setResults(pendingLog.results); setSelectedPrompt(pendingLog.prompt); setRecoveredRequestId(pendingLog.id);
                         if (pendingLogs[0]) {
-                            setNotice(uiText("已恢复未结束的原请求。请查询原请求，不会自动重新生成或扣费；修改设计输入可开始新任务。"));
+                            setNotice(uiText("已恢复上次任务，正在自动获取结果；不会重新生成。"));
                         }
                     }
                 }
@@ -445,6 +451,7 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
     };
 
     const stopObserving = () => {
+        setObservationStopped(true);
         for (const controller of observationControllers.current) controller.abort();
         setNotice(uiText("已停止本页查询；服务端任务可能继续，可查询原任务。"));
     };
@@ -453,6 +460,7 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
         if (running || restoring || historyLoadingRef.current || log.ownerId !== user?.id || log.sceneId !== sceneId) return;
         const revision = epoch.current;
         const viewRevision = ++viewEpoch.current;
+        setObservationStopped(false);
         setActiveLog(null); setSelectedPrompt(null);
         setResults([]); setPreviewing(true); setError(null); setNotice(null);
         try {
@@ -558,6 +566,7 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
         const storageWarnings: string[] = [];
         const controller = new AbortController(); observationControllers.current.add(controller);
         viewEpoch.current += 1;
+        setObservationStopped(false);
         setRunning(true); setError(null); setNotice(null); setActiveLog(null); setSelectedPrompt(null); setPreviewing(false); setResults(pending); setStartedAt(start);
         const updateResult = (index: number, result: SceneResult) => {
             if (revision === epoch.current) setResults(current => current.map((item, itemIndex) => itemIndex === index ? result : item));
@@ -667,26 +676,32 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
         finally { observationControllers.current.delete(controller); release(); if (revision === epoch.current) { setRunning(false); setOptimizing(false); } }
     };
 
-    const queryResult = async (result: SceneResult, continueSubmission = false) => {
-        if (!user || !history || !activeLog || running || loading || !canQuerySceneResult(result)) return;
+    const queryResult = async (result: SceneResult, continueSubmission = false, observationSignal?: AbortSignal) => {
+        const automatic = Boolean(observationSignal);
+        if (!user || !history || !activeLog || running || loading || queryingResult.current || !canQuerySceneResult(result) || (automatic && continueSubmission)) return;
         const release = workbenchSubmissions.acquire(`creative:${scope}`);
         if (!release) return;
-        const revision = epoch.current, originalId = activeLog.id;
+        queryingResult.current = true;
+        const revision = epoch.current, viewRevision = viewEpoch.current, originalId = activeLog.id;
         const controller = new AbortController(); observationControllers.current.add(controller);
-        const assertCurrent = () => { if (revision !== epoch.current || useUserStore.getState().user?.id !== user.id) throw new Error("员工或场景已变化，未继续原请求"); };
-        setRunning(true); setOptimizing(false); setError(null); setNotice(null);
+        const signal = observationSignal ? AbortSignal.any([controller.signal, observationSignal]) : controller.signal;
+        const assertCurrent = () => { signal.throwIfAborted(); if (revision !== epoch.current || viewRevision !== viewEpoch.current || useUserStore.getState().user?.id !== user.id) throw new Error("员工或场景已变化，未继续原请求"); };
+        if (!automatic) { setObservationStopped(false); setRunning(true); setOptimizing(false); setError(null); setNotice(null); }
         try {
+            assertCurrent();
             let log = await history.read(originalId);
             let currentResult = log.results.find(item => item.id === result.id);
             if (!currentResult) throw new Error("原结果记录已变化，请重新打开历史");
-            const original = await readSceneRequest(log, currentResult, user.id);
+            assertCurrent();
+            if (!canQuerySceneResult(currentResult)) return;
+            const original = await readSceneRequest(log, currentResult, user.id, undefined, AbortSignal.any([signal, AbortSignal.timeout(10_000)]));
             assertCurrent();
             const commit = async (next: SceneResult, patch: Partial<SceneLog> = {}) => {
                 assertCurrent();
                 const results = log.results.map(item => item.id === next.id ? next : item);
                 log = { ...log, ...patch, results, images: results.flatMap(item => item.image ? [item.image] : []), successCount: results.filter(item => item.status === "success").length, failCount: results.filter(item => item.status === "failed" && item.failureKind !== "uncertain").length };
                 await history.save(serializeSceneLog(log)); assertCurrent(); currentResult = next;
-                setActiveLog(log); setResults(results); setSelectedPrompt(log.prompt); rememberLog(log);
+                setActiveLog(log); setResults(results); setSelectedPrompt(log.prompt); rememberLog(log); setError(null);
             };
             const restoreSnapshot = async () => {
                 if (!log.selection) return { images: log.referenceImages, selection: null };
@@ -696,18 +711,26 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
                 assertCurrent(); return { images: restoredImages, selection: restoredSelection };
             };
             if (original.task) {
-                const task = original.task;
+                let task = original.task;
+                if (continueSubmission && task.status === "paused" && task.upstreamTaskId?.trim()) {
+                    task = await recoverQueuedTask(task.id, signal);
+                    assertCurrent();
+                }
                 const patch = { prompt: task.prompt || log.prompt, userInput: task.userInput || log.userInput, optimized: task.optimized === true };
                 if (task.status === "success") {
                     if (!task.resultUrls[0]) throw new Error("原任务成功但未返回结果图片，请勿重新生成");
                     const snapshot = await restoreSnapshot(); assertCurrent();
-                    const completed = await storeSceneResult({ ...currentResult, taskId: task.id, failureKind: undefined, error: undefined, compilationId: undefined }, { id: `${task.id}:0`, dataUrl: task.resultUrls[0], sourceTaskId: task.id, prompt: patch.prompt, userInput: patch.userInput, optimized: patch.optimized }, 0, sceneId, snapshot, text => setNotice(uiText(text)));
+                    const completed = await storeSceneResult({ ...currentResult, taskId: task.id, failureKind: undefined, recovery: undefined, error: undefined, compilationId: undefined }, { id: `${task.id}:0`, dataUrl: task.resultUrls[0], sourceTaskId: task.id, durationMs: completedTaskDurationMs(task), prompt: patch.prompt, userInput: patch.userInput, optimized: patch.optimized }, 0, sceneId, snapshot, text => setNotice(uiText(text)));
                     await commit(completed, patch); setNotice(uiText("已找回原任务结果，没有重新生成或扣费。"));
                 } else if (task.status === "failed" || task.status === "cancelled") {
                     await commit({ id: currentResult.id, ...sceneFailure(new QueuedTaskFailedError(task), true, task.id, task.requestId) }, patch);
+                } else if (task.status === "paused") {
+                    await commit({ id: currentResult.id, ...sceneFailure(new QueuedTaskPausedError(task), true, task.id, task.requestId) }, patch);
+                } else if (["waiting", "processing"].includes(task.status)) {
+                    await commit({ ...currentResult, taskId: task.id, requestId: task.requestId, status: "pending", failureKind: "uncertain", recovery: undefined, compilationId: undefined, error: "图片正在生成，完成后会自动显示。" }, patch);
+                    if (!automatic) setNotice(uiText("图片仍在生成，完成后会自动显示。"));
                 } else {
-                    await commit({ ...currentResult, taskId: task.id, requestId: task.requestId, status: "pending", failureKind: "uncertain", compilationId: undefined, error: task.failureReason || "原图片任务仍在执行，可稍后查询；不会重新提交。" }, patch);
-                    setNotice(uiText("原图片任务尚未结束，本次仅查询了原任务。"));
+                    await commit({ ...currentResult, status: "failed", failureKind: "uncertain", recovery: "investigate", error: "暂时无法获取结果，需要管理员协助。" }, patch);
                 }
                 return;
             }
@@ -717,10 +740,10 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
                 return;
             }
             if (compilation?.status !== "success" || !compilation.prompt?.trim()) {
-                await commit({ ...currentResult, status: "failed", failureKind: "uncertain", compilationId: undefined, error: compilation?.message || "原请求仍在优化或状态待核查。可稍后查询，不会自动重新提交。" });
+                await commit({ ...currentResult, status: "failed", failureKind: "uncertain", compilationId: undefined, error: compilation?.status === "optimizing" ? "正在准备提示词，请稍候。" : "暂时无法获取进度，稍后会自动更新。" });
                 return;
             }
-            await commit({ ...currentResult, status: "failed", failureKind: "uncertain", compilationId: compilation.id, error: "原提示词已优化完成，图片任务尚未查到。可明确点击继续原请求；仍使用原请求编号，不会重复优化或创建两张图片。" }, { prompt: compilation.prompt, optimized: compilation.optimized });
+            await commit({ ...currentResult, status: "failed", failureKind: "uncertain", compilationId: compilation.id, error: "准备已完成，图片尚未开始生成。点击“继续生成”可沿用已保存的设置。" }, { prompt: compilation.prompt, optimized: compilation.optimized });
             if (!continueSubmission) return;
             if (!toolEnabled || !log.userInput || !log.submittedReferences || !sceneRootRequestId(currentResult)) throw new Error("缺少原始提交归档或场景已停用，无法安全继续原请求");
             const restoredReferences = await Promise.all(log.submittedReferences.map(restoreLocalInput));
@@ -740,9 +763,29 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
                 assertCurrent();
                 await commit({ id: currentResult!.id, ...sceneFailure(caught, submitted, currentResult!.taskId, currentResult!.requestId) });
             }
-        } catch (caught) { if (revision === epoch.current) setError(uiText(errorText(caught))); }
-        finally { observationControllers.current.delete(controller); release(); if (revision === epoch.current) { setRunning(false); setOptimizing(false); } }
+        } catch (caught) { if (!signal.aborted && revision === epoch.current && viewRevision === viewEpoch.current && useUserStore.getState().user?.id === user.id) setError(uiText(automatic ? "暂时无法获取进度，稍后会自动更新。" : errorText(caught))); }
+        finally { observationControllers.current.delete(controller); release(); queryingResult.current = false; if (!automatic && revision === epoch.current) { setRunning(false); setOptimizing(false); } }
     };
+
+    // Reuse the shared GET-only observer. A restored request never starts another
+    // generation or resumes a paused upstream task without an explicit action.
+    const reconcileCurrentResults = useRef<(signal: AbortSignal) => Promise<void>>(async () => {});
+    reconcileCurrentResults.current = async signal => {
+        for (const result of results.filter(canQuerySceneResult)) {
+            signal.throwIfAborted();
+            await queryResult(result, false, signal);
+        }
+    };
+    const reconciliationKey = activeLog ? `${activeLog.id}:${results.filter(canQuerySceneResult).map(result => `${result.id}:${result.taskId || ""}`).join("|")}` : "";
+    const autoObserving = Boolean(!observationStopped && !running && !loading && workbenchTask.active && user?.status === "active" && results.some(canQuerySceneResult));
+    useEffect(() => {
+        if (!autoObserving || !reconciliationKey) return;
+        const controller = new AbortController(); observationControllers.current.add(controller);
+        void watchTaskReconciliation({ taskIds: results.flatMap(result => canQuerySceneResult(result) && result.taskId ? [result.taskId] : []), signal: controller.signal,
+            reconcile: () => reconcileCurrentResults.current(controller.signal),
+        }).catch(() => { /* Unmount, stop, task switch and account changes dispose this observer. */ });
+        return () => { controller.abort(); observationControllers.current.delete(controller); };
+    }, [scope, reconciliationKey, autoObserving, user?.id]);
 
     const resultAction = async (action: "saveAsset" | "canvas" | "reference", image: SceneImage) => {
         if (!resultActions || !activeLog || resultActionGate.current || running) return;
@@ -772,5 +815,5 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
     const updateForm: typeof setForm = (value) => { viewEpoch.current += 1; setRestoring(false); setPreviewing(false); setSelectedPrompt(null); setForm(value); };
     return { form, setForm: updateForm, images, setImage, setAsset, selection, saveSelection, clearSelection: () => { if (!running) { viewEpoch.current += 1; setRestoring(false); setPreviewing(false); setSelectedPrompt(null); setSelection(null); setError(null); } }, saveLocalResult, config, updateConfig, model, profile, count, running, optimizing, loading,
         uploading: uploadCount > 0, logs, historyTotal, historyHasMore, historyLoading, loadMoreHistory, deleteLogs, stopObserving, activeLog, selectedPrompt, previewing, previewLog, selectResultPrompt, results, generate, restoreLog, reset, error, validation,
-        quotaBlocked, estimatedCredits: estimateValue.credits, download, startedAt, notice, resultActionBusy, resultAction, retryResult, queryResult, recoveredRequestId };
+        quotaBlocked, estimatedCredits: estimateValue.credits, download, startedAt, notice, resultActionBusy, resultAction, retryResult, queryResult, autoObserving, recoveredRequestId };
 }

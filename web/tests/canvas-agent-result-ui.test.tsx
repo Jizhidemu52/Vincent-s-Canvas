@@ -42,7 +42,7 @@ test("result card keeps original media, explicit version and current selection w
     const preview = tree.find(element => element.type === "preview")!;
     expect(preview.props).toMatchObject({ url: attachment.url, alt: attachment.name, width: 320, height: 240 });
     expect(tree.find(element => element.type === "button")!.props["aria-haspopup"]).toBe("dialog");
-    expect(byId(tree, "canvas-agent-image-result").props.style.borderColor).toBe(canvasThemes.light.node.activeStroke);
+    expect(byId(tree, "canvas-agent-image-result").props.style.outline).toBe(`1px solid ${canvasThemes.light.node.activeStroke}`);
     expect(tree.some(element => element.type === "span" && element.props.children?.includes?.(" · V3"))).toBe(true);
     expect(byId(tree, "canvas-agent-image-current").props.children).toBe("当前");
     const actions = tree.find(element => element.type === "image-actions")!;
@@ -81,7 +81,7 @@ test("busy, unavailable and unselected cards retain accurate state without inven
     expect(byId(unavailable, "canvas-agent-image-current")).toBeUndefined();
     expect(unavailable.some(element => element.type === "span" && element.props.children?.includes?.(" · V0"))).toBe(false);
     const plain = render({ imageControls: undefined });
-    expect(byId(plain, "canvas-agent-image-result").props.style.borderColor).toBe(canvasThemes.light.node.stroke);
+    expect(byId(plain, "canvas-agent-image-result").props.style.outline).toBeUndefined();
     expect(byId(plain, "canvas-agent-image-actions")).toBeUndefined();
 });
 

@@ -4,6 +4,7 @@ import ts from "typescript";
 import { findPendingImageTask, updateImageResultForRecord, type PendingImage } from "../src/pages/image/image-pending";
 import { classifyTaskRecovery, submissionInvestigationMessage } from "../src/services/api/task-result-reconciliation";
 import { generationErrorDiagnostic } from "../src/lib/generation-feedback";
+import { completedTaskDurationMs } from "../src/lib/completed-task-duration";
 import { defaultConfig } from "../src/stores/use-config-store";
 import type { QueuedTask } from "../src/services/api/generation-tasks";
 
@@ -35,7 +36,7 @@ function harness(options: { task?: QueuedTask | null; results?: any[]; records?:
         mountedRef: { current: true }, activeSubmissionRef: { current: false }, finishingImages: { current: options.commits || new Map() },
         latestPendingImages: { current: [...records.values()] },
         useUserStore: { getState: () => ({ user: { id: owner } }) },
-        findPendingImageTask, updateImageResultForRecord, classifyTaskRecovery, submissionInvestigationMessage, generationErrorDiagnostic,
+        findPendingImageTask, updateImageResultForRecord, classifyTaskRecovery, submissionInvestigationMessage, generationErrorDiagnostic, completedTaskDurationMs,
         async getQueuedTask(id: string, signal: AbortSignal) { signal.throwIfAborted(); calls.push(`GET ${id}`); return currentTask; },
         async getQueuedTaskByRequestId(id: string, signal: AbortSignal) { signal.throwIfAborted(); calls.push(`GET request:${id}`); return currentTask; },
         async uploadImage(url: string) { uploads.push(url); await options.upload?.(url); return { url, storageKey: `stored:${url}`, width: 100, height: 100, bytes: 123, mimeType: "image/png" }; },
@@ -61,6 +62,14 @@ test("an already successful original task is imported once without using current
     expect(h.logs[0]).toMatchObject({ id: pending.id, model: "disabled-old-provider-model" });
     expect(h.results()[0]).toMatchObject({ id: pending.id, status: "success", image: { sourceTaskId: task.id } });
     expect(h.records.size).toBe(0);
+    expect(h.logs[0].durationMs).toBeNull();
+});
+
+test("late image reconciliation uses backend completion time, not the age of the browser record", async () => {
+    const h = harness({ task: { ...task, queuedAt: "2026-11-10T07:50:48.073Z", completedAt: "2026-11-10T07:59:32.825Z" } });
+    await h.reconcile(pending, new AbortController().signal);
+    expect(h.logs[0].durationMs).toBe(524752);
+    expect(h.results()[0].image.durationMs).toBe(524752);
 });
 
 test.each([

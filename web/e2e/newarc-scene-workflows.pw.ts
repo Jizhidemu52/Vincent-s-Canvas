@@ -91,9 +91,9 @@ test("a pending try-on request keeps its original receipt on refresh and does no
     await upload(page, "产品图", "pending-product.png");
     await page.getByRole("textbox", { name: "成人模特与试穿要求", exact: true }).fill("成年女性，正面站姿");
     await page.getByRole("button", { name: /^生成试穿效果/ }).click();
-    await expect(page.getByRole("button", { name: "查询原请求", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "刷新进度", exact: true })).toBeVisible();
     const originalId = api.submissions[0].requestId;
     await page.reload();
-    await expect(page.getByRole("button", { name: "查询原请求", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "刷新进度", exact: true })).toBeVisible();
     expect(api.submissions).toHaveLength(1); expect(api.submissions[0].requestId).toBe(originalId);
 });
