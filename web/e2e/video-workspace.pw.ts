@@ -15,11 +15,13 @@ test("视频可并行提交且刷新恢复各自结果，手动入库不重复�
     let failAcknowledgement = false;
     let originalLookupUnavailable = false;
     const lookedUpRequestIds: string[] = [];
+    const lookupMethods: string[] = [];
     await context.route("**/api/models", route => route.fulfill({ json: { models: [model], tools: toolDefinitions.map(tool => ({ ...tool, enabled: true, modelConfigId: model.id, configurationVersion: 1 })), prices: [] } }));
     await context.route("**/api/tasks/preflight", route => route.fulfill({ json: { ok: true, normalized: {} } }));
     await context.route("**/api/tasks/by-request/*", route => {
         const requestId = decodeURIComponent(new URL(route.request().url()).pathname.split("/").at(-1)!);
         lookedUpRequestIds.push(requestId);
+        lookupMethods.push(route.request().method());
         if (originalLookupUnavailable) return route.fulfill({ status: 503, json: { error: "FIXTURE_TASK_LOOKUP_UNAVAILABLE" } });
         return route.fulfill({ json: { task: [...api.tasks.values()].find(task => task.requestId === requestId) } });
     });
@@ -55,9 +57,16 @@ test("视频可并行提交且刷新恢复各自结果，手动入库不重复�
     await prompt.fill("第三条视频：提交响应中断");
     await page.getByRole("button", { name: "继续生成新视频", exact: true }).click();
     await expect.poll(() => api.submissions.length).toBe(3);
-    await expect(page.getByText("原任务查询暂停", { exact: true })).toBeVisible();
+    await expect(page.getByText("暂时无法获取进度", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "继续获取结果", exact: true })).toBeEnabled();
+    await expect(page.getByRole("status", { name: "视频生成中" })).toHaveCount(2);
+    await expect(page.getByRole("button", { name: "继续生成新视频", exact: true })).toBeEnabled();
     expect(lookedUpRequestIds).toEqual([api.submissions[2]!.requestId]);
+    expect(lookupMethods).toEqual(["GET"]);
     expect(api.submissions).toHaveLength(3);
+    const submittedRequestIds = api.submissions.map(item => item.requestId);
+    expect(submittedRequestIds.every(requestId => typeof requestId === "string" && requestId.length > 0)).toBe(true);
+    expect(new Set(submittedRequestIds).size).toBe(3);
     const lookupsBeforeReload = lookedUpRequestIds.length;
     originalLookupUnavailable = false;
     for (const task of api.tasks.values()) { task.status = "success"; task.resultUrls = [`/api/assets/${task.id}/content`]; }
@@ -65,7 +74,9 @@ test("视频可并行提交且刷新恢复各自结果，手动入库不重复�
     await expect(page.locator("video")).toHaveCount(3);
     await expect.poll(() => lookedUpRequestIds.length).toBeGreaterThan(lookupsBeforeReload);
     expect(lookedUpRequestIds.every(requestId => requestId === api.submissions[2]!.requestId)).toBe(true);
+    expect(lookupMethods).toEqual(lookedUpRequestIds.map(() => "GET"));
     expect(api.submissions).toHaveLength(3);
+    expect(api.submissions.map(item => item.requestId)).toEqual(submittedRequestIds);
     await page.getByRole("button", { name: "保存到素材库", exact: true }).first().click();
     await expect(page.getByText("该视频已在我的素材中，无需重复添加")).toBeVisible();
     // Only generated server assets exist; no upload-request was issued for a result.

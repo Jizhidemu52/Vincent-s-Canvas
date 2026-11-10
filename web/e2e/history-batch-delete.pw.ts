@@ -89,6 +89,15 @@ test("image partial failure keeps only failed history and media selected, then p
 });
 
 async function seedScene(page: Page, count: number) {
+    const originalLookups: string[] = [], taskWrites: string[] = [];
+    page.on("request", request => { if (new URL(request.url()).pathname.startsWith("/api/tasks") && request.method() !== "GET") taskWrites.push(`${request.method()} ${new URL(request.url()).pathname}`); });
+    // Preserve a genuinely unresolved record while the GET-only observer runs.
+    // Only this seeded request is declared; every other unknown API still fails.
+    await page.route("**/api/tasks/by-request/unresolved%3A0", route => {
+        expect(route.request().method()).toBe("GET");
+        originalLookups.push(decodeURIComponent(new URL(route.request().url()).pathname.split("/").at(-1)!));
+        return route.fulfill({ status: 503, json: { error: "TEMPORARILY_UNAVAILABLE", message: "原任务状态暂不可确认" } });
+    });
     await page.goto(`/creative/${SCENE}`);
     await expect(page.getByText("正在恢复场景草稿…", { exact: true })).toHaveCount(0);
     await expect(page.getByRole("button", { name: /最近任务/ })).toBeVisible();
@@ -102,8 +111,10 @@ async function seedScene(page: Page, count: number) {
         await history.save({ ...base, id: "unresolved", createdAt: 1700000001000, successCount: 0, results: [{ id: "pending-result", status: "pending", requestId: "unresolved:0" }] });
     }, { owner: OWNER, scene: SCENE, count });
     await page.reload();
+    await expect.poll(() => originalLookups.length).toBeGreaterThan(0);
     await page.getByRole("button", { name: /最近任务/ }).click();
     await expect(page.getByRole("button", { name: "批量管理", exact: true })).toBeEnabled();
+    return { originalLookups, taskWrites };
 }
 
 async function sceneRecords(page: Page) {
@@ -115,7 +126,7 @@ async function sceneRecords(page: Page) {
 }
 
 test("creative bulk select covers only loaded finished tasks and leaves tracking plus archived details intact", async ({ page, api }, info) => {
-    await seedScene(page, 24);
+    const recovery = await seedScene(page, 24);
     await page.getByRole("button", { name: "批量管理", exact: true }).click();
     await expect(page.getByRole("button", { name: "批量删除", exact: true })).toBeDisabled();
     await page.getByRole("checkbox", { name: "全选已加载的已结束任务", exact: true }).check();
@@ -136,11 +147,14 @@ test("creative bulk select covers only loaded finished tasks and leaves tracking
     await page.setViewportSize({ width: 390, height: 844 });
     await page.getByRole("button", { name: "退出批量管理", exact: true }).scrollIntoViewIfNeeded();
     await page.screenshot({ path: info.outputPath("creative-history-mobile.png"), fullPage: true, animations: "disabled" });
+    expect(new Set(recovery.originalLookups)).toEqual(new Set(["unresolved:0"]));
+    expect(recovery.taskWrites).toEqual([]);
     expect(api.submissions).toEqual([]);
+    expect(api.batchSubmissions).toEqual([]);
 });
 
 test("creative partial index-write failure preserves only failed selection for retry", async ({ page, api }) => {
-    await seedScene(page, 3);
+    const recovery = await seedScene(page, 3);
     await page.evaluate(() => {
         const original = IDBObjectStore.prototype.put;
         (window as any).failSceneDelete = true;
@@ -162,5 +176,8 @@ test("creative partial index-write failure preserves only failed selection for r
     await page.getByRole("button", { name: "确认删除", exact: true }).click();
     await expect(page.locator(".cs-history-item")).toHaveCount(1);
     expect((await sceneRecords(page)).original).not.toBeNull();
+    expect(new Set(recovery.originalLookups)).toEqual(new Set(["unresolved:0"]));
+    expect(recovery.taskWrites).toEqual([]);
     expect(api.submissions).toEqual([]);
+    expect(api.batchSubmissions).toEqual([]);
 });

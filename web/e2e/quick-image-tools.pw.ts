@@ -119,9 +119,25 @@ test("an unresolved standalone request only refreshes its original task and cann
     await page.goto("/remove-background");
     await uploadStandaloneImage(page);
     await page.getByRole("button", { name: "一键去背景", exact: true }).click();
-    await expect(page.getByText("提交结果待核查", { exact: true })).toBeVisible();
+    // A paused task without an upstream id needs investigation, not a new
+    // submission. The visible wording is intentionally not "generation failed".
+    await expect(page.getByText("需要管理员协助", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "一键去背景", exact: true })).toBeDisabled();
-    await page.getByRole("button", { name: "刷新状态", exact: true }).click();
+    expect(api.submissions).toHaveLength(1);
+    const original = [...api.tasks.values()][0]!;
+    const taskPath = `/api/tasks/${original.id}`;
+    const readsBeforeRefresh = api.taskReads.filter(path => path === taskPath).length;
+    await page.getByRole("button", { name: "刷新进度", exact: true }).click();
+    await expect.poll(() => api.taskReads.filter(path => path === taskPath).length).toBeGreaterThan(readsBeforeRefresh);
+    await expect(page.getByText("需要管理员协助", { exact: true })).toBeVisible();
+    expect(api.submissions).toHaveLength(1);
+    // On reload, the original result is adopted automatically. Do not race
+    // that observer by clicking a recovery card which may already be gone.
+    original.status = "success";
+    original.resultUrls = [`/api/assets/${original.id}/content`];
+    await page.reload();
+    await expect(page.getByRole("button", { name: "下载", exact: true })).toBeVisible();
+    expect([...api.tasks.keys()]).toEqual([original.id]);
     expect(api.submissions).toHaveLength(1);
 });
 

@@ -143,6 +143,15 @@ test("queued cancellation is explicit, calls the original task once and verifies
 });
 
 test("creative history removal confirms and cannot remove an unresolved tracking record", async ({ page, api }) => {
+    const originalLookups: string[] = [], taskWrites: string[] = [];
+    page.on("request", request => { if (new URL(request.url()).pathname.startsWith("/api/tasks") && request.method() !== "GET") taskWrites.push(`${request.method()} ${new URL(request.url()).pathname}`); });
+    // Restored pending history now queries its original request automatically.
+    // Model an unavailable read explicitly; it is not evidence the task ended.
+    await page.route("**/api/tasks/by-request/unresolved%3A0", route => {
+        expect(route.request().method()).toBe("GET");
+        originalLookups.push(decodeURIComponent(new URL(route.request().url()).pathname.split("/").at(-1)!));
+        return route.fulfill({ status: 503, json: { error: "TEMPORARILY_UNAVAILABLE", message: "原任务状态暂不可确认" } });
+    });
     await page.goto("/creative/text-to-style");
     await expect(page.getByRole("button", { name: /最近任务/ })).toBeVisible();
     await expect(page.getByText("正在恢复场景草稿…", { exact: true })).toHaveCount(0);
@@ -164,6 +173,7 @@ test("creative history removal confirms and cannot remove an unresolved tracking
         }); db.close();
     }, { ownerId, sceneId, records });
     await page.reload();
+    await expect.poll(() => originalLookups.length).toBeGreaterThan(0);
     await page.getByRole("button", { name: /最近任务/ }).click();
     const deletions = page.getByRole("button", { name: "删除", exact: true });
     await expect(deletions).toHaveCount(2);
@@ -176,5 +186,8 @@ test("creative history removal confirms and cannot remove an unresolved tracking
     await page.getByRole("button", { name: "确认删除", exact: true }).click();
     await expect(deletions).toHaveCount(1);
     await expect(deletions).toBeDisabled();
+    expect(new Set(originalLookups)).toEqual(new Set(["unresolved:0"]));
+    expect(taskWrites).toEqual([]);
     expect(api.submissions).toHaveLength(0);
+    expect(api.batchSubmissions).toEqual([]);
 });

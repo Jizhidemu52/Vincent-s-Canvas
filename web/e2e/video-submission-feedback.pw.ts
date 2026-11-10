@@ -30,7 +30,7 @@ test("video recipe 503 is a definite failed submission, with no recovery loop af
     await page.getByRole("button", { name: "生成视频", exact: true }).click();
     await expect(page.getByRole("button", { name: "按原参数重试", exact: true })).toBeVisible();
     await expect(page.locator("p[role=alert]")).toContainText("尚未提交生成");
-    await expect(page.getByRole("button", { name: "恢复查询原任务", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "继续获取结果", exact: true })).toHaveCount(0);
     const copied = await diagnostic(page);
     expect(copied).toContain("PROMPT_RECIPE_UNAVAILABLE");
     expect(copied).toContain(`requestId: ${requestId}`);
@@ -44,27 +44,44 @@ test("video recipe 503 is a definite failed submission, with no recovery loop af
 
 test("an unknown video 503 keeps the first diagnostic through missing lookup and reload, without a second POST", async ({ page, context, api }) => {
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-    let posts = 0, lookups = 0, requestId = "";
+    let posts = 0, requestId = "";
+    const lookups: { requestId: string; method: string }[] = [];
     await page.route("**/api/tasks", route => {
         if (route.request().method() !== "POST") return route.fallback();
         posts++; requestId = route.request().postDataJSON().requestId;
         return route.fulfill({ status: 503, json: { error: "UNKNOWN_SUBMISSION_STATE", message: "original-video-503-diagnostic" } });
     });
-    await page.route("**/api/tasks/by-request/**", route => { lookups++; return route.fulfill({ status: 404, json: { error: "NOT_FOUND", message: "later lookup 404" } }); });
+    await page.route("**/api/tasks/by-request/**", route => {
+        lookups.push({ requestId: decodeURIComponent(new URL(route.request().url()).pathname.split("/").at(-1)!), method: route.request().method() });
+        return route.fulfill({ status: 404, json: { error: "NOT_FOUND", message: "later lookup 404" } });
+    });
     await prepare(page);
     await page.getByRole("button", { name: "生成视频", exact: true }).click();
-    await expect(page.getByRole("button", { name: "恢复查询原任务", exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "恢复查询原任务", exact: true }).click();
-    await expect(page.getByRole("button", { name: "恢复查询原任务", exact: true })).toBeVisible();
-    const copied = await diagnostic(page);
-    expect(copied).toContain("original-video-503-diagnostic");
-    expect(copied).toContain("HTTP 503");
-    expect(copied).toContain(`requestId: ${requestId}`);
-    expect(copied).not.toContain("later lookup 404");
+    const resume = page.getByRole("button", { name: "继续获取结果", exact: true });
+    await expect(resume).toBeVisible();
+    await expect(resume).toBeEnabled();
+    // The uncertain POST already performs one GET before exposing recovery.
+    expect(requestId).not.toBe("");
+    expect(lookups).toEqual([{ requestId, method: "GET" }]);
+    const expectFirstDiagnostic = (copied: string) => {
+        expect(copied).toContain("original-video-503-diagnostic");
+        expect(copied).toContain("HTTP 503");
+        expect(copied).toContain(`requestId: ${requestId}`);
+        expect(copied).not.toContain("later lookup 404");
+    };
+    expectFirstDiagnostic(await diagnostic(page));
+    await resume.click();
+    await expect.poll(() => lookups).toEqual(Array.from({ length: 2 }, () => ({ requestId, method: "GET" })));
+    await expect(resume).toBeVisible();
+    await expect(resume).toBeEnabled();
+    expectFirstDiagnostic(await diagnostic(page));
+    expect(posts).toBe(1);
     await page.reload();
-    await expect(page.getByRole("button", { name: "恢复查询原任务", exact: true })).toBeVisible();
-    expect(await diagnostic(page)).toContain("original-video-503-diagnostic");
-    expect(posts).toBe(1); expect(lookups).toBeGreaterThanOrEqual(2);
+    await expect.poll(() => lookups).toEqual(Array.from({ length: 3 }, () => ({ requestId, method: "GET" })));
+    await expect(resume).toBeVisible();
+    await expect(resume).toBeEnabled();
+    expectFirstDiagnostic(await diagnostic(page));
+    expect(posts).toBe(1);
     expect(api.submissions).toHaveLength(0);
 });
 
