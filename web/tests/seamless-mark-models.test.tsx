@@ -50,6 +50,7 @@ function mockServer(models: PublicModel[], tools: PublicToolConfiguration[] = []
         calls.push({ path, body });
         if (path === "/api/models") return Response.json(business);
         if (path === "/api/assets/upload-request") return Response.json({ assetId: "source-asset", uploadUrl: null });
+        if (path === "/api/assets/source-asset") return Response.json({ asset: { id: "source-asset", ownerUserId: "employee-a", kind: "image", status: "ready", deletedAt: null } });
         if (path === "/api/assets/source-asset/content" && init?.method === "HEAD") {
             expect(init).toMatchObject({ credentials: "include", cache: "no-store" });
             return new Response(null, { status: 200, headers: { "content-type": "image/png" } });
@@ -84,6 +85,18 @@ test("Nano seamless stitching discards unsupported GPT and legacy workflow param
     const parameters = calls.find(call => call.path === "/api/tasks" && call.body)?.body?.parameters;
     expect(parameters).toMatchObject({ size: "4:3", resolution: "2k", count: 1 });
     for (const key of ["quality", "output_format", "output_compression", "background", "steps", "google_search"]) expect(parameters[key]).toBeUndefined();
+});
+
+test("reusing an uploaded seamless reference rechecks its owner and original bytes without uploading again", async () => {
+    const calls = mockServer([flare]);
+    await requestSeamlessStitch(reference, DEFAULT_SEAMLESS_STITCH_PARAMETERS, config(flare.id));
+    const firstCallCount = calls.length;
+    await requestSeamlessStitch(reference, DEFAULT_SEAMLESS_STITCH_PARAMETERS, config(flare.id));
+    const repeated = calls.slice(firstCallCount);
+    expect(repeated.filter(call => call.path === "/api/assets/source-asset")).toHaveLength(1);
+    expect(repeated.filter(call => call.path === "/api/assets/source-asset/content")).toHaveLength(1);
+    expect(repeated.filter(call => call.path === "/api/assets/upload-request")).toHaveLength(0);
+    expect(repeated.filter(call => call.path === "/api/tasks" && call.body)).toHaveLength(1);
 });
 
 test.each(["gpt", "grok-image"] as const)("new %s uses image controls and single-reference parameters, not internal workflow knobs", async kind => {

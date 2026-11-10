@@ -188,10 +188,13 @@ test("the edit API receives exactly the displayed and mentioned image order, inc
     expect(submitted[0].references.map((item: any) => [item.id, item.dataUrl])).toEqual([
         ["original", "https://images.test/original.png"], ["color", "https://images.test/color.png"], ["pattern", "https://images.test/pattern.png"],
     ]);
-    expect(submitted[0].prompt).toBe("参考图片编号：图片1、图片2、图片3。请按这些编号理解提示词中的图片引用。\n\n按图片2的配色和图片3的花型修改图片1");
+    expect(submitted[0].prompt).toBe("参考图片编号：图片1、图片2、图片3。请按这些编号理解提示词中的图片引用。\n图片1：以此图作为编辑原图。\n\n按图片2的配色和图片3的花型修改图片1");
+    expect(submitted[0].references.map((item: any) => item.role || "")).toEqual(["以此图作为编辑原图。", "", ""]);
     elements(renderTray(tray(app).props)).find(element => element.props["aria-label"] === "将图片3前移")!.props.onClick();
     await requestEdit(config, "用图片2的花型和图片3的配色修改图片1", resolveCanvasNodeImageReferences(app.node, [app.node], []));
     expect(submitted[1].references.map((item: any) => item.id)).toEqual(["original", "pattern", "color"]);
+    expect(submitted[1].prompt).toBe("参考图片编号：图片1、图片2、图片3。请按这些编号理解提示词中的图片引用。\n图片1：以此图作为编辑原图。\n\n用图片2的花型和图片3的配色修改图片1");
+    expect(submitted[1].references.map((item: any) => item.role || "")).toEqual(["以此图作为编辑原图。", "", ""]);
 });
 
 test("a removed connected auxiliary stays excluded after a later reorder", () => {
