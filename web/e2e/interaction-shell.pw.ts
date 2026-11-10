@@ -14,6 +14,57 @@ function clean(api: MockCanvasApi) {
     expect(api.unexpected).toEqual([]); expect(api.pageErrors).toEqual([]);
 }
 
+test("main navigation enables creative prompt preview, cancels without generation, and persists the shared mobile setting", async ({ page }) => {
+    const api = await setup(page);
+    const previewRequests: unknown[] = [];
+    const compiledPrompt = "Create a cobalt blue knitted hat with a ribbed folded cuff.";
+    await page.context().route("**/api/tasks/preview", route => {
+        const input = route.request().postDataJSON();
+        expect(route.request().method()).toBe("POST");
+        expect(input).toMatchObject({ toolKey: "creative-text-to-style", operationType: "image_generation", sourceUrls: [], promptInput: { scene: "text-to-style", userText: "钴蓝色针织帽，罗纹翻边" } });
+        previewRequests.push(input);
+        return route.fulfill({ json: { preview: { prompt: compiledPrompt, summaryZh: "保留针织材质与罗纹翻边要求", optimized: true, promptInput: { ...input.promptInput, compilationId: "30000000-0000-4000-8000-000000000001" } } } });
+    });
+    await page.goto("/creative/text-to-style");
+    const description = page.getByRole("textbox", { name: "款式描述", exact: true });
+    await expect(description).toBeVisible();
+    const desktopToggle = page.getByRole("button", { name: "生成前确认：已关闭", exact: true });
+    await expect(desktopToggle).toBeVisible();
+    await expect(desktopToggle).toHaveAttribute("aria-pressed", "false");
+    await desktopToggle.click();
+    await expect(page.getByRole("button", { name: "生成前确认：已开启", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await page.reload();
+    await expect(page.getByRole("button", { name: "生成前确认：已开启", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await description.fill("钴蓝色针织帽，罗纹翻边");
+    await page.getByRole("button", { name: /^生成款式/ }).click();
+    const preview = page.getByRole("dialog", { name: "生成前确认", exact: true });
+    await expect(preview).toBeVisible();
+    await expect(preview.getByLabel("实际发送文本", { exact: true })).toHaveText(compiledPrompt);
+    await page.screenshot({ path: test.info().outputPath("desktop-preview.png"), fullPage: true, animations: "disabled" });
+    expect(previewRequests).toHaveLength(1);
+    expect(api.submissions).toEqual([]);
+    await preview.getByRole("button", { name: "取消，返回修改", exact: true }).click();
+    await expect(preview).toBeHidden();
+    await expect(page.getByRole("button", { name: /^生成款式/ })).toBeEnabled();
+    await expect(description).toHaveValue("钴蓝色针织帽，罗纹翻边");
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByRole("button", { name: "打开导航菜单", exact: true }).click();
+    const drawer = page.getByRole("dialog", { name: "功能模块", exact: true });
+    const mobileToggle = drawer.getByRole("button", { name: "生成前确认：已开启", exact: true });
+    await expect(mobileToggle).toBeVisible();
+    await expect(mobileToggle).toHaveAttribute("aria-pressed", "true");
+    await page.screenshot({ path: test.info().outputPath("mobile-enabled.png"), fullPage: true, animations: "disabled" });
+    await mobileToggle.click();
+    await expect(drawer.getByRole("button", { name: "生成前确认：已关闭", exact: true })).toHaveAttribute("aria-pressed", "false");
+    await page.reload();
+    await expect(description).toHaveValue("钴蓝色针织帽，罗纹翻边");
+    await page.getByRole("button", { name: "打开导航菜单", exact: true }).click();
+    await expect(drawer.getByRole("button", { name: "生成前确认：已关闭", exact: true })).toHaveAttribute("aria-pressed", "false");
+    expect(previewRequests).toHaveLength(1);
+    expect(api.batchSubmissions).toEqual([]);
+    clean(api);
+});
+
 test("manual pinned navigation stays stable, has one active location, and mobile includes workbench and theme", async ({ page }) => {
     const api = await setup(page);
     await page.goto("/");
@@ -28,7 +79,7 @@ test("manual pinned navigation stays stable, has one active location, and mobile
     await nav.getByRole("link", { name: "素材库", exact: true }).click();
     await expect(page.getByRole("heading", { name: "素材库", exact: true })).toBeVisible();
     await expect(pinned.getByRole("link")).toHaveCount(1);
-    await page.screenshot({ path: "../output/interaction-experience/shell/desktop-light.png", fullPage: true });
+    await page.screenshot({ path: test.info().outputPath("desktop-light.png"), fullPage: true });
     await page.setViewportSize({ width: 390, height: 844 });
     await page.getByRole("button", { name: "打开导航菜单" }).click();
     const drawer = page.getByRole("dialog");
@@ -37,7 +88,7 @@ test("manual pinned navigation stays stable, has one active location, and mobile
     await expect(page.locator("html")).toHaveClass(/dark/);
     await expect(page.locator("html")).not.toHaveAttribute("data-magicui-theme-vt", "active");
     await expect(drawer.getByRole("status").filter({ hasText: "画布" })).toBeVisible();
-    await page.screenshot({ path: "../output/interaction-experience/shell/mobile-dark.png", fullPage: true });
+    await page.screenshot({ path: test.info().outputPath("mobile-dark.png"), fullPage: true });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     clean(api);
 });
