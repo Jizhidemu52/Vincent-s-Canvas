@@ -311,23 +311,34 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
     });
 
     const incomingSessionsRef = useRef({ sessions, activeSessionId });
-    const publishedSessionsRef = useRef<{ sessions: CanvasAssistantSession[]; activeSessionId: string | null } | null>(null);
+    const pendingSessionPublicationsRef = useRef<Array<{ sessions: CanvasAssistantSession[]; activeSessionId: string | null }>>([]);
+    const publishSessions = (nextSessions: CanvasAssistantSession[], nextActiveId: string | null, options?: { flush: boolean }) => {
+        const pending = pendingSessionPublicationsRef.current;
+        if (!pending.some(item => item.sessions === nextSessions && item.activeSessionId === nextActiveId)) {
+            pending.push({ sessions: nextSessions, activeSessionId: nextActiveId });
+        }
+        return onSessionsChange(nextSessions, nextActiveId, options);
+    };
     useEffect(() => {
         const previous = incomingSessionsRef.current;
         const changed = previous.sessions !== sessions || previous.activeSessionId !== activeSessionId;
         incomingSessionsRef.current = { sessions, activeSessionId };
-        const published = publishedSessionsRef.current;
-        const echo = published?.sessions === sessions && published.activeSessionId === activeSessionId;
+        const pending = pendingSessionPublicationsRef.current;
+        const echoIndex = pending.findIndex(item => item.sessions === sessions && item.activeSessionId === activeSessionId);
+        const echo = echoIndex >= 0;
+        if (echo) pending.splice(0, echoIndex + 1);
         // A parent echo must not overwrite newer local messages. Reconcile in one
-        // effect so an external restore is never simultaneously published back as stale state.
+        // effect, retaining every unacknowledged publication, including a pre-flush echo.
+        // Acknowledged snapshots are removed so a later explicit history restore still works.
         if (changed && !echo) {
+            pending.length = 0;
             setLocalSessions(expireCanvasToolConfirmations(sessions, new Set(pendingToolContextRef.current.keys())));
             setLocalActiveSessionId(activeSessionId);
             return;
         }
-        if (localSessions === sessions && localActiveSessionId === activeSessionId) return;
-        publishedSessionsRef.current = { sessions: localSessions, activeSessionId: localActiveSessionId };
-        onSessionsChange(localSessions, localActiveSessionId);
+        const currentSessions = localSessionsRef.current, currentActiveId = localActiveSessionIdRef.current;
+        if (currentSessions === sessions && currentActiveId === activeSessionId) return;
+        publishSessions(currentSessions, currentActiveId);
     }, [activeSessionId, sessions, localActiveSessionId, localSessions, onSessionsChange]);
 
     useEffect(() => {
@@ -579,8 +590,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
             // A complete reply must not remain behind the panel and editor debounce queues.
             const snapshot = { sessions: localSessionsRef.current, activeSessionId: localActiveSessionIdRef.current || sessionId };
             setLocalActiveSessionId(snapshot.activeSessionId);
-            publishedSessionsRef.current = snapshot;
-            await onSessionsChange(snapshot.sessions, snapshot.activeSessionId, { flush: true });
+            await publishSessions(snapshot.sessions, snapshot.activeSessionId, { flush: true });
         } catch (error) {
             if (!onlineMountedRef.current || signal?.aborted) return;
             addOnlineLog("对话保存失败", error instanceof Error ? error.message : error);
@@ -1194,13 +1204,13 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
         upsertMessage(sessionId, { id: messageId, role: "assistant", text: "正在查询原任务；停止本地查询不会撤销服务端任务。", ...previous,
             detail: { ...previous?.detail, kind: "agent_generation", status: "running", pendingTask, resubmitAllowed: false } });
         try {
-            await onSessionsChange(localSessionsRef.current, localActiveSessionIdRef.current || sessionId, { flush: true });
+            await publishSessions(localSessionsRef.current, localActiveSessionIdRef.current || sessionId, { flush: true });
             signal?.throwIfAborted();
         } catch (error) {
             // This callback is awaited before POST: its rejection proves no job was submitted.
             if (beforeSubmission && onlineMountedRef.current && snapshotRef.current.projectId === pendingTask.projectId) {
                 upsertMessage(sessionId, { id: messageId, role: "error", text: "本次请求未提交，可重新发送。", detail: { kind: "agent_generation", status: "failed" } });
-                await Promise.resolve(onSessionsChange(localSessionsRef.current, localActiveSessionIdRef.current || sessionId, { flush: true })).catch(() => undefined);
+                await Promise.resolve(publishSessions(localSessionsRef.current, localActiveSessionIdRef.current || sessionId, { flush: true })).catch(() => undefined);
             }
             throw error;
         }

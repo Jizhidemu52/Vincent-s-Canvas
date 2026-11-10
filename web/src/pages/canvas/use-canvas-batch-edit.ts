@@ -50,6 +50,7 @@ export function useCanvasBatchEdit({ projectId, generationDispatchLocksRef, getC
     const setSelectedNodeIds = useCanvasGraphSetter("selectedNodeIds");
     const [batchEditOpen, setBatchEditOpen] = useState(false);
     const batchInputVersionRef = useRef(0);
+    const fileSelectionVersionRef = useRef(0);
     const nextBatchIndexRef = useRef(1);
     const initialBatchRef = useRef<BatchEditState | null>(null);
     if (!initialBatchRef.current) initialBatchRef.current = newBatch(nextBatchIndexRef.current++);
@@ -103,7 +104,10 @@ export function useCanvasBatchEdit({ projectId, generationDispatchLocksRef, getC
     const setBatchEditPrompt = useCallback((value: SetStateAction<string>) => updateInput(batch => ({ ...batch, prompt: resolveValue(value, batch.prompt) })), [updateInput]);
     const setBatchImageSettings = useCallback((value: SetStateAction<Partial<AiConfig>>) => updateInput(batch => ({ ...batch, imageSettings: resolveValue(value, batch.imageSettings) })), [updateInput]);
     const setBatchOptimizePrompt = useCallback((value: SetStateAction<boolean>) => updateInput(batch => ({ ...batch, optimizePrompt: resolveValue(value, batch.optimizePrompt) })), [updateInput]);
-    const setBatchEditItems = useCallback((value: SetStateAction<BatchEditFileItem[]>) => updateInput(batch => ({ ...batch, items: resolveValue(value, batch.items) })), [updateInput]);
+    const setBatchEditItems = useCallback((value: SetStateAction<BatchEditFileItem[]>) => updateInput(batch => {
+        fileSelectionVersionRef.current += 1;
+        return { ...batch, items: resolveValue(value, batch.items) };
+    }), [updateInput]);
     const activateBatch = useCallback((id: string) => {
         activeBatchIdRef.current = id; setActiveBatchEditId(id); batchInputVersionRef.current += 1;
         selectionEpochRef.current += 1; setSelectionEpoch(selectionEpochRef.current);
@@ -129,13 +133,13 @@ export function useCanvasBatchEdit({ projectId, generationDispatchLocksRef, getC
         if (!current() || activeBatchIdRef.current !== activeBatchEditId || selectionEpochRef.current !== selectionEpoch) return;
         const batch = batchesRef.current.find(item => item.id === activeBatchEditId);
         if (!batch || batch.running || batch.items.some(item => item.requestId)) return;
-        const selected = Array.from(files || []), inputVersion = batch.inputVersion;
+        const selected = Array.from(files || []), fileSelectionVersion = ++fileSelectionVersionRef.current;
         try {
             const { prepareCanvasBatchFiles } = await loadBatchEditRuntime();
-            if (!current() || activeBatchIdRef.current !== activeBatchEditId || selectionEpochRef.current !== selectionEpoch) return;
+            if (!current() || activeBatchIdRef.current !== activeBatchEditId || selectionEpochRef.current !== selectionEpoch || fileSelectionVersionRef.current !== fileSelectionVersion) return;
             const items = prepareCanvasBatchFiles(selected);
             updateBatch(batch.id, previous => {
-                if (previous.running || previous.items.some(item => item.requestId) || previous.inputVersion !== inputVersion) return previous;
+                if (previous.running || previous.items.some(item => item.requestId)) return previous;
                 batchInputVersionRef.current += 1;
                 return { ...previous, items, inputVersion: previous.inputVersion + 1 };
             });

@@ -91,6 +91,14 @@ for (const failPreview of [false, true]) {
                 .find((message: any) => message.role === "user" && message.text === prompt)?.detail?.previewImageIds)
                 .toEqual([branch.imageId(5), branch.imageId(1)]);
             await expect(input).toHaveValue(prompt);
+            await expect.poll(() => api.document(branch.project)!.chatSessions[0].messages
+                .filter((message: any) => message.role === "error").map((message: any) => ({ title: message.title, text: message.text })))
+                .toEqual([{ title: "操作失败", text: "画布媒体不可读取" }]);
+            await page.reload();
+            await page.getByRole("tab", { name: "对话", exact: true }).first().click();
+            await expect(panel.getByText("画布媒体不可读取", { exact: true })).toBeVisible();
+            expect(chat.requests).toHaveLength(1);
+            expect(api.submissions).toHaveLength(0);
         } else {
             await expect.poll(() => api.submissions.length).toBe(1);
             await expect.poll(() => api.document(branch.project)?.nodes.length).toBe(6);

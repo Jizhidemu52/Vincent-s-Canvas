@@ -63,6 +63,11 @@ for (const route of [
                 await input.fill(`MULTI_${index}_独立款式，不改变其他任务`);
             }
             if (route.reference) await upload(page, `source-${index}.png`);
+            if (route.prompt && route.reference) {
+                const references = active(page).getByRole("region", { name: "参考图", exact: true });
+                await expect(references.getByRole("combobox", { name: "图片1用途", exact: true })).toBeVisible();
+                await expect(references.getByText("以此图作为编辑原图。", { exact: true })).toBeVisible();
+            }
             const submit = active(page).getByRole("button", { name: route.button, exact: true });
             await expect(submit).toBeEnabled(); await submit.click();
             await expect.poll(() => api.submissions.length).toBe(index + 1);
@@ -72,7 +77,7 @@ for (const route of [
         expect(new Set(api.submissions.map(item => item.requestId)).size).toBe(6);
         for (let index = 0; index < 6; index++) {
             const request = api.submissions[index];
-            if (route.prompt) expect(request.prompt).toBe(`${route.reference ? "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n\n" : ""}MULTI_${index}_独立款式，不改变其他任务`);
+            if (route.prompt) expect(request.prompt).toBe(`${route.reference ? "参考图片编号：图片1。请按这些编号理解提示词中的图片引用。\n图片1：以此图作为编辑原图。\n\n" : ""}MULTI_${index}_独立款式，不改变其他任务`);
             else { expect(request).not.toHaveProperty("prompt"); expect(request).not.toHaveProperty("modelConfigId"); }
             if (route.reference) {
                 const assetId = request.sourceUrls[0].split("/")[3];

@@ -60,6 +60,12 @@ for (const model of [flare, sunburst, mai]) {
                 await expect(page.getByRole("img", { name: "reference-1.png", exact: true })).toBeVisible();
             }
             await page.getByRole("button", { name: "一键优化提示词", exact: true }).click();
+            const preview = page.getByRole("dialog", { name: "核对提示词优化", exact: true });
+            await expect(preview.locator("pre").nth(1)).toHaveText(optimized);
+            await expect(prompt).toHaveValue("蓝色亚麻连衣裙，保留材质");
+            expect(api.submissions).toHaveLength(0);
+            await preview.getByRole("button", { name: "确认应用", exact: true }).click();
+            await expect(preview).toBeHidden();
             await expect(prompt).toHaveValue(optimized);
             expect(compilations).toHaveLength(1);
             expect(compilations[0].modelConfigId).toBe(model.id);
@@ -91,6 +97,12 @@ test("standalone explicit model changes clear incompatible 4K options and old op
     await settings.getByRole("combobox", { name: "输出格式", exact: true }).selectOption("webp");
     await settings.getByRole("button", { name: "关闭模型设置", exact: true }).click();
     await page.getByRole("button", { name: "一键优化提示词", exact: true }).click();
+    const preview = page.getByRole("dialog", { name: "核对提示词优化", exact: true });
+    await expect(preview.locator("pre").nth(1)).toHaveText(optimized);
+    await expect(prompt).toHaveValue("保留轮廓的服装产品图");
+    expect(api.submissions).toHaveLength(0);
+    await preview.getByRole("button", { name: "确认应用", exact: true }).click();
+    await expect(preview).toBeHidden();
     await expect(prompt).toHaveValue(optimized);
     settings = await openSettings(page);
     await selectStandalone(page, settings, mai);
@@ -151,6 +163,12 @@ test("canvas switches profiles without truncating references and restores text-o
     await page.locator('[data-usage-control="resolution"][data-usage-value="2k"]').click();
     await page.getByRole("button", { name: "返回创建面板", exact: true }).click();
     await panel.getByRole("button", { name: "一键优化提示词", exact: true }).click();
+    const preview = page.getByRole("dialog", { name: "核对提示词优化", exact: true });
+    await expect(preview.locator("pre").nth(1)).toHaveText(optimized);
+    await expect(prompt).toHaveValue("蓝色亚麻连衣裙");
+    expect(api.submissions).toHaveLength(0);
+    await preview.getByRole("button", { name: "确认应用", exact: true }).click();
+    await expect(preview).toBeHidden();
     await expect(prompt).toHaveValue(optimized);
     await panel.getByRole("button", { name: /^生成(?:\s|$)/ }).click();
     await expect.poll(() => api.submissions.length).toBe(1);

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
-import type { Locator, Page } from "@playwright/test";
+import type { Locator, Page, Route } from "@playwright/test";
 import { test, expect, IMAGE, newCanvas, type MockCanvasApi } from "./fixtures";
 import { toolDefinitions } from "../../shared/feature-catalog";
 import { assertVideoMotionTimeline, parseOptimizedPrompt } from "../../server/src/prompt-safety";
@@ -103,6 +103,12 @@ for (const mode of [{ query: "", tool: "image", operation: "image_generation", a
         await pasteReference(input, bytes);
         await expect(page.getByRole("img", { name: "synthetic-hat.png", exact: true })).toBeVisible();
         await page.getByRole("button", { name: "一键优化提示词", exact: true }).click();
+        const preview = page.getByRole("dialog", { name: "核对提示词优化", exact: true });
+        await expect(preview.locator("pre").nth(1)).toHaveText(referencePrompt);
+        await expect(input).toHaveValue("仅将帽子改为钴蓝色，其他保持参考图原样");
+        expect(api.submissions).toHaveLength(0);
+        await preview.getByRole("button", { name: "确认应用", exact: true }).click();
+        await expect(preview).toBeHidden();
         await expect(input).toHaveValue(referencePrompt);
         expect(flow.compilations).toHaveLength(1); expect(api.submissions).toHaveLength(0);
         expect(flow.compilations[0].promptInput.userText).not.toContain("NOVA");
@@ -125,6 +131,12 @@ test("canvas reference optimization preserves literal lettering and reuses the c
     await pasteReference(prompt, bytes);
     await expect(panel.locator(".cw-reference-image")).toHaveCount(1);
     await panel.getByRole("button", { name: "一键优化提示词", exact: true }).click();
+    const preview = page.getByRole("dialog", { name: "核对提示词优化", exact: true });
+    await expect(preview.locator("pre").nth(1)).toHaveText(referencePrompt);
+    await expect(prompt).toHaveValue("仅改变帽子的针织颜色，其他完全保留");
+    expect(api.submissions).toHaveLength(0);
+    await preview.getByRole("button", { name: "确认应用", exact: true }).click();
+    await expect(preview).toBeHidden();
     await expect(prompt).toHaveValue(referencePrompt);
     expect(api.submissions).toHaveLength(0);
     await panel.getByRole("button", { name: /^生成修改图/ }).click();
@@ -198,19 +210,33 @@ test("series selected color optimizes exactly once with its full palette and dis
 });
 
 test("canvas batch opt-in compiles once for two independent originals and never creates a second batch", async ({ page, api }) => {
-    const flow = await setupFlow(page, api), bytes = await hatImage(page), id = await newCanvas(page);
+    const flow = await setupFlow(page, api), bytes = await hatImage(page);
+    let runtimeRequest: Route | undefined;
+    await page.route("**/src/pages/canvas/canvas-batch-edit-runtime.ts*", route => { runtimeRequest = route; });
+    const id = await newCanvas(page);
     await page.getByRole("button", { name: "更多工具", exact: true }).click();
     await page.getByRole("menuitem", { name: "批量改图", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "批量一键改图" }), chooser = page.waitForEvent("filechooser");
     await dialog.getByRole("button", { name: "选择图片（可多选）" }).click();
     await (await chooser).setFiles(["hat-a.png", "hat-b.png"].map(name => ({ name, mimeType: "image/png", buffer: bytes })));
-    await dialog.locator("textarea").fill("分别改为钴蓝色，逐张保留其原来的文字和结构");
+    await expect.poll(() => Boolean(runtimeRequest)).toBe(true);
+    // Edit while file preparation is blocked on its lazy module. These unrelated
+    // fields must not invalidate the already selected independent originals.
+    const instruction = "分别改为钴蓝色，逐张保留其原来的文字和结构";
+    await dialog.locator("textarea").fill(instruction);
     await expect(dialog.getByRole("switch", { name: "批量统一优化提示词", exact: true })).not.toBeChecked();
     await dialog.getByRole("switch", { name: "批量统一优化提示词", exact: true }).click();
+    await expect(dialog.locator("textarea")).toHaveValue(instruction);
+    await expect(dialog.getByRole("switch", { name: "批量统一优化提示词", exact: true })).toBeChecked();
+    expect(api.batchSubmissions).toHaveLength(0); expect(flow.compilations).toHaveLength(0);
+    await runtimeRequest!.fallback();
+    await expect(dialog.getByText("hat-a.png", { exact: true })).toBeVisible();
+    await expect(dialog.getByText("hat-b.png", { exact: true })).toBeVisible();
+    await expect(dialog.getByText("等待中", { exact: true })).toHaveCount(2);
     await dialog.getByRole("button", { name: "一键生图", exact: true }).click();
     await expect(dialog.getByText("成功", { exact: true })).toHaveCount(2);
     expect(api.batchSubmissions).toHaveLength(1); expect(api.submissions).toHaveLength(0); expect(flow.compilations).toHaveLength(1);
-    expect(api.batchSubmissions[0]).toMatchObject({ operationType: "batch_image", toolKey: "canvas-batch", promptInput: { scene: "batch-optimize", mode: "edit" }, parameters: { count: 1, n: 1 } });
+    expect(api.batchSubmissions[0]).toMatchObject({ operationType: "batch_image", toolKey: "canvas-batch", promptInput: { scene: "batch-optimize", mode: "edit", userText: instruction }, parameters: { count: 1, n: 1 } });
     expect(api.batchSubmissions[0].items).toHaveLength(2);
     expect(new Set(api.batchSubmissions[0].items.map((item: any) => item.sourceUrls[0])).size).toBe(2);
     await expect.poll(() => api.document(id)?.nodes.filter((node: any) => node.metadata?.prompt === batchPrompt && node.metadata?.status === "success").length).toBe(2);
@@ -264,6 +290,12 @@ test("native mask editing keeps its explicit instruction and mask, without borro
     await expect(panel.locator(".cw-reference-image")).toHaveCount(1);
     await prompt.fill("整张帽子改为钴蓝色，保留所有文字");
     await panel.getByRole("button", { name: "一键优化提示词", exact: true }).click();
+    const preview = page.getByRole("dialog", { name: "核对提示词优化", exact: true });
+    await expect(preview.locator("pre").nth(1)).toHaveText(referencePrompt);
+    await expect(prompt).toHaveValue("整张帽子改为钴蓝色，保留所有文字");
+    expect(api.submissions).toHaveLength(0);
+    await preview.getByRole("button", { name: "确认应用", exact: true }).click();
+    await expect(preview).toBeHidden();
     await expect(prompt).toHaveValue(referencePrompt);
     expect(flow.compilations).toHaveLength(1); expect(api.submissions).toHaveLength(0);
     await node.hover();
@@ -306,6 +338,13 @@ test("manual optimizer retains an uncertain request through a failed lookup and 
     const query = page.getByRole("button", { name: "查询原优化请求", exact: true });
     await expect(query).toBeEnabled();
     await query.click(); await expect(query).toBeEnabled();
-    await query.click(); await expect(input).toHaveValue(textOnlyPrompt);
+    await query.click();
+    const preview = page.getByRole("dialog", { name: "核对提示词优化", exact: true });
+    await expect(preview.locator("pre").nth(1)).toHaveText(textOnlyPrompt);
+    await expect(input).toHaveValue("钴蓝色针织帽");
+    expect(posts).toBe(1); expect(lookups).toBe(3); expect(api.submissions).toHaveLength(0);
+    await preview.getByRole("button", { name: "确认应用", exact: true }).click();
+    await expect(preview).toBeHidden();
+    await expect(input).toHaveValue(textOnlyPrompt);
     expect(posts).toBe(1); expect(lookups).toBe(3); expect(api.submissions).toHaveLength(0);
 });

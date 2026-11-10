@@ -73,6 +73,46 @@ test("late file preparation cannot replace a newer input or an A-B-A selection",
     h.unmount();
 });
 
+test("editing prompt and settings during file preparation preserves both selected files and current inputs", async () => {
+    const h = batchHarness();
+    const form = h.render();
+    const selected = ["one.png", "two.png"].map(name => new File(["png"], name, { type: "image/png" }));
+    const loading = form.applyBatchEditFiles(selected);
+    form.setBatchEditPrompt("只把领口改成 V 领");
+    form.setBatchOptimizePrompt(true);
+    form.setBatchImageSettings({ model: "gpt-image-2", size: "1:1" });
+    await loading;
+    const current = h.render();
+    expect(current.batchEditItems.map(item => item.file)).toEqual(selected);
+    expect(current.batchEditPrompt).toBe("只把领口改成 V 领");
+    expect(current.batchOptimizePrompt).toBe(true);
+    expect(current.batchImageSettings).toEqual({ model: "gpt-image-2", size: "1:1" });
+    expect(h.submissions).toEqual([]);
+    h.unmount();
+});
+
+test("a newer file selection supersedes earlier preparation even before either list is ready", async () => {
+    const h = batchHarness();
+    const form = h.render();
+    const first = form.applyBatchEditFiles([new File(["png"], "first.png", { type: "image/png" })]);
+    const second = form.applyBatchEditFiles([new File(["png"], "second.png", { type: "image/png" })]);
+    await Promise.all([first, second]);
+    expect(h.render().batchEditItems.map(item => item.relativePath)).toEqual(["second.png"]);
+    h.unmount();
+});
+
+test("explicitly clearing files invalidates preparation without losing later prompt edits", async () => {
+    const h = batchHarness();
+    const form = h.draft("a");
+    const loading = form.applyBatchEditFiles([new File(["png"], "late.png", { type: "image/png" })]);
+    form.setBatchEditItems([]);
+    form.setBatchEditPrompt("new prompt");
+    await loading;
+    expect(h.render().batchEditItems).toEqual([]);
+    expect(h.render().batchEditPrompt).toBe("new prompt");
+    h.unmount();
+});
+
 test("batch templates atomically create B without overwriting running A or a nonempty draft", async () => {
     const h = batchHarness();
     const emptyId = h.render().activeBatchEditId;

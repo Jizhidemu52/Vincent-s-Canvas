@@ -236,6 +236,8 @@ function panelHarness(options: { replies: ToolResponseResult[]; stream?: string;
         pauseReply(gate: Promise<void>) { replyGate = gate; },
         newChat() { findElements(render()).find(element => element.props.title === "新对话")!.props.children.props.onClick(); },
         echoCommit() { const committed = sessionCommits.at(-1)!; sessions = committed.sessions; activeSessionId = committed.activeId; render(); },
+        echoUpdate(index: number) { const update = sessionUpdates[index]!; sessions = update.sessions; activeSessionId = update.activeId; render(); },
+        restoreSessions(restored: CanvasAssistantSession[], activeId: string | null) { sessions = restored; activeSessionId = activeId; render(); },
         sessionIds: () => states.flatMap(value => Array.isArray(value) ? value.filter(item => Array.isArray(item?.messages)).map(item => item.id) : []),
         workflowCards: () => findElements(render()).filter((element) => typeof element.type === "function" && element.type.name === "CanvasAgentMediaWorkflowCard").map((element) => element.props),
         switchProject(projectId: string) { sessions = []; activeSessionId = null; snapshotRef.current = { ...snapshotRef.current, projectId }; render(); },
@@ -944,6 +946,42 @@ describe("canvas assistant submission", () => {
         expect(harness.messages().some(message => message.text === "已返回的完整回复")).toBe(true);
         saved.resolve();
         await submitted;
+    });
+
+    test("an older parent echo cannot erase a media failure while its completed turn is saving", async () => {
+        const read = Promise.withResolvers<string>(), saved = Promise.withResolvers<void>();
+        const selected: CanvasNodeData = { id: "source", type: CanvasNodeType.Image, title: "原图", position: { x: 0, y: 0 }, width: 100, height: 100, metadata: { content: "blob:source" } };
+        const harness = panelHarness({ replies: [], selected: [selected], readImage: () => read.promise });
+        harness.pauseCommit(saved.promise);
+        const submitted = harness.submit("只把原图改成蓝色");
+        await waitFor(() => harness.imagePreviewReads.length === 1);
+        harness.composer();
+        const earlierUpdate = harness.sessionUpdates.length - 1;
+        expect(JSON.stringify(harness.sessionUpdates[earlierUpdate])).toContain("只把原图改成蓝色");
+        read.reject(new Error("画布媒体不可读取"));
+        await waitFor(() => harness.sessionCommits.length === 1);
+        expect(harness.messages().some(message => message.role === "error" && message.text === "画布媒体不可读取")).toBe(true);
+        harness.echoUpdate(earlierUpdate);
+        expect(harness.messages().some(message => message.role === "error" && message.text === "画布媒体不可读取")).toBe(true);
+        expect(harness.composer().props.prompt).toBe("只把原图改成蓝色");
+        expect(JSON.stringify(harness.sessionUpdates.at(-1))).toContain("画布媒体不可读取");
+        expect(harness.requests).toEqual([]);
+        saved.resolve(); await submitted;
+        harness.echoCommit();
+        expect(harness.messages().some(message => message.text === "画布媒体不可读取")).toBe(true);
+    });
+
+    test("an acknowledged snapshot can later be explicitly restored without blocking external history", async () => {
+        const harness = panelHarness({ replies: [{ content: "完整回复", toolCalls: [] }] });
+        await harness.submit("保留这轮");
+        harness.echoCommit();
+        const acknowledged = harness.sessionCommits.at(-1)!;
+        harness.newChat(); harness.composer();
+        expect(harness.sessionIds()).toHaveLength(2);
+        harness.echoUpdate(harness.sessionUpdates.length - 1);
+        harness.restoreSessions(acknowledged.sessions, acknowledged.activeId);
+        expect(harness.sessionIds()).toEqual(acknowledged.sessions.map(session => session.id));
+        expect(harness.messages().some(message => message.text === "完整回复")).toBe(true);
     });
 
     test("restores historical blob references through their storage keys and only backfills missing keys", () => {

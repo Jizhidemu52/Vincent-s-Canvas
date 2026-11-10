@@ -42,6 +42,12 @@ for (const mode of [
         await prompt.fill("蓝色亚麻连衣裙，保留参考图材质");
         await reference(page);
         await page.getByRole("button", { name: "一键优化提示词", exact: true }).click();
+        const preview = page.getByRole("dialog", { name: "核对提示词优化", exact: true });
+        await expect(preview.locator("pre").nth(1)).toHaveText(optimized);
+        await expect(prompt).toHaveValue("蓝色亚麻连衣裙，保留参考图材质");
+        expect(api.submissions).toHaveLength(0);
+        await preview.getByRole("button", { name: "确认应用", exact: true }).click();
+        await expect(preview).toBeHidden();
         await expect(prompt).toHaveValue(optimized);
         expect(compilations).toHaveLength(1);
         expect(compilations[0]).toMatchObject({ toolKey: mode.toolKey, modelConfigId: model.id, promptInput: { scene: "free-optimize", mode: mode.promptMode } });
@@ -76,6 +82,12 @@ test("changing the model after optimization invalidates the old compilation with
     const prompt = page.getByRole("textbox", { name: "图像提示词", exact: true });
     await prompt.fill("蓝色亚麻连衣裙");
     await page.getByRole("button", { name: "一键优化提示词", exact: true }).click();
+    const preview = page.getByRole("dialog", { name: "核对提示词优化", exact: true });
+    await expect(preview.locator("pre").nth(1)).toHaveText(optimized);
+    await expect(prompt).toHaveValue("蓝色亚麻连衣裙");
+    expect(api.submissions).toHaveLength(0);
+    await preview.getByRole("button", { name: "确认应用", exact: true }).click();
+    await expect(preview).toBeHidden();
     await expect(prompt).toHaveValue(optimized);
     await page.getByRole("button", { name: "切换生成图片模型", exact: true }).click();
     await page.locator("[data-usage-control=model][role=combobox]").click();

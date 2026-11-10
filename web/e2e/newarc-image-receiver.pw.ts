@@ -98,6 +98,12 @@ test("optimization carries the same fields and editing them invalidates a comple
     await expect(requirements(page)).toHaveValue(REQUIREMENTS.join("\n"));
     await prompt(page).fill("调整袖口");
     await page.getByRole("button", { name: "一键优化提示词", exact: true }).click();
+    const preview = page.getByRole("dialog", { name: "核对提示词优化", exact: true });
+    await expect(preview.locator("pre").nth(1)).toHaveText("Optimized cuff change only");
+    await expect(prompt(page)).toHaveValue("调整袖口");
+    expect(api.submissions).toHaveLength(0);
+    await preview.getByRole("button", { name: "确认应用", exact: true }).click();
+    await expect(preview).toBeHidden();
     await expect(prompt(page)).toHaveValue("Optimized cuff change only");
     expect(compilations).toHaveLength(1);
     expect(compilations[0].promptInput).toMatchObject({ scene: "free-optimize", mode: "edit", fields: { carryoverRequirements: REQUIREMENTS } });

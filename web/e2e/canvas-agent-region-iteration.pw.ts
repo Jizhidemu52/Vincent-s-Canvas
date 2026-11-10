@@ -367,10 +367,14 @@ test("Canvas planner 本地无效 edit_spec 仅修复一次，保存本版规格
     expect(result.metadata!.imageAgent!.spec).toEqual(validSpec);
     expect(canvasMessages(document).find(message => message.attachments?.some((attachment: any) => attachment.id === result.id)).detail.imageAgent.spec).toEqual(validSpec);
     expect(document.nodes.some(node => node.metadata?.content === "INVALID_SPEC_MUST_NOT_CREATE")).toBe(false);
-    expect(api.submissions[0].prompt).toContain("本轮具体变化：");
-    expect(api.submissions[0].prompt).toContain("领口改为 V 领");
+    expect(api.submissions[0].prompt).toContain("只把领口改为 V 领，针织纹理与背景保持");
     expect(api.submissions[0].prompt).toContain("图片分工：");
-    expect(api.submissions[0].prompt).toContain("结果应满足：");
+    expect(api.submissions[0].prompt).toContain("修改底图。沿用原版针织衫主体与纹理");
+    expect(api.submissions[0].prompt).toContain("除本次明确修改外，其余保持底图不变。");
+    expect(api.submissions[0].prompt).toContain("修改区域：领口");
+    // Acceptance criteria stay in the saved spec and review UI, not in the
+    // compact execution prompt as a second set of image instructions.
+    expect(api.submissions[0].prompt).not.toContain("领口呈 V 形，针织纹理保持");
     const inspectVisibleSpec = async () => {
         await panel(page).getByText("最终提示词", { exact: true }).click();
         const requirements = panel(page).getByRole("region", { name: "本轮要求与假设", exact: true });

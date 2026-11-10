@@ -20,7 +20,10 @@ async function managedQuickTask(page: Page, api: MockCanvasApi) {
 
 async function expectStandaloneActionOnly(page: Page) {
     await expect(page.getByRole("textbox", { name: "图像提示词" })).toHaveCount(0);
-    await expect(page.getByRole("combobox")).toHaveCount(0);
+    // The shared reference tray owns a purpose selector, not a model control.
+    // Every visible combobox must be that exact single-image tray control.
+    const referencePurpose = page.getByRole("region", { name: "参考图", exact: true }).getByRole("combobox", { name: "图片1用途", exact: true });
+    await expect.poll(async () => (await page.getByRole("combobox").count()) - (await referencePurpose.count())).toBe(0);
     await expect(page.getByRole("button", { name: /^(切换生成图片模型|调整|复用提示词|存为提示词|恢复为草稿继续改)$/ })).toHaveCount(0);
     await expect(page.getByText(/后台私有配方|内置配方|Nano 2\.1|MAI|4K|还差：选择模型/)).toHaveCount(0);
 }
@@ -87,6 +90,8 @@ for (const action of ["remove-background", "hd-upscale", "item-extract"] as cons
         const submit = page.getByRole("button", { name: title, exact: true });
         await expect(submit).toBeDisabled();
         await uploadStandaloneImage(page);
+        await expect(page.getByRole("region", { name: "参考图", exact: true }).getByRole("combobox", { name: "图片1用途", exact: true })).toBeVisible();
+        await expectStandaloneActionOnly(page);
         await expect(submit).toBeEnabled();
         expect(api.submissions).toHaveLength(0);
         await submit.click();

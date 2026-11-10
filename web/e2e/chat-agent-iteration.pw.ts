@@ -174,7 +174,10 @@ test("规划校验只修一次，规格经pending和结果持久化，所选版�
     await expect.poll(() => api.submissions.length).toBe(1);
     expect(plans).toHaveLength(2); expect(plans[1].profileContext.stage).toBe("repair");
     expect(plans[1].requestId).not.toBe(plans[0].requestId);
-    expect(api.submissions[0].prompt).toContain("完整规划："); expect(api.submissions[0].prompt).toContain("仅修改本轮明确要求");
+    expect(api.submissions[0].prompt).toContain("完整规划：左袖口罗纹过渡自然，保留真实棉纱纹理。");
+    expect(api.submissions[0].prompt).toContain("除本次明确修改外，其余保持底图不变。");
+    expect(api.submissions[0].prompt).toContain("左袖口改为罗纹");
+    expect(api.submissions[0].prompt).toContain("修改区域：左袖口");
     await expect(page.getByTestId("chat-image-spec")).toContainText("本轮假设：只处理左袖口");
     await expect(page.getByTestId("chat-edit-base")).toHaveCount(0);
     await expect.poll(async () => (await sessions(page))[0]?.messages.find((m: any) => m.pendingImageTask)?.pendingImageTask.spec).toEqual(spec);
