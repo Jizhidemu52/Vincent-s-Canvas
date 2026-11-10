@@ -1,5 +1,6 @@
 import type { Allocation, Group } from "./ledger";
 import { defaultAllocation, validateAllocation } from "./ledger";
+import { INITIAL_BATCH_ID, validateBatchId } from "./budget-extension";
 
 export type Strategy = "raw" | "template" | "minimal" | "legacy";
 export type Source = { path: string; role: string; provenance: string; approvedForEvaluation: boolean; fromAttempt?: string };
@@ -40,8 +41,8 @@ export function starterConfig(): Config {
     strategies: ["raw", "template", "minimal", "legacy"], parameters: { n: 1, size: "1:1", resolution: "1k" }, recipes,
     samples: structuredClone(candidateSamples), sequenceSampleIds: ["garment-color", "specified-text"], approvedForPaidExecution: false };
 }
-export function buildJobs(config: Config): Job[] {
-  validateAllocation(config.allocation);
+export function buildJobs(config: Config, maximumAllocation = 100): Job[] {
+  validateAllocation(config.allocation, maximumAllocation);
   if (!/^[a-zA-Z0-9_-]{1,40}$/.test(config.campaign) || new Set(config.samples.map(s => s.id)).size !== config.samples.length
     || new Set(config.models.map(m => m.key)).size !== config.models.length || new Set(config.strategies).size !== config.strategies.length
     || config.strategies.some(strategy => !["raw", "template", "minimal", "legacy"].includes(strategy))) throw new Error("INVALID_PLAN");
@@ -69,4 +70,17 @@ export function buildJobs(config: Config): Job[] {
   }
   if (jobs.filter(j => j.group === "single").length > config.allocation.single || jobs.filter(j => j.group === "sequence").length > config.allocation.sequence) throw new Error("PLAN_EXCEEDS_ALLOCATION");
   return jobs;
+}
+
+export function namespaceAttemptKey(key: string, batchId: string) {
+  if (batchId !== INITIAL_BATCH_ID) validateBatchId(batchId);
+  const result = batchId === INITIAL_BATCH_ID ? key : `batch:${batchId}:${key}`;
+  if (!/^[a-zA-Z0-9:_-]{1,160}$/.test(result)) throw new Error("INVALID_ATTEMPT_KEY");
+  return result;
+}
+
+/** Each explicit batch owns its task identities and prior-round links; original snapshots remain unchanged. */
+export function namespaceJobs(jobs: Job[], batchId = INITIAL_BATCH_ID): Job[] {
+  return jobs.map(job => ({ ...job, key: namespaceAttemptKey(job.key, batchId), sample: { ...job.sample,
+    sources: job.sample.sources.map(source => ({ ...source, ...(source.fromAttempt ? { fromAttempt: namespaceAttemptKey(source.fromAttempt, batchId) } : {}) })) } }));
 }

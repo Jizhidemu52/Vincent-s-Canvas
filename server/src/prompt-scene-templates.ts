@@ -102,7 +102,7 @@ export function compileSceneTemplate(input: PromptInput, fields: Record<string, 
       main = mode === "reference"
         ? t(`调整图片1中${region}的配色，图片2仅提供颜色，不带入其款式、图案或背景；其他修改按下方明确要求执行。`, `Change the colors of ${region} in Image 1. Image 2 supplies colors only, not its structure, pattern or background. Apply other changes only when explicitly requested below.`)
         : t(`调整图片1中${region}的颜色${colors ? `，使用指定配色：${colors}` : "，按下方原始要求执行"}；其他修改按下方明确要求执行。`, `Change the colors of ${region} in Image 1${colors ? `, using the supplied palette: ${colors}` : ", following the original request below"}. Apply other changes only when explicitly requested below.`);
-      keep = t("未明确要求调整的结构、数量、位置、纹理与画面内容保持不变。", "Preserve structure, counts, positions, texture and scene content wherever not explicitly requested to change.");
+      keep = t("未明确要求改色的区域保留原颜色；未明确要求调整的结构、数量、位置、纹理与画面内容保持不变。", "Preserve the original colors of areas not explicitly targeted for recoloring. Preserve structure, counts, positions, texture and scene content wherever not explicitly requested to change.");
       summaryZh = mode === "reference" ? "按配色参考图与明确要求调整指定区域，未要求修改的内容保持不变。" : "按明确要求调整指定配色，未要求修改的内容保持不变。";
       break;
     }
@@ -127,14 +127,14 @@ export function compileSceneTemplate(input: PromptInput, fields: Record<string, 
       if (!change) throw new PromptOptimizationError("PROMPT_FIELDS_INVALID", "请填写要修改的内容，未提交生成。", 400);
       const area = text("restyleArea", t("明确指定部位", "the specified area"));
       main = t(`只修改图片1中${target ? `${target}的` : ""}${area}：${change}`, `Change only ${area}${target ? ` of ${target}` : ""} in Image 1: ${change}`);
-      keep = t("修改范围外的结构、颜色、纹理、图案、背景及拍摄角度保持不变。", "Preserve structure, colors, texture, pattern, background and camera angle outside the requested changes.");
+      keep = t("除明确要求的修改外，保持原图表现形式、画面范围、结构、颜色、纹理、图案、背景及拍摄角度不变。", "Except for the explicitly requested changes, preserve the original image's representation and framing, along with structure, colors, texture, pattern, background and camera angle.");
       summaryZh = "只修改明确指定的部位，其余设计与画面保持不变。";
       break;
     }
     case "pattern-extract": {
       const mode = text("extractMode", "单独图案"), background = text("extractBackground", "白底");
       if (!["单独图案", "完整可见花型"].includes(mode) || !["白底", "保留底色"].includes(background)) throw new PromptOptimizationError("PROMPT_FIELDS_INVALID", "提取范围或背景设置无效，未提交生成。", 400);
-      main = t(`从图片1${target ? `的${target}` : ""}提取${mode}，展平为二维图案${background === "白底" ? "，置于纯白不透明背景" : "，保留原底色和真实透明度"}。`, `Extract the ${mode === "单独图案" ? "individual motif" : "complete visible pattern"} from Image 1${target ? ` (${target})` : ""} as flat 2D artwork${background === "白底" ? " on an opaque white background" : ", preserving the original background color and true transparency"}.`);
+      main = t(`从图片1${target ? `的${target}` : ""}提取${mode}，展平为二维图案${background === "白底" ? "，置于纯白不透明背景" : "，保留原底色和真实透明度"}。`, `Extract the ${mode === "单独图案" ? "specified visible pattern content" : "complete visible pattern"} from Image 1${target ? ` (${target})` : ""} as flat 2D artwork${background === "白底" ? " on an opaque white background" : ", preserving the original background color and true transparency"}.`);
       keep = t("保留可见元素的轮廓、数量、相对位置和裁切边界；只处理有证据的内容，不推测遮挡或画外部分。", "Preserve visible contours, element counts, relative positions and crop boundaries. Use visible evidence only, without inventing occluded or off-frame content.");
       summaryZh = "提取可见图案并保留元素关系，不推测缺失内容。";
       break;
@@ -142,7 +142,7 @@ export function compileSceneTemplate(input: PromptInput, fields: Record<string, 
     case "pattern-craft": {
       const craft = text("craft");
       if (!craft && !instruction) return;
-      main = t(`把图片1的图案呈现为${craft || "下方指定工艺"}效果${text("craftFabric") ? `，承载面料为${text("craftFabric")}` : ""}。`, `Render the artwork in Image 1 as ${craft || "the craft specified below"}${text("craftFabric") ? ` on ${text("craftFabric")}` : ""}.`);
+      main = t(`${referenceCount > 1 ? "按各参考图的明确分工，把指定图案" : "把图片1的图案"}呈现为${craft || "下方指定工艺"}效果${text("craftFabric") ? `，承载面料为${text("craftFabric")}` : ""}。`, `${referenceCount > 1 ? "Following the assigned role of each reference image, render the specified artwork" : "Render the artwork in Image 1"} as ${craft || "the craft specified below"}${text("craftFabric") ? ` on ${text("craftFabric")}` : ""}.`);
       keep = t("保留未明确要求修改的可见元素、颜色、轮廓和数量；未明确允许调整的相对位置保持不变，组合或重排仅限明确指定的范围。主体完整入镜、四边留出背景边距；在指定构图内表现工艺质感。", "Preserve visible elements, colors, contours and counts unless explicitly requested otherwise. Keep relative positions unchanged except within the explicitly allowed scope of composition or rearrangement. Show the complete motif with margins on all sides; express the craft in the specified composition.");
       summaryZh = "按指定工艺呈现完整图案，仅按明确要求调整元素排布。";
       break;

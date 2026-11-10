@@ -136,6 +136,62 @@ describe("avoid clauses with explicitly preserved text", () => {
   });
 });
 
+describe("minimal avoid constraint polarity", () => {
+  const parseMinimal = (avoid: string[], language: "zh" | "en" = "zh") => parseOptimizedPrompt(JSON.stringify({
+    prompt: "Only apply the requested edit.", summary_zh: "仅执行指定修改。", avoid, keep_text: [], questions: [],
+  }), [], { minimal: true, referenceCount: 0, userText: "", language });
+
+  test.each([
+    ["sleeve-brick", ["不要把砖红色扩展到衣身、肩条、领口、门襟、纽扣或领内背片", "不要改变画面左侧短袖的蓝色"]],
+    ["reversed-motifs", ["不新增叶片或花瓣", "花朵与枝叶不相互遮挡", "不以花替换顶叶"]],
+  ] as const)("keeps actual holdout %s prohibitions verbatim without a second negation", (_case, avoid) => {
+    const parsed = parseMinimal([...avoid]);
+    expect(parsed.prompt).toBe(`Only apply the requested edit.\n${avoid.join("\n")}`);
+    expect(parsed).toMatchObject({ summaryZh: "仅执行指定修改。", questions: [], keepText: [] });
+  });
+
+  test("keeps mixed Chinese prohibitions standalone while nominal exclusions stay prohibited", () => {
+    const avoid = ["不要改变背景", "水印", "不新增叶片或花瓣", "不透明背景", "不相互遮挡", "不以花替换顶叶", "不规则图案"];
+    expect(parseMinimal(avoid).prompt).toBe([
+      "Only apply the requested edit.", "不要改变背景", "避免: 水印.", "不新增叶片或花瓣", "避免: 不透明背景.",
+      "不相互遮挡", "不以花替换顶叶", "避免: 不规则图案.",
+    ].join("\n"));
+  });
+
+  test("preserves English do not, no, never and don't without treating adjective prefixes as prohibitions", () => {
+    const avoid = ["Do not change the color.", "No additional petals.", "Never crop the design.", "Don't replace the top leaf.", "watermarks", "noisy backgrounds", "no-logo fabric"];
+    expect(parseMinimal(avoid, "en").prompt).toBe([
+      "Only apply the requested edit.", ...avoid.slice(0, 4), "Avoid: watermarks.", "Avoid: noisy backgrounds.", "Avoid: no-logo fabric.",
+    ].join("\n"));
+  });
+
+  test("does not promote quoted or attributive negative phrases into positive requirements", () => {
+    const avoid = ["带有‘不要改变’的字样", "花朵与枝叶不相互遮挡的图案", "不透明背景"];
+    expect(parseMinimal(avoid).prompt).toBe(`Only apply the requested edit.\n${avoid.map(item => `避免: ${item}.`).join("\n")}`);
+  });
+
+  test("does not wrap an explicit Avoid or 避免 imperative again", () => {
+    expect(parseMinimal(["避免背景变化"]).prompt).toBe("Only apply the requested edit.\n避免背景变化");
+    expect(parseMinimal(["Avoid extra petals"], "en").prompt).toBe("Only apply the requested edit.\nAvoid extra petals");
+  });
+
+  test("keeps existing exact-lettering repair ahead of minimal polarity rendering", () => {
+    const parsed = parseOptimizedPrompt(JSON.stringify({
+      prompt: 'Print "NOVA 73".', summary_zh: "保留指定文字。", avoid: ["no text", "Do not change the background.", "watermarks"], keep_text: ["NOVA 73"], questions: [],
+    }), [], { minimal: true, referenceCount: 0, userText: 'Print "NOVA 73".', language: "en", requiredText: ["NOVA 73"] });
+    expect(parsed.prompt).toBe('Print "NOVA 73".\nAvoid: unrelated text.\nDo not change the background.\nAvoid: watermarks.');
+    expect(parsed.keepText).toEqual(["NOVA 73"]);
+  });
+
+  test("does not change the legacy non-minimal avoid contract", () => {
+    const avoid = ["Do not change the background.", "watermarks"];
+    const parsed = parseOptimizedPrompt(JSON.stringify({ prompt: "A plain shirt.", avoid, keep_text: [] }), [], {
+      referenceCount: 0, userText: "", language: "en",
+    });
+    expect(parsed.prompt).toBe(`A plain shirt.\nAvoid: ${avoid.join(", ")}.`);
+  });
+});
+
 describe("printed text from reference images versus explicit user text", () => {
   test.each(["NOVA", "73"])("retains reference lettering %s without requiring the user to transcribe it", lettering => {
     const parsed = parseOptimizedPrompt(JSON.stringify({ prompt: `Use the knitted hat from Image 1, preserving its original ${lettering} lettering.`, avoid: ["no text", "watermarks"], keep_text: [lettering] }), [], {

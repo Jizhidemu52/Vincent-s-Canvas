@@ -1,16 +1,16 @@
 /** Offline test helper. Never imports the application client and cannot call a model. */
 import { EvalLedger, codeOf } from "./ledger";
-const [path, prefix, countText, same] = process.argv.slice(2);
+const [path, prefix, countText, same, batchId] = process.argv.slice(2);
 if (!path || !prefix) throw new Error("TEST_ARGUMENTS_REQUIRED");
 const ledger = new EvalLedger(path, { single: 100, sequence: 0, reserve: 0 });
 let created = 0, exhausted = 0;
 for (let index = 0; index < Number(countText); index++) {
   try {
-    const result = ledger.reserve(same ? "shared-attempt" : `${prefix}-${index}`, "single", { fixture: "offline", index: same ? 0 : index });
+    const result = ledger.reserve(same ? "shared-attempt" : `${prefix}-${index}`, "single", { fixture: "offline", index: same ? 0 : index }, batchId);
     if (result.created) created++;
     if (same === "crash") process.exit(19);
   } catch (error) {
-    if (codeOf(error) === "IMAGE_BUDGET_EXHAUSTED" || codeOf(error) === "GROUP_BUDGET_EXHAUSTED") exhausted++;
+    if (["IMAGE_BUDGET_EXHAUSTED", "GROUP_BUDGET_EXHAUSTED", "BATCH_BUDGET_EXHAUSTED"].includes(codeOf(error))) exhausted++;
     else throw error;
   }
 }

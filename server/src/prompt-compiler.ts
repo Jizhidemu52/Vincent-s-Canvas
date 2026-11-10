@@ -154,10 +154,10 @@ export class PromptCompiler {
       const result = await optimizer!.invoke(system, content);
       rawResponse = result.content;
       usage = result.usage;
-      const output = parseOptimizedPrompt(result.content, [system], outputOptions);
+      const { avoidForMetrics, ...output } = parseOptimizedPrompt(result.content, [system], outputOptions);
       if (minimal) assertMinimalPromptFidelity(output.prompt, outputOptions.userText, output.questions);
       if (isVideo) assertVideoMotionTimeline(output.prompt, fields.duration);
-      await this.store.finish(claim.id, "success", { ...output, optimized: true, rawResponse, promptMetrics: promptOutputMetrics(output.prompt, request.promptInput),
+      await this.store.finish(claim.id, "success", { ...output, optimized: true, rawResponse, promptMetrics: promptOutputMetrics(output.prompt, request.promptInput, avoidForMetrics),
         ...(output.questions?.length ? { message: "需要先补充或确认下列信息，尚未提交图片生成。" } : {}),
         latencyMs: Math.round(performance.now() - started), ...usageFields(usage, optimizer!.estimatedRmbCost) });
     } catch (error) {
@@ -177,10 +177,10 @@ export class PromptCompiler {
         const prompt = active.version.fallbackPrompt.replaceAll("{{user_text}}", userText).replaceAll("{{fields}}", JSON.stringify(fields));
         try {
           const fallbackRaw = isVideo ? prompt : JSON.stringify(outputOptions.reverse ? { prompt, summary_zh: "" } : { prompt, avoid: [], keep_text: [], ...(minimal ? { summary_zh: "按管理员明确配置的基础模板执行。", questions: [] } : {}) });
-          const fallback = parseOptimizedPrompt(fallbackRaw, [system], outputOptions);
+          const { avoidForMetrics, ...fallback } = parseOptimizedPrompt(fallbackRaw, [system], outputOptions);
           if (minimal) assertMinimalPromptFidelity(fallback.prompt, outputOptions.userText, fallback.questions);
           if (isVideo) assertVideoMotionTimeline(fallback.prompt, fields.duration);
-          await this.store.finish(claim.id, "success", { ...metrics, ...fallback, promptMetrics: promptOutputMetrics(fallback.prompt, request.promptInput), optimized: false, message: "未优化：管理员已显式启用基础模板" });
+          await this.store.finish(claim.id, "success", { ...metrics, ...fallback, promptMetrics: promptOutputMetrics(fallback.prompt, request.promptInput, avoidForMetrics), optimized: false, message: "未优化：管理员已显式启用基础模板" });
         } catch (fallbackError) {
           const timelineFailure = fallbackError instanceof PromptOptimizationError && fallbackError.code === "PROMPT_VIDEO_TIMELINE_INVALID" ? fallbackError : null;
           await this.store.finish(claim.id, "failed", { ...metrics, errorCode: timelineFailure?.code ?? "PROMPT_OUTPUT_REJECTED", message: timelineFailure?.message ?? "备用提示词未通过检查，未提交生成" });

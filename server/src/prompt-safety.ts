@@ -87,6 +87,22 @@ function allowRequiredText(avoid: string, language: "en" | "zh") {
   }).join("");
 }
 
+function minimalAvoidConstraints(avoid: readonly string[], language: "en" | "zh") {
+  return avoid.map(item => {
+    const text = item.trim();
+    if (!text) return "";
+    // Keep explicit prohibitions intact; wrapping them in "Avoid" negates them
+    // again. Match controlled verb forms, never every leading 不/no (e.g.
+    // 不透明背景, 不规则图案, noisy backgrounds and no-logo fabric are exclusions).
+    const prohibition = /^(?:do\s+not|don['’]t|no|never|avoid)\s+\S/i.test(text)
+      || /^(?:不要|不得|不许|切勿|请勿|勿|避免|不(?:新增|增加|添加|删除|改变|修改|改动|移动|替换|裁切|重绘|重排|以))/.test(text)
+      // A complete subject + predicate clause, not an attributive phrase such
+      // as 花朵与枝叶不相互遮挡的图案. Also covers the subject-free imperative.
+      || /^(?:[^,，;；。.!！?？\r\n]{1,60})?不(?:相互|互相)遮挡[。.!！?？]*$/.test(text);
+    return prohibition ? text : `${language === "zh" ? "避免" : "Avoid"}: ${text}${/[。.!！?？]$/.test(text) ? "" : "."}`;
+  }).filter(Boolean).join("\n");
+}
+
 type PromptOutputOptions = { video?: boolean; reverse?: boolean; minimal?: boolean; referenceCount: number; userText: string; language: "en" | "zh"; requiredText?: string[] };
 
 /** Apply to fresh, fallback and cached final text before any generation admission. */
@@ -139,7 +155,11 @@ export function parseOptimizedPrompt(raw: string, rules: readonly string[], opti
   // every explicit literal. Never invent or patch missing text into the prompt.
   const keepText = [...new Set([...reportedText, ...(options.requiredText || [])])];
   const avoid = (value.avoid as string[]).filter(Boolean).map(item => keepText.length ? allowRequiredText(item, options.language) : item);
-  const prompt = [value.prompt.trim(), avoid.length ? `${options.language === "zh" ? "避免" : "Avoid"}: ${avoid.join(", ")}.` : ""].filter(Boolean).join("\n");
+  const constraints = options.minimal ? minimalAvoidConstraints(avoid, options.language)
+    : avoid.length ? `${options.language === "zh" ? "避免" : "Avoid"}: ${avoid.join(", ")}.` : "";
+  const prompt = [value.prompt.trim(), constraints].filter(Boolean).join("\n");
   if (prompt.length > imagePromptOutputLimits.prompt) throw new PromptOptimizationError("PROMPT_OUTPUT_INVALID", "最终提示词过长，未提交生成", 422);
-  return { prompt, keepText, ...(options.minimal ? { summaryZh: (value.summary_zh as string).trim(), questions: value.questions as string[] } : {}) };
+  // Parser-only metric input: the compiler removes it before persistence/public
+  // output. Counting rendered "Avoid" prefixes would miss standalone clauses.
+  return { prompt, keepText, ...(options.minimal ? { summaryZh: (value.summary_zh as string).trim(), questions: value.questions as string[], avoidForMetrics: avoid } : {}) };
 }

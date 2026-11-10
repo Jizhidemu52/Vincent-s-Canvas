@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import { INITIAL_BATCH_ID, attemptBatchId, assertApprovedBatch, authorizeBudgetBatch, readBudgetBatches, type BudgetAuthorization, type BatchApproval } from "./budget-extension";
 
 export const HARD_IMAGE_LIMIT = 100;
 export const defaultAllocation = { single: 80, sequence: 12, reserve: 8 };
@@ -18,24 +19,24 @@ export function codeOf(error: unknown) {
   const value = error instanceof Error ? error.message : "UNKNOWN_ERROR";
   return /^[A-Z][A-Z0-9_]{0,100}$/.test(value) ? value : "UNCLASSIFIED_ERROR";
 }
-export function validateAllocation(value: Allocation) {
+export function validateAllocation(value: Allocation, maximum = HARD_IMAGE_LIMIT) {
   if (Object.keys(value).sort().join(",") !== "reserve,sequence,single" || Object.values(value).some(n => !Number.isSafeInteger(n) || n < 0)
-    || Object.values(value).reduce((a, b) => a + b, 0) > HARD_IMAGE_LIMIT) throw new Error("INVALID_ALLOCATION");
+    || !Number.isSafeInteger(Object.values(value).reduce((a, b) => a + b, 0)) || Object.values(value).reduce((a, b) => a + b, 0) > maximum) throw new Error("INVALID_ALLOCATION");
 }
 export function costOf(value: any = {}) {
   const amount = (v: unknown) => typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null;
   return { actual: amount(value.actualCost), estimated: amount(value.estimatedCost), currency: typeof value.currency === "string" && /^[A-Z]{3}$/.test(value.currency) ? value.currency : null };
 }
 export type Attempt = {
-  key: string; requestId: string; compilationRequestId: string; group: Group; inputHash: string; input: any;
+  key: string; requestId: string; compilationRequestId: string; group: Group; batchId: string; inputHash: string; input: any;
   status: Status; planningStarted: boolean; imagePostStarted: boolean; createdAt: string; updatedAt: string; evidence: any;
 };
 
 /** One SQLite file is the entire campaign budget, not a per-run ledger. Never delete/reset it to retry. */
 export class EvalLedger {
   private db: Database;
-  constructor(readonly path: string, allocation: Allocation = defaultAllocation) {
-    validateAllocation(allocation);
+  constructor(readonly path: string, allocation?: Allocation) {
+    if (allocation !== undefined) validateAllocation(allocation);
     mkdirSync(dirname(path), { recursive: true });
     this.db = new Database(path, { create: true, strict: true });
     this.db.exec("PRAGMA busy_timeout=30000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;");
@@ -60,11 +61,14 @@ export class EvalLedger {
       END;
     `);
     try { this.db.transaction(() => {
-      this.db.query("INSERT OR IGNORE INTO budget VALUES(1,?,?)").run(canonical(allocation), Object.values(allocation).reduce((a, b) => a + b, 0));
+      const initial = allocation ?? defaultAllocation;
+      this.db.query("INSERT OR IGNORE INTO budget VALUES(1,?,?)").run(canonical(initial), Object.values(initial).reduce((a, b) => a + b, 0));
       const stored = this.db.query("SELECT allocation_json FROM budget WHERE id=1").get() as any;
-      if (stored.allocation_json !== canonical(allocation)) throw new Error("ALLOCATION_CHANGED_EXISTING_BUDGET");
+      if (allocation !== undefined && stored.allocation_json !== canonical(allocation)) throw new Error("ALLOCATION_CHANGED_EXISTING_BUDGET");
     }).immediate(); } catch (error) { this.db.close(); throw error; }
   }
+  authorizeBatch(authorization: BudgetAuthorization, approval: BatchApproval) { return authorizeBudgetBatch(this.db, authorization, approval); }
+  batch(batchId = INITIAL_BATCH_ID) { return assertApprovedBatch(this.db, batchId); }
   bind(binding: { apiOrigin: string; ownerHash: string }) {
     this.db.transaction(() => {
       this.db.query("INSERT OR IGNORE INTO binding VALUES(1,?)").run(canonical(binding));
@@ -73,22 +77,25 @@ export class EvalLedger {
   }
   get(key: string): Attempt | null {
     const row = this.db.query("SELECT * FROM attempts WHERE attempt_key=?").get(key) as any;
-    return row ? { key: row.attempt_key, requestId: row.request_id, compilationRequestId: row.compilation_request_id, group: row.group_name,
+    return row ? { key: row.attempt_key, requestId: row.request_id, compilationRequestId: row.compilation_request_id, group: row.group_name, batchId: attemptBatchId(this.db, key),
       inputHash: row.input_hash, input: JSON.parse(row.input_json), status: row.status, planningStarted: !!row.planning_started,
       imagePostStarted: !!row.image_post_started, createdAt: row.created_at, updatedAt: row.updated_at, evidence: JSON.parse(row.evidence_json) } : null;
   }
-  reserve(key: string, group: Group, input: unknown): { created: boolean; attempt: Attempt } {
+  reserve(key: string, group: Group, input: unknown, batchId?: string): { created: boolean; attempt: Attempt } {
     if (!/^[a-zA-Z0-9:_-]{1,160}$/.test(key)) throw new Error("INVALID_ATTEMPT_KEY");
     return this.db.transaction(() => {
       const previous = this.get(key), inputHash = sha256(canonical(input));
       if (previous) {
-        if (previous.inputHash !== inputHash || previous.group !== group) throw new Error("ATTEMPT_INPUT_CHANGED");
+        if (previous.inputHash !== inputHash || previous.group !== group || batchId !== undefined && previous.batchId !== batchId) throw new Error("ATTEMPT_INPUT_CHANGED");
         return { created: false, attempt: previous };
       }
+      const selectedBatch = batchId ?? INITIAL_BATCH_ID;
+      assertApprovedBatch(this.db, selectedBatch);
       const id = randomUUID(), at = new Date().toISOString();
+      if (selectedBatch !== INITIAL_BATCH_ID) this.db.query("INSERT INTO attempt_batch_allocations(attempt_key,batch_id) VALUES(?,?)").run(key, selectedBatch);
       this.db.query("INSERT INTO attempts(attempt_key,request_id,compilation_request_id,group_name,input_hash,input_json,status,created_at,updated_at) VALUES(?,?,?,?,?,?,'reserved',?,?)")
         .run(key, `pce:${id}`, `pce:${id}:compile`, group, inputHash, canonical(input), at, at);
-      this.db.query("INSERT INTO events(attempt_key,at,event_json) VALUES(?,?,?)").run(key, at, canonical({ type: "reserved", imageUnits: 1 }));
+      this.db.query("INSERT INTO events(attempt_key,at,event_json) VALUES(?,?,?)").run(key, at, canonical({ type: "reserved", imageUnits: 1, ...(selectedBatch !== INITIAL_BATCH_ID ? { batchId: selectedBatch } : {}) }));
       return { created: true, attempt: this.get(key)! };
     }).immediate(); // COMMIT + synchronous=FULL completes before any external POST.
   }
@@ -107,13 +114,15 @@ export class EvalLedger {
   list(): Attempt[] { return (this.db.query("SELECT attempt_key FROM attempts ORDER BY created_at,attempt_key").all() as any[]).map(row => this.get(row.attempt_key)!); }
   report() {
     const rows = this.list();
+    const batches = readBudgetBatches(this.db), authorizedImageLimit = batches.reduce((sum, batch) => sum + batch.imageLimit, 0);
     const sumCosts = (kind: "imageCost" | "planningCost") => {
       const selected = kind === "planningCost" ? rows.filter(row => row.planningStarted) : rows;
       const currencies: Record<string, number> = {};
       for (const row of selected) { const c = row.evidence[kind]; if (c?.actual !== null && c?.actual !== undefined && c.currency) currencies[c.currency] = (currencies[c.currency] ?? 0) + c.actual; }
       return { knownActualByCurrency: currencies, unknownCount: selected.filter(row => !row.evidence[kind] || row.evidence[kind].actual === null || !row.evidence[kind].currency).length };
     };
-    return { hardImageLimit: HARD_IMAGE_LIMIT, allocation: JSON.parse((this.db.query("SELECT allocation_json FROM budget").get() as any).allocation_json),
+    return { hardImageLimit: authorizedImageLimit, initialImageLimit: batches[0]!.imageLimit, authorizedImageLimit, budgetMode: batches.length > 1 ? "approved-batches" : "initial", batches,
+      allocation: JSON.parse((this.db.query("SELECT allocation_json FROM budget").get() as any).allocation_json),
       reservedImageAttempts: rows.length, imagePostAttempts: rows.filter(row => row.imagePostStarted).length,
       planningAttempts: rows.filter(row => row.planningStarted).length,
       compilationApiAttempts: rows.filter(row => row.planningStarted).length,
@@ -129,8 +138,8 @@ export interface AttemptTransport {
   query(attempt: Attempt): Promise<void>;
 }
 /** Only the process that created the durable reservation receives permission to POST. */
-export async function executeAttempt(ledger: EvalLedger, key: string, group: Group, input: unknown, transport: AttemptTransport) {
-  const reservation = ledger.reserve(key, group, input);
+export async function executeAttempt(ledger: EvalLedger, key: string, group: Group, input: unknown, transport: AttemptTransport, batchId?: string) {
+  const reservation = ledger.reserve(key, group, input, batchId);
   try {
     if (reservation.created) await transport.submit(reservation.attempt);
     else await transport.query(reservation.attempt);

@@ -4,8 +4,9 @@ import { existsSync } from "node:fs";
 import { resolve, dirname, relative, isAbsolute, sep } from "node:path";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
-import { EvalLedger, executeAttempt, sha256, costOf, codeOf, type Attempt } from "./prompt-chain-eval/ledger";
-import { starterConfig, buildJobs, type Config, type Job, type Source } from "./prompt-chain-eval/cases";
+import { EvalLedger, executeAttempt, sha256, canonical, costOf, codeOf, type Attempt } from "./prompt-chain-eval/ledger";
+import { starterConfig, buildJobs, namespaceJobs, namespaceAttemptKey, type Config, type Job, type Source } from "./prompt-chain-eval/cases";
+import { INITIAL_BATCH_ID, parseBatchApprovalArguments, validateBatchId, validateBudgetAuthorization, type BudgetAuthorization } from "./prompt-chain-eval/budget-extension";
 import { preflightApiMartImageRequest } from "../server/src/apimart-image";
 
 export const repoRoot = resolve(import.meta.dir, "..");
@@ -257,31 +258,81 @@ async function exportReport(ledger: EvalLedger) {
   return relative(repoRoot, path);
 }
 function argument(args: string[], name: string) { const index = args.indexOf(name); return index < 0 ? undefined : args[index + 1]; }
+export function selectedBatchArgument(args: string[]) {
+  const positions = args.flatMap((arg, index) => arg === "--batch-id" ? [index] : []);
+  if (!positions.length) return INITIAL_BATCH_ID;
+  const value = args[positions[0]! + 1];
+  if (positions.length !== 1 || !value || value.startsWith("--")) throw new Error("EXPLICIT_BATCH_ID_REQUIRED");
+  if (value !== INITIAL_BATCH_ID) validateBatchId(value);
+  return value;
+}
+export function validateRunBatch(ledger: EvalLedger, config: Config, jobs: Job[], batchId: string) {
+  const batch = ledger.batch(batchId);
+  if (canonical(batch.allocation) !== canonical(config.allocation)) throw new Error("CONFIG_BATCH_ALLOCATION_MISMATCH");
+  const needed = { single: 0, sequence: 0, reserve: 0 };
+  for (const job of jobs) {
+    const prior = ledger.get(job.key);
+    if (prior && prior.batchId !== batchId) throw new Error("ATTEMPT_BATCH_MISMATCH");
+    if (!prior) needed[job.group]++;
+  }
+  if (Object.keys(needed).some(group => needed[group as keyof typeof needed] > batch.remaining[group as keyof typeof needed])) throw new Error("SELECTED_JOBS_EXCEED_REMAINING_BATCH");
+}
+function validateArguments(args: string[], command: string) {
+  const values = command === "run" ? ["--config", "--batch-id", "--only", "--limit", "--retry-of", "--retry-key"]
+    : command === "plan" || command === "recover" ? ["--config", "--batch-id"] : ["--config"];
+  const flags = command === "run" ? ["--execute"] : [];
+  const seen = new Set<string>();
+  for (let index = 1; index < args.length; index++) {
+    const name = args[index]!;
+    if (seen.has(name) || !values.includes(name) && !flags.includes(name)) throw new Error("INVALID_COMMAND_ARGUMENTS");
+    seen.add(name);
+    if (values.includes(name) && (!args[++index] || args[index]!.startsWith("--"))) throw new Error("INVALID_COMMAND_ARGUMENTS");
+  }
+}
 export async function main(args = process.argv.slice(2)) {
   const command = args[0] ?? "plan";
+  if (command === "authorize-batch") {
+    const parsed = parseBatchApprovalArguments(args);
+    const authorization = JSON.parse(await readFile(resolve(repoRoot, parsed.authorizationFile), "utf8")) as BudgetAuthorization;
+    validateBudgetAuthorization(authorization);
+    // Authorization extends this existing campaign only; never bootstrap a fresh ledger here.
+    if (!existsSync(budgetPath)) throw new Error("EXISTING_BUDGET_REQUIRED");
+    const ledger = new EvalLedger(budgetPath);
+    try { return { mode: "budget-approval-only", paidRequests: 0, ...ledger.authorizeBatch(authorization, parsed.approval) }; }
+    finally { ledger.close(); }
+  }
+  if (!["plan", "status", "run", "recover"].includes(command)) throw new Error("UNKNOWN_COMMAND");
+  validateArguments(args, command);
+  if (command === "run" && !args.includes("--execute")) throw new Error("EXECUTE_FLAG_REQUIRED");
+  const batchId = selectedBatchArgument(args);
   const configFile = resolve(repoRoot, argument(args, "--config") ?? "output/prompt-chain-optimization/evaluation/config.json");
   const config: Config = existsSync(configFile) ? JSON.parse(await readFile(configFile, "utf8")) : starterConfig();
-  const jobs = buildJobs(config);
   if (command === "plan") {
+    const jobs = namespaceJobs(buildJobs(config, batchId === INITIAL_BATCH_ID ? 100 : Number.MAX_SAFE_INTEGER), batchId);
     if (!existsSync(configFile)) await saveNew(configFile, config);
     const candidates = await Promise.all(config.samples.map(async sample => ({ ...sample, sources: await Promise.all(sample.sources.map(sourceEvidence)) })));
     const path = resolve(campaignDirectory, "plans", `${new Date().toISOString().replace(/[:.]/g, "-")}-${process.pid}.json`);
-    await saveNew(path, { offline: true, networkRequests: 0, paidRequests: 0, hardImageLimit: 100, allocation: config.allocation, candidates, jobs,
-      reserve: "8 slots are not automatically submitted. An explicit --retry-key creates a new charged reserve attempt.", caveat: "候选是已有公开 Synthetic 业务任务素材，不代表真实公司样本；须逐组核准来源。" });
-    return { mode: "offline-plan", plannedSingle: jobs.filter(j => j.group === "single").length, plannedSequence: jobs.filter(j => j.group === "sequence").length, reserve: config.allocation.reserve, paidRequests: 0, config: relative(repoRoot, configFile), plan: relative(repoRoot, path) };
+    await saveNew(path, { offline: true, networkRequests: 0, paidRequests: 0, initialImageLimit: 100, batchId, requestedBatchImageLimit: Object.values(config.allocation).reduce((a, b) => a + b, 0),
+      budgetApproval: "not-checked-offline-plan-does-not-authorize", allocation: config.allocation, candidates, jobs,
+      reserve: `${config.allocation.reserve} slots are not automatically submitted. An explicit --retry-key creates a new charged reserve attempt.`, caveat: "候选是已有公开 Synthetic 业务任务素材，不代表真实公司样本；须逐组核准来源。" });
+    return { mode: "offline-plan", batchId, plannedSingle: jobs.filter(j => j.group === "single").length, plannedSequence: jobs.filter(j => j.group === "sequence").length, reserve: config.allocation.reserve, paidRequests: 0, config: relative(repoRoot, configFile), plan: relative(repoRoot, path) };
   }
-  if (!["status", "run", "recover"].includes(command)) throw new Error("UNKNOWN_COMMAND");
-  if (command === "run" && !args.includes("--execute")) throw new Error("EXECUTE_FLAG_REQUIRED");
   if ((command === "status" || command === "recover") && !existsSync(budgetPath)) return { reservedImageAttempts: 0, message: "No budget ledger exists; nothing has been submitted." };
-  const ledger = new EvalLedger(budgetPath, config.allocation);
+  if (batchId !== INITIAL_BATCH_ID && !existsSync(budgetPath)) throw new Error("EXISTING_BUDGET_REQUIRED");
+  const ledger = new EvalLedger(budgetPath, command === "run" && batchId === INITIAL_BATCH_ID ? config.allocation : undefined);
   try {
-    if (command === "status") { const report = ledger.report(); return { reservedImageAttempts: report.reservedImageAttempts, imagePostAttempts: report.imagePostAttempts, planningAttempts: report.planningAttempts, images: report.images, planning: report.planning, report: await exportReport(ledger) }; }
+    if (command === "status") { const report = ledger.report(); return { initialImageLimit: report.initialImageLimit, authorizedImageLimit: report.authorizedImageLimit, batches: report.batches,
+      reservedImageAttempts: report.reservedImageAttempts, imagePostAttempts: report.imagePostAttempts, planningAttempts: report.planningAttempts, images: report.images, planning: report.planning, report: await exportReport(ledger) }; }
     const client = new ApplicationClient(config.apiOrigin), transport = new EvaluationTransport(config, client, ledger);
     if (command === "recover") {
+      if (args.includes("--batch-id")) ledger.batch(batchId);
+      const selected = args.includes("--batch-id") ? ledger.list().filter(attempt => attempt.batchId === batchId) : ledger.list();
       const session = await client.api("/api/auth/session"); if (!session.user?.id) throw new Error("SESSION_OWNER_MISSING");
       client.ownerId = session.user.id; ledger.bind({ apiOrigin: client.base.origin, ownerHash: sha256(client.ownerId) });
-      for (const attempt of ledger.list()) try { await transport.query(attempt); } catch (error) { ledger.mark(attempt.key, "uncertain", { errorCode: codeOf(error) }); }
+      for (const attempt of selected) try { await transport.query(attempt); } catch (error) { ledger.mark(attempt.key, "uncertain", { errorCode: codeOf(error) }); }
     } else {
+      const batch = ledger.batch(batchId);
+      const jobs = namespaceJobs(buildJobs(config, batch.imageLimit), batchId);
       let selected = jobs;
       const only = argument(args, "--only"); if (only) selected = selected.filter(job => job.key.includes(only));
       const limit = argument(args, "--limit"); if (limit) { if (!/^\d+$/.test(limit) || Number(limit) < 1) throw new Error("INVALID_LIMIT"); selected = selected.slice(0, Number(limit)); }
@@ -289,18 +340,20 @@ export async function main(args = process.argv.slice(2)) {
       if (retryOf || retryKey) {
         if (!retryOf || !retryKey || !ledger.get(retryOf)) throw new Error("EXPLICIT_RETRY_REFERENCE_REQUIRED");
         const original = jobs.find(job => job.key === retryOf) ?? ledger.get(retryOf)!.input as Job;
-        selected = [{ ...original, key: retryKey, group: "reserve", retryOf }];
+        selected = [{ ...original, key: namespaceAttemptKey(retryKey, batchId), group: "reserve", retryOf }];
       }
       if (!selected.length) throw new Error("NO_SELECTED_JOBS");
+      validateRunBatch(ledger, config, selected, batchId);
       await preflight(config, selected, client, ledger);
       for (const job of selected) {
         const prior = ledger.get(job.key);
         if (prior) { try { await transport.query(prior); } catch (error) { ledger.mark(job.key, "uncertain", { errorCode: codeOf(error) }); } }
-        else { const input = await transport.prepare(job); await executeAttempt(ledger, job.key, job.group, input, transport); }
+        else { const input = await transport.prepare(job); await executeAttempt(ledger, job.key, job.group, input, transport, batchId); }
       }
     }
     const report = ledger.report();
-    return { reservedImageAttempts: report.reservedImageAttempts, imagePostAttempts: report.imagePostAttempts, planningAttempts: report.planningAttempts, report: await exportReport(ledger) };
+    return { initialImageLimit: report.initialImageLimit, authorizedImageLimit: report.authorizedImageLimit, batches: report.batches,
+      reservedImageAttempts: report.reservedImageAttempts, imagePostAttempts: report.imagePostAttempts, planningAttempts: report.planningAttempts, report: await exportReport(ledger) };
   } finally { ledger.close(); }
 }
 if (import.meta.main) main().then(value => console.log(JSON.stringify(value, null, 2))).catch(error => { console.error(JSON.stringify({ error: codeOf(error) })); process.exitCode = 1; });

@@ -1,4 +1,4 @@
-# 提示词链路 100 张限额评测
+# 提示词链路评测：初始 100 张与显式追加批次
 
 入口 `tools/prompt-chain-eval.ts`。默认只生成离线计划，无网络、无模型请求。仅通过本项目正式应用 API 调用，不读取 `server/.env`、Provider Key 或用户浏览器凭据；不改配方，不激活版本，不动旧 557 次台账。
 
@@ -8,15 +8,15 @@
 
 ```powershell
 bun --no-env-file tools/prompt-chain-eval.ts plan
-bun --no-env-file test tools/prompt-chain-eval/ledger.test.ts
+bun --no-env-file test tools/prompt-chain-eval
 bun server/node_modules/typescript/bin/tsc --project tools/prompt-chain-eval/tsconfig.json --pretty false
 ```
 
-计划和候选配置在 `output/prompt-chain-optimization/evaluation/`，该目录被 Git 忽略。`plan` 不创建预算数据库。计划每次新建快照，不覆盖既有证据。10 组输入 × 4 策略 × 2 模型 = 80；2 组 × 2 模型 × 3 轮 = 12；8 个复核名额不自动执行。可在首次初始化前缩减分组额度，但总数不可超过 100，初始化后不能变更额度。
+计划和候选配置在 `output/prompt-chain-optimization/evaluation/`，该目录被 Git 忽略。`plan` 不创建预算数据库。计划每次新建快照，不覆盖既有证据。10 组输入 × 4 策略 × 2 模型 = 80；2 组 × 2 模型 × 3 轮 = 12；8 个复核名额不自动执行。可在首次初始化前缩减初始分组额度，但初始总数不可超过 100，初始化后不能修改。新增付费额度只能按下文单独授权追加，不能覆盖旧预算。
 
 ## 执行前由操作者补齐
 
-- `config.json` 中两个图片模型的配置 UUID 和实际模型标识，固定尺寸、质量等参数；所有调用 `n=1`，不支持批次、自动重试或额外模型枚举。
+- `config.json` 中两个图片模型的配置 UUID 和实际模型标识，固定尺寸、质量等参数；所有调用 `n=1`，不支持一次请求多图、自动重试或额外模型枚举。
 - 每个场景的 `template` / `minimal` / `legacy` 版本 UUID，分别核验版本策略 `template-first` / `minimal` / `llm`。旧版本缺失策略按 `llm`。使用 `POST /api/admin/prompt-recipes/:scene/test` 测指定版本，不激活生产配方。
 - 已配置模型凭据的**隔离正式 API** origin 与 `super_admin` 会话。只允许运行时 `PCE_COOKIE` 环境变量传入会话，不要写进配置、命令记录、仓库或报告。模型凭据仍完全由服务端保管。
 - 可用 `image-edit` 工具绑定必须允许对照的两模型；脚本不会改变绑定。非 raw 分组使用合法的管理员版本测试 compilationId，并由服务端复核权限与输入哈希。
@@ -54,6 +54,46 @@ bun --no-env-file tools/prompt-chain-eval.ts run --execute --retry-of prompt-cha
 ```
 
 不允许通过删除数据库、换工作区或复制空台账重置额度。这是本次任务的唯一预算，不是每个分支/设备各 100 张。数据库被丢失、损坏或外部调用绕过本工具时，应停止执行，先核对服务器原任务与已发生调用，不能重新初始化假装零次。
+
+## 有用户明确授权时追加一个固定批次
+
+没有新授权时，初始 100 张仍是上限。`run`、`status`、`recover` 不会自动安装追加预算结构，也不会选择下一个批次。即使用户授权继续迭代，操作者仍需明确每一批的 `single`、`sequence`、`reserve` 数量；脚本没有无限循环或自动补满功能。
+
+先将用户已经给出的授权原话和可核查来源记录在私有 `output/` JSON 中。以下是格式示意，**不是已有用户授权，不可照抄作为真实授权**：
+
+```json
+{
+  "version": 1,
+  "authorizationId": "user-authorization-unique-id",
+  "sourceReference": "实际用户消息的引用或记录位置",
+  "authorizedAt": "2026-11-11T00:00:00Z",
+  "userStatement": "替换为用户已明确给出的授权原话",
+  "scope": "prompt-chain-evaluation",
+  "allowAdditionalPaidBatches": true
+}
+```
+
+字段必须完整且没有其他字段；时间使用 UTC ISO 格式。`authorizationId` 是不可变身份，不能用同一 ID 改写原话；同一授权允许追加多个明确批准的小批次，但每次仍需下面的完整命令。此命令只写预算证据，**不调用网络或模型**：
+
+```powershell
+bun --no-env-file tools/prompt-chain-eval.ts authorize-batch --authorization output/prompt-chain-optimization/authorization.json --batch-id iteration-01 --single 40 --sequence 0 --reserve 0 --approve-budget
+```
+
+该命令要求已有且已绑定账号/应用 origin 的唯一总账。一次事务只新增授权、批次、attempt 归属表及额度触发器；保留原 `budget`、`binding`、全部 `attempts` 和 `events`。回执包含原尝试/事件数、授权 SHA、历史前后 SHA；二者必须一致。重复相同命令幂等，不增加第二份额度；改动同名批次或授权内容会拒绝并回滚。
+
+例如旧账本已占 96/100，追加 40 后就是“初始 96/100 + iteration-01 0/40”，累计已授权 140、已占 96。初始剩余 4 张不会转入新批，也不会由新批自动使用。失败、不确定和 POST 前崩溃仍永久占当前批名额。各批及各分组额度分别约束，多进程竞争仍在同一 SQLite 事务中计数。
+
+给新批另存一份 `config-iteration-01.json`，不要修改历史配置。它的 `allocation` 必须与已批准分组额度完全相同；场景、原话、模型、素材与 API origin 等仍需完成前述核对。新增批次 ID 为 1–40 位字母/数字/下划线/连字符，不能使用保留名 `initial`。先离线检查，再显式执行：
+
+```powershell
+bun --no-env-file tools/prompt-chain-eval.ts plan --config output/prompt-chain-optimization/evaluation/config-iteration-01.json --batch-id iteration-01
+bun --no-env-file tools/prompt-chain-eval.ts run --config output/prompt-chain-optimization/evaluation/config-iteration-01.json --batch-id iteration-01 --execute
+bun --no-env-file tools/prompt-chain-eval.ts recover --config output/prompt-chain-optimization/evaluation/config-iteration-01.json --batch-id iteration-01
+```
+
+`plan` 只列计划，不代表预算已批准。`run` 先核对整组选中任务的剩余额度，再预检网络；真实并发最终仍由数据库触发器限额。新 key 统一为 `batch:iteration-01:<原任务key>`，连续改图的上一轮依赖同步加前缀，避免串到旧实验。`--only` 使用此前的子串过滤规则。新增批的 `--retry-key` 输入不带前缀的新 key，脚本自动加前缀；`--retry-of` 必须是账本中原 attempt 的完整 key，复核消耗当前批的 `reserve`。每次命令只处理指定批次，没有批次参数的 `run` 仍只使用 `initial`。
+
+`recover --batch-id` 仅 GET 查询该批；不带批次参数的 `recover` 查询所有已有批次，但不会新建尝试或产生付费调用。`status` 报告包含 `initialImageLimit`、`authorizedImageLimit` 和每批分组的已占/剩余值；旧 `hardImageLimit` 现在表示累计已批准的实际总限额，不能只看历史 `allocation` 判断追加批次。
 
 ## 证据与结论
 
