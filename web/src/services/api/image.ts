@@ -1,4 +1,4 @@
-import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
+import { buildDirectImagePrompt } from "@/lib/image-reference-prompt";
 import { imageModelProfile, imageModelSettingsError, imageOutputIsGif, imageReferenceSizeIsAutomatic, normalizeImageModelSettings } from "@/lib/image-model-settings";
 import { validateImageReferences } from "@/lib/image-reference-policy";
 import { readGenerationReferenceDataUrl, requestQueuedImageBatch, requestQueuedImages, uploadImageReference, type QueuedBatchItem } from "@/services/api/generation-tasks";
@@ -65,7 +65,7 @@ function requestResolvedGeneration(resolved: Awaited<ReturnType<typeof resolveTo
     const validation = validateImageReferences(resolved.model.modelId, references || [], profile);
     if (!validation.valid) throw new Error(validation.message);
     const markup = profile.supportsMarkup ? imageMarkupReference(config.imageOptions) : undefined;
-    const actualPrompt = profile.requiresPrompt ? options?.promptInput || options?.exactPrompt ? prompt : withSystemPrompt(config, prompt) : "";
+    const actualPrompt = profile.requiresPrompt ? options?.promptInput || options?.exactPrompt ? prompt : buildDirectImagePrompt(config, prompt, references, options?.referencePromptLanguage) : "";
     if (!options?.promptInput) validateImagePrompt(actualPrompt, profile);
     return requestQueuedImages({
         resolvedModel: resolved.model,
@@ -118,7 +118,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     }
     const validation = validateImageReferences(resolved.model.modelId, references, profile);
     if (!validation.valid) throw new Error(validation.message);
-    const actualPrompt = options?.promptInput || options?.exactPrompt ? prompt : withSystemPrompt(config, buildImageReferencePromptText(prompt, references, options?.referencePromptLanguage));
+    const actualPrompt = options?.promptInput || options?.exactPrompt ? prompt : buildDirectImagePrompt(config, prompt, references, options?.referencePromptLanguage);
     if (!options?.promptInput) validateImagePrompt(actualPrompt, profile);
     const count = Number(normalizeImageModelSettings(config, profile).count);
     const imageOptions = readImageOptions(config.imageOptions);

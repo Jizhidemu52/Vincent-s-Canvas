@@ -160,10 +160,12 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     };
 
     const saveReferences = (next: typeof imageReferences) => {
+        if (imageInput?.usesSnapshot) { onConfigChange(node.id, { draftImageReferences: next.map(toCanvasStoredImageReference) }); return; }
         const additional = next.filter(reference => reference.referenceKey !== fixedReferenceKey);
         const connectedKeys = new Set([...(node.metadata?.excludedConnectedImageReferenceKeys || []), ...imageReferences.filter((reference) => reference.origin === "connection").map((reference) => reference.referenceKey)]);
         const nextKeys = new Set(additional.map((reference) => reference.referenceKey));
         onConfigChange(node.id, {
+            imageReferenceRoles: Object.fromEntries(next.filter(reference => reference.role !== undefined).map(reference => [reference.referenceKey, reference.role!])),
             manualImageReferences: additional.filter((reference) => reference.origin !== "connection").map(toCanvasStoredImageReference),
             excludedConnectedImageReferenceKeys: [...connectedKeys].filter((key) => !nextKeys.has(key)),
             imageReferenceOrder: additional.map((reference) => reference.referenceKey),

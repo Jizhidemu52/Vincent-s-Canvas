@@ -13,7 +13,7 @@ export function resolveCanvasImageReferences(node: CanvasNodeData, nodes: Canvas
         .map((candidate) => createImageReferenceItem({ id: candidate.id, name: candidate.metadata?.originalFileName || candidate.title || candidate.id, originalFileName: candidate.metadata?.originalFileName, imageName: canvasImageBaseName(candidate), imageVersion: canvasImageVersion(candidate), type: candidate.metadata?.mimeType || "image/png", dataUrl: candidate.metadata?.content || "", storageKey: candidate.metadata?.storageKey }, "connection"))
         .map((reference) => ({ ...reference, referenceKey: `node:${reference.id}` }))
         .filter((reference) => !excluded.has(reference.referenceKey));
-    return applyCanvasReferenceOrder(dedupeImageReferences([...manual, ...connected]), node.metadata?.imageReferenceOrder || []);
+    return applyCanvasReferenceOrder(dedupeImageReferences([...manual, ...connected]), node.metadata?.imageReferenceOrder || []).map(reference => ({ ...reference, role: node.metadata?.imageReferenceRoles?.[reference.referenceKey] ?? reference.role }));
 }
 
 /** The node-edit tray, mentions and generation request share this exact input order. */
@@ -24,7 +24,7 @@ export function resolveCanvasNodeImageReferences(node: CanvasNodeData, nodes: Ca
         ...createImageReferenceItem({ id: node.id, name: node.metadata.originalFileName || node.title || node.id, originalFileName: node.metadata.originalFileName,
             imageName: canvasImageBaseName(node), imageVersion: canvasImageVersion(node), type: node.metadata.mimeType || "image/png",
             dataUrl: node.metadata.content || "", storageKey: node.metadata.storageKey }, "canvas"),
-        referenceKey: `source:${node.id}`, originLabel: "当前原图",
+        referenceKey: `source:${node.id}`, originLabel: "当前原图", role: node.metadata.imageReferenceRoles?.[`source:${node.id}`] ?? "以此图作为编辑原图。",
     };
     return dedupeImageReferences([source, ...references.filter(reference => reference.id !== node.id && (!source.dataUrl || reference.dataUrl !== source.dataUrl))]);
 }
@@ -51,9 +51,9 @@ export function excludeConnectedReference(metadata: CanvasNodeMetadata, referenc
 }
 
 export function toCanvasStoredImageReference(reference: ImageReferenceItem): CanvasStoredImageReference {
-    return { referenceKey: reference.referenceKey, id: reference.id, name: reference.name, originalFileName: reference.originalFileName, imageName: reference.imageName, imageVersion: reference.imageVersion, type: reference.type, content: reference.dataUrl, storageKey: reference.storageKey, sourceNodeId: reference.origin === "canvas" ? reference.id : undefined, origin: reference.origin === "asset" ? "asset" : reference.origin === "canvas" ? "canvas" : "upload" };
+    return { referenceKey: reference.referenceKey, id: reference.id, name: reference.name, role: reference.role, originalFileName: reference.originalFileName, imageName: reference.imageName, imageVersion: reference.imageVersion, type: reference.type, content: reference.dataUrl, storageKey: reference.storageKey, sourceNodeId: reference.origin === "canvas" ? reference.id : undefined, origin: reference.origin === "asset" ? "asset" : reference.origin === "canvas" ? "canvas" : "upload" };
 }
 
 function toReferenceItem(reference: CanvasStoredImageReference): ImageReferenceItem {
-    return { ...createImageReferenceItem({ id: reference.id, name: reference.name, originalFileName: reference.originalFileName, imageName: reference.imageName, imageVersion: reference.imageVersion, type: reference.type, dataUrl: reference.content, storageKey: reference.storageKey }, reference.origin === "asset" ? "asset" : reference.origin === "canvas" ? "canvas" : "upload"), referenceKey: reference.referenceKey };
+    return { ...createImageReferenceItem({ id: reference.id, name: reference.name, role: reference.role, originalFileName: reference.originalFileName, imageName: reference.imageName, imageVersion: reference.imageVersion, type: reference.type, dataUrl: reference.content, storageKey: reference.storageKey }, reference.origin === "asset" ? "asset" : reference.origin === "canvas" ? "canvas" : "upload"), referenceKey: reference.referenceKey };
 }

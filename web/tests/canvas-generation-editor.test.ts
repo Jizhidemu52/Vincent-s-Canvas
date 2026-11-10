@@ -8,7 +8,7 @@ const original = image("purple");
 const archive: CanvasGenerationRecord = {
     version: 1, id: "run-1", sourceNodeId: original.id, createdAt: "2026-10-30T00:00:00Z", prompt: "expanded blue", inputPrompt: "blue",
     parameters: { model: "m", size: "1:1", quality: "1k", imageOptions: "", systemPrompt: "", count: 1, generationType: "edit" },
-    references: [{ id: original.id, referenceKey: `node:${original.id}`, name: "purple.png", type: "image/png", content: original.metadata!.content!, storageKey: original.metadata!.storageKey, sourceNodeId: original.id, origin: "canvas", order: 0 }],
+    references: [{ id: original.id, referenceKey: `node:${original.id}`, name: "purple.png", role: "只参考此图的颜色。", type: "image/png", content: original.metadata!.content!, storageKey: original.metadata!.storageKey, sourceNodeId: original.id, origin: "canvas", order: 0 }],
 };
 const result = { ...image("blue"), metadata: { ...image("blue").metadata, prompt: archive.prompt, generationRecord: archive } };
 
@@ -37,6 +37,7 @@ describe("node-owned generation editor", () => {
         expect(state.references).toHaveLength(1);
         expect(state.references[0].storageKey).toBe("purple.png");
         expect(storeCanvasEditorReferences(state.references)[0].sourceNodeId).toBe("purple");
+        expect(storeCanvasEditorReferences(state.references)[0].role).toBe("只参考此图的颜色。");
         expect(archive.references).toHaveLength(1);
     });
     test("an intentionally empty draft and no-reference choice do not fall back to the archive", () => {

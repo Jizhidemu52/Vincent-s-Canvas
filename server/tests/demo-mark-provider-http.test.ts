@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { fileURLToPath } from "node:url";
 import { MARK_IMAGE_MODELS, MARK_PLATFORM_MODELS } from "../../shared/mark-image-models";
+import { ANGLE_CONTROL_PROMPT, DETAIL_ENHANCE_PROMPT, SEAMLESS_PATTERN_PROMPT } from "../src/fixed-tool-prompt";
 
 test("demo exposes the expanded Mark catalog, enforces reference limits, and submits the original three UUIDs only once", async () => {
   const submissions: Array<Record<string, unknown>> = [];
@@ -79,8 +80,15 @@ test("demo exposes the expanded Mark catalog, enforces reference limits, and sub
     }
     expect(submissions).toHaveLength(0);
 
+    const fixedTools = [
+      { operationType: "upscale", toolKey: "detail-enhance", instruction: DETAIL_ENHANCE_PROMPT },
+      { operationType: "seamless_stitch", toolKey: "seamless-stitch", instruction: SEAMLESS_PATTERN_PROMPT },
+      { operationType: "inpaint", toolKey: "angle-control", instruction: ANGLE_CONTROL_PROMPT },
+    ];
     for (const [index, model] of images.entries()) {
-      const input = { requestId: crypto.randomUUID(), projectId: "mark-fixture", operationType: index === 1 ? "seamless_stitch" : "image_generation", modelConfigId: model.id, prompt: "local fake Mark verification", parameters: { resolution: "1k", ...(index < 2 ? { quality: "low" } : {}) } };
+      const fixedTool = fixedTools[index]!;
+      const input = { requestId: crypto.randomUUID(), projectId: "mark-fixture", operationType: fixedTool.operationType, toolKey: fixedTool.toolKey, modelConfigId: model.id, sourceUrls: [sourceUrl], prompt: "local fake Mark verification：45°，7粒扣不变。", parameters: { resolution: "1k", ...(index < 2 ? { quality: "low" } : {}) } };
+      const effectivePrompt = index === 1 ? fixedTool.instruction : `${fixedTool.instruction}\n\n用户要求：\n${input.prompt}`;
       const generated = await request("/api/tasks", "POST", input);
       expect(generated.status).toBe(201);
       const task = (await generated.json()).task;
@@ -96,7 +104,8 @@ test("demo exposes the expanded Mark catalog, enforces reference limits, and sub
       expect(completed.task.submissionStartedAt).toEqual(expect.any(String));
       expect(completed.task.upstreamTaskId).toBe(`fake-upstream-${index + 1}`);
       expect(submissions).toHaveLength(index + 1);
-      expect(submissions[index]).toMatchObject({ model: MARK_IMAGE_MODELS[index]!.modelId, n: 1, prompt: input.prompt });
+      expect(submissions[index]).toMatchObject({ model: MARK_IMAGE_MODELS[index]!.modelId, n: 1, prompt: effectivePrompt });
+      expect(task.prompt).toBe(effectivePrompt);
     }
     expect(submissions).toHaveLength(3);
     expect(reads).toHaveLength(3);

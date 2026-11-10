@@ -116,7 +116,9 @@ export function resolveCanvasImageEdit(
     if (references.some(ref => !ref.dataUrl && !ref.storageKey)) throw new Error("改图底图不可读取，请重新提供图片；不会退回文生图。");
     const known = [...context.originals, ...context.results];
     const continuing = target ? target.mode === "original" || Boolean(target.resultImageId) : intent === "correct_original" || intent === "refine_latest" || (intent === "explicit" && references.length > 0 && references.every(ref => known.some(item => (item.storageKey || item.dataUrl) === (ref.storageKey || ref.dataUrl))));
-    const prefix = target && target.mode === "edit" ? "Use the attached image explicitly selected by the user as the editing base; preserve the successful changes." : continuing ? intent === "correct_original" ? "Edit the attached original source image; do not reproduce errors from the previous result." : intent === "refine_latest" ? "Refine the attached latest result while preserving the successful changes." : "Use the attached image explicitly selected by the user as the editing base." : "";
+    // Actual asset selection already fixes original/latest/explicit identity.
+    // Do not ask the image model to infer which prior pixels were successful.
+    const prefix = "";
     const compiled = compileCanvasEditContract({ contract: args.editContract, previous: context.contract, continuing, userPrompt, legacySources: [context.originalPrompt, ...(context.legacyUserSources || [])], draftPrompt: args.prompt, references, prefix });
     const lineage: CanvasImageEditLineage = {
         intent,

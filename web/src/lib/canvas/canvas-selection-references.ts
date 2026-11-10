@@ -36,7 +36,7 @@ export function syncCanvasSelectionReferences(
         if (!updated) { next.push(reference); continue; }
         const unchanged = reference.name === updated.name && reference.type === updated.type &&
             reference.dataUrl === updated.dataUrl && reference.url === updated.url && reference.storageKey === updated.storageKey && reference.originalFileName === updated.originalFileName && reference.imageName === updated.imageName && reference.imageVersion === updated.imageVersion;
-        next.push(unchanged ? reference : updated);
+        next.push(unchanged ? reference : { ...updated, role: reference.role });
         selected.delete(reference.canvasNodeId);
     }
     next.push(...selected.values());

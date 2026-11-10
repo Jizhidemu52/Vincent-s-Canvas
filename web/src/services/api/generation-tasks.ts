@@ -24,6 +24,7 @@ import { readImageOptions } from "@/lib/image-advanced-settings";
 import { getBusinessConfig } from "./business-config";
 import { requireToolKey, resolveConfiguredToolModel } from "./tool-runtime";
 import { quickImageReferenceFileError, type QuickImageAction } from "@/lib/quick-image-tools";
+import { confirmImageTaskPreview, promptPreviewReferences } from "./prompt-task-preview";
 
 type ImageOperationType = "image_generation" | "inpaint" | "upscale" | "batch_image" | "seamless_stitch";
 type PublicModel = { id: string; name: string; modelId: string; capabilities: string[]; creditCost: number; rmbCost: number };
@@ -179,7 +180,7 @@ export async function requestQueuedImages(input: { quickImageAction?: QuickImage
         assertOwner();
         input.signal?.throwIfAborted();
         sourceUrls.push(`/api/assets/${assetId}/content`);
-        archivedReferences.push({ id: reference.id, name: reference.name, originalFileName: reference.originalFileName, type: file.type, bytes: file.size, sha256: hash, url: sourceUrls[sourceUrls.length - 1]!, sourceAssetId: assetId });
+        archivedReferences.push({ id: reference.id, name: reference.name, role: reference.role, originalFileName: reference.originalFileName, type: file.type, bytes: file.size, sha256: hash, url: sourceUrls[sourceUrls.length - 1]!, sourceAssetId: assetId });
     }
 
     const rootRequestId = input.requestId || createClientId();
@@ -196,7 +197,7 @@ export async function requestQueuedImages(input: { quickImageAction?: QuickImage
         parameters: { ...input.parameters }, references: archivedReferences, maskReferenceIndex: input.draft.maskReferenceIndex,
         ...(input.draft.markupReferenceIndex !== undefined ? { markupReferenceIndex: input.draft.markupReferenceIndex } : {}),
     } : undefined;
-    const taskRequests = createImageTaskRequests({
+    let taskRequests = createImageTaskRequests({
         quickImageAction: input.quickImageAction,
         toolKey,
         requestId: rootRequestId,
@@ -209,6 +210,12 @@ export async function requestQueuedImages(input: { quickImageAction?: QuickImage
         sourceUrls,
         count: input.count,
     });
+    if (input.promptInput && model) {
+        const task = taskRequests[0]!;
+        taskRequests = [await confirmImageTaskPreview(task, { modelName: model.name,
+            references: promptPreviewReferences(sourceUrls, input.promptInput, archivedReferences.map(reference => reference.name || ""), input.draft?.maskReferenceIndex, input.draft?.markupReferenceIndex),
+            signal: input.signal })];
+    }
     input.signal?.throwIfAborted();
     const submitted = await Promise.allSettled(
         taskRequests.map(async (task) => {
@@ -293,6 +300,12 @@ export async function requestQueuedImageBatch(input: { modelId: string; resolved
 
     const requestId = createClientId();
     assertOwner();
+    const previewTask = await confirmImageTaskPreview({
+        requestId, projectId: input.projectId || currentProjectId("canvas-batch-edit"), operationType: "batch_image", toolKey: "canvas-batch",
+        modelConfigId: model.id, prompt: input.prompt, promptInput: input.promptInput,
+        parameters: { ...input.parameters, tool: "canvas-batch", count: 1, n: 1 }, sourceUrls: [uploadedItems[0]!.sourceUrl], priority: "normal",
+    }, { modelName: model.name, references: uploadedItems.map((item, index) => ({ url: item.sourceUrl, name: input.files[item.itemIndex]!.title, label: `批次原图${index + 1}（每张独立执行）` })), signal: input.signal, batchCount: uploadedItems.length });
+    assertOwner();
     await input.onSubmissionStarted?.(requestId, uploadedItems);
     assertOwner();
     if (input.promptInput) input.onOptimizing?.();
@@ -310,7 +323,7 @@ export async function requestQueuedImageBatch(input: { modelId: string; resolved
             toolKey: "canvas-batch",
             modelConfigId: model.id,
             prompt: input.prompt,
-            ...(input.promptInput ? { promptInput: input.promptInput } : {}),
+            ...(previewTask.promptInput ? { promptInput: previewTask.promptInput } : {}),
             parameters: { ...input.parameters, tool: "canvas-batch", count: 1, n: 1 },
             priority: "normal",
             items: uploadedItems.map((item) => ({ sourceUrls: [item.sourceUrl] })),

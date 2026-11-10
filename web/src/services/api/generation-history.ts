@@ -9,7 +9,7 @@ import { readImageOptions } from "@/lib/image-advanced-settings";
 
 export type GenerationDraftConfig = Pick<AiConfig, "model" | "imageModel" | "size" | "quality" | "count" | "systemPrompt" | "imageOptions">;
 export type GenerationDraftInput = { prompt: string; config: GenerationDraftConfig; maskReferenceIndex?: number; markupReferenceIndex?: number };
-export type ArchivedReference = { id: string; name: string; originalFileName?: string; type: string; bytes: number; sha256: string; url: string; sourceAssetId?: string };
+export type ArchivedReference = { id: string; name: string; role?: string; originalFileName?: string; type: string; bytes: number; sha256: string; url: string; sourceAssetId?: string };
 export type GenerationInputArchive = {
     version: 1; ownerId: string; modelConfigId: string; modelId: string;
     prompt: string; userInput?: PromptInputData; optimized?: boolean; effectivePrompt: string; submittedPrompt?: string; config: GenerationDraftConfig;
@@ -49,7 +49,7 @@ export async function restoreGenerationDraft(taskId: string) {
         || !["model", "imageModel", "size", "quality", "count", "systemPrompt"].every(key => typeof archive.config[key as keyof GenerationDraftConfig] === "string")
         || !Array.isArray(archive.references) || !Array.isArray(task.sourceUrls)
         || archive.references.length !== task.sourceUrls.length
-        || archive.references.some((item, index) => item.url !== task.sourceUrls[index] || !/^\/api\/assets\/[a-zA-Z0-9_-]+\/content$/.test(item.url) || !/^[a-f0-9]{64}$/.test(item.sha256))) {
+        || archive.references.some((item, index) => (item.role !== undefined && typeof item.role !== "string") || item.url !== task.sourceUrls[index] || !/^\/api\/assets\/[a-zA-Z0-9_-]+\/content$/.test(item.url) || !/^[a-f0-9]{64}$/.test(item.sha256))) {
         throw new Error("历史输入归档不完整或顺序不一致，未套用任何参数");
     }
     const { models } = await (await get("/api/models")).json();
@@ -69,7 +69,7 @@ export async function restoreGenerationDraft(taskId: string) {
         const dataUrl = await new Promise<string>((resolve, reject) => {
             const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(new Error("原图读取失败")); reader.readAsDataURL(new Blob([blob], { type: item.type }));
         });
-        references.push({ id: `history:${taskId}:${index}`, name: item.name, originalFileName: item.originalFileName, type: item.type, bytes: item.bytes, sourceAssetId: item.sourceAssetId, dataUrl });
+        references.push({ id: `history:${taskId}:${index}`, name: item.name, role: item.role, originalFileName: item.originalFileName, type: item.type, bytes: item.bytes, sourceAssetId: item.sourceAssetId, dataUrl });
     }
     assertOwner();
     const restoredConfig = { ...archive.config, model: archive.modelConfigId, imageModel: archive.modelConfigId };

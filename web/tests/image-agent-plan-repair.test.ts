@@ -91,8 +91,8 @@ test("compiler retains full visual prompt and code-owned non-target preservation
     const full = "只把左袖口换成蓝色罗纹，沿用原有细腻布纹与柔和侧光。";
     const compiled = compileImageAgentPrompt({ prompt: full, keep: [], images: [{ id: "a", label: "图8" }], baseImageId: "a", spec: { changes: ["左袖口改蓝色罗纹"], assumptions: ["不修改右袖口"], acceptance: ["左袖口可见蓝色罗纹"] } });
     expect(compiled.prompt).toContain(full);
-    expect(compiled.prompt).toContain("未涉及");
-    expect(compiled.prompt).toContain("本轮明确要求的变化优先");
+    expect(compiled.prompt).toContain("除本次明确修改外，其余保持底图不变");
+    expect(compiled.prompt).not.toContain("结果应满足");
     expect(compiled.spec?.assumptions).toEqual(["不修改右袖口"]);
     expect(() => compileImageAgentPrompt({ prompt: full, keep: [], images: [{ id: "a", label: "图8" }], baseImageId: "b" })).toThrow("第一张");
     expect(() => compileImageAgentPrompt({ prompt: "x".repeat(20_000), keep: [], images: [{ id: "a", label: "图8" }], baseImageId: "a" })).toThrow("20000");

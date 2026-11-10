@@ -88,8 +88,16 @@ test("all actual references must have one valid role and unknown or duplicate ro
     for (const referenceRoles of [[], [{ id: "wrong", role: "base" }], [{ id: "shirt", role: "base" }, { id: "shirt", role: "color" }], [{ id: "shirt", role: "look-only" }]]) expect(() => compile(input({ contract: contract({ referenceRoles }) }))).toThrow("referenceRoles");
 });
 
-test("source provenance, duplicate ids and non-English instructions fail closed", () => {
-    for (const changes of [[clause("fabric", "Make the shirt pink.", "用户从未说过")], [clause("fabric", "改粉色", "衬衫改粉色")], [clause("buttons", "Make the shirt pink.", "衬衫改粉色")]]) expect(() => compile(input({ contract: contract({ changes }) }))).toThrow();
+test("source provenance, duplicate ids and reasoning payloads fail closed; Chinese visual instructions are valid", () => {
+    for (const changes of [[clause("fabric", "Make the shirt pink.", "用户从未说过")], [clause("fabric", "<think>改粉色</think>", "衬衫改粉色")], [clause("buttons", "Make the shirt pink.", "衬衫改粉色")]]) expect(() => compile(input({ contract: contract({ changes }) }))).toThrow();
+    expect(compile(input({ contract: contract({ changes: [clause("fabric", "改粉色", "衬衫改粉色")] }) })).prompt).toContain("改粉色");
+});
+
+test("Chinese preservation and artwork literals are not rewritten or translated", () => {
+    const request = "保留七颗纽扣和文字“图2”";
+    const result = compile(input({ userPrompt: request, draftPrompt: request, contract: contract({ changes: [], preserve: [clause("buttons", request, request)], forbid: [] }) }));
+    expect(result.prompt).toContain(request);
+    expect(result.contract.preserve[0]!.source).toBe(request);
 });
 
 test.each(["针织棉面料", "针织棉质", "cotton knit fabric", "棉质针织面料"])("knit material source must be a contiguous original-language excerpt, not %s", source => {

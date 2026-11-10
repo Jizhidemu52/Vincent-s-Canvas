@@ -1,0 +1,6 @@
+{
+  "extends": "../../server/tsconfig.json",
+  "compilerOptions": { "types": ["bun"], "typeRoots": ["../../server/node_modules/@types"] },
+  "include": ["../prompt-chain-eval.ts", "./*.ts"],
+  "exclude": []
+}

@@ -3,7 +3,7 @@ import { App } from "antd";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import { SeamlessStitchWorkspace } from "@/pages/image/seamless-stitch";
-import { DEFAULT_SEAMLESS_STITCH_PARAMETERS, requestSeamlessStitch, SEAMLESS_PATTERN_PROMPT } from "@/services/api/internal-ai";
+import { DEFAULT_SEAMLESS_STITCH_PARAMETERS, requestSeamlessStitch } from "@/services/api/internal-ai";
 import type { BusinessConfig, PublicModel, PublicToolConfiguration } from "@/services/api/business-config";
 import { defaultConfig, useConfigStore } from "@/stores/use-config-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
@@ -24,6 +24,7 @@ const sunburst = mark("mark-sunburst", "quality-resolution");
 const nano = mark("mark-nano", "resolution-1k");
 const internal: PublicModel = { id: "internal-stitch", modelId: "internal-seamless", name: "内部无缝工作流", capabilities: ["edit"], creditCost: 0, rmbCost: 0 };
 const reference = { id: "source", name: "flower.png", dataUrl: "data:image/png;base64,aGVsbG8=" };
+const serverSeamlessPrompt = "服务端固定花型模板：保留主体、配色和风格，四边连续衔接。";
 const binding = (modelConfigId: string | null, enabled = true): PublicToolConfiguration => ({ toolKey: "seamless-stitch", modelConfigId, enabled, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 1 });
 const config = (model: string) => ({ ...defaultConfig, model, imageModel: model, quality: "max", size: "4:3", count: "7", imageOptions: '{"resolution":"4k","output_format":"webp","output_compression":"88","google_search":"true"}' });
 
@@ -53,8 +54,8 @@ function mockServer(models: PublicModel[], tools: PublicToolConfiguration[] = []
             expect(init).toMatchObject({ credentials: "include", cache: "no-store" });
             return new Response(null, { status: 200, headers: { "content-type": "image/png" } });
         }
-        if (path === "/api/tasks" && init?.method === "POST") return Response.json({ task: { id: "task-1", status: "queued" } });
-        const task = { id: "task-1", status: "success", resultUrls: ["/api/assets/result/content"] };
+        if (path === "/api/tasks" && init?.method === "POST") return Response.json({ task: { id: "task-1", status: "queued", prompt: serverSeamlessPrompt } });
+        const task = { id: "task-1", status: "success", prompt: serverSeamlessPrompt, resultUrls: ["/api/assets/result/content"] };
         if (path === "/api/tasks/task-1") return Response.json({ task });
         if (path.startsWith("/api/tasks?")) return Response.json({ tasks: [task] });
         if (path === "/api/auth/session") return Response.json({ user: { id: "employee-a", status: "active", role: "designer" } });
@@ -63,16 +64,18 @@ function mockServer(models: PublicModel[], tools: PublicToolConfiguration[] = []
     return calls;
 }
 
-test.each([flare, sunburst])("$id sends independent Mark image parameters and a seamless-repeat prompt", async model => {
+test.each([flare, sunburst])("$id sends only seamless intent and returns the actual server template with independent image parameters", async model => {
     const calls = mockServer([model]);
     const result = await requestSeamlessStitch(reference, DEFAULT_SEAMLESS_STITCH_PARAMETERS, config(model.id));
     const task = calls.find(call => call.path === "/api/tasks" && call.body)?.body;
-    expect(task).toMatchObject({ operationType: "seamless_stitch", toolKey: "seamless-stitch", modelConfigId: model.id, prompt: SEAMLESS_PATTERN_PROMPT, parameters: { size: "4:3", quality: "max", resolution: "4k", output_format: "webp", output_compression: 88, count: 1 } });
+    expect(task).toMatchObject({ operationType: "seamless_stitch", toolKey: "seamless-stitch", modelConfigId: model.id, prompt: "无缝拼接", parameters: { size: "4:3", quality: "max", resolution: "4k", output_format: "webp", output_compression: 88, count: 1 } });
     expect(task?.parameters.inputArchive.config.count).toBe("1");
     for (const key of ["cutWidth", "redrawWidth", "blurAmount", "redrawStrength", "steps", "google_search"]) expect(task?.parameters[key]).toBeUndefined();
     expect(calls.filter(call => call.path === "/api/models")).toHaveLength(1);
     expect(calls.filter(call => call.path === "/api/tasks" && call.body)).toHaveLength(1);
-    expect(result).toMatchObject({ model, prompt: SEAMLESS_PATTERN_PROMPT, usesImageSettings: true });
+    expect(result).toMatchObject({ model, prompt: serverSeamlessPrompt, usesImageSettings: true });
+    expect(task?.promptInput).toBeUndefined();
+    expect(calls.some(call => call.path.includes("prompt-compilations"))).toBe(false);
 });
 
 test("Nano seamless stitching discards unsupported GPT and legacy workflow parameters", async () => {
@@ -89,7 +92,8 @@ test.each(["gpt", "grok-image"] as const)("new %s uses image controls and single
     const result = await requestSeamlessStitch(reference, { ...DEFAULT_SEAMLESS_STITCH_PARAMETERS, steps: -1 }, { ...config(model.id), quality: kind === "gpt" ? "2k" : "medium", imageOptions: '{"resolution":"2k"}' });
     const body = calls.find(call => call.path === "/api/tasks" && call.body)?.body;
     expect(result.usesImageSettings).toBe(true);
-    expect(body.prompt).toBe(SEAMLESS_PATTERN_PROMPT);
+    expect(body.prompt).toBe("无缝拼接");
+    expect(result.prompt).toBe(serverSeamlessPrompt);
     expect(body.parameters.resolution).toBe("2k");
     expect(body.parameters.quality).toBeUndefined();
     expect(body.parameters.steps).toBeUndefined();

@@ -113,7 +113,7 @@ export async function requestCreativeChatPlan(config: AiConfig, history: Creativ
     let previews = await previewsFor(references);
     references = references.filter((item) => previews.some((preview) => preview.id === item.id));
     options.signal?.throwIfAborted();
-    const context = { catalog, selectedImageId, lockedImageId, newCreation, referenceImageIds: options.referenceImageIds, documents: options.documents, requirements: options.requirements };
+    const context = { catalog, selectedImageId, lockedImageId, newCreation, referenceImageIds: options.referenceImageIds, documents: options.documents, requirements: options.requirements, userPrompt: current.content };
     const requestOptions = {
         tool: "gpt-chat",
         chatProfile: "creative-chat" as const,

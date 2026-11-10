@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { requestEdit, requestGeneration } from "@/services/api/image";
 import { restoreGenerationDraft } from "@/services/api/generation-history";
 import { imageMarkupReference } from "@/lib/image-advanced-settings";
+import { buildDirectImagePrompt } from "@/lib/image-reference-prompt";
 import { defaultConfig } from "@/stores/use-config-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { useUserStore } from "@/stores/use-user-store";
@@ -83,6 +84,35 @@ test("edit path attaches markup separately and blocks mask conflicts before uplo
     requests = [];
     await expect(requestEdit(config, "Edit", references(1), references(1)[0], { tool: "canvas-mask-edit" })).rejects.toThrow("不能同时");
     expect(requests.map(request => request.path)).toEqual(["/api/models"]);
+});
+
+test.each(["generate", "edit"])("%s sends the preview text literally, archives roles and never numbers markup", async mode => {
+    const refs = references(2).map((image, index) => ({ ...image, role: index ? "只参考此图的颜色。" : "以此图作为编辑原图。" }));
+    const text = '\n只改蓝色；保留 6 颗纽扣与 "春日 快乐"。  ';
+    const withSystem = { ...config, systemPrompt: "保留明确要求。" };
+    if (mode === "generate") await requestGeneration(withSystem, text, { tool: "canvas-image" }, refs);
+    else await requestEdit(withSystem, text, refs, undefined, { tool: "canvas-edit" });
+    const task = tasks.get("task-0");
+    expect(task.prompt).toBe(buildDirectImagePrompt(withSystem, text, refs));
+    expect(task.prompt.endsWith(text)).toBe(true);
+    expect(task.prompt).toContain("图片1：以此图作为编辑原图。\n图片2：只参考此图的颜色。");
+    expect(task.prompt).not.toContain("图片3");
+    expect(task.parameters.inputArchive.prompt).toBe(text);
+    expect(task.parameters.inputArchive.references.map((image: any) => image.role)).toEqual([...refs.map(image => image.role), undefined]);
+    expect(requests.some(request => request.path.startsWith("/api/prompt-compilations"))).toBe(false);
+    const restored = await restoreGenerationDraft("task-0");
+    expect(restored.references.map(image => image.role)).toEqual(refs.map(image => image.role));
+});
+
+test("mask remains separate from numbered references and invalid role metadata blocks restore", async () => {
+    const refs = references(2).map((image, index) => ({ ...image, role: index ? "只参考此图的图案。" : "以此图作为编辑原图。" }));
+    await requestEdit({ ...config, imageOptions: "{}" }, "保留其他区域。", refs, references(1)[0], { tool: "canvas-mask-edit" });
+    const task = tasks.get("task-0");
+    expect(task.sourceUrls).toHaveLength(3);
+    expect(task.prompt).not.toContain("图片3");
+    expect(task.parameters.inputArchive.maskReferenceIndex).toBe(2);
+    task.parameters.inputArchive.references[0].role = { invalid: true };
+    await expect(restoreGenerationDraft("task-0")).rejects.toThrow("归档不完整");
 });
 
 test("GIF is a single ordinary generation and never uploads forbidden image inputs", async () => {

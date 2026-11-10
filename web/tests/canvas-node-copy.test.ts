@@ -48,6 +48,7 @@ describe("canvas node graph copy", () => {
             composerContent: "use @[node:canvas:source]",
             manualImageReferences: [{ id: "source", sourceNodeId: "source", referenceKey: "canvas:source", origin: "canvas" as const, name: "原图", type: "image/png", content: "blob:source", storageKey: "asset:unchanged" }],
             imageReferenceOrder: ["canvas:source", "node:source", "upload:independent"],
+            imageReferenceRoles: { "node:source": "只参考此图的图案。", "upload:independent": "只参考此图的颜色。" },
             excludedConnectedImageReferenceKeys: ["node:source"],
         } };
         const output = { ...node("output"), metadata: { generationOrigin: { configNodeId: "config", sourceNodeId: "source", runId: "run", mode: "image" as const } } };
@@ -60,6 +61,7 @@ describe("canvas node graph copy", () => {
         expect(newConfig!.metadata!.composerContent).toBe(`use @[node:canvas:${newSource!.id}]`);
         expect(newConfig!.metadata!.manualImageReferences![0]).toMatchObject({ id: newSource!.id, sourceNodeId: newSource!.id, referenceKey: `canvas:${newSource!.id}`, content: "blob:source", storageKey: "asset:unchanged" });
         expect(newConfig!.metadata!.imageReferenceOrder).toEqual([`canvas:${newSource!.id}`, `node:${newSource!.id}`, "upload:independent"]);
+        expect(newConfig!.metadata!.imageReferenceRoles).toEqual({ [`node:${newSource!.id}`]: "只参考此图的图案。", "upload:independent": "只参考此图的颜色。" });
         expect(newConfig!.metadata!.excludedConnectedImageReferenceKeys).toEqual([`node:${newSource!.id}`]);
         expect(copied.connections[0]).toMatchObject({ kind: "config-target", fromNodeId: newConfig!.id, toNodeId: newSource!.id });
         expect(graph).toEqual(before);

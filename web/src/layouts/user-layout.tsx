@@ -9,6 +9,7 @@ import { useUserStore } from "@/stores/use-user-store";
 import { deploymentFeatures } from "@/lib/deployment-features";
 import { SessionRecoveryControl } from "@/components/auth/session-expired-dialog";
 import { ReleaseNotesHost } from "@/components/release-notes";
+import { PromptExecutionPreviewHost } from "@/components/prompt-execution-preview";
 import "@/styles/workbench.css";
 
 export default function UserLayout({ children }: { children: ReactNode }) {
@@ -31,6 +32,6 @@ export default function UserLayout({ children }: { children: ReactNode }) {
         <><div className={cn("flex h-dvh overflow-hidden", !hideShell && "wb-app")}>
             <AppTopNav />
             <div className={cn("min-h-0 flex-1 overflow-hidden", !hideShell && "pt-14 md:pt-0")}>{children}</div>
-        </div><SessionRecoveryControl /><ReleaseNotesHost /></>
+        </div><SessionRecoveryControl /><ReleaseNotesHost /><PromptExecutionPreviewHost /></>
     );
 }

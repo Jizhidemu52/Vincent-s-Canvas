@@ -18,7 +18,7 @@ export function createCanvasGenerationRecord(input: {
             const source = input.nodes.find(node => node.id === (item.canvasNodeId || item.sourceNodeId || reference.id));
             const sourceNodeId = item.canvasNodeId || item.sourceNodeId || (source && (!item.origin || item.origin === "canvas" || item.origin === "connection") ? source.id : undefined);
             return { id: reference.id, referenceKey: item.referenceKey || (sourceNodeId ? `node:${sourceNodeId}` : `reference:${reference.id}`),
-                name: reference.name, originalFileName: reference.originalFileName, imageName: reference.imageName, imageVersion: reference.imageVersion,
+                name: reference.name, role: reference.role, originalFileName: reference.originalFileName, imageName: reference.imageName, imageVersion: reference.imageVersion,
                 type: reference.type, content: reference.storageKey && source?.metadata?.storageKey === reference.storageKey ? source.metadata.content || "" : reference.dataUrl,
                 storageKey: reference.storageKey, sourceNodeId, origin: item.origin === "asset" ? "asset" : sourceNodeId || item.origin === "canvas" ? "canvas" : "upload", order };
         }),
@@ -28,7 +28,7 @@ export function createCanvasGenerationRecord(input: {
 }
 
 function referenceItem(reference: CanvasStoredImageReference): ImageReferenceItem & { sourceNodeId?: string } {
-    return { id: reference.id, referenceKey: reference.referenceKey, name: reference.name, originalFileName: reference.originalFileName,
+    return { id: reference.id, referenceKey: reference.referenceKey, name: reference.name, role: reference.role, originalFileName: reference.originalFileName,
         imageName: reference.imageName, imageVersion: reference.imageVersion, type: reference.type, dataUrl: reference.content,
         storageKey: reference.storageKey, sourceNodeId: reference.sourceNodeId, origin: reference.origin, originLabel: "原生成参考" };
 }

@@ -23,7 +23,8 @@ test("round 1: correction uses original bytes even when the model requests the b
     expect(readWrongRefs).toBe(false);
     expect(edit.references.map(ref => ref.dataUrl)).toEqual([original.dataUrl]);
     expect(edit.references[0]?.storageKey).toBe("image:original");
-    expect(edit.prompt).toContain("attached original source image");
+    expect(edit.prompt).toContain("Image 1: base reference");
+    expect(edit.prompt).not.toContain("errors from the previous result");
     expect(edit.prompt).toContain("keep the white background");
     expect(edit.prompt).not.toMatch(/[\u3400-\u9fff]/);
     expect(edit.lineage.originalPrompt).toBe("白底，人物服装不变");
@@ -32,7 +33,7 @@ test("round 2: refinement uses latest result, not lingering selected originals",
     const edit = resolveCanvasImageEdit({ editIntent: "refine_latest", prompt: "Improve lighting and negative space while retaining the white background and unchanged garment." }, ctx, () => [original], "再好看一点");
     expect(edit.references[0]?.dataUrl).toBe("data:image/png;base64,v1");
     expect(edit.lineage.originalReferences[0]?.storageKey).toBe("image:original");
-    expect(edit.prompt).toContain("preserving the successful changes");
+    expect(edit.prompt).not.toContain("preserving the successful changes");
     expect(edit.prompt).not.toContain("再好看一点");
 });
 

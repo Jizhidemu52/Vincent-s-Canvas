@@ -26,7 +26,7 @@ export function canvasGenerationEditorState(node: CanvasNodeData, nodes: CanvasN
 export function storeCanvasEditorReferences(references: readonly CanvasSelectionReference[]): CanvasStoredImageReference[] {
     return references.map(reference => ({
         id: reference.canvasNodeId || reference.id, referenceKey: reference.id,
-        name: reference.name, originalFileName: reference.originalFileName, imageName: reference.imageName, imageVersion: reference.imageVersion,
+        name: reference.name, role: reference.role, originalFileName: reference.originalFileName, imageName: reference.imageName, imageVersion: reference.imageVersion,
         type: reference.type, content: reference.dataUrl || reference.url || "", storageKey: reference.storageKey,
         sourceNodeId: reference.canvasNodeId, origin: reference.canvasNodeId ? "canvas" : "upload",
     }));
@@ -34,7 +34,7 @@ export function storeCanvasEditorReferences(references: readonly CanvasSelection
 
 export function canvasContinueFromImagePatch(node: CanvasNodeData): Partial<CanvasNodeMetadata> {
     return { draftPrompt: "", draftImageReferences: [{
-        id: node.id, referenceKey: `source:${node.id}`, sourceNodeId: node.id, origin: "canvas",
+        id: node.id, referenceKey: `source:${node.id}`, sourceNodeId: node.id, origin: "canvas", role: "以此图作为编辑原图。",
         name: node.metadata?.originalFileName || node.title || node.id, originalFileName: node.metadata?.originalFileName,
         imageName: node.metadata?.imageName, imageVersion: node.metadata?.imageVersion,
         type: node.metadata?.mimeType || "image/png", content: node.metadata?.content || "", storageKey: node.metadata?.storageKey,

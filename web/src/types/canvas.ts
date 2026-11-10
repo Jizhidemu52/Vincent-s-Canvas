@@ -29,6 +29,7 @@ export type CanvasCompareSource = {
 };
 
 export type CanvasStoredImageReference = {
+    role?: string;
     originalFileName?: string;
     imageName?: string;
     imageVersion?: number;
@@ -140,6 +141,7 @@ export type CanvasNodeMetadata = {
     references?: string[];
     compareSources?: CanvasCompareSource[];
     manualImageReferences?: CanvasStoredImageReference[];
+    imageReferenceRoles?: Record<string, string>;
     excludedConnectedImageReferenceKeys?: string[];
     imageReferenceOrder?: string[];
     naturalWidth?: number;

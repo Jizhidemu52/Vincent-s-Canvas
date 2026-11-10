@@ -5,6 +5,7 @@ import { promptImageBackground } from "./prompt-image-background";
 import { readImageAgentGenerationProfile } from "./image-agent-profile";
 import { normalizeVideoMotionSettings } from "../../shared/video-motion-options";
 import { assertImageEditMarkupSupport } from "./image-edit-input";
+import { prepareFixedToolPrompt, type FixedToolPromptTarget } from "./fixed-tool-prompt";
 
 export type PromptTaskInput = {
   requestId: string; operationType: string; toolKey?: string; modelConfigId?: string | null;
@@ -12,7 +13,7 @@ export type PromptTaskInput = {
 };
 
 /** Runs before queue admission/credit reservation; output contains no authoring rules. */
-export async function preparePromptTaskInput<T extends PromptTaskInput>(compiler: PromptCompiler, actor: PromptActor, input: T, options: { videoSourceMimeTypes?: string[] } = {}): Promise<T & { userInput?: PromptInput; promptCompilationId?: string; summaryZh?: string; optimized: boolean }> {
+export async function preparePromptTaskInput<T extends PromptTaskInput>(compiler: PromptCompiler, actor: PromptActor, input: T, options: { videoSourceMimeTypes?: string[]; fixedToolTarget?: FixedToolPromptTarget } = {}): Promise<T & { userInput?: PromptInput; promptCompilationId?: string; summaryZh?: string; optimized: boolean }> {
   const imageAgentProfile = readImageAgentGenerationProfile(input.parameters, input.operationType);
   if (imageAgentProfile && input.promptInput) throw new PromptOptimizationError("IMAGE_AGENT_PROMPT_ALREADY_PLANNED", "图片助手已完成本轮规划，不应再次提交提示词扩写。", 400);
   const expectedScene = requiredPromptScene(input.toolKey);
@@ -20,7 +21,7 @@ export async function preparePromptTaskInput<T extends PromptTaskInput>(compiler
   if (expectedScene && input.promptInput?.scene !== expectedScene) throw new PromptOptimizationError("PROMPT_RECIPE_MISMATCH", "优化场景与功能板块不一致，未提交生成");
   let parameters = { ...input.parameters };
   delete parameters.promptOptimization;
-  if (!input.promptInput) return { ...input, parameters, optimized: false };
+  if (!input.promptInput) return { ...prepareFixedToolPrompt({ ...input, parameters }, options.fixedToolTarget), optimized: false };
   if (!["image_generation", "inpaint", "batch_image", "video_generation"].includes(input.operationType)) throw new PromptOptimizationError("PROMPT_OPERATION_INVALID", "此任务类型不支持提示词优化");
   if (!input.modelConfigId) throw new PromptOptimizationError("MODEL_REQUIRED", "请先选择生成模型");
   const promptInput = promptInputSchema.parse(input.promptInput);
@@ -66,6 +67,7 @@ export async function preparePromptTaskInput<T extends PromptTaskInput>(compiler
     toolKey: input.toolKey, promptInput, sourceUrls });
   if (compilation.status !== "success" || !compilation.prompt) throw new PromptOptimizationError(compilation.errorCode || "PROMPT_OPTIMIZING",
     compilation.message || "提示词仍在优化，未提交生成，请查询原请求", compilation.status === "failed" ? 422 : 409);
+  if (compilation.questions?.length) throw new PromptOptimizationError("PROMPT_CLARIFICATION_REQUIRED", `请先补充要求再生成：${compilation.questions.join("；")}`, 422);
   if (isVideo) assertVideoMotionTimeline(compilation.prompt, parameters.seconds);
   if (["pattern-extract", "pattern-colorway"].includes(promptInput.scene)) {
     const target = await compiler.runtime.resolveTarget(actor, { requestId: input.requestId, modelConfigId: input.modelConfigId,

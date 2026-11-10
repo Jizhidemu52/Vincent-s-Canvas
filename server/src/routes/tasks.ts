@@ -36,6 +36,8 @@ import { assertVideoMotionPolicy } from "../video-motion-input";
 import { claimBatchAdmission, fenceBatchAdmission, findBatchForSubmission, finishBatchAdmission, readBatchAdmission, recordBatchAdmissionFailure, type BatchAdmissionToken } from "../batch-admission";
 import { prepareConfiguredQuickImageTask } from "../quick-image-configuration";
 import type { preflightStoredQuickImageTask } from "../stored-quick-image-preflight";
+import { prepareFixedToolPrompt, type FixedToolPromptTarget } from "../fixed-tool-prompt";
+import { publicPromptTaskPreview } from "../prompt-task-preview";
 
 const actionSchema = z.enum(["pause", "resume", "cancel"]);
 
@@ -72,6 +74,14 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
       return applyImagePromptExclusions(prepared, target);
     };
     if (!input.promptInput && !requiredPromptScene(input.toolKey ?? String(input.parameters.tool ?? ""))) {
+      const requestedTool = input.toolKey ?? String(input.parameters.tool ?? "");
+      if (input.operationType === "seamless_stitch"
+        || input.operationType === "upscale"
+        || (requestedTool === "angle-control" && input.operationType === "inpaint")) {
+        const execution = await resolveToolExecution(db, input);
+        const target = (await db.query<FixedToolPromptTarget>(`SELECT m.model_id AS "modelId",p.protocol,m.provider_id AS "providerId",m.workflow_config_id AS "workflowConfigId" FROM model_configs m JOIN providers p ON p.id=m.provider_id WHERE m.id=$1`, [execution.modelConfigId])).rows[0];
+        return finish({ ...prepareFixedToolPrompt({ ...input, toolKey: execution.toolKey, modelConfigId: execution.modelConfigId }, target), toolConfiguration: execution, optimized: false });
+      }
       if (input.operationType === "video_generation") {
         const execution = await resolveToolExecution(db, input);
         assertVideoMotionPolicy({ ...input, toolKey: execution.toolKey }, execution.allowRawPrompt);
@@ -110,6 +120,20 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
     return { batchId: batch.id, prompt: batch.prompt, optimized: tasks.some(task => task.optimized === true), failures: failures.sort((a, b) => a.index - b.index), totalItems: batch.totalItems, submissionComplete: batch.admissionStatus !== "admitting",
       tasks: items.filter(task => !batch.failures.some(failure => failure.index === task.itemIndex && !failure.admitted)) };
   };
+
+  router.post("/preview", async (request, response, next) => {
+    try {
+      const input = singleSchema.parse(request.body);
+      if (!input.promptInput || input.parameters.quickImageAction || !["image_generation", "inpaint", "batch_image"].includes(input.operationType)) {
+        throw new PromptOptimizationError("PROMPT_OPERATION_INVALID", "当前入口只预览带场景输入的图片任务，未提交生成。", 400);
+      }
+      const actor = (request as unknown as AuthenticatedRequest).auth;
+      // Same authorization, source hashing, compilation and exclusion processing as admission.
+      // This endpoint never enqueues, reserves image credits or invokes the image provider.
+      const prepared = await prepare(actor, input);
+      response.json({ preview: publicPromptTaskPreview(prepared) });
+    } catch (error) { next(error); }
+  });
 
   router.post("/preflight", async (request, response, next) => {
     try {

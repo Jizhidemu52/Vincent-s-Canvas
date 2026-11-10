@@ -1,4 +1,6 @@
 export type ReferenceImage = {
+    /** User-selected purpose, attached to the image rather than its visual position. */
+    role?: string;
     originalFileName?: string;
     imageName?: string;
     imageVersion?: number;

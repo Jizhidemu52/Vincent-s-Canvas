@@ -53,6 +53,8 @@ export type AiConfig = {
     audioModels: string[];
     quality: string;
     imageOptions?: string;
+    /** Personal opt-in: compile fixed scenes, then confirm the exact task snapshot. */
+    promptPreview?: boolean;
     size: string;
     count: string;
     canvasImageCount: string;
@@ -108,6 +110,7 @@ export const defaultConfig: AiConfig = {
     audioModels: ["default::gpt-4o-mini-tts"],
     quality: "high",
     imageOptions: "",
+    promptPreview: false,
     size: "1:1",
     count: "1",
     canvasImageCount: "3",

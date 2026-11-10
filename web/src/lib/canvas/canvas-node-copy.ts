@@ -80,6 +80,7 @@ export function cloneCanvasNodeGraph(graph: CanvasNodeGraph, offset: Position, o
             referenceKey: remapReferenceKey(reference.referenceKey),
         }));
         if (node.metadata.imageReferenceOrder) node.metadata.imageReferenceOrder = node.metadata.imageReferenceOrder.map(remapReferenceKey);
+        if (node.metadata.imageReferenceRoles) node.metadata.imageReferenceRoles = Object.fromEntries(Object.entries(node.metadata.imageReferenceRoles).map(([key, role]) => [remapReferenceKey(key), role]));
         if (node.metadata.excludedConnectedImageReferenceKeys) node.metadata.excludedConnectedImageReferenceKeys = node.metadata.excludedConnectedImageReferenceKeys.map(remapReferenceKey);
     });
     const groups = (graph.groups || []).map(group => ({ ...group, id: `group-${nanoid()}`, nodeIds: group.nodeIds.flatMap(id => idMap.has(id) ? [idMap.get(id)!] : []),

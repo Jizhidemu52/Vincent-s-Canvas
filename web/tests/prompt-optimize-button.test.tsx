@@ -18,6 +18,8 @@ function harness(compile: (...args: any[]) => Promise<unknown>, query: (id: stri
     const applied: unknown[] = [], notices: string[] = [];
     const cleanups: Array<() => void> = [];
     let cursor = 0, ownerId = "employee-a";
+    let rendered: ReactElement<any>;
+    const userStore = Object.assign((select: (state: any) => unknown) => select({ user: { id: ownerId } }), { getState: () => ({ user: { id: ownerId } }) });
     const dependencies: Record<string, unknown> = {
         "@/lib/i18n": i18nHarness,
         react: { ...React,
@@ -25,19 +27,23 @@ function harness(compile: (...args: any[]) => Promise<unknown>, query: (id: stri
             useState: (initial: unknown) => { const index = cursor++; if (!(index in state)) state[index] = initial; return [state[index], (value: unknown) => { state[index] = value; }]; },
             useEffect: (callback: () => void | (() => void)) => { const index = cursor++; if (!(index in state)) { state[index] = true; const cleanup = callback(); if (cleanup) cleanups.push(cleanup); } },
         },
-        antd: { App: { useApp: () => ({ message: { success: (text: string) => notices.push(text), warning: (text: string) => notices.push(text), error: (text: string) => notices.push(text) } }) }, Button: () => null },
+        antd: { App: { useApp: () => ({ message: { success: (text: string) => notices.push(text), warning: (text: string) => notices.push(text), error: (text: string) => notices.push(text) } }) }, Button: () => null, Modal: () => null },
         "@/services/api/image": { optimizeImagePrompt: compile },
         "@/services/api/prompt-compilations": { getPromptCompilation: query, completedPromptCompilation, PromptCompilationUncertainError },
         "@/lib/client-id": { createClientId: () => "compile-request" },
-        "@/stores/use-user-store": { useUserStore: { getState: () => ({ user: { id: ownerId } }) } },
+        "@/stores/use-user-store": { useUserStore: userStore },
     };
     const module = { exports: {} as { PromptOptimizeButton: (props: any) => ReactElement<any> } };
     new Function("require", "module", "exports", code)((name: string) => dependencies[name] || requireModule(name), module, module.exports);
     return {
         render: (prompt = "Change blue", references: any[] = [], scopeKey = "", overrides: Record<string, unknown> = {}) => {
             cursor = 0;
-            return module.exports.PromptOptimizeButton({ config: { model: "image-model" }, operationType: "image_generation", prompt, references, scopeKey, onApply: (...args: unknown[]) => applied.push(args), ...overrides });
+            rendered = module.exports.PromptOptimizeButton({ config: { model: "image-model" }, operationType: "image_generation", prompt, references, scopeKey, onApply: (...args: unknown[]) => applied.push(args), ...overrides });
+            return rendered.props.children[0];
         },
+        preview: () => rendered.props.children[1],
+        apply: () => rendered.props.children[1].props.footer.props.children[1].props.onClick(),
+        cancel: () => rendered.props.children[1].props.onCancel(),
         applied, notices, changeOwner: () => { ownerId = "employee-b"; }, unmount: () => { cleanups.forEach(cleanup => cleanup()); },
     };
 }
@@ -50,18 +56,24 @@ test("manual optimization only runs after a click and retains the compilation fo
     button.props.onClick();
     await tick();
     expect(calls).toBe(1);
+    expect(view.applied).toEqual([]);
+    view.render();
+    expect(view.preview().props.open).toBe(true);
+    view.apply();
+    view.apply();
     expect(view.applied).toEqual([[compilation.prompt, compilation, { scene: "free-optimize", userText: "Change blue", fields: {}, mode: "generate", referenceRoles: [], compilationId: compilation.id }]]);
 });
 
 test.each([['image_generation', 'generate'], ['inpaint', 'edit']] as const)("the clicked button uses explicit %s even with the same references", async (operationType, mode) => {
     const calls: any[][] = [];
-    const references = [{ id: "ref", name: "主图", dataUrl: "image-a" }];
+    const references = [{ id: "ref", name: "主图", dataUrl: "image-a", role: "只参考此图的颜色。" }];
     const view = harness(async (...args) => { calls.push(args); return compilation; });
     view.render("Change blue", references, "", { operationType, toolKey: operationType === "image_generation" ? "image" : "image-edit" }).props.onClick();
     await tick();
     expect(calls).toHaveLength(1);
-    expect(calls[0]![1]).toMatchObject({ mode, referenceRoles: ["主图"] });
+    expect(calls[0]![1]).toMatchObject({ mode, referenceRoles: ["只参考此图的颜色。"] });
     expect(calls[0]![3]).toMatchObject({ operationType });
+    view.render("Change blue", references, "", { operationType, toolKey: operationType === "image_generation" ? "image" : "image-edit" }); view.apply();
     expect((view.applied[0] as any[])[2]).toMatchObject({ mode, compilationId: compilation.id });
 });
 
@@ -108,6 +120,8 @@ test("an uncertain optimization only queries the original request on the next cl
     pending.props.onClick(); await tick();
     expect(posts).toBe(1);
     expect(queried).toEqual(["compile-request"]);
+    expect(view.applied).toHaveLength(0);
+    view.render(); view.apply();
     expect(view.applied).toHaveLength(1);
 });
 
@@ -167,7 +181,48 @@ test("a failed original-request lookup remains query-only on later clicks", asyn
     retry.props.onClick(); await tick();
     expect(posts).toBe(1);
     expect(queries).toBe(2);
+    view.render(); view.apply();
     expect(view.applied).toHaveLength(1);
+});
+
+test("canceling the comparison leaves the original prompt unchanged", async () => {
+    const view = harness(async () => compilation);
+    view.render().props.onClick(); await tick();
+    view.render(); view.cancel(); view.apply();
+    expect(view.applied).toEqual([]);
+    view.render(); expect(view.preview().props.open).toBe(false);
+});
+
+test.each([
+    { prompt: "Changed prompt" },
+    { config: { model: "other" } },
+    { config: { model: "image-model", quality: "high" } },
+    { references: [{ id: "ref", name: "first", dataUrl: "image-a", role: "只参考此图的材质。" }] },
+    { references: [{ id: "replacement", name: "first", dataUrl: "image-b", role: "只参考此图的颜色。" }] },
+])("a completed preview cannot apply after its inputs change, even if they change back: %j", async changes => {
+    const references = [{ id: "ref", name: "first", dataUrl: "image-a", role: "只参考此图的颜色。" }];
+    const view = harness(async () => compilation);
+    view.render("Change blue", references).props.onClick(); await tick();
+    view.render("Change blue", references, "", changes);
+    expect(view.preview().props.footer.props.children[1].props.disabled).toBe(true);
+    view.apply();
+    view.render("Change blue", references); view.apply();
+    expect(view.applied).toEqual([]);
+});
+
+test("account changes after the preview is ready cannot apply it", async () => {
+    const view = harness(async () => compilation);
+    view.render().props.onClick(); await tick(); view.render();
+    view.changeOwner(); view.apply();
+    expect(view.applied).toEqual([]);
+});
+
+test("clarification questions are shown and cannot be applied as a generation prompt", async () => {
+    const view = harness(async () => ({ ...compilation, questions: ["哪一块需要改色？"] }));
+    view.render().props.onClick(); await tick(); view.render();
+    expect(view.preview().props.footer.props.children[1].props.disabled).toBe(true);
+    expect(JSON.stringify(view.preview())).toContain("哪一块需要改色？");
+    view.apply(); expect(view.applied).toEqual([]);
 });
 
 test("unmounted optimizers cannot apply late results or clear another workspace's busy state", async () => {

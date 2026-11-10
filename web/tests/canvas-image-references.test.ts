@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { applyCanvasReferenceOrder, excludeConnectedReference, resolveCanvasImageReferences, resolveCanvasNodeImageReferences } from "../src/lib/canvas/canvas-image-references";
+import { applyCanvasReferenceOrder, excludeConnectedReference, resolveCanvasImageReferences, resolveCanvasNodeImageReferences, toCanvasStoredImageReference } from "../src/lib/canvas/canvas-image-references";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "../src/types/canvas";
 
 const imageNode: CanvasNodeData = { id: "product", type: CanvasNodeType.Image, title: "产品", position: { x: 0, y: 0 }, width: 240, height: 240, metadata: { content: "https://images.test/product.png", storageKey: "image:product", mimeType: "image/png" } };
@@ -15,6 +15,18 @@ const connection: CanvasConnection = { id: "link", fromNodeId: "product", toNode
 
 test("merges manual and connected images in the saved tray order", () => {
     expect(resolveCanvasImageReferences(configNode, [configNode, imageNode], [connection]).map((item) => item.referenceKey)).toEqual(["manual:logo", "node:product"]);
+});
+
+test("manual and connected roles persist by stable identity when the tray is reordered and restored", () => {
+    const node = { ...configNode, metadata: { ...configNode.metadata, imageReferenceOrder: ["node:product", "manual:logo"],
+        imageReferenceRoles: { "node:product": "只参考此图的材质。", "manual:logo": "只参考此图的图案。" } } };
+    const refs = resolveCanvasImageReferences(node, [node, imageNode], [connection]);
+    expect(refs.map(image => [image.id, image.role])).toEqual([["product", "只参考此图的材质。"], ["logo", "只参考此图的图案。"]]);
+    const stored = refs.map(toCanvasStoredImageReference);
+    const restored = resolveCanvasImageReferences({ ...node, metadata: { manualImageReferences: JSON.parse(JSON.stringify(stored)) } }, [], []);
+    expect(restored.map(image => image.role)).toEqual(refs.map(image => image.role));
+    expect(resolveCanvasNodeImageReferences(imageNode, [imageNode], [])[0]!.role).toBe("以此图作为编辑原图。");
+    expect(resolveCanvasNodeImageReferences({ ...imageNode, metadata: { ...imageNode.metadata, imageReferenceRoles: { "source:product": "" } } }, [], [])[0]!.role).toBe("");
 });
 
 test("excludes a connected image without deleting its canvas connection", () => {

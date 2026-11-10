@@ -138,10 +138,11 @@ export class PromptRecipeStore {
     return Promise.all(rows.map(row => this.present(row)));
   }
   async stats(key: string): Promise<PromptRecipeStats> {
-    const rows = (await this.database.query<{ status: string; reused_from_id: string | null; latency: string | number | null; input_tokens: string | number | null; output_tokens: string | number | null; actual: string | number | null; estimated: string | number | null; currency: string | null }>(
+    const rows = (await this.database.query<{ status: string; reused_from_id: string | null; latency: string | number | null; input_tokens: string | number | null; output_tokens: string | number | null; actual: string | number | null; estimated: string | number | null; currency: string | null; prompt_metrics: unknown; method: string | null; questions: unknown }>(
       `SELECT COALESCE(r.status,c.status) AS status,c.reused_from_id,
         c.details->>'latencyMs' AS latency,c.details->>'inputTokens' AS input_tokens,c.details->>'outputTokens' AS output_tokens,
-        c.details->>'actualCost' AS actual,c.details->>'estimatedCost' AS estimated,c.details->>'currency' AS currency
+        c.details->>'actualCost' AS actual,c.details->>'estimatedCost' AS estimated,c.details->>'currency' AS currency,
+        c.details->>'promptMetrics' AS prompt_metrics,c.details->>'method' AS method,c.details->>'questions' AS questions
        FROM prompt_compilations c LEFT JOIN prompt_compilations r ON r.id=c.reused_from_id WHERE c.recipe_key=$1`, [key])).rows;
     const executed = rows.filter(row => !row.reused_from_id);
     const latencies = executed.filter(row => row.latency !== null);
@@ -155,17 +156,23 @@ export class PromptRecipeStore {
       costs.set(currency, cost);
     }
     const cny = costs.get("CNY");
+    const measured = executed.filter(row => row.prompt_metrics != null).map(row => json<NonNullable<AdminPromptCompilation["promptMetrics"]>>(row.prompt_metrics));
+    const promptQuality = { measured: measured.length, overRecommended: measured.filter(value => value.overRecommended).length,
+      avoidPhrases: measured.reduce((sum, value) => sum + value.avoidPhrases, 0), templateCompilations: executed.filter(row => row.method === "template").length,
+      clarifications: executed.filter(row => row.questions != null && json<unknown[]>(row.questions).length > 0).length };
     return { total: rows.length, success: rows.filter(row => row.status === "success").length, failed: rows.filter(row => row.status === "failed" || row.status === "uncertain").length,
       cacheHits: rows.length - executed.length, averageLatencyMs: latencies.length ? latencies.reduce((sum, row) => sum + Number(row.latency), 0) / latencies.length : null,
       inputTokens: executed.reduce((sum, row) => sum + Number(row.input_tokens ?? 0), 0), outputTokens: executed.reduce((sum, row) => sum + Number(row.output_tokens ?? 0), 0),
       actualCost: cny?.actual ?? 0, estimatedCost: cny?.estimated ?? 0, unknownCostCount: [...costs.values()].reduce((sum, row) => sum + row.unknownCount, 0), costs: [...costs.values()],
+      ...(measured.length ? { promptQuality } : {}),
     };
   }
 }
 
 export function publicPromptCompilation(value: AdminPromptCompilation): PublicPromptCompilation {
   return { id: value.id, requestId: value.requestId, status: value.status, optimized: value.status === "success" && value.optimized,
-    ...(value.status === "success" ? { prompt: value.prompt, ...(value.summaryZh ? { summaryZh: value.summaryZh } : {}) } : {}),
+    ...(value.status === "success" ? { prompt: value.prompt, ...(value.summaryZh ? { summaryZh: value.summaryZh } : {}), ...(value.questions?.length ? { questions: value.questions } : {}) } : {}),
+    ...(value.method ? { method: value.method } : {}),
     ...(value.errorCode ? { errorCode: value.errorCode } : {}), ...(value.message ? { message: value.message } : {}),
   };
 }

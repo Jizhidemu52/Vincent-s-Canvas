@@ -1,4 +1,5 @@
 import { test, expect, newCanvas } from "./fixtures";
+import { toolDefinitions } from "../../shared/feature-catalog";
 
 test("顶栏扁平且改名支持键盘和中文组合输入；面板显示实际宽度", async ({ page, api }, info) => {
     await page.setViewportSize({ width: 1200, height: 800 });
@@ -92,4 +93,41 @@ test("体验数据按Esc或外部点击关闭，普通员工不显示入口", as
     api.role = "designer";
     await page.reload();
     await expect(trigger).toHaveCount(0);
+});
+
+test("390px 管理员对话发送按钮不被体验数据遮挡，收起后体验入口仍可用", async ({ page, context, api }) => {
+    api.role = "super_admin";
+    const models = [
+        { id: "shell-image", modelId: "gpt-image-2", name: "隔离图片模型", protocol: "openai", capabilities: ["generate", "edit", "batch"], creditCost: 0, rmbCost: 0 },
+        { id: "shell-chat", modelId: "shell-chat", name: "隔离对话模型", protocol: "openai", capabilities: ["chat", "vision", "tools"], creditCost: 0, rmbCost: 0 },
+    ];
+    await context.route("**/api/models", route => route.fulfill({ json: { models, prices: [], tools: toolDefinitions.map(tool => ({ ...tool, enabled: true, modelConfigId: /chat|text|agent/.test(tool.toolKey) ? "shell-chat" : "shell-image", configurationVersion: 1 })) } }));
+    await context.route("**/api/generation-capabilities?*", route => route.request().method() === "GET" ? route.fulfill({ json: { models: [] } }) : route.fallback());
+    await page.setViewportSize({ width: 390, height: 844 });
+    await newCanvas(page);
+    const trigger = page.getByLabel("本页体验数据", { exact: true });
+    await expect(trigger).toBeVisible();
+    await page.getByRole("button", { name: "打开画布菜单", exact: true }).click();
+    await page.getByRole("menuitem", { name: "打开对话", exact: true }).click();
+    const panel = page.locator(".cw-agent-panel");
+    const send = panel.getByRole("button", { name: "发送", exact: true });
+    await panel.getByRole("textbox", { name: "理解画布、修改图片或批量编排…", exact: true }).fill("只检查按钮命中，不发送");
+    await expect(send).toBeEnabled();
+    // The real canvas shell and diagnostics must participate in hit testing;
+    // an isolated composer or bounding boxes alone miss this stacking bug.
+    await expect.poll(() => send.evaluate(button => {
+        const box = button.getBoundingClientRect();
+        const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+        return hit === button || Boolean(hit && button.contains(hit));
+    })).toBe(true);
+    await page.getByRole("button", { name: "打开画布菜单", exact: true }).click();
+    await page.getByRole("menuitem", { name: "收起对话", exact: true }).click();
+    await expect(panel).toBeHidden();
+    await trigger.click();
+    await expect(trigger.locator("..")).toHaveAttribute("open", "");
+    await expect(page.getByRole("button", { name: "复制体验报告", exact: true })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(trigger.locator("..")).not.toHaveAttribute("open");
+    expect(api.submissions).toHaveLength(0);
+    expect(api.batchSubmissions).toHaveLength(0);
 });

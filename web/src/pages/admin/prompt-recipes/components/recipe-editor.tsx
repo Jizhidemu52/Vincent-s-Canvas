@@ -139,6 +139,12 @@ export function RecipeEditor({ detail, models, refresh, onDirty }: { detail: Pro
                 <Alert type="info" showIcon className="!mb-4" title="保存只创建新草稿，不会改变线上版本。" description="激活旧版本即回滚。测试也只使用已保存的版本；未保存编辑不会发送给模型。" />
                 <Form layout="vertical" disabled={Boolean(busy)}>
                     {!selected && <Alert className="!mb-4" type="info" showIcon title="尚无版本，请填写规则并保存首个草稿。" description="规则正文仅由管理员保存到服务端；保存不会自动激活，也不会调用模型。" />}
+                    <Form.Item label="执行策略" extra="旧版本保持原策略。模板优先在明确任务中不调用改写模型；智能选色、创作或无法确定处理的字段使用精简改写。模板正文由服务端维护，下面的规则仅用于模型改写，不会暗中拼入固定模板。">
+                        <Select aria-label="执行策略" className="max-w-96" value={editor.executionStrategy ?? "llm"} disabled={isVideo || detail.recipe.key === "reverse-prompt" || Boolean(busy)}
+                            onChange={(executionStrategy) => setEditor({ ...editor, executionStrategy })}
+                            options={[{ value: "llm", label: "原有 LLM 配方" }, { value: "minimal", label: "最小改写 + 中文摘要" }, { value: "template-first", label: "固定模板优先，必要时精简改写" }]} />
+                        {base && base.executionStrategy !== editor.executionStrategy && <Tag color="orange" className="ml-2">执行策略有差异</Tag>}
+                    </Form.Item>
                     {base && (
                         <div className="mb-3 grid grid-cols-2 gap-3 text-xs text-muted-foreground">
                             <span>对照 v{compare?.version}（只读）</span>

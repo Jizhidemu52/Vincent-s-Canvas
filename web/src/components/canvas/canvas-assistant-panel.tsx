@@ -10,6 +10,7 @@ import { imageModelDisplayName, imageModelIdentityHidden } from "@/lib/model-dis
 import { preferredImageModel } from "@/lib/default-image-model";
 import { ModelPicker } from "@/components/model-picker";
 import { ConversationExamples } from "@/components/conversation-examples";
+import { ImageAgentKeepControls } from "@/components/image-agent-keep-controls";
 import { ConversationImagePreview } from "@/components/conversation-image-preview";
 import { CanvasPanelSizeControl } from "@/components/canvas/canvas-panel-size-control";
 import { conversationImageLabel, type ConversationImageAction, type ConversationImageItem } from "@/components/conversation-image-controls";
@@ -1049,7 +1050,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
             if (name === "edit_image") {
                 if (turn.documents.length && !turn.requirements) throw new Error("请先整理并确认设计需求卡，再提交图片任务。");
                 const edit = resolveCanvasImageAgentEdit(args, turn.images, { focusId: turn.focusId, lockedImageId: turn.lockedImageId,
-                    newCreation: turn.newCreation, explicitIds: turn.explicitIds, previewedIds: turn.previewedIds, focusRevision: turn.focusRevision, requirements: turn.requirements });
+                    newCreation: turn.newCreation, explicitIds: turn.explicitIds, previewedIds: turn.previewedIds, focusRevision: turn.focusRevision, requirements: turn.requirements, userPrompt: turn.userPrompt });
                 turn.writeOperationAttempted = true;
                 addOnlineLog("当前图选择", { baseImageId: edit.base?.id, references: edit.record.referenceIds });
                 return await runDirectGeneration(sessionId, edit.prompt, { ...turn.settings, mode: "image", imageCount: "1" },
@@ -1893,6 +1894,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                     }} /></div> : null}
                     {attachmentDrop.dragging || attachmentDrop.reading ? <p role="status" className="mx-4 mb-2 text-xs" style={{ color: theme.node.text }}>{t(attachmentDrop.reading ? "正在读取拖入图片，请稍候。" : "松开以添加对话参考图，不会自动发送")}</p> : null}
                     <div className="mx-4 mb-1 min-w-0" style={{ color: theme.node.muted }}><ConversationExamples /></div>
+                    <div className="mx-4 mb-2" style={{ color: theme.node.muted }}><ImageAgentKeepControls keep={draftFocus?.note?.keep || []} draft={prompt} onChange={setPrompt} disabled={isRunning || attachmentsLoading} /></div>
                     <AgentChatComposer
                         key={`${activeSession?.id}:${onlineProjectId}:${user?.id || ""}`}
                         disabled={!onlineEnabled || !effectiveConfig.textModel}

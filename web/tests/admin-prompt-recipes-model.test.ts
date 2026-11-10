@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { assertFallback, buildTestImage, buildTestPromptInput, emptyVersion, jsonObject, parseVersion } from "../src/pages/admin/prompt-recipes/model";
+import { assertFallback, buildTestImage, buildTestPromptInput, editVersion, emptyVersion, jsonObject, parseVersion } from "../src/pages/admin/prompt-recipes/model";
 
 test("editor rejects malformed/object-shape input and nontext model overrides before posting", () => {
     expect(() => jsonObject("{broken", "字段")).toThrow("有效 JSON");
@@ -28,9 +28,24 @@ test("test input uses explicit scene, object fields, image roles and language wi
 
 test("empty recipes start without bundled rules and can save a first Chinese draft", () => {
     const draft = emptyVersion("zh");
-    expect(draft).toEqual({ systemPrompt: "", fieldTemplate: "", overridesJson: "{}", fallbackPrompt: "", outputLanguage: "zh", changeNote: "" });
+    expect(draft).toEqual({ systemPrompt: "", fieldTemplate: "", overridesJson: "{}", fallbackPrompt: "", executionStrategy: "llm", outputLanguage: "zh", changeNote: "" });
     expect(() => parseVersion(draft)).toThrow();
     expect(parseVersion({ ...draft, systemPrompt: "Administrator supplied private rules" })).toMatchObject({ outputLanguage: "zh", modelOverrides: {} });
+});
+
+test("version editing preserves explicit strategies and defaults legacy versions to their existing LLM behavior", () => {
+    const legacy = {
+        id: "version-id", recipeKey: "local-restyle", version: 1, contentHash: "hash", createdBy: "admin", createdAt: "2026-11-11T00:00:00Z",
+        systemPrompt: "private rules", fieldTemplate: "{{fields}}", modelOverrides: { model: "model-specific" }, fallbackPrompt: "", outputLanguage: "zh" as const, changeNote: "existing version",
+    };
+    expect(editVersion(legacy).executionStrategy).toBe("llm");
+    expect(legacy).not.toHaveProperty("executionStrategy");
+    for (const executionStrategy of ["llm", "minimal", "template-first"] as const) {
+        const saved = { ...legacy, executionStrategy };
+        const parsed = parseVersion(editVersion(saved));
+        expect(parsed.executionStrategy).toBe(executionStrategy);
+        expect(parsed).toMatchObject({ systemPrompt: legacy.systemPrompt, fieldTemplate: legacy.fieldTemplate, modelOverrides: legacy.modelOverrides, outputLanguage: "zh" });
+    }
 });
 
 test("video recipe test includes video parameters, Chinese output and image roles without admitting image generation", () => {
@@ -70,4 +85,5 @@ test("test image uses frozen compilation snapshot, one image, and the normal rou
     expect(generate.operationType).toBe("image_generation");
     expect(generate.toolKey).toBe("image");
     expect(() => buildTestImage(input, { ...compilation, status: "uncertain" }, "image-request-3", "{}")).toThrow("先完成");
+    expect(() => buildTestImage(input, { ...compilation, questions: ["需要修改哪一处？"] }, "image-request-4", "{}")).toThrow("补充待确认问题");
 });

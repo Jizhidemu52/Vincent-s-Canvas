@@ -70,6 +70,13 @@ export function resolveImageAgentBase<T extends ImageAgentImage>(
     return findImage(images, base);
 }
 
+/** Going to original changes pixels, not the current branch's effective requests. */
+export function imageAgentEditNote<T extends ImageAgentImage>(images: readonly T[], selection: ImageAgentFocus, base: T | undefined, requested?: string): ImageAgentWorkNote | undefined {
+    if (!base) return undefined;
+    if (requested === "original") return resolveImageAgentFocus(images, selection)?.note || base.note;
+    return base.note;
+}
+
 /** No viewport sweep, no unrelated old works, no more than five decoded previews. */
 export function selectImageAgentWorkingSet<T extends ImageAgentImage>(images: readonly T[], options: {
     focusId?: string; explicitIds?: readonly string[]; uploadIds?: readonly string[]; newCreation?: boolean;

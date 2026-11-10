@@ -22,8 +22,8 @@ test("Canvas compiles bounded edit_spec without truncating the original prompt o
         acceptance: ["保留两颗纽扣"], assumptions: ["按现有比例处理"],
     } }, images, selection);
     expect(result.prompt).toContain(prompt);
-    expect(result.prompt).toContain("未涉及的主体剪影");
-    expect(result.prompt).toContain("本轮明确要求的变化优先");
+    expect(result.prompt).toContain("除本次明确修改外，其余保持底图不变");
+    expect(result.prompt).not.toContain("结果应满足");
     expect(result.prompt).toContain("不迁移：背景");
     expect(result.references.map(reference => reference.id)).toEqual(["base", "fabric"]);
     expect(result.record.spec?.reference_roles?.map(role => role.image_id)).toEqual(["base", "fabric"]);
@@ -240,7 +240,10 @@ test("Canvas discussion and optional-spec-free versions retain exact historical 
     expect(previousEdit.record.note).toEqual({ summary: "蓝色圆领", keep: ["圆领"] });
     expect(previousEdit.prompt).not.toContain("黑色V领");
     expect(originalEdit.base?.id).toBe(original);
-    expect(originalEdit.record.note.summary).toBe("原版米色圆领");
+    expect(originalEdit.record.note).toEqual({ summary: "黑色V领", keep: ["V领"] });
+    expect(originalEdit.prompt).not.toContain("圆领");
+    const originalBranch = resolveCanvasImageAgentEdit({ base: original, prompt: "原始分支只缩短衣长" }, catalog, selection);
+    expect(originalBranch.record.note.summary).toBe("原版米色圆领");
     const details = canvasImageAgentInspectionDetails([catalog.find(image => image.id === previous)!], context.previews.map(image => image.id));
     expect(details.version_details).toHaveLength(1);
     expect(details.version_details[0]).toMatchObject({ id: previous, parentId: original, prompt: "米色改蓝色，仍保持圆领", promptTruncated: false, workNote: "蓝色圆领\n需保持：圆领" });

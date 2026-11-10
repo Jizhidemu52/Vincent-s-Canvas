@@ -232,6 +232,10 @@ describe("specialized form presentation", () => {
         }
         expect(fields("text-to-style")).not.toContain("targetProduct");
         expect(fields("pattern-colorway")).not.toContain("targetProduct");
+        for (const scene of ["garment-colorway", "pattern-colorway"]) {
+            expect(fields(scene)).toContain("圈选或蒙版");
+            expect(fields(scene)).toContain("不能保证其他区域不变");
+        }
     });
     test("every scene exposes its own labeled controls and not a generic prompt editor", () => {
         const labels = [

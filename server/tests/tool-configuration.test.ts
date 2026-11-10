@@ -12,6 +12,7 @@ import { normalizeTaskTool, resolveToolExecution, type ToolConfiguration } from 
 import { resolveCurrentPromptPricing } from "../src/prompt-templates";
 import { quickImageModelId, quickImageTaskTarget } from "../../shared/quick-image-tools";
 import { MARK_IMAGE_PROVIDER_ID } from "../../shared/mark-image-models";
+import { ANGLE_CONTROL_PROMPT, DETAIL_ENHANCE_PROMPT, SEAMLESS_PATTERN_PROMPT } from "../src/fixed-tool-prompt";
 
 const modelId = "10000000-0000-4000-8000-000000000001";
 const secondModelId = "10000000-0000-4000-8000-000000000002";
@@ -128,6 +129,76 @@ async function serve(state = fixture(), role = "super_admin") {
 const post = (url: string, body: unknown, method = "POST") => fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
 describe("formal catalog configuration", () => {
+  test.each([
+    ["detail-enhance", "upscale", DETAIL_ENHANCE_PROMPT],
+    ["angle-control", "inpaint", ANGLE_CONTROL_PROMPT],
+  ])("%s raw admission adds fixed task meaning without rewriting the user's input or legacy workflow", async (toolKey, operationType, instruction) => {
+    const state = fixture();
+    const { url } = await serve(state);
+    const raw = "45°；保留 7 粒扣，文字 A&B 2026 与 #Ab12cD 不改。";
+    const base = { requestId: `fixed-${toolKey}-blocked`, projectId: "fixed-tools", operationType, toolKey, modelConfigId: modelId, prompt: raw, parameters: {} };
+    state.bind(toolKey as ToolConfiguration["toolKey"], { enabled: false });
+    const disabled = await post(url + "/tasks", base);
+    expect(disabled.status).toBe(403); expect((await disabled.json()).error).toBe("TOOL_DISABLED");
+    state.bind(toolKey as ToolConfiguration["toolKey"], { modelConfigId: secondModelId });
+    const changed = await post(url + "/tasks", base);
+    expect(changed.status).toBe(409); expect((await changed.json()).error).toBe("TOOL_MODEL_CHANGED");
+    expect(state.queues).toBe(0);
+    state.bind(toolKey as ToolConfiguration["toolKey"]);
+    for (const protocol of ["openai", "apimart"]) {
+      state.models[0]!.protocol = protocol;
+      const response = await post(url + "/tasks", { requestId: `fixed-${toolKey}-${protocol}`, projectId: "fixed-tools", operationType, toolKey, modelConfigId: modelId, prompt: raw, parameters: { resolution: "2k", inputArchive: { prompt: raw, effectivePrompt: raw, config: {} } } });
+      expect(response.status).toBe(201);
+      const task = (await response.json()).task;
+      expect(task).toMatchObject({ optimized: false, prompt: `${instruction}\n\n用户要求：\n${raw}`, parameters: { resolution: "2k", inputArchive: { prompt: raw, effectivePrompt: `${instruction}\n\n用户要求：\n${raw}` } } });
+      expect(state.statements.find(item => item.sql.startsWith("INSERT INTO tasks") && item.values[1] === `fixed-${toolKey}-${protocol}`)?.values[8]).toBe(task.prompt);
+    }
+    if (toolKey === "detail-enhance") {
+      const implicit = await post(url + "/tasks", { requestId: "fixed-upscale-default-tool", projectId: "fixed-tools", operationType: "upscale", modelConfigId: modelId, prompt: raw });
+      expect(implicit.status).toBe(201);
+      expect((await implicit.json()).task.prompt).toBe(`${instruction}\n\n用户要求：\n${raw}`);
+    }
+    state.models[0]!.workflowConfigId = "existing-workflow";
+    const legacy = await post(url + "/tasks", { requestId: `fixed-${toolKey}-legacy`, projectId: "fixed-tools", operationType, toolKey, modelConfigId: modelId, prompt: raw, parameters: { customAngle: 45 } });
+    expect(legacy.status).toBe(201);
+    expect((await legacy.json()).task).toMatchObject({ prompt: raw, parameters: { customAngle: 45 } });
+    expect(state.statements.find(item => item.sql.startsWith("INSERT INTO tasks") && item.values[1] === `fixed-${toolKey}-legacy`)?.values[8]).toBe(raw);
+    expect(state.queues).toBe(toolKey === "detail-enhance" ? 4 : 3);
+  });
+
+  test("seamless raw admission uses the server template without requiring a prompt compiler", async () => {
+    const state = fixture();
+    Object.assign(state.models[0]!, { providerId: MARK_IMAGE_PROVIDER_ID, protocol: "apimart", modelId: "gpt-image-2.5-flare", capabilities: ["generate", "edit"] });
+    state.bind("seamless-stitch");
+    const { url } = await serve(state);
+    const response = await post(url + "/tasks", { requestId: "seamless-server-template", projectId: "seamless", operationType: "seamless_stitch", toolKey: "seamless-stitch", modelConfigId: modelId, prompt: "client must not own the template", parameters: { resolution: "2k", inputArchive: { prompt: "无缝拼接", effectivePrompt: "client", config: { systemPrompt: "client" } } } });
+    expect(response.status).toBe(201);
+    const task = (await response.json()).task;
+    expect(task).toMatchObject({ prompt: SEAMLESS_PATTERN_PROMPT, optimized: false, parameters: { resolution: "2k", inputArchive: { effectivePrompt: SEAMLESS_PATTERN_PROMPT, config: { systemPrompt: "" } } } });
+    expect(state.statements.find(item => item.sql.startsWith("INSERT INTO tasks"))?.values[8]).toBe(SEAMLESS_PATTERN_PROMPT);
+    expect(state.queues).toBe(1);
+  });
+
+  test("seamless binding failures remain authoritative and legacy workflow knobs remain unchanged", async () => {
+    const state = fixture();
+    Object.assign(state.models[0]!, { protocol: "custom", modelId: "sflxjj", capabilities: ["edit"] });
+    const { url } = await serve(state);
+    const parameters = { cutWidth: 180, redrawWidth: 220, blurAmount: 90, redrawStrength: 0.8, steps: 15 };
+    const input = { requestId: "seamless-legacy-knobs", projectId: "seamless", operationType: "seamless_stitch", toolKey: "seamless-stitch", modelConfigId: modelId, prompt: "无缝拼接", parameters };
+    state.bind("seamless-stitch", { enabled: false });
+    expect((await post(url + "/tasks", input)).status).toBe(403);
+    expect(state.queues).toBe(0);
+    state.bind("seamless-stitch", { modelConfigId: secondModelId });
+    const changed = await post(url + "/tasks", input);
+    expect(changed.status).toBe(409); expect((await changed.json()).error).toBe("TOOL_MODEL_CHANGED");
+    expect(state.queues).toBe(0);
+    state.bind("seamless-stitch");
+    const response = await post(url + "/tasks", input);
+    expect(response.status).toBe(201);
+    expect((await response.json()).task).toMatchObject({ prompt: "无缝拼接", optimized: false, parameters });
+    expect(state.queues).toBe(1);
+  });
+
   test("raw video prompts default off and only the standalone video tool may opt in", async () => {
     const { url } = await serve();
     const config = { modelConfigId: modelId, enabled: true, creditCostOverride: null, rmbCostOverride: null };

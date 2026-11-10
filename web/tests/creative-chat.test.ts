@@ -104,7 +104,7 @@ describe("simple tool protocol", () => {
     test("missing base defaults to focus; keep and work note stay bounded in the same call", () => {
         const plan = parseCreativeChatPlan(result({ keep: ["白底", "版型"], note_update: "当前改为浅天蓝" }), references, options);
         expect(plan).toMatchObject({ kind: "image", action: "edit", parentId: "v3", workId: "original", references: [{ id: "v3" }], workNote: { summary: "当前改为浅天蓝" } });
-        if (plan.kind === "image") { expect(plan.prompt).toContain("修改底图"); expect(plan.prompt).toContain("需要保持：白底；版型"); }
+        if (plan.kind === "image") { expect(plan.prompt).toContain("修改底图"); expect(plan.prompt).toContain("保持底图当前状态：白底；版型"); }
     });
     test.each([["original", "original"], ["previous", "v2"], ["图2", "v2"]])("%s chooses the persisted version %s", (base, expected) => {
         expect(parseCreativeChatPlan(result({ base }), references, options)).toMatchObject({ kind: "image", parentId: expected });

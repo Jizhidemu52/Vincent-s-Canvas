@@ -10,7 +10,7 @@ const source: CanvasNodeData = { id: "source", type: CanvasNodeType.Image, title
     metadata: { content: "blob:source", storageKey: "image:source", originalFileName: "原图.png" } };
 function record() { return createCanvasGenerationRecord({ id: "run", sourceNodeId: "source", prompt: "最终提示词", inputPrompt: "我的原稿", generationType: "edit", config: { ...defaultConfig, model: "gpt-image-2", size: "3:2", systemPrompt: "system" }, nodes: [source], references: [
     { id: "source", name: "原图.png", type: "image/png", dataUrl: "data:image/png;base64,hydrated", storageKey: "image:source" },
-    { id: "upload", name: "上传参考.png", type: "image/png", dataUrl: "blob:uploaded", storageKey: "image:upload" },
+    { id: "upload", name: "上传参考.png", role: "只参考此图的材质。", type: "image/png", dataUrl: "blob:uploaded", storageKey: "image:upload" },
 ] }); }
 
 test("generation snapshots preserve reference identity/order/storage independently from live input edits", () => {
@@ -23,6 +23,7 @@ test("generation snapshots preserve reference identity/order/storage independent
     expect(canvasNodeGenerationReferences(result, [result], [], { visibleOnly: true }).map(item => item.id)).toEqual(["upload"]);
     expect(visibleCanvasGenerationReferences(saved, [result]).map(item => item.order)).toEqual([1]);
     expect(canvasGenerationRecordReferences(saved)).toHaveLength(2);
+    expect(canvasGenerationRecordReferences(saved)[1]!.role).toBe("只参考此图的材质。");
     expect(saved).toEqual(original);
     expect(collectImageStorageKeys(result)).toEqual(new Set(["image:source", "image:upload"]));
 });

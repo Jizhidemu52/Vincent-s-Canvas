@@ -9,10 +9,12 @@ export function CompilationResult({ compilation }: { compilation: AdminPromptCom
         <div className="flex min-w-0 flex-col gap-3">
             <div className="flex flex-wrap gap-1">
                 <Tag color={compilation.status === "success" ? "green" : compilation.status === "failed" ? "red" : "orange"}>{compilationStatus[compilation.status]}</Tag>
-                <Tag>{compilation.optimized ? "已优化" : "未优化 / 回退"}</Tag>
+                <Tag>{compilation.method === "template" ? "固定模板 · 无改写调用" : compilation.method === "minimal" ? "精简改写" : compilation.optimized ? "已优化" : "未优化 / 回退"}</Tag>
                 {compilation.cacheHit && <Tag color="blue">缓存命中</Tag>}
             </div>
             {compilation.message && <Alert type={compilation.status === "failed" ? "error" : "warning"} title={compilation.message} />}
+            {Boolean(compilation.questions?.length) && <Alert type="warning" title="需补充后才能出图" description={compilation.questions!.join("；")} />}
+            {compilation.promptMetrics && <p className="text-xs text-muted-foreground">{compilation.promptMetrics.characters} 字符 · {compilation.promptMetrics.words} 英文词 · {compilation.promptMetrics.avoidPhrases} 项排除词{compilation.promptMetrics.overRecommended ? " · 超出简洁目标（未截断要求）" : ""}</p>}
             <div>
                 <h4 className="mb-1 text-xs text-muted-foreground">{compilation.inputSnapshot.promptInput.scene === "video-motion" ? "动效方案摘要" : "中文说明"}</h4>
                 <pre className="whitespace-pre-wrap break-words text-sm">{compilation.summaryZh || "—"}</pre>
@@ -80,6 +82,13 @@ export function CompilationHistory({ detail }: { detail: PromptRecipeDetail }) {
                     ))}
                 </div>
                 <p className="mt-3 text-xs text-muted-foreground">实记与估算不是同一指标，不相加；不同币种不合并。缺少金额并不表示免费。总成本未知 {stats.unknownCostCount} 次。</p>
+                {stats.promptQuality && <div className="mt-4 grid grid-cols-2 gap-4 lg:grid-cols-4">
+                    <Statistic title="简洁目标超标率" value={stats.promptQuality.measured ? stats.promptQuality.overRecommended / stats.promptQuality.measured * 100 : 0} precision={1} suffix="%" />
+                    <Statistic title="平均排除短语数" value={stats.promptQuality.measured ? stats.promptQuality.avoidPhrases / stats.promptQuality.measured : 0} precision={1} />
+                    <Statistic title="固定模板编译" value={stats.promptQuality.templateCompilations} />
+                    <Statistic title="需补充信息" value={stats.promptQuality.clarifications} />
+                    <p className="col-span-full text-xs text-muted-foreground">仅统计有指标的 {stats.promptQuality.measured} 次独立编译，不含缓存重复；超出简洁目标不代表质量失败，不会截断关键要求。</p>
+                </div>}
             </section>
             <section className="wb-surface min-w-0 p-4 sm:p-5">
                 <h3 className="mb-3 font-semibold">最近优化记录（最多 20 条）</h3>

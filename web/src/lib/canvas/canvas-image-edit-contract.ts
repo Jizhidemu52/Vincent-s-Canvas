@@ -1,6 +1,6 @@
 import type { CanvasAssistantReference } from "@/types/canvas";
 import { buildImageReferencePromptText } from "@/lib/image-reference-prompt";
-import { assertImagePromptInvariantCoverage, instructionsWithoutArtworkLiterals, isEnglishImagePrompt, transformImagePromptInstructions } from "./canvas-assistant-output";
+import { assertImagePromptInvariantCoverage, instructionsWithoutArtworkLiterals, transformImagePromptInstructions } from "./canvas-assistant-output";
 
 const GROUPS = ["changes", "preserve", "forbid"] as const;
 type Group = typeof GROUPS[number];
@@ -79,7 +79,7 @@ export function compileCanvasEditContract(input: {
     for (const group of GROUPS) for (const clause of next[group]) {
         if (!sourceTexts.some(source => source.includes(clause.source))) fail(`约束 ${clause.id} 的 source 不是已提供的用户要求原文`);
         const text = bindReferences(clause.text, input.references);
-        if (!isEnglishImagePrompt(text) || /```|<\/?(?:think|analysis|reasoning)\b/iu.test(text)) fail(`约束 ${clause.id} 必须是英文指令（图中文字字面量除外）`);
+        if (/```|<\/?(?:think|analysis|reasoning)\b/iu.test(text)) fail(`约束 ${clause.id} 只能包含视觉指令，不得包含内部推理或代码块`);
         const target = `${group === "preserve" ? "Keep unchanged: " : group === "forbid" ? "Do not: " : ""}${text}`;
         // A quoted historical requirement being explicitly superseded is not a new preservation command.
         // Stop at a clause delimiter so a separate current prohibition can never be removed with it.
@@ -101,7 +101,7 @@ export function compileCanvasEditContract(input: {
     const labels = { changes: "Required changes", preserve: "Keep unchanged", forbid: "Prohibitions" };
     for (const group of GROUPS) if (merged[group].length) lines.push(`${labels[group]}:\n${merged[group].map(item => {
         const text = bindReferences(item.text, input.references);
-        return `- ${group === "forbid" && !/\b(?:not|don't|never|no|avoid|without|forbidden|prohibited)\b/iu.test(instructionsWithoutArtworkLiterals(text)) ? "Do not " : ""}${text}`;
+        return `- ${group === "forbid" && !/\b(?:not|don't|never|no|avoid|without|forbidden|prohibited)\b|不要|不能|不得|禁止|不许/iu.test(instructionsWithoutArtworkLiterals(text)) ? "Do not " : ""}${text}`;
     }).join("\n")}`);
     const prompt = lines.join("\n\n");
     // Whole-turn lexical counts/literals catch omitted clauses. Negation is checked per clause:

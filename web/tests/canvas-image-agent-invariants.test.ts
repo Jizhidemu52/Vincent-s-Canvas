@@ -57,10 +57,9 @@ describe("canvas image-agent execution invariants", () => {
         expect(result.references.map(item => item.storageKey)).toEqual(["image:bag-v3"]);
         expect(result.prompt).toContain("输入图1对应图3（修改底图）");
         expect(result.prompt).toContain(current);
-        expect(result.prompt).toContain("修改底图当前可见状态");
-        expect(result.prompt).toContain("历史加宽、缩短、旋转");
-        expect(result.prompt).toContain("不作为本轮增量");
-        expect(result.prompt).toContain("发生歧义时保持底图现状");
+        expect(result.prompt).toContain("保持底图当前状态");
+        expect(result.prompt).not.toContain("历史加宽、缩短、旋转");
+        expect(result.prompt.indexOf(current)).toBeGreaterThan(result.prompt.indexOf(polluted[0]!));
         // Retain the original requirement record: no numeric stripping or invented rewrite.
         expect(result.record.note.keep).toEqual(polluted);
         expect(result.prompt).toContain(polluted[0]!);
@@ -78,9 +77,8 @@ describe("canvas image-agent execution invariants", () => {
         expect(result.record.spec?.changes).toEqual(changes);
         expect(result.record.note.keep).toEqual(keep);
         for (const constraint of keep) expect(result.prompt).toContain(constraint);
-        expect(result.prompt).toContain("本轮明确要求的变化优先");
-        expect(result.prompt).toContain("明确要求再次变化时仍执行");
-        expect(result.prompt).toContain("静态尺寸、数量和比例原样保留");
+        expect(result.prompt).toContain("除本次明确修改外，其余保持底图不变");
+        expect(result.prompt.indexOf(current)).toBeGreaterThan(result.prompt.indexOf(keep[0]!));
     });
 
     test("historical relative values stay attributed as context before the current instruction", async () => {

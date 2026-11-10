@@ -43,6 +43,8 @@ import { pastedImageFiles, readClipboardImages } from "@/lib/clipboard-images";
 import { useCanManageConfig } from "@/hooks/use-can-manage-config";
 import { toolModeOperation, type AdminToolMode } from "@/lib/admin-domain";
 import { createImageReferenceItem, dedupeImageReferences, validateImageReferences } from "@/lib/image-reference-policy";
+import { buildDirectImagePrompt, imageReferenceRoles, imageReferencesMatch, initializeImageReferenceRoles } from "@/lib/image-reference-prompt";
+import { readImageOptions } from "@/lib/image-advanced-settings";
 import { modelOptionLabel, modelOptionName, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { imageModelDisplayName } from "@/lib/model-display";
 import { nanoid } from "nanoid";
@@ -267,7 +269,8 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const [draftConfig, setDraftConfig, configReady] = useGenerationDraft<Partial<AiConfig>>(`${inputDraftScope}:settings`, {});
     const baseConfig = { ...defaults, ...draftConfig };
     const config = baseConfig;
-    const [references, setReferences, referencesReady] = useGenerationDraft<ImageReferenceItem[]>(`${inputDraftScope}:references`, [], async items => Promise.all(items.map(async item => ({ ...item, dataUrl: await resolveImageUrl(item.storageKey, item.dataUrl) }))));
+    const referenceMode = historyTool === "image-generation" || historyTool === "creative-text-to-style" ? "generate" : "edit";
+    const [references, setReferences, referencesReady] = useGenerationDraft<ImageReferenceItem[]>(`${inputDraftScope}:references`, [], async items => initializeImageReferenceRoles(await Promise.all(items.map(async item => ({ ...item, dataUrl: await resolveImageUrl(item.storageKey, item.dataUrl) }))), referenceMode));
     const toolKey = requireToolKey(historyTool === "detail-enhance" || historyTool === "hd-upscale" ? "upscale" : historyTool === "image-generation" || historyTool === "midjourney-blend" || historyTool === "creative-text-to-style" ? "image_generation" : "inpaint", historyTool === "remove-background" || historyTool === "item-extract" ? "image-edit" : historyTool === "hd-upscale" ? "detail-enhance" : historyTool);
     const businessModels = useBusinessConfigStore(state => state.models);
     const blendModels = businessModels.filter(item => item.imageParameterProfile === "blend" || item.imageParameterProfile === "midjourney-blend" || item.modelId === "midjourney-blend");
@@ -367,7 +370,10 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     const toolModeConfig = creativePreset ? { ...imageToolModes[toolMode], title: creativePreset.title, description: creativePreset.description, projectId: `creative-${creativePreset.id}` } : imageToolModes[toolMode];
     const operationType = toolModeOperation(toolMode) as "image_generation" | "inpaint" | "upscale";
     const model = effectiveConfig.imageModel || effectiveConfig.model;
-    const optimizationContext = JSON.stringify([model, operationType, toolKey, ...(designRequested ? [normalizedCarryover] : [])]);
+    const optimizationContext = JSON.stringify([effectiveConfig, model, operationType, toolKey, ...(designRequested ? [normalizedCarryover] : [])]);
+    const matchingOptimizedDraft = optimizedDraft?.prompt === prompt && imageReferencesMatch(optimizedDraft.references, references) ? optimizedDraft : undefined;
+    const compiledPreview = matchingOptimizedDraft?.input.compilationId && matchingOptimizedDraft.context === optimizationContext ? matchingOptimizedDraft.prompt : undefined;
+    const needsCompiledPreview = Boolean(!compiledPreview && (creativePreset || designRequested || matchingOptimizedDraft));
     useEffect(() => {
         setOptimizedDraft(current => !current?.input.compilationId || current.context === optimizationContext ? current
             : current.input.scene === "free-optimize" ? undefined : { ...current, input: { ...current.input, compilationId: undefined } });
@@ -377,6 +383,9 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
     // The dedicated entry keeps its input contract even before a model is configured.
     const isBlend = !quickTool && (historyTool === "midjourney-blend" || selectedModelProfile.kind === "midjourney-blend");
     const requiresPrompt = !isBlend && !quickTool;
+    const actualPromptPreview = requiresPrompt ? compiledPreview ?? (needsCompiledPreview ? undefined : buildDirectImagePrompt(effectiveConfig, prompt, references)) : "";
+    let previewNegativePrompt = "";
+    try { previewNegativePrompt = readImageOptions(effectiveConfig.imageOptions).negative_prompt || ""; } catch { /* Existing submission validation reports invalid image settings. */ }
     const generationCount = quickTool ? 1 : Number(normalizeImageModelSettings(config, selectedModelProfile).count);
     const quickReferenceError = quickTool ? references.map(reference => quickImageReferenceFileError({ type: reference.type, size: reference.bytes })).find(Boolean) : undefined;
     const referenceValidation = quickTool
@@ -393,8 +402,8 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
         label: results.some(result => result.status === "success") ? "已完成" : results.some(result => result.status === "failed") ? "已失败" : "草稿" });
     const canGenerate = draftReady && handoffReady && pendingReady && !carryoverError && !(quickTool && pendingImages.length) && !((placementToken || designRequested) && isBlend) && !readingReferences && !optimizingPrompt && (quickTool || Boolean(model)) && Boolean(user && user.status === "active") && (!requiresPrompt || Boolean(prompt.trim())) && !quotaBlocked && !missingReference && !invalidBlendReferences && referenceValidation.valid && !garmentNeedsApply && !incompleteCreativePrompt;
 
-    const appendReferences = (items: ReferenceImage[], origin: ImageReferenceOrigin) => { inputRevision.current += 1; setReferences((value) => dedupeImageReferences([...value, ...items.map((item) => createImageReferenceItem(item, origin))])); };
-    const restoreReferences = (items: ReferenceImage[], origin: ImageReferenceOrigin = "template") => { inputRevision.current += 1; setReferences(dedupeImageReferences(items.map((item) => createImageReferenceItem(item, origin)))); };
+    const appendReferences = (items: ReferenceImage[], origin: ImageReferenceOrigin) => { inputRevision.current += 1; setReferences((value) => { const next = dedupeImageReferences([...value, ...items.map((item) => createImageReferenceItem(value.length ? { ...item, role: item.role ?? "" } : item, origin))]); return value.length ? next : initializeImageReferenceRoles(next, referenceMode); }); };
+    const restoreReferences = (items: ReferenceImage[], origin: ImageReferenceOrigin = "template") => { inputRevision.current += 1; setReferences(initializeImageReferenceRoles(dedupeImageReferences(items.map((item) => createImageReferenceItem(item, origin))), referenceMode)); };
 
     const handleMissingModelConfig = () => {
         if (canManageConfig) {
@@ -695,8 +704,8 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
             message.warning(uiText(designRequested ? "沿用设计要求需要文字提示词，请选择支持文字要求的图片编辑模型。" : "定位效果需要位置保持提示词，请选择支持文字要求的图片编辑模型。"));
             return;
         }
-        const text = prompt.trim();
-        if (!text && requiresPrompt) {
+        const text = prompt;
+        if (!text.trim() && requiresPrompt) {
             message.error(uiText("请输入生图提示词"));
             return;
         }
@@ -985,13 +994,13 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
             message.error(uiText(referenceValidation.message || ""));
             return null;
         }
-        let promptInput = optimizedDraft?.prompt === text && garmentReferencesMatch(optimizedDraft.references, references) ? optimizedDraft.input
-            : creativePreset ? { scene: creativePreset.id as PromptScene, userText: text, fields: {}, mode: operationType === "image_generation" ? "generate" as const : "edit" as const, referenceRoles: references.map(image => image.name) } : undefined;
+        let promptInput = optimizedDraft?.prompt === text && imageReferencesMatch(optimizedDraft.references, references) ? optimizedDraft.input
+            : creativePreset ? { scene: creativePreset.id as PromptScene, userText: text, fields: {}, mode: operationType === "image_generation" ? "generate" as const : "edit" as const, referenceRoles: imageReferenceRoles(references) } : undefined;
         if (promptInput?.compilationId && optimizedDraft?.context !== optimizationContext) {
             promptInput = promptInput.scene === "free-optimize" ? undefined : { ...promptInput, compilationId: undefined };
         }
         if (designRequested) promptInput = {
-            ...(promptInput || { scene: "free-optimize", userText: text, mode: "edit", referenceRoles: references.map(image => image.name) }),
+            ...(promptInput || { scene: "free-optimize", userText: text, mode: "edit", referenceRoles: imageReferenceRoles(references) }),
             fields: { ...promptInput?.fields, carryoverRequirements: [...normalizedCarryover] },
         };
         // Upscaling accepts plain instructions, not the image compiler contract.
@@ -1320,6 +1329,13 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                                 onRequestAssets={() => setReferenceAssetPickerOpen(true)}
                                 onRequestClipboard={() => void addReferencesFromClipboard()}
                             />
+                            {!quickTool && requiresPrompt ? <details className="rounded-md border border-border p-3 text-sm">
+                                <summary className="cursor-pointer font-medium">{uiText("查看实际发送内容")}</summary>
+                                <p className="my-2 text-xs text-muted-foreground">{uiText("自由输入不会自动改写。参考图按以下顺序发送；蒙版和标注层不占参考图编号。")}</p>
+                                {actualPromptPreview === undefined ? <p role="status">{uiText("此工具需要先编译提示词；请先优化并核对预览，当前原文还不是最终发送文本。")}</p> : <><strong>{uiText(previewNegativePrompt.trim() ? "主提示词" : "实际发送文本")}</strong><pre aria-label={uiText(previewNegativePrompt.trim() ? "主提示词" : "实际发送文本")} className="max-h-80 overflow-auto whitespace-pre-wrap break-words bg-muted/30 p-3 font-sans text-sm">{actualPromptPreview}</pre></>}
+                                {previewNegativePrompt.trim() ? <section className="mt-2"><strong>{uiText("排除要求")}</strong><p className="my-1 text-xs text-muted-foreground">{uiText("由服务端按模型规则加入正文或原生排除参数；上方仅为主提示词。")}</p><pre className="whitespace-pre-wrap break-words font-sans text-sm">{previewNegativePrompt}</pre></section> : null}
+                                {references.length ? <ol className="mt-2 space-y-1">{references.map((image, index) => <li key={image.referenceKey}>{uiText("图片{count}", { count: index + 1 })} · {image.name} · {image.role || uiText("用途未指定")}</li>)}</ol> : null}
+                            </details> : null}
 
                         </fieldset>
                         </div>

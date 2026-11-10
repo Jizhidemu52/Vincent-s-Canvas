@@ -11,6 +11,6 @@
 .node-element:focus-visible { outline:3px solid var(--cw-active); outline-offset:7px; border-radius:8px; }
 .node-element[data-task-highlight=true]::after { content:""; position:absolute; inset:-6px; border:3px solid var(--cw-active); border-radius:10px; pointer-events:none; box-shadow:0 0 0 4px color-mix(in srgb, var(--cw-active) 12%, transparent); }
 .cw-image-progressive { transition:opacity 160ms ease,filter 160ms ease; }
-.cw-feedback-strip { position:absolute; bottom:76px; right:16px; z-index:65; max-width:calc(100% - 150px); }
+.cw-feedback-strip { position:absolute; bottom:76px; right:16px; z-index:calc(var(--cw-z-panel) - 1); max-width:calc(100% - 150px); }
 @media(max-width:640px) { .cw-feedback-strip { bottom:128px; max-width:calc(100% - 24px); right:12px; } }
 @media(prefers-reduced-motion:reduce) { .cw-image-progressive { transition:none; } }

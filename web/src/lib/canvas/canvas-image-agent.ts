@@ -4,13 +4,13 @@ import { canvasConversationImages } from "./canvas-assistant-image-catalog";
 import type { CanvasAgentSnapshot, CanvasAgentOp } from "./canvas-agent-ops";
 import { placeCanvasImageOutputs } from "./canvas-image-output-placement";
 import { CanvasNodeType, type CanvasAssistantMessage, type CanvasAssistantReference, type CanvasNodeData } from "@/types/canvas";
-import { imageAgentWorkId, getImageAgentVersions, resolveImageAgentBase, IMAGE_AGENT_MAX_IMAGES, type ImageAgentImage } from "@/lib/image-agent/focus";
-import { mergeImageAgentWorkNote, type ImageAgentWorkNote } from "@/lib/image-agent/work-note";
+import { imageAgentEditNote, imageAgentWorkId, getImageAgentVersions, resolveImageAgentBase, IMAGE_AGENT_MAX_IMAGES, type ImageAgentImage } from "@/lib/image-agent/focus";
+import { imageAgentVisualPrompt, resolveImageAgentWorkNote, type ImageAgentWorkNote } from "@/lib/image-agent/work-note";
 import { IMAGE_AGENT_PREVIEW_BYTES, type ImageAgentHistoryMessage } from "@/lib/image-agent/context";
 import type { ImageAgentRegionSelection } from "@/lib/image-agent/mask";
 import { compileImageAgentPrompt, imageAgentSpecText } from "@/lib/image-agent/compile";
 import { ImageAgentPlanningError, parseImageAgentEditSpec, parseImageAgentReview, type ImageAgentEditSpec, type ImageAgentRepairPreparationIssue, type ImageAgentReview } from "../../../../shared/image-agent-iteration";
-import type { DesignRequirements } from "../../../../shared/image-agent-documents";
+import { designRequirementsText, type DesignRequirements } from "../../../../shared/image-agent-documents";
 
 export type CanvasImageAgentRecord = {
     baseImageId?: string;
@@ -194,7 +194,7 @@ export function canvasImageAgentSelectedSnapshot(snapshot: CanvasAgentSnapshot) 
 /** Small tool contract; a missing/invalid requested asset never falls back to generation. */
 type CanvasImageAgentSelection = {
     focusId?: string; lockedImageId?: string; newCreation?: boolean; explicitIds?: readonly string[]; previewedIds?: readonly string[]; focusRevision?: number;
-    requirements?: DesignRequirements;
+    requirements?: DesignRequirements; userPrompt?: string;
 };
 export function resolveCanvasImageAgentEdit(args: Record<string, unknown>, catalog: readonly CanvasImageAgentImage[], selection: CanvasImageAgentSelection) {
     const invalid = (message: string) => new ImageAgentPlanningError("IMAGE_AGENT_ARGUMENTS_INVALID", message);
@@ -215,9 +215,10 @@ export function resolveCanvasImageAgentEdit(args: Record<string, unknown>, catal
     }
     if (references.size > 5) throw new ImageAgentPlanningError("IMAGE_AGENT_REFERENCES_INVALID", "底图与参考图合计最多 5 张。");
     if ([...references.values()].some(image => !source(image))) throw new Error("图片原件不可读取，尚未提交生成。");
-    const note = mergeImageAgentWorkNote(base?.note, args.note_update as string | undefined, args.keep as string[] | undefined);
+    const priorNote = imageAgentEditNote(catalog, selection, base, selection.lockedImageId ? undefined : args.base as string | undefined);
+    const note = resolveImageAgentWorkNote(priorNote, args.note_update as string | undefined, args.keep as string[] | undefined, selection.userPrompt === undefined ? undefined : [selection.userPrompt, selection.requirements ? designRequirementsText({ ...selection.requirements, unknowns: [] }) : ""].join("\n"));
     const keep = note.keep;
-    const { prompt, spec } = compileImageAgentPrompt({ prompt: args.prompt, keep, images: [...references.values()], baseImageId: base?.id, spec: args.edit_spec, requirements: selection.requirements });
+    const { prompt, spec } = compileImageAgentPrompt({ prompt: imageAgentVisualPrompt(args.prompt), keep, images: [...references.values()], baseImageId: base?.id, spec: args.edit_spec, requirements: selection.requirements, userPrompt: selection.userPrompt && imageAgentVisualPrompt(selection.userPrompt) });
     const missingImageIds = selection.previewedIds ? [...references.keys()].filter(id => !selection.previewedIds!.includes(id)) : [];
     if (missingImageIds.length) throw new ImageAgentPlanningError("IMAGE_AGENT_UNPREVIEWED_IMAGE", "需要先查看指定图片，再提交修改；本次未生成。", {
         missingImageIds, requiredImageIds: [...references.keys()],

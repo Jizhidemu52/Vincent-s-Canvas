@@ -98,6 +98,7 @@ export function SceneFields({ sceneId, form, onChange, disabled = false, sourceI
         <div className="cs-field">
             <label className="cs-label" htmlFor={id("colorRegion")}>{uiText("改色区域 ")}<span className="cs-help">{uiText("可选")}</span></label>
             <input id={id("colorRegion")} className="cs-input" value={form.colorRegion} onChange={(event) => update("colorRegion", event.target.value)} maxLength={500} disabled={disabled} placeholder={sceneId === "garment-colorway" ? uiText("如：仅大身，保留袖口与领口颜色") : uiText("如：仅花瓣与叶片，保留底色")} />
+            <p className="cs-help">{uiText("需要严格限定局部改色时，请使用支持圈选或蒙版的编辑入口；这里只填写部位名称，不能保证其他区域不变。")}</p>
         </div>
         {extra(sceneId === "garment-colorway" ? "如：领口滚边继续使用原色。" : "如：深色线条保持不变，让花瓣更柔和。")}
     </>;

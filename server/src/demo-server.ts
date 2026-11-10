@@ -1292,7 +1292,11 @@ Bun.serve({
         ? { ...input, prompt: trustedBatch.prepared.prompt, parameters: structuredClone(trustedBatch.prepared.parameters), promptInput: trustedBatch.prepared.promptInput,
             userInput: trustedBatch.prepared.userInput, promptCompilationId: trustedBatch.prepared.promptCompilationId, optimized: trustedBatch.prepared.optimized }
         : input.operationType === "video_generation" || input.parameters.quickImageAction ? { ...input, optimized: false }
-        : applyImagePromptExclusions(await preparePromptTaskInput(demoPromptCompiler, user, { ...input, toolKey: taskTool.toolKey }), (() => {
+        : applyImagePromptExclusions(await preparePromptTaskInput(demoPromptCompiler, user, { ...input, toolKey: taskTool.toolKey }, { fixedToolTarget: (() => {
+            const model = demoModels.find(item => item.id === taskTool.modelConfigId);
+            const provider = demoProviders.find(item => item.id === model?.providerId);
+            return model && provider ? { modelId: String(model.modelId), protocol: String(provider.protocol), providerId: String(model.providerId), workflowConfigId: typeof model.workflowConfigId === "string" ? model.workflowConfigId : null } : undefined;
+          })() }), (() => {
             const model = demoModels.find(item => item.id === taskTool.modelConfigId);
             const provider = demoProviders.find(item => item.id === model?.providerId);
             return model && provider ? { modelId: String(model.modelId), protocol: String(provider.protocol) } : undefined;

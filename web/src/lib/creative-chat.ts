@@ -1,7 +1,7 @@
 import type { ChatHistoryMessage } from "@/lib/chat-context";
 import { buildImageAgentContext, type ImageAgentHistoryMessage } from "@/lib/image-agent/context";
-import { imageAgentCandidateIds, imageAgentWorkId, resolveImageAgentBase, resolveImageAgentFocus, selectImageAgentWorkingSet, type ImageAgentImage } from "@/lib/image-agent/focus";
-import { mergeImageAgentWorkNote, type ImageAgentWorkNote } from "@/lib/image-agent/work-note";
+import { imageAgentCandidateIds, imageAgentEditNote, imageAgentWorkId, resolveImageAgentBase, resolveImageAgentFocus, selectImageAgentWorkingSet, type ImageAgentImage } from "@/lib/image-agent/focus";
+import { imageAgentVisualPrompt, resolveImageAgentWorkNote, type ImageAgentWorkNote } from "@/lib/image-agent/work-note";
 import { DuplicateJsonKeyError, parseStrictJson } from "@/lib/strict-json";
 import type { AiTextMessage, ToolResponseResult } from "@/services/api/image";
 import type { ReferenceImage } from "@/types/image";
@@ -28,7 +28,7 @@ export type CreativeChatPlan =
     | { kind: "image"; content: string; action: "generate" | "edit"; prompt: string; references: ReferenceImage[]; parentId?: string; workId?: string; workNote: ImageAgentWorkNote; keep: string[]; spec?: ImageAgentEditSpec };
 
 export type CreativeChatImageSelection = { explicitTargetImageId?: string; referenceImageIds?: string[]; newCreation?: boolean };
-export type CreativeChatContextOptions = { catalog?: CreativeImageCatalogEntry[]; selectedImageId?: string; lockedImageId?: string; newCreation?: boolean; referenceImageIds?: string[]; inspectionImageIds?: string[]; documents?: AgentDocument[]; requirements?: DesignRequirements };
+export type CreativeChatContextOptions = { catalog?: CreativeImageCatalogEntry[]; selectedImageId?: string; lockedImageId?: string; newCreation?: boolean; referenceImageIds?: string[]; inspectionImageIds?: string[]; documents?: AgentDocument[]; requirements?: DesignRequirements; userPrompt?: string };
 export const MAX_CREATIVE_CHAT_REFERENCES = 5;
 export const MAX_CREATIVE_CHAT_PREVIEW_BYTES = 8 * 1024 * 1024;
 
@@ -230,8 +230,9 @@ export function parseCreativeChatPlan(result: ToolResponseResult, references: Re
         if (!entry) throw new ImageAgentPlanningError("IMAGE_AGENT_REFERENCES_INVALID", "图片工具引用了目录外图片，未提交图片任务");
         originalReference(entry); return entry;
     });
-    const workNote = mergeImageAgentWorkNote(base?.note, args.note_update as string | undefined, keep);
-    const compiled = compileImageAgentPrompt({ prompt: args.prompt, keep: workNote.keep, images: sources.map(({ id, label }) => ({ id, label })), baseImageId: base?.id, spec: args.edit_spec, requirements: options.requirements });
+    const priorNote = imageAgentEditNote(catalog, { focusId: options.selectedImageId, newCreation: options.newCreation }, base, options.lockedImageId ? undefined : requestedBase);
+    const workNote = resolveImageAgentWorkNote(priorNote, args.note_update as string | undefined, keep, options.userPrompt === undefined ? undefined : [options.userPrompt, options.requirements ? designRequirementsText({ ...options.requirements, unknowns: [] }) : ""].join("\n"));
+    const compiled = compileImageAgentPrompt({ prompt: imageAgentVisualPrompt(args.prompt), keep: workNote.keep, images: sources.map(({ id, label }) => ({ id, label })), baseImageId: base?.id, spec: args.edit_spec, requirements: options.requirements, userPrompt: options.userPrompt && imageAgentVisualPrompt(options.userPrompt) });
     const seen = new Set(options.previewedImageIds || references.map(item => item.id));
     const missing = sources.filter(entry => !seen.has(entry.id));
     if (missing.length) throw new ImageAgentPlanningError("IMAGE_AGENT_UNPREVIEWED_IMAGE", `需要先查看较早图片 ${missing.map(entry => entry.label).join("、")}，未提交图片任务`, {

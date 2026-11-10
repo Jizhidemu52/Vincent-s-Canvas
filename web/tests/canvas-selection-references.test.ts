@@ -51,11 +51,12 @@ describe("canvas selection reference composition", () => {
         expect(sync(refs, [], fresh)[0]).toMatchObject({ storageKey: "edited-red", dataUrl: "blob:edited-red" });
     });
     test("refreshes persisted media identity without resetting reference order", () => {
-        const refs = moveImageReference(sync([], ["red", "blue"]), 0, 1);
+        const refs = moveImageReference(sync([], ["red", "blue"]).map(image => ({ ...image, role: image.canvasNodeId === "red" ? "只参考此图的颜色。" : "以此图作为编辑原图。" })), 0, 1);
         const fresh = new Map(byId); fresh.set("red", image("red", { content: "blob:restored-red" }));
         const next = sync(refs, ["red", "blue"], fresh);
         expect(next[0]).toBe(refs[0]);
         expect(next[1]!.dataUrl).toBe("blob:restored-red");
+        expect(next[1]!.role).toBe("只参考此图的颜色。");
     });
     test("never silently truncates a large box selection; model validation gates submission", () => {
         const map = new Map(Array.from({ length: 17 }, (_, index) => { const node = image(String(index)); return [node.id, node]; }));

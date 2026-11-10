@@ -1,11 +1,12 @@
 import { uiText, useUiLocale } from "@/lib/i18n";
-import { Button, Tag, Tooltip } from "antd";
+import { Button, Select, Tag, Tooltip } from "antd";
 import { ChevronLeft, ChevronRight, ClipboardPaste, FolderPlus, GripVertical, Trash2, Upload, X } from "lucide-react";
 import { useState } from "react";
 
 import { moveImageReference, type ImageReferenceValidation } from "@/lib/image-reference-policy";
 import { INTERNAL_IMAGE_DRAG } from "@/lib/dropped-images";
 import type { ImageReferenceItem } from "@/types/image";
+import { imageReferenceRoleOptions } from "@/lib/image-reference-prompt";
 
 type Props = {
     references: ImageReferenceItem[];
@@ -60,8 +61,9 @@ export function ReferenceImageTray({ references, loading, fixedReferenceKey, val
                         onDragEnd={() => setDraggingKey(null)}
                         onDragOver={(event) => event.preventDefault()}
                         onDrop={() => drop(item.referenceKey)}
-                        className={`group relative size-24 shrink-0 overflow-hidden rounded-md border bg-stone-50 transition dark:bg-stone-900 ${draggingKey === item.referenceKey ? "border-blue-400 opacity-50" : "border-stone-200 dark:border-stone-800"}`}
+                        className={`group w-36 shrink-0 rounded-md border border-border bg-muted/30 p-1 transition ${draggingKey === item.referenceKey ? "opacity-50" : ""}`}
                     >
+                        <div className="relative h-24 overflow-hidden rounded">
                         <img src={item.dataUrl} alt={item.name} loading="lazy" decoding="async" className="size-full object-cover" />
                         <span className="absolute left-1 top-1 rounded bg-black/65 px-1.5 py-0.5 text-xs font-medium text-white">{uiText("图片{count}", { count: index + 1 })}</span>
                         <Tag className="absolute bottom-1 left-1 m-0 max-w-[70px] truncate border-0 bg-black/65 px-1.5 py-0.5 text-xs text-white">{item.originLabel}</Tag>
@@ -71,6 +73,12 @@ export function ReferenceImageTray({ references, loading, fixedReferenceKey, val
                             <Tooltip title={uiText("后移")}><Button size="small" type="text" className="!size-6 !min-w-0 !bg-black/65 !p-0 !text-white" icon={<ChevronRight className="size-3.5" />} disabled={index === references.length - 1} aria-label={uiText("将图片{count}后移", { count: index + 1 })} onClick={() => move(index, index + 1)} /></Tooltip>
                             <Tooltip title={uiText("移除")}><Button size="small" type="text" danger className="!size-6 !min-w-0 !bg-black/65 !p-0 !text-red-200" icon={<Trash2 className="size-3.5" />} aria-label={uiText("移除参考图")} onClick={() => remove(item.referenceKey)} /></Tooltip>
                         </div></> : null}
+                        </div>
+                        <Select size="small" className="mt-1 w-full" aria-label={uiText("图片{count}用途", { count: index + 1 })} placeholder={uiText("选择图片用途")}
+                            value={item.role || undefined} allowClear
+                            options={[...new Set([...imageReferenceRoleOptions, ...(item.role ? [item.role] : [])])].map(role => ({ value: role, label: uiText(role) }))}
+                            onChange={role => onChange(references.map(reference => reference.referenceKey === item.referenceKey ? { ...reference, role: role || "" } : reference))}
+                            onClick={event => event.stopPropagation()} />
                     </div>
                 ))}
                 {!references.length ? <div className="flex min-w-full items-center justify-center text-sm text-stone-500">{onRequestCanvas ? uiText("上传图片、从素材库选择，或在画布中选择图片节点。") : uiText("上传、粘贴或拖入图片，也可从素材库选择。")}</div> : null}

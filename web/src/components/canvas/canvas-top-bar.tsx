@@ -8,7 +8,6 @@ import { deploymentFeatures } from "@/lib/deployment-features";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { useModuleEnabled } from "@/stores/use-module-store";
-import { UserStatusActions } from "@/components/layout/user-status-actions";
 import { UsageCollectionNotice } from "@/components/layout/frequent-navigation";
 import { CanvasSaveStatus } from "@/components/canvas/canvas-save-status";
 import { canvasActionMenuItem } from "./canvas-action-menu-item";
@@ -17,6 +16,7 @@ import { LanguageSwitch } from "@/components/layout/language-switch";
 import { canvasTopBarPropsEqual, type CanvasTopBarRenderState } from "@/lib/canvas/canvas-top-bar-render-stability";
 
 const CanvasShortcutsDialog = lazy(() => import("./canvas-shortcuts-dialog").then(module => ({ default: module.CanvasShortcutsDialog })));
+const UserStatusActions = lazy(() => import("@/components/layout/user-status-actions").then(module => ({ default: module.UserStatusActions })));
 
 export const CanvasTopBar = memo(function CanvasTopBar({
     title,
@@ -106,7 +106,7 @@ export const CanvasTopBar = memo(function CanvasTopBar({
                     <span className="cw-account-name" title={userName}>{userName}</span>
                     {compactAgentStatus ? <CompactAgentStatus status={compactAgentStatus} onClick={onToggleAgent} /> : null}
                     <Popover trigger="click" placement="bottomRight" content={<div className="cw-workspace-notice"><strong>{uiText("工作区与数据")}</strong><p>{deploymentFeatures.authenticationEnabled ? uiText("画布按当前账号身份保存，链接不等于公开分享。") : uiText("本地试用：画布保存在当前浏览器。更换设备前请导出备份。")}</p><UsageCollectionNotice compact /></div>}><button type="button" className="cw-icon" aria-label={uiText("工作区与使用记录说明")}><Info size={16} /></button></Popover>
-                    <UserStatusActions variant="canvas" />
+                    <Suspense fallback={null}><UserStatusActions variant="canvas" /></Suspense>
                 </div>
             </div>
             {shortcutsOpen ? <Suspense fallback={null}><CanvasShortcutsDialog open onClose={() => setShortcutsOpen(false)} /></Suspense> : null}

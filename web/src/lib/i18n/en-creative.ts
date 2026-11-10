@@ -189,6 +189,7 @@ const english: Record<string, string> = {
     "点击色块选色，或填写 #RGB / #RRGGBB。生成颜色为近似效果。": "Choose a swatch or enter #RGB / #RRGGBB. Generated colors are approximate.",
     "请在「配色参考图」上传第二张图片，仅参考其中的色彩搭配。": "Upload a second image under Color reference. Only its color palette will be used.",
     "改色区域 ": "Recolor area ",
+    "需要严格限定局部改色时，请使用支持圈选或蒙版的编辑入口；这里只填写部位名称，不能保证其他区域不变。": "For tightly bounded local recoloring, use an editor with region selection or masks. Naming an area here cannot guarantee that other areas stay unchanged.",
     "可选": "Optional",
     "如：仅大身，保留袖口与领口颜色": "e.g. Body only; keep the cuff and neckline colors",
     "如：仅花瓣与叶片，保留底色": "e.g. Petals and leaves only; keep the background color",

@@ -22,15 +22,13 @@ export const DEFAULT_SEAMLESS_STITCH_PARAMETERS: SeamlessStitchParameters = {
     steps: 12,
 };
 
-export const SEAMLESS_PATTERN_PROMPT = "将参考图处理成可四方连续平铺的无缝花型。保留原图的主体元素、配色、材质与绘画风格，优化边缘和元素布局，使左边缘与右边缘、上边缘与下边缘准确衔接，平铺后没有可见接缝、断裂或突兀的重复边界。输出单张平面花型单元，不要拼贴预览、边框、文字、水印或透视效果。";
-
 export async function requestSeamlessStitch(reference: ReferenceImage, parameters: SeamlessStitchParameters, config: AiConfig, lifecycle: { requestId?: string; onSubmissionStarted?: () => void | Promise<void>; onSubmitted?: (taskIds: string[]) => void | Promise<void> } = {}) {
     const resolved = await resolveToolConfig(config, "seamless_stitch", "seamless-stitch");
     const profile = imageModelProfile(resolved.model.modelId, [resolved.model]);
     const usesImageSettings = typeof resolved.model.imageSupportsMask === "boolean" || profile.kind === "quality-resolution" || profile.kind === "resolution-1k";
     if (!usesImageSettings) assertSeamlessParameters(parameters);
     const taskParameters = usesImageSettings ? imageTaskParameters(resolved.config, profile, { referenceCount: 1 }) : parameters;
-    const prompt = usesImageSettings ? SEAMLESS_PATTERN_PROMPT : "无缝拼接";
+    const prompt = "无缝拼接";
     const taskConfig = { ...resolved.config, ...normalizeImageModelSettings(resolved.config, profile), count: "1" };
     const [result] = await requestQueuedImages({
         modelId: resolved.model.modelId,
@@ -45,7 +43,7 @@ export async function requestSeamlessStitch(reference: ReferenceImage, parameter
         ...lifecycle,
     });
     if (!result) throw new Error("无缝拼接任务没有返回图片");
-    return { ...result, model: resolved.model, parameters: taskParameters, prompt, config: taskConfig, usesImageSettings };
+    return { ...result, model: resolved.model, parameters: taskParameters, prompt: result.prompt, config: taskConfig, usesImageSettings };
 }
 
 function assertSeamlessParameters(parameters: SeamlessStitchParameters) {

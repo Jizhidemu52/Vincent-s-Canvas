@@ -18,7 +18,7 @@ export function jsonObject(text: string, label: string): Record<string, unknown>
 
 export type VersionEditorValue = Omit<PromptRecipeVersionContent, "modelOverrides"> & { overridesJson: string };
 export function emptyVersion(outputLanguage: "en" | "zh"): VersionEditorValue {
-    return { systemPrompt: "", fieldTemplate: "", overridesJson: "{}", fallbackPrompt: "", outputLanguage, changeNote: "" };
+    return { systemPrompt: "", fieldTemplate: "", overridesJson: "{}", fallbackPrompt: "", executionStrategy: "llm", outputLanguage, changeNote: "" };
 }
 export function editVersion(version: AdminPromptRecipeVersion): VersionEditorValue {
     return {
@@ -28,6 +28,7 @@ export function editVersion(version: AdminPromptRecipeVersion): VersionEditorVal
         fallbackPrompt: version.fallbackPrompt,
         outputLanguage: version.outputLanguage,
         changeNote: version.changeNote,
+        executionStrategy: version.executionStrategy ?? "llm",
     };
 }
 export function parseVersion(value: VersionEditorValue): PromptRecipeVersionContent {
@@ -61,6 +62,7 @@ export function buildTestPromptInput(value: { scene: string; fieldsJson: string;
 export function buildTestImage(input: AdminPromptTestInput, compilation: PublicPromptCompilation, requestId: string, parametersJson: string): TaskSubmission {
     if (input.promptInput.mode === "video") throw new Error("视频动效测试仅规划提示词，请到视频创作页生成视频");
     if (compilation.status !== "success" || !compilation.prompt?.trim()) throw new Error("请先完成提示词优化测试");
+    if (compilation.questions?.length) throw new Error("请先补充待确认问题，不能将不明确的规划直接提交出图。");
     const edit = input.promptInput.mode === "edit";
     return {
         requestId,

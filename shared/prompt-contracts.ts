@@ -42,6 +42,9 @@ export type PublicPromptCompilation = {
   status: "optimizing" | "success" | "failed" | "uncertain";
   prompt?: string;
   summaryZh?: string;
+  /** A clarification is a completed planning result, not permission to generate. */
+  questions?: string[];
+  method?: "template" | "minimal" | "llm";
   optimized: boolean;
   errorCode?: string;
   message?: string;
@@ -59,6 +62,8 @@ export const promptRecipeSettingsSchema = z.object({
   failurePolicy: z.enum(["stop", "fallback"]).default("stop"),
 });
 export const promptRecipeVersionSchema = z.object({
+  /** Missing on existing immutable versions means the original LLM strategy. */
+  executionStrategy: z.enum(["llm", "minimal", "template-first"]).optional(),
   systemPrompt: z.string().trim().min(1).max(100_000),
   fieldTemplate: z.string().max(30_000).default(""),
   modelOverrides: z.record(z.string().max(200), z.string().max(30_000)).default({}),
@@ -74,6 +79,7 @@ export type PromptRecipeStats = {
   total: number; success: number; failed: number; cacheHits: number; averageLatencyMs: number | null;
   inputTokens: number; outputTokens: number; actualCost: number; estimatedCost: number; unknownCostCount: number;
   costs: Array<{ currency: string; actual: number; estimated: number; unknownCount: number }>;
+  promptQuality?: { measured: number; overRecommended: number; avoidPhrases: number; templateCompilations: number; clarifications: number };
 };
 export type AdminPromptCompilation = PublicPromptCompilation & {
   /** Server-only: explicit administrator recipe test, never accepted from public input. */
@@ -85,6 +91,7 @@ export type AdminPromptCompilation = PublicPromptCompilation & {
   /** Admin-only diagnostics: the compiler accepts a trusted HTTP status and fixed reason category, never provider error text. */
   upstreamStatus?: number; upstreamReason?: string;
   rawResponse: string | null; latencyMs: number | null;
+  promptMetrics?: { characters: number; words: number; avoidPhrases: number; overRecommended: boolean };
   inputTokens: number | null; outputTokens: number | null;
   actualCost: number | null; estimatedCost: number | null; currency: string;
   createdAt: string; completedAt: string | null;

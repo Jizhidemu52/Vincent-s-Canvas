@@ -56,7 +56,7 @@ export function imageWorkflowStepKey(configNodeId: string, nodes: CanvasNodeData
     const metadata = nodes.find(node => node.id === configNodeId)?.metadata;
     const automatic = new Set(automaticInputs);
     const prompt = (metadata?.composerContent || metadata?.prompt || "").replace(/@\[node:([^\]]+)\]/g, (token, id) => automatic.has(id) ? "" : token).trim();
-    return JSON.stringify([prompt, metadata?.model, metadata?.size, metadata?.quality, metadata?.imageOptions, metadata?.systemPrompt, metadata?.promptInput, metadata?.manualImageReferences,
+    return JSON.stringify([prompt, metadata?.model, metadata?.size, metadata?.quality, metadata?.imageOptions, metadata?.systemPrompt, metadata?.promptInput, metadata?.manualImageReferences, metadata?.imageReferenceRoles,
         (metadata?.imageReferenceOrder || []).filter(key => !automatic.has(key.replace(/^node:/, ""))), metadata?.generationMode || "image", metadata?.videoMode, metadata?.seconds, metadata?.vquality, metadata?.generateAudio, metadata?.watermark, metadata?.videoSeed, metadata?.videoOutputFormat, sourceRevision]);
 }
 export function imageWorkflowPlanStepKey(plan: ImageWorkflowPlan, step: ImageWorkflowPlan["steps"][number], graph: ImageWorkflowGraph) {

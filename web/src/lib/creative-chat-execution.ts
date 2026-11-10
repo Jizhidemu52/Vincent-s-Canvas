@@ -113,12 +113,9 @@ export function compileCreativeChatExecutionPrompt(input: ExecutionInput) {
         return `- 图片${index + 1}（${index === 0 ? "修改主体" : "辅助参考"}）：${rewrite(purpose)}${role?.do_not_transfer ? ` 不迁移：${rewrite(role.do_not_transfer)}` : ""}`;
     });
     const prompt = [
-        "【本轮修改要求（最高优先级）】",
         rewrite(input.prompt.trim()),
-        "本轮明确修改或撤销的要求优先于旧版本条件；下列保留项仅在不与本轮修改冲突时适用，不把旧版本当作已获用户认可。",
-        ...(referenceLines.length ? ["【参考图分工（按实际输入顺序）】", ...referenceLines] : []),
-        "【本轮仍有效的保留项】",
-        ...(preservedConstraints.length ? preservedConstraints.map((item) => `- ${item}`) : ["未额外指定；不得从其他历史分支擅自补充约束。"]),
+        ...(referenceLines.length ? ["参考图分工：", ...referenceLines] : []),
+        ...(preservedConstraints.length ? ["其余保持：", ...preservedConstraints.map((item) => `- ${item}`)] : []),
     ].join("\n");
     // requestEdit adds this shared prefix later; count it now and never silently truncate requirements.
     if (buildImageReferencePromptText(prompt, references).length > 20_000) throw new Error("完整执行要求超过 20000 字符，请精简本轮要求与保留项；未提交图片任务");

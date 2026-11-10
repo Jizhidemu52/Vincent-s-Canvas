@@ -87,7 +87,7 @@ function allowRequiredText(avoid: string, language: "en" | "zh") {
   }).join("");
 }
 
-type PromptOutputOptions = { video?: boolean; reverse?: boolean; referenceCount: number; userText: string; language: "en" | "zh"; requiredText?: string[] };
+type PromptOutputOptions = { video?: boolean; reverse?: boolean; minimal?: boolean; referenceCount: number; userText: string; language: "en" | "zh"; requiredText?: string[] };
 
 /** Apply to fresh, fallback and cached final text before any generation admission. */
 export function assertPromptOutputContent(prompt: string, rules: readonly string[], options: PromptOutputOptions) {
@@ -105,7 +105,7 @@ export function parseOptimizedPrompt(raw: string, rules: readonly string[], opti
   try { result = parseStrictJson(raw); } catch { throw new PromptOptimizationError("PROMPT_OUTPUT_INVALID", "提示词优化未返回有效 JSON，未提交生成", 422); }
   if (!result || typeof result !== "object" || Array.isArray(result)) throw new PromptOptimizationError("PROMPT_OUTPUT_INVALID", "提示词优化输出格式无效，未提交生成", 422);
   const value = result as Record<string, unknown>;
-  const allowed = options.reverse || options.video ? ["prompt", "summary_zh"] : ["prompt", "avoid", "keep_text"];
+  const allowed = options.reverse || options.video ? ["prompt", "summary_zh"] : options.minimal ? ["prompt", "summary_zh", "avoid", "keep_text", "questions"] : ["prompt", "avoid", "keep_text"];
   if (Object.keys(value).some(key => !allowed.includes(key)) || typeof value.prompt !== "string" || !value.prompt.trim() || value.prompt.length > (options.video ? 1500 : imagePromptOutputLimits.prompt)) {
     throw new PromptOptimizationError("PROMPT_OUTPUT_INVALID", "提示词优化输出字段无效，未提交生成", 422);
   }
@@ -123,6 +123,10 @@ export function parseOptimizedPrompt(raw: string, rules: readonly string[], opti
     || !Array.isArray(value.keep_text) || value.keep_text.length > imagePromptOutputLimits.keepTextItems || value.keep_text.some(item => typeof item !== "string" || !item.length || item.length > imagePromptOutputLimits.keepTextItem)) {
     throw new PromptOptimizationError("PROMPT_OUTPUT_INVALID", "提示词约束格式无效，未提交生成", 422);
   }
+  if (options.minimal && (typeof value.summary_zh !== "string" || !value.summary_zh.trim() || value.summary_zh.length > 200 || /[\r\n]/.test(value.summary_zh)
+    || !Array.isArray(value.questions) || value.questions.length > 2 || value.questions.some(question => typeof question !== "string" || !question.trim() || question.length > 200))) {
+    throw new PromptOptimizationError("PROMPT_OUTPUT_INVALID", "精简改写需要中文摘要及最多两个明确问题，未提交生成。", 422);
+  }
   const reportedText = value.keep_text as string[];
   // Reference lettering is visual input, not necessarily transcribed user text.
   // The compiler has already loaded/authorized these images; this is not OCR
@@ -137,5 +141,5 @@ export function parseOptimizedPrompt(raw: string, rules: readonly string[], opti
   const avoid = (value.avoid as string[]).filter(Boolean).map(item => keepText.length ? allowRequiredText(item, options.language) : item);
   const prompt = [value.prompt.trim(), avoid.length ? `${options.language === "zh" ? "避免" : "Avoid"}: ${avoid.join(", ")}.` : ""].filter(Boolean).join("\n");
   if (prompt.length > imagePromptOutputLimits.prompt) throw new PromptOptimizationError("PROMPT_OUTPUT_INVALID", "最终提示词过长，未提交生成", 422);
-  return { prompt, keepText };
+  return { prompt, keepText, ...(options.minimal ? { summaryZh: (value.summary_zh as string).trim(), questions: value.questions as string[] } : {}) };
 }
