@@ -52,6 +52,7 @@ const high = (page: Page) => panel(page).getByRole("spinbutton", { name: /高档
 const source = (page: Page) => panel(page).getByRole("textbox", { name: /费率确认依据/ });
 // Ant Design's leaving loading icon can temporarily prefix the accessible name.
 const save = (page: Page) => panel(page).getByRole("button", { name: /保存专用费率$/ });
+const reload = (page: Page) => panel(page).getByRole("button", { name: /读取服务端配置$/ });
 async function open(page: Page) {
     await page.goto("/admin?tab=api");
     await page.getByRole("tab", { name: "模型（高级）", exact: true }).click();
@@ -122,7 +123,7 @@ test("uncertain write requires a GET check, retains edits and never repeats PUT"
     await expect(panel(page).getByText(/保存结果待核对；编辑内容已保留/)).toBeVisible();
     await expect(save(page)).toBeDisabled(); await expect(input(page)).toHaveValue("0.04");
     expect(fixture.writes).toHaveLength(1);
-    await panel(page).getByRole("button", { name: "读取服务端配置", exact: true }).click();
+    await reload(page).click();
     await expect(panel(page).getByText("已配置 · 版本 4", { exact: true })).toBeVisible();
     await expect(save(page)).toBeDisabled(); await expect(input(page)).toHaveValue("0.04");
     expect(fixture.writes).toHaveLength(1);
@@ -135,7 +136,7 @@ test("narrow pricing panel stays within viewport and failed read does not discar
     const fixture = await setup(page); fixture.rates.push({ ...existing });
     await page.setViewportSize({ width: 390, height: 844 });
     await open(page); await input(page).fill("0.07"); fixture.flags.failLoad = true;
-    await panel(page).getByRole("button", { name: "读取服务端配置", exact: true }).click();
+    await reload(page).click();
     await expect(panel(page).getByText("费率暂时无法读取。", { exact: true })).toBeVisible();
     await expect(input(page)).toHaveValue("0.07"); expect(fixture.writes).toHaveLength(0);
     await panel(page).scrollIntoViewIfNeeded();
