@@ -104,7 +104,7 @@ describe("stored motion preflight passes its authoritative model", () => {
   for (const [model, , expectedMode] of modelModes) {
     test(`${model}: two owned images are admitted with the model's automatic mode`, async () => {
       const fixture = storedFixture(model);
-      const checked = await preflightStoredVideoTask(fixture.db as never, fixture.input, "", fixture.runtime);
+      const checked = await preflightStoredVideoTask(fixture.db as never, fixture.input, "http://owned.example", fixture.runtime);
       expect(checked.normalized).toMatchObject({ videoMode: expectedMode, referenceCount: 2, generateAudio: false });
       expect(checked.snapshot.modelId).toBe(model);
       expect(fixture.reads).toEqual(["owned/image-0.png", "owned/image-1.png"]);

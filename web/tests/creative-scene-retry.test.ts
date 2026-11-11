@@ -32,6 +32,13 @@ test("only an explicitly failed server task permits a new single-item request", 
     expect(canRetrySceneResult({ id: "old", status: "failed", error: "旧记录" })).toBe(false);
 });
 
+test.each(["paused", "failed"])("postprocessing failure in %s does not permit polling or a new paid retry", status => {
+    const result = { id: "postprocess", ...sceneFailure(new QueuedTaskFailedError({ ...task, status, errorCode: "IMAGE_RESULT_PROCESSING_FAILED" }), true) };
+    expect(result).toMatchObject({ status: "failed", failureKind: "local", taskId: task.id, requestId: task.requestId });
+    expect(canRetrySceneResult(result)).toBe(false);
+    expect(canQuerySceneResult(result)).toBe(false);
+});
+
 function fixture() {
     const config = { model: "uuid-model", imageModel: "uuid-model", size: "3:2", quality: "high", count: "3", systemPrompt: "原系统词" };
     const image = { id: "original", name: "原图.png", type: "image/png", mimeType: "image/png", dataUrl: "", width: 10, height: 20, bytes: 10, inputSha256: "a".repeat(64) };
@@ -54,6 +61,13 @@ test("retry reuses frozen effective prompt, exact model/parameters/references an
     expect(ready.input.references.map(item => item.dataUrl)).toEqual(["data:original-verified", "data:frozen-blue-guide"]);
     expect(ready.referenceImages.primary?.dataUrl).toBe("verified:original"); expect(ready.selection?.mask.dataUrl).toBe("verified:mask");
     expect(f.calls).toEqual(["task", "archive", "original", "mask"]); expect(f.log.config.count).toBe("3");
+});
+
+test("a stale retry button cannot turn a confirmed postprocessing failure into another paid task", async () => {
+    const f = fixture();
+    f.deps!.getQueuedTask = async () => { f.calls.push("task"); return { ...task, errorCode: "IMAGE_RESULT_PROCESSING_FAILED" }; };
+    await expect(prepareSceneRetry(f.log, f.result, [f.model], "owner", f.deps)).rejects.toThrow("原件已保存到素材库");
+    expect(f.calls).toEqual(["task"]);
 });
 for (const status of ["processing", "paused", "success", "cancelled"]) test(`fresh ${status} status is never resubmitted`, async () => {
     const f = fixture(); f.deps!.getQueuedTask = async () => ({ ...task, status });

@@ -4,10 +4,11 @@ import { Input, Select, Switch } from "antd";
 
 import { ImageSettingsTheme } from "@/components/image-settings-panel";
 import { type CanvasTheme } from "@/lib/canvas-theme";
-import { getVideoModelParameterSpec, normalizeVideoModelConfig, videoAspectRatioFollowsImage, videoModeLabels, videoModeLocksRatio, type VideoModelParameterKey } from "@/lib/video-model-parameters";
+import { getVideoModelParameterSpec, normalizeVideoModelConfig, videoAspectRatioFollowsImage, videoDurationBounds, videoModeLabels, videoModeLocksRatio, type VideoModelParameterKey } from "@/lib/video-model-parameters";
 import { type AiConfig } from "@/stores/use-config-store";
 
 const ratioLabels: Record<string, string> = { "16:9": "横屏", "9:16": "竖屏", "1:1": "方形", "4:3": "标准横屏", "3:4": "标准竖屏", "21:9": "宽银幕", adaptive: "自适应" };
+const settingsPopupContainer = (trigger: HTMLElement) => trigger.parentElement || document.body;
 
 type VideoSettingsPanelProps = {
     config: AiConfig;
@@ -22,16 +23,18 @@ type VideoSettingsPanelProps = {
 export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = true, className = "w-[320px] space-y-4 rounded-2xl px-1 py-0.5", referenceCount, imageMode }: VideoSettingsPanelProps) {
     useUiLocale();
     const spec = getVideoModelParameterSpec(config);
-    const normalized = normalizeVideoModelConfig(config);
+    const normalized = normalizeVideoModelConfig(config, undefined, imageMode);
+    const mode = normalized.videoMode === "auto" ? imageMode || normalized.videoMode : normalized.videoMode;
     const ratioFollowsImage = videoAspectRatioFollowsImage(config, referenceCount, normalized.videoMode === "auto" ? imageMode : normalized.videoMode);
     const lockRatio = videoModeLocksRatio({ ...config, videoMode: normalized.videoMode });
-    const editing = normalized.videoMode === "edit";
+    const editing = mode === "edit";
+    const durationBounds = spec ? videoDurationBounds(spec, mode) : undefined;
 
     useEffect(() => {
-        for (const [key, value] of Object.entries(normalizeVideoModelConfig(config))) {
+        for (const [key, value] of Object.entries(normalizeVideoModelConfig(config, undefined, imageMode))) {
             if (config[key as VideoModelParameterKey] !== value) onConfigChange(key as VideoModelParameterKey, value);
         }
-    }, [config, onConfigChange]);
+    }, [config, onConfigChange, imageMode]);
 
     return (
         <ImageSettingsTheme theme={theme}>
@@ -39,15 +42,16 @@ export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = 
                 {showTitle ? <div className="text-lg font-semibold">{uiText("视频设置")}</div> : null}
                 {!spec ? <p className="text-sm leading-6" style={{ color: theme.node.muted }}>{uiText("当前模型尚未提供参数规格，请先选择已配置的视频模型。")}</p> : <>
                     <SettingGroup title={uiText("生成方式")} color={theme.node.muted}>
-                        <Select aria-label={uiText("视频生成方式")} className="w-full" value={normalized.videoMode} onChange={value => onConfigChange("videoMode", value)} options={spec.modes.map(mode => ({ value: mode, label: uiText(videoModeLabels[mode]) }))} />
+                        <Select getPopupContainer={settingsPopupContainer} aria-label={uiText("视频生成方式")} className="w-full" value={normalized.videoMode} onChange={value => onConfigChange("videoMode", value)} options={spec.modes.map(mode => ({ value: mode, label: uiText(videoModeLabels[mode]) }))} />
                         {normalized.videoMode === "first-last-frame" ? <p className="text-xs leading-4" style={{ color: theme.node.muted }}>{uiText("图片 1 为首帧，图片 2 为尾帧；可在参考素材中调整顺序。")}</p> : null}
-                        {normalized.videoMode === "extend" ? <p className="text-xs leading-4" style={{ color: theme.node.muted }}>{uiText("请添加源视频，并在提示词中明确描述延长或续写内容。Wan 可加 1 张图片作为尾帧。")}</p> : null}
-                        {editing ? <p className="text-xs leading-4" style={{ color: theme.node.muted }}>{uiText("请添加至少 1 段 4–30 秒源视频，并明确描述编辑、删除或替换内容。")}</p> : null}
+                        {mode === "extend" ? <p className="text-xs leading-4" style={{ color: theme.node.muted }}>{uiText(spec.extendAddsDuration ? "请添加 1 段不超过 15 秒的源视频。时长控制片尾新增部分，结果包含原片和新增片段。" : "请添加源视频，并在提示词中明确描述延长或续写内容。Wan 可加 1 张图片作为尾帧。")}</p> : null}
+                        {editing ? <p className="text-xs leading-4" style={{ color: theme.node.muted }}>{uiText(spec.nativeAudio ? "请添加 1 段不超过 15 秒的源视频，并明确描述编辑、删除或替换内容。" : "请添加至少 1 段 4–30 秒源视频，并明确描述编辑、删除或替换内容。")}</p> : null}
                     </SettingGroup>
                     <SettingGroup title={uiText("分辨率")} color={theme.node.muted}>
                         <div className="grid grid-cols-2 gap-2.5">
                             {spec.resolutions.map((value) => <OptionPill key={value} selected={normalized.vquality === value} theme={theme} onClick={() => onConfigChange("vquality", value)}>{value}</OptionPill>)}
                         </div>
+                        {spec.resolutionHint ? <p className="text-xs leading-4" style={{ color: theme.node.muted }}>{uiText(spec.resolutionHint)}</p> : null}
                     </SettingGroup>
                     <SettingGroup title={uiText("画面比例")} color={theme.node.muted}>
                         {lockRatio ? <div className="rounded-xl border px-3 py-2.5 text-sm" style={{ borderColor: theme.node.stroke }}>{uiText("此模式固定使用自适应比例（adaptive）")}</div> : ratioFollowsImage ? <div className="rounded-xl border px-3 py-2.5 text-sm" style={{ borderColor: theme.node.stroke }}>{uiText("跟随输入图片，无需设置比例")}</div> : <div className="grid grid-cols-3 gap-2.5">
@@ -61,17 +65,17 @@ export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = 
                         </div>}
                         {spec.ratioHint ? <p className="text-xs leading-4" style={{ color: theme.node.muted }}>{uiText(spec.ratioHint)}</p> : null}
                     </SettingGroup>
-                    <SettingGroup title={uiText("时长")} color={theme.node.muted}>
-                        <Select aria-label={uiText("视频时长")} disabled={editing} className="w-full" value={normalized.videoSeconds} onChange={value => onConfigChange("videoSeconds", value)} options={videoDurationOptions(spec)} />
-                        <div className="text-xs leading-4" style={{ color: theme.node.muted }}>{uiText("支持")}{spec.seconds[0]}–{spec.seconds[1]} {uiText("秒")}{spec.supportsAutoDuration ? uiText("，或由模型智能决定时长") : ""}。</div>
-                        {normalized.videoSeconds === "-1" ? <p role="note" className="text-xs leading-5" style={{ color: theme.node.text }}>{editing ? uiText("编辑结果时长跟随源视频。") : uiText("实际输出时长由模型决定。")}{uiText("渠道账户按最多 30 秒输出预扣，参考视频输入时长也计费，完成后由渠道按实际用量结算。本应用积分仍按管理员配置的每任务价格计算。")}</p> : null}
+                    <SettingGroup title={uiText(mode === "extend" && spec.extendAddsDuration ? "新增时长" : "时长")} color={theme.node.muted}>
+                        <Select getPopupContainer={settingsPopupContainer} aria-label={uiText("视频时长")} disabled={editing} className="w-full" value={normalized.videoSeconds} onChange={value => onConfigChange("videoSeconds", value)} options={videoDurationOptions(spec, mode)} />
+                        {editing ? <p role="note" className="text-xs leading-5" style={{ color: theme.node.text }}>{uiText("编辑结果时长跟随源视频。")}</p> : <div className="text-xs leading-4" style={{ color: theme.node.muted }}>{uiText("支持")}{durationBounds?.[0]}–{durationBounds?.[1]} {uiText("秒")}{spec.supportsAutoDuration ? uiText("，或由模型智能决定时长") : ""}。</div>}
+                        {spec.nativeAudio ? <p role="note" className="text-xs leading-5" style={{ color: theme.node.muted }}>{uiText("渠道按至少 10 秒预扣；有视频输入按 15 秒估算。预扣不等于最终费用，编辑按源片、续写按新增部分实际结算。本应用积分按管理员每任务定价计算。")}</p> : normalized.videoSeconds === "-1" ? <p role="note" className="text-xs leading-5" style={{ color: theme.node.text }}>{!editing ? uiText("实际输出时长由模型决定。") : ""}{uiText("渠道账户按最多 30 秒输出预扣，参考视频输入时长也计费，完成后由渠道按实际用量结算。本应用积分仍按管理员配置的每任务价格计算。")}</p> : null}
                     </SettingGroup>
                     {spec.supportsAudio || spec.supportsWatermark ? <SettingGroup title={uiText("输出")} color={theme.node.muted}>
                         <div className="grid gap-2 rounded-xl border p-2.5" style={{ borderColor: theme.node.stroke }}>
                             {spec.supportsAudio ? <SwitchRow label={uiText("生成声音")} checked={normalized.videoGenerateAudio === "true"} theme={theme} onChange={(checked) => onConfigChange("videoGenerateAudio", String(checked))} /> : null}
                             {spec.supportsWatermark ? <SwitchRow label={uiText("添加水印")} checked={normalized.videoWatermark === "true"} theme={theme} onChange={(checked) => onConfigChange("videoWatermark", String(checked))} /> : null}
                         </div>
-                        {spec.outputFormats ? <Select aria-label={uiText("视频输出格式")} className="w-full" value={normalized.videoOutputFormat} onChange={value => onConfigChange("videoOutputFormat", value)} options={spec.outputFormats.map(value => ({ value, label: value.toUpperCase() }))} /> : null}
+                        {spec.outputFormats ? <Select getPopupContainer={settingsPopupContainer} aria-label={uiText("视频输出格式")} className="w-full" value={normalized.videoOutputFormat} onChange={value => onConfigChange("videoOutputFormat", value)} options={spec.outputFormats.map(value => ({ value, label: value.toUpperCase() }))} /> : null}
                     </SettingGroup> : null}
                     {spec.supportsSeed ? <SettingGroup title={uiText("随机种子")} color={theme.node.muted}>
                         <Input aria-label={uiText("视频随机种子")} inputMode="numeric" value={normalized.videoSeed} onChange={event => onConfigChange("videoSeed", event.target.value)} placeholder={uiText("留空则随机")} />
@@ -89,8 +93,10 @@ export function videoResolutionLabel(value: string) {
     return /k$/i.test(normalized) ? normalized.toUpperCase() : normalized + "p";
 }
 
-export function videoDurationOptions(spec: NonNullable<ReturnType<typeof getVideoModelParameterSpec>>) {
-    return [...(spec.supportsAutoDuration ? [{ value: "-1", label: uiText("智能时长") }] : []), ...Array.from({ length: spec.seconds[1] - spec.seconds[0] + 1 }, (_, index) => ({ value: String(spec.seconds[0] + index), label: `${spec.seconds[0] + index} ${uiText("秒")}` }))];
+export function videoDurationOptions(spec: NonNullable<ReturnType<typeof getVideoModelParameterSpec>>, mode?: string) {
+    if (mode === "edit") return [{ value: "-1", label: uiText("跟随源视频") }];
+    const [min, max] = videoDurationBounds(spec, mode);
+    return [...(spec.supportsAutoDuration ? [{ value: "-1", label: uiText("智能时长") }] : []), ...Array.from({ length: max - min + 1 }, (_, index) => ({ value: String(min + index), label: `${min + index} ${uiText("秒")}` }))];
 }
 
 export function videoSizeLabel(value: string) {
@@ -98,7 +104,9 @@ export function videoSizeLabel(value: string) {
     return uiText(ratioLabels[value] || value);
 }
 
-export function videoSecondsLabel(value: string) {
+export function videoSecondsLabel(value: string, mode?: string, addsDuration = false) {
+    if (mode === "edit") return uiText("跟随源片");
+    if (mode === "extend" && addsDuration) return "+" + value + "s";
     return String(value).trim() === "-1" ? uiText("智能") : (value || "5") + "s";
 }
 

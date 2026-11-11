@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { isQuickImageEligibleModel, validateQuickImageConfiguration } from "../src/quick-image-configuration";
-import { prepareQuickImageTask, QUICK_IMAGE_SNAPSHOT, type QuickImageSnapshot } from "../src/quick-image-tools";
+import { prepareQuickImageTask, QUICK_IMAGE_SNAPSHOT, type QuickImageInput, type QuickImageSnapshot } from "../src/quick-image-tools";
 import { quickImageTaskTarget } from "../../shared/quick-image-tools";
 
 const id = "10000000-0000-4000-8000-000000000001";
@@ -42,5 +42,29 @@ describe("quick image model selection and safe parameter boundaries", () => {
     expect(prepared.prompt).toContain("Mandatory output contract"); expect(prepared.prompt).toContain("original RGB pixels"); expect(prepared.prompt).toContain(snapshot.prompt); expect(prepared.prompt).not.toContain("FORGED");
     expect(prepared.parameters).toMatchObject({ n: 1, count: 1, resolution: "1k", quickImage: { recipeVersion: 1, configurationVersion: 6 } });
     expect(JSON.stringify(prepared)).not.toContain(String(QUICK_IMAGE_SNAPSHOT));
+  });
+
+  test("rejects the production transparent-photo instruction before any paid submission", () => {
+    for (const prompt of [
+      "Keep the main subject unchanged. Export as a PNG image with a transparent background.",
+      "Return a full-color photograph with the background removed.",
+      "保留主要商品，输出透明背景 PNG。",
+    ]) {
+      const draft = { ...configuration({}), prompt };
+      expect(() => validateQuickImageConfiguration("remove-background", draft, model("gpt-image-2.6-flare"))).toThrow("主体选择说明");
+      const snapshot: QuickImageSnapshot = { ...draft, action: "remove-background", modelId: "gpt-image-2.6-flare", configurationVersion: 4 };
+      expect(() => prepareQuickImageTask({ ...quickImageTaskTarget("remove-background"), sourceUrls: ["owned"], parameters: { quickImageAction: "remove-background" } }, snapshot)).toThrow("主体选择说明");
+    }
+  });
+
+  test("selection details about transparency and negated output instructions remain valid", () => {
+    const prompt = "Keep the transparent lace and fine hair of the person in the original position. Do not output a transparent background. 不要输出透明背景。保留半透明材质和原图颜色。";
+    const draft = { modelConfigId: id, parameters: { background: "opaque", output_format: "png" }, prompt };
+    expect(validateQuickImageConfiguration("remove-background", draft, model("gpt-image-2.6-flare"))).toEqual(draft);
+    const snapshot: QuickImageSnapshot = { ...draft, action: "remove-background", modelId: "gpt-image-2.6-flare", configurationVersion: 5 };
+    const prepared = prepareQuickImageTask<QuickImageInput>({ ...quickImageTaskTarget("remove-background"), sourceUrls: ["owned"], parameters: { quickImageAction: "remove-background" } }, snapshot);
+    expect(prepared.prompt).toContain(JSON.stringify({ foregroundSelection: prompt }));
+    expect(prepared.prompt).toContain("fully opaque (alpha 255 everywhere)");
+    expect(prepared.prompt!.match(/Mandatory output contract/g)).toHaveLength(1);
   });
 });

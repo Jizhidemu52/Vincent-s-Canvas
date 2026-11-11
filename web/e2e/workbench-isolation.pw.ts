@@ -106,40 +106,38 @@ test("seamless task tabs preserve sources, isolate history and resume original r
     expect(api.submissions).toHaveLength(2);
 });
 
-test("recipe tasks retain separate project and immutable run while background branches finish", async ({ page, api }) => {
+test("image edit tasks retain separate drafts and frozen results while background tasks finish", async ({ page, api }) => {
     api.taskStatus = "queued";
-    await page.goto("/creative/series-recipe");
-    await activePane(page).getByRole("textbox", { name: "系列名称" }).fill("RECIPE_A");
-    await activePane(page).getByLabel("上传参考底图（必需）", { exact: true }).setInputFiles({ name: "recipe-a.png", mimeType: "image/png", buffer: IMAGE });
-    await activePane(page).getByRole("button", { name: "生成第 1 色 1 张", exact: true }).click();
-    await expect.poll(() => api.submissions.length).toBe(1);
-    await addTask(page, 2);
-    await expect(activePane(page).getByRole("textbox", { name: "系列名称" })).toHaveValue("我的新系列");
-    await activePane(page).getByRole("textbox", { name: "系列名称" }).fill("RECIPE_B");
-    await activePane(page).getByLabel("上传参考底图（必需）", { exact: true }).setInputFiles({ name: "recipe-b.png", mimeType: "image/png", buffer: IMAGE });
-    await activePane(page).getByRole("button", { name: "编辑第 2 色 #cfb799", exact: true }).click();
-    await activePane(page).getByRole("button", { name: "生成第 2 色 1 张", exact: true }).click();
-    await expect.poll(() => api.submissions.length).toBe(2);
+    await page.goto("/image?tool=image-edit");
+    for (const [index, marker] of ["EDIT_A", "EDIT_B"].entries()) {
+        if (index) await addTask(page, 2);
+        await expect(activePane(page).getByRole("textbox", { name: "图像提示词", exact: true })).toHaveValue("");
+        await activePane(page).getByRole("textbox", { name: "图像提示词", exact: true }).fill(marker);
+        const chooser = page.waitForEvent("filechooser");
+        await activePane(page).getByRole("button", { name: "上传图片", exact: true }).click();
+        await (await chooser).setFiles({ name: `${marker}.png`, mimeType: "image/png", buffer: IMAGE });
+        await activePane(page).getByRole("button", { name: "开始编辑", exact: true }).click();
+        await expect.poll(() => api.submissions.length).toBe(index + 1);
+    }
     await expect(page.getByRole("button", { name: "关闭任务 2 页签" })).toBeDisabled();
     const [taskA, taskB] = [...api.tasks.values()];
     taskA!.status = "success"; taskA!.resultUrls = [`/api/assets/${taskA!.id}/content`];
     await selectTask(page, 0);
-    await expect(activePane(page).locator(".sr-result img")).toHaveCount(1);
-    await expect(activePane(page).getByRole("textbox", { name: "系列名称" })).toHaveValue("RECIPE_A");
+    await expect(activePane(page).getByRole("img", { name: "生成结果 1", exact: true })).toBeVisible();
+    await expect(activePane(page).getByRole("textbox", { name: "图像提示词", exact: true })).toHaveValue("EDIT_A");
     await selectTask(page, 1);
-    await expect(activePane(page).locator(".sr-result img")).toHaveCount(0);
+    await expect(activePane(page).getByRole("img", { name: "生成结果 1", exact: true })).toHaveCount(0);
     taskB!.status = "success"; taskB!.resultUrls = [`/api/assets/${taskB!.id}/content`];
-    await expect(activePane(page).locator(".sr-result img")).toHaveCount(1);
-    await activePane(page).getByRole("button", { name: "保存项目", exact: true }).click();
-    await expect(activePane(page).getByRole("status").filter({ hasText: /已(?:自动)?保存到当前员工的/ })).toBeVisible();
+    await expect(activePane(page).getByRole("img", { name: "生成结果 1", exact: true })).toBeVisible();
     await page.reload();
-    await expect(activePane(page).getByRole("textbox", { name: "系列名称" })).toHaveValue("RECIPE_B");
-    await expect(activePane(page).locator(".sr-result")).toContainText("沙杏");
+    await expect(activePane(page).getByRole("textbox", { name: "图像提示词", exact: true })).toHaveValue("EDIT_B");
+    await expect(activePane(page).getByRole("img", { name: "EDIT_B.png", exact: true }).first()).toBeVisible();
     await selectTask(page, 0);
-    await expect(activePane(page).getByRole("textbox", { name: "系列名称" })).toHaveValue("RECIPE_A");
-    await expect(activePane(page).locator(".sr-result")).toContainText("雾青");
+    await expect(activePane(page).getByRole("textbox", { name: "图像提示词", exact: true })).toHaveValue("EDIT_A");
+    await expect(activePane(page).getByRole("img", { name: "EDIT_A.png", exact: true }).first()).toBeVisible();
+    await expect(activePane(page).getByRole("img", { name: "生成结果 1", exact: true })).toBeVisible();
     expect(api.submissions).toHaveLength(2);
-    expect(api.submissions.map(task => task.promptInput.fields.series)).toEqual(["RECIPE_A", "RECIPE_B"]);
+    expect(api.submissions.map(task => task.prompt)).toEqual([expect.stringContaining("EDIT_A"), expect.stringContaining("EDIT_B")]);
 });
 
 test("seamless uncertain acknowledgement stays attached to its original task while another tab remains usable", async ({ page, context, api }) => {
@@ -206,7 +204,7 @@ test("seamless twelve independent source drafts survive rapid task switching and
     expect(api.submissions).toHaveLength(0);
 });
 
-for (const board of [{ path: "/video", label: "视频提示词", prefix: "VIDEO" }, { path: "/creative/series-recipe", label: "系列名称", prefix: "RECIPE" }]) {
+for (const board of [{ path: "/video", label: "视频提示词", prefix: "VIDEO" }, { path: "/image?tool=image-edit", label: "图像提示词", prefix: "EDIT" }]) {
     test(`${board.prefix} twelve task drafts survive rapid switching, closing and a narrow-screen reload without generation`, async ({ page, context, api }, testInfo) => {
         if (board.prefix === "VIDEO") await videoRoutes(context);
         await page.goto(board.path);

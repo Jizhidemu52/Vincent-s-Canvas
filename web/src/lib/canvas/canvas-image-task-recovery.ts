@@ -1,6 +1,7 @@
 import type { QueuedTask } from "@/services/api/generation-tasks";
 import { watchTaskEvents } from "@/services/api/task-events";
 import { TaskObservationStoppedError } from "@/services/api/task-observation";
+import { isImageResultProcessingFailure } from "@/lib/generation-feedback";
 
 export type CanvasImageTaskBinding = {
     requestId: string;
@@ -8,6 +9,8 @@ export type CanvasImageTaskBinding = {
     ownerId: string;
     projectId: string;
     resultIndex: number;
+    /** Retain lookup identity without polling or resuming a locally failed result. */
+    postprocessFailed?: true;
 };
 
 export type CanvasImageTaskRecoveryOptions = {
@@ -72,7 +75,7 @@ export async function observeCanvasImageTask(binding: CanvasImageTaskBinding, op
         await guarded(() => onTask(observedTask));
         assertCurrent();
         taskId = task.id;
-        if (task.status === "paused" && options.recoverTask && task.upstreamTaskId) {
+        if (task.status === "paused" && !isImageResultProcessingFailure(task) && options.recoverTask && task.upstreamTaskId) {
             task = await guarded(() => options.recoverTask!(taskId!, signal));
             // The next GET revalidates ownership and request identity before any result delivery.
             if (task.id !== taskId) throw new Error("恢复接口返回了不同的任务，已停止查询");

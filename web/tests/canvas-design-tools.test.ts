@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { CanvasNodeType, type CanvasNodeData } from "../src/types/canvas";
 import { arrangeCanvasNodes, canvasArrangeOptions } from "../src/lib/canvas/canvas-node-arrange";
-import { canvasDesignTemplates, createCanvasDesignTemplate } from "../src/lib/canvas/canvas-design-templates";
+import { canvasDesignTemplates, createCanvasDesignTemplate, isEmptyCanvasDesignTemplateReference } from "../src/lib/canvas/canvas-design-templates";
+import { replaceCanvasNodeImage } from "../src/pages/canvas/canvas-project-utils";
 import { canvasCompareImages, chooseCanvasComparePair, compareContainRect, drawCanvasCompare } from "../src/lib/canvas/canvas-image-compare";
 import { createCanvasRestoredGenerationNode } from "../src/lib/canvas/canvas-generation-draft";
 import { buildNodeGenerationContext } from "../src/components/canvas/canvas-node-generation";
@@ -40,6 +41,38 @@ describe("服装模板真实生成输入", () => {
         expect(a.connections.every(connection => connection.fromNodeId === a.nodes[0].id && a.nodes.some(node => node.id === connection.toNodeId))).toBe(true);
         expect(a.nodes[0].metadata?.content).toBeUndefined();
         expect(a.nodes.every(node => node.metadata?.status === "idle")).toBe(true);
+    });
+    test.each(canvasDesignTemplates)("$title accepts an explicit original without changing graph identity or attachments", template => {
+        const result = createCanvasDesignTemplate(template.id, undefined, { x: 0, y: 0 });
+        const source = result.nodes[0];
+        source.metadata!.manualImageReferences = [{ id: "attached", referenceKey: "upload:attached", name: "reference.png", type: "image/png", origin: "upload", content: "blob:old-preview", storageKey: "image:existing-original" }];
+        const before = structuredClone(result);
+        expect(isEmptyCanvasDesignTemplateReference(source, result.nodes, result.connections)).toBe(true);
+        expect(() => buildNodeGenerationContext(result.nodes[1].id, result.nodes, result.connections, result.nodes[1].metadata!.composerContent!)).toThrow("已失效引用");
+        const replacement = replaceCanvasNodeImage(source, { url: "blob:resolved-original", storageKey: "image:existing-original", width: 256, height: 512, bytes: 1024, mimeType: "image/png", originalFileName: "reference.png" }, "reference.png");
+        const nodes = result.nodes.map(node => node.id === source.id ? replacement : node);
+        expect(replacement.id).toBe(source.id);
+        expect(replacement.position).toBe(source.position);
+        expect(replacement.height / replacement.width).toBe(2);
+        expect(replacement.metadata?.manualImageReferences).toEqual(before.nodes[0].metadata!.manualImageReferences);
+        expect(replacement.metadata?.storageKey).toBe("image:existing-original");
+        expect(result).toEqual(before);
+        expect(isEmptyCanvasDesignTemplateReference(replacement, nodes, result.connections)).toBe(false);
+        for (const branch of nodes.slice(1)) {
+            const context = buildNodeGenerationContext(branch.id, nodes, result.connections, branch.metadata!.composerContent!);
+            expect(context.referenceImages).toHaveLength(1);
+            expect(context.referenceImages[0].id).toBe(source.id);
+            expect(context.referenceImages[0].storageKey).toBe("image:existing-original");
+        }
+    });
+    test("ordinary empty image attachments do not silently become template originals", () => {
+        const result = createCanvasDesignTemplate("development", undefined, { x: 0, y: 0 });
+        const source = result.nodes[0];
+        expect(isEmptyCanvasDesignTemplateReference(source, [source], [])).toBe(false);
+        expect(isEmptyCanvasDesignTemplateReference({ ...source, type: CanvasNodeType.Text }, result.nodes, result.connections)).toBe(false);
+        expect(isEmptyCanvasDesignTemplateReference({ ...source, metadata: { storageKey: "image:original" } }, result.nodes, result.connections)).toBe(false);
+        const generic = result.nodes.map(node => ({ ...node, metadata: { ...node.metadata, promptInput: undefined } }));
+        expect(isEmptyCanvasDesignTemplateReference(source, generic, result.connections)).toBe(false);
     });
 });
 

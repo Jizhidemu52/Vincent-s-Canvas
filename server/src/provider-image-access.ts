@@ -1,10 +1,14 @@
 import { createHash, randomBytes } from "node:crypto";
 import { Readable } from "node:stream";
 import { z } from "zod";
-import { isPublicHttpUrl, validateApiMartGenerationImage } from "./apimart-upload";
+import { APIMART_IMAGE_MAX_BYTES, isApiMartImageMimeType, isPublicHttpUrl, validateApiMartGenerationImage } from "./apimart-upload";
 import { normalizeAssetMime, validateAssetUpload } from "./asset-delivery";
 import type { Cache, Database } from "./db";
 import type { ObjectStorage } from "./object-storage";
+import { SEEDREAM55_MIMES } from "./seedream55-image";
+import { validateSeedream55Reference } from "./seedream55-reference";
+import { LAYER_STUDIO_MAX_REFERENCE_BYTES } from "../../shared/layer-studio-options";
+import { supportedVideoModelIds } from "./video-models";
 
 export const PROVIDER_IMAGE_PATH = "/api/provider-images";
 const ttlSeconds = 1800;
@@ -13,12 +17,32 @@ const cacheKey = (token: string) => `provider-image:${token}`;
 const grantSchema = z.object({
   version: z.literal(1), taskId: z.string().uuid(), userId: z.string().uuid(), assetId: z.string().uuid(),
   objectKey: z.string().min(1), mimeType: z.string().min(1), filename: z.string().min(1),
-  etag: z.string().min(1), length: z.number().int().positive().max(20 * 1024 * 1024),
+  etag: z.string().min(1), length: z.number().int().positive().max(200 * 1024 * 1024),
   expiresAt: z.number().int().positive(),
 });
 type Grant = z.infer<typeof grantSchema>;
 type Binding = { taskId: string; userId: string; assetId: string; objectKey: string };
-type BoundAsset = { object_key: string; mime_type: string; filename: string; byte_size: string | number };
+type BoundAsset = { object_key: string; mime_type: string; filename: string; byte_size: string | number;
+  tool_key?: string | null; model_id?: string | null; protocol?: string | null; operation_type?: string; kind?: string };
+
+// Expanded formats belong to this persisted task route, never to a caller's policy flag.
+function isSeedream55Task(asset: BoundAsset) {
+  return asset.tool_key === "layer-studio" && asset.model_id === "seedream-5-5" && asset.protocol === "apimart";
+}
+
+function assertBoundReferencePolicy(asset: BoundAsset, mimeType: string, length: number) {
+  if (!mimeType.startsWith("image/")) {
+    const video = asset.kind === "video" && ["video/mp4", "video/quicktime"].includes(mimeType);
+    const audio = asset.kind === "other" && ["audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav", "audio/wave"].includes(mimeType);
+    if (asset.operation_type !== "video_generation" || asset.protocol !== "apimart"
+      || !(supportedVideoModelIds as readonly string[]).includes(asset.model_id || "") || (!video && !audio)
+      || !Number.isSafeInteger(length) || length <= 0 || length > (video ? 200 : 15) * 1024 * 1024) throw new ProviderImageAccessError(404);
+    return;
+  }
+  const seedream = isSeedream55Task(asset);
+  if (asset.kind !== undefined && asset.kind !== "image" || !Number.isSafeInteger(length) || length <= 0 || length > (seedream ? LAYER_STUDIO_MAX_REFERENCE_BYTES : APIMART_IMAGE_MAX_BYTES)
+    || !(seedream ? SEEDREAM55_MIMES.has(mimeType) : isApiMartImageMimeType(mimeType))) throw new ProviderImageAccessError(404);
+}
 
 export class ProviderImageAccessError extends Error {
   readonly code: string;
@@ -53,10 +77,12 @@ export class ProviderImageAccess {
     // issuance requires that lease; every read still requires a live task and
     // exactly the same employee, source membership and ready original object.
     const result = await this.db.query<BoundAsset>(
-      `SELECT a.object_key,a.mime_type,a.filename,a.byte_size FROM assets a JOIN tasks t ON t.id=$1
+      `SELECT a.object_key,a.mime_type,a.filename,a.byte_size,a.kind,t.operation_type,t.tool_key,m.model_id,p.protocol FROM assets a JOIN tasks t ON t.id=$1
        JOIN users u ON u.id=t.user_id
+       LEFT JOIN model_configs m ON m.id=t.model_config_id LEFT JOIN providers p ON p.id=m.provider_id
        WHERE a.id=$3 AND a.owner_user_id=$2 AND a.object_key=$4
-         AND a.status='ready' AND a.deleted_at IS NULL AND a.kind='image'
+         AND a.status='ready' AND a.deleted_at IS NULL
+         AND (a.kind='image' OR (t.operation_type='video_generation' AND p.protocol='apimart' AND a.kind IN ('video','other')))
          AND t.user_id=$2 AND t.status='processing'
          AND u.status='active' AND u.deleted_at IS NULL
          AND t.source_urls @> $5::jsonb
@@ -73,11 +99,15 @@ export class ProviderImageAccess {
   } }): Promise<string> {
     if (!this.origin || !input.executionToken) throw new ProviderImageAccessError(503);
     const { source } = input;
-    validateApiMartGenerationImage(source);
-    const mimeType = await validateAssetUpload(source.bytes, source.mimeType);
-    if (mimeType !== normalizeAssetMime(source.mimeType)) throw new ProviderImageAccessError(404);
     const binding: Binding = { taskId: input.taskId, userId: input.userId, assetId: source.assetId, objectKey: source.objectKey };
     const asset = await this.boundAsset(binding, input.executionToken);
+    let mimeType: string;
+    if (isSeedream55Task(asset)) mimeType = (await validateSeedream55Reference(source)).mimeType;
+    else {
+      validateApiMartGenerationImage(source);
+      mimeType = await validateAssetUpload(source.bytes, source.mimeType);
+    }
+    if (mimeType !== normalizeAssetMime(source.mimeType)) throw new ProviderImageAccessError(404);
     if (normalizeAssetMime(asset.mime_type) !== mimeType || Number(asset.byte_size) !== source.bytes.byteLength) throw new ProviderImageAccessError(404);
     const head = await this.storage.head(source.objectKey, { abortSignal: AbortSignal.timeout(30_000) })
       .catch(() => { throw new ProviderImageAccessError(503); });
@@ -101,7 +131,7 @@ export class ProviderImageAccess {
       } catch (error) { throw error instanceof ProviderImageAccessError ? error : new ProviderImageAccessError(503); }
       finally { body?.destroy(); }
     }
-    await this.boundAsset(binding, input.executionToken);
+    assertBoundReferencePolicy(await this.boundAsset(binding, input.executionToken), mimeType, source.bytes.byteLength);
     const token = randomBytes(32).toString("hex");
     const grant = grantSchema.parse({ version: 1, ...binding, mimeType, filename: asset.filename,
       etag: head.ETag, length: source.bytes.byteLength, expiresAt: Date.now() + ttlSeconds * 1000 });
@@ -118,8 +148,34 @@ export class ProviderImageAccess {
     catch { throw new ProviderImageAccessError(404); }
     if (grant.expiresAt <= Date.now()) throw new ProviderImageAccessError(404);
     const asset = await this.boundAsset(grant);
+    assertBoundReferencePolicy(asset, grant.mimeType, grant.length);
     if (Number(asset.byte_size) !== grant.length || normalizeAssetMime(asset.mime_type) !== grant.mimeType) throw new ProviderImageAccessError(404);
     return { asset: { object_key: grant.objectKey, mime_type: grant.mimeType, filename: grant.filename },
       expectedObject: { etag: grant.etag, length: grant.length } };
+  }
+
+  /** Worker has streamed and probed this exact ETag; no public caller can issue grants. */
+  async issueMedia(input: { taskId: string; userId: string; executionToken: string; source: {
+    assetId: string; objectKey: string; byteSize: number; mimeType: string; etag: string;
+  } }): Promise<string> {
+    if (!this.origin || !input.executionToken) throw new ProviderImageAccessError(503);
+    const { source } = input;
+    const binding: Binding = { taskId: input.taskId, userId: input.userId, assetId: source.assetId, objectKey: source.objectKey };
+    const asset = await this.boundAsset(binding, input.executionToken);
+    if (source.mimeType.startsWith("image/") || normalizeAssetMime(asset.mime_type) !== normalizeAssetMime(source.mimeType)
+      || Number(asset.byte_size) !== source.byteSize || !source.etag) throw new ProviderImageAccessError(404);
+    assertBoundReferencePolicy(asset, source.mimeType, source.byteSize);
+    const head = await this.storage.head(source.objectKey, { abortSignal: AbortSignal.timeout(30_000) })
+      .catch(() => { throw new ProviderImageAccessError(503); });
+    if (head.ETag !== source.etag || head.ContentLength !== source.byteSize) throw new ProviderImageAccessError(404);
+    const current = await this.boundAsset(binding, input.executionToken);
+    assertBoundReferencePolicy(current, source.mimeType, source.byteSize);
+    if (Number(current.byte_size) !== source.byteSize || normalizeAssetMime(current.mime_type) !== normalizeAssetMime(source.mimeType)) throw new ProviderImageAccessError(404);
+    const token = randomBytes(32).toString("hex");
+    const grant = grantSchema.parse({ version: 1, ...binding, mimeType: normalizeAssetMime(source.mimeType), filename: current.filename,
+      etag: source.etag, length: source.byteSize, expiresAt: Date.now() + ttlSeconds * 1000 });
+    await this.cache.set(cacheKey(token), JSON.stringify(grant), { EX: ttlSeconds })
+      .catch(() => { throw new ProviderImageAccessError(503); });
+    return `${this.origin}${PROVIDER_IMAGE_PATH}/${token}/media`;
   }
 }

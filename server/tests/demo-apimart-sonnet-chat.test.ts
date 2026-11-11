@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 
 type PublicModel = { id: string; modelId: string; parameterModelId?: string; capabilities: string[] };
 
-test("demo defaults every chat entry to Sonnet Messages and SSE regardless of stale client model choices", async () => {
+test("an explicit legacy Sonnet demo fixture keeps Messages and SSE regardless of stale client model choices", async () => {
   const calls: Array<{ path: string; headers: Headers; body: any; raw: string }> = [];
   const assistantContent = [
     { type: "thinking", thinking: "", signature: "opaque-demo-signature" },
@@ -30,7 +30,16 @@ test("demo defaults every chat entry to Sonnet Messages and SSE regardless of st
   const reservation = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response() });
   const port = reservation.port;
   reservation.stop(true);
-  const child = Bun.spawn([process.execPath, "src/demo-server.ts"], {
+  // The open demo has no administrator writes. Pin the legacy shared model in
+  // this isolated child only; the ordinary Carbon default is tested separately.
+  const policyUrl = new URL("../src/chat-model-policy.ts", import.meta.url);
+  const script = `
+    const { mock } = await import("bun:test");
+    const policy = { ...await import(${JSON.stringify(policyUrl.href)}) };
+    mock.module(${JSON.stringify(fileURLToPath(policyUrl))}, () => ({ ...policy, INITIAL_CHAT_MODEL_ID: "claude-sonnet-5-5" }));
+    await import(${JSON.stringify(new URL("../src/demo-server.ts", import.meta.url).href)});
+  `;
+  const child = Bun.spawn([process.execPath, "--no-env-file", "--eval", script], {
     cwd: fileURLToPath(new URL("..", import.meta.url)), stdout: "ignore", stderr: "pipe",
     env: { ...process.env, DEMO_STATE_PATH: ":memory:", DEMO_RECOVERY_FILE: "", DEMO_PORT: String(port), DEMO_HOST: "127.0.0.1",
       OA_LOGIN_ENABLED: "false", AUTH_ENABLED: "true", CREDITS_ENABLED: "false", LOCAL_STANDALONE: "true", ROLE_PORTALS_ENABLED: "false", STANDALONE_WEB_DIR: "", DEMO_PUBLIC_ASSET_ORIGIN: "",
@@ -57,10 +66,11 @@ test("demo defaults every chat entry to Sonnet Messages and SSE regardless of st
     const catalog = await request("/api/models").then(response => response.json());
     const models = catalog.models as PublicModel[];
     const chats = models.filter(model => model.capabilities.includes("chat"));
-    expect(chats).toHaveLength(3);
+    expect(chats).toHaveLength(4);
     const sonnet = chats.find(model => model.parameterModelId === "claude-sonnet-5-5")!;
     const markAstra = chats.find(model => model.parameterModelId === "gpt-6-astra")!;
     const openTokenAstra = chats.find(model => model.modelId === "gpt-6-astra")!;
+    expect(chats.find(model => model.parameterModelId === "gemini-4-carbon")!.capabilities).toEqual(["chat", "vision", "tools"]);
     expect(sonnet).toBeDefined(); expect(markAstra).toBeDefined(); expect(openTokenAstra).toBeDefined();
     expect(sonnet.modelId).toBe(sonnet.id);
     expect(catalog.tools.find((tool: any) => tool.toolKey === "gpt-chat").modelConfigId).toBe(sonnet.id);

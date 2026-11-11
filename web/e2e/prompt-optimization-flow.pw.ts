@@ -190,23 +190,17 @@ for (const scene of ["text-to-style", "style-to-sketch", "local-restyle", "garme
     });
 }
 
-test("series selected color optimizes exactly once with its full palette and displays the optimized candidate", async ({ page, api }) => {
-    const flow = await setupFlow(page, api), bytes = await hatImage(page);
+test("retired series links never compile or generate a new candidate", async ({ page, api }) => {
+    const flow = await setupFlow(page, api);
     await page.goto("/creative/series-recipe");
-    await page.getByLabel("上传参考底图（必需）", { exact: true }).setInputFiles({ name: "synthetic-hat.png", mimeType: "image/png", buffer: bytes });
-    await page.getByRole("combobox", { name: "配色数量", exact: true }).selectOption("6");
-    await page.getByRole("button", { name: "编辑第 3 色 #b9827b", exact: true }).click();
-    await page.getByRole("button", { name: "生成第 3 色 1 张", exact: true }).click();
-    await expect(page.locator(".sr-result img")).toHaveCount(1);
-    expect(flow.compilations).toHaveLength(1); expect(api.submissions).toHaveLength(1);
-    expect(api.submissions[0]).toMatchObject({ toolKey: "series-recipe", promptInput: { scene: "series-recipe", fields: { variantIndex: 2, count: 6 } }, parameters: { n: 1, count: 1 } });
-    expect(api.submissions[0].promptInput.fields.palette).toHaveLength(6);
-    expect([...api.tasks.values()][0].prompt).toBe(referencePrompt);
-    await page.getByRole("button", { name: "保存项目", exact: true }).click();
-    await expect(page.getByText("已保存到当前员工的本地浏览器。", { exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "系列配方已下线", exact: true })).toBeVisible();
+    await expect(page.getByLabel("上传参考底图（必需）", { exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /生成第.*色/ })).toHaveCount(0);
     await page.reload();
-    await expect(page.locator(".sr-result img")).toHaveCount(1);
-    expect(flow.compilations).toHaveLength(1); expect(api.submissions).toHaveLength(1);
+    await expect(page.getByRole("heading", { name: "系列配方已下线", exact: true })).toBeVisible();
+    expect(flow.manualPosts).toHaveLength(0);
+    expect(flow.compilations).toHaveLength(0);
+    expect(api.submissions).toHaveLength(0);
 });
 
 test("canvas batch opt-in compiles once for two independent originals and never creates a second batch", async ({ page, api }) => {

@@ -12,15 +12,19 @@ export function motionVideoConfig(config: AiConfig, settings: VideoMotionSetting
         }
         if (getVideoModelParameterSpec(next)?.supportsAudio) next.videoGenerateAudio = settings.audio === "none" ? "false" : "true";
     }
-    return { ...next, ...normalizeVideoModelConfig(next) };
+    const mode = resolveVideoMode(next, counts.images, counts.videos, counts.audios);
+    return { ...next, ...normalizeVideoModelConfig(next, undefined, mode) };
 }
 
 export function createVideoMotionInput(userText: string, settings: VideoMotionSettings, config: AiConfig, counts: { images: number; videos: number; audios: number }): PromptInputData {
     const mode = resolveVideoMode(config, counts.images, counts.videos, counts.audios);
+    const spec = getVideoModelParameterSpec(config);
+    const motion = normalizeVideoMotionSettings(settings);
+    if (spec?.nativeAudio && motion.audio === "none") motion.audio = "ambient";
     return {
         scene: "video-motion", mode: "video", outputLanguage: "zh", userText,
-        fields: { ...normalizeVideoMotionSettings(settings), duration: Number(config.videoSeconds), ratio: config.size, resolution: config.vquality, video_mode: mode, generate_audio: config.videoGenerateAudio === "true" },
-        referenceRoles: Array.from({ length: counts.images }, (_, index) => mode === "first-frame" ? "首帧" : mode === "first-last-frame" ? index === 0 ? "首帧" : "尾帧" : `参考图片${index + 1}`),
+        fields: { ...motion, ...(spec?.nativeAudio && mode === "edit" ? {} : { duration: Number(config.videoSeconds) }), ratio: config.size, resolution: config.vquality, video_mode: mode, generate_audio: spec?.nativeAudio || config.videoGenerateAudio === "true" },
+        referenceRoles: Array.from({ length: counts.images }, (_, index) => (mode === "first-frame" || mode === "first-last-frame") && index === 0 ? "首帧" : mode === "first-last-frame" && index === 1 ? "尾帧" : `参考图片${index + 1}`),
     };
 }
 

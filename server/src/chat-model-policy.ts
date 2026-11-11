@@ -2,7 +2,7 @@ import { MARK_IMAGE_PROVIDER_ID } from "../../shared/mark-image-models";
 import type { Database } from "./db";
 
 export const DEFAULT_CHAT_MODEL_TOOL_KEY = "gpt-chat";
-export const INITIAL_CHAT_MODEL_ID = "claude-sonnet-5-5";
+export const INITIAL_CHAT_MODEL_ID = "gemini-4-carbon";
 
 const inheritedModelFields = [
   "modelName", "modelId", "modelCreditCost", "modelRmbCost", "modelEnabled",

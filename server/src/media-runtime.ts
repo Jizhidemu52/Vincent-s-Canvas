@@ -28,13 +28,14 @@ type VideoRuntime = { fetch?: (url: string, init?: RequestInit) => Promise<Respo
 
 /** Exactly one submission OR status query. Workers persist/schedule between steps. */
 export async function stepApiMartVideoTask(input: ApiMartVideoInput, runtime: VideoRuntime = {}): Promise<
-  { status: "pending"; upstreamTaskId: string; nextPollMs: number } | { status: "completed"; upstreamTaskId: string; url: string }
+  { status: "pending"; upstreamTaskId: string; nextPollMs: number } | { status: "completed"; upstreamTaskId: string; url: string; costUsd?: number }
 > {
   if (!input.apiKey.trim()) throw new Error("APIMart 视频服务端凭据未配置");
   if (!isSupportedVideoModelId(input.modelId)) throw new Error("当前 APIMart 视频模型尚不支持");
   const request = runtime.fetch || fetch;
   const baseUrl = input.baseUrl.replace(/\/$/, "");
   const headers = { authorization: `Bearer ${input.apiKey}`, "content-type": "application/json" };
+  const pollIntervalMs = input.modelId === "gemini-omni-1.2-flash" ? 5_000 : 2_000;
   let upstreamId = input.upstreamTaskId;
   if (!upstreamId) {
     if (input.submissionStarted) throw new Error("视频提交状态未知；为避免重复收费，已停止自动提交，请核查上游任务");
@@ -54,20 +55,21 @@ export async function stepApiMartVideoTask(input: ApiMartVideoInput, runtime: Vi
     upstreamId = created.data?.[0]?.task_id;
     if (!upstreamId) throw new Error("视频服务未返回任务编号；请核查上游状态，不会自动重复提交");
     await input.onSubmitted(upstreamId);
-    return { status: "pending", upstreamTaskId: upstreamId, nextPollMs: 2_000 };
+    return { status: "pending", upstreamTaskId: upstreamId, nextPollMs: pollIntervalMs };
   }
   const response = await queryProviderTaskStatus(`${baseUrl}${videoTaskStatusPath(upstreamId)}`, headers, runtime);
   if (!response.ok) {
     const detail = await readVideoProviderError(response, input.apiKey);
     throw new Error(`APIMart 视频状态查询失败（${response.status}）${detail ? `：${detail}` : ""}`);
   }
-  const result = await response.json() as { data?: { status?: string; error?: { message?: string }; result?: { videos?: unknown[] } } };
+  const result = await response.json() as { data?: { status?: string; cost?: unknown; error?: { message?: string }; result?: { videos?: unknown[] } } };
   if (["failed", "cancelled", "canceled"].includes(result.data?.status || "")) throw new VideoProviderFailure(result.data?.error?.message || "视频生成失败");
-  if (result.data?.status !== "completed") return { status: "pending", upstreamTaskId: upstreamId, nextPollMs: apiMartPollIntervalMs(input.submissionStartedAt, 2_000, runtime.now?.()) };
+  if (result.data?.status !== "completed") return { status: "pending", upstreamTaskId: upstreamId, nextPollMs: input.modelId === "gemini-omni-1.2-flash" ? pollIntervalMs : apiMartPollIntervalMs(input.submissionStartedAt, pollIntervalMs, runtime.now?.()) };
+  const costUsd = typeof result.data.cost === "number" && Number.isFinite(result.data.cost) && result.data.cost >= 0 ? result.data.cost : undefined;
   for (const video of result.data.result?.videos || []) {
     const item = video as { url?: string | string[]; video_url?: string; output_url?: string } | null;
     const url = typeof video === "string" ? video : item && typeof item === "object" ? (Array.isArray(item.url) ? item.url[0] : item.url) || item.video_url || item.output_url : null;
-    if (typeof url === "string" && /^https?:\/\//i.test(url)) return { status: "completed", upstreamTaskId: upstreamId, url };
+    if (typeof url === "string" && /^https?:\/\//i.test(url)) return { status: "completed", upstreamTaskId: upstreamId, url, ...(costUsd !== undefined ? { costUsd } : {}) };
   }
   throw new Error("视频任务完成但没有可下载结果；可稍后重新查询原任务");
 }
@@ -109,9 +111,10 @@ async function readVideoProviderError(response: Response, apiKey: string) {
 export async function runApiMartVideoTask(input: ApiMartVideoInput, runtime: VideoRuntime = {}) {
   const sleep = runtime.sleep || Bun.sleep;
   const pending = { ...input };
-  let nextPollMs = 2_000;
-  const deadline = Date.now() + 20 * 60_000;
-  while (Date.now() < deadline) {
+  let nextPollMs = input.modelId === "gemini-omni-1.2-flash" ? 5_000 : 2_000;
+  const now = runtime.now || Date.now;
+  const deadline = now() + (input.modelId === "gemini-omni-1.2-flash" ? 10 : 20) * 60_000;
+  while (now() < deadline) {
     if (pending.upstreamTaskId) await sleep(nextPollMs);
     const result = await stepApiMartVideoTask(pending, runtime);
     if (result.status === "completed") return result.url;

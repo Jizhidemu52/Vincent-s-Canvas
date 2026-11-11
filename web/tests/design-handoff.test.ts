@@ -48,7 +48,7 @@ describe("design handoff", () => {
     test("reuses stored original bytes, freezes requirements, and places no prompt or media in the URL", async () => {
         const fx = fixture(), sourceCopy = structuredClone(source), inputBrief = structuredClone(brief);
         const href = await fx.access.prepare("creative-garment-colorway", sourceCopy, inputBrief);
-        expect(href).toBe("/creative/garment-colorway?designToken=handoff-id");
+        expect(href).toBe("/garment-colorway?designToken=handoff-id");
         expect(fx.uploads).toEqual([]);
         expect(sourceCopy).toEqual(source);
         inputBrief.requirements[0] = "新修改";

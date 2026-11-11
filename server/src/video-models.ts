@@ -1,9 +1,10 @@
-import { isApiMartImageMimeType } from "./apimart-upload";
+import { isApiMartImageMimeType, isPublicHttpUrl } from "./apimart-upload";
 import { parseVideoSeed } from "../../shared/video-output";
 
 export const supportedVideoModelIds = [
   "MiniMax-H3",
   "doubao-seedance-2.5",
+  "gemini-omni-1.2-flash",
   "wan2.7",
   "happyhorse-1.1",
 ] as const;
@@ -84,6 +85,17 @@ export const videoModelCapabilities: Record<SupportedVideoModelId, VideoModelCap
     supportsAudio: true,
     supportsWatermark: true,
   },
+  "gemini-omni-1.2-flash": {
+    model: "gemini-omni-1.2-flash",
+    seconds: [3, 15],
+    resolutions: ["360p", "720p", "1080p", "4k"],
+    sizes: ["16:9", "9:16"],
+    minImages: 0,
+    maxImages: 10,
+    firstFrameRequired: false,
+    supportsAudio: false,
+    supportsWatermark: false,
+  },
   "wan2.7": {
     model: "wan2.7",
     seconds: [2, 15],
@@ -133,6 +145,7 @@ export function resolveVideoMode(model: SupportedVideoModelId, parameters: Video
   const allowed: Record<SupportedVideoModelId, VideoMode[]> = {
     "MiniMax-H3": ["auto", "text", "first-frame", "last-frame", "first-last-frame", "reference"],
     "doubao-seedance-2.5": ["auto", "text", "first-frame", "first-last-frame", "reference", "edit", "extend"],
+    "gemini-omni-1.2-flash": ["auto", "text", "first-frame", "first-last-frame", "reference", "edit", "extend"],
     "wan2.7": ["auto", "text", "first-frame", "first-last-frame", "extend"],
     "happyhorse-1.1": ["auto", "text", "first-frame", "reference"],
   };
@@ -143,6 +156,7 @@ export function resolveVideoMode(model: SupportedVideoModelId, parameters: Video
   const audio = sources.some((s) => s.mimeType.startsWith("audio/"));
   if (model === "wan2.7") return video ? "extend" : images === 2 ? "first-last-frame" : images ? "first-frame" : "text";
   if (model === "doubao-seedance-2.5") return sources.length ? "reference" : "text";
+  if (model === "gemini-omni-1.2-flash" && video) return "edit";
   return video || audio || images > 1 ? "reference" : images === 1 ? "first-frame" : "text";
 }
 
@@ -154,13 +168,15 @@ export function validateVideoSources(model: SupportedVideoModelId, parameters: V
   const mode = resolveVideoMode(model, parameters, sources);
   if (images.length + videos.length + audios.length !== sources.length) throw new Error("视频素材仅支持图片、MP4/MOV 视频、WAV/MP3 音频格式");
   const capability = getVideoModelCapability(model);
+  const omni = model === "gemini-omni-1.2-flash";
   if (images.length > capability.maxImages) throw new Error(model === "wan2.7" ? "wan2.7 accepts one first frame or a first and last frame" : `${model} accepts up to ${capability.maxImages} image references`);
-  const videoLimit = model === "MiniMax-H3" ? 3 : model === "doubao-seedance-2.5" ? 10 : model === "wan2.7" ? 1 : 0;
+  const videoLimit = model === "MiniMax-H3" ? 3 : model === "doubao-seedance-2.5" ? 10 : model === "wan2.7" || omni ? 1 : 0;
   const audioLimit = model === "MiniMax-H3" ? 3 : model === "doubao-seedance-2.5" ? 10 : model === "wan2.7" ? 1 : 0;
   if (videos.length > videoLimit || audios.length > audioLimit) throw new Error(`${model} 最多支持 ${videoLimit} 个视频和 ${audioLimit} 个音频素材`);
   if (mode === "text" && (images.length || videos.length || (audios.length && model !== "wan2.7"))) throw new Error(`${model} text mode does not accept images or reference media`);
   const frame = ["first-frame", "last-frame", "first-last-frame"].includes(mode);
-  if (frame && images.length !== (mode === "first-last-frame" ? 2 : 1)) throw new Error(`${model} ${mode} mode requires exactly ${mode === "first-last-frame" ? "two" : "one"} image(s)`);
+  const frameCount = mode === "first-last-frame" ? 2 : 1;
+  if (frame && (omni ? images.length < frameCount : images.length !== frameCount)) throw new Error(`${model} ${mode} mode requires ${omni ? "at least" : "exactly"} ${frameCount === 2 ? "two" : "one"} image(s)`);
   if (frame && (videos.length || (audios.length && model !== "wan2.7"))) throw new Error("首尾帧模式不可混合参考视频或参考音频");
   if (mode === "reference" && !sources.length) throw new Error(`${model} reference mode requires reference media`);
   if (model === "MiniMax-H3" && audios.length && !images.length && !videos.length) throw new Error("MiniMax-H3 音频不能单独作为参考，必须搭配参考图或视频");
@@ -181,15 +197,19 @@ export function validateVideoSources(model: SupportedVideoModelId, parameters: V
       if (source[key] !== undefined && (!Number.isFinite(source[key]) || source[key]! <= 0)) throw new Error(`素材 ${key} 必须是有效正数`);
     }
     if (!image && source.durationMs !== undefined) {
-      const min = video && mode === "edit" ? 4000 : 2000;
-      const max = model === "MiniMax-H3" ? 15000 : video && model === "wan2.7" ? 10000 : 30000;
-      if (source.durationMs < min || source.durationMs > max) throw new Error(`素材时长必须在 ${min / 1000}–${max / 1000} 秒内`);
+      if (omni) {
+        if (source.durationMs > 15000) throw new Error("Gemini Omni 参考视频时长不得超过 15 秒");
+      } else {
+        const min = video && mode === "edit" ? 4000 : 2000;
+        const max = model === "MiniMax-H3" ? 15000 : video && model === "wan2.7" ? 10000 : 30000;
+        if (source.durationMs < min || source.durationMs > max) throw new Error(`素材时长必须在 ${min / 1000}–${max / 1000} 秒内`);
+      }
     }
     const { width, height } = source;
     if (image && model === "happyhorse-1.1" && mode === "first-frame" && width !== undefined && height !== undefined && (Math.min(width, height) < 300 || width / height < 0.4 || width / height > 2.5)) throw new Error("HappyHorse 首帧短边至少 300px，宽高比需在 0.4–2.5 之间");
     if (image && model === "happyhorse-1.1" && mode === "reference" && width !== undefined && height !== undefined && (width / height < 0.4 || width / height > 2.5)) throw new Error("HappyHorse 参考图宽高比需在 0.4–2.5 之间");
-    if (video && model !== "wan2.7" && source.fps !== undefined && (source.fps < (model === "MiniMax-H3" ? 23.976 : 24) || source.fps > 60)) throw new Error(`${model} 视频帧率不符合要求`);
-    if (video || (image && ["MiniMax-H3", "doubao-seedance-2.5"].includes(model))) {
+    if (video && model !== "wan2.7" && !omni && source.fps !== undefined && (source.fps < (model === "MiniMax-H3" ? 23.976 : 24) || source.fps > 60)) throw new Error(`${model} 视频帧率不符合要求`);
+    if (!omni && (video || (image && ["MiniMax-H3", "doubao-seedance-2.5"].includes(model)))) {
       const [min, max, minRatio, maxRatio] = model === "MiniMax-H3" ? [256, 5760, 0.4, 2.5] : model === "wan2.7" ? [240, 4096, 0.125, 8] : [300, 6000, 0.4, 2.5];
       if ([width, height].some((edge) => edge !== undefined && (edge < min! || edge > max!))) throw new Error(`${model} 素材尺寸或宽高比超出范围`);
       if (width === undefined || height === undefined) continue;
@@ -210,10 +230,42 @@ export function buildVideoProviderRequest(
   parameters: VideoProviderParameters = {},
   sources: ProviderVideoSource[] = [],
 ): ProviderVideoRequest {
+  return buildVideoRequest(model, prompt, parameters, sources, false);
+}
+
+function buildVideoRequest(
+  model: SupportedVideoModelId,
+  prompt: string,
+  parameters: VideoProviderParameters,
+  sources: ProviderVideoSource[],
+  allowPendingSources: boolean,
+): ProviderVideoRequest {
   const { images, videos, audios, mode } = validateVideoSources(model, parameters, sources);
   const frame = ["first-frame", "last-frame", "first-last-frame"].includes(mode);
-  const urls = (items: ProviderVideoSource[]) => items.map((item) => toRemoteImageUrl(model, item));
+  const urls = (items: ProviderVideoSource[]) => items.map((item) => toRemoteMediaUrl(model, item, allowPendingSources));
   const imageUrls = urls(images), videoUrls = urls(videos), audioUrls = urls(audios);
+  if (model === "gemini-omni-1.2-flash") {
+    if (!prompt.trim()) throw new Error("Video prompt is required");
+    const maxDuration = mode === "first-last-frame" || mode === "extend" ? 10 : 15;
+    const duration = mode === "edit" ? (videos[0]?.durationMs ?? 15000) / 1000 : omniDuration(parameters.seconds, maxDuration);
+    const requestedResolution = String(parameters.resolution ?? "720p").trim().toLowerCase();
+    const resolution = requestedResolution === "2160p" ? "4k" : requestedResolution;
+    if (!videoModelCapabilities[model].resolutions.includes(resolution)) throw new Error("Gemini Omni 分辨率仅支持 360p、720p、1080p 或 4k");
+    const size = normalizeChoice(parameters.size, videoModelCapabilities[model].sizes, "16:9");
+    if (mode === "first-last-frame") validateOmniFrameRatios(images.slice(0, 2), size);
+    // Omni has native audio and SynthID; it has no audio/watermark/seed/format toggles.
+    const body: Record<string, unknown> = { model, prompt: prompt.trim(), aspect_ratio: size, resolution };
+    if (mode !== "edit") body.duration = duration;
+    if (frame) {
+      body.first_frame_image = imageUrls[0];
+      if (mode === "first-last-frame") body.last_frame_image = imageUrls[1];
+      const references = imageUrls.slice(mode === "first-last-frame" ? 2 : 1);
+      if (references.length) body.image_urls = references;
+    } else if (images.length) body.image_urls = imageUrls;
+    if (videos.length) body.video_urls = videoUrls;
+    if (["reference", "edit", "extend"].includes(mode)) body.omni_reference_task_type = mode;
+    return { body, duration, resolution, size, mode };
+  }
   const maximumPrompt = model === "MiniMax-H3" ? 7000 : model === "wan2.7" ? 5000 : model === "happyhorse-1.1" ? 2500 : 20000;
   if (prompt.length > maximumPrompt) throw new Error(`${model} prompt must be ${maximumPrompt} characters or fewer`);
   const capability = getVideoModelCapability(model);
@@ -267,7 +319,11 @@ export function preflightVideoProviderRequest(
   parameters: VideoProviderParameters = {},
   sources: ProviderVideoSource[] = [],
 ) {
-  const request = buildVideoProviderRequest(model, prompt, parameters, sources);
+  // Owned-asset admission has not issued a per-task URL yet. Only this preflight
+  // path may carry its explicit asset:// placeholders; submission never can.
+  const request = buildVideoRequest(model, prompt, parameters, sources, true);
+  const omni = model === "gemini-omni-1.2-flash";
+  const hasVideo = sources.some(source => source.mimeType.startsWith("video/"));
   return {
     request,
     normalized: {
@@ -276,7 +332,8 @@ export function preflightVideoProviderRequest(
       size: request.size,
       referenceCount: sources.length,
       videoMode: request.mode,
-      upstreamBillingSeconds: (request.duration === -1 ? 30 : request.duration) + (model === "doubao-seedance-2.5" ? sources.filter((source) => source.mimeType.startsWith("video/")).reduce((total, source) => total + (source.durationMs || 0) / 1000, 0) : 0),
+      upstreamBillingSeconds: omni ? request.duration : (request.duration === -1 ? 30 : request.duration) + (model === "doubao-seedance-2.5" ? sources.filter((source) => source.mimeType.startsWith("video/")).reduce((total, source) => total + (source.durationMs || 0) / 1000, 0) : 0),
+      ...(omni ? { upstreamDepositSeconds: hasVideo ? 15 : Math.max(10, request.duration) } : {}),
     },
   };
 }
@@ -296,8 +353,22 @@ function normalizeChoice(value: unknown, options: readonly string[], fallback: s
   return options.includes(selected) ? selected : fallback;
 }
 
-function toRemoteImageUrl(model: SupportedVideoModelId, source: ProviderVideoSource) {
+function omniDuration(value: unknown, max: number) {
+  const duration = value === undefined ? 10 : (typeof value === "number" || typeof value === "string") && String(value).trim() ? Number(value) : NaN;
+  if (!Number.isInteger(duration) || duration < 3 || duration > max) throw new Error(`Gemini Omni 当前模式时长必须为 3–${max} 的整数秒`);
+  return duration;
+}
+
+function validateOmniFrameRatios(frames: ProviderVideoSource[], size: string) {
+  const expected = size === "9:16" ? 9 / 16 : 16 / 9;
+  for (const frame of frames) {
+    if (frame.width === undefined || frame.height === undefined) continue;
+    if (Math.abs(frame.width / frame.height / expected - 1) > 0.01) throw new Error("Gemini Omni 首尾帧比例须一致并匹配所选的 16:9 或 9:16");
+  }
+}
+
+function toRemoteMediaUrl(model: SupportedVideoModelId, source: ProviderVideoSource, allowPending: boolean) {
   const value = source.publicUrl?.trim() || "";
-  if (/^https:\/\//i.test(value) || /^asset:\/\//i.test(value)) return value;
-  throw new Error(`${model} requires an https:// or asset:// image URL`);
+  if (isPublicHttpUrl(value) || (allowPending && /^asset:\/\//i.test(value))) return value;
+  throw new Error(`${model} 素材需要上游可访问的公开 HTTP(S) URL；尚未提交或扣费`);
 }

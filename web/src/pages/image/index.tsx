@@ -21,7 +21,7 @@ import { useGenerationDraft } from "@/hooks/use-generation-draft";
 import { isOrdinaryPromptUrl, usePromptUrlHandoff } from "@/hooks/use-prompt-url-handoff";
 import { useImageDrop } from "@/hooks/use-image-drop";
 import { useUnsavedGuard } from "@/hooks/use-unsaved-guard";
-import { generationErrorMessage, generationErrorDiagnostic, shouldConfirmPromptReuse } from "@/lib/generation-feedback";
+import { generationErrorMessage, generationErrorDiagnostic, isImageResultProcessingFailure, mergeGenerationDiagnostics, shouldConfirmPromptReuse } from "@/lib/generation-feedback";
 import { GenerationDiagnostic } from "@/components/generation-diagnostic";
 import { useResultCanvas } from "@/hooks/use-result-canvas";
 import { GenerationTaskCancel } from "@/components/generation-task-cancel";
@@ -1114,6 +1114,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                     record = { ...record, taskId: task.id };
                     await persistPending(record);
                     if (mountedRef.current) setActiveTaskId(task.id);
+                    if (task.status !== "success" && classifyTaskRecovery(task) === "terminal") throw new QueuedTaskFailedError(task);
                     if (task.status === "paused") {
                         if (!resumePaused || classifyTaskRecovery(task) !== "resume") throw new QueuedTaskPausedError(task);
                         task = await recoverQueuedTask(task.id, controller.signal);
@@ -1130,7 +1131,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                         record = { ...record, diagnostic, recovery: error instanceof QueuedTaskPausedError ? error.recovery : "observe", stopped: record.stopped || manuallyStoppedIds.current.has(record.id) || observationStopRequested.current };
                         await persistPending(record);
                     }
-                    if (mountedRef.current) setResults(value => updateImageResultForRecord(value, record, { status: terminal ? "failed" : "paused", error: record.recovery === "investigate" ? submissionInvestigationMessage : controller.signal.aborted ? "已停止本页查询；可手动刷新原任务状态。" : error instanceof Error ? error.message : "原任务查询暂不可用", diagnostic, taskId: record.taskId, requestId: `${record.requestId}:0`, recovery: terminal ? undefined : record, snapshot: record.snapshot }));
+                    if (mountedRef.current) setResults(value => updateImageResultForRecord(value, record, { status: terminal ? "failed" : "paused", error: terminal ? error.message : record.recovery === "investigate" ? submissionInvestigationMessage : controller.signal.aborted ? "已停止本页查询；可手动刷新原任务状态。" : error instanceof Error ? error.message : "原任务查询暂不可用", diagnostic, taskId: record.taskId, requestId: `${record.requestId}:0`, recovery: terminal ? undefined : record, snapshot: record.snapshot }));
                 } finally { observationControllers.current.delete(controller); }
             }));
         } finally { release(); activeSubmissionRef.current = false; if (mountedRef.current) setRunning(false); }
@@ -1138,6 +1139,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
 
     const retryResult = async (index: number) => {
         const previous = results[index];
+        if (isImageResultProcessingFailure(previous?.error)) return;
         if (previous?.recovery) { await resumePendingImages([previous.recovery], previous.recovery.recovery === "resume"); return; }
         if (!handoffReady) { message.warning(uiText("请先完成参考图带入，再提交新任务。")); return; }
         const snapshot = previous?.snapshot;
@@ -1178,9 +1180,10 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                 await finishImage(record, { id: record.id, dataUrl: task.resultUrls[0], durationMs: completedTaskDurationMs(task), sourceTaskId: task.id, prompt: task.prompt, optimized: task.optimized, userInput: task.userInput });
                 return;
             }
-            if (task.status === "failed" || task.status === "cancelled") {
+            if (classifyTaskRecovery(task) === "terminal") {
                 assertCurrent();
-                setResults(value => updateImageResultForRecord(value, record, { status: "failed", recovery: undefined, error: task.failureReason || "原任务已结束，未生成图片", diagnostic: generationErrorDiagnostic(new QueuedTaskFailedError(task)), taskId: task.id, requestId: task.requestId, snapshot: record.snapshot }));
+                const failure = new QueuedTaskFailedError(task);
+                setResults(value => updateImageResultForRecord(value, record, { status: "failed", recovery: undefined, error: failure.message, diagnostic: generationErrorDiagnostic(failure), taskId: task.id, requestId: task.requestId, snapshot: record.snapshot }));
                 await removePending(record);
                 return;
             }
@@ -1590,18 +1593,19 @@ function PendingImageCard({ createdAt, taskId }: { createdAt?: number; taskId?: 
 
 function FailedImageCard({ error, diagnostic, recovery, taskId, requestId, disabled, onRetry }: { error: string; diagnostic?: string; recovery?: PendingImage; taskId?: string; requestId?: string; disabled?: boolean; onRetry: () => void }) {
     useUiText();
+    const postprocessFailure = isImageResultProcessingFailure(error);
     return (
         <div className="overflow-hidden rounded-lg border border-red-200 bg-red-50 dark:border-red-950 dark:bg-red-950/20">
             <div className="flex aspect-square flex-col items-center justify-center gap-3 p-5 text-center">
-                <div className="text-sm font-medium text-red-600 dark:text-red-300">{recovery?.recovery === "investigate" ? uiText("需要管理员协助") : recovery ? uiText("暂时无法获取进度") : uiText("生成失败")}</div>
-                <GenerationDiagnostic error={error} details={[diagnostic, taskId ? `taskId: ${taskId}` : "", requestId ? `requestId: ${requestId}` : ""].filter(Boolean).join("\n")} />
-                {recovery && !recovery.stopped && recovery.recovery !== "investigate" && <GenerationTaskCancel taskId={taskId} />}
+                <div className="text-sm font-medium text-red-600 dark:text-red-300">{postprocessFailure ? uiText("图片后处理失败") : recovery?.recovery === "investigate" ? uiText("需要管理员协助") : recovery ? uiText("暂时无法获取进度") : uiText("生成失败")}</div>
+                <GenerationDiagnostic error={error} details={mergeGenerationDiagnostics(diagnostic, taskId ? `taskId: ${taskId}` : "", requestId ? `requestId: ${requestId}` : "")} />
+                {!postprocessFailure && recovery && !recovery.stopped && recovery.recovery !== "investigate" && <GenerationTaskCancel taskId={taskId} />}
             </div>
-            <div className="flex justify-end border-t border-red-200 p-3 dark:border-red-950">
+            {!postprocessFailure && <div className="flex justify-end border-t border-red-200 p-3 dark:border-red-950">
                 <Button size="small" danger={!recovery} disabled={disabled} onClick={onRetry}>
                     {recovery?.recovery === "resume" ? uiText("继续获取结果") : recovery ? uiText("刷新进度") : uiText("按原参数重试")}
                 </Button>
-            </div>
+            </div>}
         </div>
     );
 }

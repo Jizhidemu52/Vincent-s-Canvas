@@ -11,7 +11,7 @@ const imageId = "40000000-0000-4000-8000-000000000105";
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
 const finalPrompt = "A pale blue linen shirt in soft daylight on a clean white background.";
 
-test("real Demo HTTP compiles once, fails closed, keeps private rules server-side, and resumes durable batches", async () => {
+test("real Demo HTTP with an explicit legacy Sonnet fixture compiles once, keeps private rules server-side, and resumes durable batches", async () => {
   const directory = mkdtempSync(join(tmpdir(), "canvas-demo-prompt-http-"));
   const statePath = join(directory, "state.sqlite");
   const db = sqlitePromptRecipeStore(statePath);
@@ -50,7 +50,16 @@ test("real Demo HTTP compiles once, fails closed, keeps private rules server-sid
   const reservation = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response() });
   const port = reservation.port!; reservation.stop(true);
   const base = `http://127.0.0.1:${port}`;
-  const start = () => Bun.spawn([process.execPath, "src/demo-server.ts"], {
+  // This fixture exercises private Claude streaming and its existing recipes,
+  // not the first-run chat default. Keep that dependency explicit in the child.
+  const policyUrl = new URL("../src/chat-model-policy.ts", import.meta.url);
+  const script = `
+    const { mock } = await import("bun:test");
+    const policy = { ...await import(${JSON.stringify(policyUrl.href)}) };
+    mock.module(${JSON.stringify(fileURLToPath(policyUrl))}, () => ({ ...policy, INITIAL_CHAT_MODEL_ID: "claude-sonnet-5-5" }));
+    await import(${JSON.stringify(new URL("../src/demo-server.ts", import.meta.url).href)});
+  `;
+  const start = () => Bun.spawn([process.execPath, "--no-env-file", "--eval", script], {
     cwd: fileURLToPath(new URL("..", import.meta.url)), stdout: "ignore", stderr: "pipe",
     env: { ...process.env, DEMO_STATE_PATH: statePath, DEMO_RECOVERY_FILE: "", DEMO_PORT: String(port), DEMO_HOST: "127.0.0.1",
       OA_LOGIN_ENABLED: "false", AUTH_ENABLED: "true", CREDITS_ENABLED: "false", LOCAL_STANDALONE: "false", ROLE_PORTALS_ENABLED: "true", STANDALONE_WEB_DIR: "", DEMO_PUBLIC_ASSET_ORIGIN: "",

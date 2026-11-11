@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import express from "express";
 import type { UsageV2ReportResult } from "../../../shared/usage-report-v2";
 import type { AppConfig } from "../../src/config";
+import type { Database } from "../../src/db";
 import type { ChatCompletionInput, ChatCompletionResult } from "../../src/routes/chat";
 import { createAdminUsageRouter, USAGE_ANALYSIS_SYSTEM } from "../../src/routes/usage-analytics";
 import { encryptSecret } from "../../src/security";
@@ -41,9 +42,12 @@ sqlSuite("V2 paid analysis frozen-preview HTTP/SQL boundaries", () => {
         outsider = randomUUID();
     const department = randomUUID(),
         provider = randomUUID(),
-        model = randomUUID();
+        model = randomUUID(),
+        otherModel = randomUUID();
     const encryptionKey = Buffer.alloc(32, 7).toString("base64");
     const modelCalls: ChatCompletionInput[] = [];
+    const calledModels: string[] = [];
+    let afterModelRead: (() => Promise<void>) | undefined;
     let complete: (input: ChatCompletionInput) => Promise<ChatCompletionResult>;
     const filters = {
         from: "2026-10-01T00:00:00+08:00",
@@ -105,6 +109,11 @@ sqlSuite("V2 paid analysis frozen-preview HTTP/SQL boundaries", () => {
             "INSERT INTO model_configs(id,provider_id,name,model_id,capabilities,rmb_cost) VALUES($1,$2,'PRIVATE_MODEL','synthetic-analysis',ARRAY['chat','generate'],0)",
             [model, provider],
         );
+        await db.query(
+            "INSERT INTO model_configs(id,provider_id,name,model_id,capabilities,rmb_cost) VALUES($1,$2,'OTHER_MODEL','synthetic-next-analysis',ARRAY['chat'],0)",
+            [otherModel, provider],
+        );
+        await db.query("UPDATE tool_api_configurations SET model_config_id=$1,enabled=true WHERE tool_key='gpt-chat'", [model]);
         for (const [userId, cost] of [
             [person, "0.234567"],
             [outsider, "9.000000"],
@@ -142,8 +151,16 @@ sqlSuite("V2 paid analysis frozen-preview HTTP/SQL boundaries", () => {
         });
         app.use(
             "/api/admin/usage",
-            createAdminUsageRouter(db, { PROVIDER_ENCRYPTION_KEY: encryptionKey } as AppConfig, {
-                complete: async (_model, _credentials, input) => {
+            createAdminUsageRouter({ ...db, query: async (sql: string, values?: unknown[]) => {
+                const result = await db.query(sql, values);
+                if (afterModelRead && sql.startsWith("SELECT m.model_id,")) {
+                    const change = afterModelRead; afterModelRead = undefined;
+                    await change();
+                }
+                return result;
+            } } as Database, { PROVIDER_ENCRYPTION_KEY: encryptionKey } as AppConfig, {
+                complete: async (selectedModel, _credentials, input) => {
+                    calledModels.push(selectedModel.model_id);
                     modelCalls.push(structuredClone(input));
                     return complete(input);
                 },
@@ -157,6 +174,8 @@ sqlSuite("V2 paid analysis frozen-preview HTTP/SQL boundaries", () => {
     }, 120000);
     beforeEach(() => {
         modelCalls.length = 0;
+        calledModels.length = 0;
+        afterModelRead = undefined;
         complete = async () => ({
             content: "Synthetic analysis result: only observed aggregate evidence.",
             toolCalls: [],
@@ -168,6 +187,77 @@ sqlSuite("V2 paid analysis frozen-preview HTTP/SQL boundaries", () => {
             await new Promise<void>((resolve) => server!.close(() => resolve()));
         }
         if (fixture) await fixture.close();
+    });
+
+    test("analysis directory and both preview versions follow only the current shared binding, never stale or forged models", async () => {
+        const directory = async () => {
+            const response = await fetch(`${base}/analysis-models`);
+            expect(response.status).toBe(200);
+            return (await response.json()).data.models.map((entry: { id: string }) => entry.id);
+        };
+        expect(await directory()).toEqual([model]);
+        await fixture.db.query("UPDATE tool_api_configurations SET model_config_id=$1 WHERE tool_key='gpt-chat'", [otherModel]);
+        try {
+            expect(await directory()).toEqual([otherModel]);
+            for (const source of ["v1", "v2"]) {
+                const value = source === "v2" ? await preview() : (await (await send("analysis-preview", { from: filters.from, to: filters.to, includePromptSamples: false })).json()).data as Preview;
+                for (const stale of [model, randomUUID()]) {
+                    const before = fixture.statements.length;
+                    const rejected = await send("analyze", confirm(value, { source, modelConfigId: stale }));
+                    expect(rejected.status).toBe(400);
+                    expect((await rejected.json()).code).toBe("USAGE_MODEL_UNAVAILABLE");
+                    expect(fixture.statements.slice(before).some(sql => sql.startsWith("UPDATE usage_analysis_previews"))).toBe(false);
+                    expect(await saved(value.previewId)).toMatchObject({ status: "preview", consumed_at: null, model_config_id: null });
+                }
+                expect((await send("analyze", confirm(value, { source, modelConfigId: otherModel }))).status).toBe(200);
+                expect(await saved(value.previewId)).toMatchObject({ status: "success", model_config_id: otherModel });
+                expect((await send("analyze", confirm(value, { source, modelConfigId: otherModel }))).status).toBe(409);
+            }
+            expect(calledModels).toEqual(["synthetic-next-analysis", "synthetic-next-analysis"]);
+        } finally {
+            await fixture.db.query("UPDATE tool_api_configurations SET model_config_id=$1 WHERE tool_key='gpt-chat'", [model]);
+        }
+    });
+
+    test("disabled, cleared or unavailable shared binding exposes no fallback and never consumes its preview", async () => {
+        const value = await preview();
+        const cases = [
+            ["UPDATE tool_api_configurations SET enabled=false WHERE tool_key='gpt-chat'", "UPDATE tool_api_configurations SET enabled=true WHERE tool_key='gpt-chat'", []],
+            ["UPDATE tool_api_configurations SET model_config_id=NULL WHERE tool_key='gpt-chat'", "UPDATE tool_api_configurations SET model_config_id=$1 WHERE tool_key='gpt-chat'", [model]],
+            ["UPDATE model_configs SET enabled=false WHERE id=$1", "UPDATE model_configs SET enabled=true WHERE id=$1", [model]],
+            ["UPDATE providers SET enabled=false WHERE id=$1", "UPDATE providers SET enabled=true WHERE id=$1", [provider]],
+            ["UPDATE model_configs SET capabilities=ARRAY['generate'] WHERE id=$1", "UPDATE model_configs SET capabilities=ARRAY['chat','generate'] WHERE id=$1", [model]],
+            ["UPDATE providers SET encrypted_credentials='' WHERE id=$1", "UPDATE providers SET encrypted_credentials=$2 WHERE id=$1", [provider, encryptSecret(JSON.stringify({ apiKey: "synthetic-never-send-key" }), encryptionKey)]],
+        ] as const;
+        for (const [disable, restore, values] of cases) {
+            await fixture.db.query(disable, values.length && disable.includes("$1") ? [values[0]] : []);
+            try {
+                expect((await (await fetch(`${base}/analysis-models`)).json()).data.models).toEqual([]);
+                const rejected = await send("analyze", confirm(value));
+                expect(rejected.status).toBe(400);
+                expect((await rejected.json()).code).toBe("USAGE_MODEL_UNAVAILABLE");
+                expect(await saved(value.previewId)).toMatchObject({ status: "preview", consumed_at: null, model_config_id: null });
+            } finally {
+                await fixture.db.query(restore, [...values]);
+            }
+        }
+        expect(modelCalls).toHaveLength(0);
+    });
+
+    test("a shared-binding change after model lookup is fenced by the atomic preview claim", async () => {
+        const value = await preview();
+        for (const change of ["UPDATE tool_api_configurations SET model_config_id=$1 WHERE tool_key='gpt-chat'", "UPDATE tool_api_configurations SET enabled=false WHERE tool_key='gpt-chat'"]) {
+            afterModelRead = async () => { await fixture.db.query(change, change.includes("$1") ? [otherModel] : []); };
+            try {
+                expect((await send("analyze", confirm(value))).status).toBe(409);
+                expect(await saved(value.previewId)).toMatchObject({ status: "preview", consumed_at: null, model_config_id: null });
+            } finally {
+                await fixture.db.query("UPDATE tool_api_configurations SET model_config_id=$1,enabled=true WHERE tool_key='gpt-chat'", [model]);
+            }
+        }
+        expect(modelCalls).toHaveLength(0);
+        expect((await send("analyze", confirm(value))).status).toBe(200);
+        expect(calledModels).toEqual(["synthetic-analysis"]);
     });
 
     test("all six pages freeze anonymous report facts plus the exact system prompt for fifteen minutes without a provider call", async () => {

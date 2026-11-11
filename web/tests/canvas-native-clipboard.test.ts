@@ -27,7 +27,7 @@ import { CanvasNodeType, type CanvasNodeData, type CanvasConnection, type Canvas
 const source = ["project.tsx", "canvas-project-utils.ts", "canvas-import-media.ts", "use-canvas-clipboard-drop.ts", "use-canvas-shortcuts.ts"]
     .map(file => readFileSync(new URL(`../src/pages/canvas/${file}`, import.meta.url), "utf8")).join("\n");
 const ast = ts.createSourceFile("project.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-const callbackNames = new Set(["duplicateNodes", "copySelectedNodes", "pasteCopiedNodes", "createImageFileNode", "importFiles", "createTextNodeFromClipboard", "pasteSystemClipboard", "handleDrop"]);
+const callbackNames = new Set(["loadCanvasNodeUploadRuntime", "duplicateNodes", "copySelectedNodes", "pasteCopiedNodes", "createImageFileNode", "importFiles", "createTextNodeFromClipboard", "pasteSystemClipboard", "handleDrop"]);
 const declarations: ts.Node[] = [];
 let selectionEffect: ts.Node;
 function containsIdentifier(node: ts.Node, names: string[]): boolean {
@@ -46,6 +46,8 @@ function collect(node: ts.Node) {
 }
 collect(ast);
 const code = ts.transpileModule(declarations.map(node => node.getText(ast).replace(/^export\s+/, "")).join("\n"), { compilerOptions: { target: ts.ScriptTarget.ESNext } }).outputText
+    // The lazy runtime re-exports this real preparation function; retain the storage fixture below.
+    .replace('import("./canvas-node-upload-runtime")', "Promise.resolve({ prepareCanvasMediaNode })")
     .replace('import("@/lib/canvas/canvas-system-clipboard")', "({ then: callback => { callback(clipboardModule); return { catch: () => {} }; } })")
     .replace('import("@/lib/canvas/canvas-clipboard-media-check")', "Promise.resolve({ unavailableCanvasClipboardMedia: async () => [] })");
 const selectionCode = ts.transpileModule(selectionEffect!.getText(ast), { compilerOptions: { target: ts.ScriptTarget.ESNext } }).outputText;

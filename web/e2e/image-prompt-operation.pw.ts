@@ -32,7 +32,6 @@ async function compiler(page: Page) {
 for (const mode of [
     { query: "", toolKey: "image", operationType: "image_generation", promptMode: "generate", action: "开始生成" },
     { query: "?tool=image-edit", toolKey: "image-edit", operationType: "inpaint", promptMode: "edit", action: "开始编辑" },
-    { query: "?tool=angle-control", toolKey: "angle-control", operationType: "inpaint", promptMode: "edit", action: "生成角度图" },
 ]) {
     test(`${mode.toolKey}: optimize and generate use the same explicit operation with a reference`, async ({ page, api }) => {
         await models(page);
@@ -60,18 +59,21 @@ for (const mode of [
     });
 }
 
-test("detail enhancement disables only incompatible optimization and still submits plain enhancement", async ({ page, api }) => {
+test("hd-upscale submits the managed enhancement without editable prompt optimization", async ({ page, api }) => {
     await models(page);
     const compilations = await compiler(page);
-    await page.goto("/image?tool=detail-enhance");
-    await page.getByRole("textbox", { name: "图像提示词", exact: true }).fill("增强面料纹理，保留构图");
-    await reference(page);
-    await expect(page.getByRole("button", { name: "此操作不支持一键优化", exact: true })).toBeDisabled();
-    await page.getByRole("button", { name: "开始增强", exact: true }).click();
+    await page.goto("/hd-upscale");
+    await expect(page.getByRole("textbox", { name: "图像提示词", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "一键优化提示词", exact: true })).toHaveCount(0);
+    const chooser = page.waitForEvent("filechooser");
+    await page.getByRole("button", { name: "上传图片", exact: true }).click();
+    await (await chooser).setFiles({ name: "reference.png", mimeType: "image/png", buffer: IMAGE });
+    await page.getByRole("button", { name: "高清放大", exact: true }).click();
     await expect(page.getByRole("button", { name: "放入画布", exact: true })).toBeVisible();
     expect(compilations).toHaveLength(0);
     expect(api.submissions).toHaveLength(1);
-    expect(api.submissions[0]).toMatchObject({ operationType: "upscale", toolKey: "detail-enhance" });
+    expect(api.submissions[0]).toMatchObject({ operationType: "upscale", toolKey: "detail-enhance", parameters: { quickImageAction: "hd-upscale" } });
+    expect(api.submissions[0].prompt).toBeUndefined();
     expect(api.submissions[0].promptInput).toBeUndefined();
 });
 

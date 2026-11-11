@@ -30,7 +30,7 @@ async function imageRecords(page: Page) {
     });
 }
 
-for (const tool of ["image-generation", "image-edit", "detail-enhance", "angle-control", "midjourney-blend"]) {
+for (const tool of ["image-generation", "image-edit", "midjourney-blend"]) {
     test(`${tool} exposes multi-select history deletion with cancellation and scoped persistence`, async ({ page, api }, info) => {
         await seedImages(page, tool);
         const remove = page.getByRole("button", { name: /^批量删除/ });

@@ -4,7 +4,7 @@ import type { CanvasNodeGenerationMode } from "@/components/canvas/canvas-node-p
 import { NODE_DEFAULT_SIZE, getNodeSpec } from "@/constant/canvas";
 import { canvasCompareSource } from "@/lib/canvas/canvas-image-compare-source";
 import { canvasImageReferenceIdentity, originalReferenceFileName } from "@/lib/canvas/canvas-image-filename";
-import { nodeSizeFromRatio } from "@/lib/canvas/canvas-node-size";
+import { fitNodeSize, nodeSizeFromRatio } from "@/lib/canvas/canvas-node-size";
 import { QueuedTaskFailedError, QueuedTaskPausedError } from "@/services/api/generation-tasks";
 import { type UploadedFile } from "@/services/file-storage";
 import { type UploadedImage } from "@/services/image-storage";
@@ -53,6 +53,16 @@ export { audioExtension } from "@/lib/canvas/canvas-export-loader";
 
 export function imageMetadata(image: UploadedImage): CanvasNodeMetadata {
     return { imageTask: undefined, errorDetails: undefined, content: image.url, storageKey: image.storageKey, status: "success", naturalWidth: image.width, naturalHeight: image.height, bytes: image.bytes, mimeType: image.mimeType, ...(image.originalFileName ? { originalFileName: image.originalFileName, imageName: image.originalFileName.replace(/\.[^.]+$/, ""), imageVersion: 1 } : {}) };
+}
+
+/** Upload and explicit template-reference promotion replace content, never the graph identity. */
+export function replaceCanvasNodeImage(node: CanvasNodeData, image: UploadedImage, title: string): CanvasNodeData {
+    return { ...node, type: CanvasNodeType.Image, title, ...fitNodeSize(image.width, image.height), metadata: {
+        ...node.metadata, ...imageMetadata(image), errorDetails: undefined, freeResize: false,
+        isBatchRoot: undefined, batchRootId: undefined, batchChildIds: undefined, batchUsesReferenceImages: undefined,
+        generationType: undefined, model: undefined, size: undefined, quality: undefined, count: undefined,
+        references: undefined, compareSources: undefined, primaryImageId: undefined, imageBatchExpanded: undefined,
+    } };
 }
 
 export function workflowImageCandidatesFromResult(result: CanvasGenerationResult | undefined): CanvasAgentMediaWorkflow["candidates"] {

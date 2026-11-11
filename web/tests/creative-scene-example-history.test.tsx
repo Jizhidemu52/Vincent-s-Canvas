@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import React, { type ReactElement } from "react";
 import ts from "typescript";
-import { creativePresets } from "@/lib/creative-presets";
+import { buildCreativePresetHref, creativePresets, getCreativePreset } from "@/lib/creative-presets";
 import { designExampleForScene, designExamplesForScene } from "@/lib/design-examples";
 import { createSceneForm } from "@/pages/creative/scene-form-model";
 import { i18nHarness } from "./helpers/i18n-harness";
@@ -54,7 +54,9 @@ function harness(sceneId = "style-to-sketch", recoveredRequestId?: string) {
             },
         },
         antd: { App: { useApp: () => ({ modal: { confirm(value: unknown) { calls.confirms.push(value); } } }) }, Button: "button", Checkbox: "input", Image: () => null },
-        "react-router-dom": { Link: () => null, useParams: () => ({ presetId: sceneId }), useNavigate: () => () => {}, useSearchParams: () => [new URLSearchParams()] },
+        "react-router-dom": { Link: () => null, useParams: () => ({ presetId: sceneId }),
+            useLocation: () => ({ pathname: buildCreativePresetHref(getCreativePreset(sceneId)!), search: "", hash: "" }),
+            useNavigate: () => () => {}, useSearchParams: () => [new URLSearchParams()] },
         "@/components/design-examples": { PracticeExampleRecord },
         "@/components/design-result-review": { DesignResultReview: () => null },
         "@/components/workbench-tasks": { WorkbenchTasks: () => null, useWorkbenchTask: () => ({ id: "default", active: true }) },

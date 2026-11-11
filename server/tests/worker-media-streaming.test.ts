@@ -16,36 +16,43 @@ const id = "30000000-0000-4000-8000-000000000001";
 
 test("worker video/audio sources use streamed probes and metadata-only provider inputs; images retain one byte buffer", async () => {
   for (const mime of ["video/mp4", "audio/mpeg", "image/png"]) {
-    let fullReads = 0, streamReads = 0, streamedProbes = 0;
+    let fullReads = 0, streamReads = 0, streamedProbes = 0, grants = 0;
     const bytes = new Uint8Array([1, 2, 3]);
     const api = functions(["loadVideoSourceAssets"], {
       readSourceAssetObject,
+      config: { PROVIDER_IMAGE_PUBLIC_ORIGIN: "http://ai.in-choice.com.cn" }, cache: {},
+      ProviderImageAccess: class {
+        async issue(input: any) { grants++; expect(mime).toBe("image/png"); expect(input.source.bytes).toBe(bytes); expect(input.source.etag).toBe('"original"'); return "http://ai.in-choice.com.cn/image-grant"; }
+        async issueMedia(input: any) { grants++; expect(mime).not.toBe("image/png"); expect(input.source.byteSize).toBe(3); expect(input.source.etag).toBe('"original"'); return "http://ai.in-choice.com.cn/media-grant"; }
+      },
       db: { query: async (sql: string, parameters: unknown[]) => {
         expect(parameters).toEqual([id, "owner"]); expect(sql).toContain("owner_user_id=$2"); expect(sql).toContain("deleted_at IS NULL"); expect(sql).toContain("status='ready'");
         return { rows: [{ object_key: "owned/source", mime_type: mime, byte_size: 3 }] };
       } },
-      storage: { get: async () => ({ Body: { transformToByteArray: async () => { fullReads++; return bytes; }, transformToWebStream: () => { streamReads++; return new ReadableStream({ start(c) { c.enqueue(bytes); c.close(); } }); } } }), signedDownloadUrl: async () => "https://owned.example/source" },
+      storage: { get: async () => ({ ETag: '"original"', ContentLength: 3, Body: { transformToByteArray: async () => { fullReads++; return bytes; }, transformToWebStream: () => { streamReads++; return new ReadableStream({ start(c) { c.enqueue(bytes); c.close(); } }); } } }), signedDownloadUrl: async () => { throw new Error("Never expose internal S3 URLs"); } },
       probeMediaBytes: async (actual: Uint8Array) => { expect(actual).toBe(bytes); return { width: 768, height: 768 }; },
       probeMediaStream: async (stream: ReadableStream, type: string, size: number) => { streamedProbes++; expect(type).toBe(mime); expect(size).toBe(3); expect(await new Response(stream).arrayBuffer()).toEqual(bytes.buffer); return { durationMs: 5000, fps: 24 }; },
     });
-    const [result] = await api.loadVideoSourceAssets([`/api/assets/${id}/content`], "owner");
+    const [result] = await api.loadVideoSourceAssets([`/api/assets/${id}/content`], "owner", { id: "task", execution_token: "lease" });
     const image = mime.startsWith("image/");
     expect(fullReads).toBe(image ? 1 : 0); expect(streamReads).toBe(image ? 0 : 1); expect(streamedProbes).toBe(image ? 0 : 1);
     expect(result.bytes.byteLength).toBe(image ? 3 : 0); expect(result.byteSize).toBe(3);
-    expect(result.publicUrl).toBe(image ? undefined : "https://owned.example/source");
+    expect(result.publicUrl).toBe(`http://ai.in-choice.com.cn/${image ? "image" : "media"}-grant`); expect(grants).toBe(1);
   }
 });
 
-test("known upstream video only polls and returns a file owner without reloading reference media", async () => {
-  let loaded = 0, downloads = 0;
+test("known upstream video saves completion before downloading without reloading reference media", async () => {
+  let loaded = 0, downloads = 0, receipts = 0;
   const file = { filePath: "fixture-only", byteSize: 9, mimeType: "video/mp4", dispose: async () => {} };
   const api = functions(["executeApiMartVideo"], {
     storage: { configured: true }, loadVideoSourceAssets: async () => { loaded++; throw new Error("must not load"); }, VideoTaskPending,
-    stepApiMartVideoTask: async (input: Record<string, unknown>) => { expect(input.sources).toEqual([]); expect(input.upstreamTaskId).toBe("original"); return { status: "completed", url: "https://provider.invalid/result.mp4" }; },
-    downloadVideoResult: async () => { downloads++; return file; },
+    db: {},
+    stepApiMartVideoTask: async (input: Record<string, unknown>) => { expect(input.sources).toEqual([]); expect(input.upstreamTaskId).toBe("original"); return { status: "completed", upstreamTaskId: "original", url: "https://provider.invalid/result.mp4" }; },
+    saveApiMartVideoReceipt: async (_db: unknown, identity: Record<string, unknown>, result: Record<string, unknown>) => { receipts++; expect(identity.upstreamTaskId).toBe("original"); return result; },
+    downloadVideoResult: async () => { expect(receipts).toBe(1); downloads++; return file; },
   });
   expect(await api.executeApiMartVideo({ upstream_task_id: "original", upstream_submission_started_at: "started", parameters: {} }, {})).toEqual([file]);
-  expect(loaded).toBe(0); expect(downloads).toBe(1);
+  expect(loaded).toBe(0); expect(downloads).toBe(1); expect(receipts).toBe(1);
 });
 
 test.each(["stored", "store-failed", "lease-lost"])("worker disposes generated video file after %s without replaying paid work", async outcome => {

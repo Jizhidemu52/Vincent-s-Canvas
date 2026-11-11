@@ -172,7 +172,7 @@ describe("image observation and cancellation", () => {
         const error = await requestQueuedImages(baseInput).catch((error: unknown) => error);
         expect(error).toBeInstanceOf(QueuedTaskFailedError);
         expect((error as QueuedTaskFailedError).task).toEqual(task);
-        expect((error as Error).message).toBe("原任务终止");
+        expect((error as Error).message).toBe(status === "cancelled" ? "任务已取消。" : "原任务终止");
         expect(writes()).toEqual(["/api/tasks"]);
     });
 });

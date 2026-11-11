@@ -12,6 +12,20 @@ const plainInput = { input: [{ role: "user" as const, content: "Describe a cable
 const completion = { choices: [{ message: { content: "A textured cable-knit cardigan with ribbed trims." }, finish_reason: "stop" }] };
 const nativeCompletion = { status: "completed", output: [{ id: "msg-one", type: "message", role: "assistant", status: "completed", content: [{ type: "output_text", text: completion.choices[0]!.message.content, annotations: [] }] }] };
 
+test("Carbon honors the verified output-token budget and real Chat Completions usage instead of zero Responses aliases", async () => {
+    let calls = 0;
+    globalThis.fetch = (async (url, init) => {
+        calls++;
+        expect(String(url)).toBe("http://mark-provider.invalid/v1/chat/completions");
+        expect(JSON.parse(String(init?.body))).toMatchObject({ model: "gemini-4-carbon", stream: false, max_tokens: 512 });
+        return Response.json({ ...completion, usage: { prompt_tokens: 642, completion_tokens: 37, input_tokens: 0, output_tokens: 0 } });
+    }) as typeof fetch;
+    const result = await requestChatCompletion({ ...model, model_id: "gemini-4-carbon" }, credentials, { ...plainInput, gemini: { maxOutputTokens: 512 } });
+    expect(result.usage).toEqual({ inputTokens: 642, outputTokens: 37 });
+    expect(result.usage?.actualCost).toBeUndefined();
+    expect(calls).toBe(1);
+});
+
 test.each(["gpt-6-astra", "gpt-6-sol"])("Mark HTTP errors never echo provider credentials or replay either chat endpoint: %s", async (modelId) => {
     let calls = 0;
     globalThis.fetch = (async (_url, _init) => {

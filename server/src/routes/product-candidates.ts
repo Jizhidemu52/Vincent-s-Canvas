@@ -21,8 +21,10 @@ import {
 } from "../product-candidates";
 import type { requestChatCompletion } from "./chat";
 import type { ProductCandidatesReceiptConnection } from "../product-candidates-redis";
+import type { ProviderChatImageAccess } from "../provider-chat-images";
 
 export type ProductCandidatesRouterOptions = {
+    providerImages?: ProviderChatImageAccess;
     cache?: Pick<Cache, "get" | "eval">;
     sourceRuntime?: ProductCandidateSourceRuntime;
     openReceiptConnection?: () => Promise<ProductCandidatesReceiptConnection>;
@@ -111,7 +113,8 @@ export function createProductCandidatesRouter(db: Database, config: AppConfig, c
             if (response.destroyed || request.aborted) throw new PromptOptimizationError("PRODUCT_CANDIDATES_CANCELLED", "识别请求已中断，尚未发送模型请求。", 409);
             if (features.authenticationEnabled) usageRequestId = await beginUsageChat(db, { userId: actor.id, modelConfigId: execution.modelConfigId, boardKey: execution.toolKey, input: [] });
             providerStarted = true;
-            const resultPayload = await complete(model, credentials, productCandidatesProfileInput(source).input);
+            const resultPayload = await complete(model, credentials, { ...productCandidatesProfileInput(source).input,
+                ...(options.providerImages ? { providerImages: { access: options.providerImages, userId: actor.id } } : {}) });
             providerReturned = true;
             const validated = validateProductCandidatesOutput(resultPayload);
             candidates = productCandidatesResultSchema.parse(JSON.parse(validated.toolCalls[0]!.function.arguments)).candidates;

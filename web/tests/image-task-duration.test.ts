@@ -4,6 +4,7 @@ import React from "react";
 import ts from "typescript";
 import { completedTaskDurationMs } from "@/lib/completed-task-duration";
 import { formatDuration } from "@/lib/image-utils";
+import { isImageResultProcessingFailure, mergeGenerationDiagnostics } from "@/lib/generation-feedback";
 import { defaultConfig } from "@/stores/use-config-store";
 import { snapshotImageRequest, updateImageResultForRecord } from "@/pages/image/image-pending";
 
@@ -96,6 +97,7 @@ test.each([
 ])("the image recovery state %s never offers a new paid retry", state => {
     const card = pageFunction("FailedImageCard", {
         React, useUiText() {}, uiText: (value: string) => value,
+        isImageResultProcessingFailure, mergeGenerationDiagnostics,
         Button: "button", GenerationDiagnostic: "diagnostic", GenerationTaskCancel: "cancel",
     })({ error: "detail", recovery: { recovery: state.recovery }, onRetry() {} });
     expect(treeText(card)).toContain(state.title);

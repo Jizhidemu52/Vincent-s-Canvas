@@ -46,8 +46,6 @@ async function originalDigest(page: Page) {
 for (const route of [
     { path: "/image", button: "开始生成", prompt: true, reference: false },
     { path: "/image?tool=image-edit", button: "开始编辑", prompt: true, reference: true },
-    { path: "/image?tool=detail-enhance", button: "开始增强", prompt: true, reference: true },
-    { path: "/image?tool=angle-control", button: "生成角度图", prompt: true, reference: true },
     { path: "/item-extract", button: "提取产品图", prompt: false, reference: true },
     { path: "/hd-upscale", button: "高清放大", prompt: false, reference: true },
     { path: "/remove-background", button: "一键去背景", prompt: false, reference: true },

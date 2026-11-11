@@ -2,6 +2,7 @@ import { useUiText, uiText } from "@/lib/i18n";
 import { GenerationDiagnostic } from "@/components/generation-diagnostic";
 import { GenerationElapsed } from "@/components/generation-elapsed";
 import { GenerationQueueProgress } from "@/components/generation-queue-progress";
+import { imageResultProcessingFailureMessage, isImageResultProcessingFailure, mergeGenerationDiagnostics } from "@/lib/generation-feedback";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { ChevronRight, Image as ImageIcon, Music2, RefreshCw, Star, Video } from "lucide-react";
@@ -622,10 +623,19 @@ function LoadingContent({ node, theme, onStopObservation }: Pick<NodeContentRend
 function ErrorContent({ node, theme, onRetry, onReload }: Pick<NodeContentRendererProps, "node" | "theme" | "onRetry"> & { onReload?: () => void }) {
     const t = useUiText();
     const videoRecovery = node.type === CanvasNodeType.Video && Boolean(node.metadata?.videoTaskId);
+    const rawError = node.metadata?.errorDetails || t("生成失败");
+    const postprocess = !onReload && node.type === CanvasNodeType.Image
+        && (node.metadata?.imageTask?.postprocessFailed || isImageResultProcessingFailure(rawError));
+    const error = postprocess ? imageResultProcessingFailureMessage : rawError;
+    const requestId = node.metadata?.imageTask?.requestId || node.metadata?.mediaTask?.requestId || node.metadata?.textRequestId;
+    const details = mergeGenerationDiagnostics(error !== rawError ? rawError : undefined,
+        requestId ? `requestId: ${requestId}` : undefined,
+        ...[node.metadata?.imageTask?.taskId, node.metadata?.sourceTaskId, node.metadata?.mediaTask?.taskId, node.metadata?.videoTaskId]
+            .filter(Boolean).map(taskId => `taskId: ${taskId}`));
     return (
         <div className="flex max-w-[260px] flex-col items-center gap-3 px-5 text-center">
-            <div className="max-w-full text-xs leading-5" style={{ color: theme.node.muted }}>{onReload ? t("图片读取失败") : <GenerationDiagnostic error={node.metadata?.errorDetails || t("生成失败")} />}</div>
-            <button
+            <div className="max-w-full text-xs leading-5" style={{ color: theme.node.muted }}>{onReload ? t("图片读取失败") : <GenerationDiagnostic error={error} details={details} />}</div>
+            {!postprocess && <button
                 type="button"
                 aria-label={onReload ? t("重新加载图片") : undefined}
                 disabled={videoRecovery && node.metadata?.videoTaskCanRecover === false}
@@ -641,7 +651,7 @@ function ErrorContent({ node, theme, onRetry, onReload }: Pick<NodeContentRender
             >
                 <RefreshCw className="size-3.5" />
                 {onReload ? t("重新加载") : videoRecovery ? node.metadata?.videoTaskCanRecover === false ? t("提交状态待核查") : t("恢复查询") : node.metadata?.imageTask ? t("恢复查询") : t("重试")}
-            </button>
+            </button>}
         </div>
     );
 }

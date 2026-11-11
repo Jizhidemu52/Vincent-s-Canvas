@@ -25,9 +25,9 @@ test.each([false, true])("demo Mark chat and video isolate credentials and resum
     calls.push(call);
     if (call.authorization !== "Bearer isolated-mark-test-key" || !path.startsWith("/mark/v1/"))
       return Response.json({ error: "A Mark request used the wrong channel" }, { status: 403 });
-    if (path === "/mark/v1/messages") {
+    if (path === "/mark/v1/chat/completions") {
       call.body = await request.json();
-      return Response.json({ content: [{ type: "text", text: "The original cable structure is intact." }], stop_reason: "end_turn" });
+      return Response.json({ choices: [{ message: { role: "assistant", content: "The original cable structure is intact." }, finish_reason: "stop" }] });
     }
     if (path === "/mark/v1/uploads/images") {
       expect((await request.formData()).get("file")).toBeInstanceOf(File);
@@ -89,10 +89,10 @@ test.each([false, true])("demo Mark chat and video isolate credentials and resum
     if (withLegacyCredentials) expect(models.some(model => model.id !== chat!.id && model.modelId === "gpt-6-astra")).toBe(true);
 
     const reply = await request("/api/chat/responses", "POST", { modelId: chat!.id, toolKey: "gpt-chat", input: [{ role: "user", content: "Inspect this knit." }], tools: [] });
-    expect(reply.status).toBe(200);
+    expect({ status: reply.status, body: await reply.clone().json() }).toMatchObject({ status: 200 });
     expect(await reply.json()).toMatchObject({ content: "The original cable structure is intact.", toolCalls: [] });
     expect(calls).toHaveLength(1);
-    expect(calls[0]!.body).toEqual({ model: "claude-sonnet-5-5", max_tokens: 2048, messages: [{ role: "user", content: "Inspect this knit." }] });
+    expect(calls[0]!.body).toEqual({ model: "gemini-4-carbon", stream: false, messages: [{ role: "user", content: "Inspect this knit." }] });
 
     const reference = spawnSync(process.env.FFMPEG_PATH || "ffmpeg", ["-hide_banner", "-loglevel", "error", "-nostdin", "-f", "rawvideo", "-pixel_format", "rgb24", "-video_size", "720x960", "-i", "pipe:0", "-frames:v", "1", "-threads", "1", "-c:v", "png", "-f", "image2pipe", "pipe:1"], {
       input: new Uint8Array(720 * 960 * 3).fill(128), encoding: "buffer", timeout: 15_000, maxBuffer: 8 * 1024 * 1024, windowsHide: true,
@@ -104,19 +104,26 @@ test.each([false, true])("demo Mark chat and video isolate credentials and resum
       prompt: "Keep the cable-knit cardigan intact. Slow camera movement.", sourceUrls: [`/api/assets/${upload.assetId}/content`],
       parameters: { videoMode: "first-frame", seconds: 3, resolution: "720P", size: "3:4", watermark: false } };
     const preflight = await request("/api/tasks/preflight", "POST", input);
-    expect(preflight.status).toBe(200);
+    expect(preflight.status).toBe(400);
+    expect((await preflight.json()).message).toContain("自有公开 HTTP(S) URL");
     expect(calls).toHaveLength(1);
-    const submitted = await request("/api/tasks", "POST", input);
+    expect((await request("/api/tasks", "POST", input)).status).toBe(400);
+    expect(calls).toHaveLength(1);
+    // Text-only video remains available; local images never trigger supplier uploads.
+    const textInput = { ...input, requestId: crypto.randomUUID(), sourceUrls: [], parameters: { ...input.parameters, videoMode: "text" } };
+    expect((await request("/api/tasks/preflight", "POST", textInput)).status).toBe(200);
+    const submitted = await request("/api/tasks", "POST", textInput);
     expect(submitted.status).toBe(201);
     const task = (await submitted.json()).task;
-    const duplicate = await request("/api/tasks", "POST", input).then(response => response.json());
+    const duplicate = await request("/api/tasks", "POST", textInput).then(response => response.json());
     expect(duplicate.task.id).toBe(task.id);
     const paused = await settle(task.id);
     expect(paused.status).toBe("paused"); expect(paused.upstreamTaskId).toBe("same-mark-video-task");
-    expect(calls.filter(call => call.path.endsWith("/uploads/images"))).toHaveLength(1);
+    expect(calls.filter(call => call.path.endsWith("/uploads/images"))).toHaveLength(0);
     const submissions = calls.filter(call => call.path.endsWith("/videos/generations"));
     expect(submissions).toHaveLength(1);
-    expect(submissions[0]!.body).toMatchObject({ model: "happyhorse-1.1", prompt: input.prompt, duration: 3, resolution: "720P", first_frame_image: "https://mark-reference.invalid/knit.png", watermark: false });
+    expect(submissions[0]!.body).toMatchObject({ model: "happyhorse-1.1", prompt: textInput.prompt, duration: 3, resolution: "720P", size: "3:4", watermark: false });
+    expect(submissions[0]!.body).not.toHaveProperty("first_frame_image");
     const recovering = await request(`/api/tasks/${task.id}/recover`, "POST").then(response => response.json());
     expect(recovering.recovered).toBe(true);
     expect((await request(`/api/tasks/${task.id}/recover`, "POST").then(response => response.json())).recovered).toBe(false);
@@ -126,7 +133,7 @@ test.each([false, true])("demo Mark chat and video isolate credentials and resum
     expect(new Uint8Array(await (await request(completed.resultUrls[0])).arrayBuffer())).toEqual(output);
     expect(polls).toBe(2);
     expect(calls.map(call => [call.path, call.method])).toEqual([
-      ["/mark/v1/messages", "POST"], ["/mark/v1/uploads/images", "POST"], ["/mark/v1/videos/generations", "POST"],
+      ["/mark/v1/chat/completions", "POST"], ["/mark/v1/videos/generations", "POST"],
       ["/mark/v1/tasks/same-mark-video-task", "GET"], ["/mark/v1/tasks/same-mark-video-task", "GET"],
     ]);
   } finally {

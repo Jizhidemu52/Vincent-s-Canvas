@@ -1,5 +1,6 @@
-import { getQueuedTask, getQueuedTaskByRequestId, recoverQueuedTask, type QueuedTask } from "@/services/api/generation-tasks";
+import { getQueuedTask, getQueuedTaskByRequestId, recoverQueuedTask, QueuedTaskFailedError, type QueuedTask } from "@/services/api/generation-tasks";
 import { classifyTaskRecovery } from "@/services/api/task-result-reconciliation";
+import { imageResultProcessingFailureMessage, isImageResultProcessingFailure, mergeGenerationDiagnostics } from "@/lib/generation-feedback";
 import type { CreativeImageLineage } from "@/lib/creative-chat";
 import type { ImageAgentWorkNote } from "@/lib/image-agent/work-note";
 import type { CanvasMaskAdaptation } from "@/lib/canvas/canvas-mask-adaptation";
@@ -80,6 +81,11 @@ export async function recoverChatImageTask(
             signal?.throwIfAborted();
         }
 
+        if (["failed", "paused"].includes(task.status) && isImageResultProcessingFailure(task)) return {
+            kind: "failed", task,
+            content: mergeGenerationDiagnostics(imageResultProcessingFailureMessage, `taskId: ${task.id}`, `requestId: ${task.requestId}`),
+        };
+
         switch (task.status) {
             case "success": {
                 const resultUrls = Array.isArray(task.resultUrls) ? task.resultUrls.filter((url) => typeof url === "string" && url.trim()) : [];
@@ -97,7 +103,8 @@ export async function recoverChatImageTask(
             case "paused":
                 if (resumePaused && classifyTaskRecovery(task) === "resume") {
                     resumePaused = false;
-                    task = await recoverQueuedTask(task.id, signal);
+                    try { task = await recoverQueuedTask(task.id, signal); }
+                    catch (error) { if (!(error instanceof QueuedTaskFailedError)) throw error; task = error.task; }
                     continue;
                 }
                 return {

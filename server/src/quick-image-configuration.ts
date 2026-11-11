@@ -4,7 +4,7 @@ import { isQuickImageAction, quickImageModelId, type QuickImageAction } from "..
 import { MARK_IMAGE_PROVIDER_ID } from "../../shared/mark-image-models";
 import { apiMartImageModel, preflightApiMartImageRequest } from "./apimart-image";
 import type { Database } from "./db";
-import { prepareQuickImageTask, QUICK_IMAGE_SNAPSHOT, quickImageDefaultParameters, quickImageDefaultPrompts, type QuickImageInput, type QuickImageSnapshot } from "./quick-image-tools";
+import { assertQuickImageSelectionPrompt, prepareQuickImageTask, QUICK_IMAGE_SNAPSHOT, quickImageDefaultParameters, quickImageDefaultPrompts, type QuickImageInput, type QuickImageSnapshot } from "./quick-image-tools";
 import { ToolConfigurationError } from "./tool-configuration";
 
 export const quickImageActions = ["remove-background", "hd-upscale", "item-extract"] as const;
@@ -28,6 +28,7 @@ export function isQuickImageEligibleModel(model: { modelId: string; protocol: st
 /** Model-specific allowlists reject silently ignored adapter fields as well as URL/identity injection. */
 export function validateQuickImageConfiguration(action: QuickImageAction, raw: QuickImageConfigurationInput, model: { modelId: string; protocol: string; capabilities: string[]; enabled?: boolean; providerEnabled?: boolean; workflowConfigId?: unknown }) {
   const input = quickImageConfigurationSchema.parse(raw);
+  if (action === "remove-background") assertQuickImageSelectionPrompt(input.prompt);
   if (!isQuickImageEligibleModel(model)) throw new ToolConfigurationError("QUICK_IMAGE_MODEL_UNSUPPORTED", "请选择已启用、支持单图编辑的 APIMart 标准图片模型");
   const kind = apiMartImageModel(model.modelId)!;
   const allowed = kind === "mai-image-2.6-flash" ? ["web_grounding"]

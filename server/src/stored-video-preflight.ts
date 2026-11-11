@@ -1,6 +1,6 @@
 import type { Database } from "./db";
 import { BillingError } from "./billing";
-import { isPublicHttpsUrl } from "./apimart-upload";
+import { normalizeProviderImageOrigin } from "./provider-image-access";
 import { isSupportedVideoModelId, videoSourceMetadata, type ProviderVideoSource } from "./video-models";
 import { preflightVideoSources } from "./video-source-preparation";
 import { probeMediaStream } from "./media-probe";
@@ -57,19 +57,18 @@ export async function validateStoredVideoPreflightSnapshot(db: Pick<Database, "q
   if (snapshotIdentity(current) !== snapshotIdentity(snapshot)) throw new BillingError("INVALID_VIDEO_INPUT", "视频模型或参考素材已变化，请重新提交；尚未扣费");
 }
 
-export async function preflightStoredVideoTask(db: Pick<Database, "query">, input: StoredVideoInput, publicEndpoint = process.env.S3_PUBLIC_ENDPOINT || process.env.S3_ENDPOINT || "", runtime: StoredVideoProbeRuntime = {}) {
+export async function preflightStoredVideoTask(db: Pick<Database, "query">, input: StoredVideoInput, publicEndpoint = process.env.PROVIDER_IMAGE_PUBLIC_ORIGIN || "", runtime: StoredVideoProbeRuntime = {}) {
   const snapshot = await readStoredVideoSnapshot(db, input);
   const prompt = videoPreflightPrompt(input);
   const sources: ProviderVideoSource[] = [];
   for (const asset of snapshot.assets) {
-    const image = asset.mimeType.startsWith("image/");
-    if (!image && !isPublicHttpsUrl(publicEndpoint)) throw new BillingError("INVALID_VIDEO_INPUT", "视频/音频素材需配置公开 HTTPS 的 S3_PUBLIC_ENDPOINT；内部对象存储端口无需公开，尚未扣费");
-    sources.push({ mimeType: asset.mimeType, bytes: new Uint8Array(), byteSize: Number(asset.byteSize), ...videoSourceMetadata(asset.metadata), publicUrl: image ? "asset://pending-image-upload" : "https://pending-owned-storage.example/reference" });
+    sources.push({ mimeType: asset.mimeType, bytes: new Uint8Array(), byteSize: Number(asset.byteSize), ...videoSourceMetadata(asset.metadata), publicUrl: "asset://pending-owned-media" });
   }
   try {
     const parameters = videoMotionParameters(input.parameters || {}, input.promptInput, snapshot.assets.map(asset => asset.mimeType), snapshot.modelId);
     // Cheap size/count/mode checks happen before reading any stored bytes.
     preflightVideoSources(snapshot.modelId, prompt, parameters, sources);
+    if (sources.length && !normalizeProviderImageOrigin(publicEndpoint)) throw new Error("视频素材需配置公开 HTTP(S) 的 PROVIDER_IMAGE_PUBLIC_ORIGIN；内部对象存储端口无需公开，尚未扣费");
     const verified: ProviderVideoSource[] = [];
     for (const [index, source] of sources.entries()) {
       const key = snapshot.assets[index]!.objectKey;
@@ -79,7 +78,7 @@ export async function preflightStoredVideoTask(db: Pick<Database, "query">, inpu
       verified.push({ ...source, ...metadata });
     }
     const result = preflightVideoSources(snapshot.modelId, prompt, parameters, verified);
-    return { ...result, normalized: { ...result.normalized, ...(input.promptInput?.scene === "video-motion" ? { generateAudio: parameters.generateAudio !== false } : {}) }, snapshot };
+    return { ...result, normalized: { ...result.normalized, ...(input.promptInput?.scene === "video-motion" && snapshot.modelId !== "gemini-omni-1.2-flash" ? { generateAudio: parameters.generateAudio !== false } : {}) }, snapshot };
   } catch (error) {
     throw new BillingError("INVALID_VIDEO_INPUT", error instanceof Error ? error.message : "视频参数不正确");
   }

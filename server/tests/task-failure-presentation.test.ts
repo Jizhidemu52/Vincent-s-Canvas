@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import express from "express";
-import { publicGenerationFailure, publicTaskFailurePayload } from "../../shared/generation-error";
+import { IMAGE_RESULT_POSTPROCESS_FAILURE_CODE, IMAGE_RESULT_POSTPROCESS_FAILURE_PREFIX, publicGenerationFailure, publicTaskFailurePayload } from "../../shared/generation-error";
 import { createTasksRouter, createAdminTasksRouter } from "../src/routes/tasks";
 import type { Database, Cache } from "../src/db";
 
@@ -16,6 +16,58 @@ test("provider failures have safe Chinese actions without exposing diagnostics o
     expect(output.failures[0]!.index).toBe(2); expect(original.task.failureReason).toBe("HTTP 502");
     const stable = publicTaskFailurePayload({ task: { status: "paused", failureReason: "provider raw", lastFailure: { phase: "polling", code: "PROVIDER_POLL_HTTP_ERROR", httpStatus: 503, message: "secret", url: "private" } } }) as any;
     expect(stable.task.lastFailure).toEqual({ phase: "polling", code: "PROVIDER_POLL_HTTP_ERROR", httpStatus: 503 });
+});
+
+test("local postprocessing keeps a stable category without suggesting an upstream query or leaking diagnostics", () => {
+    const reason = `${IMAGE_RESULT_POSTPROCESS_FAILURE_PREFIX}：private-codec-error https://private.example key=secret；任务已暂停，不会自动重新生成。`;
+    const data = { status: "paused", failureReason: reason, errorCode: IMAGE_RESULT_POSTPROCESS_FAILURE_CODE,
+        lastFailure: { phase: "postprocess", code: IMAGE_RESULT_POSTPROCESS_FAILURE_CODE, message: "private", url: "private" } };
+    const output = publicTaskFailurePayload({ task: data, tasks: [data], message: reason }) as any;
+    for (const task of [output.task, ...output.tasks]) {
+        expect(task.errorCode).toBe("IMAGE_RESULT_PROCESSING_FAILED");
+        expect(task.lastFailure).toEqual({ phase: "postprocess", code: "IMAGE_RESULT_PROCESSING_FAILED" });
+        expect(task.failureReason).toContain(IMAGE_RESULT_POSTPROCESS_FAILURE_PREFIX);
+        expect(task.failureReason).toContain("不要重复生成");
+        expect(task.failureReason).not.toMatch(/查询原任务|private|secret|https:/);
+    }
+    expect(output.message).toBe(output.task.failureReason);
+    expect(publicGenerationFailure(output.message, "paused")).toBe(output.message);
+    expect(publicGenerationFailure(reason, "cancelled")).toBe("任务已取消。");
+    expect(publicGenerationFailure(output.message, "cancelled")).toBe("任务已取消。");
+    expect(publicGenerationFailure("提交状态待核查，请勿重复生成", "cancelled")).toBe("任务已取消。");
+    expect(publicTaskFailurePayload({ task: { ...data, status: "cancelled", failureReason: output.message } })).toMatchObject({ task: { status: "cancelled", failureReason: "任务已取消。" } });
+    expect(publicGenerationFailure(`provider says ${reason}`, "paused")).toContain("查询原任务");
+    expect(data.failureReason).toBe(reason);
+});
+
+test("formal task detail selects the same postprocessing category for employee and admin without changing stored reasons", async () => {
+    const row = { id: "11111111-1111-4111-8111-111111111111", status: "paused", failureReason: `${IMAGE_RESULT_POSTPROCESS_FAILURE_PREFIX}：private codec detail`,
+        errorCode: IMAGE_RESULT_POSTPROCESS_FAILURE_CODE, lastFailure: { phase: "postprocess", code: IMAGE_RESULT_POSTPROCESS_FAILURE_CODE } };
+    const statements: string[] = [];
+    const db = { query: async (sql: string) => { statements.push(sql); return { rows: [row] }; } } as unknown as Database;
+    const app = express();
+    app.use((request, _response, next) => { (request as any).auth = { id: "owner", role: "super_admin" }; next(); });
+    app.use("/api/tasks", createTasksRouter(db, {} as Cache));
+    app.use("/api/admin/tasks", createAdminTasksRouter(db, {} as Cache));
+    const server = app.listen(0, "127.0.0.1");
+    await new Promise<void>(resolve => server.once("listening", resolve));
+    const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+    try {
+        const employee = await (await fetch(`${base}/api/tasks/${row.id}`)).json();
+        const admin = await (await fetch(`${base}/api/admin/tasks/${row.id}`)).json();
+        for (const task of [employee.task, admin.task]) {
+            expect(task.errorCode).toBe("IMAGE_RESULT_PROCESSING_FAILED");
+            expect(task.lastFailure).toEqual(row.lastFailure);
+        }
+        for (const sql of statements) {
+            expect(sql).toContain(`t.status='paused' AND t.failure_reason LIKE '${IMAGE_RESULT_POSTPROCESS_FAILURE_PREFIX}：%'`);
+            expect(sql).toContain('END AS "errorCode"');
+            expect(sql).toContain('END AS "lastFailure"');
+        }
+        expect(statements).toHaveLength(2);
+        expect(employee.task.failureReason).not.toContain("private");
+        expect(admin.task.failureReason).toBe(row.failureReason);
+    } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
 });
 
 test("real task HTTP detail redacts employees while the admin route and stored row keep exact diagnostics", async () => {

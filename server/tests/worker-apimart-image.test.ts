@@ -1,12 +1,13 @@
 import { expect, test } from "bun:test";
 import ts from "typescript";
 import { assertImageEditMaskSupport, prepareImageEditInput } from "../src/image-edit-input";
-import { ApiMartImageQueryRetryable, ApiMartImageTaskPending } from "../src/apimart-image";
+import { ApiMartImageQueryRetryable, ApiMartImageTaskPending, preflightApiMartImageRequest } from "../src/apimart-image";
 import { validateQuickImageSource } from "../src/image-result-processing";
 import { prepareQuickImageTask } from "../src/quick-image-tools";
 
 const bytes = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAACXBIWXMAAAABAAAAAQBPJcTWAAAAFUlEQVR4nGP8////fwYGBgYWEAHCAD4KBAICIHhuAAAAAElFTkSuQmCC", "base64");
-const assets = ["original.png", "mask.png", "texture.png"].map(filename => ({ filename, bytes, mimeType: "image/png" }));
+const assets = ["original.png", "mask.png", "texture.png"].map((filename, index) => ({ filename, bytes, mimeType: "image/png",
+  assetId: `10000000-0000-4000-8000-00000000000${index + 1}`, objectKey: `private/${filename}`, etag: `"etag-${index}"` }));
 const file = await Bun.file(new URL("../src/worker.ts", import.meta.url)).text();
 const source = ts.createSourceFile("worker.ts", file, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
 const node = source.statements.find(statement => ts.isFunctionDeclaration(statement) && statement.name?.text === "executeApiMartImage")!;
@@ -15,14 +16,16 @@ const newTask = () => ({ id: "image-task", execution_token: "execution-one", use
   prompt: "edit", parameters: { inputArchive: { maskReferenceIndex: 1 }, quality: "xhigh", resolution: "4k" }, source_urls: ["original", "mask", "texture"], upstream_task_id: null as string | null, upstream_submission_started_at: null as string | null,
   poll_deadline_at: null as string | null });
 
-function harness(claim = true, failQuery?: () => unknown, sourceAssets = assets) {
+function harness(claim = true, failQuery?: () => unknown, sourceAssets: Array<{ filename: string; mimeType: string; bytes: Uint8Array; assetId?: string }> = assets) {
   const statements: Array<{ sql: string; values: unknown[] }> = [];
   const calls: Record<string, any>[] = [];
   let loaded = 0;
   let downloaded = 0;
   const deadline = new Date(Date.now() + 15 * 60_000).toISOString();
   const dependencies = {
-    loadSourceAssets: async () => { loaded++; return sourceAssets; }, prepareImageEditInput, validateQuickImageSource,
+    loadSourceAssets: async () => { loaded++; return sourceAssets; }, prepareImageEditInput, validateQuickImageSource, preflightApiMartImageRequest,
+    config: { PROVIDER_IMAGE_PUBLIC_ORIGIN: "https://owned.example" }, cache: {}, storage: {},
+    ProviderImageAccess: class { async issue(input: { source: { assetId: string } }) { return `https://owned.example/api/provider-images/${input.source.assetId}/image`; } },
     db: { query: async (sql: string, values: unknown[]) => { statements.push({ sql, values }); return { rows: claim ? [{ id: "image-task", poll_deadline_at: deadline }] : [] }; } },
     VideoSubmissionClaimLost: class extends Error {}, ApiMartImageTaskPending, ApiMartImageQueryRetryable,
     stepApiMartImageTask: async (input: Record<string, any>) => {
@@ -50,7 +53,7 @@ test("Worker isolates PNG mask, persists Mark upstream ID and deadline, then yie
   await expect(h.execute(task, { apiKey: "fixture-only" })).rejects.toMatchObject({ nextPollMs: 3_000 });
   expect(h.loaded()).toBe(1);
   expect(h.calls[0]!.sourceImages).toHaveLength(2);
-  expect(h.calls[0]!.sourceImages[0].bytes).toBe(bytes);
+  expect(h.calls[0]!.sourceImages).toEqual([assets[0], assets[2]].map(source => `https://owned.example/api/provider-images/${source!.assetId}/image`));
   expect(h.calls[0]!.maskImage.bytes).toBe(bytes);
   expect(h.calls[0]!.sourceDataUrls).toBeUndefined();
   expect(h.calls[0]!.parameters).toMatchObject({ quality: "xhigh", resolution: "4k" });

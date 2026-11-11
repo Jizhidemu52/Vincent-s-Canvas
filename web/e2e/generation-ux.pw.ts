@@ -39,9 +39,9 @@ test("desktop: persistent tool-scoped drafts and references with a visible submi
     await expect(prompt).toHaveValue("图像生成独立草稿");
     await expect(page.getByRole("img", { name: "粘贴原图.png", exact: true })).toBeVisible();
     await expect(page.getByRole("img", { name: "拖入原图.png", exact: true })).toBeVisible();
-    await page.goto("/image?tool=angle-control");
+    await page.goto("/image?tool=image-edit");
     await expect(prompt).toHaveValue("");
-    await prompt.fill("角度控制独立草稿");
+    await prompt.fill("图像编辑独立草稿");
     await page.goto("/image");
     await expect(prompt).toHaveValue("图像生成独立草稿");
     await page.screenshot({ path: info.outputPath("image-desktop.png") });

@@ -12,9 +12,10 @@ export function createProviderImagesRouter(access: ProviderImageAccess, storage:
     next();
   });
   // Express GET also implements HEAD; both use the same current-state checks.
-  router.get("/:token/image", async (request, response) => {
+  router.get(["/:token/image", "/:token/media"], async (request, response) => {
     try {
       const token = request.params.token;
+      if (typeof token !== "string") throw new ProviderImageAccessError(404);
       const resolved = await access.resolve(token);
       await streamAssetContent(request, response, storage, resolved.asset, {
         cacheControl: "no-store", expectedObject: resolved.expectedObject,

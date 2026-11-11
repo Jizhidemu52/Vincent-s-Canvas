@@ -114,6 +114,15 @@ export function getCreativePreset(id: string | null): CreativePreset | undefined
     return creativePresets.find((preset) => preset.id === id);
 }
 
+export const standaloneCreativePresetIds = ["local-restyle", "garment-colorway", "back-design"] as const;
+
+export function isStandaloneCreativePreset(id: string): id is typeof standaloneCreativePresetIds[number] {
+    return (standaloneCreativePresetIds as readonly string[]).includes(id);
+}
+
+/** Moved entries retain the same workflow identities, but no longer appear in the creative catalog. */
+export const creativeCatalogPresets = creativePresets.filter(preset => !isStandaloneCreativePreset(preset.id));
+
 export function buildCreativePresetHref(preset: CreativePreset): string {
-    return `/creative/${preset.id}`;
+    return isStandaloneCreativePreset(preset.id) ? `/${preset.id}` : `/creative/${preset.id}`;
 }

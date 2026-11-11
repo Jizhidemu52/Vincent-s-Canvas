@@ -10,7 +10,7 @@ import { mapCanvasAsyncPool } from "@/lib/canvas/canvas-async-pool";
 import { fitNodeSize } from "@/lib/canvas/canvas-node-size";
 import { NODE_DEFAULT_SIZE } from "@/constant/canvas";
 import { CanvasNodeType } from "@/types/canvas";
-import { audioMetadata, imageMetadata, videoMetadata } from "@/pages/canvas/canvas-project-utils";
+import { audioMetadata, imageMetadata, replaceCanvasNodeImage, videoMetadata } from "@/pages/canvas/canvas-project-utils";
 
 const preparationCode = ts.transpileModule(readFileSync(new URL("../src/pages/canvas/canvas-import-media.ts", import.meta.url), "utf8"), {
     compilerOptions: { target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.CommonJS },
@@ -25,6 +25,24 @@ function prepareMedia(scope: Record<string, unknown>) {
     const module = { exports: {} as { prepareCanvasMediaNode: (file: File, position: { x: number; y: number }) => Promise<unknown> } };
     new Function("require", "module", "exports", preparationCode)((name: string) => dependencies[name], module, module.exports);
     return module.exports.prepareCanvasMediaNode;
+}
+
+const uploadRuntimeCode = ts.transpileModule(readFileSync(new URL("../src/pages/canvas/canvas-node-upload-runtime.ts", import.meta.url), "utf8"), {
+    compilerOptions: { target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.CommonJS },
+}).outputText;
+function nodeUploadRuntime(scope: Record<string, unknown>) {
+    const dependencies: Record<string, unknown> = {
+        "@/constant/canvas": { NODE_DEFAULT_SIZE }, "@/types/canvas": { CanvasNodeType }, "@/lib/i18n": { uiText },
+        "@/lib/canvas/canvas-image-upload-limit": { assertCanvasImageUploadSize, isLargeCanvasImage },
+        "@/lib/canvas/canvas-node-size": { fitNodeSize },
+        "@/services/image-storage": { uploadImage: scope.uploadImage }, "@/services/file-storage": { uploadMediaFile: scope.uploadMediaFile },
+        "./canvas-project-utils": { audioMetadata, replaceCanvasNodeImage, videoMetadata },
+        "./use-canvas-clipboard-drop": { isCanvasAudioFile },
+        "./canvas-import-media": { prepareCanvasMediaNode: scope.prepareCanvasMediaNode },
+    };
+    const module = { exports: {} };
+    new Function("require", "module", "exports", uploadRuntimeCode)((name: string) => dependencies[name], module, module.exports);
+    return module.exports;
 }
 
 function quickReferenceUpload(scope: Record<string, unknown>) {
@@ -54,6 +72,7 @@ function callback(name: string, scope: Record<string, unknown>): (...args: any[]
         loadQuickGenerationNode() {}, lastEditorSelectionRef: { current: "" }, editorOwner: "owner", setQuickGenerateReferences() {}, setDialogNodeId() {},
         ...scope, message: { open() {}, info() {}, destroy() {}, ...(scope.message as object || {}) } };
     scope.prepareCanvasMediaNode ||= prepareMedia(scope);
+    scope.loadCanvasNodeUploadRuntime ||= async () => nodeUploadRuntime(scope);
     scope.quickReferenceUpload ||= quickReferenceUpload(scope);
     if (name === "handleDrop" || name === "handleImageInputChange") {
         scope.createImageFileNode ||= callback("createImageFileNode", scope);

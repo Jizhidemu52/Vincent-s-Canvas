@@ -32,7 +32,7 @@ import { useModuleEnabled } from "@/stores/use-module-store";
 import type { ToolKey } from "../../../../shared/feature-catalog";
 import { createSceneHistory, summarizeSceneLog, type SceneLogSummary } from "./scene-history";
 import { requestQueuedImages, QueuedTaskFailedError, QueuedTaskPausedError, recoverQueuedTask } from "@/services/api/generation-tasks";
-import { watchTaskReconciliation } from "@/services/api/task-result-reconciliation";
+import { classifyTaskRecovery, watchTaskReconciliation } from "@/services/api/task-result-reconciliation";
 import { canRetrySceneResult, prepareSceneRetry, sceneFailure } from "./scene-retry";
 import { createSceneResultActions } from "./scene-result-actions";
 import { canQuerySceneResult, readSceneRequest, sceneInputMatchesLog, sceneRootRequestId } from "./scene-recovery";
@@ -717,8 +717,9 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
             };
             if (original.task) {
                 let task = original.task;
-                if (continueSubmission && task.status === "paused" && task.upstreamTaskId?.trim()) {
-                    task = await recoverQueuedTask(task.id, signal);
+                if (continueSubmission && classifyTaskRecovery(task) === "resume") {
+                    try { task = await recoverQueuedTask(task.id, signal); }
+                    catch (caught) { if (!(caught instanceof QueuedTaskFailedError)) throw caught; task = caught.task; }
                     assertCurrent();
                 }
                 const patch = { prompt: task.prompt || log.prompt, userInput: task.userInput || log.userInput, optimized: task.optimized === true };
@@ -727,7 +728,7 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
                     const snapshot = await restoreSnapshot(); assertCurrent();
                     const completed = await storeSceneResult({ ...currentResult, taskId: task.id, failureKind: undefined, recovery: undefined, error: undefined, compilationId: undefined }, { id: `${task.id}:0`, dataUrl: task.resultUrls[0], sourceTaskId: task.id, durationMs: completedTaskDurationMs(task), prompt: patch.prompt, userInput: patch.userInput, optimized: patch.optimized }, 0, sceneId, snapshot, text => setNotice(uiText(text)));
                     await commit(completed, patch); setNotice(uiText("已找回原任务结果，没有重新生成或扣费。"));
-                } else if (task.status === "failed" || task.status === "cancelled") {
+                } else if (classifyTaskRecovery(task) === "terminal") {
                     await commit({ id: currentResult.id, ...sceneFailure(new QueuedTaskFailedError(task), true, task.id, task.requestId) }, patch);
                 } else if (task.status === "paused") {
                     await commit({ id: currentResult.id, ...sceneFailure(new QueuedTaskPausedError(task), true, task.id, task.requestId) }, patch);

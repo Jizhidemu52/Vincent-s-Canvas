@@ -47,10 +47,11 @@ describe("APIMart video model requests", () => {
     );
   });
 
-  test("exposes exactly the four configured video models", () => {
+  test("adds Omni as a distinct model while retaining the existing models", () => {
     expect(supportedVideoModelIds).toEqual([
       "MiniMax-H3",
       "doubao-seedance-2.5",
+      "gemini-omni-1.2-flash",
       "wan2.7",
       "happyhorse-1.1",
     ]);
@@ -112,7 +113,7 @@ describe("APIMart video model requests", () => {
 
   test("rejects a local-only image before submitting it to a URL-only provider", () => {
     expect(() => buildVideoProviderRequest("MiniMax-H3", "make it move", {}, [image])).toThrow(
-      "MiniMax-H3 requires an https:// or asset:// image URL",
+      "公开 HTTP(S) URL",
     );
   });
 
@@ -132,7 +133,7 @@ describe("APIMart video model requests", () => {
 
   test("rejects a local-only HappyHorse image before charging a video task", () => {
     expect(() => buildVideoProviderRequest("happyhorse-1.1", "make it move", {}, [image])).toThrow(
-      "happyhorse-1.1 requires an https:// or asset:// image URL",
+      "公开 HTTP(S) URL",
     );
   });
 

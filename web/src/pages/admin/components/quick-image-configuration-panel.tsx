@@ -204,7 +204,7 @@ export function QuickImageConfigurationEditor({ owner, configuration, models, lo
                     ...models.map(model => ({ value: model.id, label: `${model.name} · ${model.providerName} · ${model.modelId}` })),
                 ]} onChange={modelConfigId => setDraft(current => ({ ...current, modelConfigId }))} />
             </Form.Item>
-            <Form.Item label="处理提示词" extra="1–4000 个字符，仅管理员可见。"><Input.TextArea aria-label={`${title}处理提示词`} rows={5} maxLength={4000} showCount value={draft.prompt} onChange={event => setDraft(current => ({ ...current, prompt: event.target.value }))} /></Form.Item>
+            <Form.Item label={action === "remove-background" ? "主体选择说明" : "处理提示词"} extra={action === "remove-background" ? "只说明保留哪些主体，例如整个人物、主体商品或成套配件。不要要求直接输出透明 PNG、彩色照片或改变位置；透明结果由系统用原图合成。" : "1–4000 个字符，仅管理员可见。"}><Input.TextArea aria-label={`${title}处理提示词`} rows={5} maxLength={4000} showCount value={draft.prompt} onChange={event => setDraft(current => ({ ...current, prompt: event.target.value }))} /></Form.Item>
             <details className="mb-5 rounded-lg border border-[var(--border)] p-3"><summary className="cursor-pointer text-sm font-medium">高级参数（JSON）</summary><p className="my-2 text-xs text-[var(--muted-foreground)]">按所选模型填写，例如尺寸、质量；必须为 JSON 对象，压缩后不超过 4000 字符。服务端会验证不支持或受保护的参数。</p><Input.TextArea aria-label={`${title}高级参数 JSON`} className="!font-mono" rows={5} value={draft.parametersJson} onChange={event => setDraft(current => ({ ...current, parametersJson: event.target.value }))} /></details>
             <Button type="primary" loading={busy === "save"} disabled={disabled || !dirty || unavailable} onClick={() => void save()}>保存{title}配置</Button>
         </Form>

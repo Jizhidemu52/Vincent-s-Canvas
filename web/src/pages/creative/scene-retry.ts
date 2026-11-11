@@ -3,18 +3,19 @@ import { restoreGenerationDraft, type GenerationInputArchive } from "@/services/
 import { restoreLocalInput } from "@/services/generation-local-inputs";
 import type { SceneLog, SceneResult } from "./use-scene-workspace";
 import { PromptPreviewCancelledError } from "@/stores/use-prompt-execution-preview";
+import { imageResultProcessingFailureMessage, isImageResultProcessingFailure } from "@/lib/generation-feedback";
 
 export function sceneFailure(error: unknown, submitted: boolean, taskId?: string, requestId?: string): Pick<SceneResult, "status" | "error" | "failureKind" | "taskId" | "requestId" | "recovery"> {
     const message = error instanceof Error ? error.message : "操作未完成";
     if (error instanceof PromptPreviewCancelledError && !submitted && !taskId) return { status: "cancelled", error: message, requestId };
     if ((error as { submissionRejected?: boolean })?.submissionRejected) return { status: "failed", error: message, failureKind: "local", requestId };
-    if (error instanceof QueuedTaskFailedError) return { status: "failed", error: message, failureKind: error.task.status === "failed" ? "terminal" : "local", taskId: error.task.id, requestId: error.task.requestId };
+    if (error instanceof QueuedTaskFailedError) return { status: "failed", error: message, failureKind: error.task.status === "failed" && !isImageResultProcessingFailure(error) ? "terminal" : "local", taskId: error.task.id, requestId: error.task.requestId };
     if (error instanceof QueuedTaskPausedError) return { status: "failed", error: error.canRecover ? "获取结果已暂停，点击“继续获取结果”即可继续。" : "暂时无法获取结果，需要管理员协助。", failureKind: "uncertain", recovery: error.recovery, taskId: error.task.id, requestId: error.task.requestId };
     if (error instanceof QueuedTaskSubmissionUncertainError) return { status: "failed", error: message, failureKind: "uncertain", taskId: error.taskId || taskId, requestId: error.requestId };
     return { status: "failed", error: submitted ? `${message}；请查询原任务，勿重复生成。` : message, failureKind: submitted ? "uncertain" : "local", taskId, requestId };
 }
 
-export const canRetrySceneResult = (result: SceneResult) => result.status === "failed" && result.failureKind === "terminal" && Boolean(result.taskId) && !result.uncompositedImage && !result.retryLogId;
+export const canRetrySceneResult = (result: SceneResult) => result.status === "failed" && result.failureKind === "terminal" && Boolean(result.taskId) && !result.uncompositedImage && !result.retryLogId && !isImageResultProcessingFailure(result.error);
 
 /** Read and validate every frozen input before permitting one new paid task. */
 export async function prepareSceneRetry(log: SceneLog, result: SceneResult, models: ImageGenerationModel[], ownerId: string, deps = { getQueuedTask, restoreGenerationDraft, restoreLocalInput }) {
@@ -23,6 +24,7 @@ export async function prepareSceneRetry(log: SceneLog, result: SceneResult, mode
     if (log.ownerId !== ownerId || log.inputArchiveVersion !== 1 || log.operation !== "ai") throw new Error("原记录没有完整输入归档，无法重试");
     const task = await deps.getQueuedTask(result.taskId!);
     if (!task || task.status !== "failed" || task.id !== result.taskId || (task.userId && task.userId !== ownerId)) throw new Error("原任务不是明确失败状态，请查询原任务，勿重复生成");
+    if (isImageResultProcessingFailure(task)) throw new Error(imageResultProcessingFailureMessage);
     const archive = task.parameters?.inputArchive as GenerationInputArchive | undefined;
     if (!archive || archive.version !== 1 || archive.ownerId !== ownerId || archive.modelConfigId !== log.config.imageModel || typeof archive.effectivePrompt !== "string") throw new Error("原任务与本地记录不一致，未提交重试");
     const draft = await deps.restoreGenerationDraft(result.taskId!);

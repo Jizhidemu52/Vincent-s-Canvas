@@ -13,6 +13,7 @@ import type { ToolKey } from "../../../../shared/feature-catalog";
 import { imageModelProfile } from "@/lib/image-model-settings";
 import { compiledCanvasGenerationRecord } from "@/lib/canvas/canvas-generation-record";
 import { shouldCancelCanvasGeneration } from "@/lib/canvas/canvas-project-async-lifecycle";
+import { imageResultProcessingFailureMessage, isImageResultProcessingFailure } from "@/lib/generation-feedback";
 
 export type CanvasImageTaskScope = { projectId: string; mounted: boolean; recoveries: Map<string, AbortController>; waitForWriteAccess?: () => Promise<boolean>; isObservationCurrent?: () => boolean };
 type RecoveryOutput = { nodeId: string; status: "success" | "failed"; url?: string; storageKey?: string; error?: string };
@@ -129,9 +130,18 @@ export default function createCanvasImageTaskRuntime({ nodes, setNodes, saveQueu
                     } catch (error) {
                         await waitForWriteAccess();
                         assertCurrent();
-                        if (error instanceof QueuedTaskFailedError || (error as { submissionRejected?: boolean })?.submissionRejected) {
+                        const failedTask = error instanceof QueuedTaskFailedError ? error.task : (error as { task?: { status?: string; id?: string } } | null)?.task;
+                        if (failedTask?.status !== "cancelled" && failedTask?.status !== "success" && isImageResultProcessingFailure(error)) {
+                            const existing = nodes.current.find(node => node.id === nodeId)?.metadata?.imageTask;
+                            const taskId = existing?.taskId || failedTask?.id || (error as { taskId?: string } | null)?.taskId;
+                            await patch(nodeId, binding, {
+                                imageTask: { ...binding, ...existing, ...(taskId ? { taskId } : {}), postprocessFailed: true },
+                                ...(taskId ? { sourceTaskId: taskId } : {}), status: "error", optimizingPrompt: false,
+                                errorDetails: imageResultProcessingFailureMessage,
+                            }, prepared);
+                        } else if (error instanceof QueuedTaskFailedError || (error as { submissionRejected?: boolean })?.submissionRejected) {
                             setNodes(previous => previous.map(node => node.id === nodeId ? {
-                                ...node, metadata: { ...node.metadata, imageTask: undefined, optimizingPrompt: false },
+                                ...node, metadata: { ...node.metadata, imageTask: undefined, optimizingPrompt: false, ...(failedTask?.id ? { sourceTaskId: failedTask.id } : {}) },
                             } : node));
                         }
                         throw error;
@@ -162,7 +172,9 @@ export default function createCanvasImageTaskRuntime({ nodes, setNodes, saveQueu
             const pending = nodes.current.filter(node => node.type === CanvasNodeType.Image && node.metadata?.imageTask
                 && (!nodeId || node.id === nodeId || (source?.metadata?.isBatchRoot && node.metadata.batchRootId === nodeId)));
             if (!pending.length) return null;
-            await Promise.all(pending.map(node => runtime.recoverImageTask(node.id, node.metadata!.imageTask!, Boolean(nodeId), signal)));
+            // Keep blocked bindings in the returned result, so retry callers cannot fall through to a new POST.
+            await Promise.all(pending.filter(node => !node.metadata!.imageTask!.postprocessFailed)
+                .map(node => runtime.recoverImageTask(node.id, node.metadata!.imageTask!, Boolean(nodeId), signal)));
             return pending.map(node => {
                 const restored = nodes.current.find(item => item.id === node.id);
                 return restored?.metadata?.status === "success"
@@ -172,7 +184,7 @@ export default function createCanvasImageTaskRuntime({ nodes, setNodes, saveQueu
         },
         async recoverImageTask(nodeId: string, binding: CanvasImageTaskBinding, explicit = false, signal?: AbortSignal) {
             const recoveries = scope.recoveries;
-            if (signal?.aborted || !current(nodeId, binding) || recoveries.has(nodeId) || generating.current.has(nodeId)) return;
+            if (signal?.aborted || binding.postprocessFailed || !current(nodeId, binding) || recoveries.has(nodeId) || generating.current.has(nodeId)) return;
             const controller = new AbortController();
             // Recovery only observes the existing attempt; abort never calls cancel.
             const abort = () => controller.abort(signal?.reason);
@@ -188,7 +200,7 @@ export default function createCanvasImageTaskRuntime({ nodes, setNodes, saveQueu
         },
         async prepare(nodeId: string, binding: CanvasImageTaskBinding, signal: AbortSignal) {
             const previous = nodes.current.find(node => node.id === nodeId)?.metadata;
-            if (previous?.imageTask) throw new Error("该图片已有原任务，请先恢复查询");
+            if (previous?.imageTask) throw new Error(previous.imageTask.postprocessFailed ? imageResultProcessingFailureMessage : "该图片已有原任务，请先恢复查询");
             const previousSourceTaskId = previous?.sourceTaskId;
             try {
                 await patch(nodeId, binding, { imageTask: binding, sourceTaskId: undefined, status: "loading", errorDetails: undefined }, false);
@@ -228,11 +240,12 @@ export default function createCanvasImageTaskRuntime({ nodes, setNodes, saveQueu
                 if (!valid()) return;
                 if (!task) throw new Error("未找到原图片任务，提交状态待核查；再次点击仅查询原任务，不会重新生成。");
                 if (task.status !== "success") {
+                    const postprocess = task.status !== "cancelled" && isImageResultProcessingFailure(task);
                     const terminal = task.status === "failed" || task.status === "cancelled";
                     await patch(nodeId, binding, {
                         status: "error", sourceTaskId: task.id,
-                        errorDetails: task.failureReason || (terminal ? "原图片任务已失败或取消" : "原图片任务已暂停，提交状态待核查，请勿重复生成。"),
-                        ...(terminal ? { imageTask: undefined } : {}),
+                        errorDetails: postprocess ? imageResultProcessingFailureMessage : task.failureReason || (terminal ? "原图片任务已失败或取消" : "原图片任务已暂停，提交状态待核查，请勿重复生成。"),
+                        ...(postprocess ? { imageTask: { ...binding, taskId: task.id, postprocessFailed: true } } : terminal ? { imageTask: undefined } : {}),
                     });
                     return;
                 }

@@ -20,7 +20,7 @@ const actor = { id: randomUUID(), role: "designer", departmentId: null };
 const targetId = randomUUID();
 const motion = (fields: Record<string, unknown> = {}): PromptInput => promptInputSchema.parse({ scene: "video-motion", mode: "video", fields, userText: "", outputLanguage: "zh" });
 const output = { prompt: "以图片1为首帧。0-5秒：镜头缓慢推近毛衫的针织纹理，面料自然轻摆。保持款式、颜色和图案不变。", summary_zh: "镜头缓慢推近毛衫的针织纹理" };
-async function fixture(invoke: PromptOptimizer["invoke"] = async () => ({ content: JSON.stringify(output) })) {
+async function fixture(invoke: PromptOptimizer["invoke"] = async () => ({ content: JSON.stringify(output) }), modelId = "doubao-seedance-2.5") {
   const db = sqlitePromptRecipeStore(":memory:"); closers.push(db.close);
   await ensureVideoMotionRecipe(db.store);
   await db.store.update("video-motion", { ...(await db.store.get("video-motion")), modelConfigId: "optimizer" });
@@ -28,7 +28,7 @@ async function fixture(invoke: PromptOptimizer["invoke"] = async () => ({ conten
   await db.store.activate("video-motion", version.id);
   const calls: Parameters<PromptOptimizer["invoke"]>[] = [], reads: string[] = [];
   const compiler = new PromptCompiler(db.store, {
-    resolveTarget: async () => ({ id: targetId, modelId: "doubao-seedance-2.5", protocol: "apimart", fingerprint: "video-fixture" }),
+    resolveTarget: async () => ({ id: targetId, modelId, protocol: "apimart", fingerprint: `video-fixture:${modelId}` }),
     resolveOptimizer: async () => ({ id: "optimizer", modelId: "vision-fixture", fingerprint: "optimizer-fixture", estimatedRmbCost: null, invoke: async (...args) => { calls.push(args); return invoke(...args); } }),
     readSource: async (_actor, url) => { reads.push(url); return { bytes: Buffer.from(url), mimeType: "image/png", previewDataUrl: "data:image/webp;base64,eA==" }; },
   });
@@ -75,6 +75,52 @@ describe("video motion contract and safety", () => {
 });
 
 describe("video planner orchestration", () => {
+  test.each([6, 6.5])("Omni edit follows the actual source and accepts concise edit instructions without forcing a new timeline (%s)", async seconds => {
+    const prompt = "只将背景改为柔和日光，保持其余内容与源视频时长不变。";
+    const f = await fixture(async () => ({ content: JSON.stringify({ ...output, prompt }) }), "gemini-omni-1.2-flash");
+    const input = task(motion({ duration: 15, duration_mode: "output", generate_audio: false }));
+    input.sourceUrls = ["video-a"];
+    input.parameters = { seconds, size: "16:9", resolution: "720p", videoMode: "auto" };
+    expect(await preparePromptTaskInput(f.compiler, actor, input, { videoSourceMimeTypes: ["video/mp4"] })).toMatchObject({ prompt, optimized: true });
+    const payload = JSON.parse((f.calls[0]![1][0] as { text: string }).text);
+    expect(payload.fields).toMatchObject({ video_mode: "edit", duration_mode: "source", source_duration: seconds, generate_audio: true, native_audio: true });
+    expect(payload.fields).not.toHaveProperty("duration");
+    expect(f.reads).toEqual([]);
+  });
+
+  test("Omni extension plans only the added seconds and overrides untrusted duration mode fields", async () => {
+    const prompt = "0-3秒：沿源视频片尾继续横移，原片保持不变。";
+    const f = await fixture(async () => ({ content: JSON.stringify({ ...output, prompt }) }), "gemini-omni-1.2-flash");
+    const input = task(motion({ duration: 15, duration_mode: "source" }));
+    input.sourceUrls = ["video-a", "image-a"];
+    input.parameters = { seconds: 3, size: "16:9", resolution: "720p", videoMode: "extend", generateAudio: false };
+    expect(await preparePromptTaskInput(f.compiler, actor, input, { videoSourceMimeTypes: ["video/mp4", "image/png"] })).toMatchObject({ prompt });
+    const payload = JSON.parse((f.calls[0]![1][0] as { text: string }).text);
+    expect(payload.fields).toMatchObject({ duration: 3, duration_mode: "added", video_mode: "extend", generate_audio: true, native_audio: true });
+    expect(payload.images).toEqual([{ index: 1, role: "参考图片" }]);
+    expect(f.reads).toEqual(["image-a"]);
+  });
+
+  test.each(["first-frame", "first-last-frame"])("Omni %s labels only the actual frames while retaining additional references", async videoMode => {
+    const f = await fixture(undefined, "gemini-omni-1.2-flash");
+    const input = task(); input.sourceUrls = ["image-a", "image-b", "image-c", "image-d"]; input.parameters.videoMode = videoMode;
+    await preparePromptTaskInput(f.compiler, actor, input, { videoSourceMimeTypes: input.sourceUrls.map(() => "image/png") });
+    const payload = JSON.parse((f.calls[0]![1][0] as { text: string }).text);
+    expect(payload.images.map((image: { role: string }) => image.role)).toEqual(videoMode === "first-frame" ? ["首帧", "参考图片", "参考图片", "参考图片"] : ["首帧", "尾帧", "参考图片", "参考图片"]);
+    expect(payload.fields.duration_mode).toBe("output");
+    expect(f.reads).toEqual(input.sourceUrls);
+  });
+
+  test("a client cannot claim Omni source-duration semantics for an authoritative Seedance model", async () => {
+    const f = await fixture(async () => ({ content: JSON.stringify({ ...output, prompt: "只调整光线。" }) }));
+    const input = task(motion({ model: "gemini-omni-1.2-flash", duration_mode: "source" }));
+    input.parameters.modelId = "gemini-omni-1.2-flash";
+    await expect(preparePromptTaskInput(f.compiler, actor, input, { videoSourceMimeTypes: ["image/png"] })).rejects.toMatchObject({ code: "PROMPT_VIDEO_TIMELINE_INVALID" });
+    const payload = JSON.parse((f.calls[0]![1][0] as { text: string }).text);
+    expect(payload.fields.duration).toBe(5); expect(payload.fields.generate_audio).toBe(false);
+    expect(payload.fields).not.toHaveProperty("duration_mode");
+  });
+
   test("actual video parameters override claimed fields; images only; public summary and same-input reuse", async () => {
     const f = await fixture();
     const input = task({ ...motion({ camera: "push", subject_action: ["turn"], duration: 30, generate_audio: true }), referenceRoles: ["商品", "动作参考", "声音参考"] });

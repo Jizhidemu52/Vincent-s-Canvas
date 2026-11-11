@@ -23,13 +23,13 @@ async function selectOld(page: Page, picker: Locator) {
     await expect(picker).toContainText(oldLabel);
 }
 
-test("new image, edit, creative, recipe and seamless workspaces use Flare without selecting the first catalog row", async ({ page, api }) => {
+test("new image, edit, creative and seamless workspaces use Flare without selecting the first catalog row", async ({ page, api }) => {
     await setup(page);
-    for (const path of ["/image", "/image?tool=image-edit", "/image?tool=detail-enhance", "/image?tool=angle-control"]) {
+    for (const path of ["/image", "/image?tool=image-edit"]) {
         const picker = await imageSettings(page, path);
         await expect(picker).toContainText(flareLabel);
     }
-    for (const path of ["/creative/text-to-style", "/creative/style-to-sketch", "/creative/series-recipe", "/image?tool=seamless-stitch"]) {
+    for (const path of ["/creative/text-to-style", "/creative/style-to-sketch", "/image?tool=seamless-stitch"]) {
         await page.goto(path);
         await expect(page.locator(pickerSelector)).toContainText(flareLabel);
     }

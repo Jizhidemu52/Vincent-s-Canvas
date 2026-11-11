@@ -5,7 +5,7 @@ import { resolve } from "node:path";
 import React, { type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import ts from "typescript";
-import { creativePresets } from "@/lib/creative-presets";
+import { creativeCatalogPresets, creativePresets } from "@/lib/creative-presets";
 import { designExampleForScene, designExamplesForScene } from "@/lib/design-examples";
 import { DesignExampleArticle } from "@/components/design-examples";
 import { i18nHarness } from "./helpers/i18n-harness";
@@ -29,13 +29,17 @@ function renderCreativeHome() {
 }
 
 describe("new creative scene covers and operation examples", () => {
-    test("all eleven rendered cover URLs resolve to delivered files while the original nine keep their URLs", () => {
+    test("all eight catalog covers resolve to delivered files while standalone scenes retain their assets", () => {
         const html = renderCreativeHome();
         const sources = [...html.matchAll(/<img\b[^>]*src="([^"]+)"/g)].map(match => match[1]!);
-        expect(sources).toHaveLength(creativePresets.length);
+        expect(sources).toHaveLength(8);
+        expect(creativeCatalogPresets).toHaveLength(8);
         for (const src of sources) expect(existsSync(resolve(import.meta.dirname, "../public", src.slice(1)))).toBe(true);
         for (const preset of creativePresets.filter(preset => !["virtual-try-on", "sketch-to-photo"].includes(preset.id))) {
-            expect(sources).toContain(`/creative-scenes/v2/${preset.id}.preview.webp`);
+            const src = `/creative-scenes/v2/${preset.id}.preview.webp`;
+            expect(existsSync(resolve(import.meta.dirname, "../public", src.slice(1)))).toBe(true);
+            if (["local-restyle", "garment-colorway", "back-design"].includes(preset.id)) expect(sources).not.toContain(src);
+            else expect(sources).toContain(src);
         }
         expect(html).toContain('src="/design-examples/knit-source.webp" alt="输入示意 · 毛衫产品图"');
         expect(html).toContain('src="/design-examples/knit-sketch.webp" alt="输入示意 · 毛衫结构线稿"');

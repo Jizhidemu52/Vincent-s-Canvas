@@ -40,7 +40,7 @@ integration("video preflight outside atomic task admission", () => {
     return async (database: Pick<Database, "query">, value: Parameters<typeof preflightStoredVideoTask>[1]) => {
       if (counter) counter.count++;
       expect(transactionDepth).toBe(0);
-      const checked = await preflightStoredVideoTask(database, value, "", {
+      const checked = await preflightStoredVideoTask(database, value, "http://owned.example", {
         readSource: async () => { expect(transactionDepth).toBe(0); return (async function* () { yield new Uint8Array([1, 2, 3]); })(); },
         probe: async (stream, _mime, expected) => {
           expect(transactionDepth).toBe(0); expect(expected).toBe(3);

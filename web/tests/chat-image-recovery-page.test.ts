@@ -197,6 +197,27 @@ test("only an explicit resume click issues one recover POST; no generation POST 
     page.cleanup();
 });
 
+test("a local postprocessing failure removes pending chat recovery, retains IDs, and never imports the original as success", async () => {
+    const calls: string[] = [];
+    globalThis.fetch = (async (url, init) => {
+        calls.push(`${init?.method || "GET"} ${url}`);
+        return Response.json({ task: serverTask("a", "paused", { upstreamTaskId: "upstream-a", errorCode: "IMAGE_RESULT_PROCESSING_FAILED" }) });
+    }) as typeof fetch;
+    const page = recoveryHarness(session([pendingMessage("a")]));
+    await until(() => !page.sessionsRef.current[0]?.messages[0]?.pendingImageTask);
+    const message = page.sessionsRef.current[0]!.messages[0]!;
+    expect(message.role).toBe("error");
+    expect(message.content).toContain("原件已保存到素材库");
+    expect(message.content).toContain("taskId: task-a");
+    expect(message.content).toContain("requestId: a:0");
+    expect(message.generatedImages).toBeUndefined();
+    expect(page.media).toEqual([]);
+    expect(page.watches).toEqual([]);
+    await page.wake();
+    expect(calls).toEqual(["GET /api/tasks/task-a"]);
+    page.cleanup();
+});
+
 test.each(["missing", "paused", "failed"])("%s request affects only its own pending slot", async status => {
     const calls: string[] = [];
     globalThis.fetch = (async url => {

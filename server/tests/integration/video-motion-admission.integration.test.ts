@@ -50,7 +50,7 @@ integration("video motion formal SQL admission", () => {
     app.use((req, _res, next) => { Object.assign(req, { auth: { id: userId, role: "designer", departmentId: null } }); next(); });
     app.use("/tasks", createTasksRouter(fixture.db, { eval: async () => { queueCalls++; order.push("queue"); return 1; } } as never, false, async (db, task) => {
       preflights++; order.push("preflight");
-      return preflightStoredVideoTask(db, task, "", { readSource: async () => (async function* () { yield new Uint8Array([1, 2, 3]); })(), probe: async () => ({ width, height: 768 }) });
+      return preflightStoredVideoTask(db, task, "http://owned.example", { readSource: async () => (async function* () { yield new Uint8Array([1, 2, 3]); })(), probe: async () => ({ width, height: 768 }) });
     }, { promptCompiler: compiler }));
     app.use("/models", createPublicModelRouter(fixture.db));
     app.use(((error, _req, res, _next) => res.status(error.status ?? 400).json({ error: error.code, message: error.message })) as ErrorRequestHandler);

@@ -16,6 +16,7 @@ import { useUserStore } from "@/stores/use-user-store";
 import { CanvasNodeType, type CanvasConnection, type CanvasGenerationMode, type CanvasNodeData, type CanvasNodeMetadata } from "@/types/canvas";
 import type { CanvasGenerationOutput } from "./canvas-shared-generation-runtime";
 import { shouldCancelCanvasGeneration } from "@/lib/canvas/canvas-project-async-lifecycle";
+import { normalizeVideoModelConfig, resolveVideoMode, withVideoDurationDefault } from "@/lib/video-model-parameters";
 
 type MediaBinding = NonNullable<CanvasNodeMetadata["mediaTask"]>;
 type MediaCanvas = {
@@ -107,7 +108,10 @@ function configMetadata(config: AiConfig, mode: "video" | "audio", context: Node
 }
 
 export async function runCanvasMediaGeneration(input: Generation): Promise<CanvasGenerationOutput> {
-    const { nodeId, mode, source, config, context, controller } = input;
+    const { nodeId, mode, source, context, controller } = input;
+    const settingsNode = input.shared && input.origin?.configNodeId ? findNode(input, input.origin.configNodeId) : source;
+    const selectedConfig = mode === "video" ? withVideoDurationDefault(input.config, settingsNode?.metadata?.seconds) : input.config;
+    const config = mode === "video" ? { ...selectedConfig, ...normalizeVideoModelConfig(selectedConfig, undefined, resolveVideoMode(selectedConfig, context.imageCount, context.videoCount, context.audioCount)) } : selectedConfig;
     const base = NODE_DEFAULT_SIZE[mode === "video" ? CanvasNodeType.Video : CanvasNodeType.Audio];
     const spec = mode === "video" ? nodeSizeFromRatio(config.size, base.width, base.height) || base : base;
     const empty = source?.type === mode && !source.metadata?.content && !source.metadata?.storageKey;

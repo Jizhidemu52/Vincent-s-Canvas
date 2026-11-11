@@ -28,7 +28,7 @@ describe("video model parameter contract", () => {
         }
     });
 
-    test("the four UI models match actual server capabilities", () => {
+    test("the UI models match actual server capabilities", () => {
         for (const model of supportedVideoModelIds) {
             const spec = getVideoModelParameterSpec(model)!;
             const capability = videoModelCapabilities[model];
@@ -77,7 +77,7 @@ describe("video model parameter contract", () => {
 
     test("invalid duration inputs use a valid model default", () => {
         for (const model of supportedVideoModelIds) for (const videoSeconds of ["", "NaN", "Infinity", "0", "999", "4.5"]) {
-            expect(normalizeVideoModelConfig({ ...configFor(model), videoSeconds }).videoSeconds).toBe("5");
+            expect(normalizeVideoModelConfig({ ...configFor(model), videoSeconds }).videoSeconds).toBe(model === "gemini-omni-1.2-flash" ? "10" : "5");
         }
     });
 
@@ -135,7 +135,7 @@ describe("video model parameter contract", () => {
     test("video service uses the same normalized parameters for preflight and task submission", async () => {
         globalThis.window = { location: { pathname: "/canvas/contract-test" } } as Window & typeof globalThis;
         for (const model of supportedVideoModelIds) {
-            const config = { ...configFor(model), size: "adaptive", vquality: "480p", videoSeconds: "30", videoGenerateAudio: "true", videoWatermark: "true" };
+            const config = { ...configFor(model), size: "adaptive", vquality: "480p", videoSeconds: model === "gemini-omni-1.2-flash" ? "15" : "30", videoGenerateAudio: "true", videoWatermark: "true" };
             const payloads: Array<Record<string, unknown>> = [];
             globalThis.fetch = (async (input, init) => {
                 const url = String(input);

@@ -1,4 +1,5 @@
 import { processImageResult } from "./image-result-processing";
+import { IMAGE_RESULT_POSTPROCESS_FAILURE_CODE, IMAGE_RESULT_POSTPROCESS_FAILURE_PREFIX } from "../../shared/generation-error";
 import { quickImageResultAction } from "./quick-image-tools";
 import { inspectGifFrames } from "./gif-image";
 
@@ -17,9 +18,9 @@ type StoredResultInput = {
 };
 
 export class ImageResultPersistenceError extends Error {
-  readonly code = "IMAGE_RESULT_PROCESSING_FAILED";
+  readonly code = IMAGE_RESULT_POSTPROCESS_FAILURE_CODE;
   constructor(readonly original: AssetReference, cause: unknown) {
-    super(`渠道原件已保存到素材库，但图片后处理未完成：${cause instanceof Error ? cause.message : "本地处理失败"}；任务已暂停，不会自动重新生成。`, { cause });
+    super(`${IMAGE_RESULT_POSTPROCESS_FAILURE_PREFIX}：${cause instanceof Error ? cause.message : "本地处理失败"}；任务已暂停，不会自动重新生成。`, { cause });
   }
 }
 

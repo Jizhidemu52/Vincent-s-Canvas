@@ -41,7 +41,7 @@ function harness(saved = new Map<string, unknown>(), initialLog?: SceneLog) {
     const userStore = Object.assign((select: Function) => select(userState()), { getState: userState });
     const dependencies: Record<string, any> = {
         "@/services/api/generation-tasks": { ...requireModule("@/services/api/generation-tasks"), recoverQueuedTask: async (id: string) => { calls.push(`RECOVER ${id}`); return { ...originalTask, status: "processing" }; } },
-        "@/services/api/task-result-reconciliation": { watchTaskReconciliation: (options: any) => { observations.push(options); return new Promise<void>(resolve => options.signal.addEventListener("abort", () => resolve(), { once: true })); } },
+        "@/services/api/task-result-reconciliation": { ...requireModule("@/services/api/task-result-reconciliation"), watchTaskReconciliation: (options: any) => { observations.push(options); return new Promise<void>(resolve => options.signal.addEventListener("abort", () => resolve(), { once: true })); } },
         "@/components/workbench-tasks": { useWorkbenchTask: () => ({ id: "default", active: true, draftScope: (scope: string) => scope }), useWorkbenchTaskStatus(status: typeof taskStatus) { taskStatus = status; } },
         react: { ...React, useState: (initial: any) => { const index = stateIndex++; if (!(index in states)) states[index] = typeof initial === "function" ? initial() : initial; return [states[index], (next: any) => { states[index] = typeof next === "function" ? next(states[index]) : next; }]; },
             useRef: (initial: any) => refs[refIndex++] ||= { current: initial }, useMemo: (factory: Function) => factory(),
@@ -132,6 +132,38 @@ test("a paused accepted task is not shown as generating and only an explicit act
     expect(ws.results[0].recovery).toBeUndefined();
     expect(app.calls).toEqual(["GET task", "GET task", "RECOVER paused-original"]);
     expect(app.submissions).toHaveLength(0);
+    app.unmount();
+});
+
+test.each([
+    { status: "paused", errorCode: "IMAGE_RESULT_PROCESSING_FAILED" },
+    { status: "paused", lastFailure: { phase: "postprocess" } },
+    { status: "paused", failureReason: "渠道原件已保存到素材库，但图片后处理未完成：decoder failed" },
+    { status: "failed", errorCode: "IMAGE_RESULT_PROCESSING_FAILED" },
+])("creative postprocessing failure closes observation and rejects later continuation: %j", async failure => {
+    const app = harness(new Map(), pendingLog); await app.initialize();
+    app.setTask({ id: "local-failure", requestId: "original-request:0", userId: "owner", resultUrls: ["/upstream-original.png"], failureReason: null, ...failure, upstreamTaskId: "existing-upstream" });
+    await app.reconcile();
+    const ws = app.render();
+    expect(ws.results[0]).toMatchObject({ status: "failed", failureKind: "local", taskId: "local-failure", requestId: "original-request:0" });
+    expect(ws.results[0].recovery).toBeUndefined();
+    expect(ws.results[0].image).toBeUndefined();
+    expect(ws.results[0].error).toContain("原件已保存到素材库");
+    expect(app.status().pending).toBe(false);
+    expect(app.observations.every(item => item.signal.aborted)).toBe(true);
+    await ws.queryResult(ws.results[0], true);
+    expect(app.calls).toEqual(["GET task"]);
+    expect(app.submissions).toEqual([]);
+    app.unmount();
+});
+
+test("a stale creative continue click rechecks postprocessing failure before any recovery POST", async () => {
+    const app = harness(new Map(), pendingLog); const ws = await app.initialize();
+    app.setTask({ id: "local-failure", requestId: "original-request:0", userId: "owner", status: "paused", errorCode: "IMAGE_RESULT_PROCESSING_FAILED", resultUrls: [], failureReason: null, upstreamTaskId: "existing-upstream" });
+    await ws.queryResult(ws.results[0], true);
+    expect(app.calls).toEqual(["GET task"]);
+    expect(app.render().results[0].failureKind).toBe("local");
+    expect(app.submissions).toEqual([]);
     app.unmount();
 });
 

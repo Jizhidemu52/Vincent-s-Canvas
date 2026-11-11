@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { generationDownloadName, generationErrorDiagnostic, generationErrorMessage, shouldConfirmPromptReuse } from "../src/lib/generation-feedback";
+import { generationDownloadName, generationErrorDiagnostic, generationErrorMessage, imageResultProcessingFailureMessage, mergeGenerationDiagnostics, shouldConfirmPromptReuse } from "../src/lib/generation-feedback";
 import { snapshotVideoRequest } from "../src/pages/video/video-retry";
 import { defaultConfig } from "../src/stores/use-config-store";
 import { publicTaskFailurePayload } from "../../shared/generation-error";
@@ -45,6 +45,15 @@ describe("generation interaction safety", () => {
         expect(result).toContain("刷新进度");
         expect(result).not.toContain("继续查询原任务");
     });
+    test("local postprocessing failure is not rewritten as an uncertain upstream query", () => {
+        for (const error of ["渠道原件已保存到素材库，但图片后处理未完成：decoder failed", imageResultProcessingFailureMessage,
+            Object.assign(new Error("private decoder detail"), { code: "IMAGE_RESULT_PROCESSING_FAILED" })]) {
+            const shown = generationErrorMessage(error);
+            expect(shown).toBe(imageResultProcessingFailureMessage);
+            expect(shown).not.toMatch(/decoder|刷新进度|继续查询|查询暂停/);
+        }
+        expect(generationErrorMessage("unknown detail", 500, "IMAGE_RESULT_PROCESSING_FAILED")).toBe(imageResultProcessingFailureMessage);
+    });
     test.each([[401, "登录已过期"], [402, "额度不足"], [429, "服务请求较多"], [504, "响应超时"], [503, "暂时不可用"]])("HTTP %s maps to actionable Chinese guidance", (status, expected) => {
         expect(generationErrorMessage("upstream error", Number(status))).toContain(String(expected));
     });
@@ -67,6 +76,16 @@ describe("generation interaction safety", () => {
         expect(diagnostic).not.toContain("private");
         expect(diagnostic).not.toContain("fallback");
         expect(generationErrorDiagnostic(new Error("尚未提交"), { requestId: "prepared-request" })).toContain("requestId: prepared-request");
+    });
+    test("nested diagnostic and card context keep identical lookup identifiers only once", () => {
+        const cause = Object.assign(new Error("original diagnostic"), { taskId: "same-task", requestId: "same-request" });
+        const error = Object.assign(new Error("display message", { cause }), { taskId: "same-task", requestId: "same-request", code: "IMAGE_RESULT_PROCESSING_FAILED" });
+        const text = mergeGenerationDiagnostics(generationErrorDiagnostic(error), "taskId: same-task\r\nrequestId: same-request", "raw repeated line\nraw repeated line");
+        expect(text.match(/^taskId: same-task$/gm)).toHaveLength(1);
+        expect(text.match(/^requestId: same-request$/gm)).toHaveLength(1);
+        expect(text).toContain("original diagnostic");
+        expect(text).toContain("code: IMAGE_RESULT_PROCESSING_FAILED");
+        expect(text.match(/^raw repeated line$/gm)).toHaveLength(2);
     });
     test("download filenames distinguish versions and times and remove filesystem-unsafe characters", () => {
         const a = generationDownloadName('作品/一:二', "mp4", new Date("2026-01-01T00:00:00Z"));

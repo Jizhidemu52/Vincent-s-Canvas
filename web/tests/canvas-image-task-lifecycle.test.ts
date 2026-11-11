@@ -11,6 +11,7 @@ import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import { imageModelProfile } from "@/lib/image-model-settings";
 import { defaultConfig } from "@/stores/use-config-store";
 import { compiledCanvasGenerationRecord, createCanvasGenerationRecord } from "@/lib/canvas/canvas-generation-record";
+import { imageResultProcessingFailureMessage, isImageResultProcessingFailure } from "@/lib/generation-feedback";
 
 // Execute the actual page hook with explicit React/store/I/O boundaries, without a DOM
 // or global module mocks. The production task observer and sizing logic stay real.
@@ -43,6 +44,7 @@ function harness(options: {
     loadRuntime?: () => Promise<void>;
     persist?: (save: Save, index: number) => Promise<void>;
     query?: (query: Query) => Promise<QueuedTask | null>;
+    recover?: (id: string, signal: AbortSignal) => Promise<QueuedTask>;
     loadImage?: (url: string) => Promise<typeof image>;
     imageRequest?: (toolKey: string | undefined, edit: boolean) => Promise<Array<{ id: string; dataUrl: string }>>;
     waitForWriteAccess?: () => Promise<boolean>;
@@ -68,6 +70,7 @@ function harness(options: {
     const committed: Save[] = [];
     const queries: Query[] = [];
     const uploads: string[] = [];
+    const resumes: string[] = [];
     const events: string[] = [];
     const dependencies: Record<string, unknown> = {
         react: {
@@ -100,10 +103,12 @@ function harness(options: {
         "@/lib/canvas/canvas-generation-record": { compiledCanvasGenerationRecord },
         "@/lib/image-model-settings": { imageModelProfile },
         "@/lib/canvas/canvas-mask-adaptation": { restoreCanvasMaskResult },
+        "@/lib/generation-feedback": { imageResultProcessingFailureMessage, isImageResultProcessingFailure },
         "@/services/api/generation-tasks": {
             QueuedTaskFailedError, QueuedTaskPausedError, imageTaskPrompts,
             getQueuedTask: (id: string, signal: AbortSignal) => query({ kind: "task", id, signal }),
             getQueuedTaskByRequestId: (id: string, signal: AbortSignal) => query({ kind: "request", id, signal }),
+            recoverQueuedTask: (id: string, signal: AbortSignal) => { resumes.push(id); if (options.recover) return options.recover(id, signal); throw new Error("Unexpected upstream resume"); },
         },
         "@/services/api/image": {
             requestEdit: (_config: unknown, _prompt: string, _references: unknown, _mask: unknown, requestOptions: { tool?: string }) => { if (options.imageRequest) return options.imageRequest(requestOptions.tool, true); throw new Error("Unexpected fresh image edit"); },
@@ -168,7 +173,7 @@ function harness(options: {
     }
     render();
     return {
-        nodes, saves, committed, queries, uploads, events,
+        nodes, saves, committed, queries, uploads, resumes, events,
         action: () => value,
         runtimeLoadAttempts: () => runtimeLoadAttempts,
         result: () => nodes.current.find(node => node.id === "result-node"),
@@ -314,6 +319,23 @@ describe("lazy canvas image task runtime", () => {
 });
 
 describe("canvas image submission persistence", () => {
+    test("postprocess rejection persists original lookup IDs and stops automatic/explicit observation without enabling a fresh POST", async () => {
+        const h = harness();
+        const options = await h.action().createOptions("result-node", new AbortController());
+        await options.onSubmissionStarted();
+        await options.onSubmitted(["accepted-task"]);
+        const failure = new QueuedTaskFailedError({ ...completedTask, id: "accepted-task", requestId: `${options.requestId}:0`, status: "paused", errorCode: "IMAGE_RESULT_PROCESSING_FAILED", resultUrls: ["/api/assets/provider-original/content"], failureReason: "原任务结果待核查" });
+        await expect(options.receiveResult(Promise.reject(failure))).rejects.toBe(failure);
+        expect(h.result()!.metadata).toMatchObject({ status: "error", sourceTaskId: "accepted-task", errorDetails: imageResultProcessingFailureMessage,
+            imageTask: { taskId: "accepted-task", requestId: `${options.requestId}:0`, postprocessFailed: true } });
+        expect(h.committed.at(-1)!.nodes[1]).toEqual(h.result());
+        expect(await h.action().recoverPending()).toMatchObject([{ nodeId: "result-node", status: "failed" }]);
+        expect(await h.action().recoverPending("result-node")).toMatchObject([{ nodeId: "result-node", status: "failed" }]);
+        expect(h.queries).toEqual([]); expect(h.resumes).toEqual([]); expect(h.uploads).toEqual([]);
+        const another = await h.action().createOptions("result-node", new AbortController());
+        await expect(another.onSubmissionStarted()).rejects.toThrow(imageResultProcessingFailureMessage);
+        h.unmount();
+    });
     test.each(["failed", "cancelled"])("the shared result receiver clears a confirmed %s binding and preserves the terminal error", async status => {
         const h = harness();
         const options = await h.action().createOptions("result-node", new AbortController());
@@ -321,6 +343,18 @@ describe("canvas image submission persistence", () => {
         const failure = new QueuedTaskFailedError({ ...completedTask, status });
         await expect(options.receiveResult(Promise.reject(failure))).rejects.toBe(failure);
         expect(h.result()!.metadata?.imageTask).toBeUndefined();
+        expect(h.uploads).toEqual([]);
+        h.unmount();
+    });
+
+    test("cancelled receive remains terminal even with stale postprocess details", async () => {
+        const h = harness();
+        const options = await h.action().createOptions("result-node", new AbortController());
+        await options.onSubmissionStarted();
+        const failure = new QueuedTaskFailedError({ ...completedTask, status: "cancelled", errorCode: "IMAGE_RESULT_PROCESSING_FAILED" });
+        await expect(options.receiveResult(Promise.reject(failure))).rejects.toBe(failure);
+        expect(h.result()!.metadata?.imageTask).toBeUndefined();
+        expect(h.result()!.metadata?.sourceTaskId).toBe(completedTask.id);
         expect(h.uploads).toEqual([]);
         h.unmount();
     });
@@ -545,6 +579,46 @@ describe("canvas image tasks across edit-lease recovery", () => {
 });
 
 describe("canvas original image task recovery", () => {
+    test.each([
+        { errorCode: "IMAGE_RESULT_PROCESSING_FAILED", failureReason: "原任务结果待核查" },
+        { lastFailure: { phase: "postprocess" }, failureReason: "原任务结果待核查" },
+        { failureReason: "渠道原件已保存到素材库，但图片后处理未完成：模型未返回有效黑白蒙版" },
+    ])("ordinary canvas postprocess failure is persisted without resume or original-image import (%j)", async detail => {
+        const h = harness({ binding, query: async () => ({ ...completedTask, ...detail, status: "paused", upstreamTaskId: "paid-original", resultUrls: ["/api/assets/provider-original/content"] }) });
+        expect(await h.action().recoverPending("result-node")).toMatchObject([{ nodeId: "result-node", status: "failed" }]);
+        expect(h.result()!.metadata).toMatchObject({ status: "error", sourceTaskId: binding.taskId, errorDetails: imageResultProcessingFailureMessage, imageTask: { ...binding, postprocessFailed: true } });
+        expect(h.result()!.metadata?.content).toBeUndefined();
+        expect(h.uploads).toEqual([]); expect(h.resumes).toEqual([]); expect(h.queries).toHaveLength(1);
+        expect(h.committed.at(-1)!.nodes[1]).toEqual(h.result());
+        await h.action().recoverPending();
+        await h.action().recoverPending("result-node");
+        expect(h.queries).toHaveLength(1); expect(h.resumes).toEqual([]); expect(h.uploads).toEqual([]);
+        h.unmount();
+    });
+
+    test("genuine upstream pause still resumes only the original task and refills the existing node", async () => {
+        let reads = 0;
+        const h = harness({ binding, query: async () => reads++ ? completedTask : { ...completedTask, status: "paused", upstreamTaskId: "paid-original", resultUrls: [], failureReason: "上游查询超时" },
+            recover: async id => ({ ...completedTask, id, status: "processing" }) });
+        await h.action().recoverPending("result-node");
+        expect(h.resumes).toEqual([binding.taskId!]);
+        expect(h.queries.map(item => item.id)).toEqual([binding.taskId!, binding.taskId!]);
+        expect(h.result()!.metadata).toMatchObject({ status: "success", sourceTaskId: binding.taskId, content: image.url });
+        expect(h.result()!.metadata?.imageTask).toBeUndefined();
+        expect(h.uploads).toEqual(completedTask.resultUrls);
+        h.unmount();
+    });
+
+    test.each(["success", "cancelled"])("%s with stale postprocess fields keeps its actual terminal semantics", async status => {
+        const h = harness({ binding, query: async () => ({ ...completedTask, status, errorCode: "IMAGE_RESULT_PROCESSING_FAILED", lastFailure: { phase: "postprocess" }, failureReason: "原任务结果待核查" }) });
+        await h.action().recoverPending("result-node");
+        expect(h.result()!.metadata?.imageTask).toBeUndefined();
+        expect(h.result()!.metadata?.status).toBe(status === "success" ? "success" : "error");
+        expect(h.uploads).toEqual(status === "success" ? completedTask.resultUrls : []);
+        expect(h.resumes).toEqual([]);
+        h.unmount();
+    });
+
     test("an old child result cannot overwrite a root with its own newer image task", async () => {
         const batchNodes = initialNodes(binding);
         batchNodes[1]!.metadata!.batchRootId = "batch-root";

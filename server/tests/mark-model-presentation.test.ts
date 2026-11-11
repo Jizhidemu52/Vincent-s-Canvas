@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { MARK_IMAGE_PROVIDER_ID, MARK_PLATFORM_MODELS } from "../../shared/mark-image-models";
 import { imageParameterProfile } from "../src/image-parameter-profile";
-import { presentAdminModel, presentPublicModel, selectCreativeModels } from "../src/model-presentation";
+import { isFeaturedModelCandidate, isImageModel, presentAdminModel, presentPublicModel, selectCreativeModels } from "../src/model-presentation";
 
 const mark = {
   id: "30000000-0000-4000-8000-000000000001", providerId: MARK_IMAGE_PROVIDER_ID,
@@ -25,11 +25,11 @@ test("Mark choices require the fixed provider and exact supported IDs, without c
 });
 
 test("all platform models retain distinct UUIDs, exact display prefixes and explicit mask capabilities", () => {
-  expect(MARK_PLATFORM_MODELS).toHaveLength(14);
+  expect(MARK_PLATFORM_MODELS).toHaveLength(15);
   expect(MARK_PLATFORM_MODELS.map(model => model.modelId)).toEqual([
     "gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gemini-nano-banana-2.1", "gpt-6-astra", "happyhorse-1.1",
     "midjourney-blend", "gpt-image-2", "grok-imagine-image-2.0", "gemini-3.1-flash-image-preview-official", "claude-sonnet-5-5",
-    "gpt-image-2.6-flare", "gpt-image-2.6-sunburst", "mai-image-2.6-flash", "seedream-5-5",
+    "gpt-image-2.6-flare", "gpt-image-2.6-sunburst", "mai-image-2.6-flash", "seedream-5-5", "gemini-4-carbon",
   ]);
   for (const [index, preset] of MARK_PLATFORM_MODELS.entries()) {
     const row = { ...mark, ...preset, id: `mark-model-${index}` };
@@ -52,6 +52,23 @@ test("all platform models retain distinct UUIDs, exact display prefixes and expl
       else expect(shown.imageSupportsMask).toBeUndefined();
     }
   }
+});
+
+test("Carbon is an appended chat/vision/tools choice with exact identity and no image generation capability", () => {
+  const preset = MARK_PLATFORM_MODELS.at(-1)!;
+  expect(preset).toMatchObject({ modelId: "gemini-4-carbon", name: "aplmart-gemini-4-carbon", defaultEnabled: true,
+    description: "文字对话、图文理解与工具调用", capabilities: ["chat", "vision", "tools"] });
+  expect(MARK_PLATFORM_MODELS.find(model => model.modelId === "gpt-6-astra")!.capabilities).toEqual(["chat"]);
+  const row = { ...mark, ...preset, id: "mark-carbon", name: "Administrator renamed Carbon" };
+  expect(isImageModel(row)).toBe(false);
+  expect(isFeaturedModelCandidate(row)).toBe(false);
+  for (const role of ["designer", "super_admin", "department_admin"]) {
+    expect(presentPublicModel(row, role)).toMatchObject({ id: row.id, modelId: row.id, parameterModelId: "gemini-4-carbon",
+      name: "aplmart-gemini-4-carbon", capabilities: ["chat", "vision", "tools"], isFeatured: false });
+  }
+  expect(presentAdminModel(row)).toMatchObject({ modelId: "gemini-4-carbon", providerId: MARK_IMAGE_PROVIDER_ID, capabilities: ["chat", "vision", "tools"] });
+  expect(selectCreativeModels([row, { ...row, id: "duplicate" }, { ...row, id: "wrong-provider", providerId: "other" },
+    { ...row, id: "wrong-protocol", protocol: "gemini" }, { ...row, id: "nearby-model", modelId: "gemini-4-argon" }])).toEqual([row]);
 });
 
 test("GPT 2.6 exposes separate descriptions and quality-resolution controls without inheriting 2.5 cost", () => {

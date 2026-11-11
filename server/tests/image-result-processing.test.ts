@@ -91,6 +91,29 @@ describe("quick image local result verification", () => {
     const output = await processImageResult({ result: large, parameters: parameters("hd-upscale"), editInput: { references: [original] } });
     expect(output.display.bytes).toBe(large.bytes); expect(output.operations).toContain("quick_image_4k_dimensions_verified");
   }, 15_000);
+  for (const [width, height, sourceWidth, sourceHeight] of [[4032, 4224, 21, 22], [3580, 4800, 179, 240]]) {
+    test(`bounded 4K rounding accepts ${width}x${height} JPEG without re-encoding or relaxing source/conversion limits`, async () => {
+      const result = { mimeType: "image/jpeg", bytes: codec([
+        "-f", "lavfi", "-i", `color=c=0x789abc:s=${width}x${height}`, "-frames:v", "1", "-threads", "1", "-c:v", "mjpeg", "-f", "image2pipe", "pipe:1",
+      ], new Uint8Array()) };
+      const before = Buffer.from(result.bytes);
+      const input = png(new Uint8Array(sourceWidth! * sourceHeight! * 4).fill(255), sourceWidth, sourceHeight);
+      const output = await processImageResult({ result, parameters: parameters("hd-upscale"), editInput: { references: [input] } });
+      expect(output.display.bytes).toBe(result.bytes);
+      expect(result.bytes).toEqual(before);
+      expect(output.operations).toEqual(["quick_image_4k_dimensions_verified"]);
+      await expect(validateQuickImageSource(result, parameters("hd-upscale"))).rejects.toThrow("16777216");
+      await expect(processImageResult({ result, parameters: { output_format: "png" } })).rejects.toThrow("16777216");
+      await expect(processImageResult({ result: { ...result, bytes: Buffer.concat([result.bytes, result.bytes]) }, parameters: parameters("hd-upscale"), editInput: { references: [input] } }))
+        .rejects.toMatchObject({ code: "INVALID_IMAGE_RESULT_INPUT" });
+    }, 30_000);
+  }
+  test("4K allowance remains capped at 18 million pixels before decoding", async () => {
+    const result = { mimeType: "image/jpeg", bytes: codec([
+      "-f", "lavfi", "-i", "color=c=white:s=4500x4002", "-frames:v", "1", "-threads", "1", "-c:v", "mjpeg", "-f", "image2pipe", "pipe:1",
+    ], new Uint8Array()) };
+    await expect(processImageResult({ result, parameters: parameters("hd-upscale"), editInput: { references: [original] } })).rejects.toThrow("18000000");
+  }, 15_000);
   test("configured HD validates its actual resolution instead of retaining a fixed 4K gate", async () => {
     const configured = { ...parameters("hd-upscale"), resolution: "1k", quickImage: { action: "hd-upscale", recipeVersion: 1, configurationVersion: 2 } };
     const oneK = png(new Uint8Array(1024 * 256 * 4).fill(255), 1024, 256);

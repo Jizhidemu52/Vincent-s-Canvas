@@ -15,10 +15,12 @@ describe("canvas workspace tools", () => {
         expect(new Set(entries.map(item => item.path)).size).toBe(entries.length);
     });
 
-    test("every formal module remains discoverable through its existing workspace", () => {
+    test("every active module remains discoverable while retired boards stay out of the workspace", () => {
         const entries = canvasWorkspaceTools(access);
         const covered = new Set(entries.flatMap(item => [item.moduleKey, ...item.capabilities.map(capability => capability.moduleKey)]));
-        expect(moduleDefinitions.filter(item => !covered.has(item.moduleKey))).toEqual([]);
+        expect(moduleDefinitions.filter(item => !covered.has(item.moduleKey)).map(item => item.moduleKey)).toEqual(["angle-control", "series-recipe"]);
+        expect(entries.some(item => ["/angle-control", "/detail-enhance", "/creative/series-recipe"].includes(item.path))).toBe(false);
+        expect(entries.find(item => item.path === "/hd-upscale")?.moduleKey).toBe("detail-enhance");
     });
 
     test("every destination matches an actual router path or a registered creative scene", () => {
@@ -50,7 +52,7 @@ describe("canvas workspace tools", () => {
     test("search finds embedded tools in their real hosts and does not expose disabled capabilities", () => {
         const entries = canvasWorkspaceTools(access);
         expect(filterCanvasWorkspaceTools(entries, "SVG").map(item => item.path)).toEqual(["/creative/style-to-sketch"]);
-        expect(filterCanvasWorkspaceTools(entries, "照片取色").map(item => item.path)).toEqual(["/creative/garment-colorway"]);
+        expect(filterCanvasWorkspaceTools(entries, "照片取色").map(item => item.path)).toEqual(["/garment-colorway"]);
         expect(filterCanvasWorkspaceTools(entries, "花型循环")[0]?.path).toBe("/creative/pattern-repeat");
         const disabled = canvasWorkspaceTools({ ...access, flags: { ...flags, "standard-colors": false, "canvas-audio": false } });
         expect(filterCanvasWorkspaceTools(disabled, "照片取色")).toEqual([]);

@@ -18,6 +18,7 @@ integration("isolated PostgreSQL shared chat policy", () => {
   let database: any;
   let db: Database;
   let sonnet: string;
+  let carbon: string;
   let alternative: string;
   let actorId: string;
   beforeAll(async () => {
@@ -36,20 +37,22 @@ integration("isolated PostgreSQL shared chat policy", () => {
     } } as unknown as Database;
     await db.query("INSERT INTO providers(id,name,protocol,base_url) VALUES($1,'Shared chat test','apimart','https://never-called.invalid')", [MARK_IMAGE_PROVIDER_ID]);
     sonnet = (await db.query("INSERT INTO model_configs(provider_id,name,model_id,capabilities) VALUES($1,'Sonnet test','claude-sonnet-5-5',ARRAY['chat']) RETURNING id", [MARK_IMAGE_PROVIDER_ID])).rows[0].id;
+    carbon = (await db.query("INSERT INTO model_configs(provider_id,name,model_id,capabilities) VALUES($1,'Carbon test','gemini-4-carbon',ARRAY['chat','vision','tools']) RETURNING id", [MARK_IMAGE_PROVIDER_ID])).rows[0].id;
     alternative = (await db.query("INSERT INTO model_configs(provider_id,name,model_id,capabilities) VALUES($1,'Astra test','gpt-6-astra',ARRAY['chat']) RETURNING id", [MARK_IMAGE_PROVIDER_ID])).rows[0].id;
     actorId = (await db.query("INSERT INTO users(username,display_name) VALUES('chat-policy-designer','Chat policy designer') RETURNING id")).rows[0].id;
   }, 30000);
   afterAll(async () => { await database?.close(); });
 
-  test("first initialization and migration seed Sonnet but preserve administrative selection and clearing", async () => {
+  test("first initialization seeds Carbon and preserves old choices, administrative selection and clearing", async () => {
     const row = async () => (await db.query("SELECT model_config_id,enabled,credit_cost_override,configuration_version FROM tool_api_configurations WHERE tool_key='gpt-chat'")).rows[0];
     await db.query("UPDATE tool_api_configurations SET enabled=false,credit_cost_override=11 WHERE tool_key='gpt-chat'");
     await initializeDefaultChatModel(db);
-    expect(await row()).toMatchObject({ model_config_id: sonnet, enabled: false, credit_cost_override: 11, configuration_version: 2 });
+    expect(await row()).toMatchObject({ model_config_id: carbon, enabled: false, credit_cost_override: 11, configuration_version: 2 });
+    expect((await db.query("SELECT capabilities FROM model_configs WHERE id=$1", [carbon])).rows[0].capabilities).toEqual(["chat", "vision", "tools"]);
     await initializeDefaultChatModel(db);
     expect((await row()).configuration_version).toBe(2);
     const migration = await readFile(`${migrations}/031_default_chat_model.sql`, "utf8");
-    for (const model of [alternative, null]) {
+    for (const model of [sonnet, alternative, null]) {
       await db.query("UPDATE tool_api_configurations SET model_config_id=$1,updated_by=$2,configuration_version=3 WHERE tool_key='gpt-chat'", [model, actorId]);
       await initializeDefaultChatModel(db);
       await database.exec(migration);
@@ -62,6 +65,8 @@ integration("isolated PostgreSQL shared chat policy", () => {
     await db.query("UPDATE tool_api_configurations SET configuration_version=1 WHERE tool_key='gpt-chat'");
     await database.exec(migration);
     expect((await row()).model_config_id).toBe(sonnet);
+    await initializeDefaultChatModel(db);
+    expect((await row()).model_config_id).toBe(sonnet);
   });
 
   test("formal HTTP chat, tool plans and canvas requests use the admin default and fail closed", async () => {
@@ -71,6 +76,7 @@ integration("isolated PostgreSQL shared chat policy", () => {
       const body = await request.json();
       calls.push({ path, body });
       if (path === "/v1/messages") return Response.json({ content: [{ type: "text", text: "Sonnet fixture reply" }], stop_reason: "end_turn" });
+      if (path === "/v1/chat/completions") return Response.json({ choices: [{ message: { role: "assistant", content: "Carbon fixture reply" }, finish_reason: "stop" }] });
       if (path === "/v1/responses") return Response.json({ output: [{ type: "message", content: [{ type: "output_text", text: "Astra fixture reply" }] }] });
       return Response.json({ error: "Unexpected local provider path" }, { status: 400 });
     } });
@@ -98,6 +104,9 @@ integration("isolated PostgreSQL shared chat policy", () => {
         expect(await response.json()).toMatchObject({ content: "Sonnet fixture reply" });
       }
       expect(calls.every(call => call.path === "/v1/messages" && call.body.model === "claude-sonnet-5-5")).toBe(true);
+      await db.query("UPDATE tool_api_configurations SET model_config_id=$1 WHERE tool_key='gpt-chat'", [carbon]);
+      expect(await (await post({ toolKey: "canvas-chat", modelId: sonnet })).json()).toMatchObject({ content: "Carbon fixture reply" });
+      expect(calls.at(-1)).toMatchObject({ path: "/v1/chat/completions", body: { model: "gemini-4-carbon", stream: false } });
       await db.query("UPDATE tool_api_configurations SET model_config_id=$1 WHERE tool_key='gpt-chat'", [alternative]);
       expect(await (await post({ toolKey: "canvas-chat", modelId: sonnet })).json()).toMatchObject({ content: "Astra fixture reply" });
       expect(calls.at(-1)).toMatchObject({ path: "/v1/responses", body: { model: "gpt-6-astra" } });
@@ -108,7 +117,7 @@ integration("isolated PostgreSQL shared chat policy", () => {
       await db.query("UPDATE tool_api_configurations SET model_config_id=$1 WHERE tool_key='gpt-chat'", [sonnet]);
       await db.query("UPDATE model_configs SET enabled=false WHERE id=$1", [sonnet]);
       expect((await post({ modelId: alternative })).status).toBe(400);
-      expect(calls).toHaveLength(4);
+      expect(calls).toHaveLength(5);
     } finally {
       await new Promise<void>(resolve => { server.close(() => resolve()); server.closeAllConnections(); });
       upstream.stop(true);

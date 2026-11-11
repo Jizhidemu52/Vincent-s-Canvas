@@ -4,7 +4,7 @@ import type { CSSProperties, ChangeEvent as ReactChangeEvent, MouseEvent as Reac
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { hasPendingImageTask, INTERRUPTED_IMAGE_TASK_ERROR } from "./canvas-project-utils";
-import { applyNodeConfigPatch, audioMetadata, createCanvasNode, getInputSummary, imageMetadata, videoMetadata, type CanvasGenerationResult } from "./canvas-project-utils";
+import { applyNodeConfigPatch, createCanvasNode, getInputSummary, imageMetadata, type CanvasGenerationResult } from "./canvas-project-utils";
 import { useCanvasBatchEdit } from "./use-canvas-batch-edit";
 import { useCanvasConnections } from "./use-canvas-connections";
 import { useCanvasGeneration } from "./use-canvas-generation";
@@ -87,7 +87,6 @@ import { canvasGenerationStackCover, reconcileCanvasGenerationStackNodes } from 
 import { syncCanvasSelectionReferences } from "@/lib/canvas/canvas-selection-references";
 import { snapCanvasDrag, transferCanvasGroupMembers } from "@/lib/canvas/canvas-selection-geometry";
 import { mapCanvasAsyncPool } from "@/lib/canvas/canvas-async-pool";
-import { prepareCanvasMediaNode } from "./canvas-import-media";
 import { canvasConversationImages } from "@/lib/canvas/canvas-assistant-image-catalog";
 import type { ConversationImageItem } from "@/components/conversation-image-controls";
 import { boundsForViewport, createCanvasSpatialIndex, refreshCanvasSpatialIndex } from "@/lib/canvas/canvas-spatial-index";
@@ -105,7 +104,7 @@ import { nextProjectTitle } from "@/lib/project-title";
 import { deploymentFeatures } from "@/lib/deployment-features";
 import { moveImageReference } from "@/lib/image-reference-policy";
 import { readImageMeta } from "@/lib/image-utils";
-import { resolveMediaUrl, uploadMediaFile } from "@/services/file-storage";
+import { resolveMediaUrl } from "@/services/file-storage";
 import { resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { CanvasGraphProvider, useCanvasGraphField, useCanvasGraphSetter } from "@/stores/canvas/canvas-graph-store";
 import { useCanvasAgentStore } from "@/stores/canvas/use-canvas-agent-store";
@@ -130,7 +129,7 @@ import {
 } from "@/types/canvas";
 import { App, ConfigProvider } from "antd";
 import { nanoid } from "nanoid";
-import { isCanvasAudioFile as isAudioFile, useCanvasClipboardDrop } from "./use-canvas-clipboard-drop";
+import { useCanvasClipboardDrop } from "./use-canvas-clipboard-drop";
 import { isExternalImageDrag } from "@/lib/dropped-images";
 import { useCanvasDialogs } from "./use-canvas-dialogs";
 import { useCanvasGenerationRuntime } from "./use-canvas-generation-runtime";
@@ -151,6 +150,7 @@ const CanvasTaskFeedbackRuntime = lazy(() => import("@/components/canvas/canvas-
 const CanvasSaveFailureNotice = lazy(() => import("@/components/canvas/canvas-save-failure-notice").then(module => ({ default: module.CanvasSaveFailureNotice })));
 const loadExperienceMetrics = () => import("@/lib/canvas/canvas-experience-metrics");
 const loadCanvasFileActions = () => import("./canvas-editor-file-actions");
+const loadCanvasNodeUploadRuntime = () => import("./canvas-node-upload-runtime");
 const CanvasNodeContextMenu = lazy(() => import("@/components/canvas/canvas-context-menu").then(module => ({ default: module.CanvasNodeContextMenu })));
 const CanvasConnectionControls = lazy(() => import("@/components/canvas/canvas-connection-controls").then(module => ({ default: module.CanvasConnectionControls })));
 const CanvasMultiSelection = lazy(() => import("@/components/canvas/canvas-multi-selection").then(module => ({ default: module.CanvasMultiSelection })));
@@ -264,7 +264,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
     const imageInputRef = useRef<HTMLInputElement>(null);
     const quickReferenceInputRef = useRef<HTMLInputElement>(null);
     const batchFilesInputRef = useRef<HTMLInputElement>(null);
-    const uploadTargetRef = useRef<{ nodeId?: string; position?: Position } | null>(null);
+    const uploadTargetRef = useRef<{ nodeId?: string; position?: Position; imageOnly?: boolean } | null>(null);
     const history = useCanvasHistoryState();
     const flushQuickHistoryRef = useRef<(() => void) | null>(null);
     const flushNodePanelDraftRef = useRef<(() => void) | null>(null);
@@ -1958,20 +1958,11 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
         signal?.throwIfAborted();
         assertCanvasImageUploadSize(file);
         const ownerId = useUserStore.getState().user?.id;
-        const image = await uploadImage(file);
+        const { createCanvasUploadedNode } = await loadCanvasNodeUploadRuntime();
+        const { node: newNode, largeImage } = await createCanvasUploadedNode(file, "image", position);
         signal?.throwIfAborted();
         if (designProjectIdRef.current !== projectId || useUserStore.getState().user?.id !== ownerId) throw new Error(uiText("画布或账号已切换，已停止导入"));
-        const size = fitNodeSize(image.width, image.height);
-        const id = `image-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-        const newNode: CanvasNodeData = {
-            id,
-            type: CanvasNodeType.Image,
-            title: file.name,
-            position: { x: position.x - size.width / 2, y: position.y - size.height / 2 },
-            width: size.width,
-            height: size.height,
-            metadata: imageMetadata(image),
-        };
+        const id = newNode.id;
 
         // Clipboard import selects its new reference, but must not replace the live creation draft.
         // Consume this selection without inventing a source prompt on the uploaded image.
@@ -1985,53 +1976,29 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
         setSelectedNodeIds(new Set([id]));
         setSelectedConnectionId(null);
         if (openPanel) setDialogNodeId(id);
-        if (isLargeCanvasImage(image)) message.info(uiText(CANVAS_LARGE_IMAGE_NOTICE));
+        if (largeImage) message.info(uiText(CANVAS_LARGE_IMAGE_NOTICE));
     }, [editorOwner, flushPendingHistory, loadQuickGenerationNode, message, projectId, setQuickGenerateReferences]);
 
     const createVideoFileNode = useCallback(async (file: File, position: Position, openPanel = true) => {
         const ownerId = useUserStore.getState().user?.id;
-        const video = await uploadMediaFile(file, "video");
+        const { createCanvasUploadedNode } = await loadCanvasNodeUploadRuntime();
+        const { node } = await createCanvasUploadedNode(file, "video", position);
         if (designProjectIdRef.current !== projectId || useUserStore.getState().user?.id !== ownerId) throw new Error(uiText("画布或账号已切换，已停止导入"));
-        const size = fitNodeSize(video.width || 1280, video.height || 720, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
-        const id = `video-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
         flushPendingHistory();
-        setNodes((prev) => [
-            ...prev,
-            {
-                id,
-                type: CanvasNodeType.Video,
-                title: file.name,
-                position: { x: position.x - size.width / 2, y: position.y - size.height / 2 },
-                width: size.width,
-                height: size.height,
-                metadata: videoMetadata(video),
-            },
-        ]);
-        setSelectedNodeIds(new Set([id]));
+        setNodes(prev => [...prev, node]);
+        setSelectedNodeIds(new Set([node.id]));
         setSelectedConnectionId(null);
-        if (openPanel) setDialogNodeId(id);
+        if (openPanel) setDialogNodeId(node.id);
     }, [flushPendingHistory, projectId]);
 
     const createAudioFileNode = useCallback(async (file: File, position: Position) => {
         const ownerId = useUserStore.getState().user?.id;
-        const audio = await uploadMediaFile(file, "audio");
+        const { createCanvasUploadedNode } = await loadCanvasNodeUploadRuntime();
+        const { node } = await createCanvasUploadedNode(file, "audio", position);
         if (designProjectIdRef.current !== projectId || useUserStore.getState().user?.id !== ownerId) throw new Error(uiText("画布或账号已切换，已停止导入"));
-        const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Audio];
-        const id = `audio-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
         flushPendingHistory();
-        setNodes((prev) => [
-            ...prev,
-            {
-                id,
-                type: CanvasNodeType.Audio,
-                title: file.name,
-                position: { x: position.x - spec.width / 2, y: position.y - spec.height / 2 },
-                width: spec.width,
-                height: spec.height,
-                metadata: audioMetadata(audio),
-            },
-        ]);
-        setSelectedNodeIds(new Set([id]));
+        setNodes(prev => [...prev, node]);
+        setSelectedNodeIds(new Set([node.id]));
         setSelectedConnectionId(null);
     }, [flushPendingHistory, projectId]);
 
@@ -2045,6 +2012,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
             const current = () => designProjectIdRef.current === projectId && useUserStore.getState().user?.id === ownerId && !signal?.aborted;
             if (!current()) return;
             try {
+                const { prepareCanvasMediaNode } = await loadCanvasNodeUploadRuntime();
                 const prepared = await mapCanvasAsyncPool(files, 3, async (file, index) => {
                     if (!current()) return null;
                     const position = canvasImportGridPosition(origin, index, files.length);
@@ -2481,11 +2449,28 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
         setNodes((prev) => nodesRef.current = prev.map((node) => (node.id === nodeId ? { ...node, height: Math.max(node.height, measuredHeight), metadata: { ...node.metadata, fontSize } } : node)));
     }, []);
 
-    const handleUploadRequest = useCallback((nodeId?: string, position?: Position) => {
-        uploadTargetRef.current = { nodeId, position };
-        if (imageInputRef.current) imageInputRef.current.multiple = !nodeId;
+    const handleUploadRequest = useCallback((nodeId?: string, position?: Position, imageOnly = false) => {
+        uploadTargetRef.current = { nodeId, position, imageOnly };
+        if (imageInputRef.current) {
+            imageInputRef.current.multiple = !nodeId;
+            imageInputRef.current.accept = imageOnly ? "image/*" : "image/*,video/*,audio/mpeg,audio/wav,audio/x-wav,.mp3,.wav";
+        }
         imageInputRef.current?.click();
     }, []);
+
+    const handleUseReferenceAsOriginal = useCallback(async (nodeId: string, referenceKey: string) => {
+        const currentGraph = () => ({ nodes: nodesRef.current, connections: connectionsRef.current, writable: writable.current });
+        const originalGraph = currentGraph();
+        const { promoteCanvasTemplateReference } = await import("./canvas-template-reference-runtime");
+        await promoteCanvasTemplateReference(nodeId, referenceKey, originalGraph, currentGraph, replacement => {
+            flushPendingHistory();
+            setNodes(prev => nodesRef.current = prev.map(node => node.id === nodeId ? replacement : node));
+            setSelectedNodeIds(new Set([nodeId]));
+            setSelectedConnectionId(null);
+            setDialogNodeId(nodeId);
+            message.success(uiText("已设为参考款原图，模板分支可继续执行"));
+        });
+    }, [flushPendingHistory, message, writable]);
 
     const handleImageInputChange = useCallback(
         async (event: ReactChangeEvent<HTMLInputElement>) => {
@@ -2493,109 +2478,27 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
             const target = uploadTargetRef.current;
             uploadTargetRef.current = null;
             event.target.value = "";
-            const files = selectedFiles.filter(file => file.type.startsWith("image/") || file.type.startsWith("video/") || isAudioFile(file));
-            if (files.length !== selectedFiles.length) message.warning(uiText("仅支持图片、视频和音频，其他文件已跳过"));
-            const file = files[0];
-            if (!file) return;
-            if (!target?.nodeId) { await importFiles(files, target?.position || getCanvasCenter()); return; }
+            const ownerId = useUserStore.getState().user?.id;
             try {
-                if (file.type.startsWith("image/")) assertCanvasImageUploadSize(file);
-                if (target?.nodeId) {
-                    if (isAudioFile(file)) {
-                        const audio = await uploadMediaFile(file, "audio");
-                        const spec = NODE_DEFAULT_SIZE[CanvasNodeType.Audio];
-                        flushPendingHistory();
-                        setNodes((prev) =>
-                            prev.map((node) =>
-                                node.id === target.nodeId
-                                    ? {
-                                          ...node,
-                                          type: CanvasNodeType.Audio,
-                                          title: file.name,
-                                          position: { x: node.position.x + node.width / 2 - spec.width / 2, y: node.position.y + node.height / 2 - spec.height / 2 },
-                                          width: spec.width,
-                                          height: spec.height,
-                                          metadata: { ...node.metadata, ...audioMetadata(audio), errorDetails: undefined },
-                                      }
-                                    : node,
-                            ),
-                        );
-                        setSelectedNodeIds(new Set([target.nodeId]));
-                        setSelectedConnectionId(null);
-                        return;
-                    }
-                    if (file.type.startsWith("video/")) {
-                        const video = await uploadMediaFile(file, "video");
-                        const nextSize = fitNodeSize(video.width || 1280, video.height || 720, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
-                        flushPendingHistory();
-                        setNodes((prev) =>
-                            prev.map((node) =>
-                                node.id === target.nodeId
-                                    ? {
-                                          ...node,
-                                          type: CanvasNodeType.Video,
-                                          title: file.name,
-                                          position: { x: node.position.x + node.width / 2 - nextSize.width / 2, y: node.position.y + node.height / 2 - nextSize.height / 2 },
-                                          width: nextSize.width,
-                                          height: nextSize.height,
-                                          metadata: { ...node.metadata, ...videoMetadata(video), errorDetails: undefined },
-                                      }
-                                    : node,
-                            ),
-                        );
-                        setSelectedNodeIds(new Set([target.nodeId]));
-                        setSelectedConnectionId(null);
-                        setDialogNodeId(target.nodeId);
-                        return;
-                    }
-                    const image = await uploadImage(file);
-                    const size = fitNodeSize(image.width, image.height);
-                    flushPendingHistory();
-                    setNodes((prev) =>
-                        prev.map((node) =>
-                            node.id === target.nodeId
-                                ? {
-                                      ...node,
-                                      type: CanvasNodeType.Image,
-                                      title: file.name,
-                                      width: size.width,
-                                      height: size.height,
-                                      metadata: {
-                                          ...node.metadata,
-                                          ...imageMetadata(image),
-                                          errorDetails: undefined,
-                                          freeResize: false,
-                                          isBatchRoot: undefined,
-                                          batchRootId: undefined,
-                                          batchChildIds: undefined,
-                                          batchUsesReferenceImages: undefined,
-                                          generationType: undefined,
-                                          model: undefined,
-                                          size: undefined,
-                                          quality: undefined,
-                                          count: undefined,
-                                          references: undefined,
-                                          compareSources: undefined,
-                                          primaryImageId: undefined,
-                                          imageBatchExpanded: undefined,
-                                      },
-                                  }
-                                : node,
-                        ),
-                    );
-                    setSelectedNodeIds(new Set([target.nodeId]));
-                    setSelectedConnectionId(null);
-                    setDialogNodeId(target.nodeId);
-                    if (isLargeCanvasImage(image)) message.info(uiText(CANVAS_LARGE_IMAGE_NOTICE));
-                } else {
-                    const position = target?.position || screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
-                    await (isAudioFile(file) ? createAudioFileNode(file, position) : file.type.startsWith("video/") ? createVideoFileNode(file, position) : createImageFileNode(file, position));
-                }
+                const { selectCanvasUploadFiles, prepareCanvasNodeUpload } = await loadCanvasNodeUploadRuntime();
+                if (designProjectIdRef.current !== projectId || useUserStore.getState().user?.id !== ownerId) throw new Error(uiText("画布或账号已切换，已停止导入"));
+                const { files, kind, warning } = selectCanvasUploadFiles(selectedFiles, target?.imageOnly);
+                if (warning) message.warning(warning);
+                const file = files[0];
+                if (!file) return;
+                if (!target?.nodeId) { await importFiles(files, target?.position || getCanvasCenter()); return; }
+                const upload = await prepareCanvasNodeUpload(file, kind);
+                flushPendingHistory();
+                setNodes(prev => prev.map(node => node.id === target.nodeId ? upload.replace(node) : node));
+                setSelectedNodeIds(new Set([target.nodeId]));
+                setSelectedConnectionId(null);
+                if (upload.openDialog) setDialogNodeId(target.nodeId);
+                if (upload.largeImage) message.info(uiText(CANVAS_LARGE_IMAGE_NOTICE));
             } catch (error) {
                 message.error(error instanceof Error ? error.message : uiText("素材导入失败，请重试"));
             }
         },
-        [createAudioFileNode, createImageFileNode, createVideoFileNode, flushPendingHistory, message, screenToCanvas, size.height, size.width, importFiles, getCanvasCenter],
+        [flushPendingHistory, message, importFiles, getCanvasCenter, projectId],
     );
 
     const pasteAssistantImage = useCallback(
@@ -2881,6 +2784,8 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
                         onConfigChange={handleConfigNodeChange}
                         onGenerate={handleGenerateNode}
                         onRestoreGeneration={restorePanelGenerationInput}
+                        onUploadOriginal={nodeId => handleUploadRequest(nodeId, undefined, true)}
+                        onUseReferenceAsOriginal={handleUseReferenceAsOriginal}
                         onStop={stopNodeObservation}
                         canvasNodes={nodes}
                         canvasConnections={connections}
@@ -2892,7 +2797,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
                 </Suspense>
                 </CanvasNodePanelBoundary>
             ),
-        [connections, editorOwner, handleConfigNodeChange, handleGenerateNode, handleNodePromptChange, mentionReferenceIndex, nodes, projectId, registerNodePanelDraftFlush, restorePanelGenerationInput, runningNodeIds, sessionRecoveryRef, stopNodeObservation, t],
+        [connections, editorOwner, handleConfigNodeChange, handleGenerateNode, handleNodePromptChange, handleUploadRequest, handleUseReferenceAsOriginal, mentionReferenceIndex, nodes, projectId, registerNodePanelDraftFlush, restorePanelGenerationInput, runningNodeIds, sessionRecoveryRef, stopNodeObservation, t],
     );
 
     const configNodeActionsRef = useRef<CanvasConfigContentActions>(null!);

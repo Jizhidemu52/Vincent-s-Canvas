@@ -128,12 +128,13 @@ test("image choices have a fixed use-case order with Gemini last regardless of c
   expect(models[0]).toBe(gemini);
 });
 
-test("text choices retain only two APIMart models and OpenToken Astra without deleting configurations", () => {
+test("text choices retain exact APIMart Carbon and existing text models without deleting configurations", () => {
   const markChat = { ...image, providerId: MARK_IMAGE_PROVIDER_ID, capabilities: ["chat", "vision", "tools"] };
   const openTokenChat = { ...markChat, providerId: "opentoken", providerName: "OpenToken", protocol: "openai" };
   const models = [
     { ...markChat, id: "mark-astra", modelId: "gpt-6-astra" },
     { ...markChat, id: "mark-sonnet", modelId: "claude-sonnet-5-5" },
+    { ...markChat, id: "mark-carbon", modelId: "gemini-4-carbon" },
     { ...openTokenChat, id: "open-astra", modelId: "gpt-6-astra" },
     { ...openTokenChat, id: "duplicate-astra", modelId: "gpt-6-astra" },
     { ...openTokenChat, id: "open-claude", modelId: "claude-fable-5-1", protocol: "anthropic" },
@@ -144,8 +145,9 @@ test("text choices retain only two APIMart models and OpenToken Astra without de
     { ...markChat, id: "wrong-provider", modelId: "gpt-6-astra", providerId: "other" },
     { ...image, id: "video", capabilities: ["video"] },
   ];
-  expect(selectCreativeModels(models).map(model => model.id)).toEqual(["mark-astra", "mark-sonnet", "open-astra", "video"]);
-  expect(models).toHaveLength(11);
+  expect(selectCreativeModels(models).map(model => model.id)).toEqual(["mark-astra", "mark-sonnet", "mark-carbon", "open-astra", "video"]);
+  expect(selectCreativeModels(models).find(model => model.id === "mark-carbon")!.capabilities).toEqual(["chat", "vision", "tools"]);
+  expect(models).toHaveLength(12);
   const renamed = { ...openTokenChat, id: "renamed", modelId: "gpt-6-astra", providerName: "Renamed", providerBaseUrl: "https://cn2.gw.opentoken.io/v1" };
   expect(selectCreativeModels([renamed])).toEqual([renamed]);
 });

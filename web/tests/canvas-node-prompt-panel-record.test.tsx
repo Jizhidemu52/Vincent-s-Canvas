@@ -7,7 +7,8 @@ import { defaultConfig, useConfigStore } from "@/stores/use-config-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { useModuleStore } from "@/stores/use-module-store";
 import { moduleKeys } from "@/services/api/modules";
-import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
+import { CanvasNodeType, type CanvasNodeData, type CanvasConnection } from "@/types/canvas";
+import { createCanvasDesignTemplate } from "@/lib/canvas/canvas-design-templates";
 
 const result: CanvasNodeData = {
     id: "result", type: CanvasNodeType.Image, title: "result", position: { x: 0, y: 0 }, width: 100, height: 100,
@@ -21,7 +22,7 @@ const result: CanvasNodeData = {
     } },
 };
 
-function render(node: CanvasNodeData, sharedConfig?: CanvasNodeData) {
+function render(node: CanvasNodeData, sharedConfig?: CanvasNodeData, canvasNodes = [node], canvasConnections: CanvasConnection[] = []) {
     const business = useBusinessConfigStore.getInitialState();
     const savedBusiness = { ...business };
     const config = useConfigStore.getInitialState();
@@ -33,9 +34,24 @@ function render(node: CanvasNodeData, sharedConfig?: CanvasNodeData) {
     Object.assign(modules, { status: "ready", flags: Object.fromEntries(moduleKeys.map(key => [key, true])) });
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     try {
-        return renderToStaticMarkup(<QueryClientProvider client={client}><CanvasNodePromptPanel node={node} sharedConfig={sharedConfig} canvasNodes={[node]} isRunning={false} onPromptChange={() => undefined} onConfigChange={() => undefined} onGenerate={() => undefined} onStop={() => undefined} onRestoreGeneration={() => undefined} /></QueryClientProvider>);
+        return renderToStaticMarkup(<QueryClientProvider client={client}><CanvasNodePromptPanel node={node} sharedConfig={sharedConfig} canvasNodes={canvasNodes} canvasConnections={canvasConnections} isRunning={false} onPromptChange={() => undefined} onConfigChange={() => undefined} onGenerate={() => undefined} onStop={() => undefined} onRestoreGeneration={() => undefined} onUploadOriginal={() => undefined} onUseReferenceAsOriginal={async () => undefined} /></QueryClientProvider>);
     } finally { Object.assign(business, savedBusiness); Object.assign(config, savedConfig); Object.assign(modules, savedModules); }
 }
+
+test("template source setup makes original upload explicit and offers single-attachment promotion only", () => {
+    const graph = createCanvasDesignTemplate("development", undefined, { x: 0, y: 0 });
+    const source = graph.nodes[0];
+    const empty = render(source, undefined, graph.nodes, graph.connections);
+    expect(empty).toContain('aria-label="参考款原图设置"');
+    expect(empty).toContain("上传参考款原图");
+    expect(empty).not.toContain('aria-label="生成"');
+    expect(empty).not.toContain("<textarea");
+    source.metadata!.manualImageReferences = [{ id: "attached", referenceKey: "upload:attached", origin: "upload", name: "coat.png", type: "image/png", content: "data:image/png;base64,coat", storageKey: "image:coat" }];
+    expect(render(source, undefined, graph.nodes, graph.connections)).toContain("将这张参考图设为原图");
+    source.metadata!.manualImageReferences.push({ ...source.metadata!.manualImageReferences[0], id: "second", referenceKey: "upload:second" });
+    expect(render(source, undefined, graph.nodes, graph.connections)).not.toContain("将这张参考图设为原图");
+    expect(render(source)).not.toContain('aria-label="参考款原图设置"');
+});
 
 test("empty result panel renders a read-only archive separately from editable input and shows every submitted reference", () => {
     const markup = render(result);

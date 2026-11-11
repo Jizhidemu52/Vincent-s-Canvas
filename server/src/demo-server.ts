@@ -608,7 +608,12 @@ async function createProviderVideoSources(_model: SupportedVideoModelId, sources
     demoSourceProbes.set(material.bytes, metadata);
     verified.push({ ...material, metadata });
   }
-  return createDemoProviderVideoSources(verified, demoPublicAssetOrigin, demoPublicVideoAssetAccess);
+  const prepared = createDemoProviderVideoSources(verified, demoPublicAssetOrigin, demoPublicVideoAssetAccess);
+  if (prepared.sources.some(source => !isPublicHttpUrl(source.publicUrl || ""))) {
+    revokeProviderVideoSources(prepared.accessTokens);
+    throw new Error("视频参考素材尚无自有公开 HTTP(S) URL；本地演示不上传素材到供应商，请使用已配置素材入口的正式服务");
+  }
+  return prepared;
 }
 
 function canManageDemoOwner(user: typeof demoAccounts[number]["user"], ownerUserId: string) {
@@ -1717,7 +1722,7 @@ Bun.serve({
         accessTokens = providerSources.accessTokens;
         const parameters = videoMotionParameters(input.parameters || {}, input.promptInput, sources.map(source => source.mimeType), modelId);
         const preflight = preflightVideoSources(modelId, videoPreflightPrompt(input), parameters, providerSources.sources);
-        return json({ ok: true, requestId: input.requestId || crypto.randomUUID(), normalized: { ...preflight.normalized, ...(input.promptInput?.scene === "video-motion" ? { generateAudio: parameters.generateAudio !== false } : {}) } });
+        return json({ ok: true, requestId: input.requestId || crypto.randomUUID(), normalized: { ...preflight.normalized, ...(input.promptInput?.scene === "video-motion" && modelId !== "gemini-omni-1.2-flash" ? { generateAudio: parameters.generateAudio !== false } : {}) } });
       } catch (error) {
         return json({ error: "INVALID_VIDEO_INPUT", message: error instanceof Error ? error.message : "Invalid video parameters" }, 400);
       } finally {

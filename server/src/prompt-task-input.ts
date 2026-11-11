@@ -6,6 +6,7 @@ import { readImageAgentGenerationProfile } from "./image-agent-profile";
 import { normalizeVideoMotionSettings } from "../../shared/video-motion-options";
 import { assertImageEditMarkupSupport } from "./image-edit-input";
 import { prepareFixedToolPrompt, type FixedToolPromptTarget } from "./fixed-tool-prompt";
+import { resolveVideoMode } from "./video-models";
 
 export type PromptTaskInput = {
   requestId: string; operationType: string; toolKey?: string; modelConfigId?: string | null;
@@ -29,9 +30,14 @@ export async function preparePromptTaskInput<T extends PromptTaskInput>(compiler
   const expectedMode = isVideo ? "video" : input.operationType === "image_generation" ? "generate" : "edit";
   if (promptInput.mode !== expectedMode || (promptInput.scene === "video-motion") !== isVideo) throw new PromptOptimizationError("PROMPT_OPERATION_INVALID", "优化模式与实际生成操作不一致，未提交生成");
   let sourceUrls = input.sourceUrls;
+  let videoTimelineDuration = parameters.seconds;
   if (isVideo) {
     const mimeTypes = options.videoSourceMimeTypes;
     if (!mimeTypes || mimeTypes.length !== input.sourceUrls.length) throw new PromptOptimizationError("VIDEO_PREFLIGHT_REQUIRED", "视频素材尚未完成预检，未调用动效规划");
+    const target = await compiler.runtime.resolveTarget(actor, { requestId: input.requestId, modelConfigId: input.modelConfigId, toolKey: input.toolKey, promptInput, sourceUrls: input.sourceUrls });
+    const omni = target.protocol === "apimart" && target.modelId === "gemini-omni-1.2-flash";
+    const videoMode = omni ? resolveVideoMode("gemini-omni-1.2-flash", parameters, mimeTypes.map(mimeType => ({ mimeType, bytes: new Uint8Array() }))) : parameters.videoMode;
+    if (omni && videoMode === "edit") videoTimelineDuration = undefined;
     const imageIndexes = mimeTypes.flatMap((mime, index) => mime.startsWith("image/") ? [index] : []);
     sourceUrls = imageIndexes.map(index => input.sourceUrls[index]!);
     const roles = promptInput.referenceRoles;
@@ -42,9 +48,13 @@ export async function preparePromptTaskInput<T extends PromptTaskInput>(compiler
       return kind ? [{ kind, index: ++counters[kind], role: roles.length === mimeTypes.length ? roles[index] ?? "" : "" }] : [];
     });
     promptInput.referenceRoles = roles.length === mimeTypes.length ? imageIndexes.map(index => roles[index]!) : roles;
-    if (!promptInput.referenceRoles.length) promptInput.referenceRoles = imageIndexes.map((_, index) => parameters.videoMode === "first-last-frame" ? index ? "尾帧" : "首帧" : parameters.videoMode === "first-frame" ? "首帧" : "参考图片");
-    promptInput.fields = { ...normalizeVideoMotionSettings(promptInput.fields), duration: parameters.seconds, ratio: parameters.size,
-      resolution: parameters.resolution, video_mode: parameters.videoMode, generate_audio: parameters.generateAudio !== false, media_references: mediaReferences,
+    if (!promptInput.referenceRoles.length) promptInput.referenceRoles = imageIndexes.map((_, index) => videoMode === "first-last-frame"
+      ? index === 0 ? "首帧" : !omni || index === 1 ? "尾帧" : "参考图片"
+      : videoMode === "first-frame" && (!omni || index === 0) ? "首帧" : "参考图片");
+    promptInput.fields = { ...normalizeVideoMotionSettings(promptInput.fields), ...(videoTimelineDuration !== undefined ? { duration: videoTimelineDuration } : {}), ratio: parameters.size,
+      resolution: parameters.resolution, video_mode: videoMode, generate_audio: omni || parameters.generateAudio !== false, media_references: mediaReferences,
+      ...(omni ? { duration_mode: videoMode === "edit" ? "source" : videoMode === "extend" ? "added" : "output", native_audio: true,
+        ...(videoMode === "edit" ? { source_duration: parameters.seconds } : {}) } : {}),
       media_source_ids: mimeTypes.flatMap((mime, index) => mime.startsWith("image/") ? [] : [input.sourceUrls[index]!]) };
     promptInput.outputLanguage = "zh";
   }
@@ -68,7 +78,7 @@ export async function preparePromptTaskInput<T extends PromptTaskInput>(compiler
   if (compilation.status !== "success" || !compilation.prompt) throw new PromptOptimizationError(compilation.errorCode || "PROMPT_OPTIMIZING",
     compilation.message || "提示词仍在优化，未提交生成，请查询原请求", compilation.status === "failed" ? 422 : 409);
   if (compilation.questions?.length) throw new PromptOptimizationError("PROMPT_CLARIFICATION_REQUIRED", `请先补充要求再生成：${compilation.questions.join("；")}`, 422);
-  if (isVideo) assertVideoMotionTimeline(compilation.prompt, parameters.seconds);
+  if (isVideo) assertVideoMotionTimeline(compilation.prompt, videoTimelineDuration);
   if (["pattern-extract", "pattern-colorway"].includes(promptInput.scene)) {
     const target = await compiler.runtime.resolveTarget(actor, { requestId: input.requestId, modelConfigId: input.modelConfigId,
       toolKey: input.toolKey, promptInput, sourceUrls: input.sourceUrls }, { adminTest: compilation.adminTest === true });

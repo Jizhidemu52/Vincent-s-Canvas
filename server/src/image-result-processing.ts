@@ -29,6 +29,10 @@ type ImageMetadata = { width: number; height: number; pixelFormat: string };
 const formats: Record<string, string> = { "image/png": "png_pipe", "image/jpeg": "jpeg_pipe", "image/webp": "webp_pipe" };
 const MAX_FILE_BYTES = 50 * 1024 * 1024;
 const MAX_PIXELS = 16_777_216;
+// Providers round 4K aspect-ratio outputs above 4096² (for example 3580×4800).
+// Only pass-through HD validation gets this bounded allowance; compositing and
+// format conversion keep the original working-buffer limit.
+const MAX_HD_RESULT_PIXELS = 18_000_000;
 const MAX_EDGE = 8192;
 const TOOL_TIMEOUT_MS = 30_000;
 const ALPHA_8BIT = /^(?:rgba|bgra|argb|abgr|ya8)$/;
@@ -71,7 +75,7 @@ function runTool(tool: "ffmpeg" | "ffprobe", args: string[], maxBuffer: number):
 const toolLimits = ["-v", "error", "-max_alloc", "134217728", "-threads", "1"];
 const safeImageInput = ["-protocol_whitelist", "file,pipe", "-format_whitelist", "png_pipe,jpeg_pipe,webp_pipe"];
 
-async function inspect(file: string, mimeType: string, bytes: Uint8Array): Promise<ImageMetadata> {
+async function inspect(file: string, mimeType: string, bytes: Uint8Array, maxPixels = MAX_PIXELS): Promise<ImageMetadata> {
   const output = await runTool("ffprobe", [...toolLimits, ...safeImageInput,
     "-show_entries", "format=format_name:stream=codec_type,width,height,pix_fmt", "-of", "json", file,
   ], 64 * 1024);
@@ -82,8 +86,8 @@ async function inspect(file: string, mimeType: string, bytes: Uint8Array): Promi
   const image = streams[0];
   if (info.format?.format_name !== formats[mimeType] || streams.length !== 1 || !image
     || !Number.isInteger(image.width) || !Number.isInteger(image.height) || image.width! < 1 || image.height! < 1
-    || image.width! > MAX_EDGE || image.height! > MAX_EDGE || image.width! * image.height! > MAX_PIXELS) {
-    throw new ImageResultProcessingError("INVALID_IMAGE_RESULT_INPUT", "图片真实格式或尺寸无效；后处理仅支持单帧 PNG/JPEG/WebP、单边不超过 8192 且不超过 16777216 像素");
+    || image.width! > MAX_EDGE || image.height! > MAX_EDGE || image.width! * image.height! > maxPixels) {
+    throw new ImageResultProcessingError("INVALID_IMAGE_RESULT_INPUT", `图片真实格式或尺寸无效；后处理仅支持单帧 PNG/JPEG/WebP、单边不超过 8192 且不超过 ${maxPixels} 像素`);
   }
   // JPEG/PNG/WebP EXIF direction is usually frame side data, not stream rotation.
   // Decode only one bounded frame after validating dimensions, and fail instead of guessing alignment.
@@ -99,11 +103,12 @@ async function inspect(file: string, mimeType: string, bytes: Uint8Array): Promi
   return { width: image.width!, height: image.height!, pixelFormat: image.pix_fmt || "" };
 }
 
-async function decode(file: string, metadata: ImageMetadata, pixelFormat: "rgba" | "rgba64le" = "rgba") {
-  const expected = metadata.width * metadata.height * (pixelFormat === "rgba64le" ? 8 : 4);
+async function decode(file: string, metadata: ImageMetadata, pixelFormat: "rgba" | "rgba64le" = "rgba", validateOnly = false) {
+  const expected = (validateOnly ? 1 : metadata.width * metadata.height) * (pixelFormat === "rgba64le" ? 8 : 4);
   // Read at most two frames. The second is only for detecting and rejecting animation/concatenation.
   const pixels = await runTool("ffmpeg", ["-nostdin", ...toolLimits, ...safeImageInput, "-noautorotate", "-i", file,
-    "-map", "0:v:0", "-frames:v", "2", "-threads", "1", "-f", "rawvideo", "-pix_fmt", pixelFormat, "pipe:1",
+    "-map", "0:v:0", "-frames:v", "2", ...(validateOnly ? ["-vf", "scale=1:1"] : []),
+    "-threads", "1", "-f", "rawvideo", "-pix_fmt", pixelFormat, "pipe:1",
   ], expected * 2 + 64 * 1024);
   if (pixels.byteLength !== expected) throw new ImageResultProcessingError("INVALID_IMAGE_RESULT_INPUT", "图片不是完整单帧内容，不能安全合成或导出");
   return pixels;
@@ -128,13 +133,13 @@ async function createImageProcessingFiles() {
     await writeFile(file, bytes);
     return file;
   };
-  const load = async (name: string, image: ProcessedResultImage) => {
+  const load = async (name: string, image: ProcessedResultImage, maxPixels = MAX_PIXELS) => {
     const mimeType = providerImageMimeType(image.bytes, image.mimeType);
     if (!formats[mimeType] || !image.bytes.byteLength || image.bytes.byteLength > MAX_FILE_BYTES) {
       throw new ImageResultProcessingError("INVALID_IMAGE_RESULT_INPUT", "后处理图片必须是非空且不超过 50 MiB 的 PNG、JPEG 或 WebP");
     }
     const file = await localFile(name, image.bytes);
-    return { file, mimeType, metadata: await inspect(file, mimeType, image.bytes) };
+    return { file, mimeType, metadata: await inspect(file, mimeType, image.bytes, maxPixels) };
   };
   const cleanup = async () => {
     try {
@@ -255,7 +260,7 @@ export async function processImageResult({ result, parameters, editInput }: Imag
     return { bytes, mimeType };
   };
   try {
-    const generated = await load("generated", result);
+    const generated = await load("generated", result, quickAction === "hd-upscale" ? MAX_HD_RESULT_PIXELS : MAX_PIXELS);
     if (quickAction === "item-extract") {
       // Extraction may reframe a worn product into a flat lay, unlike exact-frame
       // upscaling/matting. Validate real output pixels without forcing source ratio.
@@ -293,7 +298,9 @@ export async function processImageResult({ result, parameters, editInput }: Imag
           || generated.metadata.width < source.metadata.width || generated.metadata.height < source.metadata.height) {
           throw new ImageResultProcessingError("IMAGE_RESULT_DIMENSION_MISMATCH", "高清结果未达到配置分辨率或小于原图尺寸；渠道原件已保留，不会把低清结果标记为高清放大成功");
         }
-        await decode(generated.file, generated.metadata);
+        // Decode each full frame, but retain only a 1×1 validation sample. The
+        // provider bytes stay untouched and multi-frame output is still rejected.
+        await decode(generated.file, generated.metadata, "rgba", true);
         return { display: { bytes: result.bytes, mimeType: generated.mimeType }, operations: [resolution === "4k" ? "quick_image_4k_dimensions_verified" : "quick_image_dimensions_verified"],
           warning: "AI 高清修复结果，已验证输出尺寸与宽高比；文字及细节请结合原图检查。" };
       }

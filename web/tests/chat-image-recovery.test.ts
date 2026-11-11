@@ -47,6 +47,23 @@ describe("read-only chat image recovery", () => {
         expect(calls).toEqual([{ url: "/api/tasks/original-task", method: "GET" }]);
     });
 
+    test.each([
+        { status: "paused", errorCode: "IMAGE_RESULT_PROCESSING_FAILED" },
+        { status: "paused", lastFailure: { phase: "postprocess" } },
+        { status: "paused", failureReason: "渠道原件已保存到素材库，但图片后处理未完成：decoder failed" },
+        { status: "failed", errorCode: "IMAGE_RESULT_PROCESSING_FAILED" },
+    ])("postprocessing failure remains terminal even on explicit resume: %j", async failure => {
+        respond(() => ({ task: { ...originalTask, ...failure, upstreamTaskId: "upstream-original" } }));
+        const result = await recoverChatImageTask(pending, { resumePaused: true });
+        expect(result.kind).toBe("failed");
+        if (result.kind !== "failed") throw new Error("Expected terminal processing failure");
+        expect(result.content).toContain("原件已保存到素材库");
+        expect(result.content).toContain("taskId: original-task");
+        expect(result.content).toContain("requestId: chat-request:0");
+        expect(result.content).not.toMatch(/上游查询|decoder/);
+        expect(calls).toEqual([{ url: "/api/tasks/original-task", method: "GET" }]);
+    });
+
     test.each(["waiting", "processing"])("a %s reconciliation snapshot reads once and leaves scheduling to the event watcher", async (status) => {
         respond(() => ({ task: { ...originalTask, status, resultUrls: [] } }));
         const result = await recoverChatImageTask(pending, { snapshotOnly: true });
@@ -222,6 +239,12 @@ describe("read-only chat image recovery", () => {
 });
 
 describe("explicit chat image original-task resume", () => {
+    test("postprocessing failure returned during recovery is settled instead of leaving a stale resume action", async () => {
+        respond((_url, init) => ({ task: { ...originalTask, status: "paused", upstreamTaskId: "upstream-original", ...(init?.method === "POST" ? { errorCode: "IMAGE_RESULT_PROCESSING_FAILED" } : {}) } }));
+        const result = await recoverChatImageTask(pending, { resumePaused: true });
+        expect(result.kind).toBe("failed");
+        expect(calls).toEqual([{ url: "/api/tasks/original-task", method: "GET" }, { url: "/api/tasks/original-task/recover", method: "POST" }]);
+    });
     const pausedTask = { ...originalTask, status: "paused", upstreamTaskId: "upstream-original", resultUrls: [] };
 
     test("resumes a verified paused original task once, then returns its existing result", async () => {

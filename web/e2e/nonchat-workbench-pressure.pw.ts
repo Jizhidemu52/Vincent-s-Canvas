@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import type { BrowserContext, Page, TestInfo } from "@playwright/test";
 import { test, expect, fixturePng, type MockCanvasApi } from "./fixtures";
 import { toolDefinitions } from "../../shared/feature-catalog";
+import { seedRetiredRecipes, snapshotRetiredRecipes, expectRecipeRetired } from "./retired-recipe-fixtures";
 
 // Each pressure case performs up to ten independent uploads, submissions,
 // reconciliations and original-byte checks. Keep this bounded when the main CI
@@ -138,36 +139,31 @@ function finish(api: MockCanvasApi, r: Receipt, id: string, failed = false) {
     task.resultUrls = failed ? [] : [`/api/assets/${id}/content`]; r.events.push({ at: Date.now() - r.started, event: task.status, id });
 }
 
-async function readResults(page: Page, kind: "image" | "video" | "creative" | "recipe") {
+async function readResults(page: Page, kind: "image" | "video" | "creative") {
     return page.evaluate(async kind => {
         const { createWorkspaceStorage } = await import("/src/lib/workspace-storage.ts");
         const { getImageBlob } = await import("/src/services/image-storage.ts");
         const { getMediaBlob } = await import("/src/services/file-storage.ts");
         const records: any[] = [];
-        await createWorkspaceStorage(kind === "image" ? "image_generation_logs" : kind === "video" ? "video_generation_logs" : kind === "creative" ? "creative_scene_workspaces" : "series_recipe_workspaces").iterate((value: any, key) => {
+        await createWorkspaceStorage(kind === "image" ? "image_generation_logs" : kind === "video" ? "video_generation_logs" : "creative_scene_workspaces").iterate((value: any, key) => {
             if (kind === "creative" && !key.startsWith("history-record:")) return; records.push(value);
         });
         const output: Array<{ taskId: string; workspaceId: string; prompt: string; references: string[]; sha256: string; bytes: number; storage: string }> = [];
         for (const log of records) {
-            const images = kind === "video" ? log.video ? [{ ...log.video, sourceTaskId: log.task?.id }] : [] : kind === "recipe" ? (log.run?.branches || []).flatMap((branch: any) => branch.images.map((image: any) => ({ ...image, sourceTaskId: branch.taskIds[0] }))) : log.images || [];
+            const images = kind === "video" ? log.video ? [{ ...log.video, sourceTaskId: log.task?.id }] : [] : log.images || [];
             for (const image of images) {
                 if (!image.sourceTaskId) continue;
-                // Recipe's documented local-project contract deliberately keeps
-                // the original same-origin asset URL; portable export embeds it.
-                // Read only that persisted content URL, never a thumbnail or an
-                // invented URL reconstructed from a task identifier.
-                const cloudOriginal = kind === "recipe" && /^\/api\/assets\/[\w-]+\/content(?:\?[^#]*)?$/.test(image.dataUrl || "");
-                const blob = image.storageKey ? await (kind === "video" ? getMediaBlob(image.storageKey) : getImageBlob(image.storageKey)) : image.dataUrl?.startsWith("data:") || cloudOriginal ? await (await fetch(image.dataUrl)).blob() : null;
+                const blob = image.storageKey ? await (kind === "video" ? getMediaBlob(image.storageKey) : getImageBlob(image.storageKey)) : image.dataUrl?.startsWith("data:") ? await (await fetch(image.dataUrl)).blob() : null;
                 if (!blob) throw new Error(`No persisted original: ${kind}:${image.sourceTaskId}`);
                 const sha256 = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", await blob.arrayBuffer())), byte => byte.toString(16).padStart(2, "0")).join("");
-                output.push({ taskId: image.sourceTaskId, workspaceId: log.workspaceId || log.form?.series || "default", prompt: log.prompt || log.form?.series || "", references: (log.references || log.submittedReferences || []).map((item: any) => item.name), sha256, bytes: blob.size, storage: cloudOriginal ? "durable-cloud-original" : "local-original" });
+                output.push({ taskId: image.sourceTaskId, workspaceId: log.workspaceId || "default", prompt: log.prompt || "", references: (log.references || log.submittedReferences || []).map((item: any) => item.name), sha256, bytes: blob.size, storage: "local-original" });
             }
         }
         return output;
     }, kind);
 }
 
-async function verifyResults(page: Page, api: MockCanvasApi, r: Receipt, kind: "image" | "video" | "creative" | "recipe", expectedSuccess: string[]) {
+async function verifyResults(page: Page, api: MockCanvasApi, r: Receipt, kind: "image" | "video" | "creative", expectedSuccess: string[]) {
     await expect.poll(async () => (await readResults(page, kind)).length).toBe(expectedSuccess.length);
     const records = await readResults(page, kind); expect(records.map(record => record.taskId).sort()).toEqual([...expectedSuccess].sort());
     for (const record of records) {
@@ -249,8 +245,7 @@ for (const [sceneIndex, scene] of scenes.entries()) test(`pressure creative ${sc
 });
 
 for (const tool of [
-    { path: "/image?tool=image-edit", button: "开始编辑", prompt: true }, { path: "/image?tool=detail-enhance", button: "开始增强", prompt: true },
-    { path: "/image?tool=angle-control", button: "生成角度图", prompt: true }, { path: "/item-extract", button: "提取产品图", prompt: false },
+    { path: "/image?tool=image-edit", button: "开始编辑", prompt: true }, { path: "/item-extract", button: "提取产品图", prompt: false },
     { path: "/hd-upscale", button: "高清放大", prompt: false }, { path: "/remove-background", button: "一键去背景", prompt: false },
 ]) test(`pressure tool ${tool.path}: three independent sources, no lost work after reload`, async ({ page, context, api }, info) => {
     const r = await setup(context, api, info), pool = await fixtures(page), ids: string[] = [];
@@ -268,34 +263,21 @@ for (const tool of [
     expect(api.submissions).toHaveLength(3); expect(r.controls).toEqual([]);
 });
 
-test("pressure series recipe: six independent frozen recipes coexist and preserve reverse-completed branches", async ({ page, context, api }, info) => {
-    const r = await setup(context, api, info), pool = await fixtures(page), ids: string[] = [];
-    await page.goto("/creative/series-recipe");
+test("retired recipe preserves six frozen projects and original bytes without executing their branches", async ({ page, context, api }, info) => {
+    const r = await setup(context, api, info);
+    const before = await seedRetiredRecipes(page, 6);
+    expect(before.projects).toHaveLength(6);
+    expect(before.files).toHaveLength(6);
     for (let index = 0; index < 6; index++) {
-        if (index) await next(page, index + 1); const marker = `RECIPE_${index}_独立系列`, source = sourcesFor(pool, marker, index % 5)[0];
-        await active(page).getByRole("textbox", { name: "系列名称", exact: true }).fill(marker);
-        await active(page).getByLabel("上传参考底图（必需）", { exact: true }).setInputFiles(source);
-        await active(page).getByRole("button", { name: "生成第 1 色 1 张", exact: true }).click(); await expect.poll(() => api.submissions.length).toBe(index + 1);
-        ids.push(sourceProof(api, r, marker, [source])); expect(api.submissions.at(-1)!.promptInput.fields.series).toBe(marker);
+        await page.goto(`/creative/series-recipe?task=${index ? `retired-${index}` : "default"}`);
+        await expectRecipeRetired(page);
     }
-    expect(r.peakInflight).toBe(6);
-    for (const index of [5, 3, 1, 4, 2, 0]) finish(api, r, ids[index]);
-    for (let index = 0; index < 6; index++) await expect(tabs(page).nth(index)).toContainText("已完成");
-    await verifyResults(page, api, r, "recipe", ids);
-    for (let index = 0; index < 6; index++) {
-        await select(page, index); const download = page.waitForEvent("download");
-        await active(page).getByRole("button", { name: "导出完整项目 JSON", exact: true }).click();
-        const path = await (await download).path(); expect(path).toBeTruthy(); const exported = JSON.parse(readFileSync(path!, "utf8"));
-        expect(exported.form.series).toBe(`RECIPE_${index}_独立系列`); expect(exported.run.branches[0].taskIds).toEqual([ids[index]]);
-        const resultData = exported.run.branches[0].images[0].dataUrl as string; expect(resultData).toMatch(/^data:image\/png;base64,/);
-        expect(hash(Buffer.from(resultData.split(",")[1], "base64"))).toBe(hash(api.assetBytes.get(ids[index])!));
-        const sourceData = exported.references[0].dataUrl as string; expect(sourceData).toMatch(/^data:image\/(png|jpeg|webp);base64,/);
-        expect(hash(Buffer.from(sourceData.split(",")[1], "base64"))).toBe(hash(r.expected.get(ids[index])!.sources[0].buffer));
-        r.events.push({ at: Date.now() - r.started, event: "portable-export-originals-verified", id: ids[index] });
-    }
-    await page.reload(); await expect(tabs(page)).toHaveCount(6);
-    for (const index of [5, 0, 3]) { await select(page, index); await expect(active(page).getByRole("textbox", { name: "系列名称", exact: true })).toHaveValue(`RECIPE_${index}_独立系列`); await expect(active(page).locator(".sr-result img")).toHaveCount(1); }
-    expect(api.submissions).toHaveLength(6); expect(r.controls).toEqual([]);
+    await page.reload();
+    await expectRecipeRetired(page);
+    expect(await snapshotRetiredRecipes(page)).toEqual(before);
+    expect(api.submissions).toHaveLength(0);
+    expect(api.taskReads).toEqual([]);
+    expect(r.controls).toEqual([]);
 });
 
 test("pressure seamless: six independent pending sources survive reload and reverse completion", async ({ page, context, api }, info) => {

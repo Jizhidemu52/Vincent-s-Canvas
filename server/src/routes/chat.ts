@@ -20,6 +20,7 @@ import { imageAgentRepairMetadata } from "../image-agent-profile";
 import { chatUpstreamFailureMessage, readChatUpstreamFailure, type ChatUpstreamFailureReason } from "../chat-upstream-failure";
 import { createProductCandidatesRouter, type ProductCandidatesRouterOptions } from "./product-candidates";
 import { imageAgentVisionError } from "../../../shared/image-agent-capabilities";
+import { type ProviderChatImageAccess, supportsProviderChatImages } from "../provider-chat-images";
 
 type ResponseContent = { type: "input_text"; text: string } | { type: "input_image"; image_url: string };
 export type ResponseInput =
@@ -32,7 +33,8 @@ export type ResponseTool = { type: "function"; name: string; description?: strin
 type ToolCall = { id: string; type: "function"; function: { name: string; arguments: string }; thoughtSignature?: string };
 export type ChatCompletionUsage = { inputTokens?: number; outputTokens?: number; actualCost?: number; currency?: string };
 export type ChatCompletionResult = { content: string; toolCalls: ToolCall[]; stopReason?: string; claudeAssistantContent?: Array<Record<string, unknown>>; responsesOutputItems?: Array<Record<string, unknown>>; usage?: ChatCompletionUsage };
-export type ChatCompletionInput = { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown; webSearch?: boolean; gemini?: { maxOutputTokens: number }; claude?: { stream?: boolean; thinking?: boolean; maxTokens?: number }; privateProfile?: boolean };
+export type ChatCompletionInput = { input: ResponseInput[]; tools: ResponseTool[]; toolChoice?: unknown; webSearch?: boolean; gemini?: { maxOutputTokens: number }; claude?: { stream?: boolean; thinking?: boolean; maxTokens?: number }; privateProfile?: boolean;
+    providerImages?: { access: ProviderChatImageAccess; userId: string } };
 type ChatModel = { model_id: string; base_url: string; protocol: string; encrypted_credentials: string | null };
 /** Shared by explicit administrator analysis selection and the execution adapter. */
 export const CHAT_COMPLETION_PROTOCOLS = ["openai", "custom", "apimart", "gemini", "anthropic", "openai-chat"] as const;
@@ -101,6 +103,7 @@ function chatErrorMetadata(error: unknown) {
 }
 
 export type ChatRouterOptions = {
+    providerImages?: ProviderChatImageAccess;
     loadProfileRules?: (profile: ChatPromptProfile, actor: AuthenticatedRequest["auth"]) => Promise<string>;
     validateProfileOutput?: (result: ChatCompletionResult, privateRules: readonly string[]) => void | Promise<void>;
     productCandidates?: ProductCandidatesRouterOptions;
@@ -109,7 +112,7 @@ export type ChatRouterOptions = {
 export function createChatRouter(db: Database, config: AppConfig, options: ChatRouterOptions = {}) {
     const router = Router();
     const features = deploymentFeatures(config);
-    router.use(createProductCandidatesRouter(db, config, requestChatCompletion, options.productCandidates ?? {}));
+    router.use(createProductCandidatesRouter(db, config, requestChatCompletion, { ...options.productCandidates, providerImages: options.providerImages }));
 
     router.post("/responses", async (request, response, next) => {
         const startedAt = performance.now();
@@ -218,7 +221,8 @@ export function createChatRouter(db: Database, config: AppConfig, options: ChatR
                 response.end();
                 return;
             }
-            let resultPayload = await requestChatCompletion(model, credentials, input);
+            let resultPayload = await requestChatCompletion(model, credentials, { ...input,
+                ...(options.providerImages ? { providerImages: { access: options.providerImages, userId: actor.id } } : {}) });
             providerInFlight = false;
             if (prepared.privateRules.length) {
                 resultPayload = validateChatProfileOutput(resultPayload, prepared.privateRules);
@@ -301,6 +305,10 @@ export async function requestChatCompletion(
     credentials: Record<string, string>,
     input: ChatCompletionInput,
 ): Promise<ChatCompletionResult> {
+    if (input.providerImages && supportsProviderChatImages(model)) {
+        const { providerImages, ...requestInput } = input;
+        return providerImages.access.run(providerImages.userId, requestInput, prepared => requestChatCompletion(model, credentials, prepared));
+    }
     if (!(CHAT_COMPLETION_PROTOCOLS as readonly string[]).includes(model.protocol)) throw new ChatProtocolError("PROTOCOL_NOT_SUPPORTED", "当前对话入口暂不支持该 Provider 协议");
     const usesResponses = model.protocol === "openai" || model.protocol === "custom" || (model.protocol === "apimart" && model.model_id === "gpt-6-astra");
     if (!usesResponses && input.input.some(item => "type" in item && item.type === "responses_assistant"))
@@ -611,7 +619,7 @@ function readApiMartChatChoices(body: Record<string, unknown>): ChatCompletionRe
     const content = choice.message.content || "";
     const toolCalls = choice.message.tool_calls || [];
     if (!content.trim() && !toolCalls.length) throw invalidApiMartChatResponse();
-    return { content, toolCalls, ...(choice.finish_reason ? { stopReason: choice.finish_reason } : {}), ...usageResult(body) };
+    return { content, toolCalls, ...(choice.finish_reason ? { stopReason: choice.finish_reason } : {}), ...usageResult(body, "chat-completions") };
 }
 
 function readApiMartResponses(body: Record<string, unknown>): ChatCompletionResult {
@@ -679,6 +687,7 @@ async function requestOpenAiChatCompletion(
             messages,
             // APIMart documents stream=true by default. This endpoint returns one JSON result.
             ...(model.protocol === "apimart" ? { stream: false } : {}),
+            ...(model.model_id === "gemini-4-carbon" && input.gemini ? { max_tokens: input.gemini.maxOutputTokens } : {}),
             ...(input.tools.length ? {
                 tools: input.tools.map(({ type, ...definition }) => ({ type, function: definition })),
                 tool_choice: toolChoice,
@@ -691,7 +700,7 @@ async function requestOpenAiChatCompletion(
     if (model.protocol === "apimart") return readApiMartChatChoices(await readApiMartChatPayload(upstream));
     const body = await upstream.json() as { choices?: Array<{ message?: { content?: string | null; tool_calls?: ToolCall[] }; finish_reason?: string }> };
     const choice = body.choices?.[0];
-    return { content: choice?.message?.content || "", toolCalls: choice?.message?.tool_calls || [], ...(choice?.finish_reason ? { stopReason: choice.finish_reason } : {}), ...usageResult(body) };
+    return { content: choice?.message?.content || "", toolCalls: choice?.message?.tool_calls || [], ...(choice?.finish_reason ? { stopReason: choice.finish_reason } : {}), ...usageResult(body, "chat-completions") };
 }
 
 async function requestGeminiCompletion(
@@ -817,13 +826,19 @@ function requestHeaders(credentials: Record<string, string>) {
 }
 
 /** Provider-reported accounting only. Missing fields stay unknown, never estimated as zero. */
-export function readChatUsage(body: unknown, protocol?: "anthropic" | "gemini"): ChatCompletionUsage | undefined {
+export function readChatUsage(body: unknown, protocol?: "anthropic" | "gemini" | "chat-completions"): ChatCompletionUsage | undefined {
     const record = (value: unknown): Record<string, unknown> => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
     const root = record(body), usage = record(root.usage), gemini = record(root.usageMetadata);
     const number = (value: unknown) => typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
     const tokens = (value: unknown) => { const count = number(value); return count !== undefined && Number.isSafeInteger(count) ? count : undefined; };
     let inputTokens = tokens(usage.input_tokens ?? usage.prompt_tokens);
     let outputTokens = tokens(usage.output_tokens ?? usage.completion_tokens);
+    // APIMart's Chat Completions also includes zero-valued Responses aliases.
+    // Use the endpoint's authoritative fields, never those placeholder zeros.
+    if (protocol === "chat-completions") {
+        inputTokens = tokens(usage.prompt_tokens) ?? tokens(usage.input_tokens);
+        outputTokens = tokens(usage.completion_tokens) ?? tokens(usage.output_tokens);
+    }
     if (protocol === "anthropic" && inputTokens !== undefined) inputTokens += (tokens(usage.cache_creation_input_tokens) || 0) + (tokens(usage.cache_read_input_tokens) || 0);
     if (protocol === "gemini") {
         inputTokens = tokens(gemini.promptTokenCount);
@@ -839,7 +854,7 @@ export function readChatUsage(body: unknown, protocol?: "anthropic" | "gemini"):
     return Object.keys(result).length ? result : undefined;
 }
 
-function usageResult(body: unknown, protocol?: "anthropic" | "gemini") {
+function usageResult(body: unknown, protocol?: "anthropic" | "gemini" | "chat-completions") {
     const usage = readChatUsage(body, protocol);
     return usage ? { usage } : {};
 }

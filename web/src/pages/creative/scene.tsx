@@ -12,7 +12,7 @@ import { GenerationQueueProgress } from "@/components/generation-queue-progress"
 import { DesignResultReview } from "@/components/design-result-review";
 import { designHandoffToken } from "@/lib/design-handoff";
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ModuleGate } from "@/components/auth/module-gate";
 import { PracticeExampleRecord } from "@/components/design-examples";
 import { designExamplesForScene } from "@/lib/design-examples";
@@ -21,7 +21,7 @@ import { ImageSettingsPanel, imageQualityLabel, imageSizeLabel } from "@/compone
 import { ModelPicker } from "@/components/model-picker";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { deploymentFeatures } from "@/lib/deployment-features";
-import { creativePresets, getCreativePreset, type CreativePreset } from "@/lib/creative-presets";
+import { buildCreativePresetHref, creativeCatalogPresets, getCreativePreset, isStandaloneCreativePreset, type CreativePreset } from "@/lib/creative-presets";
 import { isModuleAvailable, useModuleEnabled, useModuleStore } from "@/stores/use-module-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -43,10 +43,13 @@ import type { ToolKey } from "../../../../shared/feature-catalog";
 export default function CreativeScenePage() {
     useUiText();
     const { presetId } = useParams<{ presetId: string }>();
-    const preset = getCreativePreset(presetId ?? null);
+    const location = useLocation();
+    const standaloneId = location.pathname.slice(1).replace(/\/$/, "");
+    const preset = getCreativePreset(presetId ?? (isStandaloneCreativePreset(standaloneId) ? standaloneId : null));
     const [searchParams] = useSearchParams();
     const handoffToken = designHandoffToken(searchParams, `creative-${preset?.id || ""}`);
     const ownerId = useUserStore(state => state.user?.id);
+    if (preset && isStandaloneCreativePreset(preset.id) && location.pathname.startsWith("/creative/")) return <Navigate to={`${buildCreativePresetHref(preset)}${location.search}${location.hash}`} replace />;
     if (!preset) return <main className="wb-page wb-empty h-full">
         <h1 className="wb-title">{uiText("设计场景不存在")}</h1>
         <p>{uiText("请返回创意设计选择其他场景。")}</p>
@@ -81,7 +84,8 @@ function CreativeSceneWorkspace({ preset, handoffToken }: { preset: CreativePres
     const summary = sceneSummaries[preset.id]!;
     const examples = designExamplesForScene(preset.id);
     const slots = getSceneSlots(preset.id, ws.form);
-    const available = creativePresets.filter(item => isModuleAvailable(flags, tools, `creative-${item.id}` as ModuleKey));
+    const standalone = isStandaloneCreativePreset(preset.id);
+    const available = creativeCatalogPresets.filter(item => isModuleAvailable(flags, tools, `creative-${item.id}` as ModuleKey));
     const submit = () => { setView("results"); void ws.generate(); };
     const historyBusy = ws.running || ws.loading || ws.historyLoading;
     const selectableLogs = ws.logs.filter(log => !log.unresolvedCount);
@@ -105,13 +109,13 @@ function CreativeSceneWorkspace({ preset, handoffToken }: { preset: CreativePres
 
     return <main className="wb-page cs-page">
         <header className="cs-header">
-            <Link to="/creative" className="cs-back"><ArrowLeft size={16} /><span>{uiText("创意设计")}</span></Link>
+            <Link to={standalone ? "/" : "/creative"} className="cs-back"><ArrowLeft size={16} /><span>{uiText(standalone ? "工作台" : "创意设计")}</span></Link>
             <span className="cs-header-divider" />
-            <div className="cs-scene-picker">
-                <select aria-label={uiText("切换设计场景")} value={preset.id} onChange={event => navigate(`/creative/${event.target.value}`)}>
+            {standalone ? <span className="font-medium">{uiText(preset.title)}</span> : <div className="cs-scene-picker">
+                <select aria-label={uiText("切换设计场景")} value={preset.id} onChange={event => { const next = getCreativePreset(event.target.value); if (next) navigate(buildCreativePresetHref(next)); }}>
                     {available.map(item => <option key={item.id} value={item.id}>{uiText(item.title || "")}</option>)}
                 </select><ChevronDown size={14} />
-            </div>
+            </div>}
             <button className="cs-new" type="button" disabled={ws.running || ws.loading} onClick={() => { ws.reset(); setView("history"); }}><Plus size={15} />{uiText("清空当前草稿")}</button>
         </header>
         <div className="cs-layout">

@@ -11,9 +11,9 @@ import type { ReferenceImage } from "@/types/image";
 
 export const designDestinations = [
     { id: "creative-style-to-sketch", label: "款生线稿", href: "/creative/style-to-sketch" },
-    { id: "creative-garment-colorway", label: "服装配色", href: "/creative/garment-colorway" },
-    { id: "creative-local-restyle", label: "局部改款", href: "/creative/local-restyle" },
-    { id: "creative-back-design", label: "背面设计", href: "/creative/back-design" },
+    { id: "creative-garment-colorway", label: "服装配色", href: "/garment-colorway" },
+    { id: "creative-local-restyle", label: "局部改款", href: "/local-restyle" },
+    { id: "creative-back-design", label: "背面设计", href: "/back-design" },
     { id: "creative-pattern-extract", label: "花型提取", href: "/creative/pattern-extract" },
     { id: "image-edit", label: "图片编辑", href: "/image?tool=image-edit" },
 ] as const;

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { buildCreativePresetHref, CREATIVE_REQUIREMENT_PLACEHOLDER, creativePresetGroups, creativePresets, getCreativePreset } from "@/lib/creative-presets";
+import { buildCreativePresetHref, CREATIVE_REQUIREMENT_PLACEHOLDER, creativeCatalogPresets, creativePresetGroups, creativePresets, getCreativePreset, isStandaloneCreativePreset } from "@/lib/creative-presets";
 
 describe("creative design presets", () => {
     test("offers eleven uniquely addressable presets across the three design groups", () => {
@@ -21,26 +21,29 @@ describe("creative design presets", () => {
         expect(getCreativePreset(id)).toBeUndefined();
     });
 
-    test("every card opens its own creative route without using the original image page or query parameters", () => {
+    test("each workflow has its own canonical route without using the image page or query parameters", () => {
         const links = creativePresets.map(buildCreativePresetHref);
         expect(new Set(links).size).toBe(creativePresets.length);
         for (const preset of creativePresets) {
             const url = new URL(buildCreativePresetHref(preset), "https://canvas.test");
-            expect(url.pathname).toBe(`/creative/${preset.id}`);
+            expect(url.pathname).toBe(isStandaloneCreativePreset(preset.id) ? `/${preset.id}` : `/creative/${preset.id}`);
             expect(url.pathname.startsWith("/image")).toBe(false);
             expect(url.search).toBe("");
             expect(url.hash).toBe("");
-            expect(getCreativePreset(url.pathname.split("/")[2]!)).toBe(preset);
+            expect(getCreativePreset(url.pathname.split("/").at(-1)!)).toBe(preset);
         }
     });
 
     test("clothing edits have separate creative pages while retaining their structured workflow metadata", () => {
         const restyle = getCreativePreset("local-restyle")!;
         const colorway = getCreativePreset("garment-colorway")!;
-        expect(buildCreativePresetHref(restyle)).toBe("/creative/local-restyle");
-        expect(buildCreativePresetHref(colorway)).toBe("/creative/garment-colorway");
+        expect(buildCreativePresetHref(restyle)).toBe("/local-restyle");
+        expect(buildCreativePresetHref(colorway)).toBe("/garment-colorway");
         expect(restyle).toMatchObject({ tool: "image-edit", garment: "restyle" });
         expect(colorway).toMatchObject({ tool: "image-edit", garment: "colorway" });
+        expect(buildCreativePresetHref(getCreativePreset("back-design")!)).toBe("/back-design");
+        expect(creativeCatalogPresets).toHaveLength(8);
+        expect(creativeCatalogPresets.some(preset => isStandaloneCreativePreset(preset.id))).toBe(false);
     });
 
     test("tasks requiring user choices expose the same explicit placeholder without inventing a garment", () => {

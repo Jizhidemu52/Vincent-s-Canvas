@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { publicTaskFailurePayload } from "../../../shared/generation-error";
+import { IMAGE_RESULT_POSTPROCESS_FAILURE_CODE, IMAGE_RESULT_POSTPROCESS_FAILURE_PREFIX, publicTaskFailurePayload } from "../../../shared/generation-error";
 import { Router } from "express";
 import { z } from "zod";
 import { taskSubmissionSchema as singleSchema, batchSubmissionSchema as batchSchema } from "../../../shared/task-contracts";
@@ -42,8 +42,13 @@ import { layerStudioTaskOptions } from "../../../shared/layer-studio-options";
 
 const actionSchema = z.enum(["pause", "resume", "cancel"]);
 
-const taskSelect = `t.id,t.tool_key AS "toolKey",t.model_config_id AS "modelConfigId",t.request_id AS "requestId",t.batch_id AS "batchId",t.user_id AS "userId",u.display_name AS "userName",t.project_id AS "projectId",t.operation_type AS "operationType",t.prompt,t.parameters,t.source_urls AS "sourceUrls",t.result_urls AS "resultUrls",t.result_document AS "resultDocument",t.priority,t.status,t.credits,t.rmb_cost::float8 AS "rmbCost",t.failure_reason AS "failureReason",t.attempts,t.upstream_task_id AS "upstreamTaskId",t.upstream_submission_started_at AS "submissionStartedAt",t.queued_at AS "queuedAt",t.started_at AS "startedAt",t.completed_at AS "completedAt",t.user_input AS "userInput",t.prompt_optimized AS optimized,t.parameters->'promptOptimization'->>'summaryZh' AS "summaryZh"`;
-const taskSummarySelect = `t.id,t.tool_key AS "toolKey",t.model_config_id AS "modelConfigId",t.request_id AS "requestId",t.batch_id AS "batchId",t.user_id AS "userId",u.display_name AS "userName",t.project_id AS "projectId",t.operation_type AS "operationType",left(t.prompt,240) AS prompt,t.result_urls AS "resultUrls",t.result_document AS "resultDocument",t.priority,t.status,t.credits,t.rmb_cost::float8 AS "rmbCost",t.failure_reason AS "failureReason",t.attempts,t.upstream_task_id AS "upstreamTaskId",t.upstream_submission_started_at AS "submissionStartedAt",t.queued_at AS "queuedAt",t.started_at AS "startedAt",t.completed_at AS "completedAt",t.parameters->'promptOptimization'->>'summaryZh' AS "summaryZh"`;
+// Derive a safe public category from the exact local persistence error. This also
+// classifies already-paused tasks without changing their stored diagnostics.
+const postprocessFailureCondition = `t.status='paused' AND t.failure_reason LIKE '${IMAGE_RESULT_POSTPROCESS_FAILURE_PREFIX}：%'`;
+const postprocessFailureSelect = `CASE WHEN ${postprocessFailureCondition} THEN '${IMAGE_RESULT_POSTPROCESS_FAILURE_CODE}' END AS "errorCode",CASE WHEN ${postprocessFailureCondition} THEN jsonb_build_object('phase','postprocess','code','${IMAGE_RESULT_POSTPROCESS_FAILURE_CODE}') END AS "lastFailure"`;
+
+const taskSelect = `t.id,t.tool_key AS "toolKey",t.model_config_id AS "modelConfigId",t.request_id AS "requestId",t.batch_id AS "batchId",t.user_id AS "userId",u.display_name AS "userName",t.project_id AS "projectId",t.operation_type AS "operationType",t.prompt,t.parameters,t.source_urls AS "sourceUrls",t.result_urls AS "resultUrls",t.result_document AS "resultDocument",t.priority,t.status,t.credits,t.rmb_cost::float8 AS "rmbCost",t.failure_reason AS "failureReason",t.attempts,t.upstream_task_id AS "upstreamTaskId",t.upstream_submission_started_at AS "submissionStartedAt",t.queued_at AS "queuedAt",t.started_at AS "startedAt",t.completed_at AS "completedAt",t.user_input AS "userInput",t.prompt_optimized AS optimized,t.parameters->'promptOptimization'->>'summaryZh' AS "summaryZh",${postprocessFailureSelect}`;
+const taskSummarySelect = `t.id,t.tool_key AS "toolKey",t.model_config_id AS "modelConfigId",t.request_id AS "requestId",t.batch_id AS "batchId",t.user_id AS "userId",u.display_name AS "userName",t.project_id AS "projectId",t.operation_type AS "operationType",left(t.prompt,240) AS prompt,t.result_urls AS "resultUrls",t.result_document AS "resultDocument",t.priority,t.status,t.credits,t.rmb_cost::float8 AS "rmbCost",t.failure_reason AS "failureReason",t.attempts,t.upstream_task_id AS "upstreamTaskId",t.upstream_submission_started_at AS "submissionStartedAt",t.queued_at AS "queuedAt",t.started_at AS "startedAt",t.completed_at AS "completedAt",t.parameters->'promptOptimization'->>'summaryZh' AS "summaryZh",${postprocessFailureSelect}`;
 const batchSelect = `b.id,b.tool_key AS "toolKey",b.model_config_id AS "modelConfigId",b.request_id AS "requestId",b.user_id AS "userId",u.display_name AS "userName",b.department_id AS "departmentId",b.project_id AS "projectId",b.operation_type AS "operationType",m.name AS "modelName",b.priority,b.status,b.total_items AS "totalItems",b.completed_items AS "completedItems",b.failed_items AS "failedItems",stats.waiting_items AS "waitingItems",stats.processing_items AS "processingItems",stats.paused_items AS "pausedItems",stats.cancelled_items AS "cancelledItems",stats.planned_credits AS "plannedCredits",stats.consumed_credits AS "consumedCredits",stats.consumed_rmb_cost AS "consumedRmbCost",b.created_at AS "createdAt",b.updated_at AS "updatedAt"`;
 const batchStatsJoin = `LEFT JOIN LATERAL (SELECT
   COUNT(*) FILTER (WHERE t.status='waiting')::int AS waiting_items,
@@ -165,13 +170,19 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
   router.post("/:id/recover", async (request, response, next) => {
     try {
       const actor = (request as unknown as AuthenticatedRequest).auth;
-      const result = await db.query<{ id: string; requestId: string; status: string; operationType: string; upstreamTaskId: string | null; submissionStartedAt: string | null; attempts: number; priority: TaskPriority; queuedAt: string; availableAt: string }>(
+      const result = await db.query<{ id: string; requestId: string; status: string; operationType: string; upstreamTaskId: string | null; submissionStartedAt: string | null; attempts: number; priority: TaskPriority; queuedAt: string; availableAt: string; errorCode: string | null; failureReason: string | null }>(
         `SELECT ${taskSelect},t.available_at AS "availableAt" FROM tasks t JOIN users u ON u.id=t.user_id WHERE t.id=$1 AND t.user_id=$2`,
         [request.params.id, actor.id],
       );
       const task = result.rows[0];
       if (!task) {
         response.status(404).json({ error: "NOT_FOUND", message: "任务不存在" });
+        return;
+      }
+      if (task.errorCode === IMAGE_RESULT_POSTPROCESS_FAILURE_CODE) {
+        // The provider has already finished. Generic recovery only re-polls it;
+        // it is not a local postprocessing repair and must not requeue this task.
+        response.json({ task, recovered: false, message: task.failureReason });
         return;
       }
       const canPollOriginalTask = Boolean(task.upstreamTaskId);

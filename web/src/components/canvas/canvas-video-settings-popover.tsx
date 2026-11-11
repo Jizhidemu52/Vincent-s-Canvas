@@ -5,7 +5,7 @@ import { Button } from "antd";
 
 import { VideoSettingsPanel, videoResolutionLabel, videoSecondsLabel, videoSizeLabel } from "@/components/video-settings-panel";
 import { canvasThemes } from "@/lib/canvas-theme";
-import { normalizeVideoModelConfig, type VideoModelParameterKey } from "@/lib/video-model-parameters";
+import { getVideoModelParameterSpec, normalizeVideoModelConfig, type VideoModelParameterKey } from "@/lib/video-model-parameters";
 import { useThemeStore } from "@/stores/use-theme-store";
 import type { AiConfig } from "@/stores/use-config-store";
 
@@ -24,13 +24,14 @@ export function CanvasVideoSettingsPopover({ config, onConfigChange, buttonClass
     const panelRef = useRef<HTMLDivElement>(null);
     const [open, setOpen] = useState(false);
     const [buttonRect, setButtonRect] = useState<DOMRect | null>(null);
-    const normalized = normalizeVideoModelConfig(config);
+    const normalized = normalizeVideoModelConfig(config, undefined, imageMode);
+    const mode = normalized.videoMode === "auto" ? imageMode : normalized.videoMode;
 
     useEffect(() => {
-        for (const [key, value] of Object.entries(normalizeVideoModelConfig(config))) {
+        for (const [key, value] of Object.entries(normalizeVideoModelConfig(config, undefined, imageMode))) {
             if (config[key as VideoModelParameterKey] !== value) onConfigChange(key as VideoModelParameterKey, value);
         }
-    }, [config, onConfigChange]);
+    }, [config, onConfigChange, imageMode]);
 
     useEffect(() => {
         if (!open) return;
@@ -60,7 +61,7 @@ export function CanvasVideoSettingsPopover({ config, onConfigChange, buttonClass
             <span ref={buttonRef} className="inline-flex min-w-0">
                 <Button size="small" type="text" className={buttonClassName || "!h-8 !max-w-[170px] !justify-start !rounded-full !px-2.5"} style={{ background: theme.node.fill, color: theme.node.text }} icon={<Settings2 className="size-3.5" />} onClick={() => setOpen((current) => !current)}>
                     <span className="truncate">
-                        {videoResolutionLabel(normalized.vquality)} · {videoSizeLabel(normalized.size)} · {videoSecondsLabel(normalized.videoSeconds)}
+                        {videoResolutionLabel(normalized.vquality)} · {videoSizeLabel(normalized.size)} · {videoSecondsLabel(normalized.videoSeconds, mode, getVideoModelParameterSpec(config)?.extendAddsDuration)}
                     </span>
                 </Button>
             </span>

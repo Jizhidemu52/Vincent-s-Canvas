@@ -53,7 +53,7 @@ const serverImage = (id: string, title: string) => ({ id, ownerUserId: owner, ow
     metadata: { title, width: 256, height: 256 }, createdAt: "2026-11-01T00:00:00Z", contentUrl: `/api/assets/${id}/content`, thumbnailUrl: `/api/assets/${id}/thumb?w=256`,
     resultStatus: "unused", usabilityScore: 0, downloadCount: 0, firstDownloadedAt: null, eventCount: 0 });
 
-for (const path of ["/image", "/image?tool=detail-enhance", "/image?tool=angle-control", "/image?tool=midjourney-blend", "/remove-background", "/hd-upscale", "/item-extract"]) {
+for (const path of ["/image", "/image?tool=image-edit", "/image?tool=midjourney-blend", "/remove-background", "/hd-upscale", "/item-extract"]) {
     test(`shared image board accepts library originals: ${path}`, async ({ page, context, api }) => {
         const asset = serverImage(imageId, "跨板块原图"); api.assets.set(imageId, asset); api.assetBytes.set(imageId, IMAGE);
         await context.route(url => url.pathname === "/api/assets", route => route.fulfill({ json: { assets: [asset], hasMore: false } }));

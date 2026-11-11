@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import ts from "typescript";
-import { ApiMartImageQueryRetryable, ApiMartImageTaskPending, stepApiMartImageTask, type ApiMartImageTaskInput } from "../src/apimart-image";
+import { ApiMartImageQueryRetryable, ApiMartImageTaskPending, preflightApiMartImageRequest, stepApiMartImageTask, type ApiMartImageTaskInput } from "../src/apimart-image";
 import { assertImageEditMaskSupport, prepareImageEditInput } from "../src/image-edit-input";
 import { validateQuickImageSource } from "../src/image-result-processing";
 import { ProviderImageAccess } from "../src/provider-image-access";
@@ -91,7 +91,7 @@ function harness(options: { origin?: string; failIssue?: boolean; realCacheFailu
     validateQuickImageSource: async (...args: Parameters<typeof validateQuickImageSource>) => {
       events.push("validate-quick"); if (options.failQuickValidation) throw new Error("Quick source invalid"); return validateQuickImageSource(...args);
     },
-    VideoSubmissionClaimLost: class extends Error {}, ApiMartImageTaskPending, ApiMartImageQueryRetryable,
+    VideoSubmissionClaimLost: class extends Error {}, ApiMartImageTaskPending, ApiMartImageQueryRetryable, preflightApiMartImageRequest,
     stepApiMartImageTask: (input: ApiMartImageTaskInput) => stepApiMartImageTask(input, { fetch: fakeFetch, sleep: async () => { throw new Error("No polling sleep expected"); } }),
     fetchProviderResult: async () => { downloads++; return { bytes, mimeType: "image/png" }; },
   };
@@ -146,22 +146,48 @@ test("an uncertain earlier submission cannot reload sources, publish references,
   expect(h.grants).toHaveLength(0); expect(h.calls).toHaveLength(0); expect(h.loaded()).toBe(0);
 });
 
-test.each([
-  { origin: "", model: "gpt-image-2.6-flare" },
-  { origin, model: "gpt-image-2.6-sunburst" },
-  { origin, model: "gpt-image-2.5-flare" },
-  { origin, model: "mai-image-2.6-flash" },
-])("no configured origin or non-Flare model retains the existing upload path: %p", async scenario => {
-  const h = harness({ origin: scenario.origin, sourceAssets: [sources[0]!] }), task = { ...newTask(), model_id: scenario.model };
+test.each(["gpt-image-2.6-flare", "gpt-image-2.6-sunburst", "gpt-image-2.5-flare", "mai-image-2.6-flash"])(
+  "missing owned origin stops %s before granting, uploading or submitting", async model => {
+  const h = harness({ origin: "", sourceAssets: [sources[0]!] }), task = { ...newTask(), model_id: model };
+  await expect(h.execute(task)).rejects.toMatchObject({ code: "PROVIDER_IMAGE_ORIGIN_REQUIRED" });
+  expect(h.grants).toHaveLength(0); expect(h.calls).toHaveLength(0); expect(h.queries).toHaveLength(0);
+});
+
+test.each(["gpt-image-2.6-sunburst", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "mai-image-2.6-flash", "gemini-nano-banana-2.1", "gpt-image-2", "gemini-3.1-flash-image-preview"])(
+  "every standard APIMart image model %s uses the owned origin without a supplier upload", async model => {
+  const h = harness({ sourceAssets: [sources[0]!] }), task = { ...newTask(), model_id: model };
   await expect(h.execute(task)).rejects.toBeInstanceOf(ApiMartImageTaskPending);
-  expect(h.grants).toHaveLength(0);
-  expect(h.calls.map(call => call.url)).toEqual(["https://provider.invalid/v1/uploads/images", "https://provider.invalid/v1/images/generations"]);
+  expect(h.grants).toHaveLength(1);
+  expect(h.calls.map(call => call.url)).toEqual(["https://provider.invalid/v1/images/generations"]);
+  expect(h.calls[0]!.payload!.image_urls).toEqual([`${origin}/api/provider-images/reference-${sources[0]!.assetId}`]);
 });
 
 test("a cache grant failure stops before the paid POST and never falls back to uploading", async () => {
   const h = harness({ failIssue: true });
   await expect(h.execute(newTask())).rejects.toThrow("Cache grant write unavailable");
   expect(h.grants).toHaveLength(1); expect(h.calls).toHaveLength(0); expect(h.queries).toHaveLength(0);
+});
+
+test.each([
+  { model: "gemini-3.1-flash-image-preview", bytes: 10 * 1024 * 1024 + 1, mime: "image/png" },
+  { model: "grok-imagine-image-2.0", bytes: 10 * 1024 * 1024 + 1, mime: "image/png" },
+  { model: "midjourney", bytes: 12 * 1024 * 1024 + 1, mime: "image/png" },
+  { model: "gpt-image-2.5-flare", bytes: 20 * 1024 * 1024 + 1, mime: "image/png" },
+  { model: "mai-image-2.6-flash", bytes: 128, mime: "image/tiff" },
+  { model: "gemini-3.1-flash-image-preview", bytes: 128, mime: "image/gif" },
+])("owned URLs cannot bypass original model byte/MIME restrictions: %p", async scenario => {
+  const h = harness({ sourceAssets: [{ ...sources[0]!, bytes: Buffer.alloc(scenario.bytes), mimeType: scenario.mime }] });
+  const task = { ...newTask(), model_id: scenario.model, source_urls: [newTask().source_urls[0]!] };
+  await expect(h.execute(task)).rejects.toThrow();
+  expect(h.grants).toHaveLength(0); expect(h.calls).toHaveLength(0); expect(h.queries).toHaveLength(0);
+});
+
+test("owned URLs retain GPT aggregate-size rejection before any grant or provider POST", async () => {
+  const large = Buffer.alloc(20 * 1024 * 1024);
+  const refs = Array.from({ length: 13 }, (_, index) => ({ ...sources[0]!, assetId: `10000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`, bytes: large }));
+  const h = harness({ sourceAssets: refs }), task = { ...newTask(), model_id: "gpt-image-2", source_urls: refs.map(source => `/api/assets/${source.assetId}/content`) };
+  await expect(h.execute(task)).rejects.toThrow("总大小不能超过 256 MB");
+  expect(h.grants).toHaveLength(0); expect(h.calls).toHaveLength(0); expect(h.queries).toHaveLength(0);
 });
 
 test("the real grant service cache failure propagates through Worker without a claim, upload or paid POST", async () => {
@@ -208,9 +234,9 @@ test.each(imageToolRoutes)("production dispatcher covers catalog image route %p 
   const submissions = h.calls.filter(call => call.url.endsWith(route.tool === "midjourney-blend" ? "/midjourney/generations/blend" : "/images/generations"));
   expect(submissions).toHaveLength(1);
   if (route.tool === "midjourney-blend") {
-    expect(h.grants).toHaveLength(0);
-    expect(h.calls.filter(call => call.url.endsWith("/uploads/images"))).toHaveLength(sources.length);
-    expect(submissions[0]!.payload!.image_urls).toHaveLength(sources.length);
+    expect(h.grants).toHaveLength(sources.length);
+    expect(h.calls.filter(call => call.url.endsWith("/uploads/images"))).toHaveLength(0);
+    expect(submissions[0]!.payload!.image_urls).toEqual(sources.map(source => `${origin}/api/provider-images/reference-${source.assetId}`));
     return;
   }
   expect(submissions[0]!.payload!.model).toBe(task.model_id);
@@ -234,9 +260,9 @@ test.each(["gpt-image-2.6-sunburst", "gpt-image-2.5-flare", "mai-image-2.6-flash
     const h = harness({ sourceAssets: [sources[0]!] }), task = { ...providerTask(), model_id: model,
       source_urls: [providerTask().source_urls[0]!], parameters: { tool: "canvas-edit", model: "gpt-image-2.6-flare" } };
     await expect(h.dispatch(task)).rejects.toBeInstanceOf(ApiMartImageTaskPending);
-    expect(h.grants).toHaveLength(0);
-    expect(h.calls.map(call => call.url)).toEqual(["https://provider.invalid/v1/uploads/images", "https://provider.invalid/v1/images/generations"]);
-    expect(h.calls[1]!.payload!.model).toBe(model);
+    expect(h.grants).toHaveLength(1);
+    expect(h.calls.map(call => call.url)).toEqual(["https://provider.invalid/v1/images/generations"]);
+    expect(h.calls[0]!.payload!.model).toBe(model);
   },
 );
 

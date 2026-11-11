@@ -58,6 +58,19 @@ test("only an explicit recovery callback can resume a paused task with a known u
     expect((await observeCanvasImageTask(binding, unknown.options))?.status).toBe("paused");
 });
 
+test.each([
+    { errorCode: "IMAGE_RESULT_PROCESSING_FAILED", failureReason: "原任务结果待核查" },
+    { lastFailure: { phase: "postprocess" }, failureReason: "原任务结果待核查" },
+    { failureReason: "渠道原件已保存到素材库，但图片后处理未完成：模型未返回有效黑白蒙版；任务已暂停，不会自动重新生成。" },
+])("postprocess pause never resumes the paid upstream task (%j)", async detail => {
+    const failed = task("paused", { ...detail, upstreamTaskId: "paid-original", resultUrls: ["/api/assets/provider-original/content"] });
+    let resumed = 0;
+    const info = setup({ getTask: async () => failed, recoverTask: async () => { resumed++; return task("processing"); } });
+    expect(await observeCanvasImageTask(binding, info.options)).toBe(failed);
+    expect(resumed).toBe(0);
+    expect(info.seen).toEqual([failed]);
+});
+
 test("processing waits for persistence, then polls the same task until success", async () => {
     const persisted = deferred<void>();
     const notified = deferred<void>();

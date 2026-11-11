@@ -155,7 +155,7 @@ export const designExamples: Record<string, DesignExample> = {
     }),
     "creative-local-restyle": example("creative-local-restyle", {
         title: "局部改款 · 马甲换金属扣", category: "女装",
-        purpose: "修改服装的指定细节。", location: "创意设计 → 局部改款",
+        purpose: "修改服装的指定细节。", location: "左侧导航 → 局部改款",
         media: pair("womenswear", "输入 · 三颗同色扣马甲", "结果示意 · 哑光金属扣"),
         steps: [
             { title: "输入", detail: "马甲原图和三颗纽扣换金属扣的要求。" },
@@ -166,7 +166,7 @@ export const designExamples: Record<string, DesignExample> = {
     }),
     "creative-garment-colorway": example("creative-garment-colorway", {
         title: "服装配色 · 毛衫改海军蓝", category: "毛衫",
-        purpose: "为同一服装尝试不同配色。", location: "创意设计 → 服装配色",
+        purpose: "为同一服装尝试不同配色。", location: "左侧导航 → 服装配色",
         media: pair("knit", "输入 · 燕麦色毛衫", "结果示意 · 海军蓝"),
         steps: [
             { title: "输入", detail: "毛衫原图和海军蓝目标色。" },
@@ -177,7 +177,7 @@ export const designExamples: Record<string, DesignExample> = {
     }),
     "creative-back-design": example("creative-back-design", {
         title: "背面设计 · 针织 Polo 补背面", category: "男装",
-        purpose: "根据正面图设计服装背面。", location: "创意设计 → 背面设计",
+        purpose: "根据正面图设计服装背面。", location: "左侧导航 → 背面设计",
         media: [asset("menswear-source", "输入 · 男装 Polo 正面"), asset("menswear-back", "结果示意 · 背面方案")],
         steps: [
             { title: "输入", detail: "针织Polo正面图和简洁背面要求。" },
@@ -340,11 +340,12 @@ const additionalSceneExamples: Record<string, DesignExample> = {
     }),
 };
 
-const imageTools = new Set(["image", "detail-enhance", "image-edit", "angle-control", "seamless-stitch", "midjourney-blend"]);
+const imageTools = new Set(["image", "image-edit", "seamless-stitch", "midjourney-blend"]);
 const paths: Record<string, string> = {
     "/video": "video", "/chat": "gpt-chat", "/prompts": "prompts", "/my-prompts": "my-prompts",
     "/assets": "assets", "/design-library": "design-library", "/reference-import": "reference-import",
-    "/creative/pattern-placement": "pattern-placement", "/creative/pattern-repeat": "pattern-repeat", "/creative/series-recipe": "series-recipe",
+    "/creative/pattern-placement": "pattern-placement", "/creative/pattern-repeat": "pattern-repeat",
+    "/local-restyle": "creative-local-restyle", "/garment-colorway": "creative-garment-colorway", "/back-design": "creative-back-design",
 };
 
 export function designExampleForScene(id: string): DesignExample | undefined {

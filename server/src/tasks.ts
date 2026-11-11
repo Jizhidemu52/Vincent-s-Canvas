@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { IMAGE_RESULT_POSTPROCESS_FAILURE_PREFIX } from "../../shared/generation-error";
 import { singleImageTaskParameters } from "./image-task-policy";
 import { BillingError, reserveCredits, settleReservation, type PriceSnapshot } from "./billing";
 import type { Cache, Database } from "./db";
@@ -350,15 +351,17 @@ export async function transitionTask(
     attempts: number;
     upstream_task_id: string | null;
     upstream_submission_started_at: string | null;
+    failure_reason: string | null;
   }>(
-    "SELECT id,request_id,batch_id,status,priority,queued_at,operation_type,attempts,upstream_task_id,upstream_submission_started_at FROM tasks WHERE id=$1 AND status IN ('waiting','paused')",
+    "SELECT id,request_id,batch_id,status,priority,queued_at,operation_type,attempts,upstream_task_id,upstream_submission_started_at,failure_reason FROM tasks WHERE id=$1 AND status IN ('waiting','paused')",
     [taskId],
   );
   const task = current.rows[0];
   if (
     !task ||
     (action === "pause" && task.status !== "waiting") ||
-    (action === "resume" && (task.status !== "paused" || (!task.upstream_task_id && (task.upstream_submission_started_at || (task.operation_type !== "video_generation" && task.attempts > 0)))))
+    (action === "resume" && (task.status !== "paused" || task.failure_reason?.startsWith(`${IMAGE_RESULT_POSTPROCESS_FAILURE_PREFIX}：`)
+      || (!task.upstream_task_id && (task.upstream_submission_started_at || (task.operation_type !== "video_generation" && task.attempts > 0)))))
   )
     return null;
 
@@ -377,8 +380,10 @@ export async function transitionTask(
            CASE WHEN upstream_workflow_context->>'timeoutSeconds' ~ '^[0-9]{1,4}$'
              THEN LEAST(7200,GREATEST(30,(upstream_workflow_context->>'timeoutSeconds')::int)) ELSE 600 END * interval '1 second'
          WHEN operation_type='video_generation' THEN interval '20 minutes' ELSE interval '15 minutes' END
-       ELSE poll_deadline_at END,updated_at=now() WHERE id=$1 AND status='paused' AND (upstream_task_id IS NOT NULL OR (upstream_submission_started_at IS NULL AND (operation_type='video_generation' OR attempts=0))) RETURNING id`,
-      [taskId],
+       ELSE poll_deadline_at END,updated_at=now() WHERE id=$1 AND status='paused'
+       AND COALESCE(failure_reason,'') NOT LIKE $2
+       AND (upstream_task_id IS NOT NULL OR (upstream_submission_started_at IS NULL AND (operation_type='video_generation' OR attempts=0))) RETURNING id`,
+      [taskId, `${IMAGE_RESULT_POSTPROCESS_FAILURE_PREFIX}：%`],
     );
     if (!changed.rows[0]) return null;
     try {

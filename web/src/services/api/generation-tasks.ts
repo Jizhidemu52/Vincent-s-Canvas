@@ -1,5 +1,6 @@
 import { nanoid } from "nanoid";
-import { generationErrorMessage, generationSubmissionRejected } from "@/lib/generation-feedback";
+import { generationErrorMessage, generationSubmissionRejected, imageResultProcessingFailureMessage, isImageResultProcessingFailure } from "@/lib/generation-feedback";
+import { IMAGE_RESULT_POSTPROCESS_FAILURE_CODE } from "../../../../shared/generation-error";
 import { cancelOriginalTask } from "@/lib/generation-task-cancel";
 import { completedTaskDurationMs } from "@/lib/completed-task-duration";
 import type { PromptInputData } from "../../../../shared/prompt-contracts";
@@ -42,7 +43,7 @@ export type QueuedTaskProgress = {
     estimateReason: string | null;
     retryAfterSeconds: number | null;
 };
-export type QueuedTask = { prompt?: string; summaryZh?: string; userInput?: PromptInputData; optimized?: boolean; id: string; requestId: string; operationType?: string; attempts?: number; status: string; stage?: string; errorCode?: string | null; upstreamTaskId?: string | null; submissionStartedAt?: string | null; resultUrls: string[]; resultDocument?: LayerStudioResultDocument | null; failureReason: string | null; createdAt?: string; updatedAt?: string; queuedAt?: string | null; startedAt?: string | null; completedAt?: string | null; userId?: string; ownerUserId?: string; parameters?: Record<string, unknown> };
+export type QueuedTask = { prompt?: string; summaryZh?: string; userInput?: PromptInputData; optimized?: boolean; id: string; requestId: string; operationType?: string; attempts?: number; status: string; stage?: string; errorCode?: string | null; lastFailure?: { phase?: string; code?: string; httpStatus?: number } | null; upstreamTaskId?: string | null; submissionStartedAt?: string | null; resultUrls: string[]; resultDocument?: LayerStudioResultDocument | null; failureReason: string | null; createdAt?: string; updatedAt?: string; queuedAt?: string | null; startedAt?: string | null; completedAt?: string | null; userId?: string; ownerUserId?: string; parameters?: Record<string, unknown> };
 
 /** The server snapshot keeps exclusion text out of the editable/replay prompt. */
 export function imageTaskPrompts(task: Pick<QueuedTask, "prompt" | "parameters">, fallback = ""): { prompt: string; submittedPrompt?: string } {
@@ -71,11 +72,15 @@ export class QueuedTaskPausedError extends Error {
 export class QueuedTaskFailedError extends Error {
     readonly taskId: string;
     readonly requestId: string;
+    readonly code?: string;
     constructor(readonly task: QueuedTask) {
-        super(task.failureReason || "生成任务已失败或取消");
+        const cancelled = task.status === "cancelled";
+        const postprocess = !cancelled && isImageResultProcessingFailure(task);
+        super(cancelled ? "任务已取消。" : postprocess ? imageResultProcessingFailureMessage : task.failureReason || "生成任务已失败或取消");
         this.name = "QueuedTaskFailedError";
         this.taskId = task.id;
         this.requestId = task.requestId;
+        this.code = cancelled ? undefined : postprocess ? IMAGE_RESULT_POSTPROCESS_FAILURE_CODE : task.errorCode || task.lastFailure?.code || undefined;
     }
 }
 /** A POST may have been accepted, or an accepted task could not be settled locally. Never generate again to recover it. */
@@ -263,7 +268,7 @@ export async function requestQueuedImages(input: { quickImageAction?: QuickImage
         catch (error) { if (input.signal?.aborted) throw error; throw new QueuedTaskSubmissionUncertainError(taskRequests[0]!.requestId, ids[0], error); }
         void refreshSessionBalance();
         const tasks = await waitForTasks(ids, input.signal, undefined, true);
-        const failed = tasks.find((task) => task.status === "failed" || task.status === "cancelled");
+        const failed = tasks.find((task) => task.status !== "success");
         if (failed) throw new QueuedTaskFailedError(failed);
         return tasks.flatMap((task) => task.resultUrls.map((dataUrl) => ({ id: nanoid(), dataUrl, sourceTaskId: task.id, durationMs: completedTaskDurationMs(task), ...imageTaskPrompts(task, input.prompt), userInput: task.userInput || input.promptInput, optimized: task.optimized === true })));
     } catch (error) {
@@ -523,6 +528,7 @@ export async function recoverQueuedTask(id: string, signal?: AbortSignal) {
     signal?.throwIfAborted();
     const result = await request<{ task: QueuedTask; recovered?: boolean; message?: string }>(`/api/tasks/${id}/recover`, { method: "POST", signal });
     signal?.throwIfAborted();
+    if (result.task.status !== "success" && isImageResultProcessingFailure(result.task)) throw new QueuedTaskFailedError(result.task);
     if (result.task.status === "paused") throw new QueuedTaskPausedError(result.task, result.message);
     return result.task;
 }
@@ -607,8 +613,9 @@ export async function waitForTasks(ids: string[], signal?: AbortSignal, onPoll?:
         },
         done: tasks => {
         const paused = haltOnPaused ? tasks.find((task) => task.status === "paused") : undefined;
+        if (paused && isImageResultProcessingFailure(paused)) throw new QueuedTaskFailedError(paused);
         if (paused) throw new QueuedTaskPausedError(paused);
-        return tasks.length === ids.length && tasks.every((task) => ["success", "failed", "cancelled"].includes(task.status));
+        return tasks.length === ids.length && tasks.every((task) => classifyTaskRecovery(task) === "terminal");
     } }); } finally { events.close(); }
 }
 

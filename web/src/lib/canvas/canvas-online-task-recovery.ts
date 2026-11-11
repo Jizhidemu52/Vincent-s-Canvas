@@ -1,4 +1,5 @@
 import { getQueuedTask, getQueuedTaskByRequestId, recoverQueuedTask, waitForTasks, QueuedTaskFailedError, QueuedTaskPausedError } from "@/services/api/generation-tasks";
+import { classifyTaskRecovery } from "@/services/api/task-result-reconciliation";
 import { uploadImage } from "@/services/image-storage";
 import { storeGeneratedVideo } from "@/services/api/video";
 import { storeGeneratedAudio } from "@/services/api/audio";
@@ -53,8 +54,9 @@ export async function recoverOnlineAgentTask(pending: PendingOnlineAgentTask, po
     for (const original of originals) {
         if (!original) throw new Error("原任务尚未查到或无权读取，请稍后查询；不会重复生成。");
         let task = original;
+        if (task.status !== "success" && classifyTaskRecovery(task) === "terminal") throw new QueuedTaskFailedError(task);
         if (task.status === "paused") {
-            if (!task.upstreamTaskId) throw new QueuedTaskPausedError(task);
+            if (classifyTaskRecovery(task) !== "resume") throw new QueuedTaskPausedError(task);
             task = await io.recoverQueuedTask(task.id, signal);
             signal.throwIfAborted();
             assertReceipt(task, original.requestId, original.id);

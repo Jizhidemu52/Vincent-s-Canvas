@@ -11,10 +11,13 @@ type VideoConfig = Pick<AiConfig, "model" | "videoModel" | VideoModelParameterKe
 
 export type VideoModelParameterSpec = {
     seconds: readonly [number, number];
+    defaultSeconds?: number;
+    modeSeconds?: Partial<Record<VideoMode, readonly [number, number]>>;
     resolutions: readonly string[];
     sizes: readonly string[];
     /** Availability of an output-audio toggle, not native audio generation capability. */
     supportsAudio: boolean;
+    nativeAudio?: boolean;
     supportsWatermark: boolean;
     supportsAutoDuration: boolean;
     supportsSeed?: boolean;
@@ -35,6 +38,8 @@ export type VideoModelParameterSpec = {
     imageInputHint: string;
     ratioHint?: string;
     audioHint?: string;
+    resolutionHint?: string;
+    extendAddsDuration?: boolean;
 };
 
 const standardRatios = ["16:9", "9:16", "1:1", "4:3", "3:4"] as const;
@@ -63,6 +68,19 @@ const specifications: Record<string, VideoModelParameterSpec> = {
         maxVideos: 10, maxAudios: 10, videoMaxMB: 200, videoDuration: [2, 30], videoTotalSeconds: 30, audioDuration: [2, 30], audioTotalSeconds: 30,
         maxImages: 30, imageInputHint: "最多 30 张参考图；首尾帧模式按图片顺序排列，使用自适应比例，不混用视频/音频。",
         mediaHint: "最多 10 段视频（单个 ≤200MB）及 10 段音频（单个 ≤15MB），每段 2–30 秒，各类合计 ≤30 秒。支持纯音频参考。真人素材需先完成渠道素材库审核。",
+    },
+    "gemini-omni-1.2-flash": {
+        seconds: [3, 15], defaultSeconds: 10, modeSeconds: { "first-last-frame": [3, 10], extend: [3, 10] },
+        resolutions: ["360p", "720p", "1080p", "4k"], sizes: ["16:9", "9:16"],
+        supportsAudio: false, nativeAudio: true, supportsWatermark: false, supportsAutoDuration: false,
+        defaultResolution: "720p", defaultSize: "16:9", extendAddsDuration: true,
+        modes: ["auto", "text", "first-frame", "first-last-frame", "reference", "edit", "extend"],
+        maxVideos: 1, maxAudios: 0, videoMaxMB: 200, videoDuration: [0, 15], videoTotalSeconds: 15, audioDuration: [0, 0], audioTotalSeconds: 0,
+        maxImages: 10, imageInputHint: "图片与首尾帧合计最多 10 张。自动模式单图作首帧、多图作主体参考；首尾帧模式前两张依次为首帧、尾帧，其余为参考图。",
+        mediaHint: "最多 1 段不超过 15 秒的源视频；当前上传入口支持 MP4/MOV、非空且 ≤200MB。不支持音频输入。自动模式有视频时执行编辑，续写需明确选择。",
+        ratioHint: "仅支持横屏或竖屏；首尾帧应使用相同比例，并与所选画面比例一致。",
+        resolutionHint: "1080p 与 4K 为上采样输出。",
+        audioHint: "原生输出 24fps 视频并带音频；不提供静音开关。声音与不希望出现的内容可写进提示词，不保证无声。输出含 SynthID 不可见水印。",
     },
     "wan2.7": {
         seconds: [2, 15], resolutions: ["720P", "1080P"], sizes: standardRatios,
@@ -101,6 +119,27 @@ export function getVideoModelParameterSpec(config: Pick<AiConfig, "model" | "vid
     return specifications[model];
 }
 
+export function isGeminiOmniVideoConfig(config: Pick<AiConfig, "model" | "videoModel"> | string, freshParameterModelId?: string | null) {
+    return videoParameterModelId(config, freshParameterModelId) === "gemini-omni-1.2-flash";
+}
+
+/** Apply the selected model's default only when this draft/node has no saved duration. */
+export function withVideoDurationDefault(config: AiConfig, savedSeconds?: string): AiConfig {
+    const seconds = getVideoModelParameterSpec(config)?.defaultSeconds;
+    return seconds && !savedSeconds?.trim() ? { ...config, videoSeconds: String(seconds) } : config;
+}
+
+export function videoDurationBounds(spec: VideoModelParameterSpec, mode?: string): readonly [number, number] {
+    return spec.modeSeconds?.[mode as VideoMode] || spec.seconds;
+}
+
+function omniDurationError(config: Partial<Pick<AiConfig, "videoSeconds">>, spec: VideoModelParameterSpec, mode: string) {
+    if (mode === "edit" || config.videoSeconds === undefined || !String(config.videoSeconds).trim()) return "";
+    const seconds = Number(config.videoSeconds);
+    const [min, max] = videoDurationBounds(spec, mode);
+    return Number.isInteger(seconds) && seconds >= min && seconds <= max ? "" : `Gemini Omni ${mode === "extend" ? "续写新增" : mode === "first-last-frame" ? "首尾帧插值" : "输出"}时长需为 ${min}–${max} 秒的整数`;
+}
+
 export function videoAspectRatioFollowsImage(config: Pick<AiConfig, "model" | "videoModel"> | string, referenceCount = 0, imageMode?: string) {
     const model = videoParameterModelId(config);
     if (model === "MiniMax-H3") return imageMode === "reference" || imageMode === "text" ? false : imageMode && imageMode !== "auto" ? imageMode.includes("frame") : referenceCount === 1;
@@ -108,38 +147,45 @@ export function videoAspectRatioFollowsImage(config: Pick<AiConfig, "model" | "v
     return model === "happyhorse-1.1" && referenceCount === 1 && imageMode !== "reference" && imageMode !== "text";
 }
 
-export function normalizeVideoModelConfig(config: VideoConfig, freshParameterModelId?: string | null): Pick<AiConfig, VideoModelParameterKey> {
+export function normalizeVideoModelConfig(config: VideoConfig, freshParameterModelId?: string | null, resolvedMode?: string): Pick<AiConfig, VideoModelParameterKey> {
     const current = { size: config.size, vquality: config.vquality, videoSeconds: config.videoSeconds, videoMode: config.videoMode || "auto", videoGenerateAudio: config.videoGenerateAudio, videoWatermark: config.videoWatermark, videoSeed: config.videoSeed || "", videoOutputFormat: config.videoOutputFormat || "mp4" };
     const spec = getVideoModelParameterSpec(config, freshParameterModelId);
     if (!spec) return current;
 
-    const seconds = Number(config.videoSeconds);
-    const validSeconds = Number.isInteger(seconds) && ((seconds >= spec.seconds[0] && seconds <= spec.seconds[1]) || (spec.supportsAutoDuration && seconds === -1));
-    const resolution = String(config.vquality || "").trim().replace(/^(\d+)$/, "$1P").toUpperCase();
-    const size = config.size === "auto" ? "adaptive" : config.size;
     const videoMode = spec.modes.includes(config.videoMode as VideoMode) ? config.videoMode : "auto";
+    const actualMode = videoMode === "auto" ? resolvedMode || videoMode : videoMode;
+    const seconds = Number(config.videoSeconds);
+    const bounds = videoDurationBounds(spec, actualMode);
+    const validSeconds = Number.isInteger(seconds) && ((seconds >= bounds[0] && seconds <= bounds[1]) || (spec.supportsAutoDuration && seconds === -1));
+    let resolution = String(config.vquality || "").trim().replace(/^(\d+)$/, "$1P").toUpperCase();
+    if (isGeminiOmniVideoConfig(config, freshParameterModelId) && resolution === "2160P") resolution = "4K";
+    const size = config.size === "auto" ? "adaptive" : config.size;
     const lockRatio = videoModeLocksRatio({ ...config, videoMode }, freshParameterModelId);
-    const edit = videoParameterModelId(config, freshParameterModelId) === "doubao-seedance-2.5" && videoMode === "edit";
+    const edit = actualMode === "edit";
     return {
         videoMode,
         size: lockRatio ? "adaptive" : spec.sizes.includes(size) ? size : spec.defaultSize,
         vquality: spec.resolutions.find((option) => option.toUpperCase() === resolution) || spec.defaultResolution,
-        videoSeconds: edit ? "-1" : String(validSeconds ? seconds : 5),
-        videoGenerateAudio: String(spec.supportsAudio && config.videoGenerateAudio !== "false"),
+        videoSeconds: edit ? "-1" : String(validSeconds ? seconds : spec.defaultSeconds ?? 5),
+        videoGenerateAudio: String(spec.nativeAudio || (spec.supportsAudio && config.videoGenerateAudio !== "false")),
         videoWatermark: String(spec.supportsWatermark && config.videoWatermark === "true"),
         videoSeed: spec.supportsSeed ? config.videoSeed || "" : "",
         videoOutputFormat: spec.outputFormats?.includes(config.videoOutputFormat) ? config.videoOutputFormat : "mp4",
     };
 }
 
-export function videoModelRequestParameters(config: VideoConfig, freshParameterModelId?: string | null): Record<string, unknown> {
+export function videoModelRequestParameters(config: VideoConfig, freshParameterModelId?: string | null, resolvedMode?: string): Record<string, unknown> {
     const spec = getVideoModelParameterSpec(config, freshParameterModelId);
     if (!spec) throw new Error("当前视频模型尚未提供参数规格，请选择已配置的视频模型");
-    const normalized = normalizeVideoModelConfig(config, freshParameterModelId);
+    const actualMode = !config.videoMode || config.videoMode === "auto" ? resolvedMode || "auto" : config.videoMode;
+    const omni = isGeminiOmniVideoConfig(config, freshParameterModelId);
+    const durationError = omni ? omniDurationError(config, spec, actualMode) : "";
+    if (durationError) throw new Error(durationError);
+    const normalized = normalizeVideoModelConfig(config, freshParameterModelId, resolvedMode);
     const seed = spec.supportsSeed ? parseVideoSeed(normalized.videoSeed, spec.seedMaximum) : undefined;
     return {
         videoMode: normalized.videoMode,
-        seconds: Number(normalized.videoSeconds),
+        ...(omni && actualMode === "edit" ? {} : { seconds: Number(normalized.videoSeconds) }),
         size: normalized.size,
         resolution: normalized.vquality,
         ...(spec.supportsAudio ? { generateAudio: normalized.videoGenerateAudio === "true" } : {}),
@@ -158,6 +204,7 @@ export function resolveVideoMode(config: Pick<AiConfig, "model" | "videoModel" |
     const requested = config.videoMode || legacyMode || "auto";
     if (requested !== "auto") return requested as VideoMode;
     if (model === "wan2.7") return videos ? "extend" : images > 1 ? "first-last-frame" : images ? "first-frame" : "text";
+    if (model === "gemini-omni-1.2-flash") return videos ? "edit" : images > 1 ? "reference" : images ? "first-frame" : "text";
     if (model === "doubao-seedance-2.5") return images || videos || audios ? "reference" : "text";
     return videos || audios || images > 1 ? "reference" : images ? "first-frame" : "text";
 }
@@ -170,13 +217,16 @@ export function videoReferenceError(config: Pick<AiConfig, "model" | "videoModel
     const requested = config.videoMode || legacyMode || "auto";
     if (!spec.modes.includes(requested as VideoMode)) return `当前模型不支持${videoModeLabels[requested as VideoMode] || requested}模式`;
     const mode = resolveVideoMode(config, images.length, videos.length, audios.length, legacyMode, freshParameterModelId);
+    const omni = model === "gemini-omni-1.2-flash";
+    const durationError = omni ? omniDurationError(config, spec, mode) : "";
+    if (durationError) return durationError;
     if (images.length > spec.maxImages) return `当前视频模型最多支持 ${spec.maxImages} 张参考图`;
     if (videos.length > spec.maxVideos) return spec.maxVideos ? `当前视频模型最多支持 ${spec.maxVideos} 段视频` : "当前视频模型不支持视频参考";
     if (audios.length > spec.maxAudios) return spec.maxAudios ? `当前视频模型最多支持 ${spec.maxAudios} 段音频` : "当前视频模型不支持音频参考";
     if (mode === "text" && (images.length || videos.length || (model !== "wan2.7" && audios.length))) return "文生视频模式不接收这些参考素材，请移除素材或切换模式";
     if (mode.includes("frame")) {
         const count = mode === "first-last-frame" ? 2 : 1;
-        if (allowIncomplete ? images.length > count : images.length !== count) return `${videoModeLabels[mode]}模式需要恰好 ${count} 张图片`;
+        if (omni ? !allowIncomplete && images.length < count : allowIncomplete ? images.length > count : images.length !== count) return `${videoModeLabels[mode]}模式需要${omni ? "至少" : "恰好"} ${count} 张图片`;
         if (videos.length || (audios.length && model !== "wan2.7")) return "首尾帧与视频/音频参考不可混用，请切换多素材参考模式";
     }
     if ((mode === "edit" || mode === "extend") && !videos.length && !allowIncomplete) return "视频编辑或延长模式至少需要 1 段源视频";
@@ -202,18 +252,19 @@ export function videoReferenceError(config: Pick<AiConfig, "model" | "videoModel
             if (item.type && !formats.includes(item.type)) return `${label} 格式不支持，请使用${kind === "视频" ? " MP4/MOV" : " WAV/MP3"}`;
             if (item.bytes !== undefined && (item.bytes <= 0 || item.bytes > maxMB * 1024 * 1024)) return `${label} 需为非空文件且不超过 ${maxMB}MB`;
             if (item.durationMs !== undefined) {
-                const min = kind === "视频" && mode === "edit" ? 4 : duration[0];
+                const min = kind === "视频" && mode === "edit" && !omni ? 4 : duration[0];
+                if (omni && (!Number.isFinite(item.durationMs) || item.durationMs <= 0 || item.durationMs > 15_000)) return `${label} 必须具有有效时长且不超过 15 秒`;
                 if (!Number.isFinite(item.durationMs) || item.durationMs < min * 1000 || item.durationMs > duration[1] * 1000) return `${label} 时长需要在 ${min}–${duration[1]} 秒之间`;
                 sum += item.durationMs;
             }
             if (kind === "视频") {
                 const video = item as ReferenceVideo;
-                if (video.width && video.height) {
+                if (!omni && video.width && video.height) {
                     if (!validDimensions(video.width, video.height, sizeBounds)) return `${label} 宽高或比例不符合模型要求（边长 ${sizeBounds[0]}–${sizeBounds[1]}px，比例 ${sizeBounds[2]}–${sizeBounds[3]}）`;
                     if (model === "doubao-seedance-2.5" && (video.width * video.height < 409600 || video.width * video.height > 8295044)) return `${label} 像素总量需在 409600–8295044 之间`;
                 }
                 const minFps = model === "MiniMax-H3" ? 23.976 : 24;
-                if (model !== "wan2.7" && video.fps !== undefined && (video.fps < minFps || video.fps > 60)) return `${label} 帧率需在 ${minFps}–60 FPS 之间`;
+                if (!omni && model !== "wan2.7" && video.fps !== undefined && (video.fps < minFps || video.fps > 60)) return `${label} 帧率需在 ${minFps}–60 FPS 之间`;
             }
         }
         if (sum > total * 1000) return `参考${kind}总时长不能超过 ${total} 秒`;

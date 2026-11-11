@@ -1,9 +1,11 @@
 import { watchTaskEvents } from "./task-events";
+import { isImageResultProcessingFailure } from "@/lib/generation-feedback";
 
 export type TaskRecoveryKind = "observe" | "resume" | "investigate" | "terminal";
 
 /** A local observation stop is not a server pause or an unknown paid submission. */
-export function classifyTaskRecovery(task?: { status: string; upstreamTaskId?: string | null }): TaskRecoveryKind {
+export function classifyTaskRecovery(task?: { status: string; upstreamTaskId?: string | null; errorCode?: string | null; lastFailure?: { phase?: string; code?: string } | null; failureReason?: string | null }): TaskRecoveryKind {
+    if (task?.status === "paused" && isImageResultProcessingFailure(task)) return "terminal";
     if (task?.status === "paused") return task.upstreamTaskId?.trim() ? "resume" : "investigate";
     if (!task || ["waiting", "processing"].includes(task.status)) return "observe";
     return ["success", "failed", "cancelled"].includes(task.status) ? "terminal" : "investigate";

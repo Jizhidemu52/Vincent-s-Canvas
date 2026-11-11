@@ -142,10 +142,12 @@ describe("administrator analysis model directory", () => {
       for (const secret of ["private-provider", "SECRET", "headers", "protocol", "providerId", "modelId"]) expect(JSON.stringify(result)).not.toContain(secret);
     });
     const selected = calls.find(call => call.sql.includes("FROM model_configs"))!;
-    expect(selected.values).toEqual([CHAT_COMPLETION_PROTOCOLS]);
+    expect(selected.values).toEqual([CHAT_COMPLETION_PROTOCOLS, "gpt-chat"]);
     for (const field of ["base_url", "encrypted_credentials", "headers"]) expect(selected.sql.slice(0, selected.sql.indexOf(" FROM "))).not.toContain(field);
     expect(selected.sql).toContain("m.enabled=true AND p.enabled=true"); expect(selected.sql).toContain("'chat'=ANY(m.capabilities)");
     expect(selected.sql).toContain("NULLIF(btrim(p.encrypted_credentials),'') IS NOT NULL");
+    expect(selected.sql).toContain("JOIN tool_api_configurations t ON t.model_config_id=m.id");
+    expect(selected.sql).toContain("t.tool_key=$2 AND t.enabled=true");
   });
   test("missing encryption configuration returns no selectable models", async () => {
     const queries: string[] = [];
@@ -162,8 +164,9 @@ describe("administrator analysis model directory", () => {
       const response = await fetch(`${base}/analyze`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ previewId: uid, previewHash: "a".repeat(64), modelConfigId: uid, confirm: true }) });
       expect(response.status).toBe(400); expect((await response.json()).code).toBe("USAGE_MODEL_UNAVAILABLE");
     });
-    expect(calls).toHaveLength(1); expect(calls[0]!.values).toEqual([CHAT_COMPLETION_PROTOCOLS, uid]);
+    expect(calls).toHaveLength(1); expect(calls[0]!.values).toEqual([CHAT_COMPLETION_PROTOCOLS, "gpt-chat", uid]);
     expect(calls[0]!.sql).toContain("p.protocol=ANY($1::text[])"); expect(calls[0]!.sql).not.toContain("usage_analysis_previews");
+    expect(calls[0]!.sql).toContain("t.tool_key=$2 AND t.enabled=true AND m.id=$3");
   });
 });
 

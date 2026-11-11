@@ -42,7 +42,7 @@ import { deploymentFeatures } from "@/lib/deployment-features";
 import { formatBytes, formatDuration } from "@/lib/image-utils";
 import { seedanceReferenceLabel } from "@/lib/seedance-video";
 import { type HappyHorseMode } from "@/lib/happyhorse-video";
-import { getVideoModelParameterSpec, normalizeVideoModelConfig, resolveVideoMode, videoReferenceError } from "@/lib/video-model-parameters";
+import { getVideoModelParameterSpec, normalizeVideoModelConfig, resolveVideoMode, videoReferenceError, withVideoDurationDefault } from "@/lib/video-model-parameters";
 import { readReferenceMediaFile } from "@/lib/video-reference-files";
 import { createLatestVideoPreview, hydrateVideoLogMedia } from "./video-log-media";
 import { completedVideoTaskDurationMs } from "./video-task-duration";
@@ -216,10 +216,10 @@ function VideoGenerationWorkspace() {
     const model = effectiveConfig.videoModel || effectiveConfig.model;
     const allowRawPrompt = configuredTools.find(tool => tool.toolKey === "video")?.allowRawPrompt === true;
     const planning = !(allowRawPrompt && rawPrompt);
-    const videoConfig = motionVideoConfig(buildVideoConfig(effectiveConfig, model), motion, { images: references.length, videos: videoReferences.length, audios: audioReferences.length }, planning);
+    const videoConfig = motionVideoConfig(buildVideoConfig(withVideoDurationDefault(effectiveConfig, draftConfig.videoSeconds), model), motion, { images: references.length, videos: videoReferences.length, audios: audioReferences.length }, planning);
     const modelSpec = getVideoModelParameterSpec(model);
     const selectedMode = effectiveConfig.videoMode;
-    const maxImageReferences = selectedMode === "first-frame" || selectedMode === "last-frame" ? 1 : selectedMode === "first-last-frame" ? 2 : modelSpec?.maxImages || 0;
+    const maxImageReferences = modelSpec?.nativeAudio ? modelSpec.maxImages : selectedMode === "first-frame" || selectedMode === "last-frame" ? 1 : selectedMode === "first-last-frame" ? 2 : modelSpec?.maxImages || 0;
     const optionalReferenceCount = references.length + videoReferences.length + audioReferences.length;
     const validationError = videoReferenceError(videoConfig, references, videoReferences, audioReferences);
     const currentMode = resolveVideoMode(videoConfig, references.length, videoReferences.length, audioReferences.length);
@@ -822,7 +822,7 @@ function VideoGenerationWorkspace() {
 
                         <div className="mt-6 space-y-5">
 
-                            <p className="text-xs leading-5 text-muted-foreground">{uiText("图片支持 JPEG/PNG/WebP，单张 ≤10MB；视频支持 MP4/MOV，音频支持 WAV/MP3。素材和模式按所选模型校验，切换模型不会删除素材。")}</p>
+                            <p className="text-xs leading-5 text-muted-foreground">{uiText(modelSpec?.nativeAudio ? "当前上传入口支持 JPEG/PNG/WebP 图片，单张 ≤10MB；最多 1 段不超过 15 秒的 MP4/MOV 视频，≤200MB。不支持音频输入。切换模型不会删除素材。" : "图片支持 JPEG/PNG/WebP，单张 ≤10MB；视频支持 MP4/MOV，音频支持 WAV/MP3。素材和模式按所选模型校验，切换模型不会删除素材。")}</p>
                             <details open={referencesOpen} onToggle={(event) => setReferencesOpen(event.currentTarget.open)} className="rounded-xl border border-border p-3">
                                 <summary className="cursor-pointer text-sm font-medium text-foreground">{uiText("参考素材")}<span className="ml-2 text-xs font-normal text-muted-foreground">{optionalReferenceCount ? optionalReferenceCount + uiText(" 个已添加") : uiText("可选 · 点击添加")}</span></summary>
                                 <div className="mt-4 space-y-4">
@@ -840,7 +840,7 @@ function VideoGenerationWorkspace() {
                                     {references.map((item, index) => (
                                         <div key={item.id} className="group relative size-20 shrink-0 overflow-hidden rounded-md border border-stone-200 dark:border-stone-800">
                                             <img src={item.dataUrl} alt={item.name} loading="lazy" decoding="async" className="size-full object-cover" />
-                                            <span className="absolute left-1 top-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white">{currentMode === "first-frame" ? uiText("首帧") : currentMode === "first-last-frame" ? uiText(index === 0 ? "首帧" : "尾帧") : seedanceReferenceLabel("image", index)}</span>
+                                            <span className="absolute left-1 top-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white">{(currentMode === "first-frame" || currentMode === "first-last-frame") && index === 0 ? uiText("首帧") : currentMode === "first-last-frame" && index === 1 ? uiText("尾帧") : seedanceReferenceLabel("image", index)}</span>
                                             <ReferenceOrderButtons index={index} total={references.length} onMove={(offset) => setReferences((value) => moveListItem(value, index, offset))} />
                                             <button
                                                 type="button"
@@ -911,7 +911,7 @@ function VideoGenerationWorkspace() {
                                 </div>
                             </details>
 
-                            {planning ? <VideoMotionPanel value={motion} onChange={setMotion} disabled={!draftReady} /> : null}
+                            {planning ? <VideoMotionPanel value={motion} onChange={setMotion} disabled={!draftReady} nativeAudio={modelSpec?.nativeAudio} /> : null}
                             <div>
                                 <div className="mb-2 flex items-center justify-between gap-3">
                                     <span className="shrink-0 text-base font-semibold">{uiText(planning ? "想要的效果（可选）" : "视频提示词")}</span>
@@ -931,7 +931,7 @@ function VideoGenerationWorkspace() {
                         <div className="generation-submit shrink-0 pt-4">
                             <div className="mb-2 flex items-center justify-between rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-sm dark:border-stone-800 dark:bg-stone-900">
                                 <span className="truncate text-stone-500 dark:text-stone-400">
-                                    {videoModelSummaryLabel(effectiveConfig, model, configuredModels)} · {videoResolutionLabel(videoConfig.vquality)} · {videoSizeLabel(videoConfig.size)} · {videoSecondsLabel(videoConfig.videoSeconds)}
+                                    {videoModelSummaryLabel(effectiveConfig, model, configuredModels)} · {videoResolutionLabel(videoConfig.vquality)} · {videoSizeLabel(videoConfig.size)} · {videoSecondsLabel(videoConfig.videoSeconds, currentMode, modelSpec?.extendAddsDuration)}
                                 </span>
                                 <Button size="small" type="text" icon={<SlidersHorizontal className="size-4" />} onClick={() => setSettingsOpen(true)}>
                                     {uiText("调整")}</Button>

@@ -1,7 +1,7 @@
 import { uiText, useUiText } from "@/lib/i18n";
 import { ArrowRight, Pin, PinOff } from "lucide-react";
 import { Link } from "react-router-dom";
-import { buildCreativePresetHref, creativePresetGroups, creativePresets } from "@/lib/creative-presets";
+import { buildCreativePresetHref, creativePresetGroups, creativeCatalogPresets } from "@/lib/creative-presets";
 import { isModuleAvailable, useModuleStore } from "@/stores/use-module-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import type { ModuleKey } from "@/services/api/modules";
@@ -12,7 +12,6 @@ import "./creative.css";
 const workbenches = [
     { key: "pattern-placement", title: "图案定位", description: "把图案放到产品指定位置，调整大小和角度，再生成 AI 效果图。", mode: "图案定位 · AI 效果图" },
     { key: "pattern-repeat", title: "花型循环", description: "直排、半落与镜像循环，按物理尺寸设置画布，导出花型与完整工程。", mode: "本地编辑 · 无需 API" },
-    { key: "series-recipe", title: "系列配方", description: "组合参考、配色和设计约束，冻结配方后生成系列候选，分支重试与保存。", mode: "AI 生成 · 独立模型配置" },
 ] as const;
 
 const inputCovers: Record<string, { src: string; label: string }> = {
@@ -25,7 +24,7 @@ export default function CreativePage() {
     const flags = useModuleStore((state) => state.flags);
     const tools = useBusinessConfigStore(state => state.tools);
     const { pinned, togglePin } = useNavigationPreferences();
-    const presets = creativePresets.filter((preset) => isModuleAvailable(flags, tools, `creative-${preset.id}` as ModuleKey));
+    const presets = creativeCatalogPresets.filter((preset) => isModuleAvailable(flags, tools, `creative-${preset.id}` as ModuleKey));
     const availableWorkbenches = workbenches.filter(item => isModuleAvailable(flags, tools, item.key));
     const pinButton = (key: string, title: string) => {
         const isPinned = pinned.includes(key);

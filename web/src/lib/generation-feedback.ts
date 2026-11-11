@@ -1,4 +1,19 @@
-import { publicGenerationFailure } from "../../../shared/generation-error";
+import { IMAGE_RESULT_POSTPROCESS_FAILURE_CODE, IMAGE_RESULT_POSTPROCESS_FAILURE_PREFIX, publicGenerationFailure } from "../../../shared/generation-error";
+
+export const imageResultProcessingFailureMessage = `${IMAGE_RESULT_POSTPROCESS_FAILURE_PREFIX}；请联系管理员检查已保存原件，不要重复生成。`;
+
+/** A saved upstream original is not a successful processed result or a paused upstream query. */
+export function isImageResultProcessingFailure(value: unknown): boolean {
+    if (typeof value === "string") return value.startsWith(IMAGE_RESULT_POSTPROCESS_FAILURE_PREFIX);
+    if (!value || typeof value !== "object") return false;
+    const detail = value as { status?: unknown; errorCode?: unknown; code?: unknown; lastFailure?: { phase?: unknown; code?: unknown } | null; failureReason?: unknown; message?: unknown; task?: unknown };
+    if (detail.status === "cancelled") return false;
+    return detail.errorCode === IMAGE_RESULT_POSTPROCESS_FAILURE_CODE || detail.code === IMAGE_RESULT_POSTPROCESS_FAILURE_CODE
+        || detail.lastFailure?.phase === "postprocess" || detail.lastFailure?.code === IMAGE_RESULT_POSTPROCESS_FAILURE_CODE
+        || (typeof detail.failureReason === "string" && detail.failureReason.startsWith(IMAGE_RESULT_POSTPROCESS_FAILURE_PREFIX))
+        || (typeof detail.message === "string" && detail.message.startsWith(IMAGE_RESULT_POSTPROCESS_FAILURE_PREFIX))
+        || (detail.task !== value && Boolean(detail.task) && isImageResultProcessingFailure(detail.task));
+}
 
 /** Only explicit pre-admission business codes prove that no generation was submitted. */
 export function generationPreSubmissionMessage(code?: string): string | undefined {
@@ -14,6 +29,7 @@ export function generationSubmissionRejected(status: number, code?: string): boo
 export function generationErrorMessage(error: unknown, status?: number, code?: string): string {
     const notSubmitted = generationPreSubmissionMessage(code);
     if (notSubmitted) return notSubmitted;
+    if (isImageResultProcessingFailure(error) || code === IMAGE_RESULT_POSTPROCESS_FAILURE_CODE) return imageResultProcessingFailureMessage;
     const raw = error instanceof Error ? error.message : String(error || "");
     if (/暂无法恢复上游查询|提交结果待核查/.test(raw)) return "暂时无法获取结果，需要管理员协助。可先刷新进度，不会重新生成。";
     if (/待核查|勿重复|不要重复|查询暂停|停止本页查询|原请求待查询/.test(raw)) return "暂时无法获取进度，请稍后再试；刷新进度不会重新生成。";
@@ -38,8 +54,21 @@ export function shouldConfirmPromptReuse(current: string, next: string) {
 }
 
 export function generationErrorDiagnostic(error: unknown, context: { requestId?: string; taskId?: string } = {}): string {
-    if (!(error instanceof Error)) return [String(error || ""), context.requestId ? `requestId: ${context.requestId}` : "", context.taskId ? `taskId: ${context.taskId}` : ""].filter(Boolean).join("\n");
+    if (!(error instanceof Error)) return mergeGenerationDiagnostics(String(error || ""), context.requestId ? `requestId: ${context.requestId}` : "", context.taskId ? `taskId: ${context.taskId}` : "");
     const info = error as Error & { diagnostic?: string; status?: number; code?: string; requestId?: string; taskId?: string; cause?: unknown };
     const requestId = info.requestId || context.requestId, taskId = info.taskId || context.taskId;
-    return [info.name, info.diagnostic || info.message, info.status ? `HTTP ${info.status}` : "", info.code ? `code: ${info.code}` : "", requestId ? `requestId: ${requestId}` : "", taskId ? `taskId: ${taskId}` : "", info.cause ? generationErrorDiagnostic(info.cause) : ""].filter(Boolean).join("\n");
+    return mergeGenerationDiagnostics(info.name, info.diagnostic || info.message, info.status ? `HTTP ${info.status}` : "", info.code ? `code: ${info.code}` : "", requestId ? `requestId: ${requestId}` : "", taskId ? `taskId: ${taskId}` : "", info.cause ? generationErrorDiagnostic(info.cause) : "");
+}
+
+/** Cards and nested errors may supply the same lookup IDs; copy each identical ID once. */
+export function mergeGenerationDiagnostics(...parts: Array<string | undefined>): string {
+    const identifiers = new Set<string>();
+    return parts.filter(Boolean).flatMap(part => part!.split(/\r?\n/)).filter(line => {
+        const match = /^\s*(taskId|requestId):\s*(\S+)\s*$/.exec(line);
+        if (!match) return true;
+        const key = `${match[1]}:${match[2]}`;
+        if (identifiers.has(key)) return false;
+        identifiers.add(key);
+        return true;
+    }).join("\n");
 }

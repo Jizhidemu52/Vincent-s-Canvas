@@ -20,7 +20,7 @@ export type PromptActor = { id: string; role: string; departmentId?: string | nu
 export type PromptSource = { bytes: Uint8Array; mimeType: string; previewDataUrl: string };
 export type PromptTargetModel = { id: string; modelId: string; protocol: string; fingerprint: string; workflowConfigId?: string | null };
 export type PromptOptimizer = { id: string; modelId: string; fingerprint: string; estimatedRmbCost: number | null;
-  invoke: (system: string, content: Array<{ type: "input_text"; text: string } | { type: "input_image"; image_url: string }>) => Promise<{ content: string; usage?: { inputTokens?: number; outputTokens?: number; actualCost?: number; currency?: string } }>;
+  invoke: (system: string, content: Array<{ type: "input_text"; text: string } | { type: "input_image"; image_url: string }>, context: { userId: string; compilationId: string }) => Promise<{ content: string; usage?: { inputTokens?: number; outputTokens?: number; actualCost?: number; currency?: string } }>;
 };
 export type PromptCompilerRuntime = {
   resolveTarget(actor: PromptActor, request: PromptCompilationRequest, options?: { adminTest: boolean }): Promise<PromptTargetModel>;
@@ -151,7 +151,7 @@ export class PromptCompiler {
           inputTokens: 0, outputTokens: 0, actualCost: 0, estimatedCost: null, currency: "CNY", message: "服务端固定模板，未调用改写模型。" });
         return checkedResult((await this.store.getCompilation(claim.id, actor.id))!);
       }
-      const result = await optimizer!.invoke(system, content);
+      const result = await optimizer!.invoke(system, content, { userId: actor.id, compilationId: claim.id });
       rawResponse = result.content;
       usage = result.usage;
       const { avoidForMetrics, ...output } = parseOptimizedPrompt(result.content, [system], outputOptions);

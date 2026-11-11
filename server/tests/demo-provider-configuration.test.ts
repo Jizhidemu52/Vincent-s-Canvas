@@ -1,6 +1,14 @@
 import { expect, test } from "bun:test";
 
-import { resolveDemoExternalProviders } from "../src/demo-provider-configuration";
+import { resolveDemoExternalProviders, videoModelConfigIds } from "../src/demo-provider-configuration";
+import { supportedVideoModelIds } from "../src/video-models";
+
+test("every video model has a distinct stable demo configuration ID", () => {
+  expect(new Set(Object.values(videoModelConfigIds)).size).toBe(supportedVideoModelIds.length);
+  for (const model of supportedVideoModelIds) expect(videoModelConfigIds[model]).toMatch(/^[0-9a-f-]{36}$/);
+  expect(videoModelConfigIds["doubao-seedance-2.5"]).toBe("40000000-0000-4000-8000-000000000111");
+  expect(videoModelConfigIds["gemini-omni-1.2-flash"]).not.toBe(videoModelConfigIds["doubao-seedance-2.5"]);
+});
 
 test("local demo enables OpenToken and APIMart together when both credentials are present", () => {
   const providers = resolveDemoExternalProviders({

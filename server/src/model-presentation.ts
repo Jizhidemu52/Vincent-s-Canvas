@@ -97,7 +97,7 @@ export function isSelectableCreativeModel(model: Record<string, unknown>) {
   if (model.modelId === LAYER_STUDIO_MODEL_ID) return false;
   if (Array.isArray(model.capabilities) && model.capabilities.includes("chat")) {
     if (model.providerId === MARK_IMAGE_PROVIDER_ID) {
-      return model.protocol === "apimart" && ["claude-sonnet-5-5", "gpt-6-astra"].includes(String(model.modelId));
+      return model.protocol === "apimart" && ["claude-sonnet-5-5", "gpt-6-astra", "gemini-4-carbon"].includes(String(model.modelId));
     }
     return isOpenTokenModel(model) && ["openai", "openai-chat"].includes(String(model.protocol)) && model.modelId === "gpt-6-astra";
   }

@@ -20,12 +20,12 @@ describe("owned demo video source URLs", () => {
     const asset = { ...video, metadata: { ...video.metadata, upstreamUrl: "https://attacker.example/fake.mp4", publicUrl: "https://attacker.example/fake.mp4" } };
     const result = createDemoProviderVideoSources([asset], "", new Map());
     expect(result.sources[0]).not.toHaveProperty("publicUrl");
-    expect(() => preflightVideoSources("wan2.7", "continue", { videoMode: "extend", seconds: 6 }, result.sources)).toThrow("公开 HTTPS");
+    expect(() => preflightVideoSources("wan2.7", "continue", { videoMode: "extend", seconds: 6 }, result.sources)).toThrow("公开 HTTP(S)");
     expect(() => resolveOwnedDemoVideoSources([assetPath], "other-user", new Map([[asset.id, { ...asset, upstreamUrl: "https://provider-cdn.example/result.mp4" }]]))).toThrow("无权访问");
     expect(() => resolveOwnedDemoVideoSources(["https://attacker.example/fake.mp4"], "owner", new Map())).toThrow();
   });
 
-  test("only selected audio/video assets receive expiring grants; images remain on the official upload path", () => {
+  test("only the existing audio/video grant is issued; pending images cannot become final provider URLs", () => {
     const image = { ...video, id: "20000000-0000-4000-8000-000000000002", mimeType: "image/png" };
     const grants = new Map();
     const before = Date.now();

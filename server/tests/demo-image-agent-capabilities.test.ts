@@ -14,7 +14,7 @@ test("demo image-agent handler checks actual selected model capabilities and lea
     let selectedModel: { capabilities: unknown } | undefined;
     const create = spyOn(markProvider, "createDemoMarkProvider").mockImplementation(input => {
         const result = originalCreate(input);
-        selectedModel = result.models.find(model => model.modelId === "claude-sonnet-5-5");
+        selectedModel = result.models.find(model => model.modelId === "gemini-4-carbon");
         return result;
     });
     let demoFetch: DemoFetch | undefined;
@@ -24,7 +24,7 @@ test("demo image-agent handler checks actual selected model capabilities and lea
         return {} as never;
     });
     const log = spyOn(console, "log").mockImplementation(() => {});
-    const upstream = spyOn(transport, "fetchProviderSubmission").mockResolvedValue(Response.json({ content: [{ type: "text", text: "已收到要求。" }], stop_reason: "end_turn" }));
+    const upstream = spyOn(transport, "fetchProviderSubmission").mockImplementation(async () => Response.json({ choices: [{ message: { role: "assistant", content: "已收到要求。" }, finish_reason: "stop" }] }));
     const post = (profile?: "creative-chat" | "canvas-assistant") => {
         if (!demoFetch) throw new Error("Demo handler was not captured");
         return demoFetch(new Request("http://demo.test/api/chat/responses", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({
@@ -49,7 +49,6 @@ test("demo image-agent handler checks actual selected model capabilities and lea
         expect(upstream.mock.calls).toHaveLength(0);
         expect((await post()).status).toBe(200);
         selectedModel.capabilities = ["chat", "vision", "tools"];
-        upstream.mockImplementation(async () => Response.json({ content: [{ type: "text", text: "已收到要求。" }], stop_reason: "end_turn" }));
         for (const profile of ["creative-chat", "canvas-assistant"] as const) expect((await post(profile)).status).toBe(200);
         expect(upstream.mock.calls).toHaveLength(3);
     } finally {

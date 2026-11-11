@@ -24,7 +24,7 @@ import {
 } from "./media-runtime";
 import { recordAssetEvent } from "./asset-events";
 import { classifyDesignDirection } from "./design-direction";
-import { ApiMartImageProviderFailure, ApiMartImageQueryRetryable, ApiMartImageTaskPending, stepApiMartImageTask } from "./apimart-image";
+import { ApiMartImageProviderFailure, ApiMartImageQueryRetryable, ApiMartImageTaskPending, preflightApiMartImageRequest, stepApiMartImageTask } from "./apimart-image";
 import { videoSourceMetadata, type ProviderVideoSource } from "./video-models";
 import { probeMediaBytes, probeMediaStream } from "./media-probe";
 import { disposeProviderResults, downloadVideoResult, type ProviderResult } from "./media-result-file";
@@ -34,7 +34,7 @@ import { createGenerationTiming, type GenerationTiming, type GenerationTimingOut
 import { fetchProviderResult } from "./provider-result";
 import { inlineProviderImageDataUrl } from "./provider-image-result";
 import { assertImageEditMaskSupport, prepareImageEditInput } from "./image-edit-input";
-import { imageResultExtension, storeImageResult } from "./image-result-storage";
+import { imageResultExtension, ImageResultPersistenceError, storeImageResult } from "./image-result-storage";
 import { validateQuickImageSource } from "./image-result-processing";
 import { scheduleAssetThumbnails } from "./asset-thumbnails";
 import { assertWorkflowTaskContext, workflowTaskContext, WorkflowTaskPending, type WorkflowTaskContext } from "./workflow-task-context";
@@ -50,6 +50,7 @@ import { seedream55PublicDocument, Seedream55OutputLimitExceeded, type Seedream5
 import { readBoundedImage, validateSeedream55Reference } from "./seedream55-reference";
 import { storeSeedream55TaskResults } from "./seedream55-worker-storage";
 import { settleLayerStudioReservation } from "./layer-studio-billing";
+import { readApiMartVideoReceipt, saveApiMartVideoReceipt, type ApiMartVideoReceipt } from "./video-provider-receipt";
 
 type WorkRow = {
   id: string;
@@ -62,7 +63,7 @@ type WorkRow = {
   model_config_id: string | null;
   tool_key: string | null;
   result_document: LayerStudioResultDocument | null;
-  upstream_result_document: Seedream55Manifest | null;
+  upstream_result_document: Seedream55Manifest | ApiMartVideoReceipt | null;
   prompt: string;
   parameters: Record<string, unknown>;
   source_urls: string[];
@@ -167,8 +168,11 @@ async function runTask(taskId: string) {
     await assertTaskExecution(task);
     const resultUrls = await timing.measure("result_store", async () => {
       if (task.tool_key !== "layer-studio") return storeResults(task, providerResults);
-      if (!task.upstream_result_document) throw new Error("图层任务缺少已持久化结果清单");
-      task.result_document = await storeSeedream55TaskResults(db, storage, task, task.upstream_result_document, task.result_document);
+      const manifest = task.upstream_result_document;
+      if (!manifest) throw new Error("图层任务缺少已持久化结果清单");
+      if ("kind" in manifest || manifest.version !== 1 || (manifest.mode !== "generate" && manifest.mode !== "decompose") || !Array.isArray(manifest.items))
+        throw new Error("图层任务结果清单类型无效，已停止恢复");
+      task.result_document = await storeSeedream55TaskResults(db, storage, task, manifest, task.result_document);
       return task.result_document.items.map(item => item.contentUrl!);
     });
     await timing.measure("task_finalize", async () => {
@@ -207,7 +211,9 @@ async function runTask(taskId: string) {
     const transportDiagnostics = readProviderSubmissionDiagnostics(error);
     const layerOutputLimitFailure = task.tool_key === "layer-studio" && error instanceof Seedream55OutputLimitExceeded;
     const reason = layerOutputLimitFailure ? error.message : task.tool_key === "layer-studio" ? "图层任务暂未完成；请恢复原任务或联系管理员核查，未自动重新生成"
-      : task.parameters.imageAgentProfile && !(error instanceof PromptOptimizationError) && !(error instanceof AssetObjectError)
+      // Keep the local persistence category for safe recovery fencing; provider
+      // messages and lookalike error codes still follow image-agent redaction.
+      : task.parameters.imageAgentProfile && !(error instanceof PromptOptimizationError) && !(error instanceof AssetObjectError) && !(error instanceof ImageResultPersistenceError)
       ? "图片助手任务未完成，请查询任务状态；服务端已隐藏上游内部详情。"
       : error instanceof Error ? error.message.slice(0, 2_000) : "任务执行失败";
     if (providerProducedResult) {
@@ -216,16 +222,27 @@ async function runTask(taskId: string) {
         "UPDATE tasks SET status='paused',failure_reason=$1,lease_expires_at=NULL,updated_at=now() WHERE id=$2 AND execution_token=$3 AND status='processing'",
         [layerOutputLimitFailure ? reason : task.tool_key === "layer-studio" && task.upstream_result_document
           ? "部分图层原件尚未保存；可恢复原任务继续保存，不会重新生成，请勿重复提交"
+          : task.operation_type === "video_generation" && task.upstream_result_document
+            ? `${reason}；视频上游结果已保存，可恢复原任务继续下载和保存，不会重新生成。`
           : `${reason}；上游已返回结果，不能直接恢复或重新生成，请先检查已保存素材。`, task.id, executionToken],
       );
       outcome = "paused";
     } else if ((task.upstream_task_id || task.upstream_submission_started_at) && !(error instanceof VideoProviderFailure) && !(error instanceof ApiMartImageProviderFailure)
       && !(error instanceof ProviderSubmissionRejected) && !submissionWasNotSent(error)) {
       keepModelSlot = true;
-      // Keep the original reservation while upstream work may still exist. Recovery only polls its persisted ID.
+      if (task.operation_type === "video_generation" && task.upstream_result_document != null) {
+        try {
+          keepModelSlot = !readApiMartVideoReceipt(task.upstream_result_document, {
+            taskId: task.id, userId: task.user_id, modelConfigId: task.model_config_id!, modelId: task.model_id!, upstreamTaskId: task.upstream_task_id!,
+          });
+        } catch { /* An invalid or foreign receipt cannot prove upstream completion. */ }
+      }
+      // Only an identity-validated durable completion releases upstream capacity;
+      // unknown or still-running work keeps its original reservation.
       await db.query(
         "UPDATE tasks SET status='paused',failure_reason=$1,lease_expires_at=NULL,updated_at=now() WHERE id=$2 AND execution_token=$3 AND status='processing'",
-        [task.upstream_task_id ? `${reason}；已暂停，可恢复查询原任务，不会重新生成` : `${reason}；提交状态待核实，不会自动重新生成`, task.id, executionToken],
+        [!keepModelSlot ? `${reason}；视频上游结果已保存，可恢复原任务继续下载和保存，不会重新生成。`
+          : task.upstream_task_id ? `${reason}；已暂停，可恢复查询原任务，不会重新生成` : `${reason}；提交状态待核实，不会自动重新生成`, task.id, executionToken],
       );
       outcome = "paused";
     } else if (canAutomaticallyRetryTask(task.operation_type, task.upstream_submission_started_at, task.attempts)) {
@@ -303,6 +320,10 @@ import { openAiImageParameters } from "./openai-image-parameters";
 import { OPENAI_IMAGE_TIMEOUT_MS } from "./opentoken-image";
 
 async function executeProvider(task: WorkRow, timing: GenerationTiming) {
+  // A completed, identity-bound receipt no longer needs provider credentials or
+  // another status query. Invalid non-null documents fail closed in the reader.
+  if (task.operation_type === "video_generation" && task.upstream_result_document != null)
+    return executeApiMartVideo(task, {});
   // Existing async image submissions must never fall through to a newly edited
   // synchronous provider/workflow configuration and create another paid job.
   if (task.upstream_workflow_context) {
@@ -449,8 +470,16 @@ async function executeApiMartImage(
   }) : { references: sourceAssets };
   if (!task.upstream_task_id && !task.upstream_submission_started_at && task.parameters.quickImageAction) await validateQuickImageSource(editInput.references[0], task.parameters);
   let sourceImages: Array<SourceAsset | string> = editInput.references;
-  if (!task.upstream_task_id && !task.upstream_submission_started_at && task.model_id === "gpt-image-2.6-flare"
-    && editInput.references.length && config.PROVIDER_IMAGE_PUBLIC_ORIGIN) {
+  if (!task.upstream_task_id && !task.upstream_submission_started_at && editInput.references.length) {
+    // Validate the owned bytes before replacing them with URLs: URL-only adapter
+    // validation cannot enforce each model's size, MIME or combined-byte limits.
+    preflightApiMartImageRequest({ modelId: task.model_id!, prompt: providerPrompt, parameters: task.parameters,
+      sourceImages: editInput.references, ...(editInput.mask ? { maskImage: editInput.mask } : {}),
+      ...(editInput.markup ? { markupImage: editInput.markup } : {}) });
+    if (!config.PROVIDER_IMAGE_PUBLIC_ORIGIN) throw Object.assign(
+      new Error("服务端未配置参考图访问域名；尚未上传到供应商或提交生成，请联系管理员配置 PROVIDER_IMAGE_PUBLIC_ORIGIN"),
+      { code: "PROVIDER_IMAGE_ORIGIN_REQUIRED" },
+    );
     const access = new ProviderImageAccess(db, cache, storage, config.PROVIDER_IMAGE_PUBLIC_ORIGIN);
     sourceImages = [];
     // Publish only validated, owned references; never expose mask/markup layers or reload a submitted task.
@@ -538,10 +567,17 @@ async function executeOpenAiAudio(
 
 async function executeApiMartVideo(task: WorkRow, credentials: Record<string, string>) {
   if (!storage.configured) throw new Error("公司对象存储尚未配置，不能保存生成视频");
+  if (task.upstream_result_document != null) {
+    const receipt = readApiMartVideoReceipt(task.upstream_result_document, {
+      taskId: task.id, userId: task.user_id, modelConfigId: task.model_config_id!, modelId: task.model_id!, upstreamTaskId: task.upstream_task_id!,
+    })!;
+    await assertTaskExecution(task);
+    return [await downloadVideoResult(receipt.url)];
+  }
   if (task.upstream_task_id && task.poll_deadline_at && new Date(task.poll_deadline_at).getTime() <= Date.now()) {
     throw new Error("视频状态查询超时；可恢复查询原任务，不会重新生成");
   }
-  const providerSources = task.upstream_task_id || task.upstream_submission_started_at ? [] : await loadVideoSourceAssets(task.source_urls, task.user_id);
+  const providerSources = task.upstream_task_id || task.upstream_submission_started_at ? [] : await loadVideoSourceAssets(task.source_urls, task.user_id, task);
   const result = await stepApiMartVideoTask({
     baseUrl: task.base_url!, apiKey: credentials.apiKey || "", modelId: task.model_id!, prompt: task.prompt,
     parameters: task.parameters, sources: providerSources, upstreamTaskId: task.upstream_task_id,
@@ -564,7 +600,12 @@ async function executeApiMartVideo(task: WorkRow, credentials: Record<string, st
     },
   });
   if (result.status === "pending") throw new VideoTaskPending(result.nextPollMs);
-  return [await downloadVideoResult(result.url)];
+  const receipt = await saveApiMartVideoReceipt(db, {
+    taskId: task.id, userId: task.user_id, modelConfigId: task.model_config_id!, modelId: task.model_id!,
+    upstreamTaskId: task.upstream_task_id!, executionToken: task.execution_token,
+  }, result);
+  task.upstream_result_document = receipt;
+  return [await downloadVideoResult(receipt.url)];
 }
 
 async function executeWorkflow(
@@ -802,8 +843,10 @@ async function loadSourceAsset(url: string, userId: string, maxBytes?: number): 
   };
 }
 
-async function loadVideoSourceAssets(urls: string[], userId: string): Promise<ProviderVideoSource[]> {
+async function loadVideoSourceAssets(urls: string[], userId: string, task: Pick<WorkRow, "id" | "execution_token">): Promise<ProviderVideoSource[]> {
   const sources: ProviderVideoSource[] = [];
+  if (urls.length && !config.PROVIDER_IMAGE_PUBLIC_ORIGIN) throw new Error("服务端未配置参考素材访问域名，尚未提交视频生成");
+  const access = urls.length ? new ProviderImageAccess(db, cache, storage, config.PROVIDER_IMAGE_PUBLIC_ORIGIN!) : null;
   for (const url of urls) {
     const id = url.match(/^\/api\/assets\/([0-9a-f-]{36})\/content$/i)?.[1];
     if (!id) throw new Error("参考素材不是公司素材地址");
@@ -817,13 +860,17 @@ async function loadVideoSourceAssets(urls: string[], userId: string): Promise<Pr
     if (isImage && byteSize > 10 * 1024 * 1024) throw new Error("视频参考图片不能超过 10MB");
     const object = await readSourceAssetObject(storage, asset.object_key);
     if (!object.Body) throw new Error("参考素材内容为空或无法读取");
-    // Only images need resident bytes for APIMart upload; video/audio are signed URLs.
+    // Images keep one validated original buffer; video/audio are probed as streams.
     const bytes = isImage ? await object.Body.transformToByteArray() : new Uint8Array();
     if (isImage && bytes.byteLength !== byteSize) throw new Error("参考素材实际大小与存储记录不一致，请重新上传");
     const metadata = isImage ? await probeMediaBytes(bytes, asset.mime_type)
       : await probeMediaStream(object.Body.transformToWebStream(), asset.mime_type, byteSize);
-    sources.push({ bytes, byteSize, mimeType: asset.mime_type, ...metadata,
-      publicUrl: isImage ? undefined : await storage.signedDownloadUrl(asset.object_key, 1800) });
+    if (!object.ETag || object.ContentLength !== byteSize) throw new Error("参考素材原件标识或大小已改变，尚未提交生成");
+    const identity = { taskId: task.id, userId, executionToken: task.execution_token };
+    const publicUrl = isImage
+      ? await access!.issue({ ...identity, source: { assetId: id, objectKey: asset.object_key, bytes, mimeType: asset.mime_type, filename: asset.filename, etag: object.ETag } })
+      : await access!.issueMedia({ ...identity, source: { assetId: id, objectKey: asset.object_key, byteSize, mimeType: asset.mime_type, etag: object.ETag } });
+    sources.push({ bytes, byteSize, mimeType: asset.mime_type, ...metadata, publicUrl });
   }
   return sources;
 }

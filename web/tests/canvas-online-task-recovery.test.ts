@@ -37,6 +37,19 @@ test("known task IDs are read directly and recover only a paused task with an up
     expect(run.calls).toEqual(["task", "recover", "wait", "store-image"]);
 });
 
+test.each([
+    { status: "paused", errorCode: "IMAGE_RESULT_PROCESSING_FAILED" },
+    { status: "paused", lastFailure: { phase: "postprocess" } },
+    { status: "paused", failureReason: "渠道原件已保存到素材库，但图片后处理未完成：decoder failed" },
+    { status: "failed", errorCode: "IMAGE_RESULT_PROCESSING_FAILED" },
+])("canvas local processing failure ends recovery without importing upstream originals: %j", async failure => {
+    const run = harness({ ...task, ...failure, upstreamTaskId: "upstream" });
+    const result = await recoverOnlineAgentTask({ ...pending, taskIds: [task.id] }, { x: 0, y: 0 }, new AbortController().signal, run.io).catch(error => error);
+    expect(result).toBeInstanceOf(QueuedTaskFailedError);
+    expect(result.message).toContain("原件已保存到素材库");
+    expect(run.calls).toEqual(["task"]);
+});
+
 test("missing, uncertain and failed tasks remain explicit without replacement submission", async () => {
     const signal = new AbortController().signal;
     const absent = harness(null);

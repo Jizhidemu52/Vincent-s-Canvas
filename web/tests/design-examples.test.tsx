@@ -9,7 +9,7 @@ import ts from "typescript";
 import { DesignExampleArticle, PracticeExampleRecord } from "@/components/design-examples";
 import { designExampleForLocation, designExampleForScene, designExamples } from "@/lib/design-examples";
 import { navigationTools } from "@/constant/navigation-tools";
-import { creativePresets } from "@/lib/creative-presets";
+import { creativePresets, isStandaloneCreativePreset } from "@/lib/creative-presets";
 
 describe("concise illustrated design examples", () => {
     test("all 27 module-specific examples use one short sentence for input, action and result", () => {
@@ -33,7 +33,7 @@ describe("concise illustrated design examples", () => {
             if (example) expect(example.location).toBe(`左侧导航 → ${tool.label}`);
         }
         for (const preset of creativePresets) {
-            expect(designExampleForScene(preset.id)?.location).toBe(`创意设计 → ${preset.title}`);
+            expect(designExampleForScene(preset.id)?.location).toBe(`${isStandaloneCreativePreset(preset.id) ? "左侧导航" : "创意设计"} → ${preset.title}`);
         }
         expect(designExamples["reference-import"].location).toBe("素材库 → 网页采集");
         expect(designExampleForLocation("/creative")).toBeUndefined();

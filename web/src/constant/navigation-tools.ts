@@ -1,8 +1,11 @@
-import { BookMarked, Box, FileText, Grid2x2, ImageIcon, ImagePlus, Images, Layers3, Lightbulb, MessageSquare, ScanLine, Scissors, ShieldCheck, Sparkles, UserRoundCog, Video, Zap } from "lucide-react";
+import { BookMarked, Box, FileText, Grid2x2, ImageIcon, ImagePlus, Images, Layers3, Lightbulb, MessageSquare, Palette, RotateCcw, ScanLine, Scissors, ShieldCheck, UserRoundCog, Video } from "lucide-react";
 
 import type { AdminOperationType } from "@/lib/admin-domain";
 
 export const navigationTools = [
+    { slug: "local-restyle", path: "/local-restyle", label: "局部改款", icon: Scissors, group: "local" },
+    { slug: "garment-colorway", path: "/garment-colorway", label: "服装配色", icon: Palette, group: "local" },
+    { slug: "back-design", path: "/back-design", label: "背面设计", icon: RotateCcw, group: "local" },
     { slug: "layer-studio", path: "/layer-studio", label: "图层拆分与图片生成", icon: Layers3, group: "local" },
     { slug: "remove-background", path: "/remove-background", label: "一键去背景", icon: Scissors, group: "local" },
     { slug: "hd-upscale", path: "/hd-upscale", label: "高清放大", icon: ScanLine, group: "local" },
@@ -15,24 +18,10 @@ export const navigationTools = [
         group: "local",
     },
     {
-        slug: "detail-enhance",
-        path: "/image?tool=detail-enhance",
-        label: "细节增强",
-        icon: Zap,
-        group: "local",
-    },
-    {
         slug: "image-edit",
         path: "/image?tool=image-edit",
         label: "图片编辑",
         icon: ImagePlus,
-        group: "local",
-    },
-    {
-        slug: "angle-control",
-        path: "/image?tool=angle-control",
-        label: "角度控制",
-        icon: Sparkles,
         group: "local",
     },
     {
@@ -125,6 +114,7 @@ export type NavigationGroup = (typeof navigationTools)[number]["group"];
 export type NavigationToolSlug = (typeof navigationTools)[number]["slug"];
 
 export function navigationModuleKey(slug: NavigationToolSlug) {
+    if (slug === "local-restyle" || slug === "garment-colorway" || slug === "back-design") return `creative-${slug}` as const;
     return slug === "remove-background" || slug === "item-extract" ? "image-edit" : slug === "hd-upscale" ? "detail-enhance" : slug === "my-prompts" ? "prompts" : slug;
 }
 
@@ -134,9 +124,7 @@ export const navigationToolBilling: Partial<Record<NavigationToolSlug, { operati
     "item-extract": { operationType: "inpaint", toolKey: "image-edit" },
     "gpt-chat": { operationType: "chat", toolKey: "gpt-chat" },
     image: { operationType: "image_generation", toolKey: "image" },
-    "detail-enhance": { operationType: "upscale", toolKey: "detail-enhance" },
     "image-edit": { operationType: "inpaint", toolKey: "image-edit" },
-    "angle-control": { operationType: "inpaint", toolKey: "angle-control" },
     "seamless-stitch": { operationType: "seamless_stitch", toolKey: "seamless-stitch" },
     "midjourney-blend": { operationType: "image_generation", toolKey: "midjourney-blend" },
     video: { operationType: "video_generation", toolKey: "video" },

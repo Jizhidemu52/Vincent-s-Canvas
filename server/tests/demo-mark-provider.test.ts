@@ -78,7 +78,7 @@ describe("read-only demo Mark catalog", () => {
     expect(mark.provider).toMatchObject({ id: MARK_IMAGE_PROVIDER_ID, hasCredentials: true, protocol: "apimart" });
     expect(mark.models.map(model => [model.id, model.modelId])).toEqual(MARK_PLATFORM_MODELS.map((model, index) => [`d5000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`, model.modelId]));
     const available = listAvailableDemoModels(mark.models, [mark.provider]);
-    expect(available).toHaveLength(12);
+    expect(available).toHaveLength(13);
     expect(available.some(model => model.modelId === "seedream-5-5")).toBe(false);
     expect(mark.models.filter(model => !model.enabled).map(model => model.modelId)).toEqual(["grok-imagine-image-2.0", "seedream-5-5"]);
     expect(mark.models.find(model => model.modelId === "claude-sonnet-5-5")).toMatchObject({ id: "d5000000-0000-4000-8000-000000000010", enabled: true });
@@ -88,6 +88,7 @@ describe("read-only demo Mark catalog", () => {
       ["d5000000-0000-4000-8000-000000000013", "mai-image-2.6-flash"],
     ]);
     expect(mark.models[13]).toMatchObject({ id: "d5000000-0000-4000-8000-000000000014", modelId: "seedream-5-5", enabled: false, creditCost: 0, rmbCost: 0 });
+    expect(mark.models[14]).toMatchObject({ id: "d5000000-0000-4000-8000-000000000015", modelId: "gemini-4-carbon", enabled: true, capabilities: ["chat", "vision", "tools"] });
     expect(mark.models.find(model => model.modelId === "gemini-3.1-flash-image-preview-official")?.id).toBe("d5000000-0000-4000-8000-000000000009");
     expect(JSON.stringify([mark.provider, mark.models])).not.toContain("fake-mark-key");
     const disabled = createDemoMarkProvider({ apiKey: " " });

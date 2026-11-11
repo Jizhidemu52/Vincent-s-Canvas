@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { confirmCanvasTextRetry, createCanvasMediaSubmission, recoverCanvasMediaTask } from "@/pages/canvas/canvas-media-generation-runtime";
+import { confirmCanvasTextRetry, createCanvasMediaSubmission, recoverCanvasMediaTask, runCanvasMediaGeneration } from "@/pages/canvas/canvas-media-generation-runtime";
 import { runCanvasGeneration, type CanvasGenerationResult } from "@/pages/canvas/canvas-shared-generation-runtime";
 import {
     QueuedTaskFailedError,
@@ -80,6 +80,37 @@ async function rejected(pending: Promise<unknown>): Promise<unknown> {
     try { await pending; } catch (error) { return error; }
     throw new Error("Expected the operation to reject");
 }
+
+describe("canvas model-specific unsaved video duration", () => {
+    test.each([
+        ["gemini-omni-1.2-flash", undefined, false, 10],
+        ["gemini-omni-1.2-flash", "8", false, 8],
+        ["gemini-omni-1.2-flash", undefined, true, 10],
+        ["gemini-omni-1.2-flash", "8", true, 8],
+        ["doubao-seedance-2.5", undefined, false, 5],
+        ["doubao-seedance-2.5", "8", true, 8],
+    ] as const)("%s saved=%s shared=%s retains its own duration %s", async (modelId, seconds, shared, expected) => {
+        const h = harness("video", shared ? {} : { seconds });
+        if (shared) h.context.nodes.current.push(node("settings", CanvasNodeType.Config, { seconds, generationMode: "video" }));
+        const controller = new AbortController();
+        network(request => {
+            if (request.path === "/api/models") return Response.json({ models: [{ ...model, id: modelId, modelId, capabilities: ["video"] }], tools: [], prices: [] });
+            expect(request.path).toBe("/api/tasks/preflight");
+            expect(request.body?.parameters).toMatchObject({ seconds: expected });
+            return Response.json({ message: "Offline validation stop" }, { status: 400 });
+        });
+        const result = await runCanvasMediaGeneration({ ...h.context, nodeId: "result", mode: "video", source: h.context.nodes.current[0], shared,
+            config: { ...defaultConfig, model: modelId, videoModel: modelId, videoSeconds: seconds || "5" },
+            context: { prompt: "offline video", referenceImages: [], referenceVideos: [], referenceAudios: [], imageCount: 0, videoCount: 0, audioCount: 0, textCount: 0 },
+            origin: { sourceNodeId: "result", configNodeId: shared ? "settings" : undefined, runId: "new", mode: "video" },
+            controller, runningId: "result", setConnections: () => undefined, start: () => controller, finish: () => undefined,
+        });
+        expect(result.status).toBe("failed");
+        expect(requests.filter(request => request.path === "/api/tasks/preflight")).toHaveLength(1);
+        expect(requests.filter(request => request.path === "/api/tasks")).toHaveLength(0);
+        expect(h.metadata.seconds).toBe(String(expected));
+    });
+});
 
 describe("canvas media edit-lease fence", () => {
     test.each(modes)("%s completion waits for renewal without losing its accepted task or result", async mode => {
@@ -285,7 +316,7 @@ describe("canvas recovery queries only the original task", () => {
                 const h = harness(mode, { status: "error", mediaTask: binding, generationSubmissionUncertain: true });
                 network(() => Response.json({ task: task({ status, failureReason: `confirmed-${status}` }) }));
                 const output = await recoverCanvasMediaTask("result", h.context);
-                expect(output).toMatchObject({ nodeId: "result", status: "failed", error: `confirmed-${status}` });
+                expect(output).toMatchObject({ nodeId: "result", status: "failed", error: status === "cancelled" ? "任务已取消。" : `confirmed-${status}` });
                 expect(h.metadata.mediaTask).toBeUndefined();
                 expect(h.metadata.generationSubmissionUncertain).toBeUndefined();
                 expect(requests).toEqual([{ path: `/api/tasks/by-request/${encodeURIComponent(binding.requestId)}`, method: "GET" }]);

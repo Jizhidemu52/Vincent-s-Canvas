@@ -11,6 +11,7 @@ import type { Cache } from "../../src/db";
 import type { ObjectStorage, ObjectReadOptions } from "../../src/object-storage";
 import { ProviderImageAccess, PROVIDER_IMAGE_PATH } from "../../src/provider-image-access";
 import { createProviderImagesRouter } from "../../src/routes/provider-images";
+import { ProviderChatImageAccess, createProviderChatImagesRouter } from "../../src/provider-chat-images";
 import { createAssetsRouter } from "../../src/routes/assets";
 import { requireAccountReady, sessionMiddleware } from "../../src/session";
 import { requireSameOrigin } from "../../src/http-security";
@@ -62,6 +63,7 @@ integration("formal route wiring and real SQL allow only a live task original; a
       const config = loadConfig({ DATABASE_URL: "unused-fixture", REDIS_URL: "unused-fixture", AUTH_ENABLED: "true", PROVIDER_IMAGE_PUBLIC_ORIGIN: enabled ? origin : "" });
       const app = express().use(helmet(), requestLogging(), cookieParser(), requireSameOrigin);
       const values = { app, config, db: fixture.db, cache, storage, PROVIDER_IMAGE_PATH, ProviderImageAccess, createProviderImagesRouter, createAssetsRouter,
+        providerChatImages: new ProviderChatImageAccess(fixture.db, cache, config.PROVIDER_IMAGE_PUBLIC_ORIGIN), createProviderChatImagesRouter,
         requireSession: sessionMiddleware(fixture.db, cache, config, { allowPersonalWorkspace: true }), requireAccountReady,
         protectModelIdentity: (_req: express.Request, _res: express.Response, next: express.NextFunction) => next(), videoPlayback: undefined };
       new Function(...Object.keys(values), code)(...Object.values(values));

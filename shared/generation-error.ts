@@ -1,9 +1,14 @@
 /** Employee-facing task failures. Raw provider diagnostics remain in task storage/admin APIs. */
+export const IMAGE_RESULT_POSTPROCESS_FAILURE_PREFIX = "渠道原件已保存到素材库，但图片后处理未完成";
+export const IMAGE_RESULT_POSTPROCESS_FAILURE_CODE = "IMAGE_RESULT_PROCESSING_FAILED";
+
 export function publicGenerationFailure(reason: unknown, status?: string): string {
+    if (status === "cancelled") return "任务已取消。";
     const raw = typeof reason === "string" ? reason : "";
+    if (raw.startsWith(`${IMAGE_RESULT_POSTPROCESS_FAILURE_PREFIX}：`) || raw.startsWith(`${IMAGE_RESULT_POSTPROCESS_FAILURE_PREFIX}；`))
+        return `${IMAGE_RESULT_POSTPROCESS_FAILURE_PREFIX}；请联系管理员检查已保存原件，不要重复生成。`;
     if (status === "paused" || /待核查|勿重复|不要重复|submission.{0,20}(unknown|uncertain)|query.{0,12}paused/i.test(raw))
         return "原任务结果待核查，请查询原任务或联系管理员；不要重复生成。";
-    if (status === "cancelled") return "任务已取消。";
     // Only the exact upload adapter message proves generation never started.
     // A generic 429 may belong to a submitted task and must keep its old guidance.
     for (const purpose of ["图片", "视频"]) {
@@ -54,7 +59,7 @@ export function publicTaskFailurePayload(body: unknown): unknown {
         const detail = raw && typeof raw === "object" ? raw as Record<string, unknown> : undefined;
         // Stable recovery classification is not a raw provider diagnostic. Keep
         // only its protocol fields, never messages, URLs or nested error objects.
-        const safeDetail = detail && ["preflight", "submission", "polling", "download", "result_store"].includes(String(detail.phase))
+        const safeDetail = detail && ["preflight", "submission", "polling", "download", "result_store", "postprocess"].includes(String(detail.phase))
             && typeof detail.code === "string" && /^[A-Z][A-Z0-9_]{0,79}$/.test(detail.code)
             ? { phase: detail.phase, code: detail.code, ...(typeof detail.httpStatus === "number" && Number.isInteger(detail.httpStatus) && detail.httpStatus >= 100 && detail.httpStatus <= 599 ? { httpStatus: detail.httpStatus } : {}) } : undefined;
         return { ...rest, ...(safeDetail ? { lastFailure: safeDetail } : {}), failureReason: publicGenerationFailure(data.failureReason, String(data.status || "")) };

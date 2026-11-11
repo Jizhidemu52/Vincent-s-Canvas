@@ -72,6 +72,7 @@ import { writeAudit } from "./audit";
 import { createAdminReleaseNotesRouter, createReleaseNotesRouter } from "./routes/release-notes";
 import { ProviderImageAccess, PROVIDER_IMAGE_PATH } from "./provider-image-access";
 import { createProviderImagesRouter } from "./routes/provider-images";
+import { ProviderChatImageAccess, createProviderChatImagesRouter } from "./provider-chat-images";
 
 const config = loadConfig();
 const features = deploymentFeatures(config);
@@ -79,7 +80,8 @@ const db = createDatabase(config.DATABASE_URL);
 const cache = await createCache(config.REDIS_URL);
 const storage = new ObjectStorage(config);
 const videoPlayback = createAssetVideoPreviewService(db, cache, storage);
-const promptCompiler = createPostgresPromptCompiler(db, config, storage);
+const providerChatImages = new ProviderChatImageAccess(db, cache, config.PROVIDER_IMAGE_PUBLIC_ORIGIN);
+const promptCompiler = createPostgresPromptCompiler(db, config, storage, providerChatImages);
 await ensureVideoMotionRecipe(promptCompiler.store);
 const taskEvents = new TaskEventsService(db);
 void taskEvents.start();
@@ -106,6 +108,7 @@ app.use(requireSameOrigin);
 // Only task-scoped random reference paths bypass login. Employee asset routes
 // below retain their existing session and ownership checks.
 if (config.PROVIDER_IMAGE_PUBLIC_ORIGIN) {
+  app.use(PROVIDER_IMAGE_PATH, createProviderChatImagesRouter(providerChatImages));
   app.use(PROVIDER_IMAGE_PATH, createProviderImagesRouter(
     new ProviderImageAccess(db, cache, storage, config.PROVIDER_IMAGE_PUBLIC_ORIGIN), storage,
   ));
@@ -241,7 +244,7 @@ app.use(
   "/api/chat",
   requireSession,
   requireAccountReady,
-  createChatRouter(db, config, { productCandidates: { cache, openReceiptConnection: () => openProductCandidatesReceiptConnection(cache) }, loadProfileRules: async profile => (await promptCompiler.store.active(profile)).version.systemPrompt }),
+  createChatRouter(db, config, { providerImages: providerChatImages, productCandidates: { cache, openReceiptConnection: () => openProductCandidatesReceiptConnection(cache) }, loadProfileRules: async profile => (await promptCompiler.store.active(profile)).version.systemPrompt }),
 );
 app.use(
   "/api/admin/credit-policy",

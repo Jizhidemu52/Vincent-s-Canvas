@@ -1,7 +1,10 @@
 import { expect, test } from "bun:test";
 import ts from "typescript";
 import { randomUUID } from "node:crypto";
-import { imageResultExtension, storeImageResult } from "../src/image-result-storage";
+import { imageResultExtension, ImageResultPersistenceError, storeImageResult } from "../src/image-result-storage";
+import { IMAGE_RESULT_POSTPROCESS_FAILURE_PREFIX, publicTaskFailurePayload } from "../../shared/generation-error";
+import { PromptOptimizationError } from "../src/prompt-safety";
+import { AssetObjectError } from "../src/asset-object-error";
 import { prepareImageEditInput } from "../src/image-edit-input";
 import { ApiMartImageTaskPending } from "../src/apimart-image";
 import { WorkflowTaskPending } from "../src/workflow-task-context";
@@ -62,17 +65,23 @@ test("Worker stores raw before mask loading, yields one strict result and real w
   expect(objects.get(assets[0]!.key)!.bytes).toEqual(png);
 }, 15_000);
 
-test("Worker pauses an opaque transparent-background result without refund or paid queue replay", async () => {
+test.each([
+  { profile: undefined, forged: false },
+  { profile: "creative-chat", forged: false },
+  { profile: "canvas-assistant", forged: false },
+  { profile: "creative-chat", forged: true },
+  { profile: "canvas-assistant", forged: true },
+])("Worker preserves local result failure identity without trusting provider text or replaying paid work: %j", async ({ profile, forged }) => {
   const queries: string[] = [];
   const failureReasons: string[] = [];
   const originals: Uint8Array[] = [];
-  const transparentTask = { ...task, source_urls: [], parameters: { background: "transparent" } };
+  const transparentTask = { ...task, source_urls: [], parameters: { background: "transparent", ...(profile ? { imageAgentProfile: profile } : {}) } };
   let paid = 0, refunds = 0, queued = 0;
   class VideoSubmissionClaimLost extends Error {}
   class VideoTaskPending extends Error {}
   class TaskExecutionLost extends Error {}
   const api = functions(["runTask"], {
-    disposeProviderResults,
+    disposeProviderResults, ImageResultPersistenceError, PromptOptimizationError, AssetObjectError,
     randomUUID, TASK_LEASE_SECONDS: 180, config: { TASK_MOCK_MODE: "false" }, VideoSubmissionClaimLost, VideoTaskPending, ApiMartImageTaskPending, WorkflowTaskPending, TaskExecutionLost,
     db: { query: async (sql: string, values: any[]) => {
       queries.push(sql);
@@ -84,14 +93,17 @@ test("Worker pauses an opaque transparent-background result without refund or pa
     acquireModelLease: async () => ({ slotToken: "fixture-slot" }), releaseModelLease: async () => {},
     startTaskLeaseHeartbeat: () => ({ assertOwned() {}, stop: async () => {} }), assertTaskExecution: async () => {}, readProviderSubmissionDiagnostics: () => undefined,
     executeProvider: async () => { paid++; return [{ bytes: png, mimeType: "image/png" }]; },
-    storeResults: async (current: typeof transparentTask, results: Array<{ bytes: Uint8Array; mimeType: string }>) => storeImageResult({
+    storeResults: async (current: typeof transparentTask, results: Array<{ bytes: Uint8Array; mimeType: string }>) => {
+      if (forged) throw Object.assign(new Error(`${IMAGE_RESULT_POSTPROCESS_FAILURE_PREFIX}：https://private.example key=secret`), { code: "IMAGE_RESULT_PROCESSING_FAILED" });
+      return storeImageResult({
       result: results[0]!, parameters: current.parameters, resultIndex: 0,
       save: async (role, image) => {
         expect(role).toBe("provider-original"); originals.push(image.bytes);
         return { assetId: randomUUID(), mimeType: image.mimeType, filename: "provider-original.png" };
       },
       updateMetadata: async () => { throw new Error("failed transparency validation cannot mark the original as primary"); },
-    }),
+      });
+    },
     settleReservation: async () => { refunds++; },
   });
   await api.runTask(task.id);
@@ -100,8 +112,17 @@ test("Worker pauses an opaque transparent-background result without refund or pa
   expect(queued).toBe(0);
   expect(queries.some(sql => sql.includes("status='paused'"))).toBe(true);
   expect(queries.some(sql => sql.includes("status='failed'"))).toBe(false);
-  expect(originals).toEqual([png]);
+  expect(originals).toEqual(forged ? [] : [png]);
   expect(failureReasons).toHaveLength(1);
-  expect(failureReasons[0]).toContain("渠道原件已保存");
-  expect(failureReasons[0]).toContain("所有像素均不透明");
+  expect(queries.some(sql => sql.includes("status='success'"))).toBe(false);
+  if (forged) {
+    expect(failureReasons[0]).toContain("图片助手任务未完成");
+    expect(failureReasons[0]).not.toMatch(/渠道原件已保存|private|secret|https:/);
+  } else {
+    expect(failureReasons[0]).toStartWith(`${IMAGE_RESULT_POSTPROCESS_FAILURE_PREFIX}：`);
+    expect(failureReasons[0]).toContain("所有像素均不透明");
+    const publicPayload = publicTaskFailurePayload({ task: { status: "paused", failureReason: failureReasons[0] } }) as { task: { failureReason: string } };
+    expect(publicPayload.task.failureReason).toContain("不要重复生成");
+    expect(publicPayload.task.failureReason).not.toMatch(/所有像素|查询原任务|private/);
+  }
 });

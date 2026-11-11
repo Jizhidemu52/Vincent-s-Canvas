@@ -2,6 +2,8 @@ import { nanoid } from "nanoid";
 import { NODE_DEFAULT_SIZE } from "@/constant/canvas";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type CanvasNodeGroup, type Position } from "@/types/canvas";
 
+export { isEmptyCanvasDesignTemplateReference } from "./canvas-design-template-reference";
+
 export const canvasDesignTemplates = [
     { id: "development", title: "整套款式开发", output: "参考款 → 技术线稿 / 改色方案 / 上身效果图", steps: [
         ["技术线稿", "正面与背面技术线稿"], ["改色方案", "服装主体海军蓝，白底正面"], ["上身效果图", "成人模特，正面全身，摄影棚"],

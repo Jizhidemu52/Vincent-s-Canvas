@@ -119,24 +119,23 @@ test("creative drop slots preserve primary versus pattern roles and reject ambig
     expect(api.submissions).toHaveLength(0);
 });
 
-test("recipe drop respects the disabled pattern slot until a primary reference exists", async ({ page, api }) => {
-    await page.goto("/creative/series-recipe");
-    await expect(page.getByLabel("选择流程", { exact: true })).toBeEnabled();
-    await page.getByLabel("选择流程", { exact: true }).selectOption("pattern");
-    const primary = page.getByLabel("上传参考底图（必需）", { exact: true });
-    const pattern = page.getByLabel("上传图案参考（可选）", { exact: true });
-    await expect(pattern).toBeDisabled();
-    expect(await dropFiles(pattern.locator(".."), "禁用图案原图.png")).toBe(true);
-    await expect(page.getByText("当前暂不能添加图片，请完成正在进行的操作后再拖入。", { exact: true })).toBeVisible();
-    await expect(pattern.locator("..").getByRole("img")).toHaveCount(0);
-    expect(await dropFiles(primary.locator(".."), "配方底图", { itemsOnly: true, type: "" })).toBe(true);
+test("creative drop blocks both roles while a task is running and preserves the accepted originals", async ({ page, api }) => {
+    api.taskStatus = "queued";
+    await page.goto("/creative/accessory-design");
+    const primary = page.getByLabel("上传辅料图", { exact: true });
+    const pattern = page.getByLabel("上传图案图", { exact: true });
+    expect(await dropFiles(primary.locator(".."), "辅料底图", { itemsOnly: true, type: "" })).toBe(true);
     await expect(primary.locator("..").getByRole("img")).toBeVisible();
-    await expect(pattern).toBeEnabled();
-    expect(await dropFiles(pattern.locator(".."), "配方图案", { type: "" })).toBe(true);
+    expect(await dropFiles(pattern.locator(".."), "辅料图案", { type: "" })).toBe(true);
     await expect(pattern.locator("..").getByRole("img")).toBeVisible();
-    await expect(page.getByTitle("配方底图", { exact: true })).toBeVisible();
-    await expect(page.getByTitle("配方图案", { exact: true })).toBeVisible();
-    expect(api.submissions).toHaveLength(0);
+    await page.locator("button.cs-generate").click();
+    await expect.poll(() => api.submissions.length).toBe(1);
+    await expect(pattern).toBeDisabled();
+    expect(await dropFiles(pattern.locator(".."), "不应覆盖图案.png")).toBe(true);
+    await expect(page.getByText("当前暂不能添加图片，请完成正在进行的操作后再拖入。", { exact: true })).toBeVisible();
+    await expect(pattern.locator("..").getByRole("img")).toHaveAttribute("alt", "辅料图案");
+    await expect(primary.locator("..").getByRole("img")).toHaveAttribute("alt", "辅料底图");
+    expect(api.submissions).toHaveLength(1);
 });
 
 test("unreadable external image drops show actionable failure without retrying or generating", async ({ page, api }) => {

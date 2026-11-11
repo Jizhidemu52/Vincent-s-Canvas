@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { IMAGE_RESULT_POSTPROCESS_FAILURE_PREFIX } from "../../shared/generation-error";
 import {
   deriveBatchStatus,
   queueScore,
@@ -40,6 +41,38 @@ describe("task queue priority", () => {
     expect(queueScore("urgent", 200)).toBeLessThan(queueScore("priority", 100));
     expect(queueScore("priority", 200)).toBeLessThan(queueScore("normal", 100));
     expect(queueScore("normal", 100)).toBeLessThan(queueScore("normal", 200));
+  });
+
+  test("single and batch resume cannot requeue saved-original postprocessing failures even with an upstream ID", async () => {
+    const task = { id: "postprocess-image", request_id: "request-1", batch_id: "batch-1", status: "paused", priority: "normal", operation_type: "image_generation", attempts: 1,
+      upstream_task_id: "completed-provider-job", failure_reason: `${IMAGE_RESULT_POSTPROCESS_FAILURE_PREFIX}：invalid matte` };
+    const writes: string[] = [];
+    const database = { query: async (sql: string) => {
+      if (sql.startsWith("SELECT id FROM tasks")) return { rows: [{ id: task.id }] };
+      if (sql.startsWith("SELECT id,request_id")) return { rows: [task] };
+      if (sql.includes("COUNT(*)::int total")) return { rows: [{ total: 1, paused: 1 }] };
+      writes.push(sql); return { rows: [] };
+    } };
+    const queued: string[] = [];
+    const cache = { eval: async (_script: string, value: { arguments: string[] }) => (queued.push(value.arguments[0]!), 1) };
+    expect(await transitionTask(database as never, cache as never, task.id, "resume")).toBeNull();
+    expect(await transitionBatchTasks(database as never, cache as never, "batch-1", "resume")).toBe(0);
+    expect(queued).toEqual([]);
+    expect(writes.some(sql => sql.startsWith("UPDATE tasks"))).toBe(false);
+  });
+
+  test("resume update fences a postprocessing failure recorded after the initial read", async () => {
+    const task = { id: "race-image", request_id: "request-1", batch_id: null, status: "paused", priority: "normal", queued_at: "2026-09-01T00:00:00Z", operation_type: "image_generation", attempts: 1, upstream_task_id: "completed-provider-job", failure_reason: null };
+    let updates = 0;
+    const database = { query: async (sql: string, values: unknown[]) => {
+      if (sql.startsWith("SELECT id,request_id")) return { rows: [task] };
+      expect(sql).toContain("AND COALESCE(failure_reason,'') NOT LIKE $2");
+      expect(values).toEqual([task.id, `${IMAGE_RESULT_POSTPROCESS_FAILURE_PREFIX}：%`]);
+      updates++; return { rows: [] };
+    } };
+    const cache = { eval: async () => { throw new Error("fenced task must not reach queue"); } };
+    expect(await transitionTask(database as never, cache as never, task.id, "resume")).toBeNull();
+    expect(updates).toBe(1);
   });
 
   test("known asynchronous image tasks can resume by original ID, without a new reservation", async () => {

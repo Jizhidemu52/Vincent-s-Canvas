@@ -6,7 +6,7 @@ import { moduleDefinitions } from "../../shared/feature-catalog";
 import { designExampleForLocation, designExampleForScene } from "../src/lib/design-examples";
 
 const scenes = ["text-to-style", "style-to-sketch", "local-restyle", "garment-colorway", "back-design", "pattern-extract", "pattern-colorway", "accessory-design", "pattern-craft"];
-const routes = ["/image", ...["detail-enhance", "image-edit", "angle-control", "midjourney-blend"].map(tool => `/image?tool=${tool}`), "/video", "/chat", "/assets", "/prompts", "/my-prompts", "/design-library", "/reference-import", "/creative/pattern-placement", "/creative/pattern-repeat", "/creative/series-recipe", ...scenes.map(scene => `/creative/${scene}`)];
+const routes = ["/image", ...["image-edit", "midjourney-blend"].map(tool => `/image?tool=${tool}`), "/video", "/chat", "/assets", "/prompts", "/my-prompts", "/design-library", "/reference-import", "/creative/pattern-placement", "/creative/pattern-repeat", ...scenes.map(scene => `/creative/${scene}`)];
 const record = (page: Page) => page.locator('[data-testid="practice-example-record"]:visible');
 const article = (page: Page) => page.locator('[data-testid="design-example-article"]:visible');
 const videoExampleSource = "/design-examples/model-natural-showcase.mp4";

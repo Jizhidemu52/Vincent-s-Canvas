@@ -67,50 +67,50 @@ test("creative two-role assets keep independent originals, metadata and previews
     expect(api.submissions).toHaveLength(0);
 });
 
-test("recipe library inputs respect disabled secondary, preserve both images and stay task-scoped", async ({ page, context, api }, info) => {
-    await library(context, api); await page.goto("/creative/series-recipe");
-    await page.getByLabel("选择流程", { exact: true }).selectOption("pattern");
-    const primary = page.getByRole("button", { name: "从素材库选择参考底图（必需）", exact: true });
-    const secondary = page.getByRole("button", { name: "从素材库选择图案参考（可选）", exact: true });
-    await expect(secondary).toBeDisabled(); await choose(page, primary); await choose(page, secondary, "图案素材");
-    expect(await bytes(page.getByRole("img", { name: "参考底图（必需）", exact: true }))).toEqual(IMAGE);
-    expect(await bytes(page.getByRole("img", { name: "图案参考（可选）", exact: true }))).toEqual(fixturePng(40));
-    await expect.poll(async () => (await stored(page, "series_recipe_workspaces", `project:${owner}`))?.references?.[1]?.sourceAssetId).toBe(secondaryId);
-    await page.screenshot({ path: info.outputPath("recipe-two-roles.png"), fullPage: true });
+test("creative library inputs preserve both originals and stay task-scoped", async ({ page, context, api }, info) => {
+    await library(context, api); await page.goto("/creative/accessory-design");
+    const primary = page.getByRole("button", { name: "从素材库选择辅料图", exact: true });
+    const secondary = page.getByRole("button", { name: "从素材库选择图案图", exact: true });
+    await expect(secondary).toBeEnabled(); await choose(page, primary); await choose(page, secondary, "图案素材");
+    expect(await bytes(page.getByRole("img", { name: "primary-original.png", exact: true }))).toEqual(IMAGE);
+    expect(await bytes(page.getByRole("img", { name: "pattern-original.png", exact: true }))).toEqual(fixturePng(40));
+    await expect.poll(async () => (await stored(page, "creative_scene_workspaces", `draft:${owner}:accessory-design`))?.images?.secondary?.sourceAssetId).toBe(secondaryId);
+    await page.screenshot({ path: info.outputPath("creative-task-two-roles.png"), fullPage: true });
     await page.getByRole("button", { name: "新建任务", exact: true }).click();
-    await expect(page.getByRole("img", { name: "参考底图（必需）", exact: true })).toHaveCount(0);
-    await choose(page, page.getByRole("button", { name: "从素材库选择参考底图（必需）", exact: true }), "图案素材");
-    expect(await bytes(page.getByRole("img", { name: "参考底图（必需）", exact: true }))).toEqual(fixturePng(40));
+    await expect(page.getByRole("img", { name: "primary-original.png", exact: true })).toHaveCount(0);
+    await choose(page, page.getByRole("button", { name: "从素材库选择辅料图", exact: true }), "图案素材");
+    expect(await bytes(page.getByRole("img", { name: "pattern-original.png", exact: true }))).toEqual(fixturePng(40));
     const firstTask = page.getByRole("tab", { name: /^任务 1/ });
     await firstTask.click();
     // Activation commits its IndexedDB registry before changing the visible pane.
     // Do not capture an image handle from task 2 while that write is pending.
     await expect(firstTask).toHaveAttribute("aria-selected", "true");
-    const restoredPrimary = await bytes(page.getByRole("img", { name: "参考底图（必需）", exact: true }));
+    const restoredPrimary = await bytes(page.getByRole("img", { name: "primary-original.png", exact: true }));
     const digest = (value: Buffer) => ({ bytes: value.length, sha256: createHash("sha256").update(value).digest("hex") });
     expect(restoredPrimary.equals(IMAGE), JSON.stringify({ expected: digest(IMAGE), received: digest(restoredPrimary) })).toBe(true);
-    await page.reload(); await expect(page.getByRole("img", { name: "图案参考（可选）", exact: true })).toBeVisible();
-    expect(await bytes(page.getByRole("img", { name: "图案参考（可选）", exact: true }))).toEqual(fixturePng(40));
+    await page.reload(); await expect(page.getByRole("img", { name: "pattern-original.png", exact: true })).toBeVisible();
+    expect(await bytes(page.getByRole("img", { name: "pattern-original.png", exact: true }))).toEqual(fixturePng(40));
     expect(api.submissions).toHaveLength(0);
 });
 
-test("recipe shows source read failure inside the picker and leaves its original untouched", async ({ page, context, api }) => {
-    await library(context, api); await page.goto("/creative/series-recipe");
-    const entry = page.getByRole("button", { name: "从素材库选择参考底图（必需）", exact: true });
+test("creative shows source read failure inside the picker and leaves its original untouched", async ({ page, context, api }) => {
+    await library(context, api); await page.goto("/creative/accessory-design");
+    const entry = page.getByRole("button", { name: "从素材库选择辅料图", exact: true });
     await choose(page, entry); await context.route(`**/api/assets/${secondaryId}/content`, route => route.fulfill({ status: 500, body: "fixture image read failed" }));
     await entry.click(); const modal = page.getByRole("dialog", { name: "选择素材", exact: true });
     await modal.getByRole("button").filter({ has: page.getByRole("img", { name: "图案素材", exact: true }) }).click();
-    await expect(modal.getByRole("alert")).toContainText("参考图读取失败");
+    await expect(modal.getByRole("alert")).toContainText("素材读取失败，请重试");
+    await expect(modal.getByRole("alert")).toContainText("图片读取失败（500）");
     await modal.getByRole("button", { name: "Close", exact: true }).click();
-    expect(await bytes(page.getByRole("img", { name: "参考底图（必需）", exact: true }))).toEqual(IMAGE);
+    expect(await bytes(page.getByRole("img", { name: "primary-original.png", exact: true }))).toEqual(IMAGE);
     expect(api.submissions).toHaveLength(0);
 });
 
-test("recipe picks a previous-page local blob using its persisted key and preserves original metadata", async ({ page, context, api }) => {
-    await library(context, api); await page.goto("/creative/accessory-design");
-    await page.getByLabel("上传辅料图", { exact: true }).setInputFiles({ name: "initialize.png", mimeType: "image/png", buffer: IMAGE });
+test("creative picks a previous-page local blob using its persisted key and preserves original metadata", async ({ page, context, api }) => {
+    await library(context, api); await page.goto("/creative/style-to-sketch");
+    await page.getByLabel("上传服装参考图", { exact: true }).setInputFiles({ name: "initialize.png", mimeType: "image/png", buffer: IMAGE });
     await expect(page.getByRole("img", { name: "initialize.png", exact: true })).toBeVisible();
-    await page.goto("/creative/series-recipe");
+    await page.goto("/creative/accessory-design");
     await page.evaluate(async ({ owner, bytes }) => {
         const blob = new Blob([new Uint8Array(bytes)], { type: "image/png" }), previousUrl = URL.createObjectURL(blob);
         const asset = { id: "persisted-local-recipe", ownerId: owner, kind: "image", title: "刷新前原素材", coverUrl: previousUrl, tags: [], createdAt: "2026-11-01T00:00:00Z", updatedAt: "2026-11-01T00:00:00Z",
@@ -124,13 +124,13 @@ test("recipe picks a previous-page local blob using its persisted key and preser
                 transaction.oncomplete = () => { db.close(); resolve(); }; transaction.onerror = () => reject(transaction.error); } catch (error) { reject(error); } };
         });
     }, { owner, bytes: [...fixturePng(60)] });
-    await page.reload(); await choose(page, page.getByRole("button", { name: "从素材库选择参考底图（必需）", exact: true }), "刷新前原素材");
-    expect(await bytes(page.getByRole("img", { name: "参考底图（必需）", exact: true }))).toEqual(fixturePng(60));
-    await expect.poll(async () => (await stored(page, "series_recipe_workspaces", `project:${owner}`))?.references?.[0]?.storageKey).toBe("image:persisted-recipe-original");
-    expect((await stored(page, "series_recipe_workspaces", `project:${owner}`)).references[0]).toMatchObject({ originalFileName: "local-original.png", imageName: "原底图", imageVersion: 4, sourceAssetId: "local-original" });
-    await page.reload(); await expect(page.getByRole("img", { name: "参考底图（必需）", exact: true })).toBeVisible();
-    expect(await bytes(page.getByRole("img", { name: "参考底图（必需）", exact: true }))).toEqual(fixturePng(60));
-    await expect.poll(async () => (await stored(page, "series_recipe_workspaces", `project:${owner}`))?.references?.[0]?.storageKey).toBe("image:persisted-recipe-original");
-    expect((await stored(page, "series_recipe_workspaces", `project:${owner}`)).references[0]).toMatchObject({ originalFileName: "local-original.png", imageName: "原底图", imageVersion: 4, sourceAssetId: "local-original" });
+    await page.reload(); await choose(page, page.getByRole("button", { name: "从素材库选择辅料图", exact: true }), "刷新前原素材");
+    expect(await bytes(page.getByRole("img", { name: "local-original.png", exact: true }))).toEqual(fixturePng(60));
+    await expect.poll(async () => (await stored(page, "creative_scene_workspaces", `draft:${owner}:accessory-design`))?.images?.primary?.storageKey).toBe("image:persisted-recipe-original");
+    expect((await stored(page, "creative_scene_workspaces", `draft:${owner}:accessory-design`)).images.primary).toMatchObject({ originalFileName: "local-original.png", imageName: "原底图", imageVersion: 4, sourceAssetId: "local-original" });
+    await page.reload(); await expect(page.getByRole("img", { name: "local-original.png", exact: true })).toBeVisible();
+    expect(await bytes(page.getByRole("img", { name: "local-original.png", exact: true }))).toEqual(fixturePng(60));
+    await expect.poll(async () => (await stored(page, "creative_scene_workspaces", `draft:${owner}:accessory-design`))?.images?.primary?.storageKey).toBe("image:persisted-recipe-original");
+    expect((await stored(page, "creative_scene_workspaces", `draft:${owner}:accessory-design`)).images.primary).toMatchObject({ originalFileName: "local-original.png", imageName: "原底图", imageVersion: 4, sourceAssetId: "local-original" });
     expect(api.submissions).toHaveLength(0);
 });

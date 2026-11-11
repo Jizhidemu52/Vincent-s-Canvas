@@ -11,7 +11,7 @@ test("all creative cards load real cover images and the two added cards remain c
     await page.goto("/creative");
     await expect(page.getByRole("heading", { name: "创意设计", exact: true })).toBeVisible();
     const covers = page.locator(".creative-card .creative-cover > img");
-    await expect(covers).toHaveCount(11);
+    await expect(covers).toHaveCount(8);
     for (const cover of await covers.all()) await expectDecodedImage(cover);
     for (const [id, label, src] of [
         ["virtual-try-on", "输入示意 · 毛衫产品图", "/design-examples/knit-source.webp"],

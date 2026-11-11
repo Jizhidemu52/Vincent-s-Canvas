@@ -45,7 +45,7 @@ describe("stored video task preflight", () => {
 
   test("cannot substitute a metadata URL for a missing public endpoint or bypass ownership", async () => {
     const fake = database("wan2.7", { ...video, metadata: { ...video.metadata, upstreamUrl: "https://attacker.example/video.mp4" } });
-    await expect(preflightStoredVideoTask(fake.db as never, input, "http://minio:9000")).rejects.toThrow("S3_PUBLIC_ENDPOINT");
+    await expect(preflightStoredVideoTask(fake.db as never, { ...input, parameters: { videoMode: "extend", seconds: 6 } }, "http://minio:9000")).rejects.toThrow("PROVIDER_IMAGE_PUBLIC_ORIGIN");
     const unowned = database("wan2.7", null);
     await expect(preflightStoredVideoTask(unowned.db as never, input, "https://media.company.example")).rejects.toThrow("无权访问");
     expect(fake.sql.some((statement) => /INSERT|UPDATE/.test(statement))).toBe(false);

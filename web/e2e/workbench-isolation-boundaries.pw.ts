@@ -11,7 +11,7 @@ const SECOND_OWNER = "00000000-0000-4000-8000-000000000088";
 const boards = [
     { kind: "video", path: "/video", submit: "生成视频" },
     { kind: "seamless", path: "/image?tool=seamless-stitch", submit: "开始无缝拼接" },
-    { kind: "recipe", path: "/creative/series-recipe", submit: "生成第 1 色 1 张" },
+    { kind: "image", path: "/image?tool=image-edit", submit: "开始编辑" },
 ] as const;
 type Board = typeof boards[number];
 const pane = (page: Page) => page.getByRole("tabpanel");
@@ -36,9 +36,11 @@ async function mockModelsAndMedia(context: BrowserContext, api: MockCanvasApi) {
 
 async function fill(page: Page, board: Board, marker: string) {
     if (board.kind === "video") await pane(page).getByRole("textbox", { name: "视频提示词", exact: true }).fill(marker);
-    if (board.kind === "recipe") {
-        await pane(page).getByRole("textbox", { name: "系列名称", exact: true }).fill(marker);
-        await pane(page).getByLabel("上传参考底图（必需）", { exact: true }).setInputFiles({ name: `${marker}.png`, mimeType: "image/png", buffer: IMAGE });
+    if (board.kind === "image") {
+        await pane(page).getByRole("textbox", { name: "图像提示词", exact: true }).fill(marker);
+        const chooser = page.waitForEvent("filechooser");
+        await pane(page).getByRole("button", { name: "上传图片", exact: true }).click();
+        await (await chooser).setFiles({ name: `${marker}.png`, mimeType: "image/png", buffer: IMAGE });
     }
     if (board.kind === "seamless") {
         await pane(page).locator('input[type="file"]').setInputFiles({ name: `${marker}.png`, mimeType: "image/png", buffer: IMAGE });
@@ -48,19 +50,15 @@ async function fill(page: Page, board: Board, marker: string) {
 
 async function expectInput(page: Page, board: Board, marker: string) {
     if (board.kind === "video") await expect(pane(page).getByRole("textbox", { name: "视频提示词", exact: true })).toHaveValue(marker);
-    if (board.kind === "recipe") await expect(pane(page).getByRole("textbox", { name: "系列名称", exact: true })).toHaveValue(marker);
+    if (board.kind === "image") await expect(pane(page).getByRole("textbox", { name: "图像提示词", exact: true })).toHaveValue(marker);
     if (board.kind === "seamless") await expect(pane(page).getByRole("img", { name: `${marker}.png`, exact: true })).toBeVisible();
 }
 
 async function expectOriginalResult(page: Page, board: Board) {
     if (board.kind === "video") await expect(pane(page).locator("video")).toHaveCount(1);
     if (board.kind === "seamless") await expect(pane(page).getByRole("img", { name: "无缝拼接结果", exact: true })).toBeVisible();
-    if (board.kind === "recipe") {
-        // Recipe recovery remains explicit and query-only after route unmount.
-        const recover = pane(page).getByRole("button", { name: /^查询原任务 \(1\)/ });
-        await expect(recover).toBeEnabled();
-        await recover.click();
-        await expect(pane(page).locator(".sr-result img")).toHaveCount(1);
+    if (board.kind === "image") {
+        await expect(pane(page).getByRole("img", { name: "生成结果 1", exact: true })).toBeVisible();
     }
 }
 
@@ -222,7 +220,7 @@ for (const completion of ["before-navigation", "after-navigation"] as const) {
         }
         const ids = [...api.tasks.keys()];
         expect(ids).toHaveLength(3);
-        // The final board is recipe. Complete it deterministically on either side
+        // The final board is image edit. Complete it deterministically on either side
         // of unmount instead of racing its active observer against navigation.
         if (completion === "after-navigation") {
             await page.goto("/");
@@ -230,15 +228,15 @@ for (const completion of ["before-navigation", "after-navigation"] as const) {
         }
         for (const task of api.tasks.values()) { task.status = "success"; task.resultUrls = [`/api/assets/${task.id}/content`]; }
         if (completion === "before-navigation") {
-            await expect(pane(page).locator(".sr-result img")).toHaveCount(1);
+            await expect(pane(page).getByRole("img", { name: "生成结果 1", exact: true })).toBeVisible();
             await expect(tabs(page).first()).toContainText("已完成");
         }
         for (const board of boards) {
             await page.goto(board.path);
             await expectInput(page, board, `BOARD_${board.kind}`);
-            if (board.kind === "recipe" && completion === "before-navigation") {
-                await expect(pane(page).locator(".sr-result img")).toHaveCount(1);
-                await expect(pane(page).getByRole("button", { name: /^查询原任务 \(0\)/ })).toBeDisabled();
+            if (board.kind === "image" && completion === "before-navigation") {
+                await expect(pane(page).getByRole("img", { name: "生成结果 1", exact: true })).toBeVisible();
+                await expect(pane(page).getByRole("button", { name: "继续获取结果", exact: true })).toHaveCount(0);
             } else {
                 await expectOriginalResult(page, board);
             }
@@ -285,19 +283,19 @@ for (const board of boards) {
         await expect(tabs(page)).toHaveCount(1);
         await expect(tabs(page).first()).toContainText("草稿");
         if (board.kind === "video") await expect(pane(page).getByRole("textbox", { name: "视频提示词", exact: true })).toHaveValue("");
-        if (board.kind === "recipe") await expect(pane(page).getByRole("textbox", { name: "系列名称", exact: true })).toHaveValue("我的新系列");
+        if (board.kind === "image") await expect(pane(page).getByRole("textbox", { name: "图像提示词", exact: true })).toHaveValue("");
         await expect(pane(page).getByText(`EMPLOYEE_A_${board.kind}`, { exact: true })).toHaveCount(0);
         await expect(pane(page).getByRole("img", { name: `EMPLOYEE_A_${board.kind}.png`, exact: true })).toHaveCount(0);
-        await expect(pane(page).locator("video,.sr-result img")).toHaveCount(0);
+        await expect(pane(page).locator('video, img[alt="生成结果 1"]')).toHaveCount(0);
         await expect(pane(page).getByRole("img", { name: "无缝拼接结果", exact: true })).toHaveCount(0);
         await fill(page, board, `EMPLOYEE_B_${board.kind}`);
         // Read-only persistence evidence before a deliberate full reload.
-        await expect.poll(() => page.evaluate(async ({ kind, owner }) => {
+        await expect.poll(() => page.evaluate(async ({ kind }) => {
             const { createWorkspaceStorage } = await import("/src/lib/workspace-storage.ts");
-            if (kind === "recipe") return (await createWorkspaceStorage("series_recipe_workspaces").getItem<any>(`project:${encodeURIComponent(owner)}`))?.form.series;
+            if (kind === "image") return createWorkspaceStorage("generation_drafts").getItem<string>("image-edit:prompt");
             const drafts = createWorkspaceStorage("generation_drafts");
             return kind === "video" ? drafts.getItem<string>("video:prompt") : (await drafts.getItem<any>("seamless-stitch:source"))?.name?.replace(/\.png$/, "");
-        }, { kind: board.kind, owner: SECOND_OWNER })).toBe(`EMPLOYEE_B_${board.kind}`);
+        }, { kind: board.kind })).toBe(`EMPLOYEE_B_${board.kind}`);
         secondOwner = false;
         await page.reload();
         await expect(tabs(page)).toHaveCount(2);

@@ -1,5 +1,5 @@
 import { dataUrlToFile } from "@/lib/image-utils";
-import { videoModelRequestParameters, videoParameterModelId, videoReferenceError } from "@/lib/video-model-parameters";
+import { resolveVideoMode, videoModelRequestParameters, videoParameterModelId, videoReferenceError } from "@/lib/video-model-parameters";
 import { getQueuedTask, QueuedTaskPausedError, recoverQueuedMedia, requestQueuedMedia, submitQueuedMediaTask } from "@/services/api/generation-tasks";
 import { getMediaBlob, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { imageToDataUrl } from "@/services/image-storage";
@@ -72,7 +72,8 @@ async function queuedVideoInput(config: AiConfig, prompt: string, references: Re
     const requestConfig = happyHorseMode && (!config.videoMode || config.videoMode === "auto") ? { ...config, videoMode: happyHorseMode } : config;
     const error = videoReferenceError(requestConfig, references, videoReferences, audioReferences, undefined, false, parameterModelId);
     if (error) throw new Error(error);
-    const parameters = { ...videoModelRequestParameters(requestConfig, parameterModelId), ...(videoParameterModelId(requestConfig, parameterModelId) === "happyhorse-1.1" && happyHorseMode ? { happyHorseMode } : {}) };
+    const mode = resolveVideoMode(requestConfig, references.length, videoReferences.length, audioReferences.length, undefined, parameterModelId);
+    const parameters = { ...videoModelRequestParameters(requestConfig, parameterModelId, mode), ...(videoParameterModelId(requestConfig, parameterModelId) === "happyhorse-1.1" && happyHorseMode ? { happyHorseMode } : {}) };
     const sourceFiles: File[] = [];
     const sourceUrls: string[] = [];
     const sourceMetadata: Record<string, unknown>[] = [];

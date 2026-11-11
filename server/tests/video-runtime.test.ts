@@ -5,23 +5,20 @@ const baseInput = { baseUrl: "https://provider.example/v1", apiKey: "test-only",
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
 describe("APIMart video runtime safety", () => {
-  test("all four video models upload local references before claiming and submitting video work", async () => {
-    for (const modelId of ["MiniMax-H3", "doubao-seedance-2.5", "wan2.7", "happyhorse-1.1"]) {
+  test("all APIMart video models preserve owned public references without provider uploads", async () => {
+    for (const modelId of ["MiniMax-H3", "doubao-seedance-2.5", "gemini-omni-1.2-flash", "wan2.7", "happyhorse-1.1"]) {
       const events: string[] = [];
       const result = await runApiMartVideoTask({ ...baseInput, modelId,
-        sources: [{ mimeType: "image/png", bytes: new Uint8Array([1, 2, 3]), publicUrl: "http://private-s3:9000/source.png" }],
+        sources: [{ mimeType: "image/png", bytes: new Uint8Array([1, 2, 3]), publicUrl: "http://owned.example/api/provider-images/fixture" }],
         beforeSubmit: async () => { events.push("claimed"); return true; },
         onSubmitted: async (id) => { events.push(`persist:${id}`); },
       }, { sleep: async () => undefined, fetch: async (url, init) => {
         events.push(`${init?.method || "GET"}:${url}`);
-        if (url.endsWith("/uploads/images")) {
-          expect(init?.body).toBeInstanceOf(FormData);
-          return json({ url: "https://cdn.example/uploaded.png" });
-        }
+        expect(url).not.toContain("/uploads/");
         if (init?.method === "POST") {
           const body = JSON.parse(String(init.body));
           expect(body.model).toBe(modelId === "doubao-seedance-2.5" ? "seedance-2.5" : modelId);
-          expect(body).toMatchObject(["MiniMax-H3", "happyhorse-1.1"].includes(modelId) ? { first_frame_image: "https://cdn.example/uploaded.png" } : { image_urls: ["https://cdn.example/uploaded.png"] });
+          expect(body).toMatchObject(["MiniMax-H3", "happyhorse-1.1", "gemini-omni-1.2-flash"].includes(modelId) ? { first_frame_image: "http://owned.example/api/provider-images/fixture" } : { image_urls: ["http://owned.example/api/provider-images/fixture"] });
           expect(String(init.body)).not.toContain("private-s3");
           expect(String(init.body)).not.toContain("base64");
           return json({ data: [{ task_id: "upstream-image" }] });
@@ -29,46 +26,28 @@ describe("APIMart video runtime safety", () => {
         return json({ data: { status: "completed", result: { videos: ["https://cdn.example/video.mp4"] } } });
       } });
       expect(result).toBe("https://cdn.example/video.mp4");
-      expect(events).toEqual(["POST:https://provider.example/v1/uploads/images", "claimed", "POST:https://provider.example/v1/videos/generations", "persist:upstream-image", "GET:https://provider.example/v1/tasks/upstream-image"]);
+      expect(events).toEqual(["claimed", "POST:https://provider.example/v1/videos/generations", "persist:upstream-image", "GET:https://provider.example/v1/tasks/upstream-image"]);
     }
   });
 
-  test("an upload failure can be retried without ever claiming or duplicating video submission", async () => {
-    let uploads = 0;
+  test("missing owned URLs fail before claiming and never fall back to provider uploads", async () => {
+    let requests = 0;
     let claims = 0;
-    let videoPosts = 0;
     const input = { ...baseInput, sources: [{ mimeType: "image/png", bytes: new Uint8Array([1]) }],
       beforeSubmit: async () => { claims++; return true; }, onSubmitted: async () => undefined };
-    const runtime = { sleep: async () => undefined, fetch: async (url: string, init?: RequestInit) => {
-      if (url.endsWith("/uploads/images")) {
-        uploads++;
-        return uploads === 1 ? json({}, 503) : json({ url: "https://cdn.example/uploaded.png" });
-      }
-      if (init?.method === "POST") { videoPosts++; return json({ data: [{ task_id: "original" }] }); }
-      return json({ data: { status: "completed", result: { videos: ["https://cdn.example/video.mp4"] } } });
-    } };
-    await expect(runApiMartVideoTask(input, runtime)).rejects.toThrow("上传失败");
+    const runtime = { fetch: async () => { requests++; return json({}); } };
+    await expect(runApiMartVideoTask(input, runtime)).rejects.toThrow("公开 HTTP(S)");
     expect(claims).toBe(0);
-    expect(videoPosts).toBe(0);
-    expect(await runApiMartVideoTask(input, runtime)).toBe("https://cdn.example/video.mp4");
-    expect(uploads).toBe(2);
-    expect(claims).toBe(1);
-    expect(videoPosts).toBe(1);
+    expect(requests).toBe(0);
   });
 
-  test("reference order is preserved and every source is validated before the first upload", async () => {
-    const sources = [{ mimeType: "image/png", bytes: new Uint8Array([1]) }, { mimeType: "image/webp", bytes: new Uint8Array([2]) }];
-    let uploads = 0;
+  test("reference order is preserved and every source is validated before the paid POST", async () => {
+    const sources = [{ mimeType: "image/png", bytes: new Uint8Array([1]), publicUrl: "https://owned.example/frame-1.png" }, { mimeType: "image/webp", bytes: new Uint8Array([2]), publicUrl: "https://owned.example/frame-2.png" }];
     const callbacks = { beforeSubmit: async () => true, onSubmitted: async () => undefined };
     await runApiMartVideoTask({ ...baseInput, ...callbacks, sources }, { sleep: async () => undefined, fetch: async (url, init) => {
-      if (url.endsWith("/uploads/images")) {
-        const index = ++uploads;
-        const file = (init?.body as FormData).get("file") as File;
-        expect(new Uint8Array(await file.arrayBuffer())).toEqual(new Uint8Array([index]));
-        return json({ url: `https://cdn.example/frame-${index}.png` });
-      }
+      expect(url).not.toContain("/uploads/");
       if (init?.method === "POST") {
-        expect(JSON.parse(String(init.body)).image_urls).toEqual(["https://cdn.example/frame-1.png", "https://cdn.example/frame-2.png"]);
+        expect(JSON.parse(String(init.body)).image_urls).toEqual(sources.map(source => source.publicUrl));
         return json({ data: [{ task_id: "original" }] });
       }
       return json({ data: { status: "completed", result: { videos: ["https://cdn.example/video.mp4"] } } });

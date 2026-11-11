@@ -7,6 +7,7 @@ import { uiText, useUiLocale } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { usageBoardForLocation } from "@/lib/usage-navigation";
 import { isQuickImageTool } from "@/lib/quick-image-tools";
+import { isStandaloneCreativePreset } from "@/lib/creative-presets";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { isModuleAvailable, useModuleStore } from "@/stores/use-module-store";
 import { isAdminRole, useUserStore } from "@/stores/use-user-store";
@@ -15,8 +16,8 @@ import type { ModuleKey } from "@/services/api/modules";
 import { useEffect } from "react";
 
 const sections: { key: string; label: string; slugs: NavigationToolSlug[] }[] = [
-    { key: "create", label: "创作", slugs: ["canvas", "image", "video", "gpt-chat", "creative"] },
-    { key: "image-tools", label: "图像工具", slugs: ["layer-studio", "remove-background", "hd-upscale", "item-extract", "detail-enhance", "image-edit", "angle-control", "seamless-stitch", "midjourney-blend"] },
+    { key: "create", label: "创作", slugs: ["local-restyle", "garment-colorway", "back-design", "canvas", "image", "video", "gpt-chat", "creative"] },
+    { key: "image-tools", label: "图像工具", slugs: ["layer-studio", "remove-background", "hd-upscale", "item-extract", "image-edit", "seamless-stitch", "midjourney-blend"] },
     { key: "resources", label: "资源", slugs: ["assets", "prompts", "my-prompts", "design-library"] },
     { key: "collaborate", label: "协作", slugs: ["team"] },
     { key: "manage", label: "管理", slugs: ["admin"] },
@@ -34,7 +35,7 @@ export function NavigationMenu({ onNavigate }: { onNavigate?: () => void }) {
     const status = useUserStore(state => state.status);
     const routeTool = pathname === "/image" ? new URLSearchParams(search).get("tool") : pathname.slice(1);
     const quickTool = isQuickImageTool(routeTool) ? routeTool : null;
-    const active = quickTool || (pathname.startsWith("/creative/") ? "creative" : pathname === "/admin" ? "admin" : pathname === "/team" ? "team" : pathname === "/my-prompts" ? "my-prompts" : usageBoardForLocation(pathname, search));
+    const active = quickTool || (routeTool && isStandaloneCreativePreset(routeTool) ? routeTool : pathname.startsWith("/creative/") ? "creative" : pathname === "/admin" ? "admin" : pathname === "/team" ? "team" : pathname === "/my-prompts" ? "my-prompts" : usageBoardForLocation(pathname, search));
     const pinsVisible = !deploymentFeatures.authenticationEnabled || (status === "authenticated" && user?.status === "active");
     useEffect(() => {
         const section = sections.find(item => item.slugs.some(slug => slug === active));

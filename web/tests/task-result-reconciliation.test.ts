@@ -24,6 +24,10 @@ test.each([
     [{ status: "paused", upstreamTaskId: " original " }, "resume"],
     [{ status: "paused", upstreamTaskId: null }, "investigate"],
     [{ status: "paused", upstreamTaskId: "  " }, "investigate"],
+    [{ status: "paused", upstreamTaskId: "original", errorCode: "IMAGE_RESULT_PROCESSING_FAILED" }, "terminal"],
+    [{ status: "paused", upstreamTaskId: "original", lastFailure: { phase: "postprocess" } }, "terminal"],
+    [{ status: "paused", upstreamTaskId: "original", failureReason: "渠道原件已保存到素材库，但图片后处理未完成：decoder failed" }, "terminal"],
+    [{ status: "paused", upstreamTaskId: "original", lastFailure: { phase: "polling", code: "UPSTREAM_QUERY_FAILED" } }, "resume"],
     [{ status: "unexpected-state" }, "investigate"],
     [{ status: "success" }, "terminal"], [{ status: "failed" }, "terminal"], [{ status: "cancelled" }, "terminal"],
 ] as const)("recovery capability is structural: %j", (task, expected) => {

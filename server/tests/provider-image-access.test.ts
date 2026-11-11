@@ -1,7 +1,11 @@
 import { expect, test } from "bun:test";
 import express from "express";
+import { execFile } from "node:child_process";
 import type { AddressInfo } from "node:net";
 import { Readable } from "node:stream";
+import { promisify } from "node:util";
+import { LAYER_STUDIO_MAX_REFERENCE_BYTES } from "../../shared/layer-studio-options";
+import { APIMART_IMAGE_MAX_BYTES } from "../src/apimart-upload";
 import type { Cache, Database } from "../src/db";
 import type { ObjectReadOptions, ObjectStorage } from "../src/object-storage";
 import { normalizeProviderImageOrigin, ProviderImageAccess, PROVIDER_IMAGE_PATH } from "../src/provider-image-access";
@@ -13,11 +17,36 @@ const taskId = "00000000-0000-4000-8000-000000000002";
 const userId = "00000000-0000-4000-8000-000000000003";
 const otherUserId = "00000000-0000-4000-8000-000000000004";
 const origin = "http://ai.in-choice.com.cn";
+const seedreamRoute = { toolKey: "layer-studio", modelId: "seedream-5-5", protocol: "apimart" };
+const standardMimes = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+const extendedMimes = ["image/bmp", "image/tiff", "image/heic", "image/heif"];
+const exec = promisify(execFile);
+const references = new Map<string, Promise<Buffer>>();
+
+async function imageReference(mimeType: string) {
+  let pending = references.get(mimeType);
+  if (!pending) {
+    pending = (async () => {
+      if (mimeType === "image/heic" || mimeType === "image/heif") {
+        const bytes = Buffer.from(await Bun.file(new URL("./fixtures/seedream55-reference.heic", import.meta.url)).arrayBuffer());
+        if (mimeType === "image/heif") bytes.write("mif1", 8, "ascii");
+        return bytes;
+      }
+      const codecs: Record<string, string> = { "image/jpeg": "mjpeg", "image/png": "png", "image/webp": "libwebp", "image/gif": "gif", "image/bmp": "bmp", "image/tiff": "tiff" };
+      const { stdout } = await exec(process.env.FFMPEG_PATH || "ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "color=c=blue:s=64x32", "-frames:v", "1", "-c:v", codecs[mimeType]!, "-threads", "1", "-f", "image2pipe", "pipe:1"],
+        { encoding: "buffer", windowsHide: true, timeout: 20_000, maxBuffer: 1024 * 1024 });
+      return stdout;
+    })();
+    references.set(mimeType, pending);
+  }
+  return pending;
+}
 
 function fixture() {
   const state = {
     owner: userId, user: userId, userStatus: "active", userDeleted: false, assetStatus: "ready", deleted: false, kind: "image", status: "processing",
     objectKey: "private/employee/original.png", mimeType: "image/png", byteSize: png.length,
+    toolKey: null as string | null, modelId: null as string | null, protocol: null as string | null, operationType: "inpaint",
     sourceUrls: [`/api/assets/${assetId}/content`], executionToken: "current-worker", leaseValid: true,
     etag: '"original-etag"', bytes: Buffer.from(png), cacheFailure: false, dbFailure: false, storageFailure: false,
   };
@@ -31,11 +60,13 @@ function fixture() {
     if (state.dbFailure) throw new Error("sensitive DB detail");
     const [task, user, asset, key, sources, executionToken] = params;
     const eligible = task === taskId && user === state.user && asset === assetId && user === state.owner
-      && key === state.objectKey && state.assetStatus === "ready" && !state.deleted && state.kind === "image"
+      && key === state.objectKey && state.assetStatus === "ready" && !state.deleted
+      && (state.kind === "image" || state.operationType === "video_generation" && state.protocol === "apimart" && ["video", "other"].includes(state.kind))
       && state.userStatus === "active" && !state.userDeleted
       && state.status === "processing" && JSON.parse(String(sources)).every((url: string) => state.sourceUrls.includes(url))
       && (executionToken === undefined || state.executionToken === executionToken && state.leaseValid);
-    return { rows: eligible ? [{ object_key: state.objectKey, mime_type: state.mimeType, filename: "员工原件.png", byte_size: state.byteSize }] : [] };
+    return { rows: eligible ? [{ object_key: state.objectKey, mime_type: state.mimeType, filename: "员工原件.png", byte_size: state.byteSize,
+      tool_key: state.toolKey, model_id: state.modelId, protocol: state.protocol, operation_type: state.operationType, kind: state.kind }] : [] };
   } } as unknown as Pick<Database, "query">;
   const cache: Pick<Cache, "get" | "set"> = {
     get: async key => { if (state.cacheFailure) throw new Error("sensitive redis detail"); return records.get(key) ?? null; },
@@ -70,6 +101,11 @@ function fixture() {
   return { state, records, writes, reads, queries, access, input, storage, onGet: (callback: () => void) => { onGet = callback; } };
 }
 
+function setReference(f: ReturnType<typeof fixture>, bytes: Buffer, mimeType: string) {
+  Object.assign(f.state, { bytes: Buffer.from(bytes), byteSize: bytes.length, mimeType });
+  Object.assign(f.input.source, { bytes, mimeType });
+}
+
 async function withServer(f: ReturnType<typeof fixture>, run: (base: string) => Promise<void>) {
   const app = express();
   app.use(PROVIDER_IMAGE_PATH, createProviderImagesRouter(f.access, f.storage));
@@ -80,6 +116,57 @@ async function withServer(f: ReturnType<typeof fixture>, run: (base: string) => 
 }
 const pathOf = (url: string) => new URL(url).pathname;
 const tokenOf = (url: string) => pathOf(url).split("/")[3]!;
+
+test.each(["video/mp4", "audio/wav"])("owned video generation %s grants stream the exact ETag-bound original via public HTTP", async mime => {
+  const f = fixture();
+  const video = mime.startsWith("video/");
+  const { stdout } = await exec(process.env.FFMPEG_PATH || "ffmpeg", ["-v", "error", "-f", "lavfi", "-i",
+    video ? "color=c=blue:s=64x32:r=24" : "sine=frequency=440:sample_rate=8000", "-t", "1",
+    ...(video ? ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-movflags", "frag_keyframe+empty_moov"] : ["-c:a", "pcm_s16le"]),
+    "-threads", "1", "-f", video ? "mp4" : "wav", "pipe:1"], { encoding: "buffer", windowsHide: true, timeout: 20_000, maxBuffer: 1024 * 1024 });
+  Object.assign(f.state, { operationType: "video_generation", protocol: "apimart", modelId: "doubao-seedance-2.5", kind: video ? "video" : "other" });
+  setReference(f, stdout, mime);
+  const input = { taskId, userId, executionToken: f.state.executionToken,
+    source: { assetId, objectKey: f.state.objectKey, byteSize: stdout.length, mimeType: mime, etag: f.state.etag } };
+  const url = await f.access.issueMedia(input);
+  expect(url).toMatch(/^http:\/\/ai\.in-choice\.com\.cn\/api\/provider-images\/[a-f0-9]{64}\/media$/);
+  expect(f.writes[0]!.options).toEqual({ EX: 1800 });
+  await withServer(f, async base => {
+    const response = await fetch(base + pathOf(url));
+    expect(response.status).toBe(200); expect(response.headers.get("content-type")).toBe(mime);
+    expect(response.headers.get("cache-control")).toBe("no-store"); expect(Buffer.from(await response.arrayBuffer())).toEqual(stdout);
+    const range = await fetch(base + pathOf(url), { headers: { Range: "bytes=3-18" } });
+    expect(range.status).toBe(206); expect(Buffer.from(await range.arrayBuffer())).toEqual(stdout.subarray(3, 19));
+    const head = await fetch(base + pathOf(url), { method: "HEAD" });
+    expect(head.status).toBe(200); expect(head.headers.get("content-length")).toBe(String(stdout.length));
+  });
+  f.state.executionToken = ""; f.state.leaseValid = false;
+  expect((await f.access.resolve(tokenOf(url))).expectedObject.length).toBe(stdout.length);
+  await expect(f.access.issueMedia(input)).rejects.toMatchObject({ status: 404 });
+  f.state.status = "cancelled";
+  await expect(f.access.resolve(tokenOf(url))).rejects.toMatchObject({ status: 404 });
+});
+
+test("video grants reject route/owner/source/lease/ETag changes and never widen ordinary image grants", async () => {
+  const create = () => {
+    const f = fixture();
+    Object.assign(f.state, { operationType: "video_generation", protocol: "apimart", modelId: "doubao-seedance-2.5", kind: "video", mimeType: "video/mp4" });
+    const input = { taskId, userId, executionToken: f.state.executionToken,
+      source: { assetId, objectKey: f.state.objectKey, byteSize: png.length, mimeType: "video/mp4", etag: f.state.etag } };
+    return { f, input };
+  };
+  for (const change of [{ operationType: "inpaint" }, { protocol: "openai" }, { modelId: "gpt-image-2" }, { kind: "other" },
+    { owner: otherUserId }, { deleted: true }, { sourceUrls: [] }, { userStatus: "disabled" }, { byteSize: 0 }]) {
+    const { f, input } = create(); const token = tokenOf(await f.access.issueMedia(input)); Object.assign(f.state, change);
+    await expect(f.access.issueMedia(input)).rejects.toMatchObject({ status: 404 });
+    await expect(f.access.resolve(token)).rejects.toMatchObject({ status: 404 });
+  }
+  const stale = create(); stale.input.source.etag = '"stale"';
+  await expect(stale.f.access.issueMedia(stale.input)).rejects.toMatchObject({ status: 404 }); expect(stale.f.writes).toHaveLength(0);
+  const image = fixture();
+  await expect(image.access.issueMedia({ taskId, userId, executionToken: image.state.executionToken,
+    source: { assetId, objectKey: image.state.objectKey, byteSize: png.length, mimeType: "image/png", etag: image.state.etag } })).rejects.toMatchObject({ status: 404 });
+});
 
 test("public origin accepts HTTP without signatures, rejects credentials/private hosts/path/query", () => {
   expect(normalizeProviderImageOrigin()).toBe("");
@@ -215,4 +302,127 @@ test("issuance rejects stale ETags, expired leases, non-images and unverifiable 
   const different = fixture(); different.input.source.etag = undefined; different.state.bytes[40] ^= 1;
   await expect(different.access.issue(different.input)).rejects.toMatchObject({ status: 404 });
   expect(different.writes).toHaveLength(0);
+});
+
+test.each([...standardMimes, ...extendedMimes])("only the persisted Seedream 5.5 route grants and serves original %s bytes", async mimeType => {
+  const f = fixture(), bytes = await imageReference(mimeType);
+  Object.assign(f.state, seedreamRoute); setReference(f, bytes, mimeType);
+  const path = pathOf(await f.access.issue(f.input));
+  expect(f.queries[0]).toContain("t.tool_key,m.model_id,p.protocol");
+  expect(f.queries[0]).toContain("LEFT JOIN model_configs m ON m.id=t.model_config_id LEFT JOIN providers p ON p.id=m.provider_id");
+  expect(JSON.parse(f.writes[0]!.value)).toMatchObject({ mimeType, length: bytes.length });
+  expect(f.writes[0]!.options).toEqual({ EX: 1800 });
+  await withServer(f, async base => {
+    const response = await fetch(base + path);
+    expect(response.status).toBe(200); expect(response.headers.get("content-type")).toBe(mimeType);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(Buffer.from(await response.arrayBuffer()).equals(bytes)).toBe(true);
+    const range = await fetch(base + path, { headers: { Range: "bytes=3-18" } });
+    expect(range.status).toBe(206); expect(Buffer.from(await range.arrayBuffer()).equals(bytes.subarray(3, 19))).toBe(true);
+    const head = await fetch(base + path, { method: "HEAD" });
+    expect(head.status).toBe(200); expect(head.headers.get("content-length")).toBe(String(bytes.length));
+    expect(await head.text()).toBe("");
+  });
+}, 30_000);
+
+test.each(standardMimes)("ordinary tasks retain original %s grants without a Seedream route", async mimeType => {
+  const f = fixture(), bytes = await imageReference(mimeType); setReference(f, bytes, mimeType);
+  const token = tokenOf(await f.access.issue(f.input));
+  expect((await f.access.resolve(token)).asset.mime_type).toBe(mimeType);
+});
+
+test.each(extendedMimes)("ordinary tasks reject %s despite caller-supplied Seedream policy flags", async mimeType => {
+  const f = fixture(); setReference(f, await imageReference(mimeType), mimeType);
+  Object.assign(f.input, { referencePolicy: "seedream55", toolKey: "layer-studio", modelId: "seedream-5-5", protocol: "apimart" });
+  await expect(f.access.issue(f.input)).rejects.toThrow("JPEG、PNG、WebP 或 GIF");
+  expect(f.writes).toHaveLength(0);
+});
+
+test("all three persisted task route fields are required; route changes revoke extended grants", async () => {
+  const bytes = await imageReference("image/bmp");
+  for (const route of [{ toolKey: "image-edit" }, { toolKey: null }, { modelId: "seedream-5-0" }, { modelId: null }, { protocol: "openai" }, { protocol: null }]) {
+    const f = fixture(); Object.assign(f.state, seedreamRoute); setReference(f, bytes, "image/bmp");
+    const token = tokenOf(await f.access.issue(f.input));
+    Object.assign(f.state, route);
+    await expect(f.access.resolve(token)).rejects.toMatchObject({ status: 404 });
+    await expect(f.access.issue(f.input)).rejects.toThrow("JPEG、PNG、WebP 或 GIF");
+    expect(f.writes).toHaveLength(1);
+  }
+});
+
+test("Seedream keeps the 30 MiB limit while the same original PNG exceeds ordinary 20 MiB policy", async () => {
+  const { stdout: bytes } = await exec(process.env.FFMPEG_PATH || "ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "color=c=blue:s=3000x3000", "-frames:v", "1", "-c:v", "png", "-compression_level", "0", "-threads", "1", "-f", "image2pipe", "pipe:1"],
+    { encoding: "buffer", windowsHide: true, timeout: 20_000, maxBuffer: LAYER_STUDIO_MAX_REFERENCE_BYTES });
+  expect(bytes.length).toBeGreaterThan(APIMART_IMAGE_MAX_BYTES); expect(bytes.length).toBeLessThanOrEqual(LAYER_STUDIO_MAX_REFERENCE_BYTES);
+  const f = fixture(); Object.assign(f.state, seedreamRoute); setReference(f, bytes, "image/png");
+  const token = tokenOf(await f.access.issue(f.input));
+  expect((await f.access.resolve(token)).expectedObject.length).toBe(bytes.length);
+  f.state.toolKey = "image-edit";
+  await expect(f.access.resolve(token)).rejects.toMatchObject({ status: 404 });
+  await expect(f.access.issue(f.input)).rejects.toThrow("20MB");
+  Object.assign(f.state, seedreamRoute); setReference(f, Buffer.alloc(LAYER_STUDIO_MAX_REFERENCE_BYTES + 1), "image/png");
+  await expect(f.access.issue(f.input)).rejects.toThrow("30 MiB");
+  expect(f.writes).toHaveLength(1);
+}, 30_000);
+
+test("cached grant metadata cannot widen ordinary MIME or byte limits, even with forged policy flags", async () => {
+  const f = fixture(); const token = tokenOf(await f.access.issue(f.input));
+  const [key, value] = [...f.records][0]!, original = JSON.parse(value);
+  for (const seedream of [false, true]) {
+    Object.assign(f.state, seedream ? seedreamRoute : { toolKey: null, modelId: null, protocol: null });
+    const limit = seedream ? LAYER_STUDIO_MAX_REFERENCE_BYTES : APIMART_IMAGE_MAX_BYTES;
+    for (const length of [limit, limit + 1]) {
+      f.state.byteSize = length; f.state.mimeType = "image/png";
+      f.records.set(key, JSON.stringify({ ...original, length, referencePolicy: "seedream55" }));
+      if (length === limit) expect((await f.access.resolve(token)).expectedObject.length).toBe(limit);
+      else await expect(f.access.resolve(token)).rejects.toMatchObject({ status: 404 });
+    }
+    for (const mimeType of [...extendedMimes, "image/avif", "image/jp2", "text/html"]) {
+      f.state.byteSize = png.length; f.state.mimeType = mimeType;
+      f.records.set(key, JSON.stringify({ ...original, mimeType, referencePolicy: "seedream55" }));
+      if (seedream && extendedMimes.includes(mimeType)) expect((await f.access.resolve(token)).asset.mime_type).toBe(mimeType);
+      else await expect(f.access.resolve(token)).rejects.toMatchObject({ status: 404 });
+    }
+  }
+});
+
+test("Seedream references still require real supported bytes, dimensions and decoding before granting", async () => {
+  for (const [bytes, mimeType] of [[Buffer.from("<html>not an image</html>"), "image/png"], [await imageReference("image/png"), "image/bmp"],
+    [await imageReference("image/bmp"), "image/avif"]] as const) {
+    const f = fixture(); Object.assign(f.state, seedreamRoute); setReference(f, bytes, mimeType);
+    await expect(f.access.issue(f.input)).rejects.toThrow("真实格式"); expect(f.writes).toHaveLength(0);
+  }
+  const damaged = Buffer.from(await imageReference("image/heic")); damaged.fill(0, damaged.indexOf("mdat") + 4);
+  const f = fixture(); Object.assign(f.state, seedreamRoute); setReference(f, damaged, "image/heic");
+  await expect(f.access.issue(f.input)).rejects.toThrow("无法解码"); expect(f.writes).toHaveLength(0);
+}, 30_000);
+
+test("expanded grants preserve lease, owner, TTL, live-task and ETag revocation boundaries", async () => {
+  const bytes = await imageReference("image/bmp");
+  const f = fixture(); Object.assign(f.state, seedreamRoute); setReference(f, bytes, "image/bmp");
+  const path = pathOf(await f.access.issue(f.input)), token = tokenOf(origin + path);
+  f.state.executionToken = ""; f.state.leaseValid = false;
+  expect((await f.access.resolve(token)).asset.mime_type).toBe("image/bmp");
+  await expect(f.access.issue(f.input)).rejects.toMatchObject({ status: 404 });
+  for (const status of ["pending", "queued", "success", "cancelled", "failed", "paused"]) {
+    f.state.status = status; await expect(f.access.resolve(token)).rejects.toMatchObject({ status: 404 });
+  }
+  f.state.status = "processing"; f.state.owner = otherUserId;
+  await expect(f.access.resolve(token)).rejects.toMatchObject({ status: 404 });
+  f.state.owner = userId; f.state.etag = '"replacement"';
+  await withServer(f, async base => {
+    const response = await fetch(base + path); expect(response.status).toBe(503); expect(await response.text()).toBe("");
+  });
+  f.state.etag = f.input.source.etag!;
+  const [key, value] = [...f.records][0]!; f.records.set(key, JSON.stringify({ ...JSON.parse(value), expiresAt: Date.now() - 1 }));
+  await expect(f.access.resolve(token)).rejects.toMatchObject({ status: 404 });
+});
+
+test("issuance rechecks the persisted route and lease after original-byte verification", async () => {
+  const bytes = await imageReference("image/bmp");
+  for (const change of [{ toolKey: "image-edit" }, { modelId: "seedream-5-0" }, { protocol: "openai" }, { leaseValid: false }]) {
+    const f = fixture(); Object.assign(f.state, seedreamRoute); setReference(f, bytes, "image/bmp"); f.input.source.etag = undefined;
+    f.onGet(() => { Object.assign(f.state, change); });
+    await expect(f.access.issue(f.input)).rejects.toMatchObject({ status: 404 }); expect(f.writes).toHaveLength(0);
+  }
 });

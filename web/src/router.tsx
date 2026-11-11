@@ -1,5 +1,5 @@
 import { lazy, Suspense, type ComponentType, type LazyExoticComponent } from "react";
-import { createBrowserRouter, Navigate, Outlet } from "react-router-dom";
+import { createBrowserRouter, Navigate, Outlet, useLocation } from "react-router-dom";
 
 import UserLayout from "@/layouts/user-layout";
 import { AuthGate } from "@/components/auth/auth-gate";
@@ -7,6 +7,8 @@ import { ModuleGate } from "@/components/auth/module-gate";
 import { standaloneEdition } from "@/lib/standalone-edition";
 import { deploymentFeatures } from "@/lib/deployment-features";
 import type { ModuleKey } from "@/services/api/modules";
+import { standaloneCreativePresetIds } from "@/lib/creative-presets";
+import { retiredWorkbenchName } from "@/lib/retired-workbenches";
 
 const AdminPage = lazy(() => import("@/pages/admin"));
 const AdminPromptRecipesPage = lazy(() => import("@/pages/admin/prompt-recipes"));
@@ -22,7 +24,7 @@ const CreativePage = lazy(() => import("@/pages/creative"));
 const CreativeScenePage = lazy(() => import("@/pages/creative/scene"));
 const PatternPlacementPage = lazy(() => import("@/pages/design-workbench/placement"));
 const PatternRepeatPage = lazy(() => import("@/pages/design-workbench/repeat"));
-const SeriesRecipePage = lazy(() => import("@/pages/design-workbench/recipe"));
+const RetiredWorkbenchPage = lazy(() => import("@/pages/retired-workbench"));
 const ChangePasswordPage = lazy(() => import("@/pages/change-password"));
 const HomePage = lazy(() => import("@/pages/home"));
 const ImagePage = lazy(() => import("@/pages/image"));
@@ -63,7 +65,12 @@ function imageModule(search: string): ModuleKey {
     const tool = new URLSearchParams(search).get("tool");
     if (tool === "remove-background" || tool === "item-extract") return "image-edit";
     if (tool === "hd-upscale") return "detail-enhance";
-    return tool === "detail-enhance" || tool === "image-edit" || tool === "angle-control" || tool === "seamless-stitch" || tool === "midjourney-blend" ? tool : "image";
+    return tool === "image-edit" || tool === "seamless-stitch" || tool === "midjourney-blend" ? tool : "image";
+}
+
+function ImageToolRoute() {
+    const { pathname, search } = useLocation();
+    return retiredWorkbenchName(pathname, search) ? routeElement(RetiredWorkbenchPage) : <ModuleGate moduleKey={imageModule}>{routeElement(ImagePage)}</ModuleGate>;
 }
 
 function canvasModule(search: string): ModuleKey {
@@ -82,10 +89,11 @@ export const router = createBrowserRouter([
             { path: "/creative", element: moduleRoute(CreativePage, "creative") },
             { path: "/creative/pattern-placement", element: moduleRoute(PatternPlacementPage, "pattern-placement") },
             { path: "/creative/pattern-repeat", element: moduleRoute(PatternRepeatPage, "pattern-repeat") },
-            { path: "/creative/series-recipe", element: moduleRoute(SeriesRecipePage, "series-recipe") },
+            ...["/creative/series-recipe", "/series-recipe", "/detail-enhance", "/angle-control"].map(path => ({ path, element: protectedRoute(RetiredWorkbenchPage) })),
+            ...standaloneCreativePresetIds.map(id => ({ path: `/${id}`, element: protectedRoute(CreativeScenePage) })),
             { path: "/creative/:presetId", element: protectedRoute(CreativeScenePage) },
             { path: "/login", element: !standaloneEdition && deploymentFeatures.authenticationEnabled && !deploymentFeatures.oaLoginEnabled ? routeElement(LoginPage) : <Navigate to="/" replace /> },
-            { path: "/image", element: moduleRoute(ImagePage, imageModule) },
+            { path: "/image", element: <AuthGate><ImageToolRoute /></AuthGate> },
             // Keep saved originals/editing accessible when new generation is disabled.
             { path: "/layer-studio", element: protectedRoute(LayerStudioPage) },
             { path: "/remove-background", element: moduleRoute(ImagePage, "image-edit") },

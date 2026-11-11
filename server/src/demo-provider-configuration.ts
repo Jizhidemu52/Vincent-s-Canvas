@@ -3,6 +3,7 @@ import { applyModelPresentation, selectCreativeModels } from "./model-presentati
 export const videoModelConfigIds = {
   "MiniMax-H3": "40000000-0000-4000-8000-000000000110",
   "doubao-seedance-2.5": "40000000-0000-4000-8000-000000000111",
+  "gemini-omni-1.2-flash": "40000000-0000-4000-8000-000000000114",
   "wan2.7": "40000000-0000-4000-8000-000000000112",
   "happyhorse-1.1": "40000000-0000-4000-8000-000000000113",
 } as const;

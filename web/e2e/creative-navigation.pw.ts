@@ -1,14 +1,13 @@
 import { test, expect } from "./fixtures";
-import { creativePresets } from "../src/lib/creative-presets";
+import { creativeCatalogPresets } from "../src/lib/creative-presets";
 import { moduleDefinitions } from "../../shared/feature-catalog";
 
 test("each creative scene and workbench can be pinned, restored and unpinned without leaving the catalog", async ({ page, api }, info) => {
     await page.goto("/creative");
     const catalog = page.locator("main.creative-page");
-    const entries = [...creativePresets.map(item => ({ label: item.title, path: `/creative/${item.id}` })),
+    const entries = [...creativeCatalogPresets.map(item => ({ label: item.title, path: `/creative/${item.id}` })),
         { label: "图案定位", path: "/creative/pattern-placement" },
-        { label: "花型循环", pinnedLabel: "图案循环", path: "/creative/pattern-repeat" },
-        { label: "系列配方", path: "/creative/series-recipe" }];
+        { label: "花型循环", pinnedLabel: "图案循环", path: "/creative/pattern-repeat" }];
     await page.getByRole("navigation", { name: "主导航" }).getByRole("button", { name: "固定图像生成", exact: true }).click();
     for (const item of entries) {
         await catalog.getByRole("button", { name: `固定${item.label}`, exact: true }).click();
@@ -26,7 +25,7 @@ test("each creative scene and workbench can be pinned, restored and unpinned wit
     await page.getByRole("button", { name: "打开导航菜单", exact: true }).click();
     const drawer = page.getByRole("dialog", { name: "功能模块", exact: true });
     await expect(drawer.getByRole("link", { name: "图案定位（常用）", exact: true })).toHaveCount(0);
-    await expect(drawer.getByRole("link", { name: "系列配方（常用）", exact: true })).toHaveAttribute("href", "/creative/series-recipe");
+    await expect(drawer.getByRole("link", { name: "图案循环（常用）", exact: true })).toHaveAttribute("href", "/creative/pattern-repeat");
     await drawer.getByRole("button", { name: "关闭", exact: true }).click();
     await page.screenshot({ path: info.outputPath("creative-pins-mobile.png"), fullPage: true });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);

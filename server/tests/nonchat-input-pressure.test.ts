@@ -19,6 +19,7 @@ import { PromptOptimizationError } from "../src/prompt-safety";
 import { preflightVideoTask } from "../src/video-task-preflight";
 import { supportedVideoModelIds, videoModelCapabilities, validateVideoSources, type ProviderVideoSource } from "../src/video-models";
 import { createIsolatedPostgres } from "./helpers/isolated-postgres";
+import { readApiMartVideoReceipt, saveApiMartVideoReceipt } from "../src/video-provider-receipt";
 
 // This intentionally does NOT pretend to execute Redis Lua or use network PG.
 // SQL is the existing single-connection PGlite fixture; cache/provider are mocks.
@@ -206,6 +207,7 @@ isolated("128 recovery/cancel attempts cannot replay an unknown submitted task o
 }, 120_000);
 
 async function productionWorker(dependencies: Record<string, unknown>) {
+  dependencies = { readApiMartVideoReceipt, saveApiMartVideoReceipt, ...dependencies };
   const file = await Bun.file(new URL("../src/worker.ts", import.meta.url)).text();
   const source = ts.createSourceFile("worker.ts", file, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const code = ["runTask", "deferTask", "assertTaskExecution", "executeApiMartVideo", "executeApiMartImage"].map(name => {

@@ -1,6 +1,6 @@
 import { useUiText } from "@/lib/i18n";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUp, LoaderCircle, Square } from "lucide-react";
+import { ArrowUp, LoaderCircle, Square, Upload } from "lucide-react";
 import { App, Button } from "antd";
 
 import { ModelPicker } from "@/components/model-picker";
@@ -20,7 +20,7 @@ import { buildNodeGenerationContext } from "./canvas-node-generation";
 import { CanvasGenerationRecordDetails } from "./canvas-generation-record-details";
 import { CanvasPersistedMediaPreview } from "./canvas-persisted-media-preview";
 import { canvasNodePromptPanelInput, createCanvasNodePromptDraft } from "./canvas-node-prompt-panel-state";
-import { normalizeVideoModelConfig, resolveVideoMode, videoReferenceError } from "@/lib/video-model-parameters";
+import { normalizeVideoModelConfig, resolveVideoMode, videoReferenceError, withVideoDurationDefault } from "@/lib/video-model-parameters";
 import { CanvasImageReferenceDialog } from "./canvas-image-reference-dialog";
 import { ReferenceImageTray } from "@/components/reference-images/reference-image-tray";
 import type { InsertAssetPayload } from "./asset-picker-modal";
@@ -38,6 +38,7 @@ import { resolveCanvasImageConfig } from "@/lib/canvas/canvas-generation-model";
 import { getRecentCanvasPrompts, rememberCanvasPrompt } from "@/lib/canvas/canvas-prompt-history";
 import { loadCanvasPromptTemplate } from "@/lib/canvas/canvas-prompt-template";
 import { createPromptActionGuard, promptActionIdentity } from "@/lib/prompt-template-reuse";
+import { isEmptyCanvasDesignTemplateReference } from "@/lib/canvas/canvas-design-template-reference";
 
 export type CanvasNodeGenerationMode = CanvasGenerationMode;
 
@@ -59,9 +60,11 @@ type CanvasNodePromptPanelProps = {
     onRestoreGeneration?: (nodeId: string) => void;
     onRegisterDraftFlush?: (flush: (() => void) | null) => void;
     uploadContextKey?: string;
+    onUploadOriginal?: (nodeId: string) => void;
+    onUseReferenceAsOriginal?: (nodeId: string, referenceKey: string) => Promise<void>;
 };
 
-export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, onStop, mentionReferences = [], onImageSettingsOpenChange, canvasNodes = [], canvasConnections = [], sharedConfig, onOpenSharedConfig, onRestoreGeneration, onRegisterDraftFlush, uploadContextKey }: CanvasNodePromptPanelProps) {
+export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfigChange, onGenerate, onStop, mentionReferences = [], onImageSettingsOpenChange, canvasNodes = [], canvasConnections = [], sharedConfig, onOpenSharedConfig, onRestoreGeneration, onRegisterDraftFlush, uploadContextKey, onUploadOriginal, onUseReferenceAsOriginal }: CanvasNodePromptPanelProps) {
     const t = useUiText();
     const { message } = App.useApp();
     const globalConfig = useEffectiveConfig("canvas");
@@ -79,7 +82,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const hasTaskImageInput = (sharedConfig ? resolveCanvasNodeImageReferences(node, canvasNodes, canvasConnections) : imageInput?.references || []).length > 0 || Boolean(sharedConfig && resolveCanvasNodeImageReferences(sharedConfig, canvasNodes, canvasConnections).length > 0);
     const toolKey = canvasToolKey(mode, mode === "image" && hasTaskImageInput, baseProfile.kind);
     const boundConfig = useToolConfig(baseConfig, toolKey);
-    let config = boundConfig;
+    let config = mode === "video" ? withVideoDurationDefault(boundConfig, (sharedConfig || node).metadata?.seconds) : boundConfig;
     let modelError = "";
     if (mode === "image") {
         try { config = modelsStatus === "ready" ? resolveCanvasImageConfig(boundConfig, { models, tools, prices: [] }, hasTaskImageInput).config : { ...boundConfig, model: "" }; }
@@ -102,6 +105,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     useEffect(() => { panelIdentity.current = node.id; return () => { panelIdentity.current = ""; }; }, [node.id]);
     const [canvasPickerOpen, setCanvasPickerOpen] = useState(false);
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
+    const [settingOriginal, setSettingOriginal] = useState(false);
     const uploadInputRef = useRef<HTMLInputElement>(null);
     const imageReferences = imageInput?.references || [];
     const fixedReferenceKey = hasImageContent && !imageInput?.usesSnapshot ? imageReferences[0]?.referenceKey : undefined;
@@ -202,6 +206,24 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
             message.error(error instanceof Error ? error.message : t("参考图上传失败"));
         }
     };
+
+    if (!sharedConfig && isEmptyCanvasDesignTemplateReference(node, canvasNodes, canvasConnections)) {
+        const attached = node.metadata?.manualImageReferences || [];
+        const reference = attached.length === 1 ? attached[0] : undefined;
+        return <section aria-label={t("参考款原图设置")} className="space-y-3 rounded-xl border p-3 text-sm backdrop-blur" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }} onMouseDown={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()} onWheel={event => event.stopPropagation()}>
+            <div className="font-medium">{t("先设置参考款原图")}</div>
+            <p className="text-xs leading-5" style={{ color: theme.node.muted }}>{t("下游模板读取此节点的原图。附加参考图不会自动成为原图；设置后即可执行各个分支。")}</p>
+            <Button type="primary" icon={<Upload className="size-4" />} disabled={isRunning || settingOriginal || !onUploadOriginal} onClick={() => onUploadOriginal?.(node.id)}>{t("上传参考款原图")}</Button>
+            {reference ? <div className="flex flex-wrap items-center gap-3">
+                <CanvasPersistedMediaPreview kind="image" url={reference.content} storageKey={reference.storageKey} alt={reference.name} className="size-20 rounded border object-contain" />
+                <Button loading={settingOriginal} disabled={isRunning || !onUseReferenceAsOriginal} onClick={() => {
+                    if (!onUseReferenceAsOriginal || settingOriginal) return;
+                    setSettingOriginal(true);
+                    void onUseReferenceAsOriginal(node.id, reference.referenceKey).catch(error => message.error(error instanceof Error ? error.message : t("设置原图失败，请重试"))).finally(() => setSettingOriginal(false));
+                }}>{t("将这张参考图设为原图")}</Button>
+            </div> : attached.length > 1 ? <p className="text-xs leading-5" style={{ color: theme.node.muted }}>{t("当前有多张附加参考图，请上传需要使用的那一张原图；已有参考图会保留。")}</p> : null}
+        </section>;
+    }
 
     if (sharedConfig) {
         const sharedPrompt = sharedConfig.metadata?.composerContent || sharedConfig.metadata?.prompt || "";

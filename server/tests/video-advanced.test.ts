@@ -128,23 +128,22 @@ describe("advanced video preflight safety", () => {
   test("rejects missing/private audio-video URLs without exposing image bytes or provider credentials", async () => {
     for (const publicUrl of [undefined, "asset://untrusted", "https://localhost/video.mp4", "http://minio:9000/video.mp4", "https://10.0.0.1/video.mp4"]) {
       let calls = 0;
-      await expect(prepareVideoProviderSources({ model: "MiniMax-H3", prompt: "test", parameters: { videoMode: "reference" }, sources: [image, { ...video, publicUrl }], baseUrl: "https://provider.example/v1", apiKey: "test-key" }, { fetch: async () => { calls++; return json({}); } })).rejects.toThrow("公开 HTTPS");
+      await expect(prepareVideoProviderSources({ model: "MiniMax-H3", prompt: "test", parameters: { videoMode: "reference" }, sources: [image, { ...video, publicUrl }], baseUrl: "https://provider.example/v1", apiKey: "test-key" }, { fetch: async () => { calls++; return json({}); } })).rejects.toThrow("公开 HTTP(S)");
       expect(calls).toBe(0);
     }
   });
 
-  test("formal runtime and demo source preparation use the same mapping, only upload images and preserve public audio/video", async () => {
+  test("runtime source preparation preserves owned image, audio and video URLs with no upload", async () => {
     const sources = [image, video, audio, last];
     const events: string[] = [];
-    const expected = { image_urls: ["https://cdn.example/upload-1.png", "https://cdn.example/upload-2.png"], video_urls: [video.publicUrl], audio_urls: [audio.publicUrl], omni_reference_task_type: "reference" };
-    let uploads = 0;
+    const expected = { image_urls: [image.publicUrl, last.publicUrl], video_urls: [video.publicUrl], audio_urls: [audio.publicUrl], omni_reference_task_type: "reference" };
     const result = await runApiMartVideoTask({ modelId: "doubao-seedance-2.5", prompt: "参考素材", parameters: { videoMode: "reference" }, sources, baseUrl: "https://provider.example/v1", apiKey: "test-key", beforeSubmit: async () => { events.push("claim"); return true; }, onSubmitted: async () => { events.push("persist"); } }, { sleep: async () => undefined, fetch: async (url, init) => {
-      if (url.endsWith("/uploads/images")) { uploads++; events.push("upload-image"); return json({ url: `https://cdn.example/upload-${uploads}.png` }); }
+      expect(url).not.toContain("/uploads/");
       if (url.endsWith("/videos/generations")) { events.push("generate"); expect(JSON.parse(String(init?.body))).toMatchObject(expected); return json({ data: [{ task_id: "original" }] }); }
       events.push("poll"); return json({ data: { status: "completed", result: { videos: ["https://cdn.example/result.mp4"] } } });
     } });
     expect(result).toBe("https://cdn.example/result.mp4");
-    expect(events).toEqual(["upload-image", "upload-image", "claim", "generate", "persist", "poll"]);
+    expect(events).toEqual(["claim", "generate", "persist", "poll"]);
     expect(preflightVideoSources("doubao-seedance-2.5", "参考素材", { videoMode: "reference" }, sources).normalized.referenceCount).toBe(4);
   });
 });

@@ -129,7 +129,7 @@ type ConfigStore = {
 
 function isVideoModelName(model: string) {
     const value = modelOptionName(model).toLowerCase();
-    return value.includes("seedance") || value.includes("video") || value.includes("sora") || value.includes("veo") || value.includes("kling") || value.includes("wan") || value.includes("hailuo") || value.includes("happyhorse") || value.includes("minimax");
+    return value === "gemini-omni-1.2-flash" || value.includes("seedance") || value.includes("video") || value.includes("sora") || value.includes("veo") || value.includes("kling") || value.includes("wan") || value.includes("hailuo") || value.includes("happyhorse") || value.includes("minimax");
 }
 
 function isImageModelName(model: string) {
