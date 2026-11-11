@@ -9,13 +9,30 @@ const initialPrompt = "保留我已输入的改图要求";
 const extraText = "，只修改指定颜色";
 const fixture = `<!doctype html><html><head><script type="module">import RefreshRuntime from '/@react-refresh';RefreshRuntime.injectIntoGlobalHook(window);window.$RefreshReg$=()=>{};window.$RefreshSig$=()=>type=>type;window.__vite_plugin_react_preamble_installed__=true;</script></head><body><div id="root"></div><script type="module" src="/e2e/conversation-clipboard.fixture.tsx"></script></body></html>`;
 
-async function nativeClipboard(page: Page) {
-    return page.evaluate(async () => {
-        const clipboard = (window as Window & { __nativeClipboard: Clipboard }).__nativeClipboard;
-        const items = await clipboard.read();
-        const item = items.find(value => value.types.includes("text/plain"));
-        return { types: items.flatMap(value => value.types), text: item ? await (await item.getType("text/plain")).text() : "" };
-    });
+type ClipboardSnapshot = { types: string[]; text: string };
+
+async function nativeClipboard(page: Page, accepts: (snapshot: ClipboardSnapshot) => boolean = () => true) {
+    let accepted: ClipboardSnapshot | undefined;
+    await expect.poll(async () => {
+        const snapshot = await page.evaluate(async () => {
+            const clipboard = (window as Window & { __nativeClipboard: Clipboard }).__nativeClipboard;
+            try {
+                const items = await clipboard.read();
+                const item = items.find(value => value.types.includes("text/plain"));
+                return { types: items.flatMap(value => value.types), text: item ? await (await item.getType("text/plain")).text() : "" };
+            } catch (error) {
+                // Chromium invalidates a lazy ClipboardItem if the ongoing OS
+                // write changes it between read() and getType(). Re-read only;
+                // permission failures and all other errors must still fail.
+                if (error instanceof DOMException && error.name === "InvalidStateError" && error.message === "Clipboard data has changed") return null;
+                throw error;
+            }
+        });
+        if (!snapshot || !accepts(snapshot)) return false;
+        accepted = snapshot;
+        return true;
+    }, { message: "a complete, current native clipboard snapshot" }).toBe(true);
+    return accepted!;
 }
 
 async function pasteNative(page: Page, composer: Locator) {
@@ -88,11 +105,7 @@ for (const surface of ["chat", "canvas-components"] as const) {
                 await expect(page.getByText(successText, { exact: true }).last()).toBeVisible();
                 // A previous toast can still be visible. Observe completion of this
                 // real OS write, not the earlier copy, before issuing native paste.
-                await expect.poll(async () => {
-                    const { text } = await nativeClipboard(page);
-                    return /^trucreate-image:v1:[0-9a-f-]{36}$/i.test(text) && text !== previousClipboardText;
-                }).toBe(true);
-                const clipboard = await nativeClipboard(page);
+                const clipboard = await nativeClipboard(page, ({ text }) => /^trucreate-image:v1:[0-9a-f-]{36}$/i.test(text) && text !== previousClipboardText);
                 expect(clipboard.text).toMatch(/^trucreate-image:v1:[0-9a-f-]{36}$/i);
                 expect(clipboard.types).toContain("text/plain");
                 if (mode === "native") expect(clipboard.types).toContain("image/png");
@@ -126,3 +139,32 @@ for (const surface of ["chat", "canvas-components"] as const) {
         });
     }
 }
+
+test("native clipboard observation tolerates one invalidated item without another write", async ({ page, context }, info) => {
+    await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: new URL(info.project.use.baseURL!).origin });
+    await page.route("**/__clipboard-observer", route => route.fulfill({ contentType: "text/html", body: "<!doctype html><title>Clipboard observation fixture</title>" }));
+    await page.goto("/__clipboard-observer");
+    const text = "隔离剪贴板读取：不重复复制";
+    await page.evaluate(async value => {
+        await navigator.clipboard.writeText(value);
+        let reads = 0;
+        // Fault only the test's observer. The app/browser clipboard API is intact.
+        Object.defineProperty(window, "__nativeClipboard", { configurable: true, value: {
+            async read() {
+                reads++;
+                const items = await navigator.clipboard.read();
+                if (reads === 1) return [{ types: ["text/plain"], getType: async () => { throw new DOMException("Clipboard data has changed", "InvalidStateError"); } }];
+                return items;
+            },
+        } });
+        Object.defineProperty(window, "__clipboardObserverReads", { get: () => reads });
+    }, text);
+    expect((await nativeClipboard(page)).text).toBe(text);
+    expect(await page.evaluate(() => (window as Window & { __clipboardObserverReads: number }).__clipboardObserverReads)).toBe(2);
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(text);
+
+    await page.evaluate(() => Object.defineProperty(window, "__nativeClipboard", { value: {
+        async read() { throw new DOMException("Clipboard read denied", "NotAllowedError"); },
+    } }));
+    await expect(nativeClipboard(page)).rejects.toThrow("NotAllowedError: Clipboard read denied");
+});
