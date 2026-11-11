@@ -1,0 +1,424 @@
+{
+  "schema": 1,
+  "replacements": [
+    {
+      "before": {
+        "name": "module_flags_module_key_check",
+        "type": "c",
+        "relation": "module_flags",
+        "definition": "CHECK ((module_key = ANY (ARRAY['creative'::text, 'canvas'::text, 'standard-colors'::text, 'photo-color-picker'::text, 'pattern-recolor'::text, 'svg-trace'::text, 'creative-selection'::text, 'canvas-local-tools'::text, 'canvas-local-agent'::text, 'assets'::text, 'prompts'::text, 'reference-import'::text, 'design-library'::text, 'team'::text, 'performance'::text, 'pattern-placement'::text, 'pattern-repeat'::text, 'image'::text, 'detail-enhance'::text, 'image-edit'::text, 'angle-control'::text, 'seamless-stitch'::text, 'midjourney-blend'::text, 'video'::text, 'creative-text-to-style'::text, 'creative-style-to-sketch'::text, 'creative-local-restyle'::text, 'creative-garment-colorway'::text, 'creative-back-design'::text, 'creative-pattern-extract'::text, 'creative-pattern-colorway'::text, 'creative-accessory-design'::text, 'creative-pattern-craft'::text, 'creative-virtual-try-on'::text, 'creative-sketch-to-photo'::text, 'canvas-image'::text, 'canvas-edit'::text, 'canvas-mask-edit'::text, 'canvas-angle'::text, 'canvas-batch'::text, 'canvas-chat'::text, 'canvas-video'::text, 'canvas-audio'::text, 'gpt-chat'::text, 'gpt-chat-image'::text, 'series-recipe'::text])))"
+      },
+      "after": {
+        "name": "module_flags_module_key_check",
+        "type": "c",
+        "relation": "module_flags",
+        "definition": "CHECK ((module_key = ANY (ARRAY['creative'::text, 'canvas'::text, 'standard-colors'::text, 'photo-color-picker'::text, 'pattern-recolor'::text, 'svg-trace'::text, 'creative-selection'::text, 'canvas-local-tools'::text, 'canvas-local-agent'::text, 'assets'::text, 'prompts'::text, 'reference-import'::text, 'design-library'::text, 'team'::text, 'performance'::text, 'pattern-placement'::text, 'pattern-repeat'::text, 'image'::text, 'detail-enhance'::text, 'image-edit'::text, 'angle-control'::text, 'seamless-stitch'::text, 'midjourney-blend'::text, 'video'::text, 'layer-studio'::text, 'creative-text-to-style'::text, 'creative-style-to-sketch'::text, 'creative-local-restyle'::text, 'creative-garment-colorway'::text, 'creative-back-design'::text, 'creative-pattern-extract'::text, 'creative-pattern-colorway'::text, 'creative-accessory-design'::text, 'creative-pattern-craft'::text, 'creative-virtual-try-on'::text, 'creative-sketch-to-photo'::text, 'canvas-image'::text, 'canvas-edit'::text, 'canvas-mask-edit'::text, 'canvas-angle'::text, 'canvas-batch'::text, 'canvas-chat'::text, 'canvas-video'::text, 'canvas-audio'::text, 'gpt-chat'::text, 'gpt-chat-image'::text, 'series-recipe'::text])))"
+      }
+    },
+    {
+      "before": {
+        "name": "tool_api_configurations_tool_key_check",
+        "type": "c",
+        "relation": "tool_api_configurations",
+        "definition": "CHECK ((tool_key = ANY (ARRAY['image'::text, 'detail-enhance'::text, 'image-edit'::text, 'angle-control'::text, 'seamless-stitch'::text, 'midjourney-blend'::text, 'video'::text, 'creative-text-to-style'::text, 'creative-style-to-sketch'::text, 'creative-local-restyle'::text, 'creative-garment-colorway'::text, 'creative-back-design'::text, 'creative-pattern-extract'::text, 'creative-pattern-colorway'::text, 'creative-accessory-design'::text, 'creative-pattern-craft'::text, 'creative-virtual-try-on'::text, 'creative-sketch-to-photo'::text, 'canvas-image'::text, 'canvas-edit'::text, 'canvas-mask-edit'::text, 'canvas-angle'::text, 'canvas-batch'::text, 'canvas-chat'::text, 'canvas-video'::text, 'canvas-audio'::text, 'gpt-chat'::text, 'gpt-chat-image'::text, 'series-recipe'::text])))"
+      },
+      "after": {
+        "name": "tool_api_configurations_tool_key_check",
+        "type": "c",
+        "relation": "tool_api_configurations",
+        "definition": "CHECK ((tool_key = ANY (ARRAY['image'::text, 'detail-enhance'::text, 'image-edit'::text, 'angle-control'::text, 'seamless-stitch'::text, 'midjourney-blend'::text, 'video'::text, 'layer-studio'::text, 'creative-text-to-style'::text, 'creative-style-to-sketch'::text, 'creative-local-restyle'::text, 'creative-garment-colorway'::text, 'creative-back-design'::text, 'creative-pattern-extract'::text, 'creative-pattern-colorway'::text, 'creative-accessory-design'::text, 'creative-pattern-craft'::text, 'creative-virtual-try-on'::text, 'creative-sketch-to-photo'::text, 'canvas-image'::text, 'canvas-edit'::text, 'canvas-mask-edit'::text, 'canvas-angle'::text, 'canvas-batch'::text, 'canvas-chat'::text, 'canvas-video'::text, 'canvas-audio'::text, 'gpt-chat'::text, 'gpt-chat-image'::text, 'series-recipe'::text])))"
+      }
+    }
+  ],
+  "additions": {
+    "columns": [
+      {
+        "udt_name": "uuid",
+        "data_type": "uuid",
+        "table_name": "layer_studio_prices",
+        "column_name": "model_config_id",
+        "is_nullable": "NO",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 1,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "numeric",
+        "data_type": "numeric",
+        "table_name": "layer_studio_prices",
+        "column_name": "input_rmb",
+        "is_nullable": "NO",
+        "numeric_scale": 6,
+        "column_default": null,
+        "ordinal_position": 2,
+        "numeric_precision": 12
+      },
+      {
+        "udt_name": "numeric",
+        "data_type": "numeric",
+        "table_name": "layer_studio_prices",
+        "column_name": "low_output_rmb",
+        "is_nullable": "NO",
+        "numeric_scale": 6,
+        "column_default": null,
+        "ordinal_position": 3,
+        "numeric_precision": 12
+      },
+      {
+        "udt_name": "numeric",
+        "data_type": "numeric",
+        "table_name": "layer_studio_prices",
+        "column_name": "high_output_rmb",
+        "is_nullable": "NO",
+        "numeric_scale": 6,
+        "column_default": null,
+        "ordinal_position": 4,
+        "numeric_precision": 12
+      },
+      {
+        "udt_name": "text",
+        "data_type": "text",
+        "table_name": "layer_studio_prices",
+        "column_name": "source_note",
+        "is_nullable": "NO",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 5,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "int4",
+        "data_type": "integer",
+        "table_name": "layer_studio_prices",
+        "column_name": "version",
+        "is_nullable": "NO",
+        "numeric_scale": 0,
+        "column_default": "1",
+        "ordinal_position": 6,
+        "numeric_precision": 32
+      },
+      {
+        "udt_name": "uuid",
+        "data_type": "uuid",
+        "table_name": "layer_studio_prices",
+        "column_name": "updated_by",
+        "is_nullable": "YES",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 7,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "timestamptz",
+        "data_type": "timestamp with time zone",
+        "table_name": "layer_studio_prices",
+        "column_name": "updated_at",
+        "is_nullable": "NO",
+        "numeric_scale": null,
+        "column_default": "now()",
+        "ordinal_position": 8,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "jsonb",
+        "data_type": "jsonb",
+        "table_name": "tasks",
+        "column_name": "result_document",
+        "is_nullable": "YES",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 37,
+        "numeric_precision": null
+      },
+      {
+        "udt_name": "jsonb",
+        "data_type": "jsonb",
+        "table_name": "tasks",
+        "column_name": "upstream_result_document",
+        "is_nullable": "YES",
+        "numeric_scale": null,
+        "column_default": null,
+        "ordinal_position": 38,
+        "numeric_precision": null
+      }
+    ],
+    "indexes": [
+      {
+        "indexdef": "CREATE UNIQUE INDEX layer_studio_prices_pkey ON public.layer_studio_prices USING btree (model_config_id)",
+        "indexname": "layer_studio_prices_pkey",
+        "tablename": "layer_studio_prices"
+      }
+    ],
+    "constraints": [
+      {
+        "name": "layer_studio_prices_check",
+        "type": "c",
+        "relation": "layer_studio_prices",
+        "definition": "CHECK (((high_output_rmb >= low_output_rmb) AND (high_output_rmb <= (1000)::numeric)))"
+      },
+      {
+        "name": "layer_studio_prices_input_rmb_check",
+        "type": "c",
+        "relation": "layer_studio_prices",
+        "definition": "CHECK (((input_rmb >= (0)::numeric) AND (input_rmb <= (1000)::numeric)))"
+      },
+      {
+        "name": "layer_studio_prices_low_output_rmb_check",
+        "type": "c",
+        "relation": "layer_studio_prices",
+        "definition": "CHECK (((low_output_rmb > (0)::numeric) AND (low_output_rmb <= (1000)::numeric)))"
+      },
+      {
+        "name": "layer_studio_prices_model_config_id_fkey",
+        "type": "f",
+        "relation": "layer_studio_prices",
+        "definition": "FOREIGN KEY (model_config_id) REFERENCES model_configs(id)"
+      },
+      {
+        "name": "layer_studio_prices_pkey",
+        "type": "p",
+        "relation": "layer_studio_prices",
+        "definition": "PRIMARY KEY (model_config_id)"
+      },
+      {
+        "name": "layer_studio_prices_source_note_check",
+        "type": "c",
+        "relation": "layer_studio_prices",
+        "definition": "CHECK (((length(source_note) >= 1) AND (length(source_note) <= 500)))"
+      },
+      {
+        "name": "layer_studio_prices_updated_by_fkey",
+        "type": "f",
+        "relation": "layer_studio_prices",
+        "definition": "FOREIGN KEY (updated_by) REFERENCES users(id)"
+      },
+      {
+        "name": "layer_studio_prices_version_check",
+        "type": "c",
+        "relation": "layer_studio_prices",
+        "definition": "CHECK ((version > 0))"
+      },
+      {
+        "name": "tasks_result_document_check",
+        "type": "c",
+        "relation": "tasks",
+        "definition": "CHECK (((result_document IS NULL) OR (jsonb_typeof(result_document) = 'object'::text)))"
+      },
+      {
+        "name": "tasks_upstream_result_document_check",
+        "type": "c",
+        "relation": "tasks",
+        "definition": "CHECK (((upstream_result_document IS NULL) OR (jsonb_typeof(upstream_result_document) = 'object'::text)))"
+      }
+    ],
+    "functions": [],
+    "triggers": []
+  },
+  "seedColumns": [
+    {
+      "udt_name": "text",
+      "data_type": "text",
+      "table_name": "module_flags",
+      "column_name": "module_key",
+      "is_nullable": "NO",
+      "numeric_scale": null,
+      "column_default": null,
+      "ordinal_position": 1,
+      "numeric_precision": null
+    },
+    {
+      "udt_name": "bool",
+      "data_type": "boolean",
+      "table_name": "module_flags",
+      "column_name": "enabled",
+      "is_nullable": "NO",
+      "numeric_scale": null,
+      "column_default": "true",
+      "ordinal_position": 2,
+      "numeric_precision": null
+    },
+    {
+      "udt_name": "uuid",
+      "data_type": "uuid",
+      "table_name": "module_flags",
+      "column_name": "updated_by",
+      "is_nullable": "YES",
+      "numeric_scale": null,
+      "column_default": null,
+      "ordinal_position": 3,
+      "numeric_precision": null
+    },
+    {
+      "udt_name": "timestamptz",
+      "data_type": "timestamp with time zone",
+      "table_name": "module_flags",
+      "column_name": "updated_at",
+      "is_nullable": "NO",
+      "numeric_scale": null,
+      "column_default": "now()",
+      "ordinal_position": 4,
+      "numeric_precision": null
+    },
+    {
+      "udt_name": "text",
+      "data_type": "text",
+      "table_name": "schema_migrations",
+      "column_name": "name",
+      "is_nullable": "NO",
+      "numeric_scale": null,
+      "column_default": null,
+      "ordinal_position": 1,
+      "numeric_precision": null
+    },
+    {
+      "udt_name": "timestamptz",
+      "data_type": "timestamp with time zone",
+      "table_name": "schema_migrations",
+      "column_name": "applied_at",
+      "is_nullable": "NO",
+      "numeric_scale": null,
+      "column_default": "now()",
+      "ordinal_position": 2,
+      "numeric_precision": null
+    },
+    {
+      "udt_name": "text",
+      "data_type": "text",
+      "table_name": "tool_api_configurations",
+      "column_name": "tool_key",
+      "is_nullable": "NO",
+      "numeric_scale": null,
+      "column_default": null,
+      "ordinal_position": 1,
+      "numeric_precision": null
+    },
+    {
+      "udt_name": "uuid",
+      "data_type": "uuid",
+      "table_name": "tool_api_configurations",
+      "column_name": "model_config_id",
+      "is_nullable": "YES",
+      "numeric_scale": null,
+      "column_default": null,
+      "ordinal_position": 2,
+      "numeric_precision": null
+    },
+    {
+      "udt_name": "bool",
+      "data_type": "boolean",
+      "table_name": "tool_api_configurations",
+      "column_name": "enabled",
+      "is_nullable": "NO",
+      "numeric_scale": null,
+      "column_default": "true",
+      "ordinal_position": 3,
+      "numeric_precision": null
+    },
+    {
+      "udt_name": "uuid",
+      "data_type": "uuid",
+      "table_name": "tool_api_configurations",
+      "column_name": "updated_by",
+      "is_nullable": "YES",
+      "numeric_scale": null,
+      "column_default": null,
+      "ordinal_position": 4,
+      "numeric_precision": null
+    },
+    {
+      "udt_name": "timestamptz",
+      "data_type": "timestamp with time zone",
+      "table_name": "tool_api_configurations",
+      "column_name": "created_at",
+      "is_nullable": "NO",
+      "numeric_scale": null,
+      "column_default": "now()",
+      "ordinal_position": 5,
+      "numeric_precision": null
+    },
+    {
+      "udt_name": "timestamptz",
+      "data_type": "timestamp with time zone",
+      "table_name": "tool_api_configurations",
+      "column_name": "updated_at",
+      "is_nullable": "NO",
+      "numeric_scale": null,
+      "column_default": "now()",
+      "ordinal_position": 6,
+      "numeric_precision": null
+    },
+    {
+      "udt_name": "int4",
+      "data_type": "integer",
+      "table_name": "tool_api_configurations",
+      "column_name": "credit_cost_override",
+      "is_nullable": "YES",
+      "numeric_scale": 0,
+      "column_default": null,
+      "ordinal_position": 7,
+      "numeric_precision": 32
+    },
+    {
+      "udt_name": "numeric",
+      "data_type": "numeric",
+      "table_name": "tool_api_configurations",
+      "column_name": "rmb_cost_override",
+      "is_nullable": "YES",
+      "numeric_scale": 6,
+      "column_default": null,
+      "ordinal_position": 8,
+      "numeric_precision": 16
+    },
+    {
+      "udt_name": "int4",
+      "data_type": "integer",
+      "table_name": "tool_api_configurations",
+      "column_name": "configuration_version",
+      "is_nullable": "NO",
+      "numeric_scale": 0,
+      "column_default": "1",
+      "ordinal_position": 9,
+      "numeric_precision": 32
+    },
+    {
+      "udt_name": "bool",
+      "data_type": "boolean",
+      "table_name": "tool_api_configurations",
+      "column_name": "allow_raw_prompt",
+      "is_nullable": "NO",
+      "numeric_scale": null,
+      "column_default": "false",
+      "ordinal_position": 10,
+      "numeric_precision": null
+    }
+  ],
+  "seeds": {
+    "module_flags": {
+      "values": {
+        "module_key": "layer-studio",
+        "enabled": false,
+        "updated_by": null
+      },
+      "timestamps": [
+        "updated_at"
+      ]
+    },
+    "tool_api_configurations": {
+      "values": {
+        "tool_key": "layer-studio",
+        "model_config_id": null,
+        "enabled": false,
+        "updated_by": null,
+        "credit_cost_override": null,
+        "rmb_cost_override": null,
+        "configuration_version": 1,
+        "allow_raw_prompt": false
+      },
+      "timestamps": [
+        "created_at",
+        "updated_at"
+      ]
+    }
+  }
+}

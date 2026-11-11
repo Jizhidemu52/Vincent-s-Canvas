@@ -66,6 +66,62 @@ export const listPriceVersions = () => request<{ prices: PriceVersion[] }>(`${ro
 export const createPriceDraft = (input: Pick<PriceVersion, "operationType" | "label" | "credits" | "rmbCost">) => request<{ price: PriceVersion }>(`${root}/prices`, { method: "POST", body: JSON.stringify(input) });
 export const markPriceTesting = (id: string) => request<void>(`${root}/prices/${id}/test`, { method: "POST" });
 export const publishPrice = (id: string) => request<void>(`${root}/prices/${id}/publish`, { method: "POST" });
+
+export type LayerStudioPriceInput = { inputRmb: number; lowOutputRmb: number; highOutputRmb: number; sourceNote: string };
+export type LayerStudioPrice = LayerStudioPriceInput & { modelConfigId: string; version: number; updatedAt: string };
+
+export function isLayerStudioPricingModel(model: Pick<ServerModel, "modelId" | "providerId" | "workflowConfigId">, providers: Pick<ServerProvider, "id" | "protocol">[]) {
+    return model.modelId === "seedream-5-5" && !model.workflowConfigId && providers.some(provider => provider.id === model.providerId && provider.protocol === "apimart");
+}
+
+export function validateLayerStudioPriceInput(value: unknown): LayerStudioPriceInput {
+    if (!value || typeof value !== "object") throw new Error("请明确填写三项费率与依据。");
+    const input = value as LayerStudioPriceInput;
+    if (typeof input.inputRmb !== "number" || !Number.isFinite(input.inputRmb) || input.inputRmb < 0 || input.inputRmb > 1000) throw new Error("输入图单价必须明确填写，范围 0–1000 元；不默认免费。");
+    if ([input.lowOutputRmb, input.highOutputRmb].some(rate => typeof rate !== "number" || !Number.isFinite(rate) || rate <= 0 || rate > 1000)) throw new Error("两档输出单价都必须大于 0 且不超过 1000 元。");
+    if (input.highOutputRmb < input.lowOutputRmb) throw new Error("高档输出单价不能低于低档。");
+    if ([input.inputRmb, input.lowOutputRmb, input.highOutputRmb].some(rate => Number(rate.toFixed(6)) !== rate)) throw new Error("费率最多支持 6 位小数，请明确确认后填写；不会自动舍入。");
+    if (typeof input.sourceNote !== "string" || !input.sourceNote.trim() || input.sourceNote.trim().length > 500) throw new Error("请填写 1–500 字的费率确认依据。");
+    return { inputRmb: input.inputRmb, lowOutputRmb: input.lowOutputRmb, highOutputRmb: input.highOutputRmb, sourceNote: input.sourceNote.trim() };
+}
+
+export class LayerStudioPricingError extends Error {
+    constructor(message: string, readonly uncertain = false) { super(message); this.name = "LayerStudioPricingError"; }
+}
+function parseLayerStudioPrice(value: unknown): LayerStudioPrice {
+    const item = value as LayerStudioPrice;
+    const input = validateLayerStudioPriceInput(item);
+    if (typeof item.modelConfigId !== "string" || !item.modelConfigId || !Number.isInteger(item.version) || item.version < 1 || typeof item.updatedAt !== "string") throw new Error("费率记录格式无效。");
+    return { ...input, modelConfigId: item.modelConfigId, version: item.version, updatedAt: item.updatedAt };
+}
+async function layerStudioPricingRequest(path: string, init: RequestInit = {}) {
+    let response: Response;
+    try { response = await fetch(path, { ...init, credentials: "include", cache: "no-store", headers: { "content-type": "application/json" } }); }
+    catch (error) {
+        if (init.signal?.aborted) throw error;
+        throw new LayerStudioPricingError(init.method === "PUT" ? "保存结果待核对；编辑内容已保留，请先读取服务端配置，不要重复保存。" : "费率读取失败，请检查网络后重试。", init.method === "PUT");
+    }
+    if (!response.ok) throw new LayerStudioPricingError(response.status === 403 ? "仅超级管理员可配置图层专用费率。"
+        : response.status === 401 ? "登录已失效，编辑内容保留，请重新登录。"
+            : response.status === 400 ? "费率或模型条件不符合要求，请检查后保存。"
+                : init.method === "PUT" ? "保存结果待核对；请先读取服务端配置，不要重复保存。" : "费率暂时无法读取。", init.method === "PUT" && response.status >= 500);
+    try { return await response.json() as Record<string, unknown>; }
+    catch { throw new LayerStudioPricingError("费率响应无法确认，请重新读取服务端配置。", init.method === "PUT"); }
+}
+export async function listLayerStudioPrices(signal?: AbortSignal) {
+    const result = await layerStudioPricingRequest(`${root}/layer-studio-pricing`, { signal });
+    if (!Array.isArray(result.prices)) throw new LayerStudioPricingError("费率列表格式无效，未覆盖当前编辑。");
+    return { prices: result.prices.map(parseLayerStudioPrice) };
+}
+export async function saveLayerStudioPrice(modelConfigId: string, values: LayerStudioPriceInput, signal?: AbortSignal) {
+    const input = validateLayerStudioPriceInput(values);
+    const result = await layerStudioPricingRequest(`${root}/layer-studio-pricing/${encodeURIComponent(modelConfigId)}`, { method: "PUT", body: JSON.stringify(input), signal });
+    try {
+        const price = parseLayerStudioPrice(result.price);
+        if (price.modelConfigId !== modelConfigId) throw new Error("费率模型不匹配");
+        return { price };
+    } catch { throw new LayerStudioPricingError("保存响应无法确认，编辑内容保留；请读取服务端配置核对。", true); }
+}
 export const listServerWorkflows=()=>request<{workflows:ServerWorkflow[]}>("/api/admin/workflows");
 export const createServerWorkflow=(input:Omit<ServerWorkflow,"id"|"providerName">)=>request<{workflow:ServerWorkflow}>("/api/admin/workflows",{method:"POST",body:JSON.stringify(input)});
 export const updateServerWorkflow=(id:string,input:Partial<Omit<ServerWorkflow,"id"|"providerName">>)=>request<{workflow:ServerWorkflow}>(`/api/admin/workflows/${id}`,{method:"PATCH",body:JSON.stringify(input)});

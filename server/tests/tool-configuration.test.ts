@@ -129,6 +129,18 @@ async function serve(state = fixture(), role = "super_admin") {
 const post = (url: string, body: unknown, method = "POST") => fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
 describe("formal catalog configuration", () => {
+  test("missing layer configuration is disabled in both admin and creation catalog without changing old defaults", async () => {
+    const state = fixture(), { url } = await serve(state);
+    for (const path of ["/admin/tool-configurations", "/models"]) {
+      const response = await fetch(url + path);
+      expect(response.status).toBe(200);
+      const { tools } = await response.json() as { tools: ToolConfiguration[] };
+      expect(tools.find(tool => tool.toolKey === "layer-studio")).toMatchObject({ enabled: false, modelConfigId: null, configurationVersion: 0 });
+      expect(tools.find(tool => tool.toolKey === "image")?.enabled).toBe(true);
+    }
+    expect(state.statements.some(({ sql }) => /^(?:INSERT|UPDATE|DELETE)/.test(sql))).toBe(false);
+  });
+
   test.each([
     ["detail-enhance", "upscale", DETAIL_ENHANCE_PROMPT],
     ["angle-control", "inpaint", ANGLE_CONTROL_PROMPT],
@@ -295,27 +307,34 @@ describe("formal catalog configuration", () => {
     const original = readFileSync(new URL("../src/migrations/026_formal_module_configuration.sql", import.meta.url), "utf8");
     const migration = readFileSync(new URL("../src/migrations/027_midjourney_blend_module.sql", import.meta.url), "utf8");
     const creative = readFileSync(new URL("../src/migrations/051_new_creative_scenes.sql", import.meta.url), "utf8");
+    const layers = readFileSync(new URL("../src/migrations/052_layer_studio.sql", import.meta.url), "utf8");
     const creativeKeys = ["creative-virtual-try-on", "creative-sketch-to-photo"];
     const keys = (value: string) => [...value.matchAll(/'([^']+)'/g)].map(match => match[1]).sort();
     const toolCheck = (value: string) => keys(/CHECK \(tool_key IN \(([\s\S]*?)\)\)/.exec(value)![1]!);
     const moduleCheck = (value: string) => keys(/CHECK \(module_key IN \(([\s\S]*?)\)\)/.exec(value)![1]!);
     const allTools = toolDefinitions.map(tool => tool.toolKey).sort();
     const allModules = [...moduleKeys].sort();
-    const beforeCreative = (key: string) => !creativeKeys.includes(key);
+    const beforeLayers = (key: string) => key !== "layer-studio";
+    const beforeCreative = (key: string) => beforeLayers(key) && !creativeKeys.includes(key);
     const beforeBlend = (key: string) => beforeCreative(key) && key !== "midjourney-blend";
     const arrays = [...original.matchAll(/unnest\(ARRAY\[([\s\S]*?)\]\)/g)];
-    expect(toolCheck(creative)).toEqual(allTools);
-    expect(moduleCheck(creative)).toEqual(allModules);
+    expect(toolCheck(layers)).toEqual(allTools);
+    expect(moduleCheck(layers)).toEqual(allModules);
+    expect(toolCheck(creative)).toEqual(allTools.filter(beforeLayers));
+    expect(moduleCheck(creative)).toEqual(allModules.filter(beforeLayers));
     expect(toolCheck(migration)).toEqual(allTools.filter(beforeCreative));
     expect(moduleCheck(migration)).toEqual(allModules.filter(beforeCreative));
     expect(keys(arrays[0]![1]!)).toEqual(allModules.filter(beforeBlend));
     expect(keys(arrays[1]![1]!)).toEqual(allTools.filter(beforeBlend));
     expect(keys(/unnest\(ARRAY\[([\s\S]*?)\]\)/.exec(creative)![1]!)).toEqual([...creativeKeys].sort());
-    for (const value of [migration, creative]) {
+    for (const value of [migration, creative, layers]) {
       expect(value).toContain("ON CONFLICT(module_key) DO NOTHING");
       expect(value).toContain("ON CONFLICT(tool_key) DO NOTHING");
     }
     expect(creative).not.toMatch(/UPDATE\s+(?:model_configs|providers|pricing_rule_versions)/);
+    expect(layers).toContain("VALUES('layer-studio',false)");
+    expect(layers).toContain("VALUES('layer-studio',NULL,false)");
+    expect(layers).not.toMatch(/UPDATE\s+(?:model_configs|providers|pricing_rule_versions)/);
     expect(original).toContain("ALTER COLUMN model_config_id DROP NOT NULL");
     expect(original).not.toMatch(/UPDATE\s+(?:model_configs|pricing_rule_versions)/);
   });

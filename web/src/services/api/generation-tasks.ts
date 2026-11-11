@@ -5,6 +5,7 @@ import { completedTaskDurationMs } from "@/lib/completed-task-duration";
 import type { PromptInputData } from "../../../../shared/prompt-contracts";
 import { getPromptCompilation } from "./prompt-compilations";
 import type { TaskSubmission } from "../../../../shared/task-contracts";
+import type { LayerStudioResultDocument } from "../../../../shared/layer-studio";
 
 import { dataUrlToFile } from "@/lib/image-utils";
 import { imageReferenceFileError } from "@/lib/image-reference-policy";
@@ -41,7 +42,7 @@ export type QueuedTaskProgress = {
     estimateReason: string | null;
     retryAfterSeconds: number | null;
 };
-export type QueuedTask = { prompt?: string; summaryZh?: string; userInput?: PromptInputData; optimized?: boolean; id: string; requestId: string; operationType?: string; attempts?: number; status: string; stage?: string; errorCode?: string | null; upstreamTaskId?: string | null; submissionStartedAt?: string | null; resultUrls: string[]; failureReason: string | null; createdAt?: string; updatedAt?: string; queuedAt?: string | null; startedAt?: string | null; completedAt?: string | null; userId?: string; ownerUserId?: string; parameters?: Record<string, unknown> };
+export type QueuedTask = { prompt?: string; summaryZh?: string; userInput?: PromptInputData; optimized?: boolean; id: string; requestId: string; operationType?: string; attempts?: number; status: string; stage?: string; errorCode?: string | null; upstreamTaskId?: string | null; submissionStartedAt?: string | null; resultUrls: string[]; resultDocument?: LayerStudioResultDocument | null; failureReason: string | null; createdAt?: string; updatedAt?: string; queuedAt?: string | null; startedAt?: string | null; completedAt?: string | null; userId?: string; ownerUserId?: string; parameters?: Record<string, unknown> };
 
 /** The server snapshot keeps exclusion text out of the editable/replay prompt. */
 export function imageTaskPrompts(task: Pick<QueuedTask, "prompt" | "parameters">, fallback = ""): { prompt: string; submittedPrompt?: string } {

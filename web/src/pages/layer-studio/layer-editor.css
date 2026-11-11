@@ -1,0 +1,438 @@
+.layer-editor {
+    --le-bg: var(--card, #fff);
+    --le-panel: var(--muted, #f7f8fa);
+    --le-line: var(--border, #dfe4e9);
+    --le-text: var(--foreground, #263244);
+    --le-muted: var(--muted-foreground, #647185);
+    --le-accent: var(--primary, #2563eb);
+    --le-accent-text: var(--primary-foreground, #fff);
+    --le-tint: color-mix(in srgb, var(--le-accent) 10%, var(--le-bg));
+    --le-check: var(--border, #e5e8ed);
+    color: var(--le-text);
+    background: var(--le-bg);
+    border: 1px solid var(--le-line);
+    border-radius: 14px;
+    overflow: hidden;
+    font-size: 14px;
+    line-height: 1.5;
+    min-width: 0;
+}
+.layer-editor[data-theme="dark"] {
+    --le-bg: var(--card, #17202c);
+    --le-panel: var(--muted, #111923);
+    --le-line: var(--border, #344153);
+    --le-text: var(--foreground, #e5ebf3);
+    --le-muted: var(--muted-foreground, #a6b4c8);
+    --le-accent: var(--primary, #8db3ff);
+    --le-accent-text: var(--primary-foreground, #17202c);
+    --le-check: var(--border, #273342);
+}
+.layer-editor * {
+    box-sizing: border-box;
+}
+.layer-editor h3,
+.layer-editor h4,
+.layer-editor p {
+    margin: 0;
+}
+.layer-editor h3 {
+    font-size: 17px;
+    font-weight: 650;
+}
+.layer-editor h4 {
+    font-size: 14px;
+    font-weight: 650;
+}
+.layer-editor button,
+.layer-editor select,
+.layer-editor input {
+    font: inherit;
+    color: inherit;
+}
+.layer-editor button,
+.layer-editor select {
+    border: 1px solid var(--le-line);
+    border-radius: 7px;
+    background: var(--le-bg);
+    padding: 7px 10px;
+    cursor: pointer;
+}
+.layer-editor button:hover:enabled {
+    border-color: var(--le-accent);
+    background: var(--le-tint);
+}
+.layer-editor button:disabled {
+    opacity: 0.48;
+    cursor: not-allowed;
+}
+.layer-editor :focus-visible {
+    outline: 2px solid var(--le-accent);
+    outline-offset: 2px;
+}
+.layer-editor input[type="checkbox"] {
+    accent-color: var(--le-accent);
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+}
+.layer-editor-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    padding: 18px 20px;
+    border-bottom: 1px solid var(--le-line);
+}
+.layer-editor-toolbar p {
+    font-size: 12px;
+    color: var(--le-muted);
+    margin-top: 3px;
+}
+.layer-editor-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+.layer-editor button.layer-editor-primary {
+    background: var(--le-accent);
+    border-color: var(--le-accent);
+    color: var(--le-accent-text);
+    font-weight: 600;
+}
+.layer-editor button.layer-editor-primary:hover:enabled {
+    background: color-mix(in srgb, var(--le-accent) 90%, var(--le-text));
+}
+.layer-editor-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 290px;
+    align-items: start;
+}
+.layer-editor-workspace {
+    min-width: 0;
+    padding: 20px;
+    background: var(--le-panel);
+    align-self: stretch;
+}
+.layer-editor-stage-wrap {
+    display: grid;
+    place-items: center;
+    min-height: 320px;
+    width: 100%;
+}
+.layer-editor-stage {
+    position: relative;
+    isolation: isolate;
+    width: 100%;
+    max-width: 100%;
+    overflow: hidden;
+    background-color: var(--le-bg);
+    background-image:
+        linear-gradient(45deg, var(--le-check) 25%, transparent 25%), linear-gradient(-45deg, var(--le-check) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, var(--le-check) 75%),
+        linear-gradient(-45deg, transparent 75%, var(--le-check) 75%);
+    background-size: 20px 20px;
+    background-position:
+        0 0,
+        0 10px,
+        10px -10px,
+        -10px 0;
+    box-shadow: 0 2px 12px #00000012;
+    touch-action: none;
+}
+.layer-editor-stage canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    position: absolute;
+    inset: 0;
+}
+.layer-editor-selection {
+    position: absolute;
+    border: 1.5px solid var(--le-accent);
+    pointer-events: none;
+}
+.layer-editor-selection > span {
+    position: absolute;
+    top: 0;
+    left: 0;
+    max-width: 200px;
+    transform: translateY(-100%);
+    background: var(--le-accent);
+    color: var(--le-accent-text);
+    padding: 2px 6px;
+    font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.layer-editor-handle {
+    position: absolute;
+    right: -7px;
+    bottom: -7px;
+    width: 14px;
+    height: 14px;
+    border: 2px solid var(--le-accent);
+    background: var(--le-bg);
+    cursor: nwse-resize;
+    pointer-events: auto;
+}
+.layer-editor-canvas-status {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 8px;
+    color: var(--le-muted);
+    font-size: 11px;
+    margin-top: 12px;
+}
+.layer-editor-sidebar {
+    padding: 16px;
+    border-left: 1px solid var(--le-line);
+    min-width: 0;
+}
+.layer-editor-sidebar > h4 {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 10px;
+}
+.layer-editor-sidebar > h4 span {
+    color: var(--le-muted);
+    font-weight: 400;
+}
+.layer-editor-list {
+    display: grid;
+    gap: 5px;
+    max-height: 310px;
+    overflow: auto;
+    padding: 2px;
+}
+.layer-editor-row {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    padding: 4px;
+    background: var(--le-panel);
+}
+.layer-editor-row.is-selected {
+    border-color: var(--le-accent);
+    background: var(--le-tint);
+}
+.layer-editor button.layer-editor-select {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    align-items: flex-start;
+    min-width: 0;
+    border: 0;
+    background: transparent;
+    padding: 3px;
+}
+.layer-editor-select span {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+}
+.layer-editor-select small {
+    font-size: 10px;
+    color: var(--le-muted);
+}
+.layer-editor-row > button:last-child {
+    padding: 2px 8px;
+}
+.layer-editor-inspector {
+    border-top: 1px solid var(--le-line);
+    margin-top: 16px;
+    padding-top: 14px;
+    display: grid;
+    gap: 12px;
+    overflow-wrap: anywhere;
+}
+.layer-editor-inspector fieldset {
+    border: 0;
+    padding: 0;
+    margin: 0;
+    min-width: 0;
+}
+.layer-editor-inspector legend {
+    font-size: 12px;
+    color: var(--le-muted);
+    margin-bottom: 8px;
+}
+.layer-editor-fields {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+.layer-editor-number {
+    display: flex;
+    align-items: center;
+    position: relative;
+    min-width: 0;
+    border: 1px solid var(--le-line);
+    border-radius: 7px;
+    background: var(--le-bg);
+    padding: 22px 7px 5px;
+}
+.layer-editor-number > span {
+    position: absolute;
+    left: 8px;
+    top: 4px;
+    font-size: 10px;
+    color: var(--le-muted);
+}
+.layer-editor-number input {
+    width: 100%;
+    min-width: 0;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    font-size: 12px;
+}
+.layer-editor-number small {
+    flex-shrink: 0;
+    white-space: nowrap;
+    font-size: 10px;
+    color: var(--le-muted);
+}
+.layer-editor-lock {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    margin: 10px 0;
+}
+.layer-editor-scale {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 12px;
+}
+.layer-editor-scale input {
+    width: 50px;
+    border: 1px solid var(--le-line);
+    background: var(--le-bg);
+    border-radius: 5px;
+    padding: 5px;
+}
+.layer-editor-scale button {
+    font-size: 12px;
+    padding: 6px;
+}
+.layer-editor-inspector .layer-editor-actions {
+    gap: 5px;
+}
+.layer-editor-inspector .layer-editor-actions button {
+    font-size: 11px;
+    padding: 5px 7px;
+}
+.layer-editor-muted {
+    font-size: 12px;
+    color: var(--le-muted);
+}
+.layer-editor-warning,
+.layer-editor-notice {
+    padding: 10px 12px;
+    margin: 10px 16px;
+    border-radius: 7px;
+    font-size: 12px;
+    overflow-wrap: anywhere;
+}
+.layer-editor-warning {
+    color: #855b06;
+    background: #fff4d9;
+    border: 1px solid #e8cf90;
+}
+.layer-editor[data-theme="dark"] .layer-editor-warning {
+    color: #f0d18b;
+    background: #392e18;
+    border-color: #6d5523;
+}
+.layer-editor-notice {
+    color: var(--le-accent);
+    background: var(--le-tint);
+}
+.layer-editor-inspector .layer-editor-warning,
+.layer-editor-workspace .layer-editor-warning {
+    margin: 0;
+}
+.layer-editor-warning ul {
+    margin: 6px 0 10px;
+    padding-left: 18px;
+}
+.layer-editor-warning button {
+    font-size: 12px;
+}
+.layer-editor-ocr {
+    font-size: 12px;
+}
+.layer-editor-ocr summary {
+    cursor: pointer;
+}
+.layer-editor-ocr pre {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    max-height: 180px;
+    overflow: auto;
+    font: 12px/1.6 inherit;
+    margin: 8px 0;
+    padding: 8px;
+    background: var(--le-panel);
+    border-radius: 5px;
+}
+.layer-editor-ocr-line {
+    border-top: 1px solid var(--le-line);
+    padding: 8px 0;
+}
+.layer-editor-ocr dl {
+    margin: 4px 0;
+}
+.layer-editor-ocr dl > div {
+    display: flex;
+    gap: 8px;
+}
+.layer-editor-ocr dt {
+    color: var(--le-muted);
+}
+.layer-editor-ocr dd {
+    margin: 0;
+}
+.layer-editor-session {
+    padding: 20px;
+}
+@media (max-width: 820px) {
+    .layer-editor-toolbar {
+        align-items: flex-start;
+        flex-direction: column;
+        padding: 14px;
+    }
+    .layer-editor-layout {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    .layer-editor-sidebar {
+        border-left: 0;
+        border-top: 1px solid var(--le-line);
+    }
+    .layer-editor-stage-wrap {
+        min-height: 180px;
+    }
+    .layer-editor-workspace {
+        padding: 12px;
+    }
+    .layer-editor-stage {
+        max-height: none;
+    }
+    .layer-editor-list {
+        max-height: 240px;
+    }
+    .layer-editor-inspector {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    .layer-editor-canvas-status {
+        font-size: 10px;
+    }
+}

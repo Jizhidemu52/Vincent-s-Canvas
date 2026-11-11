@@ -4,10 +4,11 @@ import { isDefinitiveSubmissionRejection } from "./provider-submission-policy";
 import { apiMartPollIntervalMs } from "./apimart-poll-interval";
 import { validateGpt26GifParameters } from "../../shared/gpt26-image-options";
 import { isPublicHttpUrl, normalizeApiMartImageUrl, uploadApiMartImage, validateApiMartGenerationImage } from "./apimart-upload";
+import { buildSeedream55Request, parseSeedream55Manifest, seedream55PollInterval, type Seedream55Manifest } from "./seedream55-image";
 
 type MarkImageModel = "gpt-image-2.5-flare" | "gpt-image-2.5-sunburst" | "gpt-image-2.6-flare" | "gpt-image-2.6-sunburst" | "gemini-nano-banana-2.1";
 type GrokImageModel = "grok-imagine-image-2.0";
-export type ApiMartImageModel = "gpt-image-2" | "gemini-3.1-flash-image-preview" | "midjourney" | "midjourney-blend" | "mai-image-2.6-flash" | MarkImageModel | GrokImageModel;
+export type ApiMartImageModel = "seedream-5-5" | "gpt-image-2" | "gemini-3.1-flash-image-preview" | "midjourney" | "midjourney-blend" | "mai-image-2.6-flash" | MarkImageModel | GrokImageModel;
 export type ApiMartImageBytes = { bytes: Uint8Array; mimeType: string; filename?: string };
 type ImageReference = string | ApiMartImageBytes;
 
@@ -52,6 +53,7 @@ const GROK_RESPONSE_VERSION = "2026-07-27";
 
 export function apiMartImageModel(modelId: string): ApiMartImageModel | null {
   const normalized = modelId.trim().toLowerCase();
+  if (normalized === "seedream-5-5") return normalized;
   if (normalized === "mai-image-2.6-flash") return normalized;
   if (normalized === "grok-imagine-image-2.0") return normalized;
   if (MARK_IMAGE_MODELS.has(normalized)) return normalized as MarkImageModel;
@@ -70,6 +72,7 @@ export function buildApiMartImageRequest(input: ApiMartImageInput): ApiMartImage
 export function preflightApiMartImageRequest(input: ApiMartImageInput): ApiMartImageRequest {
   const kind = apiMartImageModel(input.modelId);
   if (!kind) throw new Error(`不支持的 APIMart 图片模型：${input.modelId}`);
+  if (kind === "seedream-5-5") return buildSeedream55Request(input, false);
   return isMarkImageModel(kind) ? buildMarkImageRequest(input, kind, true, false)
     : kind === "mai-image-2.6-flash" ? buildMaiImageRequest(input, true, false)
     : kind === "grok-imagine-image-2.0" ? buildGrokImageRequest(input, true, false) : buildImageRequest(input, false);
@@ -78,6 +81,7 @@ export function preflightApiMartImageRequest(input: ApiMartImageInput): ApiMartI
 function buildImageRequest(input: ApiMartImageInput, encodeReferences: boolean): ApiMartImageRequest {
   const kind = apiMartImageModel(input.modelId);
   if (!kind) throw new Error(`不支持的 APIMart 图片模型：${input.modelId}`);
+  if (kind === "seedream-5-5") return buildSeedream55Request(input, encodeReferences);
   if (input.markupImage && !kind.startsWith("gpt-image-2.6-")) throw new Error("当前模型不支持独立标注图层");
   if (kind !== "midjourney-blend" && !input.prompt.trim()) throw new Error("请填写图像生成或编辑描述");
   if (input.parameters.n !== undefined && input.parameters.n !== 1) throw new Error("画布已拆分批量任务，每个图片任务的 n 必须为 1");
@@ -469,7 +473,7 @@ type ImageRuntime = {
 
 export type ApiMartImageTaskStep =
   | { status: "pending"; upstreamTaskId: string; nextPollMs: number }
-  | { status: "completed"; upstreamTaskId: string; urls: string[] };
+  | { status: "completed"; upstreamTaskId: string; urls: string[]; manifest?: Seedream55Manifest };
 
 /** One paid submission OR one status query; durable workers schedule the next step. */
 export async function stepApiMartImageTask(input: ApiMartImageTaskInput, runtime: ImageRuntime = {}): Promise<ApiMartImageTaskStep> {
@@ -487,7 +491,7 @@ export async function stepApiMartImageTask(input: ApiMartImageTaskInput, runtime
   const poll = runtime.fetch || fetch;
   const wait = runtime.sleep || sleep;
   let taskId = input.upstreamTaskId?.trim();
-  let pollIntervalMs = kind === "gemini-nano-banana-2.1" ? 3_000 : 2_000;
+  let pollIntervalMs = kind === "seedream-5-5" ? seedream55PollInterval(input.submissionStartedAt, runtime.now?.()) : kind === "gemini-nano-banana-2.1" ? 3_000 : 2_000;
   if (!taskId) {
     if (input.submissionStarted) throw new Error("图片提交状态未知；为避免重复收费，不会自动重新提交，请核查上游任务");
     if (kind === "grok-imagine-image-2.0") {
@@ -555,13 +559,17 @@ export async function stepApiMartImageTask(input: ApiMartImageTaskInput, runtime
   const status = readStatus(statusPayload);
   if (IMAGE_FAILURE_STATUSES.has(status)) throw new ApiMartImageProviderFailure(redactProviderCredential(readFailureMessage(statusPayload), input.apiKey) || "APIMart 图片任务失败");
   if (status === "completed") {
+    if (kind === "seedream-5-5") {
+      const manifest = parseSeedream55Manifest(statusPayload, input.parameters.layer_decomposition === true);
+      return { status: "completed", upstreamTaskId: taskId, urls: manifest.items.map(item => item.url), manifest };
+    }
     const outputs = readOutputUrls(statusPayload);
     if (!outputs.length) throw new ApiMartImageQueryRetryable("APIMart 图片任务完成但暂时没有结果图片；将查询原任务，不会重新生成", "PROVIDER_RESULT_MISSING", nextQueryMs);
     if ((isMarkImageModel(kind) || kind === "mai-image-2.6-flash" || kind === "midjourney-blend" || kind === "grok-imagine-image-2.0") && outputs.some(url => !isPublicHttpUrl(url))) throw Object.assign(new Error("APIMart 图片任务返回了无效结果地址；可恢复查询原任务，不会重新生成"), { code: "PROVIDER_RESULT_URL_INVALID" });
     return { status: "completed", upstreamTaskId: taskId, urls: outputs };
   }
   if (!IMAGE_STATUSES.has(status)) throw new ApiMartImageQueryRetryable("APIMart 返回了暂时无法识别的任务状态；将继续查询原任务", "PROVIDER_STATUS_INVALID", nextQueryMs);
-  return { status: "pending", upstreamTaskId: taskId, nextPollMs: apiMartPollIntervalMs(input.submissionStartedAt, pollIntervalMs, runtime.now?.()) };
+  return { status: "pending", upstreamTaskId: taskId, nextPollMs: kind === "seedream-5-5" ? seedream55PollInterval(input.submissionStartedAt, runtime.now?.()) : apiMartPollIntervalMs(input.submissionStartedAt, pollIntervalMs, runtime.now?.()) };
 }
 
 /** Stop claiming new references after failure, but drain every upload already started. */

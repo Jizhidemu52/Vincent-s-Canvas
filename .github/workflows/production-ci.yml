@@ -184,6 +184,8 @@ jobs:
         run: node node_modules/@playwright/test/cli.js test --config tests/canvas-production-preload.config.ts
       - name: Verify canvas interactions, recovery and live task notifications
         run: bun run test:e2e
+      - name: Verify isolated layer composition and original downloads
+        run: node node_modules/@playwright/test/cli.js test --config tests/layer-editor.config.ts
       - name: Verify image-agent DOM streaming over isolated local HTTP
         run: npm run test:e2e:image-agent-streaming
       - name: Preserve failed browser verification evidence
@@ -197,6 +199,7 @@ jobs:
             output/image-agent-validation/streaming-dom-acceptance/test-results/
             output/image-agent-validation/streaming-dom-acceptance/playwright-results.json
             output/canvas-production-preload/test-results/
+            output/seedream55-integration/editor-tests/
           if-no-files-found: ignore
           retention-days: 14
 

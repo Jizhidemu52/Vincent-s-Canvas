@@ -7,6 +7,8 @@ import { withTransaction } from "./db-transaction";
 import { removeQueuedTask, scheduleQueuedTask } from "./task-queue";
 import { queueScore, recalculateBatch, type TaskPriority } from "./tasks";
 import type { SessionUser } from "./types";
+import type { LayerStudioResultDocument } from "../../shared/layer-studio";
+import { settleLayerStudioReservation } from "./layer-studio-billing";
 
 export const CHAT_RECONCILIATION_MINUTES = 30;
 const recoverableOperations = ["image_generation", "inpaint", "upscale", "remove_background", "batch_image", "seamless_stitch", "video_generation"];
@@ -17,7 +19,7 @@ const evidence = {
 export const taskReconciliationSchema = z.discriminatedUnion("decision", [
     z.object({ ...evidence, decision: z.literal("confirmed_failed") }).strict(),
     z.object({ ...evidence, decision: z.literal("confirmed_not_submitted") }).strict(),
-    z.object({ ...evidence, decision: z.literal("confirmed_success"), resultAssetIds: z.array(z.string().uuid()).min(1).max(20).optional() }).strict(),
+    z.object({ ...evidence, decision: z.literal("confirmed_success"), resultAssetIds: z.array(z.string().uuid()).min(1).max(100).optional() }).strict(),
     z.object({ ...evidence, decision: z.literal("attach_upstream"), upstreamTaskId: z.string().trim().min(1).max(500).regex(/^[^\s\u0000-\u001f\u007f]+$/) }).strict(),
 ]);
 export const chatReconciliationSchema = z.object({
@@ -34,6 +36,7 @@ type TaskRow = {
     model_config_id: string | null; protocol: string | null; workflow_config_id: string | null;
     upstream_task_id: string | null; model_slot_token: string | null; queued_at: string;
     result_urls: unknown; execution_active: boolean;
+    tool_key?: string; result_document?: LayerStudioResultDocument | null;
 };
 
 export class ReconciliationError extends Error {
@@ -82,9 +85,17 @@ async function checkedResultUrls(client: PoolClient, task: TaskRow, provided?: s
         return match[1]!;
     });
     if (!ids.length) throw new ReconciliationError("TASK_RESULT_REQUIRED", "成功结案必须有可交付结果素材");
+    if (ids.length > (task.tool_key === "layer-studio" ? 100 : 20)) throw new ReconciliationError("INVALID_TASK_RESULT", "结果素材数量超过该工具上限");
+    if (task.tool_key === "layer-studio") {
+        const document = task.result_document;
+        if (!document || document.status !== "ready" || document.taskId !== task.id || document.expectedOutputCount !== ids.length || document.items.length !== ids.length
+            || document.items.some((item, index) => item.index !== index || item.state !== "saved" || item.assetId !== ids[index] || !item.sha256 || !item.width || !item.height)) {
+            throw new ReconciliationError("INCOMPLETE_LAYER_RESULT", "图层原件未完整保存，必须先恢复原任务，不能提前结算");
+        }
+    }
     if (new Set(ids).size !== ids.length) throw new ReconciliationError("INVALID_TASK_RESULT", "结果素材编号不能重复");
-    const result = await client.query<{ id: string; owner_user_id: string; status: string; deleted_at: string | null; kind: string; mime_type: string; byte_size: string | number; object_key: string }>(
-        `SELECT id,owner_user_id,status,deleted_at,kind,mime_type,byte_size,object_key FROM assets
+    const result = await client.query<{ id: string; owner_user_id: string; status: string; deleted_at: string | null; kind: string; mime_type: string; byte_size: string | number; object_key: string; task_id: string | null; content_sha256: string | null; metadata: { layerStudio?: { index: number; width: number; height: number; sha256: string } } }>(
+        `SELECT id,owner_user_id,status,deleted_at,kind,mime_type,byte_size,object_key,task_id,content_sha256,metadata FROM assets
           WHERE id=ANY($1::uuid[]) FOR SHARE`, [ids],
     );
     const expected = task.operation_type === "video_generation" ? "video" : task.operation_type === "audio_generation" ? "audio" : "image";
@@ -93,6 +104,11 @@ async function checkedResultUrls(client: PoolClient, task: TaskRow, provided?: s
         || asset.kind !== (expected === "audio" ? "other" : expected) || !asset.mime_type.startsWith(`${expected}/`))) {
         throw new ReconciliationError("INVALID_TASK_RESULT", "结果素材必须属于原员工、已就绪且媒体类型与任务一致");
     }
+    if (task.tool_key === "layer-studio" && result.rows.some(asset => {
+        const index = ids.indexOf(asset.id), item = task.result_document!.items[index]!, layer = asset.metadata.layerStudio;
+        return asset.task_id !== task.id || asset.content_sha256 !== item.sha256 || !layer || layer.index !== index
+            || layer.sha256 !== item.sha256 || layer.width !== item.width || layer.height !== item.height || asset.mime_type !== item.mimeType;
+    })) throw new ReconciliationError("INVALID_TASK_RESULT", "图层结果与原任务素材 hash 或尺寸记录不一致，不能结算");
     return ids.map(id => `/api/assets/${id}/content`);
 }
 
@@ -111,7 +127,7 @@ export async function reconcileTask(db: Database, cache: Cache, taskId: string, 
         // Never acquire the model admission advisory lock after this task lock.
         const selected = await client.query<TaskRow>(
             `SELECT t.id,t.request_id,t.user_id,t.department_id,t.batch_id,t.status,t.priority,t.operation_type,
-                    t.model_config_id,p.protocol,m.workflow_config_id,t.upstream_task_id,t.model_slot_token,t.queued_at,t.result_urls,
+                    t.model_config_id,p.protocol,m.workflow_config_id,t.upstream_task_id,t.model_slot_token,t.queued_at,t.result_urls,t.tool_key,t.result_document,
                     COALESCE(t.lease_expires_at>now(),false) AS execution_active
                FROM tasks t LEFT JOIN model_configs m ON m.id=t.model_config_id LEFT JOIN providers p ON p.id=m.provider_id
               WHERE t.id=$1 FOR UPDATE OF t`, [taskId],
@@ -157,7 +173,8 @@ export async function reconcileTask(db: Database, cache: Cache, taskId: string, 
             }
             if (decision.decision === "confirmed_success") resultUrls = await checkedResultUrls(client, task, decision.resultAssetIds);
             else resultUrls = [];
-            await settleReservation(db, task.request_id, outcome, input.actor.id, client, outcome === "capture" ? resultUrls.length : undefined);
+            if (outcome === "capture" && task.tool_key === "layer-studio") await settleLayerStudioReservation(db, task.request_id, task.result_document!.items.map(item => ({ width: item.width!, height: item.height! })), client);
+            else await settleReservation(db, task.request_id, outcome, input.actor.id, client, outcome === "capture" ? resultUrls.length : undefined);
             await client.query(
                 `UPDATE tasks SET status=$2,result_urls=$3,failure_reason=$4,execution_token=NULL,lease_expires_at=NULL,
                     model_slot_token=NULL,model_slot_expires_at=NULL,completed_at=now(),updated_at=now() WHERE id=$1`,

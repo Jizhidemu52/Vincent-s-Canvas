@@ -35,12 +35,14 @@ class ArtifactContracts(unittest.TestCase):
         self.assertIn("ops/release/deploy.py", artifact.PACKAGE_FILES)
         self.assertIn("ops/baota/gate.py", artifact.PACKAGE_FILES)
         self.assertFalse(any(".env" in path or "output" in path or "recipe" in path for path in artifact.PACKAGE_FILES))
-        self.assertEqual([path for path in artifact.PACKAGE_FILES if path.startswith("server/src/migrations/")], ["server/src/migrations/048_usage_daily_facts.sql", "server/src/migrations/049_quick_image_configurations.sql", "server/src/migrations/050_quick_image_item_extract.sql", "server/src/migrations/051_new_creative_scenes.sql"])
+        self.assertEqual([path for path in artifact.PACKAGE_FILES if path.startswith("server/src/migrations/")], ["server/src/migrations/048_usage_daily_facts.sql", "server/src/migrations/049_quick_image_configurations.sql", "server/src/migrations/050_quick_image_item_extract.sql", "server/src/migrations/051_new_creative_scenes.sql", "server/src/migrations/052_layer_studio.sql"])
         self.assertNotIn(creative_seed.SOURCE_PATH, artifact.PACKAGE_FILES)
         self.assertNotIn(creative_seed.SEED_PATH, artifact.PACKAGE_FILES)  # generated, not copied from a mutable seed file
         for name in ["usage-048.py", "usage-048-state.sql", "usage-048-catalog.json"]:
             self.assertIn("ops/release/" + name, artifact.PACKAGE_FILES)
         for name in ["quick-image-049.py", "quick-image-049-catalog.json"]:
+            self.assertIn("ops/release/" + name, artifact.PACKAGE_FILES)
+        for name in ["layer-studio-052.py", "layer-studio-052-catalog.json", "layer-studio-052-state.sql"]:
             self.assertIn("ops/release/" + name, artifact.PACKAGE_FILES)
 
     def test_049_payload_only_accepts_exact_reviewed_final_migration_and_hash(self):
@@ -76,12 +78,27 @@ class ArtifactContracts(unittest.TestCase):
             with self.assertRaisesRegex(Rejected, "FIXED_048_MIGRATION_REQUIRED"):
                 artifact.verify_048_payload(root, later)
 
-    def test_tail_support_is_exactly_reviewed_048_through_051_not_an_open_ended_relaxation(self):
-        names = ["048_usage_daily_facts.sql", "049_quick_image_configurations.sql", *creative_seed.MIGRATIONS]
+    def test_tail_support_is_exactly_reviewed_048_through_052_not_an_open_ended_relaxation(self):
+        names = ["048_usage_daily_facts.sql", "049_quick_image_configurations.sql", *creative_seed.MIGRATIONS, "052_layer_studio.sql"]
         self.assertTrue(artifact.fixed_migration_tail({"migrations": [{"name": name} for name in names]}, names[0]))
         for changed in [names + ["052_future.sql"], [names[0], *names[2:]], names[:-1] + ["051_other.sql"], names + [names[-1]]]:
             with self.subTest(changed=changed):
                 self.assertFalse(artifact.fixed_migration_tail({"migrations": [{"name": name} for name in changed]}, names[0]))
+
+    def test_052_payload_requires_exact_sql_hash_and_final_migration(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "server/src/migrations/052_layer_studio.sql"
+            path.parent.mkdir(parents=True)
+            path.write_bytes(b"reviewed 052 SQL")
+            rows = [{"name": path.name, "sha256": digest(path.read_bytes())}]
+            artifact.verify_052_payload(root, {"migrations": rows})
+            for changed in [[], rows * 2, rows + [{"name": "053_future.sql", "sha256": "0" * 64}]]:
+                with self.assertRaisesRegex(Rejected, "FIXED_052_MIGRATION_REQUIRED"):
+                    artifact.verify_052_payload(root, {"migrations": changed})
+            path.write_bytes(b"changed")
+            with self.assertRaisesRegex(Rejected, "052_SQL_MIGRATION_HASH_MISMATCH"):
+                artifact.verify_052_payload(root, {"migrations": rows})
 
     def test_complete_package_seals_only_two_generated_public_recipes_and_rejects_tamper(self):
         root = Path(__file__).resolve().parents[2]

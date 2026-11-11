@@ -1,8 +1,9 @@
-import { BookMarked, Box, FileText, Grid2x2, ImageIcon, ImagePlus, Images, Lightbulb, MessageSquare, ScanLine, Scissors, ShieldCheck, Sparkles, UserRoundCog, Video, Zap } from "lucide-react";
+import { BookMarked, Box, FileText, Grid2x2, ImageIcon, ImagePlus, Images, Layers3, Lightbulb, MessageSquare, ScanLine, Scissors, ShieldCheck, Sparkles, UserRoundCog, Video, Zap } from "lucide-react";
 
 import type { AdminOperationType } from "@/lib/admin-domain";
 
 export const navigationTools = [
+    { slug: "layer-studio", path: "/layer-studio", label: "图层拆分与图片生成", icon: Layers3, group: "local" },
     { slug: "remove-background", path: "/remove-background", label: "一键去背景", icon: Scissors, group: "local" },
     { slug: "hd-upscale", path: "/hd-upscale", label: "高清放大", icon: ScanLine, group: "local" },
     { slug: "item-extract", path: "/item-extract", label: "提取产品图", icon: Box, group: "local" },

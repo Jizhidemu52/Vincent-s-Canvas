@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { getApimartImageCost } from "../../../../../shared/apimart-image-costs";
 import { useUnsavedGuard } from "@/hooks/use-unsaved-guard";
 import { adminLabel } from "../admin-labels";
+import { LayerStudioPricingPanel } from "./layer-studio-pricing-panel";
 
 import {
     createPriceDraft,
@@ -276,6 +277,7 @@ export function ModelPricingPanel({ mode }: { mode: "prices" | "models" }) {
                     </Button>
                 </Form>
             </section>
+            <div className="xl:col-span-2"><LayerStudioPricingPanel models={models} providers={providers} loading={loading} /></div>
         </div>
     );
 }

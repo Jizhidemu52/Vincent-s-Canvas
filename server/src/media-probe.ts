@@ -6,6 +6,7 @@ type ProbeOutput = { format?: { format_name?: string; duration?: string }; strea
 
 const formats: Record<string, readonly string[]> = {
   "image/png": ["png_pipe"], "image/jpeg": ["jpeg_pipe"], "image/webp": ["webp_pipe"], "image/gif": ["gif"],
+  "image/bmp": ["bmp_pipe"], "image/tiff": ["tiff_pipe"],
   "video/mp4": ["mov", "mp4"], "video/quicktime": ["mov", "mp4"],
   "audio/mpeg": ["mp3"], "audio/mp3": ["mp3"], "audio/wav": ["wav"], "audio/x-wav": ["wav"], "audio/wave": ["wav"],
 };
@@ -22,7 +23,7 @@ export async function probeMediaStream(source: MediaStream, mimeType: string, ex
     const output = await new Promise<string>((resolve, reject) => {
       execFile(process.env.FFPROBE_PATH || "ffprobe", [
         "-v", "error", "-protocol_whitelist", "file,pipe",
-        "-format_whitelist", "png_pipe,jpeg_pipe,webp_pipe,gif,mov,mp3,wav",
+        "-format_whitelist", "png_pipe,jpeg_pipe,webp_pipe,bmp_pipe,tiff_pipe,gif,mov,mp3,wav",
         "-show_entries", "format=format_name,duration:stream=codec_type,codec_name,width,height,duration,avg_frame_rate,r_frame_rate:stream_disposition=attached_pic",
         "-of", "json", file.path,
       ], { timeout: 20_000, maxBuffer: 1024 * 1024, windowsHide: true }, (error, stdout) => {

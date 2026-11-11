@@ -38,11 +38,12 @@ import { prepareConfiguredQuickImageTask } from "../quick-image-configuration";
 import type { preflightStoredQuickImageTask } from "../stored-quick-image-preflight";
 import { prepareFixedToolPrompt, type FixedToolPromptTarget } from "../fixed-tool-prompt";
 import { publicPromptTaskPreview } from "../prompt-task-preview";
+import { layerStudioTaskOptions } from "../../../shared/layer-studio-options";
 
 const actionSchema = z.enum(["pause", "resume", "cancel"]);
 
-const taskSelect = `t.id,t.tool_key AS "toolKey",t.model_config_id AS "modelConfigId",t.request_id AS "requestId",t.batch_id AS "batchId",t.user_id AS "userId",u.display_name AS "userName",t.project_id AS "projectId",t.operation_type AS "operationType",t.prompt,t.parameters,t.source_urls AS "sourceUrls",t.result_urls AS "resultUrls",t.priority,t.status,t.credits,t.rmb_cost::float8 AS "rmbCost",t.failure_reason AS "failureReason",t.attempts,t.upstream_task_id AS "upstreamTaskId",t.upstream_submission_started_at AS "submissionStartedAt",t.queued_at AS "queuedAt",t.started_at AS "startedAt",t.completed_at AS "completedAt",t.user_input AS "userInput",t.prompt_optimized AS optimized,t.parameters->'promptOptimization'->>'summaryZh' AS "summaryZh"`;
-const taskSummarySelect = `t.id,t.tool_key AS "toolKey",t.model_config_id AS "modelConfigId",t.request_id AS "requestId",t.batch_id AS "batchId",t.user_id AS "userId",u.display_name AS "userName",t.project_id AS "projectId",t.operation_type AS "operationType",left(t.prompt,240) AS prompt,t.result_urls AS "resultUrls",t.priority,t.status,t.credits,t.rmb_cost::float8 AS "rmbCost",t.failure_reason AS "failureReason",t.attempts,t.upstream_task_id AS "upstreamTaskId",t.upstream_submission_started_at AS "submissionStartedAt",t.queued_at AS "queuedAt",t.started_at AS "startedAt",t.completed_at AS "completedAt",t.parameters->'promptOptimization'->>'summaryZh' AS "summaryZh"`;
+const taskSelect = `t.id,t.tool_key AS "toolKey",t.model_config_id AS "modelConfigId",t.request_id AS "requestId",t.batch_id AS "batchId",t.user_id AS "userId",u.display_name AS "userName",t.project_id AS "projectId",t.operation_type AS "operationType",t.prompt,t.parameters,t.source_urls AS "sourceUrls",t.result_urls AS "resultUrls",t.result_document AS "resultDocument",t.priority,t.status,t.credits,t.rmb_cost::float8 AS "rmbCost",t.failure_reason AS "failureReason",t.attempts,t.upstream_task_id AS "upstreamTaskId",t.upstream_submission_started_at AS "submissionStartedAt",t.queued_at AS "queuedAt",t.started_at AS "startedAt",t.completed_at AS "completedAt",t.user_input AS "userInput",t.prompt_optimized AS optimized,t.parameters->'promptOptimization'->>'summaryZh' AS "summaryZh"`;
+const taskSummarySelect = `t.id,t.tool_key AS "toolKey",t.model_config_id AS "modelConfigId",t.request_id AS "requestId",t.batch_id AS "batchId",t.user_id AS "userId",u.display_name AS "userName",t.project_id AS "projectId",t.operation_type AS "operationType",left(t.prompt,240) AS prompt,t.result_urls AS "resultUrls",t.result_document AS "resultDocument",t.priority,t.status,t.credits,t.rmb_cost::float8 AS "rmbCost",t.failure_reason AS "failureReason",t.attempts,t.upstream_task_id AS "upstreamTaskId",t.upstream_submission_started_at AS "submissionStartedAt",t.queued_at AS "queuedAt",t.started_at AS "startedAt",t.completed_at AS "completedAt",t.parameters->'promptOptimization'->>'summaryZh' AS "summaryZh"`;
 const batchSelect = `b.id,b.tool_key AS "toolKey",b.model_config_id AS "modelConfigId",b.request_id AS "requestId",b.user_id AS "userId",u.display_name AS "userName",b.department_id AS "departmentId",b.project_id AS "projectId",b.operation_type AS "operationType",m.name AS "modelName",b.priority,b.status,b.total_items AS "totalItems",b.completed_items AS "completedItems",b.failed_items AS "failedItems",stats.waiting_items AS "waitingItems",stats.processing_items AS "processingItems",stats.paused_items AS "pausedItems",stats.cancelled_items AS "cancelledItems",stats.planned_credits AS "plannedCredits",stats.consumed_credits AS "consumedCredits",stats.consumed_rmb_cost AS "consumedRmbCost",b.created_at AS "createdAt",b.updated_at AS "updatedAt"`;
 const batchStatsJoin = `LEFT JOIN LATERAL (SELECT
   COUNT(*) FILTER (WHERE t.status='waiting')::int AS waiting_items,
@@ -62,6 +63,14 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
     next();
   });
   const prepare = async <T extends ReturnType<typeof singleSchema.parse>>(actor: AuthenticatedRequest["auth"], input: T) => {
+    if ((input.toolKey ?? input.parameters.tool) === "layer-studio") {
+      if (input.operationType !== "image_generation" || input.promptInput) throw new BillingError("INVALID_LAYER_TASK", "图层工具仅支持独立图片任务和原始提示词");
+      let parameters: ReturnType<typeof layerStudioTaskOptions>;
+      try { parameters = layerStudioTaskOptions(input.parameters, input.prompt, input.sourceUrls.length); }
+      catch (error) { throw new BillingError("INVALID_LAYER_PARAMETERS", error instanceof Error ? error.message : "图层参数无效"); }
+      const execution = await resolveToolExecution(db, input);
+      return { ...input, parameters: { ...parameters, tool: "layer-studio" }, toolKey: "layer-studio", toolConfiguration: execution, modelConfigId: execution.modelConfigId, optimized: false };
+    }
     readImageAgentGenerationProfile(input.parameters, input.operationType);
     input = await prepareConfiguredQuickImageTask(db, input);
     if (input.parameters.quickImageAction) return { ...input, optimized: false };
@@ -196,7 +205,7 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
           .json({ error: "FORBIDDEN", message: "设计师只能提交普通任务" });
         return;
       }
-      if (options.promptCompiler || input.parameters.quickImageAction) {
+      if (options.promptCompiler || input.parameters.quickImageAction || (input.toolKey ?? input.parameters.tool) === "layer-studio") {
         const existing = (await db.query(`SELECT ${taskSelect} FROM tasks t JOIN users u ON u.id=t.user_id WHERE t.request_id=$1 AND t.user_id=$2`, [input.requestId, actor.id])).rows[0];
         if (existing) { response.status(200).json({ task: existing }); return; }
       }
@@ -225,6 +234,7 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
     try {
       const creditsEnabled = typeof creditPolicy === "function" ? await creditPolicy() : creditPolicy;
       const input = batchSchema.parse(request.body);
+      if ((input.toolKey ?? input.parameters.tool) === "layer-studio") throw new BillingError("INVALID_LAYER_TASK", "图层工具不接受批量任务；图层数量请在单次任务中设置");
       const actor = (request as unknown as AuthenticatedRequest).auth;
       if (input.priority !== "normal" && actor.role === "designer") {
         response.status(403).json({ error: "FORBIDDEN", message: "设计师只能提交普通任务" });

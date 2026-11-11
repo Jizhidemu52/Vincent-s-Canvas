@@ -45,6 +45,11 @@ import { PromptOptimizationError } from "./prompt-safety";
 import { AssetObjectError, readSourceAssetObject } from "./asset-object-error";
 import { processUsageRollups, scheduleUsageRollupMaintenance } from "./usage-rollups";
 import { ProviderImageAccess } from "./provider-image-access";
+import type { LayerStudioResultDocument } from "../../shared/layer-studio";
+import { seedream55PublicDocument, Seedream55OutputLimitExceeded, type Seedream55Manifest } from "./seedream55-image";
+import { readBoundedImage, validateSeedream55Reference } from "./seedream55-reference";
+import { storeSeedream55TaskResults } from "./seedream55-worker-storage";
+import { settleLayerStudioReservation } from "./layer-studio-billing";
 
 type WorkRow = {
   id: string;
@@ -55,6 +60,9 @@ type WorkRow = {
   project_id: string;
   operation_type: string;
   model_config_id: string | null;
+  tool_key: string | null;
+  result_document: LayerStudioResultDocument | null;
+  upstream_result_document: Seedream55Manifest | null;
   prompt: string;
   parameters: Record<string, unknown>;
   source_urls: string[];
@@ -115,7 +123,7 @@ async function runTask(taskId: string) {
   );
   if (!claimed.rows[0]) return;
   const details = await db.query<WorkRow>(
-    `SELECT t.id,t.request_id,t.batch_id,t.user_id,t.department_id,t.project_id,t.operation_type,t.model_config_id,t.prompt,t.parameters,t.source_urls,t.attempts,t.execution_token,t.started_at,t.poll_deadline_at,t.upstream_task_id,t.upstream_submission_started_at,t.upstream_workflow_context,t.priority,t.queued_at,m.model_id,m.provider_id,m.concurrency_limit,m.workflow_config_id,p.protocol,p.base_url,p.encrypted_credentials,w.workflow_id,w.submit_path,w.status_path,w.request_template,w.external_task_path,w.status_value_path,w.success_values,w.failure_values,w.output_path,w.poll_interval_ms,w.timeout_seconds
+    `SELECT t.id,t.request_id,t.batch_id,t.user_id,t.department_id,t.project_id,t.operation_type,t.model_config_id,t.tool_key,t.result_document,t.upstream_result_document,t.prompt,t.parameters,t.source_urls,t.attempts,t.execution_token,t.started_at,t.poll_deadline_at,t.upstream_task_id,t.upstream_submission_started_at,t.upstream_workflow_context,t.priority,t.queued_at,m.model_id,m.provider_id,m.concurrency_limit,m.workflow_config_id,p.protocol,p.base_url,p.encrypted_credentials,w.workflow_id,w.submit_path,w.status_path,w.request_template,w.external_task_path,w.status_value_path,w.success_values,w.failure_values,w.output_path,w.poll_interval_ms,w.timeout_seconds
         FROM tasks t LEFT JOIN model_configs m ON m.id=t.model_config_id LEFT JOIN providers p ON p.id=m.provider_id LEFT JOIN workflow_configs w ON w.id=m.workflow_config_id AND w.enabled=true WHERE t.id=$1 AND t.execution_token=$2`,
     [taskId, executionToken],
   );
@@ -150,19 +158,25 @@ async function runTask(taskId: string) {
     if (config.TASK_MOCK_MODE === "true" && (task.operation_type === "video_generation" || task.operation_type === "audio_generation"))
       throw new Error("模拟模式不提供真实视频或音频，请配置真实服务后生成");
     heartbeat.assertOwned();
-    providerResults =
+    providerResults = task.tool_key === "layer-studio" && task.upstream_result_document ? [] :
       config.TASK_MOCK_MODE === "true"
         ? [{ bytes: Buffer.from(mockSvg(task.id)), mimeType: "image/svg+xml" }]
         : await timing.measure("provider_execution", () => executeProvider(task, timing));
     providerProducedResult = true;
     heartbeat.assertOwned();
     await assertTaskExecution(task);
-    const resultUrls = await timing.measure("result_store", () => storeResults(task, providerResults));
+    const resultUrls = await timing.measure("result_store", async () => {
+      if (task.tool_key !== "layer-studio") return storeResults(task, providerResults);
+      if (!task.upstream_result_document) throw new Error("图层任务缺少已持久化结果清单");
+      task.result_document = await storeSeedream55TaskResults(db, storage, task, task.upstream_result_document, task.result_document);
+      return task.result_document.items.map(item => item.contentUrl!);
+    });
     await timing.measure("task_finalize", async () => {
       await withTransaction(db, async client => {
         const owned = await client.query("SELECT id FROM tasks WHERE id=$1 AND execution_token=$2 AND status='processing' FOR UPDATE", [task.id, executionToken]);
         if (!owned.rows[0]) throw new TaskExecutionLost("任务执行权已改变，不能重复结算");
-        await settleReservation(db, task.request_id, "capture", undefined, client, resultUrls.length);
+        if (task.tool_key === "layer-studio") await settleLayerStudioReservation(db, task.request_id, task.result_document!.items.map(item => ({ width: item.width!, height: item.height! })), client);
+        else await settleReservation(db, task.request_id, "capture", undefined, client, resultUrls.length);
         await client.query(
           "UPDATE tasks SET status='success',result_urls=$1,lease_expires_at=NULL,completed_at=now(),updated_at=now() WHERE id=$2",
           [JSON.stringify(resultUrls), task.id],
@@ -191,14 +205,18 @@ async function runTask(taskId: string) {
       keepModelSlot = true; outcome = "paused"; return;
     }
     const transportDiagnostics = readProviderSubmissionDiagnostics(error);
-    const reason = task.parameters.imageAgentProfile && !(error instanceof PromptOptimizationError) && !(error instanceof AssetObjectError)
+    const layerOutputLimitFailure = task.tool_key === "layer-studio" && error instanceof Seedream55OutputLimitExceeded;
+    const reason = layerOutputLimitFailure ? error.message : task.tool_key === "layer-studio" ? "图层任务暂未完成；请恢复原任务或联系管理员核查，未自动重新生成"
+      : task.parameters.imageAgentProfile && !(error instanceof PromptOptimizationError) && !(error instanceof AssetObjectError)
       ? "图片助手任务未完成，请查询任务状态；服务端已隐藏上游内部详情。"
       : error instanceof Error ? error.message.slice(0, 2_000) : "任务执行失败";
     if (providerProducedResult) {
       // Local processing/storage failures must not replay paid work or claim it never happened.
       await db.query(
         "UPDATE tasks SET status='paused',failure_reason=$1,lease_expires_at=NULL,updated_at=now() WHERE id=$2 AND execution_token=$3 AND status='processing'",
-        [`${reason}；上游已返回结果，不能直接恢复或重新生成，请先检查已保存素材。`, task.id, executionToken],
+        [layerOutputLimitFailure ? reason : task.tool_key === "layer-studio" && task.upstream_result_document
+          ? "部分图层原件尚未保存；可恢复原任务继续保存，不会重新生成，请勿重复提交"
+          : `${reason}；上游已返回结果，不能直接恢复或重新生成，请先检查已保存素材。`, task.id, executionToken],
       );
       outcome = "paused";
     } else if ((task.upstream_task_id || task.upstream_submission_started_at) && !(error instanceof VideoProviderFailure) && !(error instanceof ApiMartImageProviderFailure)
@@ -407,6 +425,8 @@ async function executeApiMartImage(
   credentials: Record<string, string>,
   providerPrompt: string,
 ) {
+  const isLayerStudio = task.tool_key === "layer-studio";
+  if (isLayerStudio && task.model_id !== "seedream-5-5") throw new Error("图层工具原模型配置已改变，不能重新提交");
   if (task.upstream_task_id) {
     // Backfill deadlines for image tasks submitted by the old blocking worker.
     // Subsequent queue invocations must retain the same deadline, not restart it.
@@ -422,8 +442,9 @@ async function executeApiMartImage(
       throw new Error("图片状态查询超时；可恢复查询原任务，不会重新生成");
     }
   }
-  const sourceAssets = task.upstream_task_id || task.upstream_submission_started_at ? [] : await loadSourceAssets(task.source_urls, task.user_id);
-  const editInput = sourceAssets.length ? await prepareImageEditInput(sourceAssets, task.parameters, {
+  const sourceAssets = task.upstream_task_id || task.upstream_submission_started_at ? [] : await loadSourceAssets(task.source_urls, task.user_id, isLayerStudio ? 1 : 4, isLayerStudio ? 30 * 1024 * 1024 : undefined);
+  if (isLayerStudio) for (const source of sourceAssets) await validateSeedream55Reference(source);
+  const editInput = !isLayerStudio && sourceAssets.length ? await prepareImageEditInput(sourceAssets, task.parameters, {
     protocol: "apimart", modelId: task.model_id!, operationType: task.operation_type,
   }) : { references: sourceAssets };
   if (!task.upstream_task_id && !task.upstream_submission_started_at && task.parameters.quickImageAction) await validateQuickImageSource(editInput.references[0], task.parameters);
@@ -471,6 +492,17 @@ async function executeApiMartImage(
     throw new ApiMartImageTaskPending(Math.min(error.nextPollMs, remaining), { code: error.code, httpStatus: error.httpStatus });
   }
   if (result.status === "pending") throw new ApiMartImageTaskPending(result.nextPollMs);
+  if (isLayerStudio) {
+    if (!result.manifest) throw new Error("图层任务缺少结果清单");
+    const document = seedream55PublicDocument(task.id, result.manifest);
+    const persisted = await db.query(`UPDATE tasks SET upstream_result_document=$1::jsonb,result_document=$2::jsonb,updated_at=now()
+      WHERE id=$3 AND user_id=$4 AND execution_token=$5 AND status='processing' AND lease_expires_at>now() AND upstream_result_document IS NULL RETURNING id`,
+      [JSON.stringify(result.manifest), JSON.stringify(document), task.id, task.user_id, task.execution_token]);
+    if (!persisted.rows.length) throw new TaskExecutionLost("图层结果清单持久化权已改变");
+    task.upstream_result_document = result.manifest;
+    task.result_document = document;
+    return [];
+  }
   return Promise.all(result.urls.map(url => fetchProviderResult(url)));
 }
 
@@ -729,39 +761,41 @@ type SourceAsset = ProviderVideoSource & {
   filename: string;
 };
 
-async function loadSourceAssets(urls: string[], userId: string, concurrency = 4): Promise<SourceAsset[]> {
+async function loadSourceAssets(urls: string[], userId: string, concurrency = 4, maxBytes?: number): Promise<SourceAsset[]> {
   const assets: SourceAsset[] = [];
   let nextIndex = 0;
   const worker = async () => {
     while (nextIndex < urls.length) {
       const index = nextIndex++;
-      assets[index] = await loadSourceAsset(urls[index]!, userId);
+      assets[index] = await loadSourceAsset(urls[index]!, userId, maxBytes);
     }
   };
   await Promise.all(Array.from({ length: Math.min(Math.max(1, concurrency), urls.length) }, worker));
   return assets;
 }
 
-async function loadSourceAsset(url: string, userId: string): Promise<SourceAsset> {
+async function loadSourceAsset(url: string, userId: string, maxBytes?: number): Promise<SourceAsset> {
   const match = url.match(/^\/api\/assets\/([0-9a-f-]{36})\/content$/i);
   if (!match) throw new Error("参考图不是公司素材地址");
   const result = await db.query<{
     object_key: string;
     mime_type: string;
     filename: string;
+    byte_size: number;
     metadata?: Record<string, unknown>;
   }>(
-    "SELECT object_key,mime_type,filename,metadata FROM assets WHERE id=$1 AND owner_user_id=$2 AND status='ready' AND deleted_at IS NULL",
+    "SELECT object_key,mime_type,filename,byte_size::int,metadata FROM assets WHERE id=$1 AND owner_user_id=$2 AND status='ready' AND deleted_at IS NULL",
     [match[1], userId],
   );
   const asset = result.rows[0];
   if (!asset) throw new Error("参考图不存在或无权访问");
+  if (maxBytes && asset.byte_size > maxBytes) throw new Error("参考图超过 30 MiB");
   const object = await readSourceAssetObject(storage, asset.object_key);
   return {
     assetId: match[1]!,
     etag: object.ETag,
     objectKey: asset.object_key,
-    bytes: await object.Body!.transformToByteArray(),
+    bytes: maxBytes ? await readBoundedImage(object.Body!.transformToWebStream(), maxBytes, asset.byte_size) : await object.Body!.transformToByteArray(),
     mimeType: asset.mime_type,
     filename: asset.filename,
     ...videoSourceMetadata(asset.metadata),

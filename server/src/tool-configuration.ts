@@ -5,6 +5,8 @@ import { assertModuleEnabled } from "./module-flags";
 import { DEFAULT_CHAT_MODEL_TOOL_KEY } from "./chat-model-policy";
 import { isQuickImageAction, matchesQuickImageTaskTarget } from "../../shared/quick-image-tools";
 import { QUICK_IMAGE_SNAPSHOT, type QuickImageSnapshot } from "./quick-image-tools";
+import { layerStudioBindingValid } from "./layer-studio-policy";
+import { LAYER_STUDIO_TOOL } from "../../shared/layer-studio";
 
 export type ToolConfiguration = {
   toolKey: ToolKey;
@@ -65,7 +67,8 @@ export async function resolveToolExecution(db: Pick<Database, "query">, input: {
   const isQuickImage = isQuickImageAction(quickAction);
   const quickSnapshot = input[QUICK_IMAGE_SNAPSHOT];
   if (isQuickImage && (!quickSnapshot || quickSnapshot.action !== quickAction)) throw new ToolConfigurationError("QUICK_IMAGE_CONFIGURATION_REQUIRED", "一键工具缺少服务端配置快照");
-  const selected = isQuickImage ? quickSnapshot!.modelConfigId : isChat ? modelConfiguration.modelConfigId : options.allowModelOverride && requested ? requested : configuration.modelConfigId ?? requested;
+  if (toolKey === LAYER_STUDIO_TOOL && !configuration.modelConfigId) throw new ToolConfigurationError("MODEL_NOT_CONFIGURED", "管理员尚未配置图层工作区", 503);
+  const selected = toolKey === LAYER_STUDIO_TOOL ? configuration.modelConfigId : isQuickImage ? quickSnapshot!.modelConfigId : isChat ? modelConfiguration.modelConfigId : options.allowModelOverride && requested ? requested : configuration.modelConfigId ?? requested;
   if (isChat && !selected) throw new ToolConfigurationError("CHAT_MODEL_NOT_CONFIGURED", "管理员尚未配置统一对话模型", 503);
   if (!selected) throw new ToolConfigurationError("MODEL_REQUIRED", "请先选择一个已启用的模型");
   const result = await db.query<{
@@ -78,6 +81,8 @@ export async function resolveToolExecution(db: Pick<Database, "query">, input: {
       WHERE m.id::text=$1 OR m.model_id=$1 ORDER BY (m.id::text=$1) DESC LIMIT 1`, [selected]);
   const model = result.rows[0];
   if (!model || !model.enabled || !model.providerEnabled) throw new ToolConfigurationError("MODEL_DISABLED", "模型或 Provider 不存在或未启用");
+  if (!layerStudioBindingValid(toolKey, model)) throw new ToolConfigurationError("TOOL_MODEL_MISMATCH", "该模型仅可用于已配置的图层工作区");
+  if (toolKey === LAYER_STUDIO_TOOL && requested && requested !== model.id) throw new ToolConfigurationError("TOOL_MODEL_CHANGED", "图层工作区配置已变化，请刷新后重试", 409);
   if (model.workflowConfigId && !model.workflowEnabled) throw new ToolConfigurationError("WORKFLOW_DISABLED", "模型工作流未启用");
   if (isQuickImage && (model.modelId !== quickSnapshot!.modelId || model.protocol !== "apimart" || model.workflowConfigId || !model.capabilities.includes("edit"))) throw new ToolConfigurationError("TOOL_MODEL_MISMATCH", "一键图片模型已变化，请重新提交");
   if (!isQuickImage && !isChat && !options.allowModelOverride && configuration.modelConfigId && requested && requested !== model.id && requested !== model.modelId) {

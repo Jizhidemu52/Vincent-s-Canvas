@@ -1,9 +1,9 @@
 import { toolDefinitions } from "@/services/api/modules";
-import type { ServerModel, ServerProvider, ServerWorkflow, ToolApiConfiguration, ToolApiConfigurationInput } from "@/services/api/model-configuration";
+import { isLayerStudioPricingModel, type ServerModel, type ServerProvider, type ServerWorkflow, type ToolApiConfiguration, type ToolApiConfigurationInput } from "@/services/api/model-configuration";
 
 export function completeToolConfigurations(configurations: ToolApiConfiguration[]): ToolApiConfiguration[] {
     return toolDefinitions.map((definition) => ({
-        ...definition, modelConfigId: null, enabled: true,
+        ...definition, modelConfigId: null, enabled: definition.toolKey !== "layer-studio",
         creditCostOverride: null, rmbCostOverride: null, configurationVersion: 0, price: null,
         ...configurations.find((item) => item.toolKey === definition.toolKey),
         capabilities: [...definition.capabilities],
@@ -15,6 +15,7 @@ export function compatibleToolModels(tool: ToolApiConfiguration, models: ServerM
         const provider = providers.find((item) => item.id === model.providerId);
         const workflow = model.workflowConfigId ? workflows.find((item) => item.id === model.workflowConfigId) : undefined;
         return model.enabled && (tool.toolKey !== "midjourney-blend" || model.modelId === "midjourney-blend")
+            && (tool.toolKey === "layer-studio" ? isLayerStudioPricingModel(model, providers) : model.modelId !== "seedream-5-5")
             && tool.capabilities.some((capability) => model.capabilities.includes(capability))
             && provider?.enabled && (provider.hasCredentials || provider.protocol === "comfyui" || provider.protocol === "custom")
             && (!model.workflowConfigId || workflow?.enabled);
@@ -23,7 +24,7 @@ export function compatibleToolModels(tool: ToolApiConfiguration, models: ServerM
 
 export function buildToolConfigurationInput(tool: ToolApiConfiguration, values: Partial<ToolApiConfigurationInput>): ToolApiConfigurationInput {
     return {
-        modelConfigId: tool.toolKey === "canvas-chat" ? null : values.modelConfigId || null, enabled: values.enabled ?? true,
+        modelConfigId: tool.toolKey === "canvas-chat" ? null : values.modelConfigId || null, enabled: values.enabled ?? (tool.toolKey !== "layer-studio"),
         creditCostOverride: values.creditCostOverride ?? null,
         rmbCostOverride: values.rmbCostOverride ?? null,
         ...(tool.toolKey === "video" ? { allowRawPrompt: values.allowRawPrompt === true } : {}),
@@ -33,6 +34,7 @@ export function buildToolConfigurationInput(tool: ToolApiConfiguration, values: 
 export function toolConfigurationState(tool: ToolApiConfiguration, compatibleModels: ServerModel[]) {
     const unavailable = (label: string, reason: string) => ({ ready: false, label, reason });
     if (!tool.enabled) return unavailable("已停用", "本板块 API 已停用，不会回退到其他模型。");
+    if (tool.toolKey === "layer-studio" && !tool.modelConfigId) return unavailable("待配置", "须由管理员绑定专属模型后才能启用；前台没有模型选择器，也不会自动使用其他模型。");
     if (tool.operationType === "chat" && !tool.modelConfigId) return unavailable("待配置", "请在“对话改图”中指定统一对话模型；设计师不能自行选择，也不会自动使用其他模型。");
     if (!tool.modelConfigId) return compatibleModels.length
         ? { ready: true, label: "继承 / 用户选择", reason: `未固定模型，可选择 ${compatibleModels.length} 个可用模型。` }

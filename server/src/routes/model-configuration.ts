@@ -20,6 +20,8 @@ import { getApimartImageCost } from "../../../shared/apimart-image-costs";
 import { configurationErrorHandler } from "./admin-configuration-errors";
 import { readConfigurationExport } from "./configuration-export";
 import { createQuickImageConfigurationRouter, type QuickImageRouterOptions } from "./quick-image-configuration";
+import { layerStudioBindingValid, LAYER_STUDIO_MODEL_ID } from "../layer-studio-policy";
+import { createLayerStudioPricingRouter } from "./layer-studio";
 
 const protocol = z.enum(["openai", "openai-chat", "anthropic", "gemini", "apimart", "volcengine", "runninghub", "comfyui", "custom"]);
 const capabilities = z.array(z.enum(["generate", "edit", "upscale", "remove_background", "batch", "chat", "vision", "tools", "video", "audio"])).min(1);
@@ -52,6 +54,7 @@ export function createModelConfigurationRouter(db: Database, config: AppConfig, 
     router.use("/mark-images", createMarkImageProviderRouter(db, config));
     router.use("/featured-models", createFeaturedModelsRouter(db));
     router.use("/quick-images", createQuickImageConfigurationRouter(db, quickImageOptions));
+    router.use("/layer-studio-pricing", createLayerStudioPricingRouter(db));
 
     router.get("/export", async (_request, response, next) => {
         try {
@@ -157,7 +160,7 @@ export function createModelConfigurationRouter(db: Database, config: AppConfig, 
                 FROM pricing_rule_versions WHERE status='published'`)).rows as Array<Record<string, unknown>>;
             response.json({ tools: applyDefaultChatModel(toolDefinitions.map((definition) => ({
                 ...definition,
-                ...(rows.find((row) => row.toolKey === definition.toolKey) || { modelConfigId: null, enabled: true, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 0, allowRawPrompt: false }),
+                ...(rows.find((row) => row.toolKey === definition.toolKey) || { modelConfigId: null, enabled: definition.toolKey !== "layer-studio", creditCostOverride: null, rmbCostOverride: null, configurationVersion: 0, allowRawPrompt: false }),
                 capabilities: definition.capabilities,
                 price: prices.find((price) => price.operationType === definition.operationType) || null,
             }))).map(tool => {
@@ -176,8 +179,11 @@ export function createModelConfigurationRouter(db: Database, config: AppConfig, 
             if (selectedTool === "canvas-chat") input.modelConfigId = null;
             const definition = toolDefinitions.find((item) => item.toolKey === selectedTool)!;
             if (input.modelConfigId) {
-                const model = await db.query<{ modelId: string; capabilities: string[] }>(`SELECT m.model_id AS "modelId",m.capabilities FROM model_configs m JOIN providers p ON p.id=m.provider_id WHERE m.id=$1`, [input.modelConfigId]);
+                const model = await db.query<{ modelId: string; capabilities: string[]; protocol: string; workflowConfigId: string | null }>(`SELECT m.model_id AS "modelId",m.capabilities,p.protocol,m.workflow_config_id AS "workflowConfigId" FROM model_configs m JOIN providers p ON p.id=m.provider_id WHERE m.id=$1`, [input.modelConfigId]);
                 if (!model.rows[0]) { response.status(400).json({ error: "MODEL_NOT_FOUND", message: "所选模型不存在" }); return; }
+                if (!layerStudioBindingValid(selectedTool, model.rows[0])) {
+                    response.status(400).json({ error: "TOOL_MODEL_MISMATCH", message: "图层工作区须使用其专属直接图像模型，其他板块不能绑定该模型" }); return;
+                }
                 if (selectedTool === "midjourney-blend" && model.rows[0].modelId !== "midjourney-blend") {
                     response.status(400).json({ error: "TOOL_MODEL_MISMATCH", message: "MJ 多图融合板块仅支持 Midjourney Blend 模型" }); return;
                 }
@@ -268,14 +274,14 @@ export function createPublicModelRouter(db: Database, creditPolicy: boolean | ((
             const role = (request as AuthenticatedRequest).auth?.role;
             const effectiveTools = applyDefaultChatModel(toolDefinitions.map(definition => ({
                 ...definition,
-                ...(tools.rows.find(tool => tool.toolKey === definition.toolKey) ?? { modelConfigId: null, enabled: true, creditCostOverride: null, rmbCostOverride: null, configurationVersion: 0, allowRawPrompt: false }),
+                ...(tools.rows.find(tool => tool.toolKey === definition.toolKey) ?? { modelConfigId: null, enabled: definition.toolKey !== "layer-studio", creditCostOverride: null, rmbCostOverride: null, configurationVersion: 0, allowRawPrompt: false }),
                 ...(!creditsEnabled ? { creditCostOverride: 0 } : {}),
             })));
             const presentedModels = applyModelPresentation(models.rows, featuredIds);
             const selectedModels = selectCreativeModels(presentedModels);
             const selectedIds = new Set(selectedModels.map(model => model.id));
             const boundIds = new Set(effectiveTools.filter(tool => tool.enabled && tool.modelConfigId).map(tool => tool.modelConfigId));
-            selectedModels.push(...presentedModels.filter(model => boundIds.has(model.id) && !selectedIds.has(model.id)));
+            selectedModels.push(...presentedModels.filter(model => model.modelId !== LAYER_STUDIO_MODEL_ID && boundIds.has(model.id) && !selectedIds.has(model.id)));
             response.json({ models: selectedModels.map((model) => presentPublicModel({ ...model, creditCost: creditsEnabled ? model.creditCost : 0 }, role)), prices: prices.rows.map(price => ({ ...price, credits: creditsEnabled ? price.credits : 0 })), tools: effectiveTools });
         } catch (error) { next(error); }
     });

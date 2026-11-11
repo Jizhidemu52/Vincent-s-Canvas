@@ -10,6 +10,7 @@ const textAssetMimeTypes = new Set(["text/plain", "application/json", "text/csv"
 const xlsMimeType = "application/vnd.ms-excel";
 export const allowedAssetMimeTypes = new Set([
   "image/png", "image/jpeg", "image/webp", "image/gif", "image/avif",
+  "image/bmp", "image/tiff", "image/heic", "image/heif",
   "video/mp4", "video/quicktime", "video/webm", "audio/mpeg", "audio/wav", "audio/x-wav", "audio/mp4",
   "application/pdf", ...textAssetMimeTypes, xlsMimeType,
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -48,6 +49,10 @@ export async function validateAssetUpload(bytes: Uint8Array, declared: string) {
   if (detected) {
     if (["text/csv", "text/markdown"].includes(mime)) throw new AssetMediaError("文本文件字节与声明的媒体类型不符");
     if (!allowedAssetMimeTypes.has(detected.mime)) throw new AssetMediaError("文件真实类型不在允许范围内");
+    if (["image/bmp", "image/tiff", "image/heic", "image/heif"].includes(detected.mime)) {
+      try { await (await import("./seedream55-reference")).validateSeedream55Reference({ bytes, mimeType: detected.mime }); }
+      catch (error) { throw new AssetMediaError(error instanceof Error ? error.message : "原始图片无法安全读取"); }
+    }
     return detected.mime;
   }
   if (!textAssetMimeTypes.has(mime)) throw new AssetMediaError("文件字节与声明的媒体类型不符");

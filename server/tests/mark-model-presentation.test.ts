@@ -25,17 +25,26 @@ test("Mark choices require the fixed provider and exact supported IDs, without c
 });
 
 test("all platform models retain distinct UUIDs, exact display prefixes and explicit mask capabilities", () => {
-  expect(MARK_PLATFORM_MODELS).toHaveLength(13);
+  expect(MARK_PLATFORM_MODELS).toHaveLength(14);
   expect(MARK_PLATFORM_MODELS.map(model => model.modelId)).toEqual([
     "gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gemini-nano-banana-2.1", "gpt-6-astra", "happyhorse-1.1",
     "midjourney-blend", "gpt-image-2", "grok-imagine-image-2.0", "gemini-3.1-flash-image-preview-official", "claude-sonnet-5-5",
-    "gpt-image-2.6-flare", "gpt-image-2.6-sunburst", "mai-image-2.6-flash",
+    "gpt-image-2.6-flare", "gpt-image-2.6-sunburst", "mai-image-2.6-flash", "seedream-5-5",
   ]);
   for (const [index, preset] of MARK_PLATFORM_MODELS.entries()) {
     const row = { ...mark, ...preset, id: `mark-model-${index}` };
     for (const role of ["designer", "super_admin"]) {
       const shown = presentPublicModel(row, role);
       expect(shown.modelId).toBe(row.id);
+      if (preset.modelId === "seedream-5-5") {
+        expect(preset.defaultEnabled).toBe(false);
+        expect(shown.name).toBe("图层拆分与图片生成");
+        expect(shown.publicDescription).toBe("独立生成、图层拆分与重组");
+        expect(shown.modelIdentityHidden).toBe(true);
+        expect(JSON.stringify(shown)).not.toMatch(/apimart|seedream/i);
+        expect(selectCreativeModels([row])).toEqual([]);
+        continue;
+      }
       expect(shown.name).toBe(preset.name);
       expect(shown.name).toStartWith("aplmart-");
       expect(shown.publicDescription).toBe(preset.description);

@@ -16,7 +16,7 @@ describe("formal admin catalog and isolated board saves", () => {
         expect(moduleKeys.length).toBe(toolDefinitions.length + nonAiDefinitions.length);
         expect(new Set(moduleKeys).size).toBe(moduleKeys.length);
         expect(moduleDefinitions.some((item) => item.moduleKey === "canvas-upscale" as string)).toBe(false);
-        expect(completeToolConfigurations([]).every((item) => item.enabled && item.modelConfigId === null && item.configurationVersion === 0)).toBe(true);
+        expect(completeToolConfigurations([]).every((item) => item.enabled === (item.toolKey !== "layer-studio") && item.modelConfigId === null && item.configurationVersion === 0)).toBe(true);
     });
 
     test("preserves false and zero while clearing binding to null", () => {
@@ -51,6 +51,35 @@ describe("formal admin catalog and isolated board saves", () => {
         expect(compatibleToolModels(tool(), models, [{ ...provider, hasCredentials: false }], [])).toEqual([]);
         expect(compatibleToolModels(tool(), models, [{ ...provider, enabled: false }], [])).toEqual([]);
         expect(compatibleToolModels(tool(), [{ ...model, workflowConfigId: "missing" }], [provider], [])).toEqual([]);
+    });
+
+    test("layer studio is disabled and unbound by default, never inherited or user-selected", () => {
+        const studio = completeToolConfigurations([]).find(item => item.toolKey === "layer-studio")!;
+        expect(studio).toMatchObject({ enabled: false, modelConfigId: null });
+        expect(buildToolConfigurationInput(studio, {})).toMatchObject({ enabled: false, modelConfigId: null });
+        expect(toolConfigurationState(studio, [model])).toMatchObject({ ready: false, label: "已停用" });
+        expect(toolConfigurationState({ ...studio, enabled: true }, [model])).toMatchObject({ ready: false, label: "待配置" });
+        expect(toolConfigurationState({ ...studio, enabled: true }, [model]).reason).not.toMatch(/继承|用户选择/);
+        expect(completeToolConfigurations([{ ...studio, enabled: true, modelConfigId: "explicit", creditCostOverride: 0 }]).find(item => item.toolKey === "layer-studio"))
+            .toMatchObject({ enabled: true, modelConfigId: "explicit", creditCostOverride: 0 });
+    });
+
+    test("layer studio binding matches exact dedicated provider/model and excludes it from every other board", () => {
+        const studio = completeToolConfigurations([]).find(item => item.toolKey === "layer-studio")!;
+        const apimart: ServerProvider = { ...provider, id: "apimart", protocol: "apimart" };
+        const dedicated: ServerModel = { ...model, id: "dedicated", providerId: apimart.id, modelId: "seedream-5-5" };
+        const models: ServerModel[] = [model, dedicated, { ...dedicated, id: "wrong-protocol", providerId: provider.id },
+            { ...dedicated, id: "workflow", workflowConfigId: "flow" }, { ...dedicated, id: "wrong-version", modelId: "seedream-5" },
+            { ...dedicated, id: "disabled", enabled: false }];
+        const providers = [provider, apimart];
+        expect(compatibleToolModels(studio, models, providers, []).map(item => item.id)).toEqual(["dedicated"]);
+        expect(compatibleToolModels(studio, [dedicated], [{ ...apimart, hasCredentials: false }], [])).toEqual([]);
+        expect(compatibleToolModels(studio, [dedicated], [{ ...apimart, enabled: false }], [])).toEqual([]);
+        for (const other of completeToolConfigurations([]).filter(item => item.toolKey !== "layer-studio")) {
+            expect(compatibleToolModels({ ...other, capabilities: ["generate"] }, models, providers, []).some(item => item.modelId === "seedream-5-5")).toBe(false);
+        }
+        expect(toolConfigurationState({ ...studio, enabled: true, modelConfigId: model.id }, compatibleToolModels(studio, models, providers, []))).toMatchObject({ ready: false, label: "绑定不可用" });
+        expect(toolConfigurationState({ ...studio, enabled: true, modelConfigId: dedicated.id }, compatibleToolModels(studio, models, providers, []))).toMatchObject({ ready: true, label: "已绑定" });
     });
 
     test("the independent Blend board cannot bind another image model, but canvas generation can bind Blend", () => {

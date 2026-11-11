@@ -42,6 +42,8 @@ function navigation(surface: "desktop" | "mobile", role: Role, rolePortalsEnable
         "antd": { Drawer: ({ open, children }: any) => open ? <div>{children}</div> : null },
         "@/components/layout/frequent-navigation": { FrequentNavigation: () => null, UsageCollectionNotice: () => null },
         "@/components/layout/personal-session-actions": { PersonalSessionActions: () => null },
+        "@/components/release-notes": { ReleaseNotesNavigation: () => null },
+        "@/stores/use-config-store": { useConfigStore: (select: any) => select({ config: { promptPreview: false }, updateConfig() {} }) },
         "@/components/ui/animated-theme-toggler": { AnimatedThemeToggler: ({ children }: any) => <button>{children}</button> },
         "@/constant/navigation-tools": { navigationTools, navigationModuleKey, navigationToolBilling },
         "@/hooks/use-can-manage-config": { useCanManageConfig: () => role === "super_admin" },

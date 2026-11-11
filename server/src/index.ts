@@ -15,6 +15,7 @@ import {
   createPublicModelRouter,
 } from "./routes/model-configuration";
 import { createAdminTasksRouter, createTasksRouter } from "./routes/tasks";
+import { createLayerStudioRouter } from "./routes/layer-studio";
 import { createTaskReconciliationRouter } from "./routes/task-reconciliation";
 import { requestLogging } from "./request-logging";
 import {
@@ -157,6 +158,7 @@ app.use(
   createPublicModelRouter(db, readCreditsEnabled),
 );
 app.use("/api/generation-capabilities", requireSession, requireAccountReady, createGenerationCapabilitiesRouter(db));
+app.use("/api/layer-studio", requireSession, requireAccountReady, createLayerStudioRouter(db, readCreditsEnabled));
 app.use(
   "/api/modules",
   requireSession,

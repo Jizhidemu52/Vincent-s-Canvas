@@ -34,6 +34,24 @@ API 默认命令仅 `bun src/index.ts`，Worker 默认仅 `bun src/worker.ts`。
 
 旧 fingerprinted 静态资源从同一已核验 Web 容器的 `/usr/share/nginx/html/assets` 与其已有只读兼容挂载合并到新审计目录，连续发布继续保留旧页依赖，不扫描任意历史宿主目录。同名同字节去重，异字节拒绝；拒绝 symlink、HTML、JSON、map、env 和未带 hash 的文件。仅这些公开副本显式设为 `0644`、叶资源目录为 `0755`，避免私有审计的 `umask 077` 使 Nginx 无法读取；私有祖先目录和源文件权限不变，新 Web 仍只读挂载兼容目录。其他旧源码挂载只删除实例明确列出的只读代码挂载；未知或可写代码挂载直接拒绝。
 
+## 052 图层工作区的独立准备
+
+`layer-studio-052.py` 仅适用于已登记至 051、统计处理仍停用的实例。它只扩展两个工具键 CHECK，为旧任务增加两个初始为空的结果清单列，新增空的专用价格表，以及默认关闭、未绑定模型的模块／工具配置；不创建模型、不填写费率、不开放功能，也不改变已有员工积分政策。
+
+```sh
+python3 -B /absolute/package/ops/release/layer-studio-052.py preflight /absolute/instance.json /absolute/package
+python3 -B /absolute/package/ops/release/layer-studio-052.py migrate /absolute/instance.json /absolute/package /absolute/052-preflight-audit
+# 原容器和正常入口恢复后，重新取得零变更发布预检，再切换同一冻结镜像。
+bash /absolute/package/ops/deploy.sh preflight /absolute/instance.json /absolute/package
+bash /absolute/package/ops/deploy.sh apply /absolute/instance.json /absolute/package /absolute/new-deploy-preflight-audit
+```
+
+SQL、catalog、快照查询和运行工具必须匹配同一已验证包；预检绑定实例、包与源文件哈希，有效期15分钟。维护门关闭、排空、停止原三个应用容器和备份后，在单一事务中锁定全部旧表，核对停机基线再执行固定变更。旧任务哈希排除新增两列后逐行保持一致，新列另验全为空；其他旧业务、配置、迁移记录和序列保持不变。完整 catalog、空价格表和关闭／未绑定种子均在提交前核验。
+
+成功后恢复相同原容器 ID，核对数据库、健康和受保护对象，再打开入口。结果未知时保留当前维护状态，不自动重放、restore或删除新表；先检查私有审计阶段、052登记、结构和原容器实际状态。应用镜像切换仍遵守零数据库变更合同；模型绑定、完整输入／两档输出费率和功能启用是后续明确配置动作。
+
+正式发布必须取得同一冻结提交的 PostgreSQL 17 事务／回滚测试，以及同一 API 镜像的无网络 HEIC 解码检查。本地 PGlite、Windows 解码与合成图片测试不能替代这些结果，也不能证明真实供应商拆层质量或扣费。
+
 ## 050/051 创意模块的独立准备
 
 `creative-050-051.py` 用于已登记至 049、统计处理仍停用的实例，不切换镜像。050 仅扩展产品提取配置的 CHECK；051 仅新增两个创意模块的缺失开关与模型绑定，并扩展对应 CHECK。两份新默认配方只在整个配方 key 缺失时新增并激活；已有草稿、自定义设置和已发布版本一律保持原样。

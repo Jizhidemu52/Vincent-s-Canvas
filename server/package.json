@@ -26,6 +26,7 @@
     "file-type": "^22.2.0",
     "helmet": "^8.1.0",
     "ipaddr.js": "^2.5.0",
+    "libheif-js": "1.23.5",
     "negotiator": "^1.1.0",
     "parse5": "^8.0.1",
     "pg": "^8.16.3",

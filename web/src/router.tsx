@@ -26,6 +26,7 @@ const SeriesRecipePage = lazy(() => import("@/pages/design-workbench/recipe"));
 const ChangePasswordPage = lazy(() => import("@/pages/change-password"));
 const HomePage = lazy(() => import("@/pages/home"));
 const ImagePage = lazy(() => import("@/pages/image"));
+const LayerStudioPage = lazy(() => import("@/pages/layer-studio"));
 const MyPromptsPage = lazy(() => import("@/pages/my-prompts"));
 const NotFound = lazy(() => import("@/pages/not-found"));
 const PromptsPage = lazy(() => import("@/pages/prompts"));
@@ -85,6 +86,8 @@ export const router = createBrowserRouter([
             { path: "/creative/:presetId", element: protectedRoute(CreativeScenePage) },
             { path: "/login", element: !standaloneEdition && deploymentFeatures.authenticationEnabled && !deploymentFeatures.oaLoginEnabled ? routeElement(LoginPage) : <Navigate to="/" replace /> },
             { path: "/image", element: moduleRoute(ImagePage, imageModule) },
+            // Keep saved originals/editing accessible when new generation is disabled.
+            { path: "/layer-studio", element: protectedRoute(LayerStudioPage) },
             { path: "/remove-background", element: moduleRoute(ImagePage, "image-edit") },
             { path: "/hd-upscale", element: moduleRoute(ImagePage, "detail-enhance") },
             { path: "/item-extract", element: moduleRoute(ImagePage, "image-edit") },

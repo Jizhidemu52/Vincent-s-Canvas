@@ -26,11 +26,13 @@ PACKAGE_FILES = [
     "ops/release/creative-050-051.py", "ops/release/creative-050-051-catalog.json",
     "ops/release/creative-050-051-state.sql", "ops/release/creative_seed.py",
     "server/src/migrations/050_quick_image_item_extract.sql", "server/src/migrations/051_new_creative_scenes.sql",
+    "ops/release/layer-studio-052.py", "ops/release/layer-studio-052-catalog.json",
+    "ops/release/layer-studio-052-state.sql", "server/src/migrations/052_layer_studio.sql",
 ]
 
 
 def fixed_migration_tail(manifest, first):
-    allowed = ["048_usage_daily_facts.sql", "049_quick_image_configurations.sql", *CREATIVE_MIGRATIONS]
+    allowed = ["048_usage_daily_facts.sql", "049_quick_image_configurations.sql", *CREATIVE_MIGRATIONS, "052_layer_studio.sql"]
     expected = allowed[allowed.index(first):]
     actual = [row["name"] for row in manifest["migrations"] if row["name"] >= first[:3]]
     return bool(actual) and actual == expected[:len(actual)]
@@ -51,6 +53,14 @@ def verify_049_payload(root, manifest):
     require(len(rows) == 1 and fixed_migration_tail(manifest, Path(relative).name), "FIXED_049_MIGRATION_REQUIRED")
     sql = root / relative
     require(sql.is_file() and not sql.is_symlink() and digest_file(sql) == rows[0]["sha256"], "PACKAGED_049_SQL_MIGRATION_HASH_MISMATCH")
+
+
+def verify_052_payload(root, manifest):
+    relative = "server/src/migrations/052_layer_studio.sql"
+    rows = [row for row in manifest["migrations"] if row["name"] == Path(relative).name]
+    require(len(rows) == 1 and fixed_migration_tail(manifest, Path(relative).name), "FIXED_052_MIGRATION_REQUIRED")
+    sql = root / relative
+    require(sql.is_file() and not sql.is_symlink() and digest_file(sql) == rows[0]["sha256"], "PACKAGED_052_SQL_MIGRATION_HASH_MISMATCH")
 
 
 def repository_commit(root):
@@ -101,6 +111,7 @@ def package(root, candidate, verification, image_archive, destination):
     require(migrations(root) == candidate["migrations"], "PACKAGE_MIGRATIONS_CHANGED")
     verify_048_payload(root, candidate)
     verify_049_payload(root, candidate)
+    verify_052_payload(root, candidate)
     seed = build_source_seed(root)
     manifest = copy.deepcopy(candidate); manifest["verification"] = verification
     validate_manifest(manifest)
@@ -127,6 +138,7 @@ def package(root, candidate, verification, image_archive, destination):
     verify_package(destination)
     verify_048_payload(destination, manifest)
     verify_049_payload(destination, manifest)
+    verify_052_payload(destination, manifest)
     verify_creative_payload(destination, manifest)
     archive = destination.with_suffix(destination.suffix + ".tar")
     require(not archive.exists(), "PACKAGE_ARCHIVE_ALREADY_EXISTS")

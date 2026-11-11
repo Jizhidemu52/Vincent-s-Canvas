@@ -1,6 +1,8 @@
 import { imageParameterProfile } from "./image-parameter-profile";
 import { MARK_PLATFORM_MODELS, MARK_IMAGE_PROVIDER_ID } from "../../shared/mark-image-models";
 import { getApimartImageCost } from "../../shared/apimart-image-costs";
+import { LAYER_STUDIO_MODEL_ID } from "./layer-studio-policy";
+import { LAYER_STUDIO_LABEL } from "../../shared/layer-studio";
 
 const imageCapabilities = ["generate", "edit", "upscale", "remove_background", "batch"];
 
@@ -51,7 +53,7 @@ export const MAX_FEATURED_MODELS = 5;
 
 /** Eligibility is identity-based, never inferred from a provider or model display name. */
 export function isFeaturedModelCandidate(model: Record<string, unknown>) {
-  return isImageModel(model) && Boolean(markImageLabel(model))
+  return model.modelId !== LAYER_STUDIO_MODEL_ID && isImageModel(model) && Boolean(markImageLabel(model))
     && Array.isArray(model.capabilities) && model.capabilities.includes("generate");
 }
 
@@ -92,6 +94,7 @@ export function canSeeModelIdentity(role: unknown) {
 
 /** Curate creation choices only; retained configurations and history are not deleted. */
 export function isSelectableCreativeModel(model: Record<string, unknown>) {
+  if (model.modelId === LAYER_STUDIO_MODEL_ID) return false;
   if (Array.isArray(model.capabilities) && model.capabilities.includes("chat")) {
     if (model.providerId === MARK_IMAGE_PROVIDER_ID) {
       return model.protocol === "apimart" && ["claude-sonnet-5-5", "gpt-6-astra"].includes(String(model.modelId));
@@ -119,6 +122,7 @@ export function selectCreativeModels<T extends Record<string, unknown>>(models: 
 }
 
 export function publicModelName(model: Record<string, unknown>) {
+  if (model.modelId === LAYER_STUDIO_MODEL_ID) return LAYER_STUDIO_LABEL;
   if (!isImageModel(model)) return String(model.name || "");
   const featureName = creativeImageLabel(model)?.name;
   if (featureName) return featureName;
@@ -138,11 +142,12 @@ const anonymousProfiles = {
 
 /** Explicit allowlist: never expose extra provider/configuration fields from a row. */
 export function presentPublicModel(model: Record<string, unknown>, role: unknown) {
+  const studio = model.modelId === LAYER_STUDIO_MODEL_ID;
   const image = isImageModel(model);
-  const hidden = image && !canSeeModelIdentity(role);
+  const hidden = image && (studio || !canSeeModelIdentity(role));
   const profile = imageParameterProfile(model.protocol, model.modelId, model.providerId);
   const mark = markPlatformLabel(model);
-  const label = image ? creativeImageLabel(model) : mark;
+  const label = studio ? { name: LAYER_STUDIO_LABEL, description: "独立生成、图层拆分与重组" } : image ? creativeImageLabel(model) : mark;
   const imageCost = getApimartImageCost(model.providerId, model.modelId);
   return {
     id: model.id,

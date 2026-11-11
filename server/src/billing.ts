@@ -3,6 +3,7 @@ import type { PoolClient } from "pg";
 import { getApimartImageCost, type ApimartImageCost } from "../../shared/apimart-image-costs";
 import { withTransaction } from "./db-transaction";
 import type { ToolConfiguration } from "./tool-configuration";
+import type { LayerStudioCostSnapshot } from "./layer-studio-billing";
 import { ensureGroupCreditPeriod } from "./group-credits";
 import {
   ensureMonthlyCreditPeriod,
@@ -12,6 +13,7 @@ import {
 export { ensureMonthlyCreditPeriod, refreshMonthlyCreditPeriod };
 
 export type PriceSnapshot = {
+  layerStudioCost?: LayerStudioCostSnapshot;
   imageCost?: ApimartImageCost;
   settledQuantity?: number;
   settledTotalRmb?: number;

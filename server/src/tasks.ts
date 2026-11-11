@@ -11,6 +11,9 @@ import { fenceBatchAdmission, type BatchAdmissionToken } from "./batch-admission
 import { QUICK_IMAGE_SNAPSHOT, type QuickImageSnapshot } from "./quick-image-tools";
 import { prepareConfiguredQuickImageTask } from "./quick-image-configuration";
 import { preflightStoredQuickImageTask, validateStoredQuickImageSnapshot } from "./stored-quick-image-preflight";
+import { preflightStoredSeedream55Task, validateStoredSeedream55Snapshot } from "./stored-seedream55-preflight";
+import { layerStudioTaskOptions } from "../../shared/layer-studio-options";
+import { loadLayerStudioPriceSnapshot } from "./layer-studio-billing";
 
 export type TaskPriority = "normal" | "priority" | "urgent";
 export type QueueTaskAction = "pause" | "resume" | "cancel";
@@ -104,10 +107,18 @@ export async function enqueueTask(
   input: TaskInput,
   videoPreflight = preflightStoredVideoTask,
   quickImagePreflight = preflightStoredQuickImageTask,
+  layerStudioPreflight = preflightStoredSeedream55Task,
 ) {
+  const isLayerStudio = (input.toolKey ?? input.parameters?.tool) === "layer-studio";
+  if (isLayerStudio) {
+    if (input.operationType !== "image_generation" || input.userInput || input.batchId) throw new BillingError("INVALID_LAYER_TASK", "图层工具仅支持独立图片任务");
+    try { layerStudioTaskOptions(input.parameters ?? {}, input.prompt, input.sourceUrls.length); }
+    catch (error) { throw new BillingError("INVALID_LAYER_PARAMETERS", error instanceof Error ? error.message : "图层参数无效"); }
+  }
   input = await prepareConfiguredQuickImageTask(db, input);
   input.parameters = singleImageTaskParameters(input.operationType, input.parameters);
   let preparedQuickImage: Awaited<ReturnType<typeof preflightStoredQuickImageTask>> | undefined;
+  let preparedLayer: Awaited<ReturnType<typeof preflightStoredSeedream55Task>> | undefined;
   const taskId = randomUUID();
   let preparedVideo: { execution: ToolConfiguration & { modelConfigId: string }; checked: Awaited<ReturnType<typeof preflightStoredVideoTask>> } | undefined = input.videoPreflightResult && input.toolConfiguration
     ? { execution: input.toolConfiguration, checked: input.videoPreflightResult } : undefined;
@@ -152,6 +163,7 @@ export async function enqueueTask(
     // The second transaction repeats those checks before atomic insert + hold.
     if (input.operationType === "video_generation" && !preparedVideo) return null;
     if (input[QUICK_IMAGE_SNAPSHOT] && !preparedQuickImage) return null;
+    if (isLayerStudio && !preparedLayer) return null;
     const inserted = await client.query<{ id: string; queuedAt: string; availableAt: string }>(
       `INSERT INTO tasks(id,request_id,batch_id,user_id,department_id,project_id,operation_type,model_config_id,prompt,parameters,source_urls,priority,credits,rmb_cost,user_input,prompt_compilation_id,prompt_optimized)
            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,0,0,$13,$14,$15)
@@ -181,6 +193,11 @@ export async function enqueueTask(
       return duplicate;
     }
     const execution = input.toolConfiguration ?? await resolveToolExecution(client, input);
+    if (isLayerStudio) {
+      if (!preparedLayer || execution.toolKey !== "layer-studio") throw new BillingError("INVALID_LAYER_TASK", "图层工具配置不匹配");
+      await validateStoredSeedream55Snapshot(client, input, preparedLayer);
+      input.priceSnapshot = await loadLayerStudioPriceSnapshot(client, { modelConfigId: execution.modelConfigId, toolConfiguration: execution, parameters: input.parameters ?? {}, sourceCount: input.sourceUrls.length, creditsEnabled: input.creditsEnabled });
+    }
     if (preparedQuickImage) await validateStoredQuickImageSnapshot(client, input, preparedQuickImage);
     input.modelConfigId = execution.modelConfigId;
     input.toolKey = execution.toolKey;
@@ -223,6 +240,12 @@ export async function enqueueTask(
     };
   });
   let task = await admit();
+  if (!task && isLayerStudio) {
+    // Original-byte ownership/format/pixel validation is outside the wallet lock
+    // and finishes before the first reservation or provider request.
+    preparedLayer = await layerStudioPreflight(db, input);
+    task = await admit();
+  }
   if (!task && input[QUICK_IMAGE_SNAPSHOT]) {
     preparedQuickImage = await quickImagePreflight(db, input);
     task = await admit();
