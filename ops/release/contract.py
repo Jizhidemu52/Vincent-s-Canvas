@@ -419,28 +419,44 @@ def can_restore_application(state):
     return isinstance(state, dict) and all(state.get(field) is True for field in ["stopConfirmed", "databaseUnchanged", "configurationKnown", "idle"])
 
 
-def prepare_compatibility_assets(source, destination):
-    source, destination = Path(source), Path(destination)
-    require(source.is_dir() and not source.is_symlink() and not destination.exists(), "STATIC_COMPATIBILITY_PATH_INVALID")
+def prepare_compatibility_assets(source, destination, retained_source=None):
+    sources = [Path(source)] + ([Path(retained_source)] if retained_source is not None else [])
+    destination = Path(destination)
+    require(all(source.is_dir() and not source.is_symlink() for source in sources)
+            and not destination.exists() and not destination.is_symlink(), "STATIC_COMPATIBILITY_PATH_INVALID")
+    assets = {}
+    for source in sources:
+        for path in sorted(source.rglob("*")):
+            require(not path.is_symlink(), "LINKED_STATIC_ASSET_REFUSED")
+            if path.is_dir():
+                continue
+            require(path.is_file(), "SPECIAL_STATIC_ASSET_REFUSED")
+            relative = path.relative_to(source).as_posix()
+            # Vite immutable chunks/assets only. No source maps, HTML, JSON/config,
+            # environment, directory traversal, or arbitrary un-hashed public files.
+            if "/" in relative or not re.fullmatch(r"[A-Za-z0-9_.-]+-[A-Za-z0-9_-]{8,}\.(?:js|css|woff2?|ttf|otf|png|jpe?g|webp|avif|svg|gif|ico|wasm)", relative):
+                continue
+            content = path.read_bytes()
+            require(relative not in assets or assets[relative][0].read_bytes() == content, "CONFLICTING_FINGERPRINTED_STATIC_ASSET")
+            assets[relative] = (path, digest(content), len(content))
+    # Validate both fixed sources before publishing anything. A shared hashed
+    # filename is immutable: deduplicate identical bytes, never overwrite them.
+    require(assets, "NO_VERIFIED_PREVIOUS_FINGERPRINTED_ASSETS")
     destination.mkdir(parents=True, mode=0o755)
     rows = []
-    for path in sorted(source.rglob("*")):
-        require(not path.is_symlink(), "LINKED_STATIC_ASSET_REFUSED")
-        if path.is_dir():
-            continue
-        require(path.is_file(), "SPECIAL_STATIC_ASSET_REFUSED")
-        relative = path.relative_to(source).as_posix()
-        # Vite immutable chunks/assets only. No source maps, HTML, JSON/config,
-        # environment, directory traversal, or arbitrary un-hashed public files.
-        if "/" in relative or not re.fullmatch(r"[A-Za-z0-9_.-]+-[A-Za-z0-9_-]{8,}\.(?:js|css|woff2?|ttf|otf|png|jpe?g|webp|avif|svg|gif|ico|wasm)", relative):
-            continue
+    for relative, (path, expected_hash, expected_size) in sorted(assets.items()):
+        require(not path.is_symlink() and path.is_file(), "STATIC_SOURCE_CHANGED_DURING_PREPARATION")
         content = path.read_bytes()
+        require((digest(content), len(content)) == (expected_hash, expected_size), "STATIC_SOURCE_CHANGED_DURING_PREPARATION")
         target = destination / relative
         fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
         with os.fdopen(fd, "wb") as output:
             output.write(content)
-        rows.append({"path": relative, "sha256": digest(content), "bytes": len(content)})
-    require(rows, "NO_VERIFIED_PREVIOUS_FINGERPRINTED_ASSETS")
+        # Deployment keeps private evidence under umask 077. Only these
+        # filtered public copies must remain readable by the nginx worker.
+        target.chmod(0o644)
+        rows.append({"path": relative, "sha256": expected_hash, "bytes": expected_size})
+    destination.chmod(0o755)
     return rows
 
 

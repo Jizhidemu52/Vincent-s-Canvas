@@ -32,7 +32,7 @@ API 默认命令仅 `bun src/index.ts`，Worker 默认仅 `bun src/worker.ts`。
 
 发布器仅操作实例中的 API、Worker、Web。不会执行 `compose down`、删除卷、清理旧文件、更新 Provider、改价格/历史/员工数据或初始化私有配方。切换前后对全部 public 表进行行数及完整内容哈希核对，并核对 schema、迁移、序列、数据库身份和所有非应用容器。备份用原数据库容器 `pg_dump` 保存到私有审计目录；没有自动数据库 restore。
 
-旧 fingerprinted 静态资源仅从当前 Web 的 `/usr/share/nginx/html/assets` 拷入审计目录，拒绝 symlink、HTML、JSON、map、env 和未带 hash 的文件；新 Web 只读挂载该兼容目录。其他旧源码挂载只删除实例明确列出的只读代码挂载；未知或可写代码挂载直接拒绝。
+旧 fingerprinted 静态资源从同一已核验 Web 容器的 `/usr/share/nginx/html/assets` 与其已有只读兼容挂载合并到新审计目录，连续发布继续保留旧页依赖，不扫描任意历史宿主目录。同名同字节去重，异字节拒绝；拒绝 symlink、HTML、JSON、map、env 和未带 hash 的文件。仅这些公开副本显式设为 `0644`、叶资源目录为 `0755`，避免私有审计的 `umask 077` 使 Nginx 无法读取；私有祖先目录和源文件权限不变，新 Web 仍只读挂载兼容目录。其他旧源码挂载只删除实例明确列出的只读代码挂载；未知或可写代码挂载直接拒绝。
 
 ## 050/051 创意模块的独立准备
 

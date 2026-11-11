@@ -26,6 +26,7 @@ import { CanvasHoverToolbarHost } from "@/components/canvas/canvas-hover-toolbar
 import { createConfigGenerationInputIndex } from "@/components/canvas/canvas-node-generation";
 import { CanvasNodeLayer } from "@/components/canvas/canvas-node-layer";
 import type { CanvasNodeGenerationMode } from "@/components/canvas/canvas-node-prompt-panel";
+import { CanvasNodePanelBoundary } from "@/components/canvas/canvas-node-panel-boundary";
 import type { CanvasOnboardingHandle } from "@/components/canvas/canvas-onboarding";
 import { CanvasOverviewLayer, type CanvasOverviewLayerHandle } from "@/components/canvas/canvas-overview-layer";
 import { canvasLinkCopiedMessage } from "@/components/canvas/canvas-save-status";
@@ -2866,7 +2867,8 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
     const renderCanvasNodePanel = useCallback(
         (panelNode: CanvasNodeData) =>
             panelNode.type === CanvasNodeType.Config ? null : (
-                <Suspense fallback={<CanvasNodePanelLoading />}>
+                <CanvasNodePanelBoundary key={panelNode.id} onClose={() => setDialogNodeId(null)} onBackup={() => sessionRecoveryRef.current!.backup()}>
+                <Suspense fallback={<div aria-live="polite" className="cw-surface min-h-36 p-4 text-sm">{t("正在加载编辑区…")}</div>}>
                     <CanvasNodePromptPanel
                         node={panelNode}
                         uploadContextKey={`${editorOwner}:${projectId}`}
@@ -2888,8 +2890,9 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
                         }}
                     />
                 </Suspense>
+                </CanvasNodePanelBoundary>
             ),
-        [connections, editorOwner, handleConfigNodeChange, handleGenerateNode, handleNodePromptChange, mentionReferenceIndex, nodes, projectId, registerNodePanelDraftFlush, restorePanelGenerationInput, runningNodeIds, stopNodeObservation],
+        [connections, editorOwner, handleConfigNodeChange, handleGenerateNode, handleNodePromptChange, mentionReferenceIndex, nodes, projectId, registerNodePanelDraftFlush, restorePanelGenerationInput, runningNodeIds, sessionRecoveryRef, stopNodeObservation, t],
     );
 
     const configNodeActionsRef = useRef<CanvasConfigContentActions>(null!);
@@ -3416,7 +3419,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
             {assistantMounted ? (
                 <div className={`cw-agent-panel cw-surface ${agentLayout === "wide" ? "is-wide" : ""}`} style={{ display: assistantCollapsed && !assistantClosing ? "none" : undefined, pointerEvents: assistantClosing ? "none" : undefined }}>
                 {isCanvasDesktopLayout && agentLayout !== "wide" ? <Suspense fallback={null}><CanvasPanelResizeHandle kind="chat" /></Suspense> : null}
-                <Suspense fallback={<CanvasAgentPanelLoading /> }>
+                <Suspense fallback={<aside aria-live="polite" className="flex w-full shrink-0 items-center justify-center text-sm">{t("正在加载对话…")}</aside>}>
                     <CanvasAssistantPanel
                         layout={agentLayout}
                         onToggleLayout={toggleAgentLayout}
@@ -3445,19 +3448,4 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
         </main>
         </CanvasMentionImagesProvider>
     );
-}
-
-function CanvasAgentPanelLoading() {
-    const t = useUiText();
-    const theme = canvasThemes[useThemeStore(state => state.theme)];
-    return (
-        <aside aria-live="polite" className="flex w-full shrink-0 items-center justify-center border-l text-sm" style={{ borderColor: theme.node.stroke, background: theme.node.fill, color: theme.node.muted }}>
-            {t("正在加载对话…")}</aside>
-    );
-}
-
-function CanvasNodePanelLoading() {
-    const t = useUiText();
-    const theme = canvasThemes[useThemeStore(state => state.theme)];
-    return <div aria-live="polite" className="min-h-36 rounded-xl border p-4 text-sm shadow-lg" style={{ borderColor: theme.node.stroke, background: theme.node.fill, color: theme.node.muted }}>{t("正在加载编辑面板…")}</div>;
 }

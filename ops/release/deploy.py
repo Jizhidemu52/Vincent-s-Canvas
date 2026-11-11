@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -18,9 +19,9 @@ import tempfile
 import time
 
 from contract import (Rejected, assert_application_runtime, assert_configured_environment, assert_database_layout, assert_idle, assert_image,
-                      assert_live_inventory, assert_migrations, assert_protected,
+                      assert_live_inventory, assert_migrations, assert_mounts, assert_protected,
                       candidate_compose, canonical, container_map, digest, read_json,
-                      loopback_web_ports, overlaps_code, prepare_compatibility_assets, require, stable_container,
+                      inside, loopback_web_ports, overlaps_code, prepare_compatibility_assets, require, stable_container,
                       validate_instance, verify_package, write_new_json)
 
 
@@ -254,6 +255,34 @@ class Deployment:
         write_new_json(temporary, read_json(model))
         os.replace(temporary, state / "active-compose.private.json")
 
+    def prepare_previous_assets(self, current, planned, destination):
+        web = container_map(current["containers"])[self.instance["containers"]["web"]]
+        container_id = web.get("Id")
+        labels = web.get("Config", {}).get("Labels") or {}
+        require(isinstance(container_id, str) and re.fullmatch(r"[a-f0-9]{64}", container_id)
+                and labels.get("com.docker.compose.project") == self.instance["project"]
+                and labels.get("com.docker.compose.service") == "web", "STATIC_SOURCE_CONTAINER_IDENTITY_REQUIRED")
+        service = current["model"]["services"]["web"]
+        assert_mounts(web, service, current["model"])
+        compatibility_target = "/opt/canvas/previous-public/assets"
+        retained = [mount for mount in service.get("volumes", []) if mount["target"] == compatibility_target]
+        require(len(retained) <= 1, "UNREVIEWED_COMPATIBILITY_MOUNT")
+        if retained:
+            mount = retained[0]
+            require(mount.get("type") == "bind" and mount.get("read_only") is True
+                    and inside(self.instance["auditRoot"], mount.get("source", ""))
+                    and {"source": mount["source"], "target": compatibility_target} in planned["retiredCodeMounts"]["web"],
+                    "UNREVIEWED_COMPATIBILITY_MOUNT")
+        source = self.audit / "previous-public-source"
+        self.command(["docker", "cp", container_id + ":/usr/share/nginx/html/assets", str(source)])
+        retained_source = None
+        if retained:
+            # Only the compatibility mount of this already-verified old Web is
+            # eligible. Never scan historical host directories or follow links.
+            retained_source = self.audit / "previous-public-retained-source"
+            self.command(["docker", "cp", container_id + ":" + compatibility_target, str(retained_source)])
+        return prepare_compatibility_assets(source, destination, retained_source)
+
     def wait_health(self, origin, release=None):
         # Bounded GET-only readiness checks; never retry a state-changing operation.
         for attempt in range(45):
@@ -443,11 +472,10 @@ class Deployment:
         for role in ["api", "web"]:
             images[role] = json.loads(self.command(["docker", "image", "inspect", release["images"][role]["reference"]]))[0]
             assert_image(images[role], release, role)
-        prior_assets = self.audit / "previous-public-source"
-        self.command(["docker", "cp", self.instance["containers"]["web"] + ":/usr/share/nginx/html/assets", str(prior_assets)])
         compatibility = self.audit / "previous-public/assets"
-        write_new_json(self.audit / "previous-public-files.json", prepare_compatibility_assets(prior_assets, compatibility))
-        target = candidate_compose(current["model"], release, self.planning_instance(current["model"]), str(compatibility))
+        planned = self.planning_instance(current["model"])
+        target = candidate_compose(current["model"], release, planned, str(compatibility))
+        write_new_json(self.audit / "previous-public-files.json", self.prepare_previous_assets(current, planned, compatibility))
         fallback = rollback_compose(current["model"], current["containers"], self.instance)
         write_new_json(self.audit / "candidate-model.private.json", target)
         write_new_json(self.audit / "rollback-model.private.json", fallback)
