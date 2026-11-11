@@ -26,7 +26,9 @@ Acquire::http::Timeout "30";
 Acquire::https::Timeout "30";
 APT::Update::Error-Mode "any";
 """
-CONFIG_NAME = "99canvas-ci-ubuntu"
+# The official runner ships zz-retries; apply our bounded policy after it.
+CONFIG_NAME = "zzzz-canvas-ci-ubuntu"
+RUNNER_MIRROR_LIST = "mirror+file:/etc/apt/apt-mirrors.txt"
 UPDATE_TIMEOUT_SECONDS = 240
 
 
@@ -44,6 +46,13 @@ def mirror_uri(uri, architecture):
     """Match complete known origins/paths, never a host substring or third-party URL."""
     if architecture not in ("amd64", "arm64"):
         raise ValueError("only amd64 and arm64 runners are supported")
+    # Official ubuntu24/20261101.360 configure-apt-sources.sh uses this exact
+    # indirection for the amd64 Ubuntu archive. Do not follow arbitrary files or
+    # change the mirror list itself; replace only the URI in the signed source.
+    if uri == RUNNER_MIRROR_LIST:
+        if architecture != "amd64":
+            raise ValueError("Ubuntu runner mirror-list family does not match runner architecture")
+        return MIRRORS["ubuntu"], True
     parsed = urlsplit(uri)
     if parsed.scheme not in ("http", "https") or parsed.query or parsed.fragment:
         return uri, False
@@ -145,6 +154,20 @@ def plan_sources(apt_directory, architecture):
     return changes, found
 
 
+def verify_effective_config():
+    values = {"CANVAS_RETRIES": ("Acquire::Retries", "0"),
+              "CANVAS_HTTP_TIMEOUT": ("Acquire::http::Timeout", "30"),
+              "CANVAS_HTTPS_TIMEOUT": ("Acquire::https::Timeout", "30"),
+              "CANVAS_UPDATE_ERRORS": ("APT::Update::Error-Mode", "any")}
+    arguments = [part for name, (key, _) in values.items() for part in (name, key)]
+    output = subprocess.run(["apt-config", "shell", *arguments], check=True, capture_output=True,
+                            text=True, timeout=15).stdout
+    expected = {f"{name}='{value}'" for name, (_, value) in values.items()}
+    if set(output.strip().splitlines()) != expected:
+        raise ValueError("effective APT download policy differs from the bounded runner configuration")
+    print("Effective APT policy verified: retries=0, HTTP/HTTPS timeout=30, update errors=any", flush=True)
+
+
 def main():
     # Do not even inspect or write host APT paths when invoked locally/self-hosted.
     environment = os.environ
@@ -165,6 +188,7 @@ def main():
         path.write_bytes(contents)
         print(f"Updated Ubuntu mirror URI in {path}", flush=True)
     config.write_bytes(APT_CONFIG.encode("utf-8"))
+    verify_effective_config()
     print(f"Checking {found} signed Ubuntu source URI(s) on noble/{architecture}; index timeout {UPDATE_TIMEOUT_SECONDS}s", flush=True)
     subprocess.run(["apt-get", "update", "--error-on=any"], check=True, timeout=UPDATE_TIMEOUT_SECONDS)
     print("Runner APT indexes verified; package signatures and all release gates remain enabled.", flush=True)

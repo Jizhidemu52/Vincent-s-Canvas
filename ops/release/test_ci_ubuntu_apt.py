@@ -25,6 +25,7 @@ Suites: noble-security
 Components: main restricted universe multiverse
 Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
 """
+EFFECTIVE_CONFIG = "CANVAS_RETRIES='0'\nCANVAS_HTTP_TIMEOUT='30'\nCANVAS_HTTPS_TIMEOUT='30'\nCANVAS_UPDATE_ERRORS='any'\n"
 
 
 class UbuntuMirrorFixtures(unittest.TestCase):
@@ -58,6 +59,33 @@ class UbuntuMirrorFixtures(unittest.TestCase):
         self.assertEqual(revised, source.replace("http://ports.ubuntu.com/ubuntu-ports/", apt.MIRRORS["ubuntu-ports"]))
         self.assertEqual(count, 2)
         self.assertNotIn("https://mirrors.mit.edu/ubuntu/", revised)
+
+    def test_actual_github_runner_mirror_file_uri_preserves_signed_sources(self):
+        source = SOURCE.replace("http://azure.archive.ubuntu.com/ubuntu/", apt.RUNNER_MIRROR_LIST)
+        source = source.replace("http://security.ubuntu.com/ubuntu/", apt.RUNNER_MIRROR_LIST)
+        revised, count = apt.rewrite_deb822(source, "amd64")
+        self.assertEqual(count, 2)
+        self.assertEqual(revised, source.replace(apt.RUNNER_MIRROR_LIST, apt.MIRRORS["ubuntu"]))
+        line = f"deb [signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] {apt.RUNNER_MIRROR_LIST} noble main\n"
+        self.assertEqual(apt.rewrite_list(line, "amd64"), (line.replace(apt.RUNNER_MIRROR_LIST, apt.MIRRORS["ubuntu"]), 1))
+        with self.assertRaisesRegex(ValueError, "does not match"):
+            apt.mirror_uri(apt.RUNNER_MIRROR_LIST, "arm64")
+
+    def test_mirror_file_lookalikes_and_other_local_lists_are_untouched(self):
+        for uri in [apt.RUNNER_MIRROR_LIST + "/", apt.RUNNER_MIRROR_LIST + "?x=1",
+                    "mirror+file:/etc/apt/vendor.txt", "mirror+file://evil.test/etc/apt/apt-mirrors.txt"]:
+            self.assertEqual(apt.mirror_uri(uri, "amd64"), (uri, False))
+
+    def test_effective_policy_is_verified_not_assumed_from_filename(self):
+        self.assertGreater(apt.CONFIG_NAME, "zz-retries")
+        for output in ["", EFFECTIVE_CONFIG.replace("='0'", "='1'"), EFFECTIVE_CONFIG.replace("='30'", "='15'"), EFFECTIVE_CONFIG.replace("='any'", "='none'")]:
+            with self.subTest(output=output), patch.object(apt.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, output)):
+                with self.assertRaisesRegex(ValueError, "effective APT download policy"):
+                    apt.verify_effective_config()
+        with patch.object(apt.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, EFFECTIVE_CONFIG)) as run, patch("builtins.print"):
+            apt.verify_effective_config()
+            self.assertEqual(run.call_args.args[0][:2], ["apt-config", "shell"])
+            self.assertEqual(run.call_args.kwargs, {"check": True, "capture_output": True, "text": True, "timeout": 15})
 
     def test_wrong_family_or_unknown_architecture_fails_closed(self):
         for uri, architecture in [("http://ports.ubuntu.com/ubuntu-ports/", "amd64"),
@@ -183,6 +211,8 @@ class UbuntuMirrorFixtures(unittest.TestCase):
             def command(argv, **kwargs):
                 if argv == ["dpkg", "--print-architecture"]:
                     return subprocess.CompletedProcess(argv, 0, "amd64\n", "")
+                if argv[:2] == ["apt-config", "shell"]:
+                    return subprocess.CompletedProcess(argv, 0, EFFECTIVE_CONFIG, "")
                 self.assertEqual(argv, ["apt-get", "update", "--error-on=any"])
                 self.assertEqual(kwargs, {"check": True, "timeout": 240})
                 self.assertIn("https://mirrors.mit.edu/ubuntu/", ubuntu.read_text())
@@ -200,7 +230,7 @@ class UbuntuMirrorFixtures(unittest.TestCase):
                 if update_error:
                     with self.assertRaises(type(update_error)):
                         apt.main()
-                    self.assertEqual(run.call_count, 2)
+                    self.assertEqual(run.call_count, 3)
                 elif conflicting_config:
                     with self.assertRaisesRegex(ValueError, "different APT configuration"):
                         apt.main()
@@ -209,7 +239,7 @@ class UbuntuMirrorFixtures(unittest.TestCase):
                     self.assertEqual(config.read_bytes(), b"preexisting config")
                 else:
                     apt.main()
-                    self.assertEqual(run.call_count, 2)
+                    self.assertEqual(run.call_count, 3)
 
     def test_main_updates_only_the_fixture_and_checks_signed_indexes_once(self):
         self.run_fixture_main()
