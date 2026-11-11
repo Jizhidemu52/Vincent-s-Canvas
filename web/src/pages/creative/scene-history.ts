@@ -2,13 +2,13 @@ import type { SceneLog } from "./use-scene-workspace";
 import { matchesWorkbenchTask } from "@/lib/workbench-task-state";
 
 type Storage = { getItem<T>(key: string): Promise<T | null>; setItem<T>(key: string, value: T): Promise<unknown> };
-export type SceneLogSummary = Pick<SceneLog, "id" | "ownerId" | "sceneId" | "workspaceId" | "createdAt" | "successCount" | "failCount" | "operation"> & { hasSelection: boolean; unresolvedCount?: number };
+export type SceneLogSummary = Pick<SceneLog, "id" | "ownerId" | "sceneId" | "workspaceId" | "createdAt" | "successCount" | "failCount" | "operation"> & { hasSelection: boolean; unresolvedCount?: number; cancelledCount?: number };
 type Index = { version: 1; entries: SceneLogSummary[] };
 const writes = new Map<string, Promise<unknown>>();
 export const SCENE_HISTORY_PAGE_SIZE = 20;
 
 export function summarizeSceneLog(log: SceneLog): SceneLogSummary {
-    return { id: log.id, ownerId: log.ownerId, sceneId: log.sceneId, ...(log.workspaceId ? { workspaceId: log.workspaceId } : {}), createdAt: log.createdAt, successCount: log.successCount, failCount: log.failCount, operation: log.operation, hasSelection: Boolean(log.selection), unresolvedCount: log.results.filter(result => result.status === "pending" || result.failureKind === "uncertain").length };
+    return { id: log.id, ownerId: log.ownerId, sceneId: log.sceneId, ...(log.workspaceId ? { workspaceId: log.workspaceId } : {}), createdAt: log.createdAt, successCount: log.successCount, failCount: log.failCount, operation: log.operation, hasSelection: Boolean(log.selection), unresolvedCount: log.results.filter(result => result.status === "pending" || result.failureKind === "uncertain").length, cancelledCount: log.results.filter(result => result.status === "cancelled").length };
 }
 
 /** Old arrays are preserved. Only the first indexed read touches them, never each new save. */

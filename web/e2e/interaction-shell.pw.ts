@@ -47,6 +47,24 @@ test("main navigation enables creative prompt preview, cancels without generatio
     await expect(preview).toBeHidden();
     await expect(page.getByRole("button", { name: /^生成款式/ })).toBeEnabled();
     await expect(description).toHaveValue("钴蓝色针织帽，罗纹翻边");
+    await expect(page.getByText("方案 1 已取消", { exact: true })).toBeVisible();
+    await expect(page.getByRole("tablist", { name: "任务列表", exact: true }).getByRole("tab").first()).toContainText("已取消");
+    await expect(page.getByText("方案 1 生成失败", { exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "刷新进度", exact: true })).toHaveCount(0);
+    await expect.poll(() => page.evaluate(async () => {
+        const { createWorkspaceStorage } = await import("/src/lib/workspace-storage.ts");
+        const records: any[] = [];
+        await createWorkspaceStorage("creative_scene_workspaces").iterate((value: any, key) => {
+            if (key.startsWith("history-record:")) records.push(value);
+        });
+        return records.map(record => ({ status: record.results[0]?.status, failCount: record.failCount, images: record.images.length }));
+    })).toEqual([{ status: "cancelled", failCount: 0, images: 0 }]);
+    await page.reload();
+    await expect(page.getByText("方案 1 已取消", { exact: true })).toBeVisible();
+    await expect(description).toHaveValue("钴蓝色针织帽，罗纹翻边");
+    await page.getByRole("button", { name: /^最近任务/ }).click();
+    await expect(page.locator("button.cs-history-item").first()).toContainText("1 张已取消");
+    await expect(page.locator("button.cs-history-item").first()).not.toContainText("张失败");
     await page.setViewportSize({ width: 390, height: 844 });
     await page.getByRole("button", { name: "打开导航菜单", exact: true }).click();
     const drawer = page.getByRole("dialog", { name: "功能模块", exact: true });

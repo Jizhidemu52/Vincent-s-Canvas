@@ -45,7 +45,7 @@ export type SceneImage = ReferenceImage & {
 export type SceneImages = Partial<Record<SceneSlotId, SceneImage>>;
 export type SceneParameters = Pick<AiConfig, "model" | "imageModel" | "size" | "quality" | "count" | "imageOptions">;
 export type SceneSelection = { sourceId: string; mask: SceneImage };
-export type SceneResult = { id: string; status: "pending" | "success" | "failed"; image?: SceneImage; uncompositedImage?: SceneImage; error?: string;
+export type SceneResult = { id: string; status: "pending" | "success" | "failed" | "cancelled"; image?: SceneImage; uncompositedImage?: SceneImage; error?: string;
     taskId?: string; requestId?: string; compilationId?: string; failureKind?: "terminal" | "uncertain" | "local"; retryLogId?: string;
     recovery?: "resume" | "investigate" };
 export type SceneLog = {
@@ -202,7 +202,7 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
     const resultActionGate = useRef(false);
     const loading = loadedScope !== scope || restoring;
     useWorkbenchTaskStatus({ busy: running || restoring || uploadCount > 0 || resultActionBusy, pending: pendingLogIds.size > 0,
-        ready: loadedScope === scope && draftReady, label: results.some(canQuerySceneResult) ? "等待结果" : results.some(result => result.status === "success") ? "已完成" : results.some(result => result.status === "failed") ? "已失败" : "草稿" });
+        ready: loadedScope === scope && draftReady, label: results.some(canQuerySceneResult) ? "等待结果" : results.some(result => result.status === "success") ? "已完成" : results.some(result => result.status === "failed") ? "已失败" : results.some(result => result.status === "cancelled") ? "已取消" : "草稿" });
     const toolKey = `creative-${sceneId}` as ToolKey;
     const toolEnabled = useToolEnabled(toolKey);
     const selectionEnabled = useModuleEnabled("creative-selection");
@@ -614,10 +614,11 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
             }));
             const successes = completed.flatMap(result => result.image ? [result.image] : []);
             const log: SceneLog = { ...runLog, prompt, userInput: promptInput, optimized, form: snapshot.form, referenceImages: snapshot.images,
-                config: snapshot.config, selection: snapshot.selection, operation: "ai", inputArchiveVersion: 1, results: completed, images: successes, durationMs: performance.now() - start, successCount: successes.length, failCount: count - successes.length };
+                config: snapshot.config, selection: snapshot.selection, operation: "ai", inputArchiveVersion: 1, results: completed, images: successes, durationMs: performance.now() - start, successCount: successes.length, failCount: completed.filter(result => result.status === "failed").length };
             if (revision === epoch.current) {
                 setResults(completed); rememberLog(log); setActiveLog(log);
-                if (!successes.length) setError(uiText(completed[0]?.error || "生成失败"));
+                if (completed.every(result => result.status === "cancelled")) setNotice(uiText(completed[0]?.error || "已取消生成前确认，未提交图片任务。"));
+                else if (!successes.length) setError(uiText(completed.find(result => result.status === "failed")?.error || "生成失败"));
                 else if (storageWarnings.length) setError(uiText(storageWarnings.join("；")));
             }
             try {
@@ -667,9 +668,13 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
                 completed = await storeSceneResult(pending, generated[0], 0, sceneId, { images: prepared.referenceImages, selection: prepared.selection }, message => warnings.push(message));
             } catch (caught) { completed = { id: pending.id, ...sceneFailure(caught, submitted, pending.taskId, pending.requestId) }; }
             const log: SceneLog = { ...retryLog, results: [completed],
-                images: completed.image ? [completed.image] : [], successCount: completed.image ? 1 : 0, failCount: completed.image ? 0 : 1, durationMs: performance.now() - start,
+                images: completed.image ? [completed.image] : [], successCount: completed.image ? 1 : 0, failCount: completed.status === "failed" ? 1 : 0, durationMs: performance.now() - start,
                 retryOf: { logId: original.id, resultId: result.id, taskId: result.taskId! } };
-            if (revision === epoch.current) { setResults(log.results); setActiveLog(log); rememberLog(log); if (completed.error || warnings.length) setError(uiText(completed.error || warnings.join("；"))); }
+            if (revision === epoch.current) {
+                setResults(log.results); setActiveLog(log); rememberLog(log);
+                if (completed.status === "cancelled") setNotice(uiText(completed.error || "已取消生成前确认，未提交图片任务。"));
+                else if (completed.error || warnings.length) setError(uiText(completed.error || warnings.join("；")));
+            }
             try { await history.save(serializeSceneLog(log)); }
             catch (caught) { if (revision === epoch.current) setError(uiText("重试结果仍保留在页面，但本地记录保存失败：{value1}", { value1: errorText(caught) })); }
         } catch (caught) { if (revision === epoch.current) setError(uiText("未提交重试：{value1}", { value1: errorText(caught) })); }

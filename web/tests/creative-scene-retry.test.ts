@@ -4,6 +4,20 @@ import { QueuedTaskFailedError, QueuedTaskPausedError, QueuedTaskSubmissionUncer
 import { createSceneForm } from "../src/pages/creative/scene-form-model";
 import { sceneReferenceUrl } from "../src/pages/creative/scene-result-actions";
 import type { SceneLog, SceneResult } from "../src/pages/creative/use-scene-workspace";
+import { PromptPreviewCancelledError } from "../src/stores/use-prompt-execution-preview";
+import { canQuerySceneResult } from "../src/pages/creative/scene-recovery";
+
+test("a cancelled preview is a finished unsubmitted attempt, not a failed or recoverable image task", () => {
+    const result = { id: "cancelled-preview", ...sceneFailure(new PromptPreviewCancelledError(), false, undefined, "preview:0") };
+    expect(result.status).toBe("cancelled");
+    expect(result.failureKind).toBeUndefined();
+    expect(result.taskId).toBeUndefined();
+    expect(result.requestId).toBe("preview:0");
+    expect(canRetrySceneResult(result)).toBe(false);
+    expect(canQuerySceneResult(result)).toBe(false);
+    expect(sceneFailure(new Error("preview preparation failed"), false).status).toBe("failed");
+    expect(sceneFailure(new PromptPreviewCancelledError(), true, "admitted-task")).toMatchObject({ status: "failed", failureKind: "uncertain", taskId: "admitted-task" });
+});
 
 const task: QueuedTask = { id: "failed-task", status: "failed", requestId: "original:0", resultUrls: [], failureReason: "模型明确失败" };
 test("only an explicitly failed server task permits a new single-item request", () => {

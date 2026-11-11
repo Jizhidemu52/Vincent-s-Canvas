@@ -2,9 +2,11 @@ import { getQueuedTask, QueuedTaskFailedError, QueuedTaskPausedError, QueuedTask
 import { restoreGenerationDraft, type GenerationInputArchive } from "@/services/api/generation-history";
 import { restoreLocalInput } from "@/services/generation-local-inputs";
 import type { SceneLog, SceneResult } from "./use-scene-workspace";
+import { PromptPreviewCancelledError } from "@/stores/use-prompt-execution-preview";
 
 export function sceneFailure(error: unknown, submitted: boolean, taskId?: string, requestId?: string): Pick<SceneResult, "status" | "error" | "failureKind" | "taskId" | "requestId" | "recovery"> {
     const message = error instanceof Error ? error.message : "操作未完成";
+    if (error instanceof PromptPreviewCancelledError && !submitted && !taskId) return { status: "cancelled", error: message, requestId };
     if ((error as { submissionRejected?: boolean })?.submissionRejected) return { status: "failed", error: message, failureKind: "local", requestId };
     if (error instanceof QueuedTaskFailedError) return { status: "failed", error: message, failureKind: error.task.status === "failed" ? "terminal" : "local", taskId: error.task.id, requestId: error.task.requestId };
     if (error instanceof QueuedTaskPausedError) return { status: "failed", error: error.canRecover ? "获取结果已暂停，点击“继续获取结果”即可继续。" : "暂时无法获取结果，需要管理员协助。", failureKind: "uncertain", recovery: error.recovery, taskId: error.task.id, requestId: error.task.requestId };

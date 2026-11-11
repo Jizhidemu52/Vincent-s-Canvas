@@ -15,6 +15,17 @@ function fixture() {
     };
     return { values, reads, writes, storage, history: createSceneHistory(storage, "owner", "text-to-style") };
 }
+test("cancelled previews retain their record without failure counts, pending work, or edits to older records", async () => {
+    const f = fixture();
+    const older = { ...log("older-failure", 1), results: [{ id: "old", status: "failed" as const, failureKind: "local" as const }], failCount: 1 };
+    await f.history.save(older);
+    const cancelled: SceneLog = { ...log("cancelled-preview", 2), results: [{ id: "preview", requestId: "preview:0", status: "cancelled", error: "已取消生成前确认，未提交图片任务。" }] };
+    await f.history.save(cancelled);
+    expect((await f.history.page()).entries[0]).toMatchObject({ id: cancelled.id, successCount: 0, failCount: 0, cancelledCount: 1, unresolvedCount: 0 });
+    expect(await f.history.pending()).toEqual([]);
+    expect(await f.history.read(cancelled.id)).toEqual(cancelled);
+    expect(await f.history.read(older.id)).toEqual(older);
+});
 test("legacy history is preserved, indexed once, and paged without reading image-bearing records", async () => {
     const f = fixture(), old = Array.from({ length: 45 }, (_, index) => log(`old-${index}`, index));
     f.values.set("history:owner:text-to-style", old);
