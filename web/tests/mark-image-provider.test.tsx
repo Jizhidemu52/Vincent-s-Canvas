@@ -6,6 +6,7 @@ import React, { type DependencyList, type EffectCallback, type ReactElement } fr
 import ts from "typescript";
 
 import { MARK_IMAGE_BASE_URL, MARK_IMAGE_MODELS, MARK_IMAGE_PROVIDER_ID, MARK_PLATFORM_MODELS } from "../../shared/mark-image-models";
+import { getApimartImageCost } from "../../shared/apimart-image-costs";
 import { getMarkImageConfiguration, MarkImageConfigurationError, saveMarkImageConfiguration, type MarkImageConfiguration, type MarkImageConfigurationInput } from "@/services/api/mark-image-provider";
 
 const originalFetch = globalThis.fetch;
@@ -177,10 +178,15 @@ test("first configuration groups every registered image, text, video and blend m
     try {
         const tree = await panel.settle();
         expect(panel.form.values.baseUrl).toBe(MARK_IMAGE_BASE_URL);
-        expect(MARK_PLATFORM_MODELS).toHaveLength(13);
-        expect(tree.some(element => element.type === "Tag" && Array.isArray(element.props.children) && element.props.children.join("") === "9 图片 · 2 文字 · 1 视频 · 1 多图融合")).toBe(true);
+        expect(MARK_PLATFORM_MODELS).toHaveLength(14);
+        expect(MARK_PLATFORM_MODELS.slice(0, 13).map(model => model.modelId)).toEqual([
+            "gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gemini-nano-banana-2.1", "gpt-6-astra", "happyhorse-1.1", "midjourney-blend",
+            "gpt-image-2", "grok-imagine-image-2.0", "gemini-3.1-flash-image-preview-official", "claude-sonnet-5-5", "gpt-image-2.6-flare", "gpt-image-2.6-sunburst", "mai-image-2.6-flash",
+        ]);
+        expect(tree.some(element => element.type === "Tag" && Array.isArray(element.props.children) && element.props.children.join("") === "10 图片 · 2 文字 · 1 视频 · 1 多图融合")).toBe(true);
         expect(panel.form.values.models).toEqual(MARK_PLATFORM_MODELS.map(model => ({ enabled: model.defaultEnabled, creditCost: 0, rmbCost: imageRmb[model.modelId] ?? 0, concurrencyLimit: 2 })));
-        expect(MARK_PLATFORM_MODELS.filter(model => !model.defaultEnabled).map(model => model.modelId)).toEqual(["grok-imagine-image-2.0"]);
+        expect(MARK_PLATFORM_MODELS.filter(model => !model.defaultEnabled).map(model => model.modelId)).toEqual(["grok-imagine-image-2.0", "seedream-5-5"]);
+        expect(MARK_PLATFORM_MODELS[13]).toMatchObject({ modelId: "seedream-5-5", defaultEnabled: false, capabilities: ["generate", "edit"] });
         expect(MARK_PLATFORM_MODELS[9]?.modelId).toBe("claude-sonnet-5-5");
         expect(MARK_PLATFORM_MODELS.slice(10, 12).map(({ modelId, description }) => ({ modelId, description }))).toEqual([
             { modelId: "gpt-image-2.6-flare", description: "速度优先，适合快速迭代" },
@@ -282,11 +288,31 @@ test("adding GPT 2.6 preserves all ten existing settings and leaves new costs in
             { modelId: "gpt-image-2.6-flare", enabled: true, creditCost: 0, rmbCost: 0, concurrencyLimit: 2 },
             { modelId: "gpt-image-2.6-sunburst", enabled: true, creditCost: 0, rmbCost: 0, concurrencyLimit: 2 },
             { modelId: "mai-image-2.6-flash", enabled: true, creditCost: 0, rmbCost: 0, concurrencyLimit: 2 },
+            { modelId: "seedream-5-5", enabled: false, creditCost: 0, rmbCost: 0, concurrencyLimit: 2 },
         ]);
         expect(panel.writes[0].apiKey).toBeUndefined();
         for (const model of MARK_PLATFORM_MODELS.slice(10)) {
             expect(tree.find(element => element.type === "InputNumber" && element.props["aria-label"] === `${model.name} 内部成本`)?.props.readOnly).toBe(false);
         }
+    } finally { panel.dispose(); }
+});
+
+test("adding the layer studio preset keeps all thirteen existing settings and does not inherit other model fees", async () => {
+    const existing = savedConfiguration();
+    existing.models = existing.models.slice(0, 13).map((model, index) => ({ ...model, enabled: index % 2 === 0, creditCost: index + 3, rmbCost: (index + 1) / 10, concurrencyLimit: index + 2 }));
+    const previous = existing.models.map(({ modelId, enabled, creditCost, rmbCost, concurrencyLimit }) => ({ modelId, enabled, creditCost, rmbCost, concurrencyLimit }));
+    const panel = harness({ load: async () => existing });
+    try {
+        const tree = await panel.settle();
+        expect(panel.form.values.models[13]).toEqual({ enabled: false, creditCost: 0, rmbCost: 0, concurrencyLimit: 2 });
+        // This registration default is not the dedicated input/tier-output tariff or evidence of a free upstream call.
+        expect(getApimartImageCost(MARK_IMAGE_PROVIDER_ID, "seedream-5-5")).toBeNull();
+        await tree.find(element => element.type === panel.Form)!.props.onFinish(panel.form.values);
+        expect(panel.writes).toHaveLength(1);
+        expect(panel.writes[0].models).toHaveLength(14);
+        expect(panel.writes[0].models.slice(0, 13)).toEqual(previous.map(model => ({ ...model, rmbCost: imageRmb[model.modelId] ?? model.rmbCost })));
+        expect(panel.writes[0].models[13]).toEqual({ modelId: "seedream-5-5", enabled: false, creditCost: 0, rmbCost: 0, concurrencyLimit: 2 });
+        expect(panel.writes[0].apiKey).toBeUndefined();
     } finally { panel.dispose(); }
 });
 

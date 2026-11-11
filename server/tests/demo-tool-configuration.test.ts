@@ -40,8 +40,12 @@ describe("demo formal tool configuration", () => {
     expect(() => resolveDemoToolConfiguration({ operationType: "chat", toolKey: "canvas-chat", modelConfigId: "chat-b" }, configured, chats, chatProviders, flags)).toThrow("未启用");
   });
   test("catalog includes formal AI slots, promoted design tools and no unfinished placeholders", () => {
-    expect(toolDefinitions).toHaveLength(29);
-    expect(new Set(moduleKeys).size).toBe(46);
+    expect(toolDefinitions).toHaveLength(30);
+    expect(toolDefinitions.filter(tool => tool.toolKey !== "layer-studio")).toHaveLength(29);
+    expect(toolDefinitions.find(tool => tool.toolKey === "layer-studio")).toEqual({ toolKey: "layer-studio", label: "图层拆分与图片生成", group: "AI 工作台", operationType: "image_generation", operations: ["image_generation"], capabilities: ["generate"], parent: null });
+    expect(moduleKeys).toHaveLength(47);
+    expect(new Set(moduleKeys).size).toBe(47);
+    expect(moduleKeys).toContain("layer-studio");
     expect(moduleKeys).toContain("creative-virtual-try-on");
     expect(moduleKeys).toContain("creative-sketch-to-photo");
     expect(moduleKeys).toContain("midjourney-blend");

@@ -29,10 +29,10 @@ test("production Worker rejects missing reference bytes before a provider call o
     let calls = 0, reads = 0;
     const dependencies = {
       db: { query: async (sql: string, values: unknown[]) => {
-        expect(sql).toStartWith("SELECT object_key,mime_type,filename,metadata FROM assets");
-        expect(sql).toContain("owner_user_id=$2"); expect(sql).toContain("status='ready'");
+        expect(sql).toStartWith("SELECT object_key,mime_type,filename,byte_size::int,metadata FROM assets");
+        expect(sql).toContain("owner_user_id=$2"); expect(sql).toContain("status='ready'"); expect(sql).toContain("deleted_at IS NULL");
         expect(values[1]).toBe("owner");
-        return { rows: [{ object_key: "private/original", mime_type: "image/png", filename: "original.png", metadata: {} }] };
+        return { rows: [{ object_key: "private/original", mime_type: "image/png", filename: "original.png", byte_size: 17, metadata: {} }] };
       } },
       storage: { get: async (_key: string, options: { abortSignal?: AbortSignal }) => { reads++; expect(options.abortSignal).toBeInstanceOf(AbortSignal); throw storageError; } },
       readSourceAssetObject, AssetObjectError,
@@ -43,5 +43,6 @@ test("production Worker rejects missing reference bytes before a provider call o
     const task = { id: "task", user_id: "owner", parameters: {}, source_urls: ["/api/assets/10000000-0000-4000-8000-000000000001/content"], upstream_task_id: null, upstream_submission_started_at: null };
     await expect(execute(task, {}, "prompt")).rejects.toMatchObject({ code: expectedCode });
     expect(reads).toBe(1); expect(calls).toBe(0);
+    expect(task.upstream_submission_started_at).toBeNull(); expect(task.upstream_task_id).toBeNull();
   }
 });
