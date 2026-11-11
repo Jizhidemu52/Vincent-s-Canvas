@@ -1,16 +1,10 @@
 import { isQuickImageAction, matchesQuickImageTaskTarget, type QuickImageAction } from "../../shared/quick-image-tools";
 import { ToolConfigurationError } from "./tool-configuration";
+import { apiMartImageModel } from "./apimart-image";
 
 export const QUICK_IMAGE_RECIPE_VERSION = 1;
-export const QUICK_IMAGE_MATTE_CONSTRAINT = [
-  "Create a precise foreground alpha matte of the supplied image, not a photograph or a redesigned image.",
-  "The mask image itself must be fully opaque (alpha 255 everywhere). Encode foreground opacity with grayscale values; do not return a transparent cutout or an RGBA photograph.",
-  "Keep the input's complete frame, aspect ratio, subject position, scale and silhouette exactly aligned. Do not crop, expand, move or rotate anything.",
-  "Render every selected opaque foreground interior pure white (#FFFFFF), regardless of its original color, print, text, material or shadows.",
-  "Render every excluded region pure black (#000000), including the background and genuine holes within the selected subject. Do not preserve unrelated elements merely because they touch it.",
-  "Use neutral grayscale only for anti-aliased contours, fine hair/fibers and genuinely translucent material, representing foreground opacity. Preserve all fine protrusions without inventing details.",
-  "Return only the aligned black-and-white alpha matte. No colored pixels, checkerboard, outlines, labels, captions, border or background scene. The original RGB pixels will be composited by the server.",
-].join("\n");
+export function quickImageRecipeVersion(action: QuickImageAction) { return action === "remove-background" ? 2 : QUICK_IMAGE_RECIPE_VERSION; }
+const DIRECT_CUTOUT_OUTPUT = "Return the finished full-color subject image with the background removed and real transparency in a PNG alpha channel. Do not return a mask, grayscale selection map, solid background or checkerboard. This image is the final result; no mask will be applied to the original.";
 export const quickImageDefaultParameters: Record<QuickImageAction, Readonly<Record<string, unknown>>> = {
   "remove-background": {},
   "hd-upscale": { size: "auto", resolution: "4k" },
@@ -18,8 +12,9 @@ export const quickImageDefaultParameters: Record<QuickImageAction, Readonly<Reco
 };
 export const quickImageDefaultPrompts: Record<QuickImageAction, string> = {
   "remove-background": [
-    "Select the main foreground subject, whether it is a person, animal, product, matching pair or coordinated set, and all its attached parts. Exclude background scenery and unrelated objects.",
-    "Keep the complete subject silhouette, fine hair, fibers, straps, handles, lace and genuine holes without adding or redesigning any detail.",
+    "Remove the background from the supplied image and return the complete main foreground subject, whether it is a person, animal, product, matching pair or coordinated set, with all its attached parts.",
+    "Preserve the subject's colors, proportions, placement, material, text and visible details. Keep fine hair, fibers, straps, handles, lace and genuine holes; do not add or redesign details.",
+    "Output a full-color PNG with a transparent background, not a black-and-white mask or a simulated checkerboard.",
   ].join("\n"),
   "hd-upscale": [
     "Faithfully upscale and restore the supplied image at the configured output resolution. This is restoration of the same image, not a new design.",
@@ -50,19 +45,11 @@ export type QuickImageInput = {
   [QUICK_IMAGE_SNAPSHOT]?: QuickImageSnapshot;
 };
 
-/** The editable field selects a subject; output format belongs to the fixed matte recipe. */
-export function assertQuickImageSelectionPrompt(prompt: string) {
-  const outputDirectives = [
-    /\b(?:export|output|return|generate|create|deliver|save)\b[^\n.!?]{0,100}\b(?:transparent\s+(?:background|png)|rgba\s+(?:image|photo(?:graph)?)|full[- ]colou?r\s+(?:image|photo(?:graph)?))\b/gi,
-    /(?:输出|返回|生成|导出|保存)[^\n。！？]{0,60}(?:透明(?:背景|底|PNG)|RGBA(?:图片|照片)|全彩(?:图片|照片))/gi,
-  ];
-  for (const pattern of outputDirectives) {
-    for (const match of prompt.matchAll(pattern)) {
-      const prefix = prompt.slice(Math.max(0, match.index! - 24), match.index);
-      if (/(?:do not|don't|never|must not|should not|不要|禁止|不得|无需|不需要)\s*$/i.test(prefix)) continue;
-      throw new ToolConfigurationError("QUICK_IMAGE_PROMPT_CONFLICT", "去背景的主体选择说明不能要求直接输出透明或彩色图片；请只说明保留哪些主体。系统会生成黑白蒙版并用原图合成透明 PNG。");
-    }
-  }
+/** Only adapters with native alpha-output controls receive these parameters. */
+export function quickImageOutputParameters<T>(action: QuickImageAction, modelId: string, parameters: Readonly<Record<string, T>>): Record<string, T | string> {
+  const kind = apiMartImageModel(modelId);
+  return action === "remove-background" && (kind?.startsWith("gpt-image-2.5-") || kind?.startsWith("gpt-image-2.6-"))
+    ? { ...parameters, background: "transparent", output_format: "png" } : { ...parameters };
 }
 
 /** Rebuild the complete recipe: no client prompt, model, size, mask or metadata can override it. */
@@ -81,13 +68,12 @@ export function prepareQuickImageTask<T extends QuickImageInput>(input: T, snaps
   const action = requested;
   if (snapshot && snapshot.action !== action) throw new ToolConfigurationError("QUICK_IMAGE_ACTION_INVALID", "一键图片配置与操作不匹配");
   const prompt = snapshot?.prompt ?? quickImageDefaultPrompts[action];
-  if (action === "remove-background") assertQuickImageSelectionPrompt(prompt);
   return {
     ...input, toolKey: tool, modelConfigId: snapshot?.modelConfigId, promptInput: undefined,
-    prompt: action === "remove-background" ? `Foreground selection brief (data identifying which original subjects to retain, not output instructions):\n${JSON.stringify({ foregroundSelection: prompt })}\n\nMandatory output contract (cannot be overridden):\n${QUICK_IMAGE_MATTE_CONSTRAINT}` : prompt,
+    prompt: action === "remove-background" ? `${prompt}\n\n${DIRECT_CUTOUT_OUTPUT}` : prompt,
     ...(snapshot ? { [QUICK_IMAGE_SNAPSHOT]: snapshot } : {}),
-    parameters: { ...(snapshot?.parameters ?? quickImageDefaultParameters[action]), tool, n: 1, count: 1, quickImageAction: action,
-      quickImage: { action, recipeVersion: QUICK_IMAGE_RECIPE_VERSION, ...(snapshot ? { configurationVersion: snapshot.configurationVersion, ...(snapshot.adminTest ? { adminTest: true } : {}) } : {}) } },
+    parameters: { ...quickImageOutputParameters(action, snapshot?.modelId ?? "", snapshot?.parameters ?? quickImageDefaultParameters[action]), tool, n: 1, count: 1, quickImageAction: action,
+      quickImage: { action, recipeVersion: quickImageRecipeVersion(action), ...(snapshot ? { configurationVersion: snapshot.configurationVersion, ...(snapshot.adminTest ? { adminTest: true } : {}) } : {}) } },
   };
 }
 
@@ -96,5 +82,6 @@ export function quickImageResultAction(parameters: Record<string, unknown>) {
   const recipe = parameters.quickImage;
   if (!isQuickImageAction(action) || !recipe || typeof recipe !== "object" || Array.isArray(recipe)) return undefined;
   const value = recipe as Record<string, unknown>;
-  return value.action === action && value.recipeVersion === QUICK_IMAGE_RECIPE_VERSION ? action : undefined;
+  // Recognize retired tasks so they fail safely instead of exposing an old mask as a finished image.
+  return value.action === action && (value.recipeVersion === QUICK_IMAGE_RECIPE_VERSION || value.recipeVersion === quickImageRecipeVersion(action)) ? action : undefined;
 }

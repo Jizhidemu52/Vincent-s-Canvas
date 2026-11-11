@@ -23,16 +23,28 @@ function harness() {
 }
 
 describe("durable image variants without paid replay", () => {
-  test("quick matte failure archives the exact provider original before loading source and never exposes it as a finished cutout", async () => {
+  test("direct cutout validation failure archives the provider original without loading source or a mask", async () => {
     const h = harness();
     const parameters = prepareQuickImageTask({ toolKey: "image-edit", operationType: "inpaint", sourceUrls: ["owned"], parameters: { quickImageAction: "remove-background" } }).parameters;
     expect(hasImageResultProcessing(parameters)).toBe(true);
     const error = await storeImageResult({ ...h, result, parameters, resultIndex: 0,
-      prepareEditInput: async () => { expect(h.calls).toEqual(["save:provider-original"]); return { references: [result] }; },
-      process: async () => { throw new Error("invalid matte"); },
+      prepareEditInput: async () => { h.calls.push("must-not-load-source"); throw new Error("No compositing source is needed"); },
+      process: async input => { expect(input.editInput).toBeUndefined(); throw new Error("transparent alpha missing"); },
     }).catch(error => error);
     expect(error).toBeInstanceOf(ImageResultPersistenceError); expect(error.message).toContain("不会自动重新生成");
     expect(h.calls).toEqual(["save:provider-original"]); expect(h.assets[0]!.bytes).toBe(result.bytes);
+  });
+  test("direct background output is one unchanged asset with version2 metadata and no source recomposition", async () => {
+    const h = harness();
+    const parameters = prepareQuickImageTask({ toolKey: "canvas-edit", operationType: "inpaint", sourceUrls: ["owned"], parameters: { quickImageAction: "remove-background" } }).parameters;
+    const primary = await storeImageResult({ ...h, result, parameters, resultIndex: 0,
+      prepareEditInput: async () => { h.calls.push("must-not-load-source"); throw new Error("Source may be unavailable after generation"); },
+      process: async input => { expect(input.editInput).toBeUndefined(); return { display: result, operations: ["transparent_alpha_verified", "ai_direct_background_removal"] }; },
+    });
+    expect(h.calls).toEqual(["save:provider-original", "metadata"]);
+    expect(h.assets).toHaveLength(1); expect(h.assets[0]!.bytes).toBe(result.bytes);
+    expect(h.assets[0]!.id).toBe(primary.assetId);
+    expect(h.assets[0]!.metadata).toMatchObject({ imageResult: { role: "primary", maskComposited: false, quickImageAction: "remove-background", recipeVersion: 2 } });
   });
   test("unrequested result is one original asset with no decode or copy", async () => {
     const h = harness();

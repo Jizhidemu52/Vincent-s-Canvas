@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { providerImageMimeType } from "./provider-image-result";
 import { hasNonIdentityImageOrientation, type ImageOrientationProbe } from "./image-edit-input";
-import { quickImageResultAction } from "./quick-image-tools";
+import { quickImageRecipeVersion, quickImageResultAction } from "./quick-image-tools";
 
 export type ProcessedResultImage = { bytes: Uint8Array; mimeType: string };
 export type ImageResultProcessingInput = {
@@ -19,7 +19,7 @@ export type ProcessedImageResult = {
   warning?: string;
 };
 type ProcessingErrorCode = "INVALID_IMAGE_RESULT_PARAMETERS" | "INVALID_IMAGE_RESULT_INPUT" | "IMAGE_RESULT_DIMENSION_MISMATCH"
-  | "IMAGE_RESULT_TOOLS_UNAVAILABLE" | "IMAGE_RESULT_PROCESSING_TIMEOUT" | "IMAGE_RESULT_PROCESSING_FAILED" | "IMAGE_RESULT_TRANSPARENCY_MISSING" | "IMAGE_RESULT_MATTE_INVALID";
+  | "IMAGE_RESULT_TOOLS_UNAVAILABLE" | "IMAGE_RESULT_PROCESSING_TIMEOUT" | "IMAGE_RESULT_PROCESSING_FAILED" | "IMAGE_RESULT_TRANSPARENCY_MISSING" | "IMAGE_RESULT_RECIPE_RETIRED";
 export class ImageResultProcessingError extends Error {
   constructor(readonly code: ProcessingErrorCode, message: string) { super(message); this.name = "ImageResultProcessingError"; }
 }
@@ -37,6 +37,13 @@ const MAX_EDGE = 8192;
 const TOOL_TIMEOUT_MS = 30_000;
 const ALPHA_8BIT = /^(?:rgba|bgra|argb|abgr|ya8)$/;
 const HIGH_BIT_DEPTH = /(?:9|10|12|14|16|48|64)(?:le|be)?$/;
+
+function assertActiveQuickImageRecipe(parameters: Record<string, unknown>) {
+  if (quickImageResultAction(parameters) === "remove-background"
+    && (parameters.quickImage as Record<string, unknown>).recipeVersion !== quickImageRecipeVersion("remove-background")) {
+    throw new ImageResultProcessingError("IMAGE_RESULT_RECIPE_RETIRED", "此历史去背景任务使用已停用的蒙版合成方案；原图与已有结果保留，不会继续合成或自动重新生成");
+  }
+}
 
 function exportSettings(parameters: Record<string, unknown>) {
   const value = parameters.output_format === "" ? undefined : parameters.output_format;
@@ -172,6 +179,7 @@ export async function hasImageTransparency(image: ProcessedResultImage): Promise
 export async function validateQuickImageSource(image: ProcessedResultImage | undefined, parameters: Record<string, unknown>) {
   const action = quickImageResultAction(parameters);
   if (!action) return;
+  assertActiveQuickImageRecipe(parameters);
   if (!image) throw new ImageResultProcessingError("INVALID_IMAGE_RESULT_INPUT", "请上传或选择一张需要处理的图片；尚未提交生成");
   const { load, cleanup } = await createImageProcessingFiles();
   try {
@@ -212,8 +220,9 @@ function flattenWhite(pixels: Buffer) {
 /** No network, storage or database writes. The caller must archive the provider result BEFORE calling. */
 export async function processImageResult({ result, parameters, editInput }: ImageResultProcessingInput): Promise<ProcessedImageResult> {
   const quickAction = quickImageResultAction(parameters);
+  assertActiveQuickImageRecipe(parameters);
   const { format, compression } = exportSettings(parameters);
-  const requireTransparency = parameters.background === "transparent";
+  const requireTransparency = quickAction === "remove-background" || parameters.background === "transparent";
   if (requireTransparency && format === "jpeg") {
     throw new ImageResultProcessingError("INVALID_IMAGE_RESULT_PARAMETERS", "透明背景仅支持 PNG 或 WebP，不能导出为 JPEG；原始结果未被替换");
   }
@@ -228,7 +237,7 @@ export async function processImageResult({ result, parameters, editInput }: Imag
     return { display: { bytes: result.bytes, mimeType: actualMimeType }, operations: [] };
   }
   const original = editInput?.references[0];
-  if (quickAction && !original) throw new ImageResultProcessingError("INVALID_IMAGE_RESULT_INPUT", "一键图片处理缺少原图；渠道原件已保留，未输出处理结果");
+  if (quickAction && quickAction !== "remove-background" && !original) throw new ImageResultProcessingError("INVALID_IMAGE_RESULT_INPUT", "一键图片处理缺少原图；渠道原件已保留，未输出处理结果");
   if (mask && !original) throw new ImageResultProcessingError("INVALID_IMAGE_RESULT_INPUT", "严格蒙版合成缺少第一张编辑原图；原始生成结果未被替换");
 
   const { localFile, load, cleanup } = await createImageProcessingFiles();
@@ -261,9 +270,27 @@ export async function processImageResult({ result, parameters, editInput }: Imag
   };
   try {
     const generated = await load("generated", result, quickAction === "hd-upscale" ? MAX_HD_RESULT_PIXELS : MAX_PIXELS);
+    if (quickAction === "remove-background") {
+      // The model's full-color cutout is the result. Never derive a mask, align it
+      // to the source, or replace its RGB with original pixels on any entry point.
+      const highBitDepth = HIGH_BIT_DEPTH.test(generated.metadata.pixelFormat);
+      const pixels = await decode(generated.file, generated.metadata, highBitDepth ? "rgba64le" : "rgba");
+      verifyTransparency(pixels, highBitDepth);
+      let visible = false;
+      for (let index = highBitDepth ? 6 : 3; index < pixels.length; index += highBitDepth ? 8 : 4) {
+        if (highBitDepth ? pixels.readUInt16LE(index) > 0 : pixels[index]! > 0) { visible = true; break; }
+      }
+      if (!visible) throw new ImageResultProcessingError("IMAGE_RESULT_TRANSPARENCY_MISSING", "去背景结果完全透明，没有可见主体；渠道原件已保留，不会自动补图或重新生成");
+      if (highBitDepth && generated.mimeType !== "image/png") throw new ImageResultProcessingError("INVALID_IMAGE_RESULT_INPUT", "去背景结果转为 PNG 暂仅支持 8 位输入，不会自动降低高位深图片精度");
+      const display = generated.mimeType === "image/png" ? { bytes: result.bytes, mimeType: generated.mimeType }
+        : await encode(pixels, generated.metadata, "png");
+      if (generated.mimeType !== "image/png") operations.push("format_conversion");
+      operations.push("ai_direct_background_removal");
+      return { display, operations, warning: "AI 直接输出的透明图片，未使用黑白蒙版或与原图合成；主体颜色、形状和细节请结合原图检查，不保证像素完全一致。" };
+    }
     if (quickAction === "item-extract") {
       // Extraction may reframe a worn product into a flat lay, unlike exact-frame
-      // upscaling/matting. Validate real output pixels without forcing source ratio.
+      // upscaling. Validate real output pixels without forcing source ratio.
       const resolution = String(parameters.resolution ?? "").toLowerCase();
       const minimum = resolution === "4k" ? 3840 : resolution === "2k" ? 1920 : resolution === "1k" ? 960 : resolution === "0.5k" ? 480 : 0;
       if (Math.max(generated.metadata.width, generated.metadata.height) < minimum) {
@@ -281,62 +308,27 @@ export async function processImageResult({ result, parameters, editInput }: Imag
       if (compression !== undefined) operations.push("compression_applied");
       return { display, operations, warning: "AI 平面商品图，已验证输出尺寸与不透明格式；白底、产品结构、遮挡补全和文字细节请结合原图检查。" };
     }
-    if (quickAction && original) {
+    if (quickAction === "hd-upscale" && original) {
       const source = await load("original", original);
       const sourceRatio = source.metadata.width / source.metadata.height;
       const resultRatio = generated.metadata.width / generated.metadata.height;
       if (Math.abs(resultRatio / sourceRatio - 1) > 0.01) {
         throw new ImageResultProcessingError("IMAGE_RESULT_DIMENSION_MISMATCH", "结果宽高比与原图不一致；未拉伸、裁剪或替换原图，请检查已保存的渠道原件");
       }
-      if (quickAction === "hd-upscale") {
-        // Old v1 tasks requested 4K. New snapshots explicitly freeze their configured
-        // resolution; model-controlled output still must not shrink the original.
-        const configured = parameters.quickImage && typeof parameters.quickImage === "object" && "configurationVersion" in parameters.quickImage;
-        const resolution = String(parameters.resolution ?? (configured ? "" : "4k")).toLowerCase();
-        const minimum = resolution === "4k" ? 3840 : resolution === "2k" ? 1920 : resolution === "1k" ? 960 : resolution === "0.5k" ? 480 : 0;
-        if (Math.max(generated.metadata.width, generated.metadata.height) < minimum
-          || generated.metadata.width < source.metadata.width || generated.metadata.height < source.metadata.height) {
-          throw new ImageResultProcessingError("IMAGE_RESULT_DIMENSION_MISMATCH", "高清结果未达到配置分辨率或小于原图尺寸；渠道原件已保留，不会把低清结果标记为高清放大成功");
-        }
-        // Decode each full frame, but retain only a 1×1 validation sample. The
-        // provider bytes stay untouched and multi-frame output is still rejected.
-        await decode(generated.file, generated.metadata, "rgba", true);
-        return { display: { bytes: result.bytes, mimeType: generated.mimeType }, operations: [resolution === "4k" ? "quick_image_4k_dimensions_verified" : "quick_image_dimensions_verified"],
-          warning: "AI 高清修复结果，已验证输出尺寸与宽高比；文字及细节请结合原图检查。" };
+      // Old v1 tasks requested 4K. New snapshots explicitly freeze their configured
+      // resolution; model-controlled output still must not shrink the original.
+      const configured = parameters.quickImage && typeof parameters.quickImage === "object" && "configurationVersion" in parameters.quickImage;
+      const resolution = String(parameters.resolution ?? (configured ? "" : "4k")).toLowerCase();
+      const minimum = resolution === "4k" ? 3840 : resolution === "2k" ? 1920 : resolution === "1k" ? 960 : resolution === "0.5k" ? 480 : 0;
+      if (Math.max(generated.metadata.width, generated.metadata.height) < minimum
+        || generated.metadata.width < source.metadata.width || generated.metadata.height < source.metadata.height) {
+        throw new ImageResultProcessingError("IMAGE_RESULT_DIMENSION_MISMATCH", "高清结果未达到配置分辨率或小于原图尺寸；渠道原件已保留，不会把低清结果标记为高清放大成功");
       }
-      if (HIGH_BIT_DEPTH.test(source.metadata.pixelFormat)) throw new ImageResultProcessingError("INVALID_IMAGE_RESULT_INPUT", "一键去背景暂仅支持 8 位原图，不会自动降低高位深图片精度");
-      const mattePixels = await decode(generated.file, generated.metadata);
-      let colored = 0, background = 0, foreground = 0;
-      for (let index = 0; index < mattePixels.length; index += 4) {
-        const red = mattePixels[index]!, green = mattePixels[index + 1]!, blue = mattePixels[index + 2]!;
-        if (Math.max(red, green, blue) - Math.min(red, green, blue) > 12 || mattePixels[index + 3]! < 247) colored++;
-        const value = Math.round((red + green + blue) / 3);
-        if (value <= 8) background++;
-        if (value >= 247) foreground++;
-      }
-      if (colored > mattePixels.length / 4 * 0.005 || !background || !foreground) {
-        throw new ImageResultProcessingError("IMAGE_RESULT_MATTE_INVALID", "模型未返回有效的黑白前景蒙版（非灰度、全黑、全白或缺少主体）；渠道原件已保留，未生成假透明结果");
-      }
-      const alignedMatte = source.metadata.width === generated.metadata.width && source.metadata.height === generated.metadata.height
-        ? mattePixels : await runTool("ffmpeg", ["-nostdin", ...toolLimits, ...safeImageInput, "-noautorotate", "-i", generated.file,
-          "-map", "0:v:0", "-frames:v", "1", "-vf", `scale=${source.metadata.width}:${source.metadata.height}:flags=lanczos`,
-          "-threads", "1", "-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"], source.metadata.width * source.metadata.height * 4 + 64 * 1024);
-      const sourcePixels = await decode(source.file, source.metadata);
-      if (alignedMatte.length !== sourcePixels.length) throw new ImageResultProcessingError("IMAGE_RESULT_MATTE_INVALID", "前景蒙版无法与原图对齐，未输出处理结果");
-      // Only opacity changes: original RGB, image size and all interior pixels stay intact.
-      const output = Buffer.from(sourcePixels);
-      let retained = 0, transparent = 0;
-      for (let index = 0; index < output.length; index += 4) {
-        const value = Math.round((alignedMatte[index]! + alignedMatte[index + 1]! + alignedMatte[index + 2]!) / 3);
-        const alpha = value <= 8 ? 0 : value >= 247 ? 255 : value;
-        output[index + 3] = Math.round(sourcePixels[index + 3]! * alpha / 255);
-        if (output[index + 3]! > 0) retained++;
-        if (output[index + 3] === 0) transparent++;
-      }
-      if (!retained || !transparent) throw new ImageResultProcessingError("IMAGE_RESULT_MATTE_INVALID", "蒙版合成后没有有效主体或透明区域，未输出处理结果");
-      const display = await encode(output, source.metadata, "png");
-      return { display, operations: ["ai_foreground_matte", "original_rgb_preserved", "original_dimensions_preserved", "transparent_alpha_verified"],
-        warning: "使用 AI 识别的前景蒙版合成，原图颜色和尺寸已保留；发丝、孔洞及半透明边缘请检查，不承诺像素级完美抠图。" };
+      // Decode each full frame, but retain only a 1×1 validation sample. The
+      // provider bytes stay untouched and multi-frame output is still rejected.
+      await decode(generated.file, generated.metadata, "rgba", true);
+      return { display: { bytes: result.bytes, mimeType: generated.mimeType }, operations: [resolution === "4k" ? "quick_image_4k_dimensions_verified" : "quick_image_dimensions_verified"],
+        warning: "AI 高清修复结果，已验证输出尺寸与宽高比；文字及细节请结合原图检查。" };
     }
     let pixels: Buffer;
     if (mask && original) {

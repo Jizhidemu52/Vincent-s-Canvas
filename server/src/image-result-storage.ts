@@ -43,7 +43,9 @@ export async function storeImageResult(input: StoredResultInput): Promise<AssetR
         maskComposited: false, requestedOutputFormat: "gif", operations: ["original_gif_animation_preserved"], animated: true, frameCount: gif.frames } });
       return original;
     }
-    const editInput = await input.prepareEditInput?.();
+    const quickAction = quickImageResultAction(input.parameters);
+    // Direct background removal no longer reads a source or mask for compositing.
+    const editInput = quickAction === "remove-background" ? undefined : await input.prepareEditInput?.();
     const processed = await (input.process ?? processImageResult)({ result: input.result, parameters: input.parameters, editInput });
     const format = String(input.parameters.output_format || "");
     const compression = Number(input.parameters.output_compression);
@@ -53,7 +55,7 @@ export async function storeImageResult(input: StoredResultInput): Promise<AssetR
       ...(["png", "jpeg", "webp"].includes(format) ? { requestedOutputFormat: format } : {}),
       ...(["jpeg", "webp"].includes(format) && input.parameters.output_compression !== undefined && input.parameters.output_compression !== "" && Number.isInteger(compression) ? { outputCompression: compression } : {}),
       operations: processed.operations,
-      ...(quickImageResultAction(input.parameters) ? { quickImageAction: quickImageResultAction(input.parameters), recipeVersion: 1 } : {}),
+      ...(quickAction ? { quickImageAction: quickAction, recipeVersion: (input.parameters.quickImage as Record<string, unknown>).recipeVersion } : {}),
     };
     let warning = processed.warning;
     let exported: AssetReference | undefined;

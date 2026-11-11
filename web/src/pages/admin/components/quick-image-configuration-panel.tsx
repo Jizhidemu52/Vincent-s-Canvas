@@ -193,7 +193,7 @@ export function QuickImageConfigurationEditor({ owner, configuration, models, lo
     };
     return <section aria-label={`${title}配置`} className="wb-surface min-w-0 space-y-4 p-4 sm:p-5">
         <div className="flex flex-wrap items-center justify-between gap-2"><h4 className="font-semibold">{title}</h4><span><Tag>{saved.isDefault ? "系统初始配置" : `配置 v${saved.configurationVersion}`}</Tag>{dirty ? <Tag color="warning">未保存</Tag> : null}</span></div>
-        <p className="text-xs leading-relaxed text-[var(--muted-foreground)]">{action === "remove-background" ? "提示词用于说明需要提取的主体。透明蒙版与原图 RGB 合成规则由服务端固定保护，保留主体原有颜色和细节。" : action === "item-extract" ? "生成白底平放的完整产品图，属于 AI 重构而非透明抠图；只补足必要遮挡，不把推测当成真实隐藏结构。模型、提示词和出图参数仅在此处管理。" : "输出尺寸与清晰度由所选模型及参数决定，不固定承诺 4K。"}</p>
+        <p className="text-xs leading-relaxed text-[var(--muted-foreground)]">{action === "remove-background" ? "模型直接生成全彩透明 PNG，原图与结果分别保留。主体颜色、细节与边缘需检查，不保证逐像素一致。" : action === "item-extract" ? "生成白底平放的完整产品图，属于 AI 重构而非透明抠图；只补足必要遮挡，不把推测当成真实隐藏结构。模型、提示词和出图参数仅在此处管理。" : "输出尺寸与清晰度由所选模型及参数决定，不固定承诺 4K。"}</p>
         {error ? <Alert type="error" showIcon title={error} /> : null}
         {notice ? <Alert type="success" showIcon title={notice} /> : null}
         {unavailable ? <Alert type="warning" showIcon title="当前模型未配置、已停用或不可用" description={`已保存：${saved.modelName || saved.modelId || saved.modelConfigId || "无可用绑定"}。请明确选择可用模型；不会自动替换。`} /> : null}
@@ -204,8 +204,8 @@ export function QuickImageConfigurationEditor({ owner, configuration, models, lo
                     ...models.map(model => ({ value: model.id, label: `${model.name} · ${model.providerName} · ${model.modelId}` })),
                 ]} onChange={modelConfigId => setDraft(current => ({ ...current, modelConfigId }))} />
             </Form.Item>
-            <Form.Item label={action === "remove-background" ? "主体选择说明" : "处理提示词"} extra={action === "remove-background" ? "只说明保留哪些主体，例如整个人物、主体商品或成套配件。不要要求直接输出透明 PNG、彩色照片或改变位置；透明结果由系统用原图合成。" : "1–4000 个字符，仅管理员可见。"}><Input.TextArea aria-label={`${title}处理提示词`} rows={5} maxLength={4000} showCount value={draft.prompt} onChange={event => setDraft(current => ({ ...current, prompt: event.target.value }))} /></Form.Item>
-            <details className="mb-5 rounded-lg border border-[var(--border)] p-3"><summary className="cursor-pointer text-sm font-medium">高级参数（JSON）</summary><p className="my-2 text-xs text-[var(--muted-foreground)]">按所选模型填写，例如尺寸、质量；必须为 JSON 对象，压缩后不超过 4000 字符。服务端会验证不支持或受保护的参数。</p><Input.TextArea aria-label={`${title}高级参数 JSON`} className="!font-mono" rows={5} value={draft.parametersJson} onChange={event => setDraft(current => ({ ...current, parametersJson: event.target.value }))} /></details>
+            <Form.Item label="处理提示词" extra={action === "remove-background" ? "说明要保留的主体、颜色与细节，并要求直接输出全彩透明 PNG；背景应真实透明，不含底色或棋盘格。1–4000 个字符，仅管理员可见。" : "1–4000 个字符，仅管理员可见。"}><Input.TextArea aria-label={`${title}处理提示词`} className="mb-6" rows={5} maxLength={4000} showCount value={draft.prompt} onChange={event => setDraft(current => ({ ...current, prompt: event.target.value }))} /></Form.Item>
+            <details className="mb-5 rounded-lg border border-[var(--border)] p-3"><summary className="cursor-pointer text-sm font-medium">高级参数（JSON）</summary><p className="my-2 text-xs text-[var(--muted-foreground)]">按所选模型填写，例如尺寸、质量；必须为 JSON 对象，压缩后不超过 4000 字符。服务端会验证不支持或受保护的参数。{action === "remove-background" ? "去背景使用 GPT Image 2.5／2.6 时，服务端固定 background=transparent、output_format=png；其他模型仅通过提示词要求透明输出，不追加不支持的参数。" : ""}</p><Input.TextArea aria-label={`${title}高级参数 JSON`} className="!font-mono" rows={5} value={draft.parametersJson} onChange={event => setDraft(current => ({ ...current, parametersJson: event.target.value }))} /></details>
             <Button type="primary" loading={busy === "save"} disabled={disabled || !dirty || unavailable} onClick={() => void save()}>保存{title}配置</Button>
         </Form>
         <div className="space-y-3 border-t border-[var(--border)] pt-4">

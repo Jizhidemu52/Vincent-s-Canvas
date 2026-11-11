@@ -10,7 +10,7 @@ import { createTasksRouter } from "../../src/routes/tasks";
 import type { AuthenticatedRequest, SessionUser } from "../../src/types";
 import { createIsolatedPostgres } from "../helpers/isolated-postgres";
 import { preflightStoredQuickImageTask } from "../../src/stored-quick-image-preflight";
-import { quickImageDefaultParameters } from "../../src/quick-image-tools";
+import { quickImageDefaultParameters, quickImageRecipeVersion } from "../../src/quick-image-tools";
 
 const integration = process.env.PGLITE_RUNTIME_PATH ? describe : describe.skip;
 integration("quick image HTTP admission through real schema, recipes, SQL and reservations", () => {
@@ -90,9 +90,9 @@ integration("quick image HTTP admission through real schema, recipes, SQL and re
       expect({ status: response.status, body }).toMatchObject({ status: 201, body: { task: { modelConfigId: expectedModel, toolKey: value.toolKey, credits: 7, optimized: false } } });
       const stored = (await query("SELECT model_config_id,prompt,parameters,source_urls,user_input,prompt_optimized FROM tasks WHERE id=$1", [body.task.id])).rows[0]!;
       expect(stored).toMatchObject({ model_config_id: expectedModel, source_urls: value.sourceUrls, user_input: null, prompt_optimized: false,
-        parameters: { quickImageAction: action, ...quickImageDefaultParameters[action], n: 1, count: 1, quickImage: { action, recipeVersion: 1 } } });
+        parameters: { quickImageAction: action, ...quickImageDefaultParameters[action], n: 1, count: 1, quickImage: { action, recipeVersion: quickImageRecipeVersion(action) } } });
       if (action === "remove-background") { expect(stored.parameters).not.toHaveProperty("size"); expect(stored.parameters).not.toHaveProperty("resolution"); }
-      expect(stored.prompt).toContain(action === "hd-upscale" ? "configured output resolution" : action === "item-extract" ? "flat-lay presentation" : "foreground alpha matte");
+      expect(stored.prompt).toContain(action === "hd-upscale" ? "configured output resolution" : action === "item-extract" ? "flat-lay presentation" : "finished full-color subject image");
       expect(stored.prompt).toBe(body.task.prompt); expect(queued.has(body.task.id)).toBe(true);
       const duplicate = await send(actor, value);
       expect(duplicate.status).toBe(200); expect((await duplicate.json()).task.id).toBe(body.task.id);

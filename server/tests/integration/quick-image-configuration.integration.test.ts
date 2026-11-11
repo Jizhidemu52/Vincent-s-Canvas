@@ -144,9 +144,12 @@ integration("administrator quick image configuration through real SQL and queue 
     const bodies = await Promise.all(responses.map(response => response.json()));
     expect(responses.every(response => [200, 201].includes(response.status))).toBe(true); expect(new Set(bodies.map(body => body.task.id)).size).toBe(1);
     const stored = (await query("SELECT * FROM tasks WHERE request_id=$1", [input.requestId])).rows[0]!;
-    expect(stored).toMatchObject({ user_id: admin, model_config_id: alternative, credits: 7, prompt_optimized: false, parameters: { n: 1, count: 1, quickImage: { adminTest: true, recipeVersion: 1 } } });
+    expect(stored).toMatchObject({ user_id: admin, model_config_id: alternative, credits: 7, prompt_optimized: false, parameters: { n: 1, count: 1, quickImage: { adminTest: true, recipeVersion: action === "remove-background" ? 2 : 1 } } });
     expect(stored.prompt).toContain("DRAFT_ONLY");
-    if (action === "remove-background") { expect(stored.prompt).toContain("original RGB pixels"); expect(stored.prompt).toContain("Mandatory output contract"); }
+    if (action === "remove-background") {
+      expect(stored.prompt).toContain("finished full-color subject image"); expect(stored.prompt).not.toContain("original RGB pixels");
+      expect(stored.parameters).toMatchObject({ background: "transparent", output_format: "png", resolution: "2k", size: "auto" });
+    }
     else expect(stored.prompt).not.toContain("Mandatory output contract");
     expect((await query("SELECT count(*)::int AS n FROM quick_image_configurations")).rows[0]!.n).toBe(0);
     expect(await counts()).toEqual({ tasks: initial.tasks + 1, holds: initial.holds + 1, queued: initial.queued + 1 });

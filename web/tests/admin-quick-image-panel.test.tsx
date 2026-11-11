@@ -53,12 +53,13 @@ test("draft validation accepts only available models, bounded prompt and bounded
     expect(() => parse({ modelConfigId: "missing", prompt: "test", parametersJson: "{}" }, [model])).toThrow("不会自动回退");
 });
 
-test("save submits one action with expected version, never uploads or tests", async () => {
+test("save accepts a direct full-color transparent output prompt without uploading or testing", async () => {
     const h = harness();
-    control(h.render(), "一键去背景处理提示词").props.onChange({ target: { value: "新要求" } });
+    const prompt = "保留毛衫主体颜色与针织细节，直接输出全彩透明 PNG，不含底色或棋盘格。";
+    control(h.render(), "一键去背景处理提示词").props.onChange({ target: { value: prompt } });
     button(h.render(), "保存一键去背景配置").props.onClick(); await tick();
     expect(h.writes.map(write => write.kind)).toEqual(["save"]);
-    expect(h.writes[0].args[1]).toEqual({ modelConfigId: model.id, prompt: "新要求", parameters: {}, expectedVersion: 2 });
+    expect(h.writes[0].args[1]).toEqual({ modelConfigId: model.id, prompt, parameters: {}, expectedVersion: 2 });
 });
 
 test("unsaved draft testing stores a private-owner receipt before one paid call and never saves", async () => {

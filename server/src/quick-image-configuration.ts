@@ -4,7 +4,7 @@ import { isQuickImageAction, quickImageModelId, type QuickImageAction } from "..
 import { MARK_IMAGE_PROVIDER_ID } from "../../shared/mark-image-models";
 import { apiMartImageModel, preflightApiMartImageRequest } from "./apimart-image";
 import type { Database } from "./db";
-import { assertQuickImageSelectionPrompt, prepareQuickImageTask, QUICK_IMAGE_SNAPSHOT, quickImageDefaultParameters, quickImageDefaultPrompts, type QuickImageInput, type QuickImageSnapshot } from "./quick-image-tools";
+import { prepareQuickImageTask, QUICK_IMAGE_SNAPSHOT, quickImageDefaultParameters, quickImageDefaultPrompts, quickImageOutputParameters, type QuickImageInput, type QuickImageSnapshot } from "./quick-image-tools";
 import { ToolConfigurationError } from "./tool-configuration";
 
 export const quickImageActions = ["remove-background", "hd-upscale", "item-extract"] as const;
@@ -28,7 +28,6 @@ export function isQuickImageEligibleModel(model: { modelId: string; protocol: st
 /** Model-specific allowlists reject silently ignored adapter fields as well as URL/identity injection. */
 export function validateQuickImageConfiguration(action: QuickImageAction, raw: QuickImageConfigurationInput, model: { modelId: string; protocol: string; capabilities: string[]; enabled?: boolean; providerEnabled?: boolean; workflowConfigId?: unknown }) {
   const input = quickImageConfigurationSchema.parse(raw);
-  if (action === "remove-background") assertQuickImageSelectionPrompt(input.prompt);
   if (!isQuickImageEligibleModel(model)) throw new ToolConfigurationError("QUICK_IMAGE_MODEL_UNSUPPORTED", "请选择已启用、支持单图编辑的 APIMart 标准图片模型");
   const kind = apiMartImageModel(model.modelId)!;
   const allowed = kind === "mai-image-2.6-flash" ? ["web_grounding"]
@@ -45,8 +44,8 @@ export function validateQuickImageConfiguration(action: QuickImageAction, raw: Q
     if (typeof value !== expected || expected === "string" && !String(value).trim()) throw new ToolConfigurationError("QUICK_IMAGE_PARAMETER_INVALID", `参数 ${key} 类型或值无效`);
   }
   if (input.parameters.output_format === "gif" || input.parameters.output_format === "svg") throw new ToolConfigurationError("QUICK_IMAGE_PARAMETER_INVALID", "一键图片编辑仅支持静态 PNG、JPEG 或 WebP");
-  if (action === "remove-background" && input.parameters.background === "transparent") throw new ToolConfigurationError("QUICK_IMAGE_PARAMETER_INVALID", "去背景使用灰阶蒙版后合成原图，不接受透明蒙版输出参数");
   if (action === "item-extract" && input.parameters.background === "transparent") throw new ToolConfigurationError("QUICK_IMAGE_PARAMETER_INVALID", "提取产品图输出白底商品图，不接受透明背景参数");
+  input.parameters = quickImageOutputParameters(action, model.modelId, input.parameters);
   try {
     preflightApiMartImageRequest({ modelId: model.modelId, prompt: input.prompt, parameters: { ...input.parameters, n: 1 }, sourceImages: ["https://owned-reference.invalid/source.png"] });
   } catch (error) { throw new ToolConfigurationError("QUICK_IMAGE_PARAMETER_INVALID", error instanceof Error ? error.message : "模型参数不正确"); }
@@ -69,7 +68,7 @@ export async function readQuickImageConfiguration(db: Pick<Database, "query">, a
   const row = (await db.query<AdminQuickImageConfiguration>(`SELECT q.action,q.model_config_id AS "modelConfigId",m.model_id AS "modelId",m.name AS "modelName",
     q.prompt,q.parameters,q.configuration_version AS "configurationVersion",false AS "isDefault"
     FROM quick_image_configurations q JOIN model_configs m ON m.id=q.model_config_id WHERE q.action=$1`, [action])).rows[0];
-  if (row) return row;
+  if (row) return { ...row, parameters: quickImageOutputParameters(action, row.modelId ?? "", row.parameters) };
   const model = (await db.query<{ id: string; modelId: string; name: string }>(`SELECT m.id,m.model_id AS "modelId",m.name FROM model_configs m
     JOIN providers p ON p.id=m.provider_id WHERE m.provider_id=$1 AND m.model_id=$2 AND p.protocol='apimart' LIMIT 1`, [MARK_IMAGE_PROVIDER_ID, quickImageModelId(action)])).rows[0];
   return { action, modelConfigId: model?.id ?? null, modelId: model?.modelId ?? null, modelName: model?.name ?? null,

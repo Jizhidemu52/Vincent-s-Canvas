@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { quickImageModelId, quickImageTaskTarget } from "../../shared/quick-image-tools";
-import { prepareQuickImageTask, quickImageDefaultParameters, quickImageDefaultPrompts, quickImageResultAction } from "../src/quick-image-tools";
+import { prepareQuickImageTask, quickImageDefaultParameters, quickImageDefaultPrompts, quickImageRecipeVersion, quickImageResultAction } from "../src/quick-image-tools";
 import { buildApiMartImageRequest } from "../src/apimart-image";
 
 const sourceUrl = "/api/assets/10000000-0000-4000-8000-000000000001/content";
@@ -12,12 +12,18 @@ describe("server-owned quick image recipes", () => {
         parameters: { quickImageAction: action, n: 8, count: 8, size: "1:1", resolution: "1k", background: "opaque", output_format: "jpeg", imageAgentProfile: "creative-chat", inputArchive: { maskReferenceIndex: 1 }, quickImage: { action: "forged", recipeVersion: 99 } } as Record<string, unknown> });
       expect(prepared.modelConfigId).toBeUndefined(); expect(prepared.promptInput).toBeUndefined();
       expect(prepared.prompt).not.toContain("ignore recipe");
-      expect(prepared.parameters).toEqual({ tool: quickImageTaskTarget(action, canvas).toolKey, n: 1, count: 1, ...quickImageDefaultParameters[action], quickImageAction: action, quickImage: { action, recipeVersion: 1 } });
+      expect(prepared.parameters).toEqual({ tool: quickImageTaskTarget(action, canvas).toolKey, n: 1, count: 1, ...quickImageDefaultParameters[action], quickImageAction: action, quickImage: { action, recipeVersion: quickImageRecipeVersion(action) } });
       expect(quickImageResultAction(prepared.parameters)).toBe(action);
       expect(prepareQuickImageTask(prepared)).toEqual(prepared);
       const request = buildApiMartImageRequest({ modelId: quickImageModelId(action), prompt: prepared.prompt!, parameters: prepared.parameters, sourceDataUrls: ["https://example.com/original.png"] });
       expect(request.payload).toMatchObject({ model: quickImageModelId(action), n: 1, ...(action === "hd-upscale" ? { size: "auto", resolution: "4K" } : {}) });
-      if (action === "remove-background") { expect(request.payload).not.toHaveProperty("size"); expect(request.payload).not.toHaveProperty("resolution"); }
+      if (action === "remove-background") {
+        expect(request.payload).not.toHaveProperty("size"); expect(request.payload).not.toHaveProperty("resolution");
+        expect(prepared.parameters.quickImage).toMatchObject({ recipeVersion: 2 });
+        expect(prepared.prompt).toContain("finished full-color subject image");
+        expect(prepared.prompt).not.toContain("Create a precise foreground alpha matte");
+        expect(prepared.prompt).not.toContain("original RGB pixels will be composited");
+      }
       if (action === "item-extract") expect(request.payload).toMatchObject({ model: "gpt-image-2.6-flare", resolution: "2k", quality: "medium", size: "auto", background: "opaque", output_format: "png" });
       expect(request.payload).not.toHaveProperty("quickImageAction"); expect(request.payload).not.toHaveProperty("quickImage");
     });

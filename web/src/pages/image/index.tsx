@@ -156,7 +156,7 @@ const imageResultCommits = new Map<string, { stopped: boolean; record: PendingIm
 type GenerationToolMode = Exclude<AdminToolMode, "gpt-chat" | "batch-image-edit" | "seamless-stitch">;
 
 const imageToolModes: Record<GenerationToolMode, { title: string; description: string; placeholder: string; button: string; projectId: string; requiresReference: boolean }> = {
-    "remove-background": { title: "一键去背景", description: "上传一张原图，自动去除背景，可下载透明 PNG 或白底 JPG，保留主体与原图。", placeholder: "", button: "一键去背景", projectId: "tool-remove-background", requiresReference: true },
+    "remove-background": { title: "一键去背景", description: "上传一张原图，由模型直接生成全彩透明图，可下载透明 PNG 或白底 JPG。原图与结果分别保留，不保证逐像素一致，请检查主体细节与边缘。", placeholder: "", button: "一键去背景", projectId: "tool-remove-background", requiresReference: true },
     "hd-upscale": { title: "高清放大", description: "上传一张原图，提升图片清晰度，原图保持不变。", placeholder: "", button: "高清放大", projectId: "tool-hd-upscale", requiresReference: true },
     "item-extract": { title: "提取产品图", description: "上传一张产品来源图，生成白底平放的完整产品图。AI 会补足必要遮挡，不是仅删除背景，也不代表真实隐藏结构。", placeholder: "", button: "提取产品图", projectId: "tool-item-extract", requiresReference: true },
     "midjourney-blend": {

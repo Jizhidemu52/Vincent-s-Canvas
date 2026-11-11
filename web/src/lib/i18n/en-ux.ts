@@ -40,7 +40,7 @@ export default {
     "一键去背景": "Remove background",
     "透明 PNG": "Transparent PNG",
     "普通图片 JPG（白底）": "JPG image (white background)",
-    "上传一张原图，自动去除背景，可下载透明 PNG 或白底 JPG，保留主体与原图。": "Upload one image to remove its background, then download a transparent PNG or white-background JPG. The original is retained.",
+    "上传一张原图，由模型直接生成全彩透明图，可下载透明 PNG 或白底 JPG。原图与结果分别保留，不保证逐像素一致，请检查主体细节与边缘。": "Upload one image for the model to generate a full-color transparent cutout directly, then download a transparent PNG or white-background JPG. The original and result are saved separately. Exact pixels are not guaranteed; check subject details and edges.",
     "高清放大": "HD upscale",
     "宽高须为不少于 768 的正整数，比例在 1:4 至 4:1 内，总像素不超过 2359296。建议使用 32 的倍数；否则模型会将实际输出宽高各向下取整到 32 的倍数。": "Width and height must be positive integers of at least 768, with an aspect ratio from 1:4 to 4:1 and no more than 2,359,296 pixels. Multiples of 32 are recommended; otherwise the model rounds each output dimension down to a multiple of 32.",
     "文生图支持 1K / 2K、宽高比及合规像素尺寸，最多 5 张参考图。图生图尺寸由模型决定，约 100 万像素；不支持 4K、蒙版或透明背景参数，固定输出 PNG。": "Text-to-image supports 1K / 2K, aspect ratios and valid pixel dimensions, with up to 5 references. Image editing produces model-selected dimensions of about 1 MP. No 4K, masks or transparent-background parameter; output is PNG.",

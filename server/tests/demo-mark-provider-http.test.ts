@@ -126,13 +126,14 @@ test("demo exposes the expanded Mark catalog, enforces reference limits, and sub
     const quick = (await quickResponse.json()).task;
     expect(quick.modelConfigId).toBe(mai.id);
     expect(quick.parameters).not.toHaveProperty("size"); expect(quick.parameters).not.toHaveProperty("resolution");
-    expect(quick.parameters.quickImage).toMatchObject({ action: "remove-background", recipeVersion: 1, configurationVersion: 0 });
+    expect(quick.parameters.quickImage).toMatchObject({ action: "remove-background", recipeVersion: 2, configurationVersion: 0 });
     expect((await request("/api/tasks", "POST", quickInput).then(response => response.json())).task.id).toBe(quick.id);
     expect((await request("/api/tasks", "POST", { ...quickInput, prompt: "changed quick retry must return existing" }).then(response => response.json())).task.id).toBe(quick.id);
     for (let attempt = 0; attempt < 100 && submissions.length < 6; attempt++) await Bun.sleep(50);
     expect(submissions).toHaveLength(6);
     expect(submissions[5]).toMatchObject({ model: "mai-image-2.6-flash", n: 1, web_grounding: false });
-    expect(submissions[5]!.prompt).toContain("foreground alpha matte");
+    expect(submissions[5]!.prompt).toContain("finished full-color subject image");
+    expect(submissions[5]!.prompt).not.toContain("Create a precise foreground alpha matte");
     expect(submissions[5]).not.toHaveProperty("size"); expect(submissions[5]).not.toHaveProperty("resolution"); expect(submissions[5]).not.toHaveProperty("quality");
   } finally {
     child.kill(); await child.exited; provider.stop(true);

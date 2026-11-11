@@ -55,35 +55,60 @@ describe("quick image local result verification", () => {
     expect(output.operations).toContain("product_alpha_flattened_white");
     expect(await hasImageTransparency(output.display)).toBe(false);
   }, 15_000);
-  test("matte preserves original RGB, dimensions, holes and soft edges in true PNG alpha", async () => {
+  test("direct removal preserves provider color and alpha bytes without replacing them with original pixels", async () => {
     const pixels = [20, 40, 60, 255, 70, 80, 90, 255, 110, 120, 130, 200, 150, 160, 170, 255];
     const input = png(pixels);
-    const matte = png([0, 0, 0, 255, 255, 255, 255, 255, 128, 128, 128, 255, 0, 0, 0, 255]);
+    const cutoutPixels = [0, 0, 0, 0, 50, 100, 200, 255, 10, 30, 60, 128, 0, 0, 0, 0];
+    const cutout = png(cutoutPixels);
     const before = Buffer.from(input.bytes);
-    const output = await processImageResult({ result: matte, parameters: parameters("remove-background"), editInput: { references: [input] } });
-    const expected = [...pixels]; expected[3] = 0; expected[11] = 100; expected[15] = 0;
-    expect([...rgba(output.display)]).toEqual(expected);
+    const output = await processImageResult({ result: cutout, parameters: parameters("remove-background"), editInput: { references: [input] } });
+    expect(output.display.bytes).toBe(cutout.bytes);
+    expect([...rgba(output.display)]).toEqual(cutoutPixels);
     expect(output.display.mimeType).toBe("image/png"); expect(await hasImageTransparency(output.display)).toBe(true);
-    expect(input.bytes).toEqual(before); expect(output.operations).toContain("original_rgb_preserved");
-    expect(output.warning).toContain("不承诺像素级完美");
+    expect(input.bytes).toEqual(before);
+    expect(output.operations).toEqual(["transparent_alpha_verified", "ai_direct_background_removal"]);
+    expect(output.warning).toContain("不保证像素完全一致");
   });
-  test("same-ratio matte resizes its alpha only, retaining original-size RGB", async () => {
+  test("direct removal never resizes or aligns model output to the original and needs no source reload", async () => {
     const input = png(Array.from({ length: 32 }, (_, index) => index % 4 === 3 ? 255 : 60), 8, 1);
-    const matte = png([0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255, 255, 255, 255, 255, 255], 4, 1);
-    // A 4:1 matte cannot be stretched onto an 8:1 source.
-    await expect(processImageResult({ result: matte, parameters: parameters("remove-background"), editInput: { references: [input] } })).rejects.toMatchObject({ code: "IMAGE_RESULT_DIMENSION_MISMATCH" });
-    const larger = png(Array.from({ length: 64 }, (_, index) => index % 4 === 3 ? 255 : 60), 8, 2);
-    const output = await processImageResult({ result: matte, parameters: parameters("remove-background"), editInput: { references: [larger] } });
-    const decoded = [...rgba(output.display)]; expect(decoded).toHaveLength(64);
-    expect(decoded.filter((_, index) => index % 4 !== 3).every(value => value === 60)).toBe(true);
+    const cutout = png([0, 0, 0, 0, 50, 100, 200, 255, 10, 30, 60, 128, 0, 0, 0, 0], 2, 2);
+    for (const references of [[input], []]) {
+      const output = await processImageResult({ result: cutout, parameters: parameters("remove-background"), editInput: { references } });
+      expect(output.display.bytes).toBe(cutout.bytes);
+      expect(rgba(output.display)).toHaveLength(16);
+    }
+    expect((await processImageResult({ result: cutout, parameters: parameters("remove-background") })).display.bytes).toBe(cutout.bytes);
   });
-  test("rejects empty, opaque, colored and wrongly proportioned mattes instead of returning fake cutouts", async () => {
+  test("opaque masks, fake backgrounds and entirely invisible images are not passed off as transparent cutouts", async () => {
     for (const value of [0, 128, 255]) {
       const matte = png(Array.from({ length: 16 }, (_, index) => index % 4 === 3 ? 255 : value));
-      await expect(processImageResult({ result: matte, parameters: parameters("remove-background"), editInput: { references: [original] } })).rejects.toMatchObject({ code: "IMAGE_RESULT_MATTE_INVALID" });
+      await expect(processImageResult({ result: matte, parameters: parameters("remove-background") })).rejects.toMatchObject({ code: "IMAGE_RESULT_TRANSPARENCY_MISSING" });
     }
-    await expect(processImageResult({ result: generated, parameters: parameters("remove-background"), editInput: { references: [original] } })).rejects.toMatchObject({ code: "IMAGE_RESULT_MATTE_INVALID" });
-    await expect(processImageResult({ result: generated, parameters: parameters("remove-background") })).rejects.toMatchObject({ code: "INVALID_IMAGE_RESULT_INPUT" });
+    const oldMatte = png([0, 0, 0, 255, 255, 255, 255, 255, 128, 128, 128, 255, 0, 0, 0, 255]);
+    await expect(processImageResult({ result: oldMatte, parameters: parameters("remove-background") })).rejects.toMatchObject({ code: "IMAGE_RESULT_TRANSPARENCY_MISSING" });
+    await expect(processImageResult({ result: png(new Uint8Array(16)), parameters: parameters("remove-background") })).rejects.toThrow("没有可见主体");
+  });
+  test("direct cutouts retain 16-bit PNG bytes and convert actual transparent WebP to PNG", async () => {
+    const wide = Buffer.alloc(16);
+    for (let index = 0; index < 8; index++) wide.writeUInt16LE(index === 3 ? 0 : 60000 - index, index * 2);
+    const highDepth = png(wide, 2, 1, "rgba64le");
+    const unchanged = await processImageResult({ result: highDepth, parameters: parameters("remove-background") });
+    expect(unchanged.display.bytes).toBe(highDepth.bytes);
+    expect(unchanged.operations).toEqual(["transparent_alpha_verified", "ai_direct_background_removal"]);
+    const cutout = png([10, 20, 30, 0, 40, 50, 60, 255, 70, 80, 90, 128, 100, 110, 120, 255]);
+    const webp = { mimeType: "image/webp", bytes: codec(["-i", "pipe:0", "-frames:v", "1", "-threads", "1", "-c:v", "libwebp", "-lossless", "1", "-f", "webp", "pipe:1"], cutout.bytes) };
+    const before = Buffer.from(webp.bytes);
+    const converted = await processImageResult({ result: webp, parameters: parameters("remove-background") });
+    expect(converted.display.mimeType).toBe("image/png");
+    expect(rgba(converted.display)).toEqual(rgba(webp));
+    expect(webp.bytes).toEqual(before);
+    expect(converted.operations).toEqual(["transparent_alpha_verified", "format_conversion", "ai_direct_background_removal"]);
+  });
+  test("retired matte requests stop before a new provider submission or reprocessing; HD recipes remain supported", async () => {
+    const retired = { quickImageAction: "remove-background", quickImage: { action: "remove-background", recipeVersion: 1 } };
+    await expect(validateQuickImageSource(original, retired)).rejects.toMatchObject({ code: "IMAGE_RESULT_RECIPE_RETIRED" });
+    await expect(processImageResult({ result: generated, parameters: retired, editInput: { references: [original] } })).rejects.toMatchObject({ code: "IMAGE_RESULT_RECIPE_RETIRED" });
+    await validateQuickImageSource(original, parameters("hd-upscale"));
   });
   test("4K action verifies actual size and keeps original provider bytes only after validation", async () => {
     await expect(processImageResult({ result: generated, parameters: parameters("hd-upscale"), editInput: { references: [original] } })).rejects.toMatchObject({ code: "IMAGE_RESULT_DIMENSION_MISMATCH" });
