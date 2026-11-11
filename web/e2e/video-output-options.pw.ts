@@ -98,7 +98,11 @@ for (const parameterModelId of ["happyhorse-1.1", "doubao-seedance-2.5"] as cons
         await expect(prompt).toHaveValue(title);
         await page.getByRole("button", { name: /^调\s*整$/ }).click();
         await expect(seedInput).toHaveValue(seed);
-        if (seedance) await expect(settings.getByText("MOV", { exact: true })).toBeVisible();
+        if (seedance) {
+            const selectedOutput = settings.locator(".ant-select-content").filter({ has: page.getByRole("combobox", { name: "视频输出格式", exact: true }) });
+            await expect(selectedOutput).toBeVisible();
+            await expect(selectedOutput).toHaveAttribute("title", "MOV");
+        }
         await settings.getByRole("button", { name: "关闭", exact: true }).click();
         const download = page.waitForEvent("download");
         await page.getByRole("button", { name: "下载", exact: true }).click();

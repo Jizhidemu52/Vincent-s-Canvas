@@ -99,14 +99,17 @@ for (const parameterModelId of ["happyhorse-1.1", "wan2.7", "MiniMax-H3", "douba
         const aliasModel = { ...model, modelId: model.id, parameterModelId };
         const resultId = "80000000-0000-4000-8000-000000000099";
         const providerBodies: Record<string, unknown>[] = [];
-        let uploads = 0;
+        const ownedSourceUrl = "http://owned-fixture.invalid/api/provider-images/original?grant=fixture-only";
+        let providerUploads = 0;
         let preflights = 0;
         await context.route("**/api/models", route => route.fulfill({ json: { models: [aliasModel], tools: toolDefinitions.map(tool => ({ ...tool, enabled: true, modelConfigId: model.id, configurationVersion: 1 })), prices: [] } }));
-        const resolveSources = async (input: any): Promise<ProviderVideoSource[]> => Promise.all(input.sourceUrls.map(async (url: string) => {
+        const resolveSources = async (input: any, providerReady = false): Promise<ProviderVideoSource[]> => Promise.all(input.sourceUrls.map(async (url: string) => {
             const id = url.split("/")[3];
             const bytes = api.assetBytes.get(id)!;
             expect(bytes).toEqual(reference);
-            return { bytes, byteSize: bytes.length, mimeType: "image/png", publicUrl: "asset://pending-image-upload", ...await probeMediaBytes(bytes, "image/png") };
+            // Admission can inspect an owned-asset placeholder; the Worker
+            // issues a public owned URL before invoking the provider runtime.
+            return { bytes, byteSize: bytes.length, mimeType: "image/png", publicUrl: providerReady ? ownedSourceUrl : "asset://pending-owned-media", ...await probeMediaBytes(bytes, "image/png") };
         }));
         await context.route("**/api/tasks/preflight", async route => {
             preflights++;
@@ -118,14 +121,12 @@ for (const parameterModelId of ["happyhorse-1.1", "wan2.7", "MiniMax-H3", "douba
             if (route.request().method() !== "POST") return route.fallback();
             const input = route.request().postDataJSON();
             api.submissions.push(input);
-            await runApiMartVideoTask({ baseUrl: "https://isolated-provider.invalid/v1", apiKey: "fixture-only", modelId: parameterModelId, prompt: input.prompt, parameters: input.parameters, sources: await resolveSources(input), beforeSubmit: async () => true, onSubmitted: async () => undefined }, {
+            await runApiMartVideoTask({ baseUrl: "https://isolated-provider.invalid/v1", apiKey: "fixture-only", modelId: parameterModelId, prompt: input.prompt, parameters: input.parameters, sources: await resolveSources(input, true), beforeSubmit: async () => true, onSubmitted: async () => undefined }, {
                 sleep: async () => undefined,
                 fetch: async (url, init) => {
                     if (url.endsWith("/uploads/images")) {
-                        uploads++;
-                        const file = (init?.body as FormData).get("file") as File;
-                        expect(Buffer.from(await file.arrayBuffer())).toEqual(reference);
-                        return Response.json({ url: "https://fixture-cdn.invalid/original.png" });
+                        providerUploads++;
+                        throw new Error("Owned video sources must not use provider uploads");
                     }
                     if (init?.method === "POST") { providerBodies.push(JSON.parse(String(init.body))); return Response.json({ data: [{ task_id: "fixture-upstream" }] }); }
                     return Response.json({ data: { status: "completed", result: { videos: ["https://fixture-cdn.invalid/result.mp4"] } } });
@@ -156,11 +157,12 @@ for (const parameterModelId of ["happyhorse-1.1", "wan2.7", "MiniMax-H3", "douba
         await expect(page.locator("video")).toHaveCount(1);
         await expect.poll(() => page.locator("video").evaluate((element: HTMLVideoElement) => element.readyState)).toBeGreaterThanOrEqual(2);
         expect(preflights).toBe(1);
-        expect(uploads).toBe(1);
+        expect(providerUploads).toBe(0);
+        expect(api.submissions).toHaveLength(1);
         expect(providerBodies).toHaveLength(1);
         expect(providerBodies[0]).toMatchObject(["happyhorse-1.1", "MiniMax-H3"].includes(parameterModelId)
-            ? { first_frame_image: "https://fixture-cdn.invalid/original.png" }
-            : parameterModelId === "doubao-seedance-2.5" ? { image_with_roles: [{ url: "https://fixture-cdn.invalid/original.png", role: "first_frame" }] } : { image_urls: ["https://fixture-cdn.invalid/original.png"] });
+            ? { first_frame_image: ownedSourceUrl }
+            : parameterModelId === "doubao-seedance-2.5" ? { image_with_roles: [{ url: ownedSourceUrl, role: "first_frame" }] } : { image_urls: [ownedSourceUrl] });
         expect(JSON.stringify(providerBodies)).not.toMatch(/\/api\/assets|base64/);
     });
 }

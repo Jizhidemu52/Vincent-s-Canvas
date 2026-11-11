@@ -135,7 +135,7 @@ test("result review carries frozen requirements and original bytes into an isola
     await page.screenshot({ path: info.outputPath("result-review-desktop.png"), fullPage: true });
     await page.getByLabel("下一步处理", { exact: true }).selectOption("creative-garment-colorway");
     await page.getByRole("button", { name: "带入新草稿", exact: true }).click();
-    await expect(page).toHaveURL(/\/creative\/garment-colorway\?designToken=/);
+    await expect(page).toHaveURL(url => url.pathname === "/garment-colorway" && /^[\w-]+$/.test(url.searchParams.get("designToken") || ""));
     const handoffUrl = page.url();
     const requirements = page.getByRole("textbox", { name: "沿用设计要求", exact: true });
     await expect(requirements).toHaveValue("目标产品：左侧蓝色衬衫\n关键特征：保留六颗纽扣与小尖领");
