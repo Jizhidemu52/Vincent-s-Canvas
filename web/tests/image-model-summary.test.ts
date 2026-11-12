@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
+import { canvasModelPresentation } from "@/lib/canvas/canvas-model-picker-options";
 import { imageModelDisplayName } from "@/lib/model-display";
 import { defaultConfig, modelOptionLabel } from "@/stores/use-config-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
@@ -16,7 +17,7 @@ function visit(node: ts.Node) {
 visit(source);
 if (!summaryExpression) throw new Error("Image workspace model summary expression was not found");
 // Evaluate the production summary expression, not a second copy of its label rule.
-const summary = new Function("modelOptionLabel", "imageModelDisplayName", "effectiveConfig", "model", "businessModels", "user", `return (${summaryExpression.getText(source)});`);
+const summary = new Function("modelOptionLabel", "imageModelDisplayName", "canvasModelPresentation", "effectiveConfig", "model", "businessModels", "user", `return (${summaryExpression.getText(source)});`);
 const savedBusiness = useBusinessConfigStore.getState();
 const savedUser = useUserStore.getState();
 afterEach(() => { useBusinessConfigStore.setState(savedBusiness); useUserStore.setState(savedUser); });
@@ -27,10 +28,22 @@ test.each(["super_admin", "department_admin", "designer"] as const)("%s image su
     useBusinessConfigStore.setState({ models: [model] });
     useUserStore.setState({ user: user as never });
     const config = { ...defaultConfig, model: model.id, imageModel: model.id };
-    expect(summary(modelOptionLabel, imageModelDisplayName, config, model.id, [model], user)).toBe(role === "designer" ? model.publicName : model.name);
+    expect(summary(modelOptionLabel, imageModelDisplayName, canvasModelPresentation, config, model.id, [model], user)).toBe("MAI Image 2.6 Flash");
     expect(config.model).toBe(model.id);
     expect(config.imageModel).toBe(model.id);
     expect(useBusinessConfigStore.getState().models).toEqual([model]);
+});
+
+test("image summary preserves a designer's published label instead of revealing the underlying model", () => {
+    const publicModel = { ...model, publicName: "出图模型9", modelIdentityHidden: true };
+    const user = { ...savedUser.user, id: "summary-test", role: "designer" };
+    useBusinessConfigStore.setState({ models: [publicModel] });
+    useUserStore.setState({ user: user as never });
+    const config = { ...defaultConfig, model: publicModel.id, imageModel: publicModel.id };
+    expect(summary(modelOptionLabel, imageModelDisplayName, canvasModelPresentation, config, publicModel.id, [publicModel], user)).toBe("出图模型9");
+    expect(config.model).toBe(publicModel.id);
+    expect(config.imageModel).toBe(publicModel.id);
+    expect(useBusinessConfigStore.getState().models).toEqual([publicModel]);
 });
 
 test("image summary keeps a local model's channel label when no server mapping exists", () => {
@@ -38,5 +51,5 @@ test("image summary keeps a local model's channel label when no server mapping e
     useBusinessConfigStore.setState({ models: [] });
     useUserStore.setState({ user: user as never });
     const config = { ...defaultConfig, channels: [{ id: "local", name: "Local channel", models: ["custom-image"], baseUrl: "", apiKey: "" }] };
-    expect(summary(modelOptionLabel, imageModelDisplayName, config, "local::custom-image", [], user)).toBe("custom-image（Local channel）");
+    expect(summary(modelOptionLabel, imageModelDisplayName, canvasModelPresentation, config, "local::custom-image", [], user)).toBe("custom-image（Local channel）");
 });
