@@ -155,7 +155,7 @@ def stage_compose(state, credentials, scripts):
         "api": service(images["api"], command=["bun", "src/index.ts"], environment=environment, volumes=[mounted_scripts], healthcheck=health(["wget", "-q", "-O", "-", "http://127.0.0.1:3100/api/health"])),
         "worker": service(images["api"], command=["bun", "src/worker.ts"], environment=environment, volumes=[mounted_scripts], healthcheck=health(["bun", "src/worker-healthcheck.ts"], "10s", 20), stop_grace_period="130s"),
         "web": service(images["web"], networks=["default", "ingress"], ports=["127.0.0.1:%d:3000" % state["webPort"]]),
-        "mock-provider": service(images["api"], command=["bun", "/smoke/mock-provider.ts"], environment={"HOST": "0.0.0.0", "PORT": "4180", "CANVAS_SMOKE_PROJECT": state["project"]}, volumes=[mounted_scripts], read_only=True, tmpfs=["/tmp:rw,noexec,nosuid,size=64m"], cap_drop=["ALL"], security_opt=["no-new-privileges:true"], healthcheck=health(["bun", "-e", 'const r=await fetch("http://127.0.0.1:4180/health");if(!r.ok)process.exit(1)'])),
+        "mock-provider": service(images["api"], command=["bun", "/smoke/mock-provider.ts"], environment={"HOST": "0.0.0.0", "PORT": "4180", "CANVAS_SMOKE_PROJECT": state["project"]}, networks={"default": {"aliases": ["mock-provider.example"]}}, volumes=[mounted_scripts], read_only=True, tmpfs=["/tmp:rw,noexec,nosuid,size=64m"], cap_drop=["ALL"], security_opt=["no-new-privileges:true"], healthcheck=health(["bun", "-e", 'const r=await fetch("http://127.0.0.1:4180/health");if(!r.ok)process.exit(1)'])),
     }
     return {"name": state["project"], "services": services,
             "networks": {"default": {"name": state["project"] + "_default", "internal": True, "labels": labels},

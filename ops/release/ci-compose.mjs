@@ -35,7 +35,7 @@ export function releaseTestCompose(source, options) {
     image: options.apiImage, pull_policy: 'never', command: ['bun', '/smoke/mock-provider.ts'],
     environment: { HOST: '0.0.0.0', PORT: '4180', CANVAS_SMOKE_PROJECT: options.project },
     volumes: [{ type: 'bind', source: resolve(options.repository, 'server/tests/production-smoke'), target: '/smoke', read_only: true, bind: { create_host_path: false } }],
-    networks: ['default'], read_only: true, tmpfs: ['/tmp:rw,noexec,nosuid,size=64m'],
+    networks: { default: { aliases: ['mock-provider.example'] } }, read_only: true, tmpfs: ['/tmp:rw,noexec,nosuid,size=64m'],
     security_opt: ['no-new-privileges:true'], cap_drop: ['ALL'],
   };
   for (const volume of Object.values(result.volumes || {})) {

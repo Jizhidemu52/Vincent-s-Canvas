@@ -23,7 +23,7 @@ test('candidate app images never rebuild while all test resources stay in one is
   expect(config.services.web.networks).toEqual(['default', 'ingress']);
   for (const [role, service] of Object.entries(config.services)) {
     if (role === 'web') continue;
-    expect(service.networks).toEqual(['default']);
+    expect(service.networks).toEqual(role === 'mock-provider' ? { default: { aliases: ['mock-provider.example'] } } : ['default']);
     expect(service.ports).toBeUndefined();
   }
   expect(config.services.web.ports).toEqual(['127.0.0.1:3301:3000']);

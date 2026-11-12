@@ -81,7 +81,9 @@ class StageIsolationTests(unittest.TestCase):
             self.assertNotIn("container_name", service)
             self.assertEqual(service["pull_policy"], "never")
             self.assertEqual(service["labels"][stage.LABEL], state["runId"])
-            self.assertEqual(service["networks"], ["default", "ingress"] if name == "web" else ["default"])
+            networks = ["default", "ingress"] if name == "web" else ["default"]
+            if name == "mock-provider": networks = {"default": {"aliases": ["mock-provider.example"]}}
+            self.assertEqual(service["networks"], networks)
             self.assertEqual(service["image"], state["images"]["api" if name in ("api", "worker", "mock-provider") else name])
             self.assertEqual(service.get("ports", []), ["127.0.0.1:13080:3000"] if name == "web" else [])
         for volume in config["volumes"].values():

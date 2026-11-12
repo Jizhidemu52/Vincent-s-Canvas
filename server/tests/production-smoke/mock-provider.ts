@@ -86,6 +86,10 @@ export function createSmokeProvider(project: string, origin: string, media = cre
     if (!SMOKE_PROJECT_PATTERN.test(project)) throw new Error("Mock provider is restricted to isolated release/staging projects");
     const endpoint = new URL(origin);
     if (endpoint.protocol !== "http:" || !["mock-provider", "127.0.0.1", "localhost"].includes(endpoint.hostname)) throw new Error("Mock provider origin must be local");
+    // A reserved example-domain alias satisfies the unchanged production result
+    // URL contract. Both disposable Compose stacks resolve it only internally.
+    const resultOrigin = new URL(endpoint.origin);
+    resultOrigin.hostname = "mock-provider.example";
     const calls: Array<{ sequence: number; method: string; path: string; model: string | null; kind: string }> = [];
     const videos = new Set<string>();
     return async (request: Request) => {
@@ -116,7 +120,7 @@ export function createSmokeProvider(project: string, origin: string, media = cre
         }
         if (request.method === "GET" && path.startsWith("/v1/tasks/") && videos.has(path.split("/").at(-1)!)) {
             calls.push({ sequence: calls.length + 1, method: "GET", path, model: null, kind: "video-poll" });
-            return Response.json({ data: { status: "completed", result: { videos: [{ url: [`${endpoint.origin}/fixtures/result.mp4`] }] } } });
+            return Response.json({ data: { status: "completed", result: { videos: [{ url: [`${resultOrigin.origin}/fixtures/result.mp4`] }] } } });
         }
         return Response.json({ error: "No mock route; external forwarding is prohibited" }, { status: 404 });
     };

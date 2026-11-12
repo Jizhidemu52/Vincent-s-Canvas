@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { readApiMartVideoReceipt } from "../../src/video-provider-receipt";
 import { createSmokeMedia, createSmokeProvider, SMOKE_CHAT_REPLY, SMOKE_PROVIDER_KEY } from "./mock-provider";
 
 const fixture = { image: Buffer.from("local-image"), video: Buffer.from("local-video"), imageSha256: "a".repeat(64), width: 1024, height: 1024 };
@@ -23,11 +24,32 @@ test("local provider supports the actual image, Responses and asynchronous video
     const video = await (await handler(post("/v1/videos/generations", "MiniMax-H3"))).json();
     expect(video.data[0].task_id).toBe("smoke-video-1");
     const polled = await (await handler(new Request("http://mock-provider:4180/v1/tasks/smoke-video-1", { headers: { authorization: `Bearer ${SMOKE_PROVIDER_KEY}` } }))).json();
-    expect(polled.data).toEqual({ status: "completed", result: { videos: [{ url: ["http://mock-provider:4180/fixtures/result.mp4"] }] } });
+    expect(polled.data).toEqual({ status: "completed", result: { videos: [{ url: ["http://mock-provider.example:4180/fixtures/result.mp4"] }] } });
     expect(await (await handler(new Request("http://mock-provider:4180/fixtures/upload.png"))).arrayBuffer()).toEqual(fixture.image.buffer.slice(fixture.image.byteOffset, fixture.image.byteOffset + fixture.image.byteLength));
     const receipt = await (await handler(new Request("http://mock-provider:4180/__smoke/receipt"))).json();
     expect(receipt).toMatchObject({ schema: 1, project: "ci-release-123-1-amd64", paid: false });
     expect(receipt.calls.map((call: { kind: string }) => call.kind)).toEqual(["image", "chat", "video", "video-poll"]);
+});
+
+test("synthetic completed video passes the production receipt URL contract without network access", async () => {
+    const handler = make();
+    const submitted = await (await handler(post("/v1/videos/generations", "MiniMax-H3"))).json();
+    const upstreamTaskId = submitted.data[0].task_id;
+    const polled = await (await handler(new Request(`http://mock-provider:4180/v1/tasks/${upstreamTaskId}`, { headers: { authorization: `Bearer ${SMOKE_PROVIDER_KEY}` } }))).json();
+    const identity = {
+        taskId: "00000000-0000-4000-8000-000000000001", userId: "00000000-0000-4000-8000-000000000002",
+        modelConfigId: "00000000-0000-4000-8000-000000000003", modelId: "MiniMax-H3", upstreamTaskId,
+    };
+    const document = { ...identity, schema: "canvas.video-provider-receipt", version: 1, kind: "apimart-video",
+        status: polled.data.status, url: polled.data.result.videos[0].url[0], currency: "USD", costStatus: "unknown" };
+    expect(() => readApiMartVideoReceipt(document, identity)).not.toThrow();
+    expect(readApiMartVideoReceipt(document, identity)?.url).toBe("http://mock-provider.example:4180/fixtures/result.mp4");
+    const result = await handler(new Request(document.url));
+    expect(result.headers.get("content-type")).toBe("video/mp4");
+    expect(Buffer.from(await result.arrayBuffer())).toEqual(fixture.video);
+    // The fixture must conform to the production rule, never weaken it.
+    expect(() => readApiMartVideoReceipt({ ...document, url: "http://mock-provider:4180/fixtures/result.mp4" }, identity)).toThrow("收据格式无效");
+    expect(() => readApiMartVideoReceipt({ ...document, url: "http://127.0.0.1:4180/fixtures/result.mp4" }, identity)).toThrow("收据格式无效");
 });
 
 test("formal smoke media is a real large PNG and playable MP4 generated locally", () => {
