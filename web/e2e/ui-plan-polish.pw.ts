@@ -55,11 +55,13 @@ test("creative examples reserve their original ratio and fade only when loaded",
 test("navigation and creative cards share 120ms hover, 80ms press and the AntD curve", async ({ page, api }) => {
     await page.context().route("**/api/prompt-templates?*", route => route.fulfill({ json: { templates: [], total: 0 } }));
     await page.goto("/creative");
-    for (const target of [page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: "自由画布", exact: true }), page.locator(".creative-card").first()]) {
+    for (const { target, properties, duration } of [
+        { target: page.getByRole("navigation", { name: "主导航" }).getByRole("link", { name: "自由画布", exact: true }), properties: "background-color, color, scale", duration: "0.12s, 0.12s, 0.08s" },
+        { target: page.locator(".creative-card").first(), properties: "border-color, transform", duration: "0.12s, 0.12s" },
+    ]) {
         await target.hover();
-        const hovered = await target.evaluate(element => ({ duration: getComputedStyle(element).transitionDuration, easing: getComputedStyle(element).transitionTimingFunction }));
-        expect(hovered.duration.split(", ")).toEqual(["0.12s", "0.12s"]);
-        expect(hovered.easing).toBe(`${ease}, ${ease}`);
+        const hovered = await target.evaluate(element => ({ properties: getComputedStyle(element).transitionProperty, duration: getComputedStyle(element).transitionDuration, easing: getComputedStyle(element).transitionTimingFunction }));
+        expect(hovered).toEqual({ properties, duration, easing: properties.split(", ").map(() => ease).join(", ") });
         await page.mouse.down();
         try { expect((await target.evaluate(element => getComputedStyle(element).transitionDuration)).split(", ").every(value => value === "0.08s")).toBe(true); }
         finally { await page.mouse.move(1, 1); await page.mouse.up(); }

@@ -70,10 +70,12 @@ for (const [sceneId, draftLabel, action] of [
             const sentinel = `not-copied:${exampleId}`;
             await page.evaluate(value => navigator.clipboard.writeText(value), sentinel);
             await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(sentinel);
-            await article.getByRole("button", { name: "复制示例要求", exact: true }).click();
+            const copyButton = article.getByRole("button", { name: "复制示例要求", exact: true });
+            await copyButton.click();
+            await expect(copyButton).toHaveText("已复制 ✓");
             await expect.poll(() => page.evaluate(async () => (await navigator.clipboard.readText()).replace(/\r\n/g, "\n"))).toBe(example!.prompt!.replace(/\r\n/g, "\n"));
-            // Ant Design may legitimately keep both successful-copy notices visible.
-            await expect(page.getByText("示例要求已复制", { exact: true }).last()).toBeVisible();
+            await expect(page.getByText("示例要求已复制", { exact: true })).toHaveCount(0);
+            await expect(copyButton).toHaveText("复制示例要求");
             await expect(draft).toHaveValue("我的未提交草稿，操作示例不能覆盖");
         }
         await page.screenshot({ path: info.outputPath(`${sceneId}-examples-desktop.png`), fullPage: true });

@@ -94,6 +94,10 @@ test("canvas tooltips retain disabled guidance and Radix parameter triggers", as
     await page.getByRole("button", { name: "画布缩放与视图", exact: true }).click();
     const selection = page.getByRole("button", { name: /缩放到选中/ });
     await expect(selection).toBeDisabled();
+    const viewPopover = page.locator(".ant-popover").filter({ has: selection });
+    await expect(viewPopover).toBeVisible();
+    // Hover at the settled position, not the popup's initial 80% entrance scale.
+    await expect(viewPopover).not.toHaveClass(/ant-zoom-big-(?:appear|enter)/);
     await selection.locator("..").hover();
     await expect(page.getByRole("tooltip").filter({ hasText: "请先选择节点" })).toBeVisible();
     expect(api.submissions).toHaveLength(0);

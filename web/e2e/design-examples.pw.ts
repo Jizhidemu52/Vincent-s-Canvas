@@ -81,6 +81,7 @@ for (const href of routes) {
 
 test("copy and download preserve the real draft and saved records, without any generation submission", async ({ page, context, api }) => {
     const writes = await exampleFixture(context);
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
     await page.goto("/image");
     const prompt = page.getByRole("textbox", { name: "图像提示词", exact: true });
     await expect(prompt).toBeVisible();
@@ -101,8 +102,13 @@ test("copy and download preserve the real draft and saved records, without any g
     });
     const before = await snapshot();
     await record(page).getByTestId("practice-example-toggle").click();
-    await article(page).getByRole("button", { name: "复制示例要求", exact: true }).click();
-    await expect(page.getByText("示例要求已复制", { exact: true })).toBeVisible();
+    const copyButton = article(page).getByRole("button", { name: "复制示例要求", exact: true });
+    await page.evaluate(() => navigator.clipboard.writeText("not-copied:design-example"));
+    await copyButton.click();
+    await expect(copyButton).toHaveText("已复制 ✓");
+    await expect.poll(() => page.evaluate(async () => (await navigator.clipboard.readText()).replace(/\r\n/g, "\n"))).toBe(designExampleForLocation("/image")!.prompt!.replace(/\r\n/g, "\n"));
+    await expect(page.getByText("示例要求已复制", { exact: true })).toHaveCount(0);
+    await expect(copyButton).toHaveText("复制示例要求");
     const material = designExampleForLocation("/image")!.media[0];
     const downloadEvent = page.waitForEvent("download");
     await article(page).getByRole("link", { name: `下载${material.label}`, exact: true }).first().click();
