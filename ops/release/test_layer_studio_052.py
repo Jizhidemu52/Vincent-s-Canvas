@@ -20,9 +20,25 @@ spec.loader.exec_module(operator)
 CATALOG = json.loads((HERE / "layer-studio-052-catalog.json").read_text(encoding="utf-8"))
 
 
+def with_task_layout(value, physical_count=36, dropped=()):
+    columns = [row for row in value["columns"] if row["table_name"] != "tasks"]
+    attributes = []
+    for position in range(1, physical_count + 1):
+        name = {35: "user_input", 36: "prompt_compilation_id", 37: "prompt_optimized"}.get(position, f"prior_task_{position}")
+        attributes.append({"attnum": position, "attname": name, "attisdropped": position in dropped})
+        if position not in dropped:
+            kind = {35: ("jsonb", "jsonb"), 37: ("boolean", "bool")}.get(position, ("text", "text"))
+            columns.append({"table_name": "tasks", "column_name": name, "ordinal_position": position,
+                            "data_type": kind[0], "udt_name": kind[1], "is_nullable": "YES", "column_default": None,
+                            "numeric_precision": None, "numeric_scale": None})
+    value["columns"] = sorted(columns, key=lambda row: (row["table_name"], row["ordinal_position"]))
+    value["layerStudioTaskLayout"] = {"relnatts": physical_count, "attributes": attributes}
+    return value
+
+
 def before_state():
     tables = [{"name": name, "count": 3, "sha256": "a" * 64} for name in sorted(operator.CHANGED_TABLES | {"users", "providers", "model_configs", "usage_rollup_state"})]
-    return {"identity": {"database": "canvas", "systemIdentifier": "same"},
+    return with_task_layout({"identity": {"database": "canvas", "systemIdentifier": "same"},
             "migrations": [{"name": operator.PREVIOUS, "applied_at": "old"}],
             "sequences": [{"sequencename": "audit_logs_id_seq", "last_value": 7}],
             "sequenceStates": [{"name": "audit_logs_id_seq", "lastValue": "7", "isCalled": True}],
@@ -32,12 +48,17 @@ def before_state():
             "layerStudioOriginalTasks": copy.deepcopy(next(row for row in tables if row["name"] == "tasks")),
             "layerStudioNonNullOutputs": 0, "layerStudioSafety": copy.deepcopy(operator.SAFETY),
             "layerStudioOtherRows": [copy.deepcopy(row) for row in tables if row["name"] in operator.SEEDS],
-            "layerStudioSeeds": {name: [] for name in operator.SEEDS}}
+            "layerStudioSeeds": {name: [] for name in operator.SEEDS}})
 
 
-def after_state():
-    before = before_state(); value = copy.deepcopy(before)
+def after_state(before=None):
+    before = before_state() if before is None else before; value = copy.deepcopy(before)
     value.update(operator.expected_catalog(before, CATALOG))
+    count = before["layerStudioTaskLayout"]["relnatts"]
+    value["layerStudioTaskLayout"]["attributes"] += [
+        {"attnum": count + 1, "attname": "result_document", "attisdropped": False},
+        {"attnum": count + 2, "attname": "upstream_result_document", "attisdropped": False}]
+    value["layerStudioTaskLayout"]["relnatts"] = count + 2
     value["migrations"].append({"name": operator.MIGRATION, "applied_at": "new"})
     for row in value["tables"]:
         if row["name"] in operator.CHANGED_TABLES:
@@ -49,6 +70,56 @@ def after_state():
 
 
 class LayerStudio052Contracts(unittest.TestCase):
+    def test_existing_37th_task_column_is_preserved_and_outputs_append_at_38_39(self):
+        before = with_task_layout(before_state(), 37); original = copy.deepcopy(before)
+        catalog = copy.deepcopy(CATALOG)
+        expected = operator.expected_catalog(before, catalog)
+        old = [row for row in expected["columns"] if row["table_name"] == "tasks" and row["column_name"] not in operator.OUTPUT_COLUMNS]
+        self.assertEqual(old, [row for row in before["columns"] if row["table_name"] == "tasks"])
+        self.assertEqual([(row["column_name"], row["ordinal_position"]) for row in expected["columns"] if row["table_name"] == "tasks" and row["column_name"] in operator.OUTPUT_COLUMNS],
+                         [("result_document", 38), ("upstream_result_document", 39)])
+        self.assertEqual(before, original); self.assertEqual(catalog, CATALOG)
+
+    def test_dropped_tail_slot_is_not_reused_for_new_outputs(self):
+        before = with_task_layout(before_state(), 38, dropped=(38,))
+        self.assertEqual(max(row["ordinal_position"] for row in before["columns"] if row["table_name"] == "tasks"), 37)
+        expected = operator.expected_catalog(before, CATALOG)
+        self.assertEqual([(row["column_name"], row["ordinal_position"]) for row in expected["columns"] if row["table_name"] == "tasks" and row["column_name"] in operator.OUTPUT_COLUMNS],
+                         [("result_document", 39), ("upstream_result_document", 40)])
+
+    def test_incomplete_or_visible_inconsistent_physical_layout_is_rejected(self):
+        mutations = [lambda b: b.pop("layerStudioTaskLayout"),
+                     lambda b: b["layerStudioTaskLayout"].update(relnatts=37),
+                     lambda b: b["layerStudioTaskLayout"].update(relnatts=True),
+                     lambda b: b["layerStudioTaskLayout"]["attributes"].pop(),
+                     lambda b: b["layerStudioTaskLayout"]["attributes"][-1].update(attnum=35),
+                     lambda b: b["layerStudioTaskLayout"]["attributes"][-1].update(attname="wrong"),
+                     lambda b: b["layerStudioTaskLayout"]["attributes"][-1].update(attisdropped=True),
+                     lambda b: b["layerStudioTaskLayout"]["attributes"][-1].update(attisdropped=0),
+                     lambda b: b["layerStudioTaskLayout"]["attributes"].reverse()]
+        for mutation in mutations:
+            with self.subTest(mutation=mutation), self.assertRaisesRegex(Rejected, "052_TASK_PHYSICAL"):
+                before = before_state(); mutation(before); operator.expected_catalog(before, CATALOG)
+
+    def test_append_delta_preserves_dropped_slots_and_every_existing_column_field(self):
+        before = with_task_layout(before_state(), 38, dropped=(4, 38))
+        operator.assert_delta(before, after_state(before), CATALOG)
+        mutations = [lambda a: a["layerStudioTaskLayout"]["attributes"][3].update(attname="changed dropped slot"),
+                     lambda a: a["layerStudioTaskLayout"].update(relnatts=41),
+                     lambda a: a["layerStudioTaskLayout"]["attributes"][-1].update(attnum=38),
+                     lambda a: a["layerStudioTaskLayout"]["attributes"][-1].update(attisdropped=True),
+                     lambda a: next(row for row in a["columns"] if row["table_name"] == "tasks" and row["column_name"] == "prompt_optimized").update(column_default="true"),
+                     lambda a: a["columns"].append(copy.deepcopy(a["columns"][-1]))]
+        for mutation in mutations:
+            with self.subTest(mutation=mutation), self.assertRaises(Rejected):
+                after = after_state(before); mutation(after); operator.assert_delta(before, after, CATALOG)
+
+    def test_unrelated_catalog_identity_collisions_are_still_rejected(self):
+        for field, row in [("indexes", CATALOG["additions"]["indexes"][0]),
+                           ("constraints", CATALOG["additions"]["constraints"][0])]:
+            with self.subTest(field=field), self.assertRaisesRegex(Rejected, "048_OBJECT_ALREADY_PRESENT"):
+                before = before_state(); before[field].append(copy.deepcopy(row)); operator.expected_catalog(before, CATALOG)
+
     def test_only_fixed_catalog_disabled_seeds_empty_prices_and_null_outputs_change(self):
         operator.assert_delta(before_state(), after_state(), CATALOG)
         mutations = [lambda s: s["identity"].update(database="other"), lambda s: s["sequences"][0].update(last_value=8),
@@ -174,6 +245,31 @@ class LayerStudio052IsolatedSql(unittest.TestCase):
         self.assertGreater(before["layerStudioOriginalTasks"]["count"], 0)
         self.assertNotEqual(next(row for row in before["tables"] if row["name"] == "tasks")["sha256"], next(row for row in after["tables"] if row["name"] == "tasks")["sha256"])
         self.assertEqual(before["layerStudioOriginalTasks"], after["layerStudioOriginalTasks"])
+
+    def test_existing_37_columns_and_dropped_tail_append_at_physical_high_water(self):
+        for suffix, positions in [("", [38, 39]), ("ALTER TABLE tasks ADD COLUMN discarded_tail text; ALTER TABLE tasks DROP COLUMN discarded_tail;", [39, 40])]:
+            with self.subTest(positions=positions):
+                rows = self.execute([{"sql": "ALTER TABLE tasks ADD COLUMN historical_task_field text;" + suffix},
+                                     {"kind": "snapshot"}, {"kind": "migration"}, {"kind": "snapshot"}])
+                self.assertTrue(rows[0]["ok"], rows[0]); self.assertTrue(rows[2]["ok"], rows[2])
+                before, after = rows[1]["snapshot"], rows[3]["snapshot"]
+                operator.assert_delta(before, after, CATALOG)
+                self.assertEqual([row["ordinal_position"] for row in after["columns"] if row["table_name"] == "tasks" and row["column_name"] in operator.OUTPUT_COLUMNS], positions)
+                self.assertEqual([row for row in after["columns"] if row["table_name"] == "tasks" and row["column_name"] not in operator.OUTPUT_COLUMNS],
+                                 [row for row in before["columns"] if row["table_name"] == "tasks"])
+                self.assertEqual(before["layerStudioTaskLayout"]["attributes"], after["layerStudioTaskLayout"]["attributes"][:-2])
+
+    def test_physical_only_drift_before_sql_is_rejected_and_in_transaction_rolls_back(self):
+        drift = "ALTER TABLE tasks ADD COLUMN physical_only_drift text; ALTER TABLE tasks DROP COLUMN physical_only_drift;"
+        rows = self.execute([{"kind": "snapshot"}, {"kind": "migration", "beforeSql": drift}, {"kind": "snapshot"}])
+        self.assertFalse(rows[1]["ok"], rows[1]); self.assertIn("052_STOPPED_BASELINE_DRIFT", rows[1]["message"])
+        before, after = rows[0]["snapshot"], rows[2]["snapshot"]
+        self.assertEqual(before["columns"], after["columns"])
+        self.assertEqual(before["migrations"], after["migrations"])
+        self.assertEqual(after["layerStudioTaskLayout"]["relnatts"], before["layerStudioTaskLayout"]["relnatts"] + 1)
+        rows = self.execute([{"kind": "snapshot"}, {"kind": "migration", "inject": drift}, {"kind": "snapshot"}])
+        self.assertFalse(rows[1]["ok"], rows[1]); self.assertIn("052_CATALOG_OR_ORIGINAL_ROWS_CHANGED", rows[1]["message"])
+        self.assertEqual(rows[0]["snapshot"], rows[2]["snapshot"])
 
     def test_old_task_rows_config_prices_provider_and_business_changes_roll_back_entire_052(self):
         injections = ["UPDATE tasks SET parameters='{\"prompt\":\"changed\"}'", "UPDATE users SET display_name='Changed'",

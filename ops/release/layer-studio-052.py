@@ -29,7 +29,8 @@ SQL_PATH = "server/src/migrations/" + MIGRATION
 CATALOG_PATH = "ops/release/layer-studio-052-catalog.json"
 STATE_PATH = "ops/release/layer-studio-052-state.sql"
 NEW_TABLE = "layer_studio_prices"
-OUTPUT_COLUMNS = {"result_document", "upstream_result_document"}
+OUTPUT_COLUMN_ORDER = ("result_document", "upstream_result_document")
+OUTPUT_COLUMNS = set(OUTPUT_COLUMN_ORDER)
 SORT_KEYS = support.SORT_KEYS
 REPLACEMENTS = {("module_flags", "module_flags_module_key_check"),
                 ("tool_api_configurations", "tool_api_configurations_tool_key_check")}
@@ -73,6 +74,32 @@ def validate_catalog(catalog):
     require(isinstance(catalog["seedColumns"], list) and {row["table_name"] for row in catalog["seedColumns"]} == set(SEEDS) | {"schema_migrations"}, "052_SEED_COLUMN_CATALOG_REQUIRED")
 
 
+def task_layout(snapshot):
+    """Bind visible columns to every allocated physical slot, including dropped tails."""
+    layout = snapshot.get("layerStudioTaskLayout")
+    require(isinstance(layout, dict) and set(layout) == {"relnatts", "attributes"}, "052_TASK_PHYSICAL_LAYOUT_REQUIRED")
+    count, attributes = layout["relnatts"], layout["attributes"]
+    require(type(count) is int and count > 0 and isinstance(attributes, list) and len(attributes) == count,
+            "052_TASK_PHYSICAL_LAYOUT_INVALID")
+    require(all(isinstance(row, dict) and set(row) == {"attnum", "attname", "attisdropped"}
+                and type(row["attnum"]) is int and isinstance(row["attname"], str) and row["attname"]
+                and type(row["attisdropped"]) is bool for row in attributes), "052_TASK_PHYSICAL_LAYOUT_INVALID")
+    require([row["attnum"] for row in attributes] == list(range(1, count + 1)), "052_TASK_PHYSICAL_SLOTS_INCOMPLETE")
+    visible = [(row["attnum"], row["attname"]) for row in attributes if not row["attisdropped"]]
+    columns = [(row["ordinal_position"], row["column_name"]) for row in snapshot["columns"] if row["table_name"] == "tasks"]
+    require(visible == columns and len({name for _, name in visible}) == len(visible), "052_TASK_PHYSICAL_VISIBLE_COLUMNS_MISMATCH")
+    return layout
+
+
+def expected_task_layout(before):
+    layout = copy.deepcopy(task_layout(before))
+    count = layout["relnatts"]
+    layout["attributes"].extend({"attnum": count + offset, "attname": name, "attisdropped": False}
+                                for offset, name in enumerate(OUTPUT_COLUMN_ORDER, 1))
+    layout["relnatts"] = count + len(OUTPUT_COLUMN_ORDER)
+    return layout
+
+
 def expected_catalog(before, catalog):
     validate_catalog(catalog)
     result = {field: copy.deepcopy(before[field]) for field in SORT_KEYS}
@@ -85,7 +112,15 @@ def expected_catalog(before, catalog):
     seed_columns = [row for row in before["columns"] if row["table_name"] in set(SEEDS) | {"schema_migrations"}]
     require_unchanged(seed_columns, catalog["seedColumns"], "052_SEED_TABLE_SCHEMA_OR_DEFAULTS_CHANGED")
     require(not any(row["table_name"] == "tasks" and row["column_name"] in OUTPUT_COLUMNS for row in before["columns"]), "052_OUTPUT_COLUMN_ALREADY_PRESENT")
-    return support.catalog_union(result, catalog["additions"])
+    count = task_layout(before)["relnatts"]
+    additions = copy.deepcopy(catalog["additions"])
+    task_columns = [row for row in additions["columns"] if row["table_name"] == "tasks"]
+    require(len(task_columns) == len(OUTPUT_COLUMN_ORDER), "052_TWO_OUTPUT_COLUMNS_REQUIRED")
+    # The reviewed catalog describes a clean 001..051 database. Only these two
+    # new ordinal positions depend on the actual table's physical append point.
+    for row in task_columns:
+        row["ordinal_position"] = count + OUTPUT_COLUMN_ORDER.index(row["column_name"]) + 1
+    return support.catalog_union(result, additions)
 
 
 def validate_before(before, catalog):
@@ -107,6 +142,8 @@ def assert_delta(before, after, catalog):
         require_unchanged(before[field], after[field], "052_ORIGINAL_" + field.upper() + "_CHANGED")
     for field, expected in expected_catalog(before, catalog).items():
         require_unchanged(expected, after[field], "052_UNEXPECTED_" + field.upper() + "_DELTA")
+    task_layout(after)
+    require_unchanged(expected_task_layout(before), after["layerStudioTaskLayout"], "052_TASK_PHYSICAL_APPEND_DELTA_INVALID")
     prior, current = ({row["name"]: row for row in value["tables"]} for value in [before, after])
     require(set(current) == set(prior) | {NEW_TABLE} and len(current) == len(after["tables"]), "052_UNEXPECTED_TABLE_DELTA")
     for name, row in prior.items():
@@ -160,8 +197,9 @@ def read_migration_sql(package, release):
 
 
 def guard_sql(before, catalog):
-    fields = [*SORT_KEYS, "identity", "sequences", "sequenceStates", "layerStudioOriginalTasks", "layerStudioOtherRows", "layerStudioSafety"]
-    expected = {**{field: before[field] for field in fields}, **expected_catalog(before, catalog)}
+    fields = [*SORT_KEYS, "identity", "sequences", "sequenceStates", "layerStudioOriginalTasks", "layerStudioOtherRows", "layerStudioSafety", "layerStudioTaskLayout"]
+    expected = {**{field: before[field] for field in fields}, **expected_catalog(before, catalog),
+                "layerStudioTaskLayout": expected_task_layout(before)}
     checks = " OR ".join(f"actual->'{field}' IS DISTINCT FROM expected->'{field}'" for field in fields)
     guards = [f"IF {checks} THEN RAISE EXCEPTION '052_CATALOG_OR_ORIGINAL_ROWS_CHANGED'; END IF;",
               f"IF actual->'layerStudioNonNullOutputs' IS DISTINCT FROM '0'::jsonb OR EXISTS(SELECT 1 FROM {NEW_TABLE}) THEN RAISE EXCEPTION '052_OUTPUTS_OR_PRICES_NOT_EMPTY'; END IF;",
@@ -230,7 +268,7 @@ class LayerStudio052(support.Usage048):
             current = self.capture("052-migrate")
             require_unchanged(prior["baseline"]["configurationHashes"], current["configurationHashes"], "052_CONFIGURATION_DRIFT")
             assert_database_layout(prior["baseline"]["database"], current["database"])
-            for field in ["functions", "triggers", "layerStudioSafety"]:
+            for field in ["functions", "triggers", "layerStudioSafety", "layerStudioTaskLayout"]:
                 require_unchanged(prior["baseline"]["database"][field], current["database"][field], "052_CATALOG_DRIFT_SINCE_PREFLIGHT")
             assert_rollback_source(current["model"], prior["baseline"]["model"], current["containers"], prior["baseline"]["containers"], self.instance)
             validate_source_migrations(current["database"], release, self.instance)
@@ -246,7 +284,7 @@ class LayerStudio052(support.Usage048):
             model = self.audit / "original.private.json"
             write_new_json(model, compose_literals(current["model"]))
             baseline = self.freeze_stopped_baseline(current, self.stop_app(model))
-            for field in ["functions", "triggers", "layerStudioSafety"]:
+            for field in ["functions", "triggers", "layerStudioSafety", "layerStudioTaskLayout"]:
                 require_unchanged(current["database"][field], baseline["database"][field], "052_CATALOG_DRIFT_DURING_DRAIN")
             validate_before(baseline["database"], catalog)
             self.disabled("052-stopped-statistics-unchanged")

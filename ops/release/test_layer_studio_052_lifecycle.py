@@ -11,6 +11,12 @@ import test_layer_studio_052 as checks
 operator = checks.operator
 
 
+def add_dropped_tail(database):
+    layout = database["layerStudioTaskLayout"]
+    layout["relnatts"] += 1
+    layout["attributes"].append({"attnum": layout["relnatts"], "attname": "dropped_tail", "attisdropped": True})
+
+
 class FakeOperator(operator.LayerStudio052):
     def __init__(self, root, failure=None):
         self.root, self.failure, self.events = root, failure, []
@@ -22,7 +28,10 @@ class FakeOperator(operator.LayerStudio052):
                          "containers": [{"Name": "/original-" + role, "Id": role + "-original-id"} for role in ["api", "worker", "web"]]}
     def new_audit(self, name):
         self.events.append("audit"); self.audit = self.root / "audit"; self.audit.mkdir()
-    def capture(self, label): return copy.deepcopy(self.baseline)
+    def capture(self, label):
+        value = copy.deepcopy(self.baseline)
+        if self.failure == "physical-preflight-drift": add_dropped_tail(value["database"])
+        return value
     def assert_platform(self, release): self.events.append("platform")
     def disabled(self, label):
         self.events.append("disabled")
@@ -35,7 +44,9 @@ class FakeOperator(operator.LayerStudio052):
     def stop_app(self, model):
         self.events.append("stop-original"); return self.baseline["containers"]
     def freeze_stopped_baseline(self, current, rows):
-        self.events.append("stopped-baseline"); return copy.deepcopy(self.baseline)
+        self.events.append("stopped-baseline"); value = copy.deepcopy(self.baseline)
+        if self.failure == "physical-drain-drift": add_dropped_tail(value["database"])
+        return value
     def backup_048(self):
         self.events.append("backup")
         if self.failure in ["sql-drift", "catalog-drift", "support-drift"]:
@@ -103,6 +114,16 @@ class LayerStudio052Lifecycle(unittest.TestCase):
             with tempfile.TemporaryDirectory() as directory:
                 runner, error, _ = self.run_operator(Path(directory), prior_change=change)
                 self.assertIsInstance(error, operator.Rejected); self.assertEqual(runner.events, [])
+
+    def test_physical_only_drift_is_checked_before_maintenance_and_after_drain(self):
+        for failure, code, closed in [("physical-preflight-drift", "052_CATALOG_DRIFT_SINCE_PREFLIGHT", False),
+                                      ("physical-drain-drift", "052_CATALOG_DRIFT_DURING_DRAIN", True)]:
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory:
+                runner, error, _ = self.run_operator(Path(directory), failure)
+                self.assertIsInstance(error, operator.Rejected); self.assertEqual(str(error), code)
+                self.assertEqual("gate:close" in runner.events, closed)
+                self.assertNotIn("backup", runner.events); self.assertNotIn("transaction", runner.events)
+                self.assertNotIn("gate:open", runner.events)
 
 
 if __name__ == "__main__": unittest.main()

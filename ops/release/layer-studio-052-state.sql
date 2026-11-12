@@ -11,6 +11,10 @@ WITH targets(table_name,key_column) AS (VALUES
  FROM (SELECT encode(digest((to_jsonb(t)-ARRAY['result_document','upstream_result_document'])::text,'sha256'),'hex') h FROM public.tasks t) rows
 )
 SELECT jsonb_build_object(
+ 'layerStudioTaskLayout',(SELECT jsonb_build_object('relnatts',c.relnatts,'attributes',
+   (SELECT coalesce(jsonb_agg(jsonb_build_object('attnum',a.attnum,'attname',a.attname,'attisdropped',a.attisdropped) ORDER BY a.attnum),'[]'::jsonb)
+    FROM pg_catalog.pg_attribute a WHERE a.attrelid=c.oid AND a.attnum>0))
+   FROM pg_catalog.pg_class c WHERE c.oid='public.tasks'::regclass),
  'layerStudioOriginalTasks',(SELECT jsonb_build_object('name','tasks','count',n,'sha256',hash) FROM task_rows),
  'layerStudioNonNullOutputs',(SELECT count(*) FROM public.tasks t
    WHERE coalesce(to_jsonb(t)->'result_document','null'::jsonb)<>'null'::jsonb

@@ -56,6 +56,7 @@ try {
                         input: JSON.stringify({ ...operation, beforeJson: await snapshotText() }), encoding: "utf8", maxBuffer: 32 * 1024 * 1024,
                     });
                     if (built.status !== 0) throw Error(built.stderr);
+                    if (operation.beforeSql) await db.exec(operation.beforeSql);
                     results.push({ ok: true, values: await db.exec(built.stdout) });
                 } else results.push({ ok: true, values: await db.exec(operation.sql) });
             } catch (error) {
