@@ -180,20 +180,42 @@ test("fixed-seed pressure: 3 rounds of 6 independent mixed-format batches with t
 
 async function panTo(page: Page, target: Locator) {
     await expect(target).toBeAttached(); const box = await target.boundingBox(); if (!box) throw new Error("Missing UI target bounds");
-    const dx = 900 - (box.x + box.width / 2), dy = 430 - (box.y + box.height / 2);
+    let dx = 900 - (box.x + box.width / 2), dy = 430 - (box.y + box.height / 2);
     if (Math.abs(dx) > 300 || Math.abs(dy) > 180) {
-        // Workflow output/config cards can now occupy the old fixed grab point.
-        // Begin on observed canvas background, not inside a textarea or toolbar.
-        const grab = await page.evaluate(() => {
-            for (let y = 140; y < innerHeight - 100; y += 80) for (let x = 20; x < innerWidth - 20; x += 80) {
-                const hit = document.elementFromPoint(x, y);
-                if (hit?.closest("[data-canvas-viewport]") && !hit.closest("[data-node-id],[data-canvas-group-id],[data-canvas-no-zoom],button,input,textarea")) return { x, y };
-            }
-            throw new Error("No unobstructed canvas background is available for panning");
-        });
-        await page.mouse.move(grab.x, grab.y); await page.mouse.down({ button: "middle" });
-        await expect(page.locator("[data-canvas-viewport]")).toHaveAttribute("data-cursor-panning", "true");
-        await page.mouse.move(grab.x + dx, grab.y + dy, { steps: 12 }); await page.mouse.up({ button: "middle" });
+        // This workflow test is not a native-middle-button test. Its old grab
+        // could release outside Chromium, importing Linux's shared selection.
+        // Use the visible hand tool and keep each left-button drag in bounds.
+        const viewport = page.locator("[data-canvas-viewport]");
+        await page.getByRole("button", { name: "移动画布", exact: true }).click();
+        while (Math.hypot(dx, dy) > 1) {
+            const grab = await viewport.evaluate((element, delta) => {
+                const bounds = element.getBoundingClientRect();
+                const left = Math.max(24, bounds.left + 24), right = Math.min(innerWidth - 24, bounds.right - 24);
+                const top = Math.max(140, bounds.top + 24), bottom = Math.min(innerHeight - 100, bounds.bottom - 24);
+                let best: { x: number; y: number; toX: number; toY: number; progress: number } | undefined;
+                for (let y = top; y <= bottom; y += 80) for (let x = left; x <= right; x += 80) {
+                    const hit = document.elementFromPoint(x, y);
+                    if (!hit?.closest("[data-canvas-viewport]") || hit.closest("[data-node-id],[data-canvas-group-id],[data-canvas-no-zoom],button,input,textarea")) continue;
+                    const toX = Math.min(right, Math.max(left, x + delta.dx)), toY = Math.min(bottom, Math.max(top, y + delta.dy));
+                    const progress = Math.hypot(delta.dx, delta.dy) - Math.hypot(delta.dx - (toX - x), delta.dy - (toY - y));
+                    if (!best || progress > best.progress) best = { x, y, toX, toY, progress };
+                }
+                if (!best || best.progress <= 0) throw new Error("No in-bounds canvas background drag can approach the target");
+                return best;
+            }, { dx, dy });
+            const remaining = Math.hypot(dx, dy);
+            await page.mouse.move(grab.x, grab.y); await page.mouse.down({ button: "left" });
+            await expect(viewport).toHaveAttribute("data-cursor-panning", "true");
+            await page.mouse.move(grab.toX, grab.toY, { steps: 12 }); await page.mouse.up({ button: "left" });
+            await expect(viewport).toHaveAttribute("data-cursor-panning", "false");
+            await expect.poll(async () => {
+                const current = await target.boundingBox();
+                if (!current) return remaining;
+                dx = 900 - (current.x + current.width / 2); dy = 430 - (current.y + current.height / 2);
+                return Math.hypot(dx, dy);
+            }).toBeLessThan(remaining - Math.min(0.5, grab.progress / 2));
+        }
+        await page.getByRole("button", { name: "选择 / 框选", exact: true }).click();
         await expect(target).toBeInViewport();
     }
 }

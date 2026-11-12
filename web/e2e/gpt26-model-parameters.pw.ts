@@ -71,7 +71,8 @@ test("GPT2.6 markup uploads separately and model switching removes unsupported o
     await dialog.getByRole("combobox", { name: "输出格式", exact: true }).click();
     const formats = page.locator(".ant-select-dropdown:visible .ant-select-item-option");
     await expect(formats).toHaveCount(4);
-    expect(await formats.evaluateAll(options => options.map(option => option.getAttribute("title")))).toEqual(["默认", "PNG", "JPEG", "WebP"]);
+    // The popup briefly scales to zero between Antd's appear-prepare and appear-start frames.
+    await expect.poll(() => formats.evaluateAll(options => options.map(option => option.getAttribute("title")))).toEqual(["默认", "PNG", "JPEG", "WebP"]);
     await page.keyboard.press("Escape");
     expect(api.submissions).toHaveLength(1); expect(api.pageErrors).toEqual([]); expect(api.blocked).toEqual([]);
 });
