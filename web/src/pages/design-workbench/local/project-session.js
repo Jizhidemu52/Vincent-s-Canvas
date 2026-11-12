@@ -135,7 +135,7 @@ export function mountProjectBar(root, session) {
     const bar = document.createElement("div");
     bar.className = "workbench-project-bar";
     bar.innerHTML =
-        "<label><span data-ui-text=\"工程 \">工程 </span><select aria-label=\"本地工程\" data-ui-aria-label=\"本地工程\"></select></label><button class=\"btn\" type=\"button\" data-project-new><span data-ui-text=\"新建工程\">新建工程</span></button><button class=\"btn ghost\" type=\"button\" data-project-rename><span data-ui-text=\"重命名\">重命名</span></button><span role=\"status\" data-project-status></span>";
+        "<label><span data-ui-text=\"工程 \">工程 </span><select aria-label=\"本地工程\" data-ui-aria-label=\"本地工程\" data-workbench-select=\"project\"></select></label><button class=\"btn\" type=\"button\" data-project-new><span data-ui-text=\"新建工程\">新建工程</span></button><button class=\"btn ghost\" type=\"button\" data-project-rename><span data-ui-text=\"重命名\">重命名</span></button><span role=\"status\" data-project-status></span>";
     root.prepend(bar);
     const select = bar.querySelector("select");
     const report = (error) => {
@@ -165,6 +165,7 @@ export function mountProjectBar(root, session) {
         const editor = root.querySelector(".workspace");
         if (editor) editor.inert = !view.ready || view.switching;
         setWorkbenchText(bar.querySelector("[data-project-status]"), () => view.error ? uiText("保存失败：{value1} · 有未保存更改", { value1: view.error }) : view.saving ? uiText("正在保存…") : view.dirty ? uiText("有未保存更改 · 即将自动保存") : view.activeId ? uiText("已自动保存到本机") : uiText("编辑后自动保存到本机"));
+        root.dispatchEvent(new Event("workbench:selects-changed"));
     };
 }
 

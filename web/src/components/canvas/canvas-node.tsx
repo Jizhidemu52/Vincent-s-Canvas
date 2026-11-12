@@ -1,3 +1,4 @@
+import { Tooltip } from "antd";
 import { useUiText, uiText } from "@/lib/i18n";
 import { GenerationDiagnostic } from "@/components/generation-diagnostic";
 import { GenerationElapsed } from "@/components/generation-elapsed";
@@ -441,11 +442,11 @@ export const CanvasNode = React.memo(function CanvasNode({
             }}
             onContextMenu={(event) => onContextMenu(event, data.id)}
         >
-            {showNodeTitle ? <button type="button" data-node-title={data.id} aria-label={t("重命名节点 {value1}", { value1: data.title })} title={t("拖动移动，双击重命名")}
+            {showNodeTitle ? <Tooltip title={t("拖动移动，双击重命名")}><button type="button" data-node-title={data.id} aria-label={t("重命名节点 {value1}", { value1: data.title })}
                 className="absolute bottom-full left-0 z-20 mb-1 max-w-full cursor-grab truncate rounded px-1 text-left text-xs active:cursor-grabbing"
                 style={{ color: theme.node.label, background: theme.canvas.background, transform: "scale(var(--canvas-node-ui-scale, 1))", transformOrigin: "bottom left" }}
                 onPointerDown={event => { if (event.button === 0) { onMouseDown(event, data.id); if (event.defaultPrevented) event.currentTarget.setPointerCapture(event.pointerId); } }}
-                onDoubleClick={event => { event.stopPropagation(); onRename?.(data.id); }} onClick={event => { if (event.detail === 0) onRename?.(data.id); }}>{data.title || t("未命名节点")}</button> : null}
+                onDoubleClick={event => { event.stopPropagation(); onRename?.(data.id); }} onClick={event => { if (event.detail === 0) onRename?.(data.id); }}>{data.title || t("未命名节点")}</button></Tooltip> : null}
             <div
                 data-canvas-image-frame={hasImageContent ? (isSelected ? "selected" : effectiveHovered ? "hovered" : "idle") : undefined}
                 className={`relative h-full w-full overflow-visible ${hasImageContent ? "rounded-none" : "rounded-3xl border-2"}`}
@@ -671,7 +672,7 @@ function TextContent({ node, theme, isEditingContent, textDraft, textareaRef, me
 
     return (
         <div className="flex h-full w-full flex-col overflow-hidden pt-8">
-            <button
+            <Tooltip title={t("用文本生图")}><button
                 type="button"
                 className="absolute right-3 top-3 z-20 hidden h-8 items-center gap-1 rounded-full border px-2.5 text-xs font-medium opacity-85 backdrop-blur-md transition group-hover/node:inline-flex group-[.is-selected]/node:inline-flex focus:inline-flex"
                 style={{ background: `${theme.toolbar.panel}dd`, borderColor: theme.node.stroke, color: theme.node.text }}
@@ -681,11 +682,10 @@ function TextContent({ node, theme, isEditingContent, textDraft, textareaRef, me
                 }}
                 onMouseDown={(event) => event.stopPropagation()}
                 onPointerDown={(event) => event.stopPropagation()}
-                title={t("用文本生图")}
                 aria-label={t("用文本生图")}
             >
                 <ImageIcon className="size-3.5" />
-                {t("生图")}</button>
+                {t("生图")}</button></Tooltip>
             {isEditingContent ? (
                 <CanvasResourceMentionTextarea
                     ref={textareaRef}
@@ -990,9 +990,8 @@ function ResizeHandle({ corner, theme, onMouseDown }: { corner: ResizeCorner; th
 function ConnectionHandleDot({ side, theme, label, visible, active, onMouseDown }: { side: "left" | "right"; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; label: string; visible: boolean; active: boolean; onMouseDown: (event: React.MouseEvent) => void }) {
 
     return (
-        <div
+        <Tooltip title={label}><div
             data-canvas-connection-handle={side}
-            title={label}
             aria-label={label}
             className={`absolute top-1/2 z-30 flex size-10 cursor-crosshair items-center justify-center transition-opacity duration-150 ${
                 side === "left" ? "left-0" : "left-full"
@@ -1001,6 +1000,6 @@ function ConnectionHandleDot({ side, theme, label, visible, active, onMouseDown 
             onPointerDown={event => { event.currentTarget.setPointerCapture(event.pointerId); onMouseDown(event); }}
         >
             <div className={`size-3 rounded-full border-2 transition-all hover:scale-125 ${active ? "scale-125" : ""}`} style={{ background: active ? theme.canvas.selectionStroke : theme.node.panel, borderColor: active ? theme.canvas.selectionStroke : theme.node.muted }} />
-        </div>
+        </div></Tooltip>
     );
 }

@@ -2,7 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 import { resolve } from "node:path";
 
 export default defineConfig({
-    testDir: ".", testMatch: ["image-new-task-entry.pw.ts"], workers: 1, retries: 0,
+    testDir: ".", testMatch: ["image-new-task-entry.pw.ts", "image-creative-ui-plan.pw.ts", "workbench-creative-boundaries.pw.ts"], workers: 1, retries: 0,
     timeout: 90_000, expect: { timeout: 15_000 },
     reporter: [["list"], ["json", { outputFile: resolve(import.meta.dirname, "../../output/image-new-task-entry-local/results.json") }]],
     outputDir: "../../output/image-new-task-entry-local/test-results",

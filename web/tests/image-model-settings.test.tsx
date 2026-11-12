@@ -109,15 +109,15 @@ test("actual image task payloads preserve ultrawide, custom size, Gemini half-K 
 });
 
 test("shared node and image-page settings render model-specific controls without fake resolutions", () => {
-    const render = (model: string) => renderToStaticMarkup(<ImageSettingsPanel config={{ ...defaultConfig, model }} theme={canvasThemes.light} onConfigChange={() => undefined} />);
-    const openai = render("gpt-image-2");
+    const render = (model: string, settings: Partial<typeof defaultConfig> = {}) => renderToStaticMarkup(<ImageSettingsPanel config={{ ...defaultConfig, model, ...settings }} theme={canvasThemes.light} onConfigChange={() => undefined} />);
+    const openai = render("gpt-image-2", { size: "auto" });
     expect(openai).toContain("画质");
     expect(openai).toContain("自适应");
-    expect(openai).toContain("仅影响下次 AI 生成，不改变已有图片");
+    expect(openai).toContain('aria-label="图像参数说明"');
     expect(openai).not.toContain("0.5K");
     expect(openai).toContain("16倍数对齐");
     expect(render("vcen-gpt2")).toContain("16倍数对齐");
-    expect(render("gemini-3.1-flash-image-preview")).toContain("0.5K");
+    expect(render("gemini-3.1-flash-image-preview", { quality: "0.5k" })).toContain("0.5K");
     const midjourney = render("midjourney-blend");
     expect(midjourney).toContain("生成速度");
     expect(midjourney).not.toContain("2 张");

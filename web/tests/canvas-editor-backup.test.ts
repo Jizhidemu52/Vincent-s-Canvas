@@ -62,7 +62,7 @@ describe("on-demand canvas node download", () => {
         let owner = { user: { id: "owner-a" }, status: "authenticated" };
         const run: typeof downloadCanvasEditorNode = new Function("CanvasNodeType", "uiText", "audioExtension", "videoFileExtension", "loadCanvasExport", "resolveMediaUrl", "useUserStore", `${code}; return downloadCanvasEditorNode;`)(
             CanvasNodeType, (text: string) => text, audioExtension, videoFileExtension,
-            async () => ({ loadCanvasImageVariants: () => loadVariants(), downloadCanvasContent: (...args: unknown[]) => events.push(args) }),
+            async () => ({ loadCanvasImageVariants: () => loadVariants(), downloadCanvasContent: (...args: unknown[]) => events.push(args), downloadCanvasImage: (...args: unknown[]) => events.push({ direct: args }) }),
             (key?: string, fallback?: string) => resolveMedia(key, fallback), { getState: () => owner },
         );
         const options = {
@@ -75,16 +75,29 @@ describe("on-demand canvas node download", () => {
     }
     test("opens image choices from the still-current original node and clears progress", async () => {
         const state = downloadHarness();
+        state.options.showOptions = true;
         await state.run();
         expect(state.events).toEqual(["loading", { projectId: "project", node: state.node, variants: { variants: "fixture" } }, "done"]);
     });
-    for (const change of ["project", "image"]) test(`late variant loading cannot open choices after the ${change} changes`, async () => {
+    test("the ordinary image action downloads original bytes directly without loading variants or opening a dialog", async () => {
         const state = downloadHarness();
+        state.setVariants(async () => { throw new Error("variants must not be requested"); });
+        await state.run();
+        expect(state.events).toEqual(["loading", { direct: [state.node, "original"] }, "done"]);
+        state.options.format = "png";
+        await state.run();
+        expect(state.events.slice(-3)).toEqual(["loading", { direct: [state.node, "png"] }, "done"]);
+    });
+    for (const change of ["project", "image", "owner", "session"]) test(`late variant loading cannot open choices after the ${change} changes`, async () => {
+        const state = downloadHarness();
+        state.options.showOptions = true;
         const gate = Promise.withResolvers<{ variants: string }>();
         state.setVariants(() => gate.promise);
         const running = state.run();
         if (change === "project") state.options.savedProjectIdRef.current = "next-project";
-        else state.options.nodesRef.current = [{ ...state.node, metadata: { content: "blob:replacement", storageKey: "image:replacement" } }];
+        if (change === "image") state.options.nodesRef.current = [{ ...state.node, metadata: { content: "blob:replacement", storageKey: "image:replacement" } }];
+        if (change === "owner") state.setOwner("owner-b");
+        if (change === "session") state.setOwner("owner-a", "unauthenticated");
         gate.resolve({ variants: "stale" });
         await running;
         expect(state.events).toEqual(["loading", "done"]);
@@ -143,6 +156,7 @@ describe("on-demand canvas node download", () => {
     });
     test("failed variant loading always clears progress and remains an error", async () => {
         const state = downloadHarness();
+        state.options.showOptions = true;
         state.setVariants(async () => { throw new Error("variants unavailable"); });
         await expect(state.run()).rejects.toThrow("variants unavailable");
         expect(state.events).toEqual(["loading", "done"]);

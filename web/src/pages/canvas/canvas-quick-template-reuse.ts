@@ -1,5 +1,4 @@
 import { uiText } from "@/lib/i18n";
-import { deploymentFeatures } from "@/lib/deployment-features";
 import { promptImageSettings } from "@/lib/prompt-editor-parameters";
 import { hydratePromptReuse } from "@/services/api/prompts";
 import { fetchServerAssetContent } from "@/services/api/server-assets";
@@ -52,14 +51,13 @@ export async function fillCanvasQuickTemplate(options: QuickTemplateOptions) {
     options.consume();
     payload.warnings.forEach(warning => message.warning(warning));
     if (payload.pricing.modelChanged) message.warning(payload.pricing.selectedModel ? uiText("模型已变更，当前使用 {value1}", { value1: payload.pricing.selectedModel.name }) : uiText("模型已变更，请选择管理员当前启用的模型"));
-    const cost = !deploymentFeatures.creditsEnabled ? "不计积分" : (payload.pricing.estimate ? `${payload.pricing.estimate.totalCredits} 积分` : "以当前选择为准");
     if (payload.mode === "fill_and_generate" && !batch) {
         const appliedInputCurrent = options.captureInput();
-        modal.confirm({ title: uiText("确认在画布生成？"), content: uiText("当前实际预计消耗 {value1}。确认后才会提交任务并扣费。", { value1: cost }), okText: uiText("确认生成"), cancelText: uiText("仅保留填入"), onOk: () => {
+        modal.confirm({ title: uiText("确认在画布生成？"), content: uiText("请检查提示词和参考图，确认后提交生成任务。"), okText: uiText("确认生成"), cancelText: uiText("仅保留填入"), onOk: () => {
             if (!appliedInputCurrent()) { keepNewerInput(); return; }
             return options.generate();
         } });
     } else if (payload.mode === "fill_and_generate" && batch) {
-        message.info(uiText("模板已填入，当前预计 {value1}。请先选择文件夹，再确认批量生成。", { value1: cost }));
-    } else message.success(uiText("模板已填入，当前预计 {value1}", { value1: cost }));
+        message.info(uiText("模板已填入，请先选择文件夹，再确认批量生成。"));
+    } else message.success(uiText("模板已填入，请检查后再生成。"));
 }

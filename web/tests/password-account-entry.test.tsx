@@ -67,7 +67,8 @@ test("failed personal login never navigates or loads a workspace", async () => {
     page.render().find(element => element.type === "form")!.props.onSubmit({ preventDefault() {} });
     await settle();
     expect(page.assignments).toEqual([]); expect(page.navigations).toEqual([]);
-    expect(page.errors).toEqual(["账号或密码错误"]);
+    expect(page.render().find(element => element.props.role === "alert")?.props.children).toBe("账号或密码错误");
+    expect(page.errors).toEqual([]);
 });
 
 test("administrator password login starts a new page rather than reusing designer stores", async () => {

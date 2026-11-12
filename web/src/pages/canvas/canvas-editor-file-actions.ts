@@ -14,18 +14,21 @@ import type { CanvasHistoryEntry, useCanvasHistoryState } from "./use-canvas-his
 export async function downloadCanvasEditorNode(node: CanvasNodeData, options: {
     projectId: string; nodesRef: RefObject<CanvasNodeData[]>; savedProjectIdRef: RefObject<string>;
     message: ReturnType<typeof App.useApp>["message"]; setImageDownload: ReturnType<typeof useCanvasDialogs>["setImageDownload"];
+    format?: "original" | "png" | "jpg"; showOptions?: boolean;
 }) {
     if ((node.type !== CanvasNodeType.Image && node.type !== CanvasNodeType.Video && node.type !== CanvasNodeType.Audio) || !node.metadata?.content) return;
     const identity = useUserStore.getState();
     const ownerId = identity.user?.id, ownerStatus = identity.status;
     const done = options.message.loading({ content: uiText("正在准备下载…"), duration: 0 });
     try {
-        const { downloadCanvasContent, loadCanvasImageVariants } = await loadCanvasExport();
+        const { downloadCanvasContent, downloadCanvasImage, loadCanvasImageVariants } = await loadCanvasExport();
         if (node.type === CanvasNodeType.Image) {
-            const variants = await loadCanvasImageVariants(node);
+            const variants = options.showOptions ? await loadCanvasImageVariants(node) : null;
             const current = options.nodesRef.current.find(item => item.id === node.id);
-            if (options.savedProjectIdRef.current !== options.projectId || !current || current.metadata?.content !== node.metadata.content || current.metadata?.storageKey !== node.metadata.storageKey) return;
-            options.setImageDownload({ projectId: options.projectId, node: current, variants });
+            const session = useUserStore.getState();
+            if (session.user?.id !== ownerId || session.status !== ownerStatus || options.savedProjectIdRef.current !== options.projectId || !current || current.metadata?.content !== node.metadata.content || current.metadata?.storageKey !== node.metadata.storageKey) return;
+            if (options.showOptions) options.setImageDownload({ projectId: options.projectId, node: current, variants });
+            else await downloadCanvasImage(current, options.format || "original");
         } else {
             const content = await resolveMediaUrl(node.metadata.storageKey, node.metadata.content);
             const current = options.nodesRef.current.find(item => item.id === node.id), session = useUserStore.getState();

@@ -97,12 +97,11 @@ describe("Gemini Omni shared settings and motion UI", () => {
         expect(videoDurationOptions(spec, "edit")).toEqual([{ value: "-1", label: "跟随源视频" }]);
     });
 
-    test("both explicit and auto editing show source duration, not a numeric or thirty-second charge claim", () => {
+    test("both explicit and auto editing follow source duration without financial estimates or invented output duration", () => {
         for (const html of [render("edit"), render("auto", "edit")]) {
             expect(html).toContain("编辑结果时长跟随源视频。");
             expect(html).toContain("跟随源视频");
-            expect(html).toContain("15 秒估算");
-            expect(html).not.toContain("最多 30 秒输出预扣");
+            for (const text of ["15 秒估算", "最多 30 秒输出预扣", "积分", "费用", "预扣", "计费"]) expect(html).not.toContain(text);
             expect(html).not.toContain("支持3–15");
         }
         const compact = renderToStaticMarkup(<CanvasVideoSettingsPopover config={config} imageMode="edit" onConfigChange={() => undefined} />);
@@ -120,11 +119,13 @@ describe("Gemini Omni shared settings and motion UI", () => {
     test("motion options remove mute only for Omni and retain saved Seedance behavior", () => {
         const native = renderToStaticMarkup(<VideoMotionPanel value={defaultVideoMotionSettings} onChange={() => undefined} nativeAudio />);
         expect(native).not.toContain("关闭声音输出");
-        expect(native).not.toContain(">无声<");
+        expect(native).not.toMatch(/>无\s*声</);
         expect(native).toContain("仅环境音");
         expect(native).toContain("声音偏好，不是静音开关");
         const seedance = renderToStaticMarkup(<VideoMotionPanel value={defaultVideoMotionSettings} onChange={() => undefined} />);
-        expect(seedance).toContain("关闭声音输出");
+        // Tooltip descriptions are not emitted by SSR; assert the actual selectable mute option.
+        expect(seedance).toMatch(/>无\s*声</);
+        expect(seedance).not.toContain("声音偏好，不是静音开关");
     });
 
     test("motion keeps auto multi-images as references and communicates native audio rather than a mute flag", () => {

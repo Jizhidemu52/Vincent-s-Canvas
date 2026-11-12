@@ -54,10 +54,10 @@ test("超级管理员从后台进入个人创作，画布与本机工程刷新�
     await expect(page.getByRole("button", { name: "新建工程", exact: true })).toBeVisible();
     page.once("dialog", dialog => dialog.accept("超级管理员个人工程"));
     await page.getByRole("button", { name: "新建工程", exact: true }).click();
-    const project = page.getByRole("combobox", { name: "本地工程", exact: true });
-    await expect(project.locator("option:checked")).toHaveText("超级管理员个人工程");
+    const project = page.locator('[data-workbench-select-control="project"]');
+    await expect(project).toContainText("超级管理员个人工程");
     await expect(page.locator("[data-project-status]")).toHaveText("已自动保存到本机");
-    await page.reload(); await expect(project.locator("option:checked")).toHaveText("超级管理员个人工程");
+    await page.reload(); await expect(project).toContainText("超级管理员个人工程");
     await page.screenshot({ path: testInfo.outputPath("super-admin-personal-workbench.png") });
     await page.goto("/assets");
     await page.getByRole("button", { name: "新增素材", exact: true }).click();

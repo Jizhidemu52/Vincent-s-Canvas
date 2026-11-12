@@ -7,6 +7,7 @@ import ts from "typescript";
 import { i18nHarness } from "./helpers/i18n-harness";
 import { defaultConfig } from "@/stores/use-config-store";
 import { ImageSettingsPanel } from "@/components/image-settings-panel";
+import { Tooltip } from "antd";
 import { imageModelProfile } from "@/lib/image-model-settings";
 import { canvasThemes } from "@/lib/canvas-theme";
 import type { PublicModel } from "@/services/api/business-config";
@@ -24,7 +25,7 @@ const model: PublicModel = {
     imageParameterProfile: "quality-resolution-v2", capabilities: ["generate", "edit"], creditCost: 0, rmbCost: 0,
 };
 
-function settingsPicker(bound = false) {
+function settingsPicker(bound = false, variant: "settings" | "default" = "settings") {
     const url = new URL("../src/components/model-picker.tsx", import.meta.url);
     const requireModule = createRequire(url);
     const state = { status: "ready", models: [model], refresh: async () => {}, tools: bound ? [{ toolKey: "image-generation", modelConfigId: model.id, enabled: true }] : [] };
@@ -40,7 +41,7 @@ function settingsPicker(bound = false) {
     const code = ts.transpileModule(readFileSync(url, "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ESNext, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
     const module = { exports: {} as { ModelPicker: (props: Record<string, unknown>) => ReactElement<any> } };
     new Function("require", "module", "exports", code)((name: string) => name.endsWith(".css") ? {} : dependencies[name] || requireModule(name), module, module.exports);
-    const root = module.exports.ModelPicker({ config: defaultConfig, value: model.modelId, capability: "image", modelsSource: "server", toolKey: "image-generation", variant: "settings", onChange: (value: string) => selected.push(value) });
+    const root = module.exports.ModelPicker({ config: defaultConfig, value: model.modelId, capability: variant === "settings" ? "image" : undefined, modelsSource: variant === "settings" ? "server" : "local", toolKey: "image-generation", variant, onChange: (value: string) => selected.push(value) });
     return { root, tree: elements(root), selected };
 }
 
@@ -60,6 +61,24 @@ test("settings model picker separates public name, use and selected state withou
     root.props.onValueChange(model.modelId);
     root.props.onValueChange("GPT Image 2.6 Flare");
     expect(selected).toEqual([model.modelId]);
+});
+
+test("both non-canvas model triggers use a wrapper Tooltip without replacing trigger event handlers", () => {
+    for (const variant of ["settings", "default"] as const) {
+        const { tree } = settingsPicker(false, variant);
+        const trigger = tree.find(item => item.type === "SelectTrigger")!;
+        const tooltip = tree.find(item => item.type === Tooltip)!;
+        expect(trigger.props.title).toBeUndefined();
+        expect(tooltip.props.title).toBeTruthy();
+        // Restoring focus from the model menu must not open another Escape-handling portal.
+        expect(tooltip.props.trigger).toBeUndefined();
+        expect(tooltip.props.children.type).toBe("span");
+        expect(tooltip.props.children.props.children).toBe(trigger);
+        let stopped = 0;
+        trigger.props.onMouseDown({ stopPropagation: () => stopped++ });
+        trigger.props.onPointerDown({ stopPropagation: () => stopped++ });
+        expect(stopped).toBe(2);
+    }
 });
 
 test("settings model picker preserves backend binding restrictions", () => {

@@ -1,6 +1,6 @@
 import { useUiText, uiText } from "@/lib/i18n";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, App, Button, Checkbox, Empty, Input, Modal, Progress, Radio, theme } from "antd";
+import { Alert, App, Button, Checkbox, Empty, Input, Modal, Progress, Radio, theme, Tooltip } from "antd";
 import { ArrowDown, ArrowUp, FileDown } from "lucide-react";
 
 import { CanvasPersistedMediaPreview } from "@/components/canvas/canvas-persisted-media-preview";
@@ -96,15 +96,15 @@ export function CanvasImagePdfDialog({ nodes, defaultSelectedIds = [], defaultNa
                             <Checkbox aria-label={t("选择 {value1}", { value1: name })} checked={chosen.has(node.id)} disabled={busy} onChange={() => toggle(node.id)} />
                             <span className="w-5 shrink-0 text-center text-xs tabular-nums" style={{ color: token.colorTextSecondary }}>{index >= 0 ? index + 1 : "—"}</span>
                             <CanvasPersistedMediaPreview kind="image" url={node.metadata?.content} storageKey={node.metadata?.storageKey} alt={name} className="size-12 shrink-0 rounded object-contain" />
-                            <span className="min-w-0 flex-1 truncate text-sm" title={name}>{name}</span>
-                            <div className="flex shrink-0"><Button size="small" type="text" title={t("上移")} aria-label={t("上移 {value1}", { value1: name })} icon={<ArrowUp size={15} />} disabled={busy || index <= 0} onClick={() => move(node.id, -1)} /><Button size="small" type="text" title={t("下移")} aria-label={t("下移 {value1}", { value1: name })} icon={<ArrowDown size={15} />} disabled={busy || index < 0 || index === chosenIds.length - 1} onClick={() => move(node.id, 1)} /></div>
+                            <Tooltip title={name}><span className="min-w-0 flex-1 truncate text-sm">{name}</span></Tooltip>
+                            <div className="flex shrink-0"><Tooltip title={t("上移")}><Button size="small" type="text" aria-label={t("上移 {value1}", { value1: name })} icon={<ArrowUp size={15} />} disabled={busy || index <= 0} onClick={() => move(node.id, -1)} /></Tooltip><Tooltip title={t("下移")}><Button size="small" type="text" aria-label={t("下移 {value1}", { value1: name })} icon={<ArrowDown size={15} />} disabled={busy || index < 0 || index === chosenIds.length - 1} onClick={() => move(node.id, 1)} /></Tooltip></div>
                         </div>;
                     })}
                 </div> : <Empty description={t("画布中暂无可导出的图片")} />}
                 <p className="text-xs" style={{ color: token.colorTextSecondary }}>{t("每批最多 200 张、原图总大小 256 MB")}{mode !== "images" && t("，单张最多 2000 万像素")}{t("。逐张处理，导出不修改画布原图。")}</p>
                 {overLimit && <Alert type="warning" showIcon title={t("每批最多导出 200 张图片，请减少选择")} />}
                 {error && <Alert type="error" showIcon title={t("未完成导出")} description={error} />}
-                {progress && <div aria-live="polite"><Progress percent={Math.round(progress.completed / progress.total * 100)} status="active" /><p className="truncate text-xs" title={progress.label}>{progress.label}</p></div>}
+                {progress && <div aria-live="polite"><Progress percent={Math.round(progress.completed / progress.total * 100)} status="active" /><Tooltip title={progress.label}><p className="truncate text-xs">{progress.label}</p></Tooltip></div>}
             </div>
         </Modal>
     );

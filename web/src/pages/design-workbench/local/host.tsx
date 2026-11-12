@@ -10,6 +10,8 @@ import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { deploymentFeatures } from "@/lib/deployment-features";
 import { createLocalWorkbenchServices, type LocalWorkbenchServices } from "./services";
 import { setWorkbenchText } from "./ui-text.js";
+import { LocalWorkbenchSelects } from "./select-controls";
+import { LocalWorkbenchTooltips } from "./tooltip-controls";
 import "./workbench.css";
 import type { InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
 import { isWorkspaceRole } from "../../../../../shared/workspace-access";
@@ -25,6 +27,7 @@ export function LocalDesignWorkbench({ moduleKey, title, description, mount }: {
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
     const [assetPickerError, setAssetPickerError] = useState("");
     const [exampleHost, setExampleHost] = useState<HTMLElement | null>(null);
+    const [selectRoot, setSelectRoot] = useState<HTMLElement | null>(null);
     const assetSelection = useRef<((asset: InsertAssetPayload | null) => void) | null>(null);
     useUnsavedGuard(dirty, uiText("有未保存更改。请等待自动保存，或返回工程重试保存/导出。"));
     const isManagementAccount = useUserStore((state) => state.status === "authenticated" && Boolean(state.user) && !isWorkspaceRole(state.user?.role));
@@ -38,6 +41,7 @@ export function LocalDesignWorkbench({ moduleKey, title, description, mount }: {
         const controller = new AbortController();
         setDirty(false);
         setExampleHost(null);
+        setSelectRoot(null);
         let cleanup: (() => void) | undefined;
         const dispose = () => {
             if (controller.signal.aborted) return;
@@ -46,6 +50,7 @@ export function LocalDesignWorkbench({ moduleKey, title, description, mount }: {
             assetSelection.current = null;
             setAssetPickerOpen(false);
             setExampleHost(null);
+            setSelectRoot(null);
             cleanup?.();
             root.replaceChildren();
         };
@@ -75,6 +80,7 @@ export function LocalDesignWorkbench({ moduleKey, title, description, mount }: {
                 if (controller.signal.aborted) stop();
                 else {
                     cleanup = stop;
+                    setSelectRoot(root);
                     const saveArea = root.querySelector(moduleKey === "pattern-placement" ? ".placement-delivery" : ".repeat-save-group");
                     if (saveArea) {
                         const target = document.createElement("div");
@@ -141,6 +147,8 @@ export function LocalDesignWorkbench({ moduleKey, title, description, mount }: {
                 <div ref={host} className="local-workbench-host" />
             )}
             {enabled && identityReady && exampleHost ? createPortal(<div onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}><PracticeExampleRecord /></div>, exampleHost) : null}
+            {enabled && identityReady && selectRoot ? <LocalWorkbenchSelects root={selectRoot} /> : null}
+            {enabled && identityReady && selectRoot ? <LocalWorkbenchTooltips root={selectRoot} /> : null}
         </main>
     );
 }

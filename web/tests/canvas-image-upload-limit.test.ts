@@ -5,6 +5,7 @@ import ts from "typescript";
 import { assertCanvasImageUploadSize, CANVAS_IMAGE_MAX_BYTES, CANVAS_LARGE_IMAGE_NOTICE, isLargeCanvasImage } from "@/lib/canvas/canvas-image-upload-limit";
 import { isCanvasAudioFile } from "@/pages/canvas/use-canvas-clipboard-drop";
 import { canvasImportGridPosition } from "@/lib/canvas/canvas-interaction-ux";
+import { placeCanvasImportedNodes } from "@/pages/canvas/canvas-import-placement";
 import * as droppedImages from "@/lib/dropped-images";
 import { mapCanvasAsyncPool } from "@/lib/canvas/canvas-async-pool";
 import { fitNodeSize } from "@/lib/canvas/canvas-node-size";
@@ -67,7 +68,7 @@ const source = ts.createSourceFile("project.tsx", pageSource, ts.ScriptTarget.La
 function callback(name: string, scope: Record<string, unknown>): (...args: any[]) => any {
     scope = { importQueueRef: { current: Promise.resolve() }, pastePositionRef: { current: null }, projectId: "upload-test", designProjectIdRef: { current: "upload-test" },
         useUserStore: { getState: () => ({ status: "authenticated", user: { id: "owner" } }) }, nanoid: () => "test-import", setImportPlaceholder() {},
-        getCanvasCenter: () => ({ x: 0, y: 0 }), getPastePosition: () => ({ x: 0, y: 0 }), isAudioFile: isCanvasAudioFile, canvasImportGridPosition, mapCanvasAsyncPool,
+        getCanvasCenter: () => ({ x: 0, y: 0 }), getPastePosition: () => ({ x: 0, y: 0 }), isAudioFile: isCanvasAudioFile, canvasImportGridPosition, placeCanvasImportedNodes, mapCanvasAsyncPool,
         flushEditorDrafts() {}, flushPendingHistory() {}, setNodes() {}, nodesRef: { current: [] }, commitSelectedNodeIds() {}, setSelectedConnectionId() {},
         loadQuickGenerationNode() {}, lastEditorSelectionRef: { current: "" }, editorOwner: "owner", setQuickGenerateReferences() {}, setDialogNodeId() {},
         ...scope, message: { open() {}, info() {}, destroy() {}, ...(scope.message as object || {}) } };

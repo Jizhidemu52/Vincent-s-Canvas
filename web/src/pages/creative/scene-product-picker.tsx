@@ -85,7 +85,7 @@ export function SceneProductPicker({ sceneId, source, disabled, onConfirm }: {
     const candidate = candidates.find(item => item.id === selected);
     return <div className="cs-product-picker" aria-label={uiText("产品识别与确认")}>
         {!record ? <button type="button" className="cs-tool-entry" disabled={disabled || busy || !ready || !source || !ownerId || source.bytes > MAX_SOURCE_BYTES} onClick={() => void act(false)}>
-            {busy ? <LoaderCircle size={14} className="animate-spin" /> : <ScanSearch size={14} />}<span>{busy ? uiText("正在识别产品…") : uiText("识别图中产品")}</span><small>{uiText("可能付费")}</small>
+            {busy ? <LoaderCircle size={14} className="animate-spin" /> : <ScanSearch size={14} />}<span>{busy ? uiText("正在识别产品…") : uiText("识别图中产品")}</span>
         </button> : null}
         {!record && <p className="cs-help">{uiText(source && source.bytes > MAX_SOURCE_BYTES ? "产品识别仅支持不超过 10 MiB 的单张原图；原件未压缩，可手动填写产品。" : "仅点击后看图识别；限单张 PNG / JPG / WebP、10 MiB 以内。也可手填，不会自动生成图片。")}</p>}
         {record && !rejected && status !== "success" && status !== "failed" && <>
@@ -94,7 +94,7 @@ export function SceneProductPicker({ sceneId, source, disabled, onConfirm }: {
         </>}
         {(status === "failed" || rejected) && <>
             <p className="cs-help" role="status">{rejected ? uiText("本次识别未提交。检查素材或配置后可明确再试，将沿用原编号核验，不会自动重发。") : record?.receipt?.message || uiText("本次识别已结束，未取得有效候选。可手填产品，或明确重新识别。")}</p>
-            <button type="button" className="cs-tool-entry" disabled={disabled || busy || !ready} onClick={() => void act(false, true)}>{busy ? <LoaderCircle size={14} className="animate-spin" /> : null}{uiText("重新识别（可能付费）")}</button>
+            <button type="button" className="cs-tool-entry" disabled={disabled || busy || !ready} onClick={() => void act(false, true)}>{busy ? <LoaderCircle size={14} className="animate-spin" /> : null}{uiText("重新识别")}</button>
         </>}
         {status === "success" && !candidates.length && <p className="cs-help" role="status">{uiText("未识别到明确产品，请手动填写要处理的产品。")}</p>}
         {!!candidates.length && <fieldset className="cs-product-candidates" disabled={disabled || busy}>

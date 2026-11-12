@@ -105,7 +105,7 @@ export async function runCanvasBatchImageEdit({
             return;
         }
         if (deploymentFeatures.creditsEnabled && usage.configured && user.creditBalance < usage.credits) {
-            message.error(uiText("额度不足：预计需要 {value1} 积分，当前剩余 {value2} 积分", { value1: usage.credits, value2: user.creditBalance }));
+            message.error(uiText("当前账号暂时无法提交生成任务，请联系管理员。"));
             return;
         }
 
@@ -418,7 +418,7 @@ export async function runCanvasBatchImageEdit({
         }
 
         if (unresolvedCount) {
-            message.warning(uiText("批次状态待核查：{value1} 张待查询原任务，不会重复提交或扣费。", { value1: unresolvedCount }));
+            message.warning(uiText("批次状态待核查：{value1} 张待查询原任务，不会重复提交。", { value1: unresolvedCount }));
         } else if (failedCount || cancelledCount) {
             message.warning(uiText("批量改图完成，成功 {value1} 张，失败 {value2} 张，取消 {value3} 张", { value1: selectedResults.length, value2: failedCount, value3: cancelledCount }));
         } else {

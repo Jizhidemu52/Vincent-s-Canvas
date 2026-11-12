@@ -1,6 +1,7 @@
 import { test, expect, newCanvas, editText } from "./fixtures";
 import { preparePerformanceScene, openPerformanceScene, PROJECT_ID } from "./canvas-performance-fixture";
 import type { Page } from "@playwright/test";
+import { antSelect, chooseAntSelect } from "./antd-select-helpers";
 
 async function changeLanguage(page: Page) { await page.getByTestId("language-switch").filter({ visible: true }).first().click(); }
 async function settleTransitions(page: Page) {
@@ -95,18 +96,27 @@ test("image settings keep raw model parameters and the prompt when switching lan
     await expect(prompt).toBeVisible();
     await prompt.fill("我的中文设计要求：保存、透明、1024x1024");
     await page.getByRole("button", { name: "切换生成图片模型", exact: true }).click();
-    const size = page.locator('select[data-usage-control="size"]').filter({ visible: true }).first();
+    const size = page.locator('[data-usage-control="size"] [role="combobox"]').filter({ visible: true }).first();
     await expect(size).toBeVisible();
-    await size.selectOption("1024x1024");
-    const parameterState = async () => page.locator("select[data-usage-control], [data-usage-value][aria-pressed=true]").evaluateAll(elements => elements.map(element => ({
-        key: element.getAttribute("data-usage-control"), value: element instanceof HTMLSelectElement ? element.value : element.getAttribute("data-usage-value"),
-    })));
+    await chooseAntSelect(size, "1:1 · 1024 × 1024");
+    // Observe persisted raw parameters: AntD's combobox input stores search text, not the selected value.
+    const parameterState = async () => page.evaluate(async () => {
+        const { createWorkspaceStorage } = await import("/src/lib/workspace-storage.ts");
+        return {
+            draft: await createWorkspaceStorage("generation_drafts").getItem<Record<string, unknown>>("image-generation:settings"),
+            segments: [...document.querySelectorAll(".image-parameters [data-usage-value][aria-pressed=true]")].map(element => ({
+                key: element.getAttribute("data-usage-control"), value: element.getAttribute("data-usage-value"),
+            })),
+        };
+    });
+    await expect.poll(parameterState).toMatchObject({ draft: { size: "1024x1024" } });
     const before = await parameterState();
     await page.getByRole("dialog", { name: /^切换生成图片模型/ }).getByRole("button", { name: "关闭模型设置", exact: true }).click();
     await changeLanguage(page);
     await expect(page.locator("html")).toHaveAttribute("lang", "en");
     await page.getByRole("button", { name: "Switch image generation model", exact: true }).click();
     await expect(size).toHaveAttribute("aria-label", "Aspect ratio");
+    await expect(antSelect(size)).toHaveText("1:1 · 1024 × 1024");
     await expect(prompt).toHaveValue("我的中文设计要求：保存、透明、1024x1024");
     expect(await parameterState()).toEqual(before);
     await expect(page.locator('[data-usage-control="model"]').first()).toContainText("出图模型");

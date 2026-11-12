@@ -62,16 +62,18 @@ try {
         });
     }, owner);
     await page.goto(origin + '/creative/pattern-placement');
-    await expect(page.getByRole('combobox', { name: '本地工程' })).toHaveValue('legacy');
+    await expect(page.locator('[data-workbench-select-control="project"]')).toContainText('原有本地工程');
+    await expect(page.locator('select[data-workbench-select="project"]')).toHaveValue('legacy');
     await expect(page.getByRole('spinbutton', { name: '图案宽度', exact: true })).toHaveValue('200');
     page.once('dialog', dialog => dialog.accept('第二个工程'));
     await page.getByRole('button', { name: '新建工程', exact: true }).click(); await saved();
-    const second = await page.getByRole('combobox', { name: '本地工程' }).inputValue();
     const width = page.getByRole('spinbutton', { name: '图案宽度', exact: true });
     await width.fill('333'); await expect(status).toContainText('有未保存更改'); await width.press('Tab'); await saved();
-    await page.getByRole('combobox', { name: '本地工程' }).selectOption('legacy');
+    await page.getByRole('combobox', { name: '本地工程' }).click();
+    await page.locator('.ant-select-dropdown:visible').getByText('原有本地工程', { exact: true }).click();
     await expect(width).toHaveValue('200');
-    await page.getByRole('combobox', { name: '本地工程' }).selectOption(second); await expect(width).toHaveValue('333');
+    await page.getByRole('combobox', { name: '本地工程' }).click();
+    await page.locator('.ant-select-dropdown:visible').getByText('第二个工程', { exact: true }).click(); await expect(width).toHaveValue('333');
     await page.reload(); await expect(width).toHaveValue('333'); await saved();
     // Inject a failing storage boundary, not a fake editor state.
     await page.evaluate(() => { window.workbenchOriginalPut = IDBObjectStore.prototype.put; IDBObjectStore.prototype.put = function(...args) { if (this.name === 'design_workbench_projects') throw new DOMException('存储已满', 'QuotaExceededError'); return window.workbenchOriginalPut.apply(this, args); }; });

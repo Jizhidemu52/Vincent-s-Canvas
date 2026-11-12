@@ -1,6 +1,6 @@
 import { uiText, useUiLocale } from "@/lib/i18n";
 import { useEffect, useRef, useState } from "react";
-import { App, Button, Modal } from "antd";
+import { App, Button, Modal, Tooltip } from "antd";
 import { Sparkles } from "lucide-react";
 import { createClientId } from "@/lib/client-id";
 import { optimizeImagePrompt } from "@/services/api/image";
@@ -102,7 +102,7 @@ export function PromptOptimizeButton({ config, prompt, references = [], operatio
     let negativePrompt = "";
     try { negativePrompt = readImageOptions(preview ? JSON.parse(preview.context.configKey).imageOptions : config.imageOptions).negative_prompt || ""; } catch { /* Invalid settings remain blocked by generation validation. */ }
     return <>
-        <Button size="small" type="text" icon={<Sparkles size={14} />} loading={busy} title={!supported ? uiText("此操作暂不支持提示词优化，可直接填写要求后生成。") : undefined} disabled={disabled || Boolean(preview) || !config.model || (!pending && (!supported || !prompt.trim()))} onClick={() => void run()}>{pending ? uiText("查询原优化请求") : !supported ? uiText("此操作不支持一键优化") : busy ? uiText("正在优化提示词…") : uiText("一键优化提示词")}</Button>
+        <Tooltip title={!supported ? uiText("此操作暂不支持提示词优化，可直接填写要求后生成。") : undefined}><span className="inline-flex"><Button size="small" type="text" icon={<Sparkles size={14} />} loading={busy} disabled={disabled || Boolean(preview) || !config.model || (!pending && (!supported || !prompt.trim()))} onClick={() => void run()}>{pending ? uiText("查询原优化请求") : !supported ? uiText("此操作不支持一键优化") : busy ? uiText("正在优化提示词…") : uiText("一键优化提示词")}</Button></span></Tooltip>
         <Modal open={Boolean(preview)} title={uiText("核对提示词优化")} width={900} onCancel={closePreview} footer={<><Button onClick={closePreview}>{uiText("取消，保留原文")}</Button><Button type="primary" disabled={disabled || stale || Boolean(preview?.result.questions?.length)} onClick={applyPreview}>{uiText("确认应用")}</Button></>}>
             <p className="text-sm text-muted-foreground">{uiText("删除部分划线，新增部分高亮。确认只替换提示词，不会自动生成图片。")}</p>
             {stale ? <p role="alert" className="text-destructive">{uiText("输入、参考图、账号或模型设置已变化，此预览已失效。请关闭后重新优化。")}</p> : null}

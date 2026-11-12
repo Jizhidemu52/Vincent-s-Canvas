@@ -127,7 +127,8 @@ test("500节点100栅格图：对照帧率、真实堆曲线与200步历史边�
             await page.getByRole("button", { name: "打开画布菜单", exact: true }).click();
             await page.getByRole("menuitem", { name: /搜索命令、节点和素材/ }).click();
             await page.getByRole("combobox", { name: "搜索命令、节点和素材" }).fill("性能样本 0");
-            await page.getByRole("option").filter({ hasText: "画布节点" }).first().click();
+            await expect(page.locator(".cw-command-group-heading").filter({ hasText: /^画布节点$/ })).toHaveCount(1);
+            await page.getByRole("option", { name: "性能样本 0 定位", exact: true }).click();
             await page.waitForTimeout(300);
         }
         await startFrames(page, busyMs);

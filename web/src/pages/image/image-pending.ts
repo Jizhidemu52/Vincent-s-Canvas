@@ -32,7 +32,7 @@ export function pendingImagesForWorkspace(records: PendingImage[], ownerId: stri
 /** Every recovery is a lookup. A missing response must never become a new POST. */
 export async function findPendingImageTask<T extends { id: string; requestId: string }>(record: PendingImage, readers: { byId: (id: string) => Promise<T | null>; byRequest: (id: string) => Promise<T | null> }) {
     const task = record.taskId ? await readers.byId(record.taskId) : await readers.byRequest(`${record.requestId}:0`);
-    if (!task) throw new Error("原任务尚未查到或无权访问；保留记录，请稍后查询，不会重新提交或扣费。");
+    if (!task) throw new Error("原任务尚未查到或无权访问；保留记录，请稍后查询，不会重新提交。");
     if ((record.taskId && task.id !== record.taskId) || task.requestId !== `${record.requestId}:0`) throw new Error("原任务标识不匹配，提交结果待核查，请勿重复提交。");
     return task;
 }

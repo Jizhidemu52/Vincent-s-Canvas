@@ -43,7 +43,7 @@ test("Grok reference mode hides quality and strips it plus unsupported fields fr
   const html = renderToStaticMarkup(<ImageSettingsPanel config={config} theme={canvasThemes.light} referenceCount={1} onConfigChange={() => undefined} />);
   expect(html).not.toContain('aria-label="图片质量"');
   expect(html).toContain("参考图模式不提交 quality");
-  expect(html).toContain('value="2k" selected=""');
+  expect(html).toContain('title="2K"');
   expect(html).not.toContain('value="4k"');
 });
 

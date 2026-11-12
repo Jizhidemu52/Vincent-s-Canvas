@@ -117,7 +117,7 @@ test("managed Sonnet retains stream/token controls without exposing a model pick
         expect(visibleText(controls)).not.toContain("Claude");
         expect(visibleText(controls)).not.toContain("Sonnet");
         expect(controls.filter(element => element.type === "Checkbox")).toHaveLength(1);
-        expect(controls.find(element => element.type === "span" && element.props.children === "思考模式 · 渠道默认")).toBeDefined();
+        expect(controls.find(element => element.type === "span" && element.props.children === "思考模式 · 默认")).toBeDefined();
         expect(controls.find(element => element.type === "Select")?.props.value).toBe(defaultConfig.claudeMaxTokens);
         expect(controls.find(element => element.type === "a")?.props.href).toBe("https://docs.apib.ai/cn/api-reference/texts/general/claude-messages");
         page.set({ tools: [tool("gpt-chat", astraId)] });

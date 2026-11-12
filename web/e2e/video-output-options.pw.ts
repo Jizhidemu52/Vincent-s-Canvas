@@ -92,6 +92,7 @@ for (const parameterModelId of ["happyhorse-1.1", "doubao-seedance-2.5"] as cons
             await page.locator(".ant-select-dropdown:visible").getByText("MP4", { exact: true }).click();
         }
         await settings.getByRole("button", { name: "关闭", exact: true }).click();
+        await page.getByRole("tab", { name: "历史记录", exact: true }).click();
         await page.getByRole("button").filter({ hasText: title }).click();
         await page.getByRole("button", { name: "恢复为草稿继续改", exact: true }).click();
         await page.getByRole("button", { name: "确认恢复", exact: true }).click();

@@ -53,6 +53,7 @@ for (const href of routes) {
         const example = scene ? designExampleForScene(scene) : designExampleForLocation(url.pathname, url.search);
         expect(example, `catalog for ${href}`).toBeTruthy();
         await page.goto(href);
+        if (["/image", "/video"].includes(url.pathname)) await page.getByRole("tab", { name: /^历史记录/ }).click();
         await expect(page.getByTestId("feature-example")).toHaveCount(0);
         await expect(record(page)).toHaveCount(1);
         await expect(record(page)).toHaveAttribute("data-example-id", example!.id);
@@ -83,6 +84,7 @@ test("copy and download preserve the real draft and saved records, without any g
     await page.goto("/image");
     const prompt = page.getByRole("textbox", { name: "图像提示词", exact: true });
     await expect(prompt).toBeVisible();
+    await page.getByRole("tab", { name: /^历史记录/ }).click();
     await expect(record(page)).toBeVisible();
     await prompt.fill("我的未提交设计草稿，不应被操作案例覆盖");
     await page.evaluate(async () => {
@@ -114,6 +116,7 @@ test("copy and download preserve the real draft and saved records, without any g
     await expect(prompt).toHaveValue("我的未提交设计草稿，不应被操作案例覆盖");
     for (const href of ["/video", "/chat", "/creative/text-to-style"]) {
         await page.goto(href);
+        if (href === "/video") await page.getByRole("tab", { name: "历史记录", exact: true }).click();
         await expect(record(page)).toBeVisible();
         await record(page).getByTestId("practice-example-toggle").click();
         await expect(article(page)).toBeVisible();
@@ -129,6 +132,7 @@ test("native MP4 video example loads only when expanded, plays at 1x manually, u
     page.on("request", request => { if (new URL(request.url()).pathname === videoExampleSource) videoRequests.push(request.url()); });
     await page.goto("/video");
     const prompt = page.getByRole("textbox", { name: "视频提示词", exact: true });
+    await page.getByRole("tab", { name: "历史记录", exact: true }).click();
     await expect(record(page)).toBeVisible();
     await prompt.fill("我的未提交视频要求，案例播放与下载不能覆盖");
     await page.evaluate(async () => {
@@ -210,6 +214,7 @@ for (const viewport of [{ width: 1800, height: 1200 }, { width: 390, height: 844
         await expect(page.getByRole("textbox", { name: "视频提示词", exact: true })).toBeVisible();
         const historyBefore = await savedExampleHistory(page);
         if (viewport.width === 390) await page.getByRole("button", { name: "记录", exact: true }).click();
+        else await page.getByRole("tab", { name: "历史记录", exact: true }).click();
         await expect(record(page)).toBeVisible();
         await record(page).getByTestId("practice-example-toggle").click();
         const video = article(page).locator("video");
@@ -257,6 +262,7 @@ test("history examples fit desktop, dark and mobile layouts without covering the
     const writes = await exampleFixture(context);
     await page.goto("/image");
     const prompt = page.getByRole("textbox", { name: "图像提示词", exact: true });
+    await page.getByRole("tab", { name: /^历史记录/ }).click();
     await expect(record(page)).toBeVisible(); await expect(prompt).toBeVisible();
     await record(page).getByTestId("practice-example-toggle").click();
     await expect(article(page)).toBeVisible();
@@ -266,13 +272,14 @@ test("history examples fit desktop, dark and mobile layouts without covering the
     await expect(page.locator("html")).not.toHaveAttribute("data-magicui-theme-vt", "active");
     await page.screenshot({ path: info.outputPath("history-example-desktop-dark.png"), fullPage: true, animations: "disabled" });
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.getByRole("button", { name: "记录", exact: true }).click();
+    await page.getByRole("tab", { name: /^历史记录/ }).click();
     await expect(record(page)).toBeVisible();
-    await record(page).getByTestId("practice-example-toggle").click();
+    await expect(record(page).getByTestId("practice-example-toggle")).toHaveAttribute("aria-expanded", "true");
     await expect(article(page)).toBeVisible();
     expect(await record(page).evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
     await page.screenshot({ path: info.outputPath("history-example-mobile-dark.png"), fullPage: true, animations: "disabled" });
-    await page.getByRole("dialog", { name: "生成记录", exact: true }).getByRole("button", { name: "关闭", exact: true }).click();
+    await page.getByRole("tab", { name: "本次结果", exact: true }).click();
+    await expect(record(page)).toHaveCount(0);
     await page.goto("/creative/garment-colorway");
     await record(page).getByTestId("practice-example-toggle").click();
     for (const image of await article(page).locator("img").all()) {

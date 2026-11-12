@@ -1,4 +1,5 @@
 import { uiText, useUiText } from "@/lib/i18n";
+import { Select, Tooltip } from "antd";
 import { FolderOpen, ImagePlus, Palette, Plus, Trash2, Upload } from "lucide-react";
 import { lazy, Suspense, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
@@ -84,10 +85,10 @@ export function SceneFields({ sceneId, form, onChange, disabled = false, sourceI
                         <div className="cs-color-row">
                             <input type="color" className="cs-color-picker" aria-label={uiText("选择颜色 {value1}", { value1: index + 1 })} value={colorPickerValue(color)} disabled={disabled} onChange={(event) => onChange(setSceneColor(form, index, event.target.value.toUpperCase()))} />
                             <input id={id(`color-${index}`)} className="cs-input cs-color-input" aria-label={uiText("颜色 {value1} HEX 色值", { value1: index + 1 })} aria-invalid={!isSceneHexColor(color)} type="text" value={color} spellCheck={false} autoComplete="off" maxLength={7} disabled={disabled} placeholder="#RRGGBB" onChange={(event) => onChange(setSceneColor(form, index, event.target.value))} />
-                            {colorLibraryEnabled && sceneId === "garment-colorway" && <button type="button" className="cs-color-library" aria-label={uiText("从标准色库选择颜色 {value1}", { value1: index + 1 })} title={uiText("从标准色库选择")} disabled={disabled} onClick={() => setColorSlot(index)}><Palette size={14} aria-hidden="true" /><span>{uiText("色库")}</span></button>}
+                            {colorLibraryEnabled && sceneId === "garment-colorway" && <Tooltip title={uiText("从标准色库选择")}><button type="button" className="cs-color-library" aria-label={uiText("从标准色库选择颜色 {value1}", { value1: index + 1 })} disabled={disabled} onClick={() => setColorSlot(index)}><Palette size={14} aria-hidden="true" /><span>{uiText("色库")}</span></button></Tooltip>}
                             <button type="button" className="cs-color-remove" aria-label={uiText("删除颜色 {value1}", { value1: index + 1 })} disabled={disabled} onClick={() => onChange(removeSceneColor(form, index))}><Trash2 size={14} aria-hidden="true" /></button>
                         </div>
-                        {selected && <div className="cs-color-source"><span title={`${selected.library} · ${selected.name}`}>{selected.library} · {selected.name}</span><a href={selected.sourceUrl} target="_blank" rel="noreferrer" aria-label={uiText("查看颜色 {value1} 来源", { value1: index + 1 })}>{uiText("来源")}</a></div>}
+                        {selected && <div className="cs-color-source"><Tooltip title={`${selected.library} · ${selected.name}`}><span>{selected.library} · {selected.name}</span></Tooltip><a href={selected.sourceUrl} target="_blank" rel="noreferrer" aria-label={uiText("查看颜色 {value1} 来源", { value1: index + 1 })}>{uiText("来源")}</a></div>}
                     </div>;
                 })}
                 <button type="button" className="cs-add-color" disabled={disabled || form.colors.length >= 6} onClick={() => onChange(addSceneColor(form))}><Plus size={14} aria-hidden="true" />{uiText("添加颜色")}</button>
@@ -111,9 +112,7 @@ export function SceneFields({ sceneId, form, onChange, disabled = false, sourceI
                 <div className="cs-field-row">
                     <div className="cs-field">
                         <label className="cs-label" htmlFor={id("category")}>{uiText("服装品类")}</label>
-                        <select id={id("category")} className="cs-select" value={form.category} onChange={(event) => update("category", event.target.value)} disabled={disabled}>
-                            {["按描述判断", "上衣", "针织衫", "外套", "连衣裙", "下装", "其他服装"].map((item) => <option key={item} value={item}>{uiText(item)}</option>)}
-                        </select>
+                        <Select id={id("category")} value={form.category} onChange={value => update("category", value)} disabled={disabled} options={["按描述判断", "上衣", "针织衫", "外套", "连衣裙", "下装", "其他服装"].map(value => ({ value, label: uiText(value) }))} />
                     </div>
                     <div className="cs-field">
                         <label className="cs-label" htmlFor={id("fabric")}>{uiText("面料方向 ")}<span className="cs-help">{uiText("可选")}</span></label>
@@ -172,9 +171,7 @@ export function SceneFields({ sceneId, form, onChange, disabled = false, sourceI
                 {choice("craft", "目标工艺", ["刺绣", "毛巾绣", "提花", "胶印"])}
                 <div className="cs-field">
                     <label className="cs-label" htmlFor={id("craftFabric")}>{uiText("承载面料")}</label>
-                    <select id={id("craftFabric")} className="cs-select" value={form.craftFabric} onChange={(event) => update("craftFabric", event.target.value)} disabled={disabled}>
-                        {["棉布", "针织面料", "牛仔布", "毛呢", "帆布", "参考图原面料"].map((item) => <option key={item} value={item}>{uiText(item)}</option>)}
-                    </select>
+                    <Select id={id("craftFabric")} value={form.craftFabric} onChange={value => update("craftFabric", value)} disabled={disabled} options={["棉布", "针织面料", "牛仔布", "毛呢", "帆布", "参考图原面料"].map(value => ({ value, label: uiText(value) }))} />
                 </div>
                 <p className="cs-help">{uiText("保留图案形状与配色，模拟工艺在所选面料上的纹理、厚度与边缘收口。")}</p>
                 {extra("如：强调细密针迹，图案边缘收口干净。")}
@@ -303,6 +300,6 @@ function SceneUploadSlot({ slot, reference, onImage, onAsset, disabled, scopeKey
                 }} />}
                 {imageDrop.dragging || imageDrop.reading ? <p role="status" className="cs-help">{imageDrop.dragging ? uiText("松开以添加到{label}，不会自动生成。", { label: uiText(slot.label) }) : uiText("正在读取拖入图片，请稍候。")}</p> : null}
                 <p className="cs-upload-meta">{uiText(slot.hint || "")}</p>
-                {reference && <div className="cs-upload-file"><span title={reference.name}>{reference.name}</span><button type="button" className="cs-upload-remove" aria-label={uiText("移除{label}", { label: uiText(slot.label) })} disabled={disabled} onClick={() => onImage(slot.id, null)}><Trash2 size={13} aria-hidden="true" />{uiText("移除")}</button></div>}
+                {reference && <div className="cs-upload-file"><Tooltip title={reference.name}><span>{reference.name}</span></Tooltip><button type="button" className="cs-upload-remove" aria-label={uiText("移除{label}", { label: uiText(slot.label) })} disabled={disabled} onClick={() => onImage(slot.id, null)}><Trash2 size={13} aria-hidden="true" />{uiText("移除")}</button></div>}
             </section>;
 }

@@ -254,7 +254,7 @@ describe("specialized form presentation", () => {
         for (const [sceneId, ...expected] of labels) {
             const markup = fields(sceneId!);
             for (const label of expected) expect(markup).toContain(label!);
-            expect(markup).not.toContain("ant-select");
+            expect(markup).not.toContain("<select");
             expect(markup).not.toContain("完整提示词");
             if (sceneId !== "text-to-style" && sceneId !== "virtual-try-on") expect(markup).toContain("<details");
         }

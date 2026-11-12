@@ -2,6 +2,18 @@ import type { ThemeConfig } from "antd";
 import { theme as antdTheme } from "antd";
 import { canvasThemes, type CanvasColorTheme } from "./canvas-theme";
 
+const motionEase = "cubic-bezier(.2, .7, .2, 1)";
+const motionTokens = {
+    motionEaseOutCirc: motionEase,
+    motionEaseInOutCirc: motionEase,
+    motionEaseOut: motionEase,
+    motionEaseInOut: motionEase,
+    motionEaseOutBack: motionEase,
+    motionEaseInBack: motionEase,
+    motionEaseInQuint: motionEase,
+    motionEaseOutQuint: motionEase,
+} satisfies NonNullable<ThemeConfig["token"]>;
+
 /** Canvas controls also render in portals: scope their neutral theme in context. */
 export function getCanvasAntThemeConfig(mode: CanvasColorTheme): ThemeConfig {
     const colors = canvasThemes[mode];
@@ -10,6 +22,7 @@ export function getCanvasAntThemeConfig(mode: CanvasColorTheme): ThemeConfig {
         algorithm: mode === "dark" ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
         cssVar: { key: `canvas-workspace-${mode}` },
         token: {
+            ...motionTokens,
             colorPrimary: colors.node.text,
             colorInfo: colors.node.text,
             colorBgLayout: colors.canvas.background,
@@ -22,10 +35,13 @@ export function getCanvasAntThemeConfig(mode: CanvasColorTheme): ThemeConfig {
             colorTextLightSolid: colors.node.panel,
             colorFillSecondary: colors.toolbar.itemHover,
             colorFillTertiary: colors.toolbar.activeBg,
-            borderRadius: 6,
-            borderRadiusLG: 10,
+            borderRadius: 8,
+            borderRadiusLG: 12,
             controlHeight: 32,
-            fontSize: 12,
+            fontSize: 13,
+            motionDurationFast: "0.12s",
+            motionDurationMid: "0.18s",
+            motionDurationSlow: "0.24s",
             fontFamily: '"Geist Variable", "PingFang SC", "Microsoft YaHei", sans-serif',
             boxShadowSecondary: "0 3px 16px rgba(0,0,0,.10)",
         },
@@ -38,48 +54,59 @@ export function getCanvasAntThemeConfig(mode: CanvasColorTheme): ThemeConfig {
     };
 }
 
-const orange = {
+const neutral = {
     light: {
-        primary: "#ea580c",
-        primaryHover: "#c2410c",
+        primary: "#272724",
+        primaryHover: "#44443f",
         primaryText: "#ffffff",
-        menuBg: "#ffedd5",
-        menuText: "#7c2d12",
-        selectActiveBg: "#fff7ed",
-        selectSelectedBg: "#ffedd5",
-        selectText: "#7c2d12",
-        tableSelectedBg: "rgba(234, 88, 12, 0.08)",
-        tableSelectedHoverBg: "rgba(234, 88, 12, 0.14)",
+        menuBg: "#f1f1ed",
+        menuText: "#272724",
+        selectActiveBg: "#f7f7f5",
+        selectSelectedBg: "#f1f1ed",
+        selectText: "#272724",
+        tableSelectedBg: "rgba(39, 39, 36, 0.04)",
+        tableSelectedHoverBg: "rgba(39, 39, 36, 0.08)",
     },
     dark: {
-        primary: "#fb923c",
-        primaryHover: "#fdba74",
-        primaryText: "#1c1208",
-        menuBg: "#431407",
-        menuText: "#ffedd5",
-        selectActiveBg: "#431407",
-        selectSelectedBg: "#5f1d08",
-        selectText: "#ffedd5",
-        tableSelectedBg: "rgba(251, 146, 60, 0.14)",
-        tableSelectedHoverBg: "rgba(251, 146, 60, 0.2)",
+        primary: "#eeefeb",
+        primaryHover: "#d3d5ce",
+        primaryText: "#222320",
+        menuBg: "#2b2d27",
+        menuText: "#eeefeb",
+        selectActiveBg: "#2b2d27",
+        selectSelectedBg: "#34362f",
+        selectText: "#eeefeb",
+        tableSelectedBg: "rgba(238, 239, 235, 0.06)",
+        tableSelectedHoverBg: "rgba(238, 239, 235, 0.10)",
     },
 };
 
 export function getAntThemeConfig(dark: boolean): ThemeConfig {
-    const color = dark ? orange.dark : orange.light;
+    const color = dark ? neutral.dark : neutral.light;
 
     return {
         algorithm: dark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
-        cssVar: { key: dark ? "orange-canvas-dark" : "orange-canvas-light" },
+        cssVar: { key: dark ? "trucreate-dark" : "trucreate-light" },
         token: {
+            ...motionTokens,
             colorBgLayout: dark ? "#181918" : "#f7f7f5",
             colorBgContainer: dark ? "#222320" : "#ffffff",
             colorBgElevated: dark ? "#222320" : "#ffffff",
             colorBorder: dark ? "#43463e" : "#e0e0da",
             colorText: dark ? "#eeefeb" : "#272724",
             colorTextSecondary: dark ? "#a9aca1" : "#70706a",
-            borderRadius: 10,
+            borderRadius: 8,
+            borderRadiusLG: 12,
             controlHeight: 36,
+            controlHeightSM: 32,
+            controlHeightLG: 44,
+            fontSize: 14,
+            fontSizeSM: 13,
+            motionDurationFast: "0.12s",
+            motionDurationMid: "0.18s",
+            motionDurationSlow: "0.24s",
+            boxShadow: "0 4px 20px rgba(0,0,0,.10)",
+            boxShadowSecondary: "0 16px 48px rgba(0,0,0,.16)",
             fontFamily: 'Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif',
             colorPrimary: color.primary,
             colorInfo: color.primary,
@@ -97,9 +124,9 @@ export function getAntThemeConfig(dark: boolean): ThemeConfig {
                 itemHoverBg: color.menuBg,
                 itemSelectedBg: color.menuBg,
                 itemSelectedColor: color.menuText,
-                darkItemHoverBg: orange.dark.menuBg,
-                darkItemSelectedBg: orange.dark.menuBg,
-                darkItemSelectedColor: orange.dark.menuText,
+                darkItemHoverBg: neutral.dark.menuBg,
+                darkItemSelectedBg: neutral.dark.menuBg,
+                darkItemSelectedColor: neutral.dark.menuText,
             },
             Select: {
                 optionActiveBg: color.selectActiveBg,

@@ -495,7 +495,7 @@ describe("text retry requires explicit confirmation against current canvas state
         const initial = structuredClone(h.context.nodes.current);
         h.open();
         expect(h.confirmations).toHaveLength(1);
-        expect(h.confirmations[0]!.content).toContain("可能再次扣费");
+        expect(h.confirmations[0]!.content).toContain("创建新任务并重新调用模型");
         expect(h.confirmations[0]!.cancelText).toBe("取消");
         expect(h.generated).toEqual([]);
         expect(h.events).toEqual([]);

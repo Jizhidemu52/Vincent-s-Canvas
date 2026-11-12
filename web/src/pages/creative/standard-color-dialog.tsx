@@ -1,5 +1,5 @@
 import { uiText, useUiText } from "@/lib/i18n";
-import { Button, Modal, Spin } from "antd";
+import { Button, Modal, Select, Spin, Tooltip } from "antd";
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { findStandardColors, loadStandardColorManifest, loadStandardColors, toStandardColorSelection, type StandardColor, type StandardColorSelection } from "@/lib/standard-colors";
 import { PhotoColorSampler } from "./photo-color-sampler";
@@ -62,10 +62,8 @@ export default function StandardColorDialog({ initialHex, selection, source, slo
         <div className="sc-dialog">
             <div className="sc-intro"><p>{uiText("搜索色号，或从原图取色寻找相近颜色。")}</p><span>{manifest ? uiText("{value1} 色 · {length} 个色库 / 分组", { value1: manifest.total.toLocaleString(), length: manifest.libraries.length }) : uiText("正在读取色库目录…")}</span></div>
             <div className="sc-filters">
-                <label>{uiText("色库")}<select className="cs-select" value={library} disabled={!manifest} onChange={event => { setLibrary(event.target.value); setPage(0); }}>
-                    <option value="">{uiText("全部色库")}</option>
-                    {manifest?.libraries.map(item => <option key={item.name} value={item.name}>{item.name}（{item.count.toLocaleString()}）</option>)}
-                </select></label>
+                <label>{uiText("色库")}<Select aria-label={uiText("色库")} className="w-full" value={library} disabled={!manifest} onChange={value => { setLibrary(value); setPage(0); }}
+                    options={[{ value: "", label: uiText("全部色库") }, ...(manifest?.libraries.map(item => ({ value: item.name, label: `${item.name}（${item.count.toLocaleString()}）` })) || [])]} /></label>
                 <label>{uiText("色号 / 名称 / HEX")}<input className="cs-input" type="search" value={query} autoFocus placeholder={uiText("例如：18-1664、RAL 3020、#A5B8C5")} onChange={event => { setQuery(event.target.value); setPage(0); }} /></label>
             </div>
             <div className="sc-match-controls">
@@ -82,8 +80,8 @@ export default function StandardColorDialog({ initialHex, selection, source, slo
                         const selected = chosen?.id === color.id && chosen.library === (library || color.brand);
                         return <button type="button" className="sc-card" key={color.id} aria-pressed={selected} aria-label={`${color.name} ${color.hex}`} onClick={() => setChosen(toStandardColorSelection(color, library || undefined, manifest?.version))}>
                             <span className="sc-swatch" style={{ background: color.hex }} />
-                            <span className="sc-card-name" title={color.name}>{color.name}</span>
-                            <span className="sc-card-library" title={library || color.brand}>{library || color.brand}</span>
+                            <Tooltip title={color.name}><span className="sc-card-name">{color.name}</span></Tooltip>
+                            <Tooltip title={library || color.brand}><span className="sc-card-library">{library || color.brand}</span></Tooltip>
                             <span className="sc-card-values">{color.hex}{deltaE !== undefined && <span>ΔE {deltaE.toFixed(2)}</span>}</span>
                         </button>;
                     })}

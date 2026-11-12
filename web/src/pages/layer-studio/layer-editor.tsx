@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { Select, Tooltip } from "antd";
 import type { LayerStudioItem, LayerStudioResultDocument } from "../../../../shared/layer-studio";
 import { workspaceOwnerHeaders } from "@/services/api/workspace-owner";
 import { useUserStore } from "@/stores/use-user-store";
@@ -217,10 +218,10 @@ function SessionEditor({ document: result, value, onChange, owner, theme }: Laye
     const positionKnown = selectedItem && group?.size && (selectedItem.role !== "layer" || layerStudioBoxRect(selectedItem.boundingBox, group.size));
     return <section className="layer-editor" data-theme={theme} aria-label="图层重组编辑器">
         <header className="layer-editor-toolbar"><div><h3>图层重组</h3><p>已保存 {savedCount} / {result.expectedOutputCount} 个原件 · 调整不会改动原图</p></div>
-            <div className="layer-editor-actions">{groups.length > 1 && <label>结果组 <select aria-label="结果组" value={group?.index} onChange={event => {
-                const next = groups.find(candidate => candidate.index === Number(event.target.value));
+            <div className="layer-editor-actions">{groups.length > 1 && <label>结果组 <Select aria-label="结果组" className="min-w-28" value={group?.index} onChange={value => {
+                const next = groups.find(candidate => candidate.index === value);
                 if (next) { setGroupIndex(next.index); commit({ ...edit, selectedIndex: next.items[0]?.index ?? null }); }
-            }}>{groups.map(candidate => <option key={candidate.index} value={candidate.index}>第 {candidate.index + 1} 组</option>)}</select></label>}
+            }} options={groups.map(candidate => ({ value: candidate.index, label: `第 ${candidate.index + 1} 组` }))} /></label>}
                 <button type="button" onClick={reset} disabled={busy || !group?.size}>复位当前组</button>
                 <button type="button" className="layer-editor-primary" onClick={exportPng} disabled={busy || !canExport}>{busy ? "处理中…" : "导出合成 PNG"}</button></div>
         </header>
@@ -247,7 +248,7 @@ function SessionEditor({ document: result, value, onChange, owner, theme }: Laye
                 return <div className={`layer-editor-row${item.index === selectedItem?.index ? " is-selected" : ""}`} key={item.index} role="listitem">
                     <input type="checkbox" aria-label={`显示 ${label(item)}`} checked={layer?.visible ?? true} disabled={!layer || busy} onChange={event => commit(updateLayerStudioEdit(edit, item.index, { visible: event.target.checked }))} />
                     <button type="button" aria-pressed={item.index === selectedItem?.index} onClick={() => select(item)} className="layer-editor-select"><span>{label(item)}</span><small>{item.state === "saved" ? item.role === "base" ? "底图原件" : "已保存" : "原件待保存"}</small></button>
-                    <button type="button" aria-label={`下载 ${label(item)} 原件`} title="下载原始文件" disabled={item.state !== "saved" || busy} onClick={() => downloadOriginal(item)}>↓</button>
+                    <Tooltip title={item.state !== "saved" ? "原件保存后即可下载" : "下载原始文件"}><button type="button" aria-label={`下载 ${label(item)} 原件`} disabled={item.state !== "saved" || busy} onClick={() => downloadOriginal(item)}>↓</button></Tooltip>
                 </div>;
             })}</div>
             {selectedItem && <div className="layer-editor-inspector"><h4>{label(selectedItem)}</h4>{selectedItem.description && <p className="layer-editor-muted">{selectedItem.description}</p>}

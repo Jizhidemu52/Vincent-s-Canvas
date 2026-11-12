@@ -5,6 +5,7 @@ import { test, expect, type MockCanvasApi } from "./fixtures";
 import { canvasExampleNodePrefix, type CanvasExampleLessonId } from "../src/lib/canvas/canvas-example-lessons";
 import { parseCanvasClipboard } from "../src/lib/canvas/canvas-system-clipboard";
 import type { CanvasNodeData } from "../src/types/canvas";
+import { canvasArrangeOptions } from "../src/lib/canvas/canvas-node-arrange-options";
 
 const assets = resolve(import.meta.dirname, "../public/design-examples/canvas-practice");
 const captureAssets = process.env.CAPTURE_CANVAS_PRACTICE_ASSETS === "1";
@@ -353,7 +354,13 @@ test("实操素材：四个包款评审单元的六种对齐与五种排列", as
     for (const mode of ["horizontal", "vertical", "right", "bottom", "center-x", "center-y", "grid", "row", "column", "distribute-x", "distribute-y"]) {
         await page.keyboard.press("Control+a");
         await expect(page.getByTestId("canvas-multi-selection")).toContainText("已选 4 项");
-        await page.getByRole("combobox", { name: "对齐与排列所选节点", exact: true }).selectOption(mode);
+        await page.getByRole("combobox", { name: "对齐与排列所选节点", exact: true }).click();
+        await expect(page.locator(".ant-select-dropdown:visible .ant-select-item-option").first()).toBeVisible();
+        const option = page.locator(`.ant-select-dropdown:visible .ant-select-item-option[title="${canvasArrangeOptions.find(option => option.key === mode)!.label}"]`);
+        // AntD virtualizes the last item in this 11-option menu; reveal it by
+        // scrolling the real options list, as a pointer user would.
+        if (!await option.count()) await page.locator(".ant-select-dropdown:visible .rc-virtual-list-holder").evaluate(element => { element.scrollTop = element.scrollHeight; });
+        await option.click();
         await expect.poll(() => current().map(node => node.position)).not.toEqual(initial.map(node => node.position));
         const result = current();
         expect(result).toHaveLength(initial.length);

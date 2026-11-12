@@ -3,6 +3,7 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import React, { type ComponentProps, type ReactElement } from "react";
+import { Tooltip } from "antd";
 import { renderToStaticMarkup } from "react-dom/server";
 import ts from "typescript";
 import { CanvasQuickGeneratePanel } from "@/components/canvas/canvas-quick-generate-panel";
@@ -66,7 +67,7 @@ test("parameter buttons reflect normalized sizes and model-specific quality whil
         { patch: { model: "vcen-gpt2", size: "728x90", quality: "2k", count: 5 }, size: "728x90", quality: "2K" },
         { patch: { model: "nano-banana-2", size: "16:9", quality: "0.5k", count: 10 }, size: "16:9", quality: "0.5K" },
         { patch: { model: "midjourney-v7", size: "3:2", quality: "turbo", count: 9 }, size: "3:2", quality: "极速" },
-        { patch: { model: "gemini-3.1-flash-image", size: "16:9", quality: "4k" }, size: "自动", quality: "渠道默认" },
+        { patch: { model: "gemini-3.1-flash-image", size: "16:9", quality: "4k" }, size: "自动", quality: "默认" },
     ];
     for (const { patch, size, quality } of cases) {
         const html = markup(patch);
@@ -96,7 +97,8 @@ test("reference guidance occupies one accessible icon in the add-reference row a
     expect(tree.findIndex(element => element.type === CanvasQuickReferenceTray)).toBeGreaterThan(tree.indexOf(row));
     const generate = tree.find(element => element.props.className === "cw-generate-button")!;
     expect(elements(generate.props.children).some(element => element.props.className === "cw-generate-count")).toBe(true);
-    expect(generate.props.title).toBe("Enter 生成，Shift+Enter 换行");
+    expect(tree.find(element => element.type === Tooltip && elements(element.props.children).includes(generate))?.props.title).toBe("Enter 生成，Shift+Enter 换行");
+    expect(generate.props.title).toBeUndefined();
     expect(html).not.toContain("cw-shortcut");
 });
 
@@ -123,7 +125,12 @@ function controls(patch: Partial<Props> = {}, toolEnabled = true, boundModel?: s
         // External drag handling has its own tests; keep this renderer focused on composer controls.
         "@/hooks/use-image-drop": { useImageDrop: () => ({ dropProps: {}, dragging: false, reading: false }) },
         "@/hooks/use-image-mentions": { useImageMentions: (options: any) => { mentionOptions = options; return { menu: null, inputProps: {}, handleChange: (event: any) => options.onChange(event.target.value), handleSelect() {}, handleKeyDown: () => false }; } },
-        react: { ...React, memo: (component: unknown) => component, useMemo: (create: () => unknown) => create(), useId: () => "settings-test", useEffect: (effect: () => void) => effects.push(effect),
+        react: { ...React, memo: (component: unknown) => component, useMemo: (create: () => unknown) => create(), useId: () => "settings-test", useEffect: (effect: () => void) => effects.push(effect), useLayoutEffect: (effect: () => void) => effects.push(effect),
+            useRef: (initial: unknown) => {
+                const index = cursor++;
+                if (!(index in state)) state[index] = { current: initial };
+                return state[index];
+            },
             useState: (initial: unknown) => {
                 const index = cursor++;
                 if (!(index in state)) state[index] = initial;
@@ -140,7 +147,9 @@ function controls(patch: Partial<Props> = {}, toolEnabled = true, boundModel?: s
         },
     };
     const module = { exports: {} as { CanvasQuickGeneratePanel: (props: Props) => ReactElement } };
-    new Function("require", "module", "exports", code)((id: string) => id === "@/lib/i18n" ? i18nHarness : ((name: string) => Object.hasOwn(dependencies, name) ? dependencies[name] : requireModule(name))(id), module, module.exports);
+    // DOM focus restoration is exercised by the panel-close browser cases.
+    const document = { activeElement: null, body: {}, querySelector: () => null };
+    new Function("require", "module", "exports", "document", code)((id: string) => id === "@/lib/i18n" ? i18nHarness : ((name: string) => Object.hasOwn(dependencies, name) ? dependencies[name] : requireModule(name))(id), module, module.exports, document);
     return (next: Partial<Props> = {}) => {
         cursor = 0; effects.length = 0;
         const tree = elements(module.exports.CanvasQuickGeneratePanel({ ...initialProps, ...patch, ...next }));

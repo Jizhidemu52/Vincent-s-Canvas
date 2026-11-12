@@ -21,6 +21,7 @@ function bubbleHarness(actionsDisabled = false) {
     const bindings = {
         ...i18nHarness,
         React, memo: <T,>(component: T) => component,
+        useState: (initial: unknown) => [initial, () => {}], useRef: (initial: unknown) => ({ current: initial }), useEffect() {},
         cn: (...values: unknown[]) => values.filter(Boolean).join(" "),
         Bot: () => null, FileText: () => null, Copy: () => null, Pencil: () => null, RotateCcw: () => null,
         useCopyText: () => () => undefined, ChatMarkdown: "div", ChatImage: "chat-image", Tooltip: "div", Button: "review-button", chatImageOriginal,

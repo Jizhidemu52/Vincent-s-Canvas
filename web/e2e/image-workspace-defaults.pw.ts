@@ -1,6 +1,7 @@
 import type { Locator, Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import { toolDefinitions } from "../../shared/feature-catalog";
+import { antSelect, chooseAntSelect } from "./antd-select-helpers";
 
 const oldModel = { id: "10000000-0000-4000-8000-000000000025", name: "aplmart-gpt2.5-flare", imageParameterProfile: "quality-resolution" };
 const flare = { id: "10000000-0000-4000-8000-000000000026", name: "aplmart-gpt2.6-flare", imageParameterProfile: "quality-resolution-v2" };
@@ -55,10 +56,10 @@ test("explicit image and seamless model choices persist separately and do not re
     picker = page.locator(pickerSelector);
     await expect(picker).toContainText(flareLabel);
     await selectOld(page, picker);
-    await page.getByRole("combobox", { name: "图片质量", exact: true }).selectOption("max");
+    await chooseAntSelect(page.getByRole("combobox", { name: "图片质量", exact: true }), "最高");
     await page.reload();
     await expect(page.locator(pickerSelector)).toContainText(oldLabel);
-    await expect(page.getByRole("combobox", { name: "图片质量", exact: true })).toHaveValue("max");
+    await expect(antSelect(page.getByRole("combobox", { name: "图片质量", exact: true }))).toHaveText("最高");
     await page.goto("/creative/text-to-style");
     await expect(page.locator(pickerSelector)).toContainText(flareLabel);
     expect(api.submissions).toHaveLength(1);

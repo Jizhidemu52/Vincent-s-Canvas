@@ -2,8 +2,8 @@ import { useUiText, uiText, useUiLocale } from "@/lib/i18n";
 import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import copyToClipboard from "copy-to-clipboard";
 import { Bot, Copy, Cpu, History, ImageIcon, Maximize2, MoreHorizontal, PanelLeft, PanelRightClose, Plus, Settings2, Trash2, Video, X } from "lucide-react";
-import { Button, Dropdown, Input, Modal, Popover, Segmented, Switch, Tooltip } from "antd";
-import { motion } from "motion/react";
+import { Button, Dropdown, Input, Modal, Popover, Segmented, Select as AntSelect, Switch, Tooltip } from "antd";
+import { motion, useReducedMotion } from "motion/react";
 
 import { modelOptionName, normalizeModelOptionValue, selectableModelsByCapability, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { imageModelDisplayName, imageModelIdentityHidden } from "@/lib/model-display";
@@ -55,7 +55,7 @@ import { getVideoModelParameterSpec } from "@/lib/video-model-parameters";
 import { getGenerationCapabilities, getImageGenerationModels, QueuedTaskFailedError, QueuedTaskPausedError, type GenerationCapabilityModel, type ImageGenerationModel } from "@/services/api/generation-tasks";
 import type { ReferenceImage } from "@/types/image";
 import { canvasAssistantPanelPropsEqual, type CanvasAssistantPanelRenderState, type CanvasMediaWorkflowAction } from "@/lib/canvas/canvas-assistant-panel-render-stability";
-import { CANVAS_AGENT_PANEL_MOTION_MS } from "@/lib/canvas/canvas-agent-panel-constants";
+import { CANVAS_PANEL_MOTION_MS } from "./use-canvas-panel-presence";
 import { agentMessageWindow, DEFAULT_AGENT_MESSAGE_WINDOW, expandAgentMessageWindow } from "@/lib/canvas/agent-message-window";
 import { executeOnlineAgentOperations, onlineAgentConfig, onlineAgentMediaSettings } from "@/lib/canvas/online-agent-execution";
 import { buildNodeGenerationContext, buildNodeResponseMessages, hydrateNodeGenerationContext } from "./canvas-node-generation";
@@ -90,7 +90,7 @@ import { mapAgentDocumentMedia } from "@/lib/image-agent/document-media";
 import { CHAT_ATTACHMENT_ACCEPT, parseChatAttachment } from "@/lib/chat-attachments";
 import { AGENT_DOCUMENT_LIMITS, designRequirementsText, type AgentDocument, type AgentDocumentReadInput, type DesignRequirements } from "../../../../shared/image-agent-documents";
 
-const PANEL_MOTION_SECONDS = CANVAS_AGENT_PANEL_MOTION_MS / 1000;
+const PANEL_MOTION_SECONDS = CANVAS_PANEL_MOTION_MS / 1000;
 const ONLINE_AGENT_MAX_STEPS = 4;
 
 
@@ -156,6 +156,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
     onToggleLayout,
 }: CanvasAssistantPanelRenderState) {
     const t = useUiText();
+    const reducedMotion = useReducedMotion();
     const locale = useUiLocale();
     const brandName = locale === "en-US" ? "TruCreate" : "AI 创意设计平台";
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
@@ -1627,7 +1628,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
             const result = await onUndoOps(turnId);
             if (!result) return;
             if (!result.undoReport?.retryable) setUndoneTurns(current => new Set([...current, turnId]));
-            appendMessage(activeSession!.id, { id: nanoid(), role: "assistant", text: result.undoReport ? canvasAgentUndoMessage(result.undoReport) : "已撤销本轮画布修改；已完成的生成费用不会退还。" });
+            appendMessage(activeSession!.id, { id: nanoid(), role: "assistant", text: result.undoReport ? canvasAgentUndoMessage(result.undoReport) : "已撤销本轮画布修改，已完成的生成任务保留。" });
         } catch (error) { setAttachmentErrors([error instanceof Error ? error.message : "撤销失败，请重试"]); }
         finally { setUndoingTurn(null); }
     };
@@ -1705,7 +1706,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                         <span>{attachment.name} · 结果复核</span>
                         <Button size="small" disabled={!onlineEnabled || isRunning} loading={reviewingResults.has(key)} onClick={() => handleReviewResult(activeSession!.id, source.id, attachment.id)}>{report ? "重新检查结果" : "检查结果"}</Button>
                     </div>
-                    <p>手动调用视觉模型，可能产生模型费用；不会重新出图。</p>
+                    <p>手动调用视觉模型分析当前图片；不会重新出图。</p>
                     {report ? <div className="space-y-2" role="status">
                         <p className="whitespace-pre-wrap break-words" style={{ color: theme.node.text }}>{report.summary}</p>
                         <ul className="space-y-2">{report.checks.map((check, checkIndex) => <li key={checkIndex} className="break-words">
@@ -1983,16 +1984,16 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
         <motion.div
             className="flex min-h-0 shrink-0"
             data-canvas-shortcuts="ignore"
-            initial={{ width: 0, opacity: 0 }}
+            initial={reducedMotion ? false : { width: 0, opacity: 0 }}
             animate={{ width: closing ? 0 : width + 1, opacity: closing ? 0 : 1 }}
-            transition={{ duration: PANEL_MOTION_SECONDS, ease: [0.22, 1, 0.36, 1] }}
+            transition={{ duration: reducedMotion ? 0 : PANEL_MOTION_SECONDS, ease: [0.22, 1, 0.36, 1] }}
             style={{ overflow: "clip", pointerEvents: closing ? "none" : undefined }}
         >
             <motion.aside
                 className="relative flex min-h-0 shrink-0 flex-col border-l"
-                initial={{ x: 48 }}
+                initial={reducedMotion ? false : { x: 48 }}
                 animate={{ x: closing ? 28 : 0 }}
-                transition={{ duration: PANEL_MOTION_SECONDS, ease: [0.22, 1, 0.36, 1] }}
+                transition={{ duration: reducedMotion ? 0 : PANEL_MOTION_SECONDS, ease: [0.22, 1, 0.36, 1] }}
                 style={{ width, background: theme.node.panel, borderColor: theme.node.stroke, color: theme.node.text }}
             >
                 <header className="cw-tabs" role="tablist" aria-label={t("创作方式")}>
@@ -2086,8 +2087,8 @@ function AgentGenerationControls({ settings: savedSettings, config: baseConfig, 
     return (
         <>
             <div data-testid="canvas-agent-generation-actions" className="col-span-2 flex min-w-0 items-center gap-2 text-xs">
-            <select aria-label={t("生成类型")} value={settings.mode} className="max-w-24 bg-transparent py-2" onChange={event => onChange(event.target.value === "image" ? { ...normalizeAgentImageSettings({ ...settings, mode: "image" }, imageProfile), imageCount: "1" } : videoCapability ? normalizeAgentVideoSettings({ ...settings, mode: "video" }, videoCapability) : { mode: "video" })}><option value="image">{t("图片")}</option><option value="video">{t("视频")}</option></select>
-            <span className="min-w-0 flex-1 truncate" title={imageModelDisplayName(modelOptionName(currentModel))}>{imageModelDisplayName(modelOptionName(currentModel))}</span>
+            <AntSelect aria-label={t("生成类型")} value={settings.mode} className="min-w-24" onChange={value => onChange(value === "image" ? { ...normalizeAgentImageSettings({ ...settings, mode: "image" }, imageProfile), imageCount: "1" } : videoCapability ? normalizeAgentVideoSettings({ ...settings, mode: "video" }, videoCapability) : { mode: "video" })} options={[{ value: "image", label: t("图片") }, { value: "video", label: t("视频") }]} />
+            <Tooltip title={imageModelDisplayName(modelOptionName(currentModel))}><span className="min-w-0 flex-1 truncate">{imageModelDisplayName(modelOptionName(currentModel))}</span></Tooltip>
             <Popover trigger="click" placement="top" content={
                 <div data-canvas-no-zoom className="w-[280px] max-w-[calc(100vw-48px)] max-h-[calc(100dvh-48px)] overflow-y-auto overscroll-contain text-xs">
                     <div className="mb-3 text-sm font-semibold">{isImage ? t("图像设置") : t("视频设置")}</div>
@@ -2119,7 +2120,7 @@ function AgentGenerationControls({ settings: savedSettings, config: baseConfig, 
 
 function AgentParameterSelect({ label, value, values, suffix = "", onChange }: { label: string; value: string; values: string[]; suffix?: string; onChange: (value: string) => void }) {
     const t = useUiText();
-    return <label className="flex min-h-9 items-center justify-between gap-3"><span className="opacity-60">{label}</span><select aria-label={label} value={value} disabled={!values.length} className="h-8 max-w-[165px] rounded-md border-0 bg-transparent px-2 text-right outline-none" onChange={(event) => onChange(event.target.value)}>{values.map((item) => <option key={item} value={item}>{item === "-1" ? t("智能") : `${item === "auto" ? "自动" : item}${suffix}`}</option>)}</select></label>;
+    return <label className="flex min-h-9 items-center justify-between gap-3"><span className="opacity-60">{label}</span><AntSelect aria-label={label} value={value} disabled={!values.length} className="w-[165px]" onChange={onChange} options={values.map(item => ({ value: item, label: item === "-1" ? t("智能") : `${item === "auto" ? t("自动") : item}${suffix}` }))} /></label>;
 }
 function AgentModelIcon({ model }: { model: string }) {
     const t = useUiText();
@@ -2161,7 +2162,7 @@ function AssistantHistory({ sessions, activeSession, onOpen, onDelete, onRename 
                                     <span className="shrink-0 text-[10px] font-medium" style={{ color: theme.node.text }}>
                                         {t("当前")}</span>
                                 ) : null}
-                                {editing?.id === session.id ? <Input autoFocus value={editing.title} onChange={event => setEditing({ id: session.id, title: event.target.value })} onBlur={saveName} onKeyDown={event => { if (event.nativeEvent.isComposing || event.keyCode === 229) return; if (event.key === "Enter") saveName(); if (event.key === "Escape") setEditing(null); }} /> : <button type="button" className="truncate text-sm font-medium leading-5" title={t("双击重命名")} onDoubleClick={() => setEditing({ id: session.id, title: session.title })}>{session.title}</button>}
+                                {editing?.id === session.id ? <Input autoFocus value={editing.title} onChange={event => setEditing({ id: session.id, title: event.target.value })} onBlur={saveName} onKeyDown={event => { if (event.nativeEvent.isComposing || event.keyCode === 229) return; if (event.key === "Enter") saveName(); if (event.key === "Escape") setEditing(null); }} /> : <Tooltip title={t("双击重命名")}><button type="button" className="truncate text-sm font-medium leading-5" onDoubleClick={() => setEditing({ id: session.id, title: session.title })}>{session.title}</button></Tooltip>}
                             </div>
                             <div className="truncate text-[11px] leading-4 opacity-65">{sessionPreview(session)}</div>
                         </div>

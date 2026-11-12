@@ -107,8 +107,7 @@ test("390px 管理员对话发送按钮不被体验数据遮挡，收起后体�
     await newCanvas(page);
     const trigger = page.getByLabel("本页体验数据", { exact: true });
     await expect(trigger).toBeVisible();
-    await page.getByRole("button", { name: "打开画布菜单", exact: true }).click();
-    await page.getByRole("menuitem", { name: "打开对话", exact: true }).click();
+    await page.getByRole("tab", { name: "对话", exact: true }).first().click();
     const panel = page.locator(".cw-agent-panel");
     const send = panel.getByRole("button", { name: "发送", exact: true });
     await panel.getByRole("textbox", { name: "理解画布、修改图片或批量编排…", exact: true }).fill("只检查按钮命中，不发送");
@@ -120,8 +119,7 @@ test("390px 管理员对话发送按钮不被体验数据遮挡，收起后体�
         const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
         return hit === button || Boolean(hit && button.contains(hit));
     })).toBe(true);
-    await page.getByRole("button", { name: "打开画布菜单", exact: true }).click();
-    await page.getByRole("menuitem", { name: "收起对话", exact: true }).click();
+    await panel.getByRole("tab", { name: "创建", exact: true }).click();
     await expect(panel).toBeHidden();
     await trigger.click();
     await expect(trigger.locator("..")).toHaveAttribute("open", "");

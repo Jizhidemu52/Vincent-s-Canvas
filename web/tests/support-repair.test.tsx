@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import React, { type ReactElement } from "react";
@@ -7,6 +7,10 @@ import { i18nHarness } from "./helpers/i18n-harness";
 import { normalizePageUrl, referenceReturnPath } from "@/pages/reference-import/collect";
 import { decodeReference } from "@/pages/reference-import/protocol";
 import type { ReferenceScan } from "@/services/api/reference-import";
+import { contributeGroupCredits, submitGroupCreditRequest } from "@/services/api/group-credits";
+
+const originalFetch = globalThis.fetch;
+afterEach(() => { globalThis.fetch = originalFetch; });
 
 function elements(value: unknown): ReactElement<any>[] {
     if (Array.isArray(value)) return value.flatMap(elements);
@@ -71,136 +75,95 @@ function component(path: string, mocks: Record<string, unknown>, browser: Record
     };
 }
 
-type CreditInput = { requestId: string; amount: number; reason?: string };
-function team(options: { fail?: "once" | "always"; pending?: ReturnType<typeof deferred<void>>; refreshFail?: boolean } = {}) {
-    const identity = userStore();
-    const calls: Array<{ kind: string; ownerId: string; groupId: string; input: CreditInput }> = [];
-    const committed = new Set<string>();
-    let balance = 100, sequence = 0, loads = 0;
-    const submit = async (kind: string, input: CreditInput) => {
-        calls.push({ kind, ownerId: identity.user().id, groupId: identity.user().groupId, input: { ...input } });
-        const duplicate = committed.has(input.requestId);
-        if (!duplicate) { committed.add(input.requestId); if (kind === "contribution") balance -= input.amount; }
-        if (options.pending) await options.pending.promise;
-        if (options.fail === "always" || (options.fail === "once" && calls.length === 1)) throw new TypeError("Response lost after mock commit");
-        return { duplicate };
+function team(options: { enabled?: boolean; groupId?: string; role?: string } = {}) {
+    const identity = userStore({ groupId: options.groupId ?? "group-a", groupRole: options.role ?? "member" });
+    const calls: Array<{ path: string; method: string }> = [];
+    const responses: Record<string, unknown> = {
+        "/api/team": { group: { id: "group-a", name: "设计组", memberCount: 1 }, summary: { taskCount: 3, successCount: 2, credits: 900, rmbCost: 87 }, members: [{ id: "member", displayName: "设计师", username: "designer", role: "member", creditBalance: 100, monthlyCreditLimit: 300 }] },
+        "/api/team/history": { history: [{ id: "history", prompt: "完整原提示词", status: "success", credits: 4, rmbCost: 0.4 }] },
+        "/api/team/audit": { auditLogs: [{ id: "nonfinancial", action: "asset.adopted" }, { id: "financial", action: "group.credit_contributed" }] },
+        "/api/assets/summary": { assets: [], total: 0 },
     };
+    globalThis.fetch = (async (input, init) => {
+        const path = String(input), method = init?.method || "GET";
+        calls.push({ path, method });
+        if (method !== "GET" || !(path in responses)) throw new Error(`Unexpected Team request: ${method} ${path}`);
+        return Response.json(responses[path]);
+    }) as typeof fetch;
     const h = component("pages/team/index.tsx", {
-        "@/lib/deployment-features": { deploymentFeatures: { creditsEnabled: true } },
-        "@/lib/client-id": { createClientId: () => `local-id-${++sequence}` },
+        "@/lib/deployment-features": { deploymentFeatures: { creditsEnabled: options.enabled ?? true } },
         "@/stores/use-user-store": { useUserStore: identity.store },
         "@/stores/use-module-store": { useModuleStore: (select: Function) => select({ flags: { performance: false } }) },
-        "./team-overview": { loadTeamOverview: async () => {
-            loads++;
-            if (options.refreshFail && loads > 1) throw new Error("Overview refresh unavailable");
-            return { myCredits: { policy: { perRequestLimit: 100 }, wallet: {}, requests: [] }, errors: [] };
-        } },
-        "@/services/api/group-credits": {
-            submitGroupCreditRequest: (input: CreditInput) => submit("request", input),
-            contributeGroupCredits: (input: CreditInput) => submit("contribution", input),
-        },
     });
-    const form = (kind: "request" | "contribution") => h.render().filter(node => typeof node.props.onFinish === "function")[kind === "request" ? 0 : 1]!;
-    return { ...h, ...identity, calls, committed, balance: () => balance, loads: () => loads, form,
-        submit: (kind: "request" | "contribution", values: { amount: number; reason?: string }) => form(kind).props.onFinish(values),
-        open: (kind: "request" | "contribution") => h.render().find(node => node.props.children === (kind === "request" ? "申请小组额度" : "归还个人额度"))!.props.onClick(),
-        cancel: (kind: "request" | "contribution") => h.render().filter(node => node.type === "Modal")[kind === "request" ? 0 : 1]!.props.onCancel(),
-    };
+    return { ...h, ...identity, calls };
 }
 
-describe("S-01 credit intent idempotency in the real Team component", () => {
+describe("S-01 retired Team financial UI and retained API contracts", () => {
+    for (const role of ["member", "leader"]) test(`${role}: the real Team and overview loader expose no financial action or endpoint`, async () => {
+        const h = team({ role }); h.render(); await settle();
+        const rendered = h.render();
+        expect(rendered.some(node => typeof node.props.onFinish === "function" || node.type === "Modal")).toBe(false);
+        expect(rendered.some(node => typeof node.props.children === "string" && /积分|额度|成本|共享池/.test(node.props.children))).toBe(false);
+        const tables = rendered.filter(node => node.type === "Table");
+        expect(tables.every(table => table.props.columns.every((column: any) => !["credits", "rmbCost", "creditBalance", "monthlyCreditLimit"].includes(column.dataIndex)))).toBe(true);
+        if (role === "leader") {
+            expect(h.calls.map(call => call.path).sort()).toEqual(["/api/assets/summary", "/api/team", "/api/team/audit", "/api/team/history"]);
+            expect(tables.at(-1)!.props.dataSource).toEqual([{ id: "nonfinancial", action: "asset.adopted" }]);
+            expect(tables[1].props.dataSource[0].prompt).toBe("完整原提示词");
+        } else expect(h.calls).toEqual([]);
+        rendered.find(node => node.props.children === "刷新")!.props.onClick(); await settle();
+        expect(h.calls.every(call => call.method === "GET" && !call.path.includes("credits"))).toBe(true);
+        expect(h.messages.error).toEqual([]);
+        h.unmount();
+    });
+
+    for (const options of [{ enabled: false }, { groupId: "" }]) test(`original Team gate stays closed without financial or team reads: ${JSON.stringify(options)}`, async () => {
+        const h = team({ role: "leader", ...options }); const rendered = h.render(); await settle();
+        expect(rendered.some(node => node.props.role === "alert")).toBe(true);
+        expect(rendered.some(node => node.props.children === "小组功能暂不可用")).toBe(true);
+        expect(h.calls).toEqual([]);
+        h.unmount();
+    });
+
+    test("account/group A-B-A and member/leader changes never reintroduce a financial form or request", async () => {
+        const h = team(); h.render(); await settle();
+        for (const identity of [{ id: "owner-b", groupRole: "leader" }, { id: "owner-a", groupId: "group-b" }, { groupId: "group-a", groupRole: "member" }]) {
+            h.setUser(identity); h.render(); await settle();
+            expect(h.render().some(node => typeof node.props.onFinish === "function" || node.type === "Modal")).toBe(false);
+        }
+        expect(h.calls).toHaveLength(8);
+        expect(h.calls.every(call => call.method === "GET" && !call.path.includes("credits"))).toBe(true);
+        expect(h.messages.error).toEqual([]);
+        h.unmount();
+    });
+
+    // The UI is retired, not the API. These are transport-contract tests; the
+    // unchanged server identity-rbac integration suite covers database idempotency.
     for (const kind of ["request", "contribution"] as const) {
-        test(`${kind}: acknowledgement loss retries the same requestId and does not commit twice`, async () => {
-            const h = team({ fail: "once" }); h.render(); await settle();
-            const values = { amount: 10, ...(kind === "request" ? { reason: "mock design request" } : {}) };
-            await h.submit(kind, values); await h.submit(kind, values);
-            expect(h.calls).toHaveLength(2);
-            expect(h.calls[1].input.requestId).toBe(h.calls[0].input.requestId);
-            expect(h.committed.size).toBe(1);
-            expect(h.balance()).toBe(kind === "contribution" ? 90 : 100);
-            h.unmount();
+        const path = `/api/group-credits/${kind === "request" ? "requests" : "contributions"}`;
+        const input = { requestId: `explicit-${kind}-intent`, amount: 10, ...(kind === "request" ? { reason: "original reason" } : {}) };
+        const send = () => kind === "request" ? submitGroupCreditRequest({ ...input, reason: input.reason! }) : contributeGroupCredits(input);
+        for (const failure of ["acknowledgement-loss", "http-rejection"] as const) test(`${kind}: ${failure} does not auto-retry and an explicit retry keeps the exact requestId and payload`, async () => {
+            const calls: Array<{ path: string; init?: RequestInit }> = [];
+            globalThis.fetch = (async (url, init) => {
+                calls.push({ path: String(url), init });
+                if (calls.length === 1) {
+                    if (failure === "acknowledgement-loss") throw new TypeError("Mock acknowledgement lost");
+                    return Response.json({ message: "Mock rejected" }, { status: 409 });
+                }
+                return Response.json({ duplicate: true });
+            }) as typeof fetch;
+            await expect(send()).rejects.toThrow(failure === "acknowledgement-loss" ? "Mock acknowledgement lost" : "Mock rejected");
+            await settle(); expect(calls).toHaveLength(1);
+            await expect(send()).resolves.toEqual({ duplicate: true });
+            expect(calls).toHaveLength(2);
+            for (const call of calls) {
+                expect(call.path).toBe(path);
+                expect(call.init).toMatchObject({ method: "POST", credentials: "include", headers: { "content-type": "application/json" } });
+                expect(JSON.parse(String(call.init!.body))).toEqual(input);
+            }
         });
     }
-
-    test("cancelling and reopening an uncertain contribution preserves its intent", async () => {
-        const h = team({ fail: "once" }); h.render(); await settle(); h.open("contribution");
-        await h.submit("contribution", { amount: 10 });
-        h.cancel("contribution"); h.open("contribution");
-        await h.submit("contribution", { amount: 10 });
-        expect(h.calls[1].input.requestId).toBe(h.calls[0].input.requestId);
-        expect(h.balance()).toBe(90); h.unmount();
-    });
-
-    test("amount/reason and operation type changes cannot reuse a different intent's id", async () => {
-        const h = team({ fail: "always" }); h.render(); await settle();
-        await h.submit("request", { amount: 10, reason: "reason-a" });
-        await h.submit("request", { amount: 20, reason: "reason-a" });
-        await h.submit("request", { amount: 20, reason: "reason-b" });
-        await h.submit("request", { amount: 20, reason: "reason-b" });
-        await h.submit("contribution", { amount: 20 });
-        expect(new Set(h.calls.slice(0, 3).map(call => call.input.requestId)).size).toBe(3);
-        expect(h.calls[3].input.requestId).toBe(h.calls[2].input.requestId);
-        expect(h.calls[4].input.requestId).not.toBe(h.calls[3].input.requestId);
-        h.unmount();
-    });
-
-    test("account/group changes isolate ids and revoke stale form callbacks including A-B-A", async () => {
-        const h = team({ fail: "always" }); h.render(); await settle();
-        const staleSubmit = h.form("contribution").props.onFinish;
-        await staleSubmit({ amount: 10 });
-        h.setUser({ id: "owner-b" }); h.render(); await settle();
-        await staleSubmit({ amount: 10 });
-        expect(h.calls).toHaveLength(1);
-        await h.submit("contribution", { amount: 10 });
-        h.setUser({ id: "owner-a", groupId: "group-b" }); h.render(); await settle();
-        await h.submit("contribution", { amount: 10 });
-        h.setUser({ groupId: "group-a" }); h.render(); await settle();
-        await staleSubmit({ amount: 10 });
-        expect(h.calls).toHaveLength(3);
-        await h.submit("contribution", { amount: 10 });
-        expect(new Set(h.calls.map(call => call.input.requestId)).size).toBe(4);
-        expect(h.calls.map(call => [call.ownerId, call.groupId])).toEqual([["owner-a", "group-a"], ["owner-b", "group-a"], ["owner-a", "group-b"], ["owner-a", "group-a"]]);
-        h.unmount();
-    });
-
-    test("POST success followed by session refresh failure is not a failed contribution or a new debit", async () => {
-        const h = team(); h.setHydrate(async () => { throw new Error("session refresh unavailable"); });
-        h.render(); await settle(); h.open("contribution");
-        const submit = h.form("contribution").props.onFinish;
-        await submit({ amount: 10 });
-        expect(h.messages.success).toHaveLength(1);
-        expect(h.messages.error).toEqual([]);
-        expect(h.render().filter(node => node.type === "Modal")[1]!.props.open).toBe(false);
-        await submit({ amount: 10 });
-        expect(h.calls).toHaveLength(1);
-        expect(h.balance()).toBe(90);
-        h.open("contribution"); await h.submit("contribution", { amount: 10 });
-        expect(h.calls).toHaveLength(2);
-        expect(h.calls[1].input.requestId).not.toBe(h.calls[0].input.requestId);
-        expect(h.balance()).toBe(80); h.unmount();
-    });
-
-    test("a successful application is not submitted again when overview refresh fails", async () => {
-        const h = team({ refreshFail: true }); h.render(); await settle();
-        const values = { amount: 10, reason: "mock design request" };
-        await h.submit("request", values); await h.submit("request", values);
-        expect(h.calls).toHaveLength(1);
-        expect(h.messages.error).toEqual([]);
-        expect(h.render().some(node => node.type === "Alert" && node.props.description?.includes("Overview refresh"))).toBe(true);
-        h.unmount();
-    });
-
-    test("late acknowledgement after an account switch cannot close/reset the new account's form", async () => {
-        const pending = deferred<void>();
-        const h = team({ pending }); h.render(); await settle(); h.open("contribution");
-        const old = h.submit("contribution", { amount: 10 });
-        h.setUser({ id: "owner-b" }); h.render(); await settle();
-        pending.resolve(); await old;
-        expect(h.messages.success).toEqual([]);
-        expect(h.messages.error).toEqual([]);
-        expect(h.loads()).toBe(2);
-        h.unmount();
-    });
 });
 
 const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=";

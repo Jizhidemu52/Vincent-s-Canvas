@@ -76,49 +76,44 @@ function deferred<T>() {
 }
 
 describe("account credit contracts", () => {
-    test("credit adjustments start blank and cancelled confirmation never writes", async () => {
+    test("account management exposes no financial controls or columns", async () => {
         const person = { id: "person", username: "zhangsan", displayName: "张三", role: "designer", status: "active", creditBalance: 500, monthlyCreditLimit: 500 };
-        const writes: any[] = [];
         const panel = harness("../src/pages/admin/index.tsx", "default", {
             "@/stores/use-user-store": { isAdminRole: () => true, useUserStore: (select: Function) => select({ user: { id: "admin", role: "super_admin" } }) },
             "@/stores/use-module-store": { useModuleStore: (select: Function) => select({ flags: { performance: false } }) },
             "@/lib/deployment-features": { deploymentFeatures: { oaLoginEnabled: false } },
             "./admin-overview": { loadAdminOverview: async () => ({ accounts: [person], departments: [], auditLogs: [], errors: [] }), resolveAdminTab: () => "accounts" },
-            "@/services/api/admin-accounts": { adjustAccountCredits: async (...input: any[]) => { writes.push(input); return { user: person }; } },
         });
         try {
-            const form = (await panel.settle()).find(element => element.props.name === "admin-credit-adjustment")!;
-            expect(form.props.initialValues).toBeUndefined();
-            expect(panel.forms[0].fields).toEqual({});
-            await form.props.onFinish({ designerId: "person", amount: 0, reason: "原因" });
-            expect(panel.confirmations).toHaveLength(0); expect(writes).toEqual([]);
-            panel.confirm(false);
-            await form.props.onFinish({ designerId: "person", amount: -20, reason: "调整原因" });
-            expect(writes).toEqual([]);
-            expect(panel.confirmations[0].title).toContain("给 张三 扣除 20 积分");
-            expect(panel.confirmations[0].content).toContain("调整后 480");
-            panel.confirm(true);
-            await form.props.onFinish({ designerId: "person", amount: -20, reason: "调整原因" });
-            expect(writes).toEqual([["person", -20, "调整原因"]]);
-            expect(panel.forms[0].fields).toEqual({});
+            const tree = await panel.settle();
+            expect(tree.filter(element => element.props.form && element.props.onFinish).map(element => element.props.name)).toEqual(["admin-account"]);
+            expect(tree.some(element => ["quotaRemaining", "monthlyCreditLimit", "amount", "designerId"].includes(element.props.name))).toBe(false);
+            const table = tree.find(element => element.type === "Table" && element.props.dataSource[0]?.id === person.id)!;
+            expect(table.props.columns.map((column: any) => column.title)).toEqual(["姓名", "登录账号", "部门", "角色", "状态", "操作"]);
+            expect(tree.filter(element => element.type === "InputNumber")).toHaveLength(0);
+            expect(panel.confirmations).toHaveLength(0);
         } finally { panel.dispose(); }
     });
-    test("new disabled accounts keep the selected state and usage comes from settled ledger totals", async () => {
+    test("new disabled accounts keep the selected state and the overview only shows manageable accounts", async () => {
         const created: any[] = [];
         const panel = harness("../src/pages/admin/index.tsx", "default", {
             "@/stores/use-user-store": { isAdminRole: () => true, useUserStore: (select: Function) => select({ user: { id: "admin", role: "super_admin" } }) },
             "@/stores/use-module-store": { useModuleStore: (select: Function) => select({ flags: { performance: false } }) },
             "@/lib/deployment-features": { deploymentFeatures: { authenticationEnabled: true, oaLoginEnabled: false } },
-            "./admin-overview": { loadAdminOverview: async () => ({ accounts: [{ id: "person", role: "designer", displayName: "设计师", creditLimit: 100, creditBalance: 0, monthlyCreditLimit: 100 }], totalUsedCredits: 0, departments: [], auditLogs: [], errors: [] }), resolveAdminTab: () => "accounts" },
+            "./admin-overview": { loadAdminOverview: async () => ({ accounts: [{ id: "person", role: "designer", displayName: "设计师", creditLimit: 100, creditBalance: 0, monthlyCreditLimit: 100 }], totalUsedCredits: 0, totalCost: 1.23, departments: [], auditLogs: [], errors: [] }), resolveAdminTab: () => "accounts" },
             "@/services/api/admin-accounts": { createAccount: async (input: any) => { created.push(input); return { user: input }; } },
         });
         try {
             const tree = await panel.settle();
             const accountForm = tree.find(element => element.props.name === "admin-account" && element.props.onFinish)!;
             await accountForm.props.onFinish({ loginName: "disabled-person", name: "待启用账号", password: "Test-Only-Password123!", role: "designer", status: "disabled", quotaRemaining: 0, monthlyCreditLimit: 0 });
-            expect(created[0].status).toBe("disabled");
-            expect(tree.find(element => element.props.label === "累计已用积分")?.props.value).toBe("0");
-            const usageTab = tree.find(element => element.type === "Tabs")?.props.items.find((item: any) => item.key === "usage-analysis");
+            expect(created[0]).toMatchObject({ status: "disabled", creditBalance: 500, creditLimit: 500, monthlyCreditLimit: 500 });
+            const overview = tree.find(element => element.props["aria-label"] === "管理概览")!;
+            expect(elements(overview).filter(element => element.props.label).map(element => ({ label: element.props.label, value: element.props.value }))).toEqual([{ label: "可管理账号", value: "1" }]);
+            const tabs = tree.find(element => element.type === "Tabs")?.props.items;
+            expect(tabs.some((item: any) => item.key === "pricing")).toBe(false);
+            expect(tabs.some((item: any) => item.key === "api")).toBe(true);
+            const usageTab = tabs.find((item: any) => item.key === "usage-analysis");
             expect(usageTab?.children.type).toBe("LazyPanel");
         } finally { panel.dispose(); }
     });
@@ -140,41 +135,39 @@ describe("account credit contracts", () => {
         expect(calls.every(call => call.init?.credentials === "include")).toBe(true);
     });
 
-    test("account edit sends the desired balance, not a delta computed from stale displayed data", async () => {
-        const person = { id: "person", username: "person", displayName: "设计师", role: "designer", status: "active", creditBalance: 500, creditLimit: 500, monthlyCreditLimit: 0 };
-        let serverBalance = 480;
-        const sets: number[] = [];
+    test("account edits omit financial writes even when stale hidden values are supplied", async () => {
+        const person = { id: "person", username: "person", displayName: "设计师", role: "designer", status: "active", creditBalance: 480, creditLimit: 500, monthlyCreditLimit: 300 };
+        const updates: any[] = [], financialWrites: any[] = [];
         const panel = harness("../src/pages/admin/index.tsx", "default", {
             "@/stores/use-user-store": { isAdminRole: () => true, useUserStore: (select: Function) => select({ user: { id: "admin", role: "super_admin" }, hydrateSession: async () => {} }) },
             "@/stores/use-module-store": { useModuleStore: (select: Function) => select({ flags: { performance: false } }) },
             "@/lib/deployment-features": { deploymentFeatures: { oaLoginEnabled: false } },
-            "./admin-overview": { loadAdminOverview: async () => ({ accounts: [person, { ...person, id: "second", monthlyCreditLimit: 300 }], departments: [], auditLogs: [], errors: [] }), resolveAdminTab: () => "accounts" },
+            "./admin-overview": { loadAdminOverview: async () => ({ accounts: [person], departments: [], auditLogs: [], errors: [] }), resolveAdminTab: () => "accounts" },
             "@/services/api/admin-accounts": {
-                updateAccount: async () => ({ user: person }),
-                setAccountCredits: async (_id: string, balance: number) => { sets.push(balance); serverBalance = balance; return { user: { ...person, creditBalance: balance } }; },
-                adjustAccountCredits: async () => { throw new Error("exact setting must not use a relative adjustment"); },
+                updateAccount: async (...args: any[]) => { updates.push(args); return { user: person }; },
+                setAccountCredits: async (...args: any[]) => financialWrites.push(args),
+                adjustAccountCredits: async (...args: any[]) => financialWrites.push(args),
             },
         });
         try {
             let tree = await panel.settle();
-            expect(tree.find(element => element.props.label === "累计已用积分")?.props.value).toBe("—");
-            expect(tree.filter(element => element.props.form && element.props.onFinish).map(element => element.props.name)).toEqual(["admin-account", "admin-credit-adjustment", "admin-monthly-credit"]);
             const department = tree.find(element => element.type === "FormItem" && element.props.name === "departmentId")!;
             expect(department.props.rules[0]({ getFieldValue: () => "designer" }).required).toBe(false);
             expect(department.props.rules[0]({ getFieldValue: () => "department_admin" }).required).toBe(true);
-            const monthlyForm = tree.find(element => element.props.form === panel.forms[1] && element.props.onFinish)!;
-            expect(monthlyForm.props.initialValues).toBeUndefined();
-            expect(panel.forms[0].fields.designerId).toBeUndefined();
-            const monthlySelect = elements(monthlyForm).find(element => element.type === "Select")!;
-            monthlySelect.props.onChange("second"); expect(panel.forms[1].fields.monthlyCreditLimit).toBe(300);
-            monthlySelect.props.onChange("person"); expect(panel.forms[1].fields.monthlyCreditLimit).toBe(0);
-            const table = tree.find(element => element.type === "Table" && element.props.dataSource[0]?.id === "person")!;
-            const edit = table.props.columns.find((column: any) => column.title === "操作").render(null, person);
-            await edit.props.onClick(); tree = panel.render();
-            const accountForm = tree.find(element => element.props.form === panel.forms[2] && element.props.onFinish)!;
-            await accountForm.props.onFinish({ ...panel.forms[2].fields, name: person.displayName, quotaRemaining: 1000 });
-            expect(sets).toEqual([1000]);
-            expect(serverBalance).toBe(1000);
+            const table = tree.find(element => element.type === "Table" && element.props.dataSource[0]?.id === person.id)!;
+            await table.props.columns.find((column: any) => column.title === "操作").render(null, person).props.onClick();
+            tree = panel.render();
+            const accountForm = tree.find(element => element.props.name === "admin-account")!;
+            expect(panel.forms[0].fields).not.toHaveProperty("quotaRemaining");
+            expect(panel.forms[0].fields).not.toHaveProperty("monthlyCreditLimit");
+            panel.confirm(false);
+            await accountForm.props.onFinish({ ...panel.forms[0].fields, name: "更新姓名" });
+            expect(updates).toEqual([]);
+            panel.confirm(true);
+            await accountForm.props.onFinish({ ...panel.forms[0].fields, name: "更新姓名", quotaRemaining: 0, monthlyCreditLimit: 0 });
+            expect(updates).toEqual([["person", { displayName: "更新姓名", email: null, employeeNo: null, departmentId: null, role: "designer", status: "active" }]]);
+            expect(financialWrites).toEqual([]);
+            expect(person).toMatchObject({ creditBalance: 480, creditLimit: 500, monthlyCreditLimit: 300 });
         } finally { panel.dispose(); }
     });
 });

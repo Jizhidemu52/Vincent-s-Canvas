@@ -262,6 +262,12 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
         navigate(tool: string, query = "") { params = new URLSearchParams(`tool=${tool}${query ? `&${query}` : ""}`); navigationKey = `image-workspace-${++navigationSequence}`; },
         setOwner(value: string) { ownerId = value; },
         setCreative(value?: object) { creativePreset = value; },
+        updateResultSlots(update: (slots: any[]) => any[]) {
+            const ids = new Set(elements(render()).filter(item => item.props["data-result-slot"]).map(item => item.props["data-result-slot"]));
+            const index = workspace.values.findIndex(value => Array.isArray(value) && value.some(item => item?.status && ids.has(item.displayId || item.id)));
+            if (index < 0) throw new Error("Gallery fixture requires existing result slots");
+            workspace.values[index] = update(workspace.values[index]);
+        },
         restoreLegacyFailedSlot(error: string, snapshot: { text: string; config: Record<string, any>; references: unknown[] }) {
             // An already-open legacy workspace can contain both successful and failed slots.
             // Seed only that old in-memory UI state; never manufacture it by bypassing today's
@@ -275,6 +281,8 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
         async settle() { for (let turn = 0; turn < 30; turn++) { render(); await Promise.resolve(); } return render(); },
         panels() { return elements(render()).filter(item => typeof item.type === "function" && item.type.name === "LogPanel").map(item => item.props); },
         cards() { return elements(render()).filter(item => typeof item.type === "function" && item.type.name === "ResultImageCard"); },
+        slots() { return elements(render()).filter(item => item.props["data-result-slot"]); },
+        thumbnails() { return elements(render()).filter(item => item.props.className === "image-result-thumbnail"); },
         failedCards() { return elements(render()).filter(item => typeof item.type === "function" && item.type.name === "FailedImageCard"); },
         images() { return elements(render()).filter(item => typeof item.type === "function" && item.type.name === "ResultImageCard").map(item => item.props.image); },
         references() { return elements(render()).find(item => item.type === "ReferenceImageTray")!.props; },
@@ -286,6 +294,69 @@ function pageHarness(initial: StoredLog[] = [], generate?: () => Promise<Image[]
 }
 
 describe("image workspace isolation", () => {
+    test("gallery keeps current and each history selection separate, and new tasks start independently", async () => {
+        const older = storedLog("image-generation", "older-gallery", 10);
+        const latest = storedLog("image-generation", "latest-gallery", 20);
+        for (const log of [older, latest]) log.images.push({ ...log.images[0]!, id: `${log.id}-second`, storageKey: `${log.id}-second` });
+        const page = pageHarness([older, latest]); await page.settle();
+        const visible = () => page.slots().filter(slot => !slot.props.hidden).map(slot => slot.props["data-result-slot"]);
+        expect(visible()).toEqual(["latest-gallery-image"]);
+        page.thumbnails()[1]!.props.onClick();
+        expect(visible()).toEqual(["latest-gallery-second"]);
+        await page.panels()[0].onPreviewLog(older); await page.settle();
+        expect(visible()).toEqual(["older-gallery-image"]);
+        page.thumbnails()[1]!.props.onClick();
+        await page.panels()[0].onPreviewLog(latest); await page.settle();
+        expect(visible()).toEqual(["latest-gallery-image"]);
+        await page.panels()[0].onPreviewLog(older); await page.settle();
+        expect(visible()).toEqual(["older-gallery-second"]);
+        elements(page.render()).find(item => item.props.children === "返回当前任务")!.props.onClick();
+        expect(visible()).toEqual(["latest-gallery-second"]);
+        await page.panels()[0].onCreateTask(); await page.settle();
+        expect(page.slots()).toEqual([]);
+        await page.panels()[0].onPreviewLog(older); await page.settle();
+        expect(visible()).toEqual(["older-gallery-image"]);
+        expect(page.requests).toEqual([]);
+    });
+
+    test("gallery keeps every pending and failed slot selectable without completion order stealing selection", async () => {
+        const log = storedLog("image-generation", "gallery-order", 10);
+        const page = pageHarness([log]); await page.settle();
+        page.updateResultSlots(slots => [{ ...slots[0], id: "pending-first", status: "pending", image: undefined }, { id: "pending-second", status: "pending" }, { id: "failed-third", status: "failed", error: "third failed" }]);
+        expect(page.thumbnails()).toHaveLength(3);
+        page.thumbnails()[1]!.props.onClick();
+        page.updateResultSlots(slots => slots.map(slot => slot.id === "pending-first" ? { ...slot, status: "success", image: log.images[0] } : slot));
+        expect(page.slots().filter(slot => !slot.props.hidden).map(slot => slot.props["data-result-slot"])).toEqual(["pending-second"]);
+        expect(page.thumbnails()[1]!.props["aria-pressed"]).toBe(true);
+        page.thumbnails()[2]!.props.onClick();
+        expect(page.slots()[2]!.props.hidden).toBe(false);
+        expect(page.failedCards()[0]!.props.error).toBe("third failed");
+        page.updateResultSlots(slots => slots.filter(slot => slot.id !== "failed-third"));
+        expect(page.slots()[0]!.props.hidden).toBe(false);
+        expect(page.requests).toEqual([]);
+    });
+
+    test("history remains viewable during generation without replacing the running task result", async () => {
+        const old = storedLog("image-generation", "previous", 10);
+        const completion = deferred<Image[]>();
+        const page = pageHarness([old], () => completion.promise);
+        await page.settle();
+        page.prompt().onChange({ target: { value: "Current task keeps its own prompt" } });
+        page.generate().onClick(); await page.settle();
+        expect(page.panels()[0].disabled).toBe(false);
+        await page.panels()[0].onPreviewLog(old); await page.settle();
+        expect(page.images().map(image => image.id)).toEqual(["previous-image"]);
+        expect(page.prompt().value).toBe("Current task keeps its own prompt");
+        completion.resolve([{ id: "current-result", dataUrl: "data:image/png;base64,YQ==" }]);
+        await page.settle();
+        expect(page.images().map(image => image.id)).toEqual(["previous-image"]);
+        expect([...page.stored.values()].find(log => log.images[0]?.id === "current-result")?.prompt).toBe("Current task keeps its own prompt");
+        const back = elements(page.render()).find(element => element.type === "Button" && textContent(element.props.children) === "返回当前任务")!;
+        back.props.onClick(); await page.settle();
+        expect(page.images().map(image => image.id)).toEqual(["current-result"]);
+        expect(page.requests).toHaveLength(1);
+    });
+
     for (const [taskId, imageId] of [["default", "knit-image"], ["bag-task", "bag-image"], ["empty-task", undefined]] as const) {
         test(`item-extract saved completion restores only its original ${taskId} pane without generation`, async () => {
             const knit = storedLog("item-extract", "knit", 10);
@@ -445,7 +516,7 @@ describe("image workspace isolation", () => {
         const page = pageHarness(logs);
         page.navigate(tool);
         await page.settle();
-        expect(page.panels()).toHaveLength(2);
+        expect(page.panels()).toHaveLength(1);
         for (const panel of page.panels()) expect(panel.logs.map((log: StoredLog) => log.id)).toEqual([`${tool}-newer`, `${tool}-older`]);
         expect(page.images().map(image => image.id)).toEqual([`${tool}-newer-image`]);
         expect(page.images()[0].dataUrl).toBe(`/stored/${tool}-newer-stored`);
@@ -691,6 +762,8 @@ describe("image workspace isolation", () => {
         await page.settle();
         const successfulImage = structuredClone(page.images()[0]);
         page.restoreLegacyFailedSlot("Legacy second-slot failure", { text: "original failed-slot prompt", config: { ...page.config }, references: [] });
+        page.thumbnails()[1]!.props.onClick();
+        expect(page.slots()[1]!.props.hidden).toBe(false);
         page.prompt().onChange({ target: { value: "retry only the failed legacy slot" } });
         expect(page.failedCards()).toHaveLength(1);
         await page.failedCards()[0]!.props.onRetry();
@@ -698,6 +771,11 @@ describe("image workspace isolation", () => {
         expect(page.images().map(image => image.id)).toEqual(["legacy-partial-image", "retried-slot"]);
         expect(page.images()[0]).toEqual(successfulImage);
         expect(page.failedCards()).toEqual([]);
+        expect(page.slots()[1]!.props.hidden).toBe(false);
+        expect(page.slots()[1]!.props["data-result-slot"]).toBe("legacy-failed-slot");
+        expect(page.cards()[1]!.props.index).toBe(1);
+        expect(JSON.stringify([...page.stored.values()])).not.toContain("displayId");
+        expect(JSON.stringify(page.requests)).not.toContain("displayId");
         expect(page.panels()[0].logs).toHaveLength(2);
         expect(page.stored.get("legacy-partial")).toEqual(legacy);
         expect(page.requests).toHaveLength(1);
@@ -726,6 +804,7 @@ describe("image optimization uses the workspace operation", () => {
 
     test("changing models discards an old manual compilation but preserves the visible prompt", async () => {
         const page = makePage(); await page.settle();
+        page.prompt().onChange({ target: { value: "make it blue" } });
         page.optimize().onApply("optimized blue", {}, { ...compiled, referenceRoles: [] });
         page.config.imageModel = page.config.model = "replacement-model";
         await page.settle();

@@ -819,7 +819,7 @@ function AgentHistoryView({ theme, threads, activeThreadId, workspacePath, loadi
                 <div className="flex min-w-0 items-center gap-2 text-xs" style={{ color: theme.node.muted }}>
                     <FolderOpen className="size-3.5 shrink-0" />
                     <span className="shrink-0">{t("工作空间")}</span>
-                    <span className="min-w-0 truncate" title={workspacePath}>{workspacePath || t("默认画布目录")}</span>
+                    <Tooltip title={workspacePath}><span className="min-w-0 truncate">{workspacePath || t("默认画布目录")}</span></Tooltip>
                 </div>
                 <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="text-sm" style={{ color: theme.node.muted }}>

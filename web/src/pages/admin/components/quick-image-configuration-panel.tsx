@@ -88,7 +88,7 @@ function QuickImageConfigurationSession({ owner }: { owner: string }) {
             <div><h3 className="text-base font-semibold">快捷图片处理</h3><p className="mt-1 text-sm text-[var(--muted-foreground)]">统一配置一键去背景、高清放大与提取产品图；普通使用页面只保留操作入口。</p></div>
             <Button icon={<RefreshCw className="size-4" />} loading={loading} onClick={async () => { if (await confirmUnsaved()) void load(); }}>重新加载</Button>
         </div>
-        <Alert type="info" showIcon title="保存与试运行相互独立" description="保存后影响此操作的后续请求；试运行使用当前未保存草稿，只创建 1 个付费任务，不会修改线上配置。离开页面只停止本地查询，不取消任务。" />
+        <Alert type="info" showIcon title="保存与试运行相互独立" description="保存后影响此操作的后续请求；试运行使用当前未保存草稿，只创建 1 个真实任务，不会修改线上配置。离开页面只停止本地查询，不取消任务。" />
         {error ? <Alert type="error" showIcon title="配置加载失败" description={error} /> : null}
         {loading && !catalog ? <p role="status">正在加载快捷图片配置…</p> : null}
         {catalog ? <div className="grid min-w-0 gap-4 xl:grid-cols-2">{catalog.configurations.map(configuration => <QuickImageConfigurationEditor key={configuration.action} owner={owner} configuration={configuration} models={catalog.models} locked={loading || Boolean(error)} />)}</div> : null}
@@ -134,7 +134,7 @@ export function QuickImageConfigurationEditor({ owner, configuration, models, lo
             signal.throwIfAborted(); requirePromptAdmin(owner);
             if (!task) task = (await findAdminQuickImageTest(requestId, { expectedOwnerId: owner, signal })) ?? undefined;
             signal.throwIfAborted();
-            if (!task) { patchRun({ requestId, notice: "尚未查到原任务，不代表未提交或未扣费；请稍后查询，不要重复试运行。" }); return; }
+            if (!task) { patchRun({ requestId, notice: "尚未查到原任务，不代表未提交；请稍后查询，不要重复试运行。" }); return; }
             patchRun({ requestId, task });
             if (["success", "failed", "cancelled", "paused"].includes(task.status)) return;
             await delay(signal); task = undefined;
@@ -160,7 +160,7 @@ export function QuickImageConfigurationEditor({ owner, configuration, models, lo
         const requestId = createClientId();
         // Must survive a refresh before any paid POST. Storage denial blocks that POST.
         try { sessionStorage.setItem(receiptKey(owner, action), requestId); }
-        catch { throw new Error("无法保存测试查询编号，请允许本站会话存储后再试；尚未提交付费任务。"); }
+        catch { throw new Error("无法保存测试查询编号，请允许本站会话存储后再试；尚未提交测试任务。"); }
         patchRun({ requestId, notice: "正在提交一次测试；结果不确定时只查询原请求。" });
         try {
             const result = await testAdminQuickImageConfiguration(action, { requestId, sourceUrl: reference.sourceUrl, configuration: input }, options);
@@ -210,10 +210,10 @@ export function QuickImageConfigurationEditor({ owner, configuration, models, lo
         </Form>
         <div className="space-y-3 border-t border-[var(--border)] pt-4">
             <h5 className="text-sm font-semibold">用当前草稿试运行</h5>
-            <p className="text-xs text-[var(--muted-foreground)]">只上传 1 张自己的原图。点击下方按钮将提交 1 个正式图片任务并按模型计费；不会保存草稿或自动重试。</p>
+            <p className="text-xs text-[var(--muted-foreground)]">只上传 1 张自己的原图。点击下方按钮将提交 1 个正式图片任务；不会保存草稿或自动重试。</p>
             <input type="file" aria-label={`${title}测试原图`} accept="image/png,image/jpeg,image/webp" disabled={disabled} className="block w-full min-w-0 text-sm" onChange={event => { selectSource(event.target.files?.[0]); event.target.value = ""; }} />
             {source ? <div className="flex min-w-0 items-center gap-3"><img src={source.preview} alt={`${title}测试原图`} className="size-20 rounded-lg border border-[var(--border)] object-contain" /><span className="min-w-0 break-all text-xs">{source.file.name}</span></div> : null}
-            <div className="flex flex-wrap gap-2"><Button loading={busy === "test"} disabled={disabled || unavailable || !source || Boolean(run && !terminal(run))} onClick={() => void test()}>付费试运行 1 张</Button>{run ? <Button loading={busy === "query"} disabled={disabled} onClick={() => void query()}>查询原测试任务</Button> : null}{classifyTaskRecovery(run?.task) === "resume" ? <Button disabled={disabled} onClick={() => void query(true)}>恢复原任务查询</Button> : null}{busy === "test" || busy === "query" ? <Button onClick={() => { operation.current?.abort(); if (runRef.current) patchRun({ ...runRef.current, notice: "本地查询已停止，服务端任务未取消。请查询原任务，不要重复试运行。" }); }}>停止本地等待</Button> : null}</div>
+            <div className="flex flex-wrap gap-2"><Button loading={busy === "test"} disabled={disabled || unavailable || !source || Boolean(run && !terminal(run))} onClick={() => void test()}>试运行 1 张</Button>{run ? <Button loading={busy === "query"} disabled={disabled} onClick={() => void query()}>查询原测试任务</Button> : null}{classifyTaskRecovery(run?.task) === "resume" ? <Button disabled={disabled} onClick={() => void query(true)}>恢复原任务查询</Button> : null}{busy === "test" || busy === "query" ? <Button onClick={() => { operation.current?.abort(); if (runRef.current) patchRun({ ...runRef.current, notice: "本地查询已停止，服务端任务未取消。请查询原任务，不要重复试运行。" }); }}>停止本地等待</Button> : null}</div>
             {classifyTaskRecovery(run?.task) === "investigate" ? <Alert type="warning" showIcon title={submissionInvestigationMessage} /> : null}
             {run ? <div role="status" className="min-w-0 space-y-3"><p className="break-all text-xs text-[var(--muted-foreground)]">请求编号：{run.requestId}</p><Tag color={run.task?.status === "success" ? "success" : run.task?.status === "failed" || run.rejected ? "error" : "processing"}>{run.rejected ? "提交已拒绝" : run.task ? statusText[run.task.status] || run.task.status : "状态待核查"}</Tag>{run.notice ? <Alert type="warning" showIcon title={run.notice} /> : null}{run.task?.failureReason ? <Alert type="error" showIcon title={run.task.failureReason} /> : null}<Image.PreviewGroup><div className="space-y-3">{run.task?.resultUrls.filter(url => /^https?:\/\//.test(url) || url.startsWith("/api/assets/")).map((url, index) => <Image key={url} src={url} alt={`${title}测试结果 ${index + 1}`} className="!max-h-96 !object-contain" />)}</div></Image.PreviewGroup></div> : null}
         </div>

@@ -1,7 +1,7 @@
 import { uiText, useUiText } from "@/lib/i18n";
 import { PracticeExampleRecord } from "@/components/design-examples";
 import { useEffect, useRef, useState } from "react";
-import { Alert, Button, Checkbox, Empty, Input, Tag } from "antd";
+import { Alert, Button, Checkbox, Empty, Input, Tag, Tooltip } from "antd";
 import { ArrowLeft, Globe, Search, Upload } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useUserStore } from "@/stores/use-user-store";
@@ -206,7 +206,7 @@ export default function ReferenceImportPage() {
             </form>
             {scan && !items.length && <section aria-label={uiText("网页候选图片")} className="space-y-3 rounded-xl border border-border p-4">
                 <div className="flex flex-wrap items-center gap-3"><h2 className="font-medium">{uiText("选择要读取的候选图片")}</h2><span className="text-sm text-muted-foreground">{uiText("已选 ")}{candidateIds.length}{uiText("/20 · 共 ")}{scan.result.candidates.length} {uiText(" 张")}</span><Button size="small" disabled={busy} onClick={() => setCandidateIds([])}>{uiText("清空选择")}</Button><Button size="small" disabled={busy} onClick={() => setCandidateIds(scan.result.candidates.slice(0, MAX_IMAGES).map(item => item.id))}>{uiText("选择前 20 张")}</Button></div>
-                <div className="grid max-h-72 gap-3 overflow-y-auto sm:grid-cols-2">{scan.result.candidates.map((candidate, index) => <div key={candidate.id} className="min-w-0"><Checkbox checked={candidateIds.includes(candidate.id)} disabled={busy || (!candidateIds.includes(candidate.id) && candidateIds.length >= MAX_IMAGES)} onChange={event => setCandidateIds(current => event.target.checked ? [...current, candidate.id] : current.filter(id => id !== candidate.id))}>{index + 1}. {candidate.name}</Checkbox><p className="truncate pl-6 text-xs text-muted-foreground" title={candidate.sourceImage}>{candidate.sourceImage}</p></div>)}</div>
+                <div className="grid max-h-72 gap-3 overflow-y-auto sm:grid-cols-2">{scan.result.candidates.map((candidate, index) => <div key={candidate.id} className="min-w-0"><Checkbox checked={candidateIds.includes(candidate.id)} disabled={busy || (!candidateIds.includes(candidate.id) && candidateIds.length >= MAX_IMAGES)} onChange={event => setCandidateIds(current => event.target.checked ? [...current, candidate.id] : current.filter(id => id !== candidate.id))}>{index + 1}. {candidate.name}</Checkbox><Tooltip title={candidate.sourceImage}><p className="truncate pl-6 text-xs text-muted-foreground" >{candidate.sourceImage}</p></Tooltip></div>)}</div>
                 <Button type="primary" disabled={busy || !candidateIds.length} onClick={() => void readSelectedCandidates()}>{uiText("读取所选 ")}{candidateIds.length} {uiText(" 张图片")}</Button><p className="text-xs text-muted-foreground">{uiText("读取后可查看原图并再次审核；候选记录约 5 分钟后过期。")}</p>
             </section>}
             <Alert type="info" title={uiText("当前员工：{value1} · {length}/20 张 · 原始图片字节，不压缩、不重绘", { value1: user?.displayName || user?.username || "未登录", length: items.length })} description={uiText("仅 PNG / JPEG / WebP / GIF，单张 ≤ 10 MiB、总计 ≤ 30 MiB。来源会移除查询参数和片段。草稿仅在本页内存中，刷新或离页会丢失；请确认你有权保存这些图片。")} />

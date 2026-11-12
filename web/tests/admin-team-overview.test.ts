@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { loadAdminOverview, markPlatformAdminTabLabel, resolveAdminTab } from "@/pages/admin/admin-overview";
-import { loadTeamOverview } from "@/pages/team/team-overview";
+import { loadTeamOverview, nonFinancialTeamCsv } from "@/pages/team/team-overview";
 
 const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; });
@@ -38,24 +38,42 @@ describe("admin and team overview loading", () => {
         expect(markPlatformAdminTabLabel).toBe("APIMart 平台");
     });
 
-    test("ordinary members request only personal group credits, never leader-only data", async () => {
+    test("removed pricing URLs return to accounts while advanced model configuration remains available", () => {
+        expect(resolveAdminTab("pricing", true, true)).toBe("accounts");
+        expect(resolveAdminTab("pricing", false, true)).toBe("accounts");
+        expect(resolveAdminTab("models", true, true)).toBe("api");
+        expect(resolveAdminTab("api", true, true)).toBe("api");
+    });
+
+    test("ordinary members request neither retired financial endpoints nor leader-only data", async () => {
         const requests = pendingRequests();
         const result = loadTeamOverview(false);
-        expect(requests.map((request) => request.url)).toEqual(["/api/group-credits"]);
-        requests[0].respond({ groupId: "mine" });
-        expect(await result).toMatchObject({ myCredits: { groupId: "mine" }, overview: undefined, managedCredits: undefined, errors: [] });
+        expect(requests).toEqual([]);
+        expect(await result).toMatchObject({ overview: undefined, history: undefined, assets: undefined, auditLogs: undefined, errors: [] });
     });
 
     test("leader requests launch together and one failure leaves other panels usable", async () => {
         const requests = pendingRequests();
         const result = loadTeamOverview(true);
-        expect(requests).toHaveLength(6);
-        requests[0].respond({ groupId: "group" });
-        requests[1].respond({ group: { id: "group" } });
-        requests[2].respond({ history: [{ id: "task" }] });
-        requests[3].respond({ message: "成果暂不可用" }, 503);
-        requests[4].respond({ auditLogs: [] });
-        requests[5].respond({ requests: [] });
-        expect(await result).toMatchObject({ myCredits: { groupId: "group" }, history: [{ id: "task" }], assets: undefined, auditLogs: [], managedCredits: { requests: [] }, errors: ["最近成果：成果暂不可用"] });
+        expect(requests).toHaveLength(4);
+        expect(requests.every(request => !request.url.includes("credits"))).toBe(true);
+        requests[0].respond({ group: { id: "group" } });
+        requests[1].respond({ history: [{ id: "task" }] });
+        requests[2].respond({ message: "成果暂不可用" }, 503);
+        requests[3].respond({ auditLogs: [] });
+        expect(await result).toMatchObject({ history: [{ id: "task" }], assets: undefined, auditLogs: [], errors: ["最近成果：成果暂不可用"] });
+    });
+
+    test("team CSV removes only financial columns and preserves complete quoted prompt cells", () => {
+        const header = '时间,设计师,功能板块,模型,完整提示词,积分,人民币成本,状态,失败原因';
+        const row = '2026-11-12,小张,image,测试模型,"保留字样 积分,用作图案\r\n还有""引号""",0,0.05368,success,""';
+        const csv = `\uFEFF${header}\r\n${row}\r\n`;
+        expect(nonFinancialTeamCsv(csv)).toBe('\uFEFF"时间","设计师","功能板块","模型","完整提示词","状态","失败原因"\r\n"2026-11-12","小张","image","测试模型","保留字样 积分,用作图案\r\n还有""引号""","success",""\r\n');
+        expect(csv).toContain(",0,0.05368,");
+        expect(nonFinancialTeamCsv(header)).toBe('\uFEFF"时间","设计师","功能板块","模型","完整提示词","状态","失败原因"');
+        expect(nonFinancialTeamCsv(`${header}\r\n2026,a,image,m,'=SUM(A1),0,0,success,`)).toContain('"\'=SUM(A1)"');
+        expect(() => nonFinancialTeamCsv(`${header}\r\n2026,a,b`)).toThrow("报表格式异常");
+        expect(() => nonFinancialTeamCsv(`${header}\r\n"unterminated`)).toThrow("报表格式异常");
+        expect(() => nonFinancialTeamCsv(header.replace("积分", "新金额列"))).toThrow("报表格式异常");
     });
 });

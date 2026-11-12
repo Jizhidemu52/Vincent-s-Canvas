@@ -37,6 +37,7 @@ for (const mode of ["straight", "half", "mirror"] as const) {
             await page.locator('input[data-role="json-file"]').setInputFiles({ name: `${mode}-${transparent}.json`, mimeType: "application/json", buffer: Buffer.from(JSON.stringify(project)) });
             await expect(page.getByText("已导入为新工程，原有工程保留。", { exact: true })).toBeVisible();
             await expect(page.getByTestId(`repeat-mode-${mode}`)).toHaveAttribute("aria-pressed", "true");
+            await expect(page.locator('[data-workbench-select-control="dpi"]')).toContainText("128");
             await expect(page.getByTestId("repeat-transparent")).toBeChecked({ checked: transparent });
             const tile = await exportedPng(page, "unit"), preview = await exportedPng(page, "preview");
             const result = await page.evaluate(async ({ tile, preview }) => {

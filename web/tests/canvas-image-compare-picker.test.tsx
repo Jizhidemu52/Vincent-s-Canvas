@@ -20,7 +20,7 @@ function harness(file: string, name: string) {
     const module = { exports: {} as Record<string, Function> };
     const dependencies: Record<string, any> = {
         react: { ...React, useEffect() {}, useMemo: (factory: Function, deps: unknown[]) => { const index = cursor++, previous = values[index]; if (!previous || previous.deps.length !== deps.length || deps.some((value, offset) => !Object.is(value, previous.deps[offset]))) values[index] = { deps, value: factory() }; return values[index].value; }, useRef: (initial: unknown) => { const index = cursor++; return values[index] ||= { current: initial }; }, useState: (initial: any) => { const index = cursor++; if (!(index in values)) values[index] = typeof initial === "function" ? initial() : initial; return [values[index], (next: any) => { values[index] = typeof next === "function" ? next(values[index]) : next; }]; } },
-        antd: { App: { useApp: () => ({ message: { error() {} } }) }, Input: "Input", Popover: "Popover", Button: "Button", Modal: "Modal", Segmented: "Segmented", Slider: "Slider", Spin: "Spin" },
+        antd: { App: { useApp: () => ({ message: { error() {} } }) }, Input: "Input", Popover: "Popover", Tooltip: "Tooltip", Button: "Button", Modal: "Modal", Segmented: "Segmented", Slider: "Slider", Spin: "Spin" },
         "@/stores/use-theme-store": { useThemeStore: (select: Function) => select({ theme: "light" }) },
         "./use-canvas-image-thumbnail": { useCanvasImageThumbnail: (image: CanvasNodeData) => ({ url: image.metadata?.content || "", thumbnail: true }) },
         "./canvas-image-compare-picker": { CanvasCompareThumbnail: "Thumbnail", CanvasImageComparePicker: "ComparePicker", canvasCompareImageLabel: (image: CanvasNodeData) => image.metadata?.imageName || image.metadata?.originalFileName || image.title },
@@ -40,7 +40,8 @@ test("large thumbnail cards preserve long names, group the direct source first a
     const cards = tree.filter(element => element.props["data-compare-candidate"]);
     expect(cards.map(card => card.props["data-compare-candidate"])).toEqual(["before", "other"]);
     expect(cards[0].props["aria-pressed"]).toBe(true);
-    expect(cards[0].props.title).toBe(longName);
+    expect(tree.find(element => element.type === "Tooltip" && element.props.children === cards[0])?.props.title).toBe(longName);
+    expect(cards[0].props.title).toBeUndefined();
     expect(cards[0].props["aria-label"]).toContain(longName);
     expect(elements(cards[0]).some(element => [element.props.children].flat().includes("已选中"))).toBe(true);
     expect(elements(cards[0]).some(element => element.props.className === "block h-32")).toBe(true);

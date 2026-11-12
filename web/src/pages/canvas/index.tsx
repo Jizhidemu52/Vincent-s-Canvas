@@ -1,8 +1,8 @@
 import { useUiLocale, useUiText, uiText } from "@/lib/i18n";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { App, Button, Select, Skeleton } from "antd";
-import { BookOpen, Download, FileUp, HardDrive, MessageSquareText, Plus } from "lucide-react";
+import { App, Button, Select, Skeleton, Tooltip } from "antd";
+import { BookOpen, Download, FileUp, HardDrive, LayoutGrid, MessageSquareText, Plus } from "lucide-react";
 
 import { CanvasDeleteProjectsDialog } from "@/components/canvas/canvas-delete-projects-dialog";
 import { CanvasProjectGrid } from "./canvas-project-grid";
@@ -131,7 +131,7 @@ export default function CanvasPage() {
                         {chatMode ? <p className="mt-3 max-w-2xl text-sm leading-6 text-stone-500 dark:text-stone-400">{t("选择或新建一个画布后，助手会围绕当前项目内容进行对话、拆解提示词和生成建议，后台会把相关任务归入画布项目历史。")}</p> : null}
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
-                        <Button disabled={!hydrated} loading={creatingExample} icon={<BookOpen className="size-4" />} title={t("每次新建一张独立教学画布，包含十类图文案例；不改旧项目、不自动生成。 ")} onClick={() => void createExample()}>{t("新建教学画布")}</Button>
+                        <Tooltip title={t("每次新建一张独立教学画布，包含十类图文案例；不改旧项目、不自动生成。 ")}><Button disabled={!hydrated} loading={creatingExample} icon={<BookOpen className="size-4" />} onClick={() => void createExample()}>{t("新建教学画布")}</Button></Tooltip>
                         {selectedIds.length ? (
                             <>
                                 <Button disabled={!hydrated} loading={exporting} icon={<Download className="size-4" />} onClick={() => void exportProjects(selectedIds, t("自由画布-{count}个项目", { count: selectedIds.length }))}>
@@ -179,6 +179,7 @@ export default function CanvasPage() {
                     <CanvasProjectGrid projects={projects} scrollElement={scrollRef} />
                 ) : (
                     <section className="wb-surface wb-empty min-h-[360px]">
+                        <LayoutGrid className="mx-auto mb-4 size-10 text-muted-foreground" aria-hidden />
                         <h2 className="text-xl font-medium">{t("还没有画布")}</h2>
                         <p className="mt-3 text-sm text-stone-500">{chatMode ? t("新建一个对话画布后，就可以围绕项目素材持续讨论和生成。") : t("新建一个画布后，就可以独立保存节点、连线和画布外观。")}</p>
                         <Button type="primary" className="mt-6" icon={<Plus className="size-4" />} onClick={createAndEnter}>

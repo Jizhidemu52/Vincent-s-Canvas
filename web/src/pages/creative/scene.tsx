@@ -1,7 +1,7 @@
 import { uiText, useUiText } from "@/lib/i18n";
 import { formatBeijingDateTime } from "@/lib/beijing-time";
 import { ArrowLeft, ArrowRight, ChevronDown, Download, History, LoaderCircle, Plus, RotateCcw, Sparkles } from "lucide-react";
-import { App, Button, Checkbox, Image } from "antd";
+import { App, Button, Checkbox, Image, Select } from "antd";
 import { handleSubmitShortcut } from "@/lib/submit-shortcut";
 import { GenerationInputList } from "@/components/generation-input-list";
 import { WorkbenchTasks, useWorkbenchTask } from "@/components/workbench-tasks";
@@ -20,7 +20,6 @@ import { GenerationElapsed } from "@/components/generation-elapsed";
 import { ImageSettingsPanel, imageQualityLabel, imageSizeLabel } from "@/components/image-settings-panel";
 import { ModelPicker } from "@/components/model-picker";
 import { canvasThemes } from "@/lib/canvas-theme";
-import { deploymentFeatures } from "@/lib/deployment-features";
 import { buildCreativePresetHref, creativeCatalogPresets, getCreativePreset, isStandaloneCreativePreset, type CreativePreset } from "@/lib/creative-presets";
 import { isModuleAvailable, useModuleEnabled, useModuleStore } from "@/stores/use-module-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
@@ -87,12 +86,12 @@ function CreativeSceneWorkspace({ preset, handoffToken }: { preset: CreativePres
     const standalone = isStandaloneCreativePreset(preset.id);
     const available = creativeCatalogPresets.filter(item => isModuleAvailable(flags, tools, `creative-${item.id}` as ModuleKey));
     const submit = () => { setView("results"); void ws.generate(); };
-    const historyBusy = ws.running || ws.loading || ws.historyLoading;
+    const historyBusy = ws.loading || ws.historyLoading;
     const selectableLogs = ws.logs.filter(log => !log.unresolvedCount);
     const selectedLogs = selectableLogs.filter(log => selectedLogIds.includes(log.id));
     const allSelected = Boolean(selectableLogs.length) && selectedLogs.length === selectableLogs.length;
     const confirmDeleteLogs = (requested: SceneLogSummary[]) => {
-        if (historyBusy || !requested.length) return;
+        if (historyBusy || ws.running || !requested.length) return;
         const snapshot = [...requested];
         modal.confirm({
             title: uiText("删除选中的 {count} 条历史记录？", { count: snapshot.length }),
@@ -112,9 +111,7 @@ function CreativeSceneWorkspace({ preset, handoffToken }: { preset: CreativePres
             <Link to={standalone ? "/" : "/creative"} className="cs-back"><ArrowLeft size={16} /><span>{uiText(standalone ? "工作台" : "创意设计")}</span></Link>
             <span className="cs-header-divider" />
             {standalone ? <span className="font-medium">{uiText(preset.title)}</span> : <div className="cs-scene-picker">
-                <select aria-label={uiText("切换设计场景")} value={preset.id} onChange={event => { const next = getCreativePreset(event.target.value); if (next) navigate(buildCreativePresetHref(next)); }}>
-                    {available.map(item => <option key={item.id} value={item.id}>{uiText(item.title || "")}</option>)}
-                </select><ChevronDown size={14} />
+                <Select aria-label={uiText("切换设计场景")} value={preset.id} variant="borderless" options={available.map(item => ({ value: item.id, label: uiText(item.title || "") }))} onChange={value => { const next = getCreativePreset(value); if (next) navigate(buildCreativePresetHref(next)); }} />
             </div>}
             <button className="cs-new" type="button" disabled={ws.running || ws.loading} onClick={() => { ws.reset(); setView("history"); }}><Plus size={15} />{uiText("清空当前草稿")}</button>
         </header>
@@ -144,17 +141,18 @@ function CreativeSceneWorkspace({ preset, handoffToken }: { preset: CreativePres
                     {ws.error && <GenerationDiagnostic error={ws.error} />}
                     {ws.notice && <p className="cs-help" role="status">{uiText(ws.notice || "")}</p>}
                     {!ws.error && ws.validation && <p className="cs-validation">{uiText(ws.validation || "")}</p>}
-                    {ws.quotaBlocked ? <p role="status" className="cs-validation">{uiText("额度不足，请联系管理员")}</p> : null}
+                    {ws.quotaBlocked ? <p role="status" className="cs-validation">{uiText("当前账号暂时无法提交，请联系管理员。")}</p> : null}
                     <p className="cs-help">{uiText("Ctrl / ⌘ + Enter 提交")}</p>
+                    {ws.running ? <Button block icon={<Plus size={16} />} disabled={!task.ready || task.creating} loading={task.creating} onClick={() => void task.createNewTask()}>{uiText("新建任务，继续创作")}</Button> : null}
                     <button type="button" className="cs-generate" disabled={ws.loading || ws.running || Boolean(ws.validation) || ws.quotaBlocked} onClick={submit}>{ws.running ? <><LoaderCircle size={16} className="animate-spin" />{ws.optimizing ? uiText("正在优化提示词…") : uiText("正在生成")}<GenerationElapsed startedAt={ws.startedAt} /></> : <><Sparkles size={16} />{uiText("生成{kind}", { kind: preset.title === "以文生款" ? uiText("款式") : preset.title === "款生线稿" ? uiText("线稿") : preset.title === "花型提取" ? uiText("图案") : preset.id === "item-extract" ? uiText("完整单品") : preset.id === "virtual-try-on" ? uiText("试穿效果") : preset.id === "sketch-to-photo" ? uiText("实拍效果") : uiText("设计") })}<span>{ws.count} {uiText(" 张")}</span></>}</button>
-                    <p className="cs-submit-note">{deploymentFeatures.creditsEnabled ? uiText("预计 {estimatedCredits} 积分 · ", { estimatedCredits: ws.estimatedCredits }) : ""}{uiText("点击后先优化提示词，再提交图片任务")}</p>
+                    <p className="cs-submit-note">{uiText(ws.running ? "任务在后台继续，可切换工作区或查看历史。" : "点击后先优化提示词，再提交图片任务")}</p>
                     {(ws.running || ws.autoObserving) && <button type="button" className="cs-tool-entry" onClick={ws.stopObserving}>{uiText("暂停获取进度")}</button>}
                 </div>
             </aside>
             <section className="cs-stage" aria-label={uiText("设计预览与结果")}>
                 <nav className="cs-stage-tabs" aria-label={uiText("预览内容")}>
-                    <button type="button" aria-pressed={view === "results"} onClick={() => setView("results")}>{uiText("当前结果")}{ws.results.length ? <span>{ws.results.length}</span> : null}</button>
-                    <button type="button" className="cs-history-tab" aria-pressed={view === "history"} onClick={() => setView("history")}><History size={15} />{uiText("最近任务")}{ws.historyTotal ? <span>{ws.historyTotal}</span> : null}</button>
+                    <button type="button" aria-pressed={view === "results" && !ws.isHistoryPreview} onClick={() => { ws.returnToCurrentTask(); setView("results"); }}>{uiText("当前结果")}{ws.currentResultCount ? <span>{ws.currentResultCount}</span> : null}</button>
+                    <button type="button" className="cs-history-tab" aria-pressed={view === "history" || ws.isHistoryPreview} onClick={() => setView("history")}><History size={15} />{uiText("最近任务")}{ws.historyTotal ? <span>{ws.historyTotal}</span> : null}</button>
                 </nav>
                 {view === "history" ? <div className="cs-history">
                     {examples.map(example => <PracticeExampleRecord key={example.id} example={example} />)}
@@ -164,16 +162,16 @@ function CreativeSceneWorkspace({ preset, handoffToken }: { preset: CreativePres
                         <div className="flex flex-wrap items-center gap-2">
                             <Checkbox aria-label={uiText("全选已加载的已结束任务")} disabled={historyBusy || !selectableLogs.length} checked={allSelected} indeterminate={selectedLogs.length > 0 && !allSelected} onChange={() => setSelectedLogIds(allSelected ? [] : selectableLogs.map(log => log.id))}>{uiText("全选已加载记录")}</Checkbox>
                             <span className="text-xs text-muted-foreground">{uiText("已选 {count} 条", { count: selectedLogs.length })}</span>
-                            <Button size="small" danger disabled={historyBusy || !selectedLogs.length} onClick={() => confirmDeleteLogs(selectedLogs)}>{uiText("批量删除")}</Button>
+                            <Button size="small" danger disabled={historyBusy || ws.running || !selectedLogs.length} onClick={() => confirmDeleteLogs(selectedLogs)}>{uiText("批量删除")}</Button>
                         </div>
                         <p className="cs-help">{uiText("只选择当前已加载且已结束的任务；待查询的原请求不会被删除。")}</p>
                     </div>}
                     {ws.logs.length ? ws.logs.map(log => <div key={log.id} className="flex items-center gap-3">{historySelection && <Checkbox aria-label={uiText("选择任务：{time}", { time: formatBeijingDateTime(log.createdAt) })} disabled={historyBusy || Boolean(log.unresolvedCount)} checked={selectedLogIds.includes(log.id)} onChange={event => setSelectedLogIds(current => event.target.checked ? [...new Set([...current, log.id])] : current.filter(id => id !== log.id))} />}<button type="button" className="cs-history-item" disabled={historyBusy} onClick={() => { void ws.previewLog(log); setPromptOpen(true); setView("results"); }}>
                         <span className="cs-history-icon"><History size={18} /></span><span><strong>{formatBeijingDateTime(log.createdAt)} {uiText("北京时间")}</strong><small>{log.operation === "recolor" ? uiText("本地精确换色 · ") : log.hasSelection ? uiText("选区合成 · ") : ""}{log.successCount} {uiText(" 张成功")}{log.failCount ? uiText(" · {failCount} 张失败", { failCount: log.failCount }) : ""}{log.cancelledCount ? uiText(" · {count} 张已取消", { count: log.cancelledCount }) : ""}{log.unresolvedCount ? uiText(" · {unresolvedCount} 张待查询", { unresolvedCount: log.unresolvedCount }) : ""} {uiText(" · 查看结果与提示词")}</small></span><ArrowRight size={15} />
-                    </button>{!historySelection && <button type="button" className="shrink-0 text-xs text-muted-foreground" disabled={historyBusy || Boolean(log.unresolvedCount)} onClick={() => confirmDeleteLogs([log])}>{uiText("删除")}</button>}</div>) : <p className="cs-help">{uiText("还没有生成记录。完成一次设计后，会在这里保存参数和结果。")}</p>}
+                    </button>{!historySelection && <button type="button" className="shrink-0 text-xs text-muted-foreground" disabled={historyBusy || ws.running || Boolean(log.unresolvedCount)} onClick={() => confirmDeleteLogs([log])}>{uiText("删除")}</button>}</div>) : <p className="cs-help">{uiText("还没有生成记录。完成一次设计后，会在这里保存参数和结果。")}</p>}
                     {ws.historyHasMore && <button type="button" className="cs-tool-entry" disabled={ws.historyLoading} onClick={() => void ws.loadMoreHistory()}>{ws.historyLoading ? uiText("正在加载…") : uiText("加载更多（已显示 {length} / {historyTotal}）", { length: ws.logs.length, historyTotal: ws.historyTotal })}</button>}
                 </div> : <div className="cs-results">
-                    <div className="cs-results-heading"><h2>{ws.optimizing ? uiText("正在优化提示词…") : ws.running ? uiText("正在创作") : uiText("设计结果")}</h2>{ws.activeLog && <><span>{formatBeijingDateTime(ws.activeLog.createdAt)} {uiText("北京时间")}</span><button type="button" className="cs-tool-entry" disabled={ws.running || ws.loading || ws.previewing} onClick={() => modal.confirm({ title: uiText("恢复为草稿？"), content: uiText("将替换当前设计要求、模型与参考素材，不会提交生成任务。"), okText: uiText("确认恢复"), cancelText: uiText("保留草稿"), onOk: async () => { await ws.restoreLog(ws.activeLog!); setPromptOpen(true); } })}>{uiText("恢复为草稿继续改")}</button></>}</div>
+                    <div className="cs-results-heading"><h2>{ws.isHistoryPreview ? uiText("历史预览") : ws.optimizing ? uiText("正在优化提示词…") : ws.running ? uiText("正在创作") : uiText("设计结果")}</h2>{ws.isHistoryPreview ? <Button size="small" onClick={ws.returnToCurrentTask}>{uiText("返回当前任务")}</Button> : null}{ws.activeLog && <><span>{formatBeijingDateTime(ws.activeLog.createdAt)} {uiText("北京时间")}</span><button type="button" className="cs-tool-entry" disabled={ws.running || ws.loading || ws.previewing} onClick={() => modal.confirm({ title: uiText("恢复为草稿？"), content: uiText("将替换当前设计要求、模型与参考素材，不会提交生成任务。"), okText: uiText("确认恢复"), cancelText: uiText("保留草稿"), onOk: async () => { await ws.restoreLog(ws.activeLog!); setPromptOpen(true); } })}>{uiText("恢复为草稿继续改")}</button></>}</div>
                     {ws.previewing && <p className="cs-help" role="status">{uiText("正在读取所选结果…")}</p>}
                     {ws.activeLog?.operation === "recolor" && <p className="cs-help cs-operation-note">{ws.activeLog.prompt}</p>}
                     {!ws.results.length ? <div className="cs-empty"><Sparkles size={28} /><h3>{uiText("让设计从这里开始")}</h3><p>{uiText("在左侧完成")}{slots.length ? uiText("素材和") : ""}{uiText("设计要求，点击生成。")}</p><button type="button" onClick={() => setView("history")}><RotateCcw size={14} />{uiText("看看实操案例")}</button></div> : <div className="cs-result-grid">{ws.results.map((result, index) => <article key={result.id} className="cs-result-card">
@@ -183,11 +181,11 @@ function CreativeSceneWorkspace({ preset, handoffToken }: { preset: CreativePres
                                 {canvasEnabled && <button type="button" disabled={ws.running || ws.resultActionBusy || !ws.activeLog} onClick={() => void ws.resultAction("canvas", result.image!).then(url => { if (url) navigate(url); })}>{uiText("放入画布")}</button>}
                                 {imageEditEnabled && <button type="button" disabled={ws.running || ws.resultActionBusy || !ws.activeLog} onClick={() => void ws.resultAction("reference", result.image!).then(url => { if (url) navigate(url); })}>{uiText("作为参考继续改")}</button>}
                             </div>{ws.activeLog && <DesignResultReview sceneId={ws.activeLog.sceneId} fields={ws.activeLog.userInput?.fields || scenePromptInput(ws.activeLog.sceneId, ws.activeLog.form).fields || {}} image={result.image} disabled={ws.running || ws.resultActionBusy} />}</> : result.status === "failed" ? <div className="cs-result-message"><span>{uiText("方案 ")}{index + 1} {result.uncompositedImage ? uiText("合成未完成") : result.compilationId ? uiText("等待继续生成") : result.recovery === "resume" ? uiText("获取结果已暂停") : result.recovery === "investigate" ? uiText("需要管理员协助") : result.failureKind === "uncertain" ? uiText("暂时无法获取进度") : uiText("生成失败")}</span><GenerationDiagnostic error={result.error || "生成失败"} details={[result.taskId, result.requestId].filter(Boolean).join("\n")} />{result.uncompositedImage && <button type="button" className="cs-tool-entry" onClick={() => void ws.download(result.uncompositedImage!, index)}><Download size={14} />{uiText("下载未合成图")}</button>}
-                            {canRetrySceneResult(result) && <><button type="button" className="cs-tool-entry" disabled={ws.running || ws.loading || !ws.activeLog} onClick={() => void ws.retryResult(result)}>{uiText("按原参数重试")}</button><small>{uiText("会提交 1 个新任务，按当前计费规则收费。")}</small></>}
+                            {canRetrySceneResult(result) && <><button type="button" className="cs-tool-entry" disabled={ws.running || ws.loading || !ws.activeLog} onClick={() => void ws.retryResult(result)}>{uiText("按原参数重试")}</button><small>{uiText("会提交 1 个新任务，原记录保留。")}</small></>}
                             {result.retryLogId && <small>{uiText("此失败项已发起过重试，请查看对应的新记录。")}</small>}
                             {canQuerySceneResult(result) && <button type="button" className="cs-tool-entry" disabled={ws.running || ws.loading || !ws.activeLog} onClick={() => void ws.queryResult(result)}>{uiText("刷新进度")}</button>}
                             {result.recovery === "resume" && <button type="button" className="cs-tool-entry" disabled={ws.running || ws.loading || !ws.activeLog} onClick={() => void ws.queryResult(result, true)}>{uiText("继续获取结果")}</button>}
-                            {result.compilationId && result.failureKind === "uncertain" && <><button type="button" className="cs-tool-entry" disabled={ws.running || ws.loading || !ws.activeLog} onClick={() => void ws.queryResult(result, true)}>{uiText("继续生成")}</button><small>{uiText("沿用已保存的设置，不重复优化；生成图片按当前规则收费。")}</small></>}
+                            {result.compilationId && result.failureKind === "uncertain" && <><button type="button" className="cs-tool-entry" disabled={ws.running || ws.loading || !ws.activeLog} onClick={() => void ws.queryResult(result, true)}>{uiText("继续生成")}</button><small>{uiText("沿用已保存的设置，不重复优化提示词。")}</small></>}
                         </div> : result.status === "cancelled" ? <div className="cs-result-message" role="status"><span>{uiText("方案 ")}{index + 1} {uiText("已取消")}</span><small>{uiText(result.error || "已取消生成前确认，未提交图片任务。")}</small></div>
                             : <div className="cs-result-message"><LoaderCircle className={ws.running || ws.autoObserving ? "animate-spin" : undefined} size={25} /><span>{ws.running || (ws.autoObserving && result.taskId) ? uiText("正在生成") : ws.autoObserving ? uiText("正在获取进度") : uiText("获取进度已暂停")}{uiText(" · 方案 ")}{index + 1}</span>{ws.running && <GenerationElapsed startedAt={ws.startedAt} />}<GenerationQueueProgress taskId={result.taskId} active={ws.running || ws.autoObserving} /><small>{result.error || uiText("任务已保存，完成后会自动显示。")}</small>{canQuerySceneResult(result) && !ws.running && <button type="button" className="cs-tool-entry" disabled={ws.loading || !ws.activeLog} onClick={() => void ws.queryResult(result)}>{uiText("刷新进度")}</button>}</div>}
                         {canQuerySceneResult(result) && result.taskId && <div className="p-3"><GenerationTaskCancel taskId={result.taskId} /></div>}

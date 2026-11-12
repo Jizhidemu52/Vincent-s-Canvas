@@ -17,7 +17,7 @@ function elements(node: unknown): ReactElement<any>[] {
     return [element, ...elements(element.props.children)];
 }
 
-function loginPage(options: { href?: string; methods?: () => Promise<unknown>; start?: () => Promise<unknown> } = {}) {
+function loginPage(options: { href?: string; methods?: () => Promise<unknown>; start?: () => Promise<unknown>; login?: () => Promise<unknown>; returnTo?: string } = {}) {
     const source = new URL("../src/pages/login/index.tsx", import.meta.url);
     const requireModule = createRequire(source);
     const code = ts.transpileModule(readFileSync(source, "utf8"), {
@@ -26,20 +26,22 @@ function loginPage(options: { href?: string; methods?: () => Promise<unknown>; s
     const values: any[] = [], effects: Array<() => (() => void) | void> = [], assignments: string[] = [], replacements: string[] = [];
     let cursor = 0, mounted = false, reloads = 0, methodCalls = 0;
     const startCalls: string[] = [];
+    const passwordCalls: unknown[][] = [], notices: unknown[] = [];
     const url = new URL(options.href || "http://ordinary.example/login");
     const dependencies: Record<string, unknown> = {
         "@/lib/i18n": i18nHarness,
         "@/components/layout/inchoice-brand": { InchoiceBrand: () => null },
         "@/components/layout/language-switch": { LanguageSwitch: () => null },
+        "@/lib/login-return": { currentLoginReturn: () => options.returnTo || "/" },
         react: {
             ...React,
             useState(initial: unknown) { const index = cursor++; if (!(index in values)) values[index] = initial; return [values[index], (value: unknown) => { values[index] = value; }]; },
             useRef(initial: unknown) { const index = cursor++; return values[index] ||= { current: initial }; },
             useEffect(effect: () => (() => void) | void) { if (!mounted) effects.push(effect); },
         },
-        antd: { App: { useApp: () => ({ message: { error() {}, warning() {} } }) }, Button: "Button", Input: Object.assign(function Input() {}, { Password: "Password" }) },
+        antd: { App: { useApp: () => ({ message: { error: (value: unknown) => notices.push(value), warning: (value: unknown) => notices.push(value) } }) }, Button: "Button", Input: Object.assign(function Input() {}, { Password: "Password" }) },
         "lucide-react": new Proxy({}, { get: (_, key) => String(key) }),
-        "@/stores/use-user-store": { useUserStore: (select: Function) => select({ loginWithPassword: async () => ({ mustChangePassword: false }) }) },
+        "@/stores/use-user-store": { useUserStore: (select: Function) => select({ loginWithPassword: async (...args: unknown[]) => { passwordCalls.push(args); return options.login ? options.login() : { mustChangePassword: false }; } }) },
         "@/services/api/auth": {
             getAuthMethods: async () => { methodCalls++; return options.methods ? options.methods() : availableMethods; },
             getWeComLoginUrl: async (portal: string) => { startCalls.push(portal); return options.start ? options.start() : { authorizationUrl }; },
@@ -51,11 +53,79 @@ function loginPage(options: { href?: string; methods?: () => Promise<unknown>; s
         { location: { href: url.href, search: url.search, origin: url.origin, assign: (path: string) => assignments.push(path), replace: (path: string) => replacements.push(path), reload: () => reloads++ } },
     );
     return {
-        assignments, replacements, startCalls, get reloads() { return reloads; }, get methodCalls() { return methodCalls; },
+        assignments, replacements, startCalls, passwordCalls, notices, get reloads() { return reloads; }, get methodCalls() { return methodCalls; },
         render() { cursor = 0; const tree = elements(module.exports.default()); mounted = true; return tree; },
         mountEffects() { return effects.map(effect => effect()); },
     };
 }
+
+test("personal login validates each required field inline without submitting or showing a toast", async () => {
+    const page = loginPage();
+    page.render().find(element => element.type === "form")!.props.onSubmit({ preventDefault() {} });
+    await settle();
+    let tree = page.render();
+    for (const field of ["identifier", "password"]) {
+        const input = tree.find(element => element.props.id === `personal-login-${field}`)!;
+        expect(input.props.status).toBe("error");
+        expect(input.props["aria-invalid"]).toBe(true);
+        const error = tree.find(element => element.props.id === input.props["aria-describedby"])!;
+        expect(error.props.role).toBe("alert");
+        expect(error.props.children).toBe(field === "identifier" ? "请输入个人账号" : "请输入密码");
+    }
+    expect(page.passwordCalls).toEqual([]);
+    expect(page.notices).toEqual([]);
+    tree.find(element => element.props.id === "personal-login-identifier")!.props.onChange({ target: { value: "   " } });
+    tree = page.render();
+    expect(tree.find(element => element.props.id === "personal-login-identifier-error")).toBeUndefined();
+    expect(tree.find(element => element.props.id === "personal-login-password-error")).toBeTruthy();
+    tree.find(element => element.type === "form")!.props.onSubmit({ preventDefault() {} });
+    await settle();
+    expect(page.render().find(element => element.props.id === "personal-login-identifier-error")).toBeTruthy();
+    expect(page.passwordCalls).toEqual([]);
+});
+
+test("personal login preserves server errors inline, clears on edit and permits a successful retry", async () => {
+    let attempts = 0;
+    const page = loginPage({ returnTo: "/canvas/saved", login: async () => {
+        if (++attempts === 1) throw new Error("账号已锁定，请联系管理员");
+        return { mustChangePassword: true };
+    } });
+    let tree = page.render();
+    tree.find(element => element.props.id === "personal-login-identifier")!.props.onChange({ target: { value: " designer " } });
+    tree.find(element => element.props.id === "personal-login-password")!.props.onChange({ target: { value: " original password " } });
+    page.render().find(element => element.type === "form")!.props.onSubmit({ preventDefault() {} });
+    await settle();
+    tree = page.render();
+    expect(tree.find(element => element.props.role === "alert")!.props.children).toBe("账号已锁定，请联系管理员");
+    expect(page.passwordCalls).toEqual([["designer", " original password ", "designer"]]);
+    expect(page.assignments).toEqual([]);
+    expect(page.notices).toEqual([]);
+    tree.find(element => element.props.id === "personal-login-password")!.props.onChange({ target: { value: "corrected" } });
+    tree = page.render();
+    expect(tree.filter(element => element.props.role === "alert")).toEqual([]);
+    tree.find(element => element.type === "form")!.props.onSubmit({ preventDefault() {} });
+    await settle();
+    expect(page.passwordCalls).toEqual([["designer", " original password ", "designer"], ["designer", "corrected", "designer"]]);
+    expect(page.assignments).toEqual(["/change-password?returnTo=%2Fcanvas%2Fsaved"]);
+});
+
+test("pending personal login remains single-flight and retains the original return destination", async () => {
+    const pending = Promise.withResolvers<{ mustChangePassword: boolean }>();
+    const page = loginPage({ returnTo: "/creative?tool=sketch", login: () => pending.promise });
+    let tree = page.render();
+    tree.find(element => element.props.id === "personal-login-identifier")!.props.onChange({ target: { value: "designer" } });
+    tree.find(element => element.props.id === "personal-login-password")!.props.onChange({ target: { value: "password" } });
+    const submit = page.render().find(element => element.type === "form")!.props.onSubmit;
+    submit({ preventDefault() {} });
+    submit({ preventDefault() {} });
+    tree = page.render();
+    expect(tree.find(element => element.props.id === "personal-login-identifier")!.props.disabled).toBe(true);
+    expect(tree.find(element => element.props.children === "登录工作台")!.props.loading).toBe(true);
+    expect(page.passwordCalls).toHaveLength(1);
+    pending.resolve({ mustChangePassword: false });
+    await settle();
+    expect(page.assignments).toEqual(["/creative?tool=sketch"]);
+});
 
 test("only configured WeCom is shown while personal and administrator login remain available", async () => {
     for (const configured of [true, false]) {

@@ -26,9 +26,10 @@ function deferred() {
     return { promise, resolve, reject, branches };
 }
 
-type TogglerProps = { onThemeChange?: (theme: "light" | "dark") => void };
+type ClickEvent = { defaultPrevented: boolean; preventDefault: () => void };
+type TogglerProps = { onThemeChange?: (theme: "light" | "dark") => void; onClick?: (event: ClickEvent) => void };
 
-function harness(options: { noApi?: boolean; reducedMotion?: boolean; canvas?: boolean; startError?: Error; themeError?: Error; animateError?: Error; invokeBeforeStartError?: boolean } = {}) {
+function harness(options: { noApi?: boolean; reducedMotion?: boolean; canvas?: boolean; startError?: Error; themeError?: Error; animateError?: Error; invokeBeforeStartError?: boolean; onClick?: (event: ClickEvent) => void } = {}) {
     const ready = deferred();
     const finished = deferred();
     const updateCallbackDone = deferred();
@@ -77,7 +78,7 @@ function harness(options: { noApi?: boolean; reducedMotion?: boolean; canvas?: b
         },
         "react/jsx-runtime": jsxRuntime,
     };
-    const module = { exports: {} as { AnimatedThemeToggler: (props: TogglerProps) => ReactElement<{ onClick: () => void }> } };
+    const module = { exports: {} as { AnimatedThemeToggler: (props: TogglerProps) => ReactElement<{ onClick: (event: ClickEvent) => void }> } };
     new Function("require", "module", "exports", "document", "window", code)(
         (name: string) => {
             if (!Object.hasOwn(dependencies, name)) throw new Error(`Unexpected dependency: ${name}`);
@@ -86,13 +87,13 @@ function harness(options: { noApi?: boolean; reducedMotion?: boolean; canvas?: b
         module, module.exports, document,
         { innerWidth: 1000, innerHeight: 800, matchMedia: () => ({ matches: Boolean(options.reducedMotion) }), reportError: (error: unknown) => { reported.push(error); } },
     );
-    const button = module.exports.AnimatedThemeToggler({ onThemeChange: theme => {
+    const button = module.exports.AnimatedThemeToggler({ onClick: options.onClick, onThemeChange: theme => {
         applied.push(theme);
         if (options.themeError) throw options.themeError;
     } });
     return {
         ready, finished, updateCallbackDone, root, styles, applied, reported, animations,
-        click: () => button.props.onClick(),
+        click: () => button.props.onClick({ defaultPrevented: false, preventDefault() { this.defaultPrevented = true; } }),
         update: () => {
             try {
                 update();
@@ -117,6 +118,16 @@ function harness(options: { noApi?: boolean; reducedMotion?: boolean; canvas?: b
 }
 
 describe("animated theme transition", () => {
+    test("a wrapper click handler does not replace theme toggling and can explicitly prevent it", () => {
+        let clicks = 0;
+        const normal = harness({ noApi: true, onClick: () => { clicks++; } });
+        normal.click();
+        expect(clicks).toBe(1);
+        expect(normal.applied).toEqual(["dark"]);
+        const prevented = harness({ noApi: true, onClick: event => event.preventDefault() });
+        prevented.click();
+        expect(prevented.applied).toEqual([]);
+    });
     test("canvas and reduced-motion preferences apply directly without a page screenshot", () => {
         for (const options of [{ canvas: true }, { reducedMotion: true }]) {
             const h = harness(options); h.click();

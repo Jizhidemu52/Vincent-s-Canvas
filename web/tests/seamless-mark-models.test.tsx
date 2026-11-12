@@ -178,7 +178,10 @@ test.each([flare, sunburst, nano, internal])("$id renders the correct seamless c
     const html = renderToStaticMarkup(<MemoryRouter><App><SeamlessStitchWorkspace /></App></MemoryRouter>);
     expect(html).toContain("处理模型");
     expect(html).toContain("输入图片");
-    expect(html).toContain("历史出图");
+    expect(html).toContain("历史记录");
+    expect(html).toContain("本次结果");
+    expect(html).toContain("新建任务，继续创作");
+    expect(html).not.toContain("积分");
     if (model.id === internal.id) {
         expect(html).toContain("花型预设");
         expect(html).toContain("切割宽度");

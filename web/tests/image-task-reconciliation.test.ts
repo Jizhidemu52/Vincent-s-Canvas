@@ -37,6 +37,7 @@ function harness(options: { task?: QueuedTask | null; results?: any[]; records?:
         latestPendingImages: { current: [...records.values()] },
         user: { id: owner }, inputDraftScope: "image-edit", pendingRestoreRevision: { current: 0 }, resultViewPinnedRef: { current: false },
         workbenchSubmissions: { acquire: () => () => {} }, setRunning() {}, setStartedAt() {}, setActiveTaskId() {},
+        returnToCurrentTask() {},
         useUserStore: { getState: () => ({ user: { id: owner } }) },
         findPendingImageTask, updateImageResultForRecord, classifyTaskRecovery, submissionInvestigationMessage, generationErrorDiagnostic, completedTaskDurationMs,
         QueuedTaskFailedError, QueuedTaskPausedError,

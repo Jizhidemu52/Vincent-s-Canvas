@@ -114,9 +114,16 @@ async function upload(page: Page, sources: Source[], video = false) {
 }
 
 async function select(page: Page, index: number) { await tabs(page).nth(index).click(); await expect(tabs(page).nth(index)).toHaveAttribute("aria-selected", "true"); }
-async function next(page: Page, count: number, entry: "sidebar" | "footer" | "top" | "mobile" = "top") {
-    if (entry === "mobile") { await active(page).getByRole("button", { name: "记录", exact: true }).click(); const drawer = page.getByRole("dialog", { name: "生成记录", exact: true }); await drawer.getByRole("button", { name: "新建", exact: true }).click(); await expect(drawer).toHaveCount(0); }
-    else if (entry === "sidebar") await active(page).locator("aside").getByRole("button", { name: "新建", exact: true }).click();
+async function next(page: Page, count: number, entry: "history" | "footer" | "top" | "mobile" = "top") {
+    if (entry === "mobile" && new URL(page.url()).pathname === "/video") { await active(page).getByRole("button", { name: "记录", exact: true }).click(); const drawer = page.getByRole("dialog", { name: "生成记录", exact: true }); await drawer.getByRole("button", { name: "新建", exact: true }).click(); await expect(drawer).toHaveCount(0); }
+    else if (entry === "history" || entry === "mobile") {
+        // The synthetic double-submit leaves the pointer over the prior result
+        // layout. Move it away so the live queue tooltip closes before navigation.
+        await page.mouse.move(0, 0);
+        await expect(page.getByRole("tooltip")).toHaveCount(0);
+        await active(page).getByRole("tab", { name: /^历史记录/ }).click();
+        await active(page).getByRole("button", { name: "新建", exact: true }).click();
+    }
     else if (entry === "footer") await active(page).getByRole("button", { name: "新建任务，继续创作", exact: true }).click();
     else await page.getByRole("button", { name: "新建任务", exact: true }).click();
     await expect(tabs(page)).toHaveCount(count); await expect(tabs(page).last()).toHaveAttribute("aria-selected", "true");
@@ -182,7 +189,7 @@ for (const kind of ["image", "video"] as const) for (let round = 0; round < 5; r
         for (let index = 0; index < 10; index++) {
             const mobile = round === 4 && index >= 8;
             if (mobile) await page.setViewportSize({ width: 390, height: 844 });
-            if (index) await next(page, index + 1, mobile ? "mobile" : round === 1 ? "footer" : round === 3 ? "top" : "sidebar");
+            if (index) await next(page, index + 1, mobile ? "mobile" : round === 1 ? "footer" : round === 3 ? "top" : "history");
             const input = active(page).getByRole("textbox", { name: kind === "image" ? "图像提示词" : "视频提示词", exact: true });
             await expect(input).toHaveValue("");
             const marker = `${kind.toUpperCase()}_R${round + 1}_T${index + 1}_`, text = marker + promptCases[(index + round) % promptCases.length]; markers.push(text);

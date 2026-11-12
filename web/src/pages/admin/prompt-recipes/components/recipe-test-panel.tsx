@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Alert, App, Button, Form, Image, Input, Select, Tag } from "antd";
+import { Alert, App, Button, Form, Image, Input, Select, Tag, Tooltip } from "antd";
 import { createClientId } from "@/lib/client-id";
 import {
     findAdminPromptCompilation,
@@ -101,7 +101,7 @@ export function RecipeTestPanel({ detail, models, refresh, editorDirty }: { deta
             requirePromptAdmin(owner);
             if (!result) result = (await findAdminPromptCompilation(run.id, options())) ?? undefined;
             if (!result) {
-                patchRun(run.id, { notice: "尚未查到原请求，不能据此认定未扣费。请稍后查询，勿重复提交。" });
+                patchRun(run.id, { notice: "尚未查到原请求，不能据此认定未执行。请稍后查询，勿重复提交。" });
                 return;
             }
             patchRun(run.id, { compilation: result });
@@ -174,7 +174,7 @@ export function RecipeTestPanel({ detail, models, refresh, editorDirty }: { deta
         }
         modal.confirm({
             title: `使用 v${run.version} 的测试结果出图？`,
-            content: "将按这次测试冻结的模型、参考图与提示词创建 1 个正式出图任务，可能产生图像模型费用。当前表单的新修改不会影响此任务。",
+            content: "将按这次测试冻结的模型、参考图与提示词创建 1 个正式出图任务。当前表单的新修改不会影响此任务。",
             okText: "提交 1 张测试图",
             cancelText: "取消",
             onOk: () =>
@@ -218,7 +218,7 @@ export function RecipeTestPanel({ detail, models, refresh, editorDirty }: { deta
             <Alert
                 type="warning"
                 showIcon
-                title={isVideo ? "仅动效规划测试也可能产生文本模型费用；此页不生成视频。" : "仅优化测试也可能产生文本模型费用；不会自动出图。"}
+                title={isVideo ? "只测试动效规划；此页不生成视频。" : "只测试提示词优化；不会自动出图。"}
                 description={
                     isVideo
                         ? "保存版本后测试。仅上传参考图片给规划模型；视频 / 音频素材请在视频创作页使用。离开页面停止本地查询，不会取消已提交请求。"
@@ -319,9 +319,9 @@ export function RecipeTestPanel({ detail, models, refresh, editorDirty }: { deta
                             {files.map((reference, index) => (
                                 <div key={reference.id} className="w-28">
                                     <img src={reference.preview} alt={`参考图 ${index + 1}`} className="h-24 w-28 rounded-lg border border-border object-contain" />
-                                    <div className="mt-1 truncate text-xs" title={reference.file.name}>
+                                    <Tooltip title={reference.file.name}><div className="mt-1 truncate text-xs" >
                                         {index + 1}. {reference.file.name}
-                                    </div>
+                                    </div></Tooltip>
                                     <Button
                                         size="small"
                                         disabled={Boolean(busy)}

@@ -17,7 +17,9 @@ function handle(kind: "create" | "chat") {
     };
     const module = { exports: {} as { CanvasPanelResizeHandle: Function } };
     new Function("require", "module", "exports", code)((id: string) => id === "@/lib/i18n" ? i18nHarness : ((name: string) => deps[name] || localRequire(name))(id), module, module.exports);
-    const props = module.exports.CanvasPanelResizeHandle({ kind }).props;
+    const element = module.exports.CanvasPanelResizeHandle({ kind }).props.children;
+    expect(element.type).toBe("button");
+    const props = element.props;
     let captured = false;
     const root = { style: { setProperty: (...args: unknown[]) => styles.push(args) } };
     const target = { closest: () => root, focus() {}, setPointerCapture() { captured = true; }, hasPointerCapture: () => captured, releasePointerCapture() { captured = false; } };

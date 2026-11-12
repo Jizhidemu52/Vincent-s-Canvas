@@ -1,5 +1,5 @@
 import { useUiText } from "@/lib/i18n";
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { Input, Modal, type InputRef } from "antd";
 import { canvasActionShortcut, type CanvasActionId } from "@/lib/canvas/canvas-actions";
 import { canvasCommandCatalog, filterCanvasCommands } from "@/lib/canvas/canvas-command-catalog";
@@ -69,9 +69,12 @@ export function CanvasCommandPalette({ nodes, bindings, onLocate, onAsset, onClo
                 if (["ArrowDown", "ArrowUp"].includes(event.key)) { event.preventDefault(); const length = currentMatches().length; setActive(value => length ? (value + (event.key === "ArrowDown" ? 1 : -1) + length) % length : 0); }
                 if (event.key === "Enter") { event.preventDefault(); execute(active); }
             }} />
-        <div id="canvas-command-results" role="listbox" aria-label={t("搜索结果")} aria-busy={query !== deferredQuery} className="cw-command-results">{matches.map((item, index) => <button id={`canvas-command-${index}`} key={item.id} type="button" role="option" aria-selected={active === index} onMouseEnter={() => setActive(index)} onClick={() => execute(index, item.id)}>
-            <span><small>{item.category}</small>{item.label}</span>{item.id.startsWith("node:") || item.id.startsWith("asset:") ? <span className="text-xs opacity-60">{item.shortcut}</span> : <kbd>{canvasShortcutLabel(item.shortcut)}</kbd>}
-        </button>)}{!matches.length && <p role="status">{t("没有匹配的可用操作或素材")}</p>}</div>
+        <div id="canvas-command-results" role="listbox" aria-label={t("搜索结果")} aria-busy={query !== deferredQuery} className="cw-command-results">{matches.map((item, index) => <Fragment key={item.id}>
+            {index === 0 || matches[index - 1].category !== item.category ? <div className="cw-command-group-heading" role="presentation">{item.category}</div> : null}
+            <button id={`canvas-command-${index}`} type="button" role="option" aria-selected={active === index} onMouseEnter={() => setActive(index)} onClick={() => execute(index, item.id)}>
+                <span>{item.label}</span>{item.id.startsWith("node:") || item.id.startsWith("asset:") ? <span className="text-xs opacity-60">{item.shortcut}</span> : <kbd>{canvasShortcutLabel(item.shortcut)}</kbd>}
+            </button>
+        </Fragment>)}{!matches.length && <p role="status">{t("没有匹配的可用操作或素材")}</p>}</div>
         <p className="cw-command-help">{t("↑ ↓ 选择 · Enter 执行 · Esc 关闭 · 云端素材请打开“我的素材”")}</p>
     </Modal>;
 }

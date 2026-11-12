@@ -94,7 +94,7 @@ describe("durable one-shot generation boundary", () => {
     });
     test("definite rejection ends locally without disclosing upstream names", async () => {
         const result = await submitLayerStudioOnce(job(), { assertCurrent() {}, async persist() {}, async create() { throw new LayerStudioApiError(503, "PRICE_NOT_CONFIGURED"); } });
-        expect(result.phase).toBe("failed"); expect(result.notice).toContain("费用尚未配置");
+        expect(result.phase).toBe("failed"); expect(result.notice).toContain("功能配置尚未就绪");
     });
     test("accepted ID persistence failure cannot issue a second POST", async () => {
         let calls = 0;

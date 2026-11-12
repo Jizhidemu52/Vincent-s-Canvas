@@ -34,7 +34,7 @@ export function generationErrorMessage(error: unknown, status?: number, code?: s
     if (/暂无法恢复上游查询|提交结果待核查/.test(raw)) return "暂时无法获取结果，需要管理员协助。可先刷新进度，不会重新生成。";
     if (/待核查|勿重复|不要重复|查询暂停|停止本页查询|原请求待查询/.test(raw)) return "暂时无法获取进度，请稍后再试；刷新进度不会重新生成。";
     if (status === 401 || /unauthorized|session.*expired|登录.*过期/i.test(raw)) return "登录已过期，请重新登录后继续；不要重复提交尚未确认的任务。";
-    if (status === 402 || /insufficient|balance|额度不足|余额不足/i.test(raw)) return "可用额度不足，请联系管理员补充额度后重试。";
+    if (status === 402 || /insufficient|balance|额度不足|余额不足/i.test(raw)) return "当前任务暂时无法提交，请联系管理员检查服务配置。";
     if (status === 429 || /rate.limit|too many|限流/i.test(raw)) return "服务请求较多，请稍后重试；已提交的任务请继续查询。";
     if (/content.?policy|moderation|safety|内容审核|敏感内容/i.test(raw)) return "内容未通过审核，请调整提示词或参考素材后重试。";
     if (status === 408 || status === 504 || /timeout|timed out|超时/i.test(raw)) return "服务响应超时。已提交的任务请继续查询，确认失败后再重试。";

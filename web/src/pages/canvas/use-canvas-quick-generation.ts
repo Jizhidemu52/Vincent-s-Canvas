@@ -332,7 +332,7 @@ export function useCanvasQuickGeneration({ projectId, projectLoaded, nodesRef, c
             return;
         }
         if (deploymentFeatures.creditsEnabled && usage.configured && user.creditBalance < usage.credits) {
-            message.error(uiText("额度不足：预计需要 {value1} 积分，当前剩余 {value2} 积分", { value1: usage.credits, value2: user.creditBalance }));
+            message.error(uiText("当前账号暂时无法提交生成任务，请联系管理员。"));
             return;
         }
 

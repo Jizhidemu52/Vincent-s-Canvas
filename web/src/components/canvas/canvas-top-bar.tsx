@@ -1,22 +1,20 @@
 import { uiText, useUiLocale } from "@/lib/i18n";
 import { lazy, Suspense, memo, useEffect, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
-import { BookOpen, ChevronDown, Download, Globe, Home, Images, Info, LayoutGrid, MessageSquare, Plus, Redo2, Trash2, Undo2, Upload } from "lucide-react";
-import { Dropdown, Popover } from "antd";
+import { ArrowLeft, BookOpen, Check, Download, Images, Info, MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
+import { Dropdown, Popover, Tooltip } from "antd";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { deploymentFeatures } from "@/lib/deployment-features";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { useUserStore } from "@/stores/use-user-store";
-import { useModuleEnabled } from "@/stores/use-module-store";
 import { UsageCollectionNotice } from "@/components/layout/frequent-navigation";
 import { CanvasSaveStatus } from "@/components/canvas/canvas-save-status";
 import { canvasActionMenuItem } from "./canvas-action-menu-item";
-import { InchoiceBrand } from "@/components/layout/inchoice-brand";
 import { LanguageSwitch } from "@/components/layout/language-switch";
 import { canvasTopBarPropsEqual, type CanvasTopBarRenderState } from "@/lib/canvas/canvas-top-bar-render-stability";
 
 const CanvasShortcutsDialog = lazy(() => import("./canvas-shortcuts-dialog").then(module => ({ default: module.CanvasShortcutsDialog })));
 const UserStatusActions = lazy(() => import("@/components/layout/user-status-actions").then(module => ({ default: module.UserStatusActions })));
+type TopBarProps = Omit<CanvasTopBarRenderState, "onShare"> & { onShare: () => void | boolean | Promise<void | boolean>; onOpenOnboarding?: () => void };
 
 export const CanvasTopBar = memo(function CanvasTopBar({
     title,
@@ -26,31 +24,31 @@ export const CanvasTopBar = memo(function CanvasTopBar({
     onStartTitleEditing,
     onFinishTitleEditing,
     onCancelTitleEditing,
-    canUndo,
-    canRedo,
-    onHome,
     onProjects,
     onCreateProject,
     onOpenExamples,
     onDeleteProject,
-    onImportImage,
-    onUndo,
-    onRedo,
     onExport,
     onExportImages,
     onShare,
-    onOpenTools,
     onOpenCommands,
     agentOpen,
     compactAgentStatus,
     onToggleAgent,
-}: CanvasTopBarRenderState) {
+    onOpenOnboarding,
+}: TopBarProps) {
     const locale = useUiLocale();
-    const navigate = useNavigate();
-    const { id: canvasId } = useParams<{ id: string }>();
-    const canImportReferences = useModuleEnabled("reference-import");
     const titleRef = useRef<HTMLDivElement>(null);
     const [shortcutsOpen, setShortcutsOpen] = useState(false);
+    const [copied, setCopied] = useState(false);
+    const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    useEffect(() => () => { if (copyTimer.current) clearTimeout(copyTimer.current); }, []);
+    const copyLink = async () => {
+        if (await onShare() !== true) return;
+        setCopied(true);
+        if (copyTimer.current) clearTimeout(copyTimer.current);
+        copyTimer.current = setTimeout(() => setCopied(false), 1200);
+    };
     const userName = useUserStore((state) => state.user?.displayName || state.user?.username || uiText("本地工作区"));
 
     useEffect(() => {
@@ -66,44 +64,37 @@ export const CanvasTopBar = memo(function CanvasTopBar({
         <>
             <div className="cw-topbar">
                 <div className={`cw-project-card ${agentOpen ? "is-agent-open" : ""}`}>
+                    <button type="button" className="cw-icon cw-back" aria-label={uiText("返回画布列表")} onClick={onProjects}><ArrowLeft className="size-4" /></button>
                     <Dropdown trigger={["click"]} styles={{ root: { zIndex: 900 } }} menu={{ items: [
-                        canvasActionMenuItem("home", onHome, <Home className="size-4" />),
-                        canvasActionMenuItem("projects", onProjects, <Images className="size-4" />),
                         canvasActionMenuItem("newProject", onCreateProject, <Plus className="size-4" />),
-                        ...(onOpenExamples ? [canvasActionMenuItem("examples", onOpenExamples, <BookOpen className="size-4" />)] : []),
                         canvasActionMenuItem("renameProject", onStartTitleEditing),
-                        canvasActionMenuItem("tools", onOpenTools, <LayoutGrid className="size-4" />),
-                        { key: "toggle-chat", icon: <MessageSquare className="size-4" />, label: locale === "en-US" ? (agentOpen ? "Hide chat" : "Open chat") : (agentOpen ? "收起对话" : "打开对话"), onClick: onToggleAgent },
-                        { type: "divider" },
-                        canvasActionMenuItem("upload", onImportImage, <Upload className="size-4" />),
-                        ...(canImportReferences ? [canvasActionMenuItem("referenceImport", () => navigate(`/reference-import${canvasId ? `?returnTo=${encodeURIComponent(`/canvas/${canvasId}`)}` : ""}`), <Globe className="size-4" />)] : []),
                         canvasActionMenuItem("export", onExport, <Download className="size-4" />),
                         canvasActionMenuItem("exportImages", onExportImages, <Images className="size-4" />),
                         { type: "divider" },
-                        canvasActionMenuItem("undo", onUndo, <Undo2 className="size-4" />, !canUndo),
-                        canvasActionMenuItem("redo", onRedo, <Redo2 className="size-4" />, !canRedo),
                         canvasActionMenuItem("commands", onOpenCommands),
                         canvasActionMenuItem("shortcuts", () => setShortcutsOpen(true)),
+                        ...(onOpenOnboarding ? [{ key: "onboarding", icon: <BookOpen className="size-4" />, label: locale === "en-US" ? "Quick start guide" : "新手引导", onClick: onOpenOnboarding }] : []),
+                        ...(onOpenExamples ? [canvasActionMenuItem("examples", onOpenExamples, <BookOpen className="size-4" />)] : []),
                         { type: "divider" },
                         canvasActionMenuItem("deleteProject", onDeleteProject, <Trash2 className="size-4" />),
                     ] }}>
-                        <button type="button" className="cw-icon cw-brand" aria-label={uiText("打开画布菜单")} title={uiText("自由画布菜单")}><InchoiceBrand /><ChevronDown className="size-3 shrink-0" /></button>
+                        <Tooltip title={locale === "en-US" ? "Canvas file and help" : "画布文件与帮助"}><button type="button" className="cw-icon cw-file-menu" aria-label={uiText("打开画布菜单")}><MoreHorizontal className="size-4" /></button></Tooltip>
                     </Dropdown>
                     <div ref={titleRef} className="cw-project-title">
                         {isTitleEditing ? (
                             <input autoFocus value={titleDraft} onChange={(event) => onTitleDraftChange(event.target.value)} onBlur={onFinishTitleEditing}
                                 onKeyDown={(event) => { if (event.nativeEvent.isComposing || event.keyCode === 229) return; if (event.key === "Enter") onFinishTitleEditing(); if (event.key === "Escape") onCancelTitleEditing(); }} aria-label={uiText("画布名称")} />
                         ) : (
-                            <button type="button" onClick={onStartTitleEditing} onKeyDown={event => { if (event.key === "F2") { event.preventDefault(); onStartTitleEditing(); } }} title={uiText("点击或按 Enter 修改画布名称")}>{title}</button>
+                            <Tooltip title={uiText("点击或按 Enter 修改画布名称")}><button type="button" onClick={onStartTitleEditing} onKeyDown={event => { if (event.key === "F2") { event.preventDefault(); onStartTitleEditing(); } }}><span>{title}</span><Pencil className="cw-title-pencil size-3" aria-hidden /></button></Tooltip>
                         )}
                     </div>
                     <CanvasSaveStatus compact />
-                    <button type="button" className="cw-share" title={uiText("复制链接；不会公开画布。本机试用跨设备请导出")} onClick={onShare}>{uiText("复制画布链接")}</button>
+                    <Tooltip title={uiText("复制链接；不会公开画布。本机试用跨设备请导出")}><button type="button" className="cw-share" aria-live="polite" onClick={() => void copyLink()}>{copied ? <><Check size={14} />{uiText("已复制")}</> : (locale === "en-US" ? "Copy link" : "复制链接")}</button></Tooltip>
                 </div>
                 <div className="cw-account-card">
                     <LanguageSwitch compact />
                     <span className="cw-account-avatar" aria-hidden="true">{userName.slice(0, 1)}</span>
-                    <span className="cw-account-name" title={userName}>{userName}</span>
+                    <Tooltip title={userName}><span className="cw-account-name">{userName}</span></Tooltip>
                     {compactAgentStatus ? <CompactAgentStatus status={compactAgentStatus} onClick={onToggleAgent} /> : null}
                     <Popover trigger="click" placement="bottomRight" content={<div className="cw-workspace-notice"><strong>{uiText("工作区与数据")}</strong><p>{deploymentFeatures.authenticationEnabled ? uiText("画布按当前账号身份保存，链接不等于公开分享。") : uiText("本地试用：画布保存在当前浏览器。更换设备前请导出备份。")}</p><UsageCollectionNotice compact /></div>}><button type="button" className="cw-icon" aria-label={uiText("工作区与使用记录说明")}><Info size={16} /></button></Popover>
                     <Suspense fallback={null}><UserStatusActions variant="canvas" /></Suspense>
@@ -112,7 +103,7 @@ export const CanvasTopBar = memo(function CanvasTopBar({
             {shortcutsOpen ? <Suspense fallback={null}><CanvasShortcutsDialog open onClose={() => setShortcutsOpen(false)} /></Suspense> : null}
         </>
     );
-}, canvasTopBarPropsEqual);
+}, (previous, next) => canvasTopBarPropsEqual(previous, next) && previous.onOpenOnboarding === next.onOpenOnboarding);
 
 function CompactAgentStatus({ status, onClick }: { status: { connected: boolean; enabled: boolean; activity: string }; onClick: () => void }) {
     useUiLocale();
@@ -121,15 +112,14 @@ function CompactAgentStatus({ status, onClick }: { status: { connected: boolean;
     const label = status.connected ? uiText("已连接本机助手") : status.enabled ? status.activity || uiText("连接中") : uiText("本机助手未连接");
     const dotColor = status.connected ? theme.node.success : status.enabled ? theme.node.warning : theme.node.muted;
     return (
-        <button
+        <Tooltip title={uiText("打开本机助手面板")}><button
             type="button"
             className="cw-text-button"
             style={{ color: theme.node.text }}
             onClick={onClick}
-            title={uiText("打开本机助手面板")}
         >
             <span className="size-2 rounded-full" style={{ background: dotColor }} />
             <span className="max-w-[180px] truncate">{label}</span>
-        </button>
+        </button></Tooltip>
     );
 }

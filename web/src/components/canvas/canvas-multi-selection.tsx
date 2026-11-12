@@ -1,4 +1,5 @@
 import { memo, useEffect, useRef, type PointerEvent } from "react";
+import { Select } from "antd";
 import type { CanvasNodeData, Position } from "@/types/canvas";
 import type { CanvasTheme } from "@/lib/canvas-theme";
 import type { CanvasResizePreview } from "@/lib/canvas/canvas-resize-preview";
@@ -54,10 +55,7 @@ export const CanvasMultiSelection = memo(function CanvasMultiSelection({ nodes, 
     return <div ref={frame} data-testid="canvas-multi-selection" className="pointer-events-none absolute z-[70]" style={{ left: bounds.x, top: bounds.y, width: bounds.width, height: bounds.height, border: `${1 / scale}px solid ${theme.canvas.selectionStroke}`, visibility: hidden ? "hidden" : undefined }}>
         <div data-canvas-no-zoom className="pointer-events-auto absolute left-0 flex origin-bottom-left items-center gap-2 whitespace-nowrap rounded px-2 py-1 text-xs shadow" style={{ bottom: bounds.height + Math.max(0, bounds.y - (toolbarTop ?? bounds.y)) + 8 / scale, transform: `scale(${1 / scale})`, background: theme.toolbar.panel, color: theme.node.text }} onPointerDown={event => event.stopPropagation()}>
             <span>{t("已选 {count} 项", { count: nodes.length })}</span>
-            <select aria-label={t("对齐与排列所选节点")} value="" style={{ background: theme.node.panel, color: theme.node.text }} onChange={event => onArrange(event.target.value as CanvasArrangeMode)}>
-                <option value="" disabled>{t("对齐 / 排列")}</option>
-                {canvasArrangeOptions.map(option => <option key={option.key} value={option.key}>{t(option.label)}</option>)}
-            </select>
+            <Select<CanvasArrangeMode> aria-label={t("对齐与排列所选节点")} size="small" className="min-w-36" value={undefined} placeholder={t("对齐 / 排列")} onChange={onArrange} options={canvasArrangeOptions.map(option => ({ value: option.key, label: t(option.label) }))} />
         </div>
         {!nodes.some(node => node.metadata?.locked) ? (["top-left", "top-right", "bottom-left", "bottom-right"] as const).map(handle => <button key={handle} type="button" aria-label={t("缩放选区 {handle}", { handle })} onPointerDown={event => start(event, handle)} className="pointer-events-auto absolute" style={{ width: 12 / scale, height: 12 / scale, background: theme.node.panel, border: `${1 / scale}px solid ${theme.canvas.selectionStroke}`, left: handle.includes("left") ? -6 / scale : undefined, right: handle.includes("right") ? -6 / scale : undefined, top: handle.includes("top") ? -6 / scale : undefined, bottom: handle.includes("bottom") ? -6 / scale : undefined, cursor: handle === "top-left" || handle === "bottom-right" ? "nwse-resize" : "nesw-resize" }} />) : null}
     </div>;

@@ -46,7 +46,7 @@ function findElements(value: unknown): ReactElement<any>[] {
 test("Agent parameters reflect standard pixel sizes and quality instead of fabricated resolution", () => {
     const result = controls({ imageModel: "gpt-image-2" });
     expect(result.markup).toContain('aria-label="宽高比"');
-    expect(result.markup).toContain('value="1536x1024"');
+    expect(result.elements.find(element => element.props.onConfigChange)?.props.profile.sizes).toContain("1536x1024");
     expect(result.markup).toContain('aria-label="画质"');
     expect(result.markup).not.toContain('value="4k"');
     result.effects.forEach((effect) => effect());
@@ -66,13 +66,14 @@ test("Agent preserves Gemini 0.5K resolution but fixes every adapter to one task
 });
 
 test("Midjourney shows speed and reference policy, not resolution or a useless output count selector", () => {
-    const markup = controls({ imageModel: "midjourney-v7" }).markup;
+    const result = controls({ imageModel: "midjourney-v7" });
+    const markup = result.markup;
     expect(markup).toContain('aria-label="生成速度"');
     expect(markup).toContain(">极速</button>");
     expect(markup).not.toContain('aria-label="数量"');
     expect(markup).not.toContain('aria-label="分辨率"');
-    expect(markup).toContain("参考图引导");
-    expect(controls({ imageModel: "midjourney-blend" }).markup).toContain("2–4 张参考图");
+    expect(result.elements.find(element => element.props.onConfigChange)?.props.profile.tip).toContain("参考图引导");
+    expect(controls({ imageModel: "midjourney-blend" }).elements.find(element => element.props.onConfigChange)?.props.profile.tip).toContain("2–4 张参考图");
 });
 
 test("switching an Agent image model atomically normalizes its illegal old parameters", () => {
@@ -83,12 +84,11 @@ test("switching an Agent image model atomically normalizes its illegal old param
 
 test("Agent only shows supported video audio and includes Seedance intelligent duration", () => {
     expect(controls({ mode: "video", videoModel: "wan2.7" }).markup).not.toContain("音频");
-    const seedance = controls({ mode: "video", videoModel: "doubao-seedance-2.5", videoSeconds: "-1" }).markup;
-    expect(seedance).toContain("音频");
-    expect(seedance).toContain('value="-1"');
-    expect(seedance).toContain("智能");
-    expect(seedance).toContain('value="30"');
-    expect(seedance).not.toContain('value="1080P"');
+    const seedance = controls({ mode: "video", videoModel: "doubao-seedance-2.5", videoSeconds: "-1" });
+    expect(seedance.markup).toContain("音频");
+    expect(seedance.markup).toContain("智能");
+    expect(seedance.elements.find(element => element.props.label === "时长")?.props).toMatchObject({ value: "-1", values: expect.arrayContaining(["-1", "30"]) });
+    expect(seedance.elements.find(element => element.props.label === "分辨率")?.props.values).not.toContain("1080P");
 });
 
 test("image and video generation models stay full-width inside the settings popover", () => {
@@ -116,13 +116,13 @@ test("compact type and settings controls preserve image and video mode changes",
     const actions = result.elements.find(element => element.props["data-testid"] === "canvas-agent-generation-actions");
     expect(actions).toBeDefined();
     const actionElements = findElements(actions);
-    const mode = actionElements.find(element => element.type === "select" && element.props["aria-label"] === "生成类型")!;
+    const mode = actionElements.find(element => element.props["aria-label"] === "生成类型")!;
     const settings = actionElements.find(element => element.type === "button" && element.props["aria-label"] === "图像设置")!;
     expect(settings.props.className).toContain("min-h-9");
     expect(actionElements.some(element => element.props.role === "tab")).toBe(false);
-    mode.props.onChange({ target: { value: "video" } });
+    mode.props.onChange("video");
     expect(result.changes.at(-1)).toMatchObject({ mode: "video", videoModel: "wan2.7" });
-    mode.props.onChange({ target: { value: "image" } });
+    mode.props.onChange("image");
     expect(result.changes.at(-1)).toMatchObject({ mode: "image", imageModel: "gpt-image-2.5-flare", imageCount: "1" });
 });
 
@@ -149,7 +149,7 @@ test("canvas model and mode normalization retain the exact user-selected image s
     const result = controls({ size: "3:4", requestedImageSize: "3:4" });
     result.elements.find(element => element.props.toolKey === "canvas-image")!.props.onChange("gpt-image-2");
     expect(result.changes.at(-1)).toMatchObject({ size: "1152x1536", requestedImageSize: "3:4" });
-    result.elements.find(element => element.type === "select" && element.props["aria-label"] === "生成类型")!.props.onChange({ target: { value: "video" } });
+    result.elements.find(element => element.props["aria-label"] === "生成类型")!.props.onChange("video");
     expect(result.changes.at(-1)).toMatchObject({ mode: "video", requestedImageSize: "3:4" });
     const returned = controls({ size: "16:9", requestedImageSize: "3:4" });
     expect(returned.elements.find(element => element.props.onConfigChange && element.props.onConfigNormalize)!.props.config.size).toBe("3:4");

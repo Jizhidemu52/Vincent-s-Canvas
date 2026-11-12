@@ -1,7 +1,7 @@
 import { useUiText, uiText } from "@/lib/i18n";
 import { ImageIcon, LoaderCircle, RefreshCw, Video } from "lucide-react";
 
-import { Button } from "antd";
+import { Button, Select as AntSelect, Tooltip } from "antd";
 
 import { canGenerateWorkflowVideo } from "@/lib/canvas/agent-media-workflow";
 import { imageModelDisplayName } from "@/lib/model-display";
@@ -159,9 +159,9 @@ export function CanvasAgentMediaWorkflowCard({
                             <div className="flex flex-wrap gap-1.5">
                                 {card.initialReferenceSummary.items.map((reference) => {
                                     const node = referenceNodes.find(node => node.id === reference.nodeId);
-                                    return <span key={reference.nodeId} title={node?.title || reference.label} className="inline-flex items-center gap-1 rounded border px-2 py-0.5" style={{ borderColor: theme.node.stroke }}>
+                                    return <Tooltip title={node?.title || reference.label} key={reference.nodeId}><span className="inline-flex items-center gap-1 rounded border px-2 py-0.5" style={{ borderColor: theme.node.stroke }}>
                                         {node ? <CanvasPersistedMediaPreview kind="image" url={node.metadata?.content} storageKey={node.metadata?.storageKey} alt="" className="size-7 rounded object-cover" /> : null}{reference.label}{node?.title ? ` · ${node.title}` : ""}
-                                    </span>;
+                                    </span></Tooltip>;
                                 })}
                             </div>
                         </div>
@@ -234,7 +234,7 @@ function shortNodeId(nodeId: string) {
 
 function WorkflowValueSelect({ ariaLabel, value, values, suffix = "", disabled, onChange }: { ariaLabel: string; value: string; values: string[]; suffix?: string; disabled: boolean; onChange?: (value: string) => void }) {
     const t = useUiText();
-    return <label className="space-y-1 text-xs"><span className="opacity-65">{ariaLabel}</span><select aria-label={ariaLabel} value={value} disabled={disabled} onChange={(event) => onChange?.(event.target.value)} className="h-8 w-full rounded-md border border-black/10 bg-transparent px-2 dark:border-white/15">{values.map((item) => <option key={item} value={item}>{item}{suffix}</option>)}</select></label>;
+    return <label className="space-y-1 text-xs"><span className="opacity-65">{ariaLabel}</span><AntSelect aria-label={ariaLabel} value={value} disabled={disabled} onChange={onChange} className="w-full" options={values.map(item => ({ value: item, label: `${item}${suffix}` }))} /></label>;
 }
 
 function ModelSelect({ ariaLabel, emptyLabel, models, value, disabled, onChange }: { ariaLabel: string; emptyLabel: string; models: string[]; value?: string; disabled: boolean; onChange?: (model: string) => void }) {

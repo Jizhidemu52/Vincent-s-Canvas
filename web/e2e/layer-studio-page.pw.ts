@@ -56,11 +56,13 @@ async function generatedMode(page: Page) {
     await pane(page).getByRole("button", { name: "图片生成 / 编辑", exact: true }).click();
     await pane(page).getByRole("textbox", { name: "图片描述", exact: true }).fill("保持原始形状与细节的产品图");
     await expect(generate(page)).toBeEnabled();
+    await expect(pane(page)).not.toContainText(/预计预扣|费用|付费|扣费|结算|CNY|¥/);
 }
 
 test("generation uses anonymous one-shot contract and persists before POST; refresh reads original only", async ({ page, studio }) => {
     await generatedMode(page);
-    await pane(page).getByRole("combobox", { name: "背景", exact: true }).selectOption("transparent");
+    await pane(page).getByRole("combobox", { name: "背景", exact: true }).click();
+    await page.locator(".ant-select-dropdown:visible .ant-select-item-option-content").getByText("透明", { exact: true }).click();
     await expect(pane(page).getByRole("combobox", { name: "输出格式", exact: true })).toBeDisabled();
     await generate(page).click();
     await expect(pane(page).getByLabel("原任务状态")).toContainText("已完成");
@@ -89,9 +91,11 @@ test("decomposition saves original bytes, includes base in cap, omits background
     await page.goto("/layer-studio");
     await pane(page).getByLabel("上传参考图片", { exact: true }).setInputFiles({ name: "original.png", mimeType: "image/png", buffer: IMAGE });
     await expect(pane(page).getByRole("button", { name: "开始拆分", exact: true })).toBeEnabled();
+    await expect(pane(page)).not.toContainText(/预计预扣|费用|付费|扣费|结算|CNY|¥/);
     await pane(page).getByLabel("输出总数上限（含底图）", { exact: true }).fill("100");
     await pane(page).getByLabel("请求文字 OCR", { exact: true }).check();
-    await pane(page).getByRole("combobox", { name: "底图格式", exact: true }).selectOption("jpeg");
+    await pane(page).getByRole("combobox", { name: "底图格式", exact: true }).click();
+    await page.locator(".ant-select-dropdown:visible .ant-select-item-option-content").getByText("JPEG", { exact: true }).click();
     await pane(page).getByRole("button", { name: "开始拆分", exact: true }).click();
     await expect(pane(page).getByLabel("原任务状态")).toContainText("已完成");
     const submitted = studio.api.submissions[0];
@@ -136,7 +140,9 @@ test("missing configured price disables generation but saved result editor remai
     await expect(pane(page).getByLabel("原任务状态")).toContainText("已完成");
     studio.quote = false;
     await page.reload();
-    await expect(pane(page).getByText("费用尚未配置，暂不能创建新任务；已有结果仍可编辑和下载。", { exact: false })).toBeVisible();
+    await expect(pane(page).getByText("功能配置尚未就绪，暂不能创建新任务；已有结果仍可编辑和下载。", { exact: false })).toBeVisible();
+    await expect(pane(page).getByRole("button", { name: "重新检查", exact: true })).toBeVisible();
+    await expect(pane(page)).not.toContainText(/预计预扣|费用|付费|扣费|结算|CNY|¥/);
     await expect(generate(page)).toBeDisabled();
     await expect(pane(page).getByRole("button", { name: /导出.*PNG/ })).toBeVisible();
     expect(studio.api.submissions).toHaveLength(1);
@@ -146,7 +152,8 @@ test("missing configured price disables generation but saved result editor remai
 test("mobile layout and exact-size validation stay usable without a request", async ({ page, studio }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await generatedMode(page);
-    await pane(page).getByRole("combobox", { name: "尺寸方式", exact: true }).selectOption("exact");
+    await pane(page).getByRole("combobox", { name: "尺寸方式", exact: true }).click();
+    await page.locator(".ant-select-dropdown:visible .ant-select-item-option-content").getByText("精确像素", { exact: true }).click();
     await pane(page).getByLabel("宽度（像素）", { exact: true }).fill("1");
     await expect(generate(page)).toBeDisabled();
     await pane(page).getByLabel("宽度（像素）", { exact: true }).fill("2048");

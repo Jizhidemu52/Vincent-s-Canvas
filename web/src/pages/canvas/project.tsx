@@ -19,7 +19,6 @@ import type { CanvasAgentMode } from "@/components/canvas/canvas-agent-chat-ui";
 import type { CanvasCommandBindings } from "@/components/canvas/canvas-command-palette";
 import type { CanvasConnectionLayerHandle } from "@/components/canvas/canvas-connection-layer";
 import { CanvasConnectionSvg, CanvasGraphConnectionLayer } from "@/components/canvas/canvas-connection-svg";
-import { CanvasConnectionHover } from "@/components/canvas/canvas-connection-hover";
 import { CanvasMentionImagesProvider } from "@/components/canvas/canvas-mention-images";
 import type { CanvasGroupLayerHandle } from "@/components/canvas/canvas-group-layer";
 import { CanvasHoverToolbarHost } from "@/components/canvas/canvas-hover-toolbar-host";
@@ -28,8 +27,7 @@ import { CanvasNodeLayer } from "@/components/canvas/canvas-node-layer";
 import type { CanvasNodeGenerationMode } from "@/components/canvas/canvas-node-prompt-panel";
 import { CanvasNodePanelBoundary } from "@/components/canvas/canvas-node-panel-boundary";
 import type { CanvasOnboardingHandle } from "@/components/canvas/canvas-onboarding";
-import { CanvasOverviewLayer, type CanvasOverviewLayerHandle } from "@/components/canvas/canvas-overview-layer";
-import { canvasLinkCopiedMessage } from "@/components/canvas/canvas-save-status";
+import type { CanvasOverviewLayerHandle } from "@/components/canvas/canvas-overview-layer";
 import { CanvasSelectionOverlay, type CanvasSelectionOverlayHandle } from "@/components/canvas/canvas-selection-overlay";
 import { CanvasToolbar } from "@/components/canvas/canvas-toolbar";
 import { CanvasTopBar } from "@/components/canvas/canvas-top-bar";
@@ -41,7 +39,7 @@ import { useCanvasExport } from "@/hooks/use-canvas-export";
 import { getCanvasAntThemeConfig } from "@/lib/app-theme";
 import { canvasThemes, type CanvasBackgroundMode } from "@/lib/canvas-theme";
 import { applyCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "@/lib/canvas/canvas-agent-ops";
-import { CANVAS_AGENT_PANEL_MOTION_MS } from "@/lib/canvas/canvas-agent-panel-constants";
+import { CANVAS_PANEL_MOTION_MS, useCanvasPanelPresence } from "@/components/canvas/use-canvas-panel-presence";
 import { loadCanvasAssistantPanel, loadCanvasLocalAgentPanel } from "@/lib/canvas/canvas-agent-panel-loaders";
 import type { CanvasAgentUndoRecord } from "@/lib/canvas/canvas-agent-undo";
 import { createCanvasBatchRenderIndex } from "@/lib/canvas/canvas-batch-motion";
@@ -99,6 +97,7 @@ import { createCanvasVisibleNodeCache } from "@/lib/canvas/canvas-visible-node-c
 import { clampCanvasZoom } from "@/lib/canvas/canvas-zoom";
 import { useCopyText } from "@/hooks/use-copy-text";
 import { canvasImportGridPosition, canvasUsableArea, fitCanvasNodes } from "@/lib/canvas/canvas-interaction-ux";
+import { placeCanvasImportedNodes } from "./canvas-import-placement";
 import { canvasLibrarySummaries } from "@/lib/canvas/canvas-project-summary";
 import { nextProjectTitle } from "@/lib/project-title";
 import { deploymentFeatures } from "@/lib/deployment-features";
@@ -127,7 +126,7 @@ import {
     type SelectionBox,
     type ViewportTransform
 } from "@/types/canvas";
-import { App, ConfigProvider } from "antd";
+import { App, ConfigProvider, Tooltip } from "antd";
 import { nanoid } from "nanoid";
 import { useCanvasClipboardDrop } from "./use-canvas-clipboard-drop";
 import { isExternalImageDrag } from "@/lib/dropped-images";
@@ -153,6 +152,8 @@ const loadCanvasFileActions = () => import("./canvas-editor-file-actions");
 const loadCanvasNodeUploadRuntime = () => import("./canvas-node-upload-runtime");
 const CanvasNodeContextMenu = lazy(() => import("@/components/canvas/canvas-context-menu").then(module => ({ default: module.CanvasNodeContextMenu })));
 const CanvasConnectionControls = lazy(() => import("@/components/canvas/canvas-connection-controls").then(module => ({ default: module.CanvasConnectionControls })));
+const CanvasConnectionHover = lazy(() => import("@/components/canvas/canvas-connection-hover").then(module => ({ default: module.CanvasConnectionHover })));
+const CanvasOverviewLayer = lazy(() => import("@/components/canvas/canvas-overview-layer").then(module => ({ default: module.CanvasOverviewLayer })));
 const CanvasMultiSelection = lazy(() => import("@/components/canvas/canvas-multi-selection").then(module => ({ default: module.CanvasMultiSelection })));
 const CanvasWorkspaceTools = lazy(() => import("@/components/canvas/canvas-workspace-tools").then(module => ({ default: module.CanvasWorkspaceTools })));
 const CanvasBatchEditDialog = lazy(() => import("@/components/canvas/canvas-batch-edit-dialog"));
@@ -507,6 +508,15 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
         quickGenerateEstimate, onQuickOptimizedPrompt, handleQuickReferenceInputChange, addQuickReferenceFiles, quickReferencesLoading,
         runQuickCanvasGeneration,
     } = quickGeneration;
+    const quickPanelPresence = useCanvasPanelPresence(quickGenerateOpen && !assistantOpen);
+    const assistantWasOpen = useRef(assistantOpen);
+    useLayoutEffect(() => {
+        const justClosed = assistantWasOpen.current && !assistantOpen;
+        assistantWasOpen.current = assistantOpen;
+        if (justClosed && (document.activeElement === document.body || document.activeElement?.closest(".cw-agent-panel"))) {
+            document.querySelector<HTMLButtonElement>('.cw-dock [data-usage-control="canvas-tool.generate"]')?.focus({ preventScroll: true });
+        }
+    }, [assistantOpen]);
     const flushEditorDrafts = useCallback(() => { flushQuickNodeDraft(); flushNodePanelDraftRef.current?.(); }, [flushQuickNodeDraft]);
     const lastEditorSelectionRef = useRef("");
 
@@ -1497,6 +1507,20 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
         setContextMenu(null);
     }, [size.height, size.width]);
 
+    const fitSelectedViewport = useCallback(() => {
+        const selected = nodesRef.current.filter(node => selectedNodeIdsRef.current.has(node.id));
+        if (!selected.length) { message.info(uiText("请先选择节点")); return; }
+        const next = fitCanvasNodes(selected, canvasUsableArea(containerRef.current, size));
+        wirelessCanvasRef.current?.previewViewport(next); viewportRef.current = next; setViewport(next);
+    }, [message, size.height, size.width]);
+
+    const initialFitProject = useRef<string | null>(null);
+    useEffect(() => {
+        if (!projectLoaded || size.width <= 0 || size.height <= 0 || initialFitProject.current === projectId || usePerformanceScenario) return;
+        initialFitProject.current = projectId;
+        if (nodesRef.current.length) resetViewport();
+    }, [projectId, projectLoaded, size.width, size.height, resetViewport, usePerformanceScenario]);
+
     const toggleMiniMap = useCallback(() => setIsMiniMapOpen((value) => !value), []);
 
     const focusCanvasArea = useCallback(
@@ -1972,7 +1996,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
             setQuickGenerateReferences(current => syncCanvasSelectionReferences(current, new Set([id]), new Map([[id, newNode]])));
         }
         flushPendingHistory();
-        setNodes((prev) => [...prev, newNode]);
+        setNodes((prev) => nodesRef.current = [...prev, ...placeCanvasImportedNodes(prev, [newNode])]);
         setSelectedNodeIds(new Set([id]));
         setSelectedConnectionId(null);
         if (openPanel) setDialogNodeId(id);
@@ -1985,7 +2009,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
         const { node } = await createCanvasUploadedNode(file, "video", position);
         if (designProjectIdRef.current !== projectId || useUserStore.getState().user?.id !== ownerId) throw new Error(uiText("画布或账号已切换，已停止导入"));
         flushPendingHistory();
-        setNodes(prev => [...prev, node]);
+        setNodes(prev => nodesRef.current = [...prev, ...placeCanvasImportedNodes(prev, [node])]);
         setSelectedNodeIds(new Set([node.id]));
         setSelectedConnectionId(null);
         if (openPanel) setDialogNodeId(node.id);
@@ -1997,12 +2021,12 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
         const { node } = await createCanvasUploadedNode(file, "audio", position);
         if (designProjectIdRef.current !== projectId || useUserStore.getState().user?.id !== ownerId) throw new Error(uiText("画布或账号已切换，已停止导入"));
         flushPendingHistory();
-        setNodes(prev => [...prev, node]);
+        setNodes(prev => nodesRef.current = [...prev, ...placeCanvasImportedNodes(prev, [node])]);
         setSelectedNodeIds(new Set([node.id]));
         setSelectedConnectionId(null);
     }, [flushPendingHistory, projectId]);
 
-    const importFiles = useCallback((files: File[], origin: Position, signal?: AbortSignal) => {
+    const importFiles = useCallback((files: File[], origin: Position, signal?: AbortSignal, append = false) => {
         const ownerId = useUserStore.getState().user?.id;
         // Independent paste/drop gestures retain their own batch and undo entry.
         // Queue before preparation so a second gesture cannot be silently discarded.
@@ -2023,7 +2047,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
                     } catch (error) { failed++; if (current()) message.error(`${file.name}：${error instanceof Error ? error.message : uiText("素材导入失败")}`); return null; }
                     finally { completed++; }
                 });
-                const imported = prepared.filter((node): node is CanvasNodeData => Boolean(node));
+                const imported = placeCanvasImportedNodes(nodesRef.current, prepared.filter((node): node is CanvasNodeData => Boolean(node)), append);
                 if (current()) {
                     if (imported.length) {
                         flushEditorDrafts(); flushPendingHistory();
@@ -2118,12 +2142,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
         nudge: (delta, repeat) => { const id = [...selectedNodeIdsRef.current][0]; if (id) actOnNodeByKeyboard(id, delta, repeat); },
         continueFromImage: () => continueFromImageRef.current(),
         resetView: resetViewport,
-        fitSelection: () => {
-            const selected = nodesRef.current.filter(node => selectedNodeIdsRef.current.has(node.id));
-            if (!selected.length) { message.info(uiText("请先选择节点")); return; }
-            const next = fitCanvasNodes(selected, canvasUsableArea(containerRef.current, size));
-            wirelessCanvasRef.current?.previewViewport(next); viewportRef.current = next; setViewport(next);
-        },
+        fitSelection: fitSelectedViewport,
         zoomIn: () => setZoomScale(viewportRef.current.k * 1.25),
         zoomOut: () => setZoomScale(viewportRef.current.k / 1.25),
         zoomActual: () => setZoomScale(1),
@@ -2359,10 +2378,17 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
         });
     }, [syncQuickGenerationNode]);
 
-    const downloadNodeImage = useCallback(async (node: CanvasNodeData) => {
+    const downloadNodeImage = useCallback(async (node: CanvasNodeData, format: "original" | "png" | "jpg" = "original") => {
         try {
             const { downloadCanvasEditorNode } = await loadCanvasFileActions();
-            await downloadCanvasEditorNode(node, { projectId, nodesRef, savedProjectIdRef, message, setImageDownload });
+            await downloadCanvasEditorNode(node, { projectId, nodesRef, savedProjectIdRef, message, setImageDownload, format });
+        } catch (error) { message.error(error instanceof Error ? error.message : uiText("图片下载失败")); }
+    }, [message, projectId]);
+
+    const openNodeDownloadOptions = useCallback(async (node: CanvasNodeData) => {
+        try {
+            const { downloadCanvasEditorNode } = await loadCanvasFileActions();
+            await downloadCanvasEditorNode(node, { projectId, nodesRef, savedProjectIdRef, message, setImageDownload, showOptions: true });
         } catch (error) { message.error(error instanceof Error ? error.message : uiText("图片下载失败")); }
     }, [message, projectId]);
 
@@ -2486,7 +2512,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
                 if (warning) message.warning(warning);
                 const file = files[0];
                 if (!file) return;
-                if (!target?.nodeId) { await importFiles(files, target?.position || getCanvasCenter()); return; }
+                if (!target?.nodeId) { await importFiles(files, target?.position || getCanvasCenter(), undefined, !target?.position); return; }
                 const upload = await prepareCanvasNodeUpload(file, kind);
                 flushPendingHistory();
                 setNodes(prev => prev.map(node => node.id === target.nodeId ? upload.replace(node) : node));
@@ -2706,7 +2732,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
             agentCloseTimerRef.current = null;
             // Keep the conversation alive while switching to Create: drafts, tool context and running requests must survive.
             setAssistantClosing(false);
-        }, CANVAS_AGENT_PANEL_MOTION_MS);
+        }, window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : CANVAS_PANEL_MOTION_MS);
     }, [assistantClosing, assistantMounted]);
     const continueFromImage = useCallback((nodeId?: string) => { prepareContinueFromImage(nodeId); closeAgent(); }, [closeAgent, prepareContinueFromImage]);
     continueFromImageRef.current = continueFromImage;
@@ -2761,9 +2787,10 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
     const shareCurrentCanvas = useCallback(async () => {
         try {
             await navigator.clipboard.writeText(window.location.href);
-            message.success(uiText(canvasLinkCopiedMessage[deploymentFeatures.authenticationEnabled ? "cloud" : "local"]));
+            return true;
         } catch {
             message.warning(uiText("无法复制链接，请从地址栏复制"));
+            return false;
         }
     }, [message]);
 
@@ -2894,7 +2921,8 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
     const cancelTitleEditing = useCallback(() => setTitleEditing(false), []);
     const goHomeFromTopBar = useCallback(() => navigate("/"), [navigate]);
     const goProjectsFromTopBar = useCallback(() => navigate("/canvas"), [navigate]);
-    const shareFromTopBar = useCallback(() => void shareCurrentCanvas(), [shareCurrentCanvas]);
+    const shareFromTopBar = useCallback(() => shareCurrentCanvas(), [shareCurrentCanvas]);
+    const openOnboardingFromTopBar = useCallback(() => onboardingRef.current?.start(), []);
     const compactAgentStatus = useMemo(
         () => (codexCompactAgent ? { connected: localAgentConnected, enabled: localAgentEnabled, activity: localAgentActivity } : undefined),
         [codexCompactAgent, localAgentConnected, localAgentEnabled, localAgentActivity],
@@ -2975,6 +3003,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
                         onOptimizedPrompt={onQuickOptimizedPrompt}
                         embedded={isCanvasDesktopLayout}
                         open={quickGenerateOpen && !assistantOpen}
+                        closing={quickPanelPresence.closing}
                         promptRef={quickGeneratePromptRef}
                         promptRevision={quickGeneratePromptRevision}
                         model={quickGenerateModel}
@@ -3020,14 +3049,39 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
                     </Suspense>
     );
 
+    const renderNodeTools = (toolbarNode: CanvasNodeData, context?: { x: number; y: number }) => <Suspense fallback={null}>
+        <CanvasNodeHoverToolbar node={toolbarNode} viewport={viewport}
+            contextMenu={context ? { ...context, onClose: () => setContextMenu(null) } : undefined}
+            onKeep={keepNodeToolbar} onLeave={hideNodeToolbar}
+            onInfo={node => setInfoNodeId(node.id)} onEditText={openTextEditor}
+            onDecreaseFont={node => handleFontSizeChange(node.id, Math.max(10, (node.metadata?.fontSize || 14) - 2))}
+            onIncreaseFont={node => handleFontSizeChange(node.id, Math.min(32, (node.metadata?.fontSize || 14) + 2))}
+            onFontSize={(node, fontSize) => handleFontSizeChange(node.id, fontSize)}
+            onRegenerate={node => void handleRegenerateNode(node)} onVariation={(node, strength) => void handleVariationNode(node, strength)}
+            onToggleDialog={editNodeFromToolbar} onGenerateImage={generateImageFromTextNode}
+            onUpload={node => handleUploadRequest(node.id)} onDownload={downloadNodeImage} onDownloadOptions={openNodeDownloadOptions}
+            onSaveAsset={node => void saveNodeAsset(node)} onMaskEdit={node => setMaskEditNodeId(node.id)}
+            onManualEdit={(node, initialTool = "select") => { if (node.metadata?.status === "loading") { message.info(t("请等待这张图片生成完成后再编辑")); return; } setDialogNodeId(null); canvasDialogs.setManualEditInitialTool(initialTool); setManualEditNode(node); }}
+            onCrop={node => setCropNodeId(node.id)} onSplit={node => setSplitNodeId(node.id)} onUpscale={node => setUpscaleNodeId(node.id)}
+            onSuperResolve={node => setSuperResolveNodeId(node.id)} onAngle={node => setAngleNodeId(node.id)} onViewImage={node => setPreviewNodeId(node.id)}
+            onReversePrompt={createImageReversePromptNodes} onCompare={openImageCompare} onDesignTemplate={node => setTemplateSourceId(node.id)}
+            onImageSequence={node => imageSequence.setDialog({ sourceId: node.id })} onRestoreGeneration={toolbarNode.metadata?.sourceTaskId ? restoreNodeGenerationInput : undefined}
+            onRetry={node => void handleRetryNode(node)} onToggleFreeResize={node => toggleNodeFreeResize(node.id)} onDelete={node => deleteNodes(new Set([node.id]))}
+            onDuplicate={node => duplicateNodes(new Set([node.id]))} onRename={node => startNodeRename(node.id)}
+            onBringFront={node => reorderNodes(new Set([node.id]), true)} onSendBack={node => reorderNodes(new Set([node.id]), false)} onToggleLock={node => toggleNodeLock(new Set([node.id]))}
+            onCopyImage={node => { void import("@/lib/canvas/canvas-image-clipboard").then(module => module.copyCanvasImageToClipboard(node)).then(() => message.success(uiText("图片已复制，可粘贴到其他应用"))).catch(error => message.error(error.message)); }}
+        />
+    </Suspense>;
+    const contextImage = contextMenu?.type === "node" && contextMenuNodeIds.size === 1 ? nodes.find(node => node.id === contextMenu.nodeId && node.type === CanvasNodeType.Image && node.metadata?.content) : undefined;
+
     return (
         <CanvasMentionImagesProvider images={quickMentionImages} scopeKey={`${editorOwner}:${projectId}:${activeChatId || ""}`}>
         <main className="cw-workspace relative flex h-full min-h-0 overflow-hidden" onFocusCapture={event => beginHistoryEditing(event.target)} onBlurCapture={finishHistoryEditing} data-theme={canvasThemeKey} style={{ background: theme.canvas.background, color: theme.node.text, "--cw-create-width": `${clampCanvasPanelWidth("create", createPanelWidth)}px`, "--cw-chat-width": `${clampCanvasPanelWidth("chat", chatPanelWidth)}px`, "--cw-prompt-height": `${clampCanvasPromptHeight(createPromptHeight)}px` } as CSSProperties}>
-            <aside data-testid="canvas-left-generator-rail" className={`cw-create-panel ${quickGenerateOpen ? "cw-surface" : "is-collapsed"} ${assistantOpen ? "is-hidden" : ""}`}>
+            <aside data-testid="canvas-left-generator-rail" data-panel-closing={quickPanelPresence.closing && isCanvasDesktopLayout || undefined} inert={quickPanelPresence.closing && isCanvasDesktopLayout} className={`cw-create-panel ${quickPanelPresence.present && isCanvasDesktopLayout ? "cw-surface" : "is-collapsed"} ${assistantOpen && !quickPanelPresence.closing ? "is-hidden" : ""}`}>
                 <div className="cw-tabs" role="tablist" aria-label={t("创作模式")}>
-                    <button role="tab" aria-selected={!assistantOpen} type="button" title={t("直接填写提示词和参考图，创建生成任务")} onClick={openQuickGenerateFromToolbar}>{t("创建")}</button>
-                    <button role="tab" aria-selected={assistantOpen} type="button" title={t("与助手讨论需求，再确认画布修改或生成")} onClick={toggleAgentFromTopBar}>{t("对话")}{onlineAgentRunning ? <span aria-label={t("助手正在执行")} className="ml-1 inline-block size-2 rounded-full" style={{ background: theme.node.success }} /> : null}</button>
-                    <div className="cw-tabs-actions">{quickGenerateOpen ? <Suspense fallback={null}><CanvasPanelSizeControl kind="create" /></Suspense> : null}<button type="button" className="cw-icon" aria-label={quickGenerateOpen ? t("收起创建面板") : t("展开创建面板")} aria-expanded={quickGenerateOpen} onClick={quickGenerateOpen ? closeQuickGeneratePanel : openQuickGenerateFromToolbar}><ChevronDown size={18} className={quickGenerateOpen ? "rotate-180" : undefined} /></button></div>
+                    <Tooltip title={t("直接填写提示词和参考图，创建生成任务")}><button role="tab" aria-selected={!assistantOpen} type="button" onClick={openQuickGenerateFromToolbar}>{t("创建")}</button></Tooltip>
+                    <Tooltip title={t("与助手讨论需求，再确认画布修改或生成")}><button role="tab" aria-selected={assistantOpen} type="button" onClick={toggleAgentFromTopBar}>{t("对话")}{onlineAgentRunning ? <span aria-label={t("助手正在执行")} className="ml-1 inline-block size-2 rounded-full" style={{ background: theme.node.success }} /> : null}</button></Tooltip>
+                    <div className="cw-tabs-actions">{quickGenerateOpen && isCanvasDesktopLayout ? <Suspense fallback={null}><CanvasPanelSizeControl kind="create" /></Suspense> : null}<button type="button" className="cw-icon" aria-label={quickGenerateOpen ? t("收起创建面板") : t("展开创建面板")} aria-expanded={quickGenerateOpen} onClick={quickGenerateOpen ? closeQuickGeneratePanel : openQuickGenerateFromToolbar}><ChevronDown size={18} className={quickGenerateOpen ? "rotate-180" : undefined} /></button></div>
                 </div>
                 {isCanvasDesktopLayout ? quickGeneratePanel : null}
                 {isCanvasDesktopLayout && quickGenerateOpen && !assistantOpen ? <Suspense fallback={null}><CanvasPanelResizeHandle kind="create" /></Suspense> : null}
@@ -3057,6 +3111,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
                     onShare={shareFromTopBar}
                     onOpenTools={openWorkspaceTools}
                     onOpenCommands={openCommands}
+                    onOpenOnboarding={openOnboardingFromTopBar}
                     agentOpen={assistantOpen}
                     compactAgentStatus={compactAgentStatus}
                     onToggleAgent={toggleAgentFromTopBar}
@@ -3101,7 +3156,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
                                     onDrawFailure={enableCanvasConnectionFallback}
                                 />
                             ) : null}
-                            {canvasOverviewEnabled ? (
+                            {canvasOverviewEnabled ? <Suspense fallback={null}>
                                 <CanvasOverviewLayer
                                     ref={canvasOverviewLayerRef}
                                     nodesById={nodeById}
@@ -3109,7 +3164,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
                                     viewport={viewport}
                                     onDrawFailure={enableCanvasOverviewFallback}
                                 />
-                            ) : null}
+                            </Suspense> : null}
                         </>
                     }
                 >
@@ -3118,7 +3173,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
                         overview={canvasOverviewEnabled} resolveNode={resolveConnectionNode} activeRef={activeConnectionPathRef}
                         onSelect={connection => { setSelectedConnectionId(connection.id); setSelectedNodeIds(new Set()); setContextMenu(null); }}
                         onContextMenu={(event, connection) => { setSelectedConnectionId(connection.id); setSelectedNodeIds(new Set()); setContextMenu({ type: "connection", x: event.clientX, y: event.clientY, connectionId: connection.id }); }} />
-                    <CanvasConnectionHover containerRef={containerRef} connections={visibleConnections} nodeById={connectionNodes.byId} scale={viewport.k} screenToCanvas={screenToCanvas} disabled={isNodeDragging || isNodeResizing || isSelecting || Boolean(connectingParams) || interactionMode === "hand"} onChange={setHoveredConnectionId} onDelete={deleteConnection} />
+                    {visibleConnections.length ? <Suspense fallback={null}><CanvasConnectionHover containerRef={containerRef} connections={visibleConnections} nodeById={connectionNodes.byId} scale={viewport.k} screenToCanvas={screenToCanvas} disabled={isNodeDragging || isNodeResizing || isSelecting || Boolean(connectingParams) || interactionMode === "hand"} onChange={setHoveredConnectionId} onDelete={deleteConnection} /></Suspense> : null}
                     {selectedConnectionId || connectingParams || connectionTargetNodeId ? <Suspense fallback={null}><CanvasConnectionControls edge={selectedConnectionId ? connectionById.get(selectedConnectionId) : undefined} nodes={renderedNodes} nodeById={connectionNodes.byId}
                         scale={viewport.k} theme={theme} connecting={Boolean(connectingParams)} targetId={connectionTargetNodeId} targetHint={connectionTargetHint} canConnect={canConnectNode} onReconnect={handleReconnectStart} /></Suspense> : null}
                     <CanvasNodeLayer nodes={renderedNodes} highlight={graphHighlight}
@@ -3167,42 +3222,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
                 {singleSelectedNode?.type === CanvasNodeType.Image && !isNodeDragging && !nodeImageSettingsOpen ? <Suspense fallback={null}><CanvasImageQuickActions key={singleSelectedNode.id} node={singleSelectedNode} onRun={quickImageNode} /></Suspense> : null}
 
                 {!isNodeDragging && !nodeImageSettingsOpen && !(quickGenerateOpen && !isCanvasDesktopLayout && !assistantOpen) ? (
-                    <CanvasHoverToolbarHost selectedNode={singleSelectedNode} multipleSelected={hasMultipleSelectedNodes}>{toolbarNode => <Suspense fallback={null}>
-                        <CanvasNodeHoverToolbar
-                            node={toolbarNode}
-                            viewport={viewport}
-                            onKeep={keepNodeToolbar}
-                            onLeave={hideNodeToolbar}
-                            onInfo={(node) => setInfoNodeId(node.id)}
-                            onEditText={openTextEditor}
-                            onDecreaseFont={(node) => handleFontSizeChange(node.id, Math.max(10, (node.metadata?.fontSize || 14) - 2))}
-                            onIncreaseFont={(node) => handleFontSizeChange(node.id, Math.min(32, (node.metadata?.fontSize || 14) + 2))}
-                            onFontSize={(node, fontSize) => handleFontSizeChange(node.id, fontSize)}
-                            onRegenerate={node => void handleRegenerateNode(node)}
-                            onVariation={(node, strength) => void handleVariationNode(node, strength)}
-                            onToggleDialog={editNodeFromToolbar}
-                            onGenerateImage={generateImageFromTextNode}
-                            onUpload={(node) => handleUploadRequest(node.id)}
-                            onDownload={downloadNodeImage}
-                            onSaveAsset={(node) => void saveNodeAsset(node)}
-                            onMaskEdit={(node) => setMaskEditNodeId(node.id)}
-                            onManualEdit={(node, initialTool = "select") => { if (node.metadata?.status === "loading") { message.info(t("请等待这张图片生成完成后再编辑")); return; } setDialogNodeId(null); canvasDialogs.setManualEditInitialTool(initialTool); setManualEditNode(node); }}
-                            onCrop={(node) => setCropNodeId(node.id)}
-                            onSplit={(node) => setSplitNodeId(node.id)}
-                            onUpscale={(node) => setUpscaleNodeId(node.id)}
-                            onSuperResolve={(node) => setSuperResolveNodeId(node.id)}
-                            onAngle={(node) => setAngleNodeId(node.id)}
-                            onViewImage={(node) => setPreviewNodeId(node.id)}
-                            onReversePrompt={createImageReversePromptNodes}
-                            onCompare={openImageCompare}
-                            onDesignTemplate={(node) => setTemplateSourceId(node.id)}
-                            onImageSequence={(node) => imageSequence.setDialog({ sourceId: node.id })}
-                            onRestoreGeneration={toolbarNode.metadata?.sourceTaskId ? restoreNodeGenerationInput : undefined}
-                            onRetry={(node) => void handleRetryNode(node)}
-                            onToggleFreeResize={(node) => toggleNodeFreeResize(node.id)}
-                            onDelete={(node) => deleteNodes(new Set([node.id]))}
-                        />
-                    </Suspense>}</CanvasHoverToolbarHost>
+                    <CanvasHoverToolbarHost selectedNode={singleSelectedNode} multipleSelected={hasMultipleSelectedNodes}>{toolbarNode => renderNodeTools(toolbarNode)}</CanvasHoverToolbarHost>
                 ) : null}
 
                 <CanvasToolbar
@@ -3233,7 +3253,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
                     onOpenMyAssets={openAssetsFromToolbar}
                     onGroupSelection={createSelectedGroup}
                     onOpenTools={openWorkspaceTools}
-                    viewControls={<Suspense fallback={null}><CanvasZoomControls scale={viewport.k} onScaleChange={setZoomScale} onScalePreview={previewZoomScale} onReset={resetViewport} isMiniMapOpen={isMiniMapOpen} onToggleMiniMap={toggleMiniMap} /></Suspense>}
+                    viewControls={<Suspense fallback={null}><CanvasZoomControls scale={viewport.k} onScaleChange={setZoomScale} onScalePreview={previewZoomScale} onReset={resetViewport} onFitSelection={fitSelectedViewport} hasSelection={selectedNodeIds.size > 0} isMiniMapOpen={isMiniMapOpen} onToggleMiniMap={toggleMiniMap} /></Suspense>}
                 >
                     {localToolsEnabled && <Suspense fallback={null}><CanvasDesignActions selectedCount={selectedNodeIds.size} selectedImages={Array.from(selectedNodeIds).filter(id => nodeById.get(id)?.type === CanvasNodeType.Image && Boolean(nodeById.get(id)?.metadata?.content)).length} onCompare={openImageCompare} onTemplate={() => setTemplateSourceId(null)} onArrange={arrangeNodes} /></Suspense>}
                 </CanvasToolbar>
@@ -3242,7 +3262,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
 
                 {contextMenu ? (
                     <Suspense fallback={null}>
-                    <CanvasNodeContextMenu
+                    {contextImage ? renderNodeTools(contextImage, contextMenu) : <CanvasNodeContextMenu
                         menu={contextMenu}
                         targetCount={contextMenuNodeIds.size}
                         imageCount={contextMenuImageCount}
@@ -3292,7 +3312,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
                             }
                             setContextMenu(null);
                         }}
-                    />
+                    />}
                     </Suspense>
                 ) : null}
 
@@ -3322,7 +3342,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
                 ) : null}
             </section>
             {assistantMounted ? (
-                <div className={`cw-agent-panel cw-surface ${agentLayout === "wide" ? "is-wide" : ""}`} style={{ display: assistantCollapsed && !assistantClosing ? "none" : undefined, pointerEvents: assistantClosing ? "none" : undefined }}>
+                <div className={`cw-agent-panel cw-surface ${agentLayout === "wide" ? "is-wide" : ""}`} inert={assistantCollapsed} aria-hidden={assistantCollapsed || undefined} data-panel-closing={assistantClosing || undefined} style={{ display: assistantCollapsed && !assistantClosing ? "none" : undefined, pointerEvents: assistantClosing ? "none" : undefined }}>
                 {isCanvasDesktopLayout && agentLayout !== "wide" ? <Suspense fallback={null}><CanvasPanelResizeHandle kind="chat" /></Suspense> : null}
                 <Suspense fallback={<aside aria-live="polite" className="flex w-full shrink-0 items-center justify-center text-sm">{t("正在加载对话…")}</aside>}>
                     <CanvasAssistantPanel

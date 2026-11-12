@@ -1,5 +1,6 @@
 import { useUiText, uiText } from "@/lib/i18n";
 import { PracticeExampleRecord } from "@/components/design-examples";
+import { WorkbenchImage } from "@/components/workbench-image";
 import { BookmarkPlus, Check, Copy, Download, Ellipsis, LoaderCircle, PencilLine, Plus, RotateCcw, Search, Share2, Trash2, Upload } from "lucide-react";
 import { lazy, Suspense, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { App, Button, Card, DatePicker, Drawer, Dropdown, Empty, Form, Image, Input, Modal, Segmented, Select, Skeleton, Space, Tag, Typography } from "antd";
@@ -562,7 +563,7 @@ export default function AssetsPage() {
             }
         }}>
             <main {...imageDrop.dropProps} aria-busy={imageDrop.reading} className={`min-h-0 flex-1 overflow-y-auto px-4 py-6 md:px-8 md:py-8${imageDrop.dragging ? " outline outline-2 outline-offset-[-4px] outline-primary" : ""}`}>
-                <div className="mx-auto max-w-7xl pb-6">
+                <div className="wb-content pb-6">
                     {imageDrop.dragging || imageDrop.reading ? <p role="status" className="mb-3 rounded-lg bg-primary/10 p-3 text-sm">{t(imageDrop.dragging ? "松开以导入我的素材，不会自动生成或分享。" : "正在读取拖入图片，请稍候。")}</p> : null}
                     <header className="wb-header">
                         <div>
@@ -572,8 +573,10 @@ export default function AssetsPage() {
                         </div>
                         <div className="wb-toolbar">
                             {libraryView === "active" ? <>
-                            <Button size="large" icon={<Plus className="size-4" />} onClick={openCreate}>{t("新增素材")}</Button>
-                            <Button size="large" type="primary" icon={<Upload className="size-4" />} disabled={Boolean(assetAction)} onClick={() => batchImageInputRef.current?.click()}>{t("上传图片")}</Button>
+                            <Dropdown trigger={["click"]} menu={{ items: [
+                                { key: "upload", label: t("上传图片"), icon: <Upload className="size-4" />, onClick: () => batchImageInputRef.current?.click() },
+                                { key: "create", label: t("新增素材"), icon: <Plus className="size-4" />, onClick: openCreate },
+                            ] }}><Button size="large" type="primary" icon={<Plus className="size-4" />} disabled={Boolean(assetAction)}>{t("添加")}</Button></Dropdown>
                             </> : null}
                         </div>
                     </header>
@@ -637,7 +640,7 @@ export default function AssetsPage() {
                     {serverError ? <div role="alert" className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200"><span>{serverError}{t("；已保留当前本地素材。")}</span><Button onClick={() => void refreshServerAssets()}>{t("重试加载")}</Button></div> : null}
                 </div>
 
-                <div className="mx-auto flex max-w-7xl flex-col gap-5">
+                <div className="wb-content flex flex-col gap-5">
                     {libraryView === "active" ? <div className="max-w-2xl"><PracticeExampleRecord /></div> : null}
                     {serverLoading && !serverAssets.length && !visibleAssets.length ? <div role="status" aria-label={t("正在加载素材")} className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{Array.from({ length: 8 }, (_, index) => <div key={index} className="wb-surface p-4"><Skeleton active paragraph={{ rows: 4 }} /></div>)}</div> : null}
                     <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -882,7 +885,7 @@ function AssetCover({ asset }: { asset: Asset }) {
     const source = useResolvedAssetMedia(asset);
     if (!source) return <AssetPlaceholder asset={asset} />;
     if (asset.kind === "video") return <video src={source} muted playsInline preload="metadata" className="aspect-[4/3] w-full object-cover" />;
-    return <img src={source} alt={asset.title} loading="lazy" decoding="async" className="aspect-[4/3] w-full object-cover" />;
+    return <WorkbenchImage src={source} alt={asset.title} loading="lazy" decoding="async" className="aspect-[4/3] w-full object-contain" />;
 }
 
 function AssetDetailPreview({ asset }: { asset: Asset }) {

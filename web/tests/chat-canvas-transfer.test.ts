@@ -108,6 +108,8 @@ function pageCanvasHarness(options: {
         activeSession: sessionsRef.current[0]!,
         sendingRef: { current: false },
         placingImageRef: { current: false },
+        preparingSendsRef: { current: new Set<unknown>() },
+        preparationQueueRef: { current: Promise.resolve() },
         loadedStorageKeyRef: { current: "user-a" },
         storageKey: "user-a",
         isCurrentScope: () => bindings.loadedStorageKeyRef.current === bindings.storageKey,
@@ -278,6 +280,39 @@ describe("actual chat-to-canvas transfer", () => {
         expect(page.sessionDatabase.size).toBe(0);
         expect(page.navigations).toEqual([]);
         expect(page.sessionsRef.current).toEqual([{ id: "account-b-session", title: "B private history", messages: [] }]);
+    });
+
+    test("canvas navigation waits for a background durable user turn and saves its latest history", async () => {
+        const gate = Promise.withResolvers<void>(), page = pageCanvasHarness();
+        page.sessionsRef.current.push({ id: "background-session", title: "B", messages: [] });
+        page.bindings.preparingSendsRef.current.add({});
+        page.bindings.preparationQueueRef.current = gate.promise;
+        const transfer = page.place();
+        for (let turn = 0; turn < 50; turn++) await Promise.resolve();
+        expect(page.events).toContain("canvas-write");
+        expect(page.events).not.toContain("session-write");
+        expect(page.navigations).toEqual([]);
+        page.sessionsRef.current = page.sessionsRef.current.map(session => session.id === "background-session" ? { ...session, messages: [{ role: "user", content: "B saved turn" }] } : session);
+        page.bindings.preparingSendsRef.current.clear(); gate.resolve();
+        await transfer;
+        expect(page.sessionDatabase.get("user-a")!.find(session => session.id === "background-session")!.messages).toEqual([{ role: "user", content: "B saved turn" }]);
+        expect(page.navigations).toEqual(["/canvas/canvas-1"]);
+        expect(page.uploaded).toHaveLength(1);
+    });
+
+    test("an account change while waiting for a background turn prevents saving and canvas navigation", async () => {
+        const gate = Promise.withResolvers<void>(), page = pageCanvasHarness();
+        page.bindings.preparingSendsRef.current.add({});
+        page.bindings.preparationQueueRef.current = gate.promise;
+        const transfer = page.place();
+        for (let turn = 0; turn < 50; turn++) await Promise.resolve();
+        expect(page.events).toContain("canvas-write");
+        page.bindings.loadedStorageKeyRef.current = "user-b";
+        page.sessionsRef.current = [{ id: "private-b", title: "B private", messages: [] }];
+        page.bindings.preparingSendsRef.current.clear(); gate.resolve();
+        await transfer;
+        expect(page.sessionDatabase.size).toBe(0);
+        expect(page.navigations).toEqual([]);
     });
 
     test("an account switch while saving the session prevents navigation into the previous account's canvas", async () => {

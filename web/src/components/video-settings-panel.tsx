@@ -54,9 +54,9 @@ export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = 
                         {spec.resolutionHint ? <p className="text-xs leading-4" style={{ color: theme.node.muted }}>{uiText(spec.resolutionHint)}</p> : null}
                     </SettingGroup>
                     <SettingGroup title={uiText("画面比例")} color={theme.node.muted}>
-                        {lockRatio ? <div className="rounded-xl border px-3 py-2.5 text-sm" style={{ borderColor: theme.node.stroke }}>{uiText("此模式固定使用自适应比例（adaptive）")}</div> : ratioFollowsImage ? <div className="rounded-xl border px-3 py-2.5 text-sm" style={{ borderColor: theme.node.stroke }}>{uiText("跟随输入图片，无需设置比例")}</div> : <div className="grid grid-cols-3 gap-2.5">
+                        {lockRatio ? <div className="rounded-xl border px-3 py-2.5 text-sm" style={{ borderColor: theme.node.stroke }}>{uiText("此模式固定使用自适应比例（adaptive）")}</div> : ratioFollowsImage ? <div className="rounded-xl border px-3 py-2.5 text-sm" style={{ borderColor: theme.node.stroke }}>{uiText("跟随输入图片，无需设置比例")}</div> : <div className="grid gap-1.5" data-testid="video-ratio-options" style={{ gridTemplateColumns: `repeat(${Math.min(spec.sizes.length, 5)}, minmax(0, 1fr))` }}>
                             {spec.sizes.map((value) => (
-                                <button key={value} type="button" aria-pressed={normalized.size === value} className="flex h-[72px] cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border bg-transparent px-1 text-sm transition hover:opacity-80" style={{ borderColor: normalized.size === value ? theme.node.text : theme.node.stroke, color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()} onClick={() => onConfigChange("size", value)}>
+                                <button key={value} type="button" aria-pressed={normalized.size === value} className="flex h-[72px] min-w-0 cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border px-1 text-sm transition hover:opacity-80 active:scale-[0.97]" style={{ background: normalized.size === value ? theme.node.fill : "transparent", borderColor: normalized.size === value ? theme.node.text : theme.node.stroke, color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()} onClick={() => onConfigChange("size", value)}>
                                     <SizePreview ratio={value} color={theme.node.text} />
                                     <span>{value === "adaptive" ? uiText("自适应") : value}</span>
                                     {value !== "adaptive" ? <span className="text-xs leading-none opacity-55">{uiText(ratioLabels[value])}</span> : null}
@@ -68,7 +68,7 @@ export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = 
                     <SettingGroup title={uiText(mode === "extend" && spec.extendAddsDuration ? "新增时长" : "时长")} color={theme.node.muted}>
                         <Select getPopupContainer={settingsPopupContainer} aria-label={uiText("视频时长")} disabled={editing} className="w-full" value={normalized.videoSeconds} onChange={value => onConfigChange("videoSeconds", value)} options={videoDurationOptions(spec, mode)} />
                         {editing ? <p role="note" className="text-xs leading-5" style={{ color: theme.node.text }}>{uiText("编辑结果时长跟随源视频。")}</p> : <div className="text-xs leading-4" style={{ color: theme.node.muted }}>{uiText("支持")}{durationBounds?.[0]}–{durationBounds?.[1]} {uiText("秒")}{spec.supportsAutoDuration ? uiText("，或由模型智能决定时长") : ""}。</div>}
-                        {spec.nativeAudio ? <p role="note" className="text-xs leading-5" style={{ color: theme.node.muted }}>{uiText("渠道按至少 10 秒预扣；有视频输入按 15 秒估算。预扣不等于最终费用，编辑按源片、续写按新增部分实际结算。本应用积分按管理员每任务定价计算。")}</p> : normalized.videoSeconds === "-1" ? <p role="note" className="text-xs leading-5" style={{ color: theme.node.text }}>{!editing ? uiText("实际输出时长由模型决定。") : ""}{uiText("渠道账户按最多 30 秒输出预扣，参考视频输入时长也计费，完成后由渠道按实际用量结算。本应用积分仍按管理员配置的每任务价格计算。")}</p> : null}
+                        {normalized.videoSeconds === "-1" && !editing ? <p role="note" className="text-[13px] leading-5" style={{ color: theme.node.text }}>{uiText("实际输出时长由模型决定。")}</p> : null}
                     </SettingGroup>
                     {spec.supportsAudio || spec.supportsWatermark ? <SettingGroup title={uiText("输出")} color={theme.node.muted}>
                         <div className="grid gap-2 rounded-xl border p-2.5" style={{ borderColor: theme.node.stroke }}>
@@ -123,12 +123,12 @@ export function normalizeVideoResolutionValue(value: string) {
 
 function OptionPill({ selected, theme, onClick, children }: { selected: boolean; theme: CanvasTheme; onClick: () => void; children: ReactNode }) {
     useUiLocale();
-    return <button type="button" aria-pressed={selected} className="h-9 cursor-pointer rounded-full border px-2 text-sm transition hover:opacity-80" style={{ background: "transparent", borderColor: selected ? theme.node.text : theme.node.stroke, color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()} onClick={onClick}>{children}</button>;
+    return <button type="button" aria-pressed={selected} className="h-9 cursor-pointer rounded-lg border px-2 text-sm transition hover:opacity-80 active:scale-[0.97]" style={{ background: selected ? theme.node.fill : "transparent", borderColor: selected ? theme.node.text : theme.node.stroke, color: theme.node.text }} onMouseDown={(event) => event.stopPropagation()} onClick={onClick}>{children}</button>;
 }
 
 function SettingGroup({ title, color, children }: { title: string; color: string; children: ReactNode }) {
     useUiLocale();
-    return <div className="space-y-2.5"><div className="text-xs font-medium" style={{ color }}>{title}</div>{children}</div>;
+    return <div className="space-y-2.5"><div className="text-sm font-medium" style={{ color }}>{title}</div>{children}</div>;
 }
 
 function SizePreview({ ratio, color }: { ratio: string; color: string }) {

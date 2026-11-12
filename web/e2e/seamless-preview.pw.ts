@@ -20,6 +20,7 @@ test("无缝历史支持平铺检查，反复打开不重复保存本地原图",
     await expect(repeat).toHaveCSS("background-size", "50% 50%");
     await expect(repeat).toHaveCSS("background-repeat", "repeat");
     await expect(repeat).toHaveCSS("aspect-ratio", "256 / 256");
+    await page.getByRole("tab", { name: "历史记录", exact: true }).click();
     await page.getByRole("button", { name: "查看", exact: true }).click();
     await expect(repeat).toBeVisible();
     expect(await page.evaluate(() => (window as typeof window & { historyImageWrites?: number }).historyImageWrites)).toBe(0);

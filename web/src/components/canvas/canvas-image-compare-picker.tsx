@@ -1,6 +1,6 @@
 import { uiText, useUiText } from "@/lib/i18n";
 import { useState, type KeyboardEvent } from "react";
-import { Input } from "antd";
+import { Input, Tooltip } from "antd";
 import { Check, Search, X } from "lucide-react";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -67,7 +67,7 @@ export function CanvasImageComparePicker({ images, sourceIds = [], preferredId, 
                     {group.images.map(node => {
                         const selected = node.id === selectedId, preferred = node.id === preferredId;
                         const label = canvasCompareImageLabel(node);
-                        return <button key={node.id} type="button" data-compare-candidate={node.id} aria-label={t("选择 {value1}{value2}", { value1: label, value2: node.metadata?.imageVersion ? ` · V${node.metadata.imageVersion}` : "" })} aria-pressed={selected} title={label} onClick={() => onChoose(node)}
+                        return <Tooltip title={label} key={node.id}><button type="button" data-compare-candidate={node.id} aria-label={t("选择 {value1}{value2}", { value1: label, value2: node.metadata?.imageVersion ? ` · V${node.metadata.imageVersion}` : "" })} aria-pressed={selected} onClick={() => onChoose(node)}
                             className="min-w-0 rounded-lg border p-2 text-left focus-visible:outline-2 focus-visible:outline-offset-2" style={{ borderColor: selected ? theme.canvas.selectionStroke : theme.node.stroke, background: selected ? theme.canvas.selectionFill : theme.node.panel, outlineColor: theme.canvas.selectionStroke }}>
                             <span className="block h-32"><CanvasCompareThumbnail node={node} /></span>
                             <span className="mt-2 block line-clamp-2 min-h-10 break-all text-sm leading-5">{label}</span>
@@ -75,7 +75,7 @@ export function CanvasImageComparePicker({ images, sourceIds = [], preferredId, 
                                 {selected ? <span className="inline-flex items-center gap-1"><Check size={13} />{t("已选中")}</span> : preferred ? t("默认上版") : node.metadata?.imageVersion ? `V${node.metadata.imageVersion}` : t("图片")}
                                 {node.metadata?.naturalWidth && node.metadata?.naturalHeight ? <span>{node.metadata.naturalWidth}×{node.metadata.naturalHeight}</span> : null}
                             </span>
-                        </button>;
+                        </button></Tooltip>;
                     })}
                 </div>
             </div> : null)}

@@ -1,3 +1,4 @@
+import { Tooltip } from "antd";
 import { useUiText } from "@/lib/i18n";
 import { ArrowUpRight, ChevronRight, Grid2X2, Search, Shapes, Sparkles, X } from "lucide-react";
 import { Dialog } from "radix-ui";
@@ -90,11 +91,11 @@ export function CanvasWorkspaceTools({ open, onOpenChange }: CanvasWorkspaceTool
                         <div className="cwt-grid">{visible.filter(item => item.group === section).map(item => {
                             const Icon = navigationTools.find(tool => tool.path === item.path)?.icon ?? (section === "创意工具" ? Shapes : item.id === "home" ? Grid2X2 : Sparkles);
                             const isCanvas = item.moduleKey === "canvas" && currentCanvas;
-                            return <button key={item.id} id={`workspace-tool-${item.id}`} role="option" aria-selected={ordered[active]?.id === item.id} type="button" className="cwt-tool" data-usage-control={`workspace-tool.${item.id}`} onMouseEnter={() => setActive(ordered.findIndex(entry => entry.id === item.id))} onClick={() => enter(item)} aria-label={`${t(item.label)}${isCanvas ? ` (${t("当前画布")})` : ""}`} title={item.capabilities.length ? t("{value1}内：{value2}", { value1: t(item.label), value2: item.capabilities.map(capability => t(capability.label)).join(" / ") }) : t(item.label)}>
+                            return <Tooltip title={item.capabilities.length ? t("{value1}内：{value2}", { value1: t(item.label), value2: item.capabilities.map(capability => t(capability.label)).join(" / ") }) : t(item.label)} key={item.id}><button id={`workspace-tool-${item.id}`} role="option" aria-selected={ordered[active]?.id === item.id} type="button" className="cwt-tool" data-usage-control={`workspace-tool.${item.id}`} onMouseEnter={() => setActive(ordered.findIndex(entry => entry.id === item.id))} onClick={() => enter(item)} aria-label={`${t(item.label)}${isCanvas ? ` (${t("当前画布")})` : ""}`}>
                                 <span className="cwt-tool-icon"><Icon size={21} strokeWidth={1.4} /></span>
                                 <span className="cwt-tool-copy"><strong>{t(item.label)}{isCanvas && <small>{t("当前画布")}</small>}</strong>{item.capabilities.length ? <span>{item.capabilities.map(capability => t(capability.label)).join(" · ")}</span> : null}</span>
                                 {isCanvas ? <ChevronRight className="cwt-arrow" size={16} /> : <ArrowUpRight className="cwt-arrow" size={16} />}
-                            </button>;
+                            </button></Tooltip>;
                         })}</div>
                     </section>)}
                     {!visible.length && <div className="cwt-empty"><Search size={25} strokeWidth={1.3} /><strong>{t("没有找到对应工具")}</strong><p>{t("试试其他名称，或切换到全部分类。")}</p><button type="button" onClick={() => { setQuery(""); setGroup("全部"); }}>{t("查看全部工具")}</button></div>}

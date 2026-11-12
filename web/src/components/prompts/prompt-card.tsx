@@ -2,15 +2,16 @@ import { getUiLocale, useUiText } from "@/lib/i18n";
 import { Copy } from "lucide-react";
 import type { ReactNode } from "react";
 import { Button, Card, Tag } from "antd";
+import { WorkbenchImage } from "@/components/workbench-image";
 
 import { formatPromptDate, type Prompt } from "@/services/api/prompts";
 
 function PromptCover({ item }: { item: Prompt }) {
     const t = useUiText();
     if (!item.coverUrl) {
-        return <div className="flex aspect-[4/3] w-full items-center justify-center bg-orange-50 text-xs font-medium text-orange-700 dark:bg-stone-900 dark:text-orange-300">{t("暂无封面")}</div>;
+        return <div className="flex aspect-[4/3] w-full items-center justify-center bg-muted text-[13px] font-medium text-muted-foreground">{t("暂无封面")}</div>;
     }
-    return <img src={item.coverUrl} alt={item.title} loading="lazy" decoding="async" className="aspect-[4/3] w-full object-cover" />;
+    return <WorkbenchImage src={item.coverUrl} alt={item.title} loading="lazy" decoding="async" className="aspect-[4/3] w-full object-contain" />;
 }
 
 export function PromptCard({
@@ -34,7 +35,7 @@ export function PromptCard({
     return (
         <Card
             hoverable
-            className="overflow-hidden"
+            className="wb-list-card overflow-hidden"
             styles={{ body: { padding: 0 } }}
             cover={
                 <button type="button" className="block w-full text-left" onClick={onOpen}>

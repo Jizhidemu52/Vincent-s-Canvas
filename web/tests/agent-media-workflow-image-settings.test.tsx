@@ -38,8 +38,8 @@ test("workflow card exposes independent quality and resolution using the shared 
     const html = renderToStaticMarkup(<CanvasAgentMediaWorkflowCard workflow={workflow()} imageModels={["mark-flare-id"]} videoModels={[]} theme={canvasThemes.light} onImageSettingsChange={() => undefined} />);
     expect(html).toContain('aria-label="图片质量"');
     expect(html).toContain('aria-label="清晰度 / 分辨率"');
-    expect(html).toContain('value="max" selected=""');
-    expect(html).toContain('value="4k" selected=""');
+    expect(html).toContain('title="最高"');
+    expect(html).toContain('title="4K"');
 });
 
 test("workflow card resolves an opaque video selection to its public model name", () => {

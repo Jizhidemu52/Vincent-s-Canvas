@@ -3,7 +3,7 @@ import { listAdminHistory } from "@/services/api/task-history";
 
 export const markPlatformAdminTabLabel = "APIMart 平台";
 
-const adminTabs = ["accounts", "groups", "performance", "modules", "pricing", "api", "usage-analysis", "mark-images", "history", "projects", "batch", "audit", "integrations", "release-notes"];
+const adminTabs = ["accounts", "groups", "performance", "modules", "api", "usage-analysis", "mark-images", "history", "projects", "batch", "audit", "integrations", "release-notes"];
 
 export function resolveAdminTab(value: string | null, isSuperAdmin: boolean, performanceEnabled: boolean) {
     const tab = ["providers", "workflows", "models"].includes(value || "") ? "api" : value || "accounts";
@@ -13,7 +13,7 @@ export function resolveAdminTab(value: string | null, isSuperAdmin: boolean, per
 
 export async function loadAdminOverview() {
     const [accounts, departments, audit, history] = await Promise.allSettled([listAccounts(), listDepartments(), listAuditLogs(), listAdminHistory({ limit: 1 })]);
-    const errors = [accounts, departments, audit, history].flatMap((result, index) => result.status === "rejected" ? [`${["账号", "部门", "审计", "成本统计"][index]}：${result.reason instanceof Error ? result.reason.message : "加载失败"}`] : []);
+    const errors = [accounts, departments, audit, history].flatMap((result, index) => result.status === "rejected" ? [`${["账号", "部门", "审计", "生成统计"][index]}：${result.reason instanceof Error ? result.reason.message : "加载失败"}`] : []);
     return {
         accounts: accounts.status === "fulfilled" ? accounts.value.users : undefined,
         totalUsedCredits: accounts.status === "fulfilled" ? accounts.value.totalUsedCredits : undefined,

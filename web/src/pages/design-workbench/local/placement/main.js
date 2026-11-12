@@ -133,16 +133,16 @@ export async function mountPlacement(root, services) {
           <div class="section-title"><span data-ui-text="图层 ">图层 </span><span class="hint" data-layer-count></span></div>
           <ul class="placement-layers" aria-label="图案图层列表" data-ui-aria-label="图案图层列表"></ul>
           <div class="placement-layer-actions">
-            <button class="btn" data-action="duplicate" title="复制选中图层" data-ui-title="复制选中图层"><span data-ui-text="复制">复制</span></button>
-            <button class="btn" data-action="up" title="图层向上移一层" data-ui-title="图层向上移一层"><span data-ui-text="上移">上移</span></button>
-            <button class="btn" data-action="down" title="图层向下移一层" data-ui-title="图层向下移一层"><span data-ui-text="下移">下移</span></button>
-            <button class="btn" data-action="delete" title="删除选中图层" data-ui-title="删除选中图层"><span data-ui-text="删除">删除</span></button>
+            <button class="btn" data-action="duplicate" data-workbench-tooltip="复制选中图层"><span data-ui-text="复制">复制</span></button>
+            <button class="btn" data-action="up" data-workbench-tooltip="图层向上移一层"><span data-ui-text="上移">上移</span></button>
+            <button class="btn" data-action="down" data-workbench-tooltip="图层向下移一层"><span data-ui-text="下移">下移</span></button>
+            <button class="btn" data-action="delete" data-workbench-tooltip="删除选中图层"><span data-ui-text="删除">删除</span></button>
           </div>
           <div class="placement-base-row"><img data-base-thumb alt="" /><span class="placement-base-name"></span><span class="placement-locked"><span data-ui-text="已锁定">已锁定</span></span></div>
         </div>
       </aside>
       <div class="panel placement-center">
-        <div class="stage-toolbar"><span class="placement-stage-label"><span data-ui-text="服装定位画布 ">服装定位画布 </span><span class="badge"><span data-ui-text="可拖动图案">可拖动图案</span></span></span><div class="toolbar"><button class="btn ghost" data-action="undo" title="Ctrl / ⌘ + Z"><span data-ui-text="撤销">撤销</span></button><button class="btn ghost" data-action="redo" title="Ctrl / ⌘ + Shift + Z"><span data-ui-text="重做">重做</span></button></div></div>
+        <div class="stage-toolbar"><span class="placement-stage-label"><span data-ui-text="服装定位画布 ">服装定位画布 </span><span class="badge"><span data-ui-text="可拖动图案">可拖动图案</span></span></span><div class="toolbar"><button class="btn ghost" data-action="undo" data-workbench-tooltip="Ctrl / ⌘ + Z"><span data-ui-text="撤销">撤销</span></button><button class="btn ghost" data-action="redo" data-workbench-tooltip="Ctrl / ⌘ + Shift + Z"><span data-ui-text="重做">重做</span></button></div></div>
         <div class="placement-canvas-wrap"><canvas aria-label="服装图案定位画布，点击图案后拖动或使用方向键微调" data-ui-aria-label="服装图案定位画布，点击图案后拖动或使用方向键微调" tabindex="0"></canvas></div>
         <div class="placement-stage-footer"><span data-dimensions></span><span><span data-ui-text="方向键微调 1 像素 · 按住换挡键加速 10 像素">方向键微调 1 像素 · 按住换挡键加速 10 像素</span></span></div>
         <div class="placement-stage-footer"><span class="placement-status"><span data-ui-text="二维定位合成 · 不包含人工智能褶皱融合">二维定位合成 · 不包含人工智能褶皱融合</span></span><span data-selection-status></span></div>
@@ -153,7 +153,7 @@ export async function mountPlacement(root, services) {
           <div><div data-controls></div><div class="placement-note"><span data-ui-text="坐标以服装底图左上角为原点，表示图案中心位置。底图始终锁定，图案等比缩放。正片叠底可保留部分底色明暗，但不产生真实褶皱变形。">坐标以服装底图左上角为原点，表示图案中心位置。底图始终锁定，图案等比缩放。正片叠底可保留部分底色明暗，但不产生真实褶皱变形。</span></div></div>
           <div class="placement-divider"></div>
           <div class="placement-delivery"><div class="section-title"><span data-ui-text="保存与交付">保存与交付</span></div>
-            ${services.openAiEffect ? "<button class=\"btn primary placement-export\" data-action=\"generate-ai\"><span data-ui-text=\"生成 AI 效果图\">生成 AI 效果图</span></button><p class=\"hint\"><span data-ui-text=\"带入定位合成图、服装原图与图案原稿，选择模型后点击开始编辑。此处不自动生成、不扣费；原图片编辑草稿保留。\">带入定位合成图、服装原图与图案原稿，选择模型后点击开始编辑。此处不自动生成、不扣费；原图片编辑草稿保留。</span></p>" : ""}
+            ${services.openAiEffect ? "<button class=\"btn primary placement-export\" data-action=\"generate-ai\"><span data-ui-text=\"生成 AI 效果图\">生成 AI 效果图</span></button><p class=\"hint\"><span data-ui-text=\"带入定位合成图、服装原图与图案原稿，选择模型后点击开始编辑。此处不自动生成；原图片编辑草稿保留。\">带入定位合成图、服装原图与图案原稿，选择模型后点击开始编辑。此处不自动生成；原图片编辑草稿保留。</span></p>" : ""}
             <button class="btn placement-export" data-action="export-png"><span data-ui-text="导出合成 PNG">导出合成 PNG</span></button>
             ${services.saveAsset ? "<button class=\"btn placement-export\" data-action=\"save-asset\"><span data-ui-text=\"保存合成图到素材库\">保存合成图到素材库</span></button>" : ""}
             <div class="placement-save-actions"><button class="btn" data-action="save"><span data-ui-text="本地保存">本地保存</span></button><button class="btn" data-action="open"><span data-ui-text="打开本地工程">打开本地工程</span></button><button class="btn ghost" data-action="export-json"><span data-ui-text="导出工程 JSON">导出工程 JSON</span></button><button class="btn ghost" data-action="import-json"><span data-ui-text="导入工程 JSON">导入工程 JSON</span></button></div>
@@ -301,10 +301,12 @@ export async function mountPlacement(root, services) {
         const layer = selected();
         if (!layer) {
             query("[data-controls]").innerHTML = "<div class=\"placement-unselected\"><span data-ui-text=\"点击画布中的图案或左侧图层，开始调整位置。\">点击画布中的图案或左侧图层，开始调整位置。</span></div>";
+            root.dispatchEvent(new Event("workbench:selects-changed"));
             return;
         }
         query("[data-controls]").innerHTML =
-            `<p class="section-title">${escapeHtml(layer.name)}</p><div class="placement-coordinate">${numberControl("x", "横向 X", layer.x, -state.base.width, state.base.width * 2)}${numberControl("y", "纵向 Y", layer.y, -state.base.height, state.base.height * 2)}</div>${numberControl("width", "图案宽度", layer.width, 1, state.base.width * 2, "像素", 1, true)}${numberControl("rotation", "旋转角度", layer.rotation, -180, 180, "°", 1, true)}${numberControl("opacity", "不透明度", layer.opacity * 100, 0, 100, "%", 1, true)}<label class="field"><span data-ui-text="混合模式">混合模式</span><select aria-label="混合模式" data-ui-aria-label="混合模式" data-blend><option value="source-over" data-ui-text="正常" ${layer.blend === "source-over" ? "selected" : ""}>正常</option><option value="multiply" data-ui-text="正片叠底" ${layer.blend === "multiply" ? "selected" : ""}>正片叠底</option></select></label>`;
+            `<p class="section-title">${escapeHtml(layer.name)}</p><div class="placement-coordinate">${numberControl("x", "横向 X", layer.x, -state.base.width, state.base.width * 2)}${numberControl("y", "纵向 Y", layer.y, -state.base.height, state.base.height * 2)}</div>${numberControl("width", "图案宽度", layer.width, 1, state.base.width * 2, "像素", 1, true)}${numberControl("rotation", "旋转角度", layer.rotation, -180, 180, "°", 1, true)}${numberControl("opacity", "不透明度", layer.opacity * 100, 0, 100, "%", 1, true)}<label class="field"><span data-ui-text="混合模式">混合模式</span><select aria-label="混合模式" data-ui-aria-label="混合模式" data-workbench-select="blend" data-blend><option value="source-over" data-ui-text="正常" ${layer.blend === "source-over" ? "selected" : ""}>正常</option><option value="multiply" data-ui-text="正片叠底" ${layer.blend === "multiply" ? "selected" : ""}>正片叠底</option></select></label>`;
+        root.dispatchEvent(new Event("workbench:selects-changed"));
     }
 
     function syncControls() {
@@ -322,7 +324,7 @@ export async function mountPlacement(root, services) {
             .reverse()
             .map(
                 (layer) =>
-                    `<li class="placement-layer ${layer.id === selectedId ? "selected" : ""} ${layer.visible ? "" : "hidden-layer"}"><img src="${layer.src}" alt="" /><button class="placement-layer-select" data-select="${layer.id}" aria-pressed="${layer.id === selectedId}">${escapeHtml(layer.name)}</button><button class="placement-eye" data-toggle="${layer.id}" data-ui-label-action="${layer.visible ? "隐藏" : "显示"}" data-ui-label-name="${escapeHtml(layer.name)}" aria-label="${uiText(layer.visible ? "隐藏" : "显示")} ${escapeHtml(layer.name)}" data-ui-title="${layer.visible ? "隐藏图层" : "显示图层"}" title="${uiText(layer.visible ? "隐藏图层" : "显示图层")}" data-ui-text="${layer.visible ? "显" : "隐"}">${uiText(layer.visible ? "显" : "隐")}</button></li>`,
+                    `<li class="placement-layer ${layer.id === selectedId ? "selected" : ""} ${layer.visible ? "" : "hidden-layer"}"><img src="${layer.src}" alt="" /><button class="placement-layer-select" data-select="${layer.id}" aria-pressed="${layer.id === selectedId}">${escapeHtml(layer.name)}</button><button class="placement-eye" data-toggle="${layer.id}" data-ui-label-action="${layer.visible ? "隐藏" : "显示"}" data-ui-label-name="${escapeHtml(layer.name)}" aria-label="${uiText(layer.visible ? "隐藏" : "显示")} ${escapeHtml(layer.name)}" data-workbench-tooltip="${layer.visible ? "隐藏图层" : "显示图层"}" data-ui-text="${layer.visible ? "显" : "隐"}">${uiText(layer.visible ? "显" : "隐")}</button></li>`,
             )
             .join("");
         query("[data-layer-count]").textContent = `${state.layers.length} / 30`;
@@ -332,6 +334,7 @@ export async function mountPlacement(root, services) {
         renderControls();
         updateToolbar();
         refreshUi();
+        root.dispatchEvent(new Event("workbench:tooltips-changed"));
         draw();
     }
 
@@ -468,7 +471,7 @@ export async function mountPlacement(root, services) {
             return;
         }
         if (name === "open") {
-            root.querySelector(".workbench-project-bar select").focus();
+            (root.querySelector('[data-workbench-select-control="project"] input') || root.querySelector(".workbench-project-bar select")).focus();
             notify("使用顶部工程列表切换；当前更改会先保存。");
             return;
         }

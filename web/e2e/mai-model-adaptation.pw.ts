@@ -1,6 +1,7 @@
 import type { Locator, Page } from "@playwright/test";
 import { test, expect, IMAGE, newCanvas } from "./fixtures";
 import { toolDefinitions } from "../../shared/feature-catalog";
+import { antSelect, chooseAntSelect } from "./antd-select-helpers";
 
 const make = (last: number, name: string, profile: string) => ({ id: `10000000-0000-4000-8000-${String(last).padStart(12, "0")}`, modelId: `10000000-0000-4000-8000-${String(last).padStart(12, "0")}`, name, publicName: name, imageParameterProfile: profile, imageSupportsMask: profile.startsWith("quality-resolution"), capabilities: ["generate", "edit", "batch"], creditCost: 0, rmbCost: 0, isFeatured: true, displayOrder: last });
 const flare = make(11, "aplmart-gpt2.6-flare", "quality-resolution-v2");
@@ -51,8 +52,8 @@ for (const model of [flare, sunburst, mai]) {
             await prompt.fill("蓝色亚麻连衣裙，保留材质");
             const settings = await openSettings(page);
             await selectStandalone(page, settings, model);
-            await settings.getByRole("combobox", { name: "清晰度 / 分辨率", exact: true }).selectOption("2k");
-            if (model !== mai) await settings.getByRole("combobox", { name: "图片质量", exact: true }).selectOption("high");
+            await chooseAntSelect(settings.getByRole("combobox", { name: "清晰度 / 分辨率", exact: true }), "2K");
+            if (model !== mai) await chooseAntSelect(settings.getByRole("combobox", { name: "图片质量", exact: true }), "高");
             else await expect(settings.getByRole("combobox", { name: "图片质量", exact: true })).toHaveCount(0);
             await settings.getByRole("button", { name: "关闭模型设置", exact: true }).click();
             if (editing) {
@@ -91,10 +92,10 @@ test("standalone explicit model changes clear incompatible 4K options and old op
     await prompt.fill("保留轮廓的服装产品图");
     let settings = await openSettings(page);
     await expect(settings.locator('[data-usage-control="model"]')).toContainText("GPT Image 2.6 Flare");
-    await settings.getByRole("combobox", { name: "清晰度 / 分辨率", exact: true }).selectOption("4k");
+    await chooseAntSelect(settings.getByRole("combobox", { name: "清晰度 / 分辨率", exact: true }), "4K");
     await settings.getByText("高级参数", { exact: true }).click();
-    await settings.getByRole("combobox", { name: "背景", exact: true }).selectOption("transparent");
-    await settings.getByRole("combobox", { name: "输出格式", exact: true }).selectOption("webp");
+    await chooseAntSelect(settings.getByRole("combobox", { name: "背景", exact: true }), "透明");
+    await chooseAntSelect(settings.getByRole("combobox", { name: "输出格式", exact: true }), "WebP");
     await settings.getByRole("button", { name: "关闭模型设置", exact: true }).click();
     await page.getByRole("button", { name: "一键优化提示词", exact: true }).click();
     const preview = page.getByRole("dialog", { name: "核对提示词优化", exact: true });
@@ -106,10 +107,10 @@ test("standalone explicit model changes clear incompatible 4K options and old op
     await expect(prompt).toHaveValue(optimized);
     settings = await openSettings(page);
     await selectStandalone(page, settings, mai);
-    await expect(settings.getByRole("combobox", { name: "清晰度 / 分辨率", exact: true })).toHaveValue("1k");
+    await expect(antSelect(settings.getByRole("combobox", { name: "清晰度 / 分辨率", exact: true }))).toHaveText("1K");
     await settings.getByText("高级参数", { exact: true }).click();
     await expect(settings.getByRole("combobox", { name: "背景", exact: true })).toHaveCount(0);
-    await settings.getByRole("combobox", { name: "联网参考", exact: true }).selectOption("false");
+    await chooseAntSelect(settings.getByRole("combobox", { name: "联网参考", exact: true }), "关闭");
     await page.screenshot({ path: testInfo.outputPath("mai-text-settings.png"), animations: "disabled" });
     await settings.getByRole("button", { name: "关闭模型设置", exact: true }).click();
     await expect(prompt).toHaveValue(optimized);

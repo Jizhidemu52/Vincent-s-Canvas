@@ -9,6 +9,7 @@ import { deploymentFeatures } from "@/lib/deployment-features";
 import type { ModuleKey } from "@/services/api/modules";
 import { standaloneCreativePresetIds } from "@/lib/creative-presets";
 import { retiredWorkbenchName } from "@/lib/retired-workbenches";
+import { uiText } from "@/lib/i18n";
 
 const AdminPage = lazy(() => import("@/pages/admin"));
 const AdminPromptRecipesPage = lazy(() => import("@/pages/admin/prompt-recipes"));
@@ -38,9 +39,16 @@ const VideoPage = lazy(() => import("@/pages/video"));
 type RoutePage = LazyExoticComponent<ComponentType>;
 
 function RouteFallback() {
+    const { pathname } = useLocation();
+    const editor = /^\/(?:image|video|layer-studio|chat|canvas\/|creative\/)/.test(pathname);
     return (
-        <div className="flex h-full items-center justify-center bg-background text-sm text-muted-foreground">
-            <div className="size-5 animate-spin rounded-full border-2 border-orange-200 border-t-orange-600" />
+        <div role="status" aria-label={uiText("正在打开工作台")} className="wb-route-skeleton h-full min-h-0 bg-background p-4 md:p-8">
+            <span className="sr-only">{uiText("正在打开工作台")}</span>
+            <div aria-hidden="true" className="mx-auto flex h-full max-w-[1440px] flex-col gap-6">
+                <div className="space-y-3"><div className="h-7 w-40 rounded-lg bg-muted" /><div className="h-4 w-64 max-w-full rounded bg-muted" /></div>
+                {editor ? <div className="grid min-h-0 flex-1 gap-4 md:grid-cols-[minmax(240px,440px)_minmax(0,1fr)]"><div className="rounded-xl bg-muted" /><div className="rounded-xl bg-muted/60" /></div>
+                    : <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">{[1, 2, 3, 4, 5, 6].map(item => <div key={item} className="h-48 rounded-xl bg-muted" />)}</div>}
+            </div>
         </div>
     );
 }

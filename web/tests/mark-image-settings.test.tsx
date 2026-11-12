@@ -48,8 +48,8 @@ test.each(["mark-flare-id", "mark-sunburst-id"])("%s keeps quality, resolution, 
   const html = renderToStaticMarkup(<ImageSettingsPanel config={config} theme={canvasThemes.light} onConfigChange={() => undefined} />);
   expect(html).toContain('aria-label="图片质量"');
   expect(html).toContain('aria-label="清晰度 / 分辨率"');
-  expect(html).toContain('value="4k" selected=""');
-  expect(html).toContain('value="max" selected=""');
+  expect(html).toContain('title="4K"');
+  expect(html).toContain('title="最高"');
 });
 
 test("exact Mark pixel sizes visibly suspend the resolution tier without changing pixels or quality", () => {
@@ -59,10 +59,12 @@ test("exact Mark pixel sizes visibly suspend the resolution tier without changin
     const config = { ...defaultConfig, model: "mark-flare-id", size, quality: "max", imageOptions: '{"resolution":"4k"}' };
     expect(imageTaskParameters(config)).toMatchObject({ size, quality: "max", resolution: "4k" });
     const html = renderToStaticMarkup(<ImageSettingsPanel config={config} theme={canvasThemes.light} onConfigChange={() => undefined} />);
-    expect(html).toMatch(/<select[^>]*aria-label="清晰度 \/ 分辨率"[^>]*disabled=""/);
+    expect(html.match(/<input[^>]*aria-label="清晰度 \/ 分辨率"[^>]*>/)?.[0]).toContain('disabled=""');
     expect(html).toMatch(/<p[^>]*role="status"/);
     expect(html).toContain(size.replace("x", " × "));
-    expect(html).toMatch(/<select[^>]*aria-label="图片质量"(?![^>]*disabled)/);
+    const qualityControl = html.match(/<input[^>]*aria-label="图片质量"[^>]*>/)?.[0];
+    expect(qualityControl).toBeDefined();
+    expect(qualityControl).not.toContain('disabled=""');
   }
 });
 
@@ -72,7 +74,9 @@ test("Mark ratio and auto sizes leave resolution selectable independently of qua
   for (const size of ["1:1", "21:9", "auto"]) {
     const config = { ...defaultConfig, model: "mark-sunburst-id", size, quality: "xhigh", imageOptions: '{"resolution":"4k"}' };
     const html = renderToStaticMarkup(<ImageSettingsPanel config={config} theme={canvasThemes.light} onConfigChange={() => undefined} />);
-    expect(html).toMatch(/<select[^>]*aria-label="清晰度 \/ 分辨率"(?![^>]*disabled)/);
+    const resolutionControl = html.match(/<input[^>]*aria-label="清晰度 \/ 分辨率"[^>]*>/)?.[0];
+    expect(resolutionControl).toBeDefined();
+    expect(resolutionControl).not.toContain('disabled=""');
     expect(html).not.toMatch(/<p[^>]*role="status"/);
     expect(imageTaskParameters(config)).toMatchObject({ size, resolution: "4k", quality: "xhigh" });
   }

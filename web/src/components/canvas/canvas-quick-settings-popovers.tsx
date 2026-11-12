@@ -1,3 +1,4 @@
+import { Tooltip } from "antd";
 import { useUiText, uiText } from "@/lib/i18n";
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { Dialog, Popover } from "radix-ui";
@@ -35,12 +36,12 @@ export function CanvasQuickRatioOptions({ profile, value, onChange, onAdvanced }
     const t = useUiText();
     return <>
         <div className="cw-ratio-grid" role="group" aria-label={t("宽高比")}>
-            {profile.sizes.filter(size => size !== "auto").map(size => <button key={size} type="button" className="cw-ratio-choice" aria-pressed={value === size}
-                data-usage-control="size" data-usage-value={size} title={size.includes("x") ? size.replace("x", " × ") : size}
-                onClick={() => onChange(size)}><span className="cw-ratio-preview"><RatioOutline value={size} /></span><span>{sizeLabel(size)}</span></button>)}
+            {profile.sizes.filter(size => size !== "auto").map(size => <Tooltip title={size.includes("x") ? size.replace("x", " × ") : size} key={size}><button type="button" className="cw-ratio-choice" aria-pressed={value === size}
+                data-usage-control="size" data-usage-value={size}
+                onClick={() => onChange(size)}><span className="cw-ratio-preview"><RatioOutline value={size} /></span><span>{sizeLabel(size)}</span></button></Tooltip>)}
         </div>
         <div className="cw-ratio-footer">
-            <span title={value}>{profile.sizes.includes(value) ? sizeLabel(value) : value.replace("x", " × ")}</span>
+            <Tooltip title={value}><span>{profile.sizes.includes(value) ? sizeLabel(value) : value.replace("x", " × ")}</span></Tooltip>
             {profile.sizes.includes("auto") ? <button type="button" aria-pressed={value === "auto"} data-usage-control="size" data-usage-value="auto" onClick={() => onChange("auto")}>{t("自动")}</button> : null}
             {onAdvanced ? <button type="button" onClick={onAdvanced}>{profile.customSize ? t("自定义像素") : t("自由比例")}</button> : null}
         </div>
@@ -74,7 +75,7 @@ export function CanvasQuickQualityOptions({ config, profile, referenceCount, onC
                     onClick={() => onConfigChange("quality", value)}>{qualityLabel(value)}</button>)}
             </div>
         </section>}
-        <p>{t("仅用于下次生成。更高画质或分辨率可能增加费用与耗时。")}</p>
+        <p>{t("仅用于下次生成。更高画质或分辨率可能需要更长时间。")}</p>
     </div>;
 }
 
@@ -84,9 +85,9 @@ function ParameterPopover({ id, label, summary, icon, disabled, active, onActive
 }) {
     const t = useUiText();
     return <Popover.Root open={!disabled && active === id} onOpenChange={open => onActiveChange(open ? id : null)}>
-        <Popover.Trigger asChild><button type="button" className={`cw-parameter-trigger cw-parameter-trigger-${id}`} disabled={disabled} aria-label={label} title={`${label}：${summary}`}>
+        <Tooltip title={`${label}：${summary}`}><span className={`cw-parameter-anchor cw-parameter-anchor-${id}`}><Popover.Trigger asChild><button type="button" className={`cw-parameter-trigger cw-parameter-trigger-${id}`} style={disabled ? { pointerEvents: "none" } : undefined} disabled={disabled} aria-label={label}>
             {icon}<span>{summary}</span>{id !== "advanced" ? <ChevronDown size={11} aria-hidden /> : null}
-        </button></Popover.Trigger>
+        </button></Popover.Trigger></span></Tooltip>
         <Popover.Anchor virtualRef={anchor} />
         <Popover.Portal><Popover.Content className={`cw-parameter-popover cw-parameter-popover-${id}`} data-canvas-no-zoom
             aria-label={label} side="bottom" align="center" sideOffset={10} collisionPadding={12} avoidCollisions={false} style={style}
@@ -139,7 +140,7 @@ export function CanvasQuickSettingsPopovers({ config, profile, theme, referenceC
     const referenceQualityDisabled = profile.kind === "grok-image" && referenceCount > 0;
     const automaticReferenceSize = imageReferenceSizeIsAutomatic(profile, referenceCount);
     const exactPixels = profile.resolutions.length > 0 && /^[1-9]\d*x[1-9]\d*$/.test(settings.size);
-    const qualitySummary = gif ? qualityLabel(settings.quality) : automaticReferenceSize ? t("约 100 万像素") : !profile.verified ? t("渠道默认") : profile.resolutions.length
+    const qualitySummary = gif ? qualityLabel(settings.quality) : automaticReferenceSize ? t("约 100 万像素") : !profile.verified ? t("默认") : profile.resolutions.length
         ? `${exactPixels ? t("像素") : resolution.toUpperCase()}${referenceQualityDisabled || profile.kind === "mai-image" ? "" : ` · ${qualityLabel(settings.quality)}`}` : qualityLabel(settings.quality);
     const hasAdvanced = profile.customSize || profile.customAspect || imageOptionFields(profile).some(field => field.key !== "resolution");
     const style = { "--cw-parameter-text": theme.node.text, "--cw-parameter-muted": theme.node.muted, "--cw-parameter-border": theme.node.stroke,

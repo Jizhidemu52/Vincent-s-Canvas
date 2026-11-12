@@ -32,6 +32,14 @@ describe("formal admin catalog and isolated board saves", () => {
         expect(result.find(item => item.toolKey === "image")?.capabilities).toEqual(["generate"]);
     });
 
+    test("omitted hidden fields retain loaded zero, nonzero and null values", () => {
+        for (const value of [0, 9, null]) {
+            const current = { ...tool(), creditCostOverride: value, rmbCostOverride: value };
+            expect(buildToolConfigurationInput(current, { enabled: false, modelConfigId: model.id })).toMatchObject({ creditCostOverride: value, rmbCostOverride: value });
+            expect(buildToolConfigurationInput(current, { creditCostOverride: null, rmbCostOverride: null })).toMatchObject({ creditCostOverride: null, rmbCostOverride: null });
+        }
+    });
+
     test("only submits one board PUT, without provider/model/global-price writes", async () => {
         const requests: Array<{ path: string; method?: string; body: unknown }> = [];
         globalThis.fetch = (async (path: RequestInfo | URL, init?: RequestInit) => {

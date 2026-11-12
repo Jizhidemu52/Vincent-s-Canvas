@@ -1,5 +1,5 @@
 import { Alert, App, Button, DatePicker, Empty, Progress, Segmented, Select, Spin, Table, Tag, Tooltip } from "antd";
-import { Activity, CheckCircle2, Clock3, Coins, Download, Gauge, Image, RefreshCw, Sparkles, Target, TrendingUp } from "lucide-react";
+import { Activity, CheckCircle2, Clock3, Image, RefreshCw, Sparkles, Target, TrendingUp, UsersRound } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { formatBeijingDateTime } from "@/lib/beijing-time";
@@ -43,7 +43,7 @@ export function PerformanceDashboard({ teamOnly = false }: { teamOnly?: boolean 
 
   return <div className="space-y-4" data-testid="performance-dashboard">
     <header className="flex flex-col gap-3 border-b border-stone-200 pb-4 lg:flex-row lg:items-end lg:justify-between">
-      <div><div className="text-xs font-semibold text-orange-600">设计效能</div><h2 className="mt-1 text-xl font-semibold">出图效率、成本与成果转化</h2></div>
+      <div><div className="text-xs font-semibold text-orange-600">设计效能</div><h2 className="mt-1 text-xl font-semibold">出图效率与成果转化</h2></div>
       <Button icon={<RefreshCw className="size-4" />} onClick={() => void load()} loading={loading}>刷新</Button>
     </header>
 
@@ -61,12 +61,9 @@ export function PerformanceDashboard({ teamOnly = false }: { teamOnly?: boolean 
         <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <Metric onClick={jumpToDetails} icon={<Image className="size-4" />} label="有效出图" value={format(data.metrics.validOutputs)} sub={`提交 ${format(data.metrics.requestedOutputs)} 张`} />
           <Metric onClick={jumpToDetails} icon={<Activity className="size-4" />} label="任务成功率" value={rate(data.metrics.successRate)} sub={`成功 ${data.metrics.successCount} / 失败 ${data.metrics.failedCount} / 取消 ${data.metrics.cancelledCount}`} />
-          <Metric onClick={jumpToDetails} icon={<Download className="size-4" />} label="成果下载率" value={rate(data.metrics.downloadRate)} sub="按图片首次成功下载去重" />
-          <Metric onClick={jumpToDetails} icon={<Gauge className="size-4" />} label="成果可用性均分" value={nullable(data.metrics.averageUsabilityScore, " 分")} sub="单张最高 100 分" />
+          <Metric icon={<UsersRound className="size-4" />} label="今日使用人数" value={data.todayUsage ? format(data.todayUsage.users) : "—"} sub="北京时间今日 · 按账号去重，不随日期筛选变化" />
           <Metric onClick={jumpToDetails} icon={<TrendingUp className="size-4" />} label="自然日均 / 活跃日均" value={`${format(data.metrics.naturalDailyAverage)} / ${nullable(data.metrics.activeDailyAverage)}`} sub="活跃日为至少有一张有效成果" />
           <Metric onClick={jumpToDetails} icon={<Clock3 className="size-4" />} label="平均完成时长" value={duration(data.metrics.averageDurationSeconds)} sub={`批量完成率 ${rate(data.metrics.batchCompletionRate)}`} />
-          <Metric onClick={jumpToDetails} icon={<RefreshCw className="size-4" />} label="返工率 / 按时交付率" value={`${rate(data.metrics.reworkRate)} / ${rate(data.metrics.onTimeDeliveryRate)}`} sub="采用后再编辑视为返工" />
-          <Metric onClick={jumpToDetails} icon={<Coins className="size-4" />} label="积分 / 人民币成本" value={`${format(data.metrics.totalCredits)} / ¥${format(data.metrics.totalRmbCost)}`} sub={`单张 ¥${nullable(data.metrics.averageCostPerOutput)}`} />
         </section>
 
         {data.comparisons ? <Panel title="设计师对比" icon={<TrendingUp className="size-4" />}>
@@ -80,13 +77,12 @@ export function PerformanceDashboard({ teamOnly = false }: { teamOnly?: boolean 
             { title: "采用率", render: (_, row) => row.value ? rate(row.value.adoptionRate) : "-" },
             { title: "交付率", render: (_, row) => row.value ? rate(row.value.deliveryRate) : "-" },
             { title: "可用性", render: (_, row) => row.value ? nullable(row.value.usabilityScore) : "-" },
-            { title: "成本", render: (_, row) => row.value ? `¥${format(row.value.rmbCost)}` : "-" },
           ]} />
         </Panel> : null}
 
         <section className="grid gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(320px,1fr)]">
           <Panel title="每日有效出图" icon={<TrendingUp className="size-4" />}>
-            {data.trend.some((item) => item.outputs) ? <div className="flex h-52 items-end gap-1 overflow-x-auto pt-6">{data.trend.map((item) => <Tooltip key={item.date} title={`${item.date}：${item.outputs} 张，${item.credits} 积分`}><div className="flex min-w-5 flex-1 flex-col items-center justify-end gap-2"><div className="w-full bg-orange-500" style={{ height: `${Math.max(4, item.outputs / maxTrend * 150)}px` }} /><span className="text-[10px] text-stone-400">{item.date.slice(5)}</span></div></Tooltip>)}</div> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前时间范围暂无有效出图" />}
+            {data.trend.some((item) => item.outputs) ? <div className="flex h-52 items-end gap-1 overflow-x-auto pt-6">{data.trend.map((item) => <Tooltip key={item.date} title={`${item.date}：${item.outputs} 张`}><div className="flex min-w-5 flex-1 flex-col items-center justify-end gap-2"><div className="w-full bg-orange-500" style={{ height: `${Math.max(4, item.outputs / maxTrend * 150)}px` }} /><span className="text-[10px] text-stone-400">{item.date.slice(5)}</span></div></Tooltip>)}</div> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前时间范围暂无有效出图" />}
           </Panel>
           <Panel title="成果转化漏斗" icon={<Target className="size-4" />}>
             <div className="space-y-3">{data.funnel.map((item) => <div key={item.stage}><div className="mb-1 flex justify-between text-sm"><span>{funnelLabels[item.stage]}</span><span className="font-medium">{item.count} · {rate(item.rate)}</span></div><Progress percent={item.rate ?? 0} showInfo={false} strokeColor="#f97316" railColor="#f5f5f4" /></div>)}</div>
@@ -108,8 +104,7 @@ export function PerformanceDashboard({ teamOnly = false }: { teamOnly?: boolean 
             { title: "有效出图", dataIndex: "outputs", sorter: (a, b) => a.outputs - b.outputs }, { title: "成功率", dataIndex: "successRate", render: rate },
             { title: "下载率", dataIndex: "downloadRate", render: rate }, { title: "复用率", dataIndex: "reuseRate", render: rate },
             { title: "采用率", dataIndex: "adoptionRate", render: rate }, { title: "交付率", dataIndex: "deliveryRate", render: rate },
-            { title: "可用性", dataIndex: "usabilityScore", render: (value) => nullable(value) }, { title: "积分", dataIndex: "credits" },
-            { title: "成本", dataIndex: "rmbCost", render: (value) => `¥${format(value)}` },
+            { title: "可用性", dataIndex: "usabilityScore", render: (value) => nullable(value) },
             { title: "主要方向", dataIndex: "topDirection", render: (value: DesignDirection | "unclassified" | null) => value && value !== "unclassified" ? designDirectionLabels[value] : "未分类" },
           ]} />
         </Panel>
@@ -120,7 +115,6 @@ export function PerformanceDashboard({ teamOnly = false }: { teamOnly?: boolean 
             { title: "设计师", dataIndex: "userName", width: 110 }, { title: "板块", dataIndex: "operationType", width: 130 },
             { title: "模型", dataIndex: "modelName", width: 130, render: (value) => value || "-" },
             { title: "完整提示词", dataIndex: "prompt", width: 320, ellipsis: true }, { title: "状态", dataIndex: "status", width: 90 },
-            { title: "积分", dataIndex: "credits", width: 80 }, { title: "成本", dataIndex: "rmbCost", width: 90, render: (value) => `¥${format(value)}` },
             { title: "失败原因", dataIndex: "failureReason", width: 180, render: (value) => value || "-" },
           ]} />
         </Panel></div>
@@ -141,8 +135,9 @@ export function PerformanceDashboard({ teamOnly = false }: { teamOnly?: boolean 
   </div>;
 }
 
-function Metric({ icon, label, value, sub, onClick }: { icon: ReactNode; label: string; value: string; sub: string; onClick: () => void }) {
-  return <button type="button" onClick={onClick} className="min-h-28 border border-stone-200 bg-white px-4 py-3 text-left transition hover:border-orange-400 hover:bg-orange-50/40"><div className="flex items-center gap-2 text-xs text-stone-500">{icon}{label}</div><div className="mt-2 text-xl font-semibold text-stone-950">{value}</div><div className="mt-1 text-xs text-stone-400">{sub}</div></button>;
+function Metric({ icon, label, value, sub, onClick }: { icon: ReactNode; label: string; value: string; sub: string; onClick?: () => void }) {
+  const Container = onClick ? "button" : "div";
+  return <Container {...(onClick ? { type: "button" as const, onClick } : {})} className={`min-h-28 border border-stone-200 bg-white px-4 py-3 text-left${onClick ? " transition hover:border-orange-400 hover:bg-orange-50/40" : ""}`}><div className="flex items-center gap-2 text-xs text-stone-500">{icon}{label}</div><div className="mt-2 text-xl font-semibold text-stone-950">{value}</div><div className="mt-1 text-xs text-stone-400">{sub}</div></Container>;
 }
 function Panel({ title, icon, children }: { title: string; icon: ReactNode; children: ReactNode }) { return <section className="border border-stone-200 bg-white"><div className="flex items-center gap-2 border-b border-stone-200 px-4 py-3 font-semibold">{icon}{title}</div><div className="p-4">{children}</div></section>; }
 function rate(value: number | null) { return value === null ? "-" : `${format(value)}%`; }

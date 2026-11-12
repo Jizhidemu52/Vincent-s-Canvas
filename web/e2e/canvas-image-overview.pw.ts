@@ -105,8 +105,18 @@ test("不同原图在低缩放失选、多选、单选焦点和AI编辑后仍真
     expect(sources()).toEqual(originalSources);
     expect([...api.assetBytes.values()].some(bytes => bytes.equals(IMAGE))).toBe(true);
     expect([...api.assetBytes.values()].some(bytes => bytes.equals(secondBytes))).toBe(true);
+    // Opening a document intentionally fits its content; the saved 25% view
+    // must not leave either original outside the usable canvas on reopening.
+    await page.getByRole("button", { name: "收起创建面板", exact: true }).click();
+    await expect(page.getByTestId("canvas-quick-generate-panel")).toHaveCount(0);
+    await page.keyboard.press("Shift+1");
+    await expect.poll(async () => (await readCanvasViewState(page, id))?.viewport.k).not.toBe(.25);
+    const fittedViewport = (await readCanvasViewState(page, id))!.viewport;
+    await page.getByRole("button", { name: "画布缩放与视图", exact: true }).click();
+    await page.getByRole("button", { name: "25%", exact: true }).click();
+    await expect.poll(async () => (await readCanvasViewState(page, id))?.viewport.k).toBe(.25);
     await page.reload();
-    await expect(page.getByRole("button", { name: "画布缩放与视图", exact: true })).toContainText("25%");
+    await expect.poll(async () => (await readCanvasViewState(page, id))?.viewport).toEqual(fittedViewport);
     await decodedImages(nodes);
     expect(sources()).toEqual(originalSources);
     expect(api.submissions).toHaveLength(0);

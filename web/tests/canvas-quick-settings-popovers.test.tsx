@@ -219,7 +219,7 @@ test("opening advanced settings normalizes only form state while actual user cho
     expect(normalized).toEqual([["size", "1:1"], ["quality", "auto"], ["count", "1"], ["imageOptions", '{"output_format":"webp","resolution":"1k"}']]);
     expect(changes).toEqual([]);
     expect(value).toEqual(original);
-    tree.find(item => item.props["aria-label"] === "输出格式")!.props.onChange({ target: { value: "png" } });
+    tree.find(item => item.props["aria-label"] === "输出格式")!.props.onChange("png");
     expect(changes).toEqual([["imageOptions", '{"output_format":"png","resolution":"1k"}']]);
 });
 
@@ -307,8 +307,8 @@ test("compact advanced handlers keep transparency and JPEG mutually compatible i
     const module = componentModule("../src/components/image-settings-panel.tsx");
     let value = config({ imageOptions: '{"resolution":"2k","background":"opaque","output_format":"jpeg","output_compression":"85"}' });
     const controls = () => module.render(exports => elements(exports.ImageSettingsPanel({ compact: true, config: value, profile: profile("mark-flare"), theme: canvasThemes.light, onConfigChange: (key: keyof AiConfig, next: string) => { value = { ...value, [key]: next }; } })));
-    controls().find(item => item.props["aria-label"] === "背景")!.props.onChange({ target: { value: "transparent" } });
+    controls().find(item => item.props["aria-label"] === "背景")!.props.onChange("transparent");
     expect(imageTaskParameters(value, profile("mark-flare"))).toEqual({ size: "1:1", quality: "high", resolution: "2k", background: "transparent", output_format: "png" });
-    controls().find(item => item.props["aria-label"] === "输出格式")!.props.onChange({ target: { value: "jpeg" } });
+    controls().find(item => item.props["aria-label"] === "输出格式")!.props.onChange("jpeg");
     expect(imageTaskParameters(value, profile("mark-flare"))).toEqual({ size: "1:1", quality: "high", resolution: "2k", background: "opaque", output_format: "jpeg", output_compression: 85 });
 });

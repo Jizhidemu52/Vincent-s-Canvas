@@ -5,6 +5,7 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { useUiLocale } from "@/lib/i18n";
 import { getImageAgentVersions, imageAgentVersion, originalImageAgentImage, type ImageAgentImage } from "@/lib/image-agent/focus";
 import { useThemeStore } from "@/stores/use-theme-store";
+import { Tooltip } from "antd";
 
 export type ImageAgentFocusImage = ImageAgentImage & { dataUrl?: string; storageKey?: string; width?: number; height?: number };
 export type ImageAgentFocusProps = {
@@ -70,14 +71,14 @@ export function ImageAgentFocus({ images, focusId, locked, newCreation, referenc
     const renderStrip = (items: readonly ImageAgentFocusImage[], title: string, showVersions: boolean) => items.length ? <div className="min-w-0">
         <p className="mb-1.5 text-[11px]" style={{ color: theme.node.faint }}>{title}</p>
         <div role="group" aria-label={title} className="flex min-w-0 gap-2 overflow-x-auto pb-1.5 overscroll-x-contain">
-            {items.map((image, index) => <button key={image.id} type="button" aria-pressed={focus?.id === image.id}
+            {items.map((image, index) => <Tooltip key={image.id} title={image.unavailableReason || image.name || label(image)}><span className="inline-flex shrink-0"><button type="button" aria-pressed={focus?.id === image.id}
                 aria-label={`${text.choose}: ${label(image)}${showVersions ? ` · V${index + 1}` : ""}`}
-                title={image.unavailableReason || image.name || label(image)} disabled={disabled || !available(image)} onClick={() => choose(image)}
+                disabled={disabled || !available(image)} onClick={() => choose(image)}
                 className="flex w-16 shrink-0 flex-col items-center gap-1 rounded p-1 text-center text-[11px] hover:opacity-70 focus-visible:outline-2 focus-visible:outline-offset-1 disabled:cursor-not-allowed disabled:opacity-40"
                 style={{ ...buttonStyle, color: focus?.id === image.id ? theme.canvas.selectionStroke : theme.node.muted, background: focus?.id === image.id ? theme.canvas.selectionFill : undefined }}>
                 <span className="block size-12"><FocusThumbnail image={image} /></span>
                 <span className="flex w-full min-w-0 items-center justify-center gap-1">{showVersions ? <span className="shrink-0 font-medium">V{index + 1}</span> : null}<span className="truncate">{label(image)}</span></span>
-            </button>)}
+            </button></span></Tooltip>)}
         </div>
     </div> : null;
 
@@ -90,7 +91,7 @@ export function ImageAgentFocus({ images, focusId, locked, newCreation, referenc
                     {focus ? <FocusThumbnail key={focus.id} image={focus} eager /> : fresh ? <Sparkles size={20} className="m-2" /> : <ImageIcon size={20} className="m-2" />}
                 </span>
                 <span className="min-w-0 flex-1">
-                    <span className="block truncate font-medium" style={{ color: theme.node.text }} title={focus?.name}>{focus ? `${label(focus)} · V${imageAgentVersion(images, focus.id)}` : missingFocus ? text.unavailable : text.fresh}</span>
+                    <Tooltip title={focus?.name}><span className="block truncate font-medium" style={{ color: theme.node.text }}>{focus ? `${label(focus)} · V${imageAgentVersion(images, focus.id)}` : missingFocus ? text.unavailable : text.fresh}</span></Tooltip>
                     <span className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]">
                         {focus ? available(focus) ? <span className="inline-flex items-center gap-1">{locked ? <LockKeyhole size={10} aria-hidden="true" /> : null}{locked ? text.locked : text.current}</span> : <span>{text.unavailable}</span> : fresh ? <span>{text.freshHint}</span> : null}
                         {referenceCount > 0 ? <span>{text.references} {referenceCount}</span> : null}

@@ -10,7 +10,7 @@ const modelA = { id: "10000000-0000-4000-8000-000000000001", name: "处理模型
 const modelB = { ...modelA, id: "10000000-0000-4000-8000-000000000002", name: "处理模型 B", modelId: "fixture-edit-b" };
 const removeTitle = "一键去背景", hdTitle = "高清放大";
 // AntD's loading icon contributes its accessible name until the leave animation ends.
-const paidTestName = /^(?:loading )?付费试运行 1 张$/;
+const paidTestName = /^(?:loading )?试运行 1 张$/;
 
 async function setup(page: Page) {
     const api = new MockCanvasApi(test.info().project.use.baseURL);
@@ -203,7 +203,7 @@ test("uncertain POST, missing or failed queries and refresh retain the original 
     const requestId = f.tests[0].input.requestId;
     await expect(panel.getByRole("button", { name: paidTestName })).toBeDisabled();
     await panel.getByRole("button", { name: /查询原测试任务$/ }).click();
-    await expect(panel.getByText(/尚未查到原任务，不代表未提交或未扣费/)).toBeVisible();
+    await expect(panel.getByText(/尚未查到原任务，不代表未提交/)).toBeVisible();
     f.flags.query = "network";
     await panel.getByRole("button", { name: /查询原测试任务$/ }).click();
     await expect(panel.getByText(/网络连接中断/)).toBeVisible();

@@ -57,6 +57,7 @@ const history = { id: "team-task", userId: OWNER, userName: "隔离设计师", o
 function performanceData(): PerformanceDashboard {
     return {
         period: { from: "2026-11-01T00:00:00+08:00", to: "2026-11-08T00:00:00+08:00" },
+        todayUsage: { date: "2026-11-12", timeZone: "Asia/Shanghai", users: 17 },
         metrics: { requestedOutputs: 4, validOutputs: 3, naturalDailyAverage: 0.43, activeDailyAverage: 3, successCount: 3, failedCount: 1, cancelledCount: 0,
             successRate: 75, batchCompletionRate: 75, averageDurationSeconds: 15, reworkRate: 0, onTimeDeliveryRate: 100, totalCredits: 12, totalRmbCost: 0.12,
             averageCreditsPerOutput: 4, averageCostPerOutput: 0.04, averageCostPerAdopted: 0.06, downloadRate: 66.67, averageUsabilityScore: 60 },
@@ -109,7 +110,7 @@ export async function configureTeam(context: BrowserContext, api: MockCanvasApi,
         if (path === "/api/team/history") return json({ history: [history] });
         if (path === "/api/team/audit") return json({ auditLogs: [] });
         if (path === "/api/team/group-credits") return json(managed);
-        if (path === "/api/team/history/export") return route.fulfill({ contentType: "text/csv;charset=utf-8", body: "user,prompt,status\nE2E,E2E 本组原始提示词,success\n" });
+        if (path === "/api/team/history/export") return route.fulfill({ contentType: "text/csv;charset=utf-8", body: '\uFEFF"时间","设计师","功能板块","模型","完整提示词","积分","人民币成本","状态","失败原因"\r\n"2026-11-12","隔离设计师","inpaint","E2E Image","E2E 本组原始提示词,含逗号\r\n与""引号""","12","0.12","success",""' });
         if (path === "/api/team/group-credits/requests/team-request/decision") {
             managed.requests[0].status = req.postDataJSON().decision;
             return json({ status: managed.requests[0].status, duplicate: false });

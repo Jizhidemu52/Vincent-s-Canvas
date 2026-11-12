@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Alert, Empty, Select, Statistic, Table, Tag } from "antd";
 import type { PromptRecipeDetail } from "@/services/api/admin-prompt-recipes";
 import type { AdminPromptCompilation } from "../../../../../../shared/prompt-contracts";
+import { formatNonFinancialJson, formatNonFinancialPreview } from "@/lib/financial-presentation";
 
 export const compilationStatus = { optimizing: "优化中", success: "成功", failed: "失败", uncertain: "状态待核查" };
 export function CompilationResult({ compilation }: { compilation: AdminPromptCompilation }) {
@@ -32,10 +33,6 @@ export function CompilationResult({ compilation }: { compilation: AdminPromptCom
                 <dd>
                     {compilation.inputTokens ?? "未知"} / {compilation.outputTokens ?? "未知"}
                 </dd>
-                <dt>实记成本</dt>
-                <dd>{compilation.actualCost == null ? "未知" : `${compilation.actualCost} ${compilation.currency}`}</dd>
-                <dt>估算成本</dt>
-                <dd>{compilation.estimatedCost == null ? "未知" : `${compilation.estimatedCost} ${compilation.currency}`}</dd>
                 <dt>优化模型 / 目标模型</dt>
                 <dd className="break-all">
                     {compilation.modelConfigId} / {compilation.targetModelConfigId}
@@ -44,9 +41,9 @@ export function CompilationResult({ compilation }: { compilation: AdminPromptCom
             <details>
                 <summary className="cursor-pointer text-xs text-muted-foreground">请求快照与原始响应（仅管理员）</summary>
                 <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border p-3 text-xs">
-                    {JSON.stringify({ requestId: compilation.requestId, versionId: compilation.recipeVersionId, input: compilation.inputSnapshot, inputHash: compilation.inputHash, reusedFromId: compilation.reusedFromId }, null, 2)}
+                    {formatNonFinancialJson({ requestId: compilation.requestId, versionId: compilation.recipeVersionId, input: compilation.inputSnapshot, inputHash: compilation.inputHash, reusedFromId: compilation.reusedFromId })}
                 </pre>
-                <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border p-3 text-xs">{compilation.rawResponse || "没有原始响应"}</pre>
+                <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border p-3 text-xs">{formatNonFinancialPreview(compilation.rawResponse || "没有原始响应")}</pre>
             </details>
         </div>
     );
@@ -69,19 +66,7 @@ export function CompilationHistory({ detail }: { detail: PromptRecipeDetail }) {
                         失败 {stats.failed} 次<br />
                         已报告输入 / 输出 Token：{stats.inputTokens} / {stats.outputTokens}
                     </div>
-                    {stats.costs?.map((cost) => (
-                        <div className="rounded-lg bg-muted/30 p-3 text-sm" key={cost.currency}>
-                            <strong>{cost.currency}</strong>
-                            <br />
-                            实记：{cost.actual}
-                            <br />
-                            估算：{cost.estimated}
-                            <br />
-                            成本未知：{cost.unknownCount} 次
-                        </div>
-                    ))}
                 </div>
-                <p className="mt-3 text-xs text-muted-foreground">实记与估算不是同一指标，不相加；不同币种不合并。缺少金额并不表示免费。总成本未知 {stats.unknownCostCount} 次。</p>
                 {stats.promptQuality && <div className="mt-4 grid grid-cols-2 gap-4 lg:grid-cols-4">
                     <Statistic title="简洁目标超标率" value={stats.promptQuality.measured ? stats.promptQuality.overRecommended / stats.promptQuality.measured * 100 : 0} precision={1} suffix="%" />
                     <Statistic title="平均排除短语数" value={stats.promptQuality.measured ? stats.promptQuality.avoidPhrases / stats.promptQuality.measured : 0} precision={1} />
@@ -104,7 +89,6 @@ export function CompilationHistory({ detail }: { detail: PromptRecipeDetail }) {
                         { title: "状态", render: (_, record) => <Tag color={record.status === "success" ? "green" : "orange"}>{compilationStatus[record.status]}</Tag> },
                         { title: "缓存", render: (_, record) => (record.cacheHit ? "命中" : "未命中") },
                         { title: "延迟", render: (_, record) => (record.latencyMs == null ? "未知" : `${record.latencyMs} ms`) },
-                        { title: "实记 / 估算", render: (_, record) => `${record.actualCost ?? "未知"} / ${record.estimatedCost ?? "未知"} ${record.currency}` },
                     ]}
                 />
                 <div className="mt-4">
@@ -115,7 +99,7 @@ export function CompilationHistory({ detail }: { detail: PromptRecipeDetail }) {
                         value={selection}
                         onChange={(values) => setSelection(values.slice(-2))}
                         className="w-full"
-                        placeholder="可跨版本比较提示词、Token 与成本"
+                        placeholder="可跨版本比较提示词、Token 与响应时间"
                         options={detail.compilations.map((record) => ({
                             value: record.id,
                             label: `${new Date(record.createdAt).toLocaleString()} · v${detail.versions.find((version) => version.id === record.recipeVersionId)?.version ?? "?"} · ${compilationStatus[record.status]}`,

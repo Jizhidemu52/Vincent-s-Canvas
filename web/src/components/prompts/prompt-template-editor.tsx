@@ -9,7 +9,6 @@ import { adaptImageModelSettings, imageModelProfile, imageModelSettingsError, im
 import { modelLabelWithUsage } from "@/lib/model-picker-options";
 import { emitModelUsage } from "@/lib/usage-control-events";
 import { canvasThemes } from "@/lib/canvas-theme";
-import { deploymentFeatures } from "@/lib/deployment-features";
 import { defaultConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 
@@ -120,7 +119,7 @@ export function PromptTemplateEditor({ open, initial, title, onCancel, onSubmit 
                 </div>
                 <Form.Item name="prompt" label={t("完整提示词")} rules={[{ required: true, whitespace: true, max: 20_000 }]}><Input.TextArea rows={7} maxLength={20_000} showCount placeholder={t("保存可以直接复用的完整提示词")} /></Form.Item>
                 <div className="grid gap-x-4 md:grid-cols-2">
-                    <Form.Item name="modelConfigId" label={t("模型快照")}><Select allowClear showSearch optionFilterProp="label" placeholder={t("可不指定，由复用时选择")} onChange={changeModel} options={models.map((model) => ({ value: model.id, label: `${modelLabelWithUsage(model.name, model.publicDescription)}${deploymentFeatures.creditsEnabled ? t(" · {p0} 模型积分", { p0: String(model.creditCost) }) : ""}` }))} /></Form.Item>
+                    <Form.Item name="modelConfigId" label={t("模型快照")}><Select allowClear showSearch optionFilterProp="label" placeholder={t("可不指定，由复用时选择")} onChange={changeModel} options={models.map((model) => ({ value: model.id, label: modelLabelWithUsage(model.name, model.publicDescription) }))} /></Form.Item>
                     <Form.Item name="referenceAssetIds" label={t("参考图")}><Select mode="multiple" allowClear maxTagCount="responsive" placeholder={t("从我的素材选择")} options={assets.map((asset) => ({ value: asset.id, label: asset.filename }))} /></Form.Item>
                 </div>
                 {assetCursor ? <Button className="mb-4" loading={loadingMoreAssets} disabled={saving} onClick={() => void loadMoreAssets()}>{t("加载更多参考图")}</Button> : null}

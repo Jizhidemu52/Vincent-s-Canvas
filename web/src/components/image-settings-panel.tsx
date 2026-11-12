@@ -1,7 +1,7 @@
 import { uiText, useUiLocale } from "@/lib/i18n";
 import { type CSSProperties, type ReactNode, useEffect, useId, useRef, useState } from "react";
-import { ConfigProvider } from "antd";
-import { ChevronDown, Ratio, Layers2, SlidersHorizontal } from "lucide-react";
+import { ConfigProvider, Select, Tooltip } from "antd";
+import { ChevronDown, CircleHelp, Ratio, Layers2, SlidersHorizontal } from "lucide-react";
 import type { CanvasTheme } from "@/lib/canvas-theme";
 import type { AiConfig } from "@/stores/use-config-store";
 import { automaticReferenceSizeNotice, gifSizeNotice, imageModelSettingsError, imageOutputIsGif, imageReferenceSizeIsAutomatic, normalizeImageModelSettings, useImageModelProfile } from "@/lib/image-model-settings";
@@ -28,6 +28,54 @@ type ImageSettingsPanelProps = {
     /** Image workspace dialog: common controls grouped, advanced settings collapsed. */
     dialog?: boolean;
 };
+
+/** Read-only projection of the same adapter capabilities used by the full settings panel. */
+export function imagePrimaryControls(config: AiConfig, profile: ReturnType<typeof useImageModelProfile>, referenceCount = 0) {
+    const normalized = normalizeImageModelSettings(config, profile);
+    const gif = imageOutputIsGif(config.imageOptions, profile);
+    const sizes = gif ? ["auto", "512x512", "768x768"] : profile.sizes;
+    const automatic = imageReferenceSizeIsAutomatic(profile, referenceCount);
+    const independentResolution = profile.resolutions.length > 0 && !gif;
+    const exactPixels = independentResolution && /^[1-9]\d*x[1-9]\d*$/.test(normalized.size);
+    const options = readImageOptions(normalizeImageOptions(config.imageOptions, profile));
+    return {
+        size: normalized.size,
+        sizes: sizes.includes(normalized.size) ? sizes : [...sizes, normalized.size],
+        sizeDisabled: !profile.verified || automatic,
+        automatic, exactPixels,
+        detailKey: independentResolution ? "imageOptions" as const : "quality" as const,
+        detailLabel: independentResolution ? "分辨率" : profile.qualityLabel,
+        detailValue: independentResolution ? profile.resolutions.includes(options.resolution || "") ? options.resolution! : "1k" : normalized.quality,
+        detailChoices: independentResolution ? profile.resolutions : profile.qualities,
+        detailDisabled: !profile.verified || automatic || exactPixels || profile.kind === "grok-image" && referenceCount > 0 && !independentResolution,
+    };
+}
+
+/** Main workspace controls; presentation never normalizes or overwrites a saved draft on mount. */
+export function ImagePrimarySettings({ config, profile, referenceCount = 0, modelControl, onConfigChange }: {
+    config: AiConfig; profile: ReturnType<typeof useImageModelProfile>; referenceCount?: number; modelControl: ReactNode;
+    onConfigChange: ImageSettingsPanelProps["onConfigChange"];
+}) {
+    useUiLocale();
+    const primary = imagePrimaryControls(config, profile, referenceCount);
+    const noticeId = useId();
+    const reason = primary.automatic ? automaticReferenceSizeNotice : primary.exactPixels
+        ? uiText("当前精确像素 {size} 优先，分辨率档位暂不生效；改选上方宽高比或自适应后启用。图片质量仍独立生效。", { size: primary.size.replace("x", " × ") })
+        : !profile.verified ? profile.tip : "";
+    return <section className="image-primary-settings" aria-label={uiText("常用参数")}>
+        <div className="image-primary-grid">
+            <div className="image-primary-field image-primary-model"><span>{uiText("模型")}</span>{modelControl}</div>
+            <div className="image-primary-field"><span>{uiText("比例")}</span><Select aria-label={uiText("宽高比")} data-usage-control="size" value={primary.automatic ? "__automatic" : primary.size} disabled={primary.sizeDisabled} aria-describedby={reason ? noticeId : undefined}
+                options={primary.automatic ? [{ value: "__automatic", label: uiText("自动") }] : primary.sizes.map(value => ({ value, label: imageSizeLabel(value) }))}
+                onChange={value => onConfigChange("size", value)} /></div>
+            <div className="image-primary-field"><span>{uiText(primary.detailLabel)}</span><Select aria-label={uiText(primary.detailLabel)} data-usage-control={primary.detailKey === "imageOptions" || profile.qualityLabel.includes("分辨率") ? "resolution" : "quality"}
+                value={primary.automatic ? "__automatic" : primary.detailValue} disabled={primary.detailDisabled} aria-describedby={reason ? noticeId : undefined}
+                options={primary.automatic ? [{ value: "__automatic", label: uiText("自动") }] : primary.detailChoices.map(value => ({ value, label: imageQualityLabel(value) }))}
+                onChange={value => onConfigChange(primary.detailKey, primary.detailKey === "imageOptions" ? JSON.stringify({ ...readImageOptions(normalizeImageOptions(config.imageOptions, profile)), resolution: value }) : value)} /></div>
+        </div>
+        {reason ? <p id={noticeId} role="status" className="mt-2 text-[13px] leading-5 text-muted-foreground">{uiText(reason)}</p> : null}
+    </section>;
+}
 
 export function ImageSettingsPanel({ config, onConfigChange, onConfigNormalize = onConfigChange, theme, showTitle = true, className = "", maxCount: maximum, profile: suppliedProfile, referenceCount = 0, uploadContextKey = "", compact = false, spacious = false, dialog = false }: ImageSettingsPanelProps) {
     useUiLocale();
@@ -97,34 +145,19 @@ export function ImageSettingsPanel({ config, onConfigChange, onConfigNormalize =
     };
     const commonControls = !compact && profile.verified && !automaticReferenceSize ? <><div className="ip-row">
                 <span className="ip-label"><Ratio size={15} />{uiText("宽高比")}</span>
-                <label className="ip-select">
-                    <select data-usage-control="size" aria-label={uiText("宽高比")} value={normalized.size} onChange={event => onConfigChange("size", event.target.value)}>
-                        {sizeChoices.map(value => <option key={value} value={value}>{imageSizeLabel(value)}{value.includes("x") ? ` · ${value.replace("x", " × ")}` : ""}</option>)}
-                        {custom ? <option value={normalized.size}>{uiText("自定义 ·")}{normalized.size.replace("x", " × ")}</option> : null}
-                    </select>
-                    <ChevronDown size={13} aria-hidden />
-                </label>
+                <Select className="ip-select" data-usage-control="size" aria-label={uiText("宽高比")} value={normalized.size} onChange={value => onConfigChange("size", value)}
+                    options={[...sizeChoices.map(value => ({ value, label: `${imageSizeLabel(value)}${value.includes("x") ? ` · ${value.replace("x", " × ")}` : ""}` })), ...(custom ? [{ value: normalized.size, label: `${uiText("自定义 ·")}${normalized.size.replace("x", " × ")}` }] : [])]} />
             </div>
-            <p className="ip-basic-note text-xs leading-5" style={{ color: theme.node.muted }}>{uiText("仅影响下次 AI 生成，不改变已有图片。")}{gif || dialog ? null : uiText(profile.tip)} {uiText("高画质、大尺寸可能增加费用与耗时。")}</p>
+            <div className="ip-basic-note text-[13px] leading-5" style={{ color: theme.node.muted }}><Tooltip title={<>{uiText("仅影响下次 AI 生成，不改变已有图片。")}{gif || dialog ? null : uiText(profile.tip)} {uiText("高画质、大尺寸可能增加生成时间。")}</>}><button type="button" className="inline-flex min-h-8 items-center gap-1" aria-label={uiText("图像参数说明")}><CircleHelp size={14} />{uiText("参数说明")}</button></Tooltip></div>
             {profile.resolutions.length && !gif ? <div className="ip-row">
                 <span className="ip-label">{uiText("清晰度 / 分辨率")}</span>
-                <label className="ip-select">
-                    <select data-usage-control="resolution" aria-label={uiText("清晰度 / 分辨率")} disabled={exactPixelsOverrideResolution} aria-describedby={exactPixelsOverrideResolution ? resolutionNoticeId : undefined} className={exactPixelsOverrideResolution ? "cursor-not-allowed opacity-60" : undefined} value={resolution} onChange={event => updateOption("resolution", event.target.value)}>
-                        {profile.resolutions.map(value => <option key={value} value={value}>{value.toUpperCase()}</option>)}
-                    </select>
-                    <ChevronDown size={13} aria-hidden />
-                </label>
+                <Select className="ip-select" data-usage-control="resolution" aria-label={uiText("清晰度 / 分辨率")} disabled={exactPixelsOverrideResolution} aria-describedby={exactPixelsOverrideResolution ? resolutionNoticeId : undefined} value={resolution} onChange={value => updateOption("resolution", value)} options={profile.resolutions.map(value => ({ value, label: value.toUpperCase() }))} />
             </div> : null}
             {exactPixelsOverrideResolution ? <p id={resolutionNoticeId} role="status" className="text-xs leading-5" style={{ color: theme.node.muted }}>{uiText("当前精确像素 {size} 优先，分辨率档位暂不生效；改选上方宽高比或自适应后启用。图片质量仍独立生效。", { size: normalized.size.replace("x", " × ") })}</p> : null}
             {gif ? <p role="status" className="text-xs leading-5" style={{ color: theme.node.muted }}>{uiText(gifSizeNotice)}{uiText("仅支持文生图，不能添加参考图、蒙版或标注层。")}</p> : null}
             {profile.kind === "mai-image" ? null : referenceQualityDisabled ? <p role="status" className="text-xs leading-5" style={{ color: theme.node.muted }}>{uiText("参考图模式不提交 quality；移除全部参考图后可设置图片质量。")}</p> : <div className="ip-row">
                 <span className="ip-label">{uiText(profile.qualityLabel)}</span>
-                {profile.kind === "quality-resolution" || profile.kind === "resolution-1k" || profile.kind === "grok-image" ? <label className="ip-select">
-                    <select data-usage-control={profile.kind === "resolution-1k" ? "resolution" : "quality"} aria-label={uiText(profile.qualityLabel)} value={normalized.quality} onChange={event => onConfigChange("quality", event.target.value)}>
-                        {profile.qualities.map(value => <option key={value} value={value}>{imageQualityLabel(value)}</option>)}
-                    </select>
-                    <ChevronDown size={13} aria-hidden />
-                </label> : <div className="ip-segments" role="group" aria-label={uiText(profile.qualityLabel)}>
+                {profile.kind === "quality-resolution" || profile.kind === "resolution-1k" || profile.kind === "grok-image" ? <Select className="ip-select" data-usage-control={profile.kind === "resolution-1k" ? "resolution" : "quality"} aria-label={uiText(profile.qualityLabel)} value={normalized.quality} onChange={value => onConfigChange("quality", value)} options={profile.qualities.map(value => ({ value, label: imageQualityLabel(value) }))} /> : <div className="ip-segments" role="group" aria-label={uiText(profile.qualityLabel)}>
                     {profile.qualities.map(value => <button key={value} data-usage-control={profile.kind === "gemini" ? "resolution" : "quality"} data-usage-value={value} type="button" aria-pressed={normalized.quality === value} onClick={() => onConfigChange("quality", value)}>{imageQualityLabel(value)}</button>)}
                 </div>}
             </div>}
@@ -137,11 +170,7 @@ export function ImageSettingsPanel({ config, onConfigChange, onConfigNormalize =
             {automaticReferenceSize ? <p role="status" className="mb-2 text-xs leading-5" style={{ color: theme.node.muted }}>{uiText(automaticReferenceSizeNotice)}</p> : null}
             {profile.kind === "mai-image" ? <p className="text-xs leading-5" style={{ color: theme.node.muted }}>{uiText("固定输出 PNG，不支持透明背景参数与蒙版。")}</p> : null}
             {profile.kind === "midjourney-blend" ? <>
-                <div className="ip-row"><span className="ip-label">{uiText("比例预设")}</span><label className="ip-select">
-                    <select aria-label={uiText("比例预设")} value={options.dimensions || "SQUARE"} onChange={event => updateOption("dimensions", event.target.value)}>
-                        <option value="SQUARE">{uiText("方形 1:1")}</option><option value="PORTRAIT">{uiText("竖向 2:3")}</option><option value="LANDSCAPE">{uiText("横向 3:2")}</option>
-                    </select><ChevronDown size={13} aria-hidden />
-                </label></div>
+                <div className="ip-row"><span className="ip-label">{uiText("比例预设")}</span><Select className="ip-select" aria-label={uiText("比例预设")} value={options.dimensions || "SQUARE"} onChange={value => updateOption("dimensions", value)} options={[{ value: "SQUARE", label: uiText("方形 1:1") }, { value: "PORTRAIT", label: uiText("竖向 2:3") }, { value: "LANDSCAPE", label: uiText("横向 3:2") }]} /></div>
                 <p className="text-xs leading-5" style={{ color: theme.node.muted }}>{uiText("选择预设会同步宽高比；实际提交的 size 优先于 dimensions，可在下方改为自由比例。")}</p>
             </> : null}
             {dialog && commonControls ? <section className="ip-basics" aria-label={uiText("常用参数")}>
@@ -176,7 +205,7 @@ export function ImageSettingsPanel({ config, onConfigChange, onConfigNormalize =
             {fields.length && spacious ? <section className="ip-section ip-advanced-section" aria-labelledby={`${resolutionNoticeId}-advanced-title`}>
                 <div className="ip-section-heading">
                     <span className="ip-section-icon"><SlidersHorizontal size={19} aria-hidden /></span>
-                    <div><h3 id={`${resolutionNoticeId}-advanced-title`}>{uiText("全部高级参数")}</h3><p>{uiText("留空使用渠道默认；只提交当前模型支持的字段。")}</p></div>
+                    <div><h3 id={`${resolutionNoticeId}-advanced-title`}>{uiText("全部高级参数")}</h3><p>{uiText("留空使用默认设置；只提交当前模型支持的字段。")}</p></div>
                     <span className="ip-section-badge">{fields.length} {uiText("项")}</span>
                 </div>
                 <div className="ip-options-grid">
@@ -194,23 +223,18 @@ export function ImageSettingsPanel({ config, onConfigChange, onConfigNormalize =
                                     <input type="radio" name={`${resolutionNoticeId}-${field.key}`} data-image-option={field.key} value={choice} checked={value === choice} onChange={event => { if (event.target.checked) updateOption(field.key, choice); }} />
                                     <span>{imageOptionLabel(choice)}</span>
                                 </label>)}
-                            </div> : choices ? <select className="ip-option-input" aria-label={uiText(field.label)} value={value} aria-describedby={field.tip ? helpId : undefined} onChange={event => updateOption(field.key, event.target.value)}>
-                                <option value="">{uiText("渠道默认")}</option>{choices.map(choice => <option key={choice} value={choice}>{imageOptionLabel(choice)}</option>)}
-                            </select> : isLongText ? <textarea className="ip-option-input ip-option-textarea" aria-label={uiText(field.label)} aria-describedby={field.tip ? helpId : undefined} value={value} placeholder={field.type === "json" ? uiText("渠道默认，或填写 JSON 对象，例如 {\"job\":\"cloth\"}") : uiText("留空使用渠道默认")} rows={field.type === "json" ? 4 : 2} spellCheck={field.type === "json" ? false : undefined} onChange={event => updateOption(field.key, event.target.value)} /> : <input className="ip-option-input" aria-label={uiText(field.label)} aria-describedby={field.tip || range ? helpId : undefined} type={field.type === "number" ? "number" : "text"} min={field.min} max={field.max} step={field.step} value={value} placeholder={uiText("渠道默认")} disabled={disabled} onChange={event => updateOption(field.key, event.target.value)} />}
+                            </div> : choices ? <Select className="w-full" aria-label={uiText(field.label)} value={value} aria-describedby={field.tip ? helpId : undefined} onChange={value => updateOption(field.key, value)} options={["", ...choices].map(value => ({ value, label: imageOptionLabel(value) }))} /> : isLongText ? <textarea className="ip-option-input ip-option-textarea" aria-label={uiText(field.label)} aria-describedby={field.tip ? helpId : undefined} value={value} placeholder={field.type === "json" ? uiText("默认，或填写 JSON 对象，例如 {\"job\":\"cloth\"}") : uiText("留空使用默认设置")} rows={field.type === "json" ? 4 : 2} spellCheck={field.type === "json" ? false : undefined} onChange={event => updateOption(field.key, event.target.value)} /> : <input className="ip-option-input" aria-label={uiText(field.label)} aria-describedby={field.tip || range ? helpId : undefined} type={field.type === "number" ? "number" : "text"} min={field.min} max={field.max} step={field.step} value={value} placeholder={uiText("默认")} disabled={disabled} onChange={event => updateOption(field.key, event.target.value)} />}
                             {field.tip || range ? <p id={helpId} className="ip-option-help">{range ? <span className="ip-option-range">{range}</span> : null}{uiText(field.tip || "")}</p> : null}
                         </fieldset>;
                     })}
                 </div>
             </section> : fields.length ? <details className="ip-details" open={compact || undefined}>
                 <summary>{uiText(dialog ? "高级参数" : "全部高级参数")}<ChevronDown size={13} /></summary>
-                <p className="text-xs leading-5" style={{ color: theme.node.muted }}>{uiText("留空使用渠道默认；只提交当前模型支持的字段。")}</p>
+                <p className="text-xs leading-5" style={{ color: theme.node.muted }}>{uiText("留空使用默认设置；只提交当前模型支持的字段。")}</p>
                 <div className={dialog ? "ip-dialog-options" : "flex flex-col gap-3 py-2"}>
                     {fields.map(field => <label key={field.key} data-image-field={field.key} className="flex flex-col gap-1 text-xs">
                         <span>{uiText(field.label)}</span>
-                        {field.type === "image" ? <ImageMarkupInput key={`${markupContext}|${options[field.key] || ""}`} contextKey={markupContext} value={options[field.key] || ""} referenceCount={referenceCount} onChange={value => updateOption(field.key, value)} /> : field.options || field.type === "boolean" ? <select aria-label={uiText(field.label)} value={options[field.key] || ""} className="w-full rounded border px-2 py-1.5" style={{ background: theme.node.fill, color: theme.node.text, borderColor: theme.node.stroke }} onChange={event => updateOption(field.key, event.target.value)}>
-                            <option value="">{uiText("渠道默认")}</option>
-                            {(field.options || ["true", "false"]).map(value => <option key={value} value={value}>{({ true: uiText("开启"), false: uiText("关闭"), auto: uiText("自动 (auto)"), opaque: uiText("不透明 (opaque)"), transparent: uiText("透明 (transparent)") } as Record<string, string>)[value] || value}</option>)}
-                        </select> : <input aria-label={uiText(field.label)} type={field.type === "number" ? "number" : "text"} min={field.min} max={field.max} step={field.step} value={options[field.key] || ""} placeholder={uiText("渠道默认")} disabled={field.key === "output_compression" && !["jpeg", "webp"].includes(options.output_format || "png")} className="w-full rounded border px-2 py-1.5 disabled:opacity-40" style={{ background: theme.node.fill, color: theme.node.text, borderColor: theme.node.stroke }} onChange={event => updateOption(field.key, event.target.value)} />}
+                        {field.type === "image" ? <ImageMarkupInput key={`${markupContext}|${options[field.key] || ""}`} contextKey={markupContext} value={options[field.key] || ""} referenceCount={referenceCount} onChange={value => updateOption(field.key, value)} /> : field.options || field.type === "boolean" ? <Select aria-label={uiText(field.label)} value={options[field.key] || ""} className="w-full" onChange={value => updateOption(field.key, value)} options={["", ...(field.options || ["true", "false"])].map(value => ({ value, label: imageOptionLabel(value) }))} /> : <input aria-label={uiText(field.label)} type={field.type === "number" ? "number" : "text"} min={field.min} max={field.max} step={field.step} value={options[field.key] || ""} placeholder={uiText("默认")} disabled={field.key === "output_compression" && !["jpeg", "webp"].includes(options.output_format || "png")} className="w-full rounded border px-2 py-1.5 disabled:opacity-40" style={{ background: theme.node.fill, color: theme.node.text, borderColor: theme.node.stroke }} onChange={event => updateOption(field.key, event.target.value)} />}
                         {field.tip ? <span className="leading-5" style={{ color: theme.node.muted }}>{uiText(field.tip || "")}</span> : null}
                     </label>)}
                 </div>
@@ -220,7 +244,7 @@ export function ImageSettingsPanel({ config, onConfigChange, onConfigNormalize =
 }
 
 function imageOptionLabel(value: string) {
-    return ({ "": uiText("渠道默认"), true: uiText("开启"), false: uiText("关闭"), auto: uiText("自动"), opaque: uiText("不透明"), transparent: uiText("透明"), png: "PNG", jpeg: "JPEG", webp: "WebP", gif: "GIF", low: uiText("低"), medium: uiText("中"), high: uiText("高") } as Record<string, string>)[value] || value;
+    return ({ "": uiText("默认"), true: uiText("开启"), false: uiText("关闭"), auto: uiText("自动"), opaque: uiText("不透明"), transparent: uiText("透明"), png: "PNG", jpeg: "JPEG", webp: "WebP", gif: "GIF", low: uiText("低"), medium: uiText("中"), high: uiText("高") } as Record<string, string>)[value] || value;
 }
 
 function ImageMarkupInput({ value, referenceCount, contextKey, onChange }: { value: string; referenceCount: number; contextKey: string; onChange: (value: string) => void }) {

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowRight, LoaderCircle } from "lucide-react";
+import { Select } from "antd";
 import { designBriefFromFields } from "../../../shared/design-brief";
 import { designDestinations, prepareDesignHandoff } from "@/lib/design-handoff";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
@@ -50,7 +51,7 @@ export function DesignResultReview({ sceneId, fields, image, disabled = false }:
     };
     const dimensions = image.width && image.height ? `${image.width} × ${image.height} px` : uiText("尺寸未记录");
     const format = image.type ? image.type.replace(/^image\//, "").toUpperCase() : uiText("格式未记录");
-    return <details className="border-t border-border px-3 py-2 text-xs leading-6">
+    return <details className="border-t border-border px-3 py-2 text-sm leading-6">
         <summary className="cursor-pointer font-medium">{uiText("结果核对与继续处理")}</summary>
         <p className="my-2 text-muted-foreground">{uiText("实际输出")}：{dimensions} · {format}</p>
         <p className="font-medium">{uiText("待人工核对，不代表已验收")}</p>
@@ -58,13 +59,11 @@ export function DesignResultReview({ sceneId, fields, image, disabled = false }:
         {!!brief.value?.requirements.length && <details className="my-2"><summary className="cursor-pointer">{uiText("将沿用的设计要求")}（{brief.value.requirements.length}）</summary><ul className="list-disc whitespace-pre-wrap break-words pl-4">{brief.value.requirements.map(line => <li key={line}>{line}</li>)}</ul></details>}
         <label className="block font-medium" htmlFor={`design-next-${image.id}`}>{uiText("下一步处理")}</label>
         <div className="my-2 flex flex-wrap gap-2">
-            <select id={`design-next-${image.id}`} className="min-w-0 flex-1 rounded border border-border bg-background px-2 py-1 text-foreground" value={destination} disabled={disabled || busy} onChange={event => setDestination(event.target.value)}>
-                <option value="">{uiText("选择已有板块")}</option>
-                {available.map(item => <option key={item.id} value={item.id}>{uiText(item.label)}</option>)}
-            </select>
+            <Select id={`design-next-${image.id}`} aria-label={uiText("下一步处理")} className="min-w-0 flex-1" value={destination} disabled={disabled || busy} onChange={setDestination}
+                options={[{ value: "", label: uiText("选择已有板块") }, ...available.map(item => ({ value: item.id, label: uiText(item.label) }))]} />
             <button type="button" className="flex items-center gap-1 rounded border border-border px-2 py-1 disabled:opacity-50" disabled={disabled || busy || !brief.value || !available.some(item => item.id === destination)} onClick={() => void proceed()}>{busy ? <LoaderCircle size={13} className="animate-spin" /> : <ArrowRight size={13} />}{uiText("带入新草稿")}</button>
         </div>
-        <p className="text-muted-foreground">{uiText("只带入结果原图和可编辑要求，保留原任务，不自动生成或扣费。原选区不会带到新图。")}</p>
+        <p className="text-muted-foreground">{uiText("只带入结果原图和可编辑要求，保留原任务，不自动生成。原选区不会带到新图。")}</p>
         {(error || brief.error) && <p role="alert" className="mt-2 text-destructive">{uiText(error || brief.error || "")}</p>}
     </details>;
 }

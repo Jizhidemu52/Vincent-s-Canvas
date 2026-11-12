@@ -1,14 +1,12 @@
 import { useUiText } from "@/lib/i18n";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, LoaderCircle, Square, Upload } from "lucide-react";
-import { App, Button } from "antd";
+import { App, Button, Tooltip } from "antd";
 
 import { ModelPicker } from "@/components/model-picker";
 import { defaultConfig, modelOptionName, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
-import { CreditSymbol } from "@/constant/credits";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { canvasThemes } from "@/lib/canvas-theme";
-import { deploymentFeatures } from "@/lib/deployment-features";
 import { createClientId } from "@/lib/client-id";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
@@ -68,7 +66,6 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const t = useUiText();
     const { message } = App.useApp();
     const globalConfig = useEffectiveConfig("canvas");
-    const estimate = useBusinessConfigStore((state) => state.estimate);
     const models = useBusinessConfigStore((state) => state.models);
     const tools = useBusinessConfigStore(state => state.tools);
     const modelsStatus = useBusinessConfigStore(state => state.status);
@@ -117,8 +114,6 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
     const videoContext = mode === "video" ? buildNodeGenerationContext(node.id, canvasNodes, canvasConnections, prompt) : null;
     const videoConfig = mode === "video" ? { ...config, ...normalizeVideoModelConfig(config) } : config;
     const videoValidation = videoContext ? videoReferenceError(videoConfig, videoContext.referenceImages, videoContext.referenceVideos, videoContext.referenceAudios) : "";
-    const usage = estimate({ operationType: operationTypeForMode(mode, toolKey === "canvas-edit"), toolKey, modelId: modelOptionName(config.model), quantity: 1 });
-    const credits = usage.configured ? usage.credits : 0;
 
     useEffect(() => {
         setPromptState(current => current.nodeId === node.id && current.value === sourcePrompt ? current : { nodeId: node.id, value: sourcePrompt });
@@ -274,10 +269,10 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
 
             {mode === "image" ? <div className="mt-2">{imageInput?.usesSnapshot ? <section aria-label={t("已选参考图")} className="min-w-0 space-y-2 text-xs">
                 {imageInput.visibleReferences.length ? <span className="font-medium">{t("参考图")}</span> : null}
-                <div className="flex gap-2 overflow-x-auto">{imageInput.visibleReferences.map(({ reference, index }) => <div key={reference.referenceKey} className="w-20 shrink-0 space-y-1" title={reference.name}>
+                <div className="flex gap-2 overflow-x-auto">{imageInput.visibleReferences.map(({ reference, index }) => <Tooltip title={reference.name} key={reference.referenceKey}><div className="w-20 shrink-0 space-y-1">
                     <CanvasPersistedMediaPreview kind="image" url={reference.dataUrl} storageKey={reference.storageKey} alt={reference.name} className="size-20 rounded border object-cover" />
                     <span className="block truncate">{t("图片{count}", { count: index + 1 })}</span>
-                </div>)}</div>
+                </div></Tooltip>)}</div>
                 {!referenceValidation.valid && referenceValidation.message ? <p role="alert" className="text-destructive">{referenceValidation.message}</p> : null}
             </section> : <ReferenceImageTray references={imageReferences} fixedReferenceKey={fixedReferenceKey} validation={referenceValidation} onChange={saveReferences} onRequestUpload={() => uploadInputRef.current?.click()} onRequestAssets={() => setAssetPickerOpen(true)} onRequestCanvas={() => setCanvasPickerOpen(true)} />}</div> : null}
             {videoValidation ? <p role="alert" className="mt-2 text-xs text-destructive">{videoValidation}{t("。已连接素材会保留。")}</p> : null}
@@ -332,10 +327,6 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                             </>
                         ) : (
                             <>
-                                {deploymentFeatures.creditsEnabled ? <span className="inline-flex items-center gap-1 text-xs font-medium tabular-nums">
-                                    <CreditSymbol />
-                                    {credits.toLocaleString()}
-                                </span> : null}
                                 <ArrowUp className="size-4" />
                             </>
                         )}
@@ -355,13 +346,6 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
 
 function defaultMode(type: CanvasNodeData["type"]): CanvasNodeGenerationMode {
     return type === CanvasNodeType.Text ? "text" : type === CanvasNodeType.Video ? "video" : type === CanvasNodeType.Audio ? "audio" : "image";
-}
-
-function operationTypeForMode(mode: CanvasNodeGenerationMode, editingImage: boolean) {
-    if (mode === "video") return "video_generation";
-    if (mode === "audio") return "audio_generation";
-    if (mode === "image") return editingImage ? "inpaint" : "image_generation";
-    return "chat";
 }
 
 function buildNodeConfig(globalConfig: AiConfig, node: CanvasNodeData, mode: CanvasNodeGenerationMode): AiConfig {

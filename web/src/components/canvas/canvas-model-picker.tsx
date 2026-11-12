@@ -1,3 +1,4 @@
+import { Tooltip } from "antd";
 import { useUiText } from "@/lib/i18n";
 import { useEffect, useId, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { ArrowLeft, Check, ChevronDown, ChevronRight, ImageIcon } from "lucide-react";
@@ -77,16 +78,17 @@ export function CanvasModelPicker({ options, value, label, emptyLabel, open, dis
     const row = (option: CanvasModelOption) => <CanvasModelRow key={option.value} option={option} selected={option.value === value} onSelect={select} />;
 
     return <Popover.Root open={open && !disabled} onOpenChange={next => { if (!disabled) onOpenChange(next); }}>
-        <Popover.Trigger asChild>
+        <Tooltip title={`${label}${bound ? ` · ${t("后台指定")}` : ""}`}><Popover.Trigger asChild>
             <button type="button" role="combobox" aria-label={t("选择模型")} aria-haspopup="dialog" aria-controls={open ? listId : undefined} aria-expanded={open && !disabled}
+                aria-description={`${label}${bound ? ` · ${t("后台指定")}` : ""}`}
                 disabled={disabled} data-usage-control="model" data-theme={themeName} style={palette}
-                className={cn("canvas-composer-model-picker canvas-model-trigger", className)} title={`${label}${bound ? ` · ${t("后台指定")}` : ""}`}
+                className={cn("canvas-composer-model-picker canvas-model-trigger", className)}
                 onPointerDown={event => event.stopPropagation()} onMouseDown={event => event.stopPropagation()}>
                 <ModelLogo option={current} compact />
                 <span className="canvas-model-trigger-name">{label}</span>
                 <ChevronDown className={cn("canvas-model-trigger-chevron", open && !disabled && "is-open")} size={15} aria-hidden="true" />
             </button>
-        </Popover.Trigger>
+        </Popover.Trigger></Tooltip>
         <Popover.Portal>
             <Popover.Content ref={menuRef} id={listId} data-testid="canvas-model-picker-menu" data-canvas-no-zoom data-theme={themeName}
                 aria-label={t("选择画布模型")} className="canvas-model-menu" style={palette} side={side} align="start" sideOffset={12} collisionPadding={12}

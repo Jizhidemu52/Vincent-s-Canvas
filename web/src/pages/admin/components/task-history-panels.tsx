@@ -5,6 +5,7 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { saveAs } from "file-saver";
 import dayjs from "dayjs";
 import { formatBeijingDateTime, formatBeijingTime } from "@/lib/beijing-time";
+import { nonFinancialHistoryCsv } from "@/lib/non-financial-history-csv";
 import { useWorkbenchField } from "@/hooks/use-workbench-field";
 import { useUserStore } from "@/stores/use-user-store";
 import { InfiniteLoadMore } from "@/components/infinite-load-more";
@@ -154,16 +155,6 @@ export function TaskManagementPanel({ active = true }: { active?: boolean }) {
                     { title: "暂停", dataIndex: "pausedItems", width: 70 },
                     { title: "取消", dataIndex: "cancelledItems", width: 70 },
                     {
-                        title: "积分",
-                        width: 105,
-                        render: (_, row: ServerBatch) => `${row.consumedCredits}/${row.plannedCredits}`,
-                    },
-                    {
-                        title: "成本",
-                        width: 100,
-                        render: (_, row: ServerBatch) => `￥${row.consumedRmbCost.toFixed(6)}`,
-                    },
-                    {
                         title: "状态",
                         width: 95,
                         render: (_, row: ServerBatch) => <Tag color={statusColor[row.status]}>{statusText[row.status] || row.status}</Tag>,
@@ -198,7 +189,6 @@ export function TaskManagementPanel({ active = true }: { active?: boolean }) {
                         width: 95,
                         render: (_, row: ServerTaskSummary) => <Tag color={statusColor[row.status]}>{statusText[row.status] || row.status}</Tag>,
                     },
-                    { title: "积分", dataIndex: "credits", width: 70 },
                     { title: "重试", dataIndex: "attempts", width: 65 },
                     { title: "失败原因", dataIndex: "failureReason", ellipsis: true, width: 180 },
                     { title: "排队时间（北京时间）", dataIndex: "queuedAt", width: 200, render: (value: string) => formatBeijingDateTime(value) },
@@ -284,7 +274,8 @@ export function HistoryManagementPanel() {
     const exportCsv = async () => {
         setExporting(true);
         try {
-            saveAs(await exportAdminHistory(filters), `TruCreate历史-${Date.now()}.csv`);
+            const original = await exportAdminHistory(filters);
+            saveAs(new Blob([nonFinancialHistoryCsv(await original.text())], { type: "text/csv;charset=utf-8" }), `TruCreate历史-${Date.now()}.csv`);
             message.success("当前筛选结果已导出并写入审计日志");
         } catch (error) {
             message.error(error instanceof Error ? error.message : "历史导出失败");
@@ -343,8 +334,6 @@ export function HistoryManagementPanel() {
                         { title: "项目", dataIndex: "projectId", width: 160, ellipsis: true },
                         { title: "操作", dataIndex: "operationType", width: 130, render: adminLabel },
                         { title: "模型", dataIndex: "modelName", width: 140 },
-                        { title: "积分", dataIndex: "credits", width: 70 },
-                        { title: "成本", width: 120, render: (_, row: ServerHistorySummary) => `￥${row.rmbCost.toFixed(6)}` },
                         { title: "状态", width: 90, render: (_, row: ServerHistorySummary) => <Tag color={row.status === "success" ? "green" : "red"}>{statusText[row.status] || row.status}</Tag> },
                         { title: "提示词", dataIndex: "prompt", width: 220, ellipsis: true },
                         { title: "失败原因", dataIndex: "failureReason", width: 180, ellipsis: true },

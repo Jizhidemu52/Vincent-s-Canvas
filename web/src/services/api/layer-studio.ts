@@ -9,10 +9,10 @@ export type LayerStudioSubmission = { requestId: string; projectId: string; oper
 export class LayerStudioApiError extends Error {
     constructor(readonly status: number, readonly code: string) {
         // A front-office page must not expose provider identities, including to admins.
-        super(code === "PRICE_NOT_CONFIGURED" ? "费用尚未配置，暂不能创建新任务；已有结果仍可编辑和下载。"
+        super(code === "PRICE_NOT_CONFIGURED" ? "功能配置尚未就绪，暂不能创建新任务；已有结果仍可编辑和下载。"
             : status === 401 ? "登录已失效，请重新登录；原任务记录保留。"
                 : status === 403 ? "当前功能未开放或没有访问权限；已有结果记录保留。"
-                    : status === 400 || status === 422 ? "输入未通过检查，请核对图片、参数和费用配置。"
+                    : status === 400 || status === 422 ? "输入未通过检查，请核对图片和参数。"
                         : "服务暂不可用；已提交的任务请只查询原记录，不要重复生成。");
         this.name = "LayerStudioApiError";
     }
@@ -34,7 +34,7 @@ async function request<T>(path: string, body: unknown, signal?: AbortSignal): Pr
 export async function estimateLayerStudio(parameters: LayerStudioOptions, sourceCount: number, signal?: AbortSignal) {
     const { estimate } = await request<{ estimate: LayerStudioEstimate }>("/api/layer-studio/estimate", { parameters, sourceCount }, signal);
     if (estimate.currency !== "CNY" || !Number.isFinite(estimate.estimatedPrecharge) || estimate.estimatedPrecharge < 0
-        || !Number.isInteger(estimate.maximumOutputs) || estimate.maximumOutputs < 1) throw new Error("费用结果无效，未开放提交。");
+        || !Number.isInteger(estimate.maximumOutputs) || estimate.maximumOutputs < 1) throw new Error("任务配置核验失败，请稍后重试。");
     return estimate;
 }
 

@@ -6,7 +6,8 @@ test("repeat exports and saved-project controls remain fully reachable at 390px 
     await expect(page.getByRole("combobox", { name: "本地工程" })).toBeEnabled();
     await page.getByRole("spinbutton", { name: "宽度 / 厘米", exact: true }).fill("12");
     await page.getByRole("spinbutton", { name: "高度 / 厘米", exact: true }).fill("8");
-    await page.getByRole("combobox", { name: "输出分辨率 / DPI", exact: true }).selectOption("150");
+    await page.getByRole("combobox", { name: "输出分辨率 / DPI", exact: true }).click();
+    await page.locator(".ant-select-dropdown:visible .ant-select-item-option-content").getByText("150", { exact: true }).click();
     await page.getByTestId("repeat-mode-mirror").click();
     const exports = page.locator(".repeat-right .panel-body");
     await expect(exports).toContainText("1418 × 944");

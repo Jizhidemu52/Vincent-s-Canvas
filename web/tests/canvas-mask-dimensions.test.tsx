@@ -94,7 +94,7 @@ function dialog(image: { width: number; height: number }) {
 
 test("mask dialog exposes quality/output only and announces automatic size adaptation", () => {
     const legal = dialog({ width: 768, height: 1024 });
-    const labels = legal.filter(element => element.type === "select" || element.type === "input").map(element => element.props["aria-label"]);
+    const labels = legal.filter(element => element.props.options || element.type === "input").map(element => element.props["aria-label"]);
     expect(labels).toContain("图片质量"); expect(labels).toContain("输出格式");
     expect(labels).not.toContain("宽高比"); expect(labels).not.toContain("清晰度 / 分辨率");
     expect(labels).not.toContain("宽度"); expect(labels).not.toContain("高度");

@@ -1,5 +1,5 @@
 import { uiText, useUiText } from "@/lib/i18n";
-import { Button, Input, Segmented, Select, Typography } from "antd";
+import { Button, Input, Segmented, Select, Typography, Tooltip } from "antd";
 import { useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { buildGarmentRecipe, garmentReferencesMatch, garmentScenarios, GARMENT_BRIEF_TEXT_LIMIT, type GarmentBrief, type GarmentRecipe, type GarmentScenario } from "@/lib/garment-recipe";
@@ -109,7 +109,7 @@ export function GarmentRecipePanel({ references, disabled, onApply, onDraftChang
                     onChange={value => changeBrief({ scenario: value })}
                 /> : null}
                 {!references.length ? <p className="text-xs text-[var(--muted-foreground)]">{uiText("请先在参考图区添加服装图。")}</p> : references.length === 1 ? (
-                    primary ? <p className="truncate text-xs text-[var(--muted-foreground)]" title={imageLabel(primary)}>{uiText("服装图：")}{imageLabel(primary)}</p> : (
+                    primary ? <Tooltip title={imageLabel(primary)}><p className="truncate text-xs text-[var(--muted-foreground)]" >{uiText("服装图：")}{imageLabel(primary)}</p></Tooltip> : (
                         <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--muted-foreground)]">
                             <span>{uiText("原服装图已移除，请重新绑定。")}</span>
                             <Button size="small" disabled={disabled} onClick={() => changeBrief({ primaryId: references[0]!.id })}>{uiText("使用当前图片")}</Button>

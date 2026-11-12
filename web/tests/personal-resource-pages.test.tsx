@@ -71,7 +71,7 @@ function page(path: string, exportName: string, dependencies: Record<string, unk
     };
 }
 
-const dashboardData = (count: number) => ({ metrics: { validOutputs: count }, trend: [], directions: [], funnel: [], designers: [], failureReasons: [], tasks: [], assets: [], comparisons: null, options: { users: [], departments: [], groups: [] } });
+const dashboardData = (count: number) => ({ todayUsage: { date: "2026-11-12", timeZone: "Asia/Shanghai", users: 17 }, metrics: { validOutputs: count }, trend: [], directions: [], funnel: [], designers: [], failureReasons: [], tasks: [], assets: [], comparisons: null, options: { users: [], departments: [], groups: [] } });
 const countShown = (rendered: ReturnType<ReturnType<typeof page>["render"]>) => rendered.elements.find(element => element.props.label === "有效出图")?.props.value;
 
 test("performance keeps the newest filter result when earlier responses finish last", async () => {
@@ -82,6 +82,8 @@ test("performance keeps the newest filter result when earlier responses finish l
     const initial = h.render(); initial.elements.find(element => element.type === "Segmented")!.props.onChange("week"); h.render();
     pending[1].resolve(dashboardData(22)); await settle();
     expect(countShown(h.render())).toBe("22");
+    expect(h.render().elements.find(element => element.props.label === "今日使用人数")?.props.value).toBe("17");
+    expect(h.render().elements.some(element => ["成果下载率", "成果可用性均分", "返工率 / 按时交付率", "积分 / 人民币成本"].includes(element.props.label))).toBe(false);
     pending[0].resolve(dashboardData(99)); await settle();
     expect(countShown(h.render())).toBe("22");
     h.unmount();

@@ -27,7 +27,7 @@ function harness(compile: (...args: any[]) => Promise<unknown>, query: (id: stri
             useState: (initial: unknown) => { const index = cursor++; if (!(index in state)) state[index] = initial; return [state[index], (value: unknown) => { state[index] = value; }]; },
             useEffect: (callback: () => void | (() => void)) => { const index = cursor++; if (!(index in state)) { state[index] = true; const cleanup = callback(); if (cleanup) cleanups.push(cleanup); } },
         },
-        antd: { App: { useApp: () => ({ message: { success: (text: string) => notices.push(text), warning: (text: string) => notices.push(text), error: (text: string) => notices.push(text) } }) }, Button: () => null, Modal: () => null },
+        antd: { App: { useApp: () => ({ message: { success: (text: string) => notices.push(text), warning: (text: string) => notices.push(text), error: (text: string) => notices.push(text) } }) }, Button: () => null, Modal: () => null, Tooltip: () => null },
         "@/services/api/image": { optimizeImagePrompt: compile },
         "@/services/api/prompt-compilations": { getPromptCompilation: query, completedPromptCompilation, PromptCompilationUncertainError },
         "@/lib/client-id": { createClientId: () => "compile-request" },
@@ -39,8 +39,9 @@ function harness(compile: (...args: any[]) => Promise<unknown>, query: (id: stri
         render: (prompt = "Change blue", references: any[] = [], scopeKey = "", overrides: Record<string, unknown> = {}) => {
             cursor = 0;
             rendered = module.exports.PromptOptimizeButton({ config: { model: "image-model" }, operationType: "image_generation", prompt, references, scopeKey, onApply: (...args: unknown[]) => applied.push(args), ...overrides });
-            return rendered.props.children[0];
+            return rendered.props.children[0].props.children.props.children;
         },
+        tooltip: () => rendered.props.children[0].props.title,
         preview: () => rendered.props.children[1],
         apply: () => rendered.props.children[1].props.footer.props.children[1].props.onClick(),
         cancel: () => rendered.props.children[1].props.onCancel(),
@@ -83,7 +84,8 @@ test("upscaling explains plain-prompt usage and cannot post unsupported compilat
     const button = view.render("Enhance details", [], "", { operationType: "upscale", toolKey: "detail-enhance" });
     expect(button.props.disabled).toBe(true);
     expect(button.props.children).toBe("此操作不支持一键优化");
-    expect(button.props.title).toContain("可直接填写要求后生成");
+    expect(button.props.title).toBeUndefined();
+    expect(view.tooltip()).toContain("可直接填写要求后生成");
     button.props.onClick(); await tick();
     expect(calls).toBe(0);
 });

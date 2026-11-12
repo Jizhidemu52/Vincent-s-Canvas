@@ -7,6 +7,7 @@ import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import type { ModuleKey } from "@/services/api/modules";
 import { sceneSummaries } from "./scene-form-model";
 import { useNavigationPreferences } from "@/hooks/use-navigation-preferences";
+import { WorkbenchImage } from "@/components/workbench-image";
 import "./creative.css";
 
 const workbenches = [
@@ -29,7 +30,7 @@ export default function CreativePage() {
     const pinButton = (key: string, title: string) => {
         const isPinned = pinned.includes(key);
         const Icon = isPinned ? PinOff : Pin;
-        return <button type="button" className="m-3 mt-0 inline-flex min-h-8 items-center justify-center gap-1.5 self-end rounded-md px-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline focus-visible:outline-2" aria-label={uiText(isPinned ? "取消固定{label}" : "固定{label}", { label: uiText(title) })} aria-pressed={isPinned} onClick={() => togglePin(key)}><Icon size={14} />{uiText(isPinned ? "取消固定" : "固定到导航顶部")}</button>;
+        return <button type="button" className="m-3 mt-0 inline-flex min-h-8 items-center justify-center gap-1.5 self-end rounded-md px-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline focus-visible:outline-2" aria-label={uiText(isPinned ? "取消固定{label}" : "固定{label}", { label: uiText(title) })} aria-pressed={isPinned} onClick={() => togglePin(key)}><Icon size={14} />{uiText(isPinned ? "取消固定" : "固定到首页最近使用")}</button>;
     };
 
     return <main className="wb-page creative-page h-full overflow-y-auto">
@@ -45,7 +46,7 @@ export default function CreativePage() {
                         {items.map((preset) => <article key={preset.id} className="creative-card flex flex-col">
                             <Link to={buildCreativePresetHref(preset)} className="block flex-1 text-inherit no-underline">
                             <div className={`creative-cover${inputCovers[preset.id] ? " creative-input-cover" : ""}`}>
-                                <img src={inputCovers[preset.id]?.src ?? `/creative-scenes/v2/${preset.id}.preview.webp`} alt={inputCovers[preset.id] ? uiText(inputCovers[preset.id].label) : uiText("{input} → {output}的功能示意", { input: uiText(sceneSummaries[preset.id]?.input || ""), output: uiText(sceneSummaries[preset.id]?.output || "") })} loading="lazy" decoding="async" />
+                                <WorkbenchImage src={inputCovers[preset.id]?.src ?? `/creative-scenes/v2/${preset.id}.preview.webp`} alt={inputCovers[preset.id] ? uiText(inputCovers[preset.id].label) : uiText("{input} → {output}的功能示意", { input: uiText(sceneSummaries[preset.id]?.input || ""), output: uiText(sceneSummaries[preset.id]?.output || "") })} loading="lazy" decoding="async" />
                                 <div className="creative-cover-flow" aria-hidden="true">{inputCovers[preset.id] ? <span>{uiText(inputCovers[preset.id].label)}</span> : <><span>{uiText(sceneSummaries[preset.id]?.input || "")}</span><ArrowRight size={15} /><span>{uiText(sceneSummaries[preset.id]?.output || "")}</span></>}</div>
                             </div>
                             <div className="creative-card-copy"><h3>{uiText(preset.title || "")}<ArrowRight size={16} strokeWidth={1.5} /></h3><p>{uiText(preset.description || "")}</p></div>

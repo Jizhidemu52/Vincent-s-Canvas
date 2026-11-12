@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test";
 import { test, expect, IMAGE } from "./fixtures";
 import { toolDefinitions } from "../../shared/feature-catalog";
+import { chooseAntSelect } from "./antd-select-helpers";
 
 const models = [
     { id: "10000000-0000-4000-8000-000000000026", name: "aplmart-gpt2.6-flare", imageParameterProfile: "quality-resolution-v2" },
@@ -22,12 +23,12 @@ async function settings(page: Page) {
 test("GPT2.6 GIF controls reach one request with valid frame parameters and no static resolution", async ({ page, api }, info) => {
     await setup(page);
     const dialog = await settings(page);
-    await dialog.getByRole("combobox", { name: "输出格式", exact: true }).selectOption("gif");
-    await dialog.getByRole("combobox", { name: "宽高比", exact: true }).selectOption("512x512");
+    await chooseAntSelect(dialog.getByRole("combobox", { name: "输出格式", exact: true }), "GIF");
+    await chooseAntSelect(dialog.getByRole("combobox", { name: "宽高比", exact: true }), "512x512 · 512 × 512");
     await dialog.getByRole("spinbutton", { name: "GIF 帧数", exact: true }).fill("12");
     await dialog.getByRole("spinbutton", { name: "GIF 每帧时长（毫秒）", exact: true }).fill("120");
-    await dialog.getByRole("combobox", { name: "规划强度", exact: true }).selectOption("high");
-    await dialog.getByRole("combobox", { name: "内容审核强度", exact: true }).selectOption("auto");
+    await chooseAntSelect(dialog.getByRole("combobox", { name: "规划强度", exact: true }), "高");
+    await chooseAntSelect(dialog.getByRole("combobox", { name: "内容审核强度", exact: true }), "自动");
     await expect(dialog.getByRole("combobox", { name: "清晰度 / 分辨率", exact: true })).toHaveCount(0);
     await expect(dialog.getByLabel("上传独立透明 PNG 标注层", { exact: true })).toHaveCount(0);
     await page.screenshot({ path: info.outputPath("gpt26-gif-controls.png") });
@@ -51,7 +52,7 @@ test("GPT2.6 markup uploads separately and model switching removes unsupported o
     let dialog = await settings(page);
     await dialog.getByLabel("上传独立透明 PNG 标注层", { exact: true }).setInputFiles({ name: "markup.png", mimeType: "image/png", buffer: IMAGE });
     await expect(dialog.getByRole("button", { name: "移除标注层", exact: true })).toBeVisible();
-    await dialog.getByRole("combobox", { name: "规划强度", exact: true }).selectOption("medium");
+    await chooseAntSelect(dialog.getByRole("combobox", { name: "规划强度", exact: true }), "中");
     await page.screenshot({ path: info.outputPath("gpt26-markup-controls.png") });
     await dialog.getByRole("button", { name: "关闭模型设置", exact: true }).click();
     await page.getByRole("button", { name: "开始生成", exact: true }).click();
@@ -67,6 +68,10 @@ test("GPT2.6 markup uploads separately and model switching removes unsupported o
     await page.locator(`[role="option"][data-usage-value="${models[1]!.id}"]`).click();
     await expect(dialog.getByLabel("上传独立透明 PNG 标注层", { exact: true })).toHaveCount(0);
     await expect(dialog.getByRole("combobox", { name: "规划强度", exact: true })).toHaveCount(0);
-    expect(await dialog.getByRole("combobox", { name: "输出格式", exact: true }).locator("option").evaluateAll(options => options.map(option => (option as HTMLOptionElement).value))).not.toContain("gif");
+    await dialog.getByRole("combobox", { name: "输出格式", exact: true }).click();
+    const formats = page.locator(".ant-select-dropdown:visible .ant-select-item-option");
+    await expect(formats).toHaveCount(4);
+    expect(await formats.evaluateAll(options => options.map(option => option.getAttribute("title")))).toEqual(["默认", "PNG", "JPEG", "WebP"]);
+    await page.keyboard.press("Escape");
     expect(api.submissions).toHaveLength(1); expect(api.pageErrors).toEqual([]); expect(api.blocked).toEqual([]);
 });

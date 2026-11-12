@@ -2,7 +2,7 @@ import { uiText, useUiText } from "@/lib/i18n";
 import { formatBeijingTime } from "@/lib/beijing-time";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { App, Button, Empty, Image, InputNumber, Segmented, Tag } from "antd";
-import { ClipboardPaste, Download, FolderPlus, Grid2x2, ImagePlus, LoaderCircle, RotateCcw, Upload } from "lucide-react";
+import { ClipboardPaste, Download, FolderPlus, Grid2x2, ImagePlus, LoaderCircle, Plus, RotateCcw, Upload } from "lucide-react";
 import { saveAs } from "file-saver";
 import { nanoid } from "nanoid";
 import { useSearchParams } from "react-router-dom";
@@ -35,6 +35,8 @@ import { useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-
 import { useThemeStore } from "@/stores/use-theme-store";
 import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
+import "./seamless-workbench.css";
+import { WorkbenchImage } from "@/components/workbench-image";
 
 const SEAMLESS_PRESETS = {
     small: { cutWidth: 100, redrawWidth: 100, blurAmount: 50, redrawStrength: 0.5, steps: 12 },
@@ -53,7 +55,8 @@ export function SeamlessStitchPage() {
 
 export function SeamlessStitchWorkspace() {
     useUiText();
-    const { id: workspaceId, active: workspaceActive, draftScope } = useWorkbenchTask();
+    const workbenchTask = useWorkbenchTask();
+    const { id: workspaceId, active: workspaceActive, draftScope } = workbenchTask;
     const [stitchTaskStore] = useState(() => createWorkspaceStorage("seamless_stitch_tasks"));
     const { message, modal } = App.useApp();
     const [searchParams] = useSearchParams();
@@ -86,6 +89,9 @@ export function SeamlessStitchWorkspace() {
     const [preset, setPreset, presetReady] = useGenerationDraft<StitchPreset>(draftScope("seamless-stitch:preset"), workspaceId === DEFAULT_WORKBENCH_TASK && searchParams.get("preset") === "small" ? "small" : "large");
     const [parameters, setParameters, parametersReady] = useGenerationDraft<SeamlessStitchParameters>(draftScope("seamless-stitch:parameters"), readSeamlessParameters(workspaceId === DEFAULT_WORKBENCH_TASK ? searchParams : new URLSearchParams()));
     const [result, setResult] = useState<StitchResult>({ status: "idle" });
+    const [historyResult, setHistoryResult] = useState<StitchResult>({ status: "idle" });
+    const [resultView, setResultView] = useState<"current" | "history">("current");
+    const displayedResult = resultView === "history" ? historyResult : result;
     const [running, setRunning] = useState(false);
     const [readingSource, setReadingSource] = useState(false);
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
@@ -146,16 +152,18 @@ export function SeamlessStitchWorkspace() {
         }
     }, [workspaceId, stitchTaskStore]);
 
-    const openHistoryTask = async (task: QueuedTask) => {
+    const openHistoryTask = async (task: QueuedTask, initial = false) => {
         const imageUrl = task.resultUrls[0];
-        if (!imageUrl || submitLockRef.current) return;
+        if (!imageUrl) return;
         const sequence = ++previewSequenceRef.current;
+        if (!initial) setResultView("history");
         setPreviewLoading(true);
         try {
             const image = await loadSeamlessPreview(imageUrl);
             if (!mountedRef.current || sequence !== previewSequenceRef.current) return;
             restoredHistoryTaskIdRef.current = task.id;
-            setResult({ status: "success", image, durationMs: 0 });
+            if (initial) setResult({ status: "success", image, durationMs: 0 });
+            else setHistoryResult({ status: "success", image, durationMs: 0 });
         } catch (error) {
             if (sequence === previewSequenceRef.current) message.error(error instanceof Error ? uiText(error.message) : uiText("历史图片读取失败"));
         } finally {
@@ -183,11 +191,11 @@ export function SeamlessStitchWorkspace() {
         if (!latest || latest.id === restoredHistoryTaskIdRef.current) return;
         // Auto-restore once; a broken preview can still be retried explicitly.
         restoredHistoryTaskIdRef.current = latest.id;
-        void openHistoryTask(latest);
+        void openHistoryTask(latest, true);
     }, [history, result.status, running, previewLoading]);
 
     const setSourceFromBlob = async (blob: Blob, name: string) => {
-        if (sourceReadRef.current || submitLockRef.current) return;
+        if (sourceReadRef.current) return;
         const owner = useUserStore.getState().user?.id;
         sourceReadRef.current = true; setReadingSource(true);
         try {
@@ -205,7 +213,7 @@ export function SeamlessStitchWorkspace() {
 
     const imageDrop = useImageDrop({
         scopeKey: draftScope("seamless-stitch:source"),
-        disabled: !workspaceActive || !draftReady || running || readingSource || user?.status !== "active",
+        disabled: !workspaceActive || !draftReady || readingSource || user?.status !== "active",
         onFiles: async files => {
             if (files.length !== 1) throw new Error("每个参考图位置一次只能拖入一张图片，请分别放入对应位置。");
             await setSourceFromBlob(files[0]!, files[0]!.name);
@@ -272,17 +280,18 @@ export function SeamlessStitchWorkspace() {
             return;
         }
         if ((deploymentFeatures.creditsEnabled && !estimatedUsage.configured) || !seamlessModel) {
-            message.error(uiText("管理员尚未启用无缝拼接模型或价格"));
+            message.error(uiText("管理员尚未完成无缝拼接配置"));
             return;
         }
         if (deploymentFeatures.creditsEnabled && currentUser && estimatedUsage.configured && currentUser.creditBalance < estimatedUsage.credits) {
-            message.error(uiText("额度不足：需要 {credits} 积分，当前剩余 {creditBalance} 积分", { credits: estimatedUsage.credits, creditBalance: currentUser.creditBalance }));
+            message.error(uiText("当前账号暂时无法提交，请联系管理员"));
             return;
         }
 
         const startedAt = performance.now();
         ++previewSequenceRef.current;
         setPreviewLoading(false);
+        setResultView("current");
         setResult({ status: "pending" });
             const response = await requestSeamlessStitch(activeSource, parameters, config, {
                 requestId,
@@ -333,7 +342,7 @@ export function SeamlessStitchWorkspace() {
                 },
             });
             setResult({ status: "success", image: uploaded, durationMs: performance.now() - startedAt });
-            message.success(!deploymentFeatures.creditsEnabled ? uiText("无缝拼接完成") : uiText("无缝拼接完成，预计消耗 {credits} 积分", { credits: estimatedUsage.credits }));
+            message.success(uiText("无缝拼接完成"));
         } catch (error) {
             if (useUserStore.getState().user?.id !== ownerId) return;
             const unresolved = submitted && !(error instanceof QueuedTaskFailedError) && (Boolean(taskId) || error instanceof QueuedTaskSubmissionUncertainError);
@@ -376,11 +385,10 @@ export function SeamlessStitchWorkspace() {
             const firstAssetId = payload.template.referenceAssetIds[0];
             if (firstAssetId) await setSourceFromBlob(await fetchServerAssetContent(firstAssetId), "模板参考图.png");
             payload.warnings.forEach((warning) => message.warning(uiText(warning)));
-            const cost = payload.pricing.estimate?.totalCredits ?? estimatedUsage.credits;
             if (payload.mode === "fill_and_generate") {
                 if (!firstAssetId) message.info(uiText("模板参数已填入，请先选择一张图片后再生成。"));
-                else modal.confirm({ title: uiText("确认开始无缝拼接？"), content: !deploymentFeatures.creditsEnabled ? uiText("确认后将直接提交生成任务。") : uiText("当前实际消耗 {cost} 积分。确认后才会提交任务并扣费。", { cost: cost }), okText: uiText("确认生成"), cancelText: uiText("仅保留填入"), onOk: () => runStitchRef.current() });
-            } else message.success(!deploymentFeatures.creditsEnabled ? uiText("模板已填入") : uiText("模板已填入，当前消耗 {cost} 积分/次", { cost: cost }));
+                else modal.confirm({ title: uiText("确认开始无缝拼接？"), content: uiText("确认后将直接提交生成任务。"), okText: uiText("确认生成"), cancelText: uiText("仅保留填入"), onOk: () => runStitchRef.current() });
+            } else message.success(uiText("模板已填入"));
         }).catch((error) => {
             loadedReuseTokenRef.current.delete(token);
             message.error(error instanceof Error ? uiText(error.message) : uiText("模板复用失败"));
@@ -388,59 +396,57 @@ export function SeamlessStitchWorkspace() {
     }, [estimatedUsage.credits, message, modal, searchParams, updateConfig, config.model]);
 
     return (
-        <div className="wb-page flex h-full min-h-0 flex-col overflow-hidden">
-            <main className="grid min-h-0 flex-1 gap-4 overflow-y-auto p-4 xl:grid-cols-[340px_minmax(0,1fr)_210px] xl:overflow-hidden">
-                <section {...imageDrop.dropProps} aria-busy={imageDrop.reading || readingSource} className={`wb-surface thin-scrollbar flex min-h-0 flex-col overflow-y-auto p-4${imageDrop.dragging ? " outline outline-2 outline-offset-2 outline-primary" : ""}`}>
+        <div className="wb-page stitch-workbench flex h-full min-h-0 flex-col overflow-hidden">
+            <main className="stitch-workbench-layout min-h-0 flex-1">
+                <section {...imageDrop.dropProps} aria-busy={imageDrop.reading || readingSource} className={`wb-surface stitch-form flex min-h-0 flex-col p-4${imageDrop.dragging ? " outline outline-2 outline-offset-2 outline-primary" : ""}`}>
+                    <div className="thin-scrollbar stitch-form-fields min-h-0 flex-1 overflow-y-auto">
                     {imageDrop.dragging || imageDrop.reading || readingSource ? <p role="status" className="mb-3 rounded-lg bg-primary/10 p-3 text-sm">{uiText(imageDrop.dragging ? "松开以添加参考图片，不会自动生成。" : "正在读取拖入图片，请稍候。")}</p> : null}
                     <div className="flex items-start justify-between gap-3">
                         <div>
-                            <div className="mb-3 grid size-10 place-items-center rounded-lg bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-300">
+                            <div className="mb-3 grid size-10 place-items-center rounded-lg bg-muted text-foreground">
                                 <Grid2x2 className="size-5" />
                             </div>
-                            <h1 className="text-2xl font-semibold">{uiText("无缝拼接")}</h1>
-                            <p className="mt-2 text-sm leading-6 text-stone-500 dark:text-stone-400">{uiText("把单张花纹或纹理处理成可连续平铺的无缝素材。")}</p>
+                            <h1 className="wb-title">{uiText("无缝拼接")}</h1>
+                            <p className="mt-2 text-sm leading-6 text-muted-foreground">{uiText("把单张花纹或纹理处理成可连续平铺的无缝素材。")}</p>
                         </div>
-                        <Tag className="m-0 shrink-0">
-                            {!deploymentFeatures.creditsEnabled ? uiText("不计积分") : uiText("{credits} 积分/次", { credits: estimatedUsage.credits })}
-                        </Tag>
                     </div>
 
                     <div className="mt-6">
                         <div className="mb-2 flex items-center justify-between gap-3">
                             <span className="text-base font-semibold">{uiText("输入图片")}</span>
                             <div className="flex gap-2">
-                                <Button size="small" disabled={running || readingSource || imageDrop.reading} icon={<ClipboardPaste className="size-3.5" />} onClick={() => void pasteSource()}>
+                                <Button size="small" disabled={readingSource || imageDrop.reading} icon={<ClipboardPaste className="size-3.5" />} onClick={() => void pasteSource()}>
                                     {uiText("粘贴")}</Button>
-                                <Button size="small" disabled={running || readingSource || imageDrop.reading} icon={<FolderPlus className="size-3.5" />} onClick={() => setAssetPickerOpen(true)}>
+                                <Button size="small" disabled={readingSource || imageDrop.reading} icon={<FolderPlus className="size-3.5" />} onClick={() => setAssetPickerOpen(true)}>
                                     {uiText("素材库")}</Button>
-                                <Button size="small" disabled={running || readingSource || imageDrop.reading} icon={<Upload className="size-3.5" />} onClick={() => fileInputRef.current?.click()}>
+                                <Button size="small" disabled={readingSource || imageDrop.reading} icon={<Upload className="size-3.5" />} onClick={() => fileInputRef.current?.click()}>
                                     {uiText("上传")}</Button>
                             </div>
                         </div>
                         <button
                             type="button"
-                            disabled={running || readingSource || imageDrop.reading}
-                            className="group relative flex aspect-[4/3] w-full items-center justify-center overflow-hidden rounded-lg border border-dashed border-stone-300 bg-stone-50 transition hover:border-stone-500 dark:border-stone-700 dark:bg-stone-950/30"
+                            disabled={readingSource || imageDrop.reading}
+                            className="group relative flex aspect-[4/3] w-full items-center justify-center overflow-hidden rounded-lg border border-dashed border-border bg-muted transition hover:border-border"
                             onClick={() => fileInputRef.current?.click()}
                         >
                             {source ? (
-                                <img src={source.dataUrl} alt={source.name} className="size-full object-contain" />
+                                <WorkbenchImage src={source.dataUrl} alt={source.name} className="size-full object-contain" />
                             ) : (
-                                <span className="flex flex-col items-center gap-3 text-sm text-stone-500">
-                                    <span className="grid size-12 place-items-center rounded-full bg-white text-stone-500 shadow-sm dark:bg-stone-900">
+                                <span className="flex flex-col items-center gap-3 text-sm text-muted-foreground">
+                                    <span className="grid size-12 place-items-center rounded-full bg-white text-muted-foreground shadow-sm">
                                         <ImagePlus className="size-5" />
                                     </span>
                                     {uiText("选择一张花纹或纹理图片")}</span>
                             )}
                         </button>
-                        {source ? <div className="mt-2 truncate text-xs text-stone-500">{source.name}</div> : null}
+                        {source ? <div className="mt-2 truncate text-xs text-muted-foreground">{source.name}</div> : null}
                     </div>
 
                     <div className="mt-5">
                         <span className="mb-2 block text-sm font-semibold">{uiText("处理模型")}</span>
-                        <ModelPicker toolKey="seamless-stitch" config={config} value={config.model} onChange={(value) => updateConfig("imageModel", value)} capability="image" modelsSource="server" fullWidth disabled={running} className="h-10 rounded-lg" onMissingConfig={() => openConfigDialog(false)} />
+                        <ModelPicker toolKey="seamless-stitch" config={config} value={config.model} onChange={(value) => updateConfig("imageModel", value)} capability="image" modelsSource="server" fullWidth className="h-10 rounded-lg" onMissingConfig={() => openConfigDialog(false)} />
                     </div>
-                    {usesImageSettings ? <fieldset disabled={running} className="mt-4 min-w-0 border-0 p-0">
+                    {usesImageSettings ? <fieldset className="mt-4 min-w-0 border-0 p-0">
                         <ImageSettingsPanel config={config} referenceCount={source ? 1 : 0} onConfigChange={updateConfig} onConfigNormalize={(key, value) => { if (configReady) updateConfig(key, value); }} theme={theme} maxCount={1} showTitle={false} className="space-y-4" />
                         <p className="mt-3 text-xs leading-5" style={{ color: theme.node.muted }}>{uiText("按参考图生成四方连续平铺的花型单元，保留原图元素、配色与风格。此模式不使用内部工作流的切割、重绘或步数参数；生成后请检查平铺接缝。")}</p>
                     </fieldset> : <><div className="mt-5">
@@ -448,7 +454,6 @@ export function SeamlessStitchWorkspace() {
                         <Segmented
                             block
                             value={preset}
-                            disabled={running}
                             options={[{ label: uiText("小花"), value: "small" }, { label: uiText("大花"), value: "large" }, { label: uiText("自定义"), value: "custom" }]}
                             onChange={(value) => {
                                 const nextPreset = value as StitchPreset;
@@ -458,101 +463,102 @@ export function SeamlessStitchWorkspace() {
                         />
                     </div>
                     <div className="mt-3 grid grid-cols-2 gap-3">
-                        <ParameterField label={uiText("切割宽度")} value={parameters.cutWidth} disabled={running} onChange={(value) => updateParameter(setParameters, setPreset, "cutWidth", value)} />
-                        <ParameterField label={uiText("重绘宽度")} value={parameters.redrawWidth} disabled={running} onChange={(value) => updateParameter(setParameters, setPreset, "redrawWidth", value)} />
-                        <ParameterField label={uiText("羽化")} value={parameters.blurAmount} disabled={running} onChange={(value) => updateParameter(setParameters, setPreset, "blurAmount", value)} />
-                        <ParameterField label={uiText("重绘强度")} value={parameters.redrawStrength} disabled={running} min={0} max={1} step={0.1} onChange={(value) => updateParameter(setParameters, setPreset, "redrawStrength", value)} />
-                        <ParameterField label={uiText("步数")} value={parameters.steps} disabled={running} max={100} onChange={(value) => updateParameter(setParameters, setPreset, "steps", value)} />
+                        <ParameterField label={uiText("切割宽度")} value={parameters.cutWidth} onChange={(value) => updateParameter(setParameters, setPreset, "cutWidth", value)} />
+                        <ParameterField label={uiText("重绘宽度")} value={parameters.redrawWidth} onChange={(value) => updateParameter(setParameters, setPreset, "redrawWidth", value)} />
+                        <ParameterField label={uiText("羽化")} value={parameters.blurAmount} onChange={(value) => updateParameter(setParameters, setPreset, "blurAmount", value)} />
+                        <ParameterField label={uiText("重绘强度")} value={parameters.redrawStrength} min={0} max={1} step={0.1} onChange={(value) => updateParameter(setParameters, setPreset, "redrawStrength", value)} />
+                        <ParameterField label={uiText("步数")} value={parameters.steps} max={100} onChange={(value) => updateParameter(setParameters, setPreset, "steps", value)} />
                     </div>
-                    <div className="mt-2 text-xs leading-5 text-stone-400">{uiText("小花推荐 100 / 100 / 50 / 0.5；大花推荐 200 / 200 / 100 / 1。参数由真实内部工作流处理。")}</div></>}
+                    <div className="mt-2 text-xs leading-5 text-muted-foreground">{uiText("小花推荐 100 / 100 / 50 / 0.5；大花推荐 200 / 200 / 100 / 1。参数由真实内部工作流处理。")}</div></>}
 
-                    <div className="mt-auto pt-6">
-                        <div className="mb-3 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-xs dark:border-stone-800 dark:bg-stone-950">
-                            <div className="flex items-center justify-between gap-3">
-                                <span>{!deploymentFeatures.creditsEnabled ? uiText("不计积分") : uiText("本次消耗 {credits} 积分", { credits: estimatedUsage.credits })}</span>
-                                <span>{deploymentFeatures.authenticationEnabled ? uiText("个人工作区") : uiText("本机试用")}</span>
-                            </div>
-                            {quotaBlocked ? <div className="mt-1 text-red-500">{uiText("额度不足，无法提交任务。")}</div> : null}
-                        </div>
-                        {!seamlessModel ? <p className="mb-3 text-xs leading-5 text-stone-500">{uiText("此工具尚未配置，管理员启用无缝拼接模型后即可使用。")}</p> : null}
+                    </div>
+                    <div className="stitch-submit shrink-0 pt-4">
+                        {!source && draftReady ? <p role="status" className="text-[13px] text-muted-foreground">{uiText("请先上传一张需要无缝拼接的图片")}</p> : null}
+                        {quotaBlocked ? <p role="status" className="text-sm text-destructive">{uiText("当前账号暂时无法提交，请联系管理员")}</p> : null}
+                        {!seamlessModel ? <p className="mb-3 text-xs leading-5 text-muted-foreground">{uiText("此工具尚未配置，管理员启用无缝拼接模型后即可使用。")}</p> : null}
                         {historyPending && !running ? <p role="status" className="mb-2 text-xs text-muted-foreground">{uiText("原任务仍在处理或待核查；可新建独立任务，当前请求不会自动重发。")}</p> : null}
-                        <Button type="primary" size="large" block icon={<Grid2x2 className="size-4" />} loading={running} disabled={!draftReady || !historyReady || historyPending || !source || (deploymentFeatures.creditsEnabled && !estimatedUsage.configured) || !seamlessModel || running || readingSource || imageDrop.reading || quotaBlocked} onClick={() => void runStitch()}>
-                            {uiText("开始无缝拼接")}</Button>
+                        <Button block icon={<Plus className="size-4" />} loading={workbenchTask.creating} disabled={!workbenchTask.ready || workbenchTask.creating} onClick={() => void workbenchTask.createNewTask()}>{uiText("新建任务，继续创作")}</Button>
+                        <Button type="primary" size="large" block aria-label={uiText("开始无缝拼接")} icon={<Grid2x2 className="size-4" />} loading={running} disabled={!draftReady || !historyReady || historyPending || !source || (deploymentFeatures.creditsEnabled && !estimatedUsage.configured) || !seamlessModel || running || readingSource || imageDrop.reading || quotaBlocked} onClick={() => void runStitch()}>
+                            {uiText(running ? "正在处理无缝拼接" : "开始无缝拼接")}</Button>
                     </div>
                 </section>
 
-                <section className="wb-surface thin-scrollbar min-h-0 overflow-y-auto p-4 lg:p-5">
+                <section className="wb-surface thin-scrollbar stitch-result-panel min-h-0 overflow-y-auto p-4 lg:p-5">
+                    <div role="tablist" aria-label={uiText("无缝拼接结果视图")} className="stitch-result-tabs mb-4">
+                        <button type="button" role="tab" aria-selected={resultView === "current"} onClick={() => setResultView("current")}>{uiText("本次结果")}</button>
+                        <button type="button" role="tab" aria-selected={resultView === "history"} onClick={() => setResultView("history")}>{uiText("历史记录")}</button>
+                    </div>
+                    <div className="stitch-preview">
                     <div className="mb-4 flex items-center justify-between gap-3">
                         <h2 className="text-lg font-semibold">{uiText("处理结果")}</h2>
-                        {previewLoading ? <span role="status" className="text-xs text-stone-500">{uiText("正在读取历史图片…")}</span> : null}
-                        {result.status === "success" ? <Tag color="green">{uiText("已完成")}</Tag> : result.status === "pending" ? <Tag color="orange">{uiText("处理中")}</Tag> : null}
+                        {previewLoading ? <span role="status" className="text-xs text-muted-foreground">{uiText("正在读取历史图片…")}</span> : null}
+                        {displayedResult.status === "success" ? <Tag color="green">{uiText("已完成")}</Tag> : displayedResult.status === "pending" ? <Tag color="orange">{uiText("处理中")}</Tag> : null}
                     </div>
-                    {result.status === "pending" ? (
-                        <div className="flex min-h-[520px] flex-col items-center justify-center rounded-lg border border-dashed border-orange-300 bg-orange-50/30 text-stone-500 dark:bg-orange-950/10">
+                    {displayedResult.status === "pending" ? (
+                        <div className="flex min-h-[520px] flex-col items-center justify-center rounded-lg border border-dashed border-orange-300 bg-orange-50/30 text-muted-foreground dark:bg-orange-950/10">
                             <LoaderCircle className="mb-3 size-8 animate-spin text-orange-500" />
                             <span className="text-sm">{uiText("正在生成无缝纹理")}</span>
                         </div>
-                    ) : result.status === "success" ? (
+                    ) : displayedResult.status === "success" ? (
                         <div>
                             <div className="mb-3 flex flex-wrap items-center gap-3">
                                 <Segmented name="seamless-preview" aria-label={uiText("结果预览方式")} value={previewMode} onChange={value => setPreviewMode(value as "single" | "repeat")} options={[{ label: "单图", value: "single" }, { label: "2×2 平铺", value: "repeat" }]} />
                                 <span className="text-xs" style={{ color: theme.node.muted }}>{uiText("平铺检查接缝，不改变原图或下载文件。")}</span>
                             </div>
-                            <div className="overflow-hidden rounded-lg border border-stone-200 bg-stone-100 dark:border-stone-800 dark:bg-stone-950">
-                                {previewMode === "repeat" ? <div role="img" aria-label={uiText("无缝拼接结果 2×2 平铺预览")} className="w-full" style={{ aspectRatio: `${result.image.width} / ${result.image.height}`, backgroundImage: `url(${JSON.stringify(result.image.url)})`, backgroundSize: "50% 50%", backgroundRepeat: "repeat" }} /> : <Image src={result.image.url} alt={uiText("无缝拼接结果")} className="max-h-[620px] w-full object-contain" />}
+                            <div className="overflow-hidden rounded-lg border border-border bg-muted">
+                                {previewMode === "repeat" ? <div role="img" aria-label={uiText("无缝拼接结果 2×2 平铺预览")} className="w-full" style={{ aspectRatio: `${displayedResult.image.width} / ${displayedResult.image.height}`, backgroundImage: `url(${JSON.stringify(displayedResult.image.url)})`, backgroundSize: "50% 50%", backgroundRepeat: "repeat" }} /> : <Image src={displayedResult.image.url} alt={uiText("无缝拼接结果")} className="max-h-[620px] w-full object-contain" />}
                             </div>
                             <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-                                <div className="text-xs text-stone-500">
-                                    {result.durationMs ? uiText("{width}×{height} · {value3} 秒", { width: result.image.width, height: result.image.height, value3: (result.durationMs / 1000).toFixed(1) }) : uiText("历史处理结果")}
+                                <div className="text-xs text-muted-foreground">
+                                    {displayedResult.durationMs ? uiText("{width}×{height} · {value3} 秒", { width: displayedResult.image.width, height: displayedResult.image.height, value3: (displayedResult.durationMs / 1000).toFixed(1) }) : uiText("历史处理结果")}
                                 </div>
                                 <div className="flex gap-2">
                                     <Button
                                         icon={<RotateCcw className="size-4" />}
                                         onClick={() => {
-                                            const nextSource = { id: nanoid(), name: "seamless-result.png", type: result.image.mimeType, dataUrl: result.image.url, url: result.image.url, storageKey: result.image.storageKey };
+                                            const nextSource = { id: nanoid(), name: "seamless-result.png", type: displayedResult.image.mimeType, dataUrl: displayedResult.image.url, url: displayedResult.image.url, storageKey: displayedResult.image.storageKey };
                                             sourceRef.current = nextSource;
                                             setSource(nextSource);
                                         }}
                                     >
                                         {uiText("继续拼接")}</Button>
-                                    <Button type="primary" icon={<Download className="size-4" />} onClick={() => saveAs(result.image.url, "seamless-stitch.png")}>
+                                    <Button icon={<Download className="size-4" />} onClick={() => saveAs(displayedResult.image.url, "seamless-stitch.png")}>
                                         {uiText("下载结果")}</Button>
                                 </div>
                             </div>
                         </div>
-                    ) : result.status === "failed" ? (
+                    ) : displayedResult.status === "failed" ? (
                         <div className="flex min-h-[520px] flex-col items-center justify-center rounded-lg border border-red-200 bg-red-50 px-6 text-center dark:border-red-950 dark:bg-red-950/20">
-                            <p className="max-w-lg text-sm text-red-600 dark:text-red-300">{uiText(result.error || "")}</p>
+                            <p className="max-w-lg text-sm text-red-600 dark:text-red-300">{uiText(displayedResult.error || "")}</p>
                             <Button className="mt-4" icon={<RotateCcw className="size-4" />} onClick={() => void runStitch()}>
                                 {uiText("重新处理")}</Button>
                         </div>
                     ) : (
-                        <div className="flex min-h-[520px] flex-col items-center justify-center rounded-lg border border-dashed border-stone-300 dark:border-stone-700">
-                            <Grid2x2 className="mb-4 size-12 text-stone-300" />
+                        <div className="flex min-h-[520px] flex-col items-center justify-center rounded-lg border border-dashed border-border">
+                            <Grid2x2 className="mb-4 size-12 text-muted-foreground" />
                             <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={uiText("先上传花纹图片，选择模型并调整参数，再点击开始无缝拼接")} />
                         </div>
                     )}
-                </section>
-
-                <aside className="wb-surface thin-scrollbar min-h-0 overflow-y-auto p-4">
+                    </div>
+                {resultView === "history" ? <aside className="stitch-history-panel">
                     <div className="mb-4 flex items-center justify-between gap-3">
                         <div>
                             <h2 className="text-base font-semibold">{uiText("历史出图")}</h2>
-                            <p className="mt-1 text-xs text-stone-500">{uiText("最近 20 条无缝拼接任务")}</p>
+                            <p className="mt-1 text-xs text-muted-foreground">{uiText("最近 20 条无缝拼接任务")}</p>
                         </div>
                         <Tag>{history.length}</Tag>
                     </div>
-                    {historyLoading ? <p role="status" className="py-8 text-center text-xs text-stone-500">{uiText("正在加载历史…")}</p> : null}
-                    {historyError ? <div role="alert" className="mb-3 text-xs leading-5 text-stone-500">{historyError}<Button size="small" className="mt-2" onClick={() => void refreshHistory()}>{uiText("重试")}</Button></div> : null}
+                    {historyLoading ? <p role="status" className="py-8 text-center text-xs text-muted-foreground">{uiText("正在加载历史…")}</p> : null}
+                    {historyError ? <div role="alert" className="mb-3 text-xs leading-5 text-muted-foreground">{historyError}<Button size="small" className="mt-2" onClick={() => void refreshHistory()}>{uiText("重试")}</Button></div> : null}
                     {history.length ? (
                         <div className="space-y-3">
                             {history.map((task) => {
                                 const imageUrl = task.resultUrls[0];
                                 const time = `${formatBeijingTime(task.createdAt)} ${uiText("北京时间")}`;
                                 return (
-                                    <article key={task.id} className="overflow-hidden rounded-lg border border-stone-200 bg-stone-50 dark:border-stone-800 dark:bg-stone-950">
-                                        {task.status === "success" && imageUrl ? <button type="button" disabled={running} className="block w-full" onClick={() => void openHistoryTask(task)} title={uiText("查看处理结果")}><img loading="lazy" decoding="async" src={imageUrl} alt={uiText("无缝拼接历史结果")} className="aspect-square w-full object-cover transition hover:opacity-80" /></button> : (
-                                            <div className="flex aspect-square flex-col items-center justify-center gap-2 px-3 text-center text-xs text-stone-500">
+                                    <article key={task.id} className="overflow-hidden rounded-lg border border-border bg-muted">
+                                        {task.status === "success" && imageUrl ? <button type="button" className="block w-full" onClick={() => void openHistoryTask(task)} aria-label={uiText("查看处理结果")}><WorkbenchImage loading="lazy" decoding="async" src={imageUrl} alt={uiText("无缝拼接历史结果")} className="aspect-[4/3] w-full object-contain transition hover:opacity-80" /></button> : (
+                                            <div className="flex aspect-square flex-col items-center justify-center gap-2 px-3 text-center text-xs text-muted-foreground">
                                                 {task.status === "processing" ? <LoaderCircle className="size-5 animate-spin text-orange-500" /> : <Grid2x2 className="size-5 text-red-400" />}
                                                 <span>{task.status === "processing" ? uiText("正在等待内部 AI 返回") : task.failureReason || uiText("处理失败")}</span>
                                             </div>
@@ -560,8 +566,8 @@ export function SeamlessStitchWorkspace() {
                                         <div className="flex items-center justify-between gap-2 px-3 py-2 text-xs">
                                             <span className={task.status === "success" ? "text-emerald-600" : task.status === "processing" ? "text-orange-600" : "text-red-500"}>{task.status === "success" ? uiText("已完成") : task.status === "processing" ? uiText("处理中") : uiText("失败")}</span>
                                             <div className="flex items-center gap-2">
-                                                {task.status === "success" && imageUrl ? <><button type="button" className="text-stone-500 hover:text-orange-600" onClick={() => void openHistoryTask(task)}>{uiText("查看")}</button><button type="button" className="text-stone-500 hover:text-orange-600" onClick={() => saveAs(imageUrl, `seamless-stitch-${task.id.slice(0, 8)}.png`)}>{uiText("下载")}</button></> : null}
-                                                <span className="text-stone-400">{time}</span>
+                                                {task.status === "success" && imageUrl ? <><button type="button" className="text-muted-foreground hover:text-orange-600" onClick={() => void openHistoryTask(task)}>{uiText("查看")}</button><button type="button" className="text-muted-foreground hover:text-orange-600" onClick={() => saveAs(imageUrl, `seamless-stitch-${task.id.slice(0, 8)}.png`)}>{uiText("下载")}</button></> : null}
+                                                <span className="text-muted-foreground">{time}</span>
                                             </div>
                                         </div>
                                     </article>
@@ -570,11 +576,12 @@ export function SeamlessStitchWorkspace() {
                         </div>
                     ) : (
                         <div className="flex min-h-48 flex-col items-center justify-center text-center">
-                            <Grid2x2 className="mb-3 size-8 text-stone-300" />
-                            <p className="text-sm text-stone-500">{uiText("提交后的任务会保留在这里")}</p>
+                            <Grid2x2 className="mb-3 size-8 text-muted-foreground" />
+                            <p className="text-sm text-muted-foreground">{uiText("提交后的任务会保留在这里")}</p>
                         </div>
                     )}
-                </aside>
+                </aside> : null}
+                </section>
             </main>
 
             <input
@@ -592,9 +599,9 @@ export function SeamlessStitchWorkspace() {
     );
 }
 
-function ParameterField({ label, value, min = 1, max = 2_000, step = 1, disabled, onChange }: { label: string; value: number; min?: number; max?: number; step?: number; disabled: boolean; onChange: (value: number | null) => void }) {
+function ParameterField({ label, value, min = 1, max = 2_000, step = 1, disabled, onChange }: { label: string; value: number; min?: number; max?: number; step?: number; disabled?: boolean; onChange: (value: number | null) => void }) {
     useUiText();
-    return <label className="min-w-0"><span className="mb-2 block text-xs font-medium text-stone-600 dark:text-stone-300">{label}</span><InputNumber className="w-full" value={value} min={min} max={max} step={step} disabled={disabled} onChange={onChange} /></label>;
+    return <label className="min-w-0"><span className="mb-2 block text-xs font-medium text-foreground">{label}</span><InputNumber className="w-full" value={value} min={min} max={max} step={step} disabled={disabled} onChange={onChange} /></label>;
 }
 
 function updateParameter(setParameters: React.Dispatch<React.SetStateAction<SeamlessStitchParameters>>, setPreset: React.Dispatch<React.SetStateAction<StitchPreset>>, key: keyof SeamlessStitchParameters, value: number | null) {

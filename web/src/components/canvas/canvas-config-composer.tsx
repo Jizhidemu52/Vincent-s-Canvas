@@ -1,7 +1,7 @@
 import { useUiText } from "@/lib/i18n";
 import { Fragment, memo, useCallback, useDeferredValue, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, MouseEvent, PointerEvent, Ref } from "react";
-import { Button, Image } from "antd";
+import { Button, Image, Tooltip } from "antd";
 import { FileText, Image as ImageIcon, Music2, Video, X } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -277,13 +277,12 @@ const MentionMenu = memo(function MentionMenu({ inputs, allInputs, referenceLabe
             {inputs.map((input, index) => (
                 <Fragment key={input.nodeId}>
                 {input.mentionSource && input.mentionSource !== inputs[index - 1]?.mentionSource ? <div className="px-2 pb-1 pt-2 text-[11px]" style={{ color: theme.node.muted }}>{t(input.mentionSource === "canvas" ? "画布图片" : "对话图片")}</div> : null}
-                <button
+                <Tooltip title={input.mentionImage?.unavailableReason}><button
                     ref={index === activeIndex ? activeItemRef : undefined}
                     type="button"
                     role="option"
                     aria-selected={index === activeIndex}
                     disabled={Boolean(input.mentionImage?.unavailableReason)}
-                    title={input.mentionImage?.unavailableReason}
                     className="flex w-full min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition"
                     style={{ background: index === activeIndex ? theme.toolbar.activeBg : "transparent", color: index === activeIndex ? theme.toolbar.activeText : theme.node.text }}
                     onMouseDown={(event) => {
@@ -297,7 +296,7 @@ const MentionMenu = memo(function MentionMenu({ inputs, allInputs, referenceLabe
                         <span className="block font-medium">{resourceLabel(input, allInputs, referenceLabels)}</span>
                         <span className="block truncate opacity-65">{input.text || input.title}</span>
                     </span>
-                </button>
+                </button></Tooltip>
                 </Fragment>
             ))}
         </div>

@@ -2,6 +2,7 @@ import { i18nHarness } from "./helpers/i18n-harness";
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import { dirname, resolve } from "node:path";
 import React, { type DependencyList, type EffectCallback, type ReactElement } from "react";
 import ts from "typescript";
 
@@ -30,6 +31,9 @@ const code = ts.transpileModule(source, {
     compilerOptions: { target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true },
 }).outputText;
 const toolConfigCode = ts.transpileModule(readFileSync(new URL("../src/hooks/use-tool-config.ts", import.meta.url), "utf8"), {
+    compilerOptions: { target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.CommonJS, esModuleInterop: true },
+}).outputText;
+const reducedMotionCode = ts.transpileModule(readFileSync(resolve(dirname(requireModule.resolve("framer-motion")), "../es/utils/reduced-motion/use-reduced-motion.mjs"), "utf8"), {
     compilerOptions: { target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.CommonJS, esModuleInterop: true },
 }).outputText;
 
@@ -206,6 +210,9 @@ function panelHarness(options: { replies: ToolResponseResult[]; stream?: string;
     };
     // Execute the real hook against this harness's React dispatcher and scoped stores.
     // No global Zustand state or network configuration leaks into manual renders.
+    const reducedMotionModule = { exports: {} as any };
+    new Function("require", "module", "exports", reducedMotionCode)((id: string) => id === "react" ? dependencies.react : requireModule(id), reducedMotionModule, reducedMotionModule.exports);
+    dependencies["motion/react"] = { ...requireModule("motion/react"), ...reducedMotionModule.exports };
     const toolConfigModule = { exports: {} as any };
     new Function("require", "module", "exports", toolConfigCode)((id: string) => id === "@/lib/i18n" ? i18nHarness : ((name: string) => Object.hasOwn(dependencies, name) ? dependencies[name] : requireToolConfigModule(name))(id), toolConfigModule, toolConfigModule.exports);
     dependencies["@/hooks/use-tool-config"] = toolConfigModule.exports;

@@ -13,5 +13,5 @@ export function CanvasDesignActions({ selectedCount, selectedImages, onCompare, 
         { key: "template", disabled: selectedCount > 0, icon: <PanelsTopLeft className="size-4" />, label: <span data-usage-control="canvas-tool.template">{t("整套服装画布模板")}</span>, title: selectedCount ? t("取消选择后创建整套模板") : t("创建参考图节点和 3 个可生成配置"), onClick: onTemplate },
         { type: "divider" },
         { key: "arrange", icon: <LayoutGrid className="size-4" />, label: <span data-usage-control="canvas-tool.arrange">{t("自动整理排版")}</span>, title: t("{value1}，不改变组内布局", { value1: selectedCount ? uiText("移动所选节点及所属款式组") : uiText("整理整个画布") }), children: canvasArrangeOptions.map(option => ({ ...option, label: t(option.label), onClick: () => onArrange(option.key) })) },
-    ] }}><Tooltip title={menuOpen ? null : t("设计工具 · 对比、模板与排版")}><button className="cw-icon" type="button" data-usage-control="canvas-tool.design-tools" aria-label={t("设计工具")} aria-haspopup="menu"><Shapes className="size-4" /></button></Tooltip></Dropdown>;
+    ] }}><Tooltip title={menuOpen ? null : t("设计工具 · 对比、模板与排版")}><button className="cw-icon cw-labeled-tool" type="button" data-usage-control="canvas-tool.design-tools" aria-label={t("设计工具")} aria-haspopup="menu"><Shapes className="size-4" /><span>{t("设计工具")}</span></button></Tooltip></Dropdown>;
 }

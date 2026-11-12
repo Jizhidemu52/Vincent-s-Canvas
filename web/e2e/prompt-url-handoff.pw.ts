@@ -2,6 +2,7 @@ import type { Page } from "@playwright/test";
 import { test, expect, IMAGE, type MockCanvasApi } from "./fixtures";
 import { generalPromptTemplates } from "../../shared/general-prompt-templates";
 import { toolDefinitions } from "../../shared/feature-catalog";
+import { antSelect, chooseAntSelect } from "./antd-select-helpers";
 
 const OWNER = "00000000-0000-4000-8000-000000000099";
 const TEMPLATE = generalPromptTemplates.find(item => item.id === "precise-local-recolor")!;
@@ -59,11 +60,11 @@ async function prepareThreeTasks(page: Page, targetPrompt = "") {
     const dialog = await settings(page);
     await dialog.locator('[data-usage-control="model"][role="combobox"]').click();
     await page.locator(`[role="option"][data-usage-value="${MODELS[1].id}"]`).click();
-    await dialog.getByRole("combobox", { name: "宽高比", exact: true }).selectOption("16:9");
-    await dialog.getByRole("combobox", { name: "清晰度 / 分辨率", exact: true }).selectOption("2k");
-    await dialog.getByRole("combobox", { name: "图片质量", exact: true }).selectOption("high");
+    await chooseAntSelect(dialog.getByRole("combobox", { name: "宽高比", exact: true }), "16:9");
+    await chooseAntSelect(dialog.getByRole("combobox", { name: "清晰度 / 分辨率", exact: true }), "2K");
+    await chooseAntSelect(dialog.getByRole("combobox", { name: "图片质量", exact: true }), "高");
     await dialog.locator("summary", { hasText: "高级参数" }).click();
-    await dialog.getByLabel("输出格式", { exact: true }).selectOption("png");
+    await chooseAntSelect(dialog.getByRole("combobox", { name: "输出格式", exact: true }), "PNG");
     await dialog.getByRole("button", { name: "关闭模型设置", exact: true }).click();
     const chooser = page.waitForEvent("filechooser");
     await active(page).getByRole("button", { name: "上传图片", exact: true }).click();
@@ -102,11 +103,11 @@ async function expectTargetOptions(page: Page) {
     await expect(active(page).getByRole("region", { name: "参考图", exact: true }).getByRole("img", { name: REFERENCE, exact: true })).toBeVisible();
     const dialog = await settings(page);
     await expect(dialog.locator('[data-usage-control="model"][role="combobox"]')).toContainText(/sunburst/i);
-    await expect(dialog.getByRole("combobox", { name: "宽高比", exact: true })).toHaveValue("16:9");
-    await expect(dialog.getByRole("combobox", { name: "清晰度 / 分辨率", exact: true })).toHaveValue("2k");
-    await expect(dialog.getByRole("combobox", { name: "图片质量", exact: true })).toHaveValue("high");
+    await expect(antSelect(dialog.getByRole("combobox", { name: "宽高比", exact: true }))).toHaveText("16:9");
+    await expect(antSelect(dialog.getByRole("combobox", { name: "清晰度 / 分辨率", exact: true }))).toHaveText("2K");
+    await expect(antSelect(dialog.getByRole("combobox", { name: "图片质量", exact: true }))).toHaveText("高");
     await dialog.locator("summary", { hasText: "高级参数" }).click();
-    await expect(dialog.getByLabel("输出格式", { exact: true })).toHaveValue("png");
+    await expect(antSelect(dialog.getByRole("combobox", { name: "输出格式", exact: true }))).toHaveText("PNG");
     await dialog.getByRole("button", { name: "关闭模型设置", exact: true }).click();
 }
 
@@ -375,11 +376,11 @@ test("ordinary prompt/model URL stays with loading task 3 when task 4 is created
     await expect(active(page).getByRole("region", { name: "参考图", exact: true }).getByRole("img", { name: REFERENCE, exact: true })).toBeVisible();
     const dialog = await settings(page);
     await expect(dialog.locator('[data-usage-control="model"][role="combobox"]')).toContainText(/flare/i);
-    await expect(dialog.getByRole("combobox", { name: "宽高比", exact: true })).toHaveValue("16:9");
-    await expect(dialog.getByRole("combobox", { name: "清晰度 / 分辨率", exact: true })).toHaveValue("2k");
-    await expect(dialog.getByRole("combobox", { name: "图片质量", exact: true })).toHaveValue("high");
+    await expect(antSelect(dialog.getByRole("combobox", { name: "宽高比", exact: true }))).toHaveText("16:9");
+    await expect(antSelect(dialog.getByRole("combobox", { name: "清晰度 / 分辨率", exact: true }))).toHaveText("2K");
+    await expect(antSelect(dialog.getByRole("combobox", { name: "图片质量", exact: true }))).toHaveText("高");
     await dialog.locator("summary", { hasText: "高级参数" }).click();
-    await expect(dialog.getByLabel("输出格式", { exact: true })).toHaveValue("png");
+    await expect(antSelect(dialog.getByRole("combobox", { name: "输出格式", exact: true }))).toHaveText("PNG");
     await dialog.getByRole("button", { name: "关闭模型设置", exact: true }).click();
     await tabs(page).nth(3).click();
     await expect(input(page)).toHaveValue(fourth);

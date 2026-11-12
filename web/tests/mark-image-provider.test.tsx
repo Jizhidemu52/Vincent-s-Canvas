@@ -135,25 +135,23 @@ test("only super admins read the dedicated configuration", async () => {
     } finally { panel.dispose(); }
 });
 
-test("fixed image RMB costs replace stale values, are read-only and survive form submission exactly", async () => {
+test("hidden financial values survive registered-fields-only submission without normalization", async () => {
     const existing = savedConfiguration();
     existing.models = existing.models.map(model => ({ ...model, creditCost: 7, rmbCost: 1.23 }));
     const panel = harness({ load: async () => existing });
     try {
         const tree = await panel.settle();
-        for (const [modelId, rmbPerImage] of Object.entries(imageRmb)) {
+        for (const modelId of Object.keys(imageRmb)) {
             const index = existing.models.findIndex(model => model.modelId === modelId);
             const model = existing.models[index]!;
-            expect(panel.form.values.models[index].rmbCost).toBe(rmbPerImage);
-            const input = tree.find(element => element.type === "InputNumber" && element.props["aria-label"] === `${model.name} 内部成本`)!;
-            expect(input.props.readOnly).toBe(true);
-            expect(input.props.precision).toBe(6);
+            expect(panel.form.values.models[index].rmbCost).toBe(1.23);
+            expect(tree.find(element => element.type === "InputNumber" && element.props["aria-label"] === `${model.name} 内部成本`)).toBeUndefined();
         }
         const other = existing.models.findIndex(model => model.modelId === "gemini-nano-banana-2.1");
         expect(panel.form.values.models[other].rmbCost).toBe(1.23);
         const form = tree.find(element => element.type === panel.Form)!;
-        await form.props.onFinish(panel.form.values);
-        expect(panel.writes[0].models.find(model => model.modelId === "gpt-image-2")).toMatchObject({ creditCost: 7, rmbCost: 0.05368 });
+        await form.props.onFinish({ ...panel.form.values, models: panel.form.values.models.map(({ enabled, concurrencyLimit }: { enabled: boolean; concurrencyLimit: number }) => ({ enabled, concurrencyLimit })) });
+        expect(panel.writes[0].models.find(model => model.modelId === "gpt-image-2")).toMatchObject({ creditCost: 7, rmbCost: 1.23 });
     } finally { panel.dispose(); }
 });
 
@@ -163,7 +161,9 @@ test("the configuration API preserves five-decimal RMB costs in the JSON request
         submitted = JSON.parse(String(init?.body));
         return Response.json({ ...savedConfiguration(), models: submitted!.models.map((model, index) => ({ ...model, id: `model-${index}`, name: model.modelId })) });
     }) as typeof fetch;
-    const panel = harness({ load: async () => savedConfiguration(), save: saveMarkImageConfiguration });
+    const existing = savedConfiguration();
+    existing.models.find(model => model.modelId === "gpt-image-2")!.rmbCost = 0.05368;
+    const panel = harness({ load: async () => existing, save: saveMarkImageConfiguration });
     try {
         const tree = await panel.settle();
         await tree.find(element => element.type === panel.Form)!.props.onFinish(panel.form.values);
@@ -195,7 +195,7 @@ test("first configuration groups every registered image, text, video and blend m
         ]);
         expect(tree.filter(element => element.type === "Text" && element.props.strong).map(element => element.props.children).sort()).toEqual(MARK_PLATFORM_MODELS.map(model => model.name).sort());
         expect(tree.filter(element => element.type === "Title" && element.props.id).map(element => element.props.children)).toEqual(["图片模型", "文字模型", "视频模型", "多图融合"]);
-        expect(tree.filter(element => element.type === "InputNumber")).toHaveLength(MARK_PLATFORM_MODELS.length * 3);
+        expect(tree.filter(element => element.type === "InputNumber")).toHaveLength(MARK_PLATFORM_MODELS.length);
         expect(tree.filter(element => element.type === "Switch" && element.props["aria-label"])).toHaveLength(MARK_PLATFORM_MODELS.length);
         for (const model of MARK_PLATFORM_MODELS) {
             const usage = tree.find(element => element.type === "Text" && element.props["aria-label"] === `${model.name} 用途`);
@@ -227,10 +227,10 @@ test("saving writes exact model identities once, clears the key and refreshes bu
         await submit(panel.form.values);
         expect(panel.writes).toHaveLength(1);
         expect(panel.writes[0].models.map(model => model.modelId)).toEqual(MARK_PLATFORM_MODELS.map(model => model.modelId));
-        expect(panel.writes[0].models[1]).toEqual({ modelId: MARK_IMAGE_MODELS[1].modelId, enabled: false, creditCost: 7, rmbCost: 0.1342, concurrencyLimit: 4 });
-        expect(panel.writes[0].models[3]).toEqual({ modelId: "gpt-6-astra", enabled: false, creditCost: 2, rmbCost: 0.0123, concurrencyLimit: 3 });
-        expect(panel.writes[0].models[4]).toEqual({ modelId: "happyhorse-1.1", enabled: true, creditCost: 25, rmbCost: 0.6, concurrencyLimit: 1 });
-        expect(panel.writes[0].models[5]).toEqual({ modelId: "midjourney-blend", enabled: false, creditCost: 13, rmbCost: 0.4, concurrencyLimit: 3 });
+        expect(panel.writes[0].models[1]).toEqual({ modelId: MARK_IMAGE_MODELS[1].modelId, enabled: false, creditCost: 0, rmbCost: 0.1342, concurrencyLimit: 4 });
+        expect(panel.writes[0].models[3]).toEqual({ modelId: "gpt-6-astra", enabled: false, creditCost: 0, rmbCost: 0, concurrencyLimit: 3 });
+        expect(panel.writes[0].models[4]).toEqual({ modelId: "happyhorse-1.1", enabled: true, creditCost: 0, rmbCost: 0, concurrencyLimit: 1 });
+        expect(panel.writes[0].models[5]).toEqual({ modelId: "midjourney-blend", enabled: false, creditCost: 0, rmbCost: 0, concurrencyLimit: 3 });
         expect(panel.writes[0].apiKey).toBe("test-value");
         expect(panel.render().find(element => element.type === panel.Form)!.props.disabled).toBe(true);
         finish(savedConfiguration());
@@ -253,7 +253,7 @@ test("existing three-model configurations retain saved values and add independen
     try {
         const tree = await panel.settle();
         expect(panel.form.values.models).toHaveLength(MARK_PLATFORM_MODELS.length);
-        expect(panel.form.values.models[0]).toEqual({ enabled: false, creditCost: 11, rmbCost: 0.1342, concurrencyLimit: 7 });
+        expect(panel.form.values.models[0]).toEqual({ enabled: false, creditCost: 11, rmbCost: 0.45, concurrencyLimit: 7 });
         expect(panel.form.values.models.slice(3)).toEqual(MARK_PLATFORM_MODELS.slice(3).map(model => ({ enabled: model.defaultEnabled, creditCost: 0, rmbCost: imageRmb[model.modelId] ?? 0, concurrencyLimit: 2 })));
         expect(panel.form.values.apiKey).toBe("");
         await tree.find(element => element.type === panel.Form)!.props.onFinish(panel.form.values);
@@ -270,7 +270,7 @@ test("adding Blend and image models preserves non-cost settings and costs outsid
     try {
         const tree = await panel.settle();
         await tree.find(element => element.type === panel.Form)!.props.onFinish(panel.form.values);
-        expect(panel.writes[0].models.slice(0, 5)).toEqual(previous.map(model => ({ ...model, rmbCost: imageRmb[model.modelId] ?? model.rmbCost })));
+        expect(panel.writes[0].models.slice(0, 5)).toEqual(previous);
         expect(panel.writes[0].models.slice(5)).toEqual(MARK_PLATFORM_MODELS.slice(5).map(({ modelId, defaultEnabled }) => ({ modelId, enabled: defaultEnabled, creditCost: 0, rmbCost: imageRmb[modelId] ?? 0, concurrencyLimit: 2 })));
         expect(panel.writes[0].apiKey).toBeUndefined();
     } finally { panel.dispose(); }
@@ -284,7 +284,7 @@ test("adding GPT 2.6 preserves all ten existing settings and leaves new costs in
     try {
         const tree = await panel.settle();
         await tree.find(element => element.type === panel.Form)!.props.onFinish(panel.form.values);
-        expect(panel.writes[0].models.slice(0, 10)).toEqual(previous.map(model => ({ ...model, rmbCost: imageRmb[model.modelId] ?? model.rmbCost })));
+        expect(panel.writes[0].models.slice(0, 10)).toEqual(previous);
         expect(panel.writes[0].models.slice(10)).toEqual([
             { modelId: "gpt-image-2.6-flare", enabled: true, creditCost: 0, rmbCost: 0, concurrencyLimit: 2 },
             { modelId: "gpt-image-2.6-sunburst", enabled: true, creditCost: 0, rmbCost: 0, concurrencyLimit: 2 },
@@ -294,7 +294,7 @@ test("adding GPT 2.6 preserves all ten existing settings and leaves new costs in
         ]);
         expect(panel.writes[0].apiKey).toBeUndefined();
         for (const model of MARK_PLATFORM_MODELS.slice(10)) {
-            expect(tree.find(element => element.type === "InputNumber" && element.props["aria-label"] === `${model.name} 内部成本`)?.props.readOnly).toBe(false);
+            expect(tree.find(element => element.type === "InputNumber" && element.props["aria-label"] === `${model.name} 内部成本`)).toBeUndefined();
         }
     } finally { panel.dispose(); }
 });
@@ -312,7 +312,7 @@ test("adding the layer studio preset keeps all thirteen existing settings and do
         await tree.find(element => element.type === panel.Form)!.props.onFinish(panel.form.values);
         expect(panel.writes).toHaveLength(1);
         expect(panel.writes[0].models).toHaveLength(15);
-        expect(panel.writes[0].models.slice(0, 13)).toEqual(previous.map(model => ({ ...model, rmbCost: imageRmb[model.modelId] ?? model.rmbCost })));
+        expect(panel.writes[0].models.slice(0, 13)).toEqual(previous);
         expect(panel.writes[0].models[13]).toEqual({ modelId: "seedream-5-5", enabled: false, creditCost: 0, rmbCost: 0, concurrencyLimit: 2 });
         expect(panel.writes[0].models[14]).toEqual({ modelId: "gemini-4-carbon", enabled: true, creditCost: 0, rmbCost: 0, concurrencyLimit: 2 });
         expect(panel.writes[0].apiKey).toBeUndefined();
@@ -327,13 +327,13 @@ for (const grokEnabled of [false, true]) test(`adding Nano2 preserves an existin
     try {
         const tree = await panel.settle();
         await tree.find(element => element.type === panel.Form)!.props.onFinish(panel.form.values);
-        expect(panel.writes[0].models.slice(0, 8)).toEqual(previous.map(model => ({ ...model, rmbCost: imageRmb[model.modelId] ?? model.rmbCost })));
+        expect(panel.writes[0].models.slice(0, 8)).toEqual(previous);
         expect(panel.writes[0].models[8]).toEqual({ modelId: "gemini-3.1-flash-image-preview-official", enabled: true, creditCost: 0, rmbCost: 0.3355, concurrencyLimit: 2 });
         expect(panel.writes[0].apiKey).toBeUndefined();
     } finally { panel.dispose(); }
 });
 
-test("text billing and concurrency controls are disabled and disclosed while saved values survive unchanged", async () => {
+test("text concurrency stays disabled, finance controls are absent and saved values survive unchanged", async () => {
     const existing = savedConfiguration();
     const textIndex = existing.models.findIndex(model => model.modelId === "gpt-6-astra");
     existing.models[textIndex] = { ...existing.models[textIndex]!, creditCost: 9, rmbCost: 0.1234, concurrencyLimit: 7 };
@@ -343,12 +343,10 @@ test("text billing and concurrency controls are disabled and disclosed while sav
         const inputs = tree.filter(element => element.type === "InputNumber");
         const textModelName = existing.models[textIndex]!.name;
         const textModels = MARK_PLATFORM_MODELS.filter(model => model.capabilities.some(capability => capability === "chat"));
-        expect(inputs.filter(element => element.props.disabled).map(element => element.props["aria-label"])).toEqual(textModels.flatMap(model => [
-            `${model.name} 站内积分`, `${model.name} 内部成本`, `${model.name} 并发上限`,
-        ]));
-        expect(inputs.filter(element => !element.props.disabled)).toHaveLength((MARK_PLATFORM_MODELS.length - textModels.length) * 3);
+        expect(inputs.filter(element => element.props.disabled).map(element => element.props["aria-label"])).toEqual(textModels.map(model => `${model.name} 并发上限`));
+        expect(inputs.filter(element => !element.props.disabled)).toHaveLength(MARK_PLATFORM_MODELS.length - textModels.length);
         expect(tree.find(element => element.type === "Switch" && element.props["aria-label"] === `启用 ${textModelName}`)?.props.disabled).not.toBe(true);
-        expect(tree.some(element => element.type === "Text" && typeof element.props.children === "string" && element.props.children.includes("对话积分请在“板块 API 配置”中设置"))).toBe(true);
+        expect(tree.some(element => element.type === "Text" && typeof element.props.children === "string" && /积分|人民币|费用|计费|成本/.test(element.props.children))).toBe(false);
         await tree.find(element => element.type === panel.Form)!.props.onFinish(panel.form.values);
         expect(panel.writes[0].models[textIndex]).toEqual({ modelId: "gpt-6-astra", enabled: true, creditCost: 9, rmbCost: 0.1234, concurrencyLimit: 7 });
     } finally { panel.dispose(); }

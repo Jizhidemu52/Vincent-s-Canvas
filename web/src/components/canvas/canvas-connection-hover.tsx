@@ -1,3 +1,4 @@
+import { Tooltip } from "antd";
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { X } from "lucide-react";
 import { createConnectionGeometry, connectionGeometryPointAt } from "@/lib/canvas/canvas-connection-geometry";
@@ -48,7 +49,7 @@ export function CanvasConnectionHover(props: {
     const from = connection && props.nodeById.get(connection.fromNodeId), to = connection && props.nodeById.get(connection.toNodeId);
     if (!connection || !from || !to || props.disabled) return null;
     const point = connectionGeometryPointAt(createConnectionGeometry(from, to), 0.5);
-    return <button type="button" data-connection-hover={connection.id} data-canvas-no-zoom aria-label={t("删除连线")} title={t("删除连线，保留两端节点")} className="absolute z-30 grid size-7 place-items-center rounded-full border"
+    return <Tooltip title={t("删除连线，保留两端节点")}><button type="button" data-connection-hover={connection.id} data-canvas-no-zoom aria-label={t("删除连线")} className="absolute z-30 grid size-7 place-items-center rounded-full border"
         style={{ left: point.x, top: point.y, transform: `translate(-50%, -50%) scale(${1 / props.scale})`, background: theme.node.panel, borderColor: theme.canvas.selectionStroke, color: theme.node.text }}
-        onPointerDown={event => { event.preventDefault(); event.stopPropagation(); }} onClick={event => { event.stopPropagation(); props.onDelete(connection.id); hoveredIdRef.current = null; setHovered(null); props.onChange(null); }}><X size={14} /></button>;
+        onPointerDown={event => { event.preventDefault(); event.stopPropagation(); }} onClick={event => { event.stopPropagation(); props.onDelete(connection.id); hoveredIdRef.current = null; setHovered(null); props.onChange(null); }}><X size={14} /></button></Tooltip>;
 }

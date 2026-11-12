@@ -1,5 +1,5 @@
 import { uiText, useUiLocale } from "@/lib/i18n";
-import { App } from "antd";
+import { App, Popover, Tooltip } from "antd";
 import { KeyRound, LoaderCircle, LogOut } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -11,7 +11,7 @@ import { useUserStore } from "@/stores/use-user-store";
 // The desktop footer and mobile drawer can both be mounted at once.
 let logoutInFlight = false;
 
-export function PersonalSessionActions({ onSignedOut }: { onSignedOut?: () => void }) {
+export function PersonalSessionActions({ onSignedOut, compact = false }: { onSignedOut?: () => void; compact?: boolean }) {
     useUiLocale();
     const { message } = App.useApp();
     const navigate = useNavigate();
@@ -48,25 +48,25 @@ export function PersonalSessionActions({ onSignedOut }: { onSignedOut?: () => vo
         }
     };
 
-    return (
+    const actions = (
         <div className="mt-2 flex items-center gap-2 border-t border-stone-200 px-2 pt-3" aria-label={uiText("个人账号")}>
             <div className="min-w-0 flex-1">
-                <div className="truncate text-xs font-medium text-foreground" title={user.displayName || user.username}>{user.displayName || user.username}</div>
+                <Tooltip title={user.displayName || user.username}><div className="truncate text-xs font-medium text-foreground">{user.displayName || user.username}</div></Tooltip>
                 <div className="mt-0.5 text-xs text-muted-foreground">{uiText("个人账号")}</div>
             </div>
-            <button type="button" className="wb-nav-link inline-flex size-9 items-center justify-center rounded-md" disabled={busy} aria-label={uiText("修改密码")} title={uiText("修改密码")} onClick={() => navigate(`/change-password?returnTo=${encodeURIComponent(window.location.pathname + window.location.search)}`)}><KeyRound className="size-3.5" /></button>
-            <button
+            <Tooltip title={uiText("修改密码")}><span className="inline-flex"><button type="button" className="wb-nav-link inline-flex size-9 items-center justify-center rounded-md" disabled={busy} aria-label={uiText("修改密码")} onClick={() => navigate(`/change-password?returnTo=${encodeURIComponent(window.location.pathname + window.location.search)}`)}><KeyRound className="size-3.5" /></button></span></Tooltip>
+            <Tooltip title={uiText("保存画布并退出登录")}><span className="inline-flex"><button
                 type="button"
                 className="wb-nav-link inline-flex h-9 shrink-0 items-center justify-center gap-1 rounded-md px-2 text-xs disabled:cursor-wait disabled:opacity-60"
                 onClick={signOut}
                 disabled={busy}
                 aria-label={uiText("退出登录")}
                 aria-busy={busy}
-                title={uiText("保存画布并退出登录")}
             >
                 {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <LogOut className="size-3.5" />}
                 {busy ? uiText("退出中") : uiText("退出")}
-            </button>
+            </button></span></Tooltip>
         </div>
     );
+    return compact ? <Popover content={actions} trigger="click" placement="topRight"><Tooltip title={user.displayName || user.username}><button type="button" className="inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-semibold" aria-label={uiText("个人账号")}>{(user.displayName || user.username || "U").slice(0, 1)}</button></Tooltip></Popover> : actions;
 }

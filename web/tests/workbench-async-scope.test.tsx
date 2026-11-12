@@ -278,6 +278,9 @@ test("video: selecting the original running task again receives its completion",
     app.createSession(); app.render();
     expect(app.cards()).toEqual([]);
     app.selectTask("default"); app.find("LogPanel").props.onPreviewLog(videoLog); await settle();
+    // This hook harness does not schedule React renders after a state update.
+    // Commit the selected history view before the deferred server response.
+    expect(app.cards()[0]!.type.name).toBe("PendingVideoCard");
     wait.resolve([{ id: "old-task", requestId: "old-request", status: "success", resultUrls: ["/api/assets/old/content"] }]); await settle();
     expect(app.cards()).toHaveLength(1);
     expect(app.cards()[0]!.props.video).toMatchObject({ storageKey: "video:old-result" });

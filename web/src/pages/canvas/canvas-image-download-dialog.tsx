@@ -19,7 +19,7 @@ export function CanvasImageDownloadDialog({ node, variants, onClose }: {
     const { message } = App.useApp();
     const theme = canvasThemes[useThemeStore(state => state.theme)];
     const [downloading, setDownloading] = useState<string | null>(null);
-    const [format, setFormat] = useState<"png" | "jpg">("jpg");
+    const [format, setFormat] = useState<"png" | "jpg">(() => { try { return localStorage.getItem("canvas-image-download-format-v1") === "jpg" ? "jpg" : "png"; } catch { return "png"; } });
     const busy = useRef(false);
     const job = useRef<AbortController | null>(null);
     const [progress, setProgress] = useState<CanvasImageProgress | null>(null);
@@ -50,6 +50,7 @@ export function CanvasImageDownloadDialog({ node, variants, onClose }: {
 
     const downloadCurrent = async (selectedFormat: "original" | "png" | "jpg") => {
         if (busy.current) return;
+        if (selectedFormat !== "original") { try { localStorage.setItem("canvas-image-download-format-v1", selectedFormat); } catch { /* preference is optional */ } }
         busy.current = true;
         const controller = new AbortController(); job.current = controller;
         setDownloading(selectedFormat);

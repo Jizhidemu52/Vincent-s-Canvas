@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { App, Button, Drawer, Tag } from "antd";
 import { BookOpen, Copy, Save, Send } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -29,6 +29,15 @@ function GeneralPromptCard({ item }: { item: GeneralPrompt }) {
     const { pending, run } = useAsyncAction(`general-prompt:${item.id}`);
     const [open, setOpen] = useState(false);
     const [savedIdentity, setSavedIdentity] = useState<string | null>(null);
+    const [copied, setCopied] = useState(false);
+    const copyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+    useEffect(() => () => clearTimeout(copyTimer.current), []);
+    const copyPrompt = async () => {
+        if (!await copyText(item.prompt, t("提示词已复制"))) return;
+        clearTimeout(copyTimer.current);
+        setCopied(true);
+        copyTimer.current = setTimeout(() => setCopied(false), 1200);
+    };
     const saved = savedIdentity === identity;
     const fillLabel = `${t("填入")} ${t(promptTargetLabels[item.targetTool])}`;
     const fill = () => navigate(generalPromptDestination(item));
@@ -46,7 +55,7 @@ function GeneralPromptCard({ item }: { item: GeneralPrompt }) {
     const actions = <div className="space-y-2">
         <Button block type="primary" className="!h-10" onClick={fill} icon={<Send className="size-4" />}>{fillLabel}</Button>
         <div className="grid grid-cols-2 gap-2">
-            <Button disabled={pending} onClick={() => void copyText(item.prompt, t("提示词已复制"))} icon={<Copy className="size-4" />}>{t("复制提示词")}</Button>
+            <Button disabled={pending} onClick={() => void copyPrompt()} icon={<Copy className="size-4" />}>{copied ? t("已复制 ✓") : t("复制提示词")}</Button>
             <Button disabled={pending || saved} loading={pending} onClick={() => void run(save)} icon={<Save className="size-4" />}>{saved ? t("已存到我的提示词") : t("存到我的提示词")}</Button>
         </div>
     </div>;

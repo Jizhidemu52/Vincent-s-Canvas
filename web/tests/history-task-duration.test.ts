@@ -32,15 +32,16 @@ function historyHarness(kind: "image" | "video", read: (id: string) => Promise<a
         images: [{ id: "image", dataUrl: "blob:image", storageKey: "image:original", sourceTaskId: task.id, durationMs: 2124000 }],
         references: [], videoReferences: [], audioReferences: [],
     };
-    let owner = "owner", selected: any, results: any[] = [], logs = [original], unclassified: any[] = [], completion: Promise<void> | undefined;
+    let owner = "owner", selected: any, results: any[] = [], historyResults: any[] = [], resultView = "current", logs = [original], unclassified: any[] = [], completion: Promise<void> | undefined;
     const writes: any[] = [], reads: string[] = [], warnings: string[] = [];
     const noop = () => {};
     const loader = createLatestVideoPreview();
     const scope = {
-        running: false, pendingRestoreRevision: { current: 0 }, resultViewPinnedRef: { current: false }, previewRevision: { current: 0 },
-        resultViewScopeRef: { current: 0 }, mountedRef: { current: true }, visibleResultLogIdsRef: { current: new Set() }, restoredInitialResultRef: { current: false },
+        running: false, deletingLogs: false, handoffReady: true, pendingRestoreRevision: { current: 0 }, resultViewPinnedRef: { current: false }, previewRevision: { current: 0 },
+        resultViewScopeRef: { current: 0 }, draftEditRevisionRef: { current: 0 }, mountedRef: { current: true }, visibleResultLogIdsRef: { current: new Set() }, restoredInitialResultRef: { current: false },
         user: { id: "owner" }, useUserStore: { getState: () => ({ user: { id: owner } }) },
         setPreviewLog: (value: unknown) => { selected = value; }, setResults: (value: any[]) => { results = value; },
+        setHistoryResults: (value: any[]) => { historyResults = value; }, setResultView: (value: string) => { resultView = value; },
         setLogs: (update: (value: any[]) => any[]) => { logs = update(logs); },
         setUnclassifiedLogs: (update: (value: any[]) => any[]) => { unclassified = update(unclassified); },
         setLogsOpen: noop, setPreviewLoading: noop, setPreviewError: noop,
@@ -64,8 +65,9 @@ function historyHarness(kind: "image" | "video", read: (id: string) => Promise<a
         original, scope, writes, reads, warnings,
         async open(log = original) { const returned = preview(log); await (kind === "video" ? completion : returned); },
         owner(value: string) { owner = value; },
+        current(value: any[]) { results = value; scope.running = true; },
         invalidate() { loader.invalidate(); scope.previewRevision.current += 1; },
-        result: () => ({ selected, results, logs, unclassified }),
+        result: () => ({ selected, results, logs, unclassified, displayed: pageFunction(kind, "displayedResults", { previewLog: selected, resultView, historyResults, results }) as any[] }),
     };
 }
 
@@ -77,7 +79,8 @@ test.each(["video", "image"] as const)("opening a saved %s record corrects only 
     expect(h.writes[0].durationMs).toBe(524752);
     expect(h.result().selected.durationMs).toBe(524752);
     expect(h.result().logs[0].durationMs).toBe(524752);
-    expect(h.result().results[0][kind].durationMs).toBe(524752);
+    expect(h.result().displayed[0][kind].durationMs).toBe(524752);
+    expect(h.result().results).toEqual([]);
     expect(h.original.durationMs).toBe(2124000);
     expect(h.warnings).toEqual([]);
 });
@@ -86,8 +89,9 @@ test.each(["video", "image"] as const)("a %s history lookup failure leaves the o
     const h = historyHarness(kind, async () => { throw new Error("offline"); });
     await h.open();
     expect(h.writes).toEqual([]);
-    expect(h.result().results[0].status).toBe("success");
-    expect(h.result().results[0][kind].durationMs).toBe(2124000);
+    expect(h.result().displayed[0].status).toBe("success");
+    expect(h.result().displayed[0][kind].durationMs).toBe(2124000);
+    expect(h.result().results).toEqual([]);
     expect(h.warnings).toEqual([]);
 });
 
@@ -111,6 +115,7 @@ for (const kind of ["video", "image"] as const) {
         await pending;
         expect(h.writes).toEqual([]);
         expect(h.result().results).toEqual([]);
+        expect(h.result().displayed).toEqual([]);
         expect(h.warnings).toEqual([]);
     });
 }
@@ -120,5 +125,19 @@ test.each(["video", "image"] as const)("a verified %s task without completion ti
     await h.open();
     expect(h.writes[0].durationMs).toBeNull();
     expect(h.result().selected.durationMs).toBeNull();
-    expect(h.result().results[0][kind].durationMs).toBeNull();
+    expect(h.result().displayed[0][kind].durationMs).toBeNull();
+    expect(h.result().results).toEqual([]);
+});
+
+test.each(["video", "image"] as const)("browsing %s history keeps the independently running current result and its task identity", async kind => {
+    const h = historyHarness(kind, async () => task);
+    const current = [{ id: "current-slot", status: "pending", taskId: "different-running-task" }];
+    h.current(current);
+    await h.open();
+    expect(h.reads).toEqual(["paid-original"]);
+    expect(h.result().results).toBe(current);
+    expect(h.result().results).toEqual([{ id: "current-slot", status: "pending", taskId: "different-running-task" }]);
+    expect(h.result().displayed[0][kind].durationMs).toBe(524752);
+    expect(h.writes).toHaveLength(1);
+    expect(h.writes[0].task.id).toBe("paid-original");
 });

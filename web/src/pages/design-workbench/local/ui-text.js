@@ -23,7 +23,7 @@ export function watchWorkbenchUi(root, signal) {
     const refresh = () => {
         if (signal.aborted) return;
         root.querySelectorAll("[data-ui-text], [data-ui-bound]").forEach(updateText);
-        for (const attribute of ["title", "aria-label"]) {
+        for (const attribute of ["aria-label"]) {
             root.querySelectorAll(`[data-ui-${attribute}]`).forEach(element => {
                 const value = uiText(element.getAttribute(`data-ui-${attribute}`));
                 if (element.getAttribute(attribute) !== value) element.setAttribute(attribute, value);

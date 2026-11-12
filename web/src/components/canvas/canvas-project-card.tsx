@@ -3,7 +3,7 @@ import { memo, useRef, useState } from "react";
 import { Check, Copy, Download, Image, Pencil, Trash2, X, LayoutGrid } from "lucide-react";
 import { CanvasPersistedMediaPreview } from "./canvas-persisted-media-preview";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { App, Button, Input, Tag } from "antd";
+import { App, Button, Input, Tag, Tooltip } from "antd";
 
 import { loadCanvasProject, useCanvasStore, type CanvasProject } from "@/stores/canvas/use-canvas-store";
 import { useCanvasUiStore } from "@/stores/canvas/use-canvas-ui-store";
@@ -73,7 +73,7 @@ export const CanvasProjectCard = memo(function CanvasProjectCard({ project }: { 
     };
 
     return (
-        <article data-canvas-project-id={project.id} data-selected={selected ? "true" : "false"} className="wb-surface group flex cursor-pointer flex-col overflow-hidden transition hover:shadow-sm" style={selected ? { outline: `2px solid ${theme.canvas.selectionStroke}`, outlineOffset: 2 } : undefined} onClick={() => !editing && open()}>
+        <article data-canvas-project-id={project.id} data-selected={selected ? "true" : "false"} className="wb-surface wb-list-card group flex cursor-pointer flex-col overflow-hidden transition hover:shadow-sm" style={selected ? { outline: `2px solid ${theme.canvas.selectionStroke}`, outlineOffset: 2 } : undefined} onClick={() => !editing && open()}>
             <div className="flex h-36 items-center justify-center overflow-hidden border-b border-stone-200/60 bg-stone-100 dark:border-stone-800 dark:bg-stone-800">
                 {cover ? <CanvasPersistedMediaPreview kind="image" storageKey={cover.storageKey} url={cover.content} alt={project.title} className="h-full w-full object-cover" /> : <LayoutGrid size={28} className="text-stone-400" />}
             </div>
@@ -113,7 +113,7 @@ export const CanvasProjectCard = memo(function CanvasProjectCard({ project }: { 
                 <Button size="small" disabled={busy} onClick={() => void act(keepCopy)}>{t("保留此版本")}</Button>
             </div> : null}
             <div className="mt-4 flex items-center justify-between gap-2">
-                <p className="min-w-0 text-xs text-stone-500" title={new Date(project.updatedAt).toLocaleString(locale)}>{t("更新于 {time}", { time: formatCanvasProjectTime(project.updatedAt, locale) })}</p>
+                <Tooltip title={new Date(project.updatedAt).toLocaleString(locale)}><p className="min-w-0 text-xs text-stone-500">{t("更新于 {time}", { time: formatCanvasProjectTime(project.updatedAt, locale) })}</p></Tooltip>
                 <div className="flex items-center gap-1" onClick={(event) => event.stopPropagation()}>
                     {editing ? (
                         <>

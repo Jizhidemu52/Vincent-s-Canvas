@@ -1,4 +1,4 @@
-import { Alert, Button, Checkbox, Empty, Tag } from "antd";
+import { Alert, Button, Checkbox, Empty, Tag, Tooltip } from "antd";
 import { ArrowDown, ArrowUp, RefreshCw, Star, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -121,7 +121,7 @@ export function HotModelOrderPanel({ isAdmin }: { isAdmin: boolean }) {
             </div>
             <Button icon={<RefreshCw className="size-4" />} onClick={load} loading={loading} disabled={saving}>重新加载</Button>
         </div>
-        <Alert type="info" showIcon title="只控制展示，不修改调用配置" description="其他接口的模型仍保留在“所有模型”中；此处不会变更模型价格、密钥、启用状态或板块绑定。取消全部选择并保存后，画布不再展示热门区。各入口只显示与当前功能兼容的已选模型。" />
+        <Alert type="info" showIcon title="只控制展示，不修改调用配置" description="其他接口的模型仍保留在“所有模型”中；此处不会变更模型密钥、启用状态或板块绑定。取消全部选择并保存后，画布不再展示热门区。各入口只显示与当前功能兼容的已选模型。" />
         {loadError ? <Alert type="error" showIcon title="热门模型加载失败" description={loadError} /> : null}
         {saveError ? <Alert type="error" showIcon title="热门模型保存失败" description={saveError} /> : null}
         {notice ? <Alert type={notice.type} showIcon title={notice.text} /> : null}
@@ -160,9 +160,9 @@ export function HotModelOrderPanel({ isAdmin }: { isAdmin: boolean }) {
                             <span className="w-5 shrink-0 text-center text-sm tabular-nums text-[var(--muted-foreground)]">{index + 1}</span>
                             <span className="min-w-0 flex-1 break-words text-sm font-medium">{name}</span>
                             <div className="flex shrink-0 items-center gap-1">
-                                <Button size="small" type="text" icon={<ArrowUp className="size-4" />} aria-label={`上移 ${name}`} title="上移" disabled={locked || index === 0} onClick={() => move(index, -1)} />
-                                <Button size="small" type="text" icon={<ArrowDown className="size-4" />} aria-label={`下移 ${name}`} title="下移" disabled={locked || index === selectedIds.length - 1} onClick={() => move(index, 1)} />
-                                <Button size="small" type="text" icon={<X className="size-4" />} aria-label={`移除 ${name}`} title="移除热门，不会删除模型" disabled={locked} onClick={() => toggle(id, false)} />
+                                <Tooltip title="上移"><Button size="small" type="text" icon={<ArrowUp className="size-4" />} aria-label={`上移 ${name}`}  disabled={locked || index === 0} onClick={() => move(index, -1)} /></Tooltip>
+                                <Tooltip title="下移"><Button size="small" type="text" icon={<ArrowDown className="size-4" />} aria-label={`下移 ${name}`}  disabled={locked || index === selectedIds.length - 1} onClick={() => move(index, 1)} /></Tooltip>
+                                <Tooltip title="移除热门，不会删除模型"><Button size="small" type="text" icon={<X className="size-4" />} aria-label={`移除 ${name}`}  disabled={locked} onClick={() => toggle(id, false)} /></Tooltip>
                             </div>
                         </li>;
                     })}

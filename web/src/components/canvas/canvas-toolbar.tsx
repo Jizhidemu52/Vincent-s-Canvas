@@ -29,8 +29,8 @@ export const CanvasToolbar = memo(function CanvasToolbar(props: CanvasToolbarRen
                 <ActionButton action="pan" icon={Hand} pressed={interactionMode === "hand"} onClick={() => { onDeselect(); onInteractionModeChange?.("hand"); }} />
                 <ActionButton action="upload" icon={Upload} onClick={onUpload} />
                 <ActionButton action="text" icon={Type} onClick={onAddText} />
+                {isModuleAvailable(flags, bindings, "canvas-image") ? <ActionButton action="generate" icon={Sparkles} labeled primary onClick={onOpenQuickGenerate} /> : null}
                 <Dropdown trigger={["click"]} placement="topLeft" onOpenChange={setMoreOpen} styles={{ root: { zIndex: 900 } }} classNames={{ root: "cw-tool-menu" }} menu={{ items: [
-                    canvasActionMenuItem("generate", onOpenQuickGenerate, <Sparkles className="size-4" />),
                     canvasActionMenuItem("config", onAddConfig, <Settings2 className="size-4" />),
                     canvasActionMenuItem("image", onAddImage, <ImageIcon className="size-4" />),
                     canvasActionMenuItem("video", onAddVideo, <Video className="size-4" />),
@@ -50,8 +50,8 @@ export const CanvasToolbar = memo(function CanvasToolbar(props: CanvasToolbarRen
                 {viewControls ? <><span className="cw-divider" aria-hidden="true" />{viewControls}</> : null}
             </div>
             <div className="cw-tools cw-surface cw-toolbar-secondary" role="group" aria-label={t("工作台与设计工具")}>
-                {onOpenTools ? <ActionButton action="tools" icon={Grid3X3} onClick={onOpenTools} /> : null}
-                <ActionButton action="assets" icon={FolderOpen} onClick={onOpenMyAssets} />
+                {onOpenTools ? <ActionButton action="tools" icon={Grid3X3} labeled onClick={onOpenTools} /> : null}
+                <ActionButton action="assets" icon={FolderOpen} labeled onClick={onOpenMyAssets} />
                 {children ? <span className="cw-divider" aria-hidden="true" /> : null}
                 {children}
             </div>
@@ -59,8 +59,7 @@ export const CanvasToolbar = memo(function CanvasToolbar(props: CanvasToolbarRen
     );
 }, canvasToolbarPropsEqual);
 
-function ActionButton({ action, icon: Icon, pressed, disabled, onClick }: { action: CanvasActionId; icon: LucideIcon; pressed?: boolean; disabled?: boolean; onClick: () => void }) {
-    const t = useUiText();
+function ActionButton({ action, icon: Icon, pressed, disabled, labeled, primary, onClick }: { action: CanvasActionId; icon: LucideIcon; pressed?: boolean; disabled?: boolean; labeled?: boolean; primary?: boolean; onClick: () => void }) {
     const usage = action === "undo" || action === "redo" ? action : `canvas-tool.${action === "tools" ? "workspaces" : action}`;
-    return <Tooltip title={canvasActionHint(action)}><button data-usage-control={usage} type="button" className="cw-icon" aria-label={canvasActionLabel(action, "toolbar")} aria-pressed={pressed} disabled={disabled} onClick={onClick}><Icon className="size-4" /></button></Tooltip>;
+    return <Tooltip title={canvasActionHint(action)}><span className="inline-flex"><button data-usage-control={usage} type="button" className={`cw-icon ${labeled ? "cw-labeled-tool" : ""} ${primary ? "cw-primary-tool" : ""}`} style={disabled ? { pointerEvents: "none" } : undefined} aria-label={canvasActionLabel(action, "toolbar")} aria-pressed={pressed} disabled={disabled} onClick={onClick}><Icon className="size-4" />{labeled ? <span>{canvasActionLabel(action, "toolbar")}</span> : null}</button></span></Tooltip>;
 }

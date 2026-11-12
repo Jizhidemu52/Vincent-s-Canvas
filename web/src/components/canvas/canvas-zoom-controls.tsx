@@ -1,8 +1,8 @@
-import { useUiText } from "@/lib/i18n";
+import { useUiLocale, useUiText } from "@/lib/i18n";
 import type { CSSProperties } from "react";
 import { Check, ChevronDown, Compass, Focus, HelpCircle, Minus, Plus } from "lucide-react";
 import { lazy, Suspense, memo, useEffect, useRef, useState } from "react";
-import { Popover } from "antd";
+import { Popover, Tooltip } from "antd";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { canvasZoomSliderValue, canvasZoomFromSlider, clampCanvasZoom, MIN_CANVAS_ZOOM, MAX_CANVAS_ZOOM } from "@/lib/canvas/canvas-zoom";
@@ -17,12 +17,15 @@ type CanvasZoomControlsProps = {
     onScaleChange: (scale: number) => void;
     onScalePreview?: (scale: number) => void;
     onReset: () => void;
+    onFitSelection?: () => void;
+    hasSelection?: boolean;
     isMiniMapOpen: boolean;
     onToggleMiniMap: () => void;
 };
 
-export const CanvasZoomControls = memo(function CanvasZoomControls({ scale, onScaleChange, onScalePreview, onReset, isMiniMapOpen, onToggleMiniMap }: CanvasZoomControlsProps) {
+export const CanvasZoomControls = memo(function CanvasZoomControls({ scale, onScaleChange, onScalePreview, onReset, onFitSelection, hasSelection, isMiniMapOpen, onToggleMiniMap }: CanvasZoomControlsProps) {
     const t = useUiText();
+    const english = useUiLocale() === "en-US";
     const [shortcutsOpen, setShortcutsOpen] = useState(false);
     const [viewMenuOpen, setViewMenuOpen] = useState(false);
     const [previewScale, setPreviewScale] = useState<number | null>(null);
@@ -98,12 +101,14 @@ export const CanvasZoomControls = memo(function CanvasZoomControls({ scale, onSc
                     />
                     <div className="cw-view-presets">{[.25, .5, 1, 2].map(value => <button key={value} type="button" aria-pressed={Math.round(displayedScale * 100) === value * 100} onClick={() => onScaleChange(value)}>{value * 100}%</button>)}</div>
                     <div className="cw-view-separator" />
-                    <button type="button" className="cw-view-action" onClick={() => { onReset(); setViewMenuOpen(false); }}><Focus size={16} strokeWidth={1.5} />{canvasActionLabel("resetView")}</button>
+                    <button type="button" className="cw-view-action" onClick={() => { onReset(); setViewMenuOpen(false); }}><Focus size={16} strokeWidth={1.5} />{english ? "Show all" : "显示全部"}<kbd className="ml-auto text-xs opacity-60">Shift+1</kbd></button>
+                    {onFitSelection ? <Tooltip title={!hasSelection ? t("请先选择节点") : undefined}><span className="block"><button type="button" className="cw-view-action" style={!hasSelection ? { pointerEvents: "none" } : undefined} disabled={!hasSelection} onClick={() => { onFitSelection(); setViewMenuOpen(false); }}><Focus size={16} strokeWidth={1.5} />{english ? "Zoom to selection" : "缩放到选中"}<kbd className="ml-auto text-xs opacity-60">Shift+2</kbd></button></span></Tooltip> : null}
+                    <button type="button" className="cw-view-action" onClick={() => { onScaleChange(1); setViewMenuOpen(false); }}>{english ? "Actual size (100%)" : "回到 100%"}</button>
                     <button type="button" className="cw-view-action" aria-pressed={isMiniMapOpen} aria-label={isMiniMapOpen ? t("关闭小地图") : t("打开小地图")} onClick={onToggleMiniMap}><Compass size={16} strokeWidth={1.5} />{canvasActionLabel("minimap", "toolbar")}{isMiniMapOpen ? <Check size={14} /> : null}</button>
                     <div className="cw-view-separator" />
                     <button type="button" className="cw-view-action" onClick={() => { setViewMenuOpen(false); setShortcutsOpen(true); }}><HelpCircle size={16} strokeWidth={1.5} />{canvasActionLabel("shortcuts")}</button>
                 </div>}>
-                    <button type="button" className="cw-zoom-trigger" data-usage-control="canvas-tool.zoom" aria-label={t("画布缩放与视图")} title={t("双击恢复 100%")} onDoubleClick={() => { finishScaleAdjustment(); onScaleChange(1); setViewMenuOpen(false); }} aria-expanded={viewMenuOpen} aria-haspopup="dialog">{Math.round(displayedScale * 100)}%<ChevronDown className="size-3" /></button>
+                    <Tooltip title={t("双击恢复 100%")}><button type="button" className="cw-zoom-trigger" data-usage-control="canvas-tool.zoom" aria-label={t("画布缩放与视图")} onDoubleClick={() => { finishScaleAdjustment(); onScaleChange(1); setViewMenuOpen(false); }} aria-expanded={viewMenuOpen} aria-haspopup="dialog">{Math.round(displayedScale * 100)}%<ChevronDown className="size-3" /></button></Tooltip>
                 </Popover>
                 <button type="button" className="cw-icon" aria-label={t("放大画布")} onClick={() => onScaleChange(clampCanvasZoom(scale * 1.25))}><Plus size={16} /></button>
             {shortcutsOpen ? <Suspense fallback={null}><CanvasShortcutsDialog open onClose={() => setShortcutsOpen(false)} /></Suspense> : null}

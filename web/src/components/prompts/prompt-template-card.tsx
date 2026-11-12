@@ -54,7 +54,7 @@ export function PromptTemplateCard({ item, editable, canSubmit, onReuse, onInser
             <p className="whitespace-pre-wrap break-words text-sm leading-7">{item.prompt}</p>
             {item.notes ? <><h3 className="mb-2 mt-6 font-medium">{t("使用说明")}</h3><p className="whitespace-pre-wrap break-words text-sm leading-7">{item.notes}</p></> : null}
             {item.referenceAssetIds.length ? <p className="mt-5 text-sm text-muted-foreground">{t("包含 {p0} 张参考图，填入时会核验访问权限。", { p0: String(item.referenceAssetIds.length) })}</p> : null}
-            <p className="mt-6 text-xs text-muted-foreground">{t("查看详情不会提交生成或扣除积分；填入后可继续调整。")}</p>
+            <p className="mt-6 text-[13px] text-muted-foreground">{t("查看详情不会提交生成；填入后可继续调整。")}</p>
         </Drawer>
         </>
     );

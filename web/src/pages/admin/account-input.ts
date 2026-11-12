@@ -43,6 +43,6 @@ export function accountTemplateCsv(departments: Department[], wecomEnabled: bool
         username: "zhangsan", displayName: "张三", email: "zhangsan@company.com",
         employeeNo: wecomEnabled ? "ZhangSan" : "D001",
         ...(!wecomEnabled ? { password: "Canvas2026Start" } : {}),
-        role: "designer", departmentCode: departments[0]?.code || "", creditBalance: 500, creditLimit: 500,
+        role: "designer", departmentCode: departments[0]?.code || "",
     }]);
 }

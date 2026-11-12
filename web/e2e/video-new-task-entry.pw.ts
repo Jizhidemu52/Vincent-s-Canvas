@@ -11,7 +11,7 @@ const sourceA = fixturePng(31), sourceB = fixturePng(213);
 const active = (page: Page) => page.getByRole("tabpanel");
 const tabs = (page: Page) => page.getByRole("tablist", { name: "任务列表", exact: true }).getByRole("tab");
 const prompt = (page: Page) => active(page).getByRole("textbox", { name: "视频提示词", exact: true });
-const sidebarNew = (page: Page) => active(page).locator("aside").getByRole("button", { name: "新建", exact: true });
+const sidebarNew = (page: Page) => active(page).getByRole("button", { name: "新建任务，继续创作", exact: true });
 const digest = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
 
 async function routes(context: BrowserContext, api: MockCanvasApi) {

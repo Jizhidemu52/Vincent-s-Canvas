@@ -240,6 +240,7 @@ test("editing creative parameters while a preview loads cancels the spinner and 
     const started = Promise.withResolvers<void>();
     const app = harness("creative", async key => slow && key === "image:generated" ? new Promise<string>(resolve => { finish = resolve; started.resolve(); }) : `blob:${key}`);
     app.render(); await settle(); app.render();
+    const originalResults = app.render().results;
     slow = true;
     const pending = app.render().previewLog(sceneLog);
     await started.promise;
@@ -248,7 +249,8 @@ test("editing creative parameters while a preview loads cancels the spinner and 
     finish("blob:older"); await pending;
     expect(app.render().config.size).toBe("1536x1024");
     expect(app.render().config.count).toBe("1");
-    expect(app.render().results).toEqual([]);
+    expect(app.render().results).toEqual(originalResults);
+    expect(app.render().isHistoryPreview).toBe(false);
     app.unmount();
 });
 
@@ -265,8 +267,10 @@ test("creative result selection only accepts an explicit result of this owner an
     app.render().selectResultPrompt(sceneLog.results[0]);
     expect(app.render().selectedPrompt).toBe("原任务完整提示词：保留领口结构。");
     app.render().setForm({ ...workspace.form, description: "新草稿" });
+    const selectedHistoryPrompt = app.render().selectedPrompt;
     app.render().selectResultPrompt({ ...sceneLog.results[0], id: "unrelated", image: { ...image, id: "unrelated" } });
-    expect(app.render().selectedPrompt).toBeNull();
+    expect(app.render().selectedPrompt).toBe(selectedHistoryPrompt);
+    expect(app.render().form.description).toBe("新草稿");
     expect(app.submissions).toHaveLength(0);
     app.unmount();
 });

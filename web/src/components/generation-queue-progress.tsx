@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { getQueuedTaskProgress, type QueuedTaskProgress } from "@/services/api/generation-tasks";
 import { useUserStore } from "@/stores/use-user-store";
 import { watchTaskEvents } from "@/services/api/task-events";
+import { Tooltip } from "antd";
 
 type ProgressView = { progress: QueuedTaskProgress | null; unavailable: boolean };
 
@@ -85,5 +86,5 @@ export function GenerationQueueProgress({ taskId, active }: { taskId?: string | 
     if (!active || !taskId) return null;
     const text = view.progress ? generationProgressText(view.progress)
         : view.unavailable ? uiText("排队状态暂不可用，生成仍在继续") : uiText("正在查询排队状态…");
-    return <span role="status" className="text-xs text-muted-foreground" title={uiText("名次只含当前同模型可运行队列，按实际优先级排序；预计时间基于最近 7 天最多 30 次同类成功任务，不是完成时间保证，可能受插队、调度和上游速度影响。")}>{text}</span>;
+    return <Tooltip title={uiText("名次只含当前同模型可运行队列，按实际优先级排序；预计时间基于最近 7 天最多 30 次同类成功任务，不是完成时间保证，可能受插队、调度和上游速度影响。") }><span role="status" className="text-xs text-muted-foreground">{text}</span></Tooltip>;
 }

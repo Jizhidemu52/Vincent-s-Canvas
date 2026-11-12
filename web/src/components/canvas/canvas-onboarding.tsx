@@ -22,10 +22,10 @@ type Props = {
 type Rect = { left: number; top: number; width: number; height: number };
 
 const steps = [
-    { title: "添加一张参考图", text: "将图片拖到画布，或点击高亮的上传按钮。原图会保留，之后的修改另存为新结果。", selectors: ['[data-usage-control="canvas-tool.upload"]'] },
-    { title: "写清要求，再点击生成", text: "先选中参考图，在创建区说明要改什么、哪些细节不能变；确认模型和要求后再点生成。引导本身不会调用模型。", selectors: ['[data-testid="canvas-quick-generate-panel"]', '[data-usage-control="canvas-tool.more"]'] },
-    { title: "连线与多图执行", text: "从素材节点右侧连接点拖到生成配置左侧。逐图执行会为每张任务图分别生成；合并参考让多图共同参与一次生成。在配置提示词输入 @ 选择已连接素材，并说明各图用途。", selectors: ['[data-canvas-connection-handle="right"]', '.node-element', '[data-usage-control="canvas-tool.more"]'] },
-    { title: "对比原图和结果", text: "生成后选择原图与结果，在高亮的设计工具中打开“改款前后对比”，查看滑块、并排或叠加效果；满意后再下载。没有结果时可以先打开示例学习结构。", selectors: ['[data-usage-control="canvas-tool.design-tools"]', '.cw-toolbar-secondary'] },
+    { title: "添加一张参考图", text: "拖入图片或点击上传，原图保留，修改会另存为新结果。", selectors: ['[data-usage-control="canvas-tool.upload"]'] },
+    { title: "写清要求，再点击生成", text: "选中参考图，在创建区写清修改要求，确认后再点生成；引导本身不会生成。", selectors: ['[data-testid="canvas-quick-generate-panel"]', '[data-usage-control="canvas-tool.generate"]'] },
+    { title: "连线与多图执行", text: "把素材连接到生成配置，输入 @ 指定各图用途，再选择逐图执行或合并参考。", selectors: ['[data-canvas-connection-handle="right"]', '.node-element', '[data-usage-control="canvas-tool.more"]'] },
+    { title: "对比原图和结果", text: "选中原图与结果，从设计工具打开改款前后对比，满意后下载。", selectors: ['[data-usage-control="canvas-tool.design-tools"]', '.cw-toolbar-secondary'] },
 ] as const;
 
 /** Non-modal guidance: real controls remain clickable and the canvas stays usable. */
@@ -221,7 +221,6 @@ export function CanvasOnboarding({ ref, empty, onImportImage, onUseTemplate, onO
                 <header className="flex items-center justify-between gap-3"><span className="text-xs" style={{ color: theme.node.muted }}>{t("快速上手 · {step} / 4", { step: step + 1 })}</span><button type="button" aria-label={t("关闭引导，以后再看")} className="cw-icon" onClick={() => dismiss("later")}><X className="size-4" /></button></header>
                 <h2 id="canvas-onboarding-title" className="mt-2 text-lg font-semibold">{t(steps[step].title)}</h2>
                 <p className="mt-3 text-sm leading-6">{t(steps[step].text)}</p>
-                {step === 2 && empty ? <p className="mt-2 text-xs leading-5" style={{ color: theme.node.muted }}>{t("当前还没有节点。先从高亮的“更多工具”添加生成配置，或关闭引导后打开示例画布。")}</p> : null}
                 {!target ? <p className="mt-2 text-xs" style={{ color: theme.node.muted }}>{t("对应工具尚未显示；可以先关闭引导添加素材，再重新查看。")}</p> : null}
                 <div className="mt-4 flex items-center justify-between gap-2">
                     <button type="button" className="rounded px-2 py-2 text-xs hover:opacity-70" onClick={() => dismiss("skipped")}>{t("跳过引导")}</button>

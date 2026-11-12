@@ -75,6 +75,7 @@ test("handoff stays separate, suppresses query overrides, preserves edits across
     expect((await saved(page, href)).handoff).toEqual(originalHandoff);
     expect((await saved(page, href)).ordinary).toBe("原图片编辑草稿保持不变");
     await requirements(page).fill("尚未提交的下一款要求");
+    await page.getByRole("tab", { name: /^历史记录/ }).click();
     await page.getByRole("button").filter({ has: page.getByRole("checkbox", { name: "选择记录：只调整袖口宽度", exact: true }) }).click();
     await page.getByRole("button", { name: "恢复为草稿继续改", exact: true }).click();
     await page.getByRole("button", { name: "确认恢复", exact: true }).click();

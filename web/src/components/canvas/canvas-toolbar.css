@@ -25,3 +25,7 @@
 .cw-view-menu .cw-view-action > svg:last-child:not(:first-child) { margin-left: auto; }
 .cw-view-shortcut { display: flex; justify-content: space-between; align-items: center; gap: 24px; padding: 8px 0; font-size: 13px; }
 .cw-view-shortcut > span:last-child { opacity: .6; text-align: right; }
+.cw-toolbar-primary .cw-labeled-tool, .cw-toolbar-secondary .cw-labeled-tool { width: auto; gap: 6px; padding: 0 10px; font-size: 13px; white-space: nowrap; }
+.cw-toolbar-primary .cw-primary-tool { color: var(--cw-inverse); background: var(--cw-active); }
+.cw-toolbar-primary .cw-primary-tool:not(:disabled):hover { background: color-mix(in srgb, var(--cw-active) 88%, var(--cw-panel)); }
+.cw-view-action:disabled { opacity: .4; cursor: not-allowed; }

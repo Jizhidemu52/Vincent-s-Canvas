@@ -251,7 +251,7 @@ export function createCanvasImageActionsRuntime(context: CanvasImageActionRuntim
                 return;
             }
             if (!usage.configured) {
-                message.error(uiText("管理员尚未为该局部编辑模型启用价格或接口"));
+                message.error(uiText("管理员尚未启用该局部编辑模型，请联系管理员。"));
                 return;
             }
             if (!user || user.status !== "active") {
@@ -259,7 +259,7 @@ export function createCanvasImageActionsRuntime(context: CanvasImageActionRuntim
                 return;
             }
             if (deploymentFeatures.creditsEnabled && user.creditBalance < usage.credits) {
-                message.error(uiText("额度不足：本次局部编辑需要 {value1} 积分，当前剩余 {value2} 积分", { value1: usage.credits, value2: user.creditBalance }));
+                message.error(uiText("当前账号暂时无法提交生成任务，请联系管理员。"));
                 return;
             }
             const userPrompt = payload.prompt.trim();

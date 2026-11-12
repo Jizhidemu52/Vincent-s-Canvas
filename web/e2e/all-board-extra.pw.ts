@@ -187,46 +187,45 @@ for (const boundary of ["credits-off", "no-group", "module-off"] as const) {
     });
 }
 
-test("team member submits and returns their own credits without loading leader-only team or performance data", async ({ page, context, api }) => {
+test("team member sees the group without retired finance controls or leader-only requests", async ({ page, context, api }) => {
     const state = await configureTeam(context, api, { groupRole: "member" });
     await page.goto("/team"); await expect(page.getByRole("heading", { name: "E2E 设计组", exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "申请小组额度", exact: true }).click();
-    const request = page.getByRole("dialog", { name: "申请小组共享额度" });
-    await request.getByRole("spinbutton").fill("10"); await request.getByPlaceholder("例如：本周商品图批量改图任务").fill("E2E 本组样图申请");
-    await request.getByRole("button", { name: "提交申请", exact: true }).click();
-    await expect(page.getByRole("row").filter({ hasText: "E2E 本组样图申请" })).toContainText("待审批");
-    await page.getByRole("button", { name: "归还个人额度", exact: true }).click();
-    const contribution = page.getByRole("dialog", { name: "归还个人额度到本组共享池" });
-    await contribution.getByRole("spinbutton").fill("5"); await contribution.getByRole("button", { name: "确认归还", exact: true }).click();
-    await expect(contribution).not.toBeVisible();
-    expect(state.writes.map(write => write.path)).toEqual(["/api/group-credits/requests", "/api/group-credits/contributions"]);
-    expect(state.writes[0].input).toMatchObject({ amount: 10, reason: "E2E 本组样图申请" });
-    expect(state.writes[1].input.amount).toBe(5);
-    expect(state.reads.every(path => path === "/api/group-credits")).toBe(true);
-    await expect(page.getByText("共享池审批", { exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /申请小组额度|归还个人额度/ })).toHaveCount(0);
+    await expect(page.locator("main")).not.toContainText(/积分|额度|共享池|人民币|累计成本/);
+    await page.getByRole("button", { name: /^刷\s*新$/ }).click();
+    expect(state.writes).toEqual([]);
+    expect(state.reads).toEqual([]);
     await expect(page.getByTestId("performance-dashboard")).toHaveCount(0);
 });
 
-test("team leader can approve, filter business performance and export the original team report", async ({ page, context, api }, info) => {
+test("team leader can filter business performance and export the audited nonfinancial report", async ({ page, context, api }, info) => {
     const state = await configureTeam(context, api, { groupRole: "leader" });
     await page.goto("/team");
     const dashboard = page.getByTestId("performance-dashboard");
-    await expect(dashboard.getByRole("heading", { name: "出图效率、成本与成果转化" })).toBeVisible();
+    await expect(dashboard.getByRole("heading", { name: "出图效率与成果转化" })).toBeVisible();
     await expect(dashboard.getByRole("button", { name: /^有效出图/ })).toContainText("3");
+    await expect(dashboard.getByText("今日使用人数", { exact: true }).locator("..").locator("..")).toContainText("17");
+    for (const label of ["成果下载率", "成果可用性均分", "返工率 / 按时交付率", "积分 / 人民币成本"]) {
+        await expect(dashboard.getByRole("button", { name: label })).toHaveCount(0);
+    }
     await dashboard.getByText("本周", { exact: true }).click();
     await expect.poll(() => state.reads.filter(path => path.startsWith("/api/performance?")).at(-1)).toContain("preset=week");
+    await expect(dashboard.getByText("今日使用人数", { exact: true }).locator("..").locator("..")).toContainText("17");
     await dashboard.getByRole("combobox").first().click();
     await page.locator(".ant-select-dropdown:visible").getByText("隔离设计师", { exact: true }).click();
     await expect.poll(() => state.reads.filter(path => path.startsWith("/api/performance?")).at(-1)).toContain(`userId=${OWNER}`);
     await expect(dashboard.getByText("部门", { exact: true })).toHaveCount(0);
     await expect(dashboard.getByText("小组", { exact: true })).toHaveCount(0);
-    await page.getByRole("button", { name: /^通\s*过$/ }).click();
-    await page.getByRole("dialog").getByRole("button", { name: "确认通过", exact: true }).click();
-    await expect(page.getByRole("row").filter({ hasText: "E2E 团队批量改图" })).toContainText("已到账");
+    await expect(page.getByRole("button", { name: /^通\s*过$/ })).toHaveCount(0);
+    await expect(page.locator("main")).not.toContainText(/积分|额度|共享池|人民币|累计成本/);
+    await expect(page.getByRole("columnheader", { name: /积分|额度|余额|人民币|成本/ })).toHaveCount(0);
     const downloading = page.waitForEvent("download"); await page.getByRole("button", { name: "导出本组报表", exact: true }).click();
     const download = await downloading, csv = readFileSync((await download.path())!, "utf8");
-    expect(download.suggestedFilename()).toBe("E2E 设计组-历史报表.csv"); expect(csv).toContain("E2E 本组原始提示词");
-    expect(state.writes).toEqual([{ path: "/api/team/group-credits/requests/team-request/decision", input: { decision: "approved" } }]);
+    expect(download.suggestedFilename()).toBe("E2E 设计组-历史报表.csv");
+    expect(csv).toContain('"E2E 本组原始提示词,含逗号\r\n与""引号"""');
+    expect(csv).not.toContain("积分"); expect(csv).not.toContain("人民币成本");
+    expect(state.writes).toEqual([]);
+    expect(state.reads.some(path => path.includes("group-credits"))).toBe(false);
     expect(state.reads).toContain("/api/team/history/export");
     await info.attach("team-performance-read-write-boundary", { contentType: "application/json", body: Buffer.from(JSON.stringify({ reads: state.reads, writes: state.writes, reportSha256: sha(Buffer.from(csv)), scope: "group leader; team-only controls" })) });
 });
@@ -234,7 +233,8 @@ test("team leader can approve, filter business performance and export the origin
 test("team leader with performance disabled still sees the team and makes no performance request", async ({ page, context, api }) => {
     const state = await configureTeam(context, api, { groupRole: "leader", performanceEnabled: false });
     await page.goto("/team");
-    await expect(page.getByText("共享池审批", { exact: true })).toBeVisible();
+    await expect(page.getByText("本组成员", { exact: true })).toBeVisible();
+    await expect(page.getByText("共享池审批", { exact: true })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "导出本组报表", exact: true })).toBeEnabled();
     await expect(page.getByTestId("performance-dashboard")).toHaveCount(0);
     expect(state.reads.some(path => path.startsWith("/api/performance"))).toBe(false);

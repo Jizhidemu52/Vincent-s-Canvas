@@ -3,7 +3,6 @@ import { i18nHarness } from "./helpers/i18n-harness";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import React, { type ReactElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
 import ts from "typescript";
 import { modelLabelWithUsage } from "@/lib/model-picker-options";
 import type { PublicModel } from "@/services/api/business-config";
@@ -47,14 +46,13 @@ test("usage labels are presentation-only and omit empty descriptions", () => {
 
 test("selected and dropdown names show the same usage while selection retains the UUID", () => {
     const before = { ...model };
-    const { root, tree, selected } = picker([model], model.modelId);
-    const label = "aplmart-nano2 · 快速出图与参考图改款";
+    const { root, selected } = picker([model], model.modelId);
+    const label = "Nano Banana 2";
     expect(root.props.value).toBe(model.modelId);
-    expect(tree.find(item => item.type === "SelectTrigger")!.props.title).toBe(label);
-    const option = tree.find(item => item.type === "SelectItem")!;
-    expect(option.props.value).toBe(model.modelId);
-    expect(option.props.textValue).toBe(label);
-    expect(renderToStaticMarkup(option.props.children)).toContain(label);
+    expect(root.props.label).toBe(label);
+    expect(root.props.options).toHaveLength(1);
+    expect(root.props.options[0]).toMatchObject({ value: model.modelId, name: label, description: model.publicDescription, icon: "/icons/gemini.svg" });
+    expect(root.props.options[0]).not.toHaveProperty("creditCost");
     root.props.onValueChange(model.modelId);
     root.props.onValueChange(label);
     expect(selected).toEqual([model.modelId]);
@@ -62,7 +60,9 @@ test("selected and dropdown names show the same usage while selection retains th
 });
 
 test("bound pickers retain both the usage and the backend binding indicator", () => {
-    const { root, tree } = picker([model], model.modelId, true);
+    const { root } = picker([model], model.modelId, true);
     expect(root.props.disabled).toBe(true);
-    expect(tree.find(item => item.type === "SelectTrigger")!.props.title).toBe("aplmart-nano2 · 快速出图与参考图改款 · 后台指定");
+    expect(root.props.bound).toBe(true);
+    expect(root.props.label).toBe("Nano Banana 2");
+    expect(root.props.options[0].description).toBe(model.publicDescription);
 });

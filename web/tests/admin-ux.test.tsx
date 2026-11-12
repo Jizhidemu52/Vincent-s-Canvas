@@ -21,10 +21,12 @@ test("account search matches people fields and intersects status/department filt
     expect(filterAdminAccounts(accounts, "张三", "disabled", "")).toEqual([]);
 });
 
-test("semantic labels and nested readable details preserve values and Beijing instants", () => {
+test("semantic labels preserve nonfinancial values and Beijing instants while omitting finance fields", () => {
     expect(adminLabel("task.admin_cancelled")).toBe("任务：管理员取消");
     expect(adminLabel("image_generation")).toBe("图像生成");
     const html = renderToStaticMarkup(<AdminDetails value={{ credits: 0, enabled: false, createdAt: "2026-10-29T17:02:03Z", before: { status: "active" } }} />);
-    for (const value of ["积分", ">0<", "否", "2026-10-30 01:02:03", "北京时间", "修改前", "启用"]) expect(html).toContain(value);
+    for (const value of ["否", "2026-10-30 01:02:03", "北京时间", "修改前", "启用"]) expect(html).toContain(value);
+    expect(html).not.toContain("积分");
+    expect(html).not.toContain(">0<");
     expect(html).not.toContain("<pre");
 });

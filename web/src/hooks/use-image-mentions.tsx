@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useId, useRef, useState, type ChangeEvent, type KeyboardEvent, type SyntheticEvent } from "react";
-import { App } from "antd";
+import { App, Tooltip } from "antd";
 import { CanvasPersistedMediaPreview } from "@/components/canvas/canvas-persisted-media-preview";
 import { conversationImageLabel, type ConversationImageItem } from "@/components/conversation-image-controls";
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -88,11 +88,11 @@ export function useImageMentions(options: {
         <div className="px-2 py-1 text-[11px]" style={{ color: theme.node.muted }}>{t("↑↓ 选择 · Enter 确定 · Esc 关闭")}</div>
         {images.length ? images.map((image, index) => <Fragment key={image.id}>
             {index === 0 || (image.source === "canvas") !== (images[index - 1]?.source === "canvas") ? <div className="px-2 pb-1 pt-2 text-[11px]" style={{ color: theme.node.muted }}>{image.source === "canvas" ? t("画布图片") : t("对话图片")}</div> : null}
-            <button type="button" role="option" aria-selected={index === selectedIndex} disabled={choosing || Boolean(image.unavailableReason)} title={image.unavailableReason ? t(image.unavailableReason) : image.name}
+            <Tooltip title={image.unavailableReason ? t(image.unavailableReason) : image.name}><span className="flex w-full"><button type="button" role="option" aria-selected={index === selectedIndex} disabled={choosing || Boolean(image.unavailableReason)}
             onMouseDown={event => event.preventDefault()} onClick={() => void choose(image)} className="flex min-h-12 w-full min-w-0 items-center gap-2 rounded px-2 py-1 text-left disabled:opacity-40" style={{ background: index === selectedIndex ? theme.node.fill : "transparent" }}>
             <CanvasPersistedMediaPreview kind="image" url={image.dataUrl} storageKey={image.storageKey} alt="" className="size-9 shrink-0 rounded object-cover" />
             <span className="shrink-0 text-xs font-medium">{conversationImageLabel(image.label)}</span><span className="min-w-0 truncate text-xs" style={{ color: theme.node.muted }}>{image.name}</span>
-        </button></Fragment>) : <p className="px-2 py-3 text-xs" style={{ color: theme.node.muted }}>{t("没有匹配的图片")}</p>}
+        </button></span></Tooltip></Fragment>) : <p className="px-2 py-3 text-xs" style={{ color: theme.node.muted }}>{t("没有匹配的图片")}</p>}
         {matches.length > images.length ? <p className="px-2 py-2 text-xs" style={{ color: theme.node.muted }}>{t("还有 {count} 张，请输入图号或名称筛选", { count: matches.length - images.length })}</p> : null}
     </div> : null;
     return { menu, handleChange, handleSelect, handleKeyDown, inputProps: { "aria-controls": visible ? id : undefined, "aria-expanded": visible, "aria-autocomplete": "list" as const } };

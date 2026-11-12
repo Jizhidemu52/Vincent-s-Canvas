@@ -1,6 +1,6 @@
 import { uiText, useUiText, getUiLocale } from "@/lib/i18n";
 import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, LoaderCircle, Music2, Plus, SlidersHorizontal, Sparkles, Trash2, Upload, VideoIcon } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { handleSubmitShortcut } from "@/lib/submit-shortcut";
 import { useGenerationDraft } from "@/hooks/use-generation-draft";
 import { isOrdinaryPromptUrl, usePromptUrlHandoff } from "@/hooks/use-prompt-url-handoff";
@@ -11,6 +11,7 @@ import { generationDownloadName, generationErrorMessage, generationErrorDiagnost
 import { GenerationDiagnostic } from "@/components/generation-diagnostic";
 import { useResultCanvas } from "@/hooks/use-result-canvas";
 import { GenerationTaskCancel } from "@/components/generation-task-cancel";
+import { WorkbenchImage } from "@/components/workbench-image";
 import { snapshotVideoRequest, type VideoRequestSnapshot } from "./video-retry";
 import { VideoMotionPanel } from "./video-motion-panel";
 import { createVideoMotionInput, motionVideoConfig, videoMotionSummary } from "./video-motion";
@@ -63,6 +64,7 @@ import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 import { videoFileExtension } from "../../../../shared/video-output";
 import "../image/image-workbench.css";
+import "./video-workbench.css";
 
 type GeneratedVideo = {
     id: string;
@@ -135,6 +137,16 @@ export default function VideoPage() {
     return <WorkbenchTasks key={ownerId || "local"} ownerId={ownerId} boardKey="video" urlInputKey={isOrdinaryPromptUrl(searchParams) ? navigationKey : undefined}><VideoGenerationWorkspace /></WorkbenchTasks>;
 }
 
+/** Editing a draft revokes only pending history-to-draft writes, not its running task or preview. */
+function useVideoDraft<T>(key: string, initial: T, revision: { current: number }, hydrate?: (value: T) => Promise<T>) {
+    const [value, save, ready] = useGenerationDraft(key, initial, hydrate);
+    const update = useCallback<Dispatch<SetStateAction<T>>>(next => {
+        revision.current += 1;
+        save(next);
+    }, [revision, save]);
+    return [value, update, ready] as const;
+}
+
 function VideoGenerationWorkspace() {
     useUiText();
     const workbenchTask = useWorkbenchTask();
@@ -158,9 +170,10 @@ function VideoGenerationWorkspace() {
     const logRefreshRevisionRef = useRef(0);
     const logReadIdRef = useRef(0);
     const resultViewScopeRef = useRef(0);
+    const draftEditRevisionRef = useRef(0);
     const visibleResultLogIdsRef = useRef(new Set<string>());
     const baseConfig = useEffectiveConfig();
-    const [draftConfig, setDraftConfig, configReady] = useGenerationDraft<Partial<AiConfig>>(draftScope("video:settings"), {});
+    const [draftConfig, setDraftConfig, configReady] = useVideoDraft<Partial<AiConfig>>(draftScope("video:settings"), {}, draftEditRevisionRef);
     const config = { ...baseConfig, ...draftConfig };
     const effectiveConfig = useToolConfig({ ...config, model: config.videoModel || config.model }, "video");
     const updateConfig: UpdateAiConfig = useCallback((key, value) => setDraftConfig(current => current[key] === value ? current : { ...current, [key]: value }), [setDraftConfig]);
@@ -172,10 +185,10 @@ function VideoGenerationWorkspace() {
     const configuredTools = useBusinessConfigStore((state) => state.tools);
     const configStatus = useBusinessConfigStore((state) => state.status);
     const user = useUserStore((state) => state.user);
-    const [prompt, setPrompt, promptReady] = useGenerationDraft(draftScope("video:prompt"), "");
-    const [motion, setMotion, motionReady] = useGenerationDraft<VideoMotionSettings>(draftScope("video:motion"), defaultVideoMotionSettings, async value => normalizeVideoMotionSettings(value));
-    const [rawPrompt, setRawPrompt, rawReady] = useGenerationDraft(draftScope("video:raw-prompt"), false);
-    const [references, setReferences, referencesReady] = useGenerationDraft<ReferenceImage[]>(draftScope("video:references"), [], async items => Promise.all(items.map(async item => ({ ...item, dataUrl: await resolveImageUrl(item.storageKey, item.dataUrl) }))));
+    const [prompt, setPrompt, promptReady] = useVideoDraft(draftScope("video:prompt"), "", draftEditRevisionRef);
+    const [motion, setMotion, motionReady] = useVideoDraft<VideoMotionSettings>(draftScope("video:motion"), defaultVideoMotionSettings, draftEditRevisionRef, async value => normalizeVideoMotionSettings(value));
+    const [rawPrompt, setRawPrompt, rawReady] = useVideoDraft(draftScope("video:raw-prompt"), false, draftEditRevisionRef);
+    const [references, setReferences, referencesReady] = useVideoDraft<ReferenceImage[]>(draftScope("video:references"), [], draftEditRevisionRef, async items => Promise.all(items.map(async item => ({ ...item, dataUrl: await resolveImageUrl(item.storageKey, item.dataUrl) }))));
     const {
         logs, setLogs, running, setRunning, startedAt, setStartedAt, activeTaskId, setActiveTaskId,
         previewLoading, setPreviewLoading, logsOpen, setLogsOpen, settingsOpen, setSettingsOpen,
@@ -183,9 +196,14 @@ function VideoGenerationWorkspace() {
         selectedLogIds, setSelectedLogIds, previewLog, setPreviewLog, deleteConfirmOpen, setDeleteConfirmOpen,
         deletingLogs, deleteSelectedHistory,
     } = useGenerationWorkspace<ReferenceImage, GenerationLog>();
-    const [videoReferences, setVideoReferences, videosReady] = useGenerationDraft<ReferenceVideo[]>(draftScope("video:videos"), [], async items => Promise.all(items.map(async item => ({ ...item, url: await resolveMediaUrl(item.storageKey, item.url) }))));
-    const [audioReferences, setAudioReferences, audiosReady] = useGenerationDraft<ReferenceAudio[]>(draftScope("video:audios"), [], async items => Promise.all(items.map(async item => ({ ...item, url: await resolveMediaUrl(item.storageKey, item.url) }))));
+    const [videoReferences, setVideoReferences, videosReady] = useVideoDraft<ReferenceVideo[]>(draftScope("video:videos"), [], draftEditRevisionRef, async items => Promise.all(items.map(async item => ({ ...item, url: await resolveMediaUrl(item.storageKey, item.url) }))));
+    const [audioReferences, setAudioReferences, audiosReady] = useVideoDraft<ReferenceAudio[]>(draftScope("video:audios"), [], draftEditRevisionRef, async items => Promise.all(items.map(async item => ({ ...item, url: await resolveMediaUrl(item.storageKey, item.url) }))));
     const [results, setResults] = useState<GenerationResult[]>([]);
+    const [historyResults, setHistoryResults] = useState<GenerationResult[]>([]);
+    const [resultView, setResultView] = useState<"current" | "history">("current");
+    const previewLogRef = useRef(previewLog);
+    previewLogRef.current = previewLog;
+    const displayedResults = resultView === "history" ? historyResults : results;
     const [playbacks, setPlaybacks] = useState<Record<string, VideoPlaybackView>>({});
     const [previewError, setPreviewError] = useState("");
     const [readingReferences, setReadingReferences] = useState(false);
@@ -256,7 +274,7 @@ function VideoGenerationWorkspace() {
     }, []);
 
     useEffect(() => {
-        const videos = results.flatMap(result => result.status === "success" && result.video ? [result.video] : []);
+        const videos = displayedResults.flatMap(result => result.status === "success" && result.video ? [result.video] : []);
         const currentVideos = new Map(videos.map(video => [video.id, video]));
         for (const [id, session] of playbackSessions) {
             if (currentVideos.get(id) === session.video && session.owner === playbackOwner) continue;
@@ -283,7 +301,7 @@ function VideoGenerationWorkspace() {
                 setPlaybacks(current => ({ ...current, [video.id]: { status: "error", error: error instanceof Error ? error.message : "兼容预览暂不可用；原任务已成功，可下载原件。" } }));
             });
         }
-    }, [results, playbackSessions, playbackOwner]);
+    }, [displayedResults, playbackSessions, playbackOwner]);
 
     useEffect(() => {
         if (restoredInitialResultRef.current || running || !logs.length || results.length) return;
@@ -338,10 +356,9 @@ function VideoGenerationWorkspace() {
             setReferences(nextReferences.filter((item): item is NonNullable<typeof item> => item !== null));
             payload.warnings.forEach((warning) => message.warning(uiText(warning)));
             if (payload.pricing.modelChanged) message.warning(payload.pricing.selectedModel ? uiText("模型已变更，当前使用 {name}", { name: payload.pricing.selectedModel.name }) : uiText("模型已变更，请先选择管理员当前启用的视频模型"));
-            const cost = !deploymentFeatures.creditsEnabled ? "不计积分" : (payload.pricing.estimate ? `${payload.pricing.estimate.totalCredits} 积分` : "以当前选择为准");
             if (payload.mode === "fill_and_generate") {
-                modal.confirm({ title: uiText("确认使用当前配置生成视频？"), content: !deploymentFeatures.creditsEnabled ? uiText("确认后将直接提交视频生成任务。") : uiText("当前实际预计消耗 {cost}。确认后才会提交任务并扣费。", { cost: cost }), okText: uiText("确认生成"), cancelText: uiText("仅保留填入"), onOk: () => generateRef.current() });
-            } else message.success(uiText("模板已填入，当前预计 {cost}", { cost: cost }));
+                modal.confirm({ title: uiText("确认使用当前配置生成视频？"), content: uiText("确认后将直接提交视频生成任务。"), okText: uiText("确认生成"), cancelText: uiText("仅保留填入"), onOk: () => generateRef.current() });
+            } else message.success(uiText("模板已填入"));
         }).catch((error) => {
             loadedReuseTokenRef.current.delete(token);
             if (stillCurrent()) message.error(error instanceof Error ? uiText(error.message) : uiText("模板复用失败"));
@@ -367,6 +384,7 @@ function VideoGenerationWorkspace() {
     const addMediaReferences = async (files: FileList | null, kind: "video" | "audio") => {
         const selected = Array.from(files || []);
         if (!selected.length) return;
+        draftEditRevisionRef.current += 1;
         const scope = referenceScopeRef.current;
         setReadingReferences(true);
         setReferenceError("");
@@ -389,6 +407,7 @@ function VideoGenerationWorkspace() {
 
     const addReferencesFromClipboard = async () => {
         if (readingReferences) return;
+        draftEditRevisionRef.current += 1;
         const scope = referenceScopeRef.current;
         setReadingReferences(true);
         try {
@@ -423,7 +442,7 @@ function VideoGenerationWorkspace() {
         const release = workbenchSubmissions.acquire(`video:${user?.id}:${workspaceId}`);
         if (!release) { message.info(uiText("视频正在提交，请勿重复点击")); return; }
         setSubmitting(true);
-        setPreviewLog(null);
+        setResultView("current");
         let log = { ...buildLog({ prompt: snapshot.text, model: snapshot.config.model, config: snapshot.config, references: snapshot.references, videoReferences: snapshot.videoReferences, audioReferences: snapshot.audioReferences, durationMs: null, status: "生成中" }), workspaceId, promptInput: snapshot.promptInput };
         visibleResultLogIdsRef.current.add(log.id);
         setResults(current => [...current, { id: log.id, status: "pending", createdAt: log.createdAt }]);
@@ -470,7 +489,7 @@ function VideoGenerationWorkspace() {
             return null;
         }
         if (quotaBlocked) {
-            message.error(uiText("额度不足：预计需要 {credits} 积分，当前剩余 {creditBalance} 积分", { credits: estimatedUsage.credits, creditBalance: user.creditBalance }));
+            message.error(uiText("当前账号暂时无法提交，请联系管理员"));
             return null;
         }
         if (validationError) {
@@ -490,7 +509,7 @@ function VideoGenerationWorkspace() {
         }
         const log = logs.find(item => item.id === result.id);
         if (!log || log.status !== "失败") { message.warning(uiText("原任务状态尚未确认，请继续查询，不要重复生成。")); return; }
-        modal.confirm({ title: uiText("按原参数重试？"), content: uiText("将使用此失败任务的原提示词、模型与参考素材提交一个新任务，按当前规则计费；当前草稿保持不变。"), okText: uiText("按原参数重试"), cancelText: uiText("取消"), onOk: async () => {
+        modal.confirm({ title: uiText("按原参数重试？"), content: uiText("将使用此失败任务的原提示词、模型与参考素材提交一个新任务；当前草稿保持不变。"), okText: uiText("按原参数重试"), cancelText: uiText("取消"), onOk: async () => {
             const restored = await hydrateVideoLogMedia(log, { image: resolveImageUrl, media: resolveMediaUrl }, true);
             await generate(snapshotVideoRequest({ text: log.prompt, promptInput: log.promptInput, config: { ...baseConfig, ...log.config }, references: restored.references, videoReferences: restored.videoReferences, audioReferences: restored.audioReferences }));
         } });
@@ -546,6 +565,7 @@ function VideoGenerationWorkspace() {
 
     const insertPickedAsset = async (payload: InsertAssetPayload) => {
         if (!workspaceActive || !draftReady || readingReferences) return;
+        draftEditRevisionRef.current += 1;
         const scope = referenceScopeRef.current;
         setReadingReferences(true);
         try {
@@ -583,8 +603,12 @@ function VideoGenerationWorkspace() {
                 await Promise.all(selected.map(log => logStore.removeItem(log.id)));
                 await deleteStoredMedia(mediaKeys);
             });
-            if (deleted?.previewRemoved) setResults([]);
-            if (deleted) await refreshLogs();
+            if (deleted?.previewRemoved) setHistoryResults([]);
+            if (deleted) {
+                const removed = new Set(deleted.deletedIds);
+                setResults(current => current.filter(result => !removed.has(result.id)));
+                await refreshLogs();
+            }
         } catch (error) {
             message.error(error instanceof Error ? uiText(error.message) : uiText("记录删除失败"));
         }
@@ -640,10 +664,14 @@ function VideoGenerationWorkspace() {
         observationControllers.current.set(log.id, controller);
         const isCurrent = () => mountedRef.current && useUserStore.getState().user?.id === ownerId;
         const displayResult = (result: GenerationResult) => {
-            if (!isCurrent() || !visibleResultLogIdsRef.current.has(log.id)) return;
-            // A terminal task update wins over an older preview read of the same visible task.
-            if (result.status !== "pending") { previewLoader.invalidate(); setPreviewLoading(false); }
-            setResults(current => [...current.filter(item => item.id !== log.id), { ...result, id: log.id, createdAt: log.createdAt, taskId: task?.id }]);
+            if (!isCurrent()) return;
+            const updated = { ...result, id: log.id, createdAt: log.createdAt, taskId: task?.id };
+            if (visibleResultLogIdsRef.current.has(log.id)) setResults(current => [...current.filter(item => item.id !== log.id), updated]);
+            // History is a separate view: another task finishing cannot replace it.
+            if (previewLogRef.current?.id === log.id) {
+                if (result.status !== "pending") { previewLoader.invalidate(); setPreviewLoading(false); }
+                setHistoryResults([updated]);
+            }
         };
         activeLogIdsRef.current.add(log.id);
         setRunning(true);
@@ -713,11 +741,11 @@ function VideoGenerationWorkspace() {
         const revision = ++resultViewScopeRef.current;
         const ownerId = user?.id;
         const isCurrent = () => mountedRef.current && resultViewScopeRef.current === revision && useUserStore.getState().user?.id === ownerId;
-        visibleResultLogIdsRef.current = new Set([log.id]);
         restoredInitialResultRef.current = true;
         setPreviewLog(log);
+        setResultView("history");
         setLogsOpen(false);
-        setResults([]);
+        setHistoryResults([]);
         setPreviewLoading(true);
         setPreviewError("");
         if (restoreDraft) {
@@ -738,6 +766,7 @@ function VideoGenerationWorkspace() {
             updateConfig("videoSeed", log.config.videoSeed || "");
             updateConfig("videoOutputFormat", log.config.videoOutputFormat || "mp4");
         }
+        const restorationRevision = draftEditRevisionRef.current;
         void previewLoader.load(
             async (signal) => {
                 const resolved = await hydrateVideoLogMedia(log, { image: resolveImageUrl, media: resolveMediaUrl, task: getQueuedTask, refreshDuration: true }, restoreDraft, signal);
@@ -759,12 +788,12 @@ function VideoGenerationWorkspace() {
                     logRefreshRevisionRef.current += 1;
                     setLogs(current => upsertGenerationLog(current, resolved));
                 }
-                if (restoreDraft) {
+                if (restoreDraft && restorationRevision === draftEditRevisionRef.current) {
                     setReferences(resolved.references);
                     setVideoReferences(resolved.videoReferences);
                     setAudioReferences(resolved.audioReferences);
                 }
-                setResults(resolved.status === "生成中" ? [{ id: resolved.id, status: "pending" }] : resolved.video ? [{ id: resolved.id, status: "success", video: resolved.video }] : [{ id: resolved.id, status: "failed", error: resolved.error || "生成失败", diagnostic: resolved.diagnostic, taskId: resolved.task?.id, ...((resolved.task || resolved.requestId) && resolved.canRecover !== undefined ? { recovery: { logId: resolved.id, task: resolved.task, canRecover: resolved.canRecover } } : {}) }]);
+                setHistoryResults(resolved.status === "生成中" ? [{ id: resolved.id, status: "pending" }] : resolved.video ? [{ id: resolved.id, status: "success", video: resolved.video }] : [{ id: resolved.id, status: "failed", error: resolved.error || "生成失败", diagnostic: resolved.diagnostic, taskId: resolved.task?.id, ...((resolved.task || resolved.requestId) && resolved.canRecover !== undefined ? { recovery: { logId: resolved.id, task: resolved.task, canRecover: resolved.canRecover } } : {}) }]);
             },
             (error) => { if (isCurrent()) { setPreviewLoading(false); setPreviewError(error instanceof Error ? uiText(error.message) : uiText("记录中的媒体暂时无法读取")); } },
         );
@@ -772,6 +801,7 @@ function VideoGenerationWorkspace() {
 
     const readReferenceFiles = async (files: FileList | File[] | null) => {
         if (!files?.length || readingReferences) return;
+        draftEditRevisionRef.current += 1;
         const scope = referenceScopeRef.current;
         setReadingReferences(true);
         setReferenceError("");
@@ -787,27 +817,13 @@ function VideoGenerationWorkspace() {
     });
 
     return (
-        <div className="wb-page generation-workbench flex h-full flex-col overflow-hidden">
-            <main className="grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-y-auto p-4 lg:grid-cols-[260px_minmax(0,1fr)] lg:overflow-hidden xl:grid-cols-[280px_minmax(0,1fr)]">
-                <aside className="wb-surface thin-scrollbar hidden min-h-0 overflow-y-auto p-4 lg:block">
-                    <LogPanel
-                        logs={logs}
-                        selectedLogIds={selectedLogIds}
-                        activeLogId={previewLog?.id}
-                        onSelectedLogIdsChange={setSelectedLogIds}
-                        createDisabled={!workbenchTask.ready || workbenchTask.creating}
-                        onCreateTask={() => void createTask()}
-                        onDeleteSelected={() => setDeleteConfirmOpen(true)}
-                        onPreviewLog={previewGenerationLog}
-                    />
-                </aside>
-
-                <section className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4 lg:min-h-0 lg:overflow-hidden xl:grid-cols-[minmax(380px,420px)_minmax(0,1fr)]">
+        <div className="wb-page generation-workbench video-workbench flex h-full flex-col overflow-hidden">
+            <main className="video-workbench-layout min-h-0 flex-1">
                     <div {...imageDrop.dropProps} aria-busy={imageDrop.reading || readingReferences} className={`wb-surface generation-form flex min-w-0 flex-col p-5 lg:min-h-0 lg:overflow-hidden${imageDrop.dragging ? " outline outline-2 outline-offset-2 outline-primary" : ""}`}>
                         {imageDrop.dragging ? <p role="status" className="mb-3 rounded-lg bg-primary/10 p-3 text-sm text-foreground">{uiText("松开以添加参考图片，不会自动生成。")}</p> : null}
                         <div className="thin-scrollbar min-h-0 flex-1 overflow-y-auto">
                         <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div><p className="wb-eyebrow">{uiText("动态影像工作台")}</p><h1 className="wb-title">{uiText("视频生成")}</h1></div>
+                            <div><h1 className="wb-title">{uiText("视频生成")}</h1></div>
                             <div className="flex shrink-0 gap-2 lg:hidden">
                                 <Button icon={<History className="size-4" />} onClick={() => setLogsOpen(true)}>
                                     {uiText("记录")}</Button>
@@ -822,10 +838,10 @@ function VideoGenerationWorkspace() {
 
                         <div className="mt-6 space-y-5">
 
-                            <p className="text-xs leading-5 text-muted-foreground">{uiText(modelSpec?.nativeAudio ? "当前上传入口支持 JPEG/PNG/WebP 图片，单张 ≤10MB；最多 1 段不超过 15 秒的 MP4/MOV 视频，≤200MB。不支持音频输入。切换模型不会删除素材。" : "图片支持 JPEG/PNG/WebP，单张 ≤10MB；视频支持 MP4/MOV，音频支持 WAV/MP3。素材和模式按所选模型校验，切换模型不会删除素材。")}</p>
                             <details open={referencesOpen} onToggle={(event) => setReferencesOpen(event.currentTarget.open)} className="rounded-xl border border-border p-3">
                                 <summary className="cursor-pointer text-sm font-medium text-foreground">{uiText("参考素材")}<span className="ml-2 text-xs font-normal text-muted-foreground">{optionalReferenceCount ? optionalReferenceCount + uiText(" 个已添加") : uiText("可选 · 点击添加")}</span></summary>
                                 <div className="mt-4 space-y-4">
+                            <p className="text-[13px] leading-5 text-muted-foreground">{uiText(modelSpec?.nativeAudio ? "当前上传入口支持 JPEG/PNG/WebP 图片，单张 ≤10MB；最多 1 段不超过 15 秒的 MP4/MOV 视频，≤200MB。不支持音频输入。切换模型不会删除素材。" : "图片支持 JPEG/PNG/WebP，单张 ≤10MB；视频支持 MP4/MOV，音频支持 WAV/MP3。素材和模式按所选模型校验，切换模型不会删除素材。")}</p>
                             <div className="min-w-0">
                                 <div className="mb-2 flex items-center justify-between gap-3">
                                     <span className="text-base font-semibold">{uiText("参考图")}</span>
@@ -836,11 +852,11 @@ function VideoGenerationWorkspace() {
                                             {uiText("上传")}</Button>
                                     </div>
                                 </div>
-                                <div className="hover-scrollbar hover-scrollbar-hint flex min-h-24 w-full min-w-0 max-w-full gap-2 overflow-x-scroll overflow-y-hidden rounded-lg border border-dashed border-stone-300 p-2 pb-3 overscroll-x-contain dark:border-stone-700">
+                                <div className="hover-scrollbar hover-scrollbar-hint flex min-h-24 w-full min-w-0 max-w-full gap-2 overflow-x-scroll overflow-y-hidden rounded-lg border border-dashed border-border p-2 pb-3 overscroll-x-contain">
                                     {references.map((item, index) => (
-                                        <div key={item.id} className="group relative size-20 shrink-0 overflow-hidden rounded-md border border-stone-200 dark:border-stone-800">
-                                            <img src={item.dataUrl} alt={item.name} loading="lazy" decoding="async" className="size-full object-cover" />
-                                            <span className="absolute left-1 top-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white">{(currentMode === "first-frame" || currentMode === "first-last-frame") && index === 0 ? uiText("首帧") : currentMode === "first-last-frame" && index === 1 ? uiText("尾帧") : seedanceReferenceLabel("image", index)}</span>
+                                        <div key={item.id} className="group relative size-20 shrink-0 overflow-hidden rounded-md border border-border">
+                                            <WorkbenchImage src={item.dataUrl} alt={item.name} loading="lazy" decoding="async" className="size-full object-cover" />
+                                            <span className="absolute left-1 top-1 rounded bg-black/60 px-1.5 py-0.5 text-xs font-medium text-white">{(currentMode === "first-frame" || currentMode === "first-last-frame") && index === 0 ? uiText("首帧") : currentMode === "first-last-frame" && index === 1 ? uiText("尾帧") : seedanceReferenceLabel("image", index)}</span>
                                             <ReferenceOrderButtons index={index} total={references.length} onMove={(offset) => setReferences((value) => moveListItem(value, index, offset))} />
                                             <button
                                                 type="button"
@@ -852,7 +868,7 @@ function VideoGenerationWorkspace() {
                                             </button>
                                         </div>
                                     ))}
-                                    {!references.length ? <div className="flex min-w-full items-center justify-center text-sm text-stone-500">{uiText("暂无参考图，最多 ")}{maxImageReferences} {uiText(" 张")}</div> : null}
+                                    {!references.length ? <div className="flex min-w-full items-center justify-center text-sm text-muted-foreground">{uiText("暂无参考图，最多 ")}{maxImageReferences} {uiText(" 张")}</div> : null}
                                 </div>
                                 <p className="mt-2 text-xs leading-5 text-muted-foreground">{uiText(modelSpec?.imageInputHint || "")}</p>
                             </div>
@@ -861,11 +877,11 @@ function VideoGenerationWorkspace() {
                                     <span className="text-sm font-semibold">{uiText("参考视频 · 最多 ")}{modelSpec?.maxVideos || 0} {uiText(" 段")}</span>
                                     <Button size="small" disabled={!modelSpec?.maxVideos || readingReferences} icon={<Upload className="size-3.5" />} onClick={() => videoInputRef.current?.click()}>{uiText("上传视频")}</Button>
                                 </div>
-                                <div className="hover-scrollbar hover-scrollbar-hint flex min-h-24 w-full min-w-0 max-w-full gap-2 overflow-x-scroll overflow-y-hidden rounded-lg border border-dashed border-stone-300 p-2 pb-3 overscroll-x-contain dark:border-stone-700">
+                                <div className="hover-scrollbar hover-scrollbar-hint flex min-h-24 w-full min-w-0 max-w-full gap-2 overflow-x-scroll overflow-y-hidden rounded-lg border border-dashed border-border p-2 pb-3 overscroll-x-contain">
                                     {videoReferences.map((item, index) => (
-                                        <div key={item.id} className="group relative h-20 w-32 shrink-0 overflow-hidden rounded-md border border-stone-200 bg-black dark:border-stone-800">
+                                        <div key={item.id} className="group relative h-20 w-32 shrink-0 overflow-hidden rounded-md border border-border bg-black">
                                             <video src={item.url} className="size-full object-cover" muted preload="metadata" />
-                                            <span className="absolute left-1 top-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white">{seedanceReferenceLabel("video", index)}</span>
+                                            <span className="absolute left-1 top-1 rounded bg-black/60 px-1.5 py-0.5 text-xs font-medium text-white">{seedanceReferenceLabel("video", index)}</span>
                                             <ReferenceOrderButtons index={index} total={videoReferences.length} onMove={(offset) => setVideoReferences((value) => moveListItem(value, index, offset))} />
                                             <button
                                                 type="button"
@@ -885,12 +901,12 @@ function VideoGenerationWorkspace() {
                                     <span className="text-sm font-semibold">{uiText("参考音频 · 最多 ")}{modelSpec?.maxAudios || 0} {uiText(" 段")}</span>
                                     <Button size="small" disabled={!modelSpec?.maxAudios || readingReferences} icon={<Upload className="size-3.5" />} onClick={() => audioInputRef.current?.click()}>{uiText("上传音频")}</Button>
                                 </div>
-                                <div className="hover-scrollbar hover-scrollbar-hint flex min-h-24 w-full min-w-0 max-w-full gap-2 overflow-x-scroll overflow-y-hidden rounded-lg border border-dashed border-stone-300 p-2 pb-3 overscroll-x-contain dark:border-stone-700">
+                                <div className="hover-scrollbar hover-scrollbar-hint flex min-h-24 w-full min-w-0 max-w-full gap-2 overflow-x-scroll overflow-y-hidden rounded-lg border border-dashed border-border p-2 pb-3 overscroll-x-contain">
                                     {audioReferences.map((item, index) => (
-                                        <div key={item.id} className="group relative flex h-20 w-48 shrink-0 flex-col justify-center gap-2 rounded-md border border-stone-200 bg-stone-50 px-2 dark:border-stone-800 dark:bg-stone-900">
-                                            <div className="flex min-w-0 items-center gap-2 text-xs text-stone-500 dark:text-stone-400">
+                                        <div key={item.id} className="group relative flex h-20 w-48 shrink-0 flex-col justify-center gap-2 rounded-md border border-border bg-muted px-2">
+                                            <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
                                                 <Music2 className="size-4 shrink-0" />
-                                                <span className="shrink-0 rounded bg-stone-200 px-1 text-[10px] text-stone-700 dark:bg-stone-800 dark:text-stone-200">{seedanceReferenceLabel("audio", index)}</span>
+                                                <span className="shrink-0 rounded bg-muted px-1 text-xs text-foreground">{seedanceReferenceLabel("audio", index)}</span>
                                                 <span className="truncate">{item.name}</span>
                                             </div>
                                             <audio src={item.url} controls className="h-8 w-full" preload="metadata" />
@@ -929,22 +945,18 @@ function VideoGenerationWorkspace() {
                         </div>
                         </div>
                         <div className="generation-submit shrink-0 pt-4">
-                            <div className="mb-2 flex items-center justify-between rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-sm dark:border-stone-800 dark:bg-stone-900">
-                                <span className="truncate text-stone-500 dark:text-stone-400">
+                            <div className="mb-2 flex items-center justify-between rounded-lg border border-border bg-muted px-3 py-2 text-sm">
+                                <span className="truncate text-muted-foreground">
                                     {videoModelSummaryLabel(effectiveConfig, model, configuredModels)} · {videoResolutionLabel(videoConfig.vquality)} · {videoSizeLabel(videoConfig.size)} · {videoSecondsLabel(videoConfig.videoSeconds, currentMode, modelSpec?.extendAddsDuration)}
                                 </span>
                                 <Button size="small" type="text" icon={<SlidersHorizontal className="size-4" />} onClick={() => setSettingsOpen(true)}>
                                     {uiText("调整")}</Button>
                             </div>
 
-                            <div className="mb-3 flex items-center justify-between rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-xs dark:border-stone-800 dark:bg-stone-900">
-                                <span>{!deploymentFeatures.creditsEnabled ? uiText("不计积分") : uiText("预计消耗 {value1} 积分", { value1: estimatedUsage.configured ? estimatedUsage.credits : "待配置" })}</span>
-                                <span>{deploymentFeatures.authenticationEnabled ? uiText("个人工作区") : uiText("本机试用")}</span>
-                            </div>
                             {!modelReady ? <p className="text-xs text-amber-600">{configStatus === "ready" ? uiText("当前所选视频模型不可用，请重新选择；不会自动更换渠道。") : uiText("正在读取可用模型配置…")}</p> : null}
                             {logsError ? <div role="alert" className="mb-3 text-sm text-destructive"><p>{uiText(logsError)}</p><p>{uiText(logsReady ? "已有视频任务不受影响；可重新读取记录。" : "视频记录读取成功后才能生成；不会重复提交原任务。")}</p><Button size="small" loading={logsLoading} disabled={logsLoading} onClick={() => void refreshLogs(true)}>{uiText("重新读取视频记录")}</Button></div> : null}
-                            {!canGenerate || submitting || readingReferences || previewLoading ? <p role="status" className="mb-2 text-xs text-muted-foreground">{!draftReady ? uiText("正在恢复草稿…") : !logsReady ? uiText(logsLoading ? "正在恢复视频记录…" : "视频记录尚未读取，请重试") : submitting ? uiText(planning ? "AI 正在规划动效并提交视频" : "正在提交，请勿重复点击") : readingReferences ? uiText("正在读取参考素材，请稍候") : previewLoading ? uiText("正在读取历史结果，请稍候") : !planning && !prompt.trim() ? uiText("还差：填写提示词") : quotaBlocked ? uiText("额度不足，请联系管理员") : validationError ? uiText(validationError) : !user || user.status !== "active" ? uiText("当前设计师账号不可用") : null}</p> : null}
-                            {submitting || running ? <Button block icon={<Plus className="size-4" />} loading={workbenchTask.creating} disabled={!workbenchTask.ready || workbenchTask.creating} onClick={() => void createTask()}>{uiText("新建任务，继续创作")}</Button> : null}
+                            {!canGenerate || submitting || readingReferences || previewLoading ? <p role="status" className="mb-2 text-[13px] text-muted-foreground">{!draftReady ? uiText("正在恢复草稿…") : !logsReady ? uiText(logsLoading ? "正在恢复视频记录…" : "视频记录尚未读取，请重试") : submitting ? uiText(planning ? "AI 正在规划动效并提交视频" : "正在提交，请勿重复点击") : readingReferences ? uiText("正在读取参考素材，请稍候") : previewLoading ? uiText("正在读取历史结果，请稍候") : !planning && !prompt.trim() ? uiText("还差：填写提示词") : quotaBlocked ? uiText("当前账号暂时无法提交，请联系管理员") : validationError ? uiText(validationError) : !user || user.status !== "active" ? uiText("当前设计师账号不可用") : null}</p> : null}
+                            <Button block icon={<Plus className="size-4" />} loading={workbenchTask.creating} disabled={!workbenchTask.ready || workbenchTask.creating} onClick={() => void createTask()}>{uiText("新建任务，继续创作")}</Button>
                             {running ? <Button block onClick={() => { for (const controller of observationControllers.current.values()) controller.abort(); }}>{uiText("停止本页查询（不取消服务端任务）")}</Button> : logs.some(log => log.status === "查询暂停") ? <Button block onClick={() => resumePendingLogs(logs)}>{uiText("继续查询原任务")}</Button> : null}
                             {/* Keep the primary action bottom-most so a second pointer click cannot hit a newly inserted action. */}
                             <Button type="primary" size="large" block icon={<Sparkles className="size-4" />} loading={submitting} disabled={!canGenerate || submitting || readingReferences || previewLoading} onClick={() => void generate()}>
@@ -953,17 +965,22 @@ function VideoGenerationWorkspace() {
                         </div>
                     </div>
 
-                    <div className="wb-surface thin-scrollbar min-w-0 p-5 lg:min-h-0 lg:overflow-y-auto">
+                    <div className="wb-surface thin-scrollbar video-result-panel min-w-0 p-5 lg:min-h-0 lg:overflow-y-auto">
+                        <div role="tablist" aria-label={uiText("视频结果视图")} className="generation-result-tabs mb-4">
+                            <button type="button" role="tab" aria-selected={resultView === "current"} onClick={() => setResultView("current")}>{uiText("本次结果")}</button>
+                            <button type="button" role="tab" aria-selected={resultView === "history"} onClick={() => setResultView("history")}>{uiText("历史记录")}</button>
+                        </div>
+                        {resultView === "history" ? <div className="video-history-panel mb-5"><LogPanel logs={logs} selectedLogIds={selectedLogIds} activeLogId={previewLog?.id} onSelectedLogIdsChange={setSelectedLogIds} createDisabled={!workbenchTask.ready || workbenchTask.creating} onCreateTask={() => void createTask()} onDeleteSelected={() => setDeleteConfirmOpen(true)} onPreviewLog={previewGenerationLog} /></div> : null}
                         <div className="mb-4 flex items-center justify-between gap-3">
-                            <h2 className="text-xl font-semibold">{uiText("生成结果")}</h2>
-                            {previewLog ? <Button size="small" disabled={running || previewLoading} onClick={() => modal.confirm({ title: uiText("恢复为草稿？"), content: uiText("将替换当前提示词、参数与参考素材，不会提交生成任务。"), okText: uiText("确认恢复"), cancelText: uiText("保留草稿"), onOk: () => previewGenerationLog(previewLog, true) })}>{uiText("恢复为草稿继续改")}</Button> : null}
+                            <h2 className="text-xl font-semibold">{uiText(resultView === "history" ? "历史结果预览" : "生成结果")}</h2>
+                            {resultView === "history" && previewLog ? <Button size="small" disabled={previewLoading} onClick={() => modal.confirm({ title: uiText("恢复为草稿？"), content: uiText("将替换当前提示词、参数与参考素材，不会提交生成任务。"), okText: uiText("确认恢复"), cancelText: uiText("保留草稿"), onOk: () => previewGenerationLog(previewLog, true) })}>{uiText("恢复为草稿继续改")}</Button> : null}
                             {running ? <Tag className="m-0 px-2 py-1">{uiText("用时 ")}<GenerationElapsed startedAt={startedAt} /></Tag> : null}
                         </div>
-                        <GenerationQueueProgress taskId={activeTaskId} active={running} />
+                        {resultView === "current" ? <GenerationQueueProgress taskId={activeTaskId} active={running} /> : null}
                         {previewError ? <div role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200"><p>{uiText(previewError || "")}</p>{previewLog ? <Button className="mt-3" onClick={() => previewGenerationLog(previewLog)}>{uiText("重新读取记录")}</Button> : null}</div> : null}
-                        {results.length ? (
+                        {displayedResults.length ? (
                             <div className="grid gap-4">
-                                {results.map((result) =>
+                                {displayedResults.map((result) =>
                                     result.status === "success" && result.video ? (
                                         <ResultVideoCard
                                             key={result.id} video={result.video} playback={playbackSessions.get(result.video.id)?.owner === playbackOwner ? playbacks[result.video.id] : undefined}
@@ -990,7 +1007,6 @@ function VideoGenerationWorkspace() {
                             </div>
                         )}
                     </div>
-                </section>
             </main>
             <input
                 ref={fileInputRef}
@@ -1054,7 +1070,7 @@ function ResultVideoCard({ video, playback, onPlaybackError, onMetadata, summary
     const preparing = playback?.status === "preparing" || Boolean(video.serverAssetId && !playback);
     const playbackUrl = video.serverAssetId ? playback?.playbackUrl : video.url;
     return (
-        <div className="overflow-hidden rounded-lg border border-stone-200 bg-background dark:border-stone-800">
+        <div className="overflow-hidden rounded-lg border border-border bg-background">
             {summaryZh ? <div className="border-b border-border bg-muted/30 px-4 py-3 text-sm"><span className="mr-2 font-medium">{uiText("AI 动效规划")}</span><span className="text-muted-foreground">{summaryZh}</span></div> : null}
             <video src={playbackUrl} controls preload="metadata" className="aspect-video w-full bg-black object-contain" onError={onPlaybackError} onLoadedMetadata={event => {
                 const media = event.currentTarget;
@@ -1063,8 +1079,8 @@ function ResultVideoCard({ video, playback, onPlaybackError, onMetadata, summary
             {preparing ? <div role="status" className="flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />{uiText("视频已生成，正在准备兼容预览（最多等待 150 秒）；下载仍为原件。")}</div> : null}
             {!video.serverAssetId && !playback?.error ? <p className="px-3 py-2 text-xs text-muted-foreground">{uiText("仅有本地原件，服务端兼容预览不可用；播放能力取决于当前浏览器。")}</p> : null}
             {playback?.error ? <p role="alert" className="px-3 py-2 text-sm text-destructive">{uiText(playback.error)}</p> : null}
-            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-stone-200 px-3 py-2.5 dark:border-stone-800">
-                <div className="flex min-w-0 flex-wrap gap-x-2 gap-y-1 text-xs text-stone-500 dark:text-stone-400">
+            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-border px-3 py-2.5">
+                <div className="flex min-w-0 flex-wrap gap-x-2 gap-y-1 text-xs text-muted-foreground">
                     <span>
                         {playback?.width && playback.height ? `${playback.width}x${playback.height}` : uiText("尺寸未知")}
                     </span>
@@ -1089,8 +1105,8 @@ function PendingVideoCard({ createdAt, taskId, summaryZh }: { createdAt?: number
     return (
         <div>
         {summaryZh ? <p className="mb-3 text-sm"><span className="mr-2 font-medium">{uiText("AI 动效规划")}</span><span className="text-muted-foreground">{summaryZh}</span></p> : null}
-        <div role="status" aria-label={uiText("视频生成中")} className="relative aspect-video overflow-hidden rounded-lg border border-dashed border-stone-300 bg-stone-50 dark:border-stone-700 dark:bg-stone-900">
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-stone-500 dark:text-stone-400">
+        <div role="status" aria-label={uiText("视频生成中")} className="relative aspect-video overflow-hidden rounded-lg border border-dashed border-border bg-muted">
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
                 <LoaderCircle className="size-6 animate-spin" />
                 <span>{uiText("已等待 ")}<GenerationElapsed startedAt={createdAt ? performance.now() - (Date.now() - createdAt) : 0} /></span>
                 <GenerationQueueProgress taskId={taskId} active />
@@ -1172,7 +1188,7 @@ function LogPanel({
                     />
                 ))}
                 {visibleCount < logs.length ? <Button block className="!h-10" onClick={() => setVisibleCount((value) => value + 40)}>{uiText("加载更多记录（剩余 ")}{logs.length - visibleCount} {uiText(" 条）")}</Button> : null}
-                {!logs.length ? <div className="flex min-h-48 items-center justify-center rounded-lg border border-dashed border-stone-300 text-center text-sm text-stone-500 dark:border-stone-700">{uiText("暂无生成记录")}</div> : null}
+                {!logs.length ? <div className="flex min-h-48 items-center justify-center rounded-lg border border-dashed border-border text-center text-sm text-muted-foreground">{uiText("暂无生成记录")}</div> : null}
             </div>
         </>
     );
@@ -1183,7 +1199,7 @@ function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: Ge
     return (
         <button
             type="button"
-            className={`block w-full rounded-lg border p-2 text-left transition ${active ? "border-stone-900 bg-blue-50 dark:border-stone-100 dark:bg-blue-950/20" : "border-stone-200 bg-background hover:bg-stone-50 dark:border-stone-800 dark:hover:bg-stone-900"}`}
+            className={`block w-full rounded-lg border p-2 text-left transition ${active ? "border-border bg-muted font-semibold" : "border-border bg-background hover:bg-muted"}`}
             onClick={onClick}
         >
             <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-2">

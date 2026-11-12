@@ -39,7 +39,7 @@ function navigation(surface: "desktop" | "mobile", role: Role, rolePortalsEnable
         "@/lib/usage-navigation": { usageBoardForLocation: () => "home" },
         "@/components/layout/inchoice-brand": { InchoiceBrand: () => null },
         "react-router-dom": { Link: ({ to, children, ...rest }: any) => <a href={to} {...rest}>{children}</a>, useLocation: () => ({ pathname: "/", search: "" }), useNavigate: () => () => undefined },
-        "antd": { Drawer: ({ open, children }: any) => open ? <div>{children}</div> : null },
+        "antd": { Drawer: ({ open, children }: any) => open ? <div>{children}</div> : null, Popover: ({ children }: any) => <>{children}</>, Tooltip: ({ children }: any) => <>{children}</> },
         "@/components/layout/frequent-navigation": { FrequentNavigation: () => null, UsageCollectionNotice: () => null },
         "@/components/layout/personal-session-actions": { PersonalSessionActions: () => null },
         "@/components/release-notes": { ReleaseNotesNavigation: () => null },

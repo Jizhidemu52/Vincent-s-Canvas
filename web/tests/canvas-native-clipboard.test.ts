@@ -13,6 +13,7 @@ import { shouldIgnoreCanvasShortcut } from "@/lib/canvas/canvas-keyboard";
 import { matchCanvasActionShortcut } from "@/lib/canvas/canvas-actions";
 import { fitNodeSize } from "@/lib/canvas/canvas-node-size";
 import { canvasImportGridPosition } from "@/lib/canvas/canvas-interaction-ux";
+import { placeCanvasImportedNodes } from "@/pages/canvas/canvas-import-placement";
 import { mapCanvasAsyncPool } from "@/lib/canvas/canvas-async-pool";
 import { isCanvasBatchChildHidden } from "@/lib/canvas/canvas-batch-visibility";
 import { syncCanvasSelectionReferences } from "@/lib/canvas/canvas-selection-references";
@@ -101,10 +102,10 @@ function harness(initialNodes: CanvasNodeData[] = [], initialConnections: Canvas
     const env = {
         uiText,
         CANVAS_LARGE_IMAGE_NOTICE, isLargeCanvasImage,
-        canvasImportGridPosition, mapCanvasAsyncPool, pastePositionRef: { current: null }, importQueueRef: { current: Promise.resolve() }, setImportPlaceholder: noop, flushEditorDrafts: noop,
+        canvasImportGridPosition, placeCanvasImportedNodes, mapCanvasAsyncPool, pastePositionRef: { current: null }, importQueueRef: { current: Promise.resolve() }, setImportPlaceholder: noop, flushEditorDrafts: noop,
         savedProjectIdRef: { current: "clipboard-test" }, hiddenGroupNodeIds: new Set(), isCanvasBatchChildHidden, batchRootsById: new Map(), collapsingBatchIds: new Set(),
         designProjectIdRef: { current: "clipboard-test" }, useUserStore: Object.assign((select: Function) => select({ status: "authenticated", user: { id: "clipboard-owner" } }), { getState: () => ({ user: { id: "clipboard-owner" } }) }), setDropReading: noop,
-        resetViewport: noop,
+        resetViewport: noop, fitSelectedViewport: noop,
         canvasRepeatCopyOffset, repeatCopyRef: { current: null },
         ...clipboard, ...nodeCopy, clipboardModule: clipboard, shouldIgnoreCanvasShortcut, matchCanvasActionShortcut, isCanvasAudioFile, fitNodeSize, getNodeSpec, CanvasNodeType, NODE_STATUS_SUCCESS: "success", assertCanvasImageUploadSize,
         window: target, navigator: {}, // HTTP/permissionless path: no navigator.clipboard exists.

@@ -54,7 +54,7 @@ describe("generation interaction safety", () => {
         }
         expect(generationErrorMessage("unknown detail", 500, "IMAGE_RESULT_PROCESSING_FAILED")).toBe(imageResultProcessingFailureMessage);
     });
-    test.each([[401, "登录已过期"], [402, "额度不足"], [429, "服务请求较多"], [504, "响应超时"], [503, "暂时不可用"]])("HTTP %s maps to actionable Chinese guidance", (status, expected) => {
+    test.each([[401, "登录已过期"], [402, "检查服务配置"], [429, "服务请求较多"], [504, "响应超时"], [503, "暂时不可用"]])("HTTP %s maps to actionable Chinese guidance", (status, expected) => {
         expect(generationErrorMessage("upstream error", Number(status))).toContain(String(expected));
     });
     test("network failures retain their raw cause for diagnostic copying", () => {

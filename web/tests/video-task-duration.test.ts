@@ -32,8 +32,9 @@ async function finishRecoveredVideo(completed: Record<string, unknown>, newSubmi
         mountedRef: { current: true },
         user: { id: "owner" },
         useUserStore: { getState: () => ({ user: { id: "owner" } }) },
+        previewLogRef: { current: null },
         previewLoader: { invalidate: noop },
-        setPreviewLoading: noop, setResults: noop, setRunning: noop, setActiveTaskId: noop, setStartedAt: noop,
+        setPreviewLoading: noop, setResults: noop, setHistoryResults: noop, setResultView: noop, setRunning: noop, setActiveTaskId: noop, setStartedAt: noop,
         waitForTasks: async (ids: string[]) => {
             expect(ids).toEqual(["original-paid-task"]);
             return [completed];

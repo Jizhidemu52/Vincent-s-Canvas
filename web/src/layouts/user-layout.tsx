@@ -31,7 +31,7 @@ export default function UserLayout({ children }: { children: ReactNode }) {
     return (
         <><div className={cn("flex h-dvh overflow-hidden", !hideShell && "wb-app")}>
             <AppTopNav />
-            <div className={cn("min-h-0 flex-1 overflow-hidden", !hideShell && "pt-14 md:pt-0")}>{children}</div>
+            <div className={cn("min-h-0 min-w-0 flex-1 overflow-hidden", !hideShell && "pt-14 md:pt-0")}>{children}</div>
         </div><SessionRecoveryControl /><ReleaseNotesHost /><PromptExecutionPreviewHost /></>
     );
 }

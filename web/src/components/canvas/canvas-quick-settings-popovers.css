@@ -2,8 +2,10 @@
 .cw-parameter-trigger { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-width: 0; min-height: 40px; padding: 0 7px; border: 0; border-radius: 8px; background: transparent; color: inherit; font-size: 15px; white-space: nowrap; cursor: pointer; }
 .cw-parameter-trigger > span:not(.cw-ratio-outline) { overflow: hidden; text-overflow: ellipsis; }
 .cw-parameter-trigger > svg { flex-shrink: 0; color: var(--cw-parameter-muted); }
-.cw-parameter-trigger-size { max-width: 38%; }
-.cw-parameter-trigger-quality { flex: 1; }
+.cw-parameter-anchor { display: inline-flex; min-width: 0; }
+.cw-parameter-anchor-size { max-width: 38%; }
+.cw-parameter-anchor-quality { flex: 1; }
+.cw-parameter-anchor > .cw-parameter-trigger { width: 100%; }
 .cw-parameter-trigger-advanced { margin-left: auto; flex-shrink: 0; }
 .cw-parameter-trigger:hover, .cw-parameter-trigger[data-state="open"] { background: var(--cw-parameter-soft); }
 .cw-parameter-trigger:disabled { opacity: .4; cursor: default; }

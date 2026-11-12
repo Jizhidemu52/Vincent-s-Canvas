@@ -30,6 +30,7 @@ function harness(sceneId = "style-to-sketch", recoveredRequestId?: string) {
         recoveredRequestId, logs: [] as Array<{ id: string; createdAt: number; successCount: number; failCount: number; unresolvedCount?: number }>,
         results: [], historyTotal: 0, historyHasMore: false, selectedPrompt: null,
         generate: () => { calls.generated++; }, reset: () => { calls.reset++; },
+        returnToCurrentTask: () => {},
         previewLog: (log: unknown) => { calls.previews.push(log); },
         deleteLogs: async (logs: Array<{ id: string }>) => {
             calls.deleted.push(logs.map(log => log.id));

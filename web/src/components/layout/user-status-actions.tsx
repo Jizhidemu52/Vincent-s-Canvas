@@ -8,6 +8,7 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { useConfigStore } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { deploymentFeatures } from "@/lib/deployment-features";
+import { Tooltip } from "antd";
 
 type UserStatusActionsProps = {
     showConfig?: boolean;
@@ -29,20 +30,20 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
 
     return (
         <div className="inline-flex shrink-0 items-center gap-1">
-            <button type="button" className={naturalIconClass} style={iconStyle} onClick={() => updateConfig("promptPreview", !promptPreview)} aria-pressed={promptPreview}
-                aria-label={uiText(promptPreview ? "生成前确认：已开启" : "生成前确认：已关闭")} title={uiText(promptPreview ? "生成前确认已开启：固定板块编译后先核对再出图" : "开启生成前确认：固定板块编译后先核对再出图")}>
+            <Tooltip title={uiText(promptPreview ? "生成前确认已开启：固定板块编译后先核对再出图" : "开启生成前确认：固定板块编译后先核对再出图")}><button type="button" className={naturalIconClass} style={iconStyle} onClick={() => updateConfig("promptPreview", !promptPreview)} aria-pressed={promptPreview}
+                aria-label={uiText(promptPreview ? "生成前确认：已开启" : "生成前确认：已关闭")}>
                 <Eye className={promptPreview ? "size-4 text-primary" : "size-4"} />
-            </button>
+            </button></Tooltip>
             {showConfig && canManageConfig && deploymentFeatures.rolePortalsEnabled ? (
-                <button type="button" className={naturalIconClass} style={iconStyle} onClick={() => openConfigDialog(false)} aria-label={uiText("配置")} title={uiText("配置")}>
+                <Tooltip title={uiText("配置")}><button type="button" className={naturalIconClass} style={iconStyle} onClick={() => openConfigDialog(false)} aria-label={uiText("配置")}>
                     <Settings2 className="size-4" />
-                </button>
+                </button></Tooltip>
             ) : null}
-            <AnimatedThemeToggler theme={theme} onThemeChange={setTheme} className={naturalIconClass} style={iconStyle} aria-label={theme === "dark" ? uiText("切换到浅色主题") : uiText("切换到深色主题")} title={theme === "dark" ? uiText("切换到浅色主题") : uiText("切换到深色主题")} />
+            <Tooltip title={theme === "dark" ? uiText("切换到浅色主题") : uiText("切换到深色主题")}><span className="inline-flex"><AnimatedThemeToggler theme={theme} onThemeChange={setTheme} className={naturalIconClass} style={iconStyle} aria-label={theme === "dark" ? uiText("切换到浅色主题") : uiText("切换到深色主题")} /></span></Tooltip>
             {onOpenShortcuts ? (
-                <button type="button" className={naturalIconClass} style={iconStyle} onClick={onOpenShortcuts} aria-label={uiText("快捷键")} title={uiText("快捷键")}>
+                <Tooltip title={uiText("快捷键")}><button type="button" className={naturalIconClass} style={iconStyle} onClick={onOpenShortcuts} aria-label={uiText("快捷键")}>
                     <Keyboard className="size-4" />
-                </button>
+                </button></Tooltip>
             ) : null}
         </div>
     );

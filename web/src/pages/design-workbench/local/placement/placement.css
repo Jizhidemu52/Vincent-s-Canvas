@@ -21,13 +21,13 @@
     margin-top: 0;
 }
 .local-design-workbench .placement-demo .placement-subhead {
-    font-size: 11px;
+    font-size: 13px;
     color: var(--muted);
     font-weight: 500;
     letter-spacing: 0.08em;
 }
 .local-design-workbench .placement-demo .placement-intro {
-    font-size: 13px;
+    font-size: 14px;
     line-height: 1.65;
     color: var(--muted);
     margin-bottom: 20px;
@@ -46,12 +46,12 @@
 }
 .local-design-workbench .placement-demo .placement-material {
     border: 1px solid var(--line);
-    border-radius: 9px;
+    border-radius: 8px;
     padding: 7px 3px;
     background: var(--bg);
     cursor: pointer;
     color: var(--text);
-    font-size: 11px;
+    font-size: 13px;
 }
 .local-design-workbench .placement-demo .placement-material:hover {
     border-color: var(--accent);
@@ -105,7 +105,7 @@
     text-align: left;
     cursor: pointer;
     font: inherit;
-    font-size: 12px;
+    font-size: 14px;
     color: var(--text);
     min-width: 0;
     overflow: hidden;
@@ -117,7 +117,7 @@
     background: transparent;
     padding: 0;
     cursor: pointer;
-    font-size: 11px;
+    font-size: 13px;
     color: var(--muted);
 }
 .local-design-workbench .placement-demo .placement-base-row {
@@ -127,14 +127,14 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 12px;
+    font-size: 14px;
     color: var(--muted);
 }
 .local-design-workbench .placement-demo .placement-base-row img {
     width: 28px;
     height: 28px;
     object-fit: contain;
-    border-radius: 4px;
+    border-radius: 6px;
 }
 .local-design-workbench .placement-demo .placement-base-name {
     flex: 1;
@@ -150,7 +150,7 @@
 }
 .local-design-workbench .placement-demo .placement-layer-actions .btn {
     padding: 7px 2px;
-    font-size: 11px;
+    font-size: 13px;
 }
 .local-design-workbench .placement-demo .placement-center {
     display: flex;
@@ -166,7 +166,7 @@
     padding: 13px 17px;
 }
 .local-design-workbench .placement-demo .placement-stage-label {
-    font-size: 12px;
+    font-size: 14px;
     color: var(--muted);
 }
 .local-design-workbench .placement-demo .placement-canvas-wrap {
@@ -201,7 +201,7 @@
     flex-wrap: wrap;
     gap: 8px;
     justify-content: space-between;
-    font-size: 11px;
+    font-size: 13px;
     line-height: 1.6;
     color: var(--muted);
     padding: 12px 18px;
@@ -220,7 +220,7 @@
     display: flex;
     align-items: center;
     border: 1px solid var(--line);
-    border-radius: 7px;
+    border-radius: 8px;
     background: var(--surface);
     overflow: hidden;
 }
@@ -234,7 +234,7 @@
     color: var(--text);
 }
 .local-design-workbench .placement-demo .placement-number span {
-    font-size: 11px;
+    font-size: 13px;
     color: var(--muted);
     padding-right: 8px;
 }
@@ -245,7 +245,7 @@
 .local-design-workbench .placement-demo .field {
     display: block;
     margin-bottom: 16px;
-    font-size: 12px;
+    font-size: 14px;
 }
 .local-design-workbench .placement-demo .field > span {
     display: block;
@@ -261,7 +261,7 @@
 .local-design-workbench .placement-demo select {
     width: 100%;
     border: 1px solid var(--line);
-    border-radius: 7px;
+    border-radius: 8px;
     padding: 10px 8px;
     background: var(--surface);
     color: var(--text);
@@ -270,7 +270,7 @@
     padding: 12px;
     border-radius: 8px;
     background: var(--bg);
-    font-size: 11px;
+    font-size: 13px;
     color: var(--muted);
     line-height: 1.7;
 }
@@ -285,25 +285,25 @@
     margin-bottom: 9px;
 }
 .local-design-workbench .placement-demo .placement-save-actions .btn {
-    font-size: 11px;
+    font-size: 13px;
     padding: 9px 4px;
 }
 .local-design-workbench .placement-demo .placement-save-state {
-    font-size: 11px;
+    font-size: 13px;
     color: var(--muted);
     line-height: 1.6;
     min-height: 34px;
 }
 .local-design-workbench .placement-demo .placement-unselected {
     color: var(--muted);
-    font-size: 12px;
+    font-size: 14px;
     line-height: 1.7;
     padding: 20px 0;
 }
 .local-design-workbench .placement-demo .placement-locked {
-    font-size: 10px;
+    font-size: 12px;
     border: 1px solid var(--line);
-    border-radius: 4px;
+    border-radius: 6px;
     padding: 2px 4px;
     white-space: nowrap;
 }
@@ -312,7 +312,7 @@
     padding: 18px;
     background: #fff0ee;
     border: 1px solid #edc9c4;
-    border-radius: 10px;
+    border-radius: 12px;
 }
 @media (max-width: 1150px) {
     .local-design-workbench .placement-demo .workspace {

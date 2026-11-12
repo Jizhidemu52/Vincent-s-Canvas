@@ -21,7 +21,7 @@ test("product candidates need explicit identification and confirmation, then fre
     await target.fill("手写的目标");
     await keep.fill("保留六颗纽扣与小尖领");
     await page.getByLabel("上传服装参考图", { exact: true }).setInputFiles({ name: "original-product.png", mimeType: "image/png", buffer: IMAGE });
-    const identify = page.getByRole("button", { name: "识别图中产品 可能付费", exact: true });
+    const identify = page.getByRole("button", { name: "识别图中产品", exact: true });
     await expect(identify).toBeEnabled();
     expect(posts).toHaveLength(0); expect(api.submissions).toHaveLength(0);
     await identify.evaluate(button => { (button as HTMLButtonElement).click(); (button as HTMLButtonElement).click(); });
@@ -75,7 +75,7 @@ test("a lost recognition response and GET 404 survive reload without another pai
     });
     await page.goto("/creative/garment-colorway");
     await page.getByLabel("上传服装参考图", { exact: true }).setInputFiles({ name: "original.png", mimeType: "image/png", buffer: IMAGE });
-    await page.getByRole("button", { name: "识别图中产品 可能付费", exact: true }).click();
+    await page.getByRole("button", { name: "识别图中产品", exact: true }).click();
     await expect(page.getByRole("button", { name: "查询原识别请求", exact: true })).toBeEnabled();
     await page.reload();
     const query = page.getByRole("button", { name: "查询原识别请求", exact: true });
@@ -102,8 +102,8 @@ test("only a terminal failed receipt enables an explicitly paid new recognition 
     });
     await page.goto("/creative/pattern-extract");
     await page.getByLabel("上传图案参考图", { exact: true }).setInputFiles({ name: "original.png", mimeType: "image/png", buffer: IMAGE });
-    await page.getByRole("button", { name: "识别图中产品 可能付费", exact: true }).click();
-    const retry = page.getByRole("button", { name: "重新识别（可能付费）", exact: true });
+    await page.getByRole("button", { name: "识别图中产品", exact: true }).click();
+    const retry = page.getByRole("button", { name: "重新识别", exact: true });
     await expect(retry).toBeEnabled(); expect(posts).toHaveLength(1);
     await page.reload(); await expect(retry).toBeEnabled(); expect(posts).toHaveLength(1);
     await retry.click();
@@ -133,7 +133,8 @@ test("result review carries frozen requirements and original bytes into an isola
     await expect(page.getByText("目标产品：左侧蓝色衬衫", { exact: true })).toBeVisible();
     await expect(page.getByText("关键特征：保留六颗纽扣与小尖领", { exact: true })).toBeVisible();
     await page.screenshot({ path: info.outputPath("result-review-desktop.png"), fullPage: true });
-    await page.getByLabel("下一步处理", { exact: true }).selectOption("creative-garment-colorway");
+    await page.getByLabel("下一步处理", { exact: true }).click();
+    await page.locator(".ant-select-dropdown:visible .ant-select-item-option").filter({ hasText: "服装配色" }).click();
     await page.getByRole("button", { name: "带入新草稿", exact: true }).click();
     await expect(page).toHaveURL(url => url.pathname === "/garment-colorway" && /^[\w-]+$/.test(url.searchParams.get("designToken") || ""));
     const handoffUrl = page.url();
@@ -166,7 +167,7 @@ test("oversized recognition sources remain untouched and are blocked before serv
     await page.goto("/creative/back-design");
     const bytes = Buffer.concat([IMAGE, Buffer.alloc(10 * 1024 * 1024 + 1 - IMAGE.length)]);
     await page.getByLabel("上传服装正面图", { exact: true }).setInputFiles({ name: "large-original.png", mimeType: "image/png", buffer: bytes });
-    await expect(page.getByRole("button", { name: "识别图中产品 可能付费", exact: true })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "识别图中产品", exact: true })).toBeDisabled();
     await expect(page.getByText("产品识别仅支持不超过 10 MiB 的单张原图；原件未压缩，可手动填写产品。", { exact: true })).toBeVisible();
     await page.getByRole("textbox", { name: /要处理的产品/ }).fill("仍可手工指定产品");
     expect(api.assets.size).toBe(0); expect(api.submissions).toHaveLength(0);
@@ -183,8 +184,8 @@ test("a known pre-claim rejection needs an explicit same-ID retry, while ordinar
     });
     await page.goto("/creative/local-restyle");
     await page.getByLabel("上传服装参考图", { exact: true }).setInputFiles({ name: "original.png", mimeType: "image/png", buffer: IMAGE });
-    await page.getByRole("button", { name: "识别图中产品 可能付费", exact: true }).click();
-    const retry = page.getByRole("button", { name: "重新识别（可能付费）", exact: true });
+    await page.getByRole("button", { name: "识别图中产品", exact: true }).click();
+    const retry = page.getByRole("button", { name: "重新识别", exact: true });
     await expect(retry).toBeEnabled();
     await expect(page.getByText("本次识别未提交。检查素材或配置后可明确再试，将沿用原编号核验，不会自动重发。", { exact: true })).toBeVisible();
     await page.reload(); await expect(retry).toBeEnabled(); expect(posts).toHaveLength(1);

@@ -38,6 +38,7 @@ async function finishImageThroughPage(origin: "new" | "resume", durationMs: numb
         saveLog: async (value: unknown) => { logs.push(value); },
         removePending: async () => {}, persistPending: async () => {},
         setResults: noop, setRunning: noop, setStartedAt: noop, setActiveTaskId: noop, setOptimizingPrompt: noop,
+        returnToCurrentTask: noop,
         workbenchSubmissions: { acquire: () => noop },
         findPendingImageTask: async () => task,
         completedTaskDurationMs, snapshotImageRequest, updateImageResultForRecord,

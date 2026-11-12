@@ -35,7 +35,44 @@ type AssetRow = {
 type BatchRow = { id: string; totalItems: number; completedItems: number; failedItems: number; status: string };
 
 export async function getPerformanceDashboard(db: Database, actor: SessionUser, filters: PerformanceFilters) {
-  return getPerformanceDashboardInternal(db, actor, filters, true);
+  const [dashboard, todayUsage] = await Promise.all([
+    getPerformanceDashboardInternal(db, actor, filters, true),
+    getPerformanceTodayUsage(db, actor, filters),
+  ]);
+  return { ...dashboard, todayUsage };
+}
+
+/** Actual use, not logins/visits; independent of the dashboard's selected period. */
+export async function getPerformanceTodayUsage(db: Database, actor: SessionUser, filters: Omit<PerformanceFilters, "from" | "to">, now = new Date()) {
+  const date = shanghaiDate(now.toISOString());
+  const from = new Date(`${date}T00:00:00+08:00`);
+  const scope = buildScope(actor, {
+    ...filters,
+    from: from.toISOString(),
+    to: new Date(from.getTime() + 86_400_000).toISOString(),
+  }, "r", "r.occurred_at");
+  // Event/chat rows have no department snapshot, so use their user's department,
+  // as usage analytics does. Group membership is evaluated at each activity time.
+  const result = await db.query<{ users: number }>(
+    `SELECT count(DISTINCT r.user_id)::int AS users
+       FROM (
+         SELECT t.user_id,t.department_id,t.queued_at AS occurred_at
+           FROM tasks t WHERE t.queued_at>=$1::timestamptz AND t.queued_at<$2::timestamptz
+         UNION ALL
+         SELECT c.user_id,u.department_id,c.created_at
+           FROM usage_chat_requests c JOIN users u ON u.id=c.user_id
+          WHERE c.created_at>=$1::timestamptz AND c.created_at<$2::timestamptz
+         UNION ALL
+         SELECT e.user_id,u.department_id,e.occurred_at
+           FROM usage_events e JOIN users u ON u.id=e.user_id
+          WHERE e.occurred_at>=$1::timestamptz AND e.occurred_at<$2::timestamptz
+            AND e.action NOT IN ('visit','gap')
+       ) r JOIN users u ON u.id=r.user_id
+       LEFT JOIN LATERAL (SELECT group_id FROM group_memberships x WHERE x.user_id=r.user_id
+         AND x.effective_at<=r.occurred_at AND (x.ended_at IS NULL OR x.ended_at>r.occurred_at) LIMIT 1) gm ON true
+       ${scope.where} AND coalesce(u.is_guest,false)=false`, scope.values,
+  );
+  return { date, timeZone: "Asia/Shanghai" as const, users: result.rows[0]?.users ?? 0 };
 }
 
 async function getPerformanceDashboardInternal(db: Database, actor: SessionUser, filters: PerformanceFilters, includeComparisons: boolean): Promise<ReturnType<typeof aggregatePerformance> & { comparisons: PerformanceComparisons | null }> {

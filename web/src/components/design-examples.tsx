@@ -4,6 +4,7 @@ import { Button } from "antd";
 import { BookOpen, ChevronDown, Copy, Download } from "lucide-react";
 import { useCopyText } from "@/hooks/use-copy-text";
 import { designExampleForLocation, type DesignExample } from "@/lib/design-examples";
+import { WorkbenchImage } from "@/components/workbench-image";
 
 function stopExampleSubmit(event: KeyboardEvent<HTMLElement>) {
     if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
@@ -28,7 +29,7 @@ export function DesignExampleArticle({ example }: { example: DesignExample }) {
                     event.currentTarget.playbackRate = 1;
                 }} className="aspect-[3/4] max-h-[65vh] w-full object-contain">
                     当前浏览器无法播放此视频，可下载后查看。
-                </video> : <img src={media.src} alt={media.alt} loading="lazy" decoding="async" width={1536} height={1024} className="aspect-[3/2] w-full object-contain" />}
+                </video> : <WorkbenchImage src={media.src} alt={media.alt} loading="lazy" decoding="async" width={1536} height={1024} className="aspect-[3/2] w-full object-contain" />}
                 <figcaption className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-border px-3 py-2.5 text-xs">
                     <span className="font-medium">{media.label}</span>
                     <a href={media.kind === "video" ? media.downloadSrc ?? media.src : media.src} download={(media.kind === "video" ? media.downloadSrc ?? media.src : media.src).split("/").at(-1)} className="inline-flex items-center gap-1.5 rounded py-1 text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring" aria-label={`下载${media.label}`}><Download size={13} />{media.kind === "video" ? "下载原视频" : "下载教学素材"}</a>
@@ -67,7 +68,7 @@ export function PracticeExampleRecord({ example: suppliedExample }: { example?: 
                 <span className="block text-sm font-medium leading-5">{example.title}</span>
             </span><ChevronDown size={15} aria-hidden="true" className={`mt-0.5 shrink-0 text-muted-foreground ${expanded ? "rotate-180" : ""}`} /></span>
             <span className="grid w-full max-w-40 grid-cols-2 gap-2">{previews.map(media => <span key={media.src} className="block min-w-0">
-                <img src={media.kind === "video" ? media.poster : media.src} alt={media.alt} loading="lazy" decoding="async" width={96} height={64} className="aspect-[3/2] w-full rounded border border-border object-contain" />
+                <WorkbenchImage src={media.kind === "video" ? media.poster : media.src} alt={media.alt} loading="lazy" decoding="async" width={96} height={64} className="aspect-[3/2] w-full rounded border border-border object-contain" />
                 <span className="mt-1 block truncate text-[10px] leading-4 text-muted-foreground">{media.label}</span>
             </span>)}</span>
         </button>

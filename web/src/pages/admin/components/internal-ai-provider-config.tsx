@@ -62,7 +62,7 @@ export function InternalAiProviderConfig({ isAdmin }: { isAdmin: boolean }) {
     };
 
     const testConnection = async () => {
-        if (!await modal.confirm({ title: "确认提交真实测试出图？", content: "测试使用已保存的服务配置，可能产生上游费用。当前未保存的修改不参与测试。", okText: "确认测试", cancelText: "取消" })) return;
+        if (!await modal.confirm({ title: "确认提交真实测试出图？", content: "测试将使用已保存的服务配置发起真实生成请求。当前未保存的修改不参与测试。", okText: "确认测试", cancelText: "取消" })) return;
         setTesting(true);
         setTestResult(null);
         try {

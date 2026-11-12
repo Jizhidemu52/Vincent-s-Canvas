@@ -60,6 +60,25 @@ import { mapAgentDocumentMedia } from "@/lib/image-agent/document-media";
 import { AGENT_DOCUMENT_LIMITS } from "../../../../shared/image-agent-documents";
 
 const storagePrefix = "wireless-canvas:llm-chat:";
+type ChatSendLifetime = {
+    sessionId: string;
+    controller: AbortController;
+    submitted: boolean;
+    stopRequested: boolean;
+    detached: boolean;
+    phase: string;
+    stream?: ReturnType<typeof createChatStreamBuffer>;
+};
+type ChatComposerDraft = {
+    draft: string;
+    editing: { messageId: string; content: string } | null;
+    attachments: ChatAttachment[];
+    imageTarget: { id: string; mode: "region" | "correction"; sessionId: string } | null;
+    referenceImageIds: string[];
+    regionImage: SceneImage | null;
+    regionSelection: ChatRegionSelection | null;
+};
+const emptyComposerDraft = (): ChatComposerDraft => ({ draft: "", editing: null, attachments: [], imageTarget: null, referenceImageIds: [], regionImage: null, regionSelection: null });
 const RegionSelectionDialog = lazy(() => import("@/pages/creative/region-selection-dialog").then(module => ({ default: module.RegionSelectionDialog })));
 function createSession(): ChatSession {
     return { id: createClientId(), title: "新对话", messages: [], updatedAt: new Date().toISOString() };
@@ -116,13 +135,23 @@ export default function ChatPage() {
     const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
     const activeSessionIdRef = useRef(activeSessionId);
     activeSessionIdRef.current = activeSessionId;
-    const [draft, setDraft] = useState("");
-    const [editing, setEditing] = useState<{ messageId: string; content: string } | null>(null);
-    const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
-    const [imageTarget, setImageTarget] = useState<{ id: string; mode: "region" | "correction"; sessionId: string } | null>(null);
-    const [referenceImageIds, setReferenceImageIds] = useState<string[]>([]);
-    const [regionImage, setRegionImage] = useState<SceneImage | null>(null);
-    const [regionSelection, setRegionSelection] = useState<ChatRegionSelection | null>(null);
+    const [composerDraft, setComposerDraftState] = useState(emptyComposerDraft);
+    const composerDraftRef = useRef(composerDraft);
+    const sessionDraftsRef = useRef(new Map<string, ChatComposerDraft>());
+    const { draft, editing, attachments, imageTarget, referenceImageIds, regionImage, regionSelection } = composerDraft;
+    const setComposerDraft = (value: ChatComposerDraft) => { composerDraftRef.current = value; setComposerDraftState(value); };
+    const updateComposerDraft = <K extends keyof ChatComposerDraft,>(key: K, update: SetStateAction<ChatComposerDraft[K]>) => {
+        const current = composerDraftRef.current;
+        const value = typeof update === "function" ? (update as (previous: ChatComposerDraft[K]) => ChatComposerDraft[K])(current[key]) : update;
+        if (value !== current[key]) setComposerDraft({ ...current, [key]: value });
+    };
+    const setDraft = (value: SetStateAction<string>) => updateComposerDraft("draft", value);
+    const setEditing = (value: SetStateAction<ChatComposerDraft["editing"]>) => updateComposerDraft("editing", value);
+    const setAttachments = (value: SetStateAction<ChatAttachment[]>) => updateComposerDraft("attachments", value);
+    const setImageTarget = (value: SetStateAction<ChatComposerDraft["imageTarget"]>) => updateComposerDraft("imageTarget", value);
+    const setReferenceImageIds = (value: SetStateAction<string[]>) => updateComposerDraft("referenceImageIds", value);
+    const setRegionImage = (value: SetStateAction<SceneImage | null>) => updateComposerDraft("regionImage", value);
+    const setRegionSelection = (value: SetStateAction<ChatRegionSelection | null>) => updateComposerDraft("regionSelection", value);
     const [readingAttachments, setReadingAttachments] = useState(false);
     const attachmentReadRef = useRef<object | null>(null);
     const [hydratingMedia, setHydratingMedia] = useState(false);
@@ -130,7 +159,8 @@ export default function ChatPage() {
     const [mediaReload, setMediaReload] = useState(0);
     const [isSending, setIsSending] = useState(false);
     const sendingRef = useRef(false);
-    const activeSendRef = useRef<{ controller: AbortController; submitted: boolean; stopRequested?: boolean; detached?: boolean } | null>(null);
+    const activeSendRef = useRef<ChatSendLifetime | null>(null);
+    const sendLifetimesRef = useRef(new Set<ChatSendLifetime>());
     const imageRequestsRef = useRef(new Map<string, AbortController>());
     const reviewRequestsRef = useRef(new Map<string, AbortController>());
     const [reviewingImageIds, setReviewingImageIds] = useState<ReadonlySet<string>>(new Set());
@@ -140,8 +170,33 @@ export default function ChatPage() {
     const placingImageRef = useRef(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const composerRef = useRef<HTMLTextAreaElement>(null);
-    const activeStreamRef = useRef<ReturnType<typeof createChatStreamBuffer> | null>(null);
-    const preparingMessageRef = useRef(false);
+    const preparingSendsRef = useRef(new Set<ChatSendLifetime>());
+    const preparationQueueRef = useRef(Promise.resolve());
+    const syncVisibleSend = (sessionId = activeSessionIdRef.current) => {
+        const current = [...sendLifetimesRef.current].find(item => item.sessionId === sessionId && !item.detached) || null;
+        activeSendRef.current = current;
+        sendingRef.current = Boolean(current);
+        setIsSending(Boolean(current));
+        setSendPhase(current?.phase || "");
+    };
+    const switchComposerSession = (id: string | null, preserveCurrent = true) => {
+        if (preserveCurrent && activeSessionIdRef.current) sessionDraftsRef.current.set(activeSessionIdRef.current, composerDraftRef.current);
+        activeSessionIdRef.current = id;
+        setActiveSessionId(id);
+        setComposerDraft((id && sessionDraftsRef.current.get(id)) || emptyComposerDraft());
+        syncVisibleSend(id);
+    };
+    const clearSubmittedComposer = (id: string, submitted: ChatComposerDraft, branched: boolean) => {
+        const current = activeSessionIdRef.current === id ? composerDraftRef.current : sessionDraftsRef.current.get(id);
+        if (!current) return;
+        // A new draft is a different object, even if the user types the same text
+        // again. Only clear the exact submitted version after its durable save.
+        const next = branched
+            ? current.editing && current.editing === submitted.editing ? { ...current, editing: null } : current
+            : current === submitted ? emptyComposerDraft() : current;
+        sessionDraftsRef.current.set(id, next);
+        if (activeSessionIdRef.current === id) setComposerDraft(next);
+    };
     const persistSessions = useCallback(async (value: ChatSession[]) => {
         try {
             await chatSessionStorage.save(storageKey, value);
@@ -157,18 +212,19 @@ export default function ChatPage() {
 
     useEffect(() => {
         const flush = () => {
-            activeStreamRef.current?.flush();
-            if (loadedStorageKeyRef.current === storageKey && !preparingMessageRef.current) persistence.schedule(sessionsRef.current);
+            for (const lifetime of sendLifetimesRef.current) lifetime.stream?.flush();
+            if (loadedStorageKeyRef.current === storageKey && !preparingSendsRef.current.size) persistence.schedule(sessionsRef.current);
             persistence.flush();
         };
         window.addEventListener("pagehide", flush);
         return () => {
             window.removeEventListener("pagehide", flush);
             flush();
-            activeStreamRef.current?.dispose();
             // Stop local waits too; submitted image tasks retain their durable
             // recovery marker and are never treated as cancelled or refunded.
-            activeSendRef.current?.controller.abort();
+            for (const lifetime of sendLifetimesRef.current) { lifetime.stream?.dispose(); lifetime.controller.abort(); }
+            sendLifetimesRef.current.clear();
+            preparingSendsRef.current.clear();
             activeSendRef.current = null;
             for (const controller of imageRequestsRef.current.values()) controller.abort();
             imageRequestsRef.current.clear();
@@ -186,16 +242,14 @@ export default function ChatPage() {
         setSessionLoadError("");
         setSessionSaveError("");
         setSessions([]);
-        setDraft("");
-        setAttachments([]);
-        setEditing(null);
-        setImageTarget(null);
-        setReferenceImageIds([]);
-        setRegionSelection(null);
-        setRegionImage(null);
+        sessionDraftsRef.current.clear();
+        setComposerDraft(emptyComposerDraft());
+        activeSessionIdRef.current = null;
+        setActiveSessionId(null);
         setActiveImageRequestIds(new Set());
         sendingRef.current = false;
-        preparingMessageRef.current = false;
+        preparingSendsRef.current.clear();
+        preparationQueueRef.current = Promise.resolve();
         setIsSending(false);
         setReadingAttachments(false);
         setHydratingMedia(false);
@@ -205,6 +259,7 @@ export default function ChatPage() {
                 if (cancelled) return;
                 const restored = stored.length ? stored : [createSession()];
                 setSessions(restored);
+                activeSessionIdRef.current = restored[0]!.id;
                 setActiveSessionId(restored[0]!.id);
                 loadedStorageKeyRef.current = storageKey;
                 setLoadedStorageKey(storageKey);
@@ -217,12 +272,12 @@ export default function ChatPage() {
 
     useEffect(() => {
         const active = sessions.find((item) => item.id === activeSessionId);
-        if (!active) setActiveSessionId(sessions[0]?.id || null);
+        if (!active && activeSessionIdRef.current !== (sessions[0]?.id || null)) switchComposerSession(sessions[0]?.id || null, false);
     }, [activeSessionId, sessions]);
 
     useEffect(() => {
         // Account changes must not persist the previous account's sessions under the new key.
-        if (loadedStorageKey !== storageKey || preparingMessageRef.current) return;
+        if (loadedStorageKey !== storageKey || preparingSendsRef.current.size) return;
         persistence.schedule(sessions);
         if (!isSending) persistence.flush();
     }, [isSending, loadedStorageKey, persistence, sessions, storageKey]);
@@ -256,10 +311,6 @@ export default function ChatPage() {
     const selectedClaude = isClaudeModel(selectedParameterModel);
 
     useEffect(() => {
-        setImageTarget(null);
-        setReferenceImageIds([]);
-        setRegionSelection(null);
-        setRegionImage(null);
         for (const controller of reviewRequestsRef.current.values()) controller.abort();
         reviewRequestsRef.current.clear();
         setReviewingImageIds(new Set());
@@ -291,42 +342,32 @@ export default function ChatPage() {
         persist: async () => {
             // The prepared user-turn snapshot is already queued. A background
             // completion must not queue an older snapshot without that new turn.
-            if (preparingMessageRef.current) return;
+            if (preparingSendsRef.current.size) return;
             persistence.clear(); await persistSessions(sessionsRef.current);
         },
     });
 
     const startSession = () => {
-        if (!sessionsReady || sendingRef.current || placingImageRef.current || readingAttachments) return;
+        if (!sessionsReady || placingImageRef.current || readingAttachments) return;
         const session = createSession();
         setSessions((current) => [session, ...current]);
-        setActiveSessionId(session.id);
-        setDraft("");
-        setAttachments([]);
-        setEditing(null);
-        setImageTarget(null);
-        setReferenceImageIds([]);
+        switchComposerSession(session.id);
     };
 
     const selectSession = (id: string) => {
-        if (sendingRef.current || placingImageRef.current || readingAttachments) return;
-        activeSessionIdRef.current = id;
-        setActiveSessionId(id);
-        setDraft("");
-        setAttachments([]);
-        setEditing(null);
-        setImageTarget(null);
-        setReferenceImageIds([]);
+        if (placingImageRef.current || readingAttachments) return;
+        switchComposerSession(id);
         if (window.innerWidth < 768) setSidebarOpen(false);
     };
 
     const stopSending = () => {
         const current = activeSendRef.current;
         if (!current || current.stopRequested) return;
-        activeStreamRef.current?.flush();
+        current.stream?.flush();
         current.stopRequested = true;
         current.controller.abort();
-        setSendPhase("正在停止本页等待…");
+        current.phase = "正在停止本页等待…";
+        setSendPhase(current.phase);
     };
 
     const stopImageWaiting = (item: ChatMessage) => {
@@ -411,7 +452,7 @@ export default function ChatPage() {
             updateSession(sessionId, session => ({ ...session, messages: session.messages.map(item => ({ ...item, ...(item.generatedImages ? { generatedImages: item.generatedImages.map(saved => saved.id === image.id ? { ...saved, review } : saved) } : {}) })) }));
             // A prepared new turn owns its queued snapshot; do not enqueue an
             // older history after it. The normal persistence effect follows commit.
-            if (!preparingMessageRef.current) { persistence.clear(); await persistSessions(sessionsRef.current); }
+            if (!preparingSendsRef.current.size) { persistence.clear(); await persistSessions(sessionsRef.current); }
         } catch (error) {
             if (!controller.signal.aborted && isCurrentScope() && activeSessionIdRef.current === sessionId) message.error(error instanceof Error ? error.message : "检查失败，原生成结果已保留。");
         } finally {
@@ -476,6 +517,12 @@ export default function ChatPage() {
             useCanvasStore.getState().updateProject(project!.id, { nodes: [...latestProject.nodes] });
             await flushCanvasPersistence();
             if (loadedStorageKeyRef.current !== storageKey) return;
+            // A background conversation may still own a prepared user-turn
+            // write. Do not navigate after overwriting it with an older snapshot.
+            while (preparingSendsRef.current.size) {
+                await preparationQueueRef.current;
+                if (!isCurrentScope()) return;
+            }
             persistence.clear();
             await persistSessions(sessionsRef.current);
             if (loadedStorageKeyRef.current !== storageKey) return;
@@ -489,21 +536,12 @@ export default function ChatPage() {
     };
 
     const removeSession = (id: string) => {
-        if (!sessionsReady || sendingRef.current || placingImageRef.current) return;
-        if (id === activeSession?.id) {
-            setImageTarget(null);
-            setReferenceImageIds([]);
-            setAttachments([]);
-            setDraft("");
-            setEditing(null);
-        }
-        setSessions((current) => {
-            const next = current.filter((item) => item.id !== id);
-            if (next.length) return next;
-            const session = createSession();
-            setActiveSessionId(session.id);
-            return [session];
-        });
+        if (!sessionsReady || [...sendLifetimesRef.current].some(item => item.sessionId === id) || placingImageRef.current) return;
+        const remaining = sessionsRef.current.filter((item) => item.id !== id);
+        const next = remaining.length ? remaining : [createSession()];
+        setSessions(next);
+        sessionDraftsRef.current.delete(id);
+        if (activeSessionIdRef.current === id) switchComposerSession(next[0]!.id, false);
     };
 
     const send = async (resend?: { messageId: string; content?: string }) => {
@@ -536,12 +574,31 @@ export default function ChatPage() {
         const selectedInputIds = buildCreativeImageCatalog([], { role: "user", content: "", attachments: turnAttachments }).map((item) => item.id);
         if (new Set([...selectedInputIds, ...(imageSelection.explicitTargetImageId ? [imageSelection.explicitTargetImageId] : [])]).size > 5) { message.warning(uiText("编辑目标与参考图片合计最多 5 张，请先移除一张图片")); return; }
         const sessionId = requestSession.id;
-        const sendLifetime = { controller: new AbortController(), submitted: false, stopRequested: false, detached: false };
+        const submittedComposer = composerDraftRef.current;
+        const sendLifetime: ChatSendLifetime = { sessionId: activeSession.id, controller: new AbortController(), submitted: false, stopRequested: false, detached: false, phase: "正在理解需求…" };
         const signal = sendLifetime.controller.signal;
-        activeSendRef.current = sendLifetime;
+        sendLifetimesRef.current.add(sendLifetime);
+        syncVisibleSend();
         const assertSendCurrent = () => {
             signal.throwIfAborted();
-            if (!isCurrentScope() || (!sendLifetime.detached && activeSendRef.current !== sendLifetime)) throw new DOMException("登录会话已变化", "AbortError");
+            if (!isCurrentScope() || !sendLifetimesRef.current.has(sendLifetime)) throw new DOMException("登录会话已变化", "AbortError");
+        };
+        const persistImageTaskMarker = async () => {
+            // A different conversation may still be committing its user turn.
+            // Read the snapshot only after that commit enters sessionsRef;
+            // queueing the older snapshot would erase its durably saved turn.
+            while (preparingSendsRef.current.size) {
+                await preparationQueueRef.current;
+                assertSendCurrent();
+            }
+            assertSendCurrent();
+            persistence.clear();
+            await persistSessions(sessionsRef.current);
+            assertSendCurrent();
+        };
+        const updateSendPhase = (phase: string) => {
+            sendLifetime.phase = phase;
+            if (!signal.aborted && isCurrentScope() && activeSendRef.current === sendLifetime) setSendPhase(phase);
         };
         const userMessage: ChatMessage = { id: createClientId(), parentMessageId: requestSession.messages.at(-1)?.id, editTargetImageId: turnFocus?.id, focusImageId: turnFocus?.id, focusLocked: Boolean(imageSelection.explicitTargetImageId), newCreation: imageSelection.newCreation, role: "user", content: text, attachments: turnAttachments, documentIds: requestSession.documents?.map(document => document.id), requirementCard: requestSession.requirementCard, ...(turnRegion ? { regionSelection: { ...turnRegion, mask: { ...turnRegion.mask, dataUrl: "", url: undefined }, selection: { ...turnRegion.selection, dataUrl: "", url: undefined } } } : {}), createdAt: new Date().toISOString() };
         const assistantId = createClientId();
@@ -554,56 +611,58 @@ export default function ChatPage() {
         const selectedSessionModels = { chatModelId: creativeModelId };
         const conversationTitle = (text || turnAttachments[0]?.name || "新对话").slice(0, 18);
         const committedSession = { ...requestSession, ...selectedSessionModels, focusImageId: turnFocus?.id, focusLocked: false, newCreation: imageSelection.newCreation, title: requestSession.messages.length || branch ? requestSession.title : conversationTitle, messages: [...requestSession.messages, userMessage], updatedAt: new Date().toISOString() };
-        const nextSessions = branch ? [committedSession, ...sessionsRef.current] : sessionsRef.current.map((session) => session.id === sessionId ? committedSession : session);
-        preparingMessageRef.current = true;
-        sendingRef.current = true;
+        // Serialize only the durable user-turn commit, not the model requests.
+        // Each queued commit reads the newest history so concurrent sessions
+        // cannot save a snapshot that loses a just-committed turn.
+        const previousPreparation = preparationQueueRef.current;
+        let releasePreparation!: () => void;
+        preparationQueueRef.current = new Promise<void>(resolve => { releasePreparation = resolve; });
+        preparingSendsRef.current.add(sendLifetime);
         persistence.clear();
-        setIsSending(true);
-        setSendPhase("正在理解需求…");
         try {
+            await previousPreparation;
+            assertSendCurrent();
+            const nextSessions = branch ? [committedSession, ...sessionsRef.current] : sessionsRef.current.map((session) => session.id === sessionId ? { ...session, ...selectedSessionModels, title: committedSession.title, messages: [...session.messages, userMessage], updatedAt: committedSession.updatedAt } : session);
             await persistSessions(nextSessions);
+            // Stop during the write still leaves the durably saved user turn
+            // visible; the request's abort is checked before any model call.
+            if (!isCurrentScope() || !sendLifetimesRef.current.has(sendLifetime)) throw new DOMException("登录会话已变化", "AbortError");
+            if (branch) {
+                setSessions(current => [committedSession, ...current]);
+                sendLifetime.sessionId = sessionId;
+                if (activeSessionIdRef.current === activeSession.id) switchComposerSession(sessionId);
+                syncVisibleSend();
+            }
+            else {
+                // A previous accepted image task may complete during this write.
+                // Append this turn without replacing its newly arrived result.
+                updateSession(sessionId, session => ({ ...session, ...selectedSessionModels,
+                    ...(requestSession.focusLocked && !imageSelection.explicitTargetImageId && session.focusLocked && session.focusImageId === requestSession.focusImageId && session.focusRevision === requestSession.focusRevision
+                        ? { focusImageId: turnFocus?.id, editTargetImageId: turnFocus?.id } : {}),
+                    focusLocked: false, newCreation: imageSelection.newCreation,
+                    title: committedSession.title, messages: [...session.messages, userMessage], updatedAt: committedSession.updatedAt }));
+            }
         } catch {
-            if (activeSendRef.current === sendLifetime) {
-                preparingMessageRef.current = false;
-                sendingRef.current = false;
-                activeSendRef.current = null;
-                if (isCurrentScope()) { setIsSending(false); message.error(uiText("聊天记录未保存，消息尚未发送；草稿和附件已保留。")); }
+            sendLifetimesRef.current.delete(sendLifetime);
+            if (isCurrentScope()) {
+                syncVisibleSend();
+                message.error(uiText("聊天记录未保存，消息尚未发送；草稿和附件已保留。"));
             }
             return;
+        } finally {
+            preparingSendsRef.current.delete(sendLifetime);
+            releasePreparation();
         }
-        if (!isCurrentScope() || activeSendRef.current !== sendLifetime) return;
-        preparingMessageRef.current = false;
-        if (branch) {
-            setSessions(current => [committedSession, ...current]);
-            activeSessionIdRef.current = sessionId;
-            setActiveSessionId(sessionId);
-            setEditing(null);
-            setImageTarget(null);
-            setReferenceImageIds([]);
-            setAttachments([]);
-            setDraft("");
-        } else {
-            // A previous accepted task may have completed during the durable write.
-            // Append only this turn; never replace its result with our old snapshot.
-            updateSession(sessionId, session => ({ ...session, ...selectedSessionModels,
-                ...(requestSession.focusLocked && !imageSelection.explicitTargetImageId && session.focusLocked && session.focusImageId === requestSession.focusImageId && session.focusRevision === requestSession.focusRevision
-                    ? { focusImageId: turnFocus?.id, editTargetImageId: turnFocus?.id } : {}),
-                focusLocked: false, newCreation: imageSelection.newCreation,
-                title: committedSession.title, messages: [...session.messages, userMessage], updatedAt: committedSession.updatedAt }));
-            setDraft((current) => current === draft ? "" : current);
-            const sentAttachmentIds = new Set(turnAttachments.map((item) => item.id));
-            setAttachments((current) => current.filter((item) => !sentAttachmentIds.has(item.id)));
-            setReferenceImageIds((ids) => ids.filter((id) => !sentAttachmentIds.has(id)));
-        }
-        setImageTarget(null);
-        setRegionSelection(null);
-        chatFollow.scrollToBottom();
-        const stream = createChatStreamBuffer((content) => { if (signal.aborted || activeSendRef.current !== sendLifetime) return; updateSession(sessionId, (session) => ({
+        // The user may already be composing in another conversation. Never
+        // clear its draft/attachments or pull it back to the completed save.
+        clearSubmittedComposer(activeSession.id, submittedComposer, Boolean(branch));
+        if (activeSessionIdRef.current === sessionId) chatFollow.scrollToBottom();
+        const stream = createChatStreamBuffer((content) => { if (signal.aborted || !sendLifetimesRef.current.has(sendLifetime)) return; updateSession(sessionId, (session) => ({
             ...session,
             messages: [...session.messages.filter((item) => item.id !== assistantId), { id: assistantId, parentMessageId: userMessage.id, role: "assistant", content, createdAt: new Date().toISOString() }],
             updatedAt: new Date().toISOString(),
         })); });
-        activeStreamRef.current = stream;
+        sendLifetime.stream = stream;
         let imageSubmissionStarted = false;
         let imageRequestId: string | undefined;
         try {
@@ -611,7 +670,7 @@ export default function ChatPage() {
             const history = await chatMedia.hydrateSession(requestSession, assertSendCurrent);
             const currentTurn = await chatMedia.hydrateSession({ ...requestSession, messages: [userMessage] }, assertSendCurrent);
             const requirements = confirmedDesignRequirements(requestSession.requirementCard);
-            const plan = await requestCreativeChatPlan({ ...config, model: creativeModelId, textModel: creativeModelId, systemPrompt: "" }, history.messages, currentTurn.messages[0]!, { signal, selectedImageId: userMessage.focusImageId, ...imageSelection, documents: history.documents, requirements, onPhase: (phase) => { if (!signal.aborted && activeSendRef.current === sendLifetime && isCurrentScope()) setSendPhase(phase); }, onDelta: stream.push });
+            const plan = await requestCreativeChatPlan({ ...config, model: creativeModelId, textModel: creativeModelId, systemPrompt: "" }, history.messages, currentTurn.messages[0]!, { signal, selectedImageId: userMessage.focusImageId, ...imageSelection, documents: history.documents, requirements, onPhase: updateSendPhase, onDelta: stream.push });
             assertSendCurrent();
             stream.cancel();
             assertCreativeChatImageSelection(plan, imageSelection);
@@ -635,7 +694,7 @@ export default function ChatPage() {
             }
             const quality = qualitySettings.quality;
             const resolution = qualitySettings.resolution;
-            setSendPhase(action === "edit" ? "正在按你的要求修改图片…" : "正在生成图片…");
+            updateSendPhase(action === "edit" ? "正在按你的要求修改图片…" : "正在生成图片…");
             let imageConfig: AiConfig = { ...config, model: imageModelId, imageModel: imageModelId, quality, imageOptions: chatImageRequestOptions(config.imageOptions, resolution), systemPrompt: "", count: "1" };
             if (!turnRegion || !imageModelProfile(imageModelId).supportsMask) imageConfig.size = await resolveChatImageSize(imageConfig, requestedImageSize, action, references[0], assertSendCurrent);
             const maskInput = turnRegion ? await prepareChatRegionEdit(imageConfig, references, turnRegion, assertSendCurrent) : undefined;
@@ -651,25 +710,17 @@ export default function ChatPage() {
             imageRequestsRef.current.set(imageRequestId, sendLifetime.controller);
             setActiveImageRequestIds(previous => new Set(previous).add(pendingImageTask.requestId));
             updateSession(sessionId, (session) => ({ ...session, focusRevision: pendingImageTask.focusRevision, imageModelId, imageQuality: quality, imageResolution: resolution, messages: [...session.messages.filter((item) => item.id !== assistantId), { id: assistantId, parentMessageId: userMessage.id, role: "assistant", content: `${explanation ? `${explanation}\n\n` : ""}正在准备图片…`, pendingImageTask, createdAt: new Date().toISOString() }], updatedAt: new Date().toISOString() }));
-            persistence.clear();
-            await persistSessions(sessionsRef.current);
-            assertSendCurrent();
+            await persistImageTaskMarker();
             const onSubmissionStarted = () => { imageSubmissionStarted = true; };
             const onSubmitted = async (taskIds: string[]) => {
                 sendLifetime.submitted = true;
-                if (!isCurrentScope() || activeSendRef.current !== sendLifetime) return;
+                if (!isCurrentScope() || !sendLifetimesRef.current.has(sendLifetime)) return;
                 updateSession(sessionId, (session) => ({ ...session, messages: session.messages.map((item) => item.id === assistantId ? { ...item, pendingImageTask: { ...pendingImageTask, taskId: taskIds[0] }, content: "正在处理图片，完成后会直接显示在这里。" } : item), updatedAt: new Date().toISOString() }));
-                persistence.clear();
-                await persistSessions(sessionsRef.current);
-                assertSendCurrent();
+                await persistImageTaskMarker();
                 // The accepted request owns its own observer. The composer is free
                 // for a different conversation or task without replaying this one.
                 sendLifetime.detached = true;
-                if (activeSendRef.current === sendLifetime) {
-                    activeSendRef.current = null; sendingRef.current = false;
-                    if (activeStreamRef.current === stream) activeStreamRef.current = null;
-                    setIsSending(false);
-                }
+                syncVisibleSend();
             };
             const documentOptions = requirements ? { imageAgentRequirements: requirements, imageAgentDocumentCatalog: agentDocumentCatalog(history.documents || []) } : {};
             const generated = action === "edit"
@@ -692,9 +743,9 @@ export default function ChatPage() {
                 messages: session.messages.some((item) => item.id === assistantId && item.pendingImageTask)
                     ? session.messages.map((item) => {
                         if (item.id !== assistantId) return item;
-                        if (imageSubmissionStarted || sendLifetime.submitted) return { ...item, ...(sendLifetime.stopRequested ? { stopped: true } : {}), content: sendLifetime.stopRequested || item.stopped ? "已停止本页等待。图片任务可能仍在服务端执行，计费不会因此取消；请查询原任务，勿重复生成。" : `图片任务结果尚未确认：${error instanceof Error ? error.message : "请求失败"}。请查询原任务，勿重复生成。` };
+                        if (imageSubmissionStarted || sendLifetime.submitted) return { ...item, ...(sendLifetime.stopRequested ? { stopped: true } : {}), content: sendLifetime.stopRequested || item.stopped ? "已停止本页等待。图片任务可能仍在服务端执行；请查询原任务，勿重复生成。" : `图片任务结果尚未确认：${error instanceof Error ? error.message : "请求失败"}。请查询原任务，勿重复生成。` };
                         const { pendingImageTask: _pending, ...saved } = item;
-                        if (sendLifetime.stopRequested) return { ...saved, role: "assistant", stopped: true, content: "已停止。图片任务尚未提交；此前的对话调用仍可能计费。" };
+                        if (sendLifetime.stopRequested) return { ...saved, role: "assistant", stopped: true, content: "已停止。图片任务尚未提交；此前的对话请求可能仍在服务端执行。" };
                         return { ...saved, role: "error", content: `图片任务尚未提交：${error instanceof Error ? error.message : "准备失败"}。可以修正后重新发送。` };
                     })
                     : sendLifetime.stopRequested
@@ -708,16 +759,12 @@ export default function ChatPage() {
                 if (isCurrentScope()) setActiveImageRequestIds(previous => { const next = new Set(previous); next.delete(imageRequestId!); return next; });
             }
             stream.cancel();
-            if (activeStreamRef.current === stream) activeStreamRef.current = null;
-            if (isCurrentScope() && !preparingMessageRef.current) {
+            if (isCurrentScope() && !preparingSendsRef.current.size) {
                 persistence.clear();
                 await persistSessions(sessionsRef.current).catch(() => undefined);
             }
-            if (activeSendRef.current === sendLifetime) {
-                sendingRef.current = false;
-                activeSendRef.current = null;
-                if (isCurrentScope()) setIsSending(false);
-            }
+            sendLifetimesRef.current.delete(sendLifetime);
+            if (isCurrentScope()) syncVisibleSend();
         }
     };
 
@@ -813,40 +860,38 @@ export default function ChatPage() {
                 {sidebarOpen ? <button type="button" aria-label={uiText("关闭会话列表")} className="absolute inset-0 z-10 bg-black/25 md:hidden" onClick={() => setSidebarOpen(false)} /> : null}
                 <aside inert={!sidebarOpen} aria-hidden={!sidebarOpen} className={cn("absolute inset-y-0 left-0 z-20 flex shrink-0 flex-col border-r border-border bg-background transition-[width] duration-200 md:relative md:inset-auto", sidebarOpen ? "w-[260px]" : "w-0 overflow-hidden border-r-0")}>
                     <div className="flex items-center justify-between px-4 py-4">
-                        <div className="flex items-center gap-2 text-sm font-semibold"><Bot className="size-4 text-orange-600" /> {uiText(" 对话记录")}</div>
+                        <div className="flex items-center gap-2 text-sm font-semibold"><Bot className="size-4 text-muted-foreground" /> {uiText(" 对话记录")}</div>
                         <div className="flex">
-                            <Tooltip title={uiText("新建对话")}><button type="button" aria-label={uiText("新建对话")} disabled={!sessionsReady || isSending || placingImage || readingAttachments} onClick={() => startSession()} className="grid size-9 place-items-center rounded-lg text-muted-foreground hover:bg-muted disabled:opacity-40"><MessageSquarePlus className="size-4" /></button></Tooltip>
+                            <Tooltip title={uiText("新建对话")}><button type="button" aria-label={uiText("新建对话")} disabled={!sessionsReady || placingImage || readingAttachments} onClick={() => startSession()} className="grid size-9 place-items-center rounded-lg text-muted-foreground hover:bg-muted disabled:opacity-40"><MessageSquarePlus className="size-4" /></button></Tooltip>
                             <button type="button" aria-label={uiText("收起会话")} onClick={() => setSidebarOpen(false)} className="grid size-9 place-items-center rounded-lg text-muted-foreground hover:bg-muted md:hidden"><X className="size-4" /></button>
                         </div>
                     </div>
-                    <div className="px-3"><Button type="primary" block disabled={!sessionsReady || isSending || placingImage || readingAttachments} icon={<MessageSquarePlus className="size-4" />} onClick={() => startSession()} className="!h-10">{uiText("新对话")}</Button></div>
+                    <div className="px-3"><Button block disabled={!sessionsReady || placingImage || readingAttachments} icon={<MessageSquarePlus className="size-4" />} onClick={() => startSession()} className="!h-9">{uiText("新对话")}</Button></div>
                     <div className="mt-4 min-h-0 flex-1 space-y-1 overflow-y-auto px-3 pb-3">
                         <PracticeExampleRecord />
-                        {sessions.map((session) => <div key={session.id} className={cn("group flex w-full items-center gap-1 rounded-xl pr-1 transition-colors", session.id === activeSession?.id ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted")}>
-                            <button type="button" disabled={isSending || placingImage || readingAttachments} onClick={() => selectSession(session.id)} className="flex min-w-0 flex-1 items-center gap-2 px-3 py-3 text-left disabled:opacity-60">
-                                <span className="grid size-7 shrink-0 place-items-center rounded-lg opacity-75"><Bot className="size-4" /></span>
-                                <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{sessionTitle(session)}{session.branchOf ? uiText(" · 分支") : ""}</span><span className="mt-1 block text-[11px] opacity-65">{new Date(session.updatedAt).toLocaleDateString(getUiLocale())}</span></span>
+                        {sessions.map((session) => <div key={session.id} data-chat-session={session.id} className={cn("group relative flex w-full items-center gap-1 rounded-lg pr-1 transition-colors", session.id === activeSession?.id ? "bg-muted text-foreground before:absolute before:left-0 before:top-3 before:bottom-3 before:w-0.5 before:bg-foreground" : "text-muted-foreground hover:bg-muted/70")}>
+                            <button type="button" aria-current={session.id === activeSession?.id ? "true" : undefined} disabled={placingImage || readingAttachments} onClick={() => selectSession(session.id)} className="flex min-w-0 flex-1 items-center gap-2 px-3 py-3 text-left disabled:opacity-60">
+                                <span className="grid size-7 shrink-0 place-items-center rounded-lg opacity-75">{[...sendLifetimesRef.current].some(item => item.sessionId === session.id) ? <LoaderCircle aria-label={uiText("正在处理")} className="size-4 animate-spin" /> : <Bot className="size-4" />}</span>
+                                <span className="min-w-0 flex-1"><span className={cn("block truncate text-sm", session.id === activeSession?.id ? "font-semibold" : "font-medium")}>{sessionTitle(session)}{session.branchOf ? uiText(" · 分支") : ""}</span><span className="mt-1 block text-xs opacity-65">{new Date(session.updatedAt).toLocaleDateString(getUiLocale())}</span></span>
                             </button>
-                            <button type="button" disabled={isSending || placingImage} onClick={() => modal.confirm({ title: uiText("删除这段对话？"), content: uiText("会话仅保存在当前浏览器，删除后无法恢复。"), okText: uiText("删除"), cancelText: uiText("保留"), okButtonProps: { danger: true }, onOk: () => removeSession(session.id) })} className="grid size-8 shrink-0 place-items-center rounded-lg opacity-50 transition hover:opacity-100 focus-visible:opacity-100 md:opacity-0 md:group-hover:opacity-60" aria-label={uiText("删除会话")}><Trash2 className="size-4" /></button>
+                            <Tooltip title={[...sendLifetimesRef.current].some(item => item.sessionId === session.id) ? uiText("这段对话仍在处理，完成后可删除") : uiText("删除会话")}><button type="button" disabled={[...sendLifetimesRef.current].some(item => item.sessionId === session.id) || placingImage} onClick={() => modal.confirm({ title: uiText("删除这段对话？"), content: uiText("会话仅保存在当前浏览器，删除后无法恢复。"), okText: uiText("删除"), cancelText: uiText("保留"), okButtonProps: { danger: true }, onOk: () => removeSession(session.id) })} className="grid size-8 shrink-0 place-items-center rounded-lg opacity-50 transition hover:opacity-100 focus-visible:opacity-100 md:opacity-0 md:group-hover:opacity-60" aria-label={uiText("删除会话")}><Trash2 className="size-4" /></button></Tooltip>
                         </div>)}
                     </div>
-                    <div className="border-t border-border px-4 py-4 text-xs leading-6 text-muted-foreground">{uiText("对话保存在当前浏览器。")}<br />{uiText("模型与密钥由服务端统一管理。")}</div>
+                    <div className="border-t border-border px-3 py-2"><Popover trigger="click" content={<p className="max-w-64 text-[13px] leading-6">{uiText("对话保存在当前浏览器。")}<br />{uiText("模型与密钥由服务端统一管理。")}</p>}><button type="button" aria-label={uiText("对话保存说明")} className="grid size-8 place-items-center rounded-lg text-muted-foreground hover:bg-muted"><CircleHelp className="size-4" /></button></Popover></div>
                 </aside>
 
                 <section {...imageDrop.dropProps} aria-label={uiText("对话图片拖入区域")} aria-busy={imageDrop.reading || readingAttachments} className={cn("flex min-h-0 min-w-0 flex-1 flex-col", imageDrop.dragging && "outline outline-2 -outline-offset-2 outline-primary")}>
-                    <header className="flex h-16 shrink-0 items-center gap-2 px-3 sm:px-5">
+                    <header data-testid="chat-header" className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3 sm:px-5">
                         <Tooltip title={sidebarOpen ? uiText("收起会话") : uiText("展开会话")}><button type="button" aria-label={sidebarOpen ? uiText("收起会话") : uiText("展开会话")} onClick={() => setSidebarOpen((value) => !value)} className="grid size-10 place-items-center rounded-xl text-muted-foreground hover:bg-muted">{sidebarOpen ? <PanelLeftClose className="size-5" /> : <PanelLeftOpen className="size-5" />}</button></Tooltip>
-                        <div className="min-w-0 flex-1"><h1 className="truncate text-base font-medium">{uiText("对话改图")}</h1><p className="truncate text-xs text-muted-foreground">{uiText("直接发消息、图片或文件，接着聊、接着改。")}</p></div>
+                        <h1 className="min-w-0 flex-1 truncate text-base font-medium">{uiText("对话改图")}</h1>
                         {modelsLoading ? <LoaderCircle role="status" aria-label={uiText("正在读取对话配置")} className="size-4 animate-spin text-muted-foreground" /> : null}
                     </header>
                     {imageDrop.dragging ? <p role="status" className="border-b border-border bg-primary/10 px-6 py-3 text-sm text-foreground">{uiText("松开以添加图片或文件，不会自动发送。")}</p> : null}
                     {modelError ? <div role="alert" className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/60 px-6 py-3 text-sm"><span>{uiText(modelError || "")}</span><Button onClick={() => void refreshModels().catch(() => undefined)}>{uiText("重试加载")}</Button></div> : null}
                     {modelsStatus === "ready" && !selected ? <p role="status" className="border-b border-border px-6 py-3 text-sm text-muted-foreground">{uiText("对话服务暂不可用，请联系管理员检查后台配置。")}</p> : null}
                     {!sessionsReady ? <div role={sessionLoadError ? "alert" : "status"} className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/60 px-6 py-3 text-sm"><span>{sessionLoadError || uiText("正在读取本地聊天记录…")}</span>{sessionLoadError ? <Button onClick={() => setSessionReload((value) => value + 1)}>{uiText("重试读取记录")}</Button> : null}</div> : null}
-                    {sessionSaveError ? <div role="alert" className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/60 px-6 py-3 text-sm"><span>{uiText(sessionSaveError || "")}</span><Button onClick={() => { if (sessionsReady && !preparingMessageRef.current) { persistence.clear(); void persistSessions(sessionsRef.current).catch(() => undefined); } }}>{uiText("重试保存记录")}</Button></div> : null}
+                    {sessionSaveError ? <div role="alert" className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/60 px-6 py-3 text-sm"><span>{uiText(sessionSaveError || "")}</span><Button onClick={() => { if (sessionsReady && !preparingSendsRef.current.size) { persistence.clear(); void persistSessions(sessionsRef.current).catch(() => undefined); } }}>{uiText("重试保存记录")}</Button></div> : null}
                     {mediaError ? <div role="alert" className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/60 px-6 py-3 text-sm"><span>{uiText(mediaError || "")}</span><Button disabled={hydratingMedia || isSending} onClick={() => setMediaReload((value) => value + 1)}>{uiText("重试读取图片")}</Button></div> : null}
-
-                    {selectedClaude ? <details className="border-b border-border px-4 py-2 text-xs text-muted-foreground md:px-6"><summary className="w-fit cursor-pointer">{uiText("模型设置")}</summary><ClaudeChatControls model={selectedParameterModel} stream={config.claudeStream !== "false"} thinking={config.claudeThinking === "true"} maxTokens={config.claudeMaxTokens} onStreamChange={(value) => updateConfig("claudeStream", String(value))} onThinkingChange={(value) => updateConfig("claudeThinking", String(value))} onMaxTokensChange={(value) => updateConfig("claudeMaxTokens", value)} /></details> : null}
 
                     {activeSession ? <AgentDocumentPanel key={activeSession.id} documents={activeSession.documents} card={activeSession.requirementCard} disabled={imageActionsDisabled} onChange={card => { if (isCurrentScope()) updateSession(activeSession.id, session => ({ ...session, requirementCard: card })); }} onReference={figure => {
                         if (selectedImage) updateSession(activeSession.id, session => ({ ...session, focusImageId: selectedImage.id }));
@@ -868,7 +913,7 @@ export default function ChatPage() {
                         <div className="mx-auto w-full max-w-3xl">
                             <ConversationExamples className="mb-2 text-muted-foreground" />
                             {editing ? <div role="status" className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground"><span>{uiText("编辑后将从这条消息创建新分支，原会话和附件保留；发送会重新调用模型。")}</span><Button size="small" disabled={isSending} onClick={() => setEditing(null)}>{uiText("取消编辑")}</Button></div> : null}
-                            <div className="relative rounded-3xl border border-input bg-card p-3 shadow-sm transition-colors focus-within:border-ring motion-reduce:transition-none sm:p-4">
+                            <div className="relative rounded-xl border border-input bg-card p-3 transition-colors focus-within:border-ring motion-reduce:transition-none sm:p-4">
                                 {!editing ? <div className="mb-2 text-muted-foreground"><ImageAgentKeepControls keep={selectedImage?.note?.keep || []} draft={draft} onChange={setDraft} disabled={imageActionsDisabled} /></div> : null}
                                 {regionSelection && selectedImage?.id === regionSelection.imageId ? <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground"><Brush className="size-3.5" /><span>{uiText("已圈选局部区域，仅修改选区内")}</span><button type="button" onClick={() => void openRegionSelection(regionSelection.imageId)} className="underline">{uiText("调整选区")}</button><button type="button" aria-label={uiText("清除局部选区")} onClick={() => setRegionSelection(null)}><X className="size-3.5" /></button></div> : null}
                                 {regionSelection ? <p className="mb-2 text-xs leading-relaxed text-muted-foreground">{uiText("涂选后只合入选区，区域外保留原图；选区内结构、接缝与光影仍需核对。")}</p> : null}
@@ -880,6 +925,7 @@ export default function ChatPage() {
                                     <div className="flex min-w-0 flex-1 flex-wrap items-center gap-0.5">
                                         <Tooltip title={uiText("上传图片、PDF、Word、表格或文本")}><button type="button" disabled={!sessionsReady || isSending || Boolean(editing) || readingAttachments || attachments.length >= 5} onClick={() => openChatAttachmentPicker(fileInputRef.current)} className="grid size-10 place-items-center rounded-xl text-muted-foreground hover:bg-muted disabled:opacity-40" aria-label={uiText("上传文件")}><Paperclip className="size-5" /></button></Tooltip>
                                         <Tooltip title={uiText("上传图片")}><button type="button" disabled={!sessionsReady || isSending || Boolean(editing) || readingAttachments || attachments.length >= 5} onClick={() => openChatAttachmentPicker(fileInputRef.current, true)} className="grid size-10 place-items-center rounded-xl text-muted-foreground hover:bg-muted disabled:opacity-40" aria-label={uiText("上传图片")}><ImagePlus className="size-5" /></button></Tooltip>
+                                        {selectedClaude ? <Popover trigger="click" placement="topLeft" title={uiText("模型设置")} content={<div className="max-w-[min(360px,80vw)]"><ClaudeChatControls model={selectedParameterModel} stream={config.claudeStream !== "false"} thinking={config.claudeThinking === "true"} maxTokens={config.claudeMaxTokens} onStreamChange={(value) => updateConfig("claudeStream", String(value))} onThinkingChange={(value) => updateConfig("claudeThinking", String(value))} onMaxTokensChange={(value) => updateConfig("claudeMaxTokens", value)} /></div>}><button type="button" aria-label={uiText("模型设置")} className="grid size-9 place-items-center rounded-lg text-muted-foreground hover:bg-muted"><Settings2 className="size-4" /></button></Popover> : null}
                                         <Popover trigger="click" placement="topRight" title={uiText("出图设置")} content={<div className="grid w-[min(300px,75vw)] gap-3">
                                             <label className="grid gap-1 text-xs text-muted-foreground">{uiText("出图模型")}<Select data-usage-control="model" aria-label={uiText("出图模型")} value={preferredImageModel?.modelId} placeholder={modelsLoading ? uiText("正在读取模型") : uiText("暂无可用模型")} disabled={!sessionsReady || modelsLoading || isSending || !imageModels.length || Boolean(imageBinding?.modelConfigId)} onChange={modelId => { if (activeSession && imageModels.some(model => model.modelId === modelId)) updateSession(activeSession.id, session => ({ ...session, ...selectChatImageModel(modelId, session) })); }} options={imageModels.map(model => ({ value: model.modelId, label: modelLabelWithUsage(model.name, model.publicDescription) }))} /></label>
                                             <label className="grid gap-1 text-xs text-muted-foreground">{uiText("画幅比例 / 尺寸")}<Select aria-label={uiText("图片尺寸")} data-testid="chat-image-size" value={activeSession?.imageSize || CHAT_AUTO_IMAGE_SIZE} disabled={imageReferenceParametersAutomatic || !sessionsReady || modelsLoading || isSending || !preferredImageModel} onChange={value => { if (activeSession) updateSession(activeSession.id, session => ({ ...session, imageSize: value === CHAT_AUTO_IMAGE_SIZE ? undefined : value })); }} options={chatImageSizeOptions(qualityProfile).map(option => ({ ...option, label: uiText(option.label) }))} /></label>
@@ -888,15 +934,15 @@ export default function ChatPage() {
                                             {qualityProfile.kind !== "mai-image" ? <label className="grid gap-1 text-xs text-muted-foreground">{uiText(imageQualitySettings.label || "")}<Select data-usage-control={imageQualitySettings.independentResolution ? "quality" : "resolution"} aria-label={imageQualitySettings.independentResolution ? uiText("图片质量") : uiText("图片清晰度")} data-testid="chat-image-quality" value={imageQualitySettings.quality} disabled={!sessionsReady || modelsLoading || isSending || !preferredImageModel || !imageQualitySettings.adjustable} onChange={value => { if (activeSession && preferredImageModel) updateSession(activeSession.id, session => ({ ...session, imageModelId: preferredImageModel.modelId, imageQuality: value })); }} options={imageQualitySettings.options.map(option => ({ ...option, label: uiText(option.label) }))} /></label> : null}
                                             {imageBinding?.modelConfigId ? <p className="text-xs text-muted-foreground">{uiText("当前出图模型由管理员固定，无需选择。")}</p> : null}
                                         </div>}><button type="button" aria-label={uiText("出图设置")} className="inline-flex min-h-10 max-w-full items-center gap-1.5 rounded-lg px-2 text-xs text-muted-foreground hover:bg-muted"><Settings2 className="size-4 shrink-0" /><span className="shrink-0">{uiText("出图设置")}</span><span className="hidden max-w-28 truncate opacity-70 sm:block">{preferredImageModel?.name}</span></button></Popover>
-                                        <Tooltip title={uiText("Ctrl / ⌘ + V 粘贴图片；Ctrl / ⌘ + Enter 发送；直接说回原图、上一版或图号")}><button type="button" aria-label={uiText("对话操作帮助")} className="grid size-8 place-items-center rounded text-muted-foreground hover:bg-muted"><CircleHelp className="size-4" /></button></Tooltip>
+                                        <Popover trigger="click" placement="topLeft" content={<div className="max-w-72 space-y-2 text-[13px] leading-6"><p>{uiText("直接发消息、图片或文件，接着聊、接着改。")}</p><p>{uiText("Ctrl / ⌘ + V 粘贴图片；Ctrl / ⌘ + Enter 发送；直接说回原图、上一版或图号")}</p><p>{uiText("处理中可以新建或切换对话，回复会保留在原对话。")}</p></div>}><button type="button" aria-label={uiText("对话操作帮助")} className="grid size-8 place-items-center rounded-lg text-muted-foreground hover:bg-muted"><CircleHelp className="size-4" /></button></Popover>
                                     </div>
-                                    {isSending ? <Tooltip title={uiText("停止本页请求和等待，不保证取消服务端执行或计费")}><Button danger onClick={stopSending} icon={<Square className="size-4" />} className="!h-10 !shrink-0 !rounded-full !px-3">{uiText("停止")}</Button></Tooltip> : <Button type="primary" disabled={!sessionsReady || (!composerText.trim() && !composerAttachments.length) || placingImage || readingAttachments || hydratingMedia || !selectedModel} onClick={sendComposer} icon={<Send className="size-4" />} className="!h-10 !shrink-0 !rounded-full !px-3">{editing ? uiText("发送为新分支") : uiText("发送")}</Button>}
+                                    {isSending ? <Tooltip title={uiText("停止本页请求和等待，不保证取消服务端执行")}><Button danger onClick={stopSending} icon={<Square className="size-4" />} className="!h-11 !shrink-0 !rounded-lg !px-3">{uiText("停止")}</Button></Tooltip> : <Tooltip title={!composerText.trim() && !composerAttachments.length ? uiText("先写下想法或添加附件") : undefined}><Button type="primary" disabled={!sessionsReady || (!composerText.trim() && !composerAttachments.length) || placingImage || readingAttachments || hydratingMedia || !selectedModel} onClick={sendComposer} icon={<Send className="size-4" />} className="!h-11 !shrink-0 !rounded-lg !px-3">{editing ? uiText("发送为新分支") : uiText("发送")}</Button></Tooltip>}
                                 </div>
                                 <input ref={fileInputRef} type="file" multiple disabled={!sessionsReady || isSending || Boolean(editing) || readingAttachments} accept={CHAT_ATTACHMENT_ACCEPT} className="hidden" onChange={(event) => { void addFiles(event.target.files); event.currentTarget.value = ""; }} />
                                 {!isSending && (!sessionsReady || !selectedModel || placingImage || readingAttachments || hydratingMedia) ? <p role="status" className="mt-2 text-xs text-muted-foreground">{!sessionsReady ? uiText("正在读取对话，请稍候") : !selectedModel ? uiText("暂无可用对话模型，请联系管理员") : readingAttachments ? uiText("正在读取附件，请稍候") : hydratingMedia ? uiText("正在恢复图片，请稍候") : uiText("正在保存画布，请稍候")}</p> : null}
                             </div>
-                            {deploymentFeatures.creditsEnabled ? <p className="mt-2 text-xs text-muted-foreground">{uiText("对话按成功模型调用计费（含工具续答），生成图片另计积分")}</p> : null}
-                            {isSending ? <p className="mt-1 text-xs text-muted-foreground">{uiText("停止仅中断本页等待，服务端执行与计费不保证取消。")}</p> : null}
+                            <p className="mt-2 text-right text-xs text-muted-foreground">{uiText("Ctrl / ⌘ + Enter 发送")}</p>
+                            {isSending ? <p className="mt-1 text-[13px] text-muted-foreground">{uiText("停止仅中断本页等待，服务端任务可能仍在执行。")}</p> : null}
                         </div>
                     </div>
                 </section>
@@ -921,6 +967,14 @@ const ChatBubble = memo(function ChatBubble({ message, imageLabels, imageCatalog
     useUiText();
     const isUser = message.role === "user";
     const copyText = useCopyText();
+    const [copied, setCopied] = useState(false);
+    const copyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+    useEffect(() => () => clearTimeout(copyTimer.current), []);
+    const copyMessage = async () => {
+        if (!await copyText(message.content)) return;
+        clearTimeout(copyTimer.current); setCopied(true);
+        copyTimer.current = setTimeout(() => setCopied(false), 1200);
+    };
     const imageWork = message.generatedImages?.[0] || message.pendingImageTask;
     const imageControls = (imageId: string) => {
         const original = chatImageOriginal(imageCatalog, imageId);
@@ -931,10 +985,10 @@ const ChatBubble = memo(function ChatBubble({ message, imageLabels, imageCatalog
         <div data-message-id={message.id} data-message-role={message.role} className={cn("flex min-w-0", isUser ? "justify-end" : "justify-start")}>
             <div className={cn("min-w-0 text-[15px] leading-7 [overflow-wrap:anywhere] sm:text-base", isUser ? "max-w-[90%] rounded-3xl bg-muted px-4 py-3 text-foreground sm:max-w-[85%] sm:px-5" : message.role === "error" ? "w-full rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200" : "w-full text-foreground")}>
                 {message.content ? message.role === "error" ? <GenerationDiagnostic error={message.content} /> : <ChatMarkdown>{message.content}</ChatMarkdown> : null}
-                {message.stopped ? <p className="mt-2 text-xs opacity-70">{uiText("已停止接收；已有内容已保留，不代表服务端计费已取消。")}</p> : null}
+                {message.stopped ? <p className="mt-2 text-[13px] opacity-70">{uiText("已停止接收；已有内容已保留，不代表服务端执行已取消。")}</p> : null}
                 {message.generatedImages?.length ? <div className={cn("grid min-w-0 grid-cols-1 gap-5", message.content && "mt-4", message.generatedImages.length > 1 && "sm:grid-cols-2")}>{message.generatedImages.map((item) => <div key={item.id} className="min-w-0">
                     <ChatImage image={item} label={imageLabels.get(item.id) || uiText("生成结果")} {...imageControls(item.id)} onPlace={() => onPlaceOnCanvas(item)} />
-                    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs"><Button size="small" loading={reviewingImageIds.has(item.id)} disabled={actionsDisabled || reviewingImageIds.has(item.id)} title="额外调用当前对话模型检查图片，不会重新生成" onClick={() => onReview(item)}>{uiText("检查结果")}</Button><span className="text-muted-foreground">{uiText("仅手动检查，不自动重绘")}</span></div>
+                    <div className="mt-2 flex flex-wrap items-center gap-2 text-[13px]"><Tooltip title={uiText("额外调用当前对话模型检查图片，不会重新生成")}><Button size="small" loading={reviewingImageIds.has(item.id)} disabled={actionsDisabled || reviewingImageIds.has(item.id)} onClick={() => onReview(item)}>{uiText("检查结果")}</Button></Tooltip><span className="text-muted-foreground">{uiText("仅手动检查，不自动重绘")}</span></div>
                     {item.review ? <div data-testid="chat-image-review" className="mt-2 space-y-1 text-xs text-muted-foreground">
                         <p className="font-medium">{uiText("AI 检查建议（非像素级认证）")}</p>
                         {item.review.baseUnavailable ? <p>{uiText("未取得本轮底图，保留项无法进行前后核验。")}</p> : null}
@@ -957,7 +1011,7 @@ const ChatBubble = memo(function ChatBubble({ message, imageLabels, imageCatalog
                 </div> : null}
                 {message.attachments?.length ? <div className={cn("flex flex-wrap gap-2", message.content && "mt-3")}>{message.attachments.map((item) => item.dataUrl || item.storageKey || item.kind === "image" ? <ChatImage key={item.id} image={item} label={imageLabels.get(item.id) || item.name} {...imageControls(item.id)} /> : <span key={item.id} className={cn("inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs", isUser ? "bg-background/10" : "bg-muted text-muted-foreground")}><FileText className="size-3.5" />{item.name}</span>)}</div> : null}
                 <div className="mt-2 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
-                    {message.content ? <button type="button" aria-label={uiText("复制消息")} onClick={() => copyText(message.content)} className="inline-flex min-h-8 items-center gap-1 rounded px-2 hover:bg-current/10"><Copy className="size-3" />{uiText("复制")}</button> : null}
+                    {message.content ? <button type="button" aria-label={uiText("复制消息")} onClick={() => void copyMessage()} className="inline-flex min-h-8 items-center gap-1 rounded-lg px-2 hover:bg-current/10"><Copy className="size-3" />{copied ? uiText("已复制 ✓") : uiText("复制")}</button> : null}
                     {isUser ? <button type="button" disabled={actionsDisabled} aria-label={uiText("编辑消息")} onClick={onEdit} className="inline-flex min-h-8 items-center gap-1 rounded px-2 hover:bg-current/10 disabled:opacity-40"><Pencil className="size-3" />{uiText("编辑")}</button> : onRegenerate && !message.pendingImageTask ? <Tooltip title={uiText("按当前配置重新发送到新分支，原会话保留；这会重新调用模型")}><button type="button" disabled={actionsDisabled} aria-label={uiText("重新生成")} onClick={onRegenerate} className="inline-flex min-h-8 items-center gap-1 rounded px-2 hover:bg-current/10 disabled:opacity-40"><RotateCcw className="size-3" />{uiText("重新生成")}</button></Tooltip> : null}
                 </div>
             </div>
@@ -970,13 +1024,11 @@ function ClaudeChatControls({ model, stream, thinking, maxTokens, onStreamChange
     const alwaysThinking = model.toLowerCase() === "claude-fable-5";
     const openTokenClaude = model.toLowerCase() === "claude-fable-5-1";
     const channelDefaultThinking = openTokenClaude || model.toLowerCase() === "claude-sonnet-5-5";
-    return <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-border bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
-        <span className="font-medium text-foreground">{uiText("回复参数")}</span>
+    return <div className="flex flex-wrap items-center gap-x-4 gap-y-3 text-[13px] text-muted-foreground">
         <Checkbox checked={stream} onChange={(event) => onStreamChange(event.target.checked)}>{uiText("流式输出")}</Checkbox>
-        {channelDefaultThinking ? <span title={uiText("使用后台配置对应的默认思考行为。")}>{uiText("思考模式 · 渠道默认")}</span> : alwaysThinking ? <span title={uiText("当前服务始终启用自适应思考，不支持关闭或固定思考预算。")}>{uiText("自适应思考 · 始终开启")}</span> : <Checkbox checked={thinking} onChange={(event) => onThinkingChange(event.target.checked)}>{uiText("自适应思考")}</Checkbox>}
-        <label className="inline-flex items-center gap-1.5" title={uiText("总输出预算包含思考与可见回复；16384 是当前项目限制，不是模型官方最大值。")}>{uiText("总输出预算")}<Select aria-label={uiText("总输出预算")} value={maxTokens} onChange={onMaxTokensChange} options={["1024", "2048", "4096", "8192", "16384"].map((value) => ({ value, label: value }))} size="small" className="w-[100px]" />
-        </label>
+        {channelDefaultThinking ? <Tooltip title={uiText("使用后台配置对应的默认思考行为。")}><span>{uiText("思考模式 · 默认")}</span></Tooltip> : alwaysThinking ? <Tooltip title={uiText("当前服务始终启用自适应思考，不支持关闭或固定思考预算。")}><span>{uiText("自适应思考 · 始终开启")}</span></Tooltip> : <Checkbox checked={thinking} onChange={(event) => onThinkingChange(event.target.checked)}>{uiText("自适应思考")}</Checkbox>}
+        <label className="inline-flex items-center gap-1.5">{uiText("回复长度")}<Select aria-label={uiText("回复长度")} value={maxTokens} onChange={onMaxTokensChange} options={[{ value: "1024", label: uiText("短") }, { value: "2048", label: uiText("较短") }, { value: "4096", label: uiText("中") }, { value: "8192", label: uiText("长") }, { value: "16384", label: uiText("更长") }]} size="small" className="w-[100px]" /></label>
         <a href={openTokenClaude ? "https://docs.opentoken.io/api/claude/messages-api/" : "https://docs.apib.ai/cn/api-reference/texts/general/claude-messages"} target="_blank" rel="noreferrer" className="underline underline-offset-2">{uiText("接口说明")}</a>
-        <span className="w-full text-[11px] leading-4">{uiText("预算包含思考与回复；当前项目上限 16384 tokens。参数不适用于其他模型。")}</span>
+        <span className="w-full text-xs leading-5">{uiText("长度设置包含思考与回复，仅适用于当前对话模型。")}</span>
     </div>;
 }

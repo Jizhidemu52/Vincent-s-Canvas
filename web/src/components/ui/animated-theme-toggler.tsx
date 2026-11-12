@@ -82,7 +82,7 @@ function getThemeTransitionClipPaths(variant: TransitionVariant, cx: number, cy:
     }
 }
 
-export const AnimatedThemeToggler = ({ children, className, duration = 400, variant, fromCenter = false, theme, targetTheme, onThemeChange, ...props }: AnimatedThemeTogglerProps) => {
+export const AnimatedThemeToggler = ({ children, className, duration = 400, variant, fromCenter = false, theme, targetTheme, onThemeChange, onClick, ...props }: AnimatedThemeTogglerProps) => {
     useUiLocale();
     const shape = variant ?? "circle";
     const [isDark, setIsDark] = useState(false);
@@ -205,7 +205,7 @@ export const AnimatedThemeToggler = ({ children, className, duration = 400, vari
     }, [shape, fromCenter, duration, isDark, targetTheme, onThemeChange]);
 
     return (
-        <button type="button" ref={buttonRef} onClick={toggleTheme} className={cn(className)} {...props}>
+        <button type="button" ref={buttonRef} {...props} onClick={event => { onClick?.(event); if (!event.defaultPrevented) toggleTheme(); }} className={cn(className)}>
             {children ?? (isDark ? <Sun /> : <Moon />)}
             <span className="sr-only">{props["aria-label"] || uiText("切换主题")}</span>
         </button>

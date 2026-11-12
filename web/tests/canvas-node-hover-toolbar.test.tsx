@@ -66,7 +66,8 @@ describe("compact image toolbar", () => {
 
     test("shows the eraser alongside the common image actions on the first surface", () => {
         const view = elements(toolbarHarness().render());
-        expect(view.filter((element) => typeof element.props.id === "string" && typeof element.props.onClick === "function").map((element) => element.props.id)).toEqual(["manualEdit", "eraser", "edit", "download"]);
+        expect(view.filter((element) => typeof element.props.id === "string" && typeof element.props.onClick === "function").map((element) => element.props.id)).toEqual(["manualEdit", "eraser", "edit"]);
+        expect(view.some(element => typeof element.props.onDownload === "function" && element.props.showLabel === true)).toBe(true);
         const more = view.find((element) => element.props["aria-label"] === "更多图片工具");
         expect(more?.props["aria-haspopup"]).toBe("menu");
     });
@@ -97,7 +98,7 @@ describe("compact image toolbar", () => {
         });
         const view = elements(harness.render());
         const mainActions = view.filter(element => typeof element.props.id === "string" && typeof element.props.onClick === "function");
-        expect(mainActions.map(element => element.props.id)).toEqual(["download"]);
+        expect(mainActions.map(element => element.props.id)).toEqual([]);
         const dropdown = view.find(element => element.props.menu?.items)!;
         const menuKeys = dropdown.props.menu.items.flatMap((item: any) => item.children || [item]).map((item: any) => item.key);
         for (const key of ["manualEdit", "eraser", "edit", "maskEdit", "crop", "split", "upscale", "compare", "designTemplate", "resize"]) {
@@ -105,7 +106,7 @@ describe("compact image toolbar", () => {
             dropdown.props.menu.onClick({ key, domEvent: { stopPropagation() {} } });
         }
         expect(harness.calls).toEqual([]);
-        mainActions[0]!.props.onClick();
+        view.find(element => typeof element.props.onDownload === "function")!.props.onDownload("original");
         expect(harness.calls).toEqual([{ name: "onDownload", node: harness.node }]);
     });
 

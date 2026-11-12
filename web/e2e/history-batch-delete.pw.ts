@@ -6,6 +6,7 @@ const SCENE = "text-to-style";
 
 async function seedImages(page: Page, tool: string) {
     await page.goto(`/image?tool=${tool}`);
+    await page.getByRole("tab", { name: /^历史记录/ }).click();
     await expect(page.getByRole("heading", { name: "生成记录", exact: true })).toBeVisible();
     await page.evaluate(async ({ owner, tool, image }) => {
         const { createWorkspaceStorage } = await import("/src/lib/workspace-storage.ts");
@@ -19,6 +20,7 @@ async function seedImages(page: Page, tool: string) {
         await logs.setItem("other-owner", { id: "other-owner", ownerId: "other-employee", tool, title: "其他员工记录", images: [] });
     }, { owner: OWNER, tool, image: `data:image/png;base64,${IMAGE.toString("base64")}` });
     await page.reload();
+    await page.getByRole("tab", { name: /^历史记录/ }).click();
     await expect(page.getByRole("checkbox", { name: /^选择记录：/ })).toHaveCount(2);
 }
 
@@ -42,9 +44,12 @@ for (const tool of ["image-generation", "image-edit", "midjourney-blend"]) {
         await page.getByRole("button", { name: /^取\s*消$/ }).click();
         await expect(page.getByRole("dialog", { name: "批量删除生成记录", exact: true })).toBeHidden();
         expect((await imageRecords(page)).logs.slice(0, 2).every(Boolean)).toBe(true);
+        await page.getByRole("tab", { name: /^历史记录/ }).click();
         if (tool === "image-generation") await page.screenshot({ path: info.outputPath("image-history-desktop.png"), fullPage: true, animations: "disabled" });
         await remove.click();
         await page.getByRole("button", { name: "确认删除", exact: true }).click();
+        await expect(page.getByRole("dialog", { name: "批量删除生成记录", exact: true })).toBeHidden();
+        await page.getByRole("tab", { name: /^历史记录/ }).click();
         await expect(page.getByRole("checkbox", { name: /^选择记录：/ })).toHaveCount(0);
         const persisted = await imageRecords(page);
         expect(persisted.logs.slice(0, 2)).toEqual([null, null]);
@@ -69,19 +74,19 @@ test("image partial failure keeps only failed history and media selected, then p
     await page.getByRole("button", { name: "确认删除", exact: true }).click();
     await expect(page.getByRole("dialog")).toContainText("确定删除选中的1 条生成记录吗？");
     await expect(page.getByText("已删除 1 条，1 条删除失败；失败记录仍保留并已选中，可重试。", { exact: true })).toBeVisible();
-    await expect(page.getByRole("checkbox", { name: "选择记录：批量记录 b", exact: true })).toBeChecked();
     const partial = await imageRecords(page);
     expect(partial.logs[0]).toBeNull(); expect(partial.logs[1]).not.toBeNull();
     expect(partial.media).toEqual([false, true]);
     await page.getByRole("button", { name: /^取\s*消$/ }).click();
     await expect(page.getByRole("dialog", { name: "批量删除生成记录", exact: true })).toBeHidden();
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.getByRole("button", { name: "记录", exact: true }).click();
+    await page.getByRole("tab", { name: /^历史记录/ }).click();
+    await expect(page.getByRole("checkbox", { name: "选择记录：批量记录 b", exact: true })).toBeChecked();
     await expect(page.getByRole("button", { name: "批量删除（1）", exact: true }).last()).toBeVisible();
     await page.screenshot({ path: info.outputPath("image-history-mobile.png"), fullPage: true, animations: "disabled" });
     await page.evaluate(() => { (window as any).failImageDelete = false; });
     await page.getByRole("button", { name: "批量删除（1）", exact: true }).last().click();
-    await expect(page.getByRole("dialog", { name: "生成记录", exact: true })).toBeHidden();
+    await expect(page.getByRole("dialog", { name: "批量删除生成记录", exact: true })).toBeVisible();
     await page.getByRole("button", { name: /确认删除$/ }).click();
     await expect(page.getByRole("dialog", { name: "批量删除生成记录", exact: true })).toBeHidden();
     expect((await imageRecords(page)).logs.slice(0, 2)).toEqual([null, null]);

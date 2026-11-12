@@ -82,13 +82,13 @@ export async function mountRepeat(root, services) {
     root.innerHTML = `
     <div class="workspace repeat-workspace" data-testid="repeat-workspace">
       <aside class="panel repeat-left"><div class="panel-body">
-        <div class="repeat-intro"><div class="repeat-kicker"><span data-ui-text="花型设计 / 02">花型设计 / 02</span></div><h2><span data-ui-text="让灵感">让灵感</span><br><span data-ui-text="自然重复。">自然重复。</span></h2><p class="hint"><span data-ui-text="拖动花叶，跨边自动衔接。">拖动花叶，跨边自动衔接。</span><br><span data-ui-text="本地几何计算，不使用人工智能。">本地几何计算，不使用人工智能。</span></p></div>
+        <div class="repeat-intro"><h2 data-ui-text="花型参数">花型参数</h2><p class="hint" data-ui-text="拖动花叶，跨边自动衔接。">拖动花叶，跨边自动衔接。</p></div>
         <div class="repeat-mode" aria-label="重复方式" data-ui-aria-label="重复方式">${Object.entries(MODES)
             .map(([key, label]) => `<button type="button" data-mode="${key}" data-testid="repeat-mode-${key}" aria-pressed="${key === state.mode}" data-ui-text="${label}">${uiText(label)}</button>`)
             .join("")}</div>
         <section><div class="section-title"><span data-ui-text="设计单元">设计单元</span></div>
           <div class="repeat-grid2"><label class="field"><span><span data-ui-text="宽度 / 厘米">宽度 / 厘米</span></span><input data-setting="widthCm" data-testid="repeat-width" type="number" min="1" max="60" step=".1" value="10"></label><label class="field"><span><span data-ui-text="高度 / 厘米">高度 / 厘米</span></span><input data-setting="heightCm" data-testid="repeat-height" type="number" min="1" max="60" step=".1" value="10"></label></div>
-          <label class="field"><span><span data-ui-text="输出分辨率 / DPI">输出分辨率 / DPI</span></span><select data-setting="dpi" data-testid="repeat-dpi"><option>72</option><option selected>150</option><option>300</option><option>600</option></select></label>
+          <label class="field"><span><span data-ui-text="输出分辨率 / DPI">输出分辨率 / DPI</span></span><select aria-label="输出分辨率 / DPI" data-ui-aria-label="输出分辨率 / DPI" data-workbench-select="dpi" data-setting="dpi" data-testid="repeat-dpi"><option>72</option><option selected>150</option><option>300</option><option>600</option></select></label>
           <div class="hint mono" data-role="unit-pixels"></div>
           <div class="repeat-color"><input data-setting="background" type="color" value="#f6f0df" aria-label="背景颜色" data-ui-aria-label="背景颜色"><span><span data-ui-text="底布颜色">底布颜色</span></span></div>
           <label class="repeat-check"><input data-setting="transparent" data-testid="repeat-transparent" type="checkbox"><span data-ui-text="透明底色">透明底色</span></label>
@@ -325,11 +325,20 @@ export async function mountRepeat(root, services) {
         requestRender();
     }
     function syncSettings() {
+        const dpiSelect = $('[data-setting="dpi"]');
+        // Imported projects may use any valid 72–600 DPI value, not just a preset.
+        dpiSelect.querySelectorAll("[data-imported-dpi]").forEach(option => option.remove());
+        if (![...dpiSelect.options].some(option => Number(option.value) === state.dpi)) {
+            const option = new Option(String(state.dpi), String(state.dpi));
+            option.dataset.importedDpi = "true";
+            dpiSelect.add(option);
+        }
         $$("[data-setting]").forEach((input) => {
             if (input.type === "checkbox") input.checked = state[input.dataset.setting];
             else input.value = state[input.dataset.setting];
         });
         syncDetails();
+        root.dispatchEvent(new Event("workbench:selects-changed"));
     }
     async function addElement(src, name) {
         const operation = operationSequence;
@@ -478,7 +487,7 @@ export async function mountRepeat(root, services) {
                     notify("花型已保存到当前账号");
                     break;
                 case "restore": {
-                    root.querySelector(".workbench-project-bar select").focus();
+                    (root.querySelector('[data-workbench-select-control="project"] input') || root.querySelector(".workbench-project-bar select")).focus();
                     status("使用顶部工程列表切换；当前更改会先保存。");
                     break;
                 }

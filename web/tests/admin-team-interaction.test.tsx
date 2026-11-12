@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import React, { type ReactElement } from "react";
 import ts from "typescript";
+import { nonFinancialTeamCsv } from "@/pages/team/team-overview";
 
 function elements(value: unknown): ReactElement<any>[] {
     if (Array.isArray(value)) return value.flatMap(elements);
@@ -45,7 +46,9 @@ function componentHarness(path: string, exportName: string, dependencies: Record
 
 const originalWindow = globalThis.window;
 const originalDocument = globalThis.document;
-afterEach(() => { globalThis.window = originalWindow; globalThis.document = originalDocument; });
+const originalCreateObjectURL = URL.createObjectURL;
+const originalRevokeObjectURL = URL.revokeObjectURL;
+afterEach(() => { globalThis.window = originalWindow; globalThis.document = originalDocument; URL.createObjectURL = originalCreateObjectURL; URL.revokeObjectURL = originalRevokeObjectURL; });
 
 describe("admin/team interaction guards", () => {
     test("project supervision retains successful data when the independent assets read fails", async () => {
@@ -134,7 +137,7 @@ describe("admin/team interaction guards", () => {
     });
 
     test("team ignores late data after the account/group changes", async () => {
-        let user = { id: "old-user", groupId: "old-group", groupRole: "member", creditBalance: 100 };
+        let user = { id: "old-user", groupId: "old-group", groupRole: "leader", creditBalance: 100 };
         const pending = [deferred<any>(), deferred<any>()];
         let calls = 0;
         const harness = componentHarness("../src/pages/team/index.tsx", "default", {
@@ -146,33 +149,40 @@ describe("admin/team interaction guards", () => {
         harness.render();
         user = { ...user, id: "new-user", groupId: "new-group" };
         harness.render();
-        const credits = (id: string) => ({ myCredits: { policy: {}, wallet: {}, requests: [{ id }] }, errors: [] });
-        pending[1].resolve(credits("new-request")); await settle();
-        pending[0].resolve(credits("old-request")); await settle();
+        const data = (id: string) => ({ overview: { group: { name: id, memberCount: 1 }, summary: { taskCount: 1, successCount: 1 }, members: [{ id }] }, history: [{ id }], auditLogs: [], errors: [] });
+        pending[1].resolve(data("new-task")); await settle();
+        pending[0].resolve(data("old-task")); await settle();
         const tables = harness.render().filter((element) => element.type === "Table");
-        expect(tables).toHaveLength(1);
-        expect(tables[0].props.dataSource).toEqual([{ id: "new-request" }]);
+        expect(tables).toHaveLength(3);
+        expect(tables[0].props.dataSource).toEqual([{ id: "new-task" }]);
+        expect(tables[1].props.dataSource).toEqual([{ id: "new-task" }]);
         harness.unmount();
     });
 
-    test("same-tick double submit sends one credit request and releases after completion", async () => {
+    test("same-tick result action submits once without financial controls and releases after completion", async () => {
         const pending = deferred<any>();
         let submitted = 0;
         const harness = componentHarness("../src/pages/team/index.tsx", "default", {
             "@/lib/deployment-features": { deploymentFeatures: { creditsEnabled: true } },
-            "@/stores/use-user-store": { useUserStore: Object.assign((selector: any) => selector({ user: { id: "user", groupId: "group", groupRole: "member", creditBalance: 100 }, hydrateSession: async () => undefined }), { getState: () => ({ user: { id: "user", groupId: "group" } }) }) },
+            "@/stores/use-user-store": { useUserStore: Object.assign((selector: any) => selector({ user: { id: "user", groupId: "group", groupRole: "leader", creditBalance: 100 } }), { getState: () => ({ user: { id: "user", groupId: "group" } }) }) },
             "@/stores/use-module-store": { useModuleStore: (selector: any) => selector({ flags: { performance: false } }) },
-            "./team-overview": { loadTeamOverview: async () => ({ myCredits: { policy: {}, wallet: {}, requests: [] }, errors: [] }) },
-            "@/services/api/group-credits": { submitGroupCreditRequest: () => { submitted++; return pending.promise; } },
+            "./team-overview": { loadTeamOverview: async () => ({ assets: [{ id: "asset", kind: "image", filename: "花型.png", resultStatus: "unused" }], auditLogs: [{ id: "money", action: "account.credits.adjust" }, { id: "asset-audit", action: "asset.adopted" }], errors: [] }) },
+            "@/services/api/server-assets": { recordServerAssetEvent: () => { submitted++; return pending.promise; } },
         });
         harness.render(); await settle();
-        const submit = harness.render().find((element) => typeof element.props.onFinish === "function")!.props.onFinish;
-        const first = submit({ amount: 10, reason: "测试申请" });
-        await submit({ amount: 10, reason: "测试申请" });
+        let rendered = harness.render();
+        expect(rendered.some(element => typeof element.props.onFinish === "function")).toBe(false);
+        expect(rendered.some(element => typeof element.props.children === "string" && /积分|额度|累计成本|共享池/.test(element.props.children))).toBe(false);
+        const tables = rendered.filter(element => element.type === "Table");
+        expect(tables.every(table => table.props.columns.every((column: any) => !["credits", "rmbCost", "creditBalance", "monthlyCreditLimit"].includes(column.dataIndex)))).toBe(true);
+        expect(tables.at(-1)!.props.dataSource).toEqual([{ id: "asset-audit", action: "asset.adopted" }]);
+        const action = () => harness.render().find(element => element.props.children === "确认采用")!;
+        const submit = action().props.onClick;
+        submit(); submit();
         expect(submitted).toBe(1);
-        expect(harness.render().find((element) => typeof element.props.onFinish === "function")!.props.disabled).toBe(true);
-        pending.resolve({}); await first;
-        expect(harness.render().find((element) => typeof element.props.onFinish === "function")!.props.disabled).toBe(false);
+        expect(action().props.disabled).toBe(true);
+        pending.resolve({}); await settle();
+        expect(action().props.disabled).toBe(false);
         harness.unmount();
     });
 
@@ -186,10 +196,46 @@ describe("admin/team interaction guards", () => {
         });
         const blocked = harness.render();
         expect(blocked.some(element => element.props.role === "alert")).toBe(true);
-        expect(blocked.some(element => element.props.children === "当前未启用小组积分功能。")).toBe(true);
+        expect(blocked.some(element => element.props.children === "当前未启用小组功能。")).toBe(true);
         expect(blocked.some(element => element.props.to === "/")).toBe(true);
         await settle();
         expect(loaded).toBe(0);
+        harness.unmount();
+    });
+
+    for (const switchedAccount of [false, true]) test(`team export remains audited and deduplicated${switchedAccount ? " without a stale-account download" : " with only nonfinancial columns"}`, async () => {
+        let user = { id: "user-a", groupId: "group-a", groupRole: "leader" };
+        const pending = deferred<Blob>();
+        const downloads: Blob[] = [];
+        let exported = 0, clicked = 0, revoked = 0;
+        const link = { href: "", download: "", click: () => { clicked++; } };
+        globalThis.document = { createElement: () => link } as unknown as Document;
+        globalThis.window = { setTimeout: (callback: () => void) => { callback(); return 1; } } as unknown as Window & typeof globalThis;
+        URL.createObjectURL = ((blob: Blob) => { downloads.push(blob); return "blob:team-export"; }) as typeof URL.createObjectURL;
+        URL.revokeObjectURL = () => { revoked++; };
+        const harness = componentHarness("../src/pages/team/index.tsx", "default", {
+            "@/lib/deployment-features": { deploymentFeatures: { creditsEnabled: true } },
+            "@/stores/use-user-store": { useUserStore: Object.assign((selector: any) => selector({ user }), { getState: () => ({ user }) }) },
+            "@/stores/use-module-store": { useModuleStore: (selector: any) => selector({ flags: { performance: false } }) },
+            "./team-overview": { loadTeamOverview: async () => ({ history: [{ id: "history-a" }], errors: [] }), nonFinancialTeamCsv },
+            "@/services/api/groups": { exportTeamHistory: () => { exported++; return pending.promise; } },
+        });
+        harness.render(); await settle();
+        const exportButton = () => harness.render().find(element => element.props.children === "导出本组报表")!;
+        const download = exportButton().props.onClick;
+        download(); download();
+        expect(exported).toBe(1);
+        expect(exportButton().props.disabled).toBe(true);
+        if (switchedAccount) { user = { ...user, id: "user-b", groupId: "group-b" }; harness.render(); }
+        pending.resolve(new Blob(['时间,设计师,功能板块,模型,完整提示词,积分,人民币成本,状态,失败原因\r\n2026,小张,image,测试模型,"图案,换行\n保持",12,0.53,success,']));
+        await settle();
+        expect(clicked).toBe(switchedAccount ? 0 : 1);
+        expect(revoked).toBe(switchedAccount ? 0 : 1);
+        if (!switchedAccount) {
+            expect(await downloads[0].text()).toBe('"时间","设计师","功能板块","模型","完整提示词","状态","失败原因"\r\n"2026","小张","image","测试模型","图案,换行\n保持","success",""');
+            expect(link.download).toBe("本组-历史报表.csv");
+            expect(exportButton().props.disabled).toBe(false);
+        }
         harness.unmount();
     });
 

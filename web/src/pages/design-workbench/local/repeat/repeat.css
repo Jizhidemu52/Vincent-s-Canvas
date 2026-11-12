@@ -11,13 +11,13 @@
     padding: 18px;
 }
 .local-design-workbench .repeat-kicker {
-    font-size: 10px;
+    font-size: 12px;
     letter-spacing: 0.18em;
     color: var(--muted);
     font-weight: 700;
 }
 .local-design-workbench .repeat-workspace h2 {
-    font-size: 21px;
+    font-size: 20px;
     line-height: 1.35;
     margin: 6px 0 8px;
 }
@@ -25,7 +25,7 @@
     margin: 20px 0 10px;
 }
 .local-design-workbench .repeat-workspace .hint {
-    font-size: 11px;
+    font-size: 13px;
     line-height: 1.7;
     color: var(--muted);
 }
@@ -39,10 +39,10 @@
     padding: 9px 3px;
     border: 1px solid var(--line);
     background: transparent;
-    border-radius: 7px;
+    border-radius: 8px;
     cursor: pointer;
     color: var(--muted);
-    font-size: 12px;
+    font-size: 14px;
 }
 .local-design-workbench .repeat-mode button[aria-pressed="true"] {
     background: var(--accent);
@@ -64,7 +64,7 @@
     background: var(--surface);
     color: var(--text);
     font: inherit;
-    font-size: 12px;
+    font-size: 14px;
 }
 .local-design-workbench .repeat-workspace input[type="range"] {
     width: 100%;
@@ -72,7 +72,7 @@
 }
 .local-design-workbench .repeat-workspace .field {
     display: block;
-    font-size: 11px;
+    font-size: 13px;
     color: var(--muted);
     margin: 10px 0;
 }
@@ -85,7 +85,7 @@
     display: flex;
     align-items: center;
     gap: 7px;
-    font-size: 12px;
+    font-size: 14px;
     margin: 12px 0;
 }
 .local-design-workbench .repeat-check input {
@@ -96,11 +96,11 @@
     align-items: center;
     gap: 9px;
     margin-top: 10px;
-    font-size: 12px;
+    font-size: 14px;
 }
 .local-design-workbench .repeat-color input {
     border: 0;
-    border-radius: 4px;
+    border-radius: 6px;
     width: 32px;
     height: 28px;
     background: none;
@@ -117,7 +117,7 @@
     background: var(--bg);
     cursor: pointer;
     padding: 10px 6px;
-    font-size: 11px;
+    font-size: 13px;
     color: var(--text);
 }
 .local-design-workbench .repeat-asset img {
@@ -150,11 +150,11 @@
     border-bottom: 1px solid var(--line);
 }
 .local-design-workbench .repeat-stage-title {
-    font-size: 12px;
+    font-size: 14px;
     font-weight: 600;
 }
 .local-design-workbench .repeat-stage-sub {
-    font-size: 10px;
+    font-size: 12px;
     color: var(--muted);
     margin-top: 4px;
 }
@@ -205,7 +205,7 @@
     display: flex;
     justify-content: space-between;
     gap: 10px;
-    font-size: 11px;
+    font-size: 13px;
     color: var(--muted);
 }
 .local-design-workbench .repeat-selection {
@@ -218,7 +218,7 @@
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    font-size: 12px;
+    font-size: 14px;
     font-weight: 600;
 }
 .local-design-workbench .repeat-selection .repeat-grid2 {
@@ -229,7 +229,7 @@
     gap: 6px;
 }
 .local-design-workbench .repeat-inline-actions .btn {
-    font-size: 11px;
+    font-size: 13px;
     padding: 5px 9px;
 }
 .local-design-workbench .repeat-preview-box {
@@ -251,24 +251,24 @@
     padding: 18px;
 }
 .local-design-workbench .repeat-export-summary {
-    font-size: 12px;
+    font-size: 14px;
     line-height: 1.9;
     padding: 12px;
     background: var(--accent-soft);
     border: 1px solid var(--line);
-    border-radius: 7px;
+    border-radius: 8px;
     margin: 14px 0;
 }
 .local-design-workbench .repeat-export-summary strong {
     display: block;
-    font-size: 19px;
+    font-size: 20px;
     letter-spacing: -0.02em;
     color: var(--text);
 }
 .local-design-workbench .repeat-period-note {
     color: var(--accent);
     font-weight: 600;
-    font-size: 11px;
+    font-size: 13px;
     line-height: 1.6;
 }
 .local-design-workbench .repeat-right .btn {
@@ -282,7 +282,7 @@
 }
 .local-design-workbench .repeat-status {
     min-height: 33px;
-    font-size: 11px;
+    font-size: 13px;
     line-height: 1.6;
     color: var(--muted);
     margin-top: 7px;
@@ -293,12 +293,12 @@
 .local-design-workbench .repeat-help {
     margin: 8px 0 0;
     padding: 0 0 0 15px;
-    font-size: 11px;
+    font-size: 13px;
     line-height: 1.8;
     color: var(--muted);
 }
 .local-design-workbench .repeat-warning {
-    font-size: 11px;
+    font-size: 13px;
     line-height: 1.5;
     color: var(--danger);
     margin: 8px 0;
@@ -317,7 +317,7 @@
     display: none !important;
 }
 .local-design-workbench .repeat-item-count {
-    font-size: 10px;
+    font-size: 12px;
     color: var(--muted);
 }
 .local-design-workbench .repeat-guide-legend {
@@ -339,9 +339,9 @@
 .local-design-workbench .repeat-layer-list button {
     height: 26px;
     border: 1px solid var(--line);
-    border-radius: 4px;
+    border-radius: 6px;
     background: var(--surface);
-    font-size: 10px;
+    font-size: 12px;
     padding: 2px 6px;
     color: var(--muted);
     cursor: pointer;
@@ -440,7 +440,7 @@
         grid-column: auto;
     }
     .local-design-workbench .repeat-stage-footer {
-        font-size: 10px;
+        font-size: 12px;
     }
     .local-design-workbench .repeat-stage .stage-toolbar {
         align-items: flex-start;

@@ -2,14 +2,12 @@ import { useUiText } from "@/lib/i18n";
 import { PromptOptimizeButton } from "@/components/prompt-optimize-button";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { Image as ImageIcon, LoaderCircle, MessageSquare, Music2, Play, Square, Video } from "lucide-react";
-import { Button, Input, Segmented } from "antd";
+import { Button, Input, Segmented, Tooltip } from "antd";
 
 import { ModelPicker } from "@/components/model-picker";
 import { defaultConfig, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
-import { CreditSymbol } from "@/constant/credits";
 import { referencePolicyForModel } from "@/lib/image-reference-policy";
 import { canvasThemes } from "@/lib/canvas-theme";
-import { deploymentFeatures } from "@/lib/deployment-features";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { useBusinessConfigStore } from "@/stores/use-business-config-store";
 import { resolveCapabilityModel } from "@/lib/model-picker-options";
@@ -92,8 +90,6 @@ export function CanvasConfigNodePanel({ node, isRunning, linkedTaskCount = 0, li
     const toolEnabled = useToolEnabled(toolKey);
     const hasAvailableModel = Boolean(model);
     const count = 1;
-    const estimate = useBusinessConfigStore(state => state.estimate);
-    const credits = estimate({ operationType: mode === "image" ? hasImages ? "inpaint" : "image_generation" : mode === "video" ? "video_generation" : mode === "audio" ? "audio_generation" : "chat", toolKey, modelId: config.model, quantity: Math.max(1, taskCount) }).credits;
     const chipStyle = { background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text };
     const hasAnyInput = Boolean(linkedTaskCount || inputSummary.textCount || (mode !== "audio" && imageCount) || (mode === "video" && (inputSummary.videoCount || inputSummary.audioCount)));
     const hasComposerContent = Boolean((node.metadata?.composerContent ?? node.metadata?.prompt ?? "").trim());
@@ -132,7 +128,7 @@ export function CanvasConfigNodePanel({ node, isRunning, linkedTaskCount = 0, li
         <div className="flex h-full min-h-0 w-full cursor-move flex-col overflow-hidden px-3 pb-3 pt-7 text-sm" style={{ color: theme.node.text }} onWheel={(event) => event.stopPropagation()}>
             <div className="thin-scrollbar min-h-0 flex-1 overflow-y-auto" aria-label={t("生成配置内容")}>
             <div className="mb-2 flex items-center justify-between gap-3">
-                <div className="min-w-0 truncate text-sm font-semibold" title={node.title}>{node.title || t("生成配置")}</div>
+                <Tooltip title={node.title}><div className="min-w-0 truncate text-sm font-semibold">{node.title || t("生成配置")}</div></Tooltip>
                 <div className="cursor-default" onPointerDown={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()}>
                     <Segmented
                         size="small"
@@ -243,10 +239,6 @@ export function CanvasConfigNodePanel({ node, isRunning, linkedTaskCount = 0, li
                         </>
                     ) : (
                         <>
-                            {deploymentFeatures.creditsEnabled ? <span className="inline-flex items-center gap-1">
-                                <CreditSymbol />
-                                {credits.toLocaleString()}
-                            </span> : null}
                             <Play className="size-4" />
                             <span>{taskCount > 0 ? t("执行 {value1} 个任务", { value1: taskCount }) : showInputMode ? t("合并参考生成 1 张") : t("开始生成")}</span>
                         </>

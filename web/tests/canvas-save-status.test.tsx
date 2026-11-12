@@ -20,22 +20,24 @@ function statusView(cloudStatus: string, cloudError = "", compact = false) {
     } : requireModule(name);
     new Function("require", "module", "exports", code)((id: string) => id === "@/lib/i18n" ? i18nHarness : (load)(id), module, module.exports);
     const element = module.exports.CanvasSaveStatus({ compact });
-    return { element, html: renderToStaticMarkup(element), retries: () => retries };
+    const trigger = element.props.children;
+    return { element, button: trigger.type === "button" ? trigger : trigger.props.children, hint: renderToStaticMarkup(element.props.title), html: renderToStaticMarkup(element), retries: () => retries };
 }
 
 test("local save status explains browser persistence and does not promise cloud recovery", () => {
     const view = statusView("local");
     expect(view.html).toContain("保存在当前浏览器");
-    expect(view.html).toContain("同一浏览器、同一地址");
-    expect(view.html).toContain("导出画布备份");
+    expect(view.hint).toContain("同一浏览器、同一地址");
+    expect(view.hint).toContain("导出画布备份");
     expect(view.html).not.toContain("云端");
+    expect(view.hint).not.toContain("云端");
 });
 
 test("local write failures remain visible and can be retried", () => {
     const view = statusView("local-error", "画布写入本机失败");
-    expect(view.html).toContain("画布写入本机失败");
-    expect(view.element.props.disabled).toBe(false);
-    view.element.props.onClick();
+    expect(view.hint).toContain("画布写入本机失败");
+    expect(view.button.props.disabled).toBe(false);
+    view.button.props.onClick();
     expect(view.retries()).toBe(1);
 });
 
@@ -43,10 +45,10 @@ test("only confirmed cloud completion claims that the server saved the canvas an
     for (const status of ["pending", "syncing", "error"]) {
         const view = statusView(status);
         expect(view.html).not.toContain("画布与图片已保存至服务器");
-        expect(view.html).toContain("尚未确认服务器保存成功");
+        expect(view.hint).toContain("尚未确认服务器保存成功");
     }
     expect(statusView("synced").html).toContain("画布与图片已保存至服务器");
-    expect(statusView("synced").html).toContain("服务器已保存原图");
+    expect(statusView("synced").hint).toContain("服务器已保存原图");
 });
 
 test("compact status retains an accessible persistence label and a visible failure retry", () => {

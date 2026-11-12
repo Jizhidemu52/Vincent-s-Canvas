@@ -5,7 +5,7 @@ import { test, expect, fixturePng, type MockCanvasApi } from "./fixtures";
 const active = (page: Page) => page.getByRole("tabpanel");
 const tabs = (page: Page) => page.getByRole("tablist", { name: "任务列表", exact: true }).getByRole("tab");
 const prompt = (page: Page) => active(page).getByRole("textbox", { name: "图像提示词", exact: true });
-const sidebarNew = (page: Page) => active(page).locator("aside").getByRole("button", { name: "新建", exact: true });
+const sidebarNew = (page: Page) => page.getByRole("button", { name: "新建任务", exact: true });
 const sourceA = fixturePng(31), sourceB = fixturePng(213);
 const digest = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
 
@@ -121,23 +121,23 @@ test("running footer creates only one independent B when activated twice", async
     expect(api.submissions).toHaveLength(1);
 });
 
-test("mobile history New closes its portal before B can submit while A keeps running", async ({ page, api }) => {
+test("mobile history New switches to an independent B while A keeps running", async ({ page, api }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     const aId = await submitA(page, api);
-    await active(page).getByRole("button", { name: "记录", exact: true }).click();
-    const drawer = page.getByRole("dialog", { name: "生成记录", exact: true });
-    await expect(drawer).toBeVisible();
-    await expect(drawer.getByRole("button", { name: "新建", exact: true })).toBeEnabled();
-    await drawer.getByRole("button", { name: "新建", exact: true }).click();
+    await active(page).getByRole("tab", { name: /历史记录/ }).click();
+    const history = active(page).locator(".image-history-panel");
+    await expect(history).toBeVisible();
+    await expect(history.getByRole("button", { name: "新建", exact: true })).toBeEnabled();
+    await history.getByRole("button", { name: "新建", exact: true }).click();
     await expectFreshB(page);
-    await expect(drawer).toHaveCount(0);
+    await expect(history).toBeHidden();
     await prompt(page).fill("MOBILE_B_新任务保持独立");
     await active(page).getByRole("button", { name: "开始生成", exact: true }).click();
     await expect.poll(() => api.submissions.length).toBe(2);
     expect(api.tasks.get(aId)?.status).toBe("processing");
     await tabs(page).nth(0).click();
     await expect(prompt(page)).toHaveValue("ENTRY_A_绿色圆形包，仅用A原件");
-    await expect(drawer).toHaveCount(0);
+    await expect(history).toBeHidden();
 });
 
 test("a failed sidebar registry write preserves running A and its pending record", async ({ page, api }) => {

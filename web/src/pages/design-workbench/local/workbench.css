@@ -10,7 +10,7 @@
     height: 100%;
     overflow: auto;
     padding: 24px;
-    font-size: 13px;
+    font-size: 14px;
     line-height: 1.6;
     color: var(--text);
     background: var(--bg);
@@ -63,7 +63,7 @@
     min-width: 0;
     max-width: 100%;
     border: 1px solid var(--line);
-    border-radius: 5px;
+    border-radius: 6px;
     background: var(--surface);
     padding: 8px 10px;
 }
@@ -89,7 +89,7 @@
     margin: 0;
 }
 .local-design-workbench h2 {
-    font-size: 19px;
+    font-size: 20px;
     font-weight: 600;
 }
 .local-design-workbench p + p {
@@ -104,20 +104,20 @@
 }
 .local-design-workbench .local-workbench-heading a {
     color: var(--muted);
-    font-size: 12px;
+    font-size: 14px;
 }
 .local-design-workbench .local-workbench-heading h1 {
-    font-size: 24px;
+    font-size: 28px;
     font-weight: 600;
     margin: 6px 0;
 }
 .local-design-workbench .local-workbench-heading p {
     color: var(--muted);
-    font-size: 12px;
+    font-size: 14px;
 }
 .local-design-workbench .btn {
     border: 1px solid var(--line);
-    border-radius: 5px;
+    border-radius: 6px;
     padding: 8px 12px;
     background: var(--surface);
     display: inline-flex;
@@ -193,35 +193,35 @@
     padding: 10px 14px;
     background: var(--surface);
     border-bottom: 1px solid var(--line);
-    font-size: 12px;
+    font-size: 14px;
 }
 .local-design-workbench .field {
     display: flex;
     flex-direction: column;
     gap: 6px;
-    font-size: 12px;
+    font-size: 14px;
 }
 .local-design-workbench .field > span:first-child {
-    font-size: 11px;
+    font-size: 13px;
     color: var(--muted);
 }
 .local-design-workbench .hint {
-    font-size: 11px;
+    font-size: 13px;
     color: var(--muted);
     line-height: 1.7;
 }
 .local-design-workbench .badge {
     display: inline-flex;
     padding: 3px 7px;
-    font-size: 10px;
-    border-radius: 4px;
+    font-size: 12px;
+    border-radius: 6px;
     line-height: 1.4;
     background: var(--accent-soft);
     color: var(--accent);
     white-space: nowrap;
 }
 .local-design-workbench .section-title {
-    font-size: 12px;
+    font-size: 14px;
     font-weight: 600;
     letter-spacing: 0.02em;
 }
@@ -232,7 +232,7 @@
 }
 .local-design-workbench .mono {
     font-family: Consolas, monospace;
-    font-size: 11px;
+    font-size: 13px;
 }
 .local-design-workbench .local-workbench-toast {
     position: fixed;
@@ -243,7 +243,7 @@
     background: var(--surface);
     color: var(--text);
     border: 1px solid var(--line);
-    border-radius: 7px;
+    border-radius: 8px;
     box-shadow: 0 6px 30px #0002;
     padding: 11px 20px;
     max-width: min(90vw, 680px);

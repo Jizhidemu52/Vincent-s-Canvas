@@ -69,6 +69,53 @@ function harness(saved = new Map<string, unknown>(), initialLog?: SceneLog) {
         setTaskQuery: (query: () => Promise<QueuedTask | null>) => { queryTask = query; }, setSubmit: (fn: typeof submit) => { submit = fn; }, changeOwner: () => { ownerId = "other"; }, unmount: () => effects.forEach(effect => effect?.cleanup?.()) };
 }
 
+test("history can be previewed during generation without replacing the running scene's slots", async () => {
+    const image = { id: "old-image", name: "old.png", dataUrl: "/old.png", width: 100, height: 200, bytes: 20, mimeType: "image/png", type: "image/png" };
+    const old: SceneLog = { ...structuredClone(pendingLog), id: "old-log", prompt: "Old scene prompt", results: [{ id: "old-result", status: "success", image }], images: [image], successCount: 1 };
+    const app = harness(new Map(), old);
+    let finish!: () => void;
+    app.setSubmit(async options => {
+        await options.onSubmissionStarted?.();
+        await options.onSubmitted?.(["current-task"]);
+        await new Promise<void>(resolve => { finish = resolve; });
+        return [{ id: "current-image", dataUrl: "/current.png", sourceTaskId: "current-task", prompt: "Current scene prompt", optimized: false, userInput: options.promptInput }];
+    });
+    const ws = await app.initialize();
+    const generating = ws.generate(); await tick();
+    expect(app.render().running).toBe(true);
+    await app.render().previewLog(old);
+    expect(app.render().results[0].image.id).toBe("old-image");
+    expect(app.render().form.description).toBe(form.description);
+    finish(); await generating;
+    expect(app.render().results[0].image.id).toBe("old-image");
+    expect(app.render().activeLog.id).toBe("old-log");
+    app.render().returnToCurrentTask();
+    expect(app.render().results[0].image.id).toBe("current-image");
+    expect(app.render().activeLog.id).not.toBe("old-log");
+    expect(app.status().busy).toBe(false);
+    app.unmount();
+});
+
+test("history viewing does not cancel a pending original scene reconciliation", async () => {
+    const image = { id: "old-image", name: "old.png", dataUrl: "/old.png", width: 100, height: 200, bytes: 20, mimeType: "image/png", type: "image/png" };
+    const old: SceneLog = { ...structuredClone(pendingLog), id: "old-log", createdAt: 0, results: [{ id: "old-result", status: "success", image }], images: [image], successCount: 1 };
+    const saved = new Map<string, unknown>([["history:owner:text-to-style", [pendingLog, old]]]);
+    const app = harness(saved); await app.initialize();
+    let finish!: (task: QueuedTask) => void;
+    app.setTaskQuery(() => new Promise(resolve => { finish = resolve; }));
+    const querying = app.reconcile(); await tick();
+    await app.render().previewLog(old); app.render();
+    finish({ id: "late-task", requestId: "original-request:0", status: "success", userId: "owner", resultUrls: ["/original.png"], failureReason: null });
+    await querying;
+    expect(app.render().results[0].image.id).toBe("old-image");
+    app.render().returnToCurrentTask();
+    expect(app.render().results[0].status).toBe("success");
+    expect(app.render().results[0].taskId).toBe("late-task");
+    expect(app.status().pending).toBe(false);
+    expect(app.submissions).toHaveLength(0);
+    app.unmount();
+});
+
 test("creative unresolved records beyond the first history page protect their tab after clear and history preview", async () => {
     const completed: SceneLog[] = Array.from({ length: 21 }, (_, index) => ({ ...structuredClone(pendingLog), id: `completed-${index}`, createdAt: index + 2,
         results: [{ id: `done-${index}`, status: "success" }], successCount: 1 }));

@@ -12,7 +12,7 @@ async function skipGuide(page: Page) {
     await skip.click();
 }
 
-test("命令搜索、节点键盘编辑与微移、历史提示和刷新视图恢复", async ({ page, api }, testInfo) => {
+test("命令搜索、节点键盘编辑与微移、历史提示和刷新显示全部", async ({ page, api }, testInfo) => {
     await page.setViewportSize({ width: 1366, height: 768 });
     const id = await newCanvas(page);
     await skipGuide(page);
@@ -51,12 +51,16 @@ test("命令搜索、节点键盘编辑与微移、历史提示和刷新视图�
     await expect.poll(async () => (await readCanvasViewState(page, id))?.selectedNodeIds).toEqual([nodeId]);
     await page.reload();
     await expect(node).toHaveAttribute("aria-label", /已选择/);
-    await expect(page.getByRole("button", { name: "画布缩放与视图" })).toContainText("50%");
+    // Reopening fits all content; this single small text node fits at the 100% cap.
+    await expect.poll(async () => (await readCanvasViewState(page, id))?.viewport.k).toBe(1);
+    await expect(node).toBeInViewport({ ratio: 1 });
     await expect(page.getByTestId("canvas-onboarding-tour")).toHaveCount(0);
     await page.keyboard.press("Control+k");
     await search.fill("文本");
-    await expect(page.getByRole("option").filter({ hasText: "画布节点" })).toHaveCount(1);
-    await page.getByRole("option").filter({ hasText: "画布节点" }).click();
+    await expect(page.locator(".cw-command-group-heading").filter({ hasText: /^画布节点$/ })).toHaveCount(1);
+    const nodeResult = page.getByRole("option", { name: `${api.document(id)!.nodes[0].title} 定位`, exact: true });
+    await expect(nodeResult).toHaveCount(1);
+    await nodeResult.click();
     await expect(node).toHaveAttribute("aria-label", /已选择/);
     await page.screenshot({ path: testInfo.outputPath("canvas-keyboard-1366.png") });
     await node.hover();
@@ -64,7 +68,10 @@ test("命令搜索、节点键盘编辑与微移、历史提示和刷新视图�
     await expect(page.getByText("已加入我的素材", { exact: true })).toBeVisible();
     await page.keyboard.press("Control+k");
     await search.fill("画布文本");
-    await page.getByRole("option").filter({ hasText: "本地素材" }).click();
+    await expect(page.locator(".cw-command-group-heading").filter({ hasText: /^本地素材$/ })).toHaveCount(1);
+    const assetResult = page.getByRole("option").filter({ hasText: /插入$/ });
+    await expect(assetResult).toHaveCount(1);
+    await assetResult.click();
     await expect.poll(() => api.document(id)?.nodes.length).toBe(2);
     expect(api.document(id)!.nodes[1].metadata.content).toBe("键盘与命令验收");
     expect(api.submissions).toHaveLength(0);

@@ -1,5 +1,5 @@
 import { uiText, useUiText } from "@/lib/i18n";
-import { Alert, Button, Modal, Slider } from "antd";
+import { Alert, Button, Modal, Slider, Tooltip } from "antd";
 import { useEffect, useRef, useState } from "react";
 import { editorPngBlob } from "@/lib/canvas/image-editor-document";
 import { canvasPixels, loadProcessingImage, pixelsCanvas } from "./image-processing-browser";
@@ -82,7 +82,7 @@ export function RecolorDialog({ source, onClose, onSave }: {
     return <Modal open modalRender={modal => <div data-usage-board="pattern-recolor">{modal}</div>} title={uiText("精确换色 · 本地处理")} width={940} onCancel={onClose} closable={!busy} mask={{ closable: !busy }} keyboard={!busy}
         footer={<><Button onClick={onClose} disabled={busy}>{uiText("取消")}</Button><Button type="primary" loading={busy} disabled={!small} onClick={() => void save()}>{uiText("保存换色结果")}</Button></>}>
         <div className="cs-tool-dialog">
-            <p className="cs-help">{uiText("不调用 AI、不消耗生成积分。按 RGB 颜色替换，保留图案位置、原始尺寸与透明度。适合平面花型；相近颜色和抗锯齿边缘通过容差纳入，照片光影不会自动保留。")}</p>
+            <p className="cs-help">{uiText("本地颜色替换，不调用 AI。保留图案位置、原始尺寸与透明度，适合平面花型；相近颜色和抗锯齿边缘通过容差纳入，照片光影不会自动保留。")}</p>
             <fieldset disabled={busy || !small} className="cs-tool-fieldset">
                 <div className="cs-recolor-rules">{rules.map((rule, index) => <div className="cs-recolor-rule" key={index}>
                     <button className="cs-choice" aria-pressed={active === index} onClick={() => setActive(index)}>{uiText("取色 ")}{index + 1}</button>
@@ -91,7 +91,7 @@ export function RecolorDialog({ source, onClose, onSave }: {
                     <button aria-label={uiText("删除颜色映射 {value1}", { value1: index + 1 })} disabled={rules.length === 1} onClick={() => { setRules(current => current.filter((_, at) => at !== index)); setActive(0); }}>{uiText("删除")}</button>
                 </div>)}</div>
                 <div className="cs-tool-controls"><Button disabled={rules.length >= 6 || busy || !small} onClick={() => { setActive(rules.length); setRules(current => [...current, { from: palette[current.length] || "#FFFFFF", to: "#224E42" }]); }}>{uiText("添加映射")}</Button>
-                    <span className="cs-help">{uiText("参考色板：")}</span>{palette.map(color => <button key={color} aria-label={uiText("选用原色 {color}", { color: color })} title={color} className="cs-swatch" style={{ background: color }} onClick={() => changeRule(active, "from", color)} />)}</div>
+                    <span className="cs-help">{uiText("参考色板：")}</span>{palette.map(color => <Tooltip key={color} title={color}><button aria-label={uiText("选用原色 {color}", { color: color })} className="cs-swatch" style={{ background: color }} onClick={() => changeRule(active, "from", color)} /></Tooltip>)}</div>
                 <label className="cs-label">{uiText("颜色容差 ")}{tolerance}%<Slider min={0} max={100} value={tolerance} onChange={setTolerance} disabled={busy} /></label>
             </fieldset>
             {(saveError || error) && <Alert type="error" title={saveError || error} showIcon />}

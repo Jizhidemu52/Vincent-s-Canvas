@@ -18,7 +18,7 @@ export function PromptExecutionPreviewHost() {
         okText={uiText("确认这份内容并生成")} cancelText={uiText("取消，返回修改")} maskClosable={false}
         onOk={() => pending?.finish(true)} onCancel={cancelPromptExecutionPreview}>
         {pending ? <div className="max-h-[70vh] space-y-4 overflow-y-auto break-words">
-            <p className="text-sm text-muted-foreground">{uiText("已完成提示词准备，尚未提交图片任务。确认将使用以下内容；取消不会生成图片，已发生的改写调用可能产生费用。")}</p>
+            <p className="text-sm text-muted-foreground">{uiText("已完成提示词准备，尚未提交图片任务。确认将使用以下内容；取消不会生成图片。")}</p>
             <p><strong>{uiText("模型")}</strong>：{pending.modelName}{pending.batchCount ? ` · ${uiText("独立图片")} ${pending.batchCount}` : ""}</p>
             {pending.summaryZh ? <p>{pending.summaryZh}</p> : null}
             <section><strong>{uiText("实际发送文本")}</strong><pre aria-label={uiText("实际发送文本")} className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap rounded-md bg-muted/40 p-3 font-sans text-sm">{pending.prompt}</pre></section>

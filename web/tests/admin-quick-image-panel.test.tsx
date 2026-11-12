@@ -66,15 +66,15 @@ test("unsaved draft testing stores a private-owner receipt before one paid call 
     const h = harness();
     control(h.render(), "一键去背景处理提示词").props.onChange({ target: { value: "未保存的提取要求" } });
     control(h.render(), "一键去背景测试原图").props.onChange({ target: { files: [new File(["png"], "own.png", { type: "image/png" })], value: "" } });
-    const testButton = button(h.render(), "付费试运行 1 张");
+    const testButton = button(h.render(), "试运行 1 张");
     testButton.props.onClick(); testButton.props.onClick(); await tick();
     expect(h.writes.map(write => write.kind)).toEqual(["upload", "test"]);
     expect(h.writes[1].args[1]).toEqual({ requestId: "request-1", sourceUrl: "/api/assets/own-asset/content", configuration: { modelConfigId: model.id, prompt: "未保存的提取要求", parameters: {} } });
     expect([...h.storage.entries()]).toEqual([["canvas:admin-quick-image-test:admin-1:remove-background", "request-1"]]);
-    expect(button(h.render(), "付费试运行 1 张").props.disabled).toBe(true);
+    expect(button(h.render(), "试运行 1 张").props.disabled).toBe(true);
     button(h.render(), "查询原测试任务").props.onClick(); await tick();
     expect(h.writes.map(write => write.kind)).toEqual(["upload", "test", "query"]);
-    expect(button(h.render(), "付费试运行 1 张").props.disabled).toBe(true);
+    expect(button(h.render(), "试运行 1 张").props.disabled).toBe(true);
     expect(h.api.readQuickImageTestReceipt("another-admin", "remove-background")).toBeNull();
     expect(h.api.readQuickImageTestReceipt("admin-1", "remove-background")?.requestId).toBe("request-1");
 });

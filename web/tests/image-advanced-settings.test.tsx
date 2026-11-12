@@ -76,6 +76,7 @@ test("MJ single-image settings omit repeat while retaining every other advanced 
 test("shared settings renders real quality names and all documented advanced fields", () => {
     useBusinessConfigStore.setState({ models: [] });
     const html = renderToStaticMarkup(<ImageSettingsPanel config={{ ...defaultConfig, model: "gpt-image-2.5-sunburst" }} theme={canvasThemes.light} onConfigChange={() => {}} />);
-    for (const label of ["最高", "超高", "高", "3840x2160", "背景", "输出格式", "压缩", "全部高级参数"]) expect(html).toContain(label);
+    for (const label of ["最高", "超高", "高", "背景", "输出格式", "压缩", "全部高级参数"]) expect(html).toContain(label);
+    expect(imageModelProfile("gpt-image-2.5-sunburst", []).sizes).toContain("3840x2160");
     for (const rawField of ["<code>background</code>", "<code>output_format</code>", "高 high"]) expect(html).not.toContain(rawField);
 });

@@ -1,4 +1,5 @@
 import { formatBeijingDateTime } from "@/lib/beijing-time";
+import { isFinancialDisplayField } from "@/lib/financial-presentation";
 
 const labels: Record<string, string> = {
     active: "启用", disabled: "停用", locked: "锁定", archived: "已归档", deleted: "已删除",
@@ -19,10 +20,10 @@ export function adminLabel(value: string | null | undefined) {
     return auditTargets[target] && auditActions[action] ? `${auditTargets[target]}：${auditActions[action]}` : value;
 }
 
-export function AdminDetails({ value }: { value: unknown }) {
+export function AdminDetails({ value, audit = false }: { value: unknown; audit?: boolean }) {
     if (value == null || value === "") return <span>—</span>;
     if (typeof value === "boolean") return <span>{value ? "是" : "否"}</span>;
-    if (Array.isArray(value)) return value.length ? <ul className="space-y-1">{value.map((item, index) => <li key={index}><AdminDetails value={item} /></li>)}</ul> : <span>无</span>;
-    if (typeof value === "object") return <dl className="grid min-w-0 grid-cols-[minmax(5rem,auto)_minmax(0,1fr)] gap-x-3 gap-y-2 text-sm">{Object.entries(value).map(([key, item]) => <div className="contents" key={key}><dt className="text-[var(--muted-foreground)]">{adminLabel(key)}</dt><dd className="break-words">{/(?:At|Time)$/.test(key) && typeof item === "string" && /^\d{4}-\d{2}-\d{2}T/.test(item) ? `${formatBeijingDateTime(item)}（北京时间）` : <AdminDetails value={item} />}</dd></div>)}</dl>;
+    if (Array.isArray(value)) return value.length ? <ul className="space-y-1">{value.map((item, index) => <li key={index}><AdminDetails value={item} audit={audit} /></li>)}</ul> : <span>无</span>;
+    if (typeof value === "object") return <dl className="grid min-w-0 grid-cols-[minmax(5rem,auto)_minmax(0,1fr)] gap-x-3 gap-y-2 text-sm">{Object.entries(value).filter(([key]) => !isFinancialDisplayField(key) && key !== "amount" && key !== "balance").map(([key, item]) => <div className="contents" key={key}><dt className="text-[var(--muted-foreground)]">{adminLabel(key)}</dt><dd className="break-words">{/(?:At|Time)$/.test(key) && typeof item === "string" && /^\d{4}-\d{2}-\d{2}T/.test(item) ? `${formatBeijingDateTime(item)}（北京时间）` : <AdminDetails audit={audit} value={audit && key === "fields" && Array.isArray(item) ? item.filter(field => typeof field !== "string" || !isFinancialDisplayField(field)) : item} />}</dd></div>)}</dl>;
     return <span className="whitespace-pre-wrap break-words">{typeof value === "string" ? adminLabel(value) : String(value)}</span>;
 }

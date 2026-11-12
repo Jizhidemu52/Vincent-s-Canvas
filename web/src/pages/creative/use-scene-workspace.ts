@@ -169,6 +169,7 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
     const epoch = useRef(0);
     const inputEpoch = useRef<Record<SceneSlotId, number>>({ primary: 0, secondary: 0 });
     const viewEpoch = useRef(0);
+    const previewEpoch = useRef(0);
     const observationControllers = useRef(new Set<AbortController>());
     const [observationStopped, setObservationStopped] = useState(false);
     const queryingResult = useRef(false);
@@ -189,6 +190,8 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
     const [historyLoading, setHistoryLoading] = useState(false);
     const historyLoadingRef = useRef(false);
     const [activeLog, setActiveLog] = useState<SceneLog | null>(null);
+    // The running task keeps owning its log/result slots while history is inspected.
+    const [historyPreviewLog, setHistoryPreviewLog] = useState<SceneLog | null>(null);
     const [selectedPrompt, setSelectedPrompt] = useState<string | null>(null);
     const [previewing, setPreviewing] = useState(false);
     const [results, setResults] = useState<SceneResult[]>([]);
@@ -240,8 +243,8 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
         : references.some(image => !image.dataUrl) ? "部分参考图的本地文件已不可用，请重新上传"
         : selection && (!selectionMatchesSource(selection, images.primary) || !selection.mask.dataUrl) ? "选区与原图不匹配或文件不可用，请清除后重新涂选"
         : selection && images.primary && !selectionSizeMatches(config.size, images.primary) ? "选区合成需要保持原图比例，请在出图设置中选择相同比例或自适应"
-        : deploymentFeatures.creditsEnabled && !estimateValue.configured ? "当前模型或操作的计费配置不可用"
-        : quotaBlocked ? `额度不足，预计需要 ${estimateValue.credits} 积分`
+        : deploymentFeatures.creditsEnabled && !estimateValue.configured ? "当前模型暂不可用，请联系管理员。"
+        : quotaBlocked ? "当前账号暂时无法提交，请联系管理员。"
         : validateSceneForm(sceneId, form, images);
 
     useEffect(() => {
@@ -252,7 +255,8 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
         const revision = ++epoch.current;
         knownLogIds.current.clear(); setPendingLogIds(new Set()); setRecoveredRequestId(null);
         setObservationStopped(false);
-        setForm(createSceneForm(sceneId)); setImages({}); setSelection(null); setLogs([]); setResults([]); setActiveLog(null); setSelectedPrompt(null); setPreviewing(false);
+        previewEpoch.current += 1;
+        setForm(createSceneForm(sceneId)); setImages({}); setSelection(null); setLogs([]); setResults([]); setActiveLog(null); setHistoryPreviewLog(null); setSelectedPrompt(null); setPreviewing(false);
         setHistoryTotal(0); setHistoryHasMore(false); setHistoryLoading(false); historyLoadingRef.current = false;
         setSystemPromptOverride(undefined);
         setParameters(sceneParameters(configRef.current)); setRunning(false); setRestoring(false); setUploadCount(0); setStartedAt(0); setError(null); setNotice(null); setDraftReady(false);
@@ -398,6 +402,7 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
 
     const reset = () => {
         if (running) return;
+        previewEpoch.current += 1; setHistoryPreviewLog(null);
         viewEpoch.current += 1; setRestoring(false);
         inputEpoch.current.primary += 1; inputEpoch.current.secondary += 1;
         setForm(createSceneForm(sceneId)); setImages({}); setSelection(null); setResults([]); setActiveLog(null); setSelectedPrompt(null); setPreviewing(false); setError(null); setNotice(null); setStartedAt(0);
@@ -442,6 +447,7 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
                 setHistoryTotal(current => Math.max(0, current - deletedIds.size));
                 for (const id of deletedIds) knownLogIds.current.delete(id);
                 if (activeLog && deletedIds.has(activeLog.id)) { setActiveLog(null); setSelectedPrompt(null); setResults([]); }
+                if (historyPreviewLog && deletedIds.has(historyPreviewLog.id)) { previewEpoch.current += 1; setHistoryPreviewLog(null); }
             }
             if (receipt.failedIds.length) setError(uiText("已删除 {deleted} 条，{failed} 条删除失败；失败记录仍保留并已选中，可重试。", { deleted: deletedIds.size, failed: receipt.failedIds.length }));
             else setNotice(uiText("已从本机历史列表移除 {count} 条记录，原图和服务端任务仍保留。", { count: deletedIds.size }));
@@ -457,23 +463,28 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
     };
 
     const previewLog = async (log: SceneLogSummary) => {
-        if (running || restoring || historyLoadingRef.current || log.ownerId !== user?.id || log.sceneId !== sceneId) return;
+        if (restoring || historyLoadingRef.current || log.ownerId !== user?.id || log.sceneId !== sceneId) return;
         const revision = epoch.current;
-        const viewRevision = ++viewEpoch.current;
-        setObservationStopped(false);
-        setActiveLog(null); setSelectedPrompt(null);
-        setResults([]); setPreviewing(true); setError(null); setNotice(null);
+        const viewRevision = viewEpoch.current;
+        const previewRevision = ++previewEpoch.current;
+        setHistoryPreviewLog(null); setPreviewing(true); setError(null); setNotice(null);
         try {
             const restored = await hydrateLog(await history!.read(log.id));
-            if (revision !== epoch.current || viewRevision !== viewEpoch.current) return;
-            setActiveLog(restored); setSelectedPrompt(restored.prompt); setResults(restored.results); setStartedAt(0);
-        } catch (caught) { if (revision === epoch.current && viewRevision === viewEpoch.current) setError(uiText("结果读取失败：{value1}；当前草稿未改变", { value1: errorText(caught) })); }
-        finally { if (revision === epoch.current && viewRevision === viewEpoch.current) setPreviewing(false); }
+            if (revision !== epoch.current || viewRevision !== viewEpoch.current || previewRevision !== previewEpoch.current) return;
+            setHistoryPreviewLog(restored);
+            if (!running && restored.results.some(canQuerySceneResult)) setObservationStopped(false);
+        } catch (caught) { if (revision === epoch.current && viewRevision === viewEpoch.current && previewRevision === previewEpoch.current) setError(uiText("结果读取失败：{value1}；当前草稿未改变", { value1: errorText(caught) })); }
+        finally { if (revision === epoch.current && viewRevision === viewEpoch.current && previewRevision === previewEpoch.current) setPreviewing(false); }
+    };
+
+    const returnToCurrentTask = () => {
+        previewEpoch.current += 1; setHistoryPreviewLog(null); setPreviewing(false); setSelectedPrompt(null);
     };
 
     const selectResultPrompt = (result: SceneResult) => {
         if (!result.image) return;
-        const log = activeLog?.results.some(stored => stored.id === result.id && stored.image?.id === result.image?.id) ? activeLog : null;
+        const displayedLog = historyPreviewLog || activeLog;
+        const log = displayedLog?.results.some(stored => stored.id === result.id && stored.image?.id === result.image?.id) ? displayedLog : null;
         if (log && typeof log.prompt === "string") setSelectedPrompt(log.prompt);
     };
 
@@ -498,6 +509,7 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
             setForm(cloneSceneForm({ ...createSceneForm(sceneId), ...log.form })); setImages(restoredImages); setParameters(sceneParameters(draft ? { ...draft.config, count: log.config.count } : log.config));
             setSystemPromptOverride(draft?.config.systemPrompt);
             setSelection(restoredSelection);
+            returnToCurrentTask();
             setActiveLog(restored); setSelectedPrompt(log.prompt); setResults(restored.results); setStartedAt(0);
         } catch (caught) { if (revision === epoch.current && viewRevision === viewEpoch.current) setError(uiText("记录恢复失败：{value1}", { value1: errorText(caught) })); }
         finally { if (revision === epoch.current && viewRevision === viewEpoch.current) setRestoring(false); }
@@ -517,6 +529,7 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
     const saveLocalResult = async (sourceId: string, blob: Blob, description: string) => {
         if (!user || user.status !== "active" || !scope || loading || running || uploadCount || imagesRef.current.primary?.id !== sourceId) throw new Error("当前图片或账号状态已变化，请重新打开换色工具");
         const revision = epoch.current, start = performance.now();
+        returnToCurrentTask();
         viewEpoch.current += 1;
         setRunning(true); setSelectedPrompt(null); setPreviewing(false); setError(null); setStartedAt(start);
         try {
@@ -567,6 +580,7 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
         const controller = new AbortController(); observationControllers.current.add(controller);
         viewEpoch.current += 1;
         setObservationStopped(false);
+        returnToCurrentTask();
         setRunning(true); setError(null); setNotice(null); setActiveLog(null); setSelectedPrompt(null); setPreviewing(false); setResults(pending); setStartedAt(start);
         const updateResult = (index: number, result: SceneResult) => {
             if (revision === epoch.current) setResults(current => current.map((item, itemIndex) => itemIndex === index ? result : item));
@@ -629,10 +643,12 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
     };
 
     const retryResult = async (result: SceneResult) => {
-        if (!user || !history || !activeLog || running || loading || !toolEnabled || !canRetrySceneResult(result)) return;
+        const sourceLog = historyPreviewLog || activeLog;
+        if (!user || !history || !sourceLog || running || loading || !toolEnabled || !canRetrySceneResult(result)) return;
         const release = workbenchSubmissions.acquire(`creative:${scope}`);
         if (!release) { setError(uiText("当前场景正在处理任务，请勿重复提交")); return; }
-        const revision = epoch.current, originalId = activeLog.id, start = performance.now(), retryId = nanoid();
+        const revision = epoch.current, originalId = sourceLog.id, start = performance.now(), retryId = nanoid();
+        returnToCurrentTask();
         const controller = new AbortController(); observationControllers.current.add(controller);
         const pending: SceneResult = { id: nanoid(), status: "pending", requestId: `${nanoid()}:0` };
         let submitted = false;
@@ -683,15 +699,19 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
 
     const queryResult = async (result: SceneResult, continueSubmission = false, observationSignal?: AbortSignal) => {
         const automatic = Boolean(observationSignal);
-        if (!user || !history || !activeLog || running || loading || queryingResult.current || !canQuerySceneResult(result) || (automatic && continueSubmission)) return;
+        const previewSource = historyPreviewLog?.results.some(item => item.id === result.id) ? historyPreviewLog : null;
+        const sourceLog = automatic ? activeLog?.results.some(item => item.id === result.id) ? activeLog : previewSource : previewSource || activeLog;
+        if (!user || !history || !sourceLog || running || loading || queryingResult.current || !canQuerySceneResult(result) || (automatic && continueSubmission)) return;
         const release = workbenchSubmissions.acquire(`creative:${scope}`);
         if (!release) return;
         queryingResult.current = true;
-        const revision = epoch.current, viewRevision = viewEpoch.current, originalId = activeLog.id;
+        const revision = epoch.current, viewRevision = viewEpoch.current, originalId = sourceLog.id;
+        const previewRevision = previewEpoch.current;
+        const previewOnly = automatic && sourceLog.id !== activeLog?.id;
         const controller = new AbortController(); observationControllers.current.add(controller);
         const signal = observationSignal ? AbortSignal.any([controller.signal, observationSignal]) : controller.signal;
-        const assertCurrent = () => { signal.throwIfAborted(); if (revision !== epoch.current || viewRevision !== viewEpoch.current || useUserStore.getState().user?.id !== user.id) throw new Error("员工或场景已变化，未继续原请求"); };
-        if (!automatic) { setObservationStopped(false); setRunning(true); setOptimizing(false); setError(null); setNotice(null); }
+        const assertCurrent = () => { signal.throwIfAborted(); if (revision !== epoch.current || viewRevision !== viewEpoch.current || (previewOnly && previewRevision !== previewEpoch.current) || useUserStore.getState().user?.id !== user.id) throw new Error("员工或场景已变化，未继续原请求"); };
+        if (!automatic) { returnToCurrentTask(); setObservationStopped(false); setRunning(true); setOptimizing(false); setError(null); setNotice(null); }
         try {
             assertCurrent();
             let log = await history.read(originalId);
@@ -706,7 +726,12 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
                 const results = log.results.map(item => item.id === next.id ? next : item);
                 log = { ...log, ...patch, results, images: results.flatMap(item => item.image ? [item.image] : []), successCount: results.filter(item => item.status === "success").length, failCount: results.filter(item => item.status === "failed" && item.failureKind !== "uncertain").length };
                 await history.save(serializeSceneLog(log)); assertCurrent(); currentResult = next;
-                setActiveLog(log); setResults(results); setSelectedPrompt(log.prompt); rememberLog(log); setError(null);
+                if (previewOnly) setHistoryPreviewLog(log);
+                else {
+                    setActiveLog(log); setResults(results); setSelectedPrompt(log.prompt);
+                    setHistoryPreviewLog(current => current?.id === log.id ? log : current);
+                }
+                rememberLog(log); setError(null);
             };
             const restoreSnapshot = async () => {
                 if (!log.selection) return { images: log.referenceImages, selection: null };
@@ -727,7 +752,7 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
                     if (!task.resultUrls[0]) throw new Error("原任务成功但未返回结果图片，请勿重新生成");
                     const snapshot = await restoreSnapshot(); assertCurrent();
                     const completed = await storeSceneResult({ ...currentResult, taskId: task.id, failureKind: undefined, recovery: undefined, error: undefined, compilationId: undefined }, { id: `${task.id}:0`, dataUrl: task.resultUrls[0], sourceTaskId: task.id, durationMs: completedTaskDurationMs(task), prompt: patch.prompt, userInput: patch.userInput, optimized: patch.optimized }, 0, sceneId, snapshot, text => setNotice(uiText(text)));
-                    await commit(completed, patch); setNotice(uiText("已找回原任务结果，没有重新生成或扣费。"));
+                    await commit(completed, patch); setNotice(uiText("已找回原任务结果，没有重新生成。"));
                 } else if (classifyTaskRecovery(task) === "terminal") {
                     await commit({ id: currentResult.id, ...sceneFailure(new QueuedTaskFailedError(task), true, task.id, task.requestId) }, patch);
                 } else if (task.status === "paused") {
@@ -777,28 +802,31 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
     // generation or resumes a paused upstream task without an explicit action.
     const reconcileCurrentResults = useRef<(signal: AbortSignal) => Promise<void>>(async () => {});
     reconcileCurrentResults.current = async signal => {
-        for (const result of results.filter(canQuerySceneResult)) {
+        const pending = [...results, ...(historyPreviewLog && historyPreviewLog.id !== activeLog?.id ? historyPreviewLog.results : [])].filter(canQuerySceneResult);
+        for (const result of pending) {
             signal.throwIfAborted();
             await queryResult(result, false, signal);
         }
     };
-    const reconciliationKey = activeLog ? `${activeLog.id}:${results.filter(canQuerySceneResult).map(result => `${result.id}:${result.taskId || ""}`).join("|")}` : "";
-    const autoObserving = Boolean(!observationStopped && !running && !loading && workbenchTask.active && user?.status === "active" && results.some(canQuerySceneResult));
+    const previewPending = historyPreviewLog?.results.filter(canQuerySceneResult) || [];
+    const reconciliationKey = [activeLog ? `${activeLog.id}:${results.filter(canQuerySceneResult).map(result => `${result.id}:${result.taskId || ""}`).join("|")}` : "", previewPending.length ? `${historyPreviewLog!.id}:${previewPending.map(result => `${result.id}:${result.taskId || ""}`).join("|")}` : ""].join(";");
+    const autoObserving = Boolean(!observationStopped && !running && !loading && workbenchTask.active && user?.status === "active" && (results.some(canQuerySceneResult) || previewPending.length));
     useEffect(() => {
         if (!autoObserving || !reconciliationKey) return;
         const controller = new AbortController(); observationControllers.current.add(controller);
-        void watchTaskReconciliation({ taskIds: results.flatMap(result => canQuerySceneResult(result) && result.taskId ? [result.taskId] : []), signal: controller.signal,
+        void watchTaskReconciliation({ taskIds: [...results, ...previewPending].flatMap(result => canQuerySceneResult(result) && result.taskId ? [result.taskId] : []), signal: controller.signal,
             reconcile: () => reconcileCurrentResults.current(controller.signal),
         }).catch(() => { /* Unmount, stop, task switch and account changes dispose this observer. */ });
         return () => { controller.abort(); observationControllers.current.delete(controller); };
     }, [scope, reconciliationKey, autoObserving, user?.id]);
 
     const resultAction = async (action: "saveAsset" | "canvas" | "reference", image: SceneImage) => {
-        if (!resultActions || !activeLog || resultActionGate.current || running) return;
+        const sourceLog = historyPreviewLog || activeLog;
+        if (!resultActions || !sourceLog || resultActionGate.current || running) return;
         const revision = epoch.current;
         resultActionGate.current = true; setResultActionBusy(true); setError(null); setNotice(null);
         try {
-            const value = await resultActions[action](image, activeLog);
+            const value = await resultActions[action](image, sourceLog);
             if (revision !== epoch.current) return;
             if (action === "saveAsset") { setNotice(uiText("原图已保存到素材库。")); return; }
             return value;
@@ -820,6 +848,9 @@ export function useSceneWorkspace(sceneId: string, handoffToken: string | null =
 
     const updateForm: typeof setForm = (value) => { viewEpoch.current += 1; setRestoring(false); setPreviewing(false); setSelectedPrompt(null); setForm(value); };
     return { form, setForm: updateForm, images, setImage, setAsset, selection, saveSelection, clearSelection: () => { if (!running) { viewEpoch.current += 1; setRestoring(false); setPreviewing(false); setSelectedPrompt(null); setSelection(null); setError(null); } }, saveLocalResult, config, updateConfig, model, profile, count, running, optimizing, loading,
-        uploading: uploadCount > 0, logs, historyTotal, historyHasMore, historyLoading, loadMoreHistory, deleteLogs, stopObserving, activeLog, selectedPrompt, previewing, previewLog, selectResultPrompt, results, generate, restoreLog, reset, error, validation,
+        uploading: uploadCount > 0, logs, historyTotal, historyHasMore, historyLoading, loadMoreHistory, deleteLogs, stopObserving,
+        activeLog: historyPreviewLog || activeLog, selectedPrompt: historyPreviewLog?.prompt ?? selectedPrompt,
+        previewing, previewLog, isHistoryPreview: Boolean(historyPreviewLog), returnToCurrentTask, selectResultPrompt,
+        results: previewing ? [] : historyPreviewLog?.results || results, currentResultCount: results.length, generate, restoreLog, reset, error, validation,
         quotaBlocked, estimatedCredits: estimateValue.credits, download, startedAt, notice, resultActionBusy, resultAction, retryResult, queryResult, autoObserving, recoveredRequestId };
 }

@@ -101,12 +101,14 @@ test("decoded original dimensions recover without guessing; result groups stay i
     await expect(page.getByRole("spinbutton", { name: "图层宽度" })).toHaveValue("32");
     await fixture(page, "multipleGroups");
     await page.getByRole("spinbutton", { name: "X 位置" }).fill("9"); await page.getByRole("spinbutton", { name: "X 位置" }).press("Enter");
-    await page.getByRole("combobox", { name: "结果组" }).selectOption("1");
+    await page.getByRole("combobox", { name: "结果组" }).click();
+    await page.locator('.ant-select-dropdown:visible .ant-select-item-option[title="第 2 组"]').click();
     await expect.poll(() => pixel(page, 1, 1)).toEqual([0, 0, 255, 255]);
     await expect.poll(() => pixel(page, 4, 4)).toEqual([0, 255, 0, 255]);
     await expect(page.getByRole("list", { name: "图层列表，最上方在最前景" }).getByRole("listitem")).toHaveCount(2);
     await page.getByRole("button", { name: "复位当前组" }).click();
-    await page.getByRole("combobox", { name: "结果组" }).selectOption("0");
+    await page.getByRole("combobox", { name: "结果组" }).click();
+    await page.locator('.ant-select-dropdown:visible .ant-select-item-option[title="第 1 组"]').click();
     await page.getByRole("button", { name: "蓝色方块 已保存", exact: true }).click();
     await expect(page.getByRole("spinbutton", { name: "X 位置" })).toHaveValue("9");
     expect(errors).toEqual([]);

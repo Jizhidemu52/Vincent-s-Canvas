@@ -1,6 +1,6 @@
 import { useUiText } from "@/lib/i18n";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { App, Button, Modal, Popover, Progress, Segmented, Slider, Spin } from "antd";
+import { App, Button, Modal, Popover, Progress, Segmented, Slider, Spin, Tooltip } from "antd";
 import { saveAs } from "file-saver";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useThemeStore } from "@/stores/use-theme-store";
@@ -121,7 +121,7 @@ export function CanvasImageCompareDialog({ nodes, initialIds, onClose, compariso
                     content={<div style={{ width: "min(600px, calc(100vw - 56px))" }}><CanvasImageComparePicker images={candidates} selectedId={selected?.id} sourceIds={index === 0 ? lineage.images.map(node => node.id) : []} preferredId={index === 0 ? previousId : undefined} title={label} onChoose={node => chooseImage(index, node)} onClose={closePicker} /></div>}>
                     <button ref={element => { pickerTriggers.current[index] = element; }} type="button" aria-label={label} aria-expanded={picker === index} aria-haspopup="dialog" className="flex min-w-0 items-center gap-3 rounded-lg border p-3 text-left focus-visible:outline-2 focus-visible:outline-offset-2" style={{ borderColor: theme.node.stroke, background: theme.node.panel, color: theme.node.text, outlineColor: theme.canvas.selectionStroke }}>
                         <span className="block h-24 w-32 shrink-0 overflow-hidden rounded-md" style={{ background: theme.node.fill }}>{selected ? <CanvasCompareThumbnail node={selected} /> : <span className="flex h-full items-center justify-center text-xs" style={{ color: theme.node.muted }}>{t("点击选图")}</span>}</span>
-                        <span className="min-w-0 flex-1"><span className="mb-1 block text-xs" style={{ color: theme.node.muted }}>{index === 0 ? t("改款前") : t("改款后")}{index === 0 && previousId === selected?.id ? t(" · 直接上版") : ""}</span><span className="line-clamp-2 block break-all text-sm leading-5" title={selected ? canvasCompareImageLabel(selected) : undefined}>{selected ? canvasCompareImageLabel(selected) : t("尚未选择图片")}</span><span className="mt-2 block text-xs" style={{ color: theme.node.muted }}>{selected?.metadata?.imageVersion ? `V${selected.metadata.imageVersion} · ` : ""}{t("查看大缩略图并换选 ▾")}</span></span>
+                        <span className="min-w-0 flex-1"><span className="mb-1 block text-xs" style={{ color: theme.node.muted }}>{index === 0 ? t("改款前") : t("改款后")}{index === 0 && previousId === selected?.id ? t(" · 直接上版") : ""}</span><Tooltip title={selected ? canvasCompareImageLabel(selected) : undefined}><span className="line-clamp-2 block break-all text-sm leading-5">{selected ? canvasCompareImageLabel(selected) : t("尚未选择图片")}</span></Tooltip><span className="mt-2 block text-xs" style={{ color: theme.node.muted }}>{selected?.metadata?.imageVersion ? `V${selected.metadata.imageVersion} · ` : ""}{t("查看大缩略图并换选 ▾")}</span></span>
                     </button>
                 </Popover>;
             })}

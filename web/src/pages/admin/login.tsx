@@ -15,11 +15,13 @@ export default function AdminLoginPage() {
     const [loginName, setLoginName] = useState("");
     const [password, setPassword] = useState("");
     const [submitting, setSubmitting] = useState(false);
+    const [error, setError] = useState("");
     const submittingRef = useRef(false);
 
     const submit = async () => {
         if (submittingRef.current) return;
-        if (!loginName.trim() || !password) { message.warning("请输入管理员账号和密码"); return; }
+        if (!loginName.trim() || !password) { setError("请输入管理员账号和密码"); return; }
+        setError("");
         submittingRef.current = true; setSubmitting(true);
         try {
             const user = await login(loginName, password, "admin");
@@ -28,7 +30,7 @@ export default function AdminLoginPage() {
             const destination = user.mustChangePassword ? `/change-password?returnTo=${encodeURIComponent(returnTo)}` : isAdminRole(user.role) ? returnTo : "/";
             if (deploymentFeatures.authenticationEnabled) window.location.assign(destination);
             else navigate(destination, { replace: true });
-        } catch (error) { message.error(error instanceof Error ? error.message : "登录失败"); }
+        } catch (error) { setError(error instanceof Error ? error.message : "登录失败"); }
         finally { submittingRef.current = false; setSubmitting(false); }
     };
 
@@ -47,11 +49,12 @@ export default function AdminLoginPage() {
                     </div>
                 </div>
 
-                <form className="mt-6 space-y-3" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
+                <form className="mt-6 flex flex-col gap-3" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
                     <label htmlFor="admin-login-name" className="block text-sm font-medium">管理员账号</label>
                     <Input id="admin-login-name" name="username" required size="large" value={loginName} onChange={(event) => setLoginName(event.target.value)} placeholder="请输入管理员账号" autoComplete="username" />
-                    <label htmlFor="admin-login-password" className="block text-sm font-medium">登录密码</label>
+                    <label htmlFor="admin-login-password" className="mt-2 block text-sm font-medium">登录密码</label>
                     <Input.Password id="admin-login-password" name="password" required size="large" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="请输入密码" autoComplete="current-password" />
+                    {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
                     <Button type="primary" htmlType="submit" size="large" block loading={submitting} icon={<LockKeyhole className="size-4" />}>
                         登录后台
                     </Button>

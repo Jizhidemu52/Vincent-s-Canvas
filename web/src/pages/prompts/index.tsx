@@ -7,6 +7,7 @@ import { useWorkbenchField } from "@/hooks/use-workbench-field";
 import { BookOpen, Check, Plus, Search, X } from "lucide-react";
 
 import { PromptTemplateCard } from "@/components/prompts/prompt-template-card";
+import { PromptLibraryTabs } from "@/components/prompts/prompt-library-tabs";
 import { PromptTemplateEditor } from "@/components/prompts/prompt-template-editor";
 import { usePromptTemplateActions } from "@/components/prompts/use-prompt-template-actions";
 import { usePromptFavoriteList } from "@/components/prompts/use-prompt-favorite-list";
@@ -73,11 +74,12 @@ export default function PromptsPage() {
 
     return (
         <main className="wb-page h-full overflow-y-auto px-4 py-6 md:px-8 md:py-8">
-            <div className="mx-auto max-w-7xl">
+            <div className="wb-content">
                 <header className="wb-header">
                     <div><p className="wb-eyebrow">{t("共享经验库")}</p><h1 className="wb-title">{t("提示词库")}</h1><p className="wb-description">{t("选择通用起点，或复用团队与公共模板。先填入、再调整；团队模板经过审核，公共模板由管理员维护。")}</p></div>
-                    {isSuper && scope === "public" ? <Button size="large" type="primary" icon={<Plus className="size-4" />} onClick={() => { setEditing(null); setEditorOpen(true); }}>{t("新建公共模板")}</Button> : <Button size="large" onClick={() => navigate("/my-prompts")}>{t("我的提示词")}</Button>}
+                    {isSuper && scope === "public" ? <Button size="large" type="primary" icon={<Plus className="size-4" />} onClick={() => { setEditing(null); setEditorOpen(true); }}>{t("新建公共模板")}</Button> : null}
                 </header>
+                <PromptLibraryTabs />
                 <section className="wb-toolbar mb-6">
                     <div className="max-w-full overflow-x-auto"><Segmented value={scope} onChange={(value) => { setScope(value as "general" | "team" | "public"); setPage(1); }} options={[{ value: "general", label: t("通用提示词") }, ...(canAccessTeam ? [{ value: "team", label: t("团队提示词") }] : []), { value: "public", label: t("公共提示词库") }]} /></div>
                     <Input className="max-w-md" allowClear prefix={<Search className="size-4 text-stone-400" />} value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder={t("搜索标题、完整提示词或分类")} />

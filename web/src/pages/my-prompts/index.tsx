@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { App, Button, Input, Pagination, Select, Skeleton, Switch } from "antd";
 import { useWorkbenchField } from "@/hooks/use-workbench-field";
 import { BookOpen, Plus, Search } from "lucide-react";
-import { deploymentFeatures } from "@/lib/deployment-features";
+import { PromptLibraryTabs } from "@/components/prompts/prompt-library-tabs";
 import { createPromptListLoader } from "@/lib/prompt-list-loader";
 
 import { PromptTemplateCard } from "@/components/prompts/prompt-template-card";
@@ -60,11 +60,12 @@ export default function MyPromptsPage() {
 
     return (
         <main className="wb-page h-full overflow-y-auto px-4 py-6 md:px-8 md:py-8">
-            <div className="mx-auto max-w-7xl">
+            <div className="wb-content">
                 <header className="wb-header">
-                    <div><p className="wb-eyebrow">{t("个人经验库")}</p><h1 className="wb-title">{t("我的提示词")}</h1><p className="wb-description">{t("发送到生成页仅填入内容，")}{deploymentFeatures.creditsEnabled ? t("确认积分后") : t("确认参数后")}{t("再生成；也可直接插入画布继续编辑。")}</p></div>
+                    <div><p className="wb-eyebrow">{t("个人经验库")}</p><h1 className="wb-title">{t("提示词库")}</h1><p className="wb-description">{t("发送到生成页仅填入内容，")}{t("确认参数后")}{t("再生成；也可直接插入画布继续编辑。")}</p></div>
                     <Button size="large" type="primary" icon={<Plus className="size-4" />} onClick={() => { setEditing(null); setEditorOpen(true); }}>{t("新建模板")}</Button>
                 </header>
+                <PromptLibraryTabs />
                 <section className="wb-toolbar mb-6">
                     <Input className="max-w-md" allowClear prefix={<Search className="size-4 text-stone-400" />} value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder={t("搜索名称、提示词或分类")} />
                     <Select value={sort} onChange={(value) => { setSort(value); setPage(1); }} options={[{ value: "updated", label: t("最近更新") }, { value: "recent", label: t("最近使用") }, { value: "used", label: t("使用最多") }]} />

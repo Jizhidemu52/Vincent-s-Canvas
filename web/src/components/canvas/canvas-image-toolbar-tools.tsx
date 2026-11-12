@@ -42,6 +42,14 @@ export type ImageQuickToolsConfig = {
     showLabels: boolean;
 };
 
+export const imageToolMenuGroups = [
+    { id: "ai", label: "AI 改图", english: "AI editing", tools: ["edit", "maskEdit", "angle", "upscale", "reversePrompt", "regenerate", "variation-subtle", "variation-strong", "retry"] },
+    { id: "local", label: "本地编辑", english: "Local editing", tools: ["manualEdit", "eraser", "crop", "split", "replace", "resize"] },
+    { id: "workflow", label: "流程", english: "Workflow", tools: ["imageSequence", "designTemplate", "restoreGeneration", "compare"] },
+    { id: "assets", label: "素材与信息", english: "Assets and details", tools: ["saveAsset", "download", "copyImage", "copyPrompt", "view", "info"] },
+    { id: "organize", label: "排列与管理", english: "Arrange and manage", tools: ["duplicate", "rename", "bringFront", "sendBack", "lock"] },
+] as const;
+
 export const IMAGE_QUICK_TOOLS_STORAGE_KEY = "canvas-image-quick-tools-v6";
 
 const allBaseToolIds: ImageQuickToolId[] = ["info", "delete", "saveAsset", "download", "edit"];

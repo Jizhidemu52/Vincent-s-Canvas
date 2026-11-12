@@ -36,15 +36,15 @@ export function GenerationTaskCancel({ taskId }: { taskId?: string }) {
         return () => { controller.abort(); events.close(); };
     }, [taskId, ownerId, reload]);
     if (!taskId) return null;
-    if (task?.status === "cancelled") return <span role="status" className="text-xs text-muted-foreground">{uiText("任务已取消；额度以账户记录为准。")}</span>;
-    const cancel = () => modal.confirm({ title: uiText("取消此排队任务？"), content: uiText("只取消尚未提交上游的原任务。若任务已开始执行，取消会被拒绝；额度是否释放以账户记录为准。"), okText: uiText("确认取消任务"), cancelText: uiText("保留任务"), onOk: async () => {
+    if (task?.status === "cancelled") return <span role="status" className="text-[13px] text-muted-foreground">{uiText("任务已取消。")}</span>;
+    const cancel = () => modal.confirm({ title: uiText("取消此排队任务？"), content: uiText("只取消尚未开始执行的原任务。若任务已开始执行，取消会被拒绝。"), okText: uiText("确认取消任务"), cancelText: uiText("保留任务"), onOk: async () => {
         if (working.current || useUserStore.getState().user?.id !== ownerId) return;
         working.current = true; setBusy(true);
         try {
             const current = await cancelQueuedTask(taskId);
             if (useUserStore.getState().user?.id !== ownerId) return;
             setTask(current);
-            if (current.status === "cancelled") message.success(uiText("任务已取消；额度以账户记录为准。"));
+            if (current.status === "cancelled") message.success(uiText("任务已取消。"));
             else message.warning(uiText("任务状态已变化，未确认取消；请继续查询原任务。"));
         } catch (error) { setTask(null); message.warning(uiText(generationErrorMessage(error))); }
         finally { working.current = false; setBusy(false); }

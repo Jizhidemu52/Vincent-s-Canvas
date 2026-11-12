@@ -42,13 +42,15 @@ function harness(options: { role?: string; analyze?: (body: unknown, signal: Abo
         "file-saver": { saveAs: (...args: any[]) => calls.saves.push(args) },
         "@/stores/use-user-store": { useUserStore: (select: Function) => select(userState) },
         "@/stores/use-business-config-store": { useBusinessConfigStore: () => { throw new Error("OA admin must not depend on the creative model store"); } },
+        "@/lib/non-financial-usage-export": {
+            exportNonFinancialUsageRecords: async (body: unknown, options_: any) => { calls.export.push({ body, options: options_ }); return options.export ? options.export() : { blob: new Blob(["complete"]), recordCount: 10001, manifest: {} }; },
+        },
         "@/services/api/usage-analytics": {
             listUsagePeople: async (query: unknown, signal: AbortSignal) => { calls.list.push({ query, signal }); return options.list ? options.list(signal) : people; },
             listUsageAnalysisModels: async (signal: AbortSignal) => { calls.models.push({ signal }); return options.models ? options.models(signal) : { models: [{ id: "text-model", name: "配置的文字模型" }] }; },
             getUsagePerson: async (...args: any[]) => { calls.detail.push(args); return options.detail ? options.detail() : { ...people, person, records: [] }; },
             previewUsageAnalysis: async (body: unknown, signal: AbortSignal) => { calls.preview.push({ body, signal }); return options.preview ? options.preview() : frozenPreview; },
             analyzeUsage: async (body: unknown, signal: AbortSignal) => { calls.analyze.push({ body, signal }); return options.analyze ? options.analyze(body, signal) : { analysisId: "a-1", modelConfigId: "text-model", content: "流程改进建议", createdAt: "2026-10-15T00:00:00Z" }; },
-            exportUsageRecords: async (body: unknown, options_: any) => { calls.export.push({ body, options: options_ }); return options.export ? options.export() : { blob: new Blob(["complete"]), recordCount: 10001, manifest: {} }; },
         },
     };
     const module = { exports: {} as any };
@@ -81,10 +83,10 @@ test("employee charts and deterministic summary use only that person's breakdown
         }
         const brief = labelled(tree, "个人统计简述").props.children;
         expect(brief).toContain("该员工已记录 9 次模型请求");
-        expect(brief).toContain("已记账生成消费 ￥1.006500");
+        expect(brief).not.toContain("已记账生成消费");
         expect(brief).toContain("成功实际出图 3 张（不是请求次数）");
-        const personalTotals = elements(labelled(tree, "个人消费与出图统计"));
-        expect(personalTotals.find(element => element.props.title === "生成消费（元）")?.props.value).toBe("￥1.006500");
+        const personalTotals = elements(labelled(tree, "个人出图统计"));
+        expect(personalTotals.some(element => element.props.title === "生成消费（元）")).toBe(false);
         expect(personalTotals.find(element => element.props.title === "成功出图（张）")?.props.value).toBe(3);
         expect(brief).toContain("个人专用模型"); expect(brief).toContain("个人改图板块"); expect(brief).toContain("个人尺寸选择");
         expect(brief).toContain("8 条已知采集缺口"); expect(brief).not.toContain("3 条已知采集缺口");
@@ -99,6 +101,29 @@ test("deterministic brief selects highest observed counts without assuming sort 
     expect(brief).toContain("常用模型”（5 次调用）"); expect(brief).not.toContain("少用模型");
     expect(brief).toContain("暂无可用板块记录"); expect(brief).toContain("暂无可用操作控件记录");
     expect(brief).toContain("历史点击与聊天不能回补"); expect(brief).not.toContain("已知采集缺口");
+});
+
+test("usage display removes known financial explanations but preserves collection gaps and free text", () => {
+    const panel = harness();
+    const display = panel.exports.usageDisplayExplanation;
+    expect(display("生成成本汇总已保存的成功生成历史人民币金额（含图片、视频和音频），不按新单价重算。")).toBe("");
+    expect(display("当前筛选中有 2 个成功任务缺少成功结算历史，费用未计入且不补估；已保存的图片结果仍计入张数。")).toBe("已保存的图片结果仍计入张数。");
+    expect(display("已保存历史金额不按新单价重算；未上报缺口可能未知。")).toBe("未上报缺口可能未知。");
+    expect(display("采集缺失不能推断为未使用；不作人格或绩效评价。")).toBe("采集缺失不能推断为未使用；不作人格或绩效评价。");
+    expect(display("分析调用可能产生费用；仅在明确确认后调用一次，不自动重试。")).toBe("分析仅在明确确认后调用一次，不自动重试。");
+});
+
+test("preview display omits financial metadata without changing the frozen content or prompt samples", () => {
+    const panel = harness();
+    const original = { summary, promptSamples: [{ prompt: "参考商品价格99元，保留设计说明" }], coverage: { notes: ["生成成本汇总已保存的成功生成历史人民币金额（含图片、视频和音频）。", "采集缺口仍需说明。"] } };
+    const content = JSON.stringify(original);
+    const display = JSON.parse(panel.exports.usagePreviewDisplay(content));
+    expect(display.summary).not.toHaveProperty("totalRmbCost");
+    expect(display.summary.generatedImages).toBe(summary.generatedImages);
+    expect(display.coverage.notes).toEqual(["采集缺口仍需说明。"]);
+    expect(display.promptSamples).toEqual(original.promptSamples);
+    expect(JSON.parse(content)).toEqual(original);
+    expect(original.summary.totalRmbCost).toBe(0.2684);
 });
 
 test("date filters use inclusive Beijing days, reject impossible ranges and preserve searches for every scope", () => {
@@ -130,12 +155,12 @@ test("daily values keep visits and interactions separate from requests and do no
     const daily = { ...summary, visits: 100, interactions: 200, generationRequests: 2, chatRequests: 3, succeeded: 2, failed: 1, pending: 2 };
     expect(panel.exports.usageTrendValue(daily, "requests")).toBe(5);
     expect(panel.exports.usageTrendValue(daily, "images")).toBe(summary.generatedImages);
-    expect(panel.exports.usageTrendValue(daily, "cost")).toBe(summary.totalRmbCost);
     expect(panel.exports.usageTrendValue(daily, "successRate")).toBeCloseTo(66.666667);
     expect(panel.exports.usageTrendValue({ ...daily, succeeded: 0, failed: 0 }, "successRate")).toBeNull();
     const chart = panel.exports.UsageDailyTrend({ daily: [{ day: "2026-10-15", ...daily }], from: "2026-10-01", to: "2026-10-30", coverage: { ...coverage, missingHistoryCount: 2 } });
-    expect(text(chart)).toContain("2 个成功任务缺少结算历史");
-    expect(text(chart)).toContain("￥0.268400");
+    expect(text(chart)).not.toContain("费用");
+    expect(text(chart)).not.toContain("￥0.268400");
+    expect(elements(chart).find(element => element.type === "Select")!.props.options.map((option: any) => option.value)).toEqual(["requests", "images", "successRate"]);
     expect(text(chart)).toContain("66.7%");
     expect(elements(chart).find(element => element.type === "table")?.props["aria-label"]).toBe("每日趋势数据表");
     expect(elements(chart).find(element => element.type === "title")?.props.children).toContain("5");
@@ -178,27 +203,31 @@ test.each(["UTC", "America/Los_Angeles"])("Beijing date boundaries and recent 30
     });
 });
 
-test("summary, people rows and individual records distinguish six-decimal cost and actual image count from calls", async () => {
+test("all usage displays omit financial values while retaining counts and original records", async () => {
     const record = { id: "generation-1", kind: "generation", status: "success", occurredAt: "2026-10-29T16:00:00Z", boardLabel: "图片生成", modelName: "图片模型", prompt: "测试", parameters: {}, totalRmbCost: 0.16104, generatedImages: 3 };
     const panel = harness({ detail: async () => ({ ...people, person, records: [record] }) });
     try {
         let tree = await panel.settle();
         const top = elements(labelled(tree, "使用简要统计"));
-        expect(top.find(element => element.props.title === "生成消费（元）")?.props.value).toBe("￥0.268400");
+        expect(top.filter(element => element.props.title).map(element => element.props.title)).toEqual(["成功出图（张）", "模型调用次数", "已完成 / 失败", "板块访问记录", "交互操作记录"]);
+        expect(labelled(tree, "统计简述").props.children).not.toContain("已记账生成消费");
+        expect(labelled(tree, "统计简述").props.children).not.toContain("￥0.268400");
         expect(top.find(element => element.props.title === "成功出图（张）")?.props.value).toBe(5);
         expect(top.find(element => element.props.title === "模型调用次数")?.props.value).toBe(3);
         const table = tree.find(element => element.type === "Table")!;
-        expect(text(table.props.columns.find((column: any) => column.title === "生成消费（元）").render(null, person))).toBe("￥0.268400");
+        expect(table.props.columns.some((column: any) => column.key === "cost")).toBe(false);
         expect(table.props.columns.find((column: any) => column.title === "成功出图（张）").render(null, person)).toBe(5);
         expect(table.props.columns.find((column: any) => column.title === "模型调用").render(null, person)).toBe(3);
         expect(table.props.columns.find((column: any) => column.title === "最后记录").render("2026-10-29T16:00:00Z")).toBe("2026-10-30 00:00:00");
-        expect(text(tree)).toContain("历史成本按原记录汇总，不按当前单价追溯重算");
+        expect(text(tree)).not.toContain("历史成本按原记录汇总");
         expect(text(tree)).not.toContain("供应商积分");
         table.props.columns.find((column: any) => column.title === "姓名").render(person.displayName, person).props.onClick();
         tree = await panel.settle();
         const card = tree.find(element => element.props.record?.id === record.id)!;
         const cardText = text((card.type as Function)(card.props));
-        expect(cardText).toContain("已记账生成消费 ￥0.161040");
+        expect(cardText).not.toContain("已记账生成消费");
+        expect(cardText).not.toContain("￥0.161040");
+        expect(record.totalRmbCost).toBe(0.16104);
         expect(cardText).toContain("成功实际出图 3 张");
         expect(cardText).toContain("2026-10-30 00:00:00（北京时间）");
         expect(text(tree)).toContain("成功请求 2 次");
@@ -242,13 +271,13 @@ test("sorting retains cross-page selections while changing a filter clears detai
         table = tree.find(element => element.type === "Table")!;
         table.props.columns.find((column: any) => column.title === "姓名").render(person.displayName, person).props.onClick(); tree = await panel.settle();
         table = tree.find(element => element.type === "Table")!;
-        table.props.onChange({}, {}, { columnKey: "cost", order: "descend" }, { action: "sort" }); tree = await panel.settle();
-        expect(panel.calls.list.at(-1).query).toMatchObject({ sort: "cost", order: "desc", page: 1 });
+        table.props.onChange({}, {}, { columnKey: "images", order: "descend" }, { action: "sort" }); tree = await panel.settle();
+        expect(panel.calls.list.at(-1).query).toMatchObject({ sort: "images", order: "desc", page: 1 });
         table = tree.find(element => element.type === "Table")!;
         expect(table.props.rowSelection.selectedRowKeys).toEqual(["person-1", "person-2"]);
         expect(tree.some(element => element.props["data-testid"] === "usage-analysis-preview")).toBe(true);
         table.props.pagination.onChange(2); tree = await panel.settle();
-        expect(panel.calls.list.at(-1).query).toMatchObject({ sort: "cost", order: "desc", page: 2 });
+        expect(panel.calls.list.at(-1).query).toMatchObject({ sort: "images", order: "desc", page: 2 });
         expect(tree.find(element => element.type === "Table")!.props.rowSelection.selectedRowKeys).toEqual(["person-1", "person-2"]);
         labelled(tree, "使用分析板块筛选").props.onChange("image"); tree = panel.render();
         expect(tree.find(element => element.type === "Table")!.props.rowSelection.selectedRowKeys).toEqual([]);
@@ -379,7 +408,7 @@ test("cancelled analysis aborts waiting and consumes the preview without automat
         reject(new DOMException("Aborted", "AbortError")); tree = await panel.settle();
         expect(button(tree, "发送已预览汇总 · 手动分析").props.disabled).toBe(true);
         expect(panel.calls.analyze).toHaveLength(1);
-        expect(tree.some(element => element.type === "Alert" && String(element.props.title).includes("仍可能产生费用"))).toBe(true);
+        expect(tree.some(element => element.type === "Alert" && String(element.props.title).includes("已提交的请求可能继续处理"))).toBe(true);
     } finally { panel.dispose(); }
 });
 

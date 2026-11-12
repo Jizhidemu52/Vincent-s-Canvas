@@ -117,7 +117,7 @@ test("department administrator creation retains password and department requirem
     const panel = page();
     try {
         await panel.settle();
-        panel.forms[2].setFieldsValue({ role: "department_admin" });
+        panel.forms[0].setFieldsValue({ role: "department_admin" });
         expect(panel.render().some(item => item.props.name === "password")).toBe(true);
         await panel.submit({ ...formValues, role: "department_admin", password: "StrongPassword123" });
         expect(panel.requests).toHaveLength(0);
@@ -133,7 +133,7 @@ test("editing an existing account retains optional password reset behavior", asy
         const table = tree.find(item => item.type === "Table" && item.props.dataSource[0]?.id === person.id)!;
         await table.props.columns.find((column: any) => column.title === "操作").render(null, person).props.onClick();
         expect(panel.render().find(item => item.props.name === "password")!.props.rules).toEqual([]);
-        await panel.submit({ ...panel.forms[2].fields, password: "ChangedPassword123" });
+        await panel.submit({ ...panel.forms[0].fields, password: "ChangedPassword123" });
         expect(panel.requests.map(item => item.path)).toEqual(["/api/admin/accounts/person", "/api/admin/accounts/person/reset-password"]);
         expect(panel.requests[1].body).toEqual({ password: "ChangedPassword123" });
     } finally { panel.dispose(); }
@@ -146,6 +146,8 @@ test("WeCom CSV and template omit password, allow no department, and preserve un
         tree.find(item => item.props.children === "下载模板")!.props.onClick();
         const template = Papa.parse<Record<string, string>>(await panel.downloads[0].text(), { header: true });
         expect(template.meta.fields).not.toContain("password");
+        expect(template.meta.fields).not.toContain("creditBalance");
+        expect(template.meta.fields).not.toContain("creditLimit");
         expect(template.meta.fields).toContain("employeeNo");
         const csv = "username,displayName,employeeNo,departmentCode,creditBalance,creditLimit\nnew-person,新成员,NewMember,,0,500";
         await panel.import(csv);

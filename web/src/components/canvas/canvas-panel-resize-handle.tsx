@@ -1,3 +1,4 @@
+import { Tooltip } from "antd";
 import { useUiText, uiText } from "@/lib/i18n";
 import { useEffect, useRef, useState, type PointerEvent } from "react";
 import { canvasPanelWidths, clampCanvasPanelWidth, type CanvasPanelKind } from "@/lib/canvas/canvas-panel-width";
@@ -31,11 +32,10 @@ export function CanvasPanelResizeHandle({ kind }: { kind: CanvasPanelKind }) {
         if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
     };
 
-    return <button type="button" role="separator" aria-orientation="vertical" tabIndex={0}
+    return <Tooltip title={t("拖动调整宽度，双击恢复默认；方向键微调，Home 恢复默认")}><button type="button" role="separator" aria-orientation="vertical" tabIndex={0}
         aria-label={t("调整{value1}面板宽度", { value1: kind === "create" ? uiText("创建") : uiText("对话") })}
         aria-valuemin={limits.min} aria-valuemax={limits.max} aria-valuenow={preview ?? width}
         aria-valuetext={t("{value1} 像素", { value1: preview ?? width })}
-        title={t("拖动调整宽度，双击恢复默认；方向键微调，Home 恢复默认")}
         className={`cw-panel-resize-handle ${preview !== null ? "is-resizing" : ""}`}
         data-canvas-no-zoom
         onPointerDown={(event) => {
@@ -68,5 +68,5 @@ export function CanvasPanelResizeHandle({ kind }: { kind: CanvasPanelKind }) {
             if (next === null) return;
             event.preventDefault();
             setWidth(kind, next);
-        }} />;
+        }} /></Tooltip>;
 }

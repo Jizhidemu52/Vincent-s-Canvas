@@ -1,6 +1,7 @@
 import { uiText, useUiLocale } from "@/lib/i18n";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Cpu } from "lucide-react";
+import { Tooltip } from "antd";
 import { CanvasModelPicker } from "@/components/canvas/canvas-model-picker";
 import { canvasImageModelDetails, canvasModelPresentation } from "@/lib/canvas/canvas-model-picker-options";
 import { imageModelProfile } from "@/lib/image-model-settings";
@@ -10,7 +11,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/u
 import { useCanManageConfig } from "@/hooks/use-can-manage-config";
 import { cn } from "@/lib/utils";
 import { standaloneEdition } from "@/lib/standalone-edition";
-import { deploymentFeatures } from "@/lib/deployment-features";
 import { imageModelDisplayName, imageModelIdentityHidden } from "@/lib/model-display";
 import { emitModelUsage } from "@/lib/usage-control-events";
 import { modelOptionLabel, modelOptionName, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
@@ -72,7 +72,7 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
     const nameFor = (model: string) => {
         const serverModel = serverModels.find(item => item.modelId === model);
         return imageModelIdentityHidden(model, businessModels) ? imageModelDisplayName(model, businessModels)
-            : serverModel?.name || modelOptionLabel(config, model);
+            : canvasModelPresentation(serverModel?.name || modelOptionLabel(config, model)).name;
     };
     const labelFor = (model: string) => modelLabelWithUsage(nameFor(model), serverModels.find(item => item.modelId === model)?.publicDescription);
     const currentLabel = binding?.enabled === false ? uiText("此板块已停用") : binding?.modelConfigId && !boundModel ? uiText("绑定模型不可用") : current ? `${labelFor(current)}${boundModel ? uiText(" · 后台指定") : ""}` : options.length ? placeholder : emptyLabel;
@@ -102,8 +102,9 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
         const selected = current ? presentationFor(current) : undefined;
         const selectedName = binding?.enabled === false ? uiText("此板块已停用") : binding?.modelConfigId && !boundModel ? uiText("绑定模型不可用") : selected?.name || (options.length ? placeholder : emptyLabel);
         return <Select open={open} value={current} disabled={pickerDisabled} onOpenChange={changeOpen} onValueChange={changeValue}>
+            <Tooltip title={selectedName} open={open ? false : undefined}><span className="block min-w-0 w-full">
             <SelectTrigger data-usage-control="model" aria-label={uiText("生成图片模型")} className={cn("settings-model-trigger", className)}
-                title={selectedName} onMouseDown={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>
+                onMouseDown={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>
                 <span className="settings-model-icon" aria-hidden>{selected?.icon ? <img src={selected.icon} alt="" /> : <Cpu size={20} />}</span>
                 <span className="settings-model-copy">
                     <span className="settings-model-name">{selectedName}</span>
@@ -111,6 +112,7 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
                 </span>
                 {selected ? <span className="settings-model-current">{uiText(boundModel ? "后台指定" : "当前使用")}</span> : null}
             </SelectTrigger>
+            </span></Tooltip>
             <SelectContent data-canvas-no-zoom aria-label={uiText("可用生成图片模型")} className="settings-model-menu" position="popper" align="start" side="bottom" sideOffset={6}
                 onEscapeKeyDown={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()} onMouseDown={event => event.stopPropagation()}>
                 {options.length ? options.map(model => {
@@ -125,7 +127,7 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
             </SelectContent>
         </Select>;
     }
-    if (variant === "canvas" || (variant !== "default" && toolKey?.startsWith("canvas-"))) {
+    if (variant === "canvas" || capability || (variant !== "default" && toolKey?.startsWith("canvas-"))) {
         const canvasOptions = options.map(model => {
             const serverModel = serverModels.find(item => item.modelId === model);
             const profile = capability === "image" ? imageModelProfile(model, businessModels) : undefined;
@@ -136,7 +138,7 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
         const label = binding?.enabled === false ? uiText("此板块已停用") : binding?.modelConfigId && !boundModel ? uiText("绑定模型不可用")
             : canvasOptions.find(option => option.value === current)?.name || (options.length ? placeholder : emptyLabel);
         return <CanvasModelPicker options={canvasOptions} value={current} label={label} emptyLabel={emptyLabel} open={open} disabled={pickerDisabled} bound={Boolean(boundModel)}
-            categoryLabel={uiText("{label}模型", { label: uiText(capability === "image" ? "图像" : modelCapabilityLabel(capability)) })} className={className} side={side} onOpenChange={changeOpen} onValueChange={changeValue} />;
+            categoryLabel={uiText("{label}模型", { label: uiText(capability === "image" ? "图像" : modelCapabilityLabel(capability)) })} className={cn(fullWidth && "!w-full !max-w-full", className)} side={side || (toolKey?.startsWith("canvas-") ? "right" : "bottom")} onOpenChange={changeOpen} onValueChange={changeValue} />;
     }
 
     return (
@@ -147,6 +149,7 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
             onOpenChange={changeOpen}
             onValueChange={changeValue}
         >
+            <Tooltip title={currentLabel} open={open ? false : undefined}><span className={cn("inline-flex min-w-0 max-w-full", fullWidth && "w-full")}>
             <SelectTrigger
                 data-usage-control="model"
                 className={cn(
@@ -157,11 +160,11 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
                 )}
                 onMouseDown={(event) => event.stopPropagation()}
                 onPointerDown={(event) => event.stopPropagation()}
-                title={currentLabel}
             >
                 <ModelIcon model={current} />
                 <span className="canvas-model-picker-text min-w-0 flex-1 truncate text-left">{currentLabel}</span>
             </SelectTrigger>
+            </span></Tooltip>
             <SelectContent
                 data-canvas-no-zoom
                 className="z-[1200] w-80 max-w-[calc(100vw-24px)] rounded-xl border border-border/70 bg-popover p-1 shadow-xl"
@@ -175,7 +178,7 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
                 {options.length ? (
                     options.map((model) => (
                         <SelectItem key={model} value={model} textValue={labelFor(model)} data-usage-control="model" data-usage-value={serverModels.find(item => item.modelId === model)?.id}>
-                            <ModelLabel model={model} label={labelFor(model)} serverModel={serverModels.find((item)=>item.modelId===model)} />
+                            <ModelLabel model={model} label={labelFor(model)} />
                         </SelectItem>
                     ))
                 ) : (
@@ -196,13 +199,13 @@ function emptyModelLabel(config: AiConfig, capability?: ModelCapability, canMana
     return config.models.length ? uiText("暂无匹配的{label}模型", { label }) : uiText("请先到配置里添加渠道和模型");
 }
 
-function ModelLabel({ model, label, serverModel }: { model: string; label: string; serverModel?: { creditCost: number } }) {
+function ModelLabel({ model, label }: { model: string; label: string }) {
     useUiLocale();
     return (
         <span className="flex min-w-0 items-center gap-2">
             <ModelIcon model={model} />
             <span className="flex min-w-0 flex-col py-1">
-                <span className="whitespace-normal">{serverModel && deploymentFeatures.creditsEnabled ? uiText("{label} · 模型 {credits} 积分", { label, credits: serverModel.creditCost }) : label}</span>
+                <span className="whitespace-normal">{label}</span>
             </span>
         </span>
     );

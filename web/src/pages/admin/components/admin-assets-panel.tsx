@@ -66,7 +66,7 @@ export function AdminAssetsPanel() {
         <Table className="wb-surface min-w-0 overflow-hidden" rowKey="id" size="small" loading={projectsQuery.isFetching} dataSource={projects} scroll={{ x: 1100 }} pagination={{ pageSize: 10 }} title={() => "公司项目监管"} locale={{ emptyText: "暂无可查看的公司项目" }} columns={[
             { title: "项目", dataIndex: "name", ellipsis: true }, { title: "设计师", dataIndex: "ownerName" }, { title: "部门", dataIndex: "departmentName" },
             { title: "状态", render: (_, project: ServerProject) => <Tag color={project.status === "active" ? "green" : "default"}>{adminLabel(project.status)}</Tag> },
-            { title: "任务", dataIndex: "taskCount" }, { title: "素材", dataIndex: "assetCount" }, { title: "消耗积分", dataIndex: "credits" }, { title: "更新时间（北京时间）", dataIndex: "updatedAt", render: formatBeijingDateTime },
+            { title: "任务", dataIndex: "taskCount" }, { title: "素材", dataIndex: "assetCount" }, { title: "更新时间（北京时间）", dataIndex: "updatedAt", render: formatBeijingDateTime },
             { title: "操作", width: 100, fixed: "right", render: (_, project: ServerProject) => <Button type="link" onClick={() => { setDetail(null); setSearchParams(current => patchAssetFilters(clearAssetFilters(current), { assetProject: project.id }), { replace: true }); }}>查看素材</Button> },
         ]} />
         <section aria-label="素材筛选" className="wb-surface grid min-w-0 gap-3 p-4">

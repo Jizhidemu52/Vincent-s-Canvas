@@ -1,49 +1,30 @@
 import { useUiText } from "@/lib/i18n";
 import { adminLabel } from "@/pages/admin/admin-labels";
 import { formatBeijingDateTime } from "@/lib/beijing-time";
-import { Alert, App, Button, Empty, Form, Input, InputNumber, Modal, Skeleton, Table, Tag } from "antd";
-import { CheckCircle2, CircleDollarSign, Clock3, Download, HandCoins, Images, RefreshCw, RotateCcw, Send, UsersRound, XCircle } from "lucide-react";
+import { Alert, App, Button, Empty, Skeleton, Table, Tag } from "antd";
+import { CheckCircle2, Clock3, Download, Images, RefreshCw, RotateCcw, UsersRound, XCircle } from "lucide-react";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 
-import { createClientId } from "@/lib/client-id";
+import { isFinancialAuditAction } from "@/lib/financial-presentation";
 import { deploymentFeatures } from "@/lib/deployment-features";
 
-import {
-  contributeGroupCredits,
-  decideTeamGroupCreditRequest,
-  submitGroupCreditRequest,
-  type ManagedGroupCredits,
-  type MyGroupCredits,
-} from "@/services/api/group-credits";
 import { exportTeamHistory, type TeamAuditLog, type TeamHistory, type TeamOverview } from "@/services/api/groups";
 import { recordServerAssetEvent, type AssetEventType, type ServerAsset } from "@/services/api/server-assets";
 import { useUserStore } from "@/stores/use-user-store";
 import { useModuleStore } from "@/stores/use-module-store";
-import { loadTeamOverview } from "./team-overview";
+import { loadTeamOverview, nonFinancialTeamCsv } from "./team-overview";
+import { WorkbenchImage } from "@/components/workbench-image";
 
 const PerformanceDashboard = lazy(() => import("@/pages/performance/dashboard").then((module) => ({ default: module.PerformanceDashboard })));
 
 const statusLabel: Record<string, string> = { unused: "未使用", candidate: "候选", project: "已入项目", editing: "继续编辑", downloaded: "已下载", adopted: "已采用", delivered: "已交付", pending: "待定", rejected: "废弃" };
-const requestStatus: Record<string, { label: string; color: string }> = {
-  pending: { label: "待审批", color: "orange" }, approved: { label: "已到账", color: "green" },
-  rejected: { label: "已拒绝", color: "red" }, expired: { label: "已过期", color: "default" },
-  cancelled: { label: "已取消", color: "default" },
-};
-type CreditIntent = { key: string; requestId: string; confirmed: boolean };
 
 export default function TeamPage() {
     const t = useUiText();
-  const { message, modal } = App.useApp();
+  const { message } = App.useApp();
   const user = useUserStore((state) => state.user);
-  const hydrateSession = useUserStore((state) => state.hydrateSession);
-  const [requestForm] = Form.useForm<{ amount: number; reason: string }>();
-  const [contributionForm] = Form.useForm<{ amount: number }>();
-  const [requestOpen, setRequestOpen] = useState(false);
-  const [contributionOpen, setContributionOpen] = useState(false);
-  const [myCredits, setMyCredits] = useState<MyGroupCredits>();
-  const [managedCredits, setManagedCredits] = useState<ManagedGroupCredits>();
   const [overview, setOverview] = useState<TeamOverview>();
   const [history, setHistory] = useState<TeamHistory[]>([]);
   const [auditLogs, setAuditLogs] = useState<TeamAuditLog[]>([]);
@@ -53,12 +34,11 @@ export default function TeamPage() {
   const [loadError, setLoadError] = useState("");
   const [pendingAction, setPendingAction] = useState("");
   const pendingActionRef = useRef<object | null>(null);
-  const creditIntents = useRef<{ request?: CreditIntent; contribution?: CreditIntent }>({});
   const actionScopeRef = useRef({ userId: user?.id, groupId: user?.groupId, active: true });
   if (actionScopeRef.current.userId !== user?.id || actionScopeRef.current.groupId !== user?.groupId) {
     actionScopeRef.current.active = false;
     actionScopeRef.current = { userId: user?.id, groupId: user?.groupId, active: true };
-    creditIntents.current = {}; pendingActionRef.current = null;
+    pendingActionRef.current = null;
   }
   const actionScope = actionScopeRef.current;
   const isCurrentScope = () => {
@@ -76,20 +56,18 @@ export default function TeamPage() {
     try {
       const result = await loadTeamOverview(isLeader);
       if (sequence !== requestSequence.current) return;
-      if (result.myCredits) setMyCredits(result.myCredits);
       if (result.overview) setOverview(result.overview);
       if (result.history) setHistory(result.history);
       if (result.assets) setAssets(result.assets);
       if (result.assetTotal !== undefined) setAssetTotal(result.assetTotal);
       if (result.auditLogs) setAuditLogs(result.auditLogs);
-      if (result.managedCredits) setManagedCredits(result.managedCredits);
       setLoadError(result.errors.join("；"));
     } catch (error) { if (sequence === requestSequence.current) setLoadError(error instanceof Error ? error.message : t("本组数据加载失败")); }
     finally { if (sequence === requestSequence.current) setLoading(false); }
   };
   useEffect(() => {
-    setMyCredits(undefined); setManagedCredits(undefined); setOverview(undefined); setHistory([]); setAssets([]); setAssetTotal(0); setAuditLogs([]); setLoadError("");
-    setPendingAction(""); setRequestOpen(false); setContributionOpen(false); requestForm.resetFields(); contributionForm.resetFields();
+    setOverview(undefined); setHistory([]); setAssets([]); setAssetTotal(0); setAuditLogs([]); setLoadError("");
+    setPendingAction("");
     void refresh();
     return () => { requestSequence.current++; };
   }, [user?.id, user?.groupId, user?.groupRole]);
@@ -102,128 +80,60 @@ export default function TeamPage() {
     finally { if (pendingActionRef.current === pending) { pendingActionRef.current = null; if (isCurrentScope()) setPendingAction(""); } }
   };
 
-  if (!deploymentFeatures.creditsEnabled || !user || !user.groupId) return <main role="alert" className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center"><h1 className="text-xl font-semibold">{t("小组功能暂不可用")}</h1><p className="text-sm text-muted-foreground">{!deploymentFeatures.creditsEnabled ? t("当前未启用小组积分功能。") : t("当前账号尚未分配小组，请联系管理员。")}</p><Link to="/" className="underline">{t("返回工作台")}</Link></main>;
+  if (!deploymentFeatures.creditsEnabled || !user || !user.groupId) return <main role="alert" className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center"><h1 className="text-xl font-semibold">{t("小组功能暂不可用")}</h1><p className="text-sm text-muted-foreground">{!deploymentFeatures.creditsEnabled ? t("当前未启用小组功能。") : t("当前账号尚未分配小组，请联系管理员。")}</p><Link to="/" className="underline">{t("返回工作台")}</Link></main>;
 
-  const creditIntent = (kind: "request" | "contribution", values: { amount: number; reason?: string }) => {
-    // A lost acknowledgement may already be committed; unchanged retries must keep this page's ID.
-    const key = JSON.stringify([user.id, user.groupId, values.amount, values.reason ?? ""]);
-    let intent = creditIntents.current[kind];
-    if (!intent || intent.key !== key) {
-      intent = { key, requestId: `group-${kind === "request" ? "claim" : "contribution"}-${createClientId()}`, confirmed: false };
-      creditIntents.current[kind] = intent;
-    }
-    return intent;
-  };
-  const applyCredits = (values: { amount: number; reason: string }) => runAction("request", async () => {
-    const intent = creditIntent("request", values);
-    if (intent.confirmed) return;
-    try {
-      await submitGroupCreditRequest({ requestId: intent.requestId, ...values });
-    } catch (error) { if (isCurrentScope()) message.error(error instanceof Error ? error.message : t("申请失败")); return; }
-    intent.confirmed = true;
-    if (!isCurrentScope()) return;
-    message.success(t("额度申请已提交，等待组长审批")); setRequestOpen(false); requestForm.resetFields(); await refresh(true);
-  });
-  const contribute = (values: { amount: number }) => runAction("contribution", async () => {
-    const intent = creditIntent("contribution", values);
-    if (intent.confirmed) return;
-    try {
-      await contributeGroupCredits({ requestId: intent.requestId, ...values });
-    } catch (error) { if (isCurrentScope()) message.error(error instanceof Error ? error.message : t("归还失败")); return; }
-    intent.confirmed = true;
-    if (!isCurrentScope()) return;
-    message.success(t("积分已归还到本组共享池，本月个人额度同步减少")); setContributionOpen(false); contributionForm.resetFields();
-    const [session] = await Promise.allSettled([hydrateSession(), refresh(true)]);
-    if (isCurrentScope() && session.status === "rejected") message.warning(t("积分归还已完成，但账户余额暂未刷新；请刷新查看，不要重复归还。"));
-  });
-  const decide = (id: string, decision: "approved" | "rejected") => runAction(`decision:${id}`, async () => {
-    try {
-      await decideTeamGroupCreditRequest(id, decision);
-      message.success(decision === "approved" ? t("审批通过，额度已到账") : t("申请已拒绝")); await refresh(true);
-    } catch (error) { message.error(error instanceof Error ? error.message : t("审批失败")); }
-  });
   const setResult = (asset: ServerAsset, eventType: AssetEventType) => runAction(`asset:${asset.id}:${eventType}`, async () => {
-    try { await recordServerAssetEvent(asset.id, eventType, { channel: "team-dashboard" }); message.success(t("成果状态已更新")); await refresh(true); }
-    catch (error) { message.error(error instanceof Error ? error.message : t("状态更新失败")); }
+    try { await recordServerAssetEvent(asset.id, eventType, { channel: "team-dashboard" }); if (!isCurrentScope()) return; message.success(t("成果状态已更新")); await refresh(true); }
+    catch (error) { if (isCurrentScope()) message.error(error instanceof Error ? error.message : t("状态更新失败")); }
   });
   const successRate = overview?.summary.taskCount ? Math.round(overview.summary.successCount / overview.summary.taskCount * 100) : 0;
   const downloadReport = () => runAction("export", async () => {
     try {
-      const blob = await exportTeamHistory(); const url = URL.createObjectURL(blob); const link = document.createElement("a");
+      const original = await exportTeamHistory(); if (!isCurrentScope()) return; const blob = new Blob([nonFinancialTeamCsv(await original.text())], { type: "text/csv;charset=utf-8" }); if (!isCurrentScope()) return; const url = URL.createObjectURL(blob); const link = document.createElement("a");
       link.href = url; link.download = t("{p0}-历史报表.csv", { p0: String(overview?.group.name || t("本组")) }); link.click(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
       message.success(t("本组报表已导出并记录审计"));
-    } catch (error) { message.error(error instanceof Error ? error.message : t("报表导出失败")); }
+    } catch (error) { if (isCurrentScope()) message.error(error instanceof Error ? error.message : t("报表导出失败")); }
   });
 
   return (
     <div className="wb-page h-full overflow-y-auto">
-      <main className="mx-auto w-full max-w-7xl space-y-6 px-4 py-6 sm:px-6 lg:px-8">
+      <main className="wb-content space-y-6 px-4 py-6 sm:px-6 lg:px-8">
         <header className="wb-header !mb-0">
-          <div><div className="wb-eyebrow">{isLeader ? t("组长工作台") : t("我的小组")}</div><h1 className="wb-title">{overview?.group.name || user.groupName || t("团队协作")}</h1><p className="wb-description">{t("查看小组额度与协作成果。优先使用个人月度额度，不足时再使用已审批的小组额度。")}</p></div>
-          <div className="wb-toolbar"><Button className="!h-10" loading={loading} icon={<RefreshCw className="size-4" />} onClick={() => void refresh()}>{t("刷新")}</Button><Button className="!h-10" disabled={loading || !myCredits || Boolean(pendingAction) || user.creditBalance <= 0} icon={<HandCoins className="size-4" />} onClick={() => { if (creditIntents.current.contribution?.confirmed) delete creditIntents.current.contribution; setContributionOpen(true); }}>{t("归还个人额度")}</Button><Button className="!h-10" disabled={loading || !myCredits || Boolean(pendingAction) || myCredits.policy.perRequestLimit <= 0} type="primary" icon={<Send className="size-4" />} onClick={() => { if (creditIntents.current.request?.confirmed) delete creditIntents.current.request; setRequestOpen(true); }}>{t("申请小组额度")}</Button></div>
+          <div><div className="wb-eyebrow">{isLeader ? t("组长工作台") : t("我的小组")}</div><h1 className="wb-title">{overview?.group.name || user.groupName || t("团队协作")}</h1><p className="wb-description">{t("查看小组成员、任务进展与协作成果。")}</p></div>
+          <div className="wb-toolbar"><Button className="!h-10" loading={loading} icon={<RefreshCw className="size-4" />} onClick={() => void refresh()}>{t("刷新")}</Button></div>
         </header>
         {loadError ? <Alert type="warning" showIcon title={t("部分小组数据暂未更新")} description={loadError} action={<Button loading={loading} onClick={() => void refresh()}>{t("重试")}</Button>} /> : null}
 
-        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <Metric icon={<CircleDollarSign className="size-4" />} label={t("已领取可用")} value={myCredits ? t("{p0} 积分", { p0: String(myCredits.wallet.availableCredits) }) : "—"} />
-          <Metric icon={<HandCoins className="size-4" />} label={t("本月累计领取")} value={myCredits ? t("{p0} 积分", { p0: String(myCredits.wallet.grantedCredits) }) : "—"} />
-          <Metric icon={<CheckCircle2 className="size-4" />} label={t("已使用小组额度")} value={myCredits ? t("{p0} 积分", { p0: String(myCredits.wallet.spentCredits) }) : "—"} />
-          <Metric icon={<Clock3 className="size-4" />} label={t("小组池当前可用")} value={myCredits ? t("{p0} 积分", { p0: String(myCredits.poolBalance) }) : "—"} />
-        </section>
-
-        <section className="wb-surface overflow-hidden">
-          <div className="border-b border-[var(--border)] px-4 py-3"><div className="font-semibold">{t("我的额度申请")}</div><div className="text-xs text-[var(--muted-foreground)]">{t("领取额度仅本月有效，月底自动清零，不能转给其他成员")}</div></div>
-          <Table loading={loading} rowKey="id" size="small" scroll={{ x: 760 }} pagination={{ pageSize: 8 }} dataSource={myCredits?.requests ?? []} columns={[
-            { title: `${t("申请时间")}（北京时间）`, dataIndex: "createdAt", render: formatBeijingDateTime },
-            { title: t("积分"), dataIndex: "amount" }, { title: t("用途"), dataIndex: "reason" },
-            { title: t("状态"), dataIndex: "status", render: (value: string) => <Tag color={requestStatus[value]?.color}>{t(requestStatus[value]?.label || value)}</Tag> },
-            { title: t("审批备注"), dataIndex: "decisionNote", render: (value: string | null) => value || "-" },
-          ]} />
-        </section>
-
         {isLeader ? <>
           {performanceEnabled ? <Suspense fallback={<div className="wb-surface p-6" role="status" aria-label={t("正在加载团队效能")}><Skeleton active /></div>}><PerformanceDashboard teamOnly /></Suspense> : null}
-          <section className="wb-surface overflow-hidden">
-            <div className="border-b border-[var(--border)] px-4 py-3"><div className="font-semibold">{t("共享池审批")}</div><div className="text-xs text-[var(--muted-foreground)]">{t("只能审批本组有效成员；单次、每日和每月上限由管理员统一设置")}</div></div>
-            <Table loading={loading} rowKey="id" size="small" scroll={{ x: 720 }} pagination={{ pageSize: 10 }} dataSource={managedCredits?.requests ?? []} columns={[
-              { title: t("成员"), dataIndex: "userName" }, { title: t("积分"), dataIndex: "amount" }, { title: t("用途"), dataIndex: "reason" },
-              { title: t("状态"), dataIndex: "status", render: (value: string) => <Tag color={requestStatus[value]?.color}>{t(requestStatus[value]?.label || value)}</Tag> },
-              { title: t("操作"), render: (_, row) => row.status === "pending" ? <div className="flex gap-2"><Button size="small" type="primary" loading={pendingAction === `decision:${row.id}`} disabled={Boolean(pendingAction)} onClick={() => modal.confirm({ title: t("通过该额度申请？"), content: t("确认后将发放 {p0} 积分。", { p0: String(row.amount) }), okText: t("确认通过"), cancelText: t("取消"), onOk: () => decide(row.id, "approved") })}>{t("通过")}</Button><Button size="small" danger disabled={Boolean(pendingAction)} onClick={() => modal.confirm({ title: t("拒绝该额度申请？"), okText: t("拒绝"), cancelText: t("取消"), okButtonProps: { danger: true }, onOk: () => decide(row.id, "rejected") })}>{t("拒绝")}</Button></div> : "-" },
-            ]} />
-          </section>
-
-          <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <section className="grid gap-3 sm:grid-cols-3">
             <Metric icon={<UsersRound className="size-4" />} label={t("当前成员")} value={overview ? String(overview.group.memberCount) : "—"} />
             <Metric icon={<Images className="size-4" />} label={t("历史任务")} value={overview ? String(overview.summary.taskCount) : "—"} />
             <Metric icon={<CheckCircle2 className="size-4" />} label={t("任务成功率")} value={overview ? `${successRate}%` : "—"} />
-            <Metric icon={<CircleDollarSign className="size-4" />} label={t("累计成本")} value={overview ? `¥${Number(overview.summary.rmbCost).toFixed(2)}` : "—"} />
           </section>
 
           <section className="wb-surface overflow-hidden"><div className="border-b border-[var(--border)] px-4 py-3 text-base font-semibold">{t("本组成员")}</div><Table loading={loading} rowKey="id" size="small" pagination={false} scroll={{ x: 640 }} dataSource={overview?.members ?? []} columns={[
             { title: t("姓名"), dataIndex: "displayName" }, { title: t("账号"), dataIndex: "username" },
             { title: t("身份"), render: (_, record) => <Tag color={record.role === "leader" ? "orange" : "default"}>{record.role === "leader" ? t("组长") : t("成员")}</Tag> },
-            { title: t("个人本月剩余"), dataIndex: "creditBalance" }, { title: t("每月固定额度"), dataIndex: "monthlyCreditLimit" },
           ]} /></section>
 
           <section><div className="mb-3 flex items-end justify-between"><div><h2 className="text-lg font-semibold">{t("最近成果")}</h2><p className="text-sm text-[var(--muted-foreground)]">{t("组长可确认采用、最终交付、待定或废弃")}</p></div><Tag>{t("共")} {assetTotal} {t("个 · 显示最近")} {assets.length} {t("个")}</Tag></div>
             {assets.length ? <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{assets.slice(0, 12).map((asset) => <article key={asset.id} className="wb-surface overflow-hidden">
-              {asset.kind === "image" ? <img src={`/api/assets/${asset.id}/content`} alt={asset.filename} loading="lazy" decoding="async" className="aspect-[4/3] w-full object-cover" /> : <div className="flex aspect-[4/3] items-center justify-center bg-[var(--muted)] text-[var(--muted-foreground)]">{asset.kind}</div>}
+              {asset.kind === "image" ? <WorkbenchImage src={`/api/assets/${asset.id}/content`} alt={asset.filename} loading="lazy" decoding="async" className="aspect-[4/3] w-full object-cover" /> : <div className="flex aspect-[4/3] items-center justify-center bg-[var(--muted)] text-[var(--muted-foreground)]">{asset.kind}</div>}
               <div className="space-y-3 p-3"><div className="flex items-start justify-between gap-2"><div><div className="break-all font-medium">{asset.filename}</div><div className="text-xs text-[var(--muted-foreground)]">{asset.ownerName} · {asset.modelName || t("未记录模型")}</div></div><Tag color="orange">{t(statusLabel[asset.resultStatus]) || asset.resultStatus}</Tag></div><p className="line-clamp-3 min-h-[60px] text-sm leading-5 text-[var(--muted-foreground)]">{asset.prompt || t("未记录提示词")}</p><div className="grid grid-cols-2 gap-2"><Button className="!h-10" loading={pendingAction === `asset:${asset.id}:asset.adopted`} disabled={Boolean(pendingAction) || asset.resultStatus === "adopted"} icon={<CheckCircle2 className="size-3.5" />} onClick={() => void setResult(asset, "asset.adopted")}>{t("确认采用")}</Button><Button className="!h-10" loading={pendingAction === `asset:${asset.id}:asset.delivered`} disabled={Boolean(pendingAction) || asset.resultStatus === "delivered"} type="primary" icon={<Clock3 className="size-3.5" />} onClick={() => void setResult(asset, "asset.delivered")}>{t("最终交付")}</Button><Button className="!h-10" loading={pendingAction === `asset:${asset.id}:asset.pending`} disabled={Boolean(pendingAction) || asset.resultStatus === "pending"} icon={<RotateCcw className="size-3.5" />} onClick={() => void setResult(asset, "asset.pending")}>{t("标记待定")}</Button><Button className="!h-10" loading={pendingAction === `asset:${asset.id}:asset.rejected`} disabled={Boolean(pendingAction) || asset.resultStatus === "rejected"} danger icon={<XCircle className="size-3.5" />} onClick={() => void setResult(asset, "asset.rejected")}>{t("标记废弃")}</Button></div></div>
             </article>)}</div> : <div className="wb-surface p-6">{loading ? <Skeleton active paragraph={{ rows: 4 }} /> : <Empty description={t("本组暂无成果，成员完成生成后会显示在这里")} />}</div>}
           </section>
 
           <section className="wb-surface overflow-hidden"><div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3"><div className="text-base font-semibold">{t("本组任务与完整提示词")}</div><Button className="!h-10" loading={pendingAction === "export"} disabled={Boolean(pendingAction) || loading || !history.length} icon={<Download className="size-4" />} onClick={() => void downloadReport()}>{t("导出本组报表")}</Button></div><Table loading={loading} rowKey="id" size="small" scroll={{ x: 900 }} pagination={{ pageSize: 20 }} dataSource={history} columns={[
-            { title: `${t("时间")} (${t("北京时间")})`, dataIndex: "createdAt", width: 200, render: (value: string) => formatBeijingDateTime(value) }, { title: t("设计师"), dataIndex: "userName", width: 120 }, { title: t("板块"), dataIndex: "operationType", width: 130, render: adminLabel }, { title: t("模型"), dataIndex: "modelName", width: 130, render: (value: string | null) => value || "-" }, { title: t("完整提示词"), dataIndex: "prompt", width: 360 }, { title: t("积分"), dataIndex: "credits", width: 80 }, { title: t("状态"), dataIndex: "status", width: 90, render: (value: string) => <Tag color={value === "success" ? "green" : "red"}>{adminLabel(value)}</Tag> },
+            { title: `${t("时间")} (${t("北京时间")})`, dataIndex: "createdAt", width: 200, render: (value: string) => formatBeijingDateTime(value) }, { title: t("设计师"), dataIndex: "userName", width: 120 }, { title: t("板块"), dataIndex: "operationType", width: 130, render: adminLabel }, { title: t("模型"), dataIndex: "modelName", width: 130, render: (value: string | null) => value || "-" }, { title: t("完整提示词"), dataIndex: "prompt", width: 360 }, { title: t("状态"), dataIndex: "status", width: 90, render: (value: string) => <Tag color={value === "success" ? "green" : "red"}>{adminLabel(value)}</Tag> },
           ]} /></section>
 
-          <section className="wb-surface overflow-hidden"><div className="border-b border-[var(--border)] px-4 py-3 text-base font-semibold">{t("本组审计记录")}</div><Table loading={loading} scroll={{ x: 850 }} rowKey="id" size="small" pagination={{ pageSize: 20 }} dataSource={auditLogs} columns={[
+          <section className="wb-surface overflow-hidden"><div className="border-b border-[var(--border)] px-4 py-3 text-base font-semibold">{t("本组审计记录")}</div><Table loading={loading} scroll={{ x: 850 }} rowKey="id" size="small" pagination={{ pageSize: 20 }} dataSource={auditLogs.filter(log => !isFinancialAuditAction(log.action))} columns={[
             { title: `${t("时间")}（北京时间）`, dataIndex: "createdAt", width: 180, render: formatBeijingDateTime }, { title: t("操作人"), dataIndex: "actorName", width: 120, render: (value: string | null) => value || t("系统") }, { title: t("行为"), dataIndex: "action", width: 180, render: adminLabel }, { title: t("目标"), dataIndex: "targetId", width: 220 }, { title: t("结果"), dataIndex: "result", width: 90, render: (value: string) => <Tag color={value === "success" ? "green" : "red"}>{adminLabel(value)}</Tag> },
           ]} /></section>
         </> : null}
       </main>
 
-      <Modal title={t("申请小组共享额度")} open={requestOpen} onCancel={() => { if (!pendingAction) setRequestOpen(false); }} keyboard={!pendingAction} maskClosable={!pendingAction} footer={null} destroyOnHidden><Form form={requestForm} disabled={Boolean(pendingAction)} layout="vertical" onFinish={applyCredits}><Form.Item name="amount" label={t("申请积分（单次最多 {p0}）", { p0: String(myCredits?.policy.perRequestLimit ?? 0) })} rules={[{ required: true }]}><InputNumber className="w-full" min={1} max={myCredits?.policy.perRequestLimit || 1} /></Form.Item><Form.Item name="reason" label={t("用途说明")} rules={[{ required: true, min: 2 }]}><Input.TextArea rows={4} maxLength={500} showCount placeholder={t("例如：本周商品图批量改图任务")} /></Form.Item><Button className="!h-10" loading={pendingAction === "request"} type="primary" htmlType="submit" block>{t("提交申请")}</Button></Form></Modal>
-      <Modal title={t("归还个人额度到本组共享池")} open={contributionOpen} onCancel={() => { if (!pendingAction) setContributionOpen(false); }} keyboard={!pendingAction} maskClosable={!pendingAction} footer={null} destroyOnHidden><Form form={contributionForm} disabled={Boolean(pendingAction)} layout="vertical" onFinish={contribute}><p className="mb-4 text-sm text-[var(--muted-foreground)]">{t("只可归还本月尚未使用的个人积分。归还后不能撤回或跨组转移，月底共享池余额统一清零。")}</p><Form.Item name="amount" label={t("归还积分（个人当前剩余 {p0}）", { p0: String(user.creditBalance) })} rules={[{ required: true }]}><InputNumber className="w-full" min={1} max={user.creditBalance} /></Form.Item><Button className="!h-10" loading={pendingAction === "contribution"} type="primary" htmlType="submit" block disabled={user.creditBalance <= 0}>{t("确认归还")}</Button></Form></Modal>
     </div>
   );
 }

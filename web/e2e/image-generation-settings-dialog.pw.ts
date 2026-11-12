@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { resolve } from "node:path";
+import { antSelect, chooseAntSelect } from "./antd-select-helpers";
 
 const fixture = `<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><script type="module">import RefreshRuntime from '/@react-refresh';RefreshRuntime.injectIntoGlobalHook(window);window.$RefreshReg$=()=>{};window.$RefreshSig$=()=>type=>type;window.__vite_plugin_react_preamble_installed__=true;</script></head><body><div id="root"></div><script type="module" src="/e2e/image-generation-settings-dialog.fixture.tsx"></script></body></html>`;
 const output = resolve(import.meta.dirname, "../../output/image-generation-settings-dialog");
@@ -40,11 +41,11 @@ test("desktop model selection and parameters are retained after closing, with fo
     await expect(page.getByRole("option", { name: /GPT Image 2.6 Flare/ })).toHaveAttribute("data-state", "checked");
     await page.getByRole("option", { name: /GPT Image 2.6 Sunburst/ }).click();
     await expect(picker).toContainText("GPT Image 2.6 Sunburst");
-    await dialog.getByRole("combobox", { name: "宽高比", exact: true }).selectOption("16:9");
-    await dialog.getByRole("combobox", { name: "清晰度 / 分辨率", exact: true }).selectOption("2k");
-    await dialog.getByRole("combobox", { name: "图片质量", exact: true }).selectOption("high");
+    await chooseAntSelect(dialog.getByRole("combobox", { name: "宽高比", exact: true }), "16:9");
+    await chooseAntSelect(dialog.getByRole("combobox", { name: "清晰度 / 分辨率", exact: true }), "2K");
+    await chooseAntSelect(dialog.getByRole("combobox", { name: "图片质量", exact: true }), "高");
     await dialog.locator("summary", { hasText: "高级参数" }).click();
-    await dialog.getByLabel("输出格式", { exact: true }).selectOption("png");
+    await chooseAntSelect(dialog.getByRole("combobox", { name: "输出格式", exact: true }), "PNG");
     await dialog.getByRole("button", { name: /^完\s*成$/ }).click();
     await expect(dialog).not.toBeVisible();
     await expect(opener).toBeFocused();
@@ -53,7 +54,7 @@ test("desktop model selection and parameters are retained after closing, with fo
     expect(JSON.parse(config.imageOptions)).toMatchObject({ resolution: "2k", output_format: "png" });
     await opener.click();
     await expect(picker).toContainText("GPT Image 2.6 Sunburst");
-    await expect(dialog.getByRole("combobox", { name: "宽高比", exact: true })).toHaveValue("16:9");
+    await expect(antSelect(dialog.getByRole("combobox", { name: "宽高比", exact: true }))).toHaveText("16:9");
     await expect(dialog.getByLabel("输出格式", { exact: true })).not.toBeVisible();
     await picker.press("Enter");
     await expect(page.getByRole("listbox", { name: "可用生成图片模型", exact: true })).toBeVisible();
@@ -84,7 +85,7 @@ test("390px dark reduced-motion sheet stays in bounds, supports long labels and 
     await page.screenshot({ path: resolve(output, "mobile-models-dark.png") });
     await page.getByRole("option", { name: /GPT Image 2.6 Sunburst/ }).click();
     await dialog.locator("summary", { hasText: "高级参数" }).click();
-    await dialog.getByLabel("输出格式", { exact: true }).selectOption("webp");
+    await chooseAntSelect(dialog.getByRole("combobox", { name: "输出格式", exact: true }), "WebP");
     await dialog.getByLabel("输出压缩质量", { exact: true }).fill("85");
     const overflow = await dialog.evaluate(element => element.scrollWidth > element.clientWidth || document.documentElement.scrollWidth > innerWidth);
     expect(overflow).toBe(false);

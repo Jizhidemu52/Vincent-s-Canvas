@@ -62,7 +62,8 @@ test("English scene choices keep Chinese source values and the original model pa
     const payload = scenePromptInput("text-to-style", form);
     await setUiLocale("en-US");
     const markup = renderToStaticMarkup(createElement(SceneFields, { sceneId: "text-to-style", form, onChange() { throw new Error("Language render must not mutate a draft"); } }));
-    expect(markup).toContain('value="针织衫" selected=""');
+    expect(markup).toContain('title="Knitwear"');
+    expect(markup).toContain('role="combobox"');
     expect(markup).toMatch(/<input(?=[^>]*value="宽松")(?=[^>]*checked="")[^>]*>/);
     expect(markup).toContain("保存 / 我的中文针织设计");
     expect(markup).toContain("Knitwear");

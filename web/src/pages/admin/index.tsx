@@ -1,11 +1,11 @@
 import type { ReactNode } from "react";
-import { Download, Edit3, FileUp, LogOut, RefreshCw, ShieldCheck, SlidersHorizontal, UserPlus, UsersRound, WalletCards } from "lucide-react";
+import { Download, Edit3, FileUp, LogOut, RefreshCw, UserPlus, UsersRound } from "lucide-react";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
-import { Alert, App, Button, Form, Input, InputNumber, Select, Skeleton, Space, Table, Tabs, Tag, Typography, Upload } from "antd";
+import { Alert, App, Button, Form, Input, Select, Skeleton, Space, Table, Tabs, Tag, Typography, Upload } from "antd";
 import { saveAs } from "file-saver";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 
-import { adjustAccountCredits, bulkCreateAccounts, createAccount, createDepartment, resetAccountPassword, setAccountCredits, updateAccount, type AuditLog, type Department } from "@/services/api/admin-accounts";
+import { bulkCreateAccounts, createAccount, createDepartment, resetAccountPassword, updateAccount, type AuditLog, type Department } from "@/services/api/admin-accounts";
 import { loadAdminOverview, markPlatformAdminTabLabel, resolveAdminTab } from "./admin-overview";
 import { accountTemplateCsv, parseAccountCsv, prepareNewAccount } from "./account-input";
 import { getAuthMethods, type ApiUser, type ApiUserRole } from "@/services/api/auth";
@@ -14,33 +14,21 @@ import { useModuleStore } from "@/stores/use-module-store";
 import { deploymentFeatures } from "@/lib/deployment-features";
 import { useUnsavedGuard, useConfirmUnsavedChanges } from "@/hooks/use-unsaved-guard";
 import { formatBeijingDateTime } from "@/lib/beijing-time";
+import { isFinancialAuditAction } from "@/lib/financial-presentation";
 import { AdminDetails, adminLabel } from "./admin-labels";
-import { creditChangeError, filterAdminAccounts } from "./account-ux";
+import { filterAdminAccounts } from "./account-ux";
 
 const ApiConfigurationHub = lazy(() => import("./components/api-configuration-hub").then((module) => ({ default: module.ApiConfigurationHub })));
 const MarkImageProviderPanel = lazy(() => import("./components/mark-image-provider-panel").then((module) => ({ default: module.MarkImageProviderPanel })));
 const UsageAnalyticsPanel = lazy(() => import("./components/usage-analytics-panel").then((module) => ({ default: module.UsageAnalyticsPanel })));
-const ModelPricingPanel = lazy(() => import("./components/model-pricing-panel").then((module) => ({ default: module.ModelPricingPanel })));
 const HistoryManagementPanel = lazy(() => import("./components/task-history-panels").then((module) => ({ default: module.HistoryManagementPanel })));
 const TaskManagementPanel = lazy(() => import("./components/task-history-panels").then((module) => ({ default: module.TaskManagementPanel })));
 const AdminAssetsPanel = lazy(() => import("./components/admin-assets-panel").then((module) => ({ default: module.AdminAssetsPanel })));
 const IntegrationStatusPanel = lazy(() => import("./components/integration-status-panel").then((module) => ({ default: module.IntegrationStatusPanel })));
 const GroupManagementPanel = lazy(() => import("./components/group-management-panel").then((module) => ({ default: module.GroupManagementPanel })));
 const ModuleSwitchPanel = lazy(() => import("./components/module-switch-panel").then((module) => ({ default: module.ModuleSwitchPanel })));
-const CreditPolicyPanel = lazy(() => import("./components/credit-policy-panel").then((module) => ({ default: module.CreditPolicyPanel })));
 const PerformanceDashboard = lazy(() => import("@/pages/performance/dashboard").then((module) => ({ default: module.PerformanceDashboard })));
 const ReleaseNotesPanel = lazy(() => import("./release-notes"));
-
-type CreditFormValues = {
-    designerId: string;
-    amount: number;
-    reason: string;
-};
-
-type LimitFormValues = {
-    designerId: string;
-    monthlyCreditLimit: number;
-};
 
 type AccountFormValues = {
     loginName: string;
@@ -51,22 +39,16 @@ type AccountFormValues = {
     departmentId?: string;
     role: ApiUserRole;
     status: ApiUser["status"];
-    quotaRemaining: number;
-    monthlyCreditLimit: number;
 };
 
 export default function AdminPage() {
     const { message, modal } = App.useApp();
     const [accountDirty, setAccountDirty] = useState(false);
-    const [creditDirty, setCreditDirty] = useState(false);
-    const [limitDirty, setLimitDirty] = useState(false);
     const [accountSearch, setAccountSearch] = useState("");
     const [accountStatus, setAccountStatus] = useState("");
     const [accountDepartment, setAccountDepartment] = useState("");
     const accountEditorRef = useRef<HTMLDivElement>(null);
     const confirmAllUnsaved = useConfirmUnsavedChanges();
-    const [creditForm] = Form.useForm<CreditFormValues>();
-    const [limitForm] = Form.useForm<LimitFormValues>();
     const [accountForm] = Form.useForm<AccountFormValues>();
     const accountRole = Form.useWatch("role", accountForm) ?? "designer";
     const navigate = useNavigate();
@@ -79,11 +61,9 @@ export default function AdminPage() {
     const [departmentName, setDepartmentName] = useState("");
     const [departmentCode, setDepartmentCode] = useState("");
     const { confirmDiscard: confirmAccountDiscard } = useUnsavedGuard(accountDirty, "账号表单尚未保存，离开后将丢失本次修改。");
-    useUnsavedGuard(creditDirty || limitDirty || Boolean(departmentName || departmentCode), "积分、额度或部门表单尚未保存，离开后将丢失本次修改。");
+    useUnsavedGuard(Boolean(departmentName || departmentCode), "部门表单尚未保存，离开后将丢失本次修改。");
     const [accountsLoading, setAccountsLoading] = useState(true);
     const [accountsReady, setAccountsReady] = useState(false);
-    const [totalCost, setTotalCost] = useState<number>();
-    const [totalUsedCredits, setTotalUsedCredits] = useState<number>();
     const [loadError, setLoadError] = useState("");
     const [pendingAction, setPendingAction] = useState("");
     const pendingActionRef = useRef("");
@@ -108,15 +88,13 @@ export default function AdminPage() {
             if (result.accounts) { setAccounts(result.accounts); setAccountsReady(true); }
             if (result.departments) setDepartments(result.departments);
             if (result.auditLogs) setAuditLogs(result.auditLogs);
-            if (result.totalCost !== undefined) setTotalCost(result.totalCost);
-            setTotalUsedCredits(result.totalUsedCredits);
             setLoadError(result.errors.join("；"));
         } catch (error) { if (request === accountsRequest.current) setLoadError(error instanceof Error ? error.message : "账号数据加载失败"); }
         finally { if (request === accountsRequest.current) setAccountsLoading(false); }
     };
 
     useEffect(() => {
-        setAccounts([]); setDepartments([]); setAuditLogs([]); setTotalCost(undefined); setTotalUsedCredits(undefined); setAccountsReady(false);
+        setAccounts([]); setDepartments([]); setAuditLogs([]); setAccountsReady(false);
         if (canManageAccounts) void refreshAccounts();
         return () => { accountsRequest.current++; };
     }, [canManageAccounts, signedInUser?.id, signedInUser?.role, signedInUser?.departmentId]);
@@ -137,29 +115,22 @@ export default function AdminPage() {
         finally { pendingActionRef.current = ""; setPendingAction(""); }
     };
 
-    const designerOptions = accounts.map((designer) => ({
-        label: `${designer.displayName}（${designer.role === "designer" ? "设计师" : "管理员"}）`,
-        value: designer.id,
-    }));
-
     useEffect(() => {
         if (activeAdminTab === "accounts") return;
-        accountForm.resetFields(); creditForm.resetFields(); limitForm.resetFields();
-        setEditingAccountId(null); setAccountDirty(false); setCreditDirty(false); setLimitDirty(false);
+        accountForm.resetFields();
+        setEditingAccountId(null); setAccountDirty(false);
         setDepartmentName(""); setDepartmentCode("");
-    }, [activeAdminTab, accountForm, creditForm, limitForm]);
-    const totalRemaining = accounts.reduce((sum, designer) => sum + designer.creditBalance, 0);
+    }, [activeAdminTab, accountForm]);
     const filteredAccounts = filterAdminAccounts(accounts, accountSearch, accountStatus, accountDepartment);
 
     const changeAdminTab = (tab: string) => {
         setSearchParams(tab === "accounts" ? {} : { tab }, { replace: true });
     };
     const adminTabOptions = [
-        { key: "accounts", label: "账号额度" },
+        { key: "accounts", label: "账号管理" },
         { key: "groups", label: "设计师分组" },
         ...(performanceEnabled ? [{ key: "performance", label: "设计效能" }] : []),
         { key: "modules", label: "模块开关" },
-        { key: "pricing", label: "积分价格" },
         { key: "api", label: "板块 API 配置" },
         { key: "usage-analysis", label: "使用分析" },
         { key: "mark-images", label: markPlatformAdminTabLabel },
@@ -171,54 +142,26 @@ export default function AdminPage() {
         { key: "release-notes", label: "版本更新" },
     ].filter((tab) => isAdmin || departmentAdminTabs.has(tab.key));
 
-    const submitCreditChange = async (values: CreditFormValues) => {
-        const target = accounts.find((account) => account.id === values.designerId);
-        const validationError = creditChangeError(target, values.amount, values.reason || "");
-        if (validationError) { message.warning(validationError); return; }
-        if (!await modal.confirm({ title: `确认给 ${target!.displayName} ${values.amount > 0 ? "增加" : "扣除"} ${Math.abs(values.amount)} 积分？`, content: `账号：${target!.username}。当前余额 ${target!.creditBalance}，调整后 ${target!.creditBalance + values.amount}。原因：${values.reason.trim()}。仅调整本月余额，下月仍按固定额度重置。`, okText: "确认调整", cancelText: "返回核对", okButtonProps: { danger: values.amount < 0 } })) return;
-        return runAction("credit", async () => {
-        try {
-            const result = await adjustAccountCredits(values.designerId, values.amount, values.reason.trim());
-            if (result.user.id === signedInUser?.id) await hydrateSession();
-            message.success(result.user.id === signedInUser?.id ? "当前积分已追加或扣除，当前会话已同步" : "当前积分已追加或扣除");
-            creditForm.resetFields(); setCreditDirty(false);
-            await refreshAccounts();
-        }
-        catch (error) { message.error(error instanceof Error ? error.message : "额度调整失败"); }
-        });
-    };
-
-    const submitLimitChange = async (values: LimitFormValues) => {
-        const target = accounts.find((account) => account.id === values.designerId && account.role === "designer");
-        if (!target || !Number.isInteger(values.monthlyCreditLimit) || values.monthlyCreditLimit < 0) { message.warning("请选择设计师并填写有效的每月固定额度"); return; }
-        if (!await modal.confirm({ title: `确认设置 ${target.displayName} 的每月固定额度？`, content: `将从 ${target.monthlyCreditLimit} 改为 ${values.monthlyCreditLimit} 积分，下月重置时生效，不改变当前余额。`, okText: "确认设置", cancelText: "返回核对" })) return;
-        return runAction("limit", async () => {
-        try { await updateAccount(values.designerId, { monthlyCreditLimit: values.monthlyCreditLimit }); setLimitDirty(false); message.success("每月固定额度已更新，下月重置时生效"); await refreshAccounts(); }
-        catch (error) { message.error(error instanceof Error ? error.message : "每月固定额度更新失败"); }
-        });
-    };
-
     const submitAccount = async (values: AccountFormValues) => {
         const account = accounts.find((item) => item.id === editingAccountId);
-        const changes = [values.status === "disabled" ? "停用后该账号无法继续使用，既有会话失效。" : "账号状态：启用。", `当前积分余额设为 ${values.quotaRemaining}（不是追加）；每月固定额度 ${values.monthlyCreditLimit}。`, values.password && editingAccountId ? "同时重置密码，既有会话失效。" : ""].filter(Boolean).join(" ");
+        const changes = [values.status === "disabled" ? "停用后该账号无法继续使用，既有会话失效。" : "账号状态：启用。", values.password && editingAccountId ? "同时重置密码，既有会话失效。" : ""].filter(Boolean).join(" ");
         if (!await modal.confirm({ title: `${editingAccountId ? "确认保存" : "确认开通"}账号 ${account?.displayName || values.name}？`, content: `登录账号：${account?.username || values.loginName}。${changes}`, okText: "确认保存", cancelText: "返回核对", okButtonProps: { danger: values.status === "disabled" } })) return;
         return runAction("account", async () => {
         try {
             if (editingAccountId) {
                 const currentAccount = accounts.find((account) => account.id === editingAccountId);
                 if (!currentAccount) throw new Error("账号不存在或已更新，请刷新后重试");
-                await updateAccount(editingAccountId, { displayName: values.name, email: values.email || null, employeeNo: values.employeeNo || null, departmentId: values.departmentId || null, role: values.role === "super_admin" ? undefined : values.role, status: values.status, monthlyCreditLimit: values.monthlyCreditLimit });
-                if (values.quotaRemaining !== currentAccount.creditBalance) await setAccountCredits(editingAccountId, values.quotaRemaining, "管理员在账号编辑中设置当前积分余额");
+                await updateAccount(editingAccountId, { displayName: values.name, email: values.email || null, employeeNo: values.employeeNo || null, departmentId: values.departmentId || null, role: values.role === "super_admin" ? undefined : values.role, status: values.status });
                 if (values.password) await resetAccountPassword(editingAccountId, values.password);
                 if (editingAccountId === signedInUser?.id) await hydrateSession();
             } else {
-                await createAccount(prepareNewAccount({ username: values.loginName, displayName: values.name, email: values.email || null, employeeNo: values.employeeNo || null, departmentId: values.departmentId || null, password: values.password, role: values.role, status: values.status === "disabled" ? "disabled" : "active", creditBalance: values.quotaRemaining, creditLimit: Math.max(values.quotaRemaining, values.monthlyCreditLimit), monthlyCreditLimit: values.monthlyCreditLimit }, wecomEnabled));
+                await createAccount(prepareNewAccount({ username: values.loginName, displayName: values.name, email: values.email || null, employeeNo: values.employeeNo || null, departmentId: values.departmentId || null, password: values.password, role: values.role, status: values.status === "disabled" ? "disabled" : "active", creditBalance: 500, creditLimit: 500, monthlyCreditLimit: 500 }, wecomEnabled));
             }
-            message.success(editingAccountId ? "账号和当前积分余额已更新" : wecomEnabled && values.role === "designer" ? "账号已开通，可直接使用企业微信扫码登录" : "账号已开通，首次登录必须修改密码");
+            message.success(editingAccountId ? "账号已更新" : wecomEnabled && values.role === "designer" ? "账号已开通，可直接使用企业微信扫码登录" : "账号已开通，首次登录必须修改密码");
             setEditingAccountId(null);
             setAccountDirty(false);
             accountForm.resetFields();
-            accountForm.setFieldsValue({ role: "designer", status: "active", quotaRemaining: 500, monthlyCreditLimit: 500 });
+            accountForm.setFieldsValue({ role: "designer", status: "active" });
             await refreshAccounts();
         } catch (error) { message.error(error instanceof Error ? error.message : "账号保存失败"); }
         });
@@ -238,8 +181,6 @@ export default function AdminPage() {
             departmentId: designer.departmentId || undefined,
             role: designer.role,
             status: designer.status,
-            quotaRemaining: designer.creditBalance,
-            monthlyCreditLimit: designer.monthlyCreditLimit,
         });
         accountEditorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
         accountEditorRef.current?.focus({ preventScroll: true });
@@ -308,25 +249,22 @@ export default function AdminPage() {
                     </div>
                 </section>
 
-                <section className="grid grid-cols-2 gap-4 xl:grid-cols-4" aria-label="管理概览" aria-busy={accountsLoading}>
+                <section className="w-full max-w-sm" aria-label="管理概览" aria-busy={accountsLoading}>
                     <Metric icon={<UsersRound className="size-4" />} label="可管理账号" value={accountsReady ? String(accounts.length) : "—"} />
-                    <Metric icon={<WalletCards className="size-4" />} label="剩余额度" value={accountsReady ? totalRemaining.toLocaleString() : "—"} />
-                    <Metric icon={<SlidersHorizontal className="size-4" />} label="累计已用积分" value={totalUsedCredits === undefined ? "—" : totalUsedCredits.toLocaleString()} />
-                    <Metric icon={<ShieldCheck className="size-4" />} label="人民币成本" value={totalCost === undefined ? "—" : `￥${totalCost.toFixed(2)}`} />
                 </section>
                 {loadError ? <Alert type="warning" showIcon title="部分概览暂未更新" description={loadError} action={<Button loading={accountsLoading} onClick={() => void refreshAccounts()}>重试</Button>} /> : null}
 
                 {!isAdmin ? (
                     <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-100">
-                        当前为部门管理员，只能管理本部门设计师账号和额度；模型、API 与全局价格仅超级管理员可配置。
+                        当前为部门管理员，只能管理本部门设计师账号；模型与 API 仅超级管理员可配置。
                     </div>
                 ) : null}
 
                 <div className="grid min-w-0 gap-5 lg:grid-cols-[180px_minmax(0,1fr)]">
                 <nav aria-label="管理板块" className="wb-surface flex gap-4 overflow-x-auto p-3 lg:sticky lg:top-3 lg:block lg:self-start">
                     {[
-                        { label: "成员与额度", keys: ["accounts", "groups", "performance"] },
-                        { label: "模型与价格", keys: ["api", "pricing", "mark-images"] },
+                        { label: "成员管理", keys: ["accounts", "groups", "performance"] },
+                        { label: "模型与服务", keys: ["api", "mark-images"] },
                         { label: "内容", keys: ["projects", "history", "release-notes"] },
                         { label: "运维", keys: ["modules", "usage-analysis", "batch", "audit", "integrations"] },
                     ].map((group) => {
@@ -352,7 +290,7 @@ export default function AdminPage() {
                         items={[
                             {
                                 key: "accounts",
-                                label: "账号额度",
+                                label: "账号管理",
                                 children: (
                                     <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
                                         <div className="min-w-0">
@@ -370,7 +308,7 @@ export default function AdminPage() {
                                             pagination={{ pageSize: 20, showSizeChanger: false }}
                                             dataSource={filteredAccounts}
                                             onRow={(record) => ({ "aria-selected": record.id === editingAccountId, style: record.id === editingAccountId ? { background: "var(--accent)", outline: "2px solid var(--primary)", outlineOffset: -2 } : undefined })}
-                                            scroll={{ x: 1080 }}
+                                            scroll={{ x: 720 }}
                                             locale={{ emptyText: loadError && !accountsReady ? "账号尚未加载，请在上方重试" : "暂无可管理账号" }}
                                             columns={[
                                                 { title: "姓名", dataIndex: "displayName" },
@@ -378,10 +316,6 @@ export default function AdminPage() {
                                                 { title: "部门", dataIndex: "departmentName", render: (value: string | null) => value || "未分配" },
                                                 { title: "角色", render: (_, record: ApiUser) => <Tag color={record.role === "super_admin" ? "red" : record.role === "department_admin" ? "blue" : "default"}>{record.role === "super_admin" ? "超级管理员" : record.role === "department_admin" ? "部门管理员" : "设计师"}</Tag> },
                                                 { title: "状态", render: (_, record: ApiUser) => <Tag color={record.status === "active" ? "green" : "red"}>{record.status === "active" ? "启用" : record.status === "locked" ? "锁定" : "停用"}</Tag> },
-                                                 { title: "当前积分余额", dataIndex: "creditBalance", sorter: (a: ApiUser, b: ApiUser) => a.creditBalance - b.creditBalance },
-                                                 { title: "每月固定额度", dataIndex: "monthlyCreditLimit" },
-                                                 { title: "本月临时调整", dataIndex: "temporaryCreditAdjustment", render: (value: number) => value > 0 ? `+${value}` : value },
-                                                 { title: "下次重置（北京时间）", dataIndex: "creditResetAt", render: (value: string) => formatBeijingDateTime(value) },
                                                 {
                                                     title: "操作",
                                                     render: (_, record: ApiUser) => (
@@ -403,7 +337,6 @@ export default function AdminPage() {
                                                     <Button className="mt-3 !h-10" loading={pendingAction === "department"} disabled={Boolean(pendingAction) && pendingAction !== "department"} block onClick={submitDepartment}>新建部门</Button>
                                                 </Panel>
                                             ) : null}
-                                            <CreditPolicyPanel />
                                             <div ref={accountEditorRef} tabIndex={-1} className="scroll-mt-4 outline-none" aria-label={editingAccountId ? "正在编辑账号" : "开通设计师账号"}>
                                             <Panel title={editingAccountId ? `编辑账号：${accounts.find((item) => item.id === editingAccountId)?.displayName || ""}` : "开通设计师账号"}>
                                                 <div className="mb-4 flex flex-wrap gap-2">
@@ -412,7 +345,7 @@ export default function AdminPage() {
                                                     </Upload>
                                                     <Button icon={<Download className="size-4" />} onClick={downloadAccountTemplate}>下载模板</Button>
                                                 </div>
-                                                 <Form name="admin-account" form={accountForm} layout="vertical" onValuesChange={() => setAccountDirty(true)} disabled={!canManageAccounts || Boolean(pendingAction)} initialValues={{ role: "designer", status: "active", quotaRemaining: 500, monthlyCreditLimit: 500 }} onFinish={submitAccount}>
+                                                 <Form name="admin-account" form={accountForm} layout="vertical" onValuesChange={() => setAccountDirty(true)} disabled={!canManageAccounts || Boolean(pendingAction)} initialValues={{ role: "designer", status: "active" }} onFinish={submitAccount}>
                                                     <Form.Item name="loginName" label="登录账号" rules={[{ required: true, message: "请输入登录账号" }]}>
                                                         <Input placeholder="例如：张三 / zhangsan / 邮箱 / 工号" disabled={Boolean(editingAccountId)} />
                                                     </Form.Item>
@@ -426,9 +359,6 @@ export default function AdminPage() {
                                                         <Form.Item name="email" label="邮箱"><Input placeholder="可用于登录" /></Form.Item>
                                                         <Form.Item name="employeeNo" label={passwordlessAccount ? "企业微信成员账号" : "工号"} rules={passwordlessAccount ? [{ required: true, whitespace: true, message: "请输入企业微信成员账号" }] : []} extra={passwordlessAccount ? "须与企业微信通讯录中的成员账号一致，不是姓名或昵称。" : undefined}><Input placeholder={passwordlessAccount ? "企业微信通讯录成员账号" : "可用于登录"} /></Form.Item>
                                                      </div>
-                                                     <Form.Item name="monthlyCreditLimit" label="每月固定额度" extra="下月 1 日按此额度重置；不改变本月当前余额。" rules={[{ required: true }]}>
-                                                         <InputNumber className="w-full" min={0} max={1000000} precision={0} />
-                                                     </Form.Item>
                                                     <Form.Item name="departmentId" label="所属部门" dependencies={["role"]} extra={isAdmin ? "设计师可不分配部门；部门管理员必须指定部门。" : undefined} rules={[({ getFieldValue }) => ({ required: !isAdmin || getFieldValue("role") === "department_admin", message: "请选择部门" })]}>
                                                         <Select allowClear={isAdmin} options={departments.map((department) => ({ label: department.name, value: department.id }))} />
                                                     </Form.Item>
@@ -448,14 +378,9 @@ export default function AdminPage() {
                                                             ]}
                                                         />
                                                     </Form.Item>
-                                                    <div className="grid grid-cols-2 gap-3">
-                                                        <Form.Item name="quotaRemaining" label="当前积分余额（设为）" extra="修改后将当前余额直接设为该数值，不是追加；下月仍按每月固定额度重置。" rules={[{ required: true }]}>
-                                                            <InputNumber className="w-full" min={0} max={1000000} precision={0} />
-                                                        </Form.Item>
-                                                    </div>
                                                     <Space className="w-full" orientation="vertical">
                                                         <Button className="!h-10" loading={pendingAction === "account"} type="primary" htmlType="submit" icon={<UserPlus className="size-4" />} block>
-                                                            {editingAccountId ? "保存账号与积分" : "开通账号"}
+                                                            {editingAccountId ? "保存账号" : "开通账号"}
                                                         </Button>
                                                         {editingAccountId ? (
                                                             <Button
@@ -465,7 +390,7 @@ export default function AdminPage() {
                                                                     setAccountDirty(false);
                                                                     setEditingAccountId(null);
                                                                     accountForm.resetFields();
-                                                                     accountForm.setFieldsValue({ role: "designer", status: "active", quotaRemaining: 500, monthlyCreditLimit: 500 });
+                                                                     accountForm.setFieldsValue({ role: "designer", status: "active" });
                                                                 }}
                                                             >
                                                                 取消编辑
@@ -476,35 +401,6 @@ export default function AdminPage() {
                                                 <Typography.Paragraph className="!mb-0 !mt-3 text-xs !text-stone-500">{wecomEnabled ? "新设计师无需初始密码，填写企业微信成员账号后即可扫码登录。CSV 每批最多 200 人，设计师可不填写部门，旧模板中的设计师密码不会导入；部门管理员仍需设置初始密码。停用和重置密码会使既有会话失效。" : "登录账号支持中文或英文，邮箱和工号也可登录。新账号首次登录必须修改密码；停用和重置密码会使既有会话失效。CSV 每批最多 200 人。"}</Typography.Paragraph>
                                             </Panel>
                                             </div>
-                                             <Panel title="追加或扣除积分">
-                                                <Form name="admin-credit-adjustment" form={creditForm} layout="vertical" onValuesChange={() => setCreditDirty(true)} disabled={!canManageAccounts || Boolean(pendingAction)} onFinish={submitCreditChange}>
-                                                    <Form.Item name="designerId" label="设计师" rules={[{ required: true, message: "请选择需要调整的设计师" }]}>
-                                                        <Select placeholder="请明确选择设计师" showSearch={{ optionFilterProp: "label" }} options={designerOptions.filter((item) => accounts.find((designer) => designer.id === item.value)?.role === "designer")} />
-                                                    </Form.Item>
-                                                     <Form.Item name="amount" label="积分变化（正数追加，负数扣除）" extra="在当前余额上增加或扣除；本月临时调整月底到期，下月按每月固定额度重置。" rules={[{ required: true, message: "请输入本次积分变化" }, { validator: (_, value) => value == null || (Number.isInteger(value) && value !== 0) ? Promise.resolve() : Promise.reject(new Error("请输入非零整数积分")) }]}>
-                                                        <InputNumber className="w-full" min={-100000} max={100000} precision={0} />
-                                                    </Form.Item>
-                                                    <Form.Item name="reason" label="原因" rules={[{ required: true, whitespace: true, message: "请填写调整原因" }]}>
-                                                        <Input placeholder="例如：项目补充额度" />
-                                                    </Form.Item>
-                                                    <Button className="!h-10" loading={pendingAction === "credit"} type="primary" htmlType="submit" block>
-                                                        保存调整
-                                                    </Button>
-                                                </Form>
-                                            </Panel>
-                                             <Panel title="设置每月固定额度">
-                                                 <Form name="admin-monthly-credit" form={limitForm} layout="vertical" onValuesChange={() => setLimitDirty(true)} disabled={!canManageAccounts || Boolean(pendingAction)} onFinish={submitLimitChange}>
-                                                    <Form.Item name="designerId" label="设计师" rules={[{ required: true }]}>
-                                                        <Select options={designerOptions.filter((item) => accounts.find((designer) => designer.id === item.value)?.role === "designer")} onChange={(id: string) => limitForm.setFieldValue("monthlyCreditLimit", accounts.find((account) => account.id === id)?.monthlyCreditLimit)} />
-                                                    </Form.Item>
-                                                     <Form.Item name="monthlyCreditLimit" label="每月 1 日重置后的积分" extra="仅改变下月起的固定额度，不立即增加或扣除当前余额。" rules={[{ required: true }]}>
-                                                        <InputNumber className="w-full" min={0} max={1000000} precision={0} />
-                                                    </Form.Item>
-                                                    <Button className="!h-10" loading={pendingAction === "limit"} htmlType="submit" block>
-                                                         保存每月固定额度
-                                                    </Button>
-                                                </Form>
-                                            </Panel>
                                         </div>
                                     </div>
                                 ),
@@ -523,11 +419,6 @@ export default function AdminPage() {
                                 key: "modules",
                                 label: "模块开关",
                                 children: <ModuleSwitchPanel />,
-                            },
-                            {
-                                key: "pricing",
-                                label: "积分价格",
-                                children: <ModelPricingPanel mode="prices" />,
                             },
                             {
                                 key: "api",
@@ -569,14 +460,14 @@ export default function AdminPage() {
                                         scroll={{ x: 1000 }}
                                         rowKey="id"
                                         size="small"
-                                        dataSource={auditLogs}
+                                        dataSource={auditLogs.filter(log => !isFinancialAuditAction(log.action))}
                                         columns={[
                                             { title: "时间（北京时间）", dataIndex: "createdAt", width: 180, render: (value: string) => formatBeijingDateTime(value) },
                                             { title: "操作人", dataIndex: "actorName", render: (value: string | null) => value || "系统" },
                                             { title: "部门", dataIndex: "departmentName", render: (value: string | null) => value || "全局" },
                                             { title: "目标", dataIndex: "targetId" },
                                             { title: "行为", dataIndex: "action", render: adminLabel },
-                                            { title: "内容", dataIndex: "detail", render: (value: Record<string, unknown>) => <details><summary className="cursor-pointer">查看内容</summary><AdminDetails value={value} /></details> },
+                                            { title: "内容", dataIndex: "detail", render: (value: Record<string, unknown>) => <details><summary className="cursor-pointer">查看内容</summary><AdminDetails value={value} audit /></details> },
                                             { title: "结果", render: (_, record) => <Tag color={record.result === "success" ? "green" : "red"}>{record.result === "success" ? "成功" : "失败"}</Tag> },
                                         ]}
                                     />
@@ -599,7 +490,7 @@ export default function AdminPage() {
                 </div>
 
                 <div className="text-xs leading-6 text-[var(--muted-foreground)]">
-                    账号、会话、模型密钥、价格版本、额度账本、任务队列、公司对象存储、生成历史和管理审计均由服务端统一管理。
+                    账号、会话、模型密钥、任务队列、公司对象存储、生成历史和管理审计均由服务端统一管理。
                 </div>
             </main>
         </div>

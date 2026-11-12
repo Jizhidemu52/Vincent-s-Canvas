@@ -155,10 +155,10 @@ describe("canvas picker integration contracts", () => {
         expect(commonCanvasModels(root.props.options)).toEqual([]);
     });
 
-    test("default non-canvas selection remains the existing Select and an explicit canvas variant supports Blend", () => {
+    test("image selection shares the friendly canvas picker and an explicit canvas variant supports Blend", () => {
         const model = imageModel("model-uuid", "aplmart-gpt2");
-        expect(picker([model], { toolKey: "image" }).root.type).toBe("Select");
-        expect(picker([model], { variant: "default" }).root.type).toBe("Select");
+        expect(picker([model], { toolKey: "image" }).root.type).toBe("CanvasModelPicker");
+        expect(picker([model], { variant: "default" }).root.type).toBe("CanvasModelPicker");
         const blend = imageModel("blend-uuid", "aplmart-mj-blend", "blend");
         const root = picker([blend], { toolKey: "midjourney-blend", variant: "canvas" }).root;
         expect(root.type).toBe("CanvasModelPicker");
@@ -167,7 +167,8 @@ describe("canvas picker integration contracts", () => {
 
     test("nested canvas settings can place the menu below without changing other picker defaults", () => {
         const model = imageModel("model-uuid", "aplmart-gpt2");
-        expect(picker([model]).root.props.side).toBeUndefined();
+        expect(picker([model]).root.props.side).toBe("right");
+        expect(picker([model], { toolKey: "image" }).root.props.side).toBe("bottom");
         expect(picker([model], { variant: "canvas", side: "bottom" }).root.props.side).toBe("bottom");
     });
 

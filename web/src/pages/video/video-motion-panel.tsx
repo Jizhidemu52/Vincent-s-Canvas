@@ -1,4 +1,4 @@
-import { Button } from "antd";
+import { Button, Tooltip } from "antd";
 import { useState } from "react";
 import { videoMotionGroups, type VideoMotionSettings } from "../../../../shared/video-motion-options";
 import { uiText, useUiText } from "@/lib/i18n";
@@ -17,10 +17,10 @@ export function VideoMotionPanel({ value, onChange, disabled = false, nativeAudi
                     <div className="flex flex-wrap gap-1.5">{group.options.filter(option => !nativeAudio || group.id !== "audio" || option.id !== "none").map(option => {
                         const selected = Array.isArray(current) ? current.includes(option.id) : current === option.id;
                         const full = Array.isArray(current) && Boolean(group.max && current.length >= group.max) && !selected;
-                        return <Button key={option.id} size="small" type={selected ? "primary" : "default"} aria-pressed={selected} title={uiText(option.description)} disabled={disabled || full} onClick={() => {
+                        return <Tooltip key={option.id} title={uiText(option.description)}><span className="inline-flex"><Button size="small" type={selected ? "primary" : "default"} aria-pressed={selected} disabled={disabled || full} onClick={() => {
                             const next = Array.isArray(current) ? selected ? current.filter(id => id !== option.id) : [...current, option.id] : selected && group.id !== "audio" ? "auto" : option.id;
                             onChange({ ...value, [group.id]: next });
-                        }}>{uiText(option.label)}</Button>;
+                        }}>{uiText(option.label)}</Button></span></Tooltip>;
                     })}</div>
                     {nativeAudio && group.id === "audio" ? <p className="mt-2 text-xs leading-5 text-muted-foreground">{uiText("模型原生输出含音频；这里是声音偏好，不是静音开关，不保证无声。")}</p> : null}
                 </fieldset>;

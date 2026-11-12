@@ -1,6 +1,6 @@
 import { useUiText } from "@/lib/i18n";
 import { useEffect, useRef, useState } from "react";
-import { Alert, App, Button, Checkbox, Form, Input, Modal, Select, Tag } from "antd";
+import { Alert, App, Button, Checkbox, Form, Input, Modal, Select, Tag, Tooltip } from "antd";
 import { ImagePlus, X } from "lucide-react";
 
 import { createClientId } from "@/lib/client-id";
@@ -130,7 +130,7 @@ export function PublishDialog({ onClose, onPublished, initialDraft }: { onClose:
                 <div className="flex flex-wrap items-center justify-between gap-2"><span className="font-medium">{t("分享图片 ·")} {files.length + selectedIds.length}/12</span><Button disabled={imageDrop.reading} icon={<ImagePlus size={16} />} onClick={() => inputRef.current?.click()}>{t("选择本地图片")}</Button></div>
                 <input ref={inputRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden onChange={event => { addFiles(event.target.files); event.target.value = ""; }} />
                 <p className="my-2 text-xs text-muted-foreground">{t("每张 ≤20 MB，合计 ≤100 MB；按原始图片字节分享。")}</p>
-                <div className="mb-3 grid grid-cols-3 gap-2">{files.map(item => <div key={item.id} className="relative overflow-hidden rounded-lg border border-border"><img className="h-24 w-full object-contain" src={item.preview} alt={item.file.name} /><div className="truncate p-1 text-xs" title={item.file.name}>{item.file.name}</div><button type="button" disabled={busy} aria-label={t("移除 {p0}", { p0: String(item.file.name) })} className="absolute right-1 top-1 rounded-full bg-background p-1" onClick={() => { URL.revokeObjectURL(item.preview); setFiles(current => current.filter(file => file.id !== item.id)); setAcknowledged(false); }}><X size={14} /></button></div>)}</div>
+                <div className="mb-3 grid grid-cols-3 gap-2">{files.map(item => <div key={item.id} className="relative overflow-hidden rounded-lg border border-border"><img className="h-24 w-full object-contain" src={item.preview} alt={item.file.name} /><Tooltip title={item.file.name}><div className="truncate p-1 text-xs" >{item.file.name}</div></Tooltip><button type="button" disabled={busy} aria-label={t("移除 {p0}", { p0: String(item.file.name) })} className="absolute right-1 top-1 rounded-full bg-background p-1" onClick={() => { URL.revokeObjectURL(item.preview); setFiles(current => current.filter(file => file.id !== item.id)); setAcknowledged(false); }}><X size={14} /></button></div>)}</div>
                 <Select className="w-full" mode="multiple" value={selectedIds} loading={assetLoading} maxCount={12 - files.length} placeholder={t("或从我的私有图片选择")} optionFilterProp="label" onOpenChange={open => { if (open && !assetsLoaded) void loadAssets(); }} options={assets.map(asset => ({ value: asset.id, label: `${asset.filename} · ${formatBytes(asset.byteSize)}` }))} onChange={ids => { dirty.current = true; setSelectedIds(ids); setAcknowledged(false); }} />
                 {assetError && <Alert className="mt-2" type="warning" title={assetError} action={<Button size="small" onClick={() => void loadAssets()}>{t("重试")}</Button>} />}
                 {assetCursor ? <Button className="mt-2" block loading={assetLoading} onClick={() => void loadAssets(assetCursor)}>{t("加载更多私有图片")}</Button> : null}

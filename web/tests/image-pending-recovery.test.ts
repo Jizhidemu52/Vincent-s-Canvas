@@ -46,6 +46,6 @@ test("late completion updates only its stable record, never another result in th
 test("acknowledged tasks are queried by task id; missing lookup is not a new generation", async () => {
     const record = { ...pending, taskId: "known-task" };
     const calls: string[] = [];
-    await expect(findPendingImageTask(record, { byId: async id => { calls.push(id); return null; }, byRequest: async () => { throw new Error("must not fall back to submit"); } })).rejects.toThrow("不会重新提交或扣费");
+    await expect(findPendingImageTask(record, { byId: async id => { calls.push(id); return null; }, byRequest: async () => { throw new Error("must not fall back to submit"); } })).rejects.toThrow("不会重新提交。");
     expect(calls).toEqual(["known-task"]);
 });

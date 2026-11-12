@@ -44,6 +44,37 @@ async function setup(page: Page) {
     return { api, writes };
 }
 
+test("admin overview only retains the account card and removed pricing URLs fall back on desktop and narrow screens", async ({ page }) => {
+    const { api, writes } = await setup(page);
+    await page.goto("/admin?tab=pricing");
+    const overview = page.getByRole("region", { name: "管理概览" });
+    await expect(overview).toHaveAttribute("aria-busy", "false");
+    await expect(overview.locator(":scope > div")).toHaveCount(1);
+    await expect(overview.getByText("可管理账号", { exact: true })).toBeVisible();
+    await expect(overview.getByText("1", { exact: true })).toBeVisible();
+    await expect(overview.getByText(/剩余额度|累计已用积分|人民币成本/)).toHaveCount(0);
+    await expect(page.locator("#admin-account")).toBeVisible();
+    await expect(page.locator("#admin-credit-adjustment")).toHaveCount(0);
+    await expect(page.locator("#admin-account_quotaRemaining")).toHaveCount(0);
+    await expect(page.locator("#admin-account_monthlyCreditLimit")).toHaveCount(0);
+    const navigation = page.getByRole("navigation", { name: "管理板块" });
+    await expect(navigation.getByRole("link", { name: "积分价格", exact: true })).toHaveCount(0);
+    await expect(navigation.getByRole("link", { name: "账号管理", exact: true })).toHaveAttribute("aria-current", "page");
+    await expect(navigation.getByRole("link", { name: "板块 API 配置", exact: true })).toBeVisible();
+    for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }]) {
+        await page.setViewportSize(viewport);
+        const bounds = await overview.boundingBox();
+        expect(bounds).not.toBeNull();
+        expect(bounds!.width).toBeGreaterThan(280);
+        expect(bounds!.width).toBeLessThanOrEqual(384);
+        expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(viewport.width);
+        await overview.screenshot({ path: test.info().outputPath(`account-overview-${viewport.width}.png`) });
+    }
+    expect(writes).toEqual([]);
+    expect(api.pageErrors).toEqual([]);
+    expect(api.unexpected).toEqual([]);
+});
+
 test("shared provider changes require confirmation and cancellation sends no write", async ({ page }) => {
     const { api, writes } = await setup(page);
     await page.goto("/admin?tab=api");
@@ -68,26 +99,20 @@ test("shared provider changes require confirmation and cancellation sends no wri
     expect(api.unexpected).toEqual([]);
 });
 
-test("explicit credit target and amount, cancellation has no mutation, and account drafts block tab changes", async ({ page }) => {
+test("account edits preserve financial fields and drafts still block tab changes", async ({ page }) => {
     const { api, writes } = await setup(page);
     await page.goto("/admin");
     await expect(page.getByRole("navigation", { name: "管理板块" })).toBeVisible();
-    const adjustment = page.locator("#admin-credit-adjustment");
-    await expect(adjustment.getByRole("spinbutton")).toHaveValue("");
-    await expect(adjustment.locator("input").last()).toHaveValue("");
-    await adjustment.getByRole("combobox").click();
-    await page.getByText("张三（设计师）", { exact: true }).click();
-    await adjustment.getByRole("spinbutton").fill("25");
-    await adjustment.getByRole("textbox", { name: /原因/ }).fill("隔离回归测试");
-    await adjustment.getByRole("button", { name: "保存调整" }).click();
-    await expect(page.getByRole("dialog")).toContainText("给 张三 增加 25 积分");
-    expect(writes).toEqual([]);
-    await page.getByRole("button", { name: "返回核对" }).click();
-    expect(writes).toEqual([]);
-    await adjustment.getByRole("button", { name: "保存调整" }).click();
-    await page.getByRole("button", { name: "确认调整" }).click();
+    await expect(page.locator("#admin-credit-adjustment")).toHaveCount(0);
+    await expect(page.locator("#admin-monthly-credit")).toHaveCount(0);
+    await expect(page.getByRole("switch", { name: "启用积分计费" })).toHaveCount(0);
+    await page.getByRole("row").filter({ hasText: "zhangsan" }).getByRole("button", { name: /编\s*辑/ }).click();
+    await page.locator("#admin-account_name").fill("张三已更新");
+    await page.getByRole("button", { name: "保存账号", exact: true }).click();
+    await expect(page.getByRole("dialog")).not.toContainText(/积分|余额|额度/);
+    await page.getByRole("button", { name: "确认保存", exact: true }).click();
     await expect.poll(() => writes.length).toBe(1);
-    expect(writes[0].data).toMatchObject({ amount: 25, reason: "隔离回归测试" });
+    expect(writes[0]).toEqual({ path: "/api/admin/accounts/person", data: { displayName: "张三已更新", email: account.email, employeeNo: account.employeeNo, departmentId: "design", role: "designer", status: "active" } });
     await page.getByRole("row").filter({ hasText: "zhangsan" }).getByRole("button", { name: /编\s*辑/ }).click();
     await page.locator("#admin-account_name").fill("张三修改中");
     await page.getByRole("navigation", { name: "管理板块" }).getByRole("link", { name: "模块开关" }).click();
@@ -106,18 +131,11 @@ test("explicit credit target and amount, cancellation has no mutation, and accou
     expect(api.pageErrors).toEqual([]); expect(api.unexpected).toEqual([]);
 });
 
-test("billing and publishing require explicit confirmation; nested provider tabs protect drafts", async ({ page }) => {
+test("nested provider tabs protect drafts without exposing removed billing controls", async ({ page }) => {
     const { api, writes } = await setup(page);
     await page.goto("/admin");
-    await page.getByRole("switch", { name: "启用积分计费" }).click();
-    await expect(page.getByRole("dialog")).toContainText("影响全部成员的新任务");
+    await expect(page.getByRole("switch", { name: "启用积分计费" })).toHaveCount(0);
     expect(writes).toEqual([]);
-    await page.getByRole("button", { name: "保持不变" }).click();
-    await page.getByRole("navigation", { name: "管理板块" }).getByRole("link", { name: "积分价格" }).click();
-    await page.getByRole("button", { name: /^发\s*布$/ }).click();
-    await expect(page.getByRole("dialog")).toContainText("8 积分");
-    expect(writes).toEqual([]);
-    await page.getByRole("button", { name: "暂不发布" }).click();
     await page.getByRole("navigation", { name: "管理板块" }).getByRole("link", { name: "板块 API 配置" }).click();
     await page.getByRole("tab", { name: "API 服务与密钥" }).click();
     await page.getByRole("textbox", { name: /显示名称/ }).fill("尚未保存的服务");
@@ -164,12 +182,12 @@ test("administrator login uses labelled form and Enter preserves the destination
         logins.push(route.request().postDataJSON());
         return route.fulfill({ contentType: "application/json", body: JSON.stringify({ user: { ...account, id: "admin", role: "super_admin", mustChangePassword: false } }) });
     });
-    await page.goto("/admin/login?returnTo=%2Fadmin%3Ftab%3Dpricing");
+    await page.goto("/admin/login?returnTo=%2Fadmin%3Ftab%3Dapi");
     await page.getByLabel("管理员账号", { exact: true }).fill("test-admin");
     await page.getByLabel("登录密码", { exact: true }).fill("FixtureOnly123!");
     await page.getByLabel("登录密码", { exact: true }).press("Enter");
-    await expect(page).toHaveURL(/admin\?tab=pricing/);
-    await expect(page.getByRole("button", { name: /^发\s*布$/ })).toBeVisible();
+    await expect(page).toHaveURL(/admin\?tab=api/);
+    await expect(page.getByRole("tab", { name: "API 服务与密钥" })).toBeVisible();
     expect(logins).toEqual([{ identifier: "test-admin", password: "FixtureOnly123!", portal: "admin" }]);
     expect(api.pageErrors).toEqual([]);
 });

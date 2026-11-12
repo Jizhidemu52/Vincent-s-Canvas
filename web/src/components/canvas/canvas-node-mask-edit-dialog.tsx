@@ -1,11 +1,10 @@
 import { useUiText } from "@/lib/i18n";
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { Button, Input, Modal, Slider } from "antd";
+import { Button, Input, Modal, Select, Slider } from "antd";
 import { Brush, Eraser, RotateCcw, WandSparkles, X } from "lucide-react";
 
 import { ModelPicker } from "@/components/model-picker";
 import type { AiConfig } from "@/stores/use-config-store";
-import { deploymentFeatures } from "@/lib/deployment-features";
 import { useToolConfig, useToolEnabled } from "@/hooks/use-tool-config";
 import { imageQualityLabel } from "@/components/image-settings-panel";
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -60,7 +59,6 @@ export function CanvasNodeMaskEditDialog({
     open,
     config,
     model,
-    estimatedCredits,
     onModelChange,
     onClose,
     onConfirm,
@@ -336,7 +334,6 @@ export function CanvasNodeMaskEditDialog({
                     <div className="space-y-2">
                         <div className="flex items-center justify-between gap-3 text-sm">
                             <span className="font-medium opacity-75">{t("编辑模型")}</span>
-                            {deploymentFeatures.creditsEnabled && typeof estimatedCredits === "number" ? <span className="shrink-0 text-xs font-medium text-orange-600">{t("预计")}{estimatedCredits} {t(" 积分")}</span> : null}
                         </div>
                         <ModelPicker toolKey="canvas-mask-edit" config={effectiveConfig} value={effectiveConfig.model} onChange={onModelChange} capability="image" fullWidth placeholder={t("选择局部编辑模型")} />
                         {!profile.supportsMask ? <p role="alert" className="text-xs text-destructive">{t("当前模型不支持蒙版，请切换支持蒙版的出图模型。")}</p> : null}
@@ -346,16 +343,11 @@ export function CanvasNodeMaskEditDialog({
                         <p className="text-xs leading-5" style={{ color: theme.node.muted }}>{adaptation && image && (adaptation.width !== image.width || adaptation.height !== image.height) ? `自动适配至 ${adaptation.width} × ${adaptation.height}px：原图与蒙版等比缩放并补边，结果还原原尺寸，未涂抹区域保留原图像素。` : "按原图像素编辑；未涂抹区域保留原图像素。"}</p>
                         {profile.kind === "standard" || profile.kind === "quality-resolution" ? <label className="flex flex-col gap-1 text-xs">
                             <span>{t("图片质量")}</span>
-                            <select aria-label={t("图片质量")} className="rounded border px-2 py-1.5" style={{ background: theme.node.fill, color: theme.node.text, borderColor: theme.node.stroke }} value={lockedSettings?.quality || effectiveConfig.quality} onChange={event => setImageSettings(current => ({ ...current, quality: event.target.value }))}>
-                                {profile.qualities.map(value => <option key={value} value={value}>{imageQualityLabel(value)}</option>)}
-                            </select>
+                            <Select aria-label={t("图片质量")} value={lockedSettings?.quality || effectiveConfig.quality} onChange={value => setImageSettings(current => ({ ...current, quality: value }))} options={profile.qualities.map(value => ({ value, label: imageQualityLabel(value) }))} />
                         </label> : null}
                         {outputFields.map(field => <label key={field.key} className="flex flex-col gap-1 text-xs">
                             <span>{field.label}</span>
-                            {field.options ? <select aria-label={field.label} value={outputOptions[field.key] || ""} className="rounded border px-2 py-1.5" style={{ background: theme.node.fill, color: theme.node.text, borderColor: theme.node.stroke }} onChange={event => setOutputOption(field.key, event.target.value)}>
-                                <option value="">{t("渠道默认")}</option>
-                                {field.options.map(value => <option key={value} value={value}>{value}</option>)}
-                            </select> : <input aria-label={field.label} type="number" min={field.min} max={field.max} step={field.step} value={outputOptions[field.key] || ""} placeholder={t("渠道默认")} disabled={field.key === "output_compression" && !["jpeg", "webp"].includes(outputOptions.output_format || "png")} className="rounded border px-2 py-1.5 disabled:opacity-40" style={{ background: theme.node.fill, color: theme.node.text, borderColor: theme.node.stroke }} onChange={event => setOutputOption(field.key, event.target.value)} />}
+                            {field.options ? <Select aria-label={field.label} value={outputOptions[field.key] || ""} onChange={value => setOutputOption(field.key, value)} options={[{ value: "", label: t("默认") }, ...field.options.map(value => ({ value, label: value }))]} /> : <input aria-label={field.label} type="number" min={field.min} max={field.max} step={field.step} value={outputOptions[field.key] || ""} placeholder={t("默认")} disabled={field.key === "output_compression" && !["jpeg", "webp"].includes(outputOptions.output_format || "png")} className="rounded border px-2 py-1.5 disabled:opacity-40" style={{ background: theme.node.fill, color: theme.node.text, borderColor: theme.node.stroke }} onChange={event => setOutputOption(field.key, event.target.value)} />}
                             {field.tip ? <span className="leading-5" style={{ color: theme.node.muted }}>{field.tip}</span> : null}
                         </label>)}
                     </div>

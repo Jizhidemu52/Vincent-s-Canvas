@@ -282,8 +282,9 @@ test("upload preserves bytes; optimize is separate from image creation and image
     expect(f.uploads).toHaveLength(1);
     expect(f.submissions).toHaveLength(1);
     await page.getByRole("tab", { name: "统计与记录" }).click();
-    await expect(page.getByText("CNY", { exact: true })).toBeVisible();
-    await expect(page.getByText("USD", { exact: true })).toBeVisible();
+    for (const metric of ["优化请求", "成功率", "缓存命中", "平均延迟"]) await expect(page.getByText(metric, { exact: true })).toBeVisible();
+    await expect(page.getByRole("tabpanel", { name: "统计与记录", exact: true })).toContainText("已报告输入 / 输出 Token：80 / 160");
+    await expect(page.getByText(/^(CNY|USD)$/)).toHaveCount(0);
     expect(f.unexpected).toEqual([]);
     expect(f.errors).toEqual([]);
 });

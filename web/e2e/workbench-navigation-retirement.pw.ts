@@ -6,12 +6,15 @@ const moved = [
     { id: "back-design", title: "背面设计" },
 ];
 
-test("only requested boards disappear; moved workflows lead desktop and narrow navigation", async ({ page, context, api }, info) => {
+test("only requested boards disappear; creation tools retain their fixed desktop and narrow navigation", async ({ page, context, api }, info) => {
     await context.route("**/api/prompt-templates?*", route => route.fulfill({ json: { templates: [], total: 0, page: 1, pageSize: 4 } }));
     await page.goto("/");
     const nav = page.getByRole("navigation", { name: "主导航" });
-    const create = nav.locator("section").filter({ has: page.getByRole("button", { name: "创作", exact: true }) });
-    await expect.poll(async () => (await create.getByRole("link").allTextContents()).slice(0, 3)).toEqual(moved.map(item => item.title));
+    const creationPaths = ["/creative", ...moved.map(item => `/${item.id}`), "/image", "/video"];
+    const create = nav.locator("section").filter({ has: page.getByRole("button", { name: "创作工具", exact: true }) });
+    await expect(create.getByRole("link")).toHaveCount(creationPaths.length);
+    for (const [index, path] of creationPaths.entries()) await expect(create.getByRole("link").nth(index)).toHaveAttribute("href", path);
+    for (const item of moved) await expect(create.getByRole("link", { name: item.title, exact: true })).toHaveAttribute("href", `/${item.id}`);
     await nav.getByRole("button", { name: "图像工具", exact: true }).click();
     await expect(nav.getByRole("link", { name: "高清放大", exact: true })).toHaveAttribute("href", "/hd-upscale");
     for (const title of ["细节增强", "角度控制", "系列配方"]) await expect(page.getByRole("link", { name: title, exact: true })).toHaveCount(0);
@@ -23,13 +26,19 @@ test("only requested boards disappear; moved workflows lead desktop and narrow n
     await expect(page.locator("main.creative-page").getByText("系列配方", { exact: true })).toHaveCount(0);
     await page.goto("/creative/style-to-sketch");
     const switcher = page.getByRole("combobox", { name: "切换设计场景", exact: true });
-    for (const item of moved) await expect(switcher.locator(`option[value="${item.id}"]`)).toHaveCount(0);
+    await switcher.click();
+    const sceneOptions = page.locator(".ant-select-dropdown:visible");
+    await expect(sceneOptions).toBeVisible();
+    for (const item of moved) await expect(sceneOptions.getByText(item.title, { exact: true })).toHaveCount(0);
+    await switcher.press("Escape");
+    await expect(sceneOptions).toHaveCount(0);
 
     await page.setViewportSize({ width: 390, height: 844 });
     await page.getByRole("button", { name: "打开导航菜单", exact: true }).click();
     const drawer = page.getByRole("dialog", { name: "功能模块", exact: true });
-    const drawerCreate = drawer.locator("section").filter({ has: page.getByRole("button", { name: "创作", exact: true }) });
-    await expect.poll(async () => (await drawerCreate.getByRole("link").allTextContents()).slice(0, 3)).toEqual(moved.map(item => item.title));
+    const drawerCreate = drawer.locator("section").filter({ has: page.getByRole("button", { name: "创作工具", exact: true }) });
+    await expect(drawerCreate.getByRole("link")).toHaveCount(creationPaths.length);
+    for (const [index, path] of creationPaths.entries()) await expect(drawerCreate.getByRole("link").nth(index)).toHaveAttribute("href", path);
     await drawer.screenshot({ path: info.outputPath("navigation-narrow.png") });
     await drawer.getByRole("link", { name: "局部改款", exact: true }).click();
     await expect(drawer).not.toBeVisible();

@@ -42,10 +42,6 @@ for (const profile of profiles) for (const viewport of [{ width: 1280, height: 7
         await page.goto(`/canvas/${id}`);
         await page.getByRole("button", { name: "跟我走一遍", exact: true }).click();
         await page.getByRole("button", { name: "跳过引导", exact: true }).click();
-        if (viewport.width < 720) {
-            await page.getByRole("button", { name: "打开画布菜单", exact: true }).click();
-            await page.getByRole("menuitem", { name: "打开对话", exact: true }).click();
-        }
         await page.getByRole("tab", { name: "对话", exact: true }).first().click();
         const panel = page.locator(".cw-agent-panel");
         const composer = panel.locator("textarea").last();
@@ -69,9 +65,11 @@ for (const profile of profiles) for (const viewport of [{ width: 1280, height: 7
         await page.screenshot({ path: info.outputPath("nested-model-picker.png"), animations: "disabled" });
         await menu.locator(`[role="option"][data-usage-value="${profile.alternative}"]`).first().click();
         await expect(picker).toContainText("备用图片模型");
-        await settings.getByRole("combobox", { name: "宽高比", exact: true }).selectOption(profile.name === "flare26" ? "16:9" : "1536x1024");
+        await settings.getByRole("combobox", { name: "宽高比", exact: true }).click();
+        await page.locator(`.ant-select-dropdown:visible .ant-select-item-option[title="${profile.name === "flare26" ? "16:9" : "3:2 · 1536 × 1024"}"]`).click();
         await settings.locator("summary", { hasText: "全部高级参数" }).click();
-        await settings.getByRole("combobox", { name: "输出格式", exact: true }).selectOption("webp");
+        await settings.getByRole("combobox", { name: "输出格式", exact: true }).click();
+        await page.locator('.ant-select-dropdown:visible .ant-select-item-option[title="WebP"]').click();
         const local = settings.getByRole("button", { name: "本机", exact: true });
         await local.scrollIntoViewIfNeeded();
         await info.attach("expanded-bounds", { body: JSON.stringify(await settings.evaluate(element => ({ bounds: element.getBoundingClientRect().toJSON(), scrollTop: element.scrollTop, clientHeight: element.clientHeight, scrollHeight: element.scrollHeight, overflowY: getComputedStyle(element).overflowY, maxHeight: getComputedStyle(element).maxHeight, pageScrollY: scrollY }))), contentType: "application/json" });
@@ -84,8 +82,8 @@ for (const profile of profiles) for (const viewport of [{ width: 1280, height: 7
         await expect(composer).toHaveValue(draft);
         await opener.click();
         await expect(picker).toContainText("备用图片模型");
-        await expect(settings.getByRole("combobox", { name: "宽高比", exact: true })).toHaveValue(profile.name === "flare26" ? "16:9" : "1536x1024");
-        await expect(settings.getByRole("combobox", { name: "输出格式", exact: true })).toHaveValue("webp");
+        await expect(settings.getByRole("combobox", { name: "宽高比", exact: true }).locator("xpath=ancestor::div[contains(@class,'ant-select')][1]")).toContainText(profile.name === "flare26" ? "16:9" : "3:2 · 1536 × 1024");
+        await expect(settings.getByRole("combobox", { name: "输出格式", exact: true }).locator("xpath=ancestor::div[contains(@class,'ant-select')][1]")).toContainText("WebP");
         expect(posts).toEqual([]);
         expect(api.submissions).toHaveLength(0);
         expect(api.batchSubmissions).toHaveLength(0);

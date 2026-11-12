@@ -1,6 +1,6 @@
 import { useUiText } from "@/lib/i18n";
 import { useEffect, useMemo, useRef, useState, type PointerEvent, type SyntheticEvent } from "react";
-import { Popover } from "antd";
+import { Popover, Tooltip } from "antd";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { clampInlineComparePercent, inlineComparePercentFromClientX } from "@/lib/canvas/canvas-inline-compare";
 import { canvasCompareImages, canvasCompareSameImage, canvasCompareSources } from "@/lib/canvas/canvas-image-compare";
@@ -94,7 +94,7 @@ export function CanvasInlineImageCompare({ node, nodes, scale, showImageInfo, vi
                 <button ref={pickerTrigger} type="button" aria-label={t("选择对比原图")} aria-expanded={pickerOpen} aria-haspopup="dialog" className="flex w-full items-center text-left focus-visible:outline-2 focus-visible:outline-offset-2"
                     style={{ gap: 8 * unit, padding: 6 * unit, borderRadius: 6 * unit, background: theme.node.panel, color: theme.node.text, outlineColor: theme.canvas.selectionStroke }}>
                     {source ? <span className="block shrink-0" style={{ width: 64 * unit, height: 48 * unit }}><CanvasCompareThumbnail node={source} /></span> : null}
-                    <span className="min-w-0 flex-1"><span className="block" style={{ fontSize: 12 * unit }}>{automatic && source?.id === sources[0]?.id ? t("修改前 · 直接上版") : source ? t("当前对比原图") : t("选择对比原图")}</span><span className="mt-0.5 block truncate" title={source ? canvasCompareImageLabel(source) : undefined} style={{ color: theme.node.muted }}>{source ? canvasCompareImageLabel(source) : sources.length ? t("多个或未确认来源，请先选择") : t("未记录修改前图片，可手动选择")}</span></span>
+                    <span className="min-w-0 flex-1"><span className="block" style={{ fontSize: 12 * unit }}>{automatic && source?.id === sources[0]?.id ? t("修改前 · 直接上版") : source ? t("当前对比原图") : t("选择对比原图")}</span><Tooltip title={source ? canvasCompareImageLabel(source) : undefined}><span className="mt-0.5 block truncate" style={{ color: theme.node.muted }}>{source ? canvasCompareImageLabel(source) : sources.length ? t("多个或未确认来源，请先选择") : t("未记录修改前图片，可手动选择")}</span></Tooltip></span>
                     <span className="shrink-0" style={{ color: theme.node.muted }}>{t("换图 ▾")}</span>
                 </button>
             </Popover>
@@ -102,7 +102,7 @@ export function CanvasInlineImageCompare({ node, nodes, scale, showImageInfo, vi
                 <span className="shrink-0">{t("原图")}</span>
                 <input type="range" aria-label={t("原图与修改后对比")} min={0} max={100} step={1} value={percent} disabled={!source} onChange={event => { setRequestedPair(pairKey); setPercent(Number(event.target.value)); }} className="min-w-0 flex-1 cursor-ew-resize touch-none" style={{ height: 24 * unit, accentColor: theme.canvas.selectionStroke }} />
                 <span className="shrink-0">{t("修改后")}</span>
-                <button type="button" onClick={() => onAdvanced(source?.id)} className="shrink-0 hover:underline" title={t("打开差异图、并排和导出工具")} style={{ fontSize: "inherit", color: theme.node.muted }}>{t("更多")}</button>
+                <Tooltip title={t("打开差异图、并排和导出工具")}><button type="button" onClick={() => onAdvanced(source?.id)} className="shrink-0 hover:underline" style={{ fontSize: "inherit", color: theme.node.muted }}>{t("更多")}</button></Tooltip>
             </div>
             {notice ? <span role="status" className="text-center" style={{ fontSize: 10 * unit }}>{t(notice)}</span> : null}
         </div>

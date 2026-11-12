@@ -13,6 +13,7 @@ import { beginChatBilling, ChatStreamOutcome, finishChatBilling } from "../chat-
 import { getCreditsEnabled } from "../credit-policy";
 import { deploymentFeatures } from "../deployment-features";
 import { DuplicateJsonKeyError, parseStrictJson } from "../strict-json";
+import { carbonToolParameters } from "../carbon-tool-schema";
 import { chatPromptProfiles, prepareChatProfileInput, validateChatProfileOutput, type ChatPromptProfile } from "../prompt-chat-profiles";
 import { PromptOptimizationError } from "../prompt-safety";
 import { imageAgentClaudeStream } from "../image-agent-stream";
@@ -689,7 +690,8 @@ async function requestOpenAiChatCompletion(
             ...(model.protocol === "apimart" ? { stream: false } : {}),
             ...(model.model_id === "gemini-4-carbon" && input.gemini ? { max_tokens: input.gemini.maxOutputTokens } : {}),
             ...(input.tools.length ? {
-                tools: input.tools.map(({ type, ...definition }) => ({ type, function: definition })),
+                tools: input.tools.map(({ type, ...definition }) => ({ type, function: model.protocol === "apimart" && model.model_id === "gemini-4-carbon"
+                    ? { ...definition, parameters: carbonToolParameters(definition.parameters) } : definition })),
                 tool_choice: toolChoice,
                 parallel_tool_calls: false,
             } : {}),

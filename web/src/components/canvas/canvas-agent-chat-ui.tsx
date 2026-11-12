@@ -240,14 +240,14 @@ export function AgentChatComposer({
                 {attachmentPreview ?? (attachments.length ? (
                     <div className="thin-scrollbar mb-2 flex gap-2 overflow-x-auto pb-1">
                         {attachments.map((item) => (
-                            <div key={item.id} className="group relative size-14 shrink-0 overflow-hidden rounded-xl border" style={{ borderColor: theme.node.stroke }} title={item.name}>
+                            <Tooltip title={item.name} key={item.id}><div className="group relative size-14 shrink-0 overflow-hidden rounded-xl border" style={{ borderColor: theme.node.stroke }}>
                                 <img src={item.url} alt={item.name} className="size-full object-cover" />
                                 {onRemoveAttachment ? (
                                     <button type="button" className="absolute right-1 top-1 grid size-5 place-items-center rounded-full border opacity-0 shadow-sm transition group-hover:opacity-100" style={{ background: theme.toolbar.panel, borderColor: theme.node.stroke, color: theme.node.text }} onClick={() => onRemoveAttachment(item.id)} aria-label={t("移除图片")}>
                                         <X className="size-3" />
                                     </button>
                                 ) : null}
-                            </div>
+                            </div></Tooltip>
                         ))}
                     </div>
                 ) : null)}
@@ -296,7 +296,7 @@ export function AgentChatComposer({
                                 </Tooltip>
                             </>
                         ) : null}
-                    {sending && onStop ? <Button type="text" shape="circle" className="!h-11 !w-11 !min-w-11 !p-0" style={{ background: theme.node.text, color: theme.node.panel }} icon={<Square className="size-4" />} onClick={onStop} aria-label={t("停止本地回复和查询")} title={t("停止本地回复和查询；已提交的服务端任务可能继续")} />
+                    {sending && onStop ? <Tooltip title={t("停止本地回复和查询；已提交的服务端任务可能继续")}><Button type="text" shape="circle" className="!h-11 !w-11 !min-w-11 !p-0" style={{ background: theme.node.text, color: theme.node.panel }} icon={<Square className="size-4" />} onClick={onStop} aria-label={t("停止本地回复和查询")} /></Tooltip>
                         : <Button type="text" shape="circle" className="!h-11 !w-11 !min-w-11 !p-0" style={{ background: canSubmit ? theme.node.text : theme.node.fill, color: canSubmit ? theme.node.panel : theme.node.faint }} disabled={!canSubmit} icon={sending ? <LoaderCircle className="size-4 animate-spin" /> : <ArrowUp className="size-4" />} onClick={() => void onSubmit()} aria-label={t("发送")} />}
                     </div>
                     {generationControls && left ? <div className="col-span-2 min-w-0">{left}</div> : null}

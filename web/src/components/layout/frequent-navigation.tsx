@@ -28,6 +28,19 @@ export function FrequentNavigation({ onNavigate }: { onNavigate?: () => void }) 
     </section>;
 }
 
+export function HomeRecentNavigation() {
+    useUiLocale();
+    const { pinned, recent } = useNavigationPreferences();
+    const flags = useModuleStore(state => state.flags);
+    const tools = useBusinessConfigStore(state => state.tools);
+    const items = [...new Set([...recent, ...pinned])].map(key => usageDestinations.find(item => item.key === key))
+        .filter((item): item is typeof usageDestinations[number] => Boolean(item && usageBoardAvailable(item.key, flags, tools))).slice(0, 6);
+    if (!items.length) return null;
+    return <section className="my-8" aria-label={uiText("最近使用")}><h2 className="mb-4 text-xl font-semibold">{uiText("最近使用")}</h2>
+        <div className="flex flex-wrap gap-3">{items.map(item => <Link key={item.key} to={item.path} className="wb-surface inline-flex min-h-11 items-center gap-2 px-4 py-2 text-sm hover:bg-muted">{pinned.includes(item.key) && <Star size={14} aria-label={uiText("已固定")} />}{uiText(item.label)}</Link>)}</div>
+    </section>;
+}
+
 export function UsageCollectionNotice({ compact = false }: { compact?: boolean }) {
     useUiLocale();
     const user = useUserStore(state => state.user), status = useUserStore(state => state.status);
@@ -36,5 +49,5 @@ export function UsageCollectionNotice({ compact = false }: { compact?: boolean }
     const text = deploymentFeatures.authenticationEnabled
         ? uiText("记录业务访问、控件操作和受限参数；不录屏、不采集键入内容或密钥。正式提交的提示词由业务服务保存。仅超级管理员可查看明细。")
         : uiText("免登录试用：固定入口保存在本浏览器，不上报人员操作记录。");
-    return <p data-usage-ignore className={compact ? "max-w-64 text-xs leading-4 text-stone-500" : "px-2 text-xs leading-4 text-stone-500"} title={text}>{text}{unavailable ? uiText(" 本地存储不可用，部分记录可能无法保留。") : ""}</p>;
+    return <p data-usage-ignore className={compact ? "max-w-64 text-[13px] leading-relaxed text-muted-foreground" : "px-2 text-[13px] leading-relaxed text-muted-foreground"}>{text}{unavailable ? uiText(" 本地存储不可用，部分记录可能无法保留。") : ""}</p>;
 }

@@ -1,3 +1,4 @@
+import { Tooltip } from "antd";
 import type { PointerEvent } from "react";
 import { useUiText } from "@/lib/i18n";
 import type { canvasThemes } from "@/lib/canvas-theme";
@@ -22,11 +23,11 @@ export function CanvasConnectionControls({ edge, nodes, nodeById, scale, theme, 
         {!connecting && edge && from && to ? ([
             { endpoint: "source" as const, x: from.position.x + from.width, y: from.position.y + from.height / 2, label: "拖动改接起点" },
             { endpoint: "target" as const, x: to.position.x, y: to.position.y + to.height / 2, label: "拖动改接终点" },
-        ]).map(item => <button key={item.endpoint} type="button" data-canvas-no-zoom data-connection-endpoint={item.endpoint}
-            aria-label={t(item.label)} title={t(item.label)} className="absolute z-[85] grid size-8 touch-none place-items-center rounded-full cursor-crosshair"
+        ]).map(item => <Tooltip title={t(item.label)} key={item.endpoint}><button type="button" data-canvas-no-zoom data-connection-endpoint={item.endpoint}
+            aria-label={t(item.label)} className="absolute z-[85] grid size-8 touch-none place-items-center rounded-full cursor-crosshair"
             style={{ left: item.x, top: item.y, transform: `translate(-50%, -50%) scale(${1 / scale})` }}
             onPointerDown={event => onReconnect(event, edge, item.endpoint)}>
             <span className="size-3 rounded-full border-2" style={{ borderColor: theme.canvas.selectionStroke, background: theme.node.panel }} />
-        </button>) : null}
+        </button></Tooltip>) : null}
     </>;
 }

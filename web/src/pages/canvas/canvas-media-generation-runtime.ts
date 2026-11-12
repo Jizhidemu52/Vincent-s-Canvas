@@ -196,7 +196,7 @@ export function confirmCanvasTextRetry(node: CanvasNodeData, context: {
 }) {
     const origin = node.metadata?.generationOrigin;
     if (!origin) { context.message.warning(uiText("原文本任务状态待核查，请先检查原结果")); return; }
-    context.modal.confirm({ title: uiText("重新提交文本任务？"), content: uiText("原文本请求已发出但结果未完整保存，无法恢复原响应。继续将创建新任务，可能再次扣费。"), okText: uiText("确认新任务"), cancelText: uiText("取消"), onOk: async () => {
+    context.modal.confirm({ title: uiText("重新提交文本任务？"), content: uiText("原文本请求已发出但结果未完整保存，无法恢复原响应。继续将创建新任务并重新调用模型。"), okText: uiText("确认新任务"), cancelText: uiText("取消"), onOk: async () => {
         if (context.locks.size) { context.message.info(uiText("当前任务仍在执行，请稍后重试")); return; }
         const config = context.nodes.current.find(item => item.id === origin.configNodeId);
         if (config?.metadata?.generationMode !== "text" || !context.nodes.current.some(item => item.id === origin.sourceNodeId)) { context.message.warning(uiText("原文本配置或输入已变化，请先检查公共配置")); return; }

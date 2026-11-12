@@ -17,6 +17,11 @@ function render(count: number, running = false, enabled = true) {
         onClose={noop} onModelChange={noop} onSizeChange={noop} onCountChange={noop} onPickReferences={noop} onRemoveReference={noop} onClearReferences={noop} onMoveReference={noop} onMissingConfig={noop} onGenerate={noop} />); }
     finally { Object.assign(business, savedBusiness); modules.flags = savedFlags; }
 }
+function generateButton(markup: string) {
+    const button = markup.match(/<button\b[^>]*\bclass="cw-generate-button"[^>]*>/)?.[0];
+    if (!button) throw new Error("Missing native generate button");
+    return button;
+}
 test("the same composer switches between creation and editing with numbered references", () => {
     expect(render(0)).toContain('aria-label="参考图说明"');
     const markup = render(2);
@@ -29,19 +34,19 @@ test("too many references remain visible but cannot be submitted", () => {
     const markup = render(17);
     expect(markup).toContain("参考图 17：reference-16");
     expect(markup).toContain('role="alert"');
-    expect(markup).toMatch(/class="cw-generate-button" disabled=""/);
+    expect(generateButton(markup)).toContain(' disabled=""');
 });
 test("uploading and submitting locks reference changes and duplicate submission", () => {
     const markup = render(2, true);
     expect(markup).toMatch(/aria-label="移除参考图 1" disabled=""/);
-    expect(markup).toMatch(/class="cw-generate-button" disabled=""/);
+    expect(generateButton(markup)).toContain(' disabled=""');
     expect(markup).toContain("提交中…");
 });
 
 test("an administratively disabled canvas tool keeps inputs visible but disables submission", () => {
-    expect(render(2)).toMatch(/class="cw-generate-button"(?! disabled)/);
+    expect(generateButton(render(2))).not.toContain(' disabled=""');
     const markup = render(2, false, false);
-    expect(markup).toMatch(/class="cw-generate-button" disabled=""/);
+    expect(generateButton(markup)).toContain(' disabled=""');
     expect(markup).toContain("修改花瓶颜色");
     expect(markup).toContain("参考图 2：reference-1");
 });

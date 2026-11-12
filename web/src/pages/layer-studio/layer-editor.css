@@ -11,7 +11,7 @@
     color: var(--le-text);
     background: var(--le-bg);
     border: 1px solid var(--le-line);
-    border-radius: 14px;
+    border-radius: 12px;
     overflow: hidden;
     font-size: 14px;
     line-height: 1.5;
@@ -36,7 +36,7 @@
     margin: 0;
 }
 .layer-editor h3 {
-    font-size: 17px;
+    font-size: 16px;
     font-weight: 650;
 }
 .layer-editor h4 {
@@ -52,7 +52,7 @@
 .layer-editor button,
 .layer-editor select {
     border: 1px solid var(--le-line);
-    border-radius: 7px;
+    border-radius: 8px;
     background: var(--le-bg);
     padding: 7px 10px;
     cursor: pointer;
@@ -62,7 +62,7 @@
     background: var(--le-tint);
 }
 .layer-editor button:disabled {
-    opacity: 0.48;
+    opacity: 0.4;
     cursor: not-allowed;
 }
 .layer-editor :focus-visible {
@@ -84,7 +84,7 @@
     border-bottom: 1px solid var(--le-line);
 }
 .layer-editor-toolbar p {
-    font-size: 12px;
+    font-size: 14px;
     color: var(--le-muted);
     margin-top: 3px;
 }
@@ -160,7 +160,7 @@
     background: var(--le-accent);
     color: var(--le-accent-text);
     padding: 2px 6px;
-    font-size: 11px;
+    font-size: 13px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -182,7 +182,7 @@
     justify-content: space-between;
     gap: 8px;
     color: var(--le-muted);
-    font-size: 11px;
+    font-size: 13px;
     margin-top: 12px;
 }
 .layer-editor-sidebar {
@@ -237,7 +237,7 @@
     font-size: 13px;
 }
 .layer-editor-select small {
-    font-size: 10px;
+    font-size: 13px;
     color: var(--le-muted);
 }
 .layer-editor-row > button:last-child {
@@ -258,7 +258,7 @@
     min-width: 0;
 }
 .layer-editor-inspector legend {
-    font-size: 12px;
+    font-size: 14px;
     color: var(--le-muted);
     margin-bottom: 8px;
 }
@@ -273,7 +273,7 @@
     position: relative;
     min-width: 0;
     border: 1px solid var(--le-line);
-    border-radius: 7px;
+    border-radius: 8px;
     background: var(--le-bg);
     padding: 22px 7px 5px;
 }
@@ -281,7 +281,7 @@
     position: absolute;
     left: 8px;
     top: 4px;
-    font-size: 10px;
+    font-size: 13px;
     color: var(--le-muted);
 }
 .layer-editor-number input {
@@ -290,19 +290,19 @@
     border: 0;
     outline: 0;
     background: transparent;
-    font-size: 12px;
+    font-size: 14px;
 }
 .layer-editor-number small {
     flex-shrink: 0;
     white-space: nowrap;
-    font-size: 10px;
+    font-size: 13px;
     color: var(--le-muted);
 }
 .layer-editor-lock {
     display: flex;
     align-items: center;
     gap: 6px;
-    font-size: 12px;
+    font-size: 14px;
     margin: 10px 0;
 }
 .layer-editor-scale {
@@ -310,36 +310,36 @@
     gap: 8px;
     align-items: center;
     justify-content: space-between;
-    font-size: 12px;
+    font-size: 14px;
 }
 .layer-editor-scale input {
     width: 50px;
     border: 1px solid var(--le-line);
     background: var(--le-bg);
-    border-radius: 5px;
+    border-radius: 8px;
     padding: 5px;
 }
 .layer-editor-scale button {
-    font-size: 12px;
+    font-size: 14px;
     padding: 6px;
 }
 .layer-editor-inspector .layer-editor-actions {
     gap: 5px;
 }
 .layer-editor-inspector .layer-editor-actions button {
-    font-size: 11px;
+    font-size: 13px;
     padding: 5px 7px;
 }
 .layer-editor-muted {
-    font-size: 12px;
+    font-size: 14px;
     color: var(--le-muted);
 }
 .layer-editor-warning,
 .layer-editor-notice {
     padding: 10px 12px;
     margin: 10px 16px;
-    border-radius: 7px;
-    font-size: 12px;
+    border-radius: 8px;
+    font-size: 14px;
     overflow-wrap: anywhere;
 }
 .layer-editor-warning {
@@ -365,10 +365,10 @@
     padding-left: 18px;
 }
 .layer-editor-warning button {
-    font-size: 12px;
+    font-size: 14px;
 }
 .layer-editor-ocr {
-    font-size: 12px;
+    font-size: 14px;
 }
 .layer-editor-ocr summary {
     cursor: pointer;
@@ -378,11 +378,11 @@
     overflow-wrap: anywhere;
     max-height: 180px;
     overflow: auto;
-    font: 12px/1.6 inherit;
+    font: 14px/1.6 inherit;
     margin: 8px 0;
     padding: 8px;
     background: var(--le-panel);
-    border-radius: 5px;
+    border-radius: 8px;
 }
 .layer-editor-ocr-line {
     border-top: 1px solid var(--le-line);
@@ -433,6 +433,6 @@
         grid-template-columns: minmax(0, 1fr);
     }
     .layer-editor-canvas-status {
-        font-size: 10px;
+        font-size: 13px;
     }
 }

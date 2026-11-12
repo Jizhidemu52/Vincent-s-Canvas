@@ -23,6 +23,7 @@ export type PerformanceFilters = {
 type Rate = number | null;
 export type PerformanceDashboard = {
   period: Omit<PerformanceFilters, "preset">;
+  todayUsage: { date: string; timeZone: "Asia/Shanghai"; users: number };
   metrics: {
     requestedOutputs: number; validOutputs: number; naturalDailyAverage: number; activeDailyAverage: number | null;
     successCount: number; failedCount: number; cancelledCount: number; successRate: Rate; batchCompletionRate: Rate;

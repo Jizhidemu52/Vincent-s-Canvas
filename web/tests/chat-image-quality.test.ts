@@ -47,11 +47,13 @@ test.each(["blend", "midjourney-blend"])("chat rejects promptless %s profiles an
 const source = readFileSync(new URL("../src/pages/chat/index.tsx", import.meta.url), "utf8");
 const ast = ts.createSourceFile("chat.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 let sendExpression: ts.Expression | undefined;
+let syncVisibleSend: ts.Expression | undefined;
 let selectExpression: ts.JsxSelfClosingElement | undefined;
 let resolutionExpression: ts.JsxSelfClosingElement | undefined;
 let modelExpression: ts.JsxSelfClosingElement | undefined;
 function visit(node: ts.Node) {
     if (ts.isVariableDeclaration(node) && node.name.getText(ast) === "send") sendExpression = node.initializer;
+    if (ts.isVariableDeclaration(node) && node.name.getText(ast) === "syncVisibleSend") syncVisibleSend = node.initializer;
     if (ts.isJsxSelfClosingElement(node) && node.tagName.getText(ast) === "Select") {
         for (const attr of node.attributes.properties) {
             if (!ts.isJsxAttribute(attr) || !attr.initializer) continue;
@@ -92,11 +94,12 @@ function sendHarness({ action = "generate", quality = "high", resolution = undef
         imageTarget: null, referenceImageIds: [], setImageTarget() {}, setReferenceImageIds() {}, assertCreativeChatImageSelection, buildCreativeImageCatalog, chatFocusImage,
         regionSelection: null, setRegionSelection() {}, chatImageTaskSignature, duplicateChatImageTask, completeChatImageTask,
         imageRequestsRef: { current: new Map() }, setActiveImageRequestIds() {}, activeSessionIdRef: { current: initial.id },
+        composerDraftRef: { current: {} }, clearSubmittedComposer() {}, switchComposerSession() {},
         restoreChatMaskResult: async (_pending: unknown, url: string) => url,
         chatMedia: { async hydrateSession<T>(session: T) { return session; }, async persist<T>(image: T, assertCurrent: () => void) { assertCurrent(); return image; } },
         selectedModel: "chat-model", selected: { modelId: "chat-model" }, creativeModelId: "chat-model", config, imageModels, preferredChatImageModel, resolveChatImageQuality, chatImageRequestOptions,
         resolveChatImageSize: (...args: Parameters<typeof resolveChatImageSize>) => resolveChatImageSize(args[0], args[1], args[2], args[3], args[4], async () => sourceSize),
-        activeSendRef: { current: null }, preparingMessageRef: { current: false }, loadedStorageKeyRef: { current: "user-a" }, storageKey: "user-a", sessionsRef,
+        activeSendRef: { current: null }, preparingSendsRef: { current: new Set() }, preparationQueueRef: { current: Promise.resolve() }, sendLifetimesRef: { current: new Set() }, loadedStorageKeyRef: { current: "user-a" }, storageKey: "user-a", sessionsRef,
         createClientId: (() => { let count = 0; return () => `message-${++count}`; })(),
         persistSessions: async (value: any[]) => { snapshots.push(structuredClone(value)); }, persistence: { clear() {} }, setIsSending() {}, setSendPhase() {}, setDraft() {}, setAttachments() {},
         updateSession: (id: string, update: (value: any) => any) => { sessionsRef.current = sessionsRef.current.map(value => value.id === id ? update(value) : value); },
@@ -113,7 +116,7 @@ function sendHarness({ action = "generate", quality = "high", resolution = undef
         await options.onSubmitted(["task-quality"]);
         return [{ id: "image", sourceTaskId: "task-quality", dataUrl: "data:image/png;base64,AQID" }];
     }
-    const code = ts.transpileModule(`exports.send = ${sendExpression.getText(ast)};`, { compilerOptions: { target: ts.ScriptTarget.ESNext } }).outputText;
+    const code = ts.transpileModule(`const syncVisibleSend = ${syncVisibleSend!.getText(ast)}; exports.send = ${sendExpression.getText(ast)};`, { compilerOptions: { target: ts.ScriptTarget.ESNext } }).outputText;
     const exports = {} as { send: () => Promise<void> };
     new Function(...Object.keys(bindings), "exports", code)(...Object.values(bindings), exports);
     return { ...exports, calls, snapshots, sessionsRef, config, initial };

@@ -4,7 +4,7 @@ import { ChevronDown, ChevronRight, FolderOpen, PencilLine, Ungroup, Workflow } 
 import { canvasGroupVisualBounds, type ResolvedCanvasGroup } from "@/lib/canvas/canvas-node-groups";
 import type { CanvasTheme } from "@/lib/canvas-theme";
 import type { CanvasNodeData } from "@/types/canvas";
-import { Dropdown } from "antd";
+import { Dropdown, Tooltip } from "antd";
 
 export type CanvasGroupLayerHandle = { refresh: () => void; highlight: (groupId: string | null) => void };
 type Props = {
@@ -66,17 +66,17 @@ export const CanvasGroupLayer = memo(forwardRef<CanvasGroupLayerHandle, Props>(f
                     { key: "delete", label: t("删除整组"), danger: true, onClick: () => onDelete?.(nodeIds) },
                 ] }}>
                 <div className="pointer-events-auto flex h-10 min-w-0 items-center gap-1 px-2" style={{ color: theme.node.muted, width: bounds.width * scale, transform: `scale(${1 / Math.max(0.05, scale)})`, transformOrigin: "top left" }} onPointerDown={event => event.stopPropagation()}>
-                    <button type="button" title={group.collapsed ? t("展开款式组") : t("折叠款式组（内容和连线仍保留）")} aria-label={t("{value1}款式组 {value2}", { value1: group.collapsed ? uiText("展开") : uiText("折叠"), value2: group.title })} aria-expanded={!group.collapsed} className="shrink-0 rounded p-1 hover:opacity-70" onClick={() => onToggle(group.id)}>
+                    <Tooltip title={group.collapsed ? t("展开款式组") : t("折叠款式组（内容和连线仍保留）")}><button type="button" aria-label={t("{value1}款式组 {value2}", { value1: group.collapsed ? uiText("展开") : uiText("折叠"), value2: group.title })} aria-expanded={!group.collapsed} className="shrink-0 rounded p-1 hover:opacity-70" onClick={() => onToggle(group.id)}>
                         {group.collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
-                    </button>
-                    <button type="button" title={t("拖动标题整体移动；双击重命名")} aria-label={t("选择款式组 {value1}", { value1: group.title })} className="flex min-w-0 flex-1 cursor-grab items-center gap-2 py-1 text-left text-xs active:cursor-grabbing" onPointerDown={event => { if (event.button === 0) onMove(event, group.id); }} onClick={event => { if (event.detail === 0) onSelect(group.id); }} onDoubleClick={() => onRename(group.id)}>
+                    </button></Tooltip>
+                    <Tooltip title={t("拖动标题整体移动；双击重命名")}><button type="button" aria-label={t("选择款式组 {value1}", { value1: group.title })} className="flex min-w-0 flex-1 cursor-grab items-center gap-2 py-1 text-left text-xs active:cursor-grabbing" onPointerDown={event => { if (event.button === 0) onMove(event, group.id); }} onClick={event => { if (event.detail === 0) onSelect(group.id); }} onDoubleClick={() => onRename(group.id)}>
                         <FolderOpen size={14} className="shrink-0" />
                         <span className="truncate font-medium" style={{ color: theme.node.text }}>{group.title}</span>
                         <span className="shrink-0 opacity-70">{nodeIds.size}</span>
-                    </button>
-                    {group.imageSequence && onImageSequence ? <button type="button" title={t("查看连续改图步骤与运行进度")} aria-label={t("连续改图 {value1}", { value1: group.title })} className="flex shrink-0 items-center gap-1 rounded p-1 text-xs hover:opacity-70" onClick={() => onImageSequence(group.id)}><Workflow size={14} />{group.imageSequence.steps.filter(step => step.status === "success").length}/{group.imageSequence.steps.length}</button> : null}
-                    <button type="button" title={t("重命名款式组")} aria-label={t("重命名款式组 {value1}", { value1: group.title })} className="shrink-0 rounded p-1 hover:opacity-70" onClick={() => onRename(group.id)}><PencilLine size={14} /></button>
-                    <button type="button" title={t("取消分组，保留全部内容")} aria-label={t("取消分组 {value1}", { value1: group.title })} className="shrink-0 rounded p-1 hover:opacity-70" onClick={() => onUngroup(group.id)}><Ungroup size={14} /></button>
+                    </button></Tooltip>
+                    {group.imageSequence && onImageSequence ? <Tooltip title={t("查看连续改图步骤与运行进度")}><button type="button" aria-label={t("连续改图 {value1}", { value1: group.title })} className="flex shrink-0 items-center gap-1 rounded p-1 text-xs hover:opacity-70" onClick={() => onImageSequence(group.id)}><Workflow size={14} />{group.imageSequence.steps.filter(step => step.status === "success").length}/{group.imageSequence.steps.length}</button></Tooltip> : null}
+                    <Tooltip title={t("重命名款式组")}><button type="button" aria-label={t("重命名款式组 {value1}", { value1: group.title })} className="shrink-0 rounded p-1 hover:opacity-70" onClick={() => onRename(group.id)}><PencilLine size={14} /></button></Tooltip>
+                    <Tooltip title={t("取消分组，保留全部内容")}><button type="button" aria-label={t("取消分组 {value1}", { value1: group.title })} className="shrink-0 rounded p-1 hover:opacity-70" onClick={() => onUngroup(group.id)}><Ungroup size={14} /></button></Tooltip>
                 </div>
                 </Dropdown>
             </div>;
