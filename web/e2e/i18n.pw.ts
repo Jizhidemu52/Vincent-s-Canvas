@@ -47,7 +47,7 @@ test("language switching preserves canvas content and an unsent assistant draft"
     await page.evaluate(() => { (window as any).__i18nNoReload = "preserved"; });
     await changeLanguage(page);
     await expect(page.locator("html")).toHaveAttribute("lang", "en");
-    await expect(page.locator(".inchoice-brand-name").filter({ visible: true }).first()).toHaveText("TruCreate");
+    await expect(page).toHaveTitle("TruCreate · Ideas Come True.");
     await expect(composer).toHaveValue("尚未发送的中文草稿：白底印花 / Inchoice");
     await expect(page.getByRole("button", { name: "Open canvas menu", exact: true })).toBeVisible();
     expect(await page.evaluate(() => (window as any).__i18nNoReload)).toBe("preserved");
@@ -96,7 +96,8 @@ test("image settings keep raw model parameters and the prompt when switching lan
     await expect(prompt).toBeVisible();
     await prompt.fill("我的中文设计要求：保存、透明、1024x1024");
     await page.getByRole("button", { name: "切换生成图片模型", exact: true }).click();
-    const size = page.locator('[data-usage-control="size"] [role="combobox"]').filter({ visible: true }).first();
+    const settings = page.getByRole("dialog", { name: /^(切换生成图片模型|Switch image generation model)/ });
+    const size = settings.locator('[data-usage-control="size"] [role="combobox"]');
     await expect(size).toBeVisible();
     await chooseAntSelect(size, "1:1 · 1024 × 1024");
     // Observe persisted raw parameters: AntD's combobox input stores search text, not the selected value.
@@ -201,8 +202,8 @@ for (const tool of ["pattern-placement", "pattern-repeat"]) {
     });
 }
 
-test("500-node canvas language switching does not rewrite the persisted document", async ({ page, context, api }) => {
-    await preparePerformanceScene(context, api, "http://127.0.0.1:5199");
+test("500-node canvas language switching does not rewrite the persisted document", async ({ page, context, api }, info) => {
+    await preparePerformanceScene(context, api, new URL(info.project.use.baseURL!).origin);
     const before = structuredClone(api.document(PROJECT_ID));
     await openPerformanceScene(page);
     await changeLanguage(page);

@@ -182,6 +182,11 @@ export function CanvasOnboarding({ ref, empty, onImportImage, onUseTemplate, onO
         window.addEventListener("resize", schedule);
         window.addEventListener("scroll", schedule, true);
         window.addEventListener("pointerup", schedule);
+        // An ancestor's entrance animation changes the target's screen position
+        // without resizing it or mutating its attributes. Re-measure once the
+        // panel settles so the outline does not retain its initial offset.
+        workspace.addEventListener("animationend", schedule, true);
+        workspace.addEventListener("transitionend", schedule, true);
         schedule();
         return () => {
             cancelAnimationFrame(frame);
@@ -189,6 +194,8 @@ export function CanvasOnboarding({ ref, empty, onImportImage, onUseTemplate, onO
             window.removeEventListener("resize", schedule);
             window.removeEventListener("scroll", schedule, true);
             window.removeEventListener("pointerup", schedule);
+            workspace.removeEventListener("animationend", schedule, true);
+            workspace.removeEventListener("transitionend", schedule, true);
             if (ownsCreationPanel.current) { ownsCreationPanel.current = false; closeCreationAction.current?.(); }
         };
     }, [open, step]);

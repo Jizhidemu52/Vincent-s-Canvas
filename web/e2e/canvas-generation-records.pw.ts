@@ -354,7 +354,7 @@ test("viewing and normalizing settings leaves source metadata untouched; intenti
     await select(page, "result-a");
     await expect(editor(page)).toHaveValue(INPUT);
     const ratio = panel(page).getByRole("button", { name: "宽高比", exact: true });
-    await expect(ratio).toHaveAttribute("title", "宽高比：1:1");
+    await expect(ratio).toHaveText("1:1");
     await panel(page).getByRole("button", { name: "更多设置", exact: true }).click();
     const settings = page.getByRole("dialog", { name: "图像高级设置", exact: true });
     await expect(settings).toBeVisible();
@@ -375,7 +375,7 @@ test("viewing and normalizing settings leaves source metadata untouched; intenti
     await page.reload();
     await select(page, "result-a");
     await expect(editor(page)).toHaveValue(INPUT);
-    await expect(ratio).toHaveAttribute("title", "宽高比：3:2");
+    await expect(ratio).toHaveText("3:2");
     await assertNoGeneration(api);
 });
 
@@ -387,7 +387,7 @@ test("deleted source remains an editable reference; replay uses exact archived i
     await expect(editor(page)).toHaveValue(INPUT);
     await expect(panel(page).locator(".cw-reference-preview")).toHaveCount(1);
     // Display normalization must not turn viewing the archived input into a node edit.
-    await expect(panel(page).getByRole("button", { name: "宽高比", exact: true })).toHaveAttribute("title", "宽高比：1:1");
+    await expect(panel(page).getByRole("button", { name: "宽高比", exact: true })).toHaveText("1:1");
     expect(node(api, "result-a").metadata.size).toBeUndefined();
     const before = structuredClone(api.document(PROJECT)!);
     before.nodes.find((item: any) => item.id === "result-a").metadata.draftPrompt = "新草稿不得污染再来一张";

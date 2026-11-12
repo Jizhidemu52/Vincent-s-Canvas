@@ -35,6 +35,7 @@ test("video recipe 503 is a definite failed submission, with no recovery loop af
     expect(copied).toContain("PROMPT_RECIPE_UNAVAILABLE");
     expect(copied).toContain(`requestId: ${requestId}`);
     await page.reload();
+    await page.getByRole("tab", { name: /^历史记录/ }).click();
     await page.getByRole("button", { name: /镜头缓慢拉近服装领口.*失败/ }).click();
     await expect(page.getByRole("button", { name: "按原参数重试", exact: true })).toBeVisible();
     expect(await diagnostic(page)).toContain("PROMPT_RECIPE_UNAVAILABLE");

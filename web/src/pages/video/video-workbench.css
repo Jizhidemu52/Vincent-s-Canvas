@@ -42,6 +42,15 @@
 .video-workbench .video-history-panel { max-height: 300px; overflow-y: auto; }
 .video-workbench .text-xs { font-size: 13px; }
 
+@media (max-width: 1023px) {
+    .video-workbench .generation-form {
+        /* Keep the bottom-most submit action still when status/actions appear.
+           The editable area scrolls inside the card instead of moving its footer. */
+        height: min(760px, calc(100dvh - 144px));
+        min-height: 320px;
+    }
+}
+
 @media (min-width: 1024px) {
     .video-workbench-layout {
         grid-template-columns: minmax(360px, 440px) minmax(0, 1fr);

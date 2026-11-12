@@ -101,9 +101,8 @@ test("4MP真实对比和导出：不冻结、精确差异、PNG透明、JPG白�
     const selected = api.document(id)!.nodes[1];
     await page.locator(`[data-node-id="${selected.id}"]`).click({ position: { x: 30, y: 12 } });
     await expect(page.getByRole("toolbar", { name: "图片工具栏", exact: true })).toBeVisible();
-    const direct = page.getByRole("button", { name: "下载图片", exact: true });
-    if (await direct.isVisible()) await direct.click();
-    else { await page.getByRole("button", { name: "更多图片工具", exact: true }).click(); await page.getByRole("menuitem", { name: "下载", exact: true }).click(); }
+    await page.getByRole("button", { name: "更多下载格式", exact: true }).click();
+    await page.getByRole("menuitem", { name: "原件版本与下载说明", exact: true }).click();
     const downloadDialog = page.getByRole("dialog", { name: "下载图片", exact: true });
     await downloadDialog.getByRole("radio", { name: "JPG（白底）", exact: true }).check();
     await page.evaluate(() => { (window as any).imageWorkerStats.hold = true; });

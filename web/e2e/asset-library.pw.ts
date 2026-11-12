@@ -89,8 +89,9 @@ test('failed uploads retain per-file errors and retry references while download 
     const fixture = await setup(context, baseURL!);
     await page.goto('/assets');
     await expect(page.getByText('首张参考', { exact: true }).first()).toBeVisible();
+    await page.getByRole('button', { name: '添加', exact: true }).click();
     const chooser = page.waitForEvent('filechooser');
-    await page.getByRole('button', { name: '上传图片', exact: true }).first().click();
+    await page.getByRole('menuitem', { name: '上传图片', exact: true }).click();
     await (await chooser).setFiles([{ name: 'success.png', mimeType: 'image/png', buffer: IMAGE }, { name: 'failed.png', mimeType: 'image/png', buffer: IMAGE }]);
     await expect(page.getByText('failed.png：测试上传中断')).toBeVisible();
     expect(await page.locator('input[type=file][multiple]').inputValue()).toBe('');

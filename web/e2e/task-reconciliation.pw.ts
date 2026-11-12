@@ -48,7 +48,7 @@ async function openTaskManagement(page: Page, context: BrowserContext, api: Mock
     const admin = new AdminApi(); await admin.attach(context);
     await page.goto("/admin");
     await page.getByRole("link", { name: "批量任务", exact: true }).click();
-    const panel = page.getByRole("region", { name: "待核查结算" });
+    const panel = page.getByRole("region", { name: "待核查任务", exact: true });
     await expect(panel.getByRole("button", { name: "核查任务" })).toHaveCount(2);
     return { admin, panel };
 }
@@ -67,12 +67,12 @@ test("超级管理员核查必填证据，500保留表单并防止重复提交�
     await expect(dialog.getByText("请选择核实后的结论")).toBeVisible();
     await expect(dialog.getByLabel("核查理由", { exact: true })).toHaveAttribute("aria-invalid", "true");
     expect(admin.resolutions).toHaveLength(0);
-    await selectDecision(dialog, "已确认成功：交付结果并结算");
+    await selectDecision(dialog, "已确认成功：交付结果");
     await dialog.getByLabel("核查理由", { exact: true }).fill("供应商账单已人工核对");
     await save.click();
-    await expect(dialog.getByLabel("供应商工单 / 账单 / 核查记录编号", { exact: true })).toHaveAttribute("aria-invalid", "true");
+    await expect(dialog.getByLabel("供应商工单 / 核查记录编号", { exact: true })).toHaveAttribute("aria-invalid", "true");
     expect(admin.resolutions).toHaveLength(0);
-    await dialog.getByLabel("供应商工单 / 账单 / 核查记录编号", { exact: true }).fill("TICKET-2026-001");
+    await dialog.getByLabel("供应商工单 / 核查记录编号", { exact: true }).fill("TICKET-2026-001");
     const readsBefore = admin.listReads;
     admin.holdResolution = true;
     await save.dblclick();
@@ -129,9 +129,9 @@ test("部门管理员没有核查或批量任务入口，直接链接也不加�
     api.role = "department_admin";
     const admin = new AdminApi(); await admin.attach(context);
     await page.goto("/admin?tab=batch");
-    await expect(page.getByRole("link", { name: "账号额度", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "账号管理", exact: true })).toBeVisible();
     await expect(page.getByRole("link", { name: "批量任务", exact: true })).toHaveCount(0);
-    await expect(page.getByRole("region", { name: "待核查结算" })).toHaveCount(0);
+    await expect(page.getByRole("region", { name: "待核查任务", exact: true })).toHaveCount(0);
     expect(admin.listReads).toBe(0);
     expect(admin.resolutions).toHaveLength(0);
 });

@@ -92,7 +92,10 @@ export async function inspectRenderedPerformanceImages(page: Page, selector = '[
 
 export async function openPerformanceScene(page: Page) {
     await page.goto(`/canvas/${PROJECT_ID}`);
-    await expect(page.locator('[data-node-id="performance-node-0"]')).toBeVisible();
+    // Opening a large graph now fits the overview, where text nodes are drawn
+    // on Canvas2D. A real image preview is the DOM readiness signal; do not
+    // change the benchmark's viewport or selection merely to await mounting.
+    await expect(page.locator('[data-node-id="performance-node-4"]')).toBeVisible();
     const skip = page.getByRole("button", { name: "跳过引导", exact: true });
     if (await skip.isVisible()) await skip.click();
     await page.evaluate(async () => { await document.fonts.ready; });

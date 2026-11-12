@@ -150,6 +150,7 @@ for (const reduced of [false, true]) test(`panel close is inert, rapid reopen pr
 });
 
 test("new imports do not overlap; More and right-click share grouped image actions", async ({ page, api }, info) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
     const id = await newCanvas(page);
     for (const name of ["first.png", "second.png", "third.png"]) {
         await uploadImage(page, name);

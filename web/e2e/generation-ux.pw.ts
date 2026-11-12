@@ -131,14 +131,14 @@ test("queued cancellation is explicit, calls the original task once and verifies
     const cancel = page.getByRole("button", { name: "取消任务", exact: true });
     await expect(cancel).toBeEnabled();
     await cancel.click();
-    await expect(page.getByRole("dialog")).toContainText("尚未提交上游");
+    await expect(page.getByRole("dialog")).toContainText("只取消尚未开始执行的原任务。若任务已开始执行，取消会被拒绝。");
     await page.getByRole("button", { name: "保留任务", exact: true }).click();
     expect(cancellations).toEqual([]);
     await cancel.click();
     await page.getByRole("button", { name: "确认取消任务", exact: true }).click();
     await expect.poll(() => cancellations.length).toBe(1);
     expect(api.tasks.get(cancellations[0]!)?.status).toBe("cancelled");
-    await expect(page.getByText("任务已取消；额度以账户记录为准。", { exact: true }).first()).toBeVisible();
+    await expect(page.getByText("任务已取消。", { exact: true }).first()).toBeVisible();
     expect(api.submissions).toHaveLength(1);
 });
 

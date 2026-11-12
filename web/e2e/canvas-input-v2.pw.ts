@@ -110,6 +110,14 @@ test("报告一键复制只含汇总，窄屏与深浅主题均可操作", async
     await preparePerformanceScene(context, api, new URL(info.project.use.baseURL!).origin);
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
     await openPerformanceScene(page);
+    // Explicitly enter the detail view through user controls before testing
+    // DOM keyboard focus and 1px nudges; the initial 500-node view is overview.
+    await page.keyboard.press("Control+k");
+    const locate = page.getByRole("combobox", { name: "搜索命令、节点和素材" });
+    await locate.fill("性能样本 0"); await locate.press("Enter");
+    await expect(page.getByRole("dialog", { name: "命令与搜索", exact: true })).toBeHidden();
+    await page.getByRole("button", { name: "画布缩放与视图", exact: true }).dblclick();
+    await expect(page.getByRole("button", { name: "画布缩放与视图", exact: true })).toHaveText("100%");
     const node = page.locator('[data-node-id="performance-node-0"]');
     // Tab is exercised from the real focus order, not only via element.focus().
     await node.focus(); await page.keyboard.press("Shift+Tab"); await page.keyboard.press("Tab");

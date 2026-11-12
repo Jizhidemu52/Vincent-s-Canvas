@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import type { BrowserContext, Route } from "@playwright/test";
+import type { BrowserContext, Locator, Page, Route } from "@playwright/test";
 import { test, expect, newCanvas } from "./fixtures";
 import type { AdminReleaseNote } from "../../shared/release-notes";
 
@@ -8,6 +8,12 @@ const version = `v${readFileSync(resolve(import.meta.dirname, "../../VERSION"), 
 const content = "画布交互与生成体验已改善。\n\n保留已有作品和历史记录。\n<b>这段是纯文本，不是 HTML</b>";
 const published = (value = version): AdminReleaseNote => ({ version: value, title: "画布体验更新与版本公告", content, revision: 1, createdAt: "2026-11-03T12:00:00.000Z", updatedAt: "2026-11-03T12:00:00.000Z", publishedAt: "2026-11-03T12:00:00.000Z" });
 const json = (route: Route, body: unknown, status = 200) => route.fulfill({ status, json: body });
+
+async function openReleaseNotes(page: Page, navigation: Page | Locator = page) {
+    await navigation.getByRole("button", { name: "帮助与使用说明", exact: true }).click();
+    // The help menu is a portal, including when opened from the mobile drawer.
+    await page.getByRole("button", { name: "版本更新", exact: true }).click();
+}
 
 async function releaseFixture(context: BrowserContext) {
     const state = { notes: [] as AdminReleaseNote[], reads: 0, saves: 0, publishes: 0, publicFailure: 0, holdPublic: false, held: [] as Route[] };
@@ -96,7 +102,7 @@ test("draft stays private; publish is explicit; ordinary users read plain text i
     await page.screenshot({ path: info.outputPath("home-dark.png"), fullPage: true });
     await page.setViewportSize({ width: 390, height: 844 });
     await page.getByRole("button", { name: "打开导航菜单", exact: true }).click();
-    await page.getByRole("dialog", { name: "功能模块", exact: true }).getByRole("button", { name: "版本更新", exact: true }).click();
+    await openReleaseNotes(page, page.getByRole("dialog", { name: "功能模块", exact: true }));
     await expect(page.getByRole("dialog", { name: "功能模块", exact: true })).toBeHidden();
     await expect(page.getByTestId("release-note-content")).toHaveText(content);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
@@ -105,7 +111,7 @@ test("draft stays private; publish is explicit; ordinary users read plain text i
     await page.getByRole("button", { name: "打开导航菜单", exact: true }).click();
     await page.getByRole("dialog", { name: "功能模块", exact: true }).getByRole("button", { name: "切换到浅色主题", exact: true }).click();
     await expect(page.locator("html")).not.toHaveAttribute("data-magicui-theme-vt", "active");
-    await page.getByRole("dialog", { name: "功能模块", exact: true }).getByRole("button", { name: "版本更新", exact: true }).click();
+    await openReleaseNotes(page, page.getByRole("dialog", { name: "功能模块", exact: true }));
     await expect(page.getByRole("dialog", { name: "功能模块", exact: true })).toBeHidden();
     await page.screenshot({ path: info.outputPath("details-mobile-light.png"), fullPage: true });
     expect(api.submissions).toHaveLength(0);
@@ -116,7 +122,7 @@ test("conflict preserves typed draft, dirty navigation asks, and refresh never o
     state.notes = [{ ...published(), publishedAt: null }];
     await page.goto("/admin?tab=release-notes"); const panel = page.getByTestId("admin-release-notes");
     await panel.getByLabel("更新标题", { exact: true }).fill("本机尚未保存的标题");
-    await page.getByRole("navigation", { name: "管理板块", exact: true }).getByRole("link", { name: "账号额度", exact: true }).click();
+    await page.getByRole("navigation", { name: "管理板块", exact: true }).getByRole("link", { name: "账号管理", exact: true }).click();
     await expect(page.getByRole("dialog")).toContainText("版本更新草稿尚未保存");
     await page.getByRole("button", { name: "继续编辑", exact: true }).click();
     state.notes[0].revision = 2; state.notes[0].title = "另一位管理员已保存";
@@ -149,13 +155,13 @@ test("empty publication list has no home banner; explicit details can show empty
     const { state } = await releaseFixture(context);
     await page.goto("/"); await expect(page.getByRole("heading", { name: "想法成真", exact: true })).toBeVisible();
     await expect.poll(() => state.reads).toBe(1); await expect(page.getByTestId("home-release-note")).toHaveCount(0);
-    await page.getByRole("button", { name: "版本更新", exact: true }).first().click();
+    await openReleaseNotes(page);
     await expect(page.getByRole("dialog")).toContainText("暂时没有已发布的版本更新");
     await page.screenshot({ path: info.outputPath("empty-state.png"), fullPage: true });
     await page.getByRole("dialog").getByRole("button", { name: "关闭", exact: true }).click();
     state.publicFailure = 503; await page.reload();
     await expect(page.getByRole("heading", { name: "想法成真", exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "版本更新", exact: true }).first().click();
+    await openReleaseNotes(page);
     await expect(page.getByRole("dialog")).toContainText("不影响继续创作");
     expect(api.submissions).toHaveLength(0);
 });
@@ -189,7 +195,10 @@ test("an old employee response cannot reappear after explicit sign-out", async (
     const { state, publicBody } = await releaseFixture(context); state.notes = [published()]; state.holdPublic = true;
     await context.route("**/api/auth/logout", route => route.fulfill({ status: 204 }));
     await page.goto("/"); await expect.poll(() => state.held.length).toBe(1);
+    await page.getByRole("button", { name: "帮助与使用说明", exact: true }).click();
     await expect(page.getByRole("status").filter({ hasText: "画布已同步" })).toBeVisible();
+    await page.getByRole("button", { name: "帮助与使用说明", exact: true }).click();
+    await page.getByRole("button", { name: "个人账号", exact: true }).click();
     await page.getByRole("button", { name: "退出登录", exact: true }).first().click();
     await expect(page.getByRole("heading", { name: "登录状态已变化，工作区已暂停", exact: true })).toBeVisible();
     state.holdPublic = false;

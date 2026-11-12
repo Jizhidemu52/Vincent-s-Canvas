@@ -116,6 +116,8 @@ test("后台晚到成功只更新生成记录，不替换已选历史预览或�
     await historical.click();
     const image = page.getByRole("img", { name: "生成结果 1", exact: true });
     await expect(image).toBeVisible();
+    // A visible thumbnail shell can precede its asynchronous source URL.
+    await expect(image).toHaveAttribute("src", /\S+/);
     const originalSource = await image.getAttribute("src");
     pending.status = "success";
     pending.resultUrls = [`/api/assets/${pending.id}/content`];

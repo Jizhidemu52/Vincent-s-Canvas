@@ -116,7 +116,7 @@ test("standalone explicit model changes clear incompatible 4K options and old op
     await expect(prompt).toHaveValue(optimized);
     await addReference(prompt);
     await expect(page.getByRole("img", { name: "reference-1.png", exact: true })).toBeVisible();
-    await expect(page.getByText("aplmart-mai2.6-flash · 模型决定尺寸 · 约 100 万像素", { exact: true })).toBeVisible();
+    await expect(page.getByText("MAI Image 2.6 Flash · 模型决定尺寸 · 约 100 万像素", { exact: true })).toBeVisible();
     settings = await openSettings(page);
     await expect(settings.getByRole("combobox", { name: "清晰度 / 分辨率", exact: true })).toHaveCount(0);
     await expect(settings.getByRole("status").filter({ hasText: "图生图尺寸由模型决定，约 100 万像素" })).toBeVisible();

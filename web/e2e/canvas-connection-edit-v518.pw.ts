@@ -19,22 +19,35 @@ test("连线两端可改接，取消和无效落点保留原线，成功改接�
     const id = "connection-rewire-v518"; const original = seed(api, id);
     await page.goto(`/canvas/${id}`);
     await expect(page.locator('[data-node-id="b"]')).toBeVisible();
-    await page.mouse.click(680, 380);
+    const selectEdge = async () => {
+        // The unselected line is now drawn on Canvas2D. Its horizontal source
+        // and target ports still define the real pointer hit-test midpoint.
+        const a = (await page.locator('[data-node-id="a"]').boundingBox())!;
+        const b = (await page.locator('[data-node-id="b"]').boundingBox())!;
+        await page.mouse.click((a.x + a.width + b.x) / 2, a.y + a.height / 2);
+    };
+    const nodeCenter = async (nodeId: string) => {
+        const bounds = (await page.locator(`[data-node-id="${nodeId}"]`).boundingBox())!;
+        return { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
+    };
+    await selectEdge();
     const end = page.getByRole("button", { name: "拖动改接终点", exact: true });
     await expect(end).toBeVisible();
     let box = (await end.boundingBox())!;
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await page.mouse.down();
-    await page.mouse.move(1205, 700, { steps: 8 });
+    const target = await nodeCenter("c");
+    await page.mouse.move(target.x, target.y, { steps: 8 });
     await expect(page.locator('[data-connection-kind]')).toContainText("作为输入参考");
     await page.mouse.up();
     await expect.poll(() => api.document(id)?.connections).toEqual([{ id: "edge-ab", fromNodeId: "a", toNodeId: "c", kind: "reference" }]);
     await page.keyboard.press("Control+z");
     await expect.poll(() => api.document(id)?.connections).toEqual(original.connections);
-    await page.mouse.click(680, 380);
+    await selectEdge();
     const start = page.getByRole("button", { name: "拖动改接起点", exact: true });
     await expect(start).toBeVisible(); box = (await start.boundingBox())!;
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await page.mouse.down();
-    await page.mouse.move(505, 700, { steps: 8 }); await page.mouse.up();
+    const source = await nodeCenter("d");
+    await page.mouse.move(source.x, source.y, { steps: 8 }); await page.mouse.up();
     await expect.poll(() => api.document(id)?.connections).toEqual([{ id: "edge-ab", fromNodeId: "d", toNodeId: "b", kind: "reference" }]);
     box = (await page.getByRole("button", { name: "拖动改接终点", exact: true }).boundingBox())!;
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await page.mouse.down();

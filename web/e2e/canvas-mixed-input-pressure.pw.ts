@@ -181,7 +181,21 @@ test("fixed-seed pressure: 3 rounds of 6 independent mixed-format batches with t
 async function panTo(page: Page, target: Locator) {
     await expect(target).toBeAttached(); const box = await target.boundingBox(); if (!box) throw new Error("Missing UI target bounds");
     const dx = 900 - (box.x + box.width / 2), dy = 430 - (box.y + box.height / 2);
-    if (Math.abs(dx) > 300 || Math.abs(dy) > 180) { await page.mouse.move(1700, 1050); await page.mouse.down({ button: "middle" }); await page.mouse.move(1700 + dx, 1050 + dy, { steps: 12 }); await page.mouse.up({ button: "middle" }); }
+    if (Math.abs(dx) > 300 || Math.abs(dy) > 180) {
+        // Workflow output/config cards can now occupy the old fixed grab point.
+        // Begin on observed canvas background, not inside a textarea or toolbar.
+        const grab = await page.evaluate(() => {
+            for (let y = 140; y < innerHeight - 100; y += 80) for (let x = 20; x < innerWidth - 20; x += 80) {
+                const hit = document.elementFromPoint(x, y);
+                if (hit?.closest("[data-canvas-viewport]") && !hit.closest("[data-node-id],[data-canvas-group-id],[data-canvas-no-zoom],button,input,textarea")) return { x, y };
+            }
+            throw new Error("No unobstructed canvas background is available for panning");
+        });
+        await page.mouse.move(grab.x, grab.y); await page.mouse.down({ button: "middle" });
+        await expect(page.locator("[data-canvas-viewport]")).toHaveAttribute("data-cursor-panning", "true");
+        await page.mouse.move(grab.x + dx, grab.y + dy, { steps: 12 }); await page.mouse.up({ button: "middle" });
+        await expect(target).toBeInViewport();
+    }
 }
 async function workflowRecord(page: Page, groupId: string) {
     const button = page.locator(`[data-canvas-group-id="${groupId}"]`).getByRole("button", { name: /^连续改图 / }); await panTo(page, button); await button.click();

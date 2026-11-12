@@ -107,7 +107,9 @@ for (const route of [
         if (route.prompt) await expect(active(page).getByRole("textbox", { name: "图像提示词", exact: true })).toHaveValue("MULTI_5_独立款式，不改变其他任务");
         await page.setViewportSize({ width: 390, height: 844 });
         await expectActiveTabVisible(page);
-        expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+        // A desktop task tooltip may finish its exit animation after the resize.
+        // Keep the same overflow bound while waiting for that layout to settle.
+        await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
         await page.screenshot({ path: testInfo.outputPath(`${route.button}-multi-mobile.png`), fullPage: true });
     });
 }

@@ -15,10 +15,7 @@ for (const surface of ["chat", "canvas"] as const) {
             if (surface === "chat") await page.goto("/chat");
             else {
                 const id = await newCanvas(page);
-                if (width === 390) {
-                    await page.getByRole("button", { name: "打开画布菜单", exact: true }).click();
-                    await page.getByRole("menuitem", { name: "打开对话", exact: true }).click();
-                } else await page.getByRole("tab", { name: "对话", exact: true }).first().click();
+                await page.getByRole("tab", { name: "对话", exact: true }).first().click();
                 await expect.poll(() => Boolean(api.document(id))).toBe(true);
             }
             const input = surface === "chat" ? page.getByRole("textbox", { name: /^(对话内容|Message)$/ }) : page.locator(".cw-agent-panel textarea").last();
@@ -38,11 +35,9 @@ for (const surface of ["chat", "canvas"] as const) {
                 requests.push(url.origin === origin ? url.pathname : url.href);
             });
             if (surface === "canvas" && width === 390) {
-                await page.getByRole("button", { name: "打开画布菜单", exact: true }).click();
-                await page.getByRole("menuitem", { name: "收起对话", exact: true }).click();
+                await page.locator(".cw-agent-panel").getByRole("tab", { name: "创建", exact: true }).click();
                 await expect(page.locator(".cw-agent-panel")).toBeHidden();
-                await page.getByRole("button", { name: "打开画布菜单", exact: true }).click();
-                await page.getByRole("menuitem", { name: "打开对话", exact: true }).click();
+                await page.getByRole("tab", { name: "对话", exact: true }).first().click();
                 await expect(input).toHaveValue("保留我的草稿，不发送，也不替换参考图。");
             }
 

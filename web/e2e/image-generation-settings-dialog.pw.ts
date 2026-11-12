@@ -86,6 +86,8 @@ test("390px dark reduced-motion sheet stays in bounds, supports long labels and 
     await page.getByRole("option", { name: /GPT Image 2.6 Sunburst/ }).click();
     await dialog.locator("summary", { hasText: "高级参数" }).click();
     await chooseAntSelect(dialog.getByRole("combobox", { name: "输出格式", exact: true }), "WebP");
+    // A closing Select portal still owns Escape until its leave motion finishes.
+    await expect(page.locator(".ant-select-dropdown:visible")).toHaveCount(0);
     await dialog.getByLabel("输出压缩质量", { exact: true }).fill("85");
     const overflow = await dialog.evaluate(element => element.scrollWidth > element.clientWidth || document.documentElement.scrollWidth > innerWidth);
     expect(overflow).toBe(false);

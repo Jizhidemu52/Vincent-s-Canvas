@@ -357,9 +357,14 @@ test("实操素材：四个包款评审单元的六种对齐与五种排列", as
         await page.getByRole("combobox", { name: "对齐与排列所选节点", exact: true }).click();
         await expect(page.locator(".ant-select-dropdown:visible .ant-select-item-option").first()).toBeVisible();
         const option = page.locator(`.ant-select-dropdown:visible .ant-select-item-option[title="${canvasArrangeOptions.find(option => option.key === mode)!.label}"]`);
-        // AntD virtualizes the last item in this 11-option menu; reveal it by
-        // scrolling the real options list, as a pointer user would.
-        if (!await option.count()) await page.locator(".ant-select-dropdown:visible .rc-virtual-list-holder").evaluate(element => { element.scrollTop = element.scrollHeight; });
+        // AntD retains the last selected item's scroll position between opens.
+        // Reveal virtualized options above or below it through the real list.
+        if (!await option.count()) {
+            const optionIndex = canvasArrangeOptions.findIndex(option => option.key === mode);
+            await page.locator(".ant-select-dropdown:visible .rc-virtual-list-holder").evaluate((element, index) => {
+                element.scrollTop = index === 0 ? 0 : element.scrollHeight;
+            }, optionIndex);
+        }
         await option.click();
         await expect.poll(() => current().map(node => node.position)).not.toEqual(initial.map(node => node.position));
         const result = current();
@@ -379,12 +384,18 @@ test("实操素材：四个包款评审单元的六种对齐与五种排列", as
         if (["column", "distribute-y"].includes(mode)) equalGaps("y");
         if (mode === "distribute-x") expect(result.map(node => node.position.y)).toEqual(initial.map(node => node.position.y));
         if (mode === "distribute-y") expect(result.map(node => node.position.x)).toEqual(initial.map(node => node.position.x));
+        // Release AntD's combobox keyboard focus before canvas shortcuts.
+        // Its native input correctly owns Shift+1 / Ctrl+Z while focused.
+        await page.getByRole("button", { name: "选择 / 框选", exact: true }).click();
         await page.keyboard.press("Shift+1");
         await snapshot(page, info, `arrange-${mode}`);
         outcomes.push({ mode, nodes: structuredClone(result) });
-        await page.mouse.click(1325, 840);
+        await page.getByRole("button", { name: "选择 / 框选", exact: true }).click();
         await page.keyboard.press("Control+z");
         await expect.poll(current).toEqual(initial);
+        // Undo restores graph geometry, not the viewport used to photograph
+        // the previous arrangement. Refit the restored graph for the next UI action.
+        await page.keyboard.press("Shift+1");
     }
     await info.attach("arrange-operation-state", { contentType: "application/json", body: JSON.stringify({ initial, outcomes, restored: current(), generationSubmissions: api.submissions.length + api.batchSubmissions.length }) });
     zeroGenerations(api);

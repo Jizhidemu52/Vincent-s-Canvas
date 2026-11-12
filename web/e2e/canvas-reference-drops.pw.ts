@@ -100,7 +100,7 @@ test("desktop assistant reference drops stay attachments and retain originals wi
     await expect(first).toBeVisible();
     await expectOriginals(page, 1);
     expect(await drop(first, `<img src="data:image/png;base64,${IMAGE.toString("base64")}">`, "text/html")).toBe(true);
-    await expect(panel.getByRole("img")).toHaveCount(2);
+    await expect(panel.getByRole("region", { name: "已选参考图", exact: true }).getByRole("img")).toHaveCount(2);
     await expectOriginals(page, 2);
     await expect.poll(() => api.document(id)?.nodes.length).toBe(0);
     expect(api.assetBytes.size).toBe(0);
@@ -149,7 +149,8 @@ for (const target of ["creation", "assistant"] as const) test(`late ${target} re
     const next = await open();
     expect(await drop(next, "新项目原图.png")).toBe(true);
     await expect(next.getByRole("img", { name: "新项目原图.png", exact: true })).toBeVisible();
-    await expect(next.getByRole("img")).toHaveCount(1);
+    const references = target === "assistant" ? next.getByRole("region", { name: "已选参考图", exact: true }) : next;
+    await expect(references.getByRole("img")).toHaveCount(1);
     expect(api.document(oldId)!.nodes).toHaveLength(0);
     await expect.poll(() => api.document(nextId)?.nodes.length).toBe(0);
     expect(api.submissions).toHaveLength(0);

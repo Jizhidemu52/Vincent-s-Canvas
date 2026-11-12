@@ -6,14 +6,15 @@ import type { BrowserContext, Page } from "@playwright/test";
 const videoModel = { id: "10000000-0000-4000-8000-000000000003", name: "测试视频模型", modelId: "wan2.7", capabilities: ["video"], creditCost: 0, rmbCost: 0 };
 const videoBytes = readFileSync(new URL("./media/video.mp4", import.meta.url));
 const activePane = (page: Page) => page.getByRole("tabpanel");
+const taskTabs = (page: Page) => page.getByRole("tablist", { name: "任务列表", exact: true }).getByRole("tab");
 const selectTask = async (page: Page, index: number) => {
-    await page.getByRole("tab").nth(index).click();
-    await expect(page.getByRole("tab").nth(index)).toHaveAttribute("aria-selected", "true");
+    await taskTabs(page).nth(index).click();
+    await expect(taskTabs(page).nth(index)).toHaveAttribute("aria-selected", "true");
 };
 const addTask = async (page: Page, expected: number) => {
     await page.getByRole("button", { name: "新建任务", exact: true }).click();
-    await expect(page.getByRole("tab")).toHaveCount(expected);
-    await expect(page.getByRole("tab").last()).toHaveAttribute("aria-selected", "true");
+    await expect(taskTabs(page)).toHaveCount(expected);
+    await expect(taskTabs(page).last()).toHaveAttribute("aria-selected", "true");
 };
 async function videoRoutes(context: BrowserContext) {
     await context.route("**/api/models", route => route.fulfill({ json: { models: [videoModel], tools: toolDefinitions.map(tool => ({ ...tool, enabled: true, modelConfigId: videoModel.id, configurationVersion: 1 })), prices: [] } }));
@@ -54,11 +55,11 @@ test("video task tabs keep delayed submissions, prompts and out-of-order results
     await expect(activePane(page).getByRole("status", { name: "视频生成中" })).toHaveCount(1);
     await expect(activePane(page).locator("video")).toHaveCount(0);
     await page.reload();
-    await expect(page.getByRole("tab")).toHaveCount(2);
+    await expect(taskTabs(page)).toHaveCount(2);
     await expect(activePane(page).getByRole("textbox", { name: "视频提示词" })).toHaveValue("TASK_A frozen navy camera");
     const taskA = [...api.tasks.values()].find(task => task.prompt.includes("TASK_A"))!;
     taskA.status = "failed"; taskA.failureReason = "FIXTURE_A_FAILED";
-    await expect(page.getByRole("tab").nth(0)).toContainText("已失败");
+    await expect(taskTabs(page).nth(0)).toContainText("已失败");
     await expect(activePane(page).getByRole("alert")).toBeVisible();
     await selectTask(page, 1);
     await expect(activePane(page).getByRole("textbox", { name: "视频提示词" })).toHaveValue("TASK_B slow turn");
@@ -77,7 +78,9 @@ test("seamless task tabs preserve sources, isolate history and resume original r
     await expect.poll(() => api.submissions.length).toBe(1);
     await addTask(page, 2);
     await expect(activePane(page).getByRole("img", { name: "TASK_A.png", exact: true })).toHaveCount(0);
+    await activePane(page).getByRole("tab", { name: /^历史记录/ }).click();
     await expect(activePane(page).getByRole("img", { name: "无缝拼接历史结果" })).toHaveCount(0);
+    await activePane(page).getByRole("tab", { name: "本次结果", exact: true }).click();
     await activePane(page).locator('input[type="file"]').setInputFiles({ name: "TASK_B.png", mimeType: "image/png", buffer: IMAGE });
     await activePane(page).getByRole("button", { name: "开始无缝拼接", exact: true }).click();
     await expect.poll(() => api.submissions.length).toBe(2);
@@ -85,7 +88,7 @@ test("seamless task tabs preserve sources, isolate history and resume original r
     await selectTask(page, 0);
     await expect(activePane(page).getByRole("img", { name: "TASK_A.png", exact: true })).toBeVisible();
     await page.reload();
-    await expect(page.getByRole("tab")).toHaveCount(2);
+    await expect(taskTabs(page)).toHaveCount(2);
     await expect(activePane(page).getByRole("img", { name: "TASK_A.png", exact: true })).toBeVisible();
     await expect(activePane(page).getByRole("button", { name: "开始无缝拼接", exact: true })).toBeDisabled();
     const [taskA, taskB] = [...api.tasks.values()];
@@ -93,15 +96,17 @@ test("seamless task tabs preserve sources, isolate history and resume original r
     await selectTask(page, 1);
     await expect(activePane(page).getByRole("img", { name: "TASK_B.png", exact: true })).toBeVisible();
     await expect(activePane(page).getByRole("img", { name: "无缝拼接结果", exact: true })).toBeVisible();
+    await activePane(page).getByRole("tab", { name: /^历史记录/ }).click();
     await expect(activePane(page).getByRole("img", { name: "无缝拼接历史结果" })).toHaveCount(1);
     await expect(page.getByRole("button", { name: "关闭任务 2 页签" })).toBeEnabled();
     await selectTask(page, 0);
     await expect(activePane(page).getByRole("img", { name: "无缝拼接结果", exact: true })).toHaveCount(0);
     taskA!.status = "failed"; taskA!.failureReason = "FIXTURE_STITCH_A_FAILED";
+    await activePane(page).getByRole("tab", { name: /^历史记录/ }).click();
     await expect(activePane(page).getByText("FIXTURE_STITCH_A_FAILED", { exact: true })).toBeVisible();
     await selectTask(page, 1);
     await page.getByRole("button", { name: "关闭任务 2 页签" }).click();
-    await expect(page.getByRole("tab")).toHaveCount(1);
+    await expect(taskTabs(page)).toHaveCount(1);
     await expect(activePane(page).getByRole("img", { name: "无缝拼接历史结果" })).toHaveCount(0);
     expect(api.submissions).toHaveLength(2);
 });
@@ -160,14 +165,15 @@ test("seamless uncertain acknowledgement stays attached to its original task whi
     await activePane(page).locator('input[type="file"]').setInputFiles({ name: "uncertain-source.png", mimeType: "image/png", buffer: IMAGE });
     await activePane(page).getByRole("button", { name: "开始无缝拼接", exact: true }).click();
     await expect.poll(() => api.submissions.length).toBe(1);
-    await expect(page.getByRole("tab").nth(1)).toContainText("待核查");
+    await expect(taskTabs(page).nth(1)).toContainText("待核查");
     await expect(page.getByRole("button", { name: "关闭任务 2 页签" })).toBeDisabled();
     await addTask(page, 3);
     await expect(activePane(page).getByRole("img", { name: "uncertain-source.png", exact: true })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "关闭任务 3 页签" })).toBeEnabled();
     await selectTask(page, 1);
     await page.reload();
-    await expect(page.getByRole("tab").nth(1)).toContainText("读取中");
+    await expect(taskTabs(page).nth(1)).toContainText("读取中");
+    await activePane(page).getByRole("tab", { name: /^历史记录/ }).click();
     // Wait for the failed read, not the shell's initial loading frame, before
     // making the mocked endpoint healthy again.
     await expect(activePane(page).getByRole("button", { name: /^重\s*试$/ })).toBeVisible();
@@ -176,9 +182,11 @@ test("seamless uncertain acknowledgement stays attached to its original task whi
     api.tasks.get(id)!.resultUrls = [`/api/assets/${id}/content`];
     // Explicit history refresh is a read of the original task, never a POST.
     await activePane(page).getByRole("button", { name: /^重\s*试$/ }).click();
+    await activePane(page).getByRole("tab", { name: "本次结果", exact: true }).click();
     await expect(activePane(page).getByRole("img", { name: "无缝拼接结果", exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "关闭任务 2 页签" })).toBeEnabled();
     await selectTask(page, 2);
+    await activePane(page).getByRole("tab", { name: /^历史记录/ }).click();
     await expect(activePane(page).getByRole("img", { name: "无缝拼接历史结果" })).toHaveCount(0);
     expect(api.submissions).toHaveLength(1);
 });
@@ -195,7 +203,7 @@ test("seamless twelve independent source drafts survive rapid task switching and
         await expect(activePane(page).getByRole("img", { name: `source-${index + 1}.png`, exact: true })).toBeVisible();
     }
     await page.reload();
-    await expect(page.getByRole("tab")).toHaveCount(12);
+    await expect(taskTabs(page)).toHaveCount(12);
     await expect(activePane(page).getByRole("img", { name: "source-1.png", exact: true })).toBeVisible();
     await selectTask(page, 11);
     await expect(activePane(page).getByRole("img", { name: "source-12.png", exact: true })).toBeVisible();
@@ -220,10 +228,10 @@ for (const board of [{ path: "/video", label: "视频提示词", prefix: "VIDEO"
         await selectTask(page, count - 1);
         await page.setViewportSize({ width: 390, height: 844 });
         await page.reload();
-        await expect(page.getByRole("tab")).toHaveCount(count);
+        await expect(taskTabs(page)).toHaveCount(count);
         await expect(activePane(page).getByRole("textbox", { name: board.label, exact: true })).toHaveValue(`${board.prefix}_TASK_${count}`);
         await page.getByRole("button", { name: `关闭任务 ${count} 页签` }).click();
-        await expect(page.getByRole("tab")).toHaveCount(count - 1);
+        await expect(taskTabs(page)).toHaveCount(count - 1);
         await expect(activePane(page).getByRole("textbox", { name: board.label, exact: true })).toHaveValue(`${board.prefix}_TASK_${count - 1}`);
         await page.screenshot({ path: testInfo.outputPath(`${board.prefix.toLowerCase()}-12-task-mobile.png`), fullPage: true });
         expect(api.submissions).toHaveLength(0);

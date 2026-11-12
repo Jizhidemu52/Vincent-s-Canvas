@@ -24,7 +24,7 @@ async function nativeClipboard(page: Page, accepts: (snapshot: ClipboardSnapshot
                 // Chromium invalidates a lazy ClipboardItem if the ongoing OS
                 // write changes it between read() and getType(). Re-read only;
                 // permission failures and all other errors must still fail.
-                if (error instanceof DOMException && error.name === "InvalidStateError" && error.message === "Clipboard data has changed") return null;
+                if (error instanceof DOMException && error.name === "InvalidStateError" && error.message.endsWith("Clipboard data has changed")) return null;
                 throw error;
             }
         });
@@ -153,7 +153,7 @@ test("native clipboard observation tolerates one invalidated item without anothe
             async read() {
                 reads++;
                 const items = await navigator.clipboard.read();
-                if (reads === 1) return [{ types: ["text/plain"], getType: async () => { throw new DOMException("Clipboard data has changed", "InvalidStateError"); } }];
+                if (reads === 1) return [{ types: ["text/plain"], getType: async () => { throw new DOMException("Failed to execute 'getType' on 'ClipboardItem': Clipboard data has changed", "InvalidStateError"); } }];
                 return items;
             },
         } });

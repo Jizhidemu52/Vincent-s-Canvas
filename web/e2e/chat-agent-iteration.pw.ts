@@ -194,7 +194,8 @@ test("规划校验只修一次，规格经pending和结果持久化，所选版�
     await page.setViewportSize({ width: 390, height: 844 });
     const sidebar = page.locator("aside").getByRole("button", { name: "收起会话", exact: true });
     if (await sidebar.isVisible()) await sidebar.click();
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    // A retiring desktop tooltip may retain its old position until motion ends.
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.screenshot({ path: info.outputPath("chat-spec-mobile.png"), animations: "disabled" });
 });
 

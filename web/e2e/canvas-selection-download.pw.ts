@@ -87,7 +87,7 @@ test("框选混合节点后从工具栏和右键下载原图 ZIP，排除未选�
     await downloadAndCheck();
     await page.keyboard.press("Control+k");
     await page.getByRole("combobox", { name: "搜索命令、节点和素材" }).fill("下载所选图片");
-    await page.getByRole("option", { name: "命令 下载所选图片", exact: true }).click();
+    await page.getByRole("option", { name: "下载所选图片", exact: true }).click();
     await downloadAndCheck();
     expect(api.document(id)!.nodes).toEqual(before.nodes);
     expect(api.document(id)!.connections).toEqual(before.connections);

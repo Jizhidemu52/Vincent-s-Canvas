@@ -92,7 +92,7 @@ test("changing the model after optimization invalidates the old compilation with
     await expect(preview).toBeHidden();
     await expect(prompt).toHaveValue(optimized);
     await page.getByRole("button", { name: "切换生成图片模型", exact: true }).click();
-    await page.locator("[data-usage-control=model][role=combobox]").click();
+    await page.getByRole("dialog", { name: /^切换生成图片模型/ }).getByRole("combobox", { name: "生成图片模型", exact: true }).click();
     await page.locator('[role=option][data-usage-value="10000000-0000-4000-8000-000000000002"]').click();
     await page.getByRole("dialog", { name: /^切换生成图片模型/ }).getByRole("button", { name: "关闭模型设置", exact: true }).click();
     await expect(prompt).toHaveValue(optimized);

@@ -90,8 +90,9 @@ async function downloadBytes(page: Page, trigger: Locator) {
 async function evidence(page: Page, target: Locator, info: TestInfo, name: string) {
     await target.screenshot({ path: info.outputPath(`${name}-desktop.png`) });
     await page.setViewportSize({ width: 390, height: 844 });
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
-    expect(await target.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+    // Portalled tooltips re-align after their in-flight animation on resize.
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+    await expect.poll(() => target.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
     await target.screenshot({ path: info.outputPath(`${name}-mobile.png`) });
 }
 async function openColorLibrary(page: Page, slot = 1) {

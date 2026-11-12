@@ -45,7 +45,7 @@ test("canvas configuration modes accept pointer clicks without moving the node w
         await expect(config.getByRole("radio", { name, exact: true })).toBeChecked();
         expect(api.document(projectId)!.nodes[0].position).toEqual(original.position);
     }
-    const handle = await config.getByTitle("生成配置", { exact: true }).boundingBox();
+    const handle = await config.getByRole("button", { name: "重命名节点 生成配置", exact: true }).boundingBox();
     expect(handle).not.toBeNull();
     await page.mouse.move(handle!.x + handle!.width / 2, handle!.y + handle!.height / 2);
     await page.mouse.down(); await page.mouse.move(handle!.x + handle!.width / 2 + 90, handle!.y + handle!.height / 2 + 60, { steps: 10 }); await page.mouse.up();
