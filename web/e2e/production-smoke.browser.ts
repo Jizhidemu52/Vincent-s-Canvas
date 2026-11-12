@@ -208,15 +208,15 @@ test("exact formal stack: login, large upload, canvas generation/recovery, origi
     const originalNode = page.locator(`[data-node-id="${uploaded.id}"]`);
     await originalNode.click({ position: { x: 30, y: 12 } });
     await originalNode.hover();
+    // Both toolbar entries download the original immediately, without opening
+    // the optional format/details dialog. Listen before either click.
+    const downloaded = page.waitForEvent("download");
     const downloadButton = page.getByRole("button", { name: "下载图片", exact: true });
     if (await downloadButton.isVisible()) await downloadButton.click();
     else {
         await page.getByRole("button", { name: "更多图片工具", exact: true }).click();
         await page.getByRole("menuitem", { name: "下载", exact: true }).click();
     }
-    const downloadDialog = page.getByRole("dialog", { name: "下载图片", exact: true });
-    const downloaded = page.waitForEvent("download");
-    await downloadDialog.getByRole("button", { name: "下载原图（原格式，推荐）", exact: true }).click();
     const originalFile = testInfo.outputPath("downloaded-original.png");
     await (await downloaded).saveAs(originalFile);
     const originalBytes = await readFile(originalFile);
