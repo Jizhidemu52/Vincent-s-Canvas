@@ -6,7 +6,7 @@ import { useCopyFeedback } from "@/hooks/use-copy-feedback";
 import { useWorkbenchTask } from "./workbench-tasks";
 import { formatBeijingDateTime } from "@/lib/beijing-time";
 import { deploymentFeatures } from "@/lib/deployment-features";
-import { formatNonFinancialJson } from "@/lib/financial-presentation";
+import { omitFinancialFields } from "@/lib/financial-presentation";
 import { listGenerationHistory, readHistoryOriginal, historyAssetPath, type GenerationHistoryTask } from "@/services/api/generation-task-history";
 
 const statusLabels: Record<string, string> = { waiting: "排队中", queued: "排队中", processing: "处理中", paused: "待核查", success: "已完成", failed: "未完成", cancelled: "已取消" };
@@ -36,20 +36,24 @@ function OriginalPreview({ path, ownerId }: { path: string; ownerId: string }) {
     </div>;
 }
 
-function HistoryDetail({ task, ownerId }: { task: GenerationHistoryTask; ownerId: string }) {
+function HistoryDetail({ task, ownerId, board }: { task: GenerationHistoryTask; ownerId: string; board: string }) {
     const sources = Array.isArray(task.sourceUrls) ? task.sourceUrls : [];
     const results = Array.isArray(task.resultUrls) ? task.resultUrls : [];
     const files = [...results.map((path, index) => ({ path, label: `结果 ${index + 1}` })), ...sources.map((path, index) => ({ path, label: `参考原图 ${index + 1}` }))];
     const [selected, setSelected] = useState(0);
     const { copy, copied } = useCopyFeedback();
+    const hideModel = board === "layer-studio";
+    // Display only: the layer workspace stays provider-neutral, including archives.
+    const detailJson = JSON.stringify(omitFinancialFields({ taskId: task.id, requestId: task.requestId, userInput: task.userInput, parameters: task.parameters, resultDocument: task.resultDocument }),
+        (key, value) => hideModel && /model|provider/i.test(key) ? undefined : value, 2);
     return <div className="space-y-4" data-testid="account-history-detail">
         <p className="text-sm text-muted-foreground">查看记录不会重新生成，也不会替换当前草稿。本浏览器里的局部合成、图层位置等未提交编辑不属于云端原件。</p>
-        <div className="flex flex-wrap items-center gap-3 text-sm"><span>{statusLabels[task.status] || task.status}</span><span>{task.modelName || task.modelId || "历史模型"}</span><time>{formatBeijingDateTime(task.queuedAt || task.createdAt || "")} 北京时间</time></div>
+        <div className="flex flex-wrap items-center gap-3 text-sm"><span>{statusLabels[task.status] || task.status}</span>{!hideModel && <span>{task.modelName || task.modelId || "历史模型"}</span>}<time>{formatBeijingDateTime(task.queuedAt || task.createdAt || "")} 北京时间</time></div>
         {files.length > 0 ? <><div className="flex flex-wrap gap-2" role="group" aria-label="历史原件选择">{files.map((file, index) => <Button key={`${file.label}:${file.path}`} aria-pressed={selected === index} className={selected === index ? "!bg-muted !font-semibold !text-foreground" : undefined} onClick={() => setSelected(index)}>{file.label}</Button>)}</div><OriginalPreview key={files[selected].path} path={files[selected].path} ownerId={ownerId} /></>
             : <p className="rounded-lg bg-muted p-4 text-sm text-muted-foreground">此任务尚无已保存结果。只展示原状态，不会自动恢复查询或重新提交。</p>}
         <section className="space-y-2"><div className="flex items-center justify-between gap-2"><h3 className="text-base font-medium">完整提示词</h3><Button size="small" icon={copied ? <Check size={14} /> : <Copy size={14} />} disabled={!task.prompt} onClick={() => void copy(task.prompt || "")}>{copied ? "已复制" : "复制提示词"}</Button></div><p className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-muted p-3 text-sm">{task.prompt || "此处理任务没有提示词"}</p></section>
-        <details className="text-sm"><summary className="cursor-pointer rounded-md py-2 focus-visible:outline-2 focus-visible:outline-primary">查看输入、参数和任务编号</summary><pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-muted p-3 text-xs">{formatNonFinancialJson({ taskId: task.id, requestId: task.requestId, userInput: task.userInput, parameters: task.parameters, resultDocument: task.resultDocument })}</pre></details>
-        {task.failureReason && <p className="text-sm text-muted-foreground">原任务说明：{task.failureReason}</p>}
+        <details className="text-sm"><summary className="cursor-pointer rounded-md py-2 focus-visible:outline-2 focus-visible:outline-primary">查看输入、参数和任务编号</summary><pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-muted p-3 text-xs">{detailJson}</pre></details>
+        {task.failureReason && <p className="text-sm text-muted-foreground">原任务说明：{hideModel ? "任务执行或结果保存存在异常，原记录与已保存原件保留。" : task.failureReason}</p>}
     </div>;
 }
 
@@ -89,7 +93,7 @@ function AccountHistoryList({ board, ownerId, active }: { board: string; ownerId
         {error && <div role="alert" className="space-y-2 text-sm text-destructive"><p>{error}</p><Button size="small" onClick={() => void load(lastRequestedCursor.current)}>重试读取历史</Button></div>}
         {loaded && !tasks.length && !error && <p className="rounded-lg bg-muted p-4 text-sm text-muted-foreground">此账号在本板块还没有可归类的云端任务。仅存本机的旧记录仍在原浏览器保留。</p>}
         {cursor && !error && <Button disabled={loading} onClick={() => void load(cursor)}>加载更多云端记录</Button>}
-        <Modal title="云端任务详情" open={Boolean(selected)} onCancel={() => setSelected(null)} footer={null} width={960} destroyOnHidden>{selected && <HistoryDetail key={selected.id} task={selected} ownerId={ownerId} />}</Modal>
+        <Modal title="云端任务详情" open={Boolean(selected)} onCancel={() => setSelected(null)} footer={null} width={960} destroyOnHidden>{selected && <HistoryDetail key={selected.id} task={selected} ownerId={ownerId} board={board} />}</Modal>
     </section>;
 }
 

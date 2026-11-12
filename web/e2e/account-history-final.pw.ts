@@ -38,6 +38,7 @@ test("fresh browser contexts show the same account originals, paginate and keep 
     const detail = page.getByTestId("account-history-detail");
     await expect(detail.getByRole("img", { name: "账号历史原件" })).toBeVisible();
     await expect(detail).toContainText("保留花边宽度");
+    await expect(detail).toContainText("原始图像模型");
     await detail.getByRole("button", { name: "参考原图 1" }).click();
     await expect(detail.getByRole("img")).toBeVisible();
     await detail.getByText("查看输入、参数和任务编号").click();
@@ -80,9 +81,12 @@ test("image edits and exact creative/quick/video/stitch boards use their own acc
     expect(api.submissions).toEqual([]); expect(api.batchSubmissions).toEqual([]);
 });
 
-test("layer studio history loads on demand and leaves its editable input unchanged", async ({ page, api }) => {
+test("layer studio history stays provider-neutral and leaves its editable input unchanged", async ({ page, api }, info) => {
     const reads: Array<{ board: string | null; cursor: string | null }> = [];
-    await cloud(page.context(), [task("layer-original", "针织字母原件与图层拆分")], reads);
+    const original = { ...task("layer-original", "针织字母原件与图层拆分"), modelName: "Seedream 5.5", modelId: "seedream-v5.5", failureReason: "apimart Seedream upstream error",
+        parameters: { size: "1024x1024", creditCost: 99, model: "seedream-v5.5", inputArchive: { prompt: "针织字母原件与图层拆分", selectedModelId: "seedream-config", providerName: "apimart" } } };
+    const originalBytes = JSON.stringify(original);
+    await cloud(page.context(), [original], reads);
     await page.context().route("**/api/layer-studio/estimate", route => route.fulfill({ json: { estimate: { currency: "CNY", estimatedPrecharge: 3.2, maximumOutputs: 1, sourceCount: 0, priceVersion: 1, employeeCredits: 0, providerCharge: "unverified" } } }));
     await page.goto("/layer-studio");
     await page.getByRole("button", { name: "图片生成 / 编辑", exact: true }).click();
@@ -91,6 +95,19 @@ test("layer studio history loads on demand and leaves its editable input unchang
     await page.getByText("账号历史记录", { exact: true }).click();
     await page.getByRole("button", { name: "查看云端记录：针织字母原件与图层拆分" }).click();
     await expect(page.getByRole("img", { name: "账号历史原件" })).toBeVisible();
+    const detail = page.getByTestId("account-history-detail");
+    await detail.getByText("查看输入、参数和任务编号").click();
+    await expect(detail).not.toContainText(/seedream|apimart|selectedModelId|providerName/i);
+    await expect(detail.locator("pre")).toContainText("1024x1024");
+    await expect(detail.locator("pre")).toContainText("layer-original");
+    await expect(detail.locator("pre")).not.toContainText("creditCost");
+    await expect(detail).toContainText("针织字母原件与图层拆分");
+    await expect(detail).toContainText("原记录与已保存原件保留");
+    expect(JSON.stringify(original)).toBe(originalBytes);
+    await page.screenshot({ path: info.outputPath("layer-history-neutral-desktop.png"), animations: "disabled" });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await page.screenshot({ path: info.outputPath("layer-history-neutral-mobile.png"), animations: "disabled" });
     await page.getByRole("button", { name: "Close", exact: true }).click();
     await expect(page.getByRole("textbox", { name: "图片描述", exact: true })).toHaveValue("此浏览器尚未提交的新草稿");
     expect(reads).toEqual([{ board: "layer-studio", cursor: null }]);
