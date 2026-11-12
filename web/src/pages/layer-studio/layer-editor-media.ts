@@ -1,5 +1,7 @@
 import type { LayerStudioItem } from "../../../../shared/layer-studio";
 import { validLayerStudioSize, type LayerStudioImage } from "./layer-composition";
+import { sha256 } from "@noble/hashes/sha256";
+import { bytesToHex } from "@noble/hashes/utils";
 
 const MAX_CACHED_BYTES = 64 * 1024 * 1024;
 
@@ -59,9 +61,8 @@ export function createLayerStudioMedia(options: {
                 if (!result.size || !["image/png", "image/jpeg"].includes(result.type.split(";")[0])) throw new Error("图层原件不是有效的 PNG / JPEG，未导出或修改原件");
                 if (item.sha256 !== undefined) {
                     if (!/^[a-f0-9]{64}$/i.test(item.sha256)) throw new Error("图层原件校验记录无效");
-                    const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", await result.arrayBuffer()));
+                    const actual = bytesToHex(sha256(new Uint8Array(await result.arrayBuffer())));
                     assertCurrent();
-                    const actual = [...digest].map(value => value.toString(16).padStart(2, "0")).join("");
                     if (actual !== item.sha256.toLowerCase()) throw new Error("图层原件校验不一致，未导出；当前编辑已保留");
                 }
                 const limit = options.cacheBytes ?? MAX_CACHED_BYTES;

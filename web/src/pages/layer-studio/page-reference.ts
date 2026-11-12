@@ -1,4 +1,6 @@
 import { uploadServerAsset } from "@/services/api/server-assets";
+import { sha256 as hashSha256 } from "@noble/hashes/sha256";
+import { bytesToHex } from "@noble/hashes/utils";
 import { LAYER_STUDIO_MAX_REFERENCE_BYTES, LAYER_STUDIO_MAX_REFERENCE_PIXELS } from "../../../../shared/layer-studio-options";
 import type { LayerStudioReference } from "./page-state";
 
@@ -24,8 +26,7 @@ export async function saveLayerStudioReference(source: File, ownerId: string, as
     } catch { /* TIFF / HEIF may be valid provider inputs without a browser decoder. Server preflight checks them. */ }
     assertCurrent();
     if (dimensions && dimensions.width * dimensions.height > LAYER_STUDIO_MAX_REFERENCE_PIXELS) throw new Error("参考图总像素不能超过 3600 万，原图未修改。");
-    const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", await file.arrayBuffer()));
-    const sha256 = [...digest].map(value => value.toString(16).padStart(2, "0")).join("");
+    const sha256 = bytesToHex(hashSha256(new Uint8Array(await file.arrayBuffer())));
     assertCurrent();
     const id = await uploadServerAsset(file, { source: "layer-studio-reference", sha256, ...dimensions }, { expectedOwnerId: ownerId, clientReferenceId: `layer-studio:${sha256}` })
         .catch(() => { throw new Error("原图上传未完成；尚未创建生成任务，原始文件未修改。请检查格式或联系管理员。"); });
