@@ -135,6 +135,9 @@ test("chat image preview preserves original bytes while older-version selection 
     expect(api.submissions[3].sourceUrls).toHaveLength(1);
     await expect.poll(async () => (await savedChat(page)).messages.at(-1)?.generatedImages?.[0]?.parentId).toBe(oldId);
     const latestId = (await savedChat(page)).messages.at(-1).generatedImages[0].id;
+    // Finish the desktop send-button tooltip exit before checking the mobile layout.
+    await page.getByTestId("chat-header").hover();
+    await expect(page.getByRole("tooltip")).toHaveCount(0);
     await page.setViewportSize({ width: 390, height: 844 });
     const sidebar = page.locator("aside").getByRole("button", { name: "收起会话", exact: true });
     if (await sidebar.isVisible()) await sidebar.click();

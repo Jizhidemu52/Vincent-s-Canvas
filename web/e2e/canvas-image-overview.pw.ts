@@ -10,6 +10,21 @@ async function moveNode(page: Page, node: Locator, x: number, y: number) {
     await page.mouse.up();
 }
 
+async function selectQuarterZoom(page: Page, projectId: string) {
+    const trigger = page.getByRole("button", { name: "画布缩放与视图", exact: true });
+    await trigger.click();
+    const preset = page.getByRole("button", { name: "25%", exact: true });
+    const popover = page.locator(".ant-popover").filter({ has: preset });
+    await expect(popover).toBeVisible();
+    // The popup briefly holds its initial scale before its entrance animation;
+    // a click measured there can miss the moving preset despite actionability.
+    await expect(popover).not.toHaveClass(/ant-zoom-big-(?:appear|enter)/);
+    await preset.click();
+    await expect(preset).toHaveAttribute("aria-pressed", "true");
+    await expect(trigger).toHaveText("25%");
+    await expect.poll(async () => (await readCanvasViewState(page, projectId))?.viewport.k).toBe(.25);
+}
+
 async function decodedImages(nodes: Locator[]) {
     const pixels: number[][] = [], sources: string[] = [];
     for (const node of nodes) {
@@ -68,8 +83,7 @@ test("不同原图在低缩放失选、多选、单选焦点和AI编辑后仍真
     await expect(first).not.toHaveAttribute("aria-label", /已选择/);
     await decodedImages(nodes);
 
-    await page.getByRole("button", { name: "画布缩放与视图", exact: true }).click();
-    await page.getByRole("button", { name: "25%", exact: true }).click();
+    await selectQuarterZoom(page, id);
     await page.getByRole("button", { name: "画布缩放与视图", exact: true }).click();
     await expect.poll(async () => (await readCanvasViewState(page, id))?.viewport.k).toBe(.25);
 
@@ -112,8 +126,7 @@ test("不同原图在低缩放失选、多选、单选焦点和AI编辑后仍真
     await page.keyboard.press("Shift+1");
     await expect.poll(async () => (await readCanvasViewState(page, id))?.viewport.k).not.toBe(.25);
     const fittedViewport = (await readCanvasViewState(page, id))!.viewport;
-    await page.getByRole("button", { name: "画布缩放与视图", exact: true }).click();
-    await page.getByRole("button", { name: "25%", exact: true }).click();
+    await selectQuarterZoom(page, id);
     await expect.poll(async () => (await readCanvasViewState(page, id))?.viewport.k).toBe(.25);
     await page.reload();
     await expect.poll(async () => (await readCanvasViewState(page, id))?.viewport).toEqual(fittedViewport);
