@@ -59,9 +59,9 @@ export function ConnectionCreateMenu({
     return <><span ref={anchorRef} aria-hidden className="pointer-events-none absolute size-0" style={{ left: pending.position.x, top: pending.position.y }} />{createPortal(
         <div
             ref={menuRef} role="menu" aria-label={t(pending.connection.handleType === "target" ? "连接上游输入" : "连接下一步")}
-            className="fixed z-[120] overflow-y-auto rounded-[18px] border p-3 shadow-2xl backdrop-blur"
+            className="fixed z-[var(--cw-z-popover,900)] overflow-y-auto rounded-xl border p-3 backdrop-blur"
             data-connection-create-menu data-canvas-no-zoom
-            style={{ ...position, background: theme.node.panel, borderColor: theme.node.stroke, color: theme.node.text }}
+            style={{ ...position, background: theme.node.panel, borderColor: theme.node.stroke, color: theme.node.text, boxShadow: "var(--ui-shadow-popover)" }}
             onMouseDown={(event) => event.stopPropagation()}
             onPointerDown={(event) => event.stopPropagation()}
             onWheel={(event) => event.stopPropagation()}
@@ -70,7 +70,7 @@ export function ConnectionCreateMenu({
             <div className="mb-2 flex items-center justify-between px-1">
                 <span className="text-sm font-medium" style={{ color: theme.node.muted }}>
                     {t(pending.connection.handleType === "target" ? "连接上游输入" : "连接下一步")}</span>
-                <button type="button" className="grid size-7 place-items-center rounded-lg text-base opacity-55 transition hover:bg-white/10 hover:opacity-100" onClick={onClose} aria-label={t("关闭")}>
+                <button type="button" className="cw-control grid size-8 place-items-center rounded-lg text-base opacity-55 hover:bg-muted hover:opacity-100" onClick={onClose} aria-label={t("关闭")}>
                     ×
                 </button>
             </div>
@@ -86,7 +86,7 @@ function ConnectionCreateOption({ theme, icon, title, description, onClick }: { 
         <button
             type="button"
             role="menuitem"
-            className="flex h-16 w-full cursor-pointer items-center gap-3 rounded-2xl px-3 text-left transition"
+            className="cw-control flex h-16 w-full cursor-pointer items-center gap-3 rounded-xl px-3 text-left"
             style={{ color: theme.node.text }}
             onClick={onClick}
             onMouseEnter={(event) => (event.currentTarget.style.background = theme.node.fill)}

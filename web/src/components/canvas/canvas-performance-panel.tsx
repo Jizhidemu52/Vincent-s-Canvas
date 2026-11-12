@@ -29,7 +29,7 @@ export const CanvasPerformancePanel = memo(function CanvasPerformancePanel({ met
                 <span>nodes {metrics.visibleNodes}/{metrics.totalNodes}</span>
                 <span>links {metrics.visibleConnections}/{metrics.totalConnections}</span>
             </div>
-            <button type="button" className="mt-3 inline-flex items-center gap-1.5 rounded py-1 hover:opacity-75" onClick={() => copy(canvasPerformanceReport(metrics), t("性能报告已复制（不含画布内容）"))}><Copy size={13} />{t("复制性能报告")}</button>
+            <button type="button" className="mt-3 inline-flex items-center gap-2 rounded py-1 hover:opacity-75" onClick={() => copy(canvasPerformanceReport(metrics), t("性能报告已复制（不含画布内容）"))}><Copy size={13} />{t("复制性能报告")}</button>
         </aside>
     );
 });

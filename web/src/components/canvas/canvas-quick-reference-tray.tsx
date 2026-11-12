@@ -1,6 +1,7 @@
 import { useUiText } from "@/lib/i18n";
 import { ArrowLeft, ArrowRight, X } from "lucide-react";
 import { useState } from "react";
+import { Tooltip } from "antd";
 import { CanvasPersistedMediaPreview } from "@/components/canvas/canvas-persisted-media-preview";
 import type { ReferenceImage } from "@/types/image";
 import { INTERNAL_IMAGE_DRAG } from "@/lib/dropped-images";
@@ -8,6 +9,7 @@ import { INTERNAL_IMAGE_DRAG } from "@/lib/dropped-images";
 type Props = {
     references: ReferenceImage[];
     disabled?: boolean;
+    disabledReason?: string;
     thumbnailSize?: number;
     labelForReference?: (reference: ReferenceImage, index: number) => string;
     referenceOrder?: readonly string[];
@@ -16,7 +18,7 @@ type Props = {
     onClear: () => void;
 };
 
-export function CanvasQuickReferenceTray({ references, disabled, thumbnailSize, labelForReference, referenceOrder, onMove, onRemove, onClear }: Props) {
+export function CanvasQuickReferenceTray({ references, disabled, disabledReason, thumbnailSize, labelForReference, referenceOrder, onMove, onRemove, onClear }: Props) {
     const t = useUiText();
     const [activeId, setActiveId] = useState<string | null>(null);
     const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -26,8 +28,9 @@ export function CanvasQuickReferenceTray({ references, disabled, thumbnailSize, 
         if (activeIndex >= 0 && references[to]) onMove(references[activeIndex]!.id, references[to]!.id);
     };
     if (!references.length) return null;
+    const blockedReason = disabled ? disabledReason || t("当前任务正在处理，可先编辑下一条提示词。") : undefined;
     return <section className="cw-reference-tray" aria-label={t("已选参考图")}>
-        <div className="cw-reference-heading"><span>{t("参考图 ·")}{references.length}</span><button type="button" disabled={disabled} onClick={onClear}>{t("清空")}</button></div>
+        <div className="cw-reference-heading"><span>{t("参考图 ·")}{references.length}</span><Tooltip title={blockedReason}><span><button type="button" disabled={disabled} style={disabled ? { pointerEvents: "none" } : undefined} onClick={onClear}>{t("清空")}</button></span></Tooltip></div>
         <div className="cw-references">
             {references.map((reference, index) => <div key={reference.id} className={`cw-reference ${activeId === reference.id ? "is-active" : ""} ${draggingId === reference.id ? "is-dragging" : ""}`} style={thumbnailSize ? { width: thumbnailSize, height: thumbnailSize } : undefined}
                 onDragOver={(event) => { if (!disabled && draggingId) { event.preventDefault(); event.dataTransfer.dropEffect = "move"; } }}
@@ -46,11 +49,11 @@ export function CanvasQuickReferenceTray({ references, disabled, thumbnailSize, 
                     <CanvasPersistedMediaPreview kind="image" url={reference.dataUrl} storageKey={reference.storageKey} alt={reference.name} className="cw-reference-preview" />
                     <span className="cw-reference-number">{labelForReference?.(reference, index) || numberFor(reference, index)}</span>
                 </button>
-                <button type="button" className="cw-reference-remove" aria-label={t("移除参考图 {value1}", { value1: numberFor(reference, index) })} disabled={disabled} onClick={() => onRemove(reference.id)}><X size={12} /></button>
+                <Tooltip title={blockedReason || t("移除参考图 {value1}", { value1: numberFor(reference, index) })}><span className="cw-reference-remove-anchor"><button type="button" className="cw-reference-remove" aria-label={t("移除参考图 {value1}", { value1: numberFor(reference, index) })} style={disabled ? { pointerEvents: "none" } : undefined} disabled={disabled} onClick={() => onRemove(reference.id)}><X size={12} /></button></span></Tooltip>
             </div>)}
         </div>
         <div className="cw-reference-order">
-            {activeIndex >= 0 ? <><span>{labelForReference?.(references[activeIndex]!, activeIndex) || `${t("图")}${numberFor(references[activeIndex]!, activeIndex)}`}</span><button type="button" aria-label={t("参考图前移")} disabled={disabled || activeIndex === 0} onClick={() => move(activeIndex - 1)}><ArrowLeft size={14} />{t("前移")}</button><button type="button" aria-label={t("参考图后移")} disabled={disabled || activeIndex === references.length - 1} onClick={() => move(activeIndex + 1)}><ArrowRight size={14} />{t("后移")}</button></> : <span>{t("点击缩略图或拖动调整顺序")}</span>}
+            {activeIndex >= 0 ? <><span>{labelForReference?.(references[activeIndex]!, activeIndex) || `${t("图")}${numberFor(references[activeIndex]!, activeIndex)}`}</span><Tooltip title={blockedReason || (activeIndex === 0 ? t("已是第一张参考图") : undefined)}><span><button type="button" aria-label={t("参考图前移")} disabled={disabled || activeIndex === 0} style={disabled || activeIndex === 0 ? { pointerEvents: "none" } : undefined} onClick={() => move(activeIndex - 1)}><ArrowLeft size={14} />{t("前移")}</button></span></Tooltip><Tooltip title={blockedReason || (activeIndex === references.length - 1 ? t("已是最后一张参考图") : undefined)}><span><button type="button" aria-label={t("参考图后移")} disabled={disabled || activeIndex === references.length - 1} style={disabled || activeIndex === references.length - 1 ? { pointerEvents: "none" } : undefined} onClick={() => move(activeIndex + 1)}><ArrowRight size={14} />{t("后移")}</button></span></Tooltip></> : <span>{t("点击缩略图或拖动调整顺序")}</span>}
         </div>
     </section>;
 }

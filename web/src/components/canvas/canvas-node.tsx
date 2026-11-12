@@ -522,7 +522,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                     )}
                 </div>
 
-                {!useOverview && showImageInfo && hasImageContent ? <ImageInfoBar node={data} /> : null}
+                {!useOverview && showImageInfo && hasImageContent ? <ImageInfoBar node={data} theme={theme} /> : null}
                 {!useOverview && data.type === CanvasNodeType.Image && data.metadata?.imageAgent && Number.isInteger(data.metadata.imageAgent.version) && data.metadata.imageAgent.version > 0 ? <span data-testid="canvas-node-agent-version" className="pointer-events-none absolute left-2 top-2 z-30 rounded px-1.5 py-0.5 text-xs font-medium" style={{ color: theme.node.text, background: theme.node.panel }}>V{data.metadata.imageAgent.version}</span> : null}
                 {!useOverview && showResourceLabel && resourceLabel ? <ResourceLabelBadge reference={resourceLabel} theme={theme} /> : null}
 
@@ -912,14 +912,14 @@ function useCanvasNodeMediaPreview(node: CanvasNodeData) {
     return previewUrl;
 }
 
-function ImageInfoBar({ node }: { node: CanvasNodeData }) {
+function ImageInfoBar({ node, theme }: { node: CanvasNodeData; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
     const t = useUiText();
     const width = Math.round(node.metadata?.naturalWidth || node.width);
     const height = Math.round(node.metadata?.naturalHeight || node.height);
     const size = formatBytes(node.metadata?.bytes || 0);
     return (
         <div className="pointer-events-none absolute bottom-3 right-3 z-40 max-w-[calc(100%-24px)]">
-            <span className="max-w-full truncate rounded-md bg-black/55 px-2 py-1 text-[11px] font-medium leading-none text-white backdrop-blur-sm">
+            <span className="max-w-full truncate rounded-md px-2 py-1 text-xs font-medium leading-none backdrop-blur-sm" style={{ background: theme.toolbar.panel, color: theme.node.text }}>
                 {canvasImageBaseName(node)} · v{canvasImageVersion(node)} · {width} x {height}
                 {size ? ` · ${size}` : ""}
             </span>

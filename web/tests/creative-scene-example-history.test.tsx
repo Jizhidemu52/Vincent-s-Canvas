@@ -113,7 +113,9 @@ test("each creative scene starts in history with only its own practice record, o
         expect(records).toHaveLength(["virtual-try-on", "sketch-to-photo"].includes(preset.id) ? 2 : 1);
         expect(records[0]!.props.example).toBe(designExampleForScene(preset.id));
         const history = elements(output).find(item => item.props.className === "cs-history")!;
-        expect(elements(history)[1]!.type).toBe(PracticeExampleRecord);
+        // Account history is a separate section; examples still precede local task records.
+        const firstLocalEntry = elements(history).find(item => item.type === PracticeExampleRecord || item.props.className === "cs-history-item");
+        expect(firstLocalEntry?.type).toBe(PracticeExampleRecord);
         expect(button(output, "最近任务").props["aria-pressed"]).toBe(true);
         expect(button(output, "功能示例")).toBeUndefined();
         expect(elements(history).some(item => item.props.className === "cs-empty")).toBe(false);

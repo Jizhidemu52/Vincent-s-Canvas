@@ -15,9 +15,16 @@ test("light workbench reserves orange and violet for semantic emphasis", () => {
 
 test("floating surfaces support both themes and 4K tools keep a semantic color", async () => {
     const workspace = await Bun.file("src/pages/canvas/workspace.css").text();
+    const project = await Bun.file("src/pages/canvas/project.tsx").text();
     const hoverToolbar = await Bun.file("src/components/canvas/canvas-node-hover-toolbar.tsx").text();
 
-    expect(workspace).toContain('.cw-workspace[data-theme="dark"]');
+    expect(project).toContain('data-theme={canvasThemeKey}');
+    expect(project).toContain("const theme = canvasThemes[canvasThemeKey]");
+    for (const [variable, token] of [["--cw-panel", "theme.node.panel"], ["--cw-text", "theme.node.text"], ["--cw-muted", "theme.node.muted"], ["--cw-border", "theme.node.stroke"], ["--cw-soft", "theme.toolbar.itemHover"]]) {
+        expect(project).toContain(`"${variable}": ${token}`);
+    }
+    expect(canvasThemes.light.node.panel).not.toBe(canvasThemes.dark.node.panel);
+    expect(workspace).toContain("--cw-panel: var(--popover)");
     expect(workspace).toContain("background: var(--cw-panel)");
     expect(hoverToolbar).toContain("theme.toolbar.highResolution");
 });

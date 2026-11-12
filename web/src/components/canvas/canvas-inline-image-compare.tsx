@@ -87,7 +87,7 @@ export function CanvasInlineImageCompare({ node, nodes, scale, showImageInfo, vi
                 <span className="absolute left-1/2 top-1/2 flex items-center justify-center rounded-full" style={{ transform: "translate(-50%, -50%)", width: 24 * unit, height: 24 * unit, fontSize: 14 * unit, background: theme.node.panel, color: theme.node.text, border: `${unit}px solid ${theme.canvas.selectionStroke}` }}>↔</span>
             </div> : null}
         </div>
-        <div data-canvas-no-zoom className="pointer-events-auto absolute flex flex-col" style={{ ...(placeInside ? { bottom: 0 } : { top: "100%", marginTop: (showImageInfo ? 30 : 10) * unit }), left: "50%", transform: "translateX(-50%)", width: Math.max(node.width, 248 * unit), padding: `${5 * unit}px ${8 * unit}px`, gap: 4 * unit, fontSize: 11 * unit, color: theme.node.label, background: theme.canvas.background }} onPointerDown={stop} onMouseDown={stop} onKeyDown={stop} onClick={stop} onDoubleClick={stop} onContextMenu={stop}>
+        <div data-canvas-no-zoom className="pointer-events-auto absolute flex flex-col" style={{ ...(placeInside ? { bottom: 0 } : { top: "100%", marginTop: (showImageInfo ? 30 : 10) * unit }), left: "50%", transform: "translateX(-50%)", width: Math.max(node.width, 248 * unit), padding: `${5 * unit}px ${8 * unit}px`, gap: 4 * unit, fontSize: 12 * unit, color: theme.node.label, background: theme.canvas.background }} onPointerDown={stop} onMouseDown={stop} onKeyDown={stop} onClick={stop} onDoubleClick={stop} onContextMenu={stop}>
             <Popover trigger="click" placement="bottom" open={pickerOpen} onOpenChange={setPickerOpen} destroyOnHidden getPopupContainer={() => document.body}
                 styles={{ container: { padding: 16, background: theme.node.panel, maxHeight: "calc(100dvh - 24px)", overflowY: "auto" }, root: { maxWidth: "calc(100vw - 24px)" } }}
                 content={<div style={{ width: "min(600px, calc(100vw - 56px))" }}><CanvasImageComparePicker images={candidates} sourceIds={sources.map(item => item.id)} preferredId={automatic ? sources[0]?.id : undefined} selectedId={source?.id} onChoose={item => { setChosen({ key: sourceSetKey, image: { ...item, metadata: { ...item.metadata } } }); closePicker(); }} onClose={closePicker} /></div>}>
@@ -104,7 +104,7 @@ export function CanvasInlineImageCompare({ node, nodes, scale, showImageInfo, vi
                 <span className="shrink-0">{t("修改后")}</span>
                 <Tooltip title={t("打开差异图、并排和导出工具")}><button type="button" onClick={() => onAdvanced(source?.id)} className="shrink-0 hover:underline" style={{ fontSize: "inherit", color: theme.node.muted }}>{t("更多")}</button></Tooltip>
             </div>
-            {notice ? <span role="status" className="text-center" style={{ fontSize: 10 * unit }}>{t(notice)}</span> : null}
+            {notice ? <span role="status" className="text-center" style={{ fontSize: 12 * unit }}>{t(notice)}</span> : null}
         </div>
     </div>;
 }

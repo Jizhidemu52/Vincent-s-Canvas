@@ -2,9 +2,8 @@ import { useUiText, uiText } from "@/lib/i18n";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import { App, Button, Input, Segmented, Tooltip } from "antd";
-import copyToClipboard from "copy-to-clipboard";
-import { Copy, FolderOpen, History, KeyRound, Link2, LoaderCircle, PlugZap, Plus, RefreshCw, RotateCcw, Terminal, Trash2 } from "lucide-react";
-import { motion } from "motion/react";
+import { Check, Copy, FolderOpen, History, KeyRound, Link2, LoaderCircle, PlugZap, Plus, RefreshCw, RotateCcw, Terminal, Trash2 } from "lucide-react";
+import { motion, useReducedMotion } from "motion/react";
 import { useShallow } from "zustand/react/shallow";
 
 import { canvasThemes } from "@/lib/canvas-theme";
@@ -19,9 +18,10 @@ import { agentMessageWindow, DEFAULT_AGENT_MESSAGE_WINDOW, expandAgentMessageWin
 import { selectLocalAgentPanelState } from "@/lib/canvas/canvas-local-agent-selection";
 import { canvasAgentUndoMessage } from "@/lib/canvas/canvas-agent-undo-report";
 import { useChatBottomFollow } from "@/hooks/use-chat-bottom-follow";
+import { useCopyFeedback } from "@/hooks/use-copy-feedback";
 import { canvasOpsDeleteContent, canvasToolCallPreview } from "@/lib/canvas/canvas-assistant-ux";
 
-const PANEL_MOTION_SECONDS = 0.5;
+const PANEL_MOTION_SECONDS = 0.24;
 const MAX_ATTACHMENTS = 6;
 const MAX_ATTACHMENT_PAYLOAD_BYTES = 28 * 1024 * 1024;
 const DEFAULT_AGENT_URL = "http://127.0.0.1:17371";
@@ -50,6 +50,7 @@ type AgentConfigResponse = { ok?: boolean; url?: string; token?: string; hasToke
 const EMPTY_AGENT_SNAPSHOT: CanvasAgentSnapshot = { projectId: "", title: "", nodes: [], connections: [], selectedNodeIds: [], viewport: { x: 0, y: 0, k: 1 } };
 
 export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotRef, canUndoOps, collapsed, embedded, headless, autoConnect, onApplyOps, onUndoOps }: { snapshot?: CanvasAgentSnapshot; snapshotRef?: { current: CanvasAgentSnapshot }; canUndoOps: boolean; collapsed?: boolean; embedded?: boolean; headless?: boolean; autoConnect?: boolean; onApplyOps: (ops: CanvasAgentOp[], options?: { turnId: string }) => unknown; onUndoOps: (turnId?: string) => CanvasAgentSnapshot | null | Promise<CanvasAgentSnapshot | null> }) {
+    const reducedMotion = useReducedMotion();
     const t = useUiText();
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const user = useUserStore((state) => state.user);
@@ -621,7 +622,6 @@ export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotR
                     theme={theme}
                     context={{ endpoint, connected, enabled, activity, waiting, sending, messages: messageCount, pendingTool: pendingTool?.name }}
                     onClear={clearEventLogs}
-                    onCopied={(text) => message.success(text)}
                     onCopyBlocked={(text) => message.warning(text)}
                 />
             ) : (
@@ -656,7 +656,7 @@ export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotR
                         onStop={stopLocalAgent}
                         onAddFiles={addAttachments}
                         onRemoveAttachment={removeAttachment}
-                        left={attachments.length ? <span className="text-[11px]" style={{ color: theme.node.muted }}>{formatBytes(attachmentPayloadBytes(attachments))} / 30MB</span> : null}
+                        left={attachments.length ? <span className="text-xs" style={{ color: theme.node.muted }}>{formatBytes(attachmentPayloadBytes(attachments))} / 30MB</span> : null}
                     />
                 </>
             )}
@@ -671,14 +671,14 @@ export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotR
             className="relative z-[70] flex h-full shrink-0"
             initial={{ width: 0, opacity: 0 }}
             animate={{ width: collapsed ? 0 : width + 1, opacity: collapsed ? 0 : 1 }}
-            transition={{ duration: resizing ? 0 : PANEL_MOTION_SECONDS, ease: [0.22, 1, 0.36, 1] }}
+            transition={{ duration: resizing || reducedMotion ? 0 : PANEL_MOTION_SECONDS, ease: [0.2, 0.7, 0.2, 1] }}
             style={{ overflow: "clip", pointerEvents: collapsed ? "none" : undefined }}
         >
             <motion.aside
                 className="relative flex h-full shrink-0 flex-col border-l"
                 initial={{ x: 48 }}
                 animate={{ x: collapsed ? 28 : 0 }}
-                transition={{ duration: resizing ? 0 : PANEL_MOTION_SECONDS, ease: [0.22, 1, 0.36, 1] }}
+                transition={{ duration: resizing || reducedMotion ? 0 : PANEL_MOTION_SECONDS, ease: [0.2, 0.7, 0.2, 1] }}
                 style={{ width, background: theme.node.panel, borderColor: theme.node.stroke, color: theme.node.text }}
             >
                 <div className="absolute left-0 top-0 h-full w-1 cursor-col-resize transition hover:bg-current/20" onPointerDown={startResize} />
@@ -688,17 +688,16 @@ export function CanvasLocalAgentPanel({ snapshot, snapshotRef: externalSnapshotR
     );
 }
 
-function AgentLogView({ logs, theme, context, onClear, onCopied, onCopyBlocked }: { logs: AgentEventLog[]; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; context: AgentLogContext; onClear: () => void; onCopied: (text: string) => void; onCopyBlocked: (text: string) => void }) {
+function AgentLogView({ logs, theme, context, onClear, onCopyBlocked }: { logs: AgentEventLog[]; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; context: AgentLogContext; onClear: () => void; onCopyBlocked: (text: string) => void }) {
     const t = useUiText();
+    const logCopy = useCopyFeedback();
+    const errorCopy = useCopyFeedback();
     const [mode, setMode] = useState<"text" | "json">("text");
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const content = mode === "text" ? formatLogText(logs, context) : formatLogJson(logs, context);
     const lastError = [...logs].reverse().find((item) => /错误|失败|error/i.test(`${item.title}\n${item.text}`));
-    const copy = async (value = content, tip = "日志已复制") => {
-        if (await copyToClipboard(value)) {
-            onCopied(tip);
-            return;
-        }
+    const copy = async (value = content, feedback = logCopy) => {
+        if (await feedback.copy(value)) return;
         textareaRef.current?.focus();
         textareaRef.current?.select();
         onCopyBlocked("已选中日志，请手动复制");
@@ -713,8 +712,8 @@ function AgentLogView({ logs, theme, context, onClear, onCopied, onCopyBlocked }
                     <Segmented size="small" value={mode} onChange={(value) => setMode(value as "text" | "json")} options={[{ label: t("排查日志"), value: "text" }, { label: t("原始 JSON"), value: "json" }]} />
                     <div className="flex items-center gap-2">
                         <span className="text-xs" style={{ color: theme.node.muted }}>{logs.length} {t(" 条")}</span>
-                        <Button size="small" icon={<Copy className="size-3.5" />} onClick={() => void copy()}>{t("复制")}</Button>
-                        <Button size="small" disabled={!lastError} onClick={() => lastError && void copy(formatLogText([lastError], context), t("最近错误已复制"))}>{t("最近错误")}</Button>
+                        <Button size="small" aria-label={t("复制")} icon={logCopy.copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />} onClick={() => void copy()}>{t(logCopy.copied ? "已复制" : "复制")}</Button>
+                        <Button size="small" aria-label={t("最近错误")} disabled={!lastError} onClick={() => lastError && void copy(formatLogText([lastError], context), errorCopy)}>{t(errorCopy.copied ? "已复制" : "最近错误")}</Button>
                         <Button size="small" danger type="text" icon={<Trash2 className="size-3.5" />} disabled={!logs.length} onClick={onClear}>{t("清空")}</Button>
                     </div>
                 </div>
@@ -733,13 +732,9 @@ function AgentLogView({ logs, theme, context, onClear, onCopied, onCopyBlocked }
 
 function AgentConnectView({ theme, url, token, enabled, connected, activity, connectError, onUrlChange, onTokenChange, onToggleEnabled }: { theme: (typeof canvasThemes)[keyof typeof canvasThemes]; url: string; token: string; enabled: boolean; connected: boolean; activity: string; connectError: string; onUrlChange: (value: string) => void; onTokenChange: (value: string) => void; onToggleEnabled: () => void }) {
     const t = useUiText();
-    const { message } = App.useApp();
+    const commandCopy = useCopyFeedback();
     const statusText = connectError ? "连接失败" : connected ? activity : enabled ? "连接中" : "未连接";
-    const statusColor = connectError ? "#dc2626" : connected ? "#16a34a" : enabled ? "#d97706" : theme.node.muted;
-    const copyCommand = (command: string) => {
-        copyToClipboard(command);
-        message.success(t("命令已复制"));
-    };
+    const statusColor = connectError ? theme.node.danger : connected ? theme.node.success : enabled ? theme.node.warning : theme.node.muted;
     return (
         <div className="thin-scrollbar min-h-0 flex-1 overflow-y-auto p-4">
             <div className="space-y-4">
@@ -752,14 +747,14 @@ function AgentConnectView({ theme, url, token, enabled, connected, activity, con
                     {AGENT_CONNECT_STEPS.map((step) => {
                         const command = "command" in step ? step.command : "";
                         return (
-                            <div key={step.title} className="rounded-lg px-3 py-2.5">
+                            <div key={step.title} className="rounded-lg px-3 py-3">
                                 <div className="text-sm font-medium leading-5">{t(step.title)}</div>
                                 <div className="mt-1 text-xs leading-5" style={{ color: theme.node.muted }}>{t(step.text)}</div>
                                 {command ? (
-                                    <div className="mt-2 flex items-center gap-2 rounded-md border bg-transparent px-2 py-1.5" style={{ borderColor: theme.node.stroke, color: theme.node.text }}>
-                                        <code className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap text-[11px] leading-5">{command}</code>
-                                        <Tooltip title={t("复制命令")}>
-                                            <Button size="small" type="text" className="!h-6 !w-6 !min-w-6" icon={<Copy className="size-3.5" />} onClick={() => copyCommand(command)} />
+                                    <div className="mt-2 flex items-center gap-2 rounded-md border bg-transparent px-2 py-2" style={{ borderColor: theme.node.stroke, color: theme.node.text }}>
+                                        <code className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap text-xs leading-5">{command}</code>
+                                        <Tooltip title={t(commandCopy.copied ? "已复制" : "复制命令")}>
+                                            <Button size="small" type="text" aria-label={t("复制命令")} icon={commandCopy.copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />} onClick={() => void commandCopy.copy(command)}>{commandCopy.copied ? t("已复制") : null}</Button>
                                         </Tooltip>
                                     </div>
                                 ) : null}
@@ -772,7 +767,7 @@ function AgentConnectView({ theme, url, token, enabled, connected, activity, con
                         <div className="min-w-0 flex-1">
                             <div className="flex min-w-0 items-center gap-2">
                                 <span className="shrink-0 text-sm font-medium leading-5">{t("网页连接")}</span>
-                                <span className="inline-flex min-w-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] leading-4" style={{ borderColor: connected || enabled || connectError ? statusColor : theme.node.stroke, color: statusColor }}>
+                                <span className="inline-flex min-w-0 items-center gap-2 rounded-full border px-2 py-1 text-xs leading-4" style={{ borderColor: connected || enabled || connectError ? statusColor : theme.node.stroke, color: statusColor }}>
                                     <span className="size-1.5 shrink-0 rounded-full" style={{ background: statusColor }} />
                                     <span className="truncate">{t(statusText)}</span>
                                 </span>
@@ -784,23 +779,23 @@ function AgentConnectView({ theme, url, token, enabled, connected, activity, con
                             {enabled ? t("断开") : t("连接")}
                         </Button>
                     </div>
-                    <div className="mt-3 grid gap-2.5">
-                        <label className="grid gap-1.5">
-                            <span className="flex items-center gap-1.5 text-xs font-medium" style={{ color: theme.node.muted }}>
+                    <div className="mt-3 grid gap-3">
+                        <label className="grid gap-2">
+                            <span className="flex items-center gap-2 text-xs font-medium" style={{ color: theme.node.muted }}>
                                 <Link2 className="size-3.5" />
                                 {t("本地地址")}<span className="font-normal opacity-70">Local URL</span>
                             </span>
                             <Input size="large" prefix={<Link2 className="mr-1 size-4" style={{ color: theme.node.faint }} />} value={url} onChange={(event) => onUrlChange(event.target.value)} placeholder={t("例如 http://127.0.0.1:17371")} />
                         </label>
-                        <label className="grid gap-1.5">
-                            <span className="flex items-center gap-1.5 text-xs font-medium" style={{ color: theme.node.muted }}>
+                        <label className="grid gap-2">
+                            <span className="flex items-center gap-2 text-xs font-medium" style={{ color: theme.node.muted }}>
                                 <KeyRound className="size-3.5" />
                                 {t("连接 Token")}<span className="font-normal opacity-70">Connect token</span>
                             </span>
                             <Input.Password size="large" prefix={<KeyRound className="mr-1 size-4" style={{ color: theme.node.faint }} />} value={token} onChange={(event) => onTokenChange(event.target.value)} placeholder={t("自动发现，或手动填入 Connect token")} />
                         </label>
                         {connectError ? (
-                            <div className="rounded-md border px-2.5 py-2 text-xs leading-5" style={{ borderColor: "rgba(220,38,38,.35)", color: "#dc2626" }}>
+                            <div className="rounded-md border px-3 py-2 text-xs leading-5" style={{ borderColor: `${theme.node.danger}59`, color: theme.node.danger }}>
                                 {connectError}
                             </div>
                         ) : null}
@@ -836,17 +831,17 @@ function AgentHistoryView({ theme, threads, activeThreadId, workspacePath, loadi
                     {threads.map((thread) => {
                         const active = thread.id === activeThreadId;
                         return (
-                            <div key={thread.id} className="rounded-lg border px-2.5 py-1.5 transition" style={{ borderColor: active ? theme.node.text : theme.node.stroke, background: "transparent", color: theme.node.text }}>
+                            <div key={thread.id} className="rounded-lg border px-3 py-2 transition" style={{ borderColor: active ? theme.node.text : theme.node.stroke, background: "transparent", color: theme.node.text }}>
                                 <div className="flex items-center gap-2">
                                     <div className="min-w-0 flex-1">
-                                        <div className="flex min-w-0 items-center gap-1.5">
-                                            {active ? <span className="shrink-0 text-[10px] font-medium" style={{ color: theme.node.text }}>{t("当前")}</span> : null}
+                                        <div className="flex min-w-0 items-center gap-2">
+                                            {active ? <span className="shrink-0 text-xs font-medium" style={{ color: theme.node.text }}>{t("当前")}</span> : null}
                                             <div className="truncate text-sm font-medium leading-5">{thread.name || thread.preview || t("未命名对话")}</div>
                                         </div>
-                                        <div className="truncate text-[11px] leading-4 opacity-65">{thread.preview || thread.id}</div>
+                                        <div className="truncate text-xs leading-4 opacity-65">{thread.preview || thread.id}</div>
                                     </div>
                                     <div className="flex shrink-0 items-center gap-1">
-                                        <span className="text-[10px] opacity-55">{formatThreadTime(thread.updatedAt || thread.createdAt)}</span>
+                                        <span className="text-xs opacity-55">{formatThreadTime(thread.updatedAt || thread.createdAt)}</span>
                                         <Button size="small" className="!h-6 !px-2" disabled={loading} onClick={() => onResumeThread(thread.id)}>
                                             {t("进入")}</Button>
                                         <Tooltip title={t("删除记录")}>

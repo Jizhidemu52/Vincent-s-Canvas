@@ -38,7 +38,9 @@ test("too many references remain visible but cannot be submitted", () => {
 });
 test("uploading and submitting locks reference changes and duplicate submission", () => {
     const markup = render(2, true);
-    expect(markup).toMatch(/aria-label="移除参考图 1" disabled=""/);
+    const remove = markup.match(/<button\b[^>]*aria-label="移除参考图 1"[^>]*>/)?.[0];
+    expect(remove).toContain('disabled=""');
+    expect(remove).toContain('pointer-events:none');
     expect(generateButton(markup)).toContain(' disabled=""');
     expect(markup).toContain("提交中…");
 });

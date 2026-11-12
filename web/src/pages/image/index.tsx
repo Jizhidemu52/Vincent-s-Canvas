@@ -1,4 +1,5 @@
 import { uiText, useUiText, getUiLocale } from "@/lib/i18n";
+import { GenerationAccountHistory } from "@/components/generation-account-history";
 import { formatBeijingDateTime } from "@/lib/beijing-time";
 import { PromptOptimizeButton } from "@/components/prompt-optimize-button";
 import type { PromptInputData, PromptScene } from "../../../../shared/prompt-contracts";
@@ -148,7 +149,7 @@ type UpdateAiConfig = <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => 
 import { adaptImageModelSettings, imageModelProfile, imageReferenceSizeIsAutomatic, normalizeImageModelSettings, useImageModelProfile } from "@/lib/image-model-settings";
 
 const LOG_STORE_KEY = "wireless-canvas:image_generation_logs";
-const RESULT_ACTION_BUTTON_CLASS = "min-w-0 px-1.5 [&_.ant-btn-icon]:shrink-0 [&>span:last-child]:min-w-0 [&>span:last-child]:truncate";
+const RESULT_ACTION_BUTTON_CLASS = "min-w-0 px-2 [&_.ant-btn-icon]:shrink-0 [&>span:last-child]:min-w-0 [&>span:last-child]:truncate";
 const logStore = createWorkspaceStorage("image_generation_logs");
 const creativeLogStore = createWorkspaceStorage("creative_generation_logs");
 const pendingImageStore = createWorkspaceStorage("image_pending_tasks");
@@ -1395,7 +1396,7 @@ function ImageGenerationWorkspace({ creativePreset, historyTool }: { creativePre
                             <button type="button" role="tab" aria-selected={!logsOpen} onClick={returnToCurrentTask}>{uiText("本次结果")}{running ? <LoaderCircle className="size-4 animate-spin" /> : null}</button>
                             <button type="button" role="tab" aria-selected={logsOpen} onClick={() => setLogsOpen(true)}><History className="size-4" />{uiText("历史记录")}<span>{logs.length}</span></button>
                         </div>
-                        <div className="image-history-panel" hidden={!logsOpen}><LogPanel
+                        <div className="image-history-panel" hidden={!logsOpen}><GenerationAccountHistory board={historyTool} active={logsOpen} /><LogPanel
                             quickTitle={quickTool ? toolModeConfig.title : undefined}
                             logs={logs} unclassifiedLogs={unclassifiedLogs} selectedLogIds={selectedLogIds}
                             activeLogId={previewLog?.id} disabled={deletingLogs || !handoffReady} deleteDisabled={running}
@@ -1546,7 +1547,7 @@ function ResultImageCard({
     return (
         <div className="image-result-card overflow-hidden rounded-lg border border-border bg-background">
             <Image src={previewUrl || undefined} preview={{ src: image.dataUrl }} alt={uiText("生成结果 {value1}", { value1: index + 1 })} loading="lazy" decoding="async" className="object-contain" />
-            <div className="space-y-2 border-t border-border px-3 py-2.5">
+            <div className="space-y-2 border-t border-border px-3 py-3">
                 {image.imageName ? <Tooltip title={`${image.imageName}_v${image.imageVersion || 1}`}><div className="truncate text-xs font-medium">{image.imageName}_v{image.imageVersion || 1}</div></Tooltip> : null}
                 <div className="flex min-w-0 gap-x-2 gap-y-1 text-xs text-muted-foreground">
                     <span>
@@ -1677,13 +1678,13 @@ function LogPanel({
                 <Tag className="m-0">{logs.length}</Tag>
             </div>
             <div className="mb-4 flex flex-wrap gap-2">
-                <Button size="small" icon={<Plus className="size-3.5" />} disabled={createDisabled} onClick={onCreateTask}>
-                    {uiText("新建")}</Button>
-                <Button size="small" icon={<CheckSquare className="size-3.5" />} disabled={disabled || !logs.length} onClick={toggleAll}>
+                <Tooltip title={createDisabled ? uiText("正在准备工作区，请稍候") : undefined}><Button size="small" icon={<Plus className="size-3.5" />} disabled={createDisabled} onClick={onCreateTask}>
+                    {uiText("新建")}</Button></Tooltip>
+                <Tooltip title={disabled ? uiText("正在准备工作区，请稍候") : !logs.length ? uiText("暂无生成记录") : undefined}><Button size="small" icon={<CheckSquare className="size-3.5" />} disabled={disabled || !logs.length} onClick={toggleAll}>
                     {allSelected ? uiText("取消全选") : uiText("全选")}
-                </Button>
-                <Button size="small" danger icon={<Trash2 className="size-3.5" />} disabled={disabled || deleteDisabled || !selectedCount} onClick={onDeleteSelected}>
-                    {uiText("批量删除")}{selectedCount ? `（${selectedCount}）` : ""}</Button>
+                </Button></Tooltip>
+                <Tooltip title={disabled ? uiText("正在准备工作区，请稍候") : deleteDisabled ? uiText("任务处理中，暂不能删除记录") : !selectedCount ? uiText("请先选择记录") : undefined}><Button size="small" danger icon={<Trash2 className="size-3.5" />} disabled={disabled || deleteDisabled || !selectedCount} onClick={onDeleteSelected}>
+                    {uiText("批量删除")}{selectedCount ? `（${selectedCount}）` : ""}</Button></Tooltip>
             </div>
             <div className="space-y-3">
                 <PracticeExampleRecord />
@@ -1699,7 +1700,7 @@ function LogPanel({
                         onClick={() => onPreviewLog(log)}
                     />
                 ))}
-                {!logs.length ? <div className="flex min-h-48 items-center justify-center rounded-lg border border-dashed border-border text-center text-sm text-muted-foreground">{uiText("暂无生成记录")}</div> : null}
+                {!logs.length ? <div className="wb-surface wb-empty min-h-48"><History className="size-8" aria-hidden="true" /><p>{uiText("暂无生成记录")}</p><Tooltip title={createDisabled ? uiText("正在准备工作区，请稍候") : undefined}><Button disabled={createDisabled} onClick={onCreateTask} icon={<Plus className="size-4" />}>{uiText("新建任务，继续创作")}</Button></Tooltip></div> : null}
                 {!!unclassifiedLogs.length && <details className="text-xs text-muted-foreground">
                     <summary className="cursor-pointer py-2">{uiText("未分类记录（")}{unclassifiedLogs.length}）</summary>
                     <p className="mb-2">{uiText("以下记录的原任务来源无法确认，保留查看，不自动归入当前板块。")}</p>
@@ -1724,7 +1725,7 @@ function LogCard({ log, displayTitle, selected, active, disabled, onSelectedChan
         >
             <div className="grid grid-cols-[minmax(0,1fr)] gap-2">
                 <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-2">
-                    {onSelectedChange && <Checkbox className="mt-0.5" aria-label={uiText("选择记录：{title}", { title })} disabled={disabled} checked={selected} onClick={(event) => event.stopPropagation()} onChange={(event) => onSelectedChange(event.target.checked)} />}
+                    {onSelectedChange && <Checkbox className="mt-1" aria-label={uiText("选择记录：{title}", { title })} disabled={disabled} checked={selected} onClick={(event) => event.stopPropagation()} onChange={(event) => onSelectedChange(event.target.checked)} />}
                     <div className="min-w-0">
                         <div className="truncate text-sm font-semibold leading-5">{title}</div>
                         {thumbnails.length ? (
@@ -1738,23 +1739,23 @@ function LogCard({ log, displayTitle, selected, active, disabled, onSelectedChan
                 </div>
                 <div className="image-history-card-meta flex min-w-0 flex-wrap items-center gap-2">
                     <div className="flex gap-1">
-                        <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none" color="blue">
+                        <Tag className="m-0 flex h-6 items-center rounded-md px-2 text-xs leading-none" color="blue">
                             {uiText("成功")}{log.successCount ?? log.imageCount}
                         </Tag>
                         {log.failCount ? (
-                            <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none" color="red">
+                            <Tag className="m-0 flex h-6 items-center rounded-md px-2 text-xs leading-none" color="red">
                                 {uiText("失败")}{log.failCount}
                             </Tag>
                         ) : null}
                     </div>
                     <div className="flex flex-wrap justify-end gap-1">
-                        <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none">{log.imageCount} {uiText(" 张")}</Tag>
-                        <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none" color="green">
+                        <Tag className="m-0 flex h-6 items-center rounded-md px-2 text-xs leading-none">{log.imageCount} {uiText(" 张")}</Tag>
+                        <Tag className="m-0 flex h-6 items-center rounded-md px-2 text-xs leading-none" color="green">
                             {log.durationMs === null ? uiText("耗时未知") : formatDuration(log.durationMs)}
                         </Tag>
                     </div>
                     <div className="flex justify-end">
-                        <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none">{formatBeijingDateTime(log.createdAt)} {uiText("北京时间")}</Tag>
+                        <Tag className="m-0 flex h-6 items-center rounded-md px-2 text-xs leading-none">{formatBeijingDateTime(log.createdAt)} {uiText("北京时间")}</Tag>
                     </div>
                 </div>
             </div>
@@ -1837,8 +1838,8 @@ function ReferenceOrderButtons({ index, total, onMove }: { index: number; total:
     if (total <= 1) return null;
     return (
         <div className="absolute inset-x-1 bottom-1 flex justify-between">
-            <Button size="small" className="!h-6 !w-6 !min-w-6 !rounded-full !bg-white/85 !p-0 !shadow-sm" icon={<ArrowLeft className="size-3" />} disabled={index <= 0} onClick={() => onMove(-1)} />
-            <Button size="small" className="!h-6 !w-6 !min-w-6 !rounded-full !bg-white/85 !p-0 !shadow-sm" icon={<ArrowRight className="size-3" />} disabled={index >= total - 1} onClick={() => onMove(1)} />
+            <Tooltip title={uiText(index <= 0 ? "已是第一张参考图" : "向前移动参考图")}><span><Button size="small" aria-label={uiText("向前移动参考图")} className="!h-8 !w-8 !min-w-8 !rounded-md !bg-card/85 !p-0 !shadow-none" icon={<ArrowLeft className="size-3" />} disabled={index <= 0} onClick={() => onMove(-1)} /></span></Tooltip>
+            <Tooltip title={uiText(index >= total - 1 ? "已是最后一张参考图" : "向后移动参考图")}><span><Button size="small" aria-label={uiText("向后移动参考图")} className="!h-8 !w-8 !min-w-8 !rounded-md !bg-card/85 !p-0 !shadow-none" icon={<ArrowRight className="size-3" />} disabled={index >= total - 1} onClick={() => onMove(1)} /></span></Tooltip>
         </div>
     );
 }

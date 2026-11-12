@@ -20,9 +20,9 @@
 .image-workbench .image-result-position { margin: 0 0 12px; font-size: 13px; color: var(--muted-foreground); }
 .image-workbench .image-result-slot[hidden] { display: none; }
 .image-workbench .image-result-thumbnails { display: flex; gap: 8px; width: 100%; min-width: 0; overflow-x: auto; padding: 12px 0 4px; }
-.image-workbench .image-result-thumbnail { display: flex; flex: 0 0 88px; flex-direction: column; align-items: center; gap: 6px; padding: 6px; border: 1px solid var(--border); border-radius: 8px; color: var(--muted-foreground); background: var(--background); font-size: 12px; }
+.image-workbench .image-result-thumbnail { display: flex; flex: 0 0 88px; flex-direction: column; align-items: center; gap: 8px; padding: 8px; border: 1px solid var(--border); border-radius: 8px; color: var(--muted-foreground); background: var(--background); font-size: 12px; }
 .image-workbench .image-result-thumbnail[aria-pressed="true"] { border-color: var(--foreground); color: var(--foreground); background: var(--muted); }
-.image-workbench .image-result-thumbnail > span:first-child { display: flex; justify-content: center; align-items: center; width: 74px; height: 64px; background: var(--muted); border-radius: 4px; }
+.image-workbench .image-result-thumbnail > span:first-child { display: flex; justify-content: center; align-items: center; width: 74px; height: 64px; background: var(--muted); border-radius: 6px; }
 .image-workbench .image-result-thumbnail img { width: 100%; height: 100%; object-fit: contain; }
 .image-workbench .image-result-card > .ant-image { display: flex; justify-content: center; width: 100%; background: var(--muted); }
 .image-workbench .image-result-card > .ant-image > img { display: block; width: 100%; height: auto; max-height: min(64vh, 760px); object-fit: contain; }

@@ -33,7 +33,7 @@ function harness(patch: Partial<CanvasNodeData["metadata"]> = {}, options: { onR
     const copies: string[] = [], retries: string[] = [];
     const Button = ({ children, href, onClick }: { children: React.ReactNode; href?: string; onClick?: () => void }) => href ? <a href={href}>{children}</a> : <button type="button" onClick={onClick}>{children}</button>;
     const Diagnostic = loadFunction("../src/components/generation-diagnostic.tsx", "GenerationDiagnostic", { React, Button, ...i18nHarness, generationErrorMessage, isImageResultProcessingFailure, mergeGenerationDiagnostics,
-        useCopyText: () => (value: string) => { copies.push(value); return Promise.resolve(true); } });
+        useCopyFeedback: () => ({ copied: false, copy: (value: string) => { copies.push(value); return Promise.resolve(true); } }) });
     const ErrorContent = loadFunction("../src/components/canvas/canvas-node.tsx", "ErrorContent", { React, RefreshCw, ...i18nHarness, CanvasNodeType, GenerationDiagnostic: Diagnostic,
         imageResultProcessingFailureMessage, isImageResultProcessingFailure, mergeGenerationDiagnostics });
     const current = { ...node, type: options.type ?? node.type, metadata: { ...node.metadata, ...patch } };

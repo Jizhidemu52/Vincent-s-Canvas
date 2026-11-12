@@ -3,7 +3,7 @@ import { PracticeExampleRecord } from "@/components/design-examples";
 import { WorkbenchImage } from "@/components/workbench-image";
 import { BookmarkPlus, Check, Copy, Download, Ellipsis, LoaderCircle, PencilLine, Plus, RotateCcw, Search, Share2, Trash2, Upload } from "lucide-react";
 import { lazy, Suspense, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { App, Button, Card, DatePicker, Drawer, Dropdown, Empty, Form, Image, Input, Modal, Segmented, Select, Skeleton, Space, Tag, Typography } from "antd";
+import { App, Button, Card, DatePicker, Drawer, Dropdown, Empty, Form, Image, Input, Modal, Segmented, Select, Skeleton, Space, Tag, Tooltip, Typography } from "antd";
 import dayjs from "dayjs";
 import { saveAs } from "file-saver";
 import { useInfiniteQuery, useQueryClient, type InfiniteData } from "@tanstack/react-query";
@@ -11,7 +11,7 @@ import { useNavigate } from "react-router-dom";
 import { useModuleEnabled } from "@/stores/use-module-store";
 import { InfiniteLoadMore } from "@/components/infinite-load-more";
 
-import { useCopyText } from "@/hooks/use-copy-text";
+import { useCopyFeedback } from "@/hooks/use-copy-feedback";
 import { useVideoPlayback, validVideoPlaybackAssetId } from "@/hooks/use-video-playback";
 import { useImageDrop } from "@/hooks/use-image-drop";
 import { imageModelDisplayName } from "@/lib/model-display";
@@ -89,7 +89,8 @@ export default function AssetsPage() {
     const queryClient = useQueryClient();
     const navigate = useNavigate();
     const referenceImportEnabled = useModuleEnabled("reference-import");
-    const copyText = useCopyText();
+    const clipboard = useCopyFeedback();
+    const [copiedAssetKey, setCopiedAssetKey] = useState<string | null>(null);
     const [form] = Form.useForm<AssetFormValues>();
     const coverInputRef = useRef<HTMLInputElement>(null);
     const imageInputRef = useRef<HTMLInputElement>(null);
@@ -178,6 +179,7 @@ export default function AssetsPage() {
     const [selectedProjectId, setSelectedProjectId] = useState<string>();
     const [formKind, setFormKind] = useState<AssetKind>("text");
     const [imageDraft, setImageDraft] = useState<ImageDraft>(null);
+    const [imageRequiredError, setImageRequiredError] = useState(false);
     const coverUrl = Form.useWatch("coverUrl", form) || "";
     const title = Form.useWatch("title", form) || "";
     const tags = Form.useWatch("tags", form) || [];
@@ -292,6 +294,7 @@ export default function AssetsPage() {
     const openCreate = () => {
         setEditingAsset(null);
         setImageDraft(null);
+        setImageRequiredError(false);
         setFormKind("text");
         form.setFieldsValue({ kind: "text", title: "", coverUrl: "", tags: [], source: "手动添加", note: "", content: "" });
         setIsAssetOpen(true);
@@ -299,6 +302,7 @@ export default function AssetsPage() {
 
     const openEdit = (asset: Asset) => {
         setEditingAsset(asset);
+        setImageRequiredError(false);
         setFormKind(asset.kind);
         setImageDraft(asset.kind === "image" ? asset.data : null);
         form.setFieldsValue({
@@ -340,7 +344,7 @@ export default function AssetsPage() {
             editingAsset ? updateAsset(editingAsset.id, asset) : addAsset(asset);
         } else {
             if (!imageDraft) {
-                message.error(t("请选择图片文件"));
+                setImageRequiredError(true);
                 return;
             }
             const asset = { ...base, kind: "image" as const, data: imageDraft };
@@ -362,13 +366,19 @@ export default function AssetsPage() {
         const image = await uploadImage(file);
         const draft = { dataUrl: image.url, storageKey: image.storageKey, width: image.width, height: image.height, bytes: image.bytes, mimeType: image.mimeType };
         setImageDraft(draft);
+        setImageRequiredError(false);
         if (!form.getFieldValue("coverUrl")) form.setFieldValue("coverUrl", draft.dataUrl);
         if (!form.getFieldValue("title")) form.setFieldValue("title", file.name);
     };
 
     const copyAssetText = async (asset: Asset) => {
         if (asset.kind !== "text") return;
-        await runAssetAction(t("正在读取文本…"), async () => { const full = await readAssetDetail(asset); if (full.kind === "text") copyText(full.data.content, t("文本已复制")); });
+        const ownerId = user?.id;
+        await runAssetAction(t("正在读取文本…"), async () => {
+            setCopiedAssetKey(null);
+            const full = await readAssetDetail(asset);
+            if (full.kind === "text" && await clipboard.copy(full.data.content) && useUserStore.getState().user?.id === ownerId) setCopiedAssetKey(`${ownerId || ""}:${asset.id}`);
+        });
     };
 
     const downloadImage = async (asset: Asset) => {
@@ -587,7 +597,7 @@ export default function AssetsPage() {
                             className="w-full"
                             size="large"
                             allowClear
-                            prefix={<Search className="size-4 text-stone-400" />}
+                            prefix={<Search className="size-4 text-muted-foreground" />}
                             value={keyword}
                             placeholder={t("搜索标题、内容、标签或来源")}
                             onChange={(event) => {
@@ -606,7 +616,7 @@ export default function AssetsPage() {
                         </div>}
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                             <div className="grid gap-2 sm:grid-cols-[56px_minmax(0,1fr)] sm:items-center">
-                                <div className="text-xs font-medium text-stone-500 dark:text-stone-400">{t("类型")}</div>
+                                <div className="text-xs font-medium text-muted-foreground">{t("类型")}</div>
                                 <div className="flex flex-wrap gap-2">
                                     {kindOptions.map((option) => (
                                         <Tag.CheckableTag
@@ -626,7 +636,7 @@ export default function AssetsPage() {
                                 <span className="text-sm text-muted-foreground">{t("已加载")} {libraryView === "trash" ? serverAssets.length : filteredAssets.length} {t("个素材")}{serverAssetResponse?.hasMore ? t(" · 还有更多") : ""}</span>
                                 {libraryView === "active" ? <>
                                 {referenceImportEnabled ? <Button onClick={() => navigate("/reference-import")}>{t("网页采集")}</Button> : null}
-                                <Button icon={<Download className="size-4" />} disabled={Boolean(assetAction) || !filteredAssets.length} onClick={() => void runAssetAction(t("正在整理导出文件…"), exportAllAssets)}>{t("导出全部筛选素材")}</Button>
+                                <Tooltip title={assetAction || (!filteredAssets.length ? t("当前筛选下没有可导出的素材") : undefined)}><span><Button icon={<Download className="size-4" />} disabled={Boolean(assetAction) || !filteredAssets.length} onClick={() => void runAssetAction(t("正在整理导出文件…"), exportAllAssets)}>{t("导出全部筛选素材")}</Button></span></Tooltip>
                                 <Button icon={<Upload className="size-4" />} disabled={Boolean(assetAction)} onClick={() => assetInputRef.current?.click()}>{t("导入素材包")}</Button>
                                 </> : null}
                             </div>
@@ -664,6 +674,7 @@ export default function AssetsPage() {
                                 onOpen={() => openDetail(asset)}
                                 onEdit={() => void runAssetAction(t("正在读取素材详情…"), async () => openEdit(await readAssetDetail(asset)))}
                                 onCopy={copyAssetText}
+                                copied={clipboard.copied && copiedAssetKey === `${user?.id || ""}:${asset.id}`}
                                 onDownload={downloadImage}
                                 onReplicate={() => void runAssetAction(t("正在读取复刻参数…"), () => replicateAsset(asset))}
                                 onDelete={() => setDeletingAsset(asset)}
@@ -701,7 +712,7 @@ export default function AssetsPage() {
                                     { label: t("文本"), value: "text" },
                                     { label: t("图片"), value: "image" },
                                 ]}
-                                onChange={(value) => setFormKind(value)}
+                                onChange={(value) => { setFormKind(value); setImageRequiredError(false); }}
                             />
                         </Form.Item>
                         <Form.Item name="title" label={t("标题")} rules={[{ required: true, whitespace: true, max: 255, message: t("请输入标题（最多255字）") }]}>
@@ -731,9 +742,9 @@ export default function AssetsPage() {
                                 <Input.TextArea disabled={editingServerAsset || savingAsset} rows={8} placeholder={t("保存提示词、说明文案、参考描述等文本素材")} />
                             </Form.Item>
                         ) : (
-                            <Form.Item label={t("图片内容")} required>
-                                <div className="rounded-lg border border-dashed border-stone-300 p-4 dark:border-stone-700">
-                                    <Button disabled={editingServerAsset || savingAsset} icon={<Upload className="size-4" />} onClick={() => imageInputRef.current?.click()}>
+                            <Form.Item label={t("图片内容")} required validateStatus={imageRequiredError ? "error" : undefined} help={imageRequiredError ? <span id="asset-image-required-error" role="alert">{t("请选择图片文件")}</span> : undefined}>
+                                <div className="rounded-lg border border-dashed border-border p-4">
+                                    <Button aria-invalid={imageRequiredError || undefined} aria-describedby={imageRequiredError ? "asset-image-required-error" : undefined} disabled={editingServerAsset || savingAsset} icon={<Upload className="size-4" />} onClick={() => imageInputRef.current?.click()}>
                                         {t("选择图片文件")}
                                     </Button>
                                     {imageDraft ? (
@@ -749,19 +760,19 @@ export default function AssetsPage() {
                             </Form.Item>
                         )}
                     </Form>
-                    <div className="rounded-xl border border-stone-200 bg-stone-50 p-4 dark:border-stone-800 dark:bg-stone-950">
+                    <div className="rounded-xl border border-border bg-muted p-4">
                         <Typography.Text strong>{t("预览")}</Typography.Text>
-                        <div className="mt-3 overflow-hidden rounded-lg border border-stone-200 bg-background dark:border-stone-800">
+                        <div className="mt-3 overflow-hidden rounded-lg border border-border bg-background">
                             {coverUrl || imageDraft?.dataUrl ? (
                                 <img src={coverUrl || imageDraft?.dataUrl} alt="" className="aspect-[4/3] w-full object-cover" />
                             ) : (
-                                <div className="flex aspect-[4/3] items-center justify-center bg-stone-100 p-5 text-center text-sm text-stone-500 dark:bg-stone-900">{content || t("暂无封面")}</div>
+                                <div className="flex aspect-[4/3] items-center justify-center bg-muted p-5 text-center text-sm text-muted-foreground">{content || t("暂无封面")}</div>
                             )}
                             <div className="p-4">
                                 <Typography.Text strong ellipsis className="block">
                                     {title || t("未命名素材")}
                                 </Typography.Text>
-                                <div className="mt-2 flex flex-wrap gap-1.5">
+                                <div className="mt-2 flex flex-wrap gap-2">
                                     {tags.length ? (
                                         tags.map((tag) => (
                                             <Tag key={tag} className="m-0">
@@ -805,6 +816,7 @@ export default function AssetsPage() {
                 isServerAsset={Boolean(previewAsset && serverAssetIds.has(previewAsset.id))}
                 onClose={() => setPreviewAsset(null)}
                 onCopy={copyAssetText}
+                copied={clipboard.copied && Boolean(previewAsset) && copiedAssetKey === `${user?.id || ""}:${previewAsset?.id}`}
                 onDownload={downloadImage}
                 onEditOriginal={openImageEditor}
                 onReplicate={replicateAsset}
@@ -915,6 +927,7 @@ function AssetCard({
     onOpen,
     onEdit,
     onCopy,
+    copied,
     onDownload,
     onReplicate,
     onDelete,
@@ -925,6 +938,7 @@ function AssetCard({
     onOpen: () => void;
     onEdit: () => void;
     onCopy: (asset: Asset) => void;
+    copied: boolean;
     onDownload: (asset: Asset) => void;
     onReplicate: () => void;
     onDelete: () => void;
@@ -963,7 +977,7 @@ function AssetCard({
                     <Typography.Paragraph type="secondary" ellipsis={{ rows: 3 }} className="!mb-0 !mt-3 !text-sm !leading-6">
                         {summary}
                     </Typography.Paragraph>
-                    <div className="mt-3 flex flex-wrap gap-1.5">
+                    <div className="mt-3 flex flex-wrap gap-2">
                         {metadataString(asset, "resultStatus") && metadataString(asset, "resultStatus") !== "unused" ? <Tag color="orange" className="m-0 text-xs">{resultStatusLabel(metadataString(asset, "resultStatus"))}</Tag> : null}
                         {metadataNumber(asset, "usabilityScore") > 0 ? <Tag className="m-0 text-xs">{t("可用性")} {metadataNumber(asset, "usabilityScore")}/100</Tag> : null}
                         {metadataNumber(asset, "downloadCount") > 0 ? <Tag className="m-0 text-xs">{t("下载")} {metadataNumber(asset, "downloadCount")}</Tag> : null}
@@ -986,10 +1000,11 @@ function AssetCard({
                 ) : null}
                 <Dropdown trigger={["click"]} menu={{ items: [
                     ...(asset.kind !== "video" ? [{ key: "edit", label: t("编辑"), icon: <PencilLine className="size-4" />, onClick: onEdit }] : []),
-                    ...(asset.kind === "text" ? [{ key: "copy", label: t("复制"), icon: <Copy className="size-4" />, onClick: () => onCopy(asset) }] : []),
+                    ...(asset.kind === "text" ? [{ key: "copy", label: copied ? t("已复制 ✓") : t("复制"), icon: <Copy className="size-4" />, onClick: () => onCopy(asset) }] : []),
                     ...(canReplicate(asset) ? [{ key: "replicate", label: t("复刻"), icon: <RotateCcw className="size-4" />, onClick: onReplicate }] : []),
                     { key: "delete", label: t("删除"), danger: true, icon: <Trash2 className="size-4" />, onClick: onDelete },
                 ] }}><Button size="small" className="ml-auto" aria-label={t("更多操作")} icon={<Ellipsis className="size-4" />} /></Dropdown>
+                {copied ? <span role="status" className="text-[13px] text-muted-foreground">{t("已复制 ✓")}</span> : null}
             </div>
         </Card>
     );
@@ -1002,6 +1017,7 @@ function AssetDrawer({
     isServerAsset,
     onClose,
     onCopy,
+    copied,
     onDownload,
     onEditOriginal,
     onReplicate,
@@ -1019,6 +1035,7 @@ function AssetDrawer({
     isServerAsset: boolean;
     onClose: () => void;
     onCopy: (asset: Asset) => void;
+    copied: boolean;
     onDownload: (asset: Asset) => void | Promise<void>;
     onEditOriginal: (asset: Asset) => void;
     onReplicate: (asset: Asset) => void | Promise<void>;
@@ -1041,7 +1058,7 @@ function AssetDrawer({
                     {asset.kind === "image" ? (
                         <AssetDetailPreview asset={asset} />
                     ) : asset.kind === "video" ? null : (
-                        <div className="rounded-lg border border-stone-200 bg-stone-50 p-5 text-sm leading-6 text-stone-600 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-300">{asset.kind === "text" ? asset.data.content : t("暂无封面")}</div>
+                        <div className="rounded-lg border border-border bg-muted p-5 text-sm leading-6 text-muted-foreground">{asset.kind === "text" ? asset.data.content : t("暂无封面")}</div>
                     )}
                     <div>
                         <Typography.Title level={4} className="!mb-2">
@@ -1057,7 +1074,7 @@ function AssetDrawer({
                             ))}
                         </Space>
                     </div>
-                    <div className="rounded-lg border border-stone-200 p-4 dark:border-stone-800">
+                    <div className="rounded-lg border border-border p-4">
                         <Typography.Text type="secondary" className="block text-xs">
                             {t("内容")}
                         </Typography.Text>
@@ -1083,8 +1100,8 @@ function AssetDrawer({
                             <Button icon={<PencilLine className="size-4" />} onClick={() => onEditOriginal(asset)}>{t("编辑原图")}</Button>
                         ) : null}
                         {asset.kind === "text" ? (
-                            <Button type="primary" icon={<Copy className="size-4" />} onClick={() => onCopy(asset)}>
-                                {t("复制文本")}
+                            <Button type="primary" aria-label={t("复制文本")} icon={<Copy className="size-4" />} onClick={() => onCopy(asset)}>
+                                {copied ? t("已复制 ✓") : t("复制文本")}
                             </Button>
                         ) : null}
                         {asset.kind === "image" || asset.kind === "video" ? (
@@ -1147,7 +1164,7 @@ function AssetTrace({ asset }: { asset: Asset }) {
     const model = metadataString(asset, "model");
     const sourceFile = metadataString(asset, "sourceFile");
     return (
-        <div className="rounded-lg border border-stone-200 p-4 text-sm dark:border-stone-800">
+        <div className="rounded-lg border border-border p-4 text-sm">
             <Typography.Text type="secondary" className="block text-xs">
                 {t("生成记录")}
             </Typography.Text>
@@ -1164,8 +1181,8 @@ function AssetTrace({ asset }: { asset: Asset }) {
 function TraceLine({ label, value, multiline }: { label: string; value: string; multiline?: boolean }) {
     return (
         <div className={multiline ? "grid gap-1" : "grid grid-cols-[72px_minmax(0,1fr)] gap-2"}>
-            <span className="text-xs text-stone-400">{label}</span>
-            <span className={multiline ? "whitespace-pre-wrap rounded-md bg-stone-50 p-2 text-stone-700 dark:bg-stone-900 dark:text-stone-200" : "truncate text-stone-700 dark:text-stone-200"}>{value}</span>
+            <span className="text-xs text-muted-foreground">{label}</span>
+            <span className={multiline ? "whitespace-pre-wrap rounded-md bg-muted p-2 text-foreground" : "truncate text-foreground"}>{value}</span>
         </div>
     );
 }

@@ -16,7 +16,7 @@ export function CanvasImageDownloadButton({ onDownload, onOptions, showLabel }: 
     };
     return <div className="inline-flex shrink-0 items-center" data-canvas-no-zoom>
         <Tooltip title={english ? "Download the original file without re-encoding" : "下载原文件，不重新编码"}>
-            <button type="button" data-usage-control="canvas-tool.download" className="flex h-8 items-center gap-1.5 rounded-l-md px-2 hover:bg-[var(--node-tool-hover)] disabled:opacity-40" aria-label={t("下载图片")} disabled={busy} onClick={() => void download("original")}>
+            <button type="button" data-usage-control="canvas-tool.download" className="flex h-8 items-center gap-2 rounded-l-md px-2 hover:bg-[var(--node-tool-hover)] disabled:opacity-40" aria-label={t("下载图片")} disabled={busy} onClick={() => void download("original")}>
                 {busy ? <LoaderCircle className="size-4 animate-spin" /> : <Download className="size-4" />}{showLabel ? <span>{busy ? t("正在准备下载…") : (english ? "Original" : "下载原图")}</span> : null}
             </button>
         </Tooltip>

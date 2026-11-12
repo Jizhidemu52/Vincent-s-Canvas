@@ -31,7 +31,7 @@
 .wb-header { display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 24px; margin-bottom: 28px; }
 .wb-eyebrow { color: var(--muted-foreground); font-size: var(--ui-text-caption); font-weight: 600; letter-spacing: .12em; margin-bottom: 8px; }
 .wb-title { color: var(--foreground); font-size: var(--ui-text-title); font-weight: 600; line-height: 1.3; letter-spacing: -.035em; margin: 0; }
-.wb-description { max-width: 640px; color: var(--muted-foreground); font-size: 14px; line-height: 1.75; margin-top: 10px; }
+.wb-description { max-width: 640px; color: var(--muted-foreground); font-size: 14px; line-height: 1.75; margin-top: 12px; }
 .wb-surface { background: var(--card); color: var(--foreground); border: 1px solid var(--border); border-radius: var(--ui-radius-panel); box-shadow: none; }
 .wb-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
 .wb-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; min-height: 280px; padding: 40px 24px; color: var(--muted-foreground); text-align: center; }
@@ -39,8 +39,9 @@
 .wb-empty p { max-width: 340px; line-height: 1.8; font-size: 14px; }
 .wb-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 20px; }
 .wb-app :where(button, a, input, textarea, select):focus-visible { outline: 2px solid var(--foreground); outline-offset: 3px; }
-.wb-app :where(button, a[role="button"], summary) { transition: background-color var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease), scale var(--motion-press) var(--motion-ease); }
-.wb-app :where(button, a[role="button"]):not(:disabled):not([aria-disabled="true"]):active { scale: .97; }
+.wb-app :where(button, a[href], summary) { transition: background-color var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease), scale var(--motion-press) var(--motion-ease); }
+.wb-app :where(button, a[href], summary):not(:disabled):not([aria-disabled="true"]):active { scale: .97; }
+.wb-app :where(.home-tool, .home-project, .creative-card, .wb-list-card):active { scale: .99; }
 .wb-app :where(button):disabled { opacity: .4; }
 .wb-app :where(input, textarea, select, .ant-input, .ant-select) { font-size: var(--ui-text-body); }
 /* Ant Design's unlayered reset must not make native primary buttons inherit body text. */
@@ -50,21 +51,21 @@
 .wb-page .ant-btn-primary:disabled { opacity: .4; }
 .wb-page .ant-input, .wb-page .ant-input-affix-wrapper, .wb-page .ant-select-selector { border-radius: var(--ui-radius-control); }
 .wb-sidebar { background: var(--background); border-right: 1px solid var(--border); color: var(--foreground); }
-.wb-nav-link { position: relative; color: var(--muted-foreground); font-size: var(--ui-text-body); font-weight: 500; transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease); }
+.wb-nav-link { position: relative; color: var(--muted-foreground); font-size: var(--ui-text-body); font-weight: 500; transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease), scale var(--motion-press) var(--motion-ease); }
 .wb-nav-link:hover { background: var(--muted); color: var(--foreground); }
 .wb-nav-link:active { background: var(--input); transition-duration: var(--motion-press); }
 .wb-nav-link[aria-current="page"] { background: var(--muted); color: var(--foreground); font-weight: 600; }
-.wb-nav-link[aria-current="page"]::before { content: ""; position: absolute; inset: 10px auto 10px 0; width: 2px; border-radius: 2px; background: var(--foreground); }
+.wb-nav-link[aria-current="page"]::before { content: ""; position: absolute; inset: 8px auto 8px 0; width: 2px; border-radius: 999px; background: var(--foreground); }
 .wb-nav-link svg { opacity: .7; }
 .wb-nav-link[aria-current="page"] svg { opacity: 1; }
 .wb-app .wb-account { background: var(--card); border: 1px solid var(--border); }
 .wb-app .wb-account p { color: var(--foreground); }
 .wb-app .wb-account p + p { color: var(--muted-foreground); }
-.wb-primary-link { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; border-radius: var(--ui-radius-control); padding: 10px 18px; background: var(--foreground); color: var(--card); font-size: 14px; font-weight: 500; cursor: pointer; }
+.wb-primary-link { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; border-radius: var(--ui-radius-control); padding: 12px 16px; background: var(--foreground); color: var(--card); font-size: 14px; font-weight: 500; cursor: pointer; }
 .wb-primary-link:hover { opacity: .82; color: var(--card); }
 .wb-primary-link:active { scale: .97; }
 .wb-task-bar { display: flex; align-items: center; flex-shrink: 0; min-width: 0; gap: 16px; min-height: 56px; padding: 8px 20px; border-bottom: 1px solid var(--border); background: var(--card); }
-.wb-task-new { display: inline-flex; flex-shrink: 0; align-items: center; justify-content: center; gap: 8px; height: 36px; padding: 0 14px; border: 1px solid var(--input); border-radius: var(--ui-radius-control); background: var(--card); color: var(--foreground); font-size: var(--ui-text-body); font-weight: 600; }
+.wb-task-new { display: inline-flex; flex-shrink: 0; align-items: center; justify-content: center; gap: 8px; height: 36px; padding: 0 16px; border: 1px solid var(--input); border-radius: var(--ui-radius-control); background: var(--card); color: var(--foreground); font-size: var(--ui-text-body); font-weight: 600; }
 .wb-task-new:hover:not(:disabled) { background: var(--muted); border-color: var(--muted-foreground); }
 .wb-task-list { display: flex; flex: 1; min-width: 0; align-items: center; gap: 8px; overflow-x: auto; scrollbar-width: thin; }
 .wb-task-item { position: relative; display: flex; flex-shrink: 0; align-items: center; border-radius: var(--ui-radius-control); }

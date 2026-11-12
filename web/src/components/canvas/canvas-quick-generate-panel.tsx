@@ -99,6 +99,7 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
     if (!open && !closing) return null;
     const disabled = !open || !toolEnabled || optimizing || running || referenceBusy || !availableModel || model !== availableModel || (profile.requiresPrompt && !prompt.trim()) || !referenceValidation.valid || Boolean(sizeError);
     const disabledReason = !toolEnabled ? t("当前图片功能已停用，请联系管理员。") : optimizing ? t("正在优化提示词，请稍候。") : running ? t("本次任务正在提交，请稍候。") : referenceBusy ? t("正在读取参考图，完成后即可生成。") : !availableModel ? t("暂未配置可用模型，请联系管理员。") : model !== availableModel ? t("原模型与当前功能绑定不匹配，已保留草稿和参数；请明确选择使用可用模型。") : profile.requiresPrompt && !prompt.trim() ? t("先填写提示词；输入 @ 可添加参考图。") : !referenceValidation.valid ? referenceValidation.message : sizeError;
+    const referenceDisabledReason = running ? t("本次任务正在提交，请稍候。") : referenceBusy ? t("正在读取参考图，完成后即可生成。") : references.length >= referenceValidation.maximum ? t("已达到当前模型的 {count} 张参考图上限，请先移除一张。", { count: referenceValidation.maximum }) : "";
     return (
         <div {...imageDrop.dropProps} ref={panelRef} data-testid="canvas-quick-generate-panel" data-canvas-no-zoom data-panel-closing={closing || undefined} inert={!open} aria-hidden={!open || undefined}
             className={embedded ? "cw-generator" : "cw-generator cw-generator-mobile cw-surface max-h-[calc(100dvh-144px)] overflow-y-auto"}
@@ -133,7 +134,7 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
                 {profile.requiresPrompt && prompt.trim() ? <PromptOptimizeButton scopeKey={referenceScopeKey} config={boundConfig} prompt={prompt} references={references} operationType={toolKey === "canvas-image" ? "image_generation" : "inpaint"} toolKey={toolKey} disabled={running} onBusyChange={setOptimizing} onApply={(value, _compilation, input) => { promptRef.current = value; setPrompt(value); onPromptChange?.(value); onOptimizedPrompt?.(value, input, references); }} /> : null}
                 {imageDrop.dragging || referenceBusy ? <p role="status" className="my-2 text-xs" style={{ color: theme.node.text }}>{t(referenceBusy ? "正在读取拖入图片，请稍候。" : "松开以添加参考图，不会自动生成")}</p> : null}
                 <div className="cw-reference-row">
-                    <button type="button" className="cw-add-reference" aria-label={t("添加参考图")} disabled={!open || running || referenceBusy || references.length >= referenceValidation.maximum} onClick={onPickReferences}><Plus size={15} aria-hidden /><span>{t("添加参考图")}</span></button>
+                    <Tooltip title={referenceDisabledReason || undefined}><span className="flex min-w-0 flex-1"><button type="button" className="cw-add-reference" aria-label={t("添加参考图")} aria-description={referenceDisabledReason || undefined} style={referenceDisabledReason ? { pointerEvents: "none" } : undefined} disabled={!open || running || referenceBusy || references.length >= referenceValidation.maximum} onClick={onPickReferences}><Plus size={15} aria-hidden /><span>{t("添加参考图")}</span></button></span></Tooltip>
                     <Popover.Root open={open && referenceHintOpen} onOpenChange={setReferenceHintOpen}>
                         <Tooltip title={t("参考图说明")}><Popover.Trigger asChild><button type="button" className="cw-reference-hint-button" aria-label={t("参考图说明")}><Info size={13} aria-hidden /></button></Popover.Trigger></Tooltip>
                         <Popover.Portal><Popover.Content className="cw-reference-hint-popover" aria-label={t("参考图说明")} side="bottom" align="end" sideOffset={6} collisionPadding={12}
@@ -144,18 +145,18 @@ export const CanvasQuickGeneratePanel = memo(function CanvasQuickGeneratePanel({
                         </Popover.Content></Popover.Portal>
                     </Popover.Root>
                 </div>
-                <CanvasQuickReferenceTray references={references} disabled={!open || running || referenceBusy} onMove={onMoveReference} onRemove={onRemoveReference} onClear={onClearReferences} />
+                <CanvasQuickReferenceTray references={references} disabled={!open || running || referenceBusy} disabledReason={running || referenceBusy ? referenceDisabledReason : undefined} onMove={onMoveReference} onRemove={onRemoveReference} onClear={onClearReferences} />
                 {!referenceValidation.valid ? <p className="cw-reference-error" role="alert">{referenceValidation.message}</p> : null}
             </div>
             <div className="cw-generator-footer">
-                        <CanvasQuickSettingsPopovers config={{ ...config, model: model || availableModel, imageModel: model || availableModel, ...settings, quality: activeQuality, imageOptions }} profile={profile} referenceCount={references.length} uploadContextKey={referenceScopeKey ? JSON.stringify([referenceScopeKey, sourceNode?.id, prompt, references.map(reference => [reference.id, reference.storageKey, reference.dataUrl, reference.url])]) : undefined} theme={theme} disabled={!open || running || !availableModel || model !== availableModel} onConfigChange={(key, value) => {
+                        <CanvasQuickSettingsPopovers config={{ ...config, model: model || availableModel, imageModel: model || availableModel, ...settings, quality: activeQuality, imageOptions }} profile={profile} referenceCount={references.length} uploadContextKey={referenceScopeKey ? JSON.stringify([referenceScopeKey, sourceNode?.id, prompt, references.map(reference => [reference.id, reference.storageKey, reference.dataUrl, reference.url])]) : undefined} theme={theme} disabled={!open || running || !availableModel || model !== availableModel} disabledReason={disabledReason} onConfigChange={(key, value) => {
                             if (key === "size") onSizeChange(value);
                             if (key === "quality") onQualityChange(value);
                             if (key === "count") onCountChange(Number(value));
                             if (key === "imageOptions") onImageOptionsChange(value);
                         }} onConfigNormalize={(key, value) => { if (model === availableModel && !running) onSettingsNormalize?.(key === "count" ? { count: Number(value) } : { [key]: value }); }} />
-                <Tooltip title={profile.requiresPrompt ? t("Enter 生成，Shift+Enter 换行") : undefined}><div className={`cw-generate-action ${disabled ? "is-disabled" : ""}`}>
-                    <button type="button" className="cw-generate-button" style={disabled ? { pointerEvents: "none" } : undefined} disabled={disabled} onClick={onGenerate}>
+                <Tooltip title={disabledReason || (profile.requiresPrompt ? t("Enter 生成，Shift+Enter 换行") : undefined)}><div className={`cw-generate-action ${disabled ? "is-disabled" : ""}`}>
+                    <button type="button" className="cw-generate-button" aria-description={disabled ? disabledReason : undefined} style={disabled ? { pointerEvents: "none" } : undefined} disabled={disabled} onClick={onGenerate}>
                         {running ? <><LoaderCircle size={16} className="animate-spin" />{t("提交中…")}</> : !profile.requiresPrompt ? t("开始融合") : references.length ? t("生成修改图") : t("生成")}
                         <span className="cw-generate-count" aria-label={t("每次生成 1 张")}>×1</span>
                     </button>

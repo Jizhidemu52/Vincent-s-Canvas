@@ -14,7 +14,7 @@ export function VideoMotionPanel({ value, onChange, disabled = false, nativeAudi
                 const current = nativeAudio && group.id === "audio" && value.audio === "none" ? "ambient" : value[group.id];
                 return <fieldset key={group.id} disabled={disabled} className="min-w-0">
                     <legend className="mb-2 text-xs font-medium text-muted-foreground">{uiText(group.label)}{group.id === "subject_action" ? ` · ${uiText("最多选 2 项")}` : ""}</legend>
-                    <div className="flex flex-wrap gap-1.5">{group.options.filter(option => !nativeAudio || group.id !== "audio" || option.id !== "none").map(option => {
+                    <div className="flex flex-wrap gap-2">{group.options.filter(option => !nativeAudio || group.id !== "audio" || option.id !== "none").map(option => {
                         const selected = Array.isArray(current) ? current.includes(option.id) : current === option.id;
                         const full = Array.isArray(current) && Boolean(group.max && current.length >= group.max) && !selected;
                         return <Tooltip key={option.id} title={uiText(option.description)}><span className="inline-flex"><Button size="small" type={selected ? "primary" : "default"} aria-pressed={selected} disabled={disabled || full} onClick={() => {

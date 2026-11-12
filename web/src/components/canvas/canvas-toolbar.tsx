@@ -60,6 +60,8 @@ export const CanvasToolbar = memo(function CanvasToolbar(props: CanvasToolbarRen
 }, canvasToolbarPropsEqual);
 
 function ActionButton({ action, icon: Icon, pressed, disabled, labeled, primary, onClick }: { action: CanvasActionId; icon: LucideIcon; pressed?: boolean; disabled?: boolean; labeled?: boolean; primary?: boolean; onClick: () => void }) {
+    const t = useUiText();
     const usage = action === "undo" || action === "redo" ? action : `canvas-tool.${action === "tools" ? "workspaces" : action}`;
-    return <Tooltip title={canvasActionHint(action)}><span className="inline-flex"><button data-usage-control={usage} type="button" className={`cw-icon ${labeled ? "cw-labeled-tool" : ""} ${primary ? "cw-primary-tool" : ""}`} style={disabled ? { pointerEvents: "none" } : undefined} aria-label={canvasActionLabel(action, "toolbar")} aria-pressed={pressed} disabled={disabled} onClick={onClick}><Icon className="size-4" />{labeled ? <span>{canvasActionLabel(action, "toolbar")}</span> : null}</button></span></Tooltip>;
+    const hint = disabled && action === "undo" ? t("还没有可撤销的操作") : disabled && action === "redo" ? t("还没有可重做的操作") : canvasActionHint(action);
+    return <Tooltip title={hint}><span className="inline-flex"><button data-usage-control={usage} type="button" className={`cw-icon ${labeled ? "cw-labeled-tool" : ""} ${primary ? "cw-primary-tool" : ""}`} style={disabled ? { pointerEvents: "none" } : undefined} aria-label={canvasActionLabel(action, "toolbar")} aria-description={disabled ? hint : undefined} aria-pressed={pressed} disabled={disabled} onClick={onClick}><Icon className="size-4" />{labeled ? <span>{canvasActionLabel(action, "toolbar")}</span> : null}</button></span></Tooltip>;
 }

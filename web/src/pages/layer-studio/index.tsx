@@ -12,9 +12,10 @@ import { layerStudioParameters, validateLayerStudioForm, unresolvedLayerStudioJo
 import { useLayerStudioWorkspace } from "./page-workspace";
 import { LAYER_STUDIO_REFERENCE_ACCEPT, saveLayerStudioReference } from "./page-reference";
 import { LayerStudioEditor } from "./layer-editor";
+import { GenerationAccountHistory } from "@/components/generation-account-history";
 
 const control = "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50";
-const smallButton = "min-h-8 rounded-md px-2 py-1.5 text-sm hover:bg-muted focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-40";
+const smallButton = "min-h-8 rounded-md px-2 py-1 text-sm hover:bg-muted focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-40";
 function Field({ label, children }: { label: string; children: ReactNode }) { return <label className="grid min-w-0 gap-2 text-sm font-medium">{label}{children}</label>; }
 const jobLabel = (job: LayerStudioJob) => job.phase === "complete" ? "已完成" : job.phase === "failed" ? "未完成" : job.phase === "uncertain" ? "待核查" : job.document ? "正在保存原件" : "处理中";
 
@@ -49,6 +50,7 @@ function LayerStudioPane({ ownerId }: { ownerId: string }) {
     const [uploading, setUploading] = useState(false);
     const uploadingRef = useRef(false);
     const [inputError, setInputError] = useState("");
+    const [accountHistoryOpen, setAccountHistoryOpen] = useState(false);
     const [estimate, setEstimate] = useState<{ key: string; value: LayerStudioEstimate } | null>(null);
     const [estimateError, setEstimateError] = useState("");
     const [estimateAttempt, setEstimateAttempt] = useState(0);
@@ -100,7 +102,7 @@ function LayerStudioPane({ ownerId }: { ownerId: string }) {
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto lg:grid lg:grid-cols-[minmax(360px,440px)_minmax(0,1fr)] lg:overflow-hidden">
             <aside className="flex min-h-0 flex-col border-b border-border lg:border-r lg:border-b-0" aria-label="输入与生成设置">
-              <div className="min-h-0 flex-1 space-y-5 p-4 lg:overflow-y-auto">
+              <div className="min-h-0 flex-1 space-y-4 p-4 lg:overflow-y-auto">
                 <div className="grid grid-cols-2 gap-1 rounded-lg bg-muted p-1" role="group" aria-label="工作模式">
                     {([['decompose', '图层拆分'], ['generate', '图片生成 / 编辑']] as const).map(([mode, title]) => <button type="button" key={mode} disabled={locked} aria-pressed={form.mode === mode}
                         className={`min-h-9 rounded-md px-2 py-2 text-sm font-medium disabled:opacity-40 ${form.mode === mode ? "bg-background text-foreground" : "text-muted-foreground"}`}
@@ -135,13 +137,14 @@ function LayerStudioPane({ ownerId }: { ownerId: string }) {
                 </div>
             </aside>
             <main className="min-h-[440px] min-w-0 space-y-4 p-4 lg:overflow-y-auto" aria-label="结果与图层编辑">
+                <details className="rounded-lg border border-border p-3" onToggle={event => setAccountHistoryOpen(event.currentTarget.open)}><summary className="cursor-pointer text-sm font-medium">账号历史记录</summary><div className="mt-4"><GenerationAccountHistory board="layer-studio" active={accountHistoryOpen} /></div></details>
                 {error && <div role="alert" className="rounded-lg border border-destructive/30 p-3 text-sm text-destructive">{error}<button type="button" className={smallButton} onClick={() => void workspace.retrySave().catch(() => {})}>重试保存</button></div>}
                 {state.jobs.length > 0 && <Field label="任务记录"><Select aria-label="任务记录" value={selected?.requestId || undefined} onChange={selectedRequestId => void update(previous => ({ ...previous, selectedRequestId })).catch(() => {})} options={state.jobs.map(job => ({ value: job.requestId, label: `${new Date(job.createdAt).toLocaleString()} · ${jobLabel(job)} · ${job.submission.parameters.layer_decomposition ? "图层拆分" : "图片生成"}` }))} /></Field>}
                 {selected && <section className="space-y-2 rounded-lg border border-border p-3 text-sm" aria-label="原任务状态"><div className="flex flex-wrap items-center justify-between gap-2"><strong>{jobLabel(selected)}</strong><span className="break-all text-[13px] text-muted-foreground">请求编号：{selected.requestId}</span></div>{selected.notice && <p>{selected.notice}</p>}{selected.document && <p>已保存 {selected.document.items.filter(item => item.state === "saved").length} / {selected.document.expectedOutputCount} 份原件</p>}{unresolvedLayerStudioJob(selected) && <div className="flex flex-wrap gap-1"><button type="button" className={smallButton} disabled={busy} onClick={() => void workspace.refresh()}><RefreshCw size={12} className="mr-1 inline" />查询原任务</button><button type="button" className={smallButton} disabled={busy || workspace.paused} onClick={workspace.pause}>暂停自动查询</button>{selected.taskStatus === "paused" && selected.upstreamAccepted && <button type="button" className={smallButton} disabled={busy} onClick={() => void workspace.resume(selected)}>恢复原任务查询 / 保存</button>}</div>}</section>}
                 {workspace.queryNotice && <p role="status" className="text-sm text-muted-foreground">{workspace.queryNotice}</p>}
                 {selected?.document ? <LayerStudioEditor key={selected.requestId} document={selected.document} value={selected.edit} onChange={edit => { void update(previous => ({ ...previous, jobs: previous.jobs.map(job => job.requestId === selected.requestId ? { ...job, edit } : job) })).catch(() => {}); }} />
                     : <div className="flex min-h-72 flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border p-8 text-center text-muted-foreground"><Layers3 size={36} strokeWidth={1} /><h2 className="text-sm font-medium text-foreground">{unresolved ? "原任务处理中，结果会逐项保存" : "从一张图片开始，也可以创造新画面"}</h2><p className="max-w-sm text-sm leading-relaxed">结果保留为原始文件。拆分后可选择、移动、缩放、显隐与调整叠放顺序，再导出新的 PNG，不覆盖原件。</p></div>}
-                <p className="text-[13px] leading-relaxed text-muted-foreground">工作区输入、历史索引和编辑位置保存在当前员工的此浏览器；原图与结果存入受权限保护的素材库。刷新只查询既有任务，不会重新生成。</p>
+                <p className="text-[13px] leading-relaxed text-muted-foreground">已提交任务的提示词、参数与原件可在账号历史跨浏览器查看。未提交输入与编辑位置保存在此浏览器；刷新只查询既有任务，不会重新生成。</p>
             </main>
         </div>
     </div>;

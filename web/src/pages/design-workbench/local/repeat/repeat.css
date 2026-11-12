@@ -8,7 +8,7 @@
     overflow: auto;
 }
 .local-design-workbench .repeat-workspace .panel-body {
-    padding: 18px;
+    padding: 20px;
 }
 .local-design-workbench .repeat-kicker {
     font-size: 12px;
@@ -19,10 +19,10 @@
 .local-design-workbench .repeat-workspace h2 {
     font-size: 20px;
     line-height: 1.35;
-    margin: 6px 0 8px;
+    margin: 8px 0 8px;
 }
 .local-design-workbench .repeat-workspace .section-title {
-    margin: 20px 0 10px;
+    margin: 20px 0 12px;
 }
 .local-design-workbench .repeat-workspace .hint {
     font-size: 13px;
@@ -32,11 +32,11 @@
 .local-design-workbench .repeat-mode {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
-    gap: 5px;
-    margin: 14px 0;
+    gap: 4px;
+    margin: 16px 0;
 }
 .local-design-workbench .repeat-mode button {
-    padding: 9px 3px;
+    padding: 8px 4px;
     border: 1px solid var(--line);
     background: transparent;
     border-radius: 8px;
@@ -45,20 +45,21 @@
     font-size: 14px;
 }
 .local-design-workbench .repeat-mode button[aria-pressed="true"] {
-    background: var(--accent);
-    color: var(--primary-foreground);
+    background: var(--accent-soft);
+    color: var(--text);
+    font-weight: 600;
     border-color: var(--accent);
 }
 .local-design-workbench .repeat-grid2 {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 10px;
+    gap: 12px;
 }
 .local-design-workbench .repeat-workspace input[type="number"],
 .local-design-workbench .repeat-workspace select {
     width: 100%;
     box-sizing: border-box;
-    padding: 9px;
+    padding: 8px;
     border: 1px solid var(--line);
     border-radius: 6px;
     background: var(--surface);
@@ -74,17 +75,17 @@
     display: block;
     font-size: 13px;
     color: var(--muted);
-    margin: 10px 0;
+    margin: 12px 0;
 }
 .local-design-workbench .repeat-workspace .field > span:first-child {
     display: flex;
     justify-content: space-between;
-    margin-bottom: 6px;
+    margin-bottom: 8px;
 }
 .local-design-workbench .repeat-check {
     display: flex;
     align-items: center;
-    gap: 7px;
+    gap: 8px;
     font-size: 14px;
     margin: 12px 0;
 }
@@ -94,8 +95,8 @@
 .local-design-workbench .repeat-color {
     display: flex;
     align-items: center;
-    gap: 9px;
-    margin-top: 10px;
+    gap: 8px;
+    margin-top: 12px;
     font-size: 14px;
 }
 .local-design-workbench .repeat-color input {
@@ -116,7 +117,7 @@
     border-radius: 8px;
     background: var(--bg);
     cursor: pointer;
-    padding: 10px 6px;
+    padding: 12px 8px;
     font-size: 13px;
     color: var(--text);
 }
@@ -125,7 +126,7 @@
     width: 42px;
     height: 42px;
     object-fit: contain;
-    margin: 0 auto 5px;
+    margin: 0 auto 4px;
 }
 .local-design-workbench .repeat-upload {
     margin-top: 8px;
@@ -146,7 +147,7 @@
     align-items: center;
     gap: 12px;
     background: var(--surface);
-    padding: 13px 18px;
+    padding: 12px 20px;
     border-bottom: 1px solid var(--line);
 }
 .local-design-workbench .repeat-stage-title {
@@ -164,7 +165,7 @@
     justify-content: center;
     flex: 1;
     min-height: 390px;
-    padding: 38px;
+    padding: 40px;
     position: relative;
     overflow: hidden;
 }
@@ -180,13 +181,13 @@
 .local-design-workbench .repeat-editor-canvas {
     position: relative;
     display: block;
-    box-shadow: 0 12px 35px #303a2922;
-    outline: 1px solid #a6ad9f;
+    box-shadow: none;
+    outline: 1px solid var(--line);
     touch-action: none;
     cursor: grab;
     max-width: 100%;
-    background-color: #fff;
-    background-image: linear-gradient(45deg, #eef0e9 25%, transparent 25%), linear-gradient(-45deg, #eef0e9 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #eef0e9 75%), linear-gradient(-45deg, transparent 75%, #eef0e9 75%);
+    background-color: var(--surface);
+    background-image: linear-gradient(45deg, var(--line) 25%, transparent 25%), linear-gradient(-45deg, var(--line) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, var(--line) 75%), linear-gradient(-45deg, transparent 75%, var(--line) 75%);
     background-size: 14px 14px;
     background-position:
         0 0,
@@ -199,17 +200,17 @@
     outline-offset: 5px;
 }
 .local-design-workbench .repeat-stage-footer {
-    padding: 12px 18px;
+    padding: 12px 20px;
     background: var(--bg);
     border-top: 1px solid var(--line);
     display: flex;
     justify-content: space-between;
-    gap: 10px;
+    gap: 12px;
     font-size: 13px;
     color: var(--muted);
 }
 .local-design-workbench .repeat-selection {
-    padding: 16px 18px;
+    padding: 16px 20px;
     background: var(--surface);
     border-top: 1px solid var(--line);
 }
@@ -226,21 +227,21 @@
 }
 .local-design-workbench .repeat-inline-actions {
     display: flex;
-    gap: 6px;
+    gap: 8px;
 }
 .local-design-workbench .repeat-inline-actions .btn {
     font-size: 13px;
-    padding: 5px 9px;
+    padding: 4px 8px;
 }
 .local-design-workbench .repeat-preview-box {
     padding: 0;
-    background-color: #fff;
-    background-image: repeating-conic-gradient(#eef0e9 0 25%, transparent 0 50%);
+    background-color: var(--surface);
+    background-image: repeating-conic-gradient(var(--line) 0 25%, transparent 0 50%);
     background-size: 14px 14px;
     overflow: hidden;
     border: 1px solid var(--line);
     border-radius: 6px;
-    margin-top: 14px;
+    margin-top: 16px;
 }
 .local-design-workbench .repeat-preview-canvas {
     display: block;
@@ -248,7 +249,7 @@
     height: auto;
 }
 .local-design-workbench .repeat-right .panel-body {
-    padding: 18px;
+    padding: 20px;
 }
 .local-design-workbench .repeat-export-summary {
     font-size: 14px;
@@ -257,7 +258,7 @@
     background: var(--accent-soft);
     border: 1px solid var(--line);
     border-radius: 8px;
-    margin: 14px 0;
+    margin: 16px 0;
 }
 .local-design-workbench .repeat-export-summary strong {
     display: block;
@@ -273,26 +274,26 @@
 }
 .local-design-workbench .repeat-right .btn {
     width: 100%;
-    margin-bottom: 7px;
+    margin-bottom: 8px;
 }
 .local-design-workbench .repeat-separator {
     border: 0;
     border-top: 1px solid var(--line);
-    margin: 18px 0;
+    margin: 20px 0;
 }
 .local-design-workbench .repeat-status {
     min-height: 33px;
     font-size: 13px;
     line-height: 1.6;
     color: var(--muted);
-    margin-top: 7px;
+    margin-top: 8px;
 }
 .local-design-workbench .repeat-status[data-error="true"] {
     color: var(--danger);
 }
 .local-design-workbench .repeat-help {
     margin: 8px 0 0;
-    padding: 0 0 0 15px;
+    padding: 0 0 0 16px;
     font-size: 13px;
     line-height: 1.8;
     color: var(--muted);
@@ -310,7 +311,7 @@
     outline-offset: 3px;
 }
 .local-design-workbench .repeat-workspace button:disabled {
-    opacity: 0.45;
+    opacity: 0.4;
     cursor: not-allowed;
 }
 .local-design-workbench .repeat-file {
@@ -322,7 +323,7 @@
 }
 .local-design-workbench .repeat-guide-legend {
     display: inline-flex;
-    gap: 5px;
+    gap: 4px;
     align-items: center;
 }
 .local-design-workbench .repeat-guide-legend:before {
@@ -332,17 +333,17 @@
 }
 .local-design-workbench .repeat-layer-list {
     display: flex;
-    gap: 5px;
+    gap: 4px;
     flex-wrap: wrap;
-    margin-top: 10px;
+    margin-top: 12px;
 }
 .local-design-workbench .repeat-layer-list button {
-    height: 26px;
+    min-height: 32px;
     border: 1px solid var(--line);
     border-radius: 6px;
     background: var(--surface);
     font-size: 12px;
-    padding: 2px 6px;
+    padding: 4px 8px;
     color: var(--muted);
     cursor: pointer;
 }
@@ -354,14 +355,14 @@
 @media (max-width: 1200px) {
     .local-design-workbench .repeat-workspace {
         grid-template-columns: 210px minmax(300px, 1fr) 240px !important;
-        gap: 10px;
+        gap: 12px;
     }
     .local-design-workbench .repeat-editor-wrap {
-        padding: 25px;
+        padding: 24px;
     }
     .local-design-workbench .repeat-workspace .panel-body,
     .local-design-workbench .repeat-right .panel-body {
-        padding: 14px;
+        padding: 16px;
     }
     .local-design-workbench .repeat-stage .stage-toolbar {
         padding: 12px;
@@ -378,13 +379,13 @@
     .local-design-workbench .repeat-right .panel-body {
         display: grid;
         grid-template-columns: 240px 1fr;
-        gap: 18px;
+        gap: 20px;
     }
     .local-design-workbench .repeat-right .repeat-preview-group {
         grid-row: span 2;
     }
     .local-design-workbench .repeat-right h2 {
-        font-size: 17px;
+        font-size: 16px;
     }
     .local-design-workbench .repeat-right .repeat-save-group {
         grid-column: 2;

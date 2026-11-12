@@ -59,7 +59,7 @@ export function CanvasExampleNavigator({ nodes, onNavigate }: { nodes: CanvasNod
                 <button type="button" aria-pressed={mode === "controls"} onClick={() => setMode("controls")} className="min-h-9 rounded px-2 text-xs" style={{ background: mode === "controls" ? theme.toolbar.itemHover : undefined }}>{t("按钮详解")}（{canvasExampleControlSteps.length}）</button>
             </div>
             {mode === "lessons" ? <ol className="space-y-1">
-                {lessons.map(lesson => <li key={lesson.id} className="rounded px-1 py-1.5"><div className="flex items-center justify-between gap-2">
+                {lessons.map(lesson => <li key={lesson.id} className="rounded px-1 py-2"><div className="flex items-center justify-between gap-2">
                     <span className="min-w-0 text-xs leading-5">{lesson.number} · {t(lesson.title)}</span>
                     <div className="flex shrink-0 gap-1">
                         <button type="button" disabled={!lesson.cases.length} aria-label={t("{number} {title}：看案例", { number: lesson.number, title: t(lesson.title) })} className="min-h-9 rounded px-2 text-xs hover:underline disabled:opacity-40" style={{ color: theme.node.text }} onClick={() => navigate(lesson.cases)}>{t("看案例")}</button>

@@ -36,8 +36,8 @@ export function CanvasRecoveryOverlay({ lock, transferring, recoveryRef, onBacke
             {!recovering && lock.status !== "checking" ? <>
                 <p>载入最新内容前，请先备份本页内容；备份失败时不会替换当前草稿。</p>
                 <div className="flex flex-wrap gap-3">
-                    <button type="button" disabled={backingUp} className="rounded-md border px-3 py-1.5" onClick={() => void backupDraft(false)}>导出本页备份</button>
-                    <button type="button" disabled={backingUp} className="rounded-md border px-3 py-1.5" onClick={() => void backupDraft(true)}>{backingUp ? "正在备份…" : "备份并在此页编辑"}</button>
+                    <button type="button" disabled={backingUp} className="rounded-md border px-3 py-2" onClick={() => void backupDraft(false)}>导出本页备份</button>
+                    <button type="button" disabled={backingUp} className="rounded-md border px-3 py-2" onClick={() => void backupDraft(true)}>{backingUp ? "正在备份…" : "备份并在此页编辑"}</button>
                 </div>
             </> : null}
         </div>
@@ -52,7 +52,7 @@ export function CanvasReadonlySession({ projectId, lock }: { projectId: string; 
         <div className="absolute inset-x-4 top-4 flex flex-wrap items-center gap-3 rounded-lg border px-4 py-3 text-sm" style={{ background: theme.toolbar.panel, borderColor: theme.node.stroke }}>
             <span className="flex-1" role="status">{lock.status === "checking" || recovering ? "正在确认编辑权…" : lock.error || "此画布正在另一标签页编辑。当前为只读快照，不会覆盖那边的修改。"}</span>
             <Link className="underline" to="/canvas">返回画布库</Link>
-            {lock.status !== "checking" && !recovering ? <button type="button" className="rounded-md border px-3 py-1.5" style={{ borderColor: theme.canvas.selectionStroke }} onClick={lock.requestEditing}>在此页编辑</button> : null}
+            {lock.status !== "checking" && !recovering ? <button type="button" className="rounded-md border px-3 py-2" style={{ borderColor: theme.canvas.selectionStroke }} onClick={lock.requestEditing}>在此页编辑</button> : null}
         </div>
     </main>;
 }

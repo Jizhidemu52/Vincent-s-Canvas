@@ -131,7 +131,7 @@ export function GarmentRecipePanel({ references, disabled, onApply, onDraftChang
                         onChange={value => changeBrief({ primaryId: value || "" })}
                     />
                 )}
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                     {initialScenario ? <label htmlFor={`${panelId}-target`} className="block text-xs font-medium">{uiText(scenario.targetLabel || "")}</label> : null}
                     <Input.TextArea
                         id={`${panelId}-target`}
@@ -153,7 +153,7 @@ export function GarmentRecipePanel({ references, disabled, onApply, onDraftChang
                     </div>
                 </div>
                 {error ? <Typography.Text type="danger" className="block text-xs" role="alert">{uiText(error || "")}</Typography.Text> : brief.target.trim() && compiled.validation ? <p role="status" className="text-xs text-[var(--muted-foreground)]">{uiText(compiled.validation || "")}</p> : null}
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
                     <Button size="small" disabled={disabled || !compiled.recipe} onClick={applyRecipe}>{uiText("套用到提示词")}</Button>
                     <span className="text-xs text-[var(--muted-foreground)]">{uiText("仅回填，不会出图")}</span>
                 </div>

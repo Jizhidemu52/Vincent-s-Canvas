@@ -239,7 +239,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
 
     return (
         <div
-            className="rounded-xl border p-3 shadow-[0_16px_38px_rgba(15,23,42,.10)] backdrop-blur"
+            className="rounded-xl border p-3 shadow-[var(--ui-shadow-popover)] backdrop-blur"
             style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
             onMouseDown={(event) => event.stopPropagation()}
             onPointerDown={(event) => event.stopPropagation()}
@@ -318,7 +318,7 @@ export function CanvasNodePromptPanel({ node, isRunning, onPromptChange, onConfi
                     onClick={() => (isRunning ? onStop(node.id) : submit())}
                     aria-label={isRunning ? t("停止生成") : t("生成")}
                 >
-                    <span className="flex items-center gap-1.5">
+                    <span className="flex items-center gap-2">
                         {isRunning ? (
                             <>
                                 <LoaderCircle className="size-4 animate-spin" />

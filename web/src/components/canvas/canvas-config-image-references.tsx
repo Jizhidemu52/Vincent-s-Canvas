@@ -106,7 +106,7 @@ export function CanvasConfigImageReferences(props: Props) {
     const full = references.length >= maximum;
     const controlStyle = { background: theme.toolbar.panel, color: theme.node.text, borderColor: theme.node.stroke };
     return <section {...imageDrop.dropProps} aria-label={t("参考图")} aria-busy={adding} className="min-w-0 cursor-default rounded-md" style={imageDrop.dragging ? { outline: `2px solid ${theme.canvas.selectionStroke}`, outlineOffset: 3 } : undefined} onMouseDown={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>
-        <button type="button" disabled={busy || full} onClick={() => inputRef.current?.click()} className="inline-flex h-7 items-center gap-1.5 rounded-md px-1 text-xs disabled:opacity-50" style={{ color: theme.node.text }}>
+        <button type="button" disabled={busy || full} onClick={() => inputRef.current?.click()} className="inline-flex h-7 items-center gap-2 rounded-md px-1 text-xs disabled:opacity-50" style={{ color: theme.node.text }}>
             {adding ? <LoaderCircle className="size-3.5 animate-spin" /> : <ImagePlus className="size-3.5" />}{adding ? t("正在添加参考图") : t("添加参考图")}
         </button>
         <span className="ml-2 text-xs" style={{ color: theme.node.muted }}>{references.length}/{maximum}</span>
@@ -115,11 +115,11 @@ export function CanvasConfigImageReferences(props: Props) {
         {references.length ? <div className="thin-scrollbar mt-1 flex gap-2 overflow-x-auto pb-1">
             {references.map((item, index) => <div key={item.referenceKey} className="group relative h-[76px] w-20 shrink-0 overflow-hidden rounded-md border" style={{ borderColor: theme.node.stroke }}>
                 <CanvasPersistedMediaPreview kind="image" url={item.dataUrl} storageKey={item.storageKey} alt={`${labels?.[item.referenceKey] || `图${index + 1}`}：${item.name}`} className="h-full w-full object-cover" />
-                <span className="absolute left-0 top-0 rounded-br px-1 text-[10px]" style={controlStyle}>{labels?.[item.referenceKey] || `图${index + 1}`}</span>
-                <button type="button" disabled={busy} aria-label={t("移除{value1}", { value1: labels?.[item.referenceKey] || uiText("参考图{value1}", { value1: index + 1 }) })} className="absolute right-0 top-0 rounded-bl p-0.5" style={controlStyle} onClick={() => save(references.filter(reference => reference.referenceKey !== item.referenceKey))}><X className="size-3" /></button>
+                <span className="absolute left-0 top-0 rounded-br px-1 text-xs" style={controlStyle}>{labels?.[item.referenceKey] || `图${index + 1}`}</span>
+                <button type="button" disabled={busy} aria-label={t("移除{value1}", { value1: labels?.[item.referenceKey] || uiText("参考图{value1}", { value1: index + 1 }) })} className="absolute right-0 top-0 rounded-bl p-1" style={controlStyle} onClick={() => save(references.filter(reference => reference.referenceKey !== item.referenceKey))}><X className="size-3" /></button>
                 {references.length > 1 ? <div className="absolute bottom-0 right-0 flex rounded-tl" style={controlStyle}>
-                    <button type="button" disabled={busy || index === 0} aria-label={t("{value1}前移", { value1: labels?.[item.referenceKey] || uiText("参考图{value1}", { value1: index + 1 }) })} className="p-0.5 disabled:opacity-30" onClick={() => save(moveImageReference(references, index, index - 1))}><ChevronLeft className="size-3" /></button>
-                    <button type="button" disabled={busy || index === references.length - 1} aria-label={t("{value1}后移", { value1: labels?.[item.referenceKey] || uiText("参考图{value1}", { value1: index + 1 }) })} className="p-0.5 disabled:opacity-30" onClick={() => save(moveImageReference(references, index, index + 1))}><ChevronRight className="size-3" /></button>
+                    <button type="button" disabled={busy || index === 0} aria-label={t("{value1}前移", { value1: labels?.[item.referenceKey] || uiText("参考图{value1}", { value1: index + 1 }) })} className="p-1 disabled:opacity-30" onClick={() => save(moveImageReference(references, index, index - 1))}><ChevronLeft className="size-3" /></button>
+                    <button type="button" disabled={busy || index === references.length - 1} aria-label={t("{value1}后移", { value1: labels?.[item.referenceKey] || uiText("参考图{value1}", { value1: index + 1 }) })} className="p-1 disabled:opacity-30" onClick={() => save(moveImageReference(references, index, index + 1))}><ChevronRight className="size-3" /></button>
                 </div> : null}
             </div>)}
         </div> : null}

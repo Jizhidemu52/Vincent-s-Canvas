@@ -154,12 +154,12 @@ export function CanvasAgentMediaWorkflowCard({
                 <div className="space-y-3 p-3">
                     <WorkflowStageTitle icon={<ImageIcon className="size-3.5" />} title={t("第一步：生成候选图")} status={workflow.imageStatus} />
                     {card.initialReferenceSummary.count ? (
-                        <div className="space-y-1.5 rounded-lg bg-black/[0.035] p-2 text-xs dark:bg-white/[0.06]">
+                        <div className="space-y-2 rounded-lg bg-black/[0.035] p-2 text-xs dark:bg-white/[0.06]">
                             <p className="opacity-65">{card.initialReferenceSummary.label}</p>
-                            <div className="flex flex-wrap gap-1.5">
+                            <div className="flex flex-wrap gap-2">
                                 {card.initialReferenceSummary.items.map((reference) => {
                                     const node = referenceNodes.find(node => node.id === reference.nodeId);
-                                    return <Tooltip title={node?.title || reference.label} key={reference.nodeId}><span className="inline-flex items-center gap-1 rounded border px-2 py-0.5" style={{ borderColor: theme.node.stroke }}>
+                                    return <Tooltip title={node?.title || reference.label} key={reference.nodeId}><span className="inline-flex items-center gap-1 rounded border px-2 py-1" style={{ borderColor: theme.node.stroke }}>
                                         {node ? <CanvasPersistedMediaPreview kind="image" url={node.metadata?.content} storageKey={node.metadata?.storageKey} alt="" className="size-7 rounded object-cover" /> : null}{reference.label}{node?.title ? ` · ${node.title}` : ""}
                                     </span></Tooltip>;
                                 })}
@@ -255,10 +255,10 @@ function ModelSelect({ ariaLabel, emptyLabel, models, value, disabled, onChange 
 
 function WorkflowStageTitle({ icon, title, status }: { icon: React.ReactNode; title: string; status: CanvasAgentMediaWorkflow["imageStatus"] }) {
     const t = useUiText();
-    return <div className="flex items-center gap-1.5 font-medium"><span className="opacity-70">{icon}</span><span>{title}</span>{status === "success" ? <span className="text-xs opacity-55">{t("已完成")}</span> : null}</div>;
+    return <div className="flex items-center gap-2 font-medium"><span className="opacity-70">{icon}</span><span>{title}</span>{status === "success" ? <span className="text-xs opacity-55">{t("已完成")}</span> : null}</div>;
 }
 
 function WorkflowError({ error, role, onRetry }: { error: string; role: "alert"; onRetry?: () => void }) {
     const t = useUiText();
-    return <div role={role} className="flex items-center justify-between gap-2 rounded-md bg-red-500/10 px-2 py-1.5 text-xs text-red-600 dark:text-red-300"><span>{error}</span>{onRetry ? <Button size="small" type="text" icon={<RefreshCw className="size-3" />} onClick={onRetry}>{t("重试")}</Button> : null}</div>;
+    return <div role={role} className="flex items-center justify-between gap-2 rounded-md bg-red-500/10 px-2 py-2 text-xs text-red-600 dark:text-red-300"><span>{error}</span>{onRetry ? <Button size="small" type="text" icon={<RefreshCw className="size-3" />} onClick={onRetry}>{t("重试")}</Button> : null}</div>;
 }

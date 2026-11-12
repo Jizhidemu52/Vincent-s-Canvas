@@ -170,7 +170,7 @@ test("menus open below their triggers without upward flipping and the spacious d
     expect(root(opened("size")).props.open).toBe(true);
     expect(root(opened("quality")).props.open).toBe(false);
     const portal = opened("size").find(item => item.type === Popover.Content)!;
-    expect(portal.props).toMatchObject({ side: "bottom", align: "center", sideOffset: 10, collisionPadding: 12, avoidCollisions: false });
+    expect(portal.props).toMatchObject({ side: "bottom", align: "center", sideOffset: 12, collisionPadding: 12, avoidCollisions: false });
     expect(opened("size").find(item => item.type === Popover.Anchor)!.props.virtualRef).toBe(opened("quality").find(item => item.type === Popover.Anchor)!.props.virtualRef);
     expect(portal.props.style["--cw-parameter-panel"]).toBe(canvasThemes.dark.node.panel);
     const ratio = opened("size").find(item => item.type === module.exports.CanvasQuickRatioOptions)!;

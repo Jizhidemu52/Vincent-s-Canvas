@@ -79,7 +79,7 @@ test("canvas tooltips retain disabled guidance and Radix parameter triggers", as
     const generate = page.locator(".cw-generate-button");
     await expect(generate).toBeDisabled();
     await generate.locator("..").hover();
-    await expect(page.getByRole("tooltip").filter({ hasText: "Enter 生成，Shift+Enter 换行" })).toBeVisible();
+    await expect(page.getByRole("tooltip").filter({ hasText: "先填写提示词；输入 @ 可添加参考图。" })).toBeVisible();
     const sizeControl = page.getByRole("button", { name: "调整面板大小", exact: true });
     await sizeControl.click();
     await expect(page.locator(".cw-panel-size-popover")).toBeVisible();
@@ -276,7 +276,7 @@ test("flat file header, local copy feedback, visible AI entry, grouped commands 
     await page.screenshot({ path: info.outputPath("canvas-dark.png"), animations: "disabled" });
     await page.setViewportSize({ width: 390, height: 844 });
     await expect(page.getByRole("button", { name: "打开画布菜单", exact: true })).toBeVisible();
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), { timeout: 2_000 }).toBe(true);
     await page.screenshot({ path: info.outputPath("canvas-narrow-dark.png"), animations: "disabled" });
     expect(api.submissions).toHaveLength(0);
 });

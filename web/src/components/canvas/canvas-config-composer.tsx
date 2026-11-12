@@ -179,7 +179,7 @@ export function CanvasConfigComposer({ ref, value, inputs, onChange, onClose, co
             <div className="mb-2 flex items-center justify-between gap-2">
                 <div className="flex min-w-0 items-baseline gap-2">
                     <div className="shrink-0 text-xs font-semibold">{label}</div>
-                    {mentionInputs.length ? <div className="truncate text-[11px] opacity-55">{t("@ 引用素材")}</div> : null}
+                    {mentionInputs.length ? <div className="truncate text-xs opacity-55">{t("@ 引用素材")}</div> : null}
                 </div>
                 {onClose ? <Button size="small" type="text" className="!h-7 !w-7 !min-w-7 !p-0" icon={<X className="size-3.5" />} onClick={onClose} /> : null}
             </div>
@@ -276,14 +276,14 @@ const MentionMenu = memo(function MentionMenu({ inputs, allInputs, referenceLabe
         <div role="listbox" aria-label={t("选择图片引用")} className="absolute left-2 top-[calc(100%+6px)] z-[90] max-h-56 w-64 overflow-y-auto rounded-xl border p-1 shadow-2xl" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border }}>
             {inputs.map((input, index) => (
                 <Fragment key={input.nodeId}>
-                {input.mentionSource && input.mentionSource !== inputs[index - 1]?.mentionSource ? <div className="px-2 pb-1 pt-2 text-[11px]" style={{ color: theme.node.muted }}>{t(input.mentionSource === "canvas" ? "画布图片" : "对话图片")}</div> : null}
+                {input.mentionSource && input.mentionSource !== inputs[index - 1]?.mentionSource ? <div className="px-2 pb-1 pt-2 text-xs" style={{ color: theme.node.muted }}>{t(input.mentionSource === "canvas" ? "画布图片" : "对话图片")}</div> : null}
                 <Tooltip title={input.mentionImage?.unavailableReason}><button
                     ref={index === activeIndex ? activeItemRef : undefined}
                     type="button"
                     role="option"
                     aria-selected={index === activeIndex}
                     disabled={Boolean(input.mentionImage?.unavailableReason)}
-                    className="flex w-full min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition"
+                    className="flex w-full min-w-0 items-center gap-2 rounded-lg px-2 py-2 text-left text-xs transition"
                     style={{ background: index === activeIndex ? theme.toolbar.activeBg : "transparent", color: index === activeIndex ? theme.toolbar.activeText : theme.node.text }}
                     onMouseDown={(event) => {
                         event.preventDefault();

@@ -1,6 +1,6 @@
 import { uiText, useUiLocale } from "@/lib/i18n";
 import { useEffect, type ReactNode } from "react";
-import { Input, Select, Switch } from "antd";
+import { Input, Select, Switch, Tooltip } from "antd";
 
 import { ImageSettingsTheme } from "@/components/image-settings-panel";
 import { type CanvasTheme } from "@/lib/canvas-theme";
@@ -66,7 +66,7 @@ export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = 
                         {spec.ratioHint ? <p className="text-xs leading-4" style={{ color: theme.node.muted }}>{uiText(spec.ratioHint)}</p> : null}
                     </SettingGroup>
                     <SettingGroup title={uiText(mode === "extend" && spec.extendAddsDuration ? "新增时长" : "时长")} color={theme.node.muted}>
-                        <Select getPopupContainer={settingsPopupContainer} aria-label={uiText("视频时长")} disabled={editing} className="w-full" value={normalized.videoSeconds} onChange={value => onConfigChange("videoSeconds", value)} options={videoDurationOptions(spec, mode)} />
+                        <Tooltip title={editing ? uiText("编辑模式沿用原视频时长") : undefined}><div><Select getPopupContainer={settingsPopupContainer} aria-label={uiText("视频时长")} disabled={editing} className="w-full" value={normalized.videoSeconds} onChange={value => onConfigChange("videoSeconds", value)} options={videoDurationOptions(spec, mode)} /></div></Tooltip>
                         {editing ? <p role="note" className="text-xs leading-5" style={{ color: theme.node.text }}>{uiText("编辑结果时长跟随源视频。")}</p> : <div className="text-xs leading-4" style={{ color: theme.node.muted }}>{uiText("支持")}{durationBounds?.[0]}–{durationBounds?.[1]} {uiText("秒")}{spec.supportsAutoDuration ? uiText("，或由模型智能决定时长") : ""}。</div>}
                         {normalized.videoSeconds === "-1" && !editing ? <p role="note" className="text-[13px] leading-5" style={{ color: theme.node.text }}>{uiText("实际输出时长由模型决定。")}</p> : null}
                     </SettingGroup>

@@ -57,7 +57,7 @@ export function CanvasImageComparePicker({ images, sourceIds = [], preferredId, 
     return <section data-canvas-no-zoom role="dialog" aria-label={t(title)} className="text-sm" style={{ color: theme.node.text }}
         onPointerDown={event => event.stopPropagation()} onMouseDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()} onWheel={event => event.stopPropagation()}
         onKeyDown={event => { event.stopPropagation(); if (event.key === "Escape") { event.preventDefault(); onClose(); } }}>
-        <div className="mb-3 flex items-center justify-between gap-3"><h3 className="font-medium">{t(title)}</h3><button type="button" aria-label={t("关闭图片选择")} onClick={onClose} className="rounded p-1.5 focus-visible:outline-2 focus-visible:outline-offset-2" style={{ outlineColor: theme.canvas.selectionStroke }}><X size={18} /></button></div>
+        <div className="mb-3 flex items-center justify-between gap-3"><h3 className="font-medium">{t(title)}</h3><button type="button" aria-label={t("关闭图片选择")} onClick={onClose} className="rounded p-2 focus-visible:outline-2 focus-visible:outline-offset-2" style={{ outlineColor: theme.canvas.selectionStroke }}><X size={18} /></button></div>
         <Input autoFocus allowClear size="large" prefix={<Search size={17} />} aria-label={t("搜索对比图片")} placeholder={t("搜索图片名称或版本")} value={query} onChange={event => setQuery(event.target.value)} />
         <p className="my-2 text-xs" style={{ color: theme.node.muted }}>{t("点击缩略图选择；也可用 Tab、方向键浏览，Enter / 空格确认。")}</p>
         <div className="max-h-[min(52dvh,460px)] overflow-y-auto overscroll-contain pr-1" onKeyDown={moveCandidateFocus}>

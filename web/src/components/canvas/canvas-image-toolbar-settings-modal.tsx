@@ -149,7 +149,7 @@ export function ImageToolSettingsModal({
             <Card
                 size="small"
                 title={
-                    <Space size={6}>
+                    <Space size={8}>
                         <Settings2 className="size-4" />
                         {t("节点预览")}</Space>
                 }
@@ -158,7 +158,7 @@ export function ImageToolSettingsModal({
                 <div className="relative flex min-h-[300px] w-full justify-center pt-20 pb-9">
                     <div
                         ref={previewToolbarRef}
-                        className="hide-scrollbar absolute left-2 right-2 top-3 z-10 flex h-12 items-center overflow-x-auto rounded-[18px] border px-1 text-[13px]"
+                        className="hide-scrollbar absolute left-2 right-2 top-3 z-10 flex h-12 items-center overflow-x-auto rounded-xl border px-1 text-[13px]"
                         style={{ background: token.colorBgElevated, borderColor: token.colorBorderSecondary, boxShadow: token.boxShadowSecondary, color: token.colorText }}
                         onScroll={syncPreviewScroll}
                     >
@@ -180,8 +180,8 @@ export function ImageToolSettingsModal({
                         max={Math.max(previewScroll.max, 1)}
                         value={Math.min(previewScroll.left, Math.max(previewScroll.max, 1))}
                         disabled={previewScroll.max <= 0}
-                        className="absolute bottom-4 left-10 right-10 h-2.5 cursor-pointer appearance-none bg-transparent disabled:cursor-default [&::-moz-range-thumb]:h-2.5 [&::-moz-range-thumb]:w-[var(--preview-scrollbar-thumb-width)] [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-[#8d9498] [&::-moz-range-track]:h-2.5 [&::-moz-range-track]:rounded-full [&::-moz-range-track]:bg-[#bdc4c8] [&::-webkit-slider-runnable-track]:h-2.5 [&::-webkit-slider-runnable-track]:rounded-full [&::-webkit-slider-runnable-track]:bg-[#bdc4c8] [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:w-[var(--preview-scrollbar-thumb-width)] [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[#8d9498]"
-                        style={{ "--preview-scrollbar-thumb-width": `${scrollbarThumbWidth}px` } as CSSProperties}
+                        className="absolute bottom-4 left-10 right-10 h-2.5 cursor-pointer appearance-none bg-transparent disabled:cursor-default [&::-moz-range-thumb]:h-2.5 [&::-moz-range-thumb]:w-[var(--preview-scrollbar-thumb-width)] [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-[var(--preview-scrollbar-thumb)] [&::-moz-range-track]:h-2.5 [&::-moz-range-track]:rounded-full [&::-moz-range-track]:bg-[var(--preview-scrollbar-track)] [&::-webkit-slider-runnable-track]:h-2.5 [&::-webkit-slider-runnable-track]:rounded-full [&::-webkit-slider-runnable-track]:bg-[var(--preview-scrollbar-track)] [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:w-[var(--preview-scrollbar-thumb-width)] [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[var(--preview-scrollbar-thumb)]"
+                        style={{ "--preview-scrollbar-thumb-width": `${scrollbarThumbWidth}px`, "--preview-scrollbar-thumb": token.colorTextTertiary, "--preview-scrollbar-track": token.colorFillSecondary } as CSSProperties}
                         onInput={(event) => setPreviewScrollLeft(Number(event.currentTarget.value))}
                         onChange={(event) => setPreviewScrollLeft(Number(event.target.value))}
                     />
@@ -218,9 +218,10 @@ export function ImageToolSettingsModal({
 
 function PreviewToolbarItem({ tool, showLabels }: { tool: PreviewTool; showLabels: boolean }) {
     const t = useUiText();
+    const { token } = antdTheme.useToken();
     return (
         <Tooltip title={t(tool.title)}>
-            <span className="flex h-12 shrink-0 items-center px-1.5" style={{ color: tool.danger ? "#ef4444" : undefined }}>
+            <span className="flex h-12 shrink-0 items-center px-2" style={{ color: tool.danger ? token.colorError : undefined }}>
                 <span className={`flex h-9 items-center rounded-lg px-2 ${showLabels ? "gap-2" : "justify-center"}`}>
                     {tool.icon}
                     {showLabels ? <span className="whitespace-nowrap">{t(tool.label)}</span> : null}

@@ -1,4 +1,5 @@
 import { uiText, useUiText } from "@/lib/i18n";
+import { GenerationAccountHistory } from "@/components/generation-account-history";
 import { formatBeijingTime } from "@/lib/beijing-time";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { App, Button, Empty, Image, InputNumber, Segmented, Tag } from "antd";
@@ -412,7 +413,7 @@ export function SeamlessStitchWorkspace() {
                     </div>
 
                     <div className="mt-6">
-                        <div className="mb-2 flex items-center justify-between gap-3">
+                        <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
                             <span className="text-base font-semibold">{uiText("输入图片")}</span>
                             <div className="flex gap-2">
                                 <Button size="small" disabled={readingSource || imageDrop.reading} icon={<ClipboardPaste className="size-3.5" />} onClick={() => void pasteSource()}>
@@ -433,7 +434,7 @@ export function SeamlessStitchWorkspace() {
                                 <WorkbenchImage src={source.dataUrl} alt={source.name} className="size-full object-contain" />
                             ) : (
                                 <span className="flex flex-col items-center gap-3 text-sm text-muted-foreground">
-                                    <span className="grid size-12 place-items-center rounded-full bg-white text-muted-foreground shadow-sm">
+                                    <span className="grid size-12 place-items-center rounded-full bg-card text-muted-foreground shadow-sm">
                                         <ImagePlus className="size-5" />
                                     </span>
                                     {uiText("选择一张花纹或纹理图片")}</span>
@@ -490,7 +491,7 @@ export function SeamlessStitchWorkspace() {
                     </div>
                     <div className="stitch-preview">
                     <div className="mb-4 flex items-center justify-between gap-3">
-                        <h2 className="text-lg font-semibold">{uiText("处理结果")}</h2>
+                        <h2 className="text-xl font-semibold">{uiText("处理结果")}</h2>
                         {previewLoading ? <span role="status" className="text-xs text-muted-foreground">{uiText("正在读取历史图片…")}</span> : null}
                         {displayedResult.status === "success" ? <Tag color="green">{uiText("已完成")}</Tag> : displayedResult.status === "pending" ? <Tag color="orange">{uiText("处理中")}</Tag> : null}
                     </div>
@@ -541,6 +542,7 @@ export function SeamlessStitchWorkspace() {
                     )}
                     </div>
                 {resultView === "history" ? <aside className="stitch-history-panel">
+                    <GenerationAccountHistory board="seamless-stitch" />
                     <div className="mb-4 flex items-center justify-between gap-3">
                         <div>
                             <h2 className="text-base font-semibold">{uiText("历史出图")}</h2>

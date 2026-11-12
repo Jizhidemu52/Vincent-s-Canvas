@@ -106,8 +106,8 @@ export function CanvasNodeContextMenu({ menu, targetCount = 1, imageCount = 0, o
     return (
         <div
             ref={menuRef} role="menu" aria-label={menu.type === "canvas" ? t("画布操作") : t("节点操作")} data-canvas-no-zoom
-            className="fixed z-[80] flex flex-col gap-1 overflow-y-auto rounded-[10px] border p-1"
-            style={{ ...position, background: theme.node.panel, borderColor: theme.node.stroke, color: theme.node.text, boxShadow: "0 4px 16px rgb(0 0 0 / .10)", fontFamily: "'Geist Variable', 'PingFang SC', 'Microsoft YaHei', sans-serif" }}
+            className="fixed z-[var(--cw-z-popover,900)] flex flex-col gap-1 overflow-y-auto rounded-xl border p-1"
+            style={{ ...position, background: theme.node.panel, borderColor: theme.node.stroke, color: theme.node.text, boxShadow: "var(--ui-shadow-popover)", fontFamily: "'Geist Variable', 'PingFang SC', 'Microsoft YaHei', sans-serif" }}
             onPointerDown={(event) => event.stopPropagation()}
             onMouseDown={event => event.stopPropagation()}
             onContextMenu={event => event.preventDefault()}
@@ -141,7 +141,7 @@ export function MenuButton({ icon, action, targetCount = 1, onClick }: { icon: R
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
 
     return (
-        <button role="menuitem" data-usage-control={`canvas-tool.${action}`} type="button" className="flex h-8 min-h-8 w-full shrink-0 items-center gap-2.5 rounded-md px-2 text-left text-xs outline-none"
+        <button role="menuitem" data-usage-control={`canvas-tool.${action}`} type="button" className="cw-control flex h-8 min-h-8 w-full shrink-0 items-center gap-3 rounded-md px-2 text-left text-[13px] outline-none"
             style={{ color: theme.node.text }} onMouseEnter={event => { event.currentTarget.style.background = theme.toolbar.itemHover; }} onMouseLeave={event => { if (document.activeElement !== event.currentTarget) event.currentTarget.style.background = "transparent"; }}
             onFocus={event => { event.currentTarget.style.background = theme.toolbar.itemHover; }} onBlur={event => { event.currentTarget.style.background = "transparent"; }}
             onClick={(event) => { event.preventDefault(); event.stopPropagation(); onClick(); }}>

@@ -133,7 +133,7 @@ function practiceRecord() {
     const dependencies: Record<string, unknown> = {
         react: { ...React, useId: () => "practice-test", useState: () => [expandedId, (value: string | null) => { expandedId = value; }] },
         "react-router-dom": { useLocation: () => location },
-        "@/hooks/use-copy-text": { useCopyText: () => (value: string) => { copies.push(value); return Promise.resolve(true); } },
+        "@/hooks/use-copy-feedback": { useCopyFeedback: () => ({ copied: false, copy: (value: string) => { copies.push(value); return Promise.resolve(true); } }) },
     };
     const module = { exports: {} as { PracticeExampleRecord: typeof PracticeExampleRecord; DesignExampleArticle: typeof DesignExampleArticle } };
     new Function("require", "module", "exports", componentCode)((name: string) => Object.hasOwn(dependencies, name) ? dependencies[name] : requireComponent(name), module, module.exports);

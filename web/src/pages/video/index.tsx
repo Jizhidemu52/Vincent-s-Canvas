@@ -1,4 +1,5 @@
 import { uiText, useUiText, getUiLocale } from "@/lib/i18n";
+import { GenerationAccountHistory } from "@/components/generation-account-history";
 import { ArrowLeft, ArrowRight, BookOpen, CheckSquare, ClipboardPaste, Download, FolderPlus, History, LoaderCircle, Music2, Plus, SlidersHorizontal, Sparkles, Trash2, Upload, VideoIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { handleSubmitShortcut } from "@/lib/submit-shortcut";
@@ -26,7 +27,7 @@ import { GenerationQueueProgress } from "@/components/generation-queue-progress"
 import { upsertGenerationLog } from "@/lib/generation-log-update";
 import { pastedImageFiles, readClipboardImages } from "@/lib/clipboard-images";
 import { workbenchSubmissions } from "@/lib/submission-gate";
-import { App, Button, Checkbox, Drawer, Empty, Input, Modal, Tag, Typography } from "antd";
+import { App, Button, Checkbox, Drawer, Empty, Input, Modal, Tag, Tooltip, Typography } from "antd";
 import { createWorkspaceStorage } from "@/lib/workspace-storage";
 import { nanoid } from "nanoid";
 import { saveAs } from "file-saver";
@@ -843,7 +844,7 @@ function VideoGenerationWorkspace() {
                                 <div className="mt-4 space-y-4">
                             <p className="text-[13px] leading-5 text-muted-foreground">{uiText(modelSpec?.nativeAudio ? "当前上传入口支持 JPEG/PNG/WebP 图片，单张 ≤10MB；最多 1 段不超过 15 秒的 MP4/MOV 视频，≤200MB。不支持音频输入。切换模型不会删除素材。" : "图片支持 JPEG/PNG/WebP，单张 ≤10MB；视频支持 MP4/MOV，音频支持 WAV/MP3。素材和模式按所选模型校验，切换模型不会删除素材。")}</p>
                             <div className="min-w-0">
-                                <div className="mb-2 flex items-center justify-between gap-3">
+                                <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
                                     <span className="text-base font-semibold">{uiText("参考图")}</span>
                                     <div className="flex gap-2">
                                         <Button size="small" icon={<ClipboardPaste className="size-3.5" />} onClick={() => void addReferencesFromClipboard()}>
@@ -856,7 +857,7 @@ function VideoGenerationWorkspace() {
                                     {references.map((item, index) => (
                                         <div key={item.id} className="group relative size-20 shrink-0 overflow-hidden rounded-md border border-border">
                                             <WorkbenchImage src={item.dataUrl} alt={item.name} loading="lazy" decoding="async" className="size-full object-cover" />
-                                            <span className="absolute left-1 top-1 rounded bg-black/60 px-1.5 py-0.5 text-xs font-medium text-white">{(currentMode === "first-frame" || currentMode === "first-last-frame") && index === 0 ? uiText("首帧") : currentMode === "first-last-frame" && index === 1 ? uiText("尾帧") : seedanceReferenceLabel("image", index)}</span>
+                                            <span className="absolute left-1 top-1 rounded bg-black/60 px-2 py-1 text-xs font-medium text-white">{(currentMode === "first-frame" || currentMode === "first-last-frame") && index === 0 ? uiText("首帧") : currentMode === "first-last-frame" && index === 1 ? uiText("尾帧") : seedanceReferenceLabel("image", index)}</span>
                                             <ReferenceOrderButtons index={index} total={references.length} onMove={(offset) => setReferences((value) => moveListItem(value, index, offset))} />
                                             <button
                                                 type="button"
@@ -881,7 +882,7 @@ function VideoGenerationWorkspace() {
                                     {videoReferences.map((item, index) => (
                                         <div key={item.id} className="group relative h-20 w-32 shrink-0 overflow-hidden rounded-md border border-border bg-black">
                                             <video src={item.url} className="size-full object-cover" muted preload="metadata" />
-                                            <span className="absolute left-1 top-1 rounded bg-black/60 px-1.5 py-0.5 text-xs font-medium text-white">{seedanceReferenceLabel("video", index)}</span>
+                                            <span className="absolute left-1 top-1 rounded bg-black/60 px-2 py-1 text-xs font-medium text-white">{seedanceReferenceLabel("video", index)}</span>
                                             <ReferenceOrderButtons index={index} total={videoReferences.length} onMove={(offset) => setVideoReferences((value) => moveListItem(value, index, offset))} />
                                             <button
                                                 type="button"
@@ -929,7 +930,7 @@ function VideoGenerationWorkspace() {
 
                             {planning ? <VideoMotionPanel value={motion} onChange={setMotion} disabled={!draftReady} nativeAudio={modelSpec?.nativeAudio} /> : null}
                             <div>
-                                <div className="mb-2 flex items-center justify-between gap-3">
+                                <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
                                     <span className="shrink-0 text-base font-semibold">{uiText(planning ? "想要的效果（可选）" : "视频提示词")}</span>
                                     <div className="flex gap-2">
                                         <Button size="small" icon={<BookOpen className="size-3.5" />} onClick={() => setPromptDialogOpen(true)}>
@@ -970,7 +971,7 @@ function VideoGenerationWorkspace() {
                             <button type="button" role="tab" aria-selected={resultView === "current"} onClick={() => setResultView("current")}>{uiText("本次结果")}</button>
                             <button type="button" role="tab" aria-selected={resultView === "history"} onClick={() => setResultView("history")}>{uiText("历史记录")}</button>
                         </div>
-                        {resultView === "history" ? <div className="video-history-panel mb-5"><LogPanel logs={logs} selectedLogIds={selectedLogIds} activeLogId={previewLog?.id} onSelectedLogIdsChange={setSelectedLogIds} createDisabled={!workbenchTask.ready || workbenchTask.creating} onCreateTask={() => void createTask()} onDeleteSelected={() => setDeleteConfirmOpen(true)} onPreviewLog={previewGenerationLog} /></div> : null}
+                        {resultView === "history" ? <div className="video-history-panel mb-5"><GenerationAccountHistory board="video" /><LogPanel logs={logs} selectedLogIds={selectedLogIds} activeLogId={previewLog?.id} onSelectedLogIdsChange={setSelectedLogIds} createDisabled={!workbenchTask.ready || workbenchTask.creating} onCreateTask={() => void createTask()} onDeleteSelected={() => setDeleteConfirmOpen(true)} onPreviewLog={previewGenerationLog} /></div> : null}
                         <div className="mb-4 flex items-center justify-between gap-3">
                             <h2 className="text-xl font-semibold">{uiText(resultView === "history" ? "历史结果预览" : "生成结果")}</h2>
                             {resultView === "history" && previewLog ? <Button size="small" disabled={previewLoading} onClick={() => modal.confirm({ title: uiText("恢复为草稿？"), content: uiText("将替换当前提示词、参数与参考素材，不会提交生成任务。"), okText: uiText("确认恢复"), cancelText: uiText("保留草稿"), onOk: () => previewGenerationLog(previewLog, true) })}>{uiText("恢复为草稿继续改")}</Button> : null}
@@ -1055,7 +1056,7 @@ function GenerationSettings({ config, model, updateConfig, openConfigDialog, ref
     return (
         <>
             <label className="col-span-2 block min-w-0 sm:col-span-1">
-                <span className="mb-1.5 block text-sm font-semibold sm:mb-2 sm:text-base">{uiText("模型")}</span>
+                <span className="mb-2 block text-sm font-semibold sm:mb-2 sm:text-base">{uiText("模型")}</span>
                 <ModelPicker toolKey="video" config={config} value={model} onChange={(value) => updateConfig("videoModel", value)} capability="video" fullWidth onMissingConfig={() => openConfigDialog(false)} />
             </label>
             <div className="col-span-2">
@@ -1079,7 +1080,7 @@ function ResultVideoCard({ video, playback, onPlaybackError, onMetadata, summary
             {preparing ? <div role="status" className="flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />{uiText("视频已生成，正在准备兼容预览（最多等待 150 秒）；下载仍为原件。")}</div> : null}
             {!video.serverAssetId && !playback?.error ? <p className="px-3 py-2 text-xs text-muted-foreground">{uiText("仅有本地原件，服务端兼容预览不可用；播放能力取决于当前浏览器。")}</p> : null}
             {playback?.error ? <p role="alert" className="px-3 py-2 text-sm text-destructive">{uiText(playback.error)}</p> : null}
-            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-border px-3 py-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-border px-3 py-3">
                 <div className="flex min-w-0 flex-wrap gap-x-2 gap-y-1 text-xs text-muted-foreground">
                     <span>
                         {playback?.width && playback.height ? `${playback.width}x${playback.height}` : uiText("尺寸未知")}
@@ -1167,13 +1168,13 @@ function LogPanel({
                 <Tag className="m-0">{logs.length}</Tag>
             </div>
             <div className="mb-4 flex flex-wrap gap-2">
-                <Button size="small" icon={<Plus className="size-3.5" />} disabled={createDisabled} onClick={onCreateTask}>
-                    {uiText("新建")}</Button>
-                <Button size="small" icon={<CheckSquare className="size-3.5" />} disabled={!logs.length} onClick={toggleAll}>
+                <Tooltip title={createDisabled ? uiText("正在准备工作区，请稍候") : undefined}><Button size="small" icon={<Plus className="size-3.5" />} disabled={createDisabled} onClick={onCreateTask}>
+                    {uiText("新建")}</Button></Tooltip>
+                <Tooltip title={!logs.length ? uiText("暂无生成记录") : undefined}><Button size="small" icon={<CheckSquare className="size-3.5" />} disabled={!logs.length} onClick={toggleAll}>
                     {allSelected ? uiText("取消") : uiText("全选")}
-                </Button>
-                <Button size="small" danger icon={<Trash2 className="size-3.5" />} disabled={!selectedLogIds.length} onClick={onDeleteSelected}>
-                    {uiText("删除")}</Button>
+                </Button></Tooltip>
+                <Tooltip title={!selectedLogIds.length ? uiText("请先选择记录") : undefined}><Button size="small" danger icon={<Trash2 className="size-3.5" />} disabled={!selectedLogIds.length} onClick={onDeleteSelected}>
+                    {uiText("删除")}</Button></Tooltip>
             </div>
             <div className="space-y-3">
                 <PracticeExampleRecord />
@@ -1188,7 +1189,7 @@ function LogPanel({
                     />
                 ))}
                 {visibleCount < logs.length ? <Button block className="!h-10" onClick={() => setVisibleCount((value) => value + 40)}>{uiText("加载更多记录（剩余 ")}{logs.length - visibleCount} {uiText(" 条）")}</Button> : null}
-                {!logs.length ? <div className="flex min-h-48 items-center justify-center rounded-lg border border-dashed border-border text-center text-sm text-muted-foreground">{uiText("暂无生成记录")}</div> : null}
+                {!logs.length ? <div className="wb-surface wb-empty min-h-48"><History className="size-8" aria-hidden="true" /><p>{uiText("暂无生成记录")}</p><Tooltip title={createDisabled ? uiText("正在准备工作区，请稍候") : undefined}><Button disabled={createDisabled} onClick={onCreateTask} icon={<Plus className="size-4" />}>{uiText("新建任务，继续创作")}</Button></Tooltip></div> : null}
             </div>
         </>
     );
@@ -1203,20 +1204,20 @@ function LogCard({ log, selected, active, onSelectedChange, onClick }: { log: Ge
             onClick={onClick}
         >
             <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-2">
-                <Checkbox className="mt-0.5" checked={selected} onClick={(event) => event.stopPropagation()} onChange={(event) => onSelectedChange(event.target.checked)} />
+                <Checkbox className="mt-1" checked={selected} onClick={(event) => event.stopPropagation()} onChange={(event) => onSelectedChange(event.target.checked)} />
                 <div className="min-w-0">
                     <div className="truncate text-sm font-semibold leading-5">{log.title}</div>
                     <div className="mt-2 flex flex-wrap gap-1">
-                        <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none">{log.size}</Tag>
-                        <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none">{videoResolutionLabel(log.resolution)}</Tag>
-                        <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none">{log.seconds}s</Tag>
+                        <Tag className="m-0 flex h-6 items-center rounded-md px-2 text-xs leading-none">{log.size}</Tag>
+                        <Tag className="m-0 flex h-6 items-center rounded-md px-2 text-xs leading-none">{videoResolutionLabel(log.resolution)}</Tag>
+                        <Tag className="m-0 flex h-6 items-center rounded-md px-2 text-xs leading-none">{log.seconds}s</Tag>
                     </div>
                 </div>
                 <div className="grid justify-items-end gap-2">
-                    <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none" color={log.status === "成功" ? "blue" : log.status === "生成中" ? "processing" : "red"}>
+                    <Tag className="m-0 flex h-6 items-center rounded-md px-2 text-xs leading-none" color={log.status === "成功" ? "blue" : log.status === "生成中" ? "processing" : "red"}>
                         {uiText(log.status || "")}
                     </Tag>
-                    <Tag className="m-0 flex h-6 items-center rounded-md px-1.5 text-xs leading-none" color="green">
+                    <Tag className="m-0 flex h-6 items-center rounded-md px-2 text-xs leading-none" color="green">
                         {log.durationMs === null ? uiText("耗时未知") : formatDuration(log.durationMs)}
                     </Tag>
                 </div>
@@ -1297,8 +1298,8 @@ function ReferenceOrderButtons({ index, total, onMove }: { index: number; total:
     if (total <= 1) return null;
     return (
         <div className="absolute inset-x-1 bottom-1 flex justify-between">
-            <Button size="small" className="!h-6 !w-6 !min-w-6 !rounded-full !bg-white/85 !p-0 !shadow-sm" icon={<ArrowLeft className="size-3" />} disabled={index <= 0} onClick={() => onMove(-1)} />
-            <Button size="small" className="!h-6 !w-6 !min-w-6 !rounded-full !bg-white/85 !p-0 !shadow-sm" icon={<ArrowRight className="size-3" />} disabled={index >= total - 1} onClick={() => onMove(1)} />
+            <Tooltip title={uiText(index <= 0 ? "已是第一张参考图" : "向前移动参考图")}><span><Button size="small" aria-label={uiText("向前移动参考图")} className="!h-8 !w-8 !min-w-8 !rounded-md !bg-card/85 !p-0 !shadow-none" icon={<ArrowLeft className="size-3" />} disabled={index <= 0} onClick={() => onMove(-1)} /></span></Tooltip>
+            <Tooltip title={uiText(index >= total - 1 ? "已是最后一张参考图" : "向后移动参考图")}><span><Button size="small" aria-label={uiText("向后移动参考图")} className="!h-8 !w-8 !min-w-8 !rounded-md !bg-card/85 !p-0 !shadow-none" icon={<ArrowRight className="size-3" />} disabled={index >= total - 1} onClick={() => onMove(1)} /></span></Tooltip>
         </div>
     );
 }

@@ -8,7 +8,7 @@
     min-width: 0;
 }
 .local-design-workbench .placement-demo .panel-body {
-    padding: 18px;
+    padding: 20px;
 }
 .local-design-workbench .placement-demo .panel-head {
     display: flex;
@@ -36,18 +36,18 @@
     width: 100%;
     display: flex;
     justify-content: center;
-    margin-bottom: 10px;
+    margin-bottom: 12px;
 }
 .local-design-workbench .placement-demo .placement-materials {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: 8px;
-    margin: 14px 0;
+    margin: 16px 0;
 }
 .local-design-workbench .placement-demo .placement-material {
     border: 1px solid var(--line);
     border-radius: 8px;
-    padding: 7px 3px;
+    padding: 8px 4px;
     background: var(--bg);
     cursor: pointer;
     color: var(--text);
@@ -62,16 +62,16 @@
     height: 57px;
     object-fit: contain;
     display: block;
-    margin-bottom: 7px;
+    margin-bottom: 8px;
 }
 .local-design-workbench .placement-demo .placement-divider {
     height: 1px;
     background: var(--line);
-    margin: 23px 0;
+    margin: 24px 0;
 }
 .local-design-workbench .placement-demo .placement-layers {
     display: grid;
-    gap: 7px;
+    gap: 8px;
     padding: 0;
     margin: 12px 0;
     list-style: none;
@@ -121,7 +121,7 @@
     color: var(--muted);
 }
 .local-design-workbench .placement-demo .placement-base-row {
-    padding: 10px;
+    padding: 12px;
     border-radius: 8px;
     background: var(--bg);
     display: flex;
@@ -149,7 +149,7 @@
     margin: 12px 0;
 }
 .local-design-workbench .placement-demo .placement-layer-actions .btn {
-    padding: 7px 2px;
+    padding: 8px 4px;
     font-size: 13px;
 }
 .local-design-workbench .placement-demo .placement-center {
@@ -163,7 +163,7 @@
     gap: 8px;
     align-items: center;
     justify-content: space-between;
-    padding: 13px 17px;
+    padding: 12px 16px;
 }
 .local-design-workbench .placement-demo .placement-stage-label {
     font-size: 14px;
@@ -174,7 +174,7 @@
     display: flex;
     justify-content: center;
     align-items: center;
-    padding: 26px;
+    padding: 28px;
     min-height: 420px;
     background-color: var(--bg);
     background-image: radial-gradient(var(--line) 0.8px, transparent 0.8px);
@@ -187,7 +187,7 @@
     max-height: 610px;
     width: auto;
     height: auto;
-    box-shadow: 0 9px 32px #27322414;
+    box-shadow: none;
     touch-action: none;
     cursor: default;
     background: var(--surface);
@@ -204,7 +204,7 @@
     font-size: 13px;
     line-height: 1.6;
     color: var(--muted);
-    padding: 12px 18px;
+    padding: 12px 20px;
     border-top: 1px solid var(--line);
     background: var(--surface);
 }
@@ -230,7 +230,7 @@
     min-width: 0;
     width: 100%;
     background: transparent;
-    padding: 9px;
+    padding: 8px;
     color: var(--text);
 }
 .local-design-workbench .placement-demo .placement-number span {
@@ -262,7 +262,7 @@
     width: 100%;
     border: 1px solid var(--line);
     border-radius: 8px;
-    padding: 10px 8px;
+    padding: 12px 8px;
     background: var(--surface);
     color: var(--text);
 }
@@ -276,17 +276,17 @@
 }
 .local-design-workbench .placement-demo .placement-export {
     width: 100%;
-    margin: 5px 0 10px;
+    margin: 4px 0 12px;
 }
 .local-design-workbench .placement-demo .placement-save-actions {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 7px;
-    margin-bottom: 9px;
+    gap: 8px;
+    margin-bottom: 8px;
 }
 .local-design-workbench .placement-demo .placement-save-actions .btn {
     font-size: 13px;
-    padding: 9px 4px;
+    padding: 8px 4px;
 }
 .local-design-workbench .placement-demo .placement-save-state {
     font-size: 13px;
@@ -304,14 +304,14 @@
     font-size: 12px;
     border: 1px solid var(--line);
     border-radius: 6px;
-    padding: 2px 4px;
+    padding: 4px 4px;
     white-space: nowrap;
 }
 .local-design-workbench .placement-demo .placement-error {
-    color: #ad443b;
-    padding: 18px;
-    background: #fff0ee;
-    border: 1px solid #edc9c4;
+    color: var(--danger);
+    padding: 20px;
+    background: color-mix(in srgb, var(--danger) 8%, var(--surface));
+    border: 1px solid color-mix(in srgb, var(--danger) 25%, var(--line));
     border-radius: 12px;
 }
 @media (max-width: 1150px) {
@@ -319,10 +319,10 @@
         grid-template-columns: 205px minmax(300px, 1fr) 250px;
     }
     .local-design-workbench .placement-demo .panel-body {
-        padding: 14px;
+        padding: 16px;
     }
     .local-design-workbench .placement-demo .placement-canvas-wrap {
-        padding: 18px;
+        padding: 20px;
     }
 }
 @media (max-width: 940px) {
@@ -335,7 +335,7 @@
     .local-design-workbench .placement-demo .placement-inspector > .panel-body {
         display: grid;
         grid-template-columns: 1fr 1fr;
-        gap: 25px;
+        gap: 24px;
     }
     .local-design-workbench .placement-demo .placement-inspector .placement-divider {
         display: none;

@@ -1,7 +1,8 @@
 import { uiText, useUiText } from "@/lib/i18n";
+import { GenerationAccountHistory } from "@/components/generation-account-history";
 import { formatBeijingDateTime } from "@/lib/beijing-time";
 import { ArrowLeft, ArrowRight, ChevronDown, Download, History, LoaderCircle, Plus, RotateCcw, Sparkles } from "lucide-react";
-import { App, Button, Checkbox, Image, Select } from "antd";
+import { App, Button, Checkbox, Image, Select, Tooltip } from "antd";
 import { handleSubmitShortcut } from "@/lib/submit-shortcut";
 import { GenerationInputList } from "@/components/generation-input-list";
 import { WorkbenchTasks, useWorkbenchTask } from "@/components/workbench-tasks";
@@ -108,12 +109,12 @@ function CreativeSceneWorkspace({ preset, handoffToken }: { preset: CreativePres
 
     return <main className="wb-page cs-page">
         <header className="cs-header">
-            <Link to={standalone ? "/" : "/creative"} className="cs-back"><ArrowLeft size={16} /><span>{uiText(standalone ? "工作台" : "创意设计")}</span></Link>
+            <Link to={standalone ? "/" : "/creative"} className="cs-back" aria-label={uiText(standalone ? "工作台" : "创意设计")}><ArrowLeft size={16} /><span>{uiText(standalone ? "工作台" : "创意设计")}</span></Link>
             <span className="cs-header-divider" />
             {standalone ? <span className="font-medium">{uiText(preset.title)}</span> : <div className="cs-scene-picker">
                 <Select aria-label={uiText("切换设计场景")} value={preset.id} variant="borderless" options={available.map(item => ({ value: item.id, label: uiText(item.title || "") }))} onChange={value => { const next = getCreativePreset(value); if (next) navigate(buildCreativePresetHref(next)); }} />
             </div>}
-            <button className="cs-new" type="button" disabled={ws.running || ws.loading} onClick={() => { ws.reset(); setView("history"); }}><Plus size={15} />{uiText("清空当前草稿")}</button>
+            <Tooltip title={ws.running ? uiText("任务在后台继续，可切换工作区或查看历史。") : ws.loading ? uiText("正在恢复场景草稿…") : undefined}><span className="cs-new"><button className="cs-new" type="button" disabled={ws.running || ws.loading} onClick={() => { ws.reset(); setView("history"); }}><Plus size={15} />{uiText("清空当前草稿")}</button></span></Tooltip>
         </header>
         <div className="cs-layout">
             <aside className="cs-form-panel" aria-label={uiText("{title}设计参数", { title: uiText(preset.title) })} onKeyDown={event => {
@@ -155,8 +156,9 @@ function CreativeSceneWorkspace({ preset, handoffToken }: { preset: CreativePres
                     <button type="button" className="cs-history-tab" aria-pressed={view === "history" || ws.isHistoryPreview} onClick={() => setView("history")}><History size={15} />{uiText("最近任务")}{ws.historyTotal ? <span>{ws.historyTotal}</span> : null}</button>
                 </nav>
                 {view === "history" ? <div className="cs-history">
+                    <GenerationAccountHistory board={`creative-${preset.id}`} />
                     {examples.map(example => <PracticeExampleRecord key={example.id} example={example} />)}
-                    <div className="flex flex-wrap items-center justify-between gap-2"><h2>{uiText("最近任务")}</h2><Button size="small" disabled={historyBusy || !ws.logs.length} onClick={() => { setHistorySelection(current => !current); setSelectedLogIds([]); }}>{historySelection ? uiText("退出批量管理") : uiText("批量管理")}</Button></div>
+                    <div className="flex flex-wrap items-center justify-between gap-2"><h2>{uiText("最近任务")}</h2><Tooltip title={historyBusy ? uiText("正在加载…") : !ws.logs.length ? uiText("暂无生成记录") : undefined}><Button size="small" disabled={historyBusy || !ws.logs.length} onClick={() => { setHistorySelection(current => !current); setSelectedLogIds([]); }}>{historySelection ? uiText("退出批量管理") : uiText("批量管理")}</Button></Tooltip></div>
                     <p className="cs-help">{uiText("显示当前账号在「")}{uiText(preset.title || "")}{uiText("」中的任务与待查询原请求，保存在本机浏览器。")}</p>
                     {historySelection && <div className="mb-3 space-y-2">
                         <div className="flex flex-wrap items-center gap-2">
@@ -168,7 +170,7 @@ function CreativeSceneWorkspace({ preset, handoffToken }: { preset: CreativePres
                     </div>}
                     {ws.logs.length ? ws.logs.map(log => <div key={log.id} className="flex items-center gap-3">{historySelection && <Checkbox aria-label={uiText("选择任务：{time}", { time: formatBeijingDateTime(log.createdAt) })} disabled={historyBusy || Boolean(log.unresolvedCount)} checked={selectedLogIds.includes(log.id)} onChange={event => setSelectedLogIds(current => event.target.checked ? [...new Set([...current, log.id])] : current.filter(id => id !== log.id))} />}<button type="button" className="cs-history-item" disabled={historyBusy} onClick={() => { void ws.previewLog(log); setPromptOpen(true); setView("results"); }}>
                         <span className="cs-history-icon"><History size={18} /></span><span><strong>{formatBeijingDateTime(log.createdAt)} {uiText("北京时间")}</strong><small>{log.operation === "recolor" ? uiText("本地精确换色 · ") : log.hasSelection ? uiText("选区合成 · ") : ""}{log.successCount} {uiText(" 张成功")}{log.failCount ? uiText(" · {failCount} 张失败", { failCount: log.failCount }) : ""}{log.cancelledCount ? uiText(" · {count} 张已取消", { count: log.cancelledCount }) : ""}{log.unresolvedCount ? uiText(" · {unresolvedCount} 张待查询", { unresolvedCount: log.unresolvedCount }) : ""} {uiText(" · 查看结果与提示词")}</small></span><ArrowRight size={15} />
-                    </button>{!historySelection && <button type="button" className="shrink-0 text-xs text-muted-foreground" disabled={historyBusy || ws.running || Boolean(log.unresolvedCount)} onClick={() => confirmDeleteLogs([log])}>{uiText("删除")}</button>}</div>) : <p className="cs-help">{uiText("还没有生成记录。完成一次设计后，会在这里保存参数和结果。")}</p>}
+                    </button>{!historySelection && <button type="button" className="shrink-0 text-xs text-muted-foreground" disabled={historyBusy || ws.running || Boolean(log.unresolvedCount)} onClick={() => confirmDeleteLogs([log])}>{uiText("删除")}</button>}</div>) : <div className="wb-surface wb-empty"><History className="size-8" aria-hidden="true" /><p>{uiText("还没有生成记录。完成一次设计后，会在这里保存参数和结果。")}</p><Button onClick={() => setView("results")}>{uiText("当前结果")}</Button></div>}
                     {ws.historyHasMore && <button type="button" className="cs-tool-entry" disabled={ws.historyLoading} onClick={() => void ws.loadMoreHistory()}>{ws.historyLoading ? uiText("正在加载…") : uiText("加载更多（已显示 {length} / {historyTotal}）", { length: ws.logs.length, historyTotal: ws.historyTotal })}</button>}
                 </div> : <div className="cs-results">
                     <div className="cs-results-heading"><h2>{ws.isHistoryPreview ? uiText("历史预览") : ws.optimizing ? uiText("正在优化提示词…") : ws.running ? uiText("正在创作") : uiText("设计结果")}</h2>{ws.isHistoryPreview ? <Button size="small" onClick={ws.returnToCurrentTask}>{uiText("返回当前任务")}</Button> : null}{ws.activeLog && <><span>{formatBeijingDateTime(ws.activeLog.createdAt)} {uiText("北京时间")}</span><button type="button" className="cs-tool-entry" disabled={ws.running || ws.loading || ws.previewing} onClick={() => modal.confirm({ title: uiText("恢复为草稿？"), content: uiText("将替换当前设计要求、模型与参考素材，不会提交生成任务。"), okText: uiText("确认恢复"), cancelText: uiText("保留草稿"), onOk: async () => { await ws.restoreLog(ws.activeLog!); setPromptOpen(true); } })}>{uiText("恢复为草稿继续改")}</button></>}</div>

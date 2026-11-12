@@ -66,7 +66,7 @@ export function CanvasImageSettingsPopover({ config, onConfigChange, onOpenChang
     return (
         <>
             <span ref={buttonRef} className="inline-flex min-w-0">
-                <Button size="small" type="text" className={buttonClassName || "!h-8 !max-w-[180px] !justify-start !rounded-full !px-2.5"} style={{ background: theme.node.fill, color: theme.node.text }} icon={<Settings2 className="size-3.5" />} onClick={() => updateOpen(!open)}>
+                <Button size="small" type="text" className={buttonClassName || "!h-8 !max-w-[180px] !justify-start !rounded-full !px-3"} style={{ background: theme.node.fill, color: theme.node.text }} icon={<Settings2 className="size-3.5" />} onClick={() => updateOpen(!open)}>
                     <span className="truncate">
                         {imageReferenceSizeIsAutomatic(profile, referenceCount) ? t("模型决定尺寸 · 约 100 万像素") : <>{profile.kind === "mai-image" ? "PNG" : profile.kind === "grok-image" && referenceCount > 0 ? t("参考图模式") : imageQualityLabel(quality)} · {imageSizeLabel(activeSize)}</>} · {t("{count} 个任务", { count: taskCount })}</span>
                 </Button>
@@ -110,9 +110,9 @@ function ImageSettingsPortal({
         left: Math.max(margin, Math.min(window.innerWidth - width - margin, left)),
         ...(topPlacement ? { bottom: window.innerHeight - buttonRect.top + gap, maxHeight: Math.max(260, buttonRect.top - margin * 2) } : { top: buttonRect.bottom + gap, maxHeight: Math.max(260, window.innerHeight - buttonRect.bottom - margin * 2) }),
         background: theme.toolbar.panel,
-        borderRadius: 10,
+        borderRadius: 12,
         border: `1px solid ${theme.toolbar.border}`,
-        boxShadow: "0 4px 20px rgba(0, 0, 0, 0.10)",
+        boxShadow: "var(--ui-shadow-popover)",
         padding: 16,
         fontFamily: "'Geist Variable', 'PingFang SC', 'Microsoft YaHei', sans-serif",
         overflowY: "auto",

@@ -24,7 +24,8 @@ function bubbleHarness(actionsDisabled = false) {
         useState: (initial: unknown) => [initial, () => {}], useRef: (initial: unknown) => ({ current: initial }), useEffect() {},
         cn: (...values: unknown[]) => values.filter(Boolean).join(" "),
         Bot: () => null, FileText: () => null, Copy: () => null, Pencil: () => null, RotateCcw: () => null,
-        useCopyText: () => () => undefined, ChatMarkdown: "div", ChatImage: "chat-image", Tooltip: "div", Button: "review-button", chatImageOriginal,
+        useCopyText: () => () => undefined, useCopyFeedback: () => ({ copied: false, copy: async () => true }),
+        ChatMarkdown: "div", ChatImage: "chat-image", Tooltip: "div", Button: "review-button", chatImageOriginal,
     };
     const code = ts.transpileModule(`exports.Bubble = ${initializer.getText(ast)};`, { compilerOptions: { target: ts.ScriptTarget.ESNext, jsx: ts.JsxEmit.React } }).outputText;
     const exports = {} as { Bubble: (props: any) => ReactElement<any> };

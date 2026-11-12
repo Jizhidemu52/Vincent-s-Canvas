@@ -67,10 +67,10 @@ export default function MyPromptsPage() {
                 </header>
                 <PromptLibraryTabs />
                 <section className="wb-toolbar mb-6">
-                    <Input className="max-w-md" allowClear prefix={<Search className="size-4 text-stone-400" />} value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder={t("搜索名称、提示词或分类")} />
+                    <Input className="max-w-md" allowClear prefix={<Search className="size-4 text-muted-foreground" />} value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder={t("搜索名称、提示词或分类")} />
                     <Select value={sort} onChange={(value) => { setSort(value); setPage(1); }} options={[{ value: "updated", label: t("最近更新") }, { value: "recent", label: t("最近使用") }, { value: "used", label: t("使用最多") }]} />
-                    <label className="flex items-center gap-2 text-sm text-stone-600 dark:text-stone-300"><Switch size="small" checked={favorite} onChange={(value) => { setFavorite(value); setPage(1); }} />{t("只看收藏")}</label>
-                    <span aria-live="polite" className="ml-auto text-xs text-stone-500">{loading && items.length ? t("正在更新 · ") : ""}{t("共")} {total} {t("个模板")}</span>
+                    <label className="flex items-center gap-2 text-sm text-muted-foreground"><Switch size="small" checked={favorite} onChange={(value) => { setFavorite(value); setPage(1); }} />{t("只看收藏")}</label>
+                    <span aria-live="polite" className="ml-auto text-xs text-muted-foreground">{loading && items.length ? t("正在更新 · ") : ""}{t("共")} {total} {t("个模板")}</span>
                 </section>
                 {loadError ? <div role="alert" className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200"><span>{loadError}</span><Button onClick={() => void load()}>{t("重新加载")}</Button></div> : null}
                 <div className="mb-5 max-w-2xl"><PracticeExampleRecord /></div>

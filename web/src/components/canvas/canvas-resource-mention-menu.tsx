@@ -37,7 +37,7 @@ export default function MentionMenu({ textarea, references, activeIndex, theme, 
                 <button
                     key={reference.id}
                     type="button"
-                    className="flex w-full min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition"
+                    className="flex w-full min-w-0 items-center gap-2 rounded-lg px-2 py-2 text-left text-xs transition"
                     style={{ background: index === activeIndex ? theme.toolbar.activeBg : "transparent", color: index === activeIndex ? theme.toolbar.activeText : theme.node.text }}
                     onPointerDown={(event) => {
                         event.preventDefault();

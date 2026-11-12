@@ -8,13 +8,19 @@ type TooltipControl = { native: HTMLButtonElement; target: HTMLElement; key: num
 
 function NativeButtonTooltip({ native }: { native: HTMLButtonElement }) {
     const trigger = useRef<HTMLSpanElement>(null);
+    const [label, setLabel] = useState(() => native.disabled && native.dataset.workbenchDisabledReason || native.dataset.workbenchTooltip || "");
     useLayoutEffect(() => {
         // Move the same button into the trigger: its properties, DOM listeners
         // and the editor's delegated action handlers remain authoritative.
         trigger.current?.append(native);
+        const refresh = () => setLabel(native.disabled && native.dataset.workbenchDisabledReason || native.dataset.workbenchTooltip || "");
+        const observer = new MutationObserver(refresh);
+        observer.observe(native, { attributes: true, attributeFilter: ["disabled", "data-workbench-disabled-reason", "data-workbench-tooltip"] });
+        refresh();
+        return () => observer.disconnect();
     }, [native]);
 
-    return <Tooltip title={uiText(native.dataset.workbenchTooltip || "")} trigger={["hover", "focus"]} destroyOnHidden>
+    return <Tooltip title={uiText(label)} trigger={["hover", "focus"]} destroyOnHidden>
         <span ref={trigger} className="local-workbench-tooltip-trigger" />
     </Tooltip>;
 }

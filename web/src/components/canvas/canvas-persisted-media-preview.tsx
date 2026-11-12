@@ -27,6 +27,7 @@ export function CanvasPersistedMediaPreview({ kind, url = "", storageKey, alt = 
     const source = { type: kind, content: url, storageKey };
     const needsResolution = needsCanvasNodeMediaPreviewResolution(source);
     const [previewUrl, setPreviewUrl] = useState(() => (needsResolution ? "" : url));
+    const [loadedThumbnail, setLoadedThumbnail] = useState("");
     const sourceKey = `${storageKey || ""}:${url}`;
     const [dimensions, setDimensions] = useState<{ source: string; width?: number; height?: number } | null>(null);
     const needsDimensions = kind === "image" && Boolean(storageKey) && !canvasServerThumbnailUrl(url, 256) && !(width && height);
@@ -61,7 +62,7 @@ export function CanvasPersistedMediaPreview({ kind, url = "", storageKey, alt = 
         };
     }, [kind, needsResolution, storageKey, url]);
 
-    if (kind === "image" ? !thumbnail : !previewUrl) return <span aria-label={t("正在恢复媒体预览")} className={`block animate-pulse bg-black/5 dark:bg-white/10 ${placeholderClassName || className}`} />;
+    if (kind === "image" ? !thumbnail : !previewUrl) return <span aria-label={t("正在恢复媒体预览")} className={`block animate-pulse bg-muted ${placeholderClassName || className}`} />;
     if (kind === "video") return <video src={previewUrl} controls={controls} preload="metadata" className={className} />;
-    return <img src={thumbnail} alt={alt} {...canvasImageRenderProps()} className={className} />;
+    return <img src={thumbnail} alt={alt} {...canvasImageRenderProps()} className={`cw-persisted-preview ${className}`} data-loaded={loadedThumbnail === thumbnail} onLoad={() => setLoadedThumbnail(thumbnail)} />;
 }

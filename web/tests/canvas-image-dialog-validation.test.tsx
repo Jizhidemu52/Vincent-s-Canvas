@@ -43,9 +43,10 @@ function dialogHarness(kind: string, name: string, extraProps: Record<string, un
                 }
             },
         },
-        antd: { App: { useApp: () => ({ modal: { confirm: (options: { onOk: () => void }) => confirmations.push(options) } }) }, Button: "Button", Modal: "Modal", InputNumber: "InputNumber", Segmented: "Segmented", Select: "Select", Checkbox: "Checkbox", Empty: "Empty", theme: { useToken: () => ({ token: {} }) } },
+        antd: { App: { useApp: () => ({ modal: { confirm: (options: { onOk: () => void }) => confirmations.push(options) } }) }, Button: "Button", Modal: "Modal", InputNumber: "InputNumber", Segmented: "Segmented", Select: "Select", Checkbox: "Checkbox", Empty: "Empty", Tooltip: "Tooltip", theme: { useToken: () => ({ token: {} }) } },
         "lucide-react": new Proxy({}, { get: (_target, key) => String(key) }),
         "@/lib/image-utils": { readImageMeta() { const reading = Promise.withResolvers<{ width: number; height: number }>(); reads.push(reading); return reading.promise; } },
+        "@/stores/use-theme-store": { useThemeStore: (select: (state: { theme: "light" }) => unknown) => select({ theme: "light" }) },
         "./use-canvas-image-thumbnail": { useCanvasImageThumbnail: (node: { id: string }, edge: number) => ({ url: `/thumb/${node.id}?w=${edge}`, key: node.id, failed: false, onError() {} }) },
     };
     const module = { exports: {} as Record<string, Function> };

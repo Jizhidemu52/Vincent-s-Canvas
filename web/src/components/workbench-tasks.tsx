@@ -104,7 +104,7 @@ export function WorkbenchTasks({ boardKey, ownerId, urlInputKey, children }: { b
 
     return <section className="wb-multitask flex h-full min-h-0 min-w-0 max-w-full flex-col bg-background text-foreground" aria-label={uiText("多任务工作区")}>
         <div className="wb-task-bar">
-            <Tooltip title={uiText("开始独立任务，当前任务继续处理")}><span className="inline-flex shrink-0"><button type="button" disabled={!ready || saving} className="wb-task-new"
+            <Tooltip title={uiText(!ready ? "正在准备工作区，请稍候" : saving ? "正在保存任务页签" : "开始独立任务，当前任务继续处理")}><span className="inline-flex shrink-0"><button type="button" disabled={!ready || saving} className="wb-task-new"
                 onClick={() => void createNewTask()}><Plus size={16} />{uiText("新建任务")}</button></span></Tooltip>
             <div ref={tabList} role="tablist" aria-label={uiText("任务列表")} className="wb-task-list">
                 {state.tasks.map(task => {
@@ -126,7 +126,7 @@ export function WorkbenchTasks({ boardKey, ownerId, urlInputKey, children }: { b
                             {status?.busy ? <LoaderCircle size={12} className="animate-spin" aria-hidden="true" /> : status?.pending ? <Circle size={10} aria-hidden="true" /> : status?.label === "已完成" ? <Check size={12} aria-hidden="true" /> : null}
                             <span>{title}</span><span className="text-muted-foreground">{statusText}</span>
                         </button></span></Tooltip>
-                        {task.id !== DEFAULT_WORKBENCH_TASK && <Tooltip title={uiText("仅关闭已结束的页签，记录和原图仍保留")}><span className="inline-flex"><button type="button" aria-label={uiText("关闭任务 {number} 页签", { number: task.number })}
+                        {task.id !== DEFAULT_WORKBENCH_TASK && <Tooltip title={uiText(!ready || !status || status.ready === false ? "正在准备工作区，请稍候" : saving ? "正在保存任务页签" : status.busy || status.pending ? "原任务仍在处理或待核查，暂不能关闭页签" : "仅关闭已结束的页签，记录和原图仍保留")}><span className="inline-flex"><button type="button" aria-label={uiText("关闭任务 {number} 页签", { number: task.number })}
                             disabled={!ready || saving || !status || status.busy || status.pending || status.ready === false}
                             className="mr-1 rounded p-1 text-muted-foreground hover:bg-muted disabled:opacity-30" onClick={() => close(task.id)}><X size={12} /></button></span></Tooltip>}
                     </div>;

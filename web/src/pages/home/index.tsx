@@ -1,6 +1,6 @@
 import { uiText, useUiText, getUiLocale } from "@/lib/i18n";
 import { ArrowRight, BookOpen, ImagePlus, Info, LayoutGrid, MessageSquareText, Plus, Video } from "lucide-react";
-import { Popover } from "antd";
+import { Popover, Tooltip } from "antd";
 import { WorkbenchImage } from "@/components/workbench-image";
 import { useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -46,7 +46,7 @@ export default function IndexPage() {
             <div className="home-content">
                 <header className="wb-header">
                     <div><p className="wb-eyebrow">{uiText("TruCreate / AI 创意设计平台")}</p><h1 className="wb-title">{uiText("想法成真")}</h1><p className="wb-description">{uiText("选一个工具开始，或回到上次的画布继续创作。")}</p></div>
-                    {canvasAvailable ? <button type="button" className="wb-primary-link" disabled={!hydrated} onClick={createAndEnter}><Plus size={18} />{uiText("新建画布")}</button> : null}
+                    {canvasAvailable ? <Tooltip title={!hydrated ? uiText("正在读取画布，请稍候") : undefined}><span><button type="button" className="wb-primary-link" disabled={!hydrated} onClick={createAndEnter}><Plus size={18} />{uiText("新建画布")}</button></span></Tooltip> : null}
                 </header>
                 <HomeReleaseNote />
                 <HomeRecentNavigation />
@@ -57,7 +57,7 @@ export default function IndexPage() {
                         <h2>{uiText(title || "")}</h2><p>{uiText(description || "")}</p><span className="home-tool-action">{uiText(action || "")}<ArrowRight size={16} /></span>
                     </Link>)}
                 </section>
-                <section className="my-8" aria-label={uiText("全部工具")}><h2 className="mb-4 text-lg font-semibold">{uiText("全部工具")}</h2><div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">{navigationTools.filter(tool => tool.group !== "admin" && isModuleAvailable(flags, tools, navigationModuleKey(tool.slug) as ModuleKey)).map(tool => <Link key={tool.slug} to={tool.path} className="wb-surface flex items-center gap-2 px-4 py-3 text-sm"><tool.icon className="size-4 shrink-0" />{uiText(tool.label)}</Link>)}</div></section>
+                <section className="my-8" aria-label={uiText("全部工具")}><h2 className="mb-4 text-xl font-semibold">{uiText("全部工具")}</h2><div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">{navigationTools.filter(tool => tool.group !== "admin" && isModuleAvailable(flags, tools, navigationModuleKey(tool.slug) as ModuleKey)).map(tool => <Link key={tool.slug} to={tool.path} className="wb-surface flex items-center gap-2 px-4 py-3 text-sm"><tool.icon className="size-4 shrink-0" />{uiText(tool.label)}</Link>)}</div></section>
                 {canvasAvailable ? <section className="home-projects">
                     <div className="wb-header"><div><p className="wb-eyebrow">{uiText("继续创作")}</p><h2 className="wb-title">{uiText("最近的画布")}</h2></div><Link to="/canvas" className="home-all-link">{uiText("查看全部 ")}{summaries.length ? "(" + summaries.length + ")" : ""}<ArrowRight size={16} /></Link></div>
                     {!hydrated ? <div className="wb-grid" role="status" aria-label={uiText("正在读取画布")}>{Array.from({ length: 4 }, (_, index) => <div className="home-skeleton animate-pulse" key={index} />)}</div> : recent.length ? <div className="home-project-grid">

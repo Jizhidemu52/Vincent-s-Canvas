@@ -9,24 +9,24 @@
 .creative-card:active { transform: scale(.99); transition-duration: var(--motion-press); }
 .creative-cover { position: relative; overflow: hidden; background: var(--muted); aspect-ratio: 1.5; }
 .creative-cover > img { display: block; width: 100%; height: 100%; object-fit: cover; }
-.creative-input-cover > img { object-fit: contain; padding: 8px 8px 38px; }
+.creative-input-cover > img { object-fit: contain; padding: 8px 8px 40px; }
 .creative-cover-flow { position: absolute; inset: auto 8px 8px; display: flex; justify-content: center; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 6px; font-size: 12px; color: var(--foreground); background: color-mix(in srgb, var(--card) 85%, transparent); backdrop-filter: blur(8px); }
 .creative-cover-flow > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .creative-cover-flow > svg { flex-shrink: 0; opacity: .55; }
-.creative-card-copy { padding: 14px 15px 16px; }
-.creative-card h3 { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0; font-size: 15px; font-weight: 600; line-height: 1.5; }
+.creative-card-copy { padding: 16px 16px 16px; }
+.creative-card h3 { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0; font-size: 16px; font-weight: 600; line-height: 1.5; }
 .creative-card h3 svg { flex-shrink: 0; color: var(--muted-foreground); }
 .creative-card p { margin: 4px 0 0; color: var(--muted-foreground); font-size: 14px; line-height: 1.65; }
 .creative-note { margin: 24px 0 0; color: var(--muted-foreground); font-size: 13px; line-height: 1.8; }
 @media (max-width: 1150px) {
-    .creative-content { padding: 26px 24px; }
+    .creative-content { padding: 28px 24px; }
     .creative-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 16px; }
 }
 @media (max-width: 760px) { .creative-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 500px) {
-    .creative-content { padding: 23px 16px; }
+    .creative-content { padding: 24px 16px; }
     .creative-page .wb-header { margin-bottom: 24px; }
     .creative-grid { grid-template-columns: minmax(0, 1fr); }
-    .creative-section + .creative-section { margin-top: 25px; }
+    .creative-section + .creative-section { margin-top: 24px; }
 }
 @media (prefers-reduced-motion: reduce) { .creative-card { transition: none; } .creative-card:hover { transform: none; } }

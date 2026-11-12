@@ -28,22 +28,22 @@ export function PromptTemplateCard({ item, editable, canSubmit, onReuse, onInser
     ];
     return (
         <>
-        <article className="wb-surface flex min-h-[288px] flex-col overflow-hidden transition-colors hover:border-orange-300 dark:hover:border-orange-800" onClick={(event) => { if (!(event.target as Element).closest("button,a,[role=menuitem]")) setDetailsOpen(true); }}>
+        <article className="wb-surface flex min-h-[288px] flex-col overflow-hidden transition-colors hover:border-foreground/30" onClick={(event) => { if (!(event.target as Element).closest("button,a,[role=menuitem]")) setDetailsOpen(true); }}>
             <div className="flex items-center justify-between px-5 pt-5">
-                <span className="rounded-md bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">{targetLabel}</span>
-                <Tooltip title={item.favorite ? t("取消收藏") : t("收藏")}><Button disabled={pending} type="text" className="!size-9" aria-label={item.favorite ? t("取消收藏") : t("收藏")} icon={<Heart className={`size-4 ${item.favorite ? "fill-orange-500 text-orange-500" : ""}`} />} onClick={() => void run(onFavorite)} /></Tooltip>
+                <span className="rounded-md bg-muted px-3 py-1 text-xs font-medium text-muted-foreground">{targetLabel}</span>
+                <Tooltip title={pending ? t("正在处理，请稍候") : item.favorite ? t("取消收藏") : t("收藏")}><Button disabled={pending} type="text" className="!size-9" aria-label={item.favorite ? t("取消收藏") : t("收藏")} icon={<Heart className={`size-4 ${item.favorite ? "fill-current text-foreground" : ""}`} />} onClick={() => void run(onFavorite)} /></Tooltip>
             </div>
             <div className="flex min-h-0 flex-1 flex-col p-5 pt-3">
                 <div className="flex items-start gap-2">
-                    <div className="min-w-0 flex-1"><h2 className="line-clamp-2 text-base font-semibold leading-6 text-foreground"><button type="button" className="text-left underline-offset-4 hover:underline focus-visible:underline" onClick={() => setDetailsOpen(true)} aria-label={t("查看完整提示词：{p0}", { p0: item.title })}>{item.title}</button></h2><p className="mt-1.5 text-xs text-muted-foreground">{t("版本")} {item.version} {t("· 已使用")} {item.useCount} {t("次")}</p></div>
+                    <div className="min-w-0 flex-1"><h2 className="line-clamp-2 text-base font-semibold leading-6 text-foreground"><button type="button" className="text-left underline-offset-4 hover:underline focus-visible:underline" onClick={() => setDetailsOpen(true)} aria-label={t("查看完整提示词：{p0}", { p0: item.title })}>{item.title}</button></h2><p className="mt-2 text-xs text-muted-foreground">{t("版本")} {item.version} {t("· 已使用")} {item.useCount} {t("次")}</p></div>
                 </div>
                 <p className="mt-4 line-clamp-3 text-sm leading-6 text-muted-foreground">{item.prompt}</p>
                 <div className="mt-3 flex flex-wrap gap-1">{item.category ? <Tag color="orange">{item.category}</Tag> : null}{item.tags.slice(0, 3).map((tag) => <Tag key={tag}>{tag}</Tag>)}</div>
                 <div className="mt-auto space-y-2 pt-4">
-                    <Tooltip title={t("仅填入，不自动生成")}><Button disabled={pending} type="primary" block className="!h-10" onClick={() => void run(() => onReuse("fill"))} icon={<Send className="size-4" />}>{fillLabel}</Button></Tooltip>
+                    <Tooltip title={pending ? t("正在处理，请稍候") : t("仅填入，不自动生成")}><Button disabled={pending} type="primary" block className="!h-11" onClick={() => void run(() => onReuse("fill"))} icon={<Send className="size-4" />}>{fillLabel}</Button></Tooltip>
                     <div className="flex gap-2">
-                        <Button disabled={pending} block className="!h-10" onClick={onInsertToCanvas} icon={<Frame className="size-4" />}>{t("插入到画布")}</Button>
-                        <Dropdown disabled={pending} menu={{ items: menu.map((entry) => ({ ...entry, disabled: pending })) }} trigger={["click"]}><Tooltip title={t("更多操作")}><Button disabled={pending} className="!h-10 !w-10 shrink-0" aria-label={t("更多操作")} icon={<Ellipsis className="size-4" />} /></Tooltip></Dropdown>
+                        <Tooltip title={pending ? t("正在处理，请稍候") : undefined}><Button disabled={pending} block className="!h-9" onClick={onInsertToCanvas} icon={<Frame className="size-4" />}>{t("插入到画布")}</Button></Tooltip>
+                        <Dropdown disabled={pending} menu={{ items: menu.map((entry) => ({ ...entry, disabled: pending })) }} trigger={["click"]}><Tooltip title={pending ? t("正在处理，请稍候") : t("更多操作")}><Button disabled={pending} className="!h-9 !w-9 shrink-0" aria-label={t("更多操作")} icon={<Ellipsis className="size-4" />} /></Tooltip></Dropdown>
                     </div>
                 </div>
             </div>

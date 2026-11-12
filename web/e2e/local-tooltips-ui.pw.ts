@@ -31,11 +31,11 @@ test("all seven local button classes use AntD tooltips, including disabled and b
     const initial = await exportProject(page);
     const labels = [
         ["duplicate", "复制选中图层", "Duplicate selected layer"],
-        ["up", "图层向上移一层", "Move layer up"],
-        ["down", "图层向下移一层", "Move layer down"],
+        ["up", "已经是最上层", "Already at the top layer"],
+        ["down", "已经是最下层", "Already at the bottom layer"],
         ["delete", "删除选中图层", "Delete selected layer"],
-        ["undo", "Ctrl / ⌘ + Z", "Ctrl / ⌘ + Z"],
-        ["redo", "Ctrl / ⌘ + Shift + Z", "Ctrl / ⌘ + Shift + Z"],
+        ["undo", "还没有可撤销的操作", "No actions to undo"],
+        ["redo", "还没有可重做的操作", "No actions to redo"],
         ["visibility", "隐藏图层", "Hide layer"],
     ];
     for (const key of ["up", "down", "undo", "redo"]) await expect(button(page, key)).toBeDisabled();
@@ -52,7 +52,7 @@ test("all seven local button classes use AntD tooltips, including disabled and b
     await expect(button(page, "duplicate")).toBeFocused();
     await expect(tooltip(page)).toHaveText(["Duplicate selected layer"]);
     expect(await exportProject(page)).toEqual(initial);
-    await hover(page, control(page, "up"), "Move layer up");
+    await hover(page, control(page, "up"), "Already at the top layer");
     await page.screenshot({ path: info.outputPath("disabled-local-tooltip-en.png"), animations: "disabled" });
     await page.getByTestId("language-switch").filter({ visible: true }).first().click();
     await hover(page, control(page, "duplicate"), "复制选中图层");

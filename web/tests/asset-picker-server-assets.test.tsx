@@ -94,8 +94,8 @@ function harness(localAssets: Asset[] = [], initialMode: "single" | "single-imag
                 });
             },
         },
-        antd: { Alert: "Alert", Button: "Button", Empty: "Empty", Input: "Input", Modal: "Modal", Pagination: "Pagination", Spin: "Spin", Tag: { CheckableTag: "CheckableTag" } },
-        "lucide-react": { Search: "Search" },
+        antd: { Alert: "Alert", Button: "Button", Empty: "Empty", Input: "Input", Modal: "Modal", Pagination: "Pagination", Spin: "Spin", Tooltip: "Tooltip", Tag: { CheckableTag: "CheckableTag" } },
+        "lucide-react": { Search: "Search", ImageIcon: "ImageIcon" },
         "@/lib/utils": { cn: (...values: unknown[]) => values.filter(Boolean).join(" ") },
         "@/lib/server-asset-local": { isSupportedServerAsset, serverAssetToLocal },
         "@/lib/canvas/canvas-asset-preview": {},
@@ -141,7 +141,7 @@ describe("shared asset picker server-backed materials", () => {
     test("empty browser cache loads formal assets and inserts the original durable image reference", async () => {
         const picker = harness();
         expect(elements(picker.render()).some(node => node.props.role === "status")).toBe(true);
-        expect(picker.nodes().some(node => node.type === "Empty")).toBe(false);
+        expect(picker.nodes().some(node => node.type === "p" && node.props.children === "没有素材")).toBe(false);
         expect(picker.requests).toHaveLength(1);
         expect(picker.requests[0]).toMatchObject({ path: "/api/assets?limit=24", init: { credentials: "include" } });
         const material = serverAsset("formal-image");
@@ -187,11 +187,16 @@ describe("shared asset picker server-backed materials", () => {
         picker.render(); picker.requests[0]!.fail("素材服务暂不可用"); await picker.settle();
         const alert = picker.nodes().find(node => node.type === "Alert");
         expect(alert?.props.description).toBe("素材服务暂不可用");
-        expect(picker.nodes().some(node => node.type === "Empty")).toBe(false);
+        expect(picker.nodes().some(node => node.type === "p" && node.props.children === "没有素材")).toBe(false);
         alert!.props.action.props.onClick(); picker.render();
         picker.requests[1]!.succeed([]); await picker.settle();
         expect(picker.nodes().some(node => node.type === "Alert")).toBe(false);
-        expect(picker.nodes().some(node => node.type === "Empty")).toBe(true);
+        const empty = picker.nodes().find(node => node.props.className?.split(" ").includes("wb-empty"));
+        expect(empty).toBeDefined();
+        const emptyContent = elements(empty);
+        expect(emptyContent.some(node => node.type === "p" && node.props.children === "没有素材")).toBe(true);
+        expect(emptyContent.some(node => node.type === "ImageIcon" && node.props["aria-hidden"])).toBe(true);
+        expect(emptyContent.some(node => node.type === "Button" && node.props.children === "刷新" && typeof node.props.onClick === "function")).toBe(true);
     });
 
     test("local-only trial assets remain visible and insertable when the server is unavailable", async () => {

@@ -215,7 +215,7 @@ function CanvasRefreshShell() {
     const themeKey = useThemeStore(state => state.theme);
     const theme = canvasThemes[themeKey];
     return (
-        <main className="cw-workspace relative h-full min-h-0 overflow-hidden" data-theme={themeKey} style={{ background: theme.canvas.background, color: theme.node.text }} aria-label={t("正在加载画布")}>
+        <main className="cw-workspace relative h-full min-h-0 overflow-hidden" data-theme={themeKey} style={{ background: theme.canvas.background, color: theme.node.text, "--cw-panel": theme.node.panel, "--cw-text": theme.node.text, "--cw-muted": theme.node.muted, "--cw-border": theme.node.stroke, "--cw-soft": theme.toolbar.itemHover, "--cw-active": theme.node.activeStroke, "--cw-inverse": theme.node.panel, "--cw-danger": theme.node.danger } as CSSProperties} aria-label={t("正在加载画布")}>
             <div
                 className="absolute inset-0"
                 style={{
@@ -3076,7 +3076,7 @@ function WirelessCanvasPage({ sessionFlushRef, sessionRecoveryRef, writable }: {
 
     return (
         <CanvasMentionImagesProvider images={quickMentionImages} scopeKey={`${editorOwner}:${projectId}:${activeChatId || ""}`}>
-        <main className="cw-workspace relative flex h-full min-h-0 overflow-hidden" onFocusCapture={event => beginHistoryEditing(event.target)} onBlurCapture={finishHistoryEditing} data-theme={canvasThemeKey} style={{ background: theme.canvas.background, color: theme.node.text, "--cw-create-width": `${clampCanvasPanelWidth("create", createPanelWidth)}px`, "--cw-chat-width": `${clampCanvasPanelWidth("chat", chatPanelWidth)}px`, "--cw-prompt-height": `${clampCanvasPromptHeight(createPromptHeight)}px` } as CSSProperties}>
+        <main className="cw-workspace relative flex h-full min-h-0 overflow-hidden" onFocusCapture={event => beginHistoryEditing(event.target)} onBlurCapture={finishHistoryEditing} data-theme={canvasThemeKey} style={{ background: theme.canvas.background, color: theme.node.text, "--cw-panel": theme.node.panel, "--cw-text": theme.node.text, "--cw-muted": theme.node.muted, "--cw-border": theme.node.stroke, "--cw-soft": theme.toolbar.itemHover, "--cw-active": theme.node.activeStroke, "--cw-inverse": theme.node.panel, "--cw-danger": theme.node.danger, "--cw-create-width": `${clampCanvasPanelWidth("create", createPanelWidth)}px`, "--cw-chat-width": `${clampCanvasPanelWidth("chat", chatPanelWidth)}px`, "--cw-prompt-height": `${clampCanvasPromptHeight(createPromptHeight)}px` } as CSSProperties}>
             <aside data-testid="canvas-left-generator-rail" data-panel-closing={quickPanelPresence.closing && isCanvasDesktopLayout || undefined} inert={quickPanelPresence.closing && isCanvasDesktopLayout} className={`cw-create-panel ${quickPanelPresence.present && isCanvasDesktopLayout ? "cw-surface" : "is-collapsed"} ${assistantOpen && !quickPanelPresence.closing ? "is-hidden" : ""}`}>
                 <div className="cw-tabs" role="tablist" aria-label={t("创作模式")}>
                     <Tooltip title={t("直接填写提示词和参考图，创建生成任务")}><button role="tab" aria-selected={!assistantOpen} type="button" onClick={openQuickGenerateFromToolbar}>{t("创建")}</button></Tooltip>

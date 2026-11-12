@@ -94,11 +94,11 @@ export function CanvasVideoNodeContent({ node, theme, renderQuality }: CanvasVid
             // pixels when zoomed, so dragging the picture never steals seeking.
             style={{ bottom: "min(100%, calc(56px * var(--canvas-node-ui-scale, 1)))", touchAction: "none" }}
             onPointerDown={() => { hoverPreview.current = false; }} /></Tooltip> : null}
-        {duration ? <span className="pointer-events-none absolute right-2 top-2 rounded px-1.5 py-0.5 text-xs tabular-nums" style={{ color: theme.node.text, background: theme.toolbar.panel }}>{duration}</span> : null}
+        {duration ? <span className="pointer-events-none absolute right-2 top-2 rounded px-2 py-1 text-xs tabular-nums" style={{ color: theme.node.text, background: theme.toolbar.panel }}>{duration}</span> : null}
         {interactive && playback.status === "preparing" ? <div role="status" className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-3 text-center text-xs" style={{ color: theme.node.text, background: theme.node.fill }}><LoaderCircle className="size-5 animate-spin" />{t("正在准备兼容预览，最多等待 150 秒；原件未更改。")}</div> : null}
         {interactive && playback.error ? <div role="alert" data-canvas-no-zoom className="absolute inset-x-2 bottom-2 z-10 rounded p-2 text-xs" style={{ color: theme.node.text, background: theme.toolbar.panel }} onPointerDown={event => event.stopPropagation()}><p>{t(playback.error)}</p><button type="button" className="mt-1 underline" onClick={playback.retry}>{t("重试预览")}</button></div> : null}
-        {interactive && playback.status === "local" ? <span className="pointer-events-none absolute left-2 top-2 max-w-[65%] rounded px-1.5 py-0.5 text-[10px]" style={{ color: theme.node.text, background: theme.toolbar.panel }}>{t("仅有本地原件，兼容性取决于浏览器")}</span> : null}
-        {interactive && playback.width && playback.height ? <span className="pointer-events-none absolute bottom-2 left-2 rounded px-1.5 py-0.5 text-xs tabular-nums" style={{ color: theme.node.text, background: theme.toolbar.panel }}>{playback.width}x{playback.height}</span> : null}
+        {interactive && playback.status === "local" ? <span className="pointer-events-none absolute left-2 top-2 max-w-[65%] rounded px-2 py-1 text-xs" style={{ color: theme.node.text, background: theme.toolbar.panel }}>{t("仅有本地原件，兼容性取决于浏览器")}</span> : null}
+        {interactive && playback.width && playback.height ? <span className="pointer-events-none absolute bottom-2 left-2 rounded px-2 py-1 text-xs tabular-nums" style={{ color: theme.node.text, background: theme.toolbar.panel }}>{playback.width}x{playback.height}</span> : null}
         {!interactive && posterUrl ? <span className="pointer-events-none absolute left-2 top-2 rounded p-1" style={{ color: theme.node.text, background: theme.toolbar.panel }}><Play className="size-3" /></span> : null}
     </div>;
 }

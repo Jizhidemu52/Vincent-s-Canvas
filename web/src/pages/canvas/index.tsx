@@ -118,17 +118,17 @@ export default function CanvasPage() {
         return () => window.removeEventListener("keydown", escape);
     }, [setSelectedIds]);
 
-    if (hydrated && (mode === "new" || mode === "recent")) return <main className="flex h-full items-center justify-center bg-background text-sm text-stone-500">{t("正在打开画布...")}</main>;
+    if (hydrated && (mode === "new" || mode === "recent")) return <main className="flex h-full items-center justify-center bg-background text-sm text-muted-foreground">{t("正在打开画布...")}</main>;
 
     return (
         <main ref={scrollRef} className="wb-page h-full overflow-auto">
-            <div className="mx-auto flex w-full max-w-[1920px] flex-col gap-6 p-5 sm:p-8">
+            <div className="mx-auto flex w-full max-w-[var(--wb-content-width,1440px)] flex-col gap-6 p-5 sm:p-8">
                 <header className="wb-page-header">
                     <div>
                         <p className="wb-eyebrow">{chatMode ? t("在线功能") : t("画布库")}</p>
                         <h1 className="wb-title">{chatMode ? t("对话改图") : t("自由画布")}</h1>
                         {!chatMode ? <p className="wb-description">{t("{count} 个画布", { count: projects.length })} · <CanvasSaveStatus /></p> : null}
-                        {chatMode ? <p className="mt-3 max-w-2xl text-sm leading-6 text-stone-500 dark:text-stone-400">{t("选择或新建一个画布后，助手会围绕当前项目内容进行对话、拆解提示词和生成建议，后台会把相关任务归入画布项目历史。")}</p> : null}
+                        {chatMode ? <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">{t("选择或新建一个画布后，助手会围绕当前项目内容进行对话、拆解提示词和生成建议，后台会把相关任务归入画布项目历史。")}</p> : null}
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                         <Tooltip title={t("每次新建一张独立教学画布，包含十类图文案例；不改旧项目、不自动生成。 ")}><Button disabled={!hydrated} loading={creatingExample} icon={<BookOpen className="size-4" />} onClick={() => void createExample()}>{t("新建教学画布")}</Button></Tooltip>
@@ -160,8 +160,8 @@ export default function CanvasPage() {
                 </div> : null}
 
                 {chatMode ? (
-                    <section className="grid gap-3 rounded-lg border border-orange-200 bg-orange-50 p-4 text-sm text-orange-950 dark:border-orange-900 dark:bg-orange-950/30 dark:text-orange-100 md:grid-cols-[auto_minmax(0,1fr)]">
-                        <div className="flex size-10 items-center justify-center rounded-full bg-orange-600 text-white">
+                    <section className="grid gap-3 rounded-xl border border-border bg-muted p-4 text-sm text-foreground md:grid-cols-[auto_minmax(0,1fr)]">
+                        <div className="flex size-10 items-center justify-center rounded-full bg-background text-foreground">
                             <MessageSquareText className="size-5" />
                         </div>
                         <div>
@@ -181,7 +181,7 @@ export default function CanvasPage() {
                     <section className="wb-surface wb-empty min-h-[360px]">
                         <LayoutGrid className="mx-auto mb-4 size-10 text-muted-foreground" aria-hidden />
                         <h2 className="text-xl font-medium">{t("还没有画布")}</h2>
-                        <p className="mt-3 text-sm text-stone-500">{chatMode ? t("新建一个对话画布后，就可以围绕项目素材持续讨论和生成。") : t("新建一个画布后，就可以独立保存节点、连线和画布外观。")}</p>
+                        <p className="mt-3 text-sm text-muted-foreground">{chatMode ? t("新建一个对话画布后，就可以围绕项目素材持续讨论和生成。") : t("新建一个画布后，就可以独立保存节点、连线和画布外观。")}</p>
                         <Button type="primary" className="mt-6" icon={<Plus className="size-4" />} onClick={createAndEnter}>
                             {chatMode ? t("新建对话画布") : t("新建画布")}
                         </Button>

@@ -274,6 +274,8 @@ export async function mountPlacement(root, services) {
     }
 
     function updateToolbar() {
+        query("[data-action=undo]").dataset.workbenchDisabledReason = "还没有可撤销的操作";
+        query("[data-action=redo]").dataset.workbenchDisabledReason = "还没有可重做的操作";
         query("[data-action=undo]").disabled = !undo.length;
         query("[data-action=redo]").disabled = !redo.length;
         const layer = selected();
@@ -282,6 +284,10 @@ export async function mountPlacement(root, services) {
         query("[data-action=duplicate]").disabled = !layer || state.layers.length >= MAX_LAYERS;
         query("[data-action=up]").disabled = !layer || index >= state.layers.length - 1;
         query("[data-action=down]").disabled = !layer || index <= 0;
+        query("[data-action=duplicate]").dataset.workbenchDisabledReason = !layer ? "请先选择图案图层" : "图层数量已达上限";
+        query("[data-action=delete]").dataset.workbenchDisabledReason = "请先选择图案图层";
+        query("[data-action=up]").dataset.workbenchDisabledReason = !layer ? "请先选择图案图层" : "已经是最上层";
+        query("[data-action=down]").dataset.workbenchDisabledReason = !layer ? "请先选择图案图层" : "已经是最下层";
         query("[data-action=export-png]").disabled = exporting;
         if (query("[data-action=save-asset]")) query("[data-action=save-asset]").disabled = exporting;
         const aiButton = query("[data-action=generate-ai]");

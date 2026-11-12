@@ -132,7 +132,7 @@ export function CanvasConfigNodePanel({ node, isRunning, linkedTaskCount = 0, li
                 <div className="cursor-default" onPointerDown={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()}>
                     <Segmented
                         size="small"
-                        className="canvas-config-mode !rounded-md !p-0.5"
+                        className="canvas-config-mode !rounded-md !p-1"
                         value={mode}
                         disabled={isRunning}
                         onChange={(value) => {
@@ -178,7 +178,7 @@ export function CanvasConfigNodePanel({ node, isRunning, linkedTaskCount = 0, li
                 </div>
             </div>
 
-            <div className="mb-2 text-[11px] leading-4" style={{ color: theme.node.muted }}>
+            <div className="mb-2 text-xs leading-4" style={{ color: theme.node.muted }}>
                 {showInputMode ? <div className="mb-1 cursor-default" onMouseDown={event => event.stopPropagation()}>
                     <Segmented block size="small" aria-label={t("图片执行方式")} disabled={isRunning}
                         value={separateImages ? "per-image" : "combined"}
@@ -197,7 +197,7 @@ export function CanvasConfigNodePanel({ node, isRunning, linkedTaskCount = 0, li
                 {mode === "image" && !blend && (!node.metadata?.promptInput || node.metadata.promptInput.scene === "free-optimize") ? <PromptOptimizeButton scopeKey={node.id} config={config} prompt={node.metadata?.composerContent ?? node.metadata?.prompt ?? ""} references={references} operationType={toolKey === "canvas-image" ? "image_generation" : "inpaint"} toolKey={toolKey} disabled={isRunning} onBusyChange={setOptimizing} onApply={(value, _compilation, input) => { composerRef.current?.replace(value); onConfigChange(node.id, { prompt: value, composerContent: value, promptInput: input, compiledPrompt: value }); }} /> : null}
                 {node.metadata?.optimizingPrompt ? <span role="status" className="text-xs">{t("正在优化提示词…")}</span> : null}
                 {mode !== "audio" ? <CanvasConfigImageReferences node={node} references={references} maximum={referencePolicyForModel(model, profile).maximum} labels={referencePresentation.trayLabels} disabled={isRunning} onChange={onConfigChange} /> : null}
-                {mode === "video" && (inputSummary.videoCount > 0 || inputSummary.audioCount > 0) ? <div className="flex flex-wrap gap-1.5">
+                {mode === "video" && (inputSummary.videoCount > 0 || inputSummary.audioCount > 0) ? <div className="flex flex-wrap gap-2">
                     {inputSummary.videoCount > 0 ? <InputChip label={t("已连视频")} value={t("{value1} 个", { value1: inputSummary.videoCount })} style={chipStyle} /> : null}
                     {inputSummary.audioCount > 0 ? <InputChip label={t("已连音频")} value={t("{value1} 个", { value1: inputSummary.audioCount })} style={chipStyle} /> : null}
                 </div> : null}
@@ -230,7 +230,7 @@ export function CanvasConfigNodePanel({ node, isRunning, linkedTaskCount = 0, li
                 onMouseDown={(event) => event.stopPropagation()}
                 onClick={() => { if (workflow) { if (isRunning) workflow.onStop(); else workflow.onRun(); } else if (isRunning) onStop(node.id); else if (canGenerate) onGenerate(node.id); }}
             >
-                <span className="inline-flex items-center gap-1.5">
+                <span className="inline-flex items-center gap-2">
                     {workflow ? <>{isRunning ? <Square className="size-4" /> : <Play className="size-4" />}<span>{isRunning ? t("停止工作流") : workflow.status === "success" ? t("重新运行工作流") : workflow.status === "failed" || workflow.status === "stopped" ? t("继续工作流") : t("运行工作流")}</span></> : isRunning ? (
                         <>
                             <LoaderCircle className="size-4 animate-spin" />
@@ -288,7 +288,7 @@ export function configReferencePresentation(references: ImageReferenceItem[], in
 function InputChip({ label, value, style }: { label: string; value: string; style: CSSProperties }) {
     const t = useUiText();
     return (
-        <div className="inline-flex h-7 items-center gap-1 rounded-md border px-2 text-[11px]" style={style}>
+        <div className="inline-flex h-7 items-center gap-1 rounded-md border px-2 text-xs" style={style}>
             <span>{label}</span>
             <span className="font-medium">{value}</span>
         </div>

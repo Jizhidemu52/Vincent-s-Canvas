@@ -1711,7 +1711,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                         <p className="whitespace-pre-wrap break-words" style={{ color: theme.node.text }}>{report.summary}</p>
                         <ul className="space-y-2">{report.checks.map((check, checkIndex) => <li key={checkIndex} className="break-words">
                             <span className="font-medium">{check.result === "pass" ? "可见符合" : check.result === "warning" ? "发现偏差" : "无法确认"} · {check.criterion}</span>
-                            <p className="mt-0.5 whitespace-pre-wrap">{check.evidence}</p>
+                            <p className="mt-1 whitespace-pre-wrap">{check.evidence}</p>
                         </li>)}</ul>
                         <p>视觉辅助检查，不是像素或生产验收认证。</p>
                         {report.checks.some(check => check.result === "warning") ? <Button size="small" disabled={isRunning || reviewingResults.has(key)} onClick={() => handleCorrectionDraft(activeSession!.id, source.id, attachment.id)}>根据问题创建纠正草稿</Button> : null}
@@ -1866,7 +1866,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                     {chatFollow.hasNewMessages ? <div className="flex shrink-0 justify-center"><button type="button" className="px-3 py-1 text-xs hover:underline" onClick={chatFollow.scrollToBottom}>↓ 新消息</button></div> : null}
                     {latestResult && latestResult.id !== dismissedResult ? <div role="status" className="mx-4 mb-2 flex items-center gap-2 text-xs" style={{ color: theme.node.text }}><CanvasPersistedMediaPreview kind={latestResult.mediaType} url={latestResult.url} storageKey={latestResult.storageKey} alt="" className="size-9 rounded object-cover" /><button type="button" className="flex-1 text-left hover:underline" onClick={() => focusResult(latestResult.id)}>结果已放入画布 · 点击收起并定位</button><button type="button" aria-label="关闭结果提示" onClick={() => setDismissedResult(latestResult.id)}><X size={14} /></button></div> : null}
                     {selectedReferences.some(item => !item.dataUrl) ? (
-                        <div className="thin-scrollbar flex max-w-full gap-1.5 overflow-x-auto px-3 pb-1">
+                        <div className="thin-scrollbar flex max-w-full gap-2 overflow-x-auto px-3 pb-1">
                             {selectedReferences.filter(item => !item.dataUrl).map((item) => (
                                 <AssistantReferenceChip
                                     key={item.id}
@@ -1882,7 +1882,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                                 <CanvasPersistedMediaPreview kind="image" url={videoConfirmation.selectedImage.url} storageKey={videoConfirmation.selectedImage.storageKey} alt={t("已选首帧")} className="size-12 rounded-md object-cover" />
                                 <div className="min-w-0 flex-1">
                                     <div className="text-sm font-medium" style={{ color: theme.node.text }}>{t("确认用这张图生成视频")}</div>
-                                    <div className="mt-0.5 text-xs" style={{ color: theme.node.muted }}>{t("它将作为首帧；可先修改下方提示词与视频预设。")}</div>
+                                    <div className="mt-1 text-xs" style={{ color: theme.node.muted }}>{t("它将作为首帧；可先修改下方提示词与视频预设。")}</div>
                                 </div>
                                 <Button size="small" onClick={() => setVideoConfirmation(null)}>{t("返回选图")}</Button>
                                 <Button size="small" type="primary" disabled={isRunning} onClick={() => void confirmVideoFromSelectedImage()}>{t("确认生成视频")}</Button>
@@ -1890,7 +1890,7 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                         </div>
                     ) : null}
                     {onlineEnabled && !effectiveConfig.textModel ? <p role="status" className="mx-4 mb-2 text-xs" style={{ color: theme.node.muted }}>{businessConfigStatus === "idle" || businessConfigStatus === "loading" ? t("正在读取对话配置…") : t("对话服务暂不可用，请联系管理员检查后台配置。")}</p> : null}
-                    <div className="mx-4 mb-2 flex items-center justify-between gap-2 text-[11px]" style={{ color: theme.node.muted }} data-testid="canvas-auto-context">
+                    <div className="mx-4 mb-2 flex items-center justify-between gap-2 text-xs" style={{ color: theme.node.muted }} data-testid="canvas-auto-context">
                         <span>{autoContext ? t("仅下一条消息读取当前视野（最多 5 张图）") : t("仅读取当前图与所选素材")}</span>
                         <button type="button" className="shrink-0 hover:underline" aria-pressed={autoContext} onClick={() => setAutoContext((current) => !current)}>{autoContext ? t("取消") : t("让助手看当前视野")}</button>
                     </div>
@@ -1911,9 +1911,9 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
                         disabled={!onlineEnabled || !effectiveConfig.textModel}
                         submitDisabled={attachmentsLoading || attachmentDrop.reading}
                         prompt={prompt}
-                        imageTarget={<div className="flex flex-wrap items-center gap-2 text-[11px]" style={{ color: theme.node.muted }}>
-                            {draftFocus ? <button type="button" className="py-1 text-[11px] hover:underline" onClick={() => void openMaskDialog(draftFocus.id)}>{t("圈选修改")}</button> : null}
-                            {activeSession?.imageAgentRegion ? <div className="flex items-center gap-2 text-[11px]"><span>{t("已圈选局部修改区域")}</span><button type="button" onClick={() => updateSession(activeSession.id, session => ({ ...session, imageAgentRegion: undefined }))}>{t("清除选区")}</button></div> : null}
+                        imageTarget={<div className="flex flex-wrap items-center gap-2 text-xs" style={{ color: theme.node.muted }}>
+                            {draftFocus ? <button type="button" className="py-1 text-xs hover:underline" onClick={() => void openMaskDialog(draftFocus.id)}>{t("圈选修改")}</button> : null}
+                            {activeSession?.imageAgentRegion ? <div className="flex items-center gap-2 text-xs"><span>{t("已圈选局部修改区域")}</span><button type="button" onClick={() => updateSession(activeSession.id, session => ({ ...session, imageAgentRegion: undefined }))}>{t("清除选区")}</button></div> : null}
                         </div>}
                         attachments={generationReferences.map((item) => ({ id: item.id, name: item.title, url: item.dataUrl || "", storageKey: item.storageKey, mediaType: "image" as const }))}
                         attachmentPreview={<div className="min-w-0 [&_.cw-reference-preview]:!object-contain">
@@ -1986,14 +1986,14 @@ export const CanvasAssistantPanel = memo(function CanvasAssistantPanel({
             data-canvas-shortcuts="ignore"
             initial={reducedMotion ? false : { width: 0, opacity: 0 }}
             animate={{ width: closing ? 0 : width + 1, opacity: closing ? 0 : 1 }}
-            transition={{ duration: reducedMotion ? 0 : PANEL_MOTION_SECONDS, ease: [0.22, 1, 0.36, 1] }}
+            transition={{ duration: reducedMotion ? 0 : PANEL_MOTION_SECONDS, ease: [0.2, 0.7, 0.2, 1] }}
             style={{ overflow: "clip", pointerEvents: closing ? "none" : undefined }}
         >
             <motion.aside
                 className="relative flex min-h-0 shrink-0 flex-col border-l"
                 initial={reducedMotion ? false : { x: 48 }}
                 animate={{ x: closing ? 28 : 0 }}
-                transition={{ duration: reducedMotion ? 0 : PANEL_MOTION_SECONDS, ease: [0.22, 1, 0.36, 1] }}
+                transition={{ duration: reducedMotion ? 0 : PANEL_MOTION_SECONDS, ease: [0.2, 0.7, 0.2, 1] }}
                 style={{ width, background: theme.node.panel, borderColor: theme.node.stroke, color: theme.node.text }}
             >
                 <header className="cw-tabs" role="tablist" aria-label={t("创作方式")}>
@@ -2154,20 +2154,20 @@ function AssistantHistory({ sessions, activeSession, onOpen, onDelete, onRename 
                 {sessions.length ? t("{value1} 条历史", { value1: sessions.length }) : t("暂无历史")}
             </div>
             {visible.map((session) => (
-                <div key={session.id} className="rounded-lg border px-2.5 py-1.5 transition" style={{ borderColor: session.id === activeSession?.id ? theme.node.text : theme.node.stroke, background: "transparent", color: theme.node.text }}>
+                <div key={session.id} className="rounded-lg border px-3 py-2 transition" style={{ borderColor: session.id === activeSession?.id ? theme.node.text : theme.node.stroke, background: "transparent", color: theme.node.text }}>
                     <div className="flex items-center gap-2">
                         <div className="min-w-0 flex-1">
-                            <div className="flex min-w-0 items-center gap-1.5">
+                            <div className="flex min-w-0 items-center gap-2">
                                 {session.id === activeSession?.id ? (
-                                    <span className="shrink-0 text-[10px] font-medium" style={{ color: theme.node.text }}>
+                                    <span className="shrink-0 text-xs font-medium" style={{ color: theme.node.text }}>
                                         {t("当前")}</span>
                                 ) : null}
                                 {editing?.id === session.id ? <Input autoFocus value={editing.title} onChange={event => setEditing({ id: session.id, title: event.target.value })} onBlur={saveName} onKeyDown={event => { if (event.nativeEvent.isComposing || event.keyCode === 229) return; if (event.key === "Enter") saveName(); if (event.key === "Escape") setEditing(null); }} /> : <Tooltip title={t("双击重命名")}><button type="button" className="truncate text-sm font-medium leading-5" onDoubleClick={() => setEditing({ id: session.id, title: session.title })}>{session.title}</button></Tooltip>}
                             </div>
-                            <div className="truncate text-[11px] leading-4 opacity-65">{sessionPreview(session)}</div>
+                            <div className="truncate text-xs leading-4 opacity-65">{sessionPreview(session)}</div>
                         </div>
                         <div className="flex shrink-0 items-center gap-1">
-                            <span className="text-[10px] opacity-55">{formatSessionTime(session.updatedAt || session.createdAt)}</span>
+                            <span className="text-xs opacity-55">{formatSessionTime(session.updatedAt || session.createdAt)}</span>
                             <Button size="small" className="!h-6 !px-2" onClick={() => onOpen(session.id)}>
                                 {t("进入")}</Button>
                             <Tooltip title={t("删除记录")}>
@@ -2279,10 +2279,10 @@ function AssistantReferenceChip({ item, label, onRemove, onPreview, onSelect, di
     const text = (item.text || item.title).replace(/\s+/g, " ").trim().slice(0, 1) || "文";
     const preview = <>
         <CanvasPersistedMediaPreview kind="image" url={item.dataUrl} storageKey={item.storageKey} alt={item.title} className="size-full rounded-lg object-contain" />
-        {displayLabel ? <span className="absolute bottom-1 left-1 rounded px-1 py-0.5 text-[10px] font-medium leading-none" style={{ background: theme.node.panel, color: theme.node.text }}>{displayLabel}</span> : null}
+        {displayLabel ? <span className="absolute bottom-1 left-1 rounded px-1 py-1 text-xs font-medium leading-none" style={{ background: theme.node.panel, color: theme.node.text }}>{displayLabel}</span> : null}
     </>;
     return (
-        <div className="group/chip relative inline-flex max-w-[150px] shrink-0 items-center gap-1.5 rounded-lg text-sm" style={{ color: theme.node.text }}>
+        <div className="group/chip relative inline-flex max-w-[150px] shrink-0 items-center gap-2 rounded-lg text-sm" style={{ color: theme.node.text }}>
             {item.dataUrl || item.storageKey ? (
                 onPreview || onSelect ? <button type="button" disabled={disabled} onClick={onPreview || onSelect} aria-haspopup={onPreview ? "dialog" : undefined} aria-label={onPreview ? `${t("查看大图")} · ${displayLabel || item.title}` : t("选择 {label} 作为编辑目标", { label: displayLabel || item.title })} className={`relative block size-20 shrink-0 rounded-lg border focus-visible:outline-2${onPreview ? " cursor-zoom-in" : ""}`} style={{ borderColor: theme.node.stroke, outlineColor: theme.canvas.selectionStroke }}>{preview}</button>
                     : <span className="relative block size-20 shrink-0 rounded-lg border" style={{ borderColor: theme.node.stroke }}>{preview}</span>

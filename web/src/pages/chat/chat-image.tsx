@@ -33,14 +33,14 @@ export const ChatImage = memo(function ChatImage({ image, label, disabled, onPla
         <div className="px-1 pt-2 text-xs text-muted-foreground">
             <span className="block break-words">{displayLabel}</span>
         </div>
-        {onAction ? <div className="flex flex-wrap gap-0.5 py-1 text-xs text-muted-foreground">
+        {onAction ? <div className="flex flex-wrap gap-1 py-1 text-xs text-muted-foreground">
             <button type="button" aria-label={`${uiText("复制图片")} · ${displayLabel}`} disabled={unavailable} onClick={() => onAction("copy", image.id)} className="min-h-8 rounded px-2 py-1 hover:bg-background disabled:opacity-50">{uiText("复制图片")}</button>
             <button type="button" aria-label={`${uiText("下载原图")} · ${displayLabel}`} disabled={unavailable} onClick={() => onAction("download", image.id)} className="min-h-8 rounded px-2 py-1 hover:bg-background disabled:opacity-50">{uiText("下载原图")}</button>
             {!compareDisabledReason ? <button type="button" disabled={unavailable} onClick={() => onAction("compare", image.id)} className="min-h-8 rounded px-2 py-1 hover:bg-background disabled:opacity-50">{uiText("对比原图")}</button> : null}
             {onMask ? <button type="button" disabled={unavailable} onClick={onMask} className="min-h-8 rounded px-2 py-1 hover:bg-background disabled:opacity-50">{uiText("涂选修改区域")}</button> : null}
             {onPlace ? <button type="button" disabled={unavailable} onClick={onPlace} className="min-h-8 rounded px-2 py-1 hover:bg-background disabled:opacity-50">{uiText("放入画布")}</button> : null}
         </div> : null}
-        {onMask ? <p className="px-1 text-[11px] leading-5 text-muted-foreground">{uiText("只改局部时，先涂选；选区外保留原图")}</p> : null}
+        {onMask ? <p className="px-1 text-[12px] leading-5 text-muted-foreground">{uiText("只改局部时，先涂选；选区外保留原图")}</p> : null}
         {previewOpen ? <ConversationImagePreview image={{ ...image, label, name: image.name || label }} onClose={() => setPreviewOpen(false)} /> : null}
     </div>;
 });

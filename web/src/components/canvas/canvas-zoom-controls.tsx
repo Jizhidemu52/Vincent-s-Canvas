@@ -77,7 +77,7 @@ export const CanvasZoomControls = memo(function CanvasZoomControls({ scale, onSc
     return (
         <div className="cw-zoom-controls" onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
                 <button type="button" className="cw-icon" aria-label={t("缩小画布")} onClick={() => onScaleChange(clampCanvasZoom(scale / 1.25))}><Minus size={16} /></button>
-                <Popover trigger="click" placement="topRight" arrow={false} open={viewMenuOpen} onOpenChange={open => { if (!open) finishScaleAdjustment(); setViewMenuOpen(open); }} styles={{ container: { background: theme.node.panel, border: `1px solid ${theme.toolbar.border}`, borderRadius: 12, padding: 6 } }} content={<div className="cw-view-menu" style={menuStyle}>
+                <Popover trigger="click" placement="topRight" arrow={false} open={viewMenuOpen} onOpenChange={open => { if (!open) finishScaleAdjustment(); setViewMenuOpen(open); }} styles={{ container: { background: theme.node.panel, border: `1px solid ${theme.toolbar.border}`, borderRadius: 12, padding: 8 } }} content={<div className="cw-view-menu" style={menuStyle}>
                     <div className="cw-view-heading"><span>{t("画布缩放")}</span><span>{Math.round(displayedScale * 100)}%</span></div>
                     <label className="flex items-center gap-2 px-2 py-1 text-sm">{t("精确比例")}
                         <input aria-label={t("画布缩放百分比")} type="number" min={MIN_CANVAS_ZOOM * 100} max={MAX_CANVAS_ZOOM * 100} step={1}

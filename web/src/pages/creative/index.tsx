@@ -30,7 +30,7 @@ export default function CreativePage() {
     const pinButton = (key: string, title: string) => {
         const isPinned = pinned.includes(key);
         const Icon = isPinned ? PinOff : Pin;
-        return <button type="button" className="m-3 mt-0 inline-flex min-h-8 items-center justify-center gap-1.5 self-end rounded-md px-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline focus-visible:outline-2" aria-label={uiText(isPinned ? "取消固定{label}" : "固定{label}", { label: uiText(title) })} aria-pressed={isPinned} onClick={() => togglePin(key)}><Icon size={14} />{uiText(isPinned ? "取消固定" : "固定到首页最近使用")}</button>;
+        return <button type="button" className="m-3 mt-0 inline-flex min-h-8 items-center justify-center gap-2 self-end rounded-md px-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline focus-visible:outline-2" aria-label={uiText(isPinned ? "取消固定{label}" : "固定{label}", { label: uiText(title) })} aria-pressed={isPinned} onClick={() => togglePin(key)}><Icon size={14} />{uiText(isPinned ? "取消固定" : "固定到首页最近使用")}</button>;
     };
 
     return <main className="wb-page creative-page h-full overflow-y-auto">

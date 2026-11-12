@@ -12,7 +12,7 @@ import "./canvas-quick-settings-popovers.css";
 
 type Profile = ReturnType<typeof imageModelProfile>;
 type SettingChange = (key: "quality" | "size" | "count" | "imageOptions", value: string) => void;
-type Props = { config: AiConfig; profile: Profile; theme: CanvasTheme; referenceCount: number; uploadContextKey?: string; disabled: boolean; onConfigChange: SettingChange; onConfigNormalize?: SettingChange };
+type Props = { config: AiConfig; profile: Profile; theme: CanvasTheme; referenceCount: number; uploadContextKey?: string; disabled: boolean; disabledReason?: string; onConfigChange: SettingChange; onConfigNormalize?: SettingChange };
 const ignoreConfigNormalization: SettingChange = () => undefined;
 type Parameter = "size" | "quality" | "advanced";
 
@@ -61,9 +61,9 @@ export function CanvasQuickQualityOptions({ config, profile, referenceCount, onC
         {profile.resolutions.length > 0 && !gif ? <section>
             <h4>{t("清晰度 / 分辨率")}</h4>
             <div className="cw-parameter-choices" role="group" aria-label={t("清晰度 / 分辨率")}>
-                {profile.resolutions.map(value => <button key={value} type="button" aria-pressed={resolution === value} disabled={exactPixels}
+                {profile.resolutions.map(value => <Tooltip key={value} title={exactPixels ? t("精确像素 {size} 优先于分辨率档位；改选宽高比或自动后启用。", { size: settings.size.replace("x", " × ") }) : undefined}><span className="flex"><button className="w-full" type="button" aria-pressed={resolution === value} disabled={exactPixels} style={exactPixels ? { pointerEvents: "none" } : undefined}
                     data-usage-control="resolution" data-usage-value={value}
-                    onClick={() => onConfigChange("imageOptions", JSON.stringify({ ...options, resolution: value }))}>{value.toUpperCase()}</button>)}
+                    onClick={() => onConfigChange("imageOptions", JSON.stringify({ ...options, resolution: value }))}>{value.toUpperCase()}</button></span></Tooltip>)}
             </div>
             {exactPixels ? <p role="status">{t("精确像素 {size} 优先于分辨率档位；改选宽高比或自动后启用。", { size: settings.size.replace("x", " × ") })}</p> : null}
         </section> : null}
@@ -79,18 +79,18 @@ export function CanvasQuickQualityOptions({ config, profile, referenceCount, onC
     </div>;
 }
 
-function ParameterPopover({ id, label, summary, icon, disabled, active, onActiveChange, style, anchor, children }: {
-    id: Parameter; label: string; summary: string; icon?: ReactNode; disabled: boolean; active: Parameter | null;
+function ParameterPopover({ id, label, summary, icon, disabled, disabledReason, active, onActiveChange, style, anchor, children }: {
+    id: Parameter; label: string; summary: string; icon?: ReactNode; disabled: boolean; disabledReason?: string; active: Parameter | null;
     onActiveChange: (value: Parameter | null) => void; style: CSSProperties; anchor: RefObject<HTMLDivElement>; children: ReactNode;
 }) {
     const t = useUiText();
     return <Popover.Root open={!disabled && active === id} onOpenChange={open => onActiveChange(open ? id : null)}>
-        <Tooltip title={`${label}：${summary}`}><span className={`cw-parameter-anchor cw-parameter-anchor-${id}`}><Popover.Trigger asChild><button type="button" className={`cw-parameter-trigger cw-parameter-trigger-${id}`} style={disabled ? { pointerEvents: "none" } : undefined} disabled={disabled} aria-label={label}>
+        <Tooltip title={disabled && disabledReason ? disabledReason : `${label}：${summary}`}><span className={`cw-parameter-anchor cw-parameter-anchor-${id}`}><Popover.Trigger asChild><button type="button" className={`cw-parameter-trigger cw-parameter-trigger-${id}`} style={disabled ? { pointerEvents: "none" } : undefined} disabled={disabled} aria-label={label} aria-description={disabled ? disabledReason : undefined}>
             {icon}<span>{summary}</span>{id !== "advanced" ? <ChevronDown size={11} aria-hidden /> : null}
         </button></Popover.Trigger></span></Tooltip>
         <Popover.Anchor virtualRef={anchor} />
         <Popover.Portal><Popover.Content className={`cw-parameter-popover cw-parameter-popover-${id}`} data-canvas-no-zoom
-            aria-label={label} side="bottom" align="center" sideOffset={10} collisionPadding={12} avoidCollisions={false} style={style}
+            aria-label={label} side="bottom" align="center" sideOffset={12} collisionPadding={12} avoidCollisions={false} style={style}
             onPointerDown={event => event.stopPropagation()} onMouseDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()}
             onWheel={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
             <header className="cw-parameter-header">
@@ -102,12 +102,12 @@ function ParameterPopover({ id, label, summary, icon, disabled, active, onActive
     </Popover.Root>;
 }
 
-function AdvancedSettingsDialog({ active, onActiveChange, disabled, style, config, profile, theme, referenceCount, uploadContextKey, onConfigChange, onConfigNormalize }: Props & {
+function AdvancedSettingsDialog({ active, onActiveChange, disabled, disabledReason, style, config, profile, theme, referenceCount, uploadContextKey, onConfigChange, onConfigNormalize }: Props & {
     id: "advanced"; active: Parameter | null; onActiveChange: (value: Parameter | null) => void; style: CSSProperties;
 }) {
     const t = useUiText();
     return <Dialog.Root open={!disabled && active === "advanced"} onOpenChange={open => onActiveChange(open ? "advanced" : null)}>
-        <Dialog.Trigger asChild><button type="button" className="cw-parameter-trigger cw-parameter-trigger-advanced" aria-label={t("更多设置")} disabled={disabled}><SlidersHorizontal size={18} /><span>{t("更多设置")}</span></button></Dialog.Trigger>
+        <Tooltip title={disabled ? disabledReason : undefined}><span className="cw-parameter-anchor cw-parameter-anchor-advanced"><Dialog.Trigger asChild><button type="button" className="cw-parameter-trigger cw-parameter-trigger-advanced" aria-label={t("更多设置")} aria-description={disabled ? disabledReason : undefined} style={disabled ? { pointerEvents: "none" } : undefined} disabled={disabled}><SlidersHorizontal size={18} /><span>{t("更多设置")}</span></button></Dialog.Trigger></span></Tooltip>
         <Dialog.Portal>
             <Dialog.Overlay className="cw-settings-overlay" />
             <Dialog.Content className="cw-settings-dialog" style={style} data-canvas-no-zoom
@@ -127,7 +127,7 @@ function AdvancedSettingsDialog({ active, onActiveChange, disabled, style, confi
     </Dialog.Root>;
 }
 
-export function CanvasQuickSettingsPopovers({ config, profile, theme, referenceCount, uploadContextKey, disabled, onConfigChange, onConfigNormalize = ignoreConfigNormalization }: Props) {
+export function CanvasQuickSettingsPopovers({ config, profile, theme, referenceCount, uploadContextKey, disabled, disabledReason, onConfigChange, onConfigNormalize = ignoreConfigNormalization }: Props) {
     const t = useUiText();
     const [active, setActive] = useState<Parameter | null>(null);
     const parameterRow = useRef<HTMLDivElement>(null!);
@@ -150,16 +150,17 @@ export function CanvasQuickSettingsPopovers({ config, profile, theme, referenceC
         if (!disabled && (config.imageOptions || "{}") !== normalizedOptions) onConfigNormalize("imageOptions", normalizedOptions);
     }, [config.imageOptions, disabled, normalizedOptions, onConfigNormalize]);
     const common = { active, onActiveChange: setActive, style };
+    const parameterDisabledReason = disabled ? disabledReason : automaticReferenceSize ? t(automaticReferenceSizeNotice) : !profile.verified ? t("当前模型暂未提供可调整的参数。") : undefined;
     return <div ref={parameterRow} className="cw-parameter-row" data-open={active || undefined} aria-label={t("生成参数")} style={style}>
-        <ParameterPopover {...common} anchor={parameterRow} id="size" label={t("宽高比")} summary={automaticReferenceSize ? t("模型决定尺寸") : sizeLabel(settings.size)} icon={<RatioOutline value={settings.size} />} disabled={disabled || !profile.verified || automaticReferenceSize}>
+        <ParameterPopover {...common} anchor={parameterRow} id="size" label={t("宽高比")} summary={automaticReferenceSize ? t("模型决定尺寸") : sizeLabel(settings.size)} icon={<RatioOutline value={settings.size} />} disabled={disabled || !profile.verified || automaticReferenceSize} disabledReason={parameterDisabledReason}>
             <CanvasQuickRatioOptions profile={ratioProfile} value={settings.size} onChange={value => { onConfigChange("size", value); setActive(null); }}
                 onAdvanced={profile.customSize || profile.customAspect ? () => setActive("advanced") : undefined} />
             {gif ? <p role="status">{t(gifSizeNotice)}</p> : null}
         </ParameterPopover>
-        <ParameterPopover {...common} anchor={parameterRow} id="quality" label={profile.kind === "mai-image" ? t("清晰度 / 分辨率") : !gif && profile.resolutions.length ? t("分辨率与质量") : t(profile.qualityLabel)} summary={qualitySummary} disabled={disabled || !profile.verified || automaticReferenceSize}>
+        <ParameterPopover {...common} anchor={parameterRow} id="quality" label={profile.kind === "mai-image" ? t("清晰度 / 分辨率") : !gif && profile.resolutions.length ? t("分辨率与质量") : t(profile.qualityLabel)} summary={qualitySummary} disabled={disabled || !profile.verified || automaticReferenceSize} disabledReason={parameterDisabledReason}>
             <CanvasQuickQualityOptions config={config} profile={profile} referenceCount={referenceCount} onConfigChange={onConfigChange} />
         </ParameterPopover>
-        <AdvancedSettingsDialog {...common} id="advanced" config={config} profile={profile} theme={theme} referenceCount={referenceCount} uploadContextKey={uploadContextKey} onConfigChange={onConfigChange} onConfigNormalize={onConfigNormalize} disabled={disabled || !hasAdvanced} />
+        <AdvancedSettingsDialog {...common} id="advanced" config={config} profile={profile} theme={theme} referenceCount={referenceCount} uploadContextKey={uploadContextKey} onConfigChange={onConfigChange} onConfigNormalize={onConfigNormalize} disabled={disabled || !hasAdvanced} disabledReason={disabled ? disabledReason : t("当前模型没有可调整的高级设置。")} />
         {automaticReferenceSize ? <span className="sr-only" role="status">{t(automaticReferenceSizeNotice)}</span> : null}
     </div>;
 }

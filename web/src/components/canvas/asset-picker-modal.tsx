@@ -1,7 +1,7 @@
 import { useUiText } from "@/lib/i18n";
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Button, Empty, Input, Modal, Spin, Tag } from "antd";
-import { Check, Search } from "lucide-react";
+import { Alert, Button, Input, Modal, Spin, Tag, Tooltip } from "antd";
+import { Check, ImageIcon, Search } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { isSupportedServerAsset, serverAssetToLocal } from "@/lib/server-asset-local";
@@ -11,6 +11,8 @@ import { resolveMediaUrl } from "@/services/file-storage";
 import { fetchServerAsset, listServerAssets } from "@/services/api/server-assets";
 import { canUserAccessAsset, serverAssetIdFromAsset, useAssetStore, type Asset } from "@/stores/use-asset-store";
 import { useUserStore } from "@/stores/use-user-store";
+import { canvasThemes } from "@/lib/canvas-theme";
+import { useThemeStore } from "@/stores/use-theme-store";
 
 export type InsertAssetPayload =
     | { kind: "text"; content: string; title: string }
@@ -47,6 +49,7 @@ const kindOptions = [
 
 function PickerCard({ asset, selected, disabled, onClick }: { asset: Asset; selected?: boolean; disabled: boolean; onClick: () => void }) {
     const t = useUiText();
+    const theme = canvasThemes[useThemeStore(state => state.theme)];
     const fallback = asset.coverUrl || (asset.kind === "image" ? asset.data.dataUrl : asset.kind === "video" ? asset.data.url : "");
     const needsResolution = (asset.kind === "image" || asset.kind === "video") && needsCanvasAssetPreviewResolution(asset);
     const [cover, setCover] = useState(() => (needsResolution ? "" : fallback));
@@ -72,23 +75,25 @@ function PickerCard({ asset, selected, disabled, onClick }: { asset: Asset; sele
         <button
             type="button"
             aria-pressed={selected}
+            aria-description={disabled ? t("正在处理图片或项目，请稍候…") : undefined}
             disabled={disabled}
-            className={`group relative cursor-pointer overflow-hidden rounded-lg border bg-white text-left transition hover:shadow-md dark:bg-stone-900 ${selected ? "border-blue-500 ring-2 ring-blue-200 dark:ring-blue-900" : "border-stone-200 hover:border-stone-400 dark:border-stone-700 dark:hover:border-stone-500"}`}
+            className="cw-asset-card group relative cursor-pointer overflow-hidden rounded-xl border text-left disabled:cursor-not-allowed disabled:opacity-40"
+            style={{ background: theme.node.panel, color: theme.node.text, borderColor: selected ? theme.canvas.selectionStroke : theme.node.stroke, outline: selected ? `2px solid ${theme.canvas.selectionStroke}` : undefined, outlineOffset: -2 }}
             onClick={onClick}
         >
             {cover ? (
                 <img src={cover} alt={asset.title} loading="lazy" decoding="async" className="aspect-[4/3] w-full object-cover" />
             ) : (
-                <div className="flex aspect-[4/3] items-center justify-center bg-stone-100 p-3 text-center text-xs leading-5 text-stone-500 dark:bg-stone-800 dark:text-stone-400">{asset.title}</div>
+                <div className="flex aspect-[4/3] items-center justify-center p-3 text-center text-[13px] leading-5" style={{ background: theme.node.fill, color: theme.node.muted }}>{asset.title}</div>
             )}
-            <div className="p-2.5">
+            <div className="p-3">
                 <div className="flex items-center justify-between gap-2">
-                    <span className="line-clamp-1 text-xs font-medium text-stone-800 dark:text-stone-200">{asset.title}</span>
-                    <Tag className="m-0 shrink-0 text-[10px]">{asset.kind === "image" ? t("图片") : asset.kind === "video" ? t("视频") : t("文本")}</Tag>
+                    <span className="line-clamp-1 text-[13px] font-medium">{asset.title}</span>
+                    <Tag className="m-0 shrink-0 text-xs">{asset.kind === "image" ? t("图片") : asset.kind === "video" ? t("视频") : t("文本")}</Tag>
                 </div>
             </div>
-            <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-stone-950/0 text-sm font-medium text-white opacity-0 transition group-hover:bg-stone-950/55 group-hover:opacity-100">{t(selected === undefined ? "插入" : selected ? "取消选择" : "选择图片")}</div>
-            {selected ? <span className="pointer-events-none absolute right-2 top-2 flex items-center gap-1 rounded bg-primary px-2 py-1 text-xs text-primary-foreground"><Check className="size-3" />{t("已选中")}</span> : null}
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm font-medium opacity-0 transition-opacity duration-[120ms] group-hover:opacity-100" style={{ background: `color-mix(in srgb, ${theme.node.panel} 70%, transparent)`, color: theme.node.text }}>{t(selected === undefined ? "插入" : selected ? "取消选择" : "选择图片")}</div>
+            {selected ? <span className="pointer-events-none absolute right-2 top-2 flex items-center gap-1 rounded-md px-2 py-1 text-xs" style={{ background: theme.toolbar.activeBg, color: theme.node.text }}><Check className="size-3" />{t("已选中")}</span> : null}
         </button>
     );
 }
@@ -241,7 +246,7 @@ function MyAssetsTab({ open, onInsert, onInsertMany, selectionMode }: Pick<Props
                 <Input
                     className="w-56"
                     size="small"
-                    prefix={<Search className="size-3.5 text-stone-400" />}
+                    prefix={<Search className="size-3.5 text-muted-foreground" />}
                     placeholder={t("搜索素材")}
                     value={keyword}
                     allowClear
@@ -250,7 +255,7 @@ function MyAssetsTab({ open, onInsert, onInsertMany, selectionMode }: Pick<Props
                         setKeyword(e.target.value);
                     }}
                 />
-                <div className="flex gap-1.5">
+                <div className="flex gap-2">
                     {kindOptions.filter(opt => !imageOnly || opt.value === "all" || opt.value === "image").map((opt) => (
                         <Tag.CheckableTag
                             key={opt.value}
@@ -265,7 +270,7 @@ function MyAssetsTab({ open, onInsert, onInsertMany, selectionMode }: Pick<Props
                         </Tag.CheckableTag>
                     ))}
                 </div>
-                <Button size="small" loading={loading} disabled={!ownerId} onClick={() => setRefreshRevision((value) => value + 1)}>{t("刷新")}</Button>
+                <Tooltip title={!ownerId ? t("请先登录") : undefined}><Button size="small" loading={loading} disabled={!ownerId} onClick={() => setRefreshRevision((value) => value + 1)}>{t("刷新")}</Button></Tooltip>
             </div>
 
             <div className="min-h-0 flex-1 space-y-4 overflow-y-auto">
@@ -279,14 +284,14 @@ function MyAssetsTab({ open, onInsert, onInsertMany, selectionMode }: Pick<Props
             ) : loading ? (
                 <div role="status" className="flex items-center justify-center gap-2 py-12 text-sm"><Spin size="small" />{t("正在加载素材…")}</div>
             ) : !error ? (
-                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("没有素材")} className="py-12" />
+                <div className="wb-empty flex flex-col items-center gap-3 py-12 text-center"><ImageIcon className="size-8 text-muted-foreground" aria-hidden /><p className="text-sm text-muted-foreground">{t("没有素材")}</p>{keyword || kindFilter !== "all" ? <Button onClick={() => { setKeyword(""); setKindFilter("all"); }}>{t("清除筛选")}</Button> : ownerId ? <Button onClick={() => setRefreshRevision(value => value + 1)}>{t("刷新")}</Button> : null}</div>
             ) : null}
 
             <div ref={loadSentinel} className="h-1" aria-hidden />
-            {nextCursor || visibleCount < filtered.length ? <Button block loading={loadingMore} disabled={loading} onClick={() => { if (visibleCount < filtered.length) setVisibleCount(value => value + PAGE_SIZE); else void loadMore(); }}>{t("加载更多素材")}</Button> : null}
+            {nextCursor || visibleCount < filtered.length ? <Tooltip title={loading ? t("加载中…") : undefined}><Button block loading={loadingMore} disabled={loading} onClick={() => { if (visibleCount < filtered.length) setVisibleCount(value => value + PAGE_SIZE); else void loadMore(); }}>{t("加载更多素材")}</Button></Tooltip> : null}
             </div>
             {insertError ? <Alert className="shrink-0" type="error" showIcon title={t("素材读取失败，请重试")} description={insertError} /> : null}
-            {selectionMode === "multiple-images" ? <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border pt-3"><span role="status" className="text-sm text-muted-foreground">{t("已选中 {count} 张图片", { count: selected.length })}</span><Button type="primary" loading={inserting} disabled={!selected.length || inserting} onClick={() => void confirmMultiple()}>{t("加入")}{selected.length} {t(" 张参考图")}</Button></div> : null}
+            {selectionMode === "multiple-images" ? <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border pt-3"><span role="status" className="text-sm text-muted-foreground">{t("已选中 {count} 张图片", { count: selected.length })}</span><Tooltip title={inserting ? t("正在处理图片或项目，请稍候…") : !selected.length ? t("请先选择图片") : undefined}><Button type="primary" loading={inserting} disabled={!selected.length || inserting} onClick={() => void confirmMultiple()}>{t("加入")}{selected.length} {t(" 张参考图")}</Button></Tooltip></div> : null}
             {inserting ? <p role="status" className="text-sm text-muted-foreground">{t("正在读取素材详情…")}</p> : null}
         </div>
     );

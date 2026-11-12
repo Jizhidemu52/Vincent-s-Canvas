@@ -39,6 +39,7 @@ import type { preflightStoredQuickImageTask } from "../stored-quick-image-prefli
 import { prepareFixedToolPrompt, type FixedToolPromptTarget } from "../fixed-tool-prompt";
 import { publicPromptTaskPreview } from "../prompt-task-preview";
 import { layerStudioTaskOptions } from "../../../shared/layer-studio-options";
+import { safeTaskHistoryValue, taskHistoryScope } from "../task-history";
 
 const actionSchema = z.enum(["pause", "resume", "cancel"]);
 
@@ -392,6 +393,25 @@ export function createTasksRouter(db: Database, cache: Cache, creditPolicy: bool
       const result = await existingBatchResult(String(request.params.requestId), (request as unknown as AuthenticatedRequest).auth.id);
       if (!result) { response.status(404).json({ error: "NOT_FOUND", message: "批次不存在" }); return; }
       response.json(result);
+    } catch (error) { next(error); }
+  });
+
+  router.get("/history", async (request, response, next) => {
+    response.set("Cache-Control", "private, no-store");
+    try {
+      const actor = (request as unknown as AuthenticatedRequest).auth;
+      const { cursor, limit } = parseCursorPage(request.query, { defaultLimit: 30, maxLimit: 30 });
+      const values: unknown[] = [actor.id];
+      const clauses = ["t.user_id=$1", ...taskHistoryScope(request.query, values)];
+      appendCursor(clauses, values, "t.queued_at", "t.id", cursor);
+      values.push(limit + 1);
+      const result = await db.query(`SELECT ${taskSelect},m.model_id AS "modelId",m.name AS "modelName",to_char(t.queued_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS "cursorCreatedAt"
+        FROM tasks t JOIN users u ON u.id=t.user_id LEFT JOIN model_configs m ON m.id=t.model_config_id
+        WHERE ${clauses.join(" AND ")} ORDER BY t.queued_at DESC,t.id DESC LIMIT $${values.length}`, values);
+      const page = makeCursorPage(result.rows, limit, row => ({ createdAt: row.cursorCreatedAt as string, id: row.id as string }));
+      response.json({ tasks: page.items.map(({ cursorCreatedAt: _cursor, ...task }) => ({ ...task,
+        parameters: safeTaskHistoryValue(task.parameters), userInput: safeTaskHistoryValue(task.userInput), resultDocument: safeTaskHistoryValue(task.resultDocument),
+      })), nextCursor: page.nextCursor, hasMore: page.hasMore });
     } catch (error) { next(error); }
   });
 

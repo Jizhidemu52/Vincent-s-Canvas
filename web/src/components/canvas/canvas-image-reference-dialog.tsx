@@ -29,7 +29,7 @@ export function CanvasImageReferenceDialog({ open, nodes, selectedReferenceKeys,
         setSelectedIds(current => current.includes(id) ? current.filter(value => value !== id) : [...current, id]);
     };
     return <Modal title={t("从画布选择参考图")} open={open} onCancel={close} destroyOnHidden footer={<div className="flex justify-end gap-2"><Button onClick={close}>{t("取消")}</Button><Button type="primary" disabled={!pendingIds.length} onClick={() => { onConfirm(pendingIds); setSelectedIds([]); }}>{t("加入参考图")}</Button></div>}>
-        {available.length ? <div className="grid max-h-[55vh] grid-cols-2 gap-3 overflow-y-auto p-0.5 sm:grid-cols-3">
+        {available.length ? <div className="grid max-h-[55vh] grid-cols-2 gap-3 overflow-y-auto p-1 sm:grid-cols-3">
             {available.map(node => {
                 const title = node.title || "未命名图片";
                 const added = existingIds.has(node.id);
