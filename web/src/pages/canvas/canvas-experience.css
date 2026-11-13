@@ -13,7 +13,8 @@
 .cw-image-progressive { transition:opacity 160ms var(--motion-ease, cubic-bezier(.2, .7, .2, 1)),filter 160ms var(--motion-ease, cubic-bezier(.2, .7, .2, 1)); }
 .cw-image-result-reveal { animation:cw-image-result-reveal 240ms var(--motion-ease, cubic-bezier(.2, .7, .2, 1)) both; }
 @keyframes cw-image-result-reveal { from { opacity:0; scale:.96; } to { opacity:1; scale:1; } }
-.cw-feedback-strip { position:absolute; bottom:76px; right:16px; z-index:calc(var(--cw-z-panel) - 1); max-width:calc(100% - 150px); }
+/* Reserve the connection toggle's 40px width and a 12px gap at the right edge. */
+.cw-feedback-strip { position:absolute; bottom:76px; right:64px; z-index:calc(var(--cw-z-panel) - 1); max-width:calc(100% - 150px); }
 @media(max-width:640px) { .cw-feedback-strip { bottom:128px; max-width:calc(100% - 24px); right:12px; } }
 @media(prefers-reduced-motion:reduce) { .cw-image-progressive { transition:none; } .cw-image-result-reveal { animation:none; } }
 .cw-command-results > button { transition: background var(--motion-fast, 120ms) var(--motion-ease), transform var(--motion-press, 80ms) var(--motion-ease); }

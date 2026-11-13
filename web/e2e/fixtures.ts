@@ -28,6 +28,7 @@ const OWNER = "00000000-0000-4000-8000-000000000099";
 const MODEL = { id: "10000000-0000-4000-8000-000000000001", name: "E2E GPT Image", modelId: "gpt-image-2", providerName: "Isolated fixture", protocol: "openai", capabilities: ["generate", "edit", "batch"], creditCost: 0, rmbCost: 0 };
 type Json = Record<string, any>;
 type CloudDocument = { id: string; revision: number; deleted: boolean; document: Json | null; updatedAt: string };
+type DisplayTranslationRequest = { target: "en-US"; texts: string[] };
 
 /** Stateful HTTP double. Test actions use the public UI; no app stores are injected. */
 export class MockCanvasApi {
@@ -40,6 +41,8 @@ export class MockCanvasApi {
     submissions: Json[] = [];
     batchSubmissions: Json[] = [];
     batchActions: string[] = [];
+    displayTranslationValues = new Map<string, string>([["隔离回归账号", "Isolated regression account"]]);
+    displayTranslationCalls: Array<{ ownerId: string; input: DisplayTranslationRequest; status: number; response: Json }> = [];
     blocked: string[] = [];
     unexpected: string[] = [];
     pageErrors: string[] = [];
@@ -105,6 +108,33 @@ export class MockCanvasApi {
         if (path === "/api/auth/session") {
             if (this.holdSession) { this.heldSessions.push(route); return; }
             return this.session(route);
+        }
+        if (path === "/api/display-translations" && method === "POST") {
+            const reply = (value: Json, status: number) => route.fulfill({ status, contentType: "application/json", headers: { "cache-control": "no-store" }, body: JSON.stringify(value) });
+            const ownerId = request.headers()["x-canvas-owner-id"];
+            if (ownerId !== OWNER) {
+                this.unexpected.push(`${method} ${path}: invalid owner`);
+                return reply({ error: "DISPLAY_TRANSLATION_AUTH_REQUIRED" }, 403);
+            }
+            let input: DisplayTranslationRequest;
+            try { input = request.postDataJSON(); } catch { input = null as unknown as DisplayTranslationRequest; }
+            // Mirror the strict, bounded request schema; never accept a model,
+            // creative task or arbitrary API through this display-only mock.
+            if (!input || Array.isArray(input) || Object.keys(input).sort().join(",") !== "target,texts" || input.target !== "en-US"
+                || !Array.isArray(input.texts) || input.texts.length < 1 || input.texts.length > 24
+                || input.texts.some(text => typeof text !== "string" || text.length < 1 || text.length > 12000)
+                || input.texts.reduce((sum, text) => sum + text.length, 0) > 12000) {
+                this.unexpected.push(`${method} ${path}: invalid payload`);
+                return reply({ error: "DISPLAY_TRANSLATION_INPUT_INVALID" }, 400);
+            }
+            const translations = input.texts.map(text => this.displayTranslationValues.get(text));
+            const ready = translations.every(text => typeof text === "string" && text.trim() && text.length <= 48000);
+            // Unconfigured strings follow the real unavailable contract, not
+            // an invented translation or a real provider request.
+            const status = ready ? 200 : 503;
+            const response = ready ? { translations } : { error: "DISPLAY_TRANSLATION_UNAVAILABLE", message: "English display is unavailable. Your original text is preserved; no automatic retry will occur." };
+            this.displayTranslationCalls.push({ ownerId, input: structuredClone(input), status, response });
+            return reply(response, status);
         }
         if (path === "/api/modules") return json({ modules: moduleDefinitions.map(item => ({ moduleKey: item.moduleKey, enabled: true })) });
         if (path === "/api/release-notes") return json({ notes: [], hasMore: false });

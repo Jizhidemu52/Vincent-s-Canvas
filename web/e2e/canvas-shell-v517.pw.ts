@@ -79,17 +79,34 @@ test("小地图可关闭、键盘平移缩放并处理指针取消；主题不�
     expect(api.submissions).toHaveLength(0);
 });
 
-test("体验数据按Esc或外部点击关闭，普通员工不显示入口", async ({ page, api }) => {
+test("体验数据按Esc或外部点击关闭，普通员工不显示入口", async ({ page, api }, info) => {
     api.role = "super_admin";
     await newCanvas(page);
     const trigger = page.getByLabel("本页体验数据", { exact: true });
-    await trigger.click();
     const details = trigger.locator("..");
-    await expect(details).toHaveAttribute("open", "");
-    await page.keyboard.press("Escape");
-    await expect(details).not.toHaveAttribute("open");
-    await trigger.click(); await page.mouse.click(700, 280);
-    await expect(details).not.toHaveAttribute("open");
+    const connections = page.getByTestId("canvas-connection-visibility-control").getByRole("button");
+    // Both controls must coexist, including either side of the feedback strip's
+    // mobile breakpoint. Native clicks catch stacking errors that visibility alone misses.
+    for (const viewport of [{ width: 1800, height: 1200 }, { width: 900, height: 700 }, { width: 641, height: 844 }, { width: 640, height: 844 }, { width: 390, height: 844 }]) {
+        await page.setViewportSize(viewport);
+        await expect(trigger).toBeVisible();
+        await expect(connections).toBeVisible();
+        const feedbackBox = (await trigger.boundingBox())!, connectionBox = (await connections.boundingBox())!;
+        const overlap = Math.max(0, Math.min(feedbackBox.x + feedbackBox.width, connectionBox.x + connectionBox.width) - Math.max(feedbackBox.x, connectionBox.x))
+            * Math.max(0, Math.min(feedbackBox.y + feedbackBox.height, connectionBox.y + connectionBox.height) - Math.max(feedbackBox.y, connectionBox.y));
+        expect(overlap, `diagnostics and connection toggle must not overlap at ${viewport.width}px`).toBe(0);
+        await connections.click();
+        await expect(connections).toHaveAttribute("aria-pressed", "false");
+        await trigger.click();
+        await expect(details).toHaveAttribute("open", "");
+        await page.screenshot({ path: info.outputPath(`diagnostics-connections-${viewport.width}.png`) });
+        await page.keyboard.press("Escape");
+        await expect(details).not.toHaveAttribute("open");
+        await connections.click();
+        await expect(connections).toHaveAttribute("aria-pressed", "true");
+        await trigger.click(); await page.mouse.click(viewport.width / 2, 280);
+        await expect(details).not.toHaveAttribute("open");
+    }
     api.role = "designer";
     await page.reload();
     await expect(trigger).toHaveCount(0);

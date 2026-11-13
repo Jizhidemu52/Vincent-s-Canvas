@@ -468,12 +468,22 @@ test("continue and E only prepare A as a draft reference; delayed quick generati
 });
 
 test("record controls remain usable in both languages and themes without changing the archive", async ({ page, api }, info) => {
+    const displayPrompt = "Exact archived prompt A\nPreserve the original silhouette; final compiled content / 100%";
+    for (const [source, translated] of [[FINAL, displayPrompt], [INPUT, "A original user input"], ["生成档案隔离验收", "Generation archive isolated acceptance"], ["原始参考.png", "Original reference.png"]]) {
+        api.displayTranslationValues.set(source, translated);
+    }
     const original = await scene(page, api);
     await select(page, "result-a");
     await editor(page).fill("可编辑草稿；保存原档案");
     for (const locale of ["zh-CN", "en"] as const) {
         if (locale === "en") await page.getByTestId("language-switch").filter({ visible: true }).first().click();
         await expect(page.locator("html")).toHaveAttribute("lang", locale);
+        if (locale === "en") {
+            await expect(panel(page).getByRole("button", { name: "Copy original generation prompt", exact: true })).toHaveText(displayPrompt);
+            const call = api.displayTranslationCalls.find(item => item.input.texts.includes(FINAL));
+            expect(call).toMatchObject({ ownerId: "00000000-0000-4000-8000-000000000099", input: { target: "en-US" }, status: 200 });
+            expect(call!.response).toEqual({ translations: call!.input.texts.map(text => api.displayTranslationValues.get(text)) });
+        }
         for (const dark of [false, true]) {
             const darkButton = page.getByRole("button", { name: locale === "en" ? "Switch to dark theme" : "切换到深色主题", exact: true });
             const lightButton = page.getByRole("button", { name: locale === "en" ? "Switch to light theme" : "切换到浅色主题", exact: true });
@@ -493,6 +503,7 @@ test("record controls remain usable in both languages and themes without changin
     }
     await panel(page).getByRole("button", { name: "Restore original prompt", exact: true }).click();
     await expect(editor(page)).toHaveValue(INPUT);
+    expect(api.document(PROJECT)!.title).toBe(original.title);
     expect(node(api, "result-a").metadata.generationRecord).toEqual(original.nodes[1]!.metadata.generationRecord);
     await assertNoGeneration(api);
 });
